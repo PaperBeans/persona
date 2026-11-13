@@ -234,7 +234,7 @@ func (n *Node) assistantCLICommand(shell, launcher, cwd string, args, env []stri
 
 func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options ...modelExecution) (*assistantProc, error) {
 	execution := executionOption(options)
-	if err := execution.check(); err != nil {
+	if err := execution.check(launcher); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(cwd, 0o700); err != nil {
@@ -401,6 +401,7 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 		cmd = n.assistantCLICommand(shell, launcher, cwd, args, env)
 	}
 	cmd.SysProcAttr = osproc.GroupAttr() // so stop() can kill the whole group
+	msysCmdLine(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

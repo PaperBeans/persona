@@ -217,7 +217,7 @@ func (n *Node) startAsync(id, cwd, launcher, prompt, workspaceID, mode, effort, 
 // startAsyncIn is startAsync in host kind ("" : the default host, withStartHost).
 func (n *Node) startAsyncIn(kind, id, cwd, launcher, prompt, workspaceID, mode, effort, tabName string, options ...modelExecution) (*proto.Session, error) {
 	execution := executionOption(options)
-	if err := execution.check(); err != nil {
+	if err := execution.check(launcher); err != nil {
 		return nil, err
 	}
 	if kind == "" && n.defaultKind() == "" { // no host enabled: refused before a starting row shows up on the phone
@@ -231,7 +231,7 @@ func (n *Node) startAsyncIn(kind, id, cwd, launcher, prompt, workspaceID, mode, 
 	if n.starts.get(id) != nil {
 		return nil, fmt.Errorf("session %s is already starting", id)
 	}
-	cwd, launcher, err := n.checkStart(cwd, launcher, "", mode, effort)
+	cwd, launcher, err := n.checkStart(cwd, launcher, "", mode, effort, "")
 	if err != nil {
 		return nil, err
 	}

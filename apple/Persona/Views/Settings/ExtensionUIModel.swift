@@ -655,6 +655,35 @@ extension APIClient {
         ExtensionMotion.redraw(from: view, to: v) { view = v }
     }
 
+    // MARK: Pictures (UI version 6)
+
+    /// A picture the hub serves for this page (`src.path`, signed for this extension): only the hub's own image route
+    /// for it gets the device's credentials, never another address (docs/extensions/extensions.md "Pictures through
+    /// the hub").
+    func picture(_ path: String, pixels: Int) async throws -> Data {
+        guard Self.isHubPicture(path, owner: plugin) else { throw APIError(status: 0, message: String(localized: "Couldn't Load This Picture")) }
+        guard let api = deps.api() else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
+        return try await api.request("GET", path, query: ["w": String(max(1, pixels))])
+    }
+
+    /// The hub's image route for extension `owner`: `/api/v1/extensions/<owner>/-/image/<token>`.
+    nonisolated static func isHubPicture(_ path: String, owner: String) -> Bool {
+        let prefix = "/api/v1/extensions/" + owner + "/-/image/"
+        guard !owner.isEmpty, !owner.contains("/"), path.hasPrefix(prefix) else { return false }
+        let token = path.dropFirst(prefix.count)
+        return !token.isEmpty && token.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "_.-".contains($0)) }
+    }
+
+    /// A hub picture did not load: its token may have run out, so the page is drawn again (signed anew), at most once a
+    /// minute.
+    func pictureFailed() {
+        guard lastPictureRedraw.map({ Date.now.timeIntervalSince($0) > 60 }) ?? true else { return }
+        lastPictureRedraw = .now
+        Task { await refresh() }
+    }
+
+    @ObservationIgnored private var lastPictureRedraw: Date?
+
     /// The page drawn again, keeping the diffs loaded since (by `load`) that it gives without their lines again: the
     /// extension does not have to remember what was opened (UI version 5).
     private func keepingLoaded(_ next: ExtensionView) -> ExtensionView {
@@ -693,6 +722,8 @@ extension APIClient {
             return Outcome(error: error.localizedDescription)
         }
     }
+
+    /// The fields' values as the extension gets them: every field of the view, by name.
     var submitted: [String: String] {
         var out: [String: String] = [:]
         for item in components {
@@ -785,7 +816,7 @@ extension APIClient {
     static func opens(_ url: URL, item: String?, owner: String? = nil) -> Bool {
         if url.scheme?.lowercased() == "https" { return url.host()?.isEmpty == false && url.user == nil && url.password == nil }
         // the subscription pages' Set Up with … (#5278): their text to the assistant, never an extension's
-        if SubscriptionsUI.askText(url) != nil { return owner == SubscriptionsUI.id }
+        if SubscriptionsUI.askText(url) != nil || SubscriptionsUI.isGraph(url) { return owner == SubscriptionsUI.id }
         if let settings = ExtensionSettingsLink.extensionID(url) { return owner != nil && settings == owner }
         guard let item, let source = InboxSourceLink.item(url) else { return false }
         return source == item

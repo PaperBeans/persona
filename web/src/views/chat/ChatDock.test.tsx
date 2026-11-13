@@ -447,15 +447,15 @@ describe("QueuePanel (#5327, cindy's pending queue)", () => {
     expect(viewOnly).not.toMatch(/data-queue-(handle|edit|delete)|data-send-now/);
   });
 
-  it("in a Persona chat offers the user's own rows the same; one from another conversation says so and has none (#4342)", () => {
+  it("in a Persona chat offers the user's own rows the same; one from another conversation is folded into one line (#4342, #6394)", () => {
     const persona = { ...queued, agent: undefined, assistant: true, queued: ["顺便把截图换掉", "来自「日报」：今天的汇总"], queued_relayed: 1 } as Session;
     const html = panel({ session: persona, persona: "Nova" });
     expect(html.match(/data-send-now/g)).toHaveLength(1);
     expect(html).toContain("现在就把排队的消息全部发给 Nova");
-    expect(html.match(/data-queue-relayed/g)).toHaveLength(1);
-    expect(html.match(/data-queue-handle/g) ?? []).toHaveLength(0);
-    expect(html).toContain('title="对话空闲后送达"');
-    expect(html).toContain('aria-label="排队的第 2 条：其他对话 · 来自「日报」：今天的汇总 · 对话空闲后送达"');
+    // collapsed: no relayed row markup yet, just the summary line
+    expect(html).not.toContain("data-queue-relayed-list");
+    expect(html).toContain("还有 1 条别的对话在排队");
+    expect(html).toContain("data-queue-relayed-summary");
     // relayed ones alone: nothing to send now
     expect(panel({ session: { ...persona, queued_relayed: 2 }, persona: "Nova" })).not.toContain("data-send-now");
   });

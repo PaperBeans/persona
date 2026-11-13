@@ -118,7 +118,7 @@ struct SettingsPairingPage: View {
             return
         }
         await model.upgradeCredentials()
-        WatchSync.shared.push(summary: model.watchSummary())
+        model.summariesChanged()
         if model.watchConfigs().missing?.isEmpty == false {
             Haptics.error()
             model.toast = Toast(String(localized: "Couldn't get credentials for the watch. Check your network and try again; if the hub is too old, update it first."), style: .error)

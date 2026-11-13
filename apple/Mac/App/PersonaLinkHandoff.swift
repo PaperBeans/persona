@@ -6,7 +6,7 @@ import Foundation
 /// of this app: it goes on to Persona Link when that is installed, else the app says to install it.
 nonisolated enum PersonaLinkHandoff {
     /// How to build and install Persona Link (no package yet, docs/assistant/onboarding.md 4.2).
-    static let installDoc = URL(string: "https://github.com/nwverse/persona/blob/master/docs/operations/persona-link-install.md")!
+    static let installDoc = URL(string: "https://github.com/nwverse/persona/blob/main/docs/operations/persona-link-install.md")!
 
     /// The executable Persona Link's bundle keeps (docs/operations/rename.md), whatever bundle id it was built with
     /// (`mac.link_bundle_id`, docs/operations/config.md): how it is told apart from this app among the scheme's handlers.

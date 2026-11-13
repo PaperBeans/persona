@@ -168,7 +168,10 @@ func (n *Node) rewind(ctx context.Context, id string, o rewindOpts) (map[string]
 		h.mu.Lock()
 		supported := h.hello.Caps.Rewind
 		h.mu.Unlock()
-		if !supported || s.IsSubagent || strings.Contains(id, subagentSep) || o.Restore != RestoreConversation {
+		// Files only where the row offers them (capabilities.rewind_code, from what the runtime's agent can do).
+		code := s.Capabilities != nil && s.Capabilities.RewindCode != nil && *s.Capabilities.RewindCode
+		if !supported || s.IsSubagent || strings.Contains(id, subagentSep) || o.Restore != RestoreConversation && !code ||
+			s.Capabilities != nil && s.Capabilities.Rewind != nil && !*s.Capabilities.Rewind {
 			return nil, rewindError(rewindUnsupported, "This session does not support the requested rewind.")
 		}
 		if s.Status == proto.StatusWorking || s.Status == proto.StatusBlocked || s.Status == proto.StatusOffline {

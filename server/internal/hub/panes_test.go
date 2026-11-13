@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/nwverse/persona/server/internal/nodeproto"
 )
 
 func termClient(h *Hub, role string) *client {
@@ -97,6 +99,8 @@ func TestPaneScreenReadsNeedAFullDevice(t *testing.T) {
 	}
 }
 
+// A full device's; cwd (#5832) only to a node with pane_cwd and new_space (#6362) only to one with pane_new_space,
+// else node_outdated before the node is asked.
 func TestNewShellIsAFullDevicesAndNamesNoDirectory(t *testing.T) {
 	tn := newTermNode(t)
 	h := tn.hub
@@ -119,6 +123,18 @@ func TestNewShellIsAFullDevicesAndNamesNoDirectory(t *testing.T) {
 	}
 	if got := tn.await(t, 1); len(got) != 1 || got[0] != "panes.new" {
 		t.Errorf("node log = %q", got)
+	}
+	m.mu.Lock()
+	m.info.Protocol, m.info.Capabilities = 1, nil // a node from before pane_cwd
+	m.mu.Unlock()
+	if code := post(roleFull, `{"workspace_id":"w1","cwd":"~/proj"}`); code != http.StatusConflict {
+		t.Errorf("cwd to an old node: %d, want 409", code)
+	}
+	m.mu.Lock()
+	m.info.Protocol, m.info.Capabilities = 1, []string{nodeproto.PaneCwd} // has pane_cwd, not pane_new_space (#6362)
+	m.mu.Unlock()
+	if code := post(roleFull, `{"kind":"herdr","cwd":"~","new_space":true}`); code != http.StatusConflict {
+		t.Errorf("new_space to a node without pane_new_space: %d, want 409", code)
 	}
 }
 

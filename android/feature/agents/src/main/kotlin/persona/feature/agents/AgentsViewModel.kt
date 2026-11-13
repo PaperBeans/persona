@@ -43,6 +43,8 @@ internal data class AgentsPageState(
     /** Built with the list on listContext: sorting every session into spaces in composition stalled the screen. */
     val spaces: List<AgentSpace> = emptyList(),
     val spacesById: Map<String, AgentSpace> = emptyMap(),
+    /** Whether the hub has the direction tree (#4352): only then does the menu offer "By direction". */
+    val directionsAvailable: Boolean = false,
 )
 
 /**
@@ -128,7 +130,7 @@ internal class AgentsViewModel(
     // Written while building [page] (on listContext) and reset from the main thread.
     @Volatile private var previous: AgentListResult? = null
     // Only touched while building [page]: one build at a time, so it needs no more.
-    private var previousContext: List<Any>? = null
+    private var previousContext: List<Any?>? = null
     private val _delivery = MutableStateFlow<Map<String, RequestDelivery>>(emptyMap())
     val delivery = _delivery.asStateFlow()
     private val _requestHistory = MutableStateFlow<List<Interaction>>(emptyList())
@@ -212,9 +214,15 @@ internal class AgentsViewModel(
 
     private val todosFlow = tasks?.todos ?: MutableStateFlow(emptyList())
     private val todosSupportedFlow = tasks?.todosSupported ?: MutableStateFlow(false)
+    // The hub's direction tree (#4352), for "By pinned": the selected assistant's snapshot holds the one copy the app
+    // reads (RealAssistantRepository), already in the list's ids.
+    private val directionsFlow: Flow<DirectionTree?> =
+        bindings?.assistant?.assistant?.map { it.directionTree }?.distinctUntilChanged() ?: flowOf(null)
     private val projectedPage = combine(renamer?.project(repository.sessions) ?: repository.sessions, repository.machines,
         preferences.snapshots(pairingScope).combine(repository.listStatus) { prefs, status -> prefs to status },
-        combine(settings, groupFilter, assistant, ::Triple), combine(operationState, todosFlow, todosSupportedFlow, ::Triple)) { hubSessions, hubMachines, (localPrefs, pagination), (settings, group, assistant), (ops, todos, todosSupported) ->
+        combine(settings, groupFilter, assistant, ::Triple),
+        combine(operationState, todosFlow.combine(directionsFlow, ::Pair), todosSupportedFlow, ::Triple)) { hubSessions, hubMachines, (localPrefs, pagination), (settings, group, assistant), (ops, todosAndTree, todosSupported) ->
+        val (todos, directions) = todosAndTree
         // The current assistant's (the hub's lists are every manager's, each row with its own).
         val everySession = if (assistant == null) hubSessions else hubSessions.filter { assistant.ownsOn(it.machineId, it.manager) }
         val everyMachine = if (assistant == null) hubMachines else hubMachines.filter { assistant.ownsOn(it.id, it.manager) }
@@ -228,18 +236,18 @@ internal class AgentsViewModel(
         val knownMachines = machines + sessions.map { it.machineId }.distinct().filter { id -> machines.none { it.id == id } }
             .map { Machine(it) } // named by the list as not updated yet (AgentsScreen.kt)
         val effective = settings.copy(grouping = prefs.grouping, sort = prefs.sort, hideBotmux = prefs.hideBotmux && !settings.quick.showsBotmux)
-        val context = listOf(prefs.range, effective.grouping, effective.sort, effective.hideBotmux, effective.quick, effective.query, effective.machineFilter, prefs.pins, todos)
+        val context = listOf(prefs.range, effective.grouping, effective.sort, effective.hideBotmux, effective.quick, effective.query, effective.machineFilter, prefs.pins, todos, directions)
         if (context != previousContext) previous = null
         previousContext = context
         // Server row search uses complete index text; searching the truncated summary again would lose matches.
         // A paged list: the hub matched the words ([hubQuery]); the conditions (machine:, is:pinned…) are checked here.
         val projectionSettings = if (pagination.paged) effective.copy(query = AgentQuery.parse(effective.query).conditions) else effective
-        val sorted = scopedAgentList(rows, knownMachines, prefs, projectionSettings, todos, openedRowsOfTheirOwn(previous, effective.kept))
+        val sorted = scopedAgentList(rows, knownMachines, prefs, projectionSettings, todos, openedRowsOfTheirOwn(previous, effective.kept), directions)
         val result = retainOpenedRows(sorted, previous, effective.kept).also { previous = it }
         val all = scopedAgentList(rows, knownMachines, prefs,
-            projectionSettings.copy(quick = AgentQuickFilter.All, kept = emptySet()), todos)
+            projectionSettings.copy(quick = AgentQuickFilter.All, kept = emptySet()), todos, directions = directions)
         // The chips count what each computer would show under the current range, search and quick filter.
-        val everywhere = scopedAgentList(rows, knownMachines, prefs, projectionSettings.copy(machineFilter = "", kept = emptySet()), todos)
+        val everywhere = scopedAgentList(rows, knownMachines, prefs, projectionSettings.copy(machineFilter = "", kept = emptySet()), todos, directions = directions)
             .groups.flatMap { it.rows }.filterNot { it.isNestedSubtask }
         AgentsPageState(sessions, knownMachines, prefs, effective, result, all.groups.sumOf { group -> group.rows.count { !it.isNestedSubtask } },
             machineCounts(knownMachines, everywhere), everywhere.size, groupCounts(everySession, everyMachine, prefs, effective, ops),
@@ -247,7 +255,7 @@ internal class AgentsViewModel(
             botmuxCount = if (effective.hideBotmux) botmuxCount(rows, prefs, effective)
                 else all.counts[AgentQuickFilter.Feishu] ?: 0, loaded = true).let { state ->
             val spaces = agentSpaces(rows)
-            state.copy(spaces = spaces, spacesById = spacesByGroup(result, prefs.grouping, spaces))
+            state.copy(spaces = spaces, spacesById = spacesByGroup(result, prefs.grouping, spaces), directionsAvailable = directions != null)
         }
     // The app (listContext set) builds only from the latest inputs and redraws at most every PAGE_MILLIS: with an
     // accessibility service on, Compose diffs the whole semantics tree on each recomposition, and one per pushed
@@ -525,9 +533,9 @@ internal class AgentsViewModel(
     /** Still not running (not started again elsewhere since the confirmation opened). */
     fun deletable(session: Session): Boolean = page.value.sessions.firstOrNull { it.key == session.key }?.canDelete
         ?: page.value.sessions.isEmpty()
-    /** Still running in a terminal pane (not closed elsewhere since a confirmation opened). */
+    /** Still running and closable from here, in a terminal pane or a runtime's (not closed elsewhere since a confirmation opened). */
     fun closable(session: Session): Boolean = page.value.sessions.firstOrNull { it.key == session.key }
-        ?.let { it.isLive && it.canTerminal } ?: page.value.sessions.isEmpty()
+        ?.let { it.isLive && it.canClose } ?: page.value.sessions.isEmpty()
     /** "Join live": join a Codex app-server thread live; the list refreshes after it. */
     fun attach(session: Session) = change(session.machineId, R.string.agents_notice_attached) { it.attach(session) }
     /** Stop its turn from the list (iOS's row menu Interrupt): felt once it went through. */

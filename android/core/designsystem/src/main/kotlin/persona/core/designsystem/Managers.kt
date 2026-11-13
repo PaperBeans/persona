@@ -158,7 +158,7 @@ fun JManagerAvatar(
                         val radius = HomeTokens.assistantPresenceDot.toPx() / 2
                         val ring = HomeTokens.assistantPresenceRing.toPx()
                         val center = androidx.compose.ui.geometry.Offset(this.size.width - radius - ring, this.size.height - radius - ring)
-                        drawCircle(androidx.compose.ui.graphics.Color.Black, radius + ring, center,
+                        drawCircle(androidx.compose.ui.graphics.Color.Transparent, radius + ring, center,
                             blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
                         drawCircle(dot, radius, center)
                     }
@@ -176,11 +176,45 @@ fun JManagerAvatar(
                     color = ink, maxLines = 1)
             }
         }
-        if (alert) JStatusDot(Status.NeedsYou, Modifier.align(Alignment.TopEnd))
+        if (alert) JStatusDot(Status.NeedsYou, Modifier.align(Alignment.TopEnd), breathes = false) // still, as iOS's `AssistantWaitingDot`
     }
 }
 
-/** An assistant's line under its name (Online · its computer, Offline · last synced …): the dot on its monogram says the state. */
+/** BlendMode.Clear uses only the source alpha; RGB must not become an opaque cutout color. */
+private val AvatarPresenceCutout = Tokens.System.Light.primary.copy(alpha = 0f)
+
+/**
+ * The default assistant's head: the chosen look's face (PersonaFace), not the first-letter monogram, so changing the
+ * look changes this face too — one identity with the main conversation (#6401). The presence and needs-you corner
+ * marks are the same [JManagerAvatar] draws, with the ring cut out of the face's own layer.
+ */
+@Composable
+fun JDefaultManagerFace(
+    manager: HubManager, modifier: Modifier = Modifier,
+    size: androidx.compose.ui.unit.Dp = HomeTokens.assistantAvatar, presence: Boolean = false, alert: Boolean = false,
+) {
+    val dot = if (presence) managerPresenceColor(manager) else null
+    androidx.compose.foundation.layout.Box(modifier.size(size).clearAndSetSemantics {}) {
+        androidx.compose.foundation.layout.Box(
+            Modifier.fillMaxSize()
+                .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+                .drawWithContent {
+                    drawContent()
+                    if (dot != null) {
+                        val radius = HomeTokens.assistantPresenceDot.toPx() / 2
+                        val ring = HomeTokens.assistantPresenceRing.toPx()
+                        val center = androidx.compose.ui.geometry.Offset(this.size.width - radius - ring, this.size.height - radius - ring)
+                        drawCircle(AvatarPresenceCutout, radius + ring, center,
+                            blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
+                        drawCircle(dot, radius, center)
+                    }
+                },
+        ) {
+            PersonaFace(PersonaState.Idle, Modifier.fillMaxSize(), size = size)
+        }
+        if (alert) JStatusDot(Status.NeedsYou, Modifier.align(Alignment.TopEnd))
+    }
+}
 @Composable
 private fun AssistantLine(text: String) =
     Text(text, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)

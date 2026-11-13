@@ -216,7 +216,8 @@ extension Theme {
         static let avatar = "person.crop.artframe"
         /// Settings › Appearance › Avatar › New from Photo: make an avatar from an image of your own (#2405).
         static let newAvatar = "photo.badge.plus"
-        /// Zoom in and out of a picture with a slider beside it (the avatar crop on the Mac).
+        /// Zoom in and out of a picture: with a slider beside it (the avatar crop on the Mac), and VNC's ⋯ › Zoom In and
+        /// Zoom to Fit (#6196).
         static let zoomIn = "plus.magnifyingglass"
         static let zoomOut = "minus.magnifyingglass"
         /// Settings › Appearance › Interface Style.
@@ -252,6 +253,8 @@ extension Theme {
         /// The queued messages given to the agent now, ahead of its next tool boundary (#6088).
         static let sendNow = "forward.end.fill"
         static let select = "selection.pin.in.out"
+        /// Select Messages… (#3838): pick several messages in a chat to forward together.
+        static let pickMessages = success
         static let insert = "text.cursor"
         static let view = "eye"
         /// Hide from a list (it stays where it is, out of sight).
@@ -299,6 +302,8 @@ extension Theme {
         static let keyboard = "keyboard"
         /// Puts the keyboard away (the chat's composer, beside the mode chips).
         static let dismissKeyboard = "keyboard.chevron.compact.down"
+        /// Indent: the text editor's key that inserts the file's indentation (#5829).
+        static let indent = "increase.indent"
 
         // MARK: Voice conversation (CarPlay)
 
@@ -385,16 +390,22 @@ extension Theme {
         /// A Moments (Feishu Moments) post in the inbox: the company's public feed.
         static let moments = "newspaper"
         static let folder = "folder"
-        /// Home: Back to Main Chat (the main conversation), and a repository's main checkout in the Agents list's By Repository (as Orca
-        /// and the web mark it).
+        /// Home: Back to Main Chat (the main conversation), a repository's main checkout in the Agents list's By Repository (as Orca
+        /// and the web mark it), and the computer's home folder in the file page's path bar.
         static let home = "house"
         /// Home accessories and scenes (HomeKit, #2285).
         static let homeAccessories = home
         static let folderFilled = "folder.fill"
-        /// Up one folder (the new chat's directory browser, Parent Folder).
+        /// Up one folder (the new chat's directory browser, Parent Folder; the file page's Up).
         static let parentFolder = "arrow.turn.left.up"
+        /// A symlink in the file page: the badge on its icon (#5827).
+        static let symlink = "arrow.turn.up.right"
+        /// Between two folders in the file page's path bar.
+        static let pathSeparator = "chevron.compact.right"
         /// A folder that is a git repository (the new chat's directory browser).
         static let gitRepository = "folder.badge.gearshape"
+        /// A temporary session: one in Claude's desktop app's scratch folder (New Agent, #5480).
+        static let temporarySession = "tray"
         static let photo = "photo"
         static let photos = "photo.on.rectangle"
         static let camera = "camera"
@@ -427,6 +438,10 @@ extension Theme {
         static let trackpad = "rectangle.and.hand.point.up.left"
         /// Center Pointer: the pointer back to the middle.
         static let pointerCenter = "scope"
+        /// The live screen's rotate button on an iPhone (#6196): the page on its side, and back upright. Each shows where
+        /// the tap turns it.
+        static let rotateToLandscape = "rectangle.landscape.rotate"
+        static let rotateToPortrait = "rectangle.portrait.rotate"
         /// The Mac's clipboard and the phone's, both ways.
         static let clipboard = "clipboard"
         /// Send Clipboard: the phone's clipboard to a computer (#3064).
@@ -493,6 +508,40 @@ extension Theme {
         static let pluginCalendar = calendarView
         static let pluginMoney = "creditcard"
         static let pluginStar = "star"
+        /// UI version 6's icons for homes and markets (docs/extensions/extensions.md "UI version 6", #827), one meaning
+        /// each. Meanings the app already has (home, lock, camera, play…) draw the app's own (`ExtensionUIStyle.icon`).
+        /// Unlock and bolt are not `lock.open` and `bolt`: the app draws those for other things (a session's permissions,
+        /// the terminal's quick commands).
+        static let pluginSofa = "sofa"
+        static let pluginLight = "lightbulb"
+        static let pluginPower = "power"
+        static let pluginFan = "fan"
+        static let pluginThermometer = "thermometer.medium"
+        static let pluginDroplet = "drop"
+        static let pluginUnlock = "lock.open.fill"
+        static let pluginDoor = "door.left.hand.closed"
+        static let pluginWindow = "window.vertical.closed"
+        static let pluginTV = "tv"
+        static let pluginPlug = "poweroutlet.type.b"
+        static let pluginBattery = "battery.75percent"
+        static let pluginBolt = "bolt.circle"
+        static let pluginCloud = "cloud.fill"
+        static let pluginRain = "cloud.rain"
+        static let pluginSnow = "snowflake"
+        static let pluginWind = "wind"
+        static let pluginLeaf = "leaf"
+        static let pluginCar = "car"
+        static let pluginRobot = "robotic.vacuum"
+        static let pluginWifi = "wifi"
+        static let pluginTrendUp = "chart.line.uptrend.xyaxis.circle"
+        static let pluginTrendDown = "chart.line.downtrend.xyaxis.circle"
+        static let pluginWallet = "wallet.bifold"
+        static let pluginBank = "building.columns"
+        static let pluginMinus = notChecked
+        /// A commit (UI version 4's code hosting).
+        static let pluginCommit = "circle.and.line.horizontal"
+        /// A picture that could not be loaded (an extension's `image`, its alt text beside it).
+        static let brokenImage = "photo.badge.exclamationmark"
         /// Asking for a GitHub star for Persona (#5761): the empty Agents pill, the milestone card, the onboarding toast.
         static let gitHubStar = pluginStar
         static let phone = "iphone"
@@ -586,6 +635,11 @@ extension Theme {
         static let forwardMessage = routeToTask
         /// A pull request a task opened.
         static let pullRequest = "arrow.triangle.pull"
+        /// An agent's closeout (#3612): the record it ends a turn with, and the switch that asks for one.
+        static let closeout = "list.bullet.rectangle.portrait"
+        /// What a closeout names besides a pull request, a branch, a document or a link (#3612): a commit, a build.
+        static let commit = "dot.circle"
+        static let build = "hammer"
         /// GitHub's thread page: a merged pull request, an open issue, a review asking for changes, a check skipped
         /// or cancelled, a label.
         static let merged = "arrow.triangle.merge"
@@ -641,6 +695,10 @@ extension Theme {
         /// A file edited in place (the Edit tools; Auto-Edit mode).
         static let editFile = "pencil.line"
         static let newFile = "doc.badge.plus"
+        /// New Folder in the file page's ＋ (#5828): the folder with a plus, as a new group.
+        static let newFolder = newGroup
+        /// Duplicate in the file page (#5830): a copy beside the original.
+        static let duplicate = "plus.square.on.square"
         /// Files looked up by name or listed (Glob, LS).
         static let findFiles = "folder.badge.questionmark"
         /// Text searched for inside files (Grep).
@@ -656,6 +714,8 @@ extension Theme {
         static let meeting = "person.2.wave.2"
         /// Persona stops attending the meeting being recorded (#2981: the recording Live Activity's Turn Off).
         static let attendanceOff = "waveform.slash"
+        /// Talk to Persona in the meeting (#3862 phase 4): held on the meeting page, a talk window from the Live Activity.
+        static let talk = "mic.circle"
         /// The calendar event a meeting recording is named after (docs/apple/recording.md).
         static let calendarEvent = "calendar.day.timeline.left"
         /// A meeting's minutes (#2710): a key point, a decision, a question left open (action items are `todo`).

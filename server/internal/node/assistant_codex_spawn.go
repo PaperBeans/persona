@@ -89,7 +89,7 @@ func (n *Node) codexAssistantCommand(shell, launcher string, args []string) *exe
 
 func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, mode string, options ...modelExecution) (*assistantProc, error) {
 	execution := executionOption(options)
-	if err := execution.check(); err != nil {
+	if err := execution.check(launcher); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(cwd, 0o700); err != nil {
@@ -115,6 +115,7 @@ func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, 
 	}()
 	cmd.Env = identity.Environment(cmd.Env, gateEnv...)
 	cmd.SysProcAttr = osproc.SessionGroupAttr()
+	msysCmdLine(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

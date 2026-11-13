@@ -97,6 +97,8 @@ func TestGoldenTaskPrompt(t *testing.T) {
 		{"interval_continued_late", Task{Title: "巡检", Prompt: "巡检", Repeat: repeatInterval, EveryMinutes: 30}, 3 * time.Hour, false, true, true},
 		// A task that pushes only what the run sends (#2396): the run is told so above its prompt.
 		{"interval_push_asked", Task{Title: "新邮件", Prompt: "看看邮箱有没有新邮件，有就告诉我", Repeat: repeatInterval, EveryMinutes: 5, Push: pushAsked}, 0, false, false, false},
+		{"interval_inbox_worthy", Task{Title: "价格监控", Prompt: "看看我关注的商品有没有降价", Repeat: repeatInterval, EveryMinutes: 30, Push: pushAsked, Inbox: inboxWorthy}, 0, false, false, false},
+		{"daily_inbox_every", Task{Title: "早报", Prompt: "给我今天的早报", Repeat: repeatDaily, Time: "09:00", Inbox: inboxEvery}, 0, false, false, false},
 		{"daily_continued_push_asked", Task{Title: "日报", Prompt: "有要紧的事才告诉我", Repeat: repeatDaily, Push: pushAsked}, 0, false, true, true},
 	} {
 		golden(t, "task_prompt."+c.name, taskPrompt(c.task, due, due.Add(c.late), loc, c.manual, c.kb, c.continued))

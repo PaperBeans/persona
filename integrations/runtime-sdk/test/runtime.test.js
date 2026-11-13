@@ -709,3 +709,24 @@ test('native rewind is advertised and returns the driver result with a refreshed
   assert.deepEqual(called, params)
   await until('inventory after rewind', () => node.all('runtime.sessions').length > 1)
 })
+
+test('seen is advertised only by a driver that has it, and reaches the driver (#6299)', async (t) => {
+  const node = await startFakeNode(t)
+  const seen = []
+  const rt = createRuntime(minimal({ listSessions: async () => [{ session_id: 's1', status: 'done', rev: 1 }], seen: async (params) => { seen.push(params) } }),
+    { runtime: 'toy', socketPath: node.path, pushDelayMs: 5 })
+  t.after(() => rt.stop())
+  rt.start()
+  await node.ready
+  assert.equal(node.hello.caps.seen, true)
+  assert.deepEqual(await node.peer.call('session.seen', { session_id: 's1' }), { ok: true })
+  assert.deepEqual(seen, [{ session_id: 's1' }])
+
+  const other = await startFakeNode(t)
+  const plain = createRuntime(minimal({}), { runtime: 'toy2', socketPath: other.path, pushDelayMs: 5 })
+  t.after(() => plain.stop())
+  plain.start()
+  await other.ready
+  assert.equal(other.hello.caps.seen, undefined, 'not said without the method')
+  await assert.rejects(other.peer.call('session.seen', { session_id: 's1' }), /unsupported/)
+})

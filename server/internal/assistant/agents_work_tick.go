@@ -442,7 +442,7 @@ func (s *Service) backfillWork(ctx context.Context, v *workView, now time.Time) 
 		if !d.Reachable {
 			continue
 		}
-		for _, c := range v.sessions(d.ID) {
+		for _, c := range v.listedSessions(d.ID) { // an archive row is offline: never unread
 			if n >= 3 {
 				return
 			}
@@ -467,7 +467,7 @@ func (s *Service) backfillWork(ctx context.Context, v *workView, now time.Time) 
 func (s *Service) sampleWork(v *workView) {
 	counts := map[string]any{}
 	for _, d := range v.machines() {
-		for _, c := range v.sessions(d.ID) {
+		for _, c := range v.listedSessions(d.ID) { // an archive row is offline: never counted
 			if c.Assistant || c.State == proto.StateOffline {
 				continue
 			}

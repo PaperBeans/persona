@@ -24,6 +24,7 @@ import { addQuote, applyDraft, getQuotes, onDraftEvent, parseQuotes, removeQuote
 import type { EditedImage } from "../../lib/image-edit";
 import { mentionAt, replaceToken, sessionQuote, workspaceContext, type MentionToken } from "../../lib/mentions";
 import { machineWithHub } from "../../lib/mesh";
+import { skillContext, skillDraft, splitSkillDraft } from "../../lib/skill-mentions";
 import { getState } from "../../lib/store";
 import { AttachmentTray } from "../../ui/AttachmentTray";
 import { cx, EASE, Spinner, toast } from "../../ui/atoms";
@@ -33,9 +34,9 @@ import { ForwardBars } from "./ForwardCard";
 import { QuoteBars } from "./Quote";
 import type { ComposerPanelHandle, MentionRow, MentionSource, PanelPick } from "./ComposerPanel";
 import type { PlanMode } from "./PermissionPicker";
-import { HistorySearch } from "./HistorySearch";
 import { useSendHistory } from "./useSendHistory";
 import { isModelCommand, requestModelPicker } from "../../lib/model-switch";
+import { isPermissionsCommand, permissionsCommand, PERMISSIONS_COMMAND, requestPermissionPicker } from "../../lib/permissions-command";
 import { MAX_IMAGES, rankCommands } from "../../lib/composer-commands";
 import { escapeCancelsEdit, escapeCountsForEdit, upStartsEdit, type EditLastBox } from "../../lib/edit-last-key";
 import { t } from "../../i18n";
@@ -45,6 +46,9 @@ import type { VoiceOffer } from "./voice/VoiceParts";
 const ImageEditor = lazyPage(() => import("./ImageEditor").then((m) => m.ImageEditor), { idle: true });
 // The + / @ panel, drawn only while it is open: its own chunk and words, fetched by the idle preload or the first opening.
 const ComposerPanel = lazyPage(() => import("./ComposerPanel").then((m) => m.ComposerPanel), { idle: true });
+const AssistantComposerPanel = lazyPage(() => import("./AssistantComposerPanel").then((m) => m.AssistantComposerPanel));
+// Skill-aware history labels are needed only when recall search opens, not on the first screen.
+const HistorySearch = lazyPage(() => import("./HistorySearch").then((m) => m.HistorySearch));
 // The "/" palette (cindy's, #5325), drawn once "/" is typed: its own chunk too, fetched by the idle preload.
 const SlashPalette = lazyPage(() => import("./SlashPalette").then((m) => m.SlashPalette), { idle: true });
 /** How long "Not sent yet" stays under the box after Enter was pressed while blocked. */
@@ -88,6 +92,8 @@ export const AGENT_COMMANDS: Command[] = [
   { word: "/compact", desc: t("chat-composer.cmd_compact_desc"), text: "/compact", agent: true },
   { word: "/context", desc: t("chat-composer.cmd_context_desc"), text: "/context", agent: true },
   { word: "/model", desc: t("chat-composer.cmd_model_desc"), text: "/model ", agent: true },
+  // Persona's own: opens the permission picker with every mode instead of sending it (#6476, lib/permissions-command.ts)
+  permissionsCommand(),
   { word: "/loop", desc: t("chat-composer.cmd_loop_desc"), text: LOOP_TEXT, agent: true },
   { word: "/clear", desc: t("chat-composer.cmd_clear_desc"), text: "/clear", confirm: t("chat-composer.cmd_clear_confirm"), agent: true },
 ];
@@ -188,7 +194,7 @@ export const Composer = memo(function Composer({
    *  cindy's pending queue, #5327). Keep it the same object while nothing in it changes, as `footer`. */
   top?: React.ReactNode;
 }) {
-  const [draft, setDraft] = useState(() => storedValue(`draft:${draftKey}`) ?? "");
+  const [draft, setDraft] = useState(() => splitSkillDraft(storedValue(`draft:${draftKey}`) ?? "").text);
   const [atts, setAtts] = useState<Attachment[]>([]);
   // The suggestion just sent with its arrow: it stays on the hub until the agent starts, and each tap would be a new message.
   const [sentPill, setSentPill] = useState<string | null>(null);
@@ -233,6 +239,20 @@ export const Composer = memo(function Composer({
   const fileInput = useRef<HTMLInputElement>(null);
   // text picked in the link panel waits here (lib/links.ts), and "AI edit" sends through this composer
   const contexts = useContexts(draftKey);
+  const restoreSkills = (text: string) => {
+    const split = splitSkillDraft(text);
+    getContexts(draftKey).filter((r) => r.kind === "skill").forEach((r) => removeContext(draftKey, r.id));
+    split.skills.forEach((r) => addContext(draftKey, r));
+    return split.text;
+  };
+  const skillEnvironment = JSON.stringify([machineId, mention?.cwd, mention?.skills]);
+  const previousSkillEnvironment = useRef(skillEnvironment);
+  useEffect(() => {
+    if (previousSkillEnvironment.current !== skillEnvironment && getContexts(draftKey).some((r) => r.kind === "skill")) {
+      toast(t("chat-composer.skills_changed"), "error");
+    }
+    previousSkillEnvironment.current = skillEnvironment;
+  }, [skillEnvironment, draftKey]);
   const sendNow = useRef<(text: string) => Promise<boolean>>(async () => false);
   sendNow.current = async (text) => (disabled || blocked || loadingDraft ? false : onSend({ text, images: [] }));
   const canTake = useRef(!disabled);
@@ -274,7 +294,7 @@ export const Composer = memo(function Composer({
 
   // a different conversation: its own draft
   useEffect(() => {
-    setDraft(storedValue(`draft:${draftKey}`) ?? "");
+    setDraft(restoreSkills(storedValue(`draft:${draftKey}`) ?? ""));
     setPlusOpen(false);
     releaseAttachments(attsNow.current);
     setAtts([]);
@@ -290,7 +310,9 @@ export const Composer = memo(function Composer({
       onDraftEvent(draftKey, (e) => {
         // a send from an earlier box of this conversation failed: its words come back even while sending is off
         if (e.type === "unsent") {
-          setDraft((cur) => withUnsent(cur, e.text));
+          const split = splitSkillDraft(e.text);
+          split.skills.forEach((r) => addContext(draftKey, r));
+          setDraft((cur) => withUnsent(cur, split.text));
           return;
         }
         if (!canTake.current) return;
@@ -313,17 +335,18 @@ export const Composer = memo(function Composer({
         const startsEdit = e.type === "replace" && Boolean(e.edit);
         if (e.type === "replace" && !startsEdit) editNow.current?.cancel();
         // "Edit" a message sent with a quote: the quote goes back to the bar, the words to the input
-        const split = e.type === "replace" ? splitQuotes(e.text) : null;
+        const selected = e.type === "replace" ? splitSkillDraft(e.text) : null;
+        const split = e.type === "replace" ? splitQuotes(selected!.text) : null;
         const nextQuotes = e.type === "replace" ? (split ? parseQuotes(split.quotes) : []) : null;
-        const next = split ? split.rest : applyDraft(draftNow.current, e);
+        const next = split ? split.rest : selected ? selected.text : applyDraft(draftNow.current, e);
         // "Edit" or a rewind over unsent words, quotes or comments puts the message in at once, with no question first:
         // the notice's Undo brings back what was typed, the quotes on the bar and where the caret was (#2450). An empty
         // bar, or one that would send the same blocks, loses nothing.
         const before = getQuotes(draftKey).list;
         const dropsQuotes = before.length > 0 && withQuoteBlock(before, "") !== withQuoteBlock(nextQuotes ?? [], "");
         const kept =
-          nextQuotes && (replaceNeedsConfirm(draftNow.current, next) || dropsQuotes)
-            ? { text: draftNow.current, quotes: before, caret: input.current?.selectionStart ?? draftNow.current.length }
+          nextQuotes && (replaceNeedsConfirm(draftNow.current, next) || dropsQuotes || getContexts(draftKey).some((r) => r.kind === "skill"))
+            ? { text: draftNow.current, skills: getContexts(draftKey).filter((r) => r.kind === "skill"), quotes: before, caret: input.current?.selectionStart ?? draftNow.current.length }
             : null;
         if (kept) {
           toast(t("chat-composer.replaced"), "ok", {
@@ -331,9 +354,10 @@ export const Composer = memo(function Composer({
             run: () => {
               if (startsEdit) editNow.current?.cancel();
               setQuotes(draftKey, kept.quotes);
+              restoreSkills(skillDraft(kept.skills, kept.text));
               // the box went away or shows another conversation: the words go back to this one's stored draft
               if (!mounted.current || keyNow.current !== draftKey) {
-                storeDraft(draftKey, kept.text);
+                storeDraft(draftKey, skillDraft(kept.skills, kept.text));
                 return;
               }
               setDraft(kept.text);
@@ -349,6 +373,7 @@ export const Composer = memo(function Composer({
           });
         }
         if (nextQuotes) setQuotes(draftKey, nextQuotes);
+        if (selected) restoreSkills(skillDraft(selected.skills, selected.text));
         setDraft(next);
         setDismissed(false);
         requestAnimationFrame(() => {
@@ -370,7 +395,7 @@ export const Composer = memo(function Composer({
     const u = unsaved.current;
     if (!u) return;
     unsaved.current = null;
-    storeDraft(u.key, u.text);
+    storeDraft(u.key, skillDraft(getContexts(u.key), u.text));
   }, []);
   // The render that moves the box to another conversation still holds the old words: they are not that one's draft
   // (the box reads its own next, and this runs again if it differs).
@@ -383,7 +408,7 @@ export const Composer = memo(function Composer({
     unsaved.current = { key: draftKey, text: draft };
     const t = setTimeout(saveDraft, 250);
     return () => clearTimeout(t);
-  }, [draft, draftKey, saveDraft]);
+  }, [draft, draftKey, saveDraft, contexts]);
   useEffect(() => {
     addEventListener("pagehide", saveDraft);
     return () => {
@@ -464,10 +489,10 @@ export const Composer = memo(function Composer({
   // ↑ / ↓ recall and Ctrl+R search of what was sent (useSendHistory.ts); desktop only
   const history = useSendHistory({
     draftKey,
-    draft,
+    draft: skillDraft(contexts, draft),
     setDraft: (text) => {
       leaveEdit();
-      setDraft(text);
+      setDraft(restoreSkills(text));
     },
     setCaret,
     input,
@@ -516,10 +541,12 @@ export const Composer = memo(function Composer({
   // A row of the + / @ panel: a session goes with the message as a quote, not as text (PromptItems.quote), a workspace as
   // a context the hub fills in; a file as `@path `. In place of the typed @ token (`at`), or at the caret from the +.
   const pickRow = (r: MentionRow, at: MentionToken | null) => {
-    if (r.kind === "session" || r.kind === "workspace") {
+    if (r.kind === "session" || r.kind === "workspace" || r.kind === "skill") {
       if (r.kind === "session") {
         const q = sessionQuote(r.session);
         addContext(draftKey, newContext("context", q.title, q.url, q.text));
+      } else if (r.kind === "skill") {
+        addContext(draftKey, skillContext(r.skill));
       } else {
         const w = workspaceContext(r.workspace, (id) => machineWithHub(id, getState().machines));
         addContext(draftKey, { ...newContext("workspace", w.title, w.url, w.text), attrs: w.attrs });
@@ -720,7 +747,7 @@ export const Composer = memo(function Composer({
     // picked contexts ride in front as <persona-context> tags (docs/protocol/protocol.md "Tags in messages"), the quote as `> ` lines
     const ok = await onSend({ text: withContexts(refs, withQuoteBlock(q, text), sent.length > 0), images: sent.map((a) => ({ mime: a.mime, data: a.data })), ...(committed ? { edit: committed } : {}) });
     if (ok) {
-      history.record(text);
+      history.record(skillDraft(refs, text));
       releaseAttachments(sent);
     } else {
       // the box closed or shows another conversation now: the words go back to this conversation's draft (its open
@@ -740,11 +767,18 @@ export const Composer = memo(function Composer({
 
   const pick = (c: Command) => {
     if (c.confirm && !confirm(c.confirm)) return;
+    // `/permissions` opens the permission menu at once; where the chat has no picker it goes in the box as any command
+    if (c.text === PERMISSIONS_COMMAND && requestPermissionPicker(draftKey)) {
+      setDraft("");
+      setDismissed(true);
+      return;
+    }
     setDraft(c.text);
     setDismissed(true);
     input.current?.focus({ preventScroll: true });
   };
 
+  const MentionPanel = mention?.skills ? AssistantComposerPanel : ComposerPanel;
   return (
     <div
       ref={box}
@@ -772,16 +806,16 @@ export const Composer = memo(function Composer({
         </Suspense>
       )}
 
-      {history.searching && <HistorySearch onPick={history.pick} onClose={history.closeSearch} />}
+      {history.searching && <Suspense fallback={null}><HistorySearch onPick={history.pick} onClose={history.closeSearch} /></Suspense>}
 
       {token && (
         <Suspense fallback={null}>
-          <ComposerPanel from="at" query={token.query} source={mention} machineId={machineId} attach={disabled ? undefined : machineId ? "files" : "images"} plan={planMode} onPick={(p) => pickPanel(p, token)} onClose={closePlus} handle={panel} />
+          <MentionPanel from="at" query={token.query} source={mention} machineId={machineId} attach={disabled ? undefined : machineId ? "files" : "images"} plan={planMode} onPick={(p) => pickPanel(p, token)} onClose={closePlus} handle={panel} />
         </Suspense>
       )}
       {plusOpen && !disabled && (
         <Suspense fallback={null}>
-          <ComposerPanel from="plus" source={mention} machineId={machineId} attach={machineId ? "files" : "images"} plan={planMode} onPick={(p) => pickPanel(p, null)} onClose={closePlus} />
+          <MentionPanel from="plus" source={mention} machineId={machineId} attach={machineId ? "files" : "images"} plan={planMode} onPick={(p) => pickPanel(p, null)} onClose={closePlus} />
         </Suspense>
       )}
 
@@ -885,6 +919,12 @@ export const Composer = memo(function Composer({
             }
             // `/model` alone opens the model panel instead of sending (where the agent switches models)
             if (enterSends(e, hasFinePointer()) && isModelCommand(draft) && requestModelPicker(draftKey)) {
+              e.preventDefault();
+              setDraft("");
+              return;
+            }
+            // so does `/permissions` alone: the permission menu (#6476)
+            if (enterSends(e, hasFinePointer()) && isPermissionsCommand(draft) && requestPermissionPicker(draftKey)) {
               e.preventDefault();
               setDraft("");
               return;

@@ -132,7 +132,8 @@ func TestCallLogOneHandover(t *testing.T) {
 		{"call 1: delegation dlg1: made in session 1"},
 		{"call 1: function call delegate_task (call c1, delegation dlg1, session 1)"},
 		{"call 1: delegation dlg1: a task for agent m/a1", "characters"},
-		{"call 1: delegation dlg1: the user-speech gate let it through (typed line)"},
+		{"call 1: delegation dlg1: the user-speech gate let it through (typed line)", "; from the handover: agent words none, caption ",
+			" before (counted), typed line ", " before (counted), own voice none"},
 		{"call 1: run " + m.ID + ": for delegation dlg1, in session 1"},
 		{"call 1: run " + m.ID + ": sending"},
 		{"call 1: run " + m.ID + ": sent to m/a1: ok in"},
@@ -181,7 +182,8 @@ func TestCallLogRefusedHandover(t *testing.T) {
 	}
 	id, _ := refused["id"].(string)
 	logs.wait("call 1: delegation dlg1: a task for agent m/a1")
-	logs.wait("call 1: delegation dlg1: the user-speech gate refused it (unprompted) after")
+	logs.wait("call 1: delegation dlg1: the user-speech gate refused it (unprompted) after",
+		"; from the handover: agent words none, caption none, typed line none, own voice none")
 	logs.wait("call 1: run " + id + ": refused (unprompted)")
 	_ = a.c.Close(websocket.StatusNormalClosure, "bye")
 	if end := logs.wait("call 1: conversation closed"); !strings.Contains(end, "runs 1 (refused 1)") {

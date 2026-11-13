@@ -56,6 +56,77 @@ done
 	}
 }
 
+// The user's model is not automatically a bad configuration: a gateway can call a model that answered moments ago
+// missing. The real process/stream-json seam retries it once, without repeating the owner's message (#5234).
+func TestAssistantTransientErrorRetriesAModelThatJustAnswered(t *testing.T) {
+	f := sdkTest(t)
+	script := `printf '%s\n' "$*" >> "$SDK_FAKE_DIR/cli-argv"
+echo '{"type":"system","subtype":"init"}'
+while IFS= read -r line; do
+  case "$line" in *'"type":"user"'*)
+    printf '%s\n' "$line" >> "$SDK_FAKE_DIR/user.jsonl"
+    count=$(cat "$SDK_FAKE_DIR/failures" 2>/dev/null || echo 0)
+    if [ "$count" -eq 0 ]; then
+      echo 1 > "$SDK_FAKE_DIR/failures"
+      echo '{"type":"stream_event","event":{"type":"message_start","message":{"model":"primary-model","usage":{"input_tokens":5}}},"parent_tool_use_id":null}'
+      echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"first answer"}},"parent_tool_use_id":null}'
+      printf '{"type":"assistant","uuid":"first","timestamp":"2026-11-10T00:00:00Z","message":{"role":"assistant","model":"primary-model","content":[{"type":"text","text":"first answer"}]}}\n' >> "$SDK_FAKE_DIR/transcript.jsonl"
+      echo '{"type":"result","subtype":"success","is_error":false,"result":"first answer"}'
+    elif [ "$count" -eq 1 ]; then
+      echo 2 > "$SDK_FAKE_DIR/failures"
+      echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"There is an issue with the selected model (primary-model). It may not exist or you may not have access to it."}'
+    else
+      echo '{"type":"stream_event","event":{"type":"message_start","message":{"model":"primary-model","usage":{"input_tokens":5}}},"parent_tool_use_id":null}'
+      echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"recovered answer"}},"parent_tool_use_id":null}'
+      printf '{"type":"assistant","uuid":"recovered","timestamp":"2026-11-10T00:01:00Z","message":{"role":"assistant","model":"primary-model","content":[{"type":"text","text":"recovered answer"}]}}\n' >> "$SDK_FAKE_DIR/transcript.jsonl"
+      echo '{"type":"result","subtype":"success","is_error":false,"result":"recovered answer"}'
+    fi ;;
+  esac
+done
+`
+	if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\n"+script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	id, err := f.n.assistantSend(context.Background(), "", t.TempDir(), "claude", "original request", nil, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.idle(t, id)
+	f.n.setPath(id, filepath.Join(f.dir, "transcript.jsonl"))
+	if _, err := f.n.assistantSend(context.Background(), id, t.TempDir(), "claude", "next request", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	f.idle(t, id)
+	got := f.file("user.jsonl")
+	if strings.Count(got, "next request") != 1 {
+		t.Fatalf("the owner's message was not sent exactly once: %s", got)
+	}
+	var retryText string
+	for _, raw := range strings.Split(strings.TrimSpace(got), "\n") {
+		var line struct {
+			Message struct {
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(raw), &line); err != nil {
+			t.Fatal(err)
+		}
+		for _, block := range line.Message.Content {
+			if strings.Contains(block.Text, "因模型服务的一次临时错误中断") {
+				retryText = block.Text
+			}
+		}
+	}
+	if retryText != prompts.RenderModelRetry() {
+		t.Fatalf("a transient model route did not use the retry prompt: %s", got)
+	}
+	if p := f.proc(id); p == nil || p.replyModel != "primary-model" || p.repliedAt.IsZero() {
+		t.Fatalf("the recovered model did not answer: %+v", p)
+	}
+}
+
 func TestAssistantFailureThenUsesTheNextLauncherModel(t *testing.T) {
 	f := sdkTest(t)
 	script := `printf '%s\n' "$*" >> "$SDK_FAKE_DIR/cli-argv"

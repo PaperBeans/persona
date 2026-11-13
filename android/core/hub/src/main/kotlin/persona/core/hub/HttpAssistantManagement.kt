@@ -170,6 +170,11 @@ class HttpAssistantManagement private constructor(
         return NewMainResult((out["archived"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
             (out["carried"] as? JsonPrimitive)?.booleanOrNull == true)
     }
+    override suspend fun clearMainConversation(expect: String?): String {
+        val body = buildJsonObject { expect?.takeIf(String::isNotBlank)?.let { put("expect", it) } }
+        val out = refusals { request("POST", listOf("api", "v1", "assistant", "main", "clear"), body, compactHttp) }
+        return (out["archived"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    }
     /** A 409 with a code is the hub refusing the action for a reason it words itself ("Answering", "Main chat already changed"…). */
     private inline fun <T> refusals(block: () -> T): T = try { block() } catch (failure: HubFailure) {
         val code = failure.code

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handoffCardBody, handoffCardState, wrapUpItems, type HandoffCardBody } from "./handoff-card";
+import { handoffCardBody, handoffCardState, wrapUpItems, wrapUpWait, type HandoffCardBody } from "./handoff-card";
 import type { FeedItem } from "./feed";
 import type { InboxItem } from "./inbox";
 
@@ -62,5 +62,22 @@ describe("Wrap up chips", () => {
     ];
     expect(wrapUpItems(items, "m1").map((x) => x.id)).toEqual(["b", "a"]);
     expect(wrapUpItems(items, "m3")).toEqual([]);
+  });
+
+  it("leave out an item handled with nothing waiting, and keep one whose suggestion waits or that is still worked on", () => {
+    const handed = (id: string, patch: Partial<InboxItem>) => item({ id, title: id, ...patch });
+    const items = [
+      handed("handled", { suggestion: undefined, handling: { state: "done" } }),
+      handed("to-send", { handling: { state: "done" } }),
+      handed("working", { suggestion: undefined, handling: { state: "agent" } }),
+    ];
+    expect(wrapUpItems(items, "m1").map((x) => x.id).sort()).toEqual(["to-send", "working"]);
+  });
+
+  it("say what waits: a reply to send, anything else to confirm, nothing without a suggestion", () => {
+    expect(wrapUpWait(item())).toBe("send");
+    expect(wrapUpWait(item({ suggestion: { version: 3, kind: "conclusion", text: "x" } }))).toBe("confirm");
+    expect(wrapUpWait(item({ suggestion: { version: 3, kind: "agent", text: "x" } }))).toBe("confirm");
+    expect(wrapUpWait(item({ suggestion: undefined }))).toBeUndefined();
   });
 });

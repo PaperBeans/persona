@@ -272,6 +272,10 @@ var (
 // /usr/local). A test that must not find the machine's own install points them elsewhere, as it does PATH and HOME.
 var agentSystemDirs = []string{"/opt/homebrew/bin", "/usr/local/bin"}
 
+// distroNodeDir is where a Linux distribution's package manager puts node, and so where `npm install -g` with that
+// node puts claude. commonNodePaths looks there after agentSystemDirs; a test points it elsewhere with them (#6257).
+var distroNodeDir = "/usr/bin"
+
 // claudeExecutable finds claude: PATH first, then the usual install spots. A node started by launchd (macOS) has a
 // minimal PATH that misses /opt/homebrew/bin, and nothing in `personad launch`'s own path adds it.
 func agentExecutable(bin string) (string, error) {

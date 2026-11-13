@@ -32,6 +32,8 @@
     <string name="assistant_voice_chat">音声チャット</string>
     <string name="assistant_compact">コンテキストを圧縮</string>
     <string name="assistant_new_main">新しいメインチャット</string>
+    <string name="assistant_clear_context">コンテキストをクリア</string>
+    <string name="assistant_clear_context_failed">コンテキストをクリアできませんでした：%1$s</string>
     <string name="assistant_archive">アーカイブ</string>
     <string name="assistant_archived">アーカイブ済み</string>
     <string name="assistant_copy_session_id">セッションIDをコピー</string>
@@ -106,8 +108,13 @@
     <string name="assistant_open_settings">設定</string>
     <string name="assistant_make_leader">常駐にする</string>
     <string name="assistant_end_leader">常駐をやめる</string>
-    <string name="assistant_leader_working">作業中 %1$d</string>
+    <string name="assistant_make_leader_title">常駐にしますか？</string>
+    <string name="assistant_make_leader_text">このチャットは常駐に移り、「最近」には出なくなります。</string>
+    <string name="assistant_end_leader_title">常駐をやめますか？</string>
+    <string name="assistant_end_leader_text">「%1$s」は「最近」に戻ります。進行中のタスクはメインチャットの監督に戻り、終了や削除はされません。</string>
     <string name="assistant_leader_needs_you">対応待ち %1$d</string>
+    <string name="assistant_direction_todos_of">%1$s の ToDo</string>
+    <string name="assistant_direction_agents_of">%1$s の Agent</string>
     <string name="assistant_conversation_actions">チャットの操作</string>
     <string name="assistant_demo_title">体験モード</string>
     <string name="assistant_demo_notice">内容はこの体験中のみ保存されます。</string>

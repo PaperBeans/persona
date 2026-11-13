@@ -50,5 +50,6 @@
   "follow_row": "跟随模型配置",
   "carry_dropped": "{computer} 上用不了 {name}，已换回这台电脑的默认设置。",
   "preset_picked": "预设 {name} · {what}",
-  "typed_now": "这次手输的模型 ID"
+  "typed_now": "这次手输的模型 ID",
+  "temporary_session": "临时会话"
 }

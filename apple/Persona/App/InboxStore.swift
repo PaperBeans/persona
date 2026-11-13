@@ -331,7 +331,7 @@ final class InboxStore {
         teachLarkSync()
         let snapshot = list
         saver.run { StateCache.save(Self.stateName, snapshot) }
-        WatchSync.shared.push(summary: AppModel.shared.watchSummary())
+        AppModel.shared.summariesChanged()
     }
 
     /// Mark All Seen / Clear All (a section), Mac's multi-select, and every Undo: one request for them all on the Done request

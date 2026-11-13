@@ -1,7 +1,7 @@
 import { memo, useEffect, useId, useState } from "react";
 import { handOffToMain, itemRoute, loadRoutedItem, suggestionAct, useInbox, type InboxItem } from "../../lib/inbox";
 import { suggestionButtons } from "../../lib/inbox-events";
-import { handoffCardBody, handoffCardState, wrapUpItems, type HandoffCardBody } from "../../lib/handoff-card";
+import { handoffCardBody, handoffCardState, wrapUpItems, wrapUpWait, type HandoffCardBody } from "../../lib/handoff-card";
 import { later, useFeed, type FeedItem } from "../../lib/feed";
 import { navigate } from "../../lib/router";
 import { errorText } from "../../lib/api";
@@ -132,7 +132,9 @@ export const HandoffCard = memo(function HandoffCard({ item: feed }: { item: Fee
 });
 
 /** Over the composer of a conversation items were handed to: "Wrap up: <title>" for each still open, which asks the
- *  conversation for the final summary and reply through the same hand-off (the item's id goes with it). */
+ *  conversation for the final summary and reply through the same hand-off (the item's id goes with it). A chip whose
+ *  item has a suggestion waiting for the owner says so ("To send" / "To confirm"); one handled with nothing waiting is
+ *  gone (wrapUpItems). */
 export const WrapUpChips = memo(function WrapUpChips({ conversation }: { conversation: string }) {
   const items = useInbox((s) => wrapUpItems(s.items, conversation));
   const [busy, setBusy] = useState<string | null>(null);
@@ -160,8 +162,20 @@ export const WrapUpChips = memo(function WrapUpChips({ conversation }: { convers
         >
           <Icon name={busy === it.id ? "clock" : "inbox"} size={12} className="shrink-0" />
           <span className="min-w-0 truncate whitespace-nowrap">{t("assistant-handoffcard.wrap_up", { title: it.title })}</span>
+          <WrapUpBadge it={it} />
         </button>
       ))}
     </div>
   );
 });
+
+/** A Wrap up chip's note of the item's suggestion waiting for the owner; nothing while none waits. */
+function WrapUpBadge({ it }: { it: InboxItem }) {
+  const wait = wrapUpWait(it);
+  if (!wait) return null;
+  return (
+    <span data-testid="wrap-up-wait" className="shrink-0 rounded-full bg-accent px-1.5 font-semibold whitespace-nowrap text-white">
+      {t(wait === "send" ? "assistant-handoffcard.wrap_up_to_send" : "assistant-handoffcard.wrap_up_to_confirm")}
+    </span>
+  );
+}

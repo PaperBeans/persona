@@ -189,10 +189,12 @@ func TestCodexPaginatedHistoryKeepsThePrefixAndAnEmptyConversation(t *testing.T)
 	if b, _ := os.ReadFile(f.Where()); strings.Count(string(b), "\n") != 1 {
 		t.Fatalf("want a header-only canonical history: %s", b)
 	}
+	// The continuation writes new turns under its own rollout ID, leaving the base segment's rows unchanged.
+	turns[0].thread = remoteOther
 	turns[0].id, turns[0].items = "replacement", [][2]string{userItem("new", "new branch")}
 	writeCodexHistory(t, home, turns)
 	n.refreshCodexAppHistory(id)
-	fresh, err := f.Refresh()
+	fresh, err := transcript.NewFile(f.Where()).Refresh()
 	if err != nil || !strings.Contains(historyText(fresh), "new branch") || strings.Contains(historyText(fresh), "retained prefix") {
 		t.Fatalf("replacement: %s %v", historyText(fresh), err)
 	}
@@ -226,6 +228,26 @@ func TestRuntimeNativeRewindCapability(t *testing.T) {
 	}
 	if _, err := n.rewind(context.Background(), s.SessionID, rewindOpts{Prompt: "example", Occurrence: 1, Restore: RestoreCodeAndConv}); err == nil || len(h.got("session.rewind")) != 1 {
 		t.Fatal("file rewind reached a conversation-only runtime")
+	}
+
+	// A row narrows the runtime's rewind for its own session, and offers the files with it (Paseo: what its provider can).
+	_ = h.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
+		{"session_id": "rewind-example", "status": "idle", "capabilities": map[string]any{"rewind": true, "rewind_code": true}},
+		{"session_id": "rewind-none", "status": "idle", "capabilities": map[string]any{"rewind": false, "rewind_code": true}},
+	}})
+	waitFor(t, "rows with their own rewind", func() bool { _, ok := listed(t, n)["rewind-none"]; return ok })
+	rows := listed(t, n)
+	if c := rows["rewind-example"].Capabilities; !*c.Rewind || c.RewindCode == nil || !*c.RewindCode {
+		t.Fatal("a row offering the files with its rewind")
+	}
+	if c := rows["rewind-none"].Capabilities; *c.Rewind || *c.RewindCode {
+		t.Fatal("a row without rewind offers none, files included")
+	}
+	if _, err := n.rewind(context.Background(), "rewind-example", rewindOpts{Prompt: "example", Occurrence: 1, Restore: RestoreCodeAndConv}); err != nil || len(h.got("session.rewind")) != 2 {
+		t.Fatalf("file rewind on a row offering it: %v", err)
+	}
+	if _, err := n.rewind(context.Background(), "rewind-none", rewindOpts{Prompt: "example", Occurrence: 1, Restore: RestoreConversation}); err == nil || len(h.got("session.rewind")) != 2 {
+		t.Fatal("rewind reached a row without it")
 	}
 }
 

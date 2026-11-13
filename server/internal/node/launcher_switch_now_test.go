@@ -98,3 +98,78 @@ func TestSwitchNowNeedsARunningAgentWithASwitch(t *testing.T) {
 		t.Errorf("drove the terminal: %q", got)
 	}
 }
+
+// session.switch (the assistant's batch switch, #6008) carries the picked switch out with no message: the agent is quit
+// and resumed on the new launcher in the same terminal, and nothing is prompted; a busy agent is refused (switch_busy)
+// with nothing done and the switch dropped.
+func TestSessionSwitchWithNoMessage(t *testing.T) {
+	n, f, _, cwd, _ := switchNode(t, proto.StatusIdle, nil)
+	if err := pick(t, n, map[string]any{"launcher": "work", "from": "claude", "model": "opus"}); err != nil {
+		t.Fatal(err)
+	}
+	f.reset()
+	quitsToShell(f, cwd)
+	comesUpWhen(f, "w1:p1", func(string) bool { return true })
+	if _, err := request(t, n, "session.switch", map[string]any{"session_id": sidA}); err != nil {
+		t.Fatalf("switch: %v\n%s", err, strings.Join(f.trace(), "\n"))
+	}
+	if starts := typedStarts(f, "w1:p1"); len(starts) != 1 || !strings.Contains(starts[0], " launch work ") || !strings.Contains(starts[0], "--resume "+sidA) {
+		t.Fatalf("typed %q", starts)
+	}
+	if got := f.trace("agent.prompt", "pane.send_text"); len(got) != 0 {
+		t.Errorf("sent something: %q", got)
+	}
+	if st, _ := n.state.get(sidA); st.Launcher != "work" || st.PendingSwitch != nil {
+		t.Errorf("record after the switch = %+v", st)
+	}
+
+	busy, bf, _, _, _ := switchNode(t, proto.StatusWorking, nil)
+	busy.state.setPendingSwitch(sidA, &proto.PendingSwitch{Launcher: "work", At: time.Now()})
+	bf.reset()
+	_, err := request(t, busy, "session.switch", map[string]any{"session_id": sidA})
+	if code, _ := refusalOf(t, err); code != proto.CodeSwitchBusy {
+		t.Fatalf("busy: refused with %q (%v)", code, err)
+	}
+	if got := drove(bf); len(got) != 0 {
+		t.Errorf("busy: drove the terminal: %q", got)
+	}
+	if busy.pendingSwitch(sidA) != nil {
+		t.Error("busy: the switch still waits for the user's next message")
+	}
+}
+
+// session.switch with a launcher, for a session that is not running: its record is pointed at that launcher and model,
+// so its next Resume comes up there; nothing starts or is typed. from must name the launcher it is on; a launcher not
+// on this computer is refused, the record unchanged.
+func TestSessionSwitchPointsAStoppedSessionAtTheLauncher(t *testing.T) {
+	n, f, _, _, _ := switchNode(t, proto.StatusIdle, nil)
+	f.reply("session.snapshot", snapshot(nil, nil, []any{}, nil)) // nothing runs it now
+	listSessions(t, n)
+	if _, live := n.agent(sidA); live {
+		t.Fatal("still running")
+	}
+	f.reset()
+	if _, err := request(t, n, "session.switch", map[string]any{"session_id": sidA, "launcher": "work", "from": "claude", "model": "opus"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := drove(f); len(got) != 0 {
+		t.Errorf("drove the terminal: %q", got)
+	}
+	if st, _ := n.state.get(sidA); st.Launcher != "work" || st.Model != "opus" {
+		t.Fatalf("record = %+v", st)
+	}
+	if r := n.resumeWith(sidA, sendOpts{}); r.launcher != "work" || r.execution.Model != "opus" {
+		t.Errorf("resumes with %s %q", r.launcher, r.execution.Model)
+	}
+	_, err := request(t, n, "session.switch", map[string]any{"session_id": sidA, "launcher": "bare", "from": "claude", "model": "m"})
+	if code, _ := refusalOf(t, err); code != proto.CodeSwitchStale {
+		t.Errorf("from another launcher: %q (%v)", code, err)
+	}
+	_, err = request(t, n, "session.switch", map[string]any{"session_id": sidA, "launcher": "gone", "from": "work"})
+	if code, _ := refusalOf(t, err); code != proto.CodeSwitchLauncherMissing {
+		t.Errorf("missing launcher: %q (%v)", code, err)
+	}
+	if st, _ := n.state.get(sidA); st.Launcher != "work" {
+		t.Errorf("a refusal changed the record: %+v", st)
+	}
+}

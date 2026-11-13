@@ -31,8 +31,9 @@ export interface ReviewSpot {
 }
 
 export type Panel =
-  /** `path`: the folder to open at; `file`: a file open in it (a panel brought back, lib/panel-memory.ts). */
-  | { kind: "files"; mid: string; sid: string; cwd: string; path?: string; file?: string }
+  /** `path`: the folder to open at; `file`: a file open in it (a panel brought back, lib/panel-memory.ts); `highlight`: a name
+   *  in the folder to mark (the viewer's Show in Files, #5827). */
+  | { kind: "files"; mid: string; sid: string; cwd: string; path?: string; file?: string; highlight?: string }
   | { kind: "git"; mid: string; sid: string; cwd: string; at?: GitSpot }
   /** Reviewing the session's changes (#151): `scope` to open at, `at` a comment's file and line to go to, or a changed
    *  file to scroll to (`path` from the repository's root, or a full path inside it; no `line`). */

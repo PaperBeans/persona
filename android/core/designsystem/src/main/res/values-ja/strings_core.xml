@@ -63,6 +63,7 @@
     <string name="designsystem_core_close_agent_title">このエージェントを閉じますか？</string>
     <string name="designsystem_core_close_agent_message_tab">「%1$s」\n%2$s\n\n%3$sの%4$sを終了し、ターミナルのタブ「%5$s」を閉じます（分割されたタブではこのペインだけ）。作業中の処理は中断されます。チャットは残り、あとでAgentsの「履歴」から続けられます。</string>
     <string name="designsystem_core_close_agent_message_pane">「%1$s」\n%2$s\n\n%3$sの%4$sを終了し、そのターミナルペインを閉じます。作業中の処理は中断されます。チャットは残り、あとでAgentsの「履歴」から続けられます。</string>
+    <string name="designsystem_core_close_agent_message_runtime">「%1$s」\n%2$s\n\n%3$sでこのセッションを終了します。作業中の処理は中断されます。</string>
     <string name="designsystem_core_delete_session_title">このチャットを削除しますか？</string>
     <string name="designsystem_core_delete_session_on_machine_command">「%1$s」はすべてのデバイスの一覧から消えます。%2$sのチャット記録は削除されません。あとでコンピューターで%3$sを使って続けると、また表示されます。</string>
     <string name="designsystem_core_delete_session_on_machine">「%1$s」はすべてのデバイスの一覧から消えます。%2$sのチャット記録は削除されません。また使うと、再び表示されます。</string>
@@ -117,6 +118,14 @@
     </plurals>
     <string name="designsystem_core_list_separator">、</string>
     <string name="designsystem_core_repo_other">その他</string>
+    <string name="designsystem_core_direction_doing">作業中</string>
+    <string name="designsystem_core_direction_needs_you">対応待ち</string>
+    <string name="designsystem_core_direction_stuck">停滞中</string>
+    <string name="designsystem_core_direction_review">検収待ち</string>
+    <string name="designsystem_core_direction_planned">未着手</string>
+    <string name="designsystem_core_direction_secretary">書記官</string>
+    <string name="designsystem_core_direction_untitled">チャット</string>
+    <string name="designsystem_core_direction_count_needs_you">対応待ち %1$d</string>
     <string name="designsystem_core_inbox_action">要対応</string>
     <string name="designsystem_core_inbox_fyi">参考</string>
     <string name="designsystem_core_inbox_noise">折りたたみ済み</string>

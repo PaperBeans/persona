@@ -32,6 +32,8 @@ import SwiftUI
     @ObservationIgnored private let deps: Deps
     /// The latest read: an older one that answers after it doesn't land.
     @ObservationIgnored private var reads = 0
+    /// The connection state of the last read.
+    @ObservationIgnored private var loadedOnline: Bool?
 
     init(machine: String, deps: Deps) {
         self.machine = machine
@@ -41,7 +43,15 @@ import SwiftUI
     /// More than a few: the page folds them behind one row that opens the whole list.
     var folded: Bool { (sites?.count ?? 0) > BrowserSiteList.inPlace }
 
+    /// The section came on screen: reads the sites unless it already has them for this connection state (the section
+    /// is rebuilt with its page's content; an open list must not go blank each time).
+    func appear(online: Bool) async {
+        if online == loadedOnline, sites != nil { return }
+        await load(online: online)
+    }
+
     func load(online: Bool) async {
+        loadedOnline = online
         reads += 1
         let read = reads
         set(nil)

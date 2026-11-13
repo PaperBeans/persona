@@ -31,8 +31,11 @@
 
 /* Design tokens, keyframes and component grammar from Beautiful UI (https://www.beautifului.dev/, MIT,
  * Copyright (c) 2026 Shane Levine; see THIRD_PARTY_NOTICES.md). Every view reads colors through these.
- * Text tokens (--ink, --ink-2, --ink-3, --accent-ink) keep WCAG AA 4.5:1 on every background token (#2804, theme-contrast.test.ts). */
-:root {
+ * Text tokens (--ink, --ink-2, --ink-3, --accent-ink) keep WCAG AA 4.5:1 on every background token (#2804, theme-contrast.test.ts).
+ * [data-terminal-scheme] gives an element one scheme's values whatever the page's: the terminal's Appearance
+ * (lib/terminal-appearance.ts). It goes before the page's selector, which the token readers (page-tokens.ts, the
+ * contrast tests) find by a regular expression that ends at the opening brace. */
+[data-terminal-scheme="light"], :root {
   --assistant-dock-open-max: calc(var(--kb-h) * 0.82);
   --task-count-meter-height: 0.25rem;
   --page: #fafafb;
@@ -101,7 +104,7 @@
   --shadow-knob: 0 2px 4px #00000026, 0 1px 1px #0000000f;
 }
 
-.dark {
+[data-terminal-scheme="dark"], .dark {
   --page: #17181a;
   --canvas: #1c1d1f;
   --surface: #232427;
@@ -182,6 +185,8 @@
 /* Phones under 340 px wide (iPhone SE first generation, small Android phones): `max-xs:` is below 340 px, where the composer's mode chips turn into
    an icon and a short word (#4316). */
 @theme { --breakpoint-xs: 340px; }
+/* The task cards' type scale by role (docs/design/task-cards.md §4.1): the card and row title, the meta line, the chip / label. The sizes the cards already used, now named; iOS Theme.Font bodyStrong / caption / label. */
+@theme { --text-card-title: 14.5px; --text-meta: 13px; --text-label: 12px; }
 @theme inline {
   --color-page: var(--page);
   --color-canvas: var(--canvas);
@@ -265,8 +270,8 @@ body {
 
 
 /* ── Persona additions ──────────────────────────────────── */
-:root { --status-needs: var(--attention); --status-working: var(--orange); --status-waiting: color-mix(in srgb, var(--status-working) 55%, var(--ink-3)); --status-unread: var(--green); --status-idle: var(--ink-3); --user-bubble: #dceaff; --neutral-bubble: #f0f1f3; --term-magenta: #a347ba; --term-cyan: #0f8a9c; }
-.dark { --user-bubble: #1d3557; --neutral-bubble: #2c2d31; --term-magenta: #c678dd; --term-cyan: #4fb6c4; }
+[data-terminal-scheme="light"], :root { --status-needs: var(--attention); --status-working: var(--orange); --status-waiting: color-mix(in srgb, var(--status-working) 55%, var(--ink-3)); --status-unread: var(--green); --status-idle: var(--ink-3); --user-bubble: #dceaff; --neutral-bubble: #f0f1f3; --term-magenta: #a347ba; --term-cyan: #0f8a9c; }
+[data-terminal-scheme="dark"], .dark { --user-bubble: #1d3557; --neutral-bubble: #2c2d31; --term-magenta: #c678dd; --term-cyan: #4fb6c4; }
 /* The chat's trace (aligned with cindy's defaults, #1963): tool rows and their chevrons, the work group's rail, thought
    text, diff counts and the running status bar's accent. */
 :root { --tool-ink: #525252; --tool-rail: #ddd6cb; --thinking-ink: #a3a3a3; --diff-add-fg: #22863a; --diff-del-fg: #b31d28; --diff-add-bg: #e6ffec; --diff-del-bg: #ffebe9; --diff-add-word: #abf2bc; --diff-del-word: #ffcecb; --status-accent: #ea6b17; --tool-hover: #ececec; }
@@ -304,6 +309,10 @@ body {
 @keyframes nudge-x{0%,to{transform:none}20%{transform:translateX(-3px)}40%{transform:translateX(3px)}60%{transform:translateX(-2px)}80%{transform:translateX(1px)}}
 [data-search-hit] { outline: 2px solid transparent; outline-offset: -2px; border-radius: var(--radius-control); animation: search-hit 3s ease-out both; }
 @media (prefers-reduced-motion: reduce) { [data-search-hit] { animation: none; outline-color: var(--accent); } }
+/* a reply rings at its own width, on the left, as a bubble rings at its own (#6426); one holding a code block, a table or a
+   card keeps the column's, so nothing in it moves while the ring shows */
+[data-answer][data-search-hit] { outline-offset: 6px; } /* text has no padding of its own: the ring sits just outside it */
+[data-answer][data-search-hit]:not(:has(pre, table, .card-ui)) { width: fit-content; max-width: 100%; }
 
 html, body, #root { height: 100%; }
 /* Pulling down at the top of a scroller must not reload the app. Vertical only: the drawer's sideways drags are unaffected. */

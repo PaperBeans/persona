@@ -97,7 +97,8 @@ fun DecisionCard(
     when (PersonaTheme.style) {
         AppStyle.Glass -> JCard(modifier, onClick = onOpen, status = Status.NeedsYou) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                JStatusDot(Status.NeedsYou, size = 8.dp)
+                // still: iOS's card leads with its kind's icon in Needs You's color (`InteractionPreviewCard`)
+                JStatusDot(Status.NeedsYou, size = 8.dp, breathes = false)
                 Spacer(Modifier.width(8.dp.dense))
                 Text(label, style = type.caption, color = palette.needsYou.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 expires?.let { Expiry(it) }
@@ -235,7 +236,7 @@ fun DecisionDock(
             if (!collapsed) kicker?.let { Text(it, style = type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 when (style) {
-                    AppStyle.Glass -> JStatusDot(Status.NeedsYou, size = 8.dp)
+                    AppStyle.Glass -> JStatusDot(Status.NeedsYou, size = 8.dp, breathes = false) // still, as iOS's panel icon
                     AppStyle.Brief -> JIcon(kind.icon, null, size = 18.dp, tint = palette.ink2)
                     AppStyle.Board -> JIcon(PhIcons.Hand, null, size = 18.dp, tint = palette.needsYou.dot, selected = true)
                 }

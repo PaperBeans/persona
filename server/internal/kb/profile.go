@@ -170,6 +170,31 @@ func cleanProfile(p PersonProfile) PersonProfile {
 	return out
 }
 
+// flatProfile is p with every text on one line, nothing cut (cleanProfile has done that to what was written).
+func flatProfile(p PersonProfile) PersonProfile {
+	flat := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	items := func(list []ProfileItem) []ProfileItem {
+		out := make([]ProfileItem, len(list))
+		for i, it := range list {
+			out[i] = ProfileItem{Text: flat(it.Text), Basis: flat(it.Basis), Sources: make([]string, len(it.Sources))}
+			for j, src := range it.Sources {
+				out[i].Sources[j] = flat(src)
+			}
+		}
+		return out
+	}
+	out := PersonProfile{Facts: items(p.Facts), Views: items(p.Views), Inferences: items(p.Inferences)}
+	for _, c := range p.Commitments {
+		c.Text, c.Due = flat(c.Text), flat(c.Due)
+		c.Sources = slices.Clone(c.Sources)
+		for j, src := range c.Sources {
+			c.Sources[j] = flat(src)
+		}
+		out.Commitments = append(out.Commitments, c)
+	}
+	return out
+}
+
 func oneLines(list []string) []string {
 	out := make([]string, len(list))
 	for i, s := range list {
@@ -189,7 +214,7 @@ func writerName(writer string) string {
 // renderProfile is writer's profile as summary.md shows it ("" writer: no heading).
 func renderProfile(writer string, sp storedProfile) string {
 	var b strings.Builder
-	p := sp.Profile
+	p := flatProfile(sp.Profile) // one line each even for a file edited by hand: PrivateProfileLine goes by the line
 	if writer != "" {
 		// i18n-ignore: summary.md is read by the model
 		fmt.Fprintf(&b, "## 画像（%s整理，%s；用户私人的了解，只供你参考，不要转述给对方，也不要写进发给别人的内容）\n", writerName(writer), sp.At.Format("2006-01-02"))
@@ -202,15 +227,15 @@ func renderProfile(writer string, sp storedProfile) string {
 		}
 	}
 	if len(p.Views) > 0 {
-		b.WriteString("### 用户说过的评价（原话）\n") // i18n-ignore
+		b.WriteString(profileViewsHeading + "\n")
 		for _, it := range p.Views {
-			fmt.Fprintf(&b, "- [用户原话] “%s”%s\n", it.Text, src(it.Sources)) // i18n-ignore
+			fmt.Fprintf(&b, "- %s “%s”%s\n", profileViewLabel, it.Text, src(it.Sources)) // i18n-ignore
 		}
 	}
 	if len(p.Inferences) > 0 {
-		b.WriteString("### 推断（仅供参考，未经确认）\n") // i18n-ignore
+		b.WriteString(profileInferencesHeading + "\n")
 		for _, it := range p.Inferences {
-			fmt.Fprintf(&b, "- [推断·仅供参考] %s（依据：%s）%s\n", it.Text, it.Basis, src(it.Sources)) // i18n-ignore
+			fmt.Fprintf(&b, "- %s %s（依据：%s）%s\n", profileInferenceLabel, it.Text, it.Basis, src(it.Sources)) // i18n-ignore
 		}
 	}
 	if len(p.Commitments) > 0 {

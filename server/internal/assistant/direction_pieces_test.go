@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
@@ -45,10 +46,10 @@ func TestLeaderTodoCreateIsAPieceOfItsDirection(t *testing.T) {
 	}
 
 	// The leader can run an agent on it with task_plan's todo_id; another conversation cannot.
-	if err := e.s.reusableTodo("conv_lead_a", piece.ID, false); err != nil {
+	if _, err := e.s.reusableTodo(context.Background(), "conv_lead_a", piece.ID, false); err != nil {
 		t.Fatalf("the leader's todo_id: %v", err)
 	}
-	if err := e.s.reusableTodo("conv_lead_b", piece.ID, false); err == nil {
+	if _, err := e.s.reusableTodo(context.Background(), "conv_lead_b", piece.ID, false); err == nil {
 		t.Fatal("another leader's todo_id was taken")
 	}
 

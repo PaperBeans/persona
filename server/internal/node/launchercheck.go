@@ -30,6 +30,12 @@ func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherChe
 	if name != "claude" && !shellcmd.NameRe.MatchString(name) {
 		return proto.LauncherCheck{Error: fmt.Sprintf("invalid launcher %q", name)}
 	}
+	if isDesktopLauncher(name) { // nothing of its own to run: the app's session runs on the app's settings
+		return proto.LauncherCheck{Agent: "claude", Error: desktopCheckMsg}
+	}
+	if isCodexAppLauncher(name) {
+		return proto.LauncherCheck{Agent: "codex", Error: codexAppCheckMsg}
+	}
 	agent := n.launcherAgent(ctx, name)
 	dir, err := os.MkdirTemp("", launcherCheckDir)
 	if err != nil {
@@ -37,6 +43,10 @@ func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherChe
 	}
 	defer os.RemoveAll(dir)
 	prompt := prompts.RenderLauncherCheck()
+	if agent == "claude" {
+		// What Claude Code keeps of the run, the shell's or a runtime's (Paseo's probe agent runs it in dir too).
+		defer n.removeCheckProject(dir)
+	}
 	if _, managed := n.managedLauncher(name); !managed {
 		if _, runtime := n.runtimeLauncherModels(name); runtime {
 			if result, handled := n.runtimeLauncherCheck(ctx, name, dir, prompt); handled {
@@ -49,7 +59,6 @@ func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherChe
 		if ready, known := n.claudeOnboardingReady(ctx); known && !ready {
 			return proto.LauncherCheck{Agent: agent, Error: claudeOnboardingNotReadyMsg}
 		}
-		defer n.removeCheckProject(dir)
 	}
 	// The flag that keeps the run off the disk goes between before and after: a transcript per check, a hundred a day on
 	// each computer, filled the newest offline sessions the list keeps and pushed the user's own Agents out (#2959).

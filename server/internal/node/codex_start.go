@@ -305,6 +305,7 @@ func codexOnRemote(argv []string) bool {
 // prompt. Codex's own dialogs on the way are answered as the user would for a start they asked
 // for: the folder is trusted (they chose it), an update is skipped. A launcher that fails ends the wait at once.
 func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, began time.Time) (string, error) {
+	poll := n.readinessPoll()
 	deadline := time.Now().Add(codexStartWait)
 	resolved := cwd
 	if r, err := filepath.EvalSymlinks(cwd); err == nil {
@@ -320,7 +321,7 @@ func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, be
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(poll):
 		}
 		for _, home := range homes {
 			for _, r := range rollouts(home) {

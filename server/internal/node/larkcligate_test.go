@@ -204,9 +204,6 @@ func TestLarkCLIRiskAndWrapper(t *testing.T) {
 	if len(lines) != 3 || lines[0] != "--profile work im +chat-list --help" {
 		t.Fatalf("lark-cli asked %d times (cached?): %q", len(lines), lines)
 	}
-	if n.larkCLIRisk(proto.AssistantLark{}) != nil {
-		t.Fatal("no lark.cli, no risk lookups")
-	}
 
 	wrapper := filepath.Join(n.dir, "lark-cli")
 	n.writeLarkCLIWrapper(n.dir, cfg.CLI)

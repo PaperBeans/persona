@@ -40,7 +40,10 @@ from a vault at runtime rather than stored in the environment file.
 Enable the timer only after the bootstrap and publication checks below pass. The publisher is
 `scripts/release/publish_hub_release.py --config <ssh-config.json>`; its config
 supplies `remote_root` and `credentials_command`, which returns SSH credentials
-as JSON (`host`, `port`, `username`, `password`, or a fields array keyed by id).
+as JSON (`host`, `port`, `username` and either `password` or `key_filename`, or a
+fields array keyed by id). `key_filename` is the path of a private key file on the
+build machine, for hosts that only accept key logins; exactly one of the two must be
+set, and no other key or SSH agent is tried.
 SSH host keys must already be trusted. Credentials are never written to release
 artifacts. The publisher needs Python and Paramiko; the remote needs Python.
 The optional `release_namespace` defaults to `hub` and selects a feed below
@@ -255,7 +258,8 @@ releases retain their separate publishing workflow.
 ## 1. Skills move out of the binary
 
 - **The user's skill space**: `~/.persona/skills/<name>/` on the machine that runs the assistant.
-  - Each directory is one skill (with a `SKILL.md` inside); the user adds and edits them, and personad only reads, never writes;
+  - Each directory is one skill (with a `SKILL.md` inside); users can add and edit them. Updates never overwrite them;
+    an explicitly confirmed Web ZIP import can add a new name, with a narrow Undo for that new installation.
   - The machine that runs the assistant is usually the hub machine's local node; when the assistant is configured on another machine, it is that one.
 - **Syncing into the assistant directory**: every time node starts the assistant process (both Claude and Codex assistants; `/agent` and the AI twin also use the assistant directory):
   1. For each skill under `~/.persona/skills/`, create a symlink at `<assistant dir>/.claude/skills/<name>`.
@@ -273,8 +277,78 @@ releases retain their separate publishing workflow.
 - **Drop `-tags public`**: there is no difference between the two anymore; `files_public.go` / `files_bundled.go` merge into one embed holding only built-in skills.
   - The privacy scan before release stays, and also checks that every skill in the binary is registered as redistributable (`assistantskills.Redistributable`);
   - A test guards it: the built-in skills directory may only contain skills registered as redistributable.
-- **App**: Settings › Assistant › Skills, a read-only list (name, the description from `SKILL.md`, whether it comes from "my skills" or **Built-in**).
-  API `GET /api/v1/skills`; the hub asks the node that runs the assistant. Management (add / delete / edit) comes later.
+- **App**: Settings › Assistant › Skills lists name, description and user / built-in / plugin source.
+  `GET /api/v1/skills` remains read-only and compatible with older clients; the hub asks the current assistant's node.
+  The Web additionally offers **Upload ZIP**, described below. Native clients are unchanged.
+
+### Web skill ZIP installation
+
+For people adding a trusted skill package, Settings › Assistant › Skills has one **Upload ZIP** action.
+Choose a file, wait for checks, review the plain-text name, description, actual destination and computer, then
+**Install skill** or **Cancel**. Selecting a file never installs it. No shell, dependency installer, HTML renderer
+or model is used to check a package. The feature changes no model/profile setting.
+
+The manager authorizes the current assistant and its execution computer using the existing full-access route,
+then sends `skills.import` to that node. The browser cannot select another machine or supply a path.
+The node uses `assistantskills.UserDir`: normally `~/.persona/skills/<name>/`, respecting `PERSONA_SKILLS_DIR`
+and the existing `PERSONA_HOME` resolver. This store is shared by assistants running as that machine's user;
+it is not silently changed to a private manager store. A changed computer, root identity, expired reference,
+offline machine or old node fails explicitly. Open the page again after changing environments.
+
+Package contract:
+
+- One ZIP with exactly one uppercase `SKILL.md`, either at the root or inside one enclosing directory; all
+  resources must be in that same package. Nested skills, several manifests and outside-wrapper files are refused.
+- The entire manifest is UTF-8, at most 64 KiB, with YAML frontmatter between `---` lines. `name` and `description`
+  are non-empty YAML strings. The name (not the ZIP filename) is at most 64 ASCII lowercase letters/digits with
+  single separating hyphens, not a reserved device name. Description is at most 4096 UTF-8 bytes.
+  Duplicate YAML keys, aliases/anchors and custom tags are refused.
+- At most 4 MiB compressed, 16 MiB expanded, 4 MiB per file, 512 archive entries and 12 path levels; maximum
+  expansion ratio 200 per entry. Both declared and actually read sizes/CRC are checked. Only Store/Deflate,
+  ordinary files/directories are accepted. No links, special files, traversal, absolute/drive/UNC/backslash paths,
+  reserved names, duplicate entries, case/Unicode-normalization collisions or internal provisioning stamps.
+- Preview extracts into a private temporary sibling and removes it before replying; only bounded, expiring metadata
+  receipts remain (32 per node, ten minutes). Install rechecks the exact same ZIP, current environment and conflicts,
+  then publishes by an exclusive atomic rename. No existing directory, built-in, plugin or local runtime skill is
+  overwritten or shadowed. Unsupported exclusive-rename platforms fail closed. Failure/cancellation removes staging.
+
+After installation the existing list refreshes. A ten-minute **Undo installation** receipt exists only on this
+connected page/node lifetime; reloading, switching assistant or node restart can invalidate it. Undo only detaches the
+same unchanged new directory, with identity/content/mode checks; modified or replaced packages are refused. It moves
+files to a hidden `.undone-…` sibling and reports that recovery path, rather than deleting them. This also protects a
+local writer holding an open file during the move. There is no arbitrary-path delete or edit API. Recovery is retained
+for the user; no background job deletes it or reinstalls an undone package.
+
+A canceled preview has no durable staged files. Cancellation before the atomic publish cleans staging; a lost response
+after publish may mean the whole installation completed, so refresh the list before retrying. Writes are never
+automatically retried. Repeated/concurrent installation cannot replace the winning name.
+
+Discovery uses existing provisioning: `assistantLarkEnv` links the user store into `.claude/skills`, and
+`assistantRuntimeSkills` links it into `.agents/skills`. Claude reads the existing assistant directory; Codex's
+existing `skills/extraRoots/set` points at `.claude/skills`. No new discovery engine or `@skill` behavior is added.
+The settings list is the Persona-provisioned inventory, not every skill a runtime might discover. Refresh lists
+immediately; start a new chat to safely pick up installation/Undo, as already-running sessions may retain old context.
+Tests exercise actual import/list/provisioning entry points and resource reads, not a paid Claude/Codex turn.
+
+`TestImport*`, `TestSkillImport*` and `web/src/views/settings/Skills.test.tsx` cover archive safety, atomic races,
+environment/credential changes, strict server-derived targeting and the confirmation/Undo states. The opt-in
+`TestSkillImportBrowserHarness` uses the real manager handler and archive store with synthetic device transport
+and a temporary directory; unrelated routes use `scripts/mock/mock_hub.py`. It is UI integration evidence, not a
+production or live-model test. Its header documents loopback ports and shutdown; run with `SKILL_IMPORT_QA=1`.
+
+Curated synthetic captures, actually inspected in a browser (not production assets):
+
+| Preview | Light | Dark |
+| --- | --- | --- |
+| Desktop, standard text | [Light](../web/screenshots/skill-zip/preview-light.png) | [Dark, keyboard focus](../web/screenshots/skill-zip/preview-dark.png) |
+| 390 px, largest supported text setting | [Light](../web/screenshots/skill-zip/narrow-light-large.png) | [Dark, keyboard focus](../web/screenshots/skill-zip/narrow-dark-large.png) |
+| Localized narrow layout | [Simplified Chinese](../web/screenshots/skill-zip/zh-preview.png) | [Japanese](../web/screenshots/skill-zip/ja-preview.png) |
+
+Browser observations: Cancel initially owns preview focus; Tab reaches Install with a visible ring; Escape closes
+and restores Upload ZIP focus. No horizontal overflow at 390 px, including Large. A missing-string description
+shows an actionable validation error; a duplicate name shows conflict with no overwrite action. Installation adds
+`example-review` to the real fixture store/list, and Undo removes only the new `example-cancel` while retaining its
+resources in the reported recovery sibling. These are local fixture results, not live Claude/Codex discovery.
 
 ## 2. Build channels
 
@@ -452,13 +526,13 @@ Where a release hub reads `latest.json` and downloads from (#4522). v0.2.1's bin
 
 ### The Android app
 
-A hub with an update source offers its phones the Android app of the newest release, with no setup (#5563). The phones update from their hub (`GET /api/v1/app/android/latest`), which serves what is in `apps/android/` (`docs/protocol/protocol.md` ("Android packages")); until now only a publisher copying an APK over SSH put anything there.
+A hub with an update source offers its phones the Android app of the newest stable release that carries one, with no setup (#5563). The phones update from their hub (`GET /api/v1/app/android/latest`), which serves what is in `apps/android/` (`docs/protocol/protocol.md` ("Android packages")); until now only a publisher copying an APK over SSH put anything there.
 
-- **What a release carries**: a version-tag release has `android.json` beside `latest.json`, naming its signed APK (`Persona-<version>-android.apk`, `docs/operations/release.md`). It holds the fields of the hub's `latest.json` for the app (package, version code and name, minimum SDK, the signing certificate's SHA-256, size, SHA-256, source commit, notes) plus `version` (the release) and `name` (the APK's file name). A release without it, for example one whose Android build was blocked, changes nothing.
+- **What a release carries**: a version-tag release has `android.json` beside `latest.json`, naming its signed APK (`Persona-<version>-android.apk`, `docs/operations/release.md`). It holds the fields of the hub's `latest.json` for the app (package, version code and name, minimum SDK, the signing certificate's SHA-256, size, SHA-256, source commit, notes) plus `version` (the release) and `name` (the APK's file name). For the official GitHub `releases/latest/download` source, a latest release without `android.json` makes the hub read the Release list and use the newest earlier stable release with both `android.json` and its named APK; drafts, prereleases and incomplete entries are skipped. It checks at most 10,000 releases and reports an error if more remain unchecked. A custom source without `android.json` changes nothing.
 - **When**: at every update check (a minute after start, then hourly), before the hub's own update so an install's restart cannot cut the download short, from the same source and through `update.proxy`. A Docker hub checks too, but has a source only when `update.url` gives one (`docs/operations/docker.md` ("Upgrading")).
 - **What it writes**: it downloads the APK, checks its size and SHA-256, and writes `<sha256>.apk`, its gzip copy and then `latest.json` under `.publish.lock`: the layout and lock of `scripts/release/android_apk_atomic.py`, so an SSH publisher and the sync never write at the same time, and the endpoints and the app need no change. It keeps the APK it replaced (a phone may still be downloading it) and removes older ones.
 - **What it never does**: go back to a lower or equal version code (a publisher building every commit on main stays ahead of the releases); put an APK of another package, or signed with another key, over the published one (the phones could not install it over the app they have, so a hub publishing its own builds keeps them); overwrite a `latest.json` it cannot read. A refusal or failure is logged once, not at every check, and the phones keep the app they have.
-- **On the phone**: nothing new. The app finds the version at launch or in the foreground, and the system still asks before installing it.
+- **On the phone**: the app finds the version at launch or in the foreground. Settings shows the last check, its hub and the result: update available, up to date, no APK, check failed, or an incompatible package or signing key. The system still asks before installing an update.
 - **Security**: as for the hub's own binaries ("Security"), the publisher signs no manifest; the SHA-256 guards against a broken download. The phone itself refuses an APK signed with another key than the app it has.
 
 Code: `server/internal/update/android.go`, called from `server/internal/hub/selfupdate_check.go`.

@@ -89,7 +89,7 @@ final class TodoStore {
     init(cachedTodos: [TodoItem]? = nil,
          cacheWriter: (@MainActor ([TodoItem]) -> Void)? = { StateCache.save(TodoStore.stateName, $0) },
          hubListChanged: @escaping @MainActor () -> Void = {
-        WatchSync.shared.push(summary: AppModel.shared.watchSummary()) // its questions name their tasks
+        AppModel.shared.summariesChanged() // its questions name their tasks
     }, managers: Managers = .one) {
         self.managers = managers
         let initial = cachedTodos ?? StateCache.load(Self.stateName, as: [TodoItem].self) ?? []
@@ -267,6 +267,40 @@ final class TodoStore {
         }
         apply(updated)
         return res
+    }
+
+    /// Moves a to-do to another due date (#2045: dragged on the calendar, or its "Change Due Date…"): drawn there at
+    /// once, before the hub answers; a failed save puts it back and says why. The task ends with whether it was saved.
+    @discardableResult
+    func reschedule(_ id: String, to due: APIClient.TodoPlanChange.Due, api: APIClient? = nil) -> Task<Bool, Never> {
+        guard let before = todo(id: id) else { return Task { false } }
+        let targetGeneration = generation
+        // Optimistic, as toggleDone: a read already in flight cannot replace it.
+        mutationRevision += 1
+        var updated = todos
+        if let idx = updated.firstIndex(where: { $0.id == id }) {
+            updated[idx] = TodoCalendar.moved(before, to: due)
+            apply(updated)
+        }
+        return Task {
+            do {
+                try await updatePlan(id: id, APIClient.TodoPlanChange(due: due), api: api)
+                return true
+            } catch {
+                // Back as it was: only this to-do, so what else changed meanwhile stays.
+                guard generation == targetGeneration else { return false }
+                mutationRevision += 1
+                var back = todos
+                if let idx = back.firstIndex(where: { $0.id == id }) {
+                    back[idx] = before
+                    apply(back)
+                }
+                // Felt as well as shown (offline has its own haptic, in `notDone`).
+                if !error.isOffline { Haptics.error() }
+                AppModel.shared.show(error)
+                return false
+            }
+        }
     }
 
     /// `api` is the client to write through (tests pass a fake hub's); the app uses the current hub connection.

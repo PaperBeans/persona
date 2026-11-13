@@ -31,7 +31,7 @@ function Section({ icon, tint, title, children }: { icon: IconName; tint: string
 }
 
 function More({ n, text = "assistant-brief.more" }: { n: number; text?: string }) {
-  return n > 0 ? <div className="py-1 text-[12px] text-ink-2">{t(text, { n })}</div> : null;
+  return n > 0 ? <div className="py-1 text-label text-ink-2">{t(text, { n })}</div> : null;
 }
 
 /** A link the hub gave, if it is a web address: anything else is not drawn as one. */
@@ -48,16 +48,19 @@ function meta(row: BriefRow): string {
 
 function WaitingRow({ row }: { row: BriefRow }) {
   return (
-    <div className="flex items-center gap-3 py-1.5" data-brief-row="waiting">
-      <div className="min-w-0 flex-1">
-        <div className="text-[13.5px] font-medium [overflow-wrap:anywhere]">{row.title}</div>
-        <div className="text-[12px] text-ink-2">{meta(row)}</div>
+    <div className="@container" data-brief-row="waiting">
+      {/* Narrow: the words take the whole width and the link drops under them, as in the Accept row (#5569) */}
+      <div className="flex items-center gap-3 py-1.5 @max-md:flex-wrap @max-md:gap-y-2">
+        <div className="min-w-0 flex-1 @max-md:w-full @max-md:flex-none">
+          <div className="text-[13.5px] font-medium [overflow-wrap:anywhere]">{row.title}</div>
+          <div className="text-label text-ink-2">{meta(row)}</div>
+        </div>
+        {webLink(row.link) && (
+          <Button href={webLink(row.link)} title={t("assistant-brief.open_row", { title: row.title })}>
+            {t("assistant-brief.open")}
+          </Button>
+        )}
       </div>
-      {webLink(row.link) && (
-        <Button href={webLink(row.link)} title={t("assistant-brief.open_row", { title: row.title })}>
-          {t("assistant-brief.open")}
-        </Button>
-      )}
     </div>
   );
 }
@@ -133,9 +136,9 @@ export function AcceptRow({ row, stacked = false, admission, onBusyChange, block
             {row.verdict}
           </div>
         )}
-        {row.detail && <div className="text-[12px] text-ink-2 [overflow-wrap:anywhere]">{row.detail}</div>}
-        {row.recommend && <div className="text-[12px] text-ink-2 [overflow-wrap:anywhere]">{t("assistant-brief.recommend", { option: row.recommend })}</div>}
-        <div className="text-[12px] text-ink-2">{meta(row)}</div>
+        {row.detail && <div className="text-label text-ink-2 [overflow-wrap:anywhere]">{row.detail}</div>}
+        {row.recommend && <div className="text-label text-ink-2 [overflow-wrap:anywhere]">{t("assistant-brief.recommend", { option: row.recommend })}</div>}
+        <div className="text-label text-ink-2">{meta(row)}</div>
       </div>
       <Button title={t("assistant-brief.open_row", { title: row.title })} onClick={() => openTask(row.id)}>
         {t("assistant-brief.open")}
@@ -181,7 +184,7 @@ function LaterRow({ row, conversation }: { row: BriefRow; conversation: string }
     <div className="flex items-center gap-3 py-1.5" data-brief-row="later">
       <div className="min-w-0 flex-1">
         <div className="text-[13.5px] font-medium [overflow-wrap:anywhere]">{row.title}</div>
-        <div className="text-[12px] text-ink-2">{meta(row)}</div>
+        <div className="text-label text-ink-2">{meta(row)}</div>
       </div>
       {webLink(row.link) && (
         <Button href={webLink(row.link)} title={t("assistant-brief.open_row", { title: row.title })}>
@@ -211,18 +214,18 @@ export function BriefCard({ item }: { item: FeedItem }) {
   const past = body.failed.length + body.done.length;
   return (
     <div className="flex flex-col rounded-card bg-surface p-4 shadow-card" data-testid="brief-card">
-      <div className="mb-2 flex items-center gap-1.5 text-[12px] font-medium text-ink-2">
+      <div className="mb-2 flex items-center gap-1.5 text-label font-medium text-ink-2">
         <Icon name="sun" size={13} />
         {body.title || t("assistant-brief.title")}
       </div>
 
       {body.waiting_unknown ? (
         <Section icon="hand" tint="bg-field text-attention" title={t("assistant-brief.waiting_head", { n: "?" })}>
-          <div className="py-1 text-[13px] text-ink-2">{t("assistant-brief.waiting_unknown")}</div>
+          <div className="py-1 text-meta text-ink-2">{t("assistant-brief.waiting_unknown")}</div>
         </Section>
       ) : (
         <Section icon="hand" tint="bg-field text-attention" title={t("assistant-brief.waiting_head", { n: body.waiting.length })}>
-          {body.waiting.length === 0 && <div className="py-1 text-[13px] text-ink-2">{t("assistant-brief.none")}</div>}
+          {body.waiting.length === 0 && <div className="py-1 text-meta text-ink-2">{t("assistant-brief.none")}</div>}
           {body.waiting.map((r) => (
             <WaitingRow key={r.id} row={r} />
           ))}
@@ -230,9 +233,9 @@ export function BriefCard({ item }: { item: FeedItem }) {
       )}
 
       <Section icon="clock" tint="bg-accent-tint text-accent" title={t("assistant-brief.past_head", { hours: body.hours, done: body.done_total, failed: body.failed_total })}>
-        {past === 0 && <div className="py-1 text-[13px] text-ink-2">{t("assistant-brief.none")}</div>}
+        {past === 0 && <div className="py-1 text-meta text-ink-2">{t("assistant-brief.none")}</div>}
         {body.failed.map((x) => (
-          <div key={`${x.kind}-${x.id}-${x.at}`} className="flex items-start gap-2 py-1 text-[13px]" data-brief-row="failed">
+          <div key={`${x.kind}-${x.id}-${x.at}`} className="flex items-start gap-2 py-1 text-meta" data-brief-row="failed">
             <Icon name="stop" size={11} className="mt-1.5 shrink-0 text-attention" />
             <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
               <span className="font-medium">{x.title}</span> · {t(failedKey(x), { time: clock(x.at) })}
@@ -241,7 +244,7 @@ export function BriefCard({ item }: { item: FeedItem }) {
           </div>
         ))}
         {body.done.map((x) => (
-          <div key={x.id} className="flex items-start gap-2 py-1 text-[13px]" data-brief-row="done">
+          <div key={x.id} className="flex items-start gap-2 py-1 text-meta" data-brief-row="done">
             <Icon name="check" size={12} className="mt-1 shrink-0 text-green" />
             <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
               <span className="font-medium">{x.title}</span> · {clock(x.at)}
@@ -252,7 +255,7 @@ export function BriefCard({ item }: { item: FeedItem }) {
       </Section>
 
       <Section icon="check" tint="bg-green-tint text-green" title={t("assistant-brief.accept_head", { n: body.accept.length })}>
-        {body.accept.length === 0 && <div className="py-1 text-[13px] text-ink-2">{t("assistant-brief.none")}</div>}
+        {body.accept.length === 0 && <div className="py-1 text-meta text-ink-2">{t("assistant-brief.none")}</div>}
         {body.accept.map((r) => (
           <AcceptRow key={r.id + (r.asked_at ?? "")} row={r} />
         ))}
@@ -283,12 +286,12 @@ export function BriefCard({ item }: { item: FeedItem }) {
           page is all a row does: nothing is turned on from here. */}
       {body.setup.length > 0 && (
         <Section icon="spark" tint="bg-field text-ink-2" title={t("assistant-brief.setup_head")}>
-          <div className="py-1 text-[12px] text-ink-2">{t("assistant-brief.setup_intro")}</div>
+          <div className="py-1 text-label text-ink-2">{t("assistant-brief.setup_intro")}</div>
           {body.setup.map((x) => {
             const page = briefSetupPage(x.id);
             return (
               <div key={x.id} className="flex items-center gap-3 py-1.5" data-brief-row="setup">
-                <div className="min-w-0 flex-1 text-[13px] [overflow-wrap:anywhere]">{x.text}</div>
+                <div className="min-w-0 flex-1 text-meta [overflow-wrap:anywhere]">{x.text}</div>
                 {page && <Button onClick={() => navigate(page)}>{t("assistant-brief.setup_open")}</Button>}
               </div>
             );

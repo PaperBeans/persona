@@ -63,6 +63,7 @@
     <string name="designsystem_core_close_agent_title">关闭这个 Agent？</string>
     <string name="designsystem_core_close_agent_message_tab">「%1$s」\n%2$s\n\n会退出 %3$s 上的 %4$s，并关掉它在终端里的标签页「%5$s」（分屏的标签页只关它这一格）。正在做的事会中断；对话记录会保留，之后可以在 Agents 的「历史」里继续。</string>
     <string name="designsystem_core_close_agent_message_pane">「%1$s」\n%2$s\n\n会退出 %3$s 上的 %4$s，并关掉它所在的终端窗格。正在做的事会中断；对话记录会保留，之后可以在 Agents 的「历史」里继续。</string>
+    <string name="designsystem_core_close_agent_message_runtime">「%1$s」\n%2$s\n\n会结束它在 %3$s 上的会话，正在做的事会中断。</string>
     <string name="designsystem_core_delete_session_title">删除这个对话？</string>
     <string name="designsystem_core_delete_session_on_machine_command">「%1$s」会从各端的列表里移除。%2$s 上的对话记录不会删除，之后在电脑上用 %3$s 继续，它会重新出现。</string>
     <string name="designsystem_core_delete_session_on_machine">「%1$s」会从各端的列表里移除。%2$s 上的对话记录不会删除，之后再用到它，它会重新出现。</string>
@@ -117,6 +118,14 @@
     </plurals>
     <string name="designsystem_core_list_separator">，</string>
     <string name="designsystem_core_repo_other">其他</string>
+    <string name="designsystem_core_direction_doing">在做</string>
+    <string name="designsystem_core_direction_needs_you">等你</string>
+    <string name="designsystem_core_direction_stuck">卡住</string>
+    <string name="designsystem_core_direction_review">待验收</string>
+    <string name="designsystem_core_direction_planned">未开始</string>
+    <string name="designsystem_core_direction_secretary">书记官</string>
+    <string name="designsystem_core_direction_untitled">对话</string>
+    <string name="designsystem_core_direction_count_needs_you">等你 %1$d</string>
     <string name="designsystem_core_inbox_action">需要你</string>
     <string name="designsystem_core_inbox_fyi">知悉即可</string>
     <string name="designsystem_core_inbox_noise">已折叠</string>

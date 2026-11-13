@@ -30,9 +30,8 @@ class HttpTerminalPanes internal constructor(
     override suspend fun panes(machineId: String): PanesResponse =
         request(panesPath(machineId), "GET", null, null).use { JsonCodec.decodeFromString(body(it)) }
 
-    override suspend fun newTab(machineId: String, workspaceId: String, kind: String?): NewPaneTab {
-        require(workspaceId.isNotBlank())
-        val payload = newTabBody(workspaceId, kind).toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+    override suspend fun newTab(machineId: String, workspaceId: String, kind: String?, cwd: String?): NewPaneTab {
+        val payload = newTabBody(workspaceId, kind, cwd).toString().toRequestBody("application/json; charset=utf-8".toMediaType())
         // The hub gives the node 30 s to open the tab (without taking the computer's focus).
         return request(panesPath(machineId), "POST", payload, 35).use { JsonCodec.decodeFromString(body(it)) }
     }
@@ -45,6 +44,10 @@ class HttpTerminalPanes internal constructor(
     companion object {
         /** The hub's feature for `/machines/{mid}/panes` and the `pane:` terminal address. */
         const val TERMINAL_PANES = "terminal_panes"
+        const val NEW_SPACE = "pane_new_space"
+
+        /** An unknown feature list offers the action, as on the other clients. */
+        fun offersNewSpace(features: Set<String>) = features.isEmpty() || NEW_SPACE in features
     }
 }
 
@@ -53,8 +56,11 @@ internal fun panesPath(machineId: String): String = HttpUrl.Builder().scheme("ht
     .addPathSegment("api").addPathSegment("v1").addPathSegment("machines").addPathSegment(machineId).addPathSegment("panes")
     .build().encodedPath
 
-/** `{workspace_id, kind?}`: the workspace and its host; nothing else (no directory, no command) goes to the node. */
-internal fun newTabBody(workspaceId: String, kind: String?): JsonObject = buildJsonObject {
-    put("workspace_id", workspaceId)
+/** A workspace tab, or a home-directory shell when the host has no workspace yet. */
+internal fun newTabBody(workspaceId: String, kind: String?, cwd: String?): JsonObject = buildJsonObject {
+    require(workspaceId.isNotBlank() || !cwd.isNullOrBlank())
+    if (workspaceId.isNotBlank()) put("workspace_id", workspaceId)
     if (!kind.isNullOrBlank()) put("kind", kind)
+    if (!cwd.isNullOrBlank()) put("cwd", cwd)
+    if (workspaceId.isBlank() && !cwd.isNullOrBlank()) put("new_space", true)
 }

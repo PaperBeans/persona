@@ -239,7 +239,7 @@ func TestAgentStartCarriesProjectContext(t *testing.T) {
 	}
 	p, _ := f.starts[0]["prompt"].(string)
 	if !strings.HasPrefix(p, `<persona-context kind="context" title="项目 · 天气 App · 背景"`) || !strings.Contains(p, "结论：修好了") ||
-		!strings.HasSuffix(p, "\n\n加深色模式") {
+		!strings.Contains(p, "\n\n加深色模式\n\nPersona task handoffs:") {
 		t.Fatalf("prompt = %q", p)
 	}
 	if len(f.tabAsked) == 0 || strings.Contains(f.tabAsked[len(f.tabAsked)-1], "persona-context") {

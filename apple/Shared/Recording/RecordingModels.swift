@@ -211,12 +211,19 @@ nonisolated struct RecordingEntry: Codable, Identifiable, Hashable, Sendable {
         return Set(segments.map(\.index)) == Set(0..<count)
     }
     var transcribedAll: Bool { receivedAll && segments.allSatisfy { $0.sentences != nil } }
-    /// The transcript, in order. Lines the microphone took from Persona's own answers out loud (#2981) are not the
-    /// meeting's and are left out (`RecordingAttendance.spoken`).
+    /// The transcript, in order. Persona's echo (#5905: a line that says the answer it was saying out loud then,
+    /// `RecordingAttendance.echo`) is not the meeting's and is left out; it stays on the recording (`markedSentences`).
     var sentences: [RecordingSentence] {
         let all = segments.sorted { $0.index < $1.index }.flatMap { $0.sentences ?? [] }
         guard let attendance, !attendance.spoken.isEmpty else { return all }
-        return all.filter { !attendance.spokenBy($0) }
+        return all.filter { !attendance.echo($0) }
+    }
+    /// Every line of the transcript, in order, each with whether it is Persona's echo: what the upload carries to a hub
+    /// that takes echo lines marked (`meeting_echo`).
+    var markedSentences: [(sentence: RecordingSentence, echo: Bool)] {
+        let all = segments.sorted { $0.index < $1.index }.flatMap { $0.sentences ?? [] }
+        guard let attendance, !attendance.spoken.isEmpty else { return all.map { (sentence: $0, echo: false) } }
+        return all.map { (sentence: $0, echo: attendance.echo($0)) }
     }
     var transcript: String { sentences.map { "[\(RecordingFormat.clock($0.start))] \($0.text)" }.joined(separator: "\n") }
 }

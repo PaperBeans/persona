@@ -31,7 +31,7 @@ import (
 
 // codexEffortLevels are Codex's reasoning efforts, weakest first: the Codex settings page's choices (codexconfig.go)
 // and what a thread offers when its app-server's model/list does not name its model.
-var codexEffortLevels = []string{"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+var codexEffortLevels = proto.CodexEffortLevels
 
 // codexModelEfforts is what model/list says about a model's efforts.
 type codexModelEfforts struct {

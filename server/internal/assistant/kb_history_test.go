@@ -1094,6 +1094,16 @@ func TestHistoryBackups(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A hub-mode meeting while it records: its audio is never in a backup; its hub transcript is, as segments.json is.
+	meeting := filepath.Join(data, "recordings", "0f8fad5b-d9cb-469f-a165-70867728950e")
+	for p, body := range map[string]string{"attachments/audio/0.pcm": "pcm", "attachments/audio/index.json": `{"rate":16000}`, "hub_segments.json": `{"rev":1}`} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(meeting, p)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(meeting, p), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	dir := historyBackupDir(data)
 	if err := os.MkdirAll(filepath.Join(dir, "kb-20200101000000.tar.gz"), 0o700); err != nil { // a directory by that name
 		t.Fatal(err)
@@ -1129,11 +1139,12 @@ func TestHistoryBackups(t *testing.T) {
 		t.Fatalf("dir mode %v", info.Mode())
 	}
 	files := tarNames(t, filepath.Join(dir, made[3]))
-	if !slices.Contains(files, "data/chats/c/messages/2026-01-01.md") || !slices.Contains(files, "data/history/plan-x.json") {
+	if !slices.Contains(files, "data/chats/c/messages/2026-01-01.md") || !slices.Contains(files, "data/history/plan-x.json") ||
+		!slices.Contains(files, "data/recordings/0f8fad5b-d9cb-469f-a165-70867728950e/hub_segments.json") {
 		t.Fatalf("archived %v", files)
 	}
 	for _, f := range files {
-		if strings.Contains(f, "attachments") || strings.HasSuffix(f, ".lock") {
+		if strings.Contains(f, "attachments") || strings.Contains(f, ".pcm") || strings.HasSuffix(f, ".lock") {
 			t.Fatalf("archived %s", f)
 		}
 	}

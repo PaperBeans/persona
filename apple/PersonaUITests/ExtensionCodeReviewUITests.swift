@@ -122,12 +122,23 @@ final class ExtensionCodeReviewUITests: XCTestCase {
         line.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5)).withOffset(CGVector(dx: 14, dy: 0)).tap()
     }
 
-    /// Drags the page up a little at a time until `element` is in the top two thirds of the screen, clear of the bar at
-    /// the bottom.
+    /// Drags the page a little at a time, slowly and held at the end so it does not fling, until `element` is in the
+    /// middle of the screen: clear of the bar at the bottom and of the header and its back row at the top (a fling once
+    /// carried a line under the back row, and the tap on its number went back to the file tree).
     @MainActor private func reveal(_ app: XCUIApplication, _ element: XCUIElement) {
-        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
-        let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
-        for _ in 0..<10 where element.frame.maxY > app.frame.height * 0.66 { from.press(forDuration: 0.05, thenDragTo: to) }
+        let height = app.frame.height
+        let lower = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+        let upper = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
+        for _ in 0..<12 {
+            let frame = element.frame
+            if frame.maxY > height * 0.66 {
+                lower.press(forDuration: 0.05, thenDragTo: upper, withVelocity: .slow, thenHoldForDuration: 0.2)
+            } else if frame.minY < height * 0.3 {
+                upper.press(forDuration: 0.05, thenDragTo: lower, withVelocity: .slow, thenHoldForDuration: 0.2)
+            } else {
+                return
+            }
+        }
     }
 
     @MainActor private func text(_ app: XCUIApplication, _ t: String) -> XCUIElement {

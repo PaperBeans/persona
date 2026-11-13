@@ -12,6 +12,7 @@
   "empty_title": "No chats yet",
   "empty_body": "Say something to Persona and the chat will show up here.",
   "no_results": "No chats match \"{query}\"",
+  "search_partial": "Still going through older chats; some may not show yet.",
   "archived_count_other": "Archived ({count})",
   "archived_footer": "Archiving only hides a chat from the list; it's still there. Send a message in an archived chat and it moves back to the list.",
   "via": "From {name}",

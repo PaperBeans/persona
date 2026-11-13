@@ -184,6 +184,17 @@ describe("the editor", () => {
     expect(taskBody(back, { ...saved, push: "asked" })).toMatchObject({ push: "" });
   });
 
+  it("跑完放进收件箱: compared, saved only when changed, independent of the push setting", () => {
+    const saved = task({ repeat: "interval", every_minutes: 30, push: "asked" });
+    expect(sameTask(saved, { ...saved, inbox: "" })).toBe(true); // a hub that does not send it: nothing goes into the Inbox
+    expect(sameTask(saved, { ...saved, inbox: "worthy" })).toBe(false);
+    expect("inbox" in taskBody(saved, saved)).toBe(false); // unchanged: a hub keeps it, and one that does not know it never gets it
+    expect("inbox" in taskBody(task({ repeat: "interval", every_minutes: 5 }))).toBe(false); // a new task that puts nothing there
+    expect(taskBody({ ...saved, inbox: "every" }, saved)).toMatchObject({ inbox: "every" });
+    expect("push" in taskBody({ ...saved, inbox: "every" }, saved)).toBe(false); // push is not touched
+    expect(taskBody({ ...saved, inbox: "" }, { ...saved, inbox: "worthy" })).toMatchObject({ inbox: "" });
+  });
+
   it("edits a cron task: says its rule, checks, compares and saves its expression", () => {
     const cron = task({ repeat: "cron", cron: "*/30 9-18 * * 1-5", cron_text: "每隔 30 分钟, 在 09:00 和 18:59 之间, 星期一至星期五", at: "0001-01-01T00:00:00Z" });
     expect(ruleText(cron)).toBe("*/30 9-18 * * 1-5 · 每隔 30 分钟, 在 09:00 和 18:59 之间, 星期一至星期五");

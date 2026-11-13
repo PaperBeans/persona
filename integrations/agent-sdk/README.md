@@ -30,6 +30,7 @@ cwd 是助手目录，env 是 node 按供应商算好的那份（`ANTHROPIC_*` �
      | `set_permission_mode {mode}` | `q.setPermissionMode(mode)` |
      | `set_model {model}` | `q.setModel(model)` |
      | `apply_flag_settings {settings}` | `q.applyFlagSettings(settings)`（`effortLevel` 走这里） |
+     | `persona_background_tasks` | 桥自己答：`{"tasks": …}`，是 SDK 转来的最近一条 `background_tasks_changed` 的列表；还没有过但已有一轮结束时是 `[]`，第一轮结束前是 `null`（不知道）。node 换模型重启前用它确认没有后台任务（#5234） |
 
      每个请求回一行 `{"type":"control_response","response":{"subtype":"success","request_id",["response":<方法的返回值>]}}`，
      失败或不认识的 subtype 回 `{"subtype":"error","request_id","error":"…"}`，和 CLI 的一样（node 只看 `response.subtype` 和 `response.error`）。

@@ -13,7 +13,7 @@ struct PersonaWatchApp: App {
             WatchRootView()
                 .onOpenURL { url in
                     // The All-Day Recording complication (persona://allday?action=…): start, continue or show it. The
-                    // Meeting Recording one (persona://record?meeting=1): straight into a meeting recording.
+                    // Record one (persona://record?meeting=1): straight into a meeting recording.
                     if HubNaming.accepts(scheme: url.scheme), let action = AllDayLink.action(of: url) {
                         WatchAllDay.shared.open(action)
                     } else if WatchModel.isMeetingLink(url) {
@@ -95,7 +95,7 @@ final class WatchModel {
     /// A meeting recording asked for from outside the app (the complication): the home page opens it.
     var meetingAsked = false
 
-    /// persona://record (the Meeting Recording complication's link); the All-Day Recording complication's is
+    /// persona://record (the Record complication's link); the All-Day Recording complication's is
     /// persona://allday, a host of its own, read first (`AllDayLink`).
     static func isMeetingLink(_ url: URL) -> Bool {
         HubNaming.accepts(scheme: url.scheme) && url.host() == "record"
@@ -455,10 +455,7 @@ struct WatchRootView: View {
                         }
                     }
                     WatchAllDayCard()
-                    WatchMeetingEntries(open: { meetingOpen = true })
-                    NavigationLink { WatchRecordingView() } label: {
-                        Label("Record [Recordings Section ef2821]", systemImage: Theme.Icon.recording).font(Theme.Font.secondaryMedium).lineLimit(1)
-                    }.watchCard()
+                    WatchMeetingEntries()
                     // A group the phone could not get the watch a credential for: none of its agents is below (#1185).
                     if !model.missing.isEmpty {
                         Section {
@@ -554,13 +551,15 @@ struct WatchRootView: View {
                     for _ in 0..<20 where model.inbox.isEmpty { try? await Task.sleep(for: .milliseconds(500)) }
                     openedItem = model.inbox.first
                 }
-                // `-openWatchItem pet|complication|allday-complication`: the Milk Frog's page, the watch face's frog in
-                // every family, or all-day recording's faces in every family and state (screenshots). One destination:
-                // two isPresented ones on this stack left both closed.
+                // `-openWatchItem pet|complication|allday-complication|record-complication`: the Milk Frog's page, the
+                // watch face's frog in every family, all-day recording's faces in every family and state, or the Record
+                // complication in every family (screenshots). One destination: two isPresented ones on this stack left
+                // both closed.
                 .navigationDestination(item: $openedPetPage) { page in
                     switch page {
                     case "complication": PetComplicationPreview()
                     case "allday-complication": AllDayComplicationPreview()
+                    case "record-complication": MeetingRecordingComplicationPreview()
                     default: WatchPetView()
                     }
                 }
@@ -569,6 +568,7 @@ struct WatchRootView: View {
                     switch UserDefaults.standard.string(forKey: "openWatchItem") {
                     case "allday": allDay.pageRequested = true
                     case "allday-complication": openedPetPage = "allday-complication"
+                    case "record-complication": openedPetPage = "record-complication"
                     default: break
                     }
                 }
@@ -606,8 +606,19 @@ struct WatchRootView: View {
                 #endif
             }
         }
-        .sheet(isPresented: $recordingOpen) { NavigationStack { WatchRecordingView() } }
-        .sheet(isPresented: $meetingOpen) { NavigationStack { WatchRecordingView(startsMeeting: true) } }
+        .sheet(isPresented: $recordingOpen) {
+            NavigationStack { WatchRecordingView() }
+                #if DEBUG
+                .largeTextIfAsked() // a sheet doesn't take the root's text size
+                #endif
+        }
+        // The Record complication's one-tap start (`model.meetingAsked`): the recording page, recording a meeting at once.
+        .sheet(isPresented: $meetingOpen) {
+            NavigationStack { WatchRecordingView(startsMeeting: true) }
+                #if DEBUG
+                .largeTextIfAsked()
+                #endif
+        }
         // All-day recording's page, asked for by the complication or a notification (`WatchAllDay.open`).
         .sheet(isPresented: Binding(get: { allDay.pageRequested }, set: { allDay.pageRequested = $0 })) {
             NavigationStack { WatchAllDayView() }
@@ -1009,14 +1020,9 @@ struct WatchPairView: View {
                         .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 WatchSyncButton()
-                // In the scroll view: beside it, it squeezed the page until the sync button was out of sight.
-                NavigationLink { WatchRecordingView(startsMeeting: true) } label: {
-                    Label("Meeting Recording", systemImage: Theme.Icon.recording).lineLimit(1)
-                }
-                .padding(.top, Theme.Space.s)
-                NavigationLink { WatchRecordingView() } label: {
-                    Label("Record [Recordings Section ef2821]", systemImage: Theme.Icon.recording).lineLimit(1)
-                }
+                // In the scroll view: beside it, it squeezed the page until the sync button was out of sight. A place, as
+                // on the home list: Record is on the page it opens.
+                NavigationLink { WatchRecordingView() } label: { WatchRecordingsLabel() }
                 .padding(.top, Theme.Space.s)
                 // Recording needs the phone, not the hub: all-day recording too, once the phone takes it (its page
                 // points to the phone's consent until the user agreed there).

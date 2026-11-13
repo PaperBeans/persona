@@ -63,6 +63,45 @@ struct ForwardTests {
         }
     }
 
+    private struct Several: Decodable {
+        struct Budget: Decodable {
+            struct Case: Decodable { var count: Int; var limit: Int }
+            var each: Int
+            var total: Int
+            var most: Int
+            var cases: [Case]
+        }
+        struct Write: Decodable { var name: String; var blocks: [Fixtures.Block]; var note: String; var message: String }
+        struct Read: Decodable { var name: String; var message: String; var msgs: [String]; var rest: String; var groups: [[Int]] }
+        var version: Int
+        var budget: Budget
+        var write: [Write]
+        var read: [Read]
+    }
+
+    /// Several at once (#3838): one block per message, the shared budget, and which blocks read as one card.
+    @Test func writesAndReadsSeveralAtOnce() throws {
+        let data = try Data(contentsOf: Self.repo.appending(path: "spec/fixtures/forward/several.json"))
+        let f = try JSONDecoder().decode(Several.self, from: data)
+        #expect(f.version == 1)
+        #expect(f.budget.each == ForwardMessage.limit && f.budget.total == ForwardMessage.total && f.budget.most == ForwardMessage.most)
+        for c in f.budget.cases { #expect(ForwardMessage.limit(count: c.count) == c.limit, "budget \(c.count)") }
+        for w in f.write {
+            let refs = w.blocks.map { ContextRef(kind: ForwardMessage.kind, title: $0.title, url: $0.url, text: $0.text, msg: $0.msg, extra: $0.attributes) }
+            #expect(ContextRef.message(refs, body: w.note) == w.message, "\(w.name)")
+        }
+        for r in f.read {
+            let parsed = ContextRef.parse(r.message)
+            #expect(parsed.refs.map(\.msg) == r.msgs && parsed.rest == r.rest, "\(r.name)")
+            #expect(ForwardMessage.groups(parsed.refs) == r.groups, "\(r.name)")
+        }
+        // A long one among several is cut at its share, and says so.
+        let long = String(repeating: "x", count: ForwardMessage.limit)
+        let share = ForwardMessage.limit(count: 4)
+        let cut = ForwardMessage.body(long, limit: share)
+        #expect(cut.hasPrefix(String(repeating: "x", count: share)) && !cut.hasSuffix("x") && cut.count < long.count)
+    }
+
     private static let key = SessionKey(group: "", machineID: "macbook", sessionID: "a1f3c2d4-0000-4000-8000-000000000006")
 
     private static func source(_ role: ForwardMessage.Role = .agent, time: Date? = nil) -> ForwardMessage.Source {

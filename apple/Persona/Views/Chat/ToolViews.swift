@@ -1540,17 +1540,20 @@ struct Base64Image: View {
     var index = 0
     /// The viewer's title for a picture alone (a file's name); a gallery's pictures go untitled.
     var title: String? = nil
+    /// Fills the width it is given instead of a thumbnail's height (`Theme.Size.box280`): a picture that is the page (#1331).
+    var fillsWidth = false
     @State private var image: UIImage?
     @State private var showViewer = false
     /// The last load gave no picture (no hub, a failed download, bytes that do not decode).
     @State private var failed = false
     /// Bumped by a tap on the retry: loads again (the loader keeps no failures).
     @State private var attempt = 0
-    init(payload: ImagePayload, gallery: [ImagePayload] = [], index: Int = 0, title: String? = nil) {
+    init(payload: ImagePayload, gallery: [ImagePayload] = [], index: Int = 0, title: String? = nil, fillsWidth: Bool = false) {
         self.payload = payload
         self.gallery = gallery
         self.index = index
         self.title = title
+        self.fillsWidth = fillsWidth
         _image = State(initialValue: ChatImageLoader.cached(payload, side: 900)) // back on screen: no placeholder flash
     }
     @Namespace private var zoom
@@ -1564,7 +1567,7 @@ struct Base64Image: View {
                 Image(uiImage: image).resizable().scaledToFit()
                     .clipShape(.rect(cornerRadius: Theme.Radius.control, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).stroke(Theme.cardStroke, lineWidth: 0.5))
-                    .scaledFrame(maxHeight: Theme.Size.box280)
+                    .scaledFrame(maxHeight: fillsWidth ? nil : Theme.Size.box280)
                     .contentShape(.rect)
                     .onTapGesture { open() }
                     #if os(macOS)

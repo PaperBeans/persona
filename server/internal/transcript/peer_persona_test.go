@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/prompts"
@@ -31,5 +32,58 @@ func TestPersonaPeerMessageStripsHead(t *testing.T) {
 		if items := ParseLine(1, line, &Meta{}); len(items) != 1 || items[0].Text != "reply with OK" {
 			t.Fatalf("%s: %+v", name, items)
 		}
+	}
+}
+
+// personaPeerLine is the hidden user line a session writes for words the node sent through its peer inbox, the way
+// Claude Code 2.1.311 writes one: the envelope in the content, its body (what Persona told the model, then the
+// words) in the origin.
+func personaPeerLine(t *testing.T, words string) []byte {
+	t.Helper()
+	body := prompts.RenderPeerMessage(prompts.PeerMessage{Text: words})
+	content := "Another Claude session sent a message:\n<cross-session-message from-name=\"Persona\">\n" + body + "\n</cross-session-message>\n\nThis came from another Claude session."
+	line, err := json.Marshal(map[string]any{"type": "user", "isMeta": true, "uuid": "00000000-0000-4000-8000-000000000002",
+		"timestamp": "2026-11-12T16:41:28Z", "message": map[string]any{"role": "user", "content": content},
+		"origin": map[string]any{"kind": "peer", "from": "unknown", "name": "Persona", "body": body}, "sessionId": "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return line
+}
+
+// The words the phone sent read as the user's, without what Persona told the model; the phone's Stop (a message asking
+// the model to stop, node/claudebg.go interruptOutside) reads as the stop, and starts the turn its one-line answer is in.
+func TestPersonaPeerWordsAndStop(t *testing.T) {
+	meta := &Meta{}
+	if items := ParseLine(1, personaPeerLine(t, "reply with OK"), meta); len(items) != 1 || items[0].Text != "reply with OK" || items[0].From != PersonaPeer {
+		t.Fatalf("words: %+v", items)
+	}
+	meta = &Meta{}
+	items := ParseLine(1, personaPeerLine(t, prompts.PeerStop()), meta)
+	if len(items) != 1 || items[0].Role != "user" || items[0].From != PersonaPeer || items[0].Text != StoppedFromPhone {
+		t.Fatalf("stop: %+v", items)
+	}
+	if !meta.TurnOpen || !meta.LastPromptAt.IsZero() {
+		t.Fatalf("stop: turn open %v, prompt at %v", meta.TurnOpen, meta.LastPromptAt)
+	}
+}
+
+// A message from the phone queued behind a running turn (priority next) shows in the queue as the user's words, not
+// with what Persona told the model; taking it in empties the queue.
+func TestPersonaPeerQueued(t *testing.T) {
+	queued := "<cross-session-message from-name=\"Persona\">\n" + prompts.RenderPeerMessage(prompts.PeerMessage{Text: "and then this"}) + "\n</cross-session-message>"
+	op := func(op string) []byte {
+		b, _ := json.Marshal(map[string]any{"type": "queue-operation", "operation": op, "timestamp": "2026-11-12T16:41:31Z", "content": queued, "sessionId": "s"})
+		return b
+	}
+	meta := &Meta{}
+	ParseLine(1, op("enqueue"), meta)
+	want := []string{"【来自 Persona】and then this"} // i18n-ignore: applyQueue's sender mark
+	if !slices.Equal(meta.Queue, want) {
+		t.Fatalf("queue %q, want %q", meta.Queue, want)
+	}
+	ParseLine(2, op("dequeue"), meta)
+	if len(meta.Queue) != 0 {
+		t.Fatalf("queue after dequeue: %q", meta.Queue)
 	}
 }

@@ -61,14 +61,27 @@ export function handoffCardState(card: HandoffCardBody, conversation: string, it
 /** How many "Wrap up" chips a conversation shows at most, newest hand-off first. */
 export const WRAP_UP_MAX = 2;
 
-/** The open items handed to conversation sid, newest hand-off first: each gets a "Wrap up" chip over the composer. */
+/** What a "Wrap up" chip says besides its title: a reply waiting to be sent, another suggestion (a conclusion, an
+ *  Agent to start) waiting to be confirmed, or nothing while the item is still being worked on. */
+export type WrapUpWait = "send" | "confirm" | undefined;
+
+/** The suggestion of item it waiting for the owner, as a Wrap up chip shows it. */
+export function wrapUpWait(it: InboxItem): WrapUpWait {
+  const s = it.suggestion;
+  if (!s) return undefined;
+  return s.kind === "reply" ? "send" : "confirm";
+}
+
+/** The open items handed to conversation sid, newest hand-off first: each gets a "Wrap up" chip over the composer.
+ *  An item whose handling is done with no suggestion waiting has nothing left to wrap up: it stays in the Inbox,
+ *  the one home of the request, and gets no chip. The items themselves, so the list compares equal while they do. */
 export function wrapUpItems(items: InboxItem[], sid: string): InboxItem[] {
   const at = (it: InboxItem) => {
     const h = [...(it.handoffs ?? [])].reverse().find((x) => x.session_id === sid);
     return h ? Date.parse(h.at ?? "") || 0 : -1;
   };
   return items
-    .filter((it) => !isDone(it) && at(it) >= 0)
+    .filter((it) => !isDone(it) && at(it) >= 0 && !(it.handling?.state === "done" && !it.suggestion))
     .sort((a, b) => at(b) - at(a))
     .slice(0, WRAP_UP_MAX);
 }

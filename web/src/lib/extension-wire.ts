@@ -315,6 +315,7 @@ export interface StoragePermission {
 export interface Contributes {
   connectors?: ConnectorItem[];
   voice?: NamedItem[];
+  transcription?: NamedItem[];
   computer?: NamedItem[];
   browser?: NamedItem[];
   iphone?: NamedItem[];
@@ -623,7 +624,7 @@ export interface ConnectorItem {
 }
 
 /**
- * A contribution with only an id and a name: voice, computer, browser.
+ * A contribution with only an id and a name: voice, transcription, computer, browser.
  */
 export interface NamedItem {
   id: string;

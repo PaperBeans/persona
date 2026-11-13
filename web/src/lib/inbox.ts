@@ -13,10 +13,11 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import { api, ApiError, enc, errorText, getToken } from "./api";
 import { BASE } from "./base";
 import type { AgentMutes } from "./agent-groups";
+import type { ContextRef } from "./links";
 import { connectorOpenTitle } from "./connectors";
 import { contextBody } from "./context-body";
 import { larkPath } from "./lark-accounts";
-import { baseName } from "./format";
+import { baseName, uuid } from "./format";
 import { conversationPage } from "./conversation-page";
 import type { Route } from "./router";
 import { isResumed } from "./reconnect";
@@ -69,6 +70,8 @@ export interface InboxDoc {
 }
 
 export interface InboxAgent {
+  /** The business task this event is about; distinct from its draft-processing session. */
+  todo_id?: string;
   state: string; // skipped | queued | running | drafted | failed
   task?: string;
   reason?: string;
@@ -356,6 +359,7 @@ export function docTypeName(type?: string): string {
 /** Who wrote what: the row's line under the summary (or its second line before triage); `preview` is the hub's
  * translation of a foreign mail's when it is shown. */
 export function fromLine(it: InboxItem, preview?: string): string {
+  if (it.source === "assistant") return it.preview; // the assistant's own row: the tag already says who, so no "Assistant:" prefix
   if (it.doc) return `${docTypeName(it.doc.type)} · ${it.preview}`; // the preview names who: "<name> mentioned you"
   if (it.moment) return t("lib-inbox.sender_line", { sender: it.sender ?? "", text: it.preview });
   if (it.connector) {
@@ -367,6 +371,13 @@ export function fromLine(it: InboxItem, preview?: string): string {
   // a Feishu direct chat's title already is the sender
   if (!it.sender || (isLark(it) && it.lark && !it.lark.is_group)) return it.preview;
   return t("lib-inbox.sender_line", { sender: it.sender, text: it.preview });
+}
+
+/** The row's text under the summary says what the summary already says (the assistant's own rows: its text is the summary), so it is not drawn twice. */
+export function repeatsSummary(it: InboxItem): boolean {
+  const summary = it.summary?.trim();
+  const text = it.preview?.trim();
+  return it.source === "assistant" && !!summary && !!text && (text === summary || text.startsWith(summary));
 }
 
 /** Where it came from, for the detail page's subtitle. */
@@ -624,6 +635,13 @@ export function contextXML(kind: string, title: string, url: string, text: strin
 
 /** The item as context the chat shows as a chip, then what to do with it (InboxHandOffSheet.message). */
 export function handOffMessage(it: InboxItem, ask: string): string {
+  const ref = handOffContext(it);
+  return `${contextXML(ref.kind, ref.title, ref.url, ref.text)}\n\n${ask.trim() || HANDOFF_PRESETS[0]}`;
+}
+
+/** The item as a `<persona-context kind="context">` (InboxHandOffSheet.contextRef): where it came from, its words, and how
+ *  the agent reads more or answers. "New Agent…" (#5933) puts it over New agent's first message as its card. */
+export function handOffContext(it: InboxItem): ContextRef {
   const title = `${it.connector ? it.account_name || it.source : isLark(it) ? t("lib-inbox.lark") : t("lib-inbox.kind_mail")} · ${it.title}`;
   let text = it.context?.trim() ? it.context : [it.sender ?? "", it.preview].filter(Boolean).join(t("lib-inbox.sender_separator"));
   if (it.lark) {
@@ -634,7 +652,7 @@ export function handOffMessage(it: InboxItem, ask: string): string {
   if (it.connector?.url) text += `\n\n${t("lib-inbox.handoff_connector", { name: it.account_name || it.source, url: it.connector.url })}`;
   const uid = it.mail?.uids[it.mail.uids.length - 1];
   if (it.mail && uid !== undefined) text += `\n\n${t("lib-inbox.handoff_mail", { account: it.mail.account_id, mailbox: it.mail.mailbox, uid })}`;
-  return `${contextXML("context", title, "", text)}\n\n${ask.trim() || HANDOFF_PRESETS[0]}`;
+  return { id: `inbox:${it.id}`, kind: "context", title, url: "", text };
 }
 
 /** "Hand to AI" to Persona's main conversation (docs/assistant/inbox.md "Item actions"): the item's manager sends text there
@@ -643,6 +661,26 @@ export function handOffMessage(it: InboxItem, ask: string): string {
 export async function handOffToMain(item: InboxItem, text: string, clientID: string): Promise<InboxHandoff> {
   const r = await api<{ session: InboxHandoff }>(`${itemPath(item.id)}/handoff`, { method: "POST", json: { text, client_id: clientID }, headers: itemRequest(item) });
   return r.session;
+}
+
+/** Best-effort record of a hand-off the client already delivered itself; no text means the manager must not send it again.
+ *  Old managers reject a record-only request (400, or 404 / 405 without the route). Every failure is quiet: delivery
+ *  already succeeded, so recording never interrupts the close and navigation that follow it. */
+export async function recordHandOff(item: InboxItem, session: Pick<Session, "machine_id" | "session_id">, kind: "agent" | "conversation", title?: string): Promise<void> {
+  try {
+    await api<void>(`${itemPath(item.id)}/handoff`, {
+      method: "POST",
+      json: {
+        session: { machine_id: session.machine_id, session_id: session.session_id },
+        kind,
+        title: title ?? "",
+        client_id: uuid(),
+      },
+      headers: itemRequest(item),
+    });
+  } catch {
+    // A missing record is not a failed hand-off; do not toast, retry or change the dialog.
+  }
 }
 
 // ── Feishu messages (docs/protocol/protocol.md "Lark API") ──────

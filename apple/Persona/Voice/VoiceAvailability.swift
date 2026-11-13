@@ -45,6 +45,9 @@ nonisolated struct VoiceInfo: Decodable, Equatable, Sendable {
 extension VoiceInfo {
     /// The extension can say a given text in the realtime voice (`POST …/speak`, #5004); older ones can't.
     nonisolated static let speakFeature = "speak"
+    /// The extension sends anyway what its user-speech gate held back (a resend of a run refused `unprompted`), and its
+    /// `start` takes `speech_gate` (#5904): the bar's Send Anyway and the setting Only Send What I Just Said.
+    nonisolated static let speechGateFeature = "speech_gate"
 }
 
 /// The realtime voice saying a text (`POST …/speak`): mono PCM16, little-endian, at `rate`, in pieces as they come.
@@ -124,6 +127,9 @@ nonisolated enum VoiceAvailability: Equatable, Sendable {
     case noConversation
     /// The conversation cannot take messages from here (a read-only source).
     case readOnly
+    /// A meeting's room conversation (origin `meeting`) opened as a chat: a room takes only meeting calls, from the
+    /// meeting's page while it records (#3862 phase 4); an ordinary call would bring its tools in front of the room.
+    case meetingRoom
     /// The hub has no voice extension running (none, switched off, or a hub too old to list them).
     case noExtension
     /// The voice extension runs but has no upstream yet (no address or key).
@@ -136,6 +142,9 @@ nonisolated enum VoiceAvailability: Equatable, Sendable {
     case unknown
 
     var isAvailable: Bool { if case .available = self { true } else { false } }
+
+    /// The origin of a meeting's room conversation (docs/assistant/meeting-minutes.md「The room conversation」).
+    static let meetingOrigin = "meeting"
 
     /// The extension the app talks to: the first one with `kind == "voice"` that runs (as Android and hub/channels.go).
     static func pick(_ extensions: [HubExtension]) -> HubExtension? {
@@ -151,6 +160,7 @@ nonisolated enum VoiceAvailability: Equatable, Sendable {
     static func evaluate(platform: VoicePlatform, session: Session?, extensions: [HubExtension]?, info: VoiceInfoState?) -> VoiceAvailability {
         guard platform == .phone else { return .unsupported }
         guard let session else { return .noConversation }
+        guard session.origin != Self.meetingOrigin else { return .meetingRoom }
         // The composer's own rule: a call hands things over only where typing could. A conversation with no source
         // (herdr) takes messages without capabilities; a source has to say it does.
         guard session.canSend else { return .readOnly }

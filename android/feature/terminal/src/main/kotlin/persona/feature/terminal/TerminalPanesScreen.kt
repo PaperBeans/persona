@@ -34,7 +34,8 @@ fun TerminalPanesScreen(model: TerminalPanesViewModel, navigator: Navigator) {
     LaunchedEffect(model, feedback, resources, navigator) {
         model.events.collect { event ->
             when (event) {
-                is TerminalPanesEvent.Open -> navigator.navigate(TerminalRoute(event.machineId, event.terminal, event.title))
+                is TerminalPanesEvent.Open -> navigator.navigate(TerminalRoute(event.machineId, event.terminal,
+                    event.title.ifEmpty { resources.getString(R.string.terminal_panes_untitled) }))
                 is TerminalPanesEvent.NewTabFailed -> feedback?.notice(resources.getString(R.string.terminal_panes_new_tab_failed, event.error))
             }
         }
@@ -61,7 +62,15 @@ fun TerminalPanesScreen(model: TerminalPanesViewModel, navigator: Navigator) {
                 listing.error != null && listing.response == null -> item("error-${machine.id}", contentType = "error") {
                     JNotice(listing.error, status = Status.NeedsYou, actionLabel = stringResource(R.string.terminal_retry), onAction = model::refresh)
                 }
-                entry.spaces.isEmpty() -> item("none-${machine.id}", contentType = "note") { Note(stringResource(R.string.terminal_panes_no_panes)) }
+                entry.spaces.isEmpty() -> item("none-${machine.id}", contentType = "note") {
+                    val kind = if (model.opensNewSpaces(machine.id)) homeShellHost(listing.response) else null
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Note(stringResource(if (kind == null) R.string.terminal_panes_no_panes_agent else R.string.terminal_panes_no_panes),
+                            Modifier.weight(1f))
+                        if (kind != null) OpenButton(stringResource(R.string.terminal_panes_new_terminal), opening = state.opening != null,
+                            thisOne = state.opening == homeOpeningKey(machine.id, kind)) { model.newTerminal(machine.id, kind) }
+                    }
+                }
             }
             for (space in entry.spaces) {
                 item(spaceItemKey(machine.id, space), contentType = "space") {
@@ -100,11 +109,14 @@ private fun SpaceHeader(space: TermSpace, opening: Boolean, thisOne: Boolean, on
             if (space.branch.isNotEmpty()) Text(space.branch, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3, maxLines = 1,
                 overflow = TextOverflow.Ellipsis)
         }
-        if (space.canOpen) {
-            if (thisOne) JSpinner(Modifier.size(Tokens.Space.Standard.l))
-            else JTextButton(stringResource(R.string.terminal_panes_new_tab), onNewTab, enabled = !opening, icon = PhIcons.Plus)
-        }
+        if (space.canOpen) OpenButton(stringResource(R.string.terminal_panes_new_tab), opening, thisOne, onNewTab)
     }
+}
+
+@Composable
+private fun OpenButton(label: String, opening: Boolean, thisOne: Boolean, onClick: () -> Unit) {
+    if (thisOne) JSpinner(Modifier.size(Tokens.Space.Standard.l))
+    else JTextButton(label, onClick, enabled = !opening, icon = PhIcons.Plus)
 }
 
 @Composable
@@ -119,8 +131,8 @@ private fun PaneRow(pane: TermPane, untitled: String, onOpen: () -> Unit) {
 }
 
 @Composable
-private fun Note(text: String) {
-    Text(text, Modifier.padding(horizontal = Tokens.Space.xs, vertical = Tokens.Space.s), style = PersonaTheme.type.caption,
+private fun Note(text: String, modifier: Modifier = Modifier) {
+    Text(text, modifier.padding(horizontal = Tokens.Space.xs, vertical = Tokens.Space.s), style = PersonaTheme.type.caption,
         color = PersonaTheme.palette.ink3)
 }
 

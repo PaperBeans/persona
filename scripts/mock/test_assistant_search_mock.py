@@ -1,0 +1,96 @@
+"""The mock hub's GET /api/v1/assistant/search answers as the manager does (#6282): the shared rule of
+spec/fixtures/chat-search ("index") for what a message counts as, the feature flag, titles and messages."""
+import json
+import os
+from pathlib import Path
+import runpy
+import socket
+import subprocess
+import tempfile
+import time
+import unittest
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+
+HERE = Path(__file__).resolve().parent
+FIXTURE = HERE.parent.parent / "spec" / "fixtures" / "chat-search" / "cases.json"
+
+
+class AssistantSearchRuleTests(unittest.TestCase):
+    def test_index_text_follows_the_shared_rule(self):
+        mock = runpy.run_path(str(HERE / "mock_hub.py"))
+        cases = json.loads(FIXTURE.read_text())["cases"]
+        self.assertGreater(len(cases), 10)
+        for case in cases:
+            with self.subTest(case["name"]):
+                self.assertEqual(mock["search_index_text"](case["item"]), case["index"])
+
+
+class AssistantSearchMockTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        cls.base = f"http://127.0.0.1:{port}"
+        cls.log = tempfile.TemporaryFile()
+        cls.process = subprocess.Popen(["python3", "-I", str(HERE / "mock_hub.py")],
+                                       env=dict(os.environ, PORT=str(port), MOCK_CHAT_SEARCH="1"), stdout=cls.log, stderr=cls.log)
+        cls.addClassCleanup(cls.stop)
+        for _ in range(100):
+            if cls.process.poll() is not None:
+                raise RuntimeError("the mock hub did not start")
+            try:
+                with urlopen(cls.base + "/api/v1/health", timeout=1):
+                    return
+            except (URLError, TimeoutError):
+                time.sleep(0.1)
+        raise RuntimeError("the mock hub took too long to start")
+
+    @classmethod
+    def stop(cls):
+        cls.process.terminate()
+        try:
+            cls.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            cls.process.kill()
+            cls.process.wait(timeout=5)
+        cls.log.close()
+
+    def get(self, path):
+        req = Request(self.base + path, headers={"Authorization": "Bearer mock"})
+        with urlopen(req, timeout=5) as response:
+            return json.loads(response.read())
+
+    def search(self, q):
+        from urllib.parse import quote
+        return self.get("/api/v1/assistant/search?q=" + quote(q))
+
+    def test_feature_listed(self):
+        self.assertIn("assistant_search", self.get("/api/v1/health").get("features", []))
+
+    def test_finds_the_users_words_and_replies_never_hidden_text(self):
+        trip = "b2e4d6f8-0000-4000-8000-000000000004"
+        for q in ("BlueLane", "青石巷", "WisteriaTea", "GlacierPost", "EarlyReply", "LastReplyWord"):
+            with self.subTest(q):
+                results = self.search(q)["results"]
+                self.assertEqual([r["session_id"] for r in results], [trip])
+                hit = results[0]["hits"][0]
+                start, end = hit["ranges"][0]
+                self.assertEqual(hit["snippet"][start:end].lower(), q.lower())
+        for q in ("ThinkWord", "CopperKey", "SilverKey", "HiddenCtx", "ActionSecret", "persona-action", "InjectedRaw", "示例任务验收"):
+            with self.subTest(q):
+                self.assertEqual(self.search(q)["results"], [])
+
+    def test_title_first(self):
+        results = self.search("AmberTitle")["results"]
+        self.assertTrue(results and results[0]["title_match"] and results[0]["hits"] == [])
+
+    def test_blank_query(self):
+        answer = self.search("  ")
+        self.assertEqual(answer["results"], [])
+        self.assertFalse(answer["partial"])
+
+
+if __name__ == "__main__":
+    unittest.main()

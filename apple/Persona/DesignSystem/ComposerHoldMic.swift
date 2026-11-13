@@ -33,18 +33,15 @@ final class ComposerHold {
         run = UUID(); let mine = run
         Haptics.tap()
         withAnimation(reduceMotion ? nil : Theme.Motion.holdAppear) { holding = true }
-        Task {
-            let problem = await dictation.start(hints: [draft] + hints) { [weak self] words in
-                guard let self, self.run == mine else { return }
-                if self.locked { text.wrappedValue = DictationHold.joined(self.draft, words) } else { self.heard = words }
-            }
-            if let problem {
-                AppModel.shared.toast = Toast(problem, style: .error)
-                if run == mine { end(reduceMotion: reduceMotion) }
-            } else if run != mine || (!holding && !locked) {
-                dictation.stop() // the finger let go while the microphone was still being asked for
-            }
-        }
+        // A finger let go while the microphone is still asked for has stopped dictation (`finish`), which ends this
+        // start before it listens; it also takes over from a tap's start that is waiting or already listening (#3407).
+        dictation.start(hints: [draft] + hints, update: { [weak self] words in
+            guard let self, self.run == mine else { return }
+            if self.locked { text.wrappedValue = DictationHold.joined(self.draft, words) } else { self.heard = words }
+        }, failed: { [weak self] problem in
+            AppModel.shared.toast = Toast(problem, style: .error)
+            if let self, self.run == mine { self.end(reduceMotion: reduceMotion) }
+        })
     }
 
     func finish(_ outcome: DictationHold.Outcome, _ dictation: Dictation, text: Binding<String>, reduceMotion: Bool) {

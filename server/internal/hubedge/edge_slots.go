@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/procs"
 )
 
 // proc is one slot: a hub process the edge started.
@@ -79,7 +81,7 @@ func (e *edge) spawn(binary string, standby bool) (*proc, error) {
 	if standby {
 		role = "standby"
 	}
-	env := append(os.Environ(), EnvSlot+"="+name, EnvRole+"="+role, EnvSockets+"="+socks)
+	env := procs.ChildEnv(append(os.Environ(), EnvSlot+"="+name, EnvRole+"="+role, EnvSockets+"="+socks))
 	cmd := exec.Command(binary, e.o.Args...)
 	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr

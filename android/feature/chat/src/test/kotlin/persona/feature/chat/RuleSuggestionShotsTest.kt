@@ -93,7 +93,7 @@ class RuleSuggestionShotsTest {
         where.copy(action = "merge", conditions = listOf("ci_green", "no_conflicts"), quote = "Merge the PR now? → Yes"),
         RuleSuggestion.STANDING_AUTHORIZATION, count = 3)
     private val delegate = RuleSuggestion("rs_delegate", "delegate",
-        "You took the recommendation 3 times. Let Persona answer agents' own-call questions for you? You can turn this on in Settings.",
+        "You took the recommendation 3 times. Let Persona answer agents' own-call questions for you?",
         creates = "", setting = "agents.delegate", count = 3)
 
     private val askedAt = "2026-11-10T08:00:00Z"

@@ -832,6 +832,7 @@ func TestBackgroundSupervisorGoneAfterRestartKeepsItsQueuedMessage(t *testing.T)
 // are quiet.
 func TestOwnerPresenceAndTheBackgroundSupervisorsQueue(t *testing.T) {
 	presenceTimes(t, 400*time.Millisecond, time.Hour)
+	ownerTurnTimes(t, 400*time.Millisecond, time.Hour)
 	s, f, _ := newBackgroundService(t)
 	stopHolds(t, s)
 	ctx := context.Background()

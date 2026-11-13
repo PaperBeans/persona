@@ -1,6 +1,7 @@
 plugins {
     id("persona.android.library")
     id("persona.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 android {

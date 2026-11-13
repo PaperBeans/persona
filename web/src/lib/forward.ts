@@ -1,5 +1,7 @@
 // Forwarding a message (#3899, the web's side of #3807; iOS Forward.swift; docs/protocol/protocol.md "Forwarded messages"):
-// a message's actions › Forward › a target, and that chat opens with the message over its box as a card. What goes out
+// a message's actions › Forward › a target, and that chat opens with the message over its box as a card. Several at once
+// (#3838): Forward to's Select messages… picks more in the chat (lib/message-pick.ts), one block each, in the chat's order;
+// which make one card and their words are lib/forward-group.ts, which only their own chunk loads. What goes out
 // is the user's own message there: a `<persona-context kind="forward">` block (the original and where it came from)
 // before the note typed under it, sent with the chat's usual send (lib/links.ts withContexts). Nothing is written back
 // to the original chat. The picker is views/chat/ForwardDialog.tsx, its lists lib/forward-targets.ts; this file is what
@@ -9,6 +11,7 @@ import { t } from "../i18n";
 import { isAppLink } from "./compatibility";
 import { clock, tabLabel } from "./format";
 import { agentLabel } from "./mentions";
+import type { MessagePick } from "./message-pick";
 import type { Item, Session } from "./types";
 
 export const FORWARD_KIND = "forward";
@@ -158,14 +161,24 @@ export function forwardDraftOf(c: ForwardChat, p: ForwardPick): ForwardDraft {
   };
 }
 
-const openers = new Set<(d: ForwardDraft) => void>();
-
-/** Opens the picker for `draft` (the app shell's ForwardHost listens). */
-export function openForward(draft: ForwardDraft) {
-  openers.forEach((l) => l(draft));
+/** What Forward to opens with: the messages, in the chat's order (one from a message's Forward, or up to 30 picked
+ *  with Select messages…). `select`: the chat can pick more (#3838), so Forward to offers Select messages…, which closes
+ *  it, makes the picks with `first` picked (lib/message-pick.ts, a chunk that comes with Forward to) and hands them to
+ *  `start`; `sent`: called once they went to a target. */
+export interface ForwardBatch {
+  drafts: ForwardDraft[];
+  select?: { first: ForwardPick; start: (pick: MessagePick) => void };
+  sent?: () => void;
 }
 
-export function onOpenForward(l: (d: ForwardDraft) => void): () => void {
+const openers = new Set<(b: ForwardBatch) => void>();
+
+/** Opens the picker for `batch` (the app shell's ForwardHost listens). */
+export function openForward(batch: ForwardBatch) {
+  openers.forEach((l) => l(batch));
+}
+
+export function onOpenForward(l: (b: ForwardBatch) => void): () => void {
   openers.add(l);
   return () => void openers.delete(l);
 }

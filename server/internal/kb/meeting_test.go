@@ -286,7 +286,7 @@ func TestUploadKeepsAMeetingUpdateMadeMeanwhile(t *testing.T) {
 	}
 	u := roomUploadJSON(t, body(2, AttendanceParticipant))
 	u.Kind = RecordingMeeting
-	m, parts, err := e.putMeetingFields(recID, &u)
+	m, parts, err := e.putMeetingFields(recID, &u, now)
 	if err != nil {
 		t.Fatal(err)
 	}

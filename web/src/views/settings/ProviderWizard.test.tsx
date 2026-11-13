@@ -813,3 +813,62 @@ describe("ProviderWizard names", () => {
     }
   });
 });
+
+// A gateway that lists more models than the wizard checks by itself (AUTO_CHECK): what was found is one click from where
+// it was fetched, a filter narrows a long list, and any row can be made the default, which checks it.
+describe("ProviderWizard with many models", () => {
+  const many = Array.from({ length: 20 }, (_, i) => ({ id: `gw-model-${String(i + 1).padStart(2, "0")}`, context_window: 200000 }));
+  const saved: ProviderView = { name: "gw", base_url: "https://gw.example.com", model: "m1", has_key: true, auth: "bearer", models: [{ id: "m1" }] };
+  async function fetchModels(list: Record<string, unknown>[]) {
+    discovered = list;
+    act(() => root.render(<><ProviderWizard existing={saved} onClose={() => {}} onSaved={() => {}} /><Toasts /></>));
+    await flush();
+    await act(async () => button("获取模型列表")!.click());
+    await flush();
+  }
+  const rows = () => [...document.body.querySelectorAll<HTMLElement>("li[data-model]")].map((r) => r.dataset.model);
+  const checked = () => [...document.body.querySelectorAll('[role="checkbox"][aria-checked="true"]')].map((b) => b.closest("li")?.getAttribute("data-model"));
+  const filter = () => document.body.querySelector<HTMLInputElement>('input[placeholder="筛选模型"]');
+
+  it("goes to Choose models from the line of the models found", async () => {
+    await fetchModels([{ id: "m1" }, ...many]);
+    const found = [...document.body.querySelectorAll('[role="status"]')].find((s) => s.textContent?.includes("找到 21 个模型。"))!;
+    expect(found.textContent).not.toContain("下一步");
+    act(() => [...found.querySelectorAll("button")].find((b) => b.textContent === "选择模型")!.click());
+    expect(rows()).toHaveLength(21);
+    expect(checked()).toEqual(["m1"]);
+  });
+
+  it("filters a long list by ID and name, and says when nothing matches", async () => {
+    await fetchModels([{ id: "m1" }, ...many, { id: "gw-x", name: "Example Long Name" }]);
+    act(() => button("下一步")!.click());
+    type(filter()!, "MODEL-1");
+    expect(rows()).toEqual(many.slice(9, 19).map((m) => m.id));
+    type(filter()!, "long name");
+    expect(rows()).toEqual(["gw-x"]);
+    type(filter()!, "no-such-model");
+    expect(rows()).toEqual([]);
+    expect(text()).toContain("没有匹配的模型。");
+  });
+
+  it("has no filter for a short list", async () => {
+    await fetchModels([{ id: "m1" }, { id: "m2" }]);
+    act(() => button("下一步")!.click());
+    expect(rows()).toEqual(["m1", "m2"]);
+    expect(filter()).toBeNull();
+  });
+
+  it("makes an unchecked model the default in one step, checking it, and saves both", async () => {
+    await fetchModels([{ id: "m1" }, ...many]);
+    act(() => button("下一步")!.click());
+    const row = document.body.querySelector<HTMLElement>('li[data-model="gw-model-05"]')!;
+    act(() => [...row.querySelectorAll("button")].find((b) => b.textContent === "设为默认")!.click());
+    expect(checked()).toEqual(["m1", "gw-model-05"]);
+    expect(row.textContent).toContain("默认");
+    await act(async () => button("保存")!.click());
+    await flush();
+    const put = calls.find((c) => c.method === "PUT")!;
+    expect(put.body).toMatchObject({ model: "gw-model-05" });
+    expect((put.body!.models as { id: string }[]).map((m) => m.id)).toEqual(["m1", "gw-model-05"]);
+  });
+});

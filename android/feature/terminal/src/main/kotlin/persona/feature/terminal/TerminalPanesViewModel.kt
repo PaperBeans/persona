@@ -3,6 +3,7 @@ package persona.feature.terminal
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import persona.core.contracts.Machine
+import persona.core.contracts.api.NewPaneTab
 import persona.core.contracts.api.PanesResponse
 import persona.core.contracts.api.SessionsRepository
 import persona.core.contracts.api.TerminalAddress
@@ -60,14 +61,25 @@ class TerminalPanesViewModel(private val panes: TerminalPanes, private val sessi
     fun refresh() { viewModelScope.launch { load(showBusy = true) } }
 
     /** "New tab": a shell tab in [space], opened as a terminal once the hub answers. */
-    fun newTab(machineId: String, space: TermSpace) {
-        val id = openingKey(machineId, space)
+    fun newTab(machineId: String, space: TermSpace) = open(machineId, openingKey(machineId, space), space.label) {
+        panes.newTab(machineId, space.id, space.host.ifEmpty { null })
+    }
+
+    /** Whether this machine's own hub can open a home-directory terminal. */
+    fun opensNewSpaces(machineId: String) = panes.opensNewSpaces(machineId)
+
+    /** "New Terminal": the first shell on a computer whose terminal host has no workspace yet. */
+    fun newTerminal(machineId: String, kind: String) = open(machineId, homeOpeningKey(machineId, kind), "") {
+        panes.newTab(machineId, "", kind.ifEmpty { null }, cwd = "~")
+    }
+
+    private fun open(machineId: String, id: String, title: String, request: suspend () -> NewPaneTab) {
         if (opening.value != null) return
         opening.value = id
         viewModelScope.launch {
             try {
-                val tab = panes.newTab(machineId, space.id, space.host.ifEmpty { null })
-                _events.emit(TerminalPanesEvent.Open(machineId, TerminalAddress.key(machineId, tab.terminal).sessionId, space.label))
+                val tab = request()
+                _events.emit(TerminalPanesEvent.Open(machineId, TerminalAddress.key(machineId, tab.terminal).sessionId, title))
                 load(listOf(machineId), showBusy = false)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { _events.emit(TerminalPanesEvent.NewTabFailed(e.message.orEmpty())) }

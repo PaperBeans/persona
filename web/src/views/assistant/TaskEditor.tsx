@@ -11,7 +11,7 @@ import { navigate } from "../../lib/router";
 import {
   BYPASS, CRON_EXAMPLES, DAY_NAMES, everyLabel, fromLocalInput, INTERVALS, lastRunText, MAX_EVERY, MIN_EVERY, momentLabel, nextRun, normalizeDays,
   parseTime, PERMISSION_MODES, repeatsLabel, runDetail, runStatusWord, sameTask, taskBody, taskTitle, toLocalInput, untilLabel, validateTask,
-  TASK_CRON_FEATURE, TASK_PUSH_FEATURE, WEEKEND, withPush, withRepeat, WORKDAYS, type CronPreview, type Push, type Repeat, type Run, type Task,
+  TASK_CRON_FEATURE, TASK_INBOX_FEATURE, TASK_PUSH_FEATURE, WEEKEND, withPush, withRepeat, WORKDAYS, type CronPreview, type InboxMode, type Push, type Repeat, type Run, type Task,
 } from "../../lib/routines";
 import { hubHas, useStore } from "../../lib/store";
 import { Button, cx, Dialog, Spinner, toast, useNow } from "../../ui/atoms";
@@ -24,6 +24,10 @@ import { formatDate, t } from "../../i18n";
 const reveal = (el: HTMLElement | null) => el?.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
 
 const everyOk = (m?: number) => Number.isInteger(m) && (m ?? 0) >= MIN_EVERY && (m ?? 0) <= MAX_EVERY;
+
+// The note under a field, and a quick-pick chip (a weekday shortcut, an interval, a cron example), as every one writes them.
+const HINT = "mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3";
+const CHIP = "h-6 whitespace-nowrap rounded-full px-2.5 text-[11.5px] font-medium transition-colors";
 
 export function TaskEditor({
   task,
@@ -50,6 +54,8 @@ export function TaskEditor({
   const origin = task.session_id;
   /** "Push when done" shows when the hub takes it (task_push), or the task already has it. */
   const hasPush = useStore((s) => hubHas(s.features, TASK_PUSH_FEATURE)) || task.push === "asked";
+  /** "When done, put it in the Inbox" shows when the hub takes it (task_inbox), or the task already has it. */
+  const hasInbox = useStore((s) => hubHas(s.features, TASK_INBOX_FEATURE)) || !!task.inbox;
   /** "Cron" shows when the hub runs cron tasks (task_cron), or the task already is one. */
   const hasCron = useStore((s) => hubHas(s.features, TASK_CRON_FEATURE)) || task.repeat === "cron";
 
@@ -227,7 +233,7 @@ export function TaskEditor({
               {draft.repeat === "cron" && <CronWhen cron={draft.cron ?? ""} onChange={(cron) => set({ cron })} onProblem={setCronProblem} />}
               {draft.repeat !== "once" && <UntilWhen draft={draft} now={now} onChange={(until) => set({ until })} />}
             </div>
-            <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">
+            <p className={HINT}>
               {draft.enabled && next && saved && !changed
                 ? t("assistant-taskeditor.next_run", { when: momentLabel(next, now), until: untilLabel(next, now) })
                 : draft.repeat === "once"
@@ -241,7 +247,7 @@ export function TaskEditor({
                       : t("assistant-taskeditor.interval_hint_blank")}
             </p>
             {draft.repeat !== "once" && (
-              <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">{t("assistant-taskeditor.until_hint")}</p>
+              <p className={HINT}>{t("assistant-taskeditor.until_hint")}</p>
             )}
           </section>
 
@@ -255,7 +261,7 @@ export function TaskEditor({
               aria-label={t("assistant-taskeditor.prompt_placeholder")}
               onChange={(e) => set({ prompt: e.target.value })}
             />
-            <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">{t("assistant-taskeditor.prompt_hint")}</p>
+            <p className={HINT}>{t("assistant-taskeditor.prompt_hint")}</p>
           </section>
 
           <section>
@@ -309,7 +315,7 @@ export function TaskEditor({
                 {t("assistant-taskeditor.bypass_on")}
               </p>
             ) : (
-              <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">
+              <p className={HINT}>
                 {t("assistant-taskeditor.permission_hint")}
                 {draft.session_id ? t("assistant-taskeditor.permission_hint_resume") : ""}
               </p>
@@ -341,8 +347,31 @@ export function TaskEditor({
                   { v: "asked", label: t("assistant-taskeditor.push_asked") },
                 ]}
               />
-              <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">
+              <p className={HINT}>
                 {draft.push === "asked" ? t("assistant-taskeditor.push_hint_asked") : t("assistant-taskeditor.push_hint_every")}
+              </p>
+            </section>
+          )}
+
+          {hasInbox && (
+            <section>
+              <SectionTitle>{t("assistant-taskeditor.section_inbox")}</SectionTitle>
+              <Segmented<InboxMode>
+                label={t("assistant-taskeditor.section_inbox")}
+                value={draft.inbox ?? ""}
+                onChange={(inbox) => set({ inbox })}
+                options={[
+                  { v: "", label: t("assistant-taskeditor.inbox_off") },
+                  { v: "worthy", label: t("assistant-taskeditor.inbox_worthy") },
+                  { v: "every", label: t("assistant-taskeditor.inbox_every") },
+                ]}
+              />
+              <p className={HINT}>
+                {draft.inbox === "every"
+                  ? t("assistant-taskeditor.inbox_hint_every")
+                  : draft.inbox === "worthy"
+                    ? t("assistant-taskeditor.inbox_hint_worthy")
+                    : t("assistant-taskeditor.inbox_hint_off")}
               </p>
             </section>
           )}
@@ -369,7 +398,7 @@ export function TaskEditor({
                   </div>
                 ))}
             </div>
-            <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">
+            <p className={HINT}>
               {draft.session_id
                 ? t("assistant-taskeditor.chat_hint_resume")
                 : own
@@ -513,7 +542,7 @@ function DailyWhen({ draft, onChange }: { draft: Task; onChange: (p: Partial<Tas
         type="button"
         aria-pressed={on}
         onClick={() => onChange({ weekdays: value })}
-        className={cx("h-6 whitespace-nowrap rounded-full px-2.5 text-[11.5px] font-medium transition-colors", on ? "bg-accent-tint text-accent-ink" : "bg-field text-ink-3 hover:text-ink-2")}
+        className={cx(CHIP, on ? "bg-accent-tint text-accent-ink" : "bg-field text-ink-3 hover:text-ink-2")}
       >
         {label}
       </button>
@@ -589,7 +618,7 @@ function IntervalWhen({ minutes, onChange }: { minutes: number; onChange: (m: nu
             type="button"
             aria-pressed={m === minutes}
             onClick={() => onChange(m)}
-            className={cx("h-6 whitespace-nowrap rounded-full px-2.5 text-[11.5px] font-medium transition-colors", m === minutes ? "bg-accent-tint text-accent-ink" : "bg-field text-ink-3 hover:text-ink-2")}
+            className={cx(CHIP, m === minutes ? "bg-accent-tint text-accent-ink" : "bg-field text-ink-3 hover:text-ink-2")}
           >
             {m < 60 ? t("assistant-taskeditor.minutes", { count: m }) : m % 1440 === 0 ? t("assistant-taskeditor.days", { count: m / 1440 }) : t("assistant-taskeditor.hours", { count: m / 60 })}
           </button>
@@ -662,7 +691,7 @@ function CronWhen({ cron, onChange, onProblem }: { cron: string; onChange: (cron
             aria-pressed={x.cron === cron.trim()}
             title={x.cron}
             onClick={() => onChange(x.cron)}
-            className={cx("h-6 whitespace-nowrap rounded-full px-2.5 text-[11.5px] font-medium transition-colors", x.cron === cron.trim() ? "bg-accent-tint text-accent-ink" : "bg-field text-ink-3 hover:text-ink-2")}
+            className={cx(CHIP, x.cron === cron.trim() ? "bg-accent-tint text-accent-ink" : "bg-field text-ink-3 hover:text-ink-2")}
           >
             {x.label}
           </button>

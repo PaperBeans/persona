@@ -163,7 +163,7 @@ struct ExtensionBadgeView: View {
         if let n = Int(badge.text), n > 0 {
             CountBadge(count: n, look: .solid(badge.tone == nil || badge.tone == "neutral" ? Theme.countBadge : ExtensionUIStyle.tone(badge.tone)))
         } else {
-            Chip(text: badge.text, look: badge.tone == nil || badge.tone == "neutral" ? .neutral : .tint(ExtensionUIStyle.tone(badge.tone)))
+            Chip(text: badge.text, look: ExtensionUIStyle.badge(badge))
                 .lineLimit(1)
         }
     }

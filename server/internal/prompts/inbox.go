@@ -47,7 +47,8 @@ type InboxGroupInput struct {
 	Context string   // their text, as the connector wrote it
 	Events  string   // the events tool's answer without a query (JSON)
 	Calls   []InboxGroupCall
-	Left    int // tool calls still allowed
+	Left    int    // tool calls still allowed
+	Problem string // the previous answer's validation or JSON error, shown once for correction
 }
 
 // InboxGroupCall is one tool call and its result (JSON as the tool answered, cut).
@@ -100,6 +101,7 @@ type InboxJudgeInput struct {
 type InboxTask struct {
 	ID, Title, State string
 	Last             string // what its latest agent said last, in a line
+	Notes            string // the task's own description, clipped: the judge reads its subject there and quotes it as evidence
 }
 
 func RenderInboxJudgeInput(in InboxJudgeInput) string { return render("inbox/judge_input", in) }
@@ -137,11 +139,17 @@ type InboxAgentLark struct {
 	Account int
 }
 
-// InboxAgentConnector is the thread of a connector's item: Source is the connector's id.
+// InboxAgentConnector is the thread of a connector's item: Source is the connector's id (a subscription's id for a
+// subscription's item). ReplyTo says where a reply goes (with CanReply false, how the user replies themself:
+// iMessage's "reply in Messages"); none, no line. A subscription's item names the subscription (Name), the connector it
+// reads (Via) and that source's name (ViaSource, #6222).
 type InboxAgentConnector struct {
-	Source  string
-	URL     string
-	ReplyTo string
+	Source    string
+	URL       string
+	ReplyTo   string
+	Name      string
+	Via       string
+	ViaSource string
 }
 
 type InboxAgentDoc struct {

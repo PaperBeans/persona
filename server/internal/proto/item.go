@@ -302,8 +302,8 @@ type Injected struct {
 	// Level classifies supervision: info updates only, triage folds the turn, user is visible.
 	Level   string `json:"level,omitempty"`
 	Kind    string `json:"kind"`              // InjectedTaskNotice | InjectedFollowup | InjectedSystem
-	State   string `json:"state,omitempty"`   // task_notice: done|needs|interrupted|failed; followup: once|daily|interval|wake; system: lost_tasks|supervise|inbox
-	Title   string `json:"title,omitempty"`   // the task's, the scheduled task's, the inbox item's, or what a woken agent waits for
+	State   string `json:"state,omitempty"`   // task_notice: done|needs|interrupted|failed; followup: once|daily|interval|wake; system: lost_tasks|supervise|inbox|ask_answered|ask_expired|ask_closed
+	Title   string `json:"title,omitempty"`   // the task's, the scheduled task's, the inbox item's, what a woken agent waits for, or a question's answers
 	Machine string `json:"machine,omitempty"` // task_notice: where its agent runs (a name)
 	TodoID  string `json:"todo_id,omitempty"` // task_notice: the task, when the hub can tell
 	Line    string `json:"line"`              // the one line to show

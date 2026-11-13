@@ -1,12 +1,12 @@
-// Machines: every computer's CPU / memory / disk now and over the last hour (docs/server/machines.md), as Insight Cards. "Add computer"
+// Machines: every computer's CPU / memory / network now and over the last hour (docs/server/machines.md), as Insight Cards. "Add computer"
 // (feature machines_add) adds one from here, and a computer waiting to be confirmed (trust pending) says so on its card.
-import { memo, useCallback, useEffect, useId, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { t as tr } from "../i18n";
 import { foldRows } from "../lib/folded-rows";
 import { canAddComputer, isPending, machineErrorText, neverConnected } from "../lib/add-computer";
 import { api, enc, errorText } from "../lib/api";
 import { readinessChanged } from "../lib/readiness";
-import { bytes, stateOf } from "../lib/format";
+import { stateOf } from "../lib/format";
 import { hubLabel, routeText } from "../lib/mesh";
 import { machineDeployment } from "../lib/machine-deploy";
 import { classifyConnection } from "../lib/node-health";
@@ -15,13 +15,15 @@ import { currentRoster, managerOrder, multiManager, offlineManagerOf, useRoster 
 import { defaultManager, withManager } from "../lib/manager-choice";
 import { useStore } from "../lib/store";
 import { documentPage, visiblePoll } from "../lib/visible-poll";
-import type { Machine, MachineMetrics, MetricPoint, Session } from "../lib/types";
+import type { Machine, MachineMetrics, Session } from "../lib/types";
 import { Button, cx, EASE, IconButton, Loading, toast } from "../ui/atoms";
 import { Icon } from "../ui/icons";
 import { Empty } from "./assistant/parts";
 import { AddComputer, type PendingComputer } from "./machines/AddComputer";
 import { HelpDialog } from "./assistant/Readiness";
 import { MachineDeploy } from "./machines/MachineDeploy";
+import { MachineMetricsSummary } from "./machines/MachineMetricsSummary";
+export { Spark } from "./machines/MachineMetricsSummary";
 import { useScopedMachines } from "../lib/current-assistant";
 import { t } from "../i18n";
 import { addTokens, formatTokens, hitRate, percentText, totalTokens, type UsageTokens } from "../lib/tokens";
@@ -173,9 +175,6 @@ type CardProps = {
 const MachineCard = memo(function MachineCard({ m, index, metrics: mm, hub, route, canAdd, answering, onReconnect, onAnswer, onAddAgain, managerOffline }: CardProps) {
   // each parent once, in its folded state: its child sessions are not agents of their own here either (#5120)
   const [agents, working] = useStore((s) => (m.online ? agentCounts(s.sessions[m.id] && foldRows(s.sessions[m.id])) : NO_AGENTS));
-  const l = mm?.latest;
-  const memPct = l?.mem_used && l.mem_total ? (l.mem_used / l.mem_total) * 100 : undefined;
-  const diskPct = l?.disk_used && l.disk_total ? (l.disk_used / l.disk_total) * 100 : undefined;
   const detail = { name: "machine" as const, mid: m.id };
   const { expectedDisconnect } = machineDeployment(m);
   const pending = isPending(m);
@@ -258,17 +257,7 @@ const MachineCard = memo(function MachineCard({ m, index, metrics: mm, hub, rout
         </p>
       )}
       <MachineDeploy machine={m} className="mt-2" />
-      <div className={cx("grid gap-px px-4 pt-3", mm?.usage ? "grid-cols-4" : "grid-cols-3")}>
-        <Stat label="CPU" value={l?.cpu !== undefined ? `${Math.round(l.cpu)}%` : "—"} warn={(l?.cpu ?? 0) > 85} />
-        <Stat label={t("machines.memory")} value={memPct !== undefined ? `${Math.round(memPct)}%` : "—"} sub={l?.mem_used ? `${bytes(l.mem_used)} / ${bytes(l.mem_total)}` : undefined} warn={(memPct ?? 0) > 90} />
-        <Stat label={t("machines.disk")} value={diskPct !== undefined ? `${Math.round(diskPct)}%` : "—"} sub={l?.disk_total ? t("machines.disk_free", { size: bytes((l.disk_total ?? 0) - (l.disk_used ?? 0)) }) : undefined} warn={(diskPct ?? 0) > 90} />
-        {mm?.usage && (
-          <Stat label={t("machines-usage.tokens")} value={t("machines-usage.per_minute_value", { n: formatTokens(mm.usage.per_minute) })} sub={t("machines-usage.today_value", { n: formatTokens(totalTokens(mm.usage.today)) })} />
-        )}
-      </div>
-      <div className="px-2 pt-2">
-        <Spark points={mm?.points ?? []} />
-      </div>
+      <MachineMetricsSummary machine={m} metrics={mm} />
       <div className="flex items-center justify-between border-t border-line px-4 py-2 text-[11.5px] text-ink-3">
         <span className="whitespace-nowrap">{pending && !m.online ? t("machines.never_connected") : !m.online ? expectedDisconnect ? t("machines.waiting_node") : t("machines.unreachable") : agents ? working ? t("machines.agents_working", { count: agents, working }) : t("machines.agents", { count: agents }) : t("machines.no_agents")}</span>
         <span className="flex min-w-0 items-center gap-3">
@@ -365,49 +354,5 @@ function Stat({ label, value, sub, warn }: { label: string; value: string; sub?:
       <div className={cx("font-mono text-[18px] leading-tight font-medium tabular-nums", warn ? "text-red" : "text-ink")}>{value}</div>
       {sub && <div className="truncate text-[10.5px] text-ink-3">{sub}</div>}
     </div>
-  );
-}
-
-// CPU over the last hour; gaps break the line. Each card draws its own Spark, so the gradient id is per instance:
-// a shared id would be a duplicate on the page and could resolve to another card's (possibly unmounted) gradient.
-export function Spark({ points }: { points: MetricPoint[] }) {
-  const fill = `cpu-fill-${useId().replace(/:/g, "")}`;
-  const W = 440,
-    H = 56;
-  const real = points.filter((p) => !p.gap && p.cpu !== undefined);
-  if (real.length < 2) return <div className="flex h-14 items-center justify-center text-[11.5px] text-ink-3">{t("machines.no_history")}</div>;
-  const t0 = points[0].t,
-    t1 = points[points.length - 1].t || t0 + 1;
-  const x = (t: number) => ((t - t0) / Math.max(1, t1 - t0)) * W;
-  const y = (v: number) => H - 3 - (Math.min(100, Math.max(0, v)) / 100) * (H - 6);
-  const runs: MetricPoint[][] = [[]];
-  for (const p of points) {
-    if (p.gap || p.cpu === undefined) {
-      if (runs[runs.length - 1].length) runs.push([]);
-    } else runs[runs.length - 1].push(p);
-  }
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-14 w-full" role="img" aria-label={t("machines.cpu_last_hour")}>
-      <defs>
-        <linearGradient id={fill} x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0" stopColor="var(--accent)" stopOpacity="0.18" />
-          <stop offset="1" stopColor="var(--accent)" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {[25, 50, 75].map((v) => (
-        <line key={v} x1={0} x2={W} y1={y(v)} y2={y(v)} stroke="var(--line)" strokeWidth={1} vectorEffect="non-scaling-stroke" strokeDasharray="2 4" />
-      ))}
-      {runs
-        .filter((r) => r.length > 1)
-        .map((r, i) => {
-          const line = r.map((p) => `${x(p.t).toFixed(1)},${y(p.cpu!).toFixed(1)}`).join(" ");
-          return (
-            <g key={i}>
-              <polygon points={`${x(r[0].t)},${H} ${line} ${x(r[r.length - 1].t)},${H}`} fill={`url(#${fill})`} />
-              <polyline points={line} fill="none" stroke="var(--accent)" strokeWidth={1.6} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
-            </g>
-          );
-        })}
-    </svg>
   );
 }

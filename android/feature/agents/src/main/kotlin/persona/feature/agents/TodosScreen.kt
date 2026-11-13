@@ -13,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
@@ -45,6 +46,9 @@ import kotlinx.coroutines.launch
 import persona.core.domain.tasks.moveTo
 import persona.core.domain.tasks.TodoListFilter
 import persona.core.domain.tasks.TodoListSort
+import persona.core.domain.tasks.TodoListGrouping
+import persona.core.domain.tasks.directionFoldKey
+import persona.core.domain.tasks.todoRows
 import persona.core.domain.tasks.filterCounts
 import persona.core.domain.tasks.hiddenWaiting
 import persona.core.domain.tasks.listed
@@ -54,6 +58,7 @@ import persona.core.domain.tasks.weekStart
 import persona.core.domain.tasks.CalendarMode
 import persona.core.contracts.*
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.answer.askingLine
 import persona.core.domain.answer.firstBySession
@@ -118,6 +123,8 @@ fun TodosScreen(
     newTodoRequests: NewTodoRequests? = null,
     /** The assistant whose to-dos [todos] are: while it is offline its list is out of reach, not empty (JAssistantOffline). */
     assistant: persona.core.contracts.api.CurrentAssistant? = null,
+    /** The hub's direction tree (#4352): the list can then be grouped by direction. Null (an older hub): status only. */
+    directions: DirectionTree? = null,
 ) {
     val cards = remember(pending) { pending.firstBySession() }
     var query by rememberSaveable { mutableStateOf("") }
@@ -147,6 +154,10 @@ fun TodosScreen(
     var listSort by remember(listPrefs) { mutableStateOf(listPrefs.sort) }
     val setFilter = { f: TodoListFilter -> listFilter = f; listPrefs.filter = f }
     val setSort = { o: TodoListSort -> listSort = o; listPrefs.sort = o }
+    // Status | Direction (#4352), kept on this device; by direction only while the hub has the tree.
+    var listGrouping by remember(listPrefs) { mutableStateOf(listPrefs.grouping) }
+    val setGrouping = { g: TodoListGrouping -> listGrouping = g; listPrefs.grouping = g }
+    val grouping = if (directions == null) TodoListGrouping.Status else listGrouping
     val zone = ZoneId.systemDefault()
     // The week is the calendar's ([weekStart], the region of the app's language).
     val appLocale = LocalConfiguration.current.locales[0]
@@ -177,7 +188,8 @@ fun TodosScreen(
             modifier = modifier,
             mode = calendarMode,
             onMode = setCalendarMode,
-            listControls = { TodoListControls(listFilter, listSort, counts, setFilter, setSort) },
+            listControls = { TodoListControls(listFilter, listSort, counts, setFilter, setSort,
+                grouping = grouping, onGrouping = setGrouping.takeIf { directions != null }) },
         )
     }
 
@@ -336,9 +348,14 @@ fun TodosScreen(
         )
     }
 
+    val listState = rememberLazyListState()
+    // The view toggles stay put below the bar, inside the reach of its blurred edge: show the edge only while the
+    // list has scrolled under it. Nothing on the calendar ever does; its grid and time axis scroll in their own boxes.
+    val underTop = remember(view) { if (view == TodosView.Calendar) { { false } } else { { listState.canScrollBackward } } }
     JPage(
         title = stringResource(R.string.agents_todos_title),
         onBack = onBack,
+        underTop = underTop,
         actions = {
             // on the calendar a new to-do is due on the day it shows, all day (iOS TodosView)
             JIconButton(PhIcons.Plus, stringResource(R.string.agents_todo_new), {
@@ -373,6 +390,7 @@ fun TodosScreen(
         }
         LazyColumn(
             Modifier.fillMaxSize(),
+            state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + Tokens.Space.s,
                 bottom = padding.calculateBottomPadding() + Tokens.Space.l,
@@ -423,15 +441,64 @@ fun TodosScreen(
                     )
                 }
             } else {
+                // By direction (#4352): one section per direction of the hub's tree, in its order, with its two counts; the
+                // rows are the tree's to-dos in its order (those the search and filter leave); the rest keep their status sections.
+                val tree = directions?.takeIf { grouping == TodoListGrouping.Direction }
+                val directionRows = if (tree == null) emptyList() else {
+                    val placed = triaged.sections.values.flatten()
+                        .flatMap { group -> group.members.map { member -> member.id to (member to group.triage.getValue(member.id)) } }.toMap()
+                    tree.todoRows(placed) { (_, triage) -> triage.section == TriageSection.Done }
+                }
+                if (tree != null) {
+                    for ((direction, rows) in directionRows) {
+                        val foldKey = directionFoldKey(direction.id)
+                        val folded = foldKey in toggled
+                        item(key = "direction:${direction.id}") {
+                            JSectionHeader(
+                                direction.localizedTitle,
+                                onClick = { toggled = if (folded) toggled - foldKey else toggled + foldKey },
+                                open = !folded,
+                                action = {
+                                    JDirectionCounts(direction)
+                                    Spacer(Modifier.width(Tokens.Space.s))
+                                    JIcon(if (folded) PersonaIcons.expand else PersonaIcons.collapse, null, size = Tokens.Space.l, tint = PersonaTheme.palette.ink3)
+                                },
+                            )
+                        }
+                        if (folded) continue
+                        items(rows, key = { "direction-row:${direction.id}/${it.first.id}" }) { (todo, triage) ->
+                            TodoTriageRow(
+                                todo = todo,
+                                triage = triage,
+                                related = 0,
+                                relatedOpen = false,
+                                onToggleRelated = {},
+                                sessionLookup = sessionLookup,
+                                cards = cards,
+                                now = now,
+                                onOpen = { onOpenTodo(todo.id) },
+                                onDone = setDone,
+                                onDelete = delete,
+                                onRestore = { restored = restores.restore(todo.id, System.currentTimeMillis()) },
+                                onSeen = if (seenOn && triage.section == TriageSection.JustDone) ({
+                                    gotIt(todo, triage.last)
+                                }) else null,
+                            )
+                        }
+                    }
+                }
+                // The to-dos the tree does not list (shelved ones, Completed, any other the hub leaves out) keep their
+                // status sections after the directions, so grouping by direction hides none of them.
+                val rest = triaged.without(directionRows.flatMap { (_, rows) -> rows.map { it.first.id } }.toSet())
                 // No "N open · N shelved · N done" line: each section title carries its count (#3712).
                 for (section in TriageSection.entries) {
-                    val rows = sortedRows(triaged.rows(section), listSort, zone)
+                    val rows = sortedRows(rest.rows(section), listSort, zone)
                     if (rows.isEmpty()) continue
                     val folded = isFolded(section)
                     item(key = "section:${section.name}") {
                         JSectionHeader(
                             section.label,
-                            count = triaged.listed(section),
+                            count = rest.listed(section),
                             status = section.status,
                             countTone = section.status ?: Status.Idle,
                             onClick = { toggled = if (section.name in toggled) toggled - section.name else toggled + section.name },

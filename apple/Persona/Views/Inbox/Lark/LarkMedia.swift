@@ -234,7 +234,7 @@ struct LarkRemoteImage: View {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
             } else if failed {
                 Rectangle().fill(Color.primary.opacity(0.05))
-                    .overlay { Image(systemName: "photo.badge.exclamationmark").font(Theme.Font.title).foregroundStyle(.tertiary) }
+                    .overlay { Image(systemName: Theme.Icon.brokenImage).font(Theme.Font.title).foregroundStyle(.tertiary) }
             } else {
                 Rectangle().fill(Color.primary.opacity(0.05)).overlay { ProgressView().controlSize(.small) }
             }

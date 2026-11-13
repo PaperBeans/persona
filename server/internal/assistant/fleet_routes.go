@@ -107,6 +107,28 @@ func (s *Service) writeEnded(ctx context.Context, w http.ResponseWriter, id stri
 
 // ---- the queue as the assistant's own code asks for it (it was the hub's: device.call, app.call) ----
 
+// localSessions is sessions.list as localFleetDeviceCall answers it, for this manager's own readers: the decorated rows
+// and the muted ones themselves, not encoded to JSON and decoded again, which was most of what a read cost (#3197).
+// The rows share their slices and pointers with the devices' list, as every decorated row does: read, never written
+// in place (proto.Session). false when the fleet is not this process's (the hub answers then).
+func (s *Service) localSessions(machine string) (list []proto.Session, muted map[string]bool, ok bool, err error) {
+	if !s.fleetOn() || machine == DeviceAll {
+		return nil, nil, false, nil
+	}
+	m, found := s.fleetMachine(machine)
+	if !found {
+		return nil, map[string]bool{}, true, ErrNoDevice
+	}
+	list = s.decorated(m.ID)
+	muted = map[string]bool{}
+	for i := range list {
+		if s.mutedAs(m.ID, list[i].SessionID, list[i].SpaceName) { // mutedSessions, as a set
+			muted[list[i].SessionID] = true
+		}
+	}
+	return list, muted, true, nil
+}
+
 // localFleetDeviceCall answers the device methods the hub answered from what was its (the pending interactions, the
 // session lists as the apps get them, one session); false for the others.
 func (s *Service) localFleetDeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage, bool, error) {

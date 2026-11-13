@@ -228,7 +228,7 @@ class ManualWorkflowTests(unittest.TestCase):
         self.assertEqual(set(release['on']), {'push', 'workflow_dispatch'})
         self.assertEqual(release['permissions'], {'contents': 'read'})
         self.assertNotIn('permissions', release['jobs']['smoke'])
-        self.assertEqual(release['jobs']['publish']['needs'], 'smoke')
+        self.assertEqual(release['jobs']['publish']['needs'], ['authorize', 'smoke'])
         self.assertEqual(release['jobs']['publish']['permissions'], {'contents': 'write', 'packages': 'write'})
         steps = release['jobs']['publish']['steps']
         create = steps[-1]

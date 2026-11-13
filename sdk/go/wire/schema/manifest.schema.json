@@ -337,6 +337,7 @@
       "properties": {
         "connectors": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/ConnectorItem"}},
         "voice": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/NamedItem"}},
+        "transcription": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/NamedItem"}},
         "computer": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/NamedItem"}},
         "browser": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/NamedItem"}},
         "iphone": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/NamedItem"}},
@@ -615,7 +616,7 @@
       "required": ["id", "name", "capabilities"]
     },
     "NamedItem": {
-      "description": "A contribution with only an id and a name: voice, computer, browser.",
+      "description": "A contribution with only an id and a name: voice, transcription, computer, browser.",
       "type": "object",
       "additionalProperties": false,
       "properties": {

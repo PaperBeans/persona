@@ -283,14 +283,16 @@ func (e *Engine) WriteMinutes(ctx context.Context, max int) int {
 	if e.Store.ReadOnly() {
 		return 0
 	}
-	now := time.Now()
+	now := e.now()
 	e.matchRecordings(now)
 	if e.Model == nil && e.ModelFor == nil {
 		return 0
 	}
 	var todo []*Recording
 	for _, r := range e.Store.Recordings() {
-		if r.Complete && r.Chars > 0 && r.MinutesState == MinutesPending && !r.minutesWaiting(now) && !r.Trimmed() {
+		// In hub mode they wait for the final transcript, at most minutesHubWait after the complete upload.
+		if r.Complete && r.Chars > 0 && r.MinutesState == MinutesPending && !r.minutesWaiting(now) && !r.Trimmed() &&
+			!r.transcriptionHolds(now) {
 			todo = append(todo, r)
 		}
 	}
@@ -330,19 +332,34 @@ func unusableAnswer(err error) bool {
 		errors.Is(err, ai.ErrRefused) || errors.As(err, &syntax) || errors.As(err, &typ)
 }
 
-// minutesFailed counts an unusable answer for revision rev of recording id.
+// minutesFailed counts an unusable answer for revision rev of recording id. Minutes that end failed from a final
+// transcript take the hub's audio with them.
 func (e *Engine) minutesFailed(id string, rev int64) {
 	st := e.Store
 	st.recMu.Lock()
-	defer st.recMu.Unlock()
 	r, ok := st.Recording(id)
 	if !ok || r.Revision != rev {
+		st.recMu.Unlock()
 		return
 	}
 	r.minutesFailuresFor(rev)
 	r.MinutesFails++
 	r.planMinutes()
+	drop := r.MinutesState == MinutesFailed && r.transcriptionDone()
 	_ = st.putEntity(KindRecording, r.ID, r, &r.Tagging, false)
+	st.recMu.Unlock()
+	e.dropAudioAfterMinutes(id, drop)
+}
+
+// dropAudioAfterMinutes deletes recording id's hub-mode audio when drop (the minutes from its final transcript are
+// written, or ended failed). The caller holds none of the store's locks.
+func (e *Engine) dropAudioAfterMinutes(id string, drop bool) {
+	if !drop {
+		return
+	}
+	if err := e.dropAudio(id, ErrTranscriptionFinal); err != nil {
+		e.logf("recording %s: audio after the minutes: %v", id, err)
+	}
 }
 
 // matchRecordings links each complete recording not matched at its current revision to the calendar item it overlaps;
@@ -499,9 +516,10 @@ func modelNumber(data []byte, cut string) int {
 	return 0
 }
 
-// writeMinutes makes and stores the minutes of recording id from what is committed now.
+// writeMinutes makes and stores the minutes of recording id from what is committed now: its transcript of record
+// (in hub mode the hub's sentences, waiting for the final ones as long as transcriptionHolds).
 func (e *Engine) writeMinutes(ctx context.Context, id string) error {
-	files, err := e.Store.recordingSnapshot(id)
+	files, meeting, hub, err := e.Store.recordSnapshot(id)
 	if err != nil {
 		return err
 	}
@@ -512,16 +530,23 @@ func (e *Engine) writeMinutes(ctx context.Context, id string) error {
 	if err := json.Unmarshal(files["meta.json"], &r); err != nil {
 		return err
 	}
-	if !r.Complete || r.Chars == 0 || r.MinutesState != MinutesPending || r.Trimmed() {
+	r.Conv = meeting
+	if !r.Complete || r.Chars == 0 || r.MinutesState != MinutesPending || r.Trimmed() || r.transcriptionHolds(e.now()) {
 		return nil
 	}
-	var segs []RecordingSegment
-	if err := json.Unmarshal(files["segments.json"], &segs); err != nil {
+	var device []RecordingSegment
+	if err := json.Unmarshal(files["segments.json"], &device); err != nil {
 		return err
 	}
+	segs := TranscriptOfRecord(hubMode(meeting), device, hub.Segments)
+	// Minutes made from the final transcript take the hub's audio with them once written (storeMinutes).
+	final := r.transcriptionDone()
 	zone := e.Store.Zone()
 	lines := make([]minutesLine, 0, len(segs))
 	for i, sg := range segs {
+		if sg.Echo {
+			continue // Persona's own answer, heard by the microphone: not the meeting's (N still counts it: citations index segs)
+		}
 		if t := strings.Join(strings.Fields(sg.Text), " "); t != "" {
 			lines = append(lines, minutesLine{N: i + 1, At: sg.Start, Text: clip(t, minutesLineRunes)})
 		}
@@ -581,7 +606,7 @@ func (e *Engine) writeMinutes(ctx context.Context, id string) error {
 		return err
 	}
 	m.Partial = partial
-	return e.storeMinutes(ctx, &r, m)
+	return e.storeMinutes(ctx, &r, m, final)
 }
 
 // minutesInput is what the model is told about recording r besides its transcript.
@@ -1072,10 +1097,11 @@ func renderMinutes(m *Minutes, start time.Time, zone *time.Location) string {
 }
 
 // storeMinutes writes m for snapshot r (the revision read) unless the recording was deleted or trimmed meanwhile, then
-// tells MinutesWritten once they are the current revision's, unless they were made again only for a photo
-// (quietMinutes). Items citing a photo no longer listed are left out; when the photos the minutes cite changed, so does
-// PartPhotos, before the minutes are written.
-func (e *Engine) storeMinutes(ctx context.Context, r *Recording, m *Minutes) error {
+// tells MinutesWritten once they are the current revision's, unless they were made again only for a photo or the final
+// transcript (quietMinutes). Items citing a photo no longer listed are left out; when the photos the minutes cite
+// changed, so does PartPhotos, before the minutes are written. final: they were made from a hub-mode recording's final
+// transcript, so its audio goes once they are stored and nothing asked for them again meanwhile (quiet or not).
+func (e *Engine) storeMinutes(ctx context.Context, r *Recording, m *Minutes, final bool) error {
 	st := e.Store
 	st.recMu.Lock()
 	cur, ok := st.Recording(r.ID)
@@ -1093,7 +1119,7 @@ func (e *Engine) storeMinutes(ctx context.Context, r *Recording, m *Minutes) err
 	dropUnlistedPhotos(m, book)
 	// The version after both meta's and the file's: a write of minutes.json that meta.json never caught up with (a
 	// crash between the two) must not give different actions the version an app may still confirm.
-	m.Version, m.Revision, m.GeneratedAt = cur.MinutesVersion+1, r.Revision, time.Now().UTC()
+	m.Version, m.Revision, m.GeneratedAt = cur.MinutesVersion+1, r.Revision, e.now().UTC()
 	var before map[int]bool
 	if old, err := st.ReadMinutes(cur.ID); err == nil {
 		m.Version = max(m.Version, old.Version+1)
@@ -1125,6 +1151,7 @@ func (e *Engine) storeMinutes(ctx context.Context, r *Recording, m *Minutes) err
 	if ready {
 		cur.MinutesQuiet = 0 // settled: minutes of a later revision or request are pushed again
 	}
+	drop := final && cur.MinutesAsks == r.MinutesAsks
 	err = st.putEntity(KindRecording, cur.ID, cur, &cur.Tagging, false)
 	st.notify(KindRecording, cur.ID, "summary")
 	snap := *cur
@@ -1135,6 +1162,7 @@ func (e *Engine) storeMinutes(ctx context.Context, r *Recording, m *Minutes) err
 	if err != nil {
 		return err
 	}
+	e.dropAudioAfterMinutes(cur.ID, drop)
 	if ready && !quiet && e.MinutesWritten != nil {
 		e.MinutesWritten(ctx, snap, *m)
 	}

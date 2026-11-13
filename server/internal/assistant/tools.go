@@ -28,12 +28,12 @@ import (
 // toolNames are the tools only assistant conversations get; their descriptions and schemas are in prompts/mcp
 // (docs/assistant/prompts.md).
 var toolNames = []string{"ask_user", "notify_user", "supervision_finish", "schedule_followup", "schedule_routine", "delete_routine", "list_followups",
-	"cancel_followup", "list_places", "save_place", "machines_list", "agents_list", "agent_read", "agent_send", "agent_switch", "agent_interrupt", "agent_start", "agent_supervise", "agent_archive", "agent_unarchive", "interaction_answer", "ask_escalate", "inbox_suggest", "inbox_draft",
-	"inbox_folders", "inbox_move", "kb_search", "kb_list", "kb_get", "kb_update", "kb_history_plan", "kb_history_status", "kb_history_stop", "kb_history_resume", "persona_settings", "secret_run",
+	"cancel_followup", "list_places", "save_place", "machines_list", "agents_list", "agent_read", "agent_send", "agent_switch", "agents_switch", "agent_interrupt", "agent_start", "agent_supervise", "agent_archive", "agent_unarchive", "interaction_answer", "ask_escalate", "inbox_suggest", "inbox_draft",
+	"inbox_folders", "inbox_move", "inbox_post", "kb_search", "kb_list", "kb_get", "kb_update", "kb_history_plan", "kb_history_status", "kb_history_stop", "kb_history_resume", "persona_settings", "secret_run",
 	"model_profiles_list", "model_profile_get", "model_profile_switch", "model_profile_rollback",
 	"repositories_list", "repository_get", "view_show", "view_update", "view_get",
 	"conversations_list", "conversation_read", "conversation_rename", "conversation_archive", "conversation_unarchive",
-	"conversation_new", "conversation_send", "task_plan", "task_review", "task_scope", "task_start_screen", "task_start_keys", "task_retry",
+	"conversation_new", "conversation_send", "task_plan", "task_plan_withdraw", "task_review", "task_scope", "task_decided", "task_start_screen", "task_start_keys", "task_retry",
 	"todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete", "concern_report",
 	"direction_name", "leader_progress"}
 
@@ -73,11 +73,18 @@ func (s *Service) Tool(ctx context.Context, call ToolCall) proto.ToolResult {
 		}
 	}
 	// A model's call says which conversation asked (task_brief.go callerOrigin); the hub's own runTool calls do not.
-	res, err := s.runTool(withToolCaller(ctx, call.MachineID, call.SessionID), call.MachineID, call.SessionID, call.Name, args)
-	if err != nil {
-		return proto.TextResult(err.Error(), true)
+	ctx = withToolCaller(ctx, call.MachineID, call.SessionID)
+	outward := s.outwardReader(ctx, call.MachineID, call.SessionID)
+	if outward {
+		ctx = withOutwardReader(ctx)
 	}
-	return proto.TextResult(res, false)
+	res, err := s.runTool(ctx, call.MachineID, call.SessionID, call.Name, args)
+	if err != nil {
+		return proto.TextResult(outwardText(outward, err.Error()), true)
+	}
+	// A conversation that writes to other people never reads the private parts of a profile, whichever tool would
+	// give them (outward_reader.go).
+	return proto.TextResult(outwardText(outward, res), false)
 }
 
 // appTool runs a tool that is app's (app.call app.tool).
@@ -109,6 +116,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		return s.toolView(ctx, machine, self, name, args)
 	case "task_plan":
 		return s.toolTaskPlanFrom(ctx, machine, self, args)
+	case "task_plan_withdraw":
+		return s.toolTaskPlanWithdraw(ctx, self, args) // tasks_start.go
 	case "model_profiles_list", "model_profile_get", "model_profile_switch", "model_profile_rollback":
 		return s.toolModelProfile(ctx, self, name, args)
 	case "task_start_screen": // a failed start's kept tab (start_remedy.go)
@@ -119,6 +128,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		return s.toolTaskRetry(ctx, self, args)
 	case "task_scope":
 		return s.toolTaskScope(ctx, self, args) // task_brief_scope.go
+	case "task_decided":
+		return s.toolTaskDecided(ctx, machine, self, args) // task_decided.go
 	case "task_review":
 		res, err := s.toolTaskReview(ctx, self, args) // supervise_review.go
 		if err == nil {
@@ -160,6 +171,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		return s.toolInboxFolders(ctx, args) // inbox_folders.go
 	case "inbox_move":
 		return s.toolInboxMove(ctx, args)
+	case "inbox_post":
+		return s.toolInboxPost(ctx, machine, self, args) // inbox_post.go
 	case "notify_user":
 		var a struct{ Title, Body string }
 		if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.Title+a.Body) == "" {
@@ -322,8 +335,12 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			handed = s.handAttachments(ctx, machine, am.ID, atts, mentioned)
 			params["text"] = withAttachments(text, handed)
 		}
+		unsent := s.noteAgentSend(self, am.ID, c.SessionID) // more from its task's conversation reopens an accepted task (#6726)
 		if c.Status != proto.StatusOffline {
 			if err := s.call(ctx, am.ID, DeviceSessionSend, params, nil); err != nil {
+				if !startResultUnknown(err) { // it may still arrive and start the turn
+					unsent()
+				}
 				return "", task.sendFailed(ctx, s, err)
 			}
 			return fmt.Sprintf("Sent to %s on %s.", agentLabel(c), am.Name) + handed.said() + task.sent(ctx, s, a.Text), nil
@@ -334,11 +351,16 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
 		if err := s.call(sctx, am.ID, DeviceSessionSend, params, nil); err != nil {
+			if !startResultUnknown(err) { // it may still arrive and start the turn
+				unsent()
+			}
 			return "", task.sendFailed(sctx, s, err)
 		}
 		return fmt.Sprintf("Resumed %s on %s (same session, directory and launcher) and sent.", agentLabel(c), am.Name) + handed.said() + task.sent(sctx, s, a.Text), nil
 	case "agent_switch": // moves a running agent to another launcher and goes on with it (agent_switch.go, #5973)
 		return s.toolAgentSwitch(ctx, machine, self, args)
+	case "agents_switch": // moves many running agents to another launcher at once (agents_switch.go, #6008)
+		return s.toolAgentsSwitch(ctx, machine, self, args)
 	case "agent_interrupt":
 		return s.toolAgentInterrupt(ctx, machine, self, args) // agent_control.go
 	case "agent_supervise":
@@ -421,6 +443,10 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			a.Effort, _ = run["effort"].(string)
 			tier, runs = "", "" // the tier's launcher is not what runs
 		}
+		// The admission gate refuses a too-busy computer before the user is asked to approve anything.
+		if err := s.checkAgentStart(ctx, am.ID); err != nil {
+			return "", fmt.Errorf("%w; no agent was started", err)
+		}
 		branch := strings.TrimSpace(a.Worktree.Branch)
 		where := am.Name + " · " + a.Cwd
 		if branch != "" {
@@ -452,7 +478,11 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		defer cancel()
 		// The tab is named from the prompt as written; the agent gets its project's background before it (#2820).
 		params := map[string]any{"cwd": a.Cwd, "launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "tab_name": s.tabName(sctx, a.Prompt)}
-		params["prompt"] = s.withProjectContext(sctx, am.ID, a.Cwd, s.withCloseoutBrief(sctx, a.Prompt, false))
+		prompt := s.withCloseoutBrief(sctx, a.Prompt, false)
+		if !s.isWorkMachine(am.ID) {
+			prompt += "\n\n" + prompts.RenderTaskHandoff()
+		}
+		params["prompt"] = s.withProjectContext(sctx, am.ID, a.Cwd, prompt)
 		if a.Ultracode {
 			params["ultracode"] = true
 		}
@@ -523,6 +553,13 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		lctx, lcancel := context.WithTimeout(sctx, agentStartListTimeout)
 		knownIDs := s.knownSessionIDs(lctx, am.ID)
 		lcancel()
+		// Last look on the machine it will really start on (a health detour may have changed am): re-check and hold
+		// its admission slot across the session.start call.
+		release, err := s.admitAgentStart(sctx, am.ID)
+		if err != nil {
+			return "", fmt.Errorf("%w; no agent was started", err)
+		}
+		defer release()
 		s.setPlanThen(ctx, am.ID, params)
 		var values *handoffValues
 		if hand != nil {
@@ -1083,6 +1120,9 @@ func (s *Service) describeAgents(ctx context.Context, state, machine, query stri
 		}
 		if c.Launcher != "" && c.SourceKind == "" && !c.Assistant { // what agent_switch moves it from (agent_switch.go)
 			fmt.Fprintf(&b, " · launcher=%s", c.Launcher)
+		}
+		if to := s.queuedSwitchOf(r.m.ID, c.SessionID); to != "" { // agents_switch queued it for the end of its turn
+			fmt.Fprintf(&b, " · switch_queued=%s", to)
 		}
 		if reset, ok := usageLimitReset(c); ok { // stopped on its subscription's usage limit (usage_limit.go)
 			fmt.Fprintf(&b, " · usage_limit resets_at=%s", reset.Format(time.RFC3339))

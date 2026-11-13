@@ -17,14 +17,17 @@ interface TerminalPanes {
     /** Whether the hub of [machineId] lists panes; machines of a hub without the feature are not asked. */
     fun lists(machineId: String): Boolean = true
 
+    /** Whether the hub offers `new_space`; an unknown feature list offers it. */
+    fun opensNewSpaces(machineId: String): Boolean = true
+
     /** `GET /api/v1/machines/{mid}/panes`. */
     suspend fun panes(machineId: String): PanesResponse
 
     /**
-     * `POST /api/v1/machines/{mid}/panes {workspace_id, kind?}`: a shell tab in that workspace, in the workspace's own
-     * directory (the request cannot name one). Only called when the user taps "New tab".
+     * `POST /api/v1/machines/{mid}/panes {workspace_id, kind?}` opens a shell tab in that workspace. With no workspace
+     * yet, `{kind, cwd: "~", new_space: true}` opens one in the home directory instead.
      */
-    suspend fun newTab(machineId: String, workspaceId: String, kind: String? = null): NewPaneTab
+    suspend fun newTab(machineId: String, workspaceId: String, kind: String? = null, cwd: String? = null): NewPaneTab
 }
 
 /** What `GET /api/v1/machines/{mid}/panes` answers (server proto.PanesResponse); ids are the host's own. */

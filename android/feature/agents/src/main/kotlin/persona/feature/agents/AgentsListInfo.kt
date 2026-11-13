@@ -13,9 +13,12 @@ import kotlinx.coroutines.flow.*
 import java.time.Instant
 import java.time.ZoneId
 
-/** The groupings the list offers: By To-do only while the hub has to-dos, as iOS's `DevGrouping.offered` (#4338 A5). */
-internal fun offeredGroupings(todosSupported: Boolean): List<AgentGrouping> =
-    if (todosSupported) AgentGrouping.selectable else AgentGrouping.selectable - AgentGrouping.Todo
+/**
+ * The groupings the list offers: By To-do only while the hub has to-dos, as iOS's `DevGrouping.offered` (#4338 A5); By
+ * pinned only with [directions] (a hub with the direction tree, or while it is the one chosen, #4352).
+ */
+internal fun offeredGroupings(todosSupported: Boolean, directions: Boolean = false): List<AgentGrouping> =
+    AgentGrouping.selectable.filter { (it != AgentGrouping.Todo || todosSupported) && (it != AgentGrouping.Direction || directions) }
 
 /** The grouping the list shows: a saved By To-do reads By project on a hub without to-dos, as iOS's `DevGrouping.resolved`. */
 internal fun resolvedGrouping(stored: AgentGrouping, todosSupported: Boolean): AgentGrouping =

@@ -32,7 +32,7 @@ Domains are examples; replace with your configuration. HTTP addresses should be 
 | Field | Default and behavior |
 | --- | --- |
 | `listen` | HTTP default `:18660`, retained for LAN / VPN. `hub pair` also requires IPv4 loopback access |
-| `public_url` | QR `url`, also added to candidates; keep an address old clients can reach |
+| `public_url` | Primary pairing URL (see the [local app QR exception](../protocol/protocol.md#temporary-pairing)), also added to candidates; keep an address old clients can reach |
 | `public.tls_listen` | Empty string disables TLS; setting it adds separate HTTPS / WSS listening |
 | `public.cert_file` / `public.key_file` | Both empty means managed self-signed certificates; custom certificates require both file paths, preferably absolute |
 | `public.advertise` | Additional candidates; full HTTPS URLs recommended, also accepts domains, IPs, or hosts with ports. Missing scheme / port is filled from current listener. Advertising does not start listeners, open firewalls, or update DNS |

@@ -151,3 +151,30 @@ func TestWorktreeCreateFallsBackToCLI(t *testing.T) {
 		t.Error("a checkout gets no more time than a pane list")
 	}
 }
+
+func TestWorktreeCreateFromCwdSendsDirectory(t *testing.T) {
+	var got map[string]any
+	sock := fakeServer(t, func(method string, params map[string]any) string {
+		got = params
+		return `"result":{"type":"worktree_created","workspace":{"workspace_id":"w2"},"tab":{"tab_id":"w2:t1"},"root_pane":{"pane_id":"w2:p1"}}`
+	})
+	c := &Client{Bin: "/nonexistent/herdr", Socket: sock}
+	if _, err := c.WorktreeCreateFromCwd(t.Context(), "/srv/proj", "feat/x", "/srv/wt/feat-x", "c2"); err != nil {
+		t.Fatal(err)
+	}
+	if got["cwd"] != "/srv/proj" || got["base"] != "c2" || got["branch"] != "feat/x" || got["path"] != "/srv/wt/feat-x" || got["focus"] != false || len(got) != 5 {
+		t.Errorf("params = %v", got)
+	}
+}
+
+func TestWorktreeCreateFromCwdFallsBackToCLI(t *testing.T) {
+	bin, args := cliScript(t, `{"id":"cli:worktree:create","result":{"workspace":{"workspace_id":"w2"},"tab":{"tab_id":"w2:t1"},"root_pane":{"pane_id":"w2:p1"}}}`)
+	c := &Client{Bin: bin, Socket: filepath.Join(t.TempDir(), "missing.sock")}
+	if _, err := c.WorktreeCreateFromCwd(t.Context(), "/srv/proj", "feat/x", "/srv/wt/feat-x", "c2"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(args)
+	if strings.TrimSpace(string(b)) != "worktree create --cwd /srv/proj --branch feat/x --path /srv/wt/feat-x --base c2 --no-focus" {
+		t.Errorf("CLI args %q", b)
+	}
+}

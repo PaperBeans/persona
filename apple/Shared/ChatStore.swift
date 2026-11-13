@@ -461,6 +461,9 @@ final class ChatStore {
     /// agent's live message its newest items do not hold yet (`agentStreamed`). Set through `showLive`, which a clear's
     /// fallback watches.
     private(set) var liveText: String = ""
+    /// The stream of `liveText` is over (a clear came) and it only waits for its transcript line: drawn whole at once,
+    /// no longer revealed a few characters a frame (`StreamReveal`, #6651).
+    private(set) var liveDone = false
     /// Bumped each time `liveText` is set: a clear's fallback (`clearLive`) does nothing once anything else set it.
     @ObservationIgnored private var liveStamp = 0
     /// The newest line when the live text began: its copy is written after it, so lines up to this one are not.
@@ -850,6 +853,7 @@ final class ChatStore {
     func showLive(_ text: String) {
         if liveText.isEmpty, !text.isEmpty { liveSince = items.last?.seq ?? 0 }
         liveText = text
+        if liveDone { liveDone = false }
         liveStamp += 1
     }
 
@@ -901,6 +905,7 @@ final class ChatStore {
         if let text, !text.isEmpty, text.hasPrefix(liveText) { showLive(text) }
         let shown = liveText
         guard !shown.isEmpty else { return }
+        liveDone = true
         if Self.holdsLive(items, shown, after: liveSince) { return endLive(shown) }
         let stamp = liveStamp
         Task { @MainActor [weak self] in
@@ -1665,8 +1670,11 @@ nonisolated struct PendingMessage: Identifiable, Hashable, Codable, Sendable {
     /// How the app wrote it when the user did not type it (a card's button): sent with it, so it never counts as the
     /// user's own words for a secret hand-off's Always rule.
     var via: APIClient.MessageVia?
+    /// It was written while the agent worked (the composer's queue mode): the queue strip draws it, not the chat
+    /// (`QueuePlacement`, #1461). nil for one written while the agent was idle, and in outboxes saved before this.
+    var queuedMode: Bool?
 
-    private enum CodingKeys: String, CodingKey { case id, text, images, state, failure, inboxHandOff, createdAt, mayHaveArrived, refused, via }
+    private enum CodingKeys: String, CodingKey { case id, text, images, state, failure, inboxHandOff, createdAt, mayHaveArrived, refused, via, queuedMode }
 
     /// Only on this phone as far as it knows: failed, or waiting for the network. Deleting it (its long press, its mark's
     /// menu) drops the bubble and its outbox entry and sends nothing (#4626). One being sent may be arriving and a sent

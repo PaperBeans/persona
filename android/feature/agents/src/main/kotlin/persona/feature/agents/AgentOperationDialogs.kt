@@ -14,6 +14,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import persona.core.contracts.Session
 import persona.core.domain.sort.SessionRename
+import persona.core.domain.sort.canTerminal
 import persona.core.domain.sort.closeConfirmation
 import persona.core.domain.sort.deleteConfirmation
 import persona.core.domain.sort.isTern
@@ -78,7 +79,7 @@ internal fun AgentOperationDialog(
             val newTab = SessionRename.changes(session, name, tab).tabName
             JDialog(
                 onDismiss = dismiss, title = stringResource(if (space) R.string.agents_dialog_rename_space else R.string.agents_action_rename),
-                text = stringResource(renameNote(session, space)),
+                text = renameNote(session, space)?.let { stringResource(it) },
                 confirmEnabled = newName != null || newTab != null,
                 confirm = stringResource(R.string.agents_dialog_save) to {
                     if (space) model.renameSpace(session, requireNotNull(newName)) else model.rename(session, newName, newTab)
@@ -97,11 +98,12 @@ internal fun AgentOperationDialog(
 /**
  * The note of a rename dialog: what else the new name renames (iOS `SpaceRenameForm.note`, `SessionRenameForm.tabNote`). A
  * space is a herdr workspace, or in Tern one of its sessions (Tern's spaces are its sessions); a pane's tab is herdr's or
- * Tern's.
+ * Tern's. None for a session without a terminal (a runtime's, #6294): it has no tab, and no Claude's /rename.
  */
 @StringRes
-internal fun renameNote(session: Session, space: Boolean): Int = when {
+internal fun renameNote(session: Session, space: Boolean): Int? = when {
     space -> if (session.spaceKind == "tern") R.string.agents_dialog_rename_space_text_tern else R.string.agents_dialog_rename_space_text
+    !session.canTerminal -> null
     session.isTern -> R.string.agents_dialog_rename_text_tern
     else -> R.string.agents_dialog_rename_text
 }

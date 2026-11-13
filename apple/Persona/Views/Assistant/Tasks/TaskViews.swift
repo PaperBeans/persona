@@ -1,7 +1,7 @@
 import PersonaKit
 import SwiftUI
 
-// The unified entry's pieces in the assistant's conversation (docs/assistant/unified-entry.md): the plan card, the task card,
+// The unified entry's pieces in the assistant's conversation (docs/assistant/unified-entry.md): the plan card, the hand-off card,
 // the lines the hub adds (answered, receipt, routed), the dock above the composer, the questions of the tasks' agents,
 // and the route chip with its @ list. They read `TasksStore` and `AppModel`, so a card follows its task live.
 
@@ -130,12 +130,23 @@ enum TaskPlace {
 
 // MARK: - Plan card
 
+/// What the user picked on an open plan's card, kept where the card's buttons can read it: the card's own, or the tray's
+/// when it draws Start, Edit and Don't Start under its list.
+@MainActor @Observable final class PlanChoices {
+    /// Start These Directly: this kind of task starts without asking from now on.
+    var remember = false
+    var editing = false
+    /// Each task's ultracode as set on the card (#12), by index; the assistant's where it is not.
+    var ultra: [Int: Bool] = [:]
+}
+
 struct PlanCard: View {
     var plan: TaskPlan
-    @State private var remember = false
-    @State private var editing = false
-    /// Each task's ultracode as set on the card (#12), by index; the assistant's where it is not.
-    @State private var ultraChoice: [Int: Bool] = [:]
+    /// The tray's, when it pins the buttons (`PlanActions`) under its list: the card then leaves them out.
+    var choices: PlanChoices? = nil
+    var actionsPinned = false
+    @State private var own = PlanChoices()
+    private var picked: PlanChoices { choices ?? own }
     private var store: TasksStore { .shared }
 
     var body: some View {
@@ -157,55 +168,39 @@ struct PlanCard: View {
     }
 
     private var openCard: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
+        @Bindable var picked = picked
+        let offered = Ultracode.planOffered
+        let ultracode = Ultracode.choices(plan, card: picked.ultra)
+        return VStack(alignment: .leading, spacing: Theme.Space.m) {
             Label(plan.tasks.count > 1 ? String(localized: "Split into \(plan.tasks.count) tasks, started like this") : String(localized: "Start like this"), systemImage: Theme.Icon.taskPlan)
                 .font(Theme.Font.captionStrong)
                 .foregroundStyle(.secondary)
-            let offered = Ultracode.planOffered
-            let ultracode = Ultracode.choices(plan, card: ultraChoice)
             ForEach(Array(plan.tasks.enumerated()), id: \.offset) { n, task in
                 if n > 0 { Divider() }
                 PlanTaskRow(number: n + 1, task: task, numbered: plan.tasks.count > 1,
                             ultra: offered ? .init(on: ultracode[n], blocked: Ultracode.blocked(machine: task.machine)) : nil,
-                            onUltra: { ultraChoice[n] = $0 })
+                            onUltra: { picked.ultra[n] = $0 })
             }
             .disabled(store.busyPlans.contains(plan.id))
             Button {
-                withAnimation(Theme.Motion.state) { remember.toggle() }
+                withAnimation(Theme.Motion.state) { picked.remember.toggle() }
             } label: {
-                Label("Start These Directly", systemImage: remember ? Theme.Icon.successFilled : Theme.Icon.unchecked)
+                Label("Start These Directly", systemImage: picked.remember ? Theme.Icon.successFilled : Theme.Icon.unchecked)
                     .font(Theme.Font.caption)
-                    .foregroundStyle(remember ? Theme.accent : .secondary)
+                    .foregroundStyle(picked.remember ? Theme.accent : .secondary)
                     .lineLimit(1)
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            HStack(spacing: Theme.Space.s) {
-                Button {
-                    let blocked = Ultracode.blockedMachines(plan.tasks)
-                    let edits = Ultracode.cardEdits(plan, choices: Ultracode.choices(plan, card: ultraChoice), blocked: { blocked.contains($0) })
-                    Task { await store.start(plan, edits: edits, remember: remember) }
-                } label: {
-                    Text(plan.tasks.count > 1 ? String(localized: "Start \(plan.tasks.count) Tasks") : String(localized: "Start")).lineLimit(1)
-                        .frame(maxWidth: .infinity)
-                }
-                .themedButton(prominent: true)
-                Button { editing = true } label: { Text("Edit [Task Views 928324]").lineLimit(1) }
-                    .themedButton()
-                Button {
-                    Task { await store.dismiss(plan) }
-                } label: { Text("Don't Start").lineLimit(1) }
-                    .themedButton()
-            }
-            .disabled(store.busyPlans.contains(plan.id))
+            if !actionsPinned { PlanActions(plan: plan, choices: picked) }
         }
         .card(padding: Theme.Space.l)
-        .sheet(isPresented: $editing) {
-            PlanEditSheet(plan: plan, ultracode: Ultracode.choices(plan, card: ultraChoice)) { edits in
-                editing = false
+        .sheet(isPresented: $picked.editing) {
+            PlanEditSheet(plan: plan, ultracode: Ultracode.choices(plan, card: picked.ultra)) { edits in
+                picked.editing = false
                 let blocked = Ultracode.blockedMachines(edits)
                 let sent = Ultracode.editsToSend(plan, edits: edits, blocked: { blocked.contains($0) })
-                Task { await store.start(plan, edits: sent, remember: remember) }
+                Task { await store.start(plan, edits: sent, remember: picked.remember) }
             }
         }
     }
@@ -226,6 +221,51 @@ struct PlanCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Start, Edit and Don't Start under an open plan: Start has the width, in one row when the three fit, else on its own
+/// line over the other two (docs/design/task-cards.md §3.1). On the card, or pinned under the tray's list so a tall card
+/// never scrolls them away.
+struct PlanActions: View {
+    var plan: TaskPlan
+    var choices: PlanChoices
+    private var store: TasksStore { .shared }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.s) { start.frame(maxWidth: .infinity); edit; dismiss }
+            VStack(spacing: Theme.Space.s) {
+                start.frame(maxWidth: .infinity)
+                HStack(spacing: Theme.Space.s) { edit.frame(maxWidth: .infinity); dismiss.frame(maxWidth: .infinity) }
+            }
+        }
+        .disabled(store.busyPlans.contains(plan.id))
+    }
+
+    private var start: some View {
+        Button {
+            let blocked = Ultracode.blockedMachines(plan.tasks)
+            let edits = Ultracode.cardEdits(plan, choices: Ultracode.choices(plan, card: choices.ultra), blocked: { blocked.contains($0) })
+            Task { await store.start(plan, edits: edits, remember: choices.remember) }
+        } label: {
+            Text(plan.tasks.count > 1 ? String(localized: "Start \(plan.tasks.count) Tasks") : String(localized: "Start"))
+                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                .frame(maxWidth: .infinity)
+        }
+        .themedButton(prominent: true)
+    }
+
+    private var edit: some View {
+        Button { choices.editing = true } label: { Text("Edit [Task Views 928324]").lineLimit(1).fixedSize(horizontal: true, vertical: false) }
+            .themedButton()
+    }
+
+    private var dismiss: some View {
+        Button {
+            Task { await store.dismiss(plan) }
+        } label: { Text("Don't Start").lineLimit(1).fixedSize(horizontal: true, vertical: false) }
+            .themedButton()
     }
 }
 
@@ -275,6 +315,8 @@ struct PlanTaskRow: View {
             if let why = task.why, !why.isEmpty {
                 Text(why).font(Theme.Font.caption).foregroundStyle(.secondary)
             }
+            // what the task will be held to, shown before Start confirms it
+            if let brief = task.brief { PlanBriefView(brief: brief, title: task.title) }
         }
     }
 
@@ -354,205 +396,6 @@ struct PlanEditSheet: View {
     }
 }
 
-// MARK: - Task card
-
-/// A task's full card: its mark, title, time, where it runs, what its agent says now.
-struct TaskCard: View {
-    var todoID: String
-    var conversation: String
-    @State private var removing: TodoItem?
-    /// The conversation's link handler: web links open in the in-app link sheet (ChatView).
-    @Environment(\.openURL) private var openURL
-    private var store: TasksStore { .shared }
-
-    var body: some View {
-        if let todo = store.todos[todoID] {
-            let state = store.state(todo)
-            let lead = store.leadSession(todo)
-            let ultracode = store.ultracode(todo)
-            if let ask = todo.openAsk {
-                BriefAcceptRow(row: ask.row(for: todo), group: AppModel.shared.hub?.group ?? "")
-                    .card(padding: Theme.Space.l)
-            } else {
-                Button {
-                    store.detailTask = todo.id
-                } label: {
-                    VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        HStack(spacing: Theme.Space.s) {
-                            TaskMark(state: state).scaledFrame(width: Theme.Size.markM)
-                            Text(todo.title).font(Theme.Font.bodyStrong).lineLimit(1)
-                            if ultracode { UltracodeMark(font: Theme.Font.labelStrong).transition(.opacity) }
-                            Spacer(minLength: Theme.Space.s)
-                            if let t = TaskClock.since(todo.createdAt), state != .done, state != .failed {
-                                Text(t).font(Theme.Font.caption).foregroundStyle(.tertiary).lineLimit(1).fixedSize()
-                            }
-                        }
-                        .animation(UltracodeMark.motion, value: ultracode)
-                        Text(TaskPlace.line(todo, lead: lead))
-                            .font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
-                        TaskNowLine(todo: todo, state: state, lead: lead)
-                        // What Persona sent its agent (#1542): the hand-off sent with this card is drawn only here.
-                        TaskSentList(todoID: todo.id, conversation: conversation)
-                        if state == .done, todo.supervision != nil {
-                            ReviewChip(todo: todo)
-                        }
-                        // The PR its work is in (`pr_url`, #2768), as the Feishu bot's task report links it (#5033).
-                        if let pr = todo.prLink {
-                            Button {
-                                openURL(pr)
-                            } label: {
-                                Label(todo.prLabel ?? String(localized: "View PR"), systemImage: Theme.Icon.pullRequest).lineLimit(1)
-                            }
-                            .font(Theme.Font.captionStrong)
-                            .foregroundStyle(Theme.accent)
-                            .buttonStyle(.plain)
-                        }
-                        if state != .done {
-                            HStack(spacing: Theme.Space.s) {
-                                Text(state.label).font(Theme.Font.captionMedium).foregroundStyle(state.labelColor).lineLimit(1).fixedSize()
-                                ReviewChip(todo: todo)
-                                Spacer(minLength: Theme.Space.l)
-                                if state == .failed {
-                                    // Nothing to say a word to: the way out is on the card.
-                                    Button {
-                                        store.askRemove(todo, pending: $removing)
-                                    } label: {
-                                        Label("Remove [Task Sheets 6135d4]", systemImage: Theme.Icon.delete).lineLimit(1)
-                                    }
-                                    .font(Theme.Font.captionStrong)
-                                    .foregroundStyle(Theme.danger)
-                                    .buttonStyle(.plain)
-                                } else {
-                                    Button {
-                                        store.routes[conversation] = todo.id
-                                    } label: {
-                                        Label("Message [Task Views 7e7db6]", systemImage: Theme.Icon.routeToTask).lineLimit(1)
-                                    }
-                                    .font(Theme.Font.captionStrong)
-                                    .foregroundStyle(Theme.accent)
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                    }
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .card(padding: Theme.Space.l)
-                .overlay {
-                    if state == .needsYou {
-                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                            .stroke(state.agentState.color, lineWidth: Theme.Size.lineMedium)
-                    }
-                }
-                .menuPreviewShape(.rect(cornerRadius: Theme.Radius.card, style: .continuous))
-                .contextMenu { TaskRemoveMenuItem(todo: todo, state: state, pending: $removing) }
-                .confirmTaskRemoval($removing)
-                .animation(Theme.Motion.state, value: state)
-            }
-        }
-    }
-}
-
-/// What the task's agent is doing or said last, in a well: waiting for the user in its tone; while it only runs tools,
-/// the step it is on and how long it has been at it (`TaskNow`).
-struct TaskNowLine: View {
-    var todo: TodoItem
-    var state: TaskState
-    var lead: Session?
-
-    private var store: TasksStore { .shared }
-
-    var body: some View {
-        let now = TaskNow(lead: lead, working: state == .working)
-        let text: String = {
-            if state == .needsYou { return TaskAsk.waitingLine(store.interactions(todo)) }
-            if state == .failed { return String(localized: "Didn't start: \(store.startFailure(todo) ?? String(localized: "unknown reason")) [Tasks Store 38bbb7]") }
-            if let now { return now.text }
-            if let e = todo.agents.first?.startError, !e.isEmpty { return String(localized: "Didn't start: \(e) [Tasks Store 38bbb7]") }
-            return state == .notStarted ? String(localized: "Starting the agent") : String(localized: "No activity yet")
-        }()
-        let tint: Color? = state == .needsYou ? state.agentState.tone.text : state == .failed ? Theme.danger : nil
-        let since: Date? = if state != .needsYou, state != .failed, case .step(_, let at)? = now { at } else { nil }
-        let isStep: Bool = if state != .needsYou, state != .failed, case .step? = now { true } else { false }
-        let subagents = (state == .working || state == .needsYou) ? runningSubagents(lead) : []
-        let subagentsLine = subagentsSummaryLine(subagents)
-        // What the agent says starts at the well's edge; only a question for the user keeps its mark.
-        VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                if state == .needsYou {
-                    ThemedIcon(Theme.Icon.askFirst)
-                        .font(Theme.Font.label)
-                        .foregroundStyle(state.agentState.tone.text)
-                }
-                Text(text)
-                    .font(Theme.Font.secondary)
-                    .foregroundStyle(tint ?? (isStep ? .secondary : .primary))
-                    .lineLimit(isStep ? 1 : 2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let since {
-                    // How long the step has gone on: a long test run or CI wait reads as one, not as a stuck card.
-                    VisibleTimelineView(interval: TaskClock.tick) { now in
-                        if let t = TaskClock.since(since, now: now) {
-                            Text(t).font(Theme.Font.caption).foregroundStyle(.tertiary).lineLimit(1).fixedSize()
-                        }
-                    }
-                }
-            }
-            if let subagentsLine {
-                Text(subagentsLine)
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            // What its agent last told Persona (report_to_supervisor, #5112): while the task is open.
-            if state != .done, state != .failed, let reported = todo.supervision?.progressLine {
-                TaskProgressLine(line: reported)
-            }
-            // A workflow its agent runs in the background (#2935): the task is not done while it does.
-            if state != .failed, let runs = lead?.runningWorkflows, !runs.isEmpty {
-                WorkflowLine(runs: runs)
-            }
-        }
-        .padding(.horizontal, Theme.Space.m)
-        .padding(.vertical, Theme.Space.s)
-        .background(Theme.Fill.well, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
-    }
-}
-
-/// A task of another day, folded: one line; a tap opens its detail (its Agent's chat, as the card does).
-struct TaskLine: View {
-    var todoID: String
-    @State private var removing: TodoItem?
-    private var store: TasksStore { .shared }
-
-    var body: some View {
-        if let todo = store.todos[todoID] {
-            let state = store.state(todo)
-            let ultracode = store.ultracode(todo)
-            Button { store.detailTask = todo.id } label: {
-                HStack(spacing: Theme.Space.s) {
-                    TaskMark(state: state).scaledFrame(width: Theme.Size.markM)
-                    Text(todo.title).font(Theme.Font.secondaryMedium).lineLimit(1)
-                    if ultracode { UltracodeMark(font: Theme.Font.label).transition(.opacity) }
-                    Spacer(minLength: Theme.Space.s)
-                    Text(state.label).font(Theme.Font.caption).foregroundStyle(state.labelColor).lineLimit(1).fixedSize()
-                    ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.labelStrong).foregroundStyle(.tertiary)
-                }
-                .animation(UltracodeMark.motion, value: ultracode)
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.vertical, Theme.Space.s)
-                .background(Theme.Fill.well, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .menuPreviewShape(.rect(cornerRadius: Theme.Radius.control, style: .continuous))
-            .contextMenu { TaskRemoveMenuItem(todo: todo, state: state, pending: $removing) }
-            .confirmTaskRemoval($removing)
-        }
-    }
-}
-
 // MARK: - The hub's lines
 
 /// One line the hub added to the conversation (docs/protocol/protocol.md「Tasks and the chat feed」).
@@ -567,7 +410,7 @@ struct FeedLine: View {
         case .plan, .task:
             if let tasks = DispatchedTasks.entries(for: item, plans: store.plans,
                                                   titleOf: { store.todos[$0]?.title }, fallback: String(localized: "Tasks")) {
-                DispatchedTaskLinks(tasks: tasks)
+                DispatchHandoffCards(tasks: tasks)
             } else if let id = item.ref, let plan = store.plans[id] ?? item.plan {
                 PlanCard(plan: plan)
             }
@@ -919,8 +762,8 @@ struct ReceiptCard: View {
 
     nonisolated static func outcome(_ item: FeedItem, todo: TodoItem?) -> Outcome {
         if item.failed { return .failed }
-        if item.turnInterrupted { return .interrupted(reason: APIErrorInfo.parse(item.receiptError ?? item.summary)?.reason) }
-        if let apiError = APIErrorInfo.parse(item.summary) { return .interrupted(reason: apiError.reason) }
+        if item.turnInterrupted { return .interrupted(reason: TurnErrorReason.of(item.receiptError ?? item.summary)) }
+        if let reason = TurnErrorReason.of(item.summary) { return .interrupted(reason: reason) }
         if let todo, todo.doneAt == nil { return .stopped }
         return .done
     }
@@ -943,45 +786,144 @@ struct ReceiptCard: View {
         }
     }
 
+    /// DEBUG `-openReceiptAll YES`: receipts open on their whole summary (the name is in release.sh's list).
+    private static var opensOnAll: Bool {
+        #if DEBUG
+        UserDefaults.standard.bool(forKey: "openReceiptAll")
+        #else
+        false
+        #endif
+    }
+
+    @Environment(MessageMenu.self) private var menu: MessageMenu?
+    /// "Show All": the whole summary, not its first four lines.
+    @State private var all = ReceiptCard.opensOnAll
+    /// The summary is longer than its four lines, measured (so Show All and Hide appear only when there is more).
+    @State private var cuts: Set<Int> = []
+
+    /// What the actions under a receipt are (docs/design/task-cards.md §3.3), apart from the PR and View: a failed start
+    /// is retried while its to-do still is one, a turn cut off is continued unless the usage limit continues by itself.
+    nonisolated enum Action: Equatable { case retry, continueWork }
+
+    nonisolated static func action(_ outcome: Outcome, todoFailed: Bool, stillInterrupted: Bool, limitContinues: Bool) -> Action? {
+        switch outcome {
+        case .failed: todoFailed ? .retry : nil
+        case .interrupted: stillInterrupted && !limitContinues ? .continueWork : nil
+        case .done, .stopped: nil
+        }
+    }
+
+    /// What Copy and Quote take: the heading, then the summary when there is one.
+    nonisolated static func shareText(heading: String, detail: String?) -> String {
+        guard let detail, !detail.isEmpty else { return heading }
+        return heading + "\n\n" + detail
+    }
+
     @ViewBuilder private var card: some View {
         let todo = item.ref.flatMap { store.todos[$0] }
         let outcome = Self.outcome(item, todo: todo)
         let title = Self.title(item, todo: todo)
+        let lead = todo.flatMap { store.leadSession($0) }
+        // a turn is still cut off while its Agent has stopped on the error (an Agent not known yet is not "continued")
+        let stopped = lead.map { !($0.turnError ?? "").isEmpty && ($0.state == .unread || $0.state == .idle) } ?? true
+        let interrupted: Bool = if case .interrupted = outcome { true } else { false }
+        let limited = interrupted && (lead?.isUsageLimited() ?? false)
+        let failedNow = todo.map { store.state($0) == .failed } ?? false
+        let action = Self.action(outcome, todoFailed: failedNow, stillInterrupted: stopped, limitContinues: limited && (lead?.usageLimitContinues ?? false))
         let tint: Color = switch outcome {
-        case .failed, .interrupted: Theme.danger
+        case .failed, .interrupted: limited ? Theme.caution : Theme.danger
         case .stopped: .secondary
         case .done: Theme.positive
         }
-        HStack(alignment: .top, spacing: Theme.Space.m) {
-            ThemedIcon(Self.icon(outcome))
-                .font(Theme.Font.heading)
-                .foregroundStyle(tint)
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text(Self.heading(outcome, title: title))
-                    .font(Theme.Font.bodyStrong)
-                if let s = Self.detail(outcome, summary: item.summary) {
-                    // The Agent's last words as Markdown, not raw `**` (#2363).
-                    Text(ExchangeText.linked(s)).font(Theme.Font.secondary).foregroundStyle(.secondary).lineLimit(4)
-                }
-                HStack(spacing: Theme.Space.s) {
-                    if let pr = item.pr, let url = URL(string: pr), let label = item.prLabel {
-                        Button { openURL(url) } label: { Label(label, systemImage: Theme.Icon.pullRequest).lineLimit(1) }
-                            .themedButton()
+        let heading = Self.heading(outcome, title: title)
+        let detail = limited ? lead?.usageLimitLabel() : Self.detail(outcome, summary: item.summary)
+        if outcome == .failed, let todo, !failedNow, lead != nil, todo.doneAt == nil {
+            // started again (it has an Agent, is not failed and not closed): a quiet line, not a red card with a Retry that has
+            // nothing to retry; one closed another way has no restart to claim
+            Label(String(localized: "“\(title)” started on retry"), systemImage: Theme.Icon.successFilled)
+                .font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("receipt.restarted")
+        } else if case .interrupted = outcome, todo != nil, !stopped {
+            Label(String(localized: "“\(title)” continued after the interruption"), systemImage: Theme.Icon.successFilled)
+                .font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("receipt.continued")
+        } else {
+            HStack(alignment: .top, spacing: Theme.Space.m) {
+                ThemedIcon(limited ? Theme.Icon.backgroundWaiting : Self.icon(outcome))
+                    .font(Theme.Font.heading)
+                    .foregroundStyle(tint)
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text(heading)
+                        .font(Theme.Font.bodyStrong)
+                    if let s = detail {
+                        // The Agent's last words as Markdown, not raw `**` (#2363).
+                        let text = ExchangeText.linked(s)
+                        Text(text).font(Theme.Font.secondary).foregroundStyle(.secondary).lineLimit(all ? nil : 4)
+                            .background { ClampMeasure(text: text, lines: 4, font: Theme.Font.secondary, cuts: $cuts) }
+                            .animation(Theme.Motion.state, value: all)
+                        if !cuts.isEmpty || all {
+                            Button { all.toggle() } label: { Text(all ? String(localized: "Show Less") : String(localized: "Show All")).lineLimit(1) }
+                                .font(Theme.Font.captionStrong)
+                                .buttonStyle(.plain)
+                                .foregroundStyle(Theme.accent)
+                                .tapTargetHeight()
+                                .accessibilityIdentifier("receipt.showall")
+                        }
                     }
-                    if let id = item.ref, todo != nil, outcome != .failed {
-                        Button { store.detailTask = id } label: { Text("View [Task Views d87059]").lineLimit(1) }
-                            .themedButton()
-                    }
+                    actions(todo: todo, outcome: outcome, action: action, heading: heading, detail: detail)
                 }
-                .font(Theme.Font.captionStrong)
-                .padding(.top, Theme.Space.xs)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Theme.Space.l)
+            .background(outcome == .stopped || limited ? Theme.Fill.well : tint.opacity(0.12),
+                        in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
+            .accessibilityIdentifier("receipt.\(Self.outcomeKey(outcome))")
         }
-        .padding(Theme.Space.l)
-        .background(outcome == .stopped ? Theme.Fill.well : tint.opacity(0.12),
-                    in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
-        .accessibilityIdentifier("receipt.\(Self.outcomeKey(outcome))")
+    }
+
+    /// PR and View, Retry or Continue, and a menu with Copy and Quote: one line each, the least needed in the row.
+    @ViewBuilder private func actions(todo: TodoItem?, outcome: Outcome, action: Action?, heading: String, detail: String?) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            if let pr = item.pr, let url = URL(string: pr), let label = item.prLabel {
+                Button { openURL(url) } label: { Label(label, systemImage: Theme.Icon.pullRequest).lineLimit(1) }
+                    .themedButton()
+            }
+            if let todo, let action {
+                let busy = store.busyRetries.contains(todo.id)
+                Button { Task { await store.retry(todo) } } label: {
+                    Text(action == .retry ? String(localized: "Retry") : String(localized: "Continue")).lineLimit(1)
+                        .opacity(busy ? 0 : 1).overlay { if busy { ProgressView().controlSize(.small) } }
+                }
+                .themedButton(prominent: true)
+                .disabled(busy)
+                .accessibilityIdentifier(action == .retry ? "receipt.retry" : "receipt.continue")
+            }
+            if let id = item.ref, todo != nil, outcome != .failed {
+                Button { store.detailTask = id } label: { Text("View [Task Views d87059]").lineLimit(1) }
+                    .themedButton()
+            }
+            let shared = Self.shareText(heading: heading, detail: detail)
+            Menu {
+                Button { CodeCopy.copy(shared, said: String(localized: "Copied [Mac Hover 07d6bb]")) } label: {
+                    Label(String(localized: "Copy"), systemImage: Theme.Icon.copy)
+                }
+                if let menu {
+                    Button { menu.quote?(shared, item.id, false, nil) } label: {
+                        Label(String(localized: "Quote"), systemImage: Theme.Icon.quote)
+                    }
+                }
+            } label: {
+                ThemedIcon(Theme.Icon.moreMenu).font(Theme.Font.bodyStrong).foregroundStyle(.secondary)
+                    .tapTargetFrame()
+                    .contentShape(.rect)
+            }
+            .accessibilityLabel(String(localized: "More"))
+            .accessibilityIdentifier("receipt.more")
+        }
+        .font(Theme.Font.captionStrong)
+        .padding(.top, Theme.Space.xs)
     }
 
     nonisolated static func icon(_ outcome: Outcome) -> String {

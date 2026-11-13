@@ -254,6 +254,37 @@ class AssistantManagementTest {
         }
     }
 
+    // Clear context (#5100, the hub's #5095): the main conversation on screen as `expect`, the one put away back; a 409 with
+    // a code is the hub's refusal in its words, anything else the failure it is.
+    @Test fun clearMainSendsTheExpectedConversationAndTurnsRefusalsIntoTheHubsWords() = runBlocking {
+        MockWebServer().use { server ->
+            val api = HttpAssistantManagement(server.url("/").toString(), "test-token", OkHttpClient())
+            server.enqueue(MockResponse().setBody("""{"ok":true,"archived":"main-1"}"""))
+            assertEquals("main-1", api.clearMainConversation("main-1"))
+            val cleared = server.takeRequest()
+            assertEquals("POST", cleared.method)
+            assertEquals("/api/v1/assistant/main/clear", cleared.path)
+            assertEquals("""{"expect":"main-1"}""", cleared.body.readUtf8())
+
+            // No main conversation known: no `expect`, and nothing put away.
+            server.enqueue(MockResponse().setBody("""{"ok":true,"archived":""}"""))
+            assertEquals("", api.clearMainConversation(null))
+            assertEquals("{}", server.takeRequest().body.readUtf8())
+
+            server.enqueue(MockResponse().setResponseCode(409).setBody("""{"code":"main_changed","error":"主对话已经在别的设备上换过了"}"""))
+            try { api.clearMainConversation("main-1"); fail("A refusal must throw") }
+            catch (refused: AssistantRefused) {
+                assertEquals("main_changed", refused.code)
+                assertEquals("主对话已经在别的设备上换过了", refused.message)
+            }
+            server.takeRequest()
+
+            server.enqueue(MockResponse().setResponseCode(500).setBody("""{"error":"boom"}"""))
+            try { api.clearMainConversation("main-1"); fail("A failure must throw") }
+            catch (failure: HubFailure) { assertEquals(500, failure.status) }
+        }
+    }
+
     @Test fun skillsReadTheAssistantsMachineAndTurnItsReasonIntoTheHubsWords() = runBlocking {
         MockWebServer().use { server ->
             val api = HttpAssistantManagement(server.url("/").toString(), "test-token", OkHttpClient())

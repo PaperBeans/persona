@@ -90,9 +90,9 @@ nonisolated struct AddAssistant: Equatable, Sendable {
 enum AddComputerText {
     static let maxName = 40
     /// How to build and install Persona Link on a Mac until there is a download (docs/assistant/onboarding.md 6.3, decision 1).
-    static let macInstallDoc = URL(string: "https://github.com/nwverse/persona/blob/master/docs/operations/persona-link-install.md")!
+    static let macInstallDoc = URL(string: "https://github.com/nwverse/persona/blob/main/docs/operations/persona-link-install.md")!
     /// How to install it on a Linux without the hub's install script (docs/operations/link.md「Linux（headless）」).
-    static let linuxInstallDoc = URL(string: "https://github.com/nwverse/persona/blob/master/docs/operations/link.md#linuxheadless")!
+    static let linuxInstallDoc = URL(string: "https://github.com/nwverse/persona/blob/main/docs/operations/link.md#linux-headless")!
 
     /// The name as sent: trimmed; nil when empty or too long.
     /// `AppModel.pendingToConfirm`: `preferred` while it waits, else the first one waiting that is online, else the first.

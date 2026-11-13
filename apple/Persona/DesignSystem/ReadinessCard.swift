@@ -67,6 +67,10 @@ struct ReadinessCard: View {
                         ThemedIcon(Theme.Icon.close).font(Theme.Font.label).foregroundStyle(.secondary)
                     }
                     .buttonStyle(.borderless)
+                    .padding(.horizontal, Theme.Space.l)
+                    .contentShape(.rect)
+                    .padding(.horizontal, -Theme.Space.l)
+                    .tapTargetOutset()
                     .accessibilityLabel(Text("Later [Readiness Card 9d2055]"))
                 }
             }

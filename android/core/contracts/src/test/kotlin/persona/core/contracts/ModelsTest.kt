@@ -74,6 +74,21 @@ class ModelsTest {
         assertNull(old.sourceKind); assertNull(old.capabilities); assertEquals(false, old.attached)
     }
 
+    // #6294: what a runtime's session can do without a terminal, where its node says it; null where an older node doesn't.
+    @Test fun optionalCapabilitiesDecodeWhereTheNodeSaysThem() {
+        fun caps(json: String) = JsonCodec.decodeFromString<Session>("""{"session_id":"s","source_kind":"runtime","capabilities":$json}""").capabilities!!
+        val said = caps("""{"read":true,"close":true,"rename":false,"model":true,"rewind":true,"rewind_code":false}""")
+        assertEquals(SessionCapabilities(read = true, close = true, rename = false, model = true, rewind = true, rewindCode = false), said)
+        val older = caps("""{"read":true,"send":true}""")
+        assertEquals(listOf(null, null, null, null, null), listOf(older.close, older.rename, older.model, older.rewind, older.rewindCode))
+        // A malformed one drops only itself (D5): null, the app's own rule, never a refusal.
+        assertEquals(SessionCapabilities(read = true, rename = true), caps("""{"read":true,"close":"yes","rename":true,"rewind_code":1}"""))
+        // They go back out under their wire names.
+        val encoded = JsonCodec.encodeToString(said)
+        assertTrue(encoded, encoded.contains(""""rewind_code":false"""))
+        assertEquals(said, JsonCodec.decodeFromString<SessionCapabilities>(encoded))
+    }
+
     @Test fun agentLabelNamesEveryAgent() {
         fun label(json: String) = JsonCodec.decodeFromString<Session>("""{"session_id":"s",$json}""").agentLabel
         assertEquals("Claude", label(""""status":"idle""""))

@@ -18,8 +18,9 @@ import (
 )
 
 // fakeSDKBridge stands in for integrations/agent-sdk's bridge.mjs (run by /bin/sh instead of Node.js): it keeps its
-// persona_start line and every later stdin line under $SDK_FAKE_DIR, says ready, answers control requests, and plays a
-// fixed turn for each user message (no result while $SDK_FAKE_DIR/hold exists).
+// persona_start line and every later stdin line under $SDK_FAKE_DIR, says ready, answers control requests (the
+// background-task list with $SDK_FAKE_DIR/tasks.json, as a bridge too old for it without), and plays a fixed turn for
+// each user message (no result while $SDK_FAKE_DIR/hold exists).
 const fakeSDKBridge = `IFS= read -r start
 printf '%s\n' "$start" > "$SDK_FAKE_DIR/start.json"
 printf '%s\n' "$0 $*" > "$SDK_FAKE_DIR/argv"
@@ -46,6 +47,12 @@ while IFS= read -r line; do
             printf '{"type":"control_response","response":{"subtype":"error","request_id":"%s","error":%s}}\n' "$id" "$(cat "$error_file")"
           else
             echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$id\"}}"
+          fi ;;
+        *'"subtype":"persona_background_tasks"'*)
+          if [ -f "$SDK_FAKE_DIR/tasks.json" ]; then
+            printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{"tasks":%s}}}\n' "$id" "$(cat "$SDK_FAKE_DIR/tasks.json")"
+          else
+            echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"$id\",\"error\":\"unsupported\"}}"
           fi ;;
         *) echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"$id\",\"error\":\"unsupported\"}}" ;;
       esac ;;
@@ -609,10 +616,8 @@ func TestSDKPrepareAndCommandWithNVMClaude(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", t.TempDir()) // restricted service PATH missing nvm
-	// Not the machine's own Homebrew or /usr/local claude, which agentExecutable would find before nvm's (#5449).
-	systemDirs := agentSystemDirs
-	agentSystemDirs = []string{t.TempDir()}
-	t.Cleanup(func() { agentSystemDirs = systemDirs })
+	// Not the machine's own claude, which agentExecutable would find before nvm's (#5449, #6257).
+	hideMachineAgents(t)
 
 	nvmBin := filepath.Join(home, ".nvm", "versions", "node", "v22.5.0", "bin")
 	if err := os.MkdirAll(nvmBin, 0o755); err != nil {

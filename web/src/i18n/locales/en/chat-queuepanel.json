@@ -5,6 +5,8 @@
   "row_label": "Queued message {n}: {text}",
   "relayed_from": "Another chat",
   "relayed_note": "Arrives when this chat is free",
+  "relayed_summary_one": "{count} message from another conversation is waiting",
+  "relayed_summary_other": "{count} messages from other conversations are waiting",
   "drag": "Drag queued message {n} to reorder",
   "send_now_tip": "Send all queued messages now, without waiting for {agent}'s next step",
   "edit": "Edit",

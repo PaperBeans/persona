@@ -47,6 +47,7 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 		return err
 	}
 	defer unlock()
+	selectionText := text
 	if opts.SwitchNow {
 		// The assistant's agent_switch (#5973): the switch it picked goes with this message now, or nothing does
 		// (launcher_switch.go switchNowRefusal). Anything but a running Claude Code agent with that switch waiting is
@@ -61,6 +62,10 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 			return n.stoppedRefusal(id)
 		}
 		return n.sendCodex(ctx, id, text, images)
+	}
+	selected, err := n.sessionSelectedSkills(ctx, id, text)
+	if err != nil {
+		return err
 	}
 	if r := n.agentsListRefusal(id); r != nil { // claudebg.go
 		return r
@@ -107,6 +112,9 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 		if kind == "codex" && n.codexJoined(id) {
 			// On its app-server (codex_daemon.go): a turn or a steer, nothing typed — a draft in its box stays as it is.
 			return n.sendCodex(ctx, id, text, images)
+		}
+		if kind == "claude" && ps != nil && ps.Agent == "" {
+			n.leaveLimitQuestion(ctx, id, pane) // the switch moves it off its usage limit: Claude Code's question about it goes
 		}
 		if err := n.checkPaneFor(ctx, pane, kind, opts); err != nil { // sendsafe.go
 			if opts.SwitchNow {
@@ -196,6 +204,13 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 				text = handoff.message(text)
 			}
 		}
+	}
+	if len(selected) > 0 {
+		// Recheck after pane readiness work; do not carry a selection across a changed environment.
+		if _, err := n.sessionSelectedSkills(ctx, id, selectionText); err != nil {
+			return err
+		}
+		text = selectedSkillInstructions(selected) + "\n\n" + text
 	}
 	paths, err := n.saveImages(images)
 	if err != nil {

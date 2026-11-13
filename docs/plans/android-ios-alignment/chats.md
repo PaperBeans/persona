@@ -104,7 +104,7 @@ Every change above is done on Glass, Brief and Board keep working (decision 8), 
 - With #5185, which folds a herdr tab's workers under their lead: the same folding in the Needs you lines over New chat's composer (C17).
 - With #5055, which stays open for them and for iOS: switching a running Agent to the other engine, with its dialog (the web's part is #5054); Codex's Fast tier and service tiers; quota bars and reference prices (the web's part is #5056); forgetting a model id typed by hand; and the model change divider's own arrows icon, which Android's icon set lacks, so it uses the model mark (C3, C16).
 - With #5045, which stays open for iOS: a running subagent's card staying out of the folded work summary (this needs the exception to super rule 2 that #5047 proposes), old `<parent>@<agent>` links opening the parent chat at the card, and the running bar's words (Android has no such bar). The header's ⋯ still lists running subagents and opens their read-only page (C2).
-- With #5100: Clear context in the main conversation's menu, and `/clear` there (C18).
+- With #5100: Clear context in the main conversation's menu, and `/clear` there (C18). Done on Android (11-13), see `docs/android/android.md`.
 - With phase 3 F9 (#4211): the sidebar's Meeting Recording row, and Health's reports and memory behind its row (C18).
 - With phase 4 R2 (#4212): iOS reading the shared tool-name cases in `spec/fixtures/tool-names` (C1).
 

@@ -33,6 +33,15 @@ func (n *Node) claudeWaits() (start, ready time.Duration) {
 	return start, ready
 }
 
+// readinessPoll keeps normal terminal starts at their existing cadence. Scripted
+// hosts produce their frames and rollouts synchronously and can be observed sooner.
+func (n *Node) readinessPoll() time.Duration {
+	if n.readyPoll > 0 {
+		return n.readyPoll
+	}
+	return 500 * time.Millisecond
+}
+
 // startWait bounds a whole start: the shell, claude, and the first message after.
 func (n *Node) startWait() time.Duration {
 	start, ready := n.claudeWaits()
@@ -47,6 +56,7 @@ func (n *Node) startWait() time.Duration {
 // shell saying it cannot run it ends the wait at once with a coded refusal (shellmiss.go, #1642).
 func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*host.Agent, error) {
 	startWait, readyWait := n.claudeWaits()
+	poll := n.readinessPoll()
 	deadline := time.Now().Add(startWait)
 	running := false
 	h, _, _ := n.paneHost(pane)
@@ -67,7 +77,7 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(poll):
 		}
 		screen, err := n.readPane(ctx, pane, "visible", 60)
 		if gone = goneLooks(gone, err); gone >= paneGoneLooks && !running {

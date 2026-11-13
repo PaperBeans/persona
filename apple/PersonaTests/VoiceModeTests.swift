@@ -73,6 +73,71 @@ struct VoiceModeTests {
         #expect(resend?["id"] as? String == "voice-2" && resend?["clear_draft"] as? String == "fix it")
     }
 
+    /// The extension's `ready` with `features` (`FakeVoiceSocket.ready` says the ones from before #5904).
+    private func ready(_ socket: FakeVoiceSocket, _ key: SessionKey, features: [String]) {
+        let list = features.map { "\"" + $0 + "\"" }.joined(separator: ",")
+        socket.deliver(#"{"type":"ready","protocol":2,"features":[\#(list)],"input_rate":16000,"output_rate":24000,"target":{"machine_id":"\#(key.machineID)","session_id":"\#(key.sessionID)","kind":"agent","agent_label":"Claude Code"}}"#)
+    }
+
+    private static let unprompted = #"{"type":"run","id":"voice-3","task":"跑一下测试","state":"refused","code":"unprompted","resendable":true,"msg_ids":["voice-3"],"base_seq":1}"#
+
+    /// #5904: an instruction the user-speech gate held back (refused, unprompted) gets Send Anyway from an extension that
+    /// keeps it (`speech_gate` in ready's features), and the tap sends a resend under its id, with nothing to clear.
+    @Test func sendAnywayResendsWhatTheGateHeldBack() async {
+        let rig = VoiceRig()
+        let call = rig.call()
+        await call.begin()
+        let socket = rig.socket!
+        ready(socket, rig.key, features: ["target", "runs", "asks", "resume", "suspend", "speak", "speech_gate"])
+        socket.deliver(Self.unprompted)
+        let line = VoiceBarLine.make(phase: call.phase, link: call.link, runs: call.runs, session: nil, cards: [], muted: false,
+                                     label: "Claude", resendable: Set(call.runs.map(\.id).filter { call.canResend($0) }))
+        #expect(line.actions.map(\.name) == ["anyway", "dismiss"])
+        #expect(call.resend("voice-3"))
+        let resend = socket.frames.last { $0["type"] as? String == "resend" }
+        #expect(resend?["id"] as? String == "voice-3" && resend?["clear_draft"] == nil)
+    }
+
+    /// #5904 review: a refusal with no task (the model said nothing of what to do, and nothing the user said was there
+    /// to take) is kept by no extension: no Send Anyway, and no resend, even from one that lists `speech_gate`.
+    @Test func noSendAnywayWithoutATask() async {
+        let rig = VoiceRig()
+        let call = rig.call()
+        await call.begin()
+        let socket = rig.socket!
+        ready(socket, rig.key, features: ["target", "runs", "asks", "resume", "suspend", "speak", "speech_gate"])
+        socket.deliver(#"{"type":"run","id":"voice-4","task":"","state":"refused","code":"unprompted","msg_ids":["voice-4"],"base_seq":1}"#)
+        #expect(call.runs.map(\.id) == ["voice-4"])
+        #expect(!call.canResend("voice-4"))
+        #expect(!call.resend("voice-4"))
+        #expect(socket.frames.allSatisfy { $0["type"] as? String != "resend" })
+    }
+
+    /// #5904 verification: a run the extension did not keep (a task longer than the bar quotes, so the user could not
+    /// see all of what they confirm) comes without `resendable`: no Send Anyway, even from one that lists `speech_gate`.
+    @Test func noSendAnywayForARunTheExtensionDidNotKeep() async {
+        let rig = VoiceRig()
+        let call = rig.call()
+        await call.begin()
+        let socket = rig.socket!
+        ready(socket, rig.key, features: ["target", "runs", "asks", "resume", "suspend", "speak", "speech_gate"])
+        socket.deliver(#"{"type":"run","id":"voice-5","task":"把文档的拼写改一下…","state":"refused","code":"unprompted","msg_ids":["voice-5"],"base_seq":1}"#)
+        #expect(call.runs.map(\.id) == ["voice-5"])
+        #expect(!call.canResend("voice-5"))
+        #expect(!call.resend("voice-5"))
+        #expect(socket.frames.allSatisfy { $0["type"] as? String != "resend" })
+    }
+
+    /// An extension from before #5904 keeps no unprompted run: its resend would do nothing, so there is no Send Anyway.
+    @Test func anOlderExtensionOffersNoSendAnyway() async {
+        let rig = VoiceRig()
+        let (call, socket) = await live(rig)
+        socket.deliver(Self.unprompted)
+        #expect(!call.canResend("voice-3"))
+        #expect(!call.resend("voice-3"))
+        #expect(socket.frames.allSatisfy { $0["type"] as? String != "resend" })
+    }
+
     @Test func cuesPlayAtTheVoicesRateWhileTheCallIsOn() async throws {
         let rig = VoiceRig()
         let call = rig.call()

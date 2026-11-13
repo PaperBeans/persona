@@ -16,8 +16,18 @@ val Session.canRead: Boolean get() = !hasSource || capabilities?.read == true
 val Session.canSend: Boolean get() = !hasSource || capabilities?.send == true
 val Session.canInterrupt: Boolean get() = !hasSource || capabilities?.interrupt == true
 val Session.canApprove: Boolean get() = !hasSource || capabilities?.approve == true
-/** A pane in a terminal engine: the terminal and its keys, closing the pane, renaming the tab. */
+/** A pane in a terminal engine: the terminal and its keys; closing and renaming where the node says nothing else ([canClose], [canRename]). */
 val Session.canTerminal: Boolean get() = !hasSource || capabilities?.terminal == true
+/**
+ * Close the agent: the node's capabilities.close where it says (a runtime's session closes without a terminal, #6294),
+ * else a terminal's, as before.
+ */
+val Session.canClose: Boolean get() = capabilities?.close ?: canTerminal
+/**
+ * Rename it: the node's capabilities.rename where it says (a runtime's session renames without a terminal, #6294), else a
+ * terminal's: its tab and Claude's /rename.
+ */
+val Session.canRename: Boolean get() = capabilities?.rename ?: canTerminal
 /** Join a Codex app-server thread live: offered until it is attached. */
 val Session.canAttach: Boolean get() = hasSource && capabilities?.attach == true && !attached
 

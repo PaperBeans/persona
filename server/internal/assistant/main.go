@@ -383,6 +383,13 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 			return bh.Answer(ctx, method, params)
 		},
 		AssistantEvent: func(event string, params json.RawMessage) { bh.TellLocal(event, params) },
+		// A meeting's audio socket (assistantwire.SocketRoutes): svc is made below, before the extensions run.
+		AssistantSocket: func(w http.ResponseWriter, r *http.Request) { svc.ServeSocket(w, r) },
+		TranscriptionChanged: func() {
+			if svc != nil {
+				svc.transcriptionReadinessChanged()
+			}
+		},
 		AssistantTools: func() []proto.Tool { return svc.toolsNow() },
 		// The model providers' keys that are references, for their provider extensions' details (launcher_secrets.go).
 		LauncherReferences: func(ctx context.Context) []extmgr.LauncherReference { return svc.launcherReferences(ctx) },

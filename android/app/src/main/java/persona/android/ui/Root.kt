@@ -289,12 +289,7 @@ private fun PersonaShell(session: ShellSession, openNavigation: MutableState<((R
     val currentKind by rememberUpdatedState<(SessionKey) -> ConversationKind?>(::kind)
     var assistantRequest by remember { mutableStateOf<SessionKey?>(null) }
     var assistantPending by remember { mutableStateOf<SessionKey?>(null) }
-    fun assistantTarget(key: NavKey): SessionKey? {
-        if (!embeddedAssistant) return null
-        val chat = when (key) { is ChatRoute -> key; is InteractionRoute -> key.chat; else -> null } ?: return null
-        val conversation = SessionKey(chat.machineId, chat.sessionId)
-        return conversation.takeIf { (chat.kind ?: currentKind(conversation)) == ConversationKind.Assistant }
-    }
+    fun assistantTarget(key: NavKey): SessionKey? = assistantHomeTarget(key, embeddedAssistant, currentKind)
     /** Show an assistant conversation in the Persona home rather than as a second chat page above it. */
     fun openAssistant(key: NavKey, select: Boolean): Boolean {
         val conversation = assistantTarget(key) ?: return false
@@ -570,6 +565,11 @@ private fun PersonaShell(session: ShellSession, openNavigation: MutableState<((R
                         }
                     },
                     onRetired = { key -> sidebar.retired = sidebar.retired + key },
+                    onOpenTodo = { id -> sidebarDestination(TodoDetailRoute(id)) },
+                    onOpenAgent = { key ->
+                        sidebar.opened.value = false
+                        selected = openResolved(ResolvedRoute(AppTab.Agents, ChatRoute(key.machineId, key.sessionId, ConversationKind.Agent)))
+                    },
                     // The current assistant at the sidebar's head; its roster opens under it.
                     switcher = { head, trailing, fallback ->
                         persona.feature.settings.AssistantSwitcher(services.managers.takeUnless { services.demo }, waiting,
@@ -626,8 +626,8 @@ private fun PersonaShell(session: ShellSession, openNavigation: MutableState<((R
                                         if (assistantRoot && currentRegular.value) sidebarColumnShown.value = !sidebarColumnShown.value
                                         else sidebar.opened.value = true
                                     })
-                                    // Something waits at another assistant: the switcher's badges say where.
-                                    if (currentOthersWaiting.value) JStatusDot(Status.NeedsYou, Modifier.align(Alignment.TopEnd).padding(Tokens.Space.xs))
+                                    // Something waits at another assistant: the switcher's badges say where. Still, as iOS's `AssistantWaitingDot`.
+                                    if (currentOthersWaiting.value) JStatusDot(Status.NeedsYou, Modifier.align(Alignment.TopEnd).padding(Tokens.Space.xs), breathes = false)
                                 }
                             }) else null) {
                         if (primary) Box(Modifier.fillMaxSize()) {

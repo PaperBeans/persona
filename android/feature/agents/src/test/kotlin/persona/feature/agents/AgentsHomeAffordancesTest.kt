@@ -132,6 +132,26 @@ class AgentsHomeAffordancesTest {
         rule.onAllNodesWithText("Interrupt").assertCountEquals(0)
     }
 
+    /** A runtime's session (#6294): no terminal, so Rename and Close agent only where its node says it can. */
+    private fun runtimeRow(capabilities: SessionCapabilities) = Session("box", "paseo", title = "Runtime task", status = "working",
+        state = "working", sourceKind = "runtime", agent = "claude", capabilities = capabilities)
+
+    @Test fun aRuntimeRowRenamesAndClosesWhereItsNodeSays() {
+        showScreen(rows = listOf(runtimeRow(SessionCapabilities(read = true, send = true, close = true, rename = true))))
+        rule.onNodeWithText("Runtime task").performTouchInput { longClick() }
+        rule.onNodeWithText("Rename").assertIsDisplayed()
+        rule.onNodeWithText("Close agent").assertIsDisplayed()
+        rule.onNodeWithText("Copy resume command").assertDoesNotExist()
+    }
+
+    @Test fun aRuntimeRowFromAnOlderNodeOffersNeither() {
+        showScreen(rows = listOf(runtimeRow(SessionCapabilities(read = true, send = true))))
+        rule.onNodeWithText("Runtime task").performTouchInput { longClick() }
+        rule.onNodeWithText("Mute").assertIsDisplayed()
+        rule.onNodeWithText("Rename").assertDoesNotExist()
+        rule.onNodeWithText("Close agent").assertDoesNotExist()
+    }
+
     @Test fun groupingLight() = shootGrouping(dark = false)
     @Test fun groupingDark() = shootGrouping(dark = true)
 

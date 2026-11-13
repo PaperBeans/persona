@@ -43,6 +43,7 @@ import {
   AUTH_AUTO_FEATURE,
   asksAuth,
   authLabel,
+  AUTO_CHECK,
   autoCheckable,
   chosenAuth,
   EFFORT_LEVELS,
@@ -76,6 +77,7 @@ import { effortLabel } from "../../lib/routines";
 import { composing } from "../../lib/send-history";
 import { hubHas, useStore } from "../../lib/store";
 import { Button, cx, Dialog, Loading, Spinner, toast } from "../../ui/atoms";
+import { SearchField } from "../../ui/SearchField";
 import { Icon, type IconName } from "../../ui/icons";
 import { Segmented } from "../assistant/parts";
 import { InstallClaudeHelp } from "../assistant/Readiness";
@@ -725,6 +727,7 @@ export function ProviderWizard({ existing, onClose, onSaved, draft = null, link 
                     waiting={autoCheck ? "wait" : autoReady ? "leave" : isNew && !checked ? "hint" : null}
                     onRetryFetch={() => void runDiscover(!!found?.check)}
                     onRetryTest={testByHand}
+                    onChooseModels={next}
                     auth={authInMore && <AuthLine f={f} onChange={more ? undefined : () => ((revealAuth.current = true), setMore(true))} />}
                   />
                 )}
@@ -974,9 +977,9 @@ function KeyTestStatus({ keyTest, hasKey, onRetest, onOther }: { keyTest: KeyTes
 }
 
 /** The Connect step's check: the connection test, the sign-in method, then what fetching the models found (it runs
- *  first; its line ends pointing at the next step). A failure says the hub's own words and offers Retry, like a preset's
- *  key test (KeyTestStatus). */
-function ConnectStatus({ discovering, found, testing, test, waiting, onRetryFetch, onRetryTest, auth }: {
+ *  first; its line offers "Choose models", the next step, where they are checked). A failure says the hub's own words
+ *  and offers Retry, like a preset's key test (KeyTestStatus). */
+function ConnectStatus({ discovering, found, testing, test, waiting, onRetryFetch, onRetryTest, onChooseModels, auth }: {
   discovering: boolean;
   found: Found | null;
   testing: boolean;
@@ -987,6 +990,8 @@ function ConnectStatus({ discovering, found, testing, test, waiting, onRetryFetc
   /** Fetches again, and tests too when the failed fetch was the step's check. */
   onRetryFetch: () => void;
   onRetryTest: () => void;
+  /** Goes on to "Choose models", like Next: offered on the line of the models found. */
+  onChooseModels?: () => void;
   /** The line naming how the gateway signs in (AuthLine), shown whether or not anything ran. */
   auth?: React.ReactNode;
 }) {
@@ -1019,6 +1024,9 @@ function ConnectStatus({ discovering, found, testing, test, waiting, onRetryFetc
                 {found.error ? t("settings-providerwizard.discover_failed", { error: found.error }) : t("settings-providerwizard.discover_found", { count: found.n })}
               </span>
               {found.error && <LineAction onClick={onRetryFetch}>{t("settings-providerwizard.retry")}</LineAction>}
+              {!found.error && found.n > 0 && onChooseModels && (
+                <LineAction onClick={onChooseModels}>{t("settings-providerwizard.step_models")}</LineAction>
+              )}
             </div>
           )}
     </>
@@ -1134,18 +1142,28 @@ function ModelList({ f, setF, opening }: { f: ProviderForm; setF: React.Dispatch
   };
   const checked = f.models.filter((m) => m.checked).length;
   const chat = f.kind === "api" && f.api === "chat";
+  // A gateway that lists more than the wizard checks by itself gets a filter over ID and name: its rows are hard to scan.
+  const [query, setQuery] = useState("");
+  const long = f.models.length > AUTO_CHECK;
+  const q = long ? query.trim().toLowerCase() : "";
+  const shown = f.models.map((m, i) => ({ m, i })).filter(({ m }) => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+  // "Set as default" on any row: an unchecked one is checked too, as the default must be one of the provider's models.
+  const makeDefault = (i: number) => setF((x) => ({ ...x, model: x.models[i].id, models: x.models.map((m, j) => (j === i ? { ...m, checked: true } : m)) }));
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-[12px] font-medium text-ink-2">{t("settings-providerwizard.models")}</span>
         <span className="text-[11px] text-ink-3 tabular-nums">{t("settings-providerwizard.checked_count", { checked, total: f.models.length })}</span>
       </div>
+      {long && <SearchField value={query} onChange={setQuery} placeholder={t("settings-providerwizard.filter_models")} tone="inset" />}
       {f.models.length === 0 ? (
         <p className="rounded-card bg-inset px-3 py-4 text-center text-[12px] text-ink-3 shadow-hairline">{t("settings-providerwizard.no_models")}</p>
+      ) : shown.length === 0 ? (
+        <p className="rounded-card bg-inset px-3 py-4 text-center text-[12px] text-ink-3 shadow-hairline">{t("settings-providerwizard.filter_none")}</p>
       ) : (
         <ul aria-label={t("settings-providerwizard.models")} className="overflow-hidden rounded-card bg-surface shadow-btn">
-          {f.models.map((m, i) => (
-            <ModelRow key={m.id + i} m={m} showEffort={!chat} isDefault={m.checked && f.model === m.id} onChange={(p) => update(i, p)} onDefault={() => setF((x) => ({ ...x, model: m.id }))} />
+          {shown.map(({ m, i }) => (
+            <ModelRow key={m.id + i} m={m} showEffort={!chat} isDefault={m.checked && f.model === m.id} onChange={(p) => update(i, p)} onDefault={() => makeDefault(i)} />
           ))}
         </ul>
       )}
@@ -1160,6 +1178,8 @@ function ModelList({ f, setF, opening }: { f: ProviderForm; setF: React.Dispatch
   );
 }
 
+const MODEL_DEFAULT = "touch-hit shrink-0 whitespace-nowrap rounded-chip px-2 py-0.5 text-[11px]";
+
 function ModelRow({ m, showEffort, isDefault, onChange, onDefault }: { m: FormModel; showEffort: boolean; isDefault: boolean; onChange: (p: Partial<FormModel>) => void; onDefault: () => void }) {
   const toggleEffort = (e: string) => {
     const efforts = m.efforts.includes(e) ? m.efforts.filter((x) => x !== e) : EFFORT_LEVELS.filter((x) => x === e || m.efforts.includes(x));
@@ -1167,7 +1187,7 @@ function ModelRow({ m, showEffort, isDefault, onChange, onDefault }: { m: FormMo
   };
   const levels = m.efforts.length ? m.efforts : [...EFFORT_LEVELS];
   return (
-    <li data-model={m.id} className="border-b border-line px-3 py-2.5 last:border-b-0">
+    <li data-model={m.id} className="group border-b border-line px-3 py-2.5 last:border-b-0">
       <div className="flex items-center gap-2.5">
         <button type="button" role="checkbox" aria-checked={m.checked} aria-label={t("settings-providerwizard.use_model", { id: m.id })} onClick={() => onChange({ checked: !m.checked })}
           className="touch-hit shrink-0">
@@ -1177,14 +1197,17 @@ function ModelRow({ m, showEffort, isDefault, onChange, onDefault }: { m: FormMo
           <span className="block truncate font-mono text-[12.5px] text-ink">{m.id}</span>
           {m.name && <span className="block truncate text-[11px] text-ink-3">{m.name}</span>}
         </span>
-        {m.checked &&
-          (isDefault ? (
-            <span className="shrink-0 whitespace-nowrap rounded-chip bg-accent-tint px-2 py-0.5 text-[11px] font-medium text-accent">{t("settings-providerwizard.default")}</span>
-          ) : (
-            <button type="button" onClick={onDefault} className="touch-hit shrink-0 whitespace-nowrap rounded-chip px-2 py-0.5 text-[11px] text-ink-3 hover:bg-hover hover:text-ink">
-              {t("settings-providerwizard.set_default")}
-            </button>
-          ))}
+        {isDefault ? (
+          <span className={cx(MODEL_DEFAULT, "bg-accent-tint font-medium text-accent")}>{t("settings-providerwizard.default")}</span>
+        ) : (
+          // on an unchecked row it also checks it; there it shows on hover and focus (always on touch), so a long list
+          // stays quiet, like the row actions of the other lists
+          <button type="button" onClick={onDefault}
+            className={cx(MODEL_DEFAULT, "text-ink-3 hover:bg-hover hover:text-ink",
+              !m.checked && "opacity-0 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100")}>
+            {t("settings-providerwizard.set_default")}
+          </button>
+        )}
       </div>
       {m.checked && (
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 pl-6.5">

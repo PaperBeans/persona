@@ -437,7 +437,7 @@ func TestInboxItemAboutATask(t *testing.T) {
 	h := &inboxHub{Service: s, f: f, in: in}
 	h.inboxReady(ctx)
 	todo := startedTask(t, s, f)
-	model, calls := captureModel(t, `{"handle":true,"task":"回复修复进度","reason":"问进度","task_id":"`+todo.ID+`"}`)
+	model, calls := captureModel(t, `{"handle":true,"task":"回复修复进度","reason":"问进度","task_id":"`+todo.ID+`","evidence":"修登录崩溃"}`)
 	in.setModel(model)
 	it := actionItem("lark:f1:12", time.Now())
 	it.Title, it.Sender, it.Preview, it.Source, it.AccountName = "客户端发版群", "陈晓", "登录那个崩溃今天能修好吗？", "lark", "飞书"

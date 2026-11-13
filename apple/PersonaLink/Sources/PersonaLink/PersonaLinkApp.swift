@@ -15,7 +15,7 @@ struct PersonaLinkApp: App {
 
         // A `persona://link?…` / `persona://link?…` link opened anywhere (Notes, AirDrop, Mail, Safari) opens this window
         // with the link filled in (Info.plist CFBundleURLTypes); pairing still waits for the 「配对」 (Pair) button.
-        Window("配对 / 修改连接", id: "pair") {
+        Window(linkText("Pair or Change Connection"), id: "pair") {
             PairView(model: model)
                 .onOpenURL { url in
                     model.openLink(url)
@@ -27,7 +27,7 @@ struct PersonaLinkApp: App {
         .handlesExternalEvents(matching: ["*"])
 
         // What the hub calls this computer (`persona-link name`, docs/operations/link.md "The computer's name").
-        Window("给这台电脑改名", id: "rename") {
+        Window(linkText("Rename Computer"), id: "rename") {
             RenameView(model: model)
         }
         .windowResizability(.contentSize)

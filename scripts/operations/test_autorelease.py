@@ -211,9 +211,10 @@ class AutoreleaseTests(unittest.TestCase):
         for entry in self.actions():
             self.assertEqual(entry["args"][0], self.initial)
             self.assertEqual(entry["head"], self.initial)
-            self.assertEqual(entry["cwd"], str(self.worktree))
+            # The worker resolves its configured paths (on macOS the temporary /var links to /private/var).
+            self.assertEqual(entry["cwd"], str(self.worktree.resolve()))
             self.assertEqual(entry["selected_environment"], "configured-value")
-            self.assertTrue(Path(entry["checkpoint"]).is_relative_to(self.state_dir))
+            self.assertTrue(Path(entry["checkpoint"]).is_relative_to(self.state_dir.resolve()))
         self.assertTrue(all(record["last_success"] == self.initial
                             for record in self.state()["targets"].values()))
         self.assertFalse(self.notify_log.exists())

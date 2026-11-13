@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -173,7 +174,7 @@ class ChatQueueStripTest {
         assertFalse(claude.copy(paneId = null).reordersQueue)
     }
 
-    @Test fun personasQueueListsTheUsersOwnFirstThenTheRelayedOnesSayingWhenTheyArrive() {
+    @Test fun personasQueueListsTheUsersOwnFirstAndFoldsTheRelayedOneIntoOneLine() {
         val queue = Queue()
         val notices = mutableListOf<String>()
         rule.setContent {
@@ -181,14 +182,19 @@ class ChatQueueStripTest {
                 ChatQueueStrip(persona, queue, ChatComposerState(), { notices += it }, {}, initiallyExpanded = true)
             }
         }
-        // The line names Persona and counts all three, in the hub's order; only the relayed one says when it arrives.
+        // The title counts all three; inside, the owner's two are rows and the relayed one is a collapsed summary (#6394).
         rule.onNodeWithContentDescription("排队中 3 条 · Persona 忙完会依次处理，已展开").assertExists()
         rule.onNodeWithContentDescription("第 1 条：顺便把下周三的会也挪到下午").assertExists()
         rule.onNodeWithContentDescription("第 2 条：再查一下航班").assertExists()
-        rule.onNodeWithContentDescription("第 3 条：来自「早报」：会议纪要整理好了，要不要发给参会的人？。对话空闲后送达").assertExists()
-        assertEquals(1, rule.onAllNodesWithText("对话空闲后送达").fetchSemanticsNodes().size)
-        // The relayed one is only copied.
+        val summary = "还有 1 条别的对话在排队"
+        rule.onNodeWithContentDescription(summary).assertExists()
+        rule.onNodeWithContentDescription("第 3 条：来自「早报」：会议纪要整理好了，要不要发给参会的人？").assertDoesNotExist()
+        // Open the summary: the relayed row appears and is only copied.
+        rule.onNodeWithContentDescription(summary).performClick()
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("第 3 条：来自「早报」：会议纪要整理好了，要不要发给参会的人？").assertExists()
         rule.onNodeWithContentDescription("第 3 条", substring = true).performClick()
+        rule.waitForIdle()
         rule.onNodeWithText("拷贝").assertIsEnabled()
         rule.onNodeWithText("撤回编辑").assertDoesNotExist()
         rule.onNodeWithText("删除").assertDoesNotExist()
@@ -215,7 +221,7 @@ class ChatQueueStripTest {
     }
 
     // Seeing one's own queue is behaviour: Brief and Board show Persona's too, as their always-open strip without Send now.
-    @Test fun briefAndBoardShowPersonasQueueOpenWithTheRelayedOneLast() {
+    @Test fun briefAndBoardFoldTheRelayedOneBehindTheSummaryLine() {
         var style by mutableStateOf(AppStyle.Brief)
         val queue = Queue()
         rule.setContent {
@@ -228,10 +234,21 @@ class ChatQueueStripTest {
             rule.waitForIdle()
             rule.onNodeWithText("排队中 3 条 · Persona 忙完会依次处理").assertExists()
             rule.onNodeWithContentDescription("第 1 条：顺便把下周三的会也挪到下午").assertExists()
-            rule.onNodeWithContentDescription("第 3 条：来自「早报」：会议纪要整理好了，要不要发给参会的人？。对话空闲后送达").assertExists()
-            assertEquals(1, rule.onAllNodesWithText("对话空闲后送达").fetchSemanticsNodes().size)
+            val summary = "还有 1 条别的对话在排队"
+            rule.onNodeWithContentDescription(summary).assertExists()
+            // The backlog stays behind the summary line until it is opened (the two styles share the strip's state,
+            // so a second style may start where the first left off: fold it first, then assert it is collapsed).
+            if (rule.onAllNodes(hasContentDescription("第 3 条：来自「早报」：会议纪要整理好了，要不要发给参会的人？")).fetchSemanticsNodes().isNotEmpty()) {
+                rule.onNodeWithContentDescription(summary).performClick()
+                rule.waitForIdle()
+            }
+            rule.onNodeWithContentDescription("第 3 条：来自「早报」：会议纪要整理好了，要不要发给参会的人？").assertDoesNotExist()
             rule.onNodeWithText("立即发送").assertDoesNotExist()
+            rule.onNodeWithContentDescription(summary).performClick()
+            rule.waitForIdle()
+            rule.onNodeWithContentDescription("第 3 条：来自「早报」：会议纪要整理好了，要不要发给参会的人？").assertExists()
             rule.onNodeWithContentDescription("第 3 条", substring = true).performClick()
+            rule.waitForIdle()
             rule.onNodeWithText("撤回编辑").assertDoesNotExist()
             rule.onNodeWithText("拷贝").performClick()
             rule.waitForIdle()
@@ -249,8 +266,14 @@ class ChatQueueStripTest {
                 ChatQueueStrip(persona.copy(status = "idle", queued = persona.queued!!.takeLast(1)), Queue(), ChatComposerState(), {}, {})
             }
         }
+        // Folded by default: the title counts the backlog and there is no Send Now; opening the strip reveals the
+        // collapsed summary line, not individual rows (#6394).
         rule.onNodeWithContentDescription("排队中 1 条 · Persona 忙完会依次处理，已收起").assertExists()
         rule.onNodeWithText("立即发送").assertDoesNotExist()
+        rule.onNodeWithContentDescription("排队中 1 条 · Persona 忙完会依次处理，已收起").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("还有 1 条别的对话在排队").assertExists()
+        rule.onNodeWithContentDescription("第 1 条：来自「早报」", substring = true).assertDoesNotExist()
     }
 
     @Test fun anAssistantRefusalOfSendNowSaysTheHubsWords() {

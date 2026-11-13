@@ -4,6 +4,7 @@
   "row_label": "キューの{n}件目：{text}",
   "relayed_from": "別の会話",
   "relayed_note": "この会話が空いたら届きます",
+  "relayed_summary_other": "別の会話からのメッセージが {count} 件待機中",
   "drag": "キューの{n}件目をドラッグして並べ替え",
   "send_now_tip": "{agent} の次のステップを待たずに、待機中のメッセージをすべて今すぐ送信",
   "edit": "編集",

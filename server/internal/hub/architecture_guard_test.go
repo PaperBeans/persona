@@ -78,7 +78,7 @@ func readList(t *testing.T, name string) []string {
 // The routes the hub answers itself (registered with a literal pattern in this package, minus the manager's it
 // relays) are exactly testdata/hub_routes_allowed.txt.
 func TestHubAnswersOnlyItsOwnRoutes(t *testing.T) {
-	relayed := slices.Concat(assistantwire.Routes, assistantwire.InboxRoutes, devicewire.Routes, devicewire.ShareRoutes, devicewire.MetricsRoutes, extwire.Routes)
+	relayed := slices.Concat(assistantwire.Routes, assistantwire.InboxRoutes, assistantwire.SocketRoutes, devicewire.Routes, devicewire.ShareRoutes, devicewire.MetricsRoutes, extwire.Routes)
 	own := map[string]string{} // pattern -> file
 	for name, f := range hubSources(t) {
 		ast.Inspect(f, func(n ast.Node) bool {

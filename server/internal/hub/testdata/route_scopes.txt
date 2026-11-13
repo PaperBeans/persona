@@ -142,6 +142,8 @@ assistant.ask        GET /api/v1/assistant/reporters
 -                    GET /api/v1/assistant/repositories/{id}
 -                    GET /api/v1/assistant/routines
 -                    GET /api/v1/assistant/runs
+-                    GET /api/v1/assistant/search
+-                    GET /api/v1/assistant/skills
 -                    GET /api/v1/assistant/standing-authorizations
 -                    GET /api/v1/assistant/tasks
 -                    GET /api/v1/assistant/tasks/cron
@@ -228,6 +230,7 @@ machines.read        GET /api/v1/machines/{id}/usage
 -                    GET /api/v1/machines/{mid}/clipboard
 -                    GET /api/v1/machines/{mid}/clipboard/settings
 -                    GET /api/v1/machines/{mid}/codex-settings
+-                    GET /api/v1/machines/{mid}/codex/{sid}/takeover
 -                    GET /api/v1/machines/{mid}/computer
 -                    GET /api/v1/machines/{mid}/computer/apps
 -                    GET /api/v1/machines/{mid}/computer/clipboard
@@ -260,6 +263,7 @@ machines.read        GET /api/v1/machines/{id}/usage
 -                    GET /api/v1/machines/{mid}/ports/{port}/connect
 -                    GET /api/v1/machines/{mid}/preview/connect
 -                    GET /api/v1/machines/{mid}/preview/servers
+-                    GET /api/v1/machines/{mid}/screen/video/connect
 machines.read        GET /api/v1/machines/{mid}/stat
 -                    GET /api/v1/managers
 -                    GET /api/v1/messaging
@@ -275,6 +279,7 @@ machines.read        GET /api/v1/machines/{mid}/stat
 -                    GET /api/v1/phone/write-queue
 -                    GET /api/v1/pins
 -                    GET /api/v1/recordings
+-                    GET /api/v1/recordings/{id}/audio
 -                    GET /api/v1/recordings/{id}/live
 -                    GET /api/v1/recordings/{id}/photos
 -                    GET /api/v1/recordings/{id}/photos/{n}
@@ -287,6 +292,7 @@ agents.read          GET /api/v1/sessions/{mid}/{sid}/items/{iid}/image
 agents.read          GET /api/v1/sessions/{mid}/{sid}/screen
 -                    GET /api/v1/sessions/{mid}/{sid}/share-catalog
 -                    GET /api/v1/sessions/{mid}/{sid}/share-preview/{preview_id}
+-                    GET /api/v1/sessions/{mid}/{sid}/skills
 -                    GET /api/v1/skills
 -                    GET /api/v1/subscriptions
 -                    GET /api/v1/subscriptions/-/graph
@@ -434,6 +440,7 @@ inbox.write          POST /api/v1/inbox/{id}/draft
 inbox.write          POST /api/v1/inbox/{id}/handoff
 inbox.write          POST /api/v1/inbox/{id}/reply
 inbox.write          POST /api/v1/inbox/{id}/suggestion
+inbox.write          POST /api/v1/inbox/{id}/task-link/recheck
 agents.control       POST /api/v1/interactions/{id}/choose
 agents.control       POST /api/v1/interactions/{id}/reanswer
 agents.control       POST /api/v1/interactions/{id}/resolve
@@ -453,15 +460,21 @@ agents.control       POST /api/v1/interactions/{id}/resolve
 -                    POST /api/v1/machines/{id}/reject
 -                    POST /api/v1/machines/{mid}/browser/cookies
 -                    POST /api/v1/machines/{mid}/browser/{action}
+-                    POST /api/v1/machines/{mid}/codex/{sid}/takeover
 -                    POST /api/v1/machines/{mid}/computer/clipboard
 -                    POST /api/v1/machines/{mid}/computer/{action}
 -                    POST /api/v1/machines/{mid}/deploy
 -                    POST /api/v1/machines/{mid}/doctor/fix
 -                    POST /api/v1/machines/{mid}/files
+-                    POST /api/v1/machines/{mid}/files/chmod
+-                    POST /api/v1/machines/{mid}/files/copy
+-                    POST /api/v1/machines/{mid}/files/mkdir
 -                    POST /api/v1/machines/{mid}/files/move
 -                    POST /api/v1/machines/{mid}/files/rename
 -                    POST /api/v1/machines/{mid}/files/restore
 -                    POST /api/v1/machines/{mid}/files/trash
+-                    POST /api/v1/machines/{mid}/files/write
+-                    POST /api/v1/machines/{mid}/files/zip
 -                    POST /api/v1/machines/{mid}/git/commit
 -                    POST /api/v1/machines/{mid}/git/pr
 -                    POST /api/v1/machines/{mid}/git/pr/merge
@@ -529,6 +542,7 @@ agents.control       POST /api/v1/sessions/{mid}/{sid}/rename
 agents.control       POST /api/v1/sessions/{mid}/{sid}/seen
 -                    POST /api/v1/sessions/{mid}/{sid}/share-preview
 -                    POST /api/v1/sessions/{mid}/{sid}/unarchive
+-                    POST /api/v1/skills/import
 -                    POST /api/v1/subscriptions
 -                    POST /api/v1/subscriptions/-/dry-run
 -                    POST /api/v1/subscriptions/-/push
@@ -540,6 +554,7 @@ agents.control       POST /api/v1/sessions/{mid}/{sid}/seen
 -                    POST /api/v1/task-plans/{id}/start
 -                    POST /api/v1/task-plans/{id}/workspace-preview
 todos.write          POST /api/v1/todos
+-                    POST /api/v1/todos/import/reminders
 -                    POST /api/v1/todos/retitle
 -                    POST /api/v1/todos/{id}/accept
 -                    POST /api/v1/todos/{id}/decision-dismiss
@@ -621,6 +636,7 @@ kb.write             PUT /api/v1/kb/{kind}/{id}
 -                    PUT /api/v1/mutes
 -                    PUT /api/v1/pins
 -                    PUT /api/v1/recordings/{id}
+-                    PUT /api/v1/recordings/{id}/audio
 -                    PUT /api/v1/recordings/{id}/private
 -                    PUT /api/v1/subscriptions/{id}
 todos.write          PUT /api/v1/todos/{id}/agents/{mid}/{sid}

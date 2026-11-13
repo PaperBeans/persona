@@ -490,7 +490,7 @@ func TestFlushAfterTheWokenSessionDropped(t *testing.T) {
 	}
 
 	c.mu.Lock()
-	c.gate.told(time.Now()) // the reconnected session's snapshot has the agent's new words
+	c.gate.told(time.Now(), agentReconnect) // the reconnected session's snapshot has the agent's new words
 	at := c.gate.agent
 	c.mu.Unlock()
 	third := &recLink{left: -1}

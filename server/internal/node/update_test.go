@@ -8,6 +8,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 func TestUpdateRestartsOnlyAfterSuccessfulRPCResponseWrite(t *testing.T) {
@@ -70,3 +72,38 @@ func (updateFailWriter) Write([]byte) (int, error) { return 0, errors.New("disco
 type updateShortWriter struct{}
 
 func (updateShortWriter) Write(p []byte) (int, error) { return len(p) - 1, nil }
+
+// A terminal Agent at work, with background tasks and subagents, does not hold an update back: the restart leaves it
+// running. A busy headless conversation or a launch still starting does.
+func TestUpdateWaitsOnlyForWhatTheRestartCuts(t *testing.T) {
+	terminal := proto.Session{SessionID: "terminal", Status: proto.StatusWorking, State: proto.StateWorking, Host: proto.EngineHerdr,
+		Background: []proto.BackgroundTask{{ID: "workflow", Kind: "workflow"}}, Subagents: []proto.Subagent{{Running: true}}}
+	if updateWouldCut(false, []proto.Session{terminal, {SessionID: "outside", Status: proto.StatusBlocked}}) {
+		t.Fatal("terminal Agents held the update back")
+	}
+	if !updateWouldCut(true, []proto.Session{terminal}) {
+		t.Fatal("a busy headless conversation did not hold the update back")
+	}
+	if !updateWouldCut(false, []proto.Session{{SessionID: "new", Starting: true}}) {
+		t.Fatal("a launch still starting did not hold the update back")
+	}
+}
+
+// sessions.list carries the commit check as update_busy: the manager waits on it, since a headless conversation's row
+// does not say it is busy (#6364).
+func TestSessionsListReportsUpdateBusy(t *testing.T) {
+	n := assistantNode(t)
+	p := &assistantProc{id: "chat", busy: true, exited: make(chan struct{})}
+	liveAssistants.Store(p, struct{}{})
+	defer liveAssistants.Delete(p)
+	out, err := request(t, n, "sessions.list", map[string]any{})
+	if err != nil || out["update_busy"] != true {
+		t.Fatalf("an answering conversation did not report update_busy: %v %v", out["update_busy"], err)
+	}
+	p.mu.Lock()
+	p.busy = false
+	p.mu.Unlock()
+	if out, _ := request(t, n, "sessions.list", map[string]any{}); out["update_busy"] != false {
+		t.Fatalf("an idle conversation reported update_busy: %v", out["update_busy"])
+	}
+}
