@@ -24,6 +24,29 @@ before the fix and 448 KB after.
 - `StackPeak.measure` (in `AgentsListStackTests`) paints the unused stack, runs the render, and finds the lowest word
   overwritten. Keep a page under half the device's stack (512 KB).
 
+## Keep a control's accessibility identifier off its surrounding container (#7033)
+
+A SwiftUI container's `accessibilityIdentifier` can replace the identifiers on a nested `Menu` and `ScrollView`, while the buttons inside the scroll view keep theirs. The Agents capsule looked correct and its filters remained queryable, but its grouping icon was exposed under the capsule's identifier instead of `agents.grouping`. Put identifiers on the actionable controls, not on their surrounding capsule, and test both the menu's identity and its fixed frame after a horizontal drag.
+
+## Words cut off by a clip still take touches, over the rows below them (2026-11-13, #6645)
+
+- `.clipped()`, `.clipShape` and `.mask` hide what is drawn, not what takes touches. A long message folded with
+  `.frame(height:)` + `.clipped()` still lays all of its words out, and the ones past the fold kept taking touches.
+  The chat's list is drawn upside down (newest first, flipped back), so an older row is drawn over the newer rows under
+  it: the message from another session folded to three lines (`LineFold`) took the taps meant for the work line right
+  under it, which never opened, and its long-press recognizer took the long presses on the answer under that, so the
+  card lifted instead. A message of about 2 KB can hide a screen of words.
+- Anything that cuts its content off by a clip takes `.contentShape(.rect)` right after the clip (`BubbleFold`,
+  `CardFold`, `LineFold`, `ReplyQuote`). Leave the words' accessibility alone while doing it: wrapping them in
+  `.accessibilityElement(children: .contain)` made the lifted copy of an open card (`MessageLift` combines a short
+  message's elements) read only its sender and Collapse, without its words.
+- Prove it with a touch at the row's own spot, not by its element: `WorkLineUnderFoldUITests` taps and long-presses
+  each row under a folded message (mock `MOCK_PEER_FOLD=1`). An element-based tap can't tell what lies on top.
+- Reproduce with the reported shape. Hidden words take touches only where their text lies: a fixture whose folded
+  message hid a bulleted list let the taps through between its items, and the work line opened on the unfixed build;
+  one English paragraph, as reported, took every tap. Get the shape from the real session (kinds, order, sizes; never
+  its words) before deciding a report does not reproduce.
+
 ## An edit menu needs the selection's rect, not just a point (#6005)
 
 - If `UIEditMenuInteraction.presentEditMenu(with:)` gets only a `sourcePoint` and its delegate has no
@@ -66,6 +89,15 @@ before the fix and 448 KB after.
   exactly as large as its words inside a SwiftUI view, a touch on the knob lands outside it and the handle can't be
   dragged. Make the text view reach past the words (`Theme.Lift.handleReach`), with a matching
   `textContainerInset` that keeps the words where they are.
+- A UIKit copy of MarkdownUI's text must use MarkdownUI's sizes, not the text style's. MarkdownUI scales its size like
+  `@ScaledMetric` relative to body and rounds it to a whole point: 22 pt at xxxLarge, where
+  `UIFont.preferredFont(forTextStyle: .body)` is 23, and 48 at AX5, where body is 53. Its list markers take at least
+  1.5 em, plus the `Label`'s 8 pt gap. At the default size both match, so only a large text size shows the copy
+  wrapping onto more lines than the chat (#6552, `ReplyText.Look.replySize`, `ReplyMetrics.markerRoom`). Compare the
+  line counts in `-showLiftLines` at xxxLarge and AX5.
+- The place between characters nearest a press can be after the pressed character. Looking the word up forward from
+  there takes the next word, and Chinese has no space to stop it. Look it up on the side the press is on
+  (`LiftUITextView.place(nearest:)`, #6552).
 
 ## A lazy grid never makes what it does not show (#4073)
 
@@ -2425,3 +2457,22 @@ different flags (testable imports), so each rebuilds swift-syntax from scratch a
 (Xcode 27.2), which is why `scripts/ci/apple.sh` builds the lint from a fixed copy beside its build output. An editor
 that opens the package (`scripts/test/isolation-lint`) leaves a `.build` folder inside it; git ignores that folder, but
 `scripts/test/test_script_layout.py` walks ignored files too and fails on the git hook samples in it, so delete it.
+
+## Picture in Picture zooms from its source's frame; iPad simulators have it (2026-11-13, #6333)
+
+- The system's transition into the small window starts at the content source layer's frame, wherever that is, and
+  Restore's ends there. A source parked out of sight (VNC's sat behind the content in the bottom-left corner) shows as a
+  small copy of the picture popping up there first. Keep the source exactly over the picture people are looking at
+  while it is up (`VNCPiPPlacement`), close the page at `willStart` (not `didStart`) so the picture never shows twice,
+  and call Restore's completion only once the page has drawn its picture again (`VNCPiPRestore`, with a time limit
+  on a timer off the main thread: a page opening under load held the main thread 10 s, so the system waited 10 s,
+  and in that run the next start never reached `didStart`). Hide the page's picture with a short fade, not at once: the system's copy appears a few
+  frames after `willStart`. With the source that large, the system sometimes draws the small window's first frames
+  (about 0.1 s) at the size the window last had, in the top-left of the transition, before the picture fills it: a
+  fresh `contentSource`, or a new controller and layer for each start, did not change it (iPad simulator; the old
+  small source hid it). Look at a couple of round trips frame by frame before blaming the source.
+- `isPictureInPictureSupported()` is false on iPhone simulators, slim or stock, but true on a stock iPad simulator
+  (`sim-boot.sh --profile stock`): record the system's transition there; how it feels on a phone still needs a device.
+- On an iPad simulator the hardware keyboard takes over once XCUITest types, hiding the on-screen keyboard: a form
+  that rose above it slides down, and a tap aimed at its button lands on whatever moved there. Submit with `"\n"` (the
+  field's `onSubmit`), or wait for the layout to settle before tapping.

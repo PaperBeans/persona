@@ -241,29 +241,26 @@ struct TerminalsView: View {
     /// A new request for each computer (`only`: those), under its own short id (`X-Client-Request-Id`, which the hub's
     /// log keeps), so a report of a stuck page can be matched to the hub's log.
     private func load(_ only: Set<String>? = nil) async {
-        await withTaskGroup(of: (String, String, Result<TerminalPanes, Error>).self) { group in
-            for m in machines where only?.contains(m.id) ?? true {
-                let ref = MachineRef(path: m.id)
-                var api = model.api(ref.group)
-                #if DEBUG
-                if UserDefaults.standard.bool(forKey: "showTerminalsUnlinked") { api = nil } // screenshots of the state below
-                #endif
-                guard let api else {
-                    loads[m.id] = TerminalsLoad(failure: String(localized: "Not connected to this computer's hub yet"))
-                    continue
-                }
-                let id = TerminalsLoad.newRequest()
-                loads[m.id, default: TerminalsLoad()].start(id)
-                group.addTask {
-                    do { return (m.id, id, .success(try await api.terminalPanes(machine: ref.id, requestID: id))) } catch { return (m.id, id, .failure(error)) }
-                }
+        var jobs: [TerminalsFetch.Job] = []
+        for m in machines where only?.contains(m.id) ?? true {
+            let ref = MachineRef(path: m.id)
+            var api = model.api(ref.group)
+            #if DEBUG
+            if UserDefaults.standard.bool(forKey: "showTerminalsUnlinked") { api = nil } // screenshots of the state below
+            #endif
+            guard let api else {
+                loads[m.id] = TerminalsLoad(failure: String(localized: "Not connected to this computer's hub yet"))
+                continue
             }
-            for await (path, id, result) in group {
-                switch result {
-                case .success(let list): loads[path]?.answer(id, list)
-                case .failure(let error) where error.isCancellation: break // left: no answer runs late, with Retry
-                case .failure(let error): loads[path]?.fail(id, TerminalsLoad.withRequest(error.shown ?? error.localizedDescription, id))
-                }
+            let id = TerminalsLoad.newRequest()
+            loads[m.id, default: TerminalsLoad()].start(id)
+            jobs.append(TerminalsFetch.Job(path: m.id, request: id) { try await api.terminalPanes(machine: ref.id, requestID: id) })
+        }
+        await TerminalsFetch.run(jobs) { job, outcome in
+            switch outcome {
+            case .answered(let list): loads[job.path]?.answer(job.request, list)
+            case .failed(let error): loads[job.path]?.fail(job.request, TerminalsLoad.withRequest(error.shown ?? error.localizedDescription, job.request))
+            case .left: break // no answer runs late, with Retry
             }
         }
     }
@@ -423,6 +420,40 @@ nonisolated enum TerminalsList {
     static func folder(_ cwd: String?) -> String {
         guard let cwd, !cwd.isEmpty else { return "" }
         return (cwd as NSString).lastPathComponent
+    }
+}
+
+/// One request per computer, each answer applied as it arrives (#7115). Not a task group read with `for await`: on the
+/// phone's Release build that loop ended without a single answer, and the page sat on its spinners until it said "hasn't
+/// answered yet". Each computer's task applies its own answer; a cancelled page cancels them all.
+nonisolated enum TerminalsFetch {
+    struct Job: Sendable {
+        var path: String
+        var request: String
+        var panes: @Sendable () async throws -> TerminalPanes
+    }
+
+    enum Outcome {
+        case answered(TerminalPanes)
+        case failed(Error)
+        /// Cancelled: no answer, the computer runs late with Retry.
+        case left
+    }
+
+    static func outcome(_ job: Job) async -> Outcome {
+        do { return .answered(try await job.panes()) } catch {
+            return error.isCancellation ? .left : .failed(error)
+        }
+    }
+
+    /// Returns when every computer has been answered, failed or left.
+    @MainActor static func run(_ jobs: [Job], apply: @escaping @MainActor (Job, Outcome) -> Void) async {
+        let tasks = jobs.map { job in Task { @MainActor in apply(job, await outcome(job)) } }
+        await withTaskCancellationHandler {
+            for t in tasks { await t.value }
+        } onCancel: {
+            for t in tasks { t.cancel() }
+        }
     }
 }
 

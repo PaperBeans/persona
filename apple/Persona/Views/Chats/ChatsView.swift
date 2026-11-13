@@ -396,13 +396,23 @@ struct ChatsView: View {
                 // Searching is not the root either: the drawer would slide the page with the keyboard up and the field open.
                 .onChange(of: path.isEmpty && !searching, initial: true) { _, root in shell?.workAtRoot = root }
                 .onChange(of: path) { _, p in
+                    #if os(iOS)
+                    // The Sidebar layout on a phone: what the drawer's list opened is in front, the drawer goes (#6332).
+                    if let unified, widthClass != .regular, !p.isEmpty { unified.drawer.close() }
+                    #endif
                     spaceAt = spaceAt.filter { $0.key < p.count }
                     if p.isEmpty, !leaving { AppModel.rememberChat(nil); model.chatSwitched = [:] } // back at the list: next launch starts here
                 }
                 .onChange(of: model.agentsListReveal) { _, request in
                     // The Sidebar layout: Agents is a part of the sidebar, not a page: choosing it shows that part, and
                     // the page beside it stays (#6332).
-                    if let unified { unified.scrollToAgents?(); return }
+                    if let unified {
+                        #if os(iOS)
+                        if widthClass != .regular { unified.drawer.open() } // on a phone the sidebar is the drawer
+                        #endif
+                        unified.scrollToAgents?()
+                        return
+                    }
                     let previousPath = path
                     stackStill.whenStill {
                         // A newer targeted open wins, even if the stable-stack opener already consumed it.
@@ -480,6 +490,10 @@ struct ChatsView: View {
             }
         }
         .environment(\.unifiedPath, unified == nil ? nil : pushing)
+        #if os(iOS)
+        // On a phone the sidebar is the drawer, the Persona conversation the page under everything it opens (#6332).
+        .environment(\.splitDrawer, unified?.drawer)
+        #endif
         .modifier(UnifiedFront(unified: unified, atRoot: path.isEmpty, query: $query))
         #if os(iOS)
         .tabActiveTask(id: model.api.map { PersonalAgentEntryModel.Connection($0) }) {
@@ -701,6 +715,8 @@ private struct AgentsList: View {
     /// get a heading of their own with the list's ⋯, Personal Agents and New Session (`UnifiedSidebarColumn`).
     var sidebarRows: AnyView? = nil
     @Environment(\.unifiedSidebar) private var unified
+    /// The split it is in (the Sidebar layout on a phone: the drawer's, `SplitDetail.drawer`).
+    @Environment(\.splitDetail) private var split
 
     @State private var searchClose = SearchCloseWatcher()
     #if os(iOS) || os(visionOS)
@@ -784,8 +800,13 @@ private struct AgentsList: View {
     /// iPhone Duo open the list beside a chat opened in code (the one remembered at launch, a card, New Session, a
     /// worktree line) was held as out of sight: its last lines, order and new agents stopped coming in (#3680).
     private var covered: Bool {
-        // The Sidebar layout's list is the sidebar, in sight beside whatever it opened (#6332).
+        // The Sidebar layout's list is the sidebar, in sight beside whatever it opened (#6332); on a phone, while the
+        // drawer is out.
+        #if os(iOS)
+        if let unified { return split?.drawer == true && !unified.drawer.isOut }
+        #else
         if unified != nil { return false }
+        #endif
         #if os(iOS) || os(visionOS)
         if ownsTop && !path.isEmpty { return true }
         if model.selectedTab != .chats && shell?.pager.moving != true { return true }
@@ -1057,16 +1078,12 @@ private struct AgentsList: View {
                     }
                     #endif
                     #if os(iOS)
-                    // A stable cell keeps the selected grouping discoverable without crowding the quick filters. In the
-                    // shell, Personal Agents beside it (#140), under it when the two don't fit across.
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: Theme.Space.s) { groupingPills }
-                        VStack(alignment: .leading, spacing: Theme.Space.s) { groupingPills }
+                    if shell != nil, showsPersonalEntry {
+                        AgentsPersonalPill { openFromList(PersonalAgentsRoute()) }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, Theme.Space.page)
+                            .padding(.bottom, Theme.Space.sm)
                     }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, Theme.Space.page)
-                        .padding(.bottom, Theme.Space.sm)
-                        .id("agents.grouping.row")
                     #endif
                 }
                     .listRowBackground(Color.clear)
@@ -1389,7 +1406,7 @@ private struct AgentsList: View {
     /// `base`: as the body worked it out (working it out again here went through every agent twice more per push).
     private func filterBar(_ base: [Session]) -> some View {
         QuickFilterBar(selection: quick, counts: model.sessionLists.paged ? [:] : filterCounts,
-                       countsUnknown: model.sessionLists.paged) { choose($0, self.base) }.equatable()
+                       countsUnknown: model.sessionLists.paged, pageAligned: ownsTop) { choose($0, self.base) }.equatable()
             .searchTraceMark("filter")
     }
 
@@ -1612,11 +1629,6 @@ private struct AgentsList: View {
     }
 
     #if os(iOS)
-    @ViewBuilder private var groupingPills: some View {
-        AgentsGroupingMenu()
-        if shell != nil, showsPersonalEntry { AgentsPersonalPill { openFromList(PersonalAgentsRoute()) } }
-    }
-
     /// The Sidebar layout's Agents heading (#6332), as the web sidebar's: the name, then the list's ⋯ (grouping, sort,
     /// display, fold all), Personal Agents and New Session, which the Agents page has in its bar.
     private var unifiedAgentsHeading: some View {
@@ -3675,17 +3687,15 @@ struct QuickFilterBar: View, Equatable {
     nonisolated let counts: [AgentFilter: Int]
     /// The hub counts the whole transport collection, including assistants, not the exact visible Agents membership.
     nonisolated var countsUnknown = false
+    nonisolated var pageAligned = false
     var choose: (AgentFilter) -> Void
 
     nonisolated static func == (a: Self, b: Self) -> Bool {
-        a.selection == b.selection && a.counts == b.counts && a.countsUnknown == b.countsUnknown
+        a.selection == b.selection && a.counts == b.counts && a.countsUnknown == b.countsUnknown && a.pageAligned == b.pageAligned
     }
 
-    /// No sideways scroll view: the navigation stack can take one at the top of the page for the page's own and
-    /// inset it by the whole top bar. It did behind a chat reopened at launch (the chips drawn ~170 pt under the
-    /// search field, blurred list between: TestFlight 35 and 38), and in the split's sidebar column. Element frames
-    /// do not show it (UIKit moves the content), the pixels do: `AgentsListTests.drawn`. Chips that do not fit
-    /// tighten, then go to a second row.
+    /// iOS uses the owner-requested scrolling capsule. Other platforms retain their existing controls.
+    /// The strip clears vertical content margins so navigation chrome cannot inset its content below search.
     var body: some View {
         #if DEBUG || PERF_SIGNPOST
         let _ = PerfTrace.body("QuickFilterBar")
@@ -3709,10 +3719,31 @@ struct QuickFilterBar: View, Equatable {
         } else {
             chipsBar
         }
+        #elseif os(iOS)
+        Group {
+            if pageAligned {
+                capsule.modifier(AgentsFieldPlace())
+            } else {
+                capsule.padding(.horizontal, Theme.Space.page)
+            }
+        }
+        .padding(.vertical, Theme.Space.sm)
         #else
         chipsBar
         #endif
     }
+
+    #if os(iOS)
+    private var capsule: some View {
+        CapsuleFilterBar(items: availableFilters.map {
+            CapsuleFilterItemData(id: $0.rawValue, title: $0.title, count: counts[$0], tone: $0.tone, symbol: $0.symbol)
+        }, selection: selection.rawValue, choose: { id in
+            if let filter = AgentFilter(rawValue: id), filter != selection { choose(filter) }
+        }) {
+            AgentsGroupingMenu(iconOnly: true)
+        }
+    }
+    #endif
 
     #if os(macOS)
     private var macPicker: some View {

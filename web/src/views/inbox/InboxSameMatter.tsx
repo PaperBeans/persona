@@ -39,8 +39,8 @@ export function SameMatterList({ items, busy, onPick }: { items: readonly InboxI
             className={cx("flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors", busy ? "opacity-60" : "hover:bg-hover")}
           >
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] text-ink">{candidate.title}</span>
-              {meta && <span className="block truncate text-[11.5px] text-ink-3">{meta}</span>}
+              <span className="block truncate text-meta text-ink">{candidate.title}</span>
+              {meta && <span className="block truncate text-label text-ink-3">{meta}</span>}
             </span>
             <Icon name="chevronRight" size={13} className="shrink-0 text-ink-3" />
           </button>
@@ -130,7 +130,7 @@ export function InboxSameMatter({
           placeholder={t("inbox-inboxline.search_placeholder")}
           aria-label={t("inbox-inboxline.search_placeholder")}
           autoComplete="off"
-          className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ink outline-none placeholder:text-ink-3"
+          className="min-w-0 flex-1 bg-transparent text-meta text-ink outline-none placeholder:text-ink-3"
         />
       </div>
       {reading || !effectiveTree ? (
@@ -138,7 +138,7 @@ export function InboxSameMatter({
       ) : candidates.length ? (
         <SameMatterList items={candidates} busy={busy} onPick={(choice) => void pick(choice)} />
       ) : (
-        <p className="py-6 text-center text-[12.5px] text-ink-3">{t("inbox-inboxline.empty")}</p>
+        <p className="py-6 text-center text-meta text-ink-3">{t("inbox-inboxline.empty")}</p>
       )}
     </Dialog>
   );

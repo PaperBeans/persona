@@ -114,4 +114,48 @@ import Testing
         #expect(TerminalsLoad.withRequest("No answer", nil) == "No answer")
         #expect(TerminalsLoad.newRequest().count == 8)
     }
+
+    /// #7115: every computer's answer reaches its row, failures included; the page never ends with answers dropped.
+    @Test func everyComputersAnswerIsApplied() async {
+        struct Down: Error {}
+        let one = panes(#"{"hosts":[{"kind":"herdr","panes":[{"pane":"w1:p1"}]}]}"#)
+        let jobs = (1...8).map { n in
+            TerminalsFetch.Job(path: "m\(n)", request: "r\(n)") {
+                try await Task.sleep(for: .milliseconds(10 * (9 - n))) // the last computer answers first
+                if n == 5 { throw Down() }
+                return one
+            }
+        }
+        var applied: [String: String] = [:]
+        await TerminalsFetch.run(jobs) { job, outcome in
+            switch outcome {
+            case .answered(let list): applied[job.path] = "answered \(list.hosts.count)"
+            case .failed: applied[job.path] = "failed"
+            case .left: applied[job.path] = "left"
+            }
+        }
+        #expect(applied.count == 8, "every computer is answered when run returns: \(applied)")
+        #expect(applied["m5"] == "failed")
+        #expect(applied.filter { $0.value == "answered 1" }.count == 7)
+    }
+
+    /// A page that goes away cancels its requests: the computers run late with Retry, nothing is shown as failed.
+    @Test func aCancelledPageLeavesItsComputers() async {
+        let jobs = (1...3).map { n in
+            TerminalsFetch.Job(path: "m\(n)", request: "r\(n)") {
+                try await Task.sleep(for: .seconds(60))
+                return TerminalPanes(hosts: [])
+            }
+        }
+        var applied: [String: String] = [:]
+        let page = Task { @MainActor in
+            await TerminalsFetch.run(jobs) { job, outcome in
+                if case .left = outcome { applied[job.path] = "left" } else { applied[job.path] = "other" }
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+        page.cancel()
+        await page.value
+        #expect(applied == ["m1": "left", "m2": "left", "m3": "left"])
+    }
 }

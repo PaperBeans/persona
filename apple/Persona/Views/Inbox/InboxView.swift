@@ -1018,6 +1018,7 @@ struct InboxRow: View {
     static let textColumn: CGFloat = 52
 
     var body: some View {
+        let now = self.now
         HStack(alignment: .top, spacing: Theme.Space.m) {
             avatar
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -1058,7 +1059,9 @@ struct InboxRow: View {
                 if showAccount && !item.isLark {
                     Text(item.accountName).font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
-                if let mark = InboxEventText.mark(item) {
+                if let now, !item.isDone {
+                    nowLine(now)
+                } else if let mark = InboxEventText.mark(item) {
                     // Inbox phase 1: the suggestion (it replaces the AI agent's draft card, which a hub mirrors it
                     // into), In Progress's state, the 'preparing a suggestion' line; its buttons are in the detail.
                     InboxEventMarkLine(mark: mark).padding(.top, Theme.Space.xxs)
@@ -1082,9 +1085,34 @@ struct InboxRow: View {
         .contentShape(.rect)
     }
 
+    /// The shared state key wins over the old mark. The frozen Mac list keeps its existing row and mark.
+    private var now: String? {
+        #if os(macOS)
+        nil
+        #else
+        InboxNow.text(for: item)
+        #endif
+    }
+
+    /// The same state line as the other clients: waiting has a still clock, only AI work spins, and anything that
+    /// needs the owner carries the existing Needs you mark. FYI and folded states do not spin.
+    private func nowLine(_ words: String) -> some View {
+        let symbol = InboxNow.symbol(for: item)
+        return HStack(spacing: Theme.Space.sm) {
+            InboxNowSymbol(symbol: symbol)
+            Text(words).font(Theme.Font.label)
+                .foregroundStyle(symbol == .failed ? AnyShapeStyle(Theme.danger) : AnyShapeStyle(.secondary))
+                .lineLimit(1)
+        }
+        .padding(.top, Theme.Space.xxs)
+    }
+
     /// Who wrote what (under the AI's summary once it has one).
     private var from: String {
         if item.isAssistantRow { return item.preview } // the tag says who: no "Assistant:" in front
+        #if !os(macOS)
+        if let meta = InboxNow.meta(item, lang: interfaceTextLocale.identifier) { return meta }
+        #endif
         if let doc = item.doc { return doc.typeName + " · " + item.preview } // the preview names who: Li Lei mentioned you
         if item.moment != nil { return String(localized: "\(item.sender ?? ""): \(item.preview)", comment: "Who wrote it: what they wrote") } // who commented, on the post in the title
         if let c = item.connector { // example-org/example-repo#12 · bob: please take a look
@@ -1287,6 +1315,7 @@ struct InboxDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var drafting = false
     @State private var handingOff = false
+    @State private var sameMatter = false
     @State private var ruling: InboxPolicyTarget?
     @State private var slot: InboxItemSlotModel
 
@@ -1304,6 +1333,7 @@ struct InboxDetailView: View {
                 InboxDraftSheet(item: current, accounts: accounts, onSent: { dismiss() })
             }
             .sheet(isPresented: $handingOff) { InboxHandOffSheet(item: current) }
+            .sheet(isPresented: $sameMatter) { InboxSameMatterPicker(item: current, tree: nil) }
             .sheet(item: $ruling) { InboxPolicySheet(target: $0) }
             #if DEBUG
             // `-showInboxAction draft|handoff`: open that sheet (screenshots).
@@ -1316,12 +1346,16 @@ struct InboxDetailView: View {
             }
             #endif
             .pageToolbar {
-                if let mutes = current.mutes, !mutes.isEmpty {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu { InboxRuleButtons(item: current) { ruling = $0 } } label: { ThemedIcon(Theme.Icon.moreMenu) }
-                            .accessibilityLabel("More")
-                            .accessibilityIdentifier("inbox.detail.more")
-                    }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if let mutes = current.mutes, !mutes.isEmpty {
+                            InboxRuleButtons(item: current) { ruling = $0 }
+                        }
+                        Button { sameMatter = true } label: { Label("Same matter as…", systemImage: Theme.Icon.link) }
+                            .accessibilityIdentifier("inbox.detail.sameMatter")
+                    } label: { ThemedIcon(Theme.Icon.moreMenu) }
+                        .accessibilityLabel("More")
+                        .accessibilityIdentifier("inbox.detail.more")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if current.isDone {

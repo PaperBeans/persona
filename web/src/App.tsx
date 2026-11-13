@@ -39,6 +39,7 @@ import { RequestPage } from "./views/RequestPage";
 import { Home } from "./views/Home";
 import { PersonaAssistant } from "./views/PersonaAssistant";
 import { NewWorktreeHost } from "./views/NewWorktreeHost";
+import { CloseAgentHost } from "./views/CloseAgentHost";
 import { WorktreeActionsHost } from "./views/WorktreeActions";
 import { openWorktreeActions } from "./lib/worktree-actions";
 import { selectWorkspace } from "./lib/workspace-selection";
@@ -562,6 +563,7 @@ function Shell() {
         </OverlayBoundary>
       )}
       <NewWorktreeHost />
+      <CloseAgentHost />
       <ForwardHost />
       <WorktreeActionsHost onOpenWorkspace={openWorkspaceInTree} />
       {/* tab title with the "Needs you" count, favicon badge, optional sounds (#2332): a leaf, so a sessions push re-renders

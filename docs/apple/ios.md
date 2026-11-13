@@ -85,6 +85,8 @@ Expanded Idle spaces in Agents reuse `AgentListOrder.ordered` across normal card
 | To-dos | List/details (sidebar To-dos with incomplete-count badge; new shell sidebar): priority Waiting for you > To review > In progress > Follow-up > Not started, completed at bottom; create title + description, tap circle or swipe right complete, swipe right reopen, swipe left delete. Details edit title/description, show current and past Agent sessions, remove failed starts; bottom Hand to Agent starts new or picks existing session with structured to-do context card |
 | Settings | Assistant (no model displayed/configured here; Model configuration › Main chat, #1291; Proactive work and memory pages, `AssistantProactiveViews.swift`: Scheduled tasks row-end toggles, existing edits save on leaving; new + with Meeting preparation / Weekly report / Agent check / End-of-day review templates uses Cancel / Add sheet so trying a template does not create it; Run now / View last result switches to Chat and opens that chat; one-time follow-ups, interval and scheduled tasks share page/editor; run settings model, permission mode, effort, Allow everything confirmation. Memory parses frontmatter, title prefers Chinese MEMORY.md index title, type badges, Markdown details, Edit whole file, swipe delete, read-only index row; About me edits notes, saves on leaving). Claude Code settings (allowlisted per-machine `~/.claude/settings.json`: exit recap, effort, always think, reply language etc., apply to all; then the computer's Live Replies switch, see "An agent's live reply", and Blocked Config Folders); Machines (online, session count, version, launchers, reconnect); Connectors (2026-11-01: This iPhone = old phone-data toggles/permissions; Email = old Inbox ⋯ account management; Lark = hub gateway status and purpose, `ConnectorsViews.swift`, `GET /api/v1/lark/status`; with hub `connectors`, add rows below Lark from `GET /api/v1/connectors` (2026-11-02, GitHub first: status, account, gh login from <machine>, last sync, generic `HubConnectorView`, DEBUG `-openConnectorGitHub YES`; in-App sign-in connectors (Telegram, `signsInHere`) add enable toggle, stepwise login, sign out, delete stored data, `ConnectorSignInSections`, DEBUG `-openConnectorTelegram YES`)); Notifications; Pair again |
 
+Inbox event detail (`InboxEventViews.swift`): the header's small line uses `InboxNow.meta` for **where · who: newest line** when `where` exists, and keeps the old source · title fallback otherwise. `InboxNow.text(for:)` supplies a state sentence for every known `now`, including done states and states with a suggestion; an absent or unknown key keeps the old status line. A state key alone opens the event page. `InboxNow.symbol(for:)` is the single row / detail mapping: waiting uses the still clock, only queued / looking / agent_working spin, action states use Needs you (failed is red), and done / FYI / folded draw no mark. The processing-state row offers **Say something** when an open item has no suggestion card, or **Try again** after processing fails. Both post `version: 0`, `action: "instruct"` through `InboxSuggestionModel`; Say something keeps the user's words on failure, Try again sends the localized "Please try again." A stale answer and a request error use the suggestion card's existing notice and error. The timeline folds to its newest three entries (all of them when there are at most three), oldest of the visible entries first, and **Show all (N)** restores the complete chain. Each icon follows `via`: a source id uses that source's brand or generic source mark; `assistant`, `agent` and `user` use the persona, Agents and person marks; without `via`, the existing kind icon stays. A `reported` entry always uses `Theme.Icon.reported`, a neutral compact **Assistant says** `Chip` and secondary text. Its words come from `detail` when present, otherwise `text`, so the server’s older-app prefix is not spoken twice. That detail is not repeated in the expansion; a reported row with only detail has no inline expander, while messages still expand on their own. Agent and Agent-stopped entries with a session link show that session's current `AgentState.label` in its `tone`, and nothing when the session is not listed. `InboxTimelineFixtureTests` replays every case in `spec/fixtures/inbox/timeline.json`; `InboxDetailTimelineUITests` covers folded / expanded chains and both instruction entries with `MOCK_INBOX_EVENTS=1`. `InboxDetailNowTests` checks the header fallback, now-only event selection and every status-symbol class; `InboxDetailNowUITests` checks waiting, suggestion and done details with `MOCK_INBOX_SHOWCASE=1`.
+
 Chat page:
 
 - Messages: user bubbles (coral), assistant Markdown (no bubble, reading first), thinking (one folded row), grouped tool steps (>2 fold into "N steps · Run 5 · Read 3",
@@ -755,7 +757,7 @@ Apps built with older Xcode do not extend under the status bar and camera on Duo
   hides the system tab bar, which iOS drew down the side with the switch at its foot, and the pages draw `ShellSwitch` at their top (`pageTabSwitch`): Assistant in its floating bar in the face's place
   (tapping the chosen Assistant opens the face's menu, as in the shell; the link's state and a copy's confirmation show under it), Agents and Messages as a row over the page column
   (`PageTabSwitchRow`; Agents' list options stay on the list's ⋯). Assistant's sidebar column has the button that folds it at its top trailing corner, where Search was (`collapse`); the page's
-  Chat History button only shows while it is folded, to bring it back. Search moves to the foot's row beside Persona's name and where it runs, and opens over the whole window as ChatGPT's (#3705, `AssistantFullSearch`): the field at the foot over the keyboard, × beside it, the conversations above, the latest first, narrowed as you type; a row opens its conversation. The main conversation's
+  Chat History button only shows while it is folded, to bring it back. Search moves to the foot's row beside Persona's name and where it runs, and opens over the whole window as ChatGPT's (#3705, `AssistantFullSearch`): the field at the foot over the keyboard, × beside it, the conversations above, the latest first, narrowed as you type; a row opens its conversation. Both searches (this one and the sidebar's own) also find a chat by what was said in it (#6284, `AssistantChatSearch.swift`): when the hub lists `assistant_search`, the current assistant's `GET /api/v1/assistant/search` is asked 200 ms after the last key, each query cancelling the one before (`docs/protocol/protocol.md` ("Assistant chat search (#6282)")); the local matches (title, last message, a direction's name) show at once and the manager's results come first once they arrive, archived chats included. A row found by a message shows that sentence under its title with the match in bold (`SearchSaidLine`), starting a few characters before the match, fewer as the text grows (8, then 5 above Large, 2 from xxxLarge: `AssistantSearchMerge.lead(for:)`), so the match stays on the line; VoiceOver reads the sentence in the last message's place. Opening it lands on that message through the hub link landing (`MessageJump`, paging back as a link's `?at=` does, opening a folded turn that holds it): it comes to the middle under the quote's accent band, held `Theme.Quote.landingHold` (1.6 s, a quote's tap holds 0.7 s) and then faded, as the web rings its hit (#6446); a row found by its title opens as usual. While the manager's index is still reading older chats a line under the heading says so; offline, without the feature or on a 404 (an older manager) the local matches are the whole answer. The main conversation's
   long press holds the face's long-press items: whose Persona (several hubs), Knowledge, Details, Copy Directory, Copy Info (`MainChatPlaceItems`); the switch's Assistant, tapped while chosen, keeps the
   whole menu, as in the shell. Persona's badge rides on the switch's Assistant; the link's state shows beside the switch, a copy's confirmation as a toast. Pushed pages of Persona's column
   have no switch: Back goes to it (Agents' and Messages' rows stay over their pushed chats). On Agents the empty page has the row as an inset of the column's stack, and each
@@ -812,9 +814,9 @@ One App for iPhone and iPad (`TARGETED_DEVICE_FAMILY` 1,2). Previously only 1, g
 Settings › Appearance › Navigation chooses how the app lays out Persona and the Agents (`NavigationLayout`, this device's
 own UserDefaults key `app.navigation`, applied at once, Settings staying on its page): **Separate**, the default and
 everything above unchanged (the Assistant | Agents switch on an iPhone, the Persona | Agents tabs on an iPad), or
-**Sidebar**, the web sidebar's structure in one column. The owner asked for it on 2026-11-13. The Sidebar layout is
-built for the iPad's regular width first (`NavigationLayout.offered`: the row shows on an iPad only); the iPhone's drawer
-follows in #6332's second part. The Mac (frozen) and Apple Vision Pro keep their own navigation.
+**Sidebar**, the web sidebar's structure in one column. The owner asked for it on 2026-11-13. On an iPhone (and at any
+compact width: iPhone Duo closed, an iPad's narrow split) the column is the drawer that slides in from the left; at
+regular width it stays beside the page. The Mac (frozen) and Apple Vision Pro keep their own navigation.
 
 - **The column** (`UnifiedSidebarColumn`, `Persona/Views/Shell/UnifiedSidebar.swift`), in the web's order: the assistant
   (its switcher) and Search; the main conversation held at the top while the rest scrolls (as the web's, #5581); one
@@ -838,6 +840,19 @@ follows in #6332's second part. The Mac (frozen) and Apple Vision Pro keep their
   flag, so the next pick does not land under it. The conversation's sidebar button folds and brings back the split's
   column (`SplitShowList.hide`). The shaded row follows what is beside the sidebar (`UnifiedSidebar.atRoot`,
   `shownPlace`).
+- **On a phone** (`SplitNavigation`'s drawer layout, `\.splitDrawer`, `SplitDetail.drawer`): the same column in the
+  drawer (`AssistantDrawerLayout`, the shell's drawer: 82% of the width, at most 380 pt), the Persona conversation the root
+  of one stack under it, and what the drawer opens that stack's first page. The conversation's bar has no Assistant |
+  Agents switch: the persona's face opens the drawer (the inbox's mark on it, how many Agents need the user at its
+  corner, `SidebarWaitingBadge`), its name in the middle holds the face's menu, New Chat on the right
+  (`AssistantTopBar.drawerRow`). A first page has the same face where a back would be (`DrawerButtonItem`; an Agent's
+  chat in its own header), and a drag to the right on it opens the drawer as on the conversation (the drawer's pan only
+  yields to a second page's back swipe, `DrawerPan.firstPages`). A pick closes the drawer. Choosing Agents by itself
+  opens the drawer at the Agents. While the drawer is in, the Agents list holds its updates as a covered list does, and
+  the Persona rows keep the list they last showed (`SidebarFeed`). The conversation is the iPhone's (`shellChat`, the
+  shell's new-conversation page). Behind the drawer is the Agents list's own page color (`Theme.groupedPage`), so its
+  head, list and foot are one surface in dark mode too. Settings is the sheet the shell shows it in (`PadRoutes`: the
+  whole window only at a phone's regular width), so it opens and closes the same way in both layouts.
 - **Routes** (`PadRouter(unified: true)`): notifications, links, Live Activities, widgets, quick actions and Siri /
   Shortcuts set `AppModel.selectedTab` and `openChat` as in the Separate layout and land on the same chat or page: an
   Agent's chat opens beside the sidebar (the Agents list takes `openChat` as before); `.assistant` goes back to the
@@ -848,7 +863,8 @@ follows in #6332's second part. The Mac (frozen) and Apple Vision Pro keep their
 - The Separate layout's views take the same code with the Sidebar layout's parts off: the whole `AssistantSidebar`,
   `RootTabs` and the shell are drawn as before (pixel comparisons in #6332's PR).
 - Tests: `SidebarLayoutRoutingTests` (the router), `SidebarLayoutTests` (iPad UI: the column, a pick replacing the
-  page, the routes). DEBUG: `-app.navigation sidebar` launches in the Sidebar layout; `-openAppearance navigation` opens
+  page, the routes), `SidebarLayoutPhoneTests` (iPhone UI: the drawer, a pick replacing the page, the face where a back
+  would be, the setting switching both ways at once). DEBUG: `-app.navigation sidebar` launches in the Sidebar layout; `-openAppearance navigation` opens
   the setting's page.
 
 ## Home-screen quick actions (#3199)
@@ -1065,7 +1081,7 @@ the web's (`web/src/lib/live-text.ts`, `docs/web/web.md`).
   same pacer (`DeltaPacer`, at most 5 draws a second, an empty delta at once).
 - **Even reveal** (#6651): the model's text comes in bursts (a few dozen characters about every 350 ms, up to 2 s apart), so drawing what
   arrived showed a jump per burst. `StreamingText` reveals it a few characters a frame (`StreamReveal` in PersonaKit, driven by
-  `StreamRevealClock`'s display link, which runs only while text waits, at most 60 Hz): a little slower than the stream's average so far,
+  `StreamRevealClock`'s display link, which runs only while text waits, at most 30 Hz: each change re-measures the chat list, #7135): a little slower than the stream's average so far,
   faster when more waits (waiting / 0.6 s), never slower than 20 characters a second. Only that view redraws per frame; the store and the
   list see the deltas as before. A first text over 80 characters (a chat opened mid-stream) shows at once; when the stream ends
   (`ChatStore.liveDone`), or the user holds the list, or the reply's item replaces it, the whole text shows at once. The Mac shows text as
@@ -1124,6 +1140,25 @@ hub; what each rule and per-item setting means is in `docs/assistant/knowledge.m
   (`apple/Persona/Views/Settings/`), `KnowledgeSelectionTests`. Screenshots: the mock hub answers the routes (`MOCK_KB_SELECTION=missing|future|fail` for
   an old hub, an unknown field and a refused save); `-tab settings -openKnowledgeSelection YES` opens the page, `rule`, `chat` or `doc` instead of `YES`
   with that sheet up. Demo Mode keeps the document in memory.
+
+## Inbox rows
+
+For people scanning what needs them, one matter keeps its title, time and AI summary. Its metadata line says where it is
+happening, who wrote the newest line and what they wrote: `where · sender: preview` in English, with the localized colon
+in Chinese and Japanese. A direct chat whose `where` equals its sender names that person once. Without `where` (an older
+hub, or mail), the existing source-specific line is unchanged. Search includes `where` in addition to title, sender,
+preview and summary; it still does not search context or triage reasons.
+
+When the manager sends the optional `now` key, `InboxNow` resolves the shared `spec/fixtures/inbox/now.json` table and
+compose rules in the interface language. On an open item, the complete sentence takes the existing mark line below the
+metadata, in the mark's current font and color (failure red, other states secondary), rather than competing with the
+metadata or its count badge for width. Waiting has a static clock, only queued / looking / Agent-working spins, and states
+that need the owner use the existing Needs you mark (failure stays red); FYI and folded states do not spin. Done rows keep
+today's absence of a mark; their done_* words belong to the detail. Waiting includes its named person, short check time
+and next step when present; failure uses only `handling.error`. An unknown or missing key keeps the existing
+`InboxEventText.mark` line and draft behavior, including its row height. The frozen native Mac row keeps its previous
+metadata and mark. `InboxNowTests` checks every shared state and row case in en, zh-Hans and ja, optional-field decoding,
+fallback and `where` search.
 
 ## Translation (Settings › Translation, 2026-10-31)
 
@@ -2159,6 +2194,16 @@ roster, none of this draws and the pages are as before.
   `ManagerGroupsUITests` against the mock hub's three managers (`MOCK_EXTENSIONS=1`, `TEST_RUNNER_PERSONA_MANAGERS_HUB`, shots with
   `TEST_RUNNER_PERSONA_SHOTS`; with `MOCK_MANAGERS=1` add `TEST_RUNNER_PERSONA_MANAGERS_ONE=1`). By hand: `-tab settings -openExtensions
   YES`, or `-openExtension <id> -openExtensionManager m-3fa21c` for 工作's copy.
+
+## Inbox lineage
+
+An item's **Thread** section reads `GET /api/v1/inbox/tree/inbox/{id}` and shows its ancestors followed by its direct children. A to-do or Agent-session row uses the title already known locally; without one it shows only its kind, never the raw id. A fallback title identical to the kind is likewise said once. Rows keep their existing destinations: another item, the to-do, or the Agent conversation. Tree responses do not carry merged-list manager stamps, so the loader applies the opened item's manager to every tree item before either action uses it.
+
+- **Not the same matter** appears on every ancestor and child row whose pair ends in an Inbox item. It sends `PUT /api/v1/inbox/{lower-item-id}/parent` with the body JSON `null`, without a confirmation step, then shows the success toast and rereads the visible tree. Failures use the app's existing error feedback.
+- **Same matter as…** appears below a nonempty Thread section and in the item detail's More menu. Its system sheet searches open items in the same manager, newest first, by title or `where`, excluding the item itself and its direct children. Each row shows the title and a second line of `where · sender` (one part when the other is absent, and no repeated name). A choice sends `PUT /api/v1/inbox/{current-item-id}/parent` with the bare body `{"kind":"inbox","id":"chosen-id"}`, shows the linked-title toast and rereads the tree. Neither body is wrapped in a `parent` field.
+- `InboxLineTests` covers row titles and the lower end of every relationship; `InboxSameMatterPickerTests` covers candidates and the second line; `InboxParentTests` pins both request-body shapes and manager routing. `InboxLineageTests` exercises the visible controls against the existing `MOCK_INBOX_LINE=1` fixture (`lark:f1:100 → lark:f2:200 → lark:f3:300`), with `TEST_RUNNER_PERSONA_SHOTS` captures on phone and wide layouts.
+
+The frozen Mac layout keeps its existing lineage rows and does not gain these two new actions.
 
 ## The inbox, notifications and computers of several managers (#1850, #1863, #1919, #1834)
 
