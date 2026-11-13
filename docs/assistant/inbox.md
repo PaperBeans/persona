@@ -441,6 +441,48 @@ awaiting response → Working; failure → Needs you; otherwise `tier` (FYI / Ne
 - **Cross-atomic related items**: phase 1 does not merge them, only records `related` on both sides, at most 10, excluding same-atomic-thread items. Currently populated when a connector says an item grew from another (`InboxThing.parent` points to an item in another source / chat),
   and from `related` submitted by a handling chat with its suggestion (only existing Inbox items are accepted).
 
+## Following up (2026-11-13, #6611)
+
+An item stays one matter for as long as it goes on: a handled event takes the messages that continue it and reopens, the processing conversation names it, and the Inbox knows what it waits on and when to look at it again. Nothing here is a new table, section, handling state or endpoint; the fields are optional on the item's JSON (`inbox_follow.go`), so old apps ignore them and new apps keep today's drawing when a hub sends none. This section is the contract the lanes of #6611 build on; each behavior lands in its own PR.
+
+**Item fields**
+
+| Field | Meaning | Listed |
+| --- | --- | --- |
+| `where` | Where the matter happens, for people: a group's name, the other person of a direct chat, a repository. Empty for mail | Yes |
+| `title_by` | Who wrote `title` and `summary`: `model` (grouping), `rules` (the connector's fallback), `assistant` (the processing conversation), `user`. Once `assistant` or `user` wrote them, grouping leaves both alone | No |
+| `follow` | `{who, next, check_at, checks, due}`: who or what it waits on (the model's words), the next step, when to look at it again (RFC 3339; 24 hours when not given), how many times in a row a look found nothing new, and whether that time came with nobody to look (the AI twin off). Apps read only `who`, `next` and `check_at` | Yes |
+| `now` | The item's state key (table below), worked out from the item alone: no clock, no settings, so the list memo holds (`inbox_list_memo.go`) | Yes, never stored |
+
+**State keys.** The manager sends a key; every app puts it in words from one table, `spec/fixtures/inbox/now.json` (English, Simplified Chinese and Japanese, with the cases Go and the apps check). Without `now` (an older hub), or with a key an app does not know (a newer hub), the apps keep their own state words. When several states hold, the first wins: done, folded, a suggestion, queued (the agent record says queued and has no session yet, while `handling` already says looking), the processing state (looking, Agent working, waiting, failed), `follow_up_ask`, `check_due`, then the tier. `{reason}` is `handling.error` as it was written (already words, in the language of its time); without it the plain "AI couldn't handle it".
+
+| `now` | When | Section | English |
+| --- | --- | --- | --- |
+| `confirm_reply` / `confirm_agent` / `decide` | A reply or Agent suggestion waits; `decide` when it is handed back (`handback`) | Needs you | Waiting for you to confirm a reply / Waiting for you to start an Agent / Waiting for your decision |
+| `queued` | Queued for the AI twin | In progress (urgent: Needs you) | Queued for the AI |
+| `looking` | A processing conversation is looking | In progress (urgent: Needs you) | AI is looking |
+| `agent_working` | An Agent it started is working | In progress | Agent working |
+| `waiting` | Waiting on the other side | In progress | Waiting for {who} · look again {time}: {next} (parts left out when empty; no `who`: Waiting for a reply) |
+| `follow_up_ask` | Three looks in a row found nothing new | Needs you | Checked 3 times with no news. Keep following? |
+| `check_due` | The time to look again came while the AI twin was off | Needs you | Time to look again: {next} |
+| `failed` | The AI could not finish | Needs you | AI couldn't finish: {reason} |
+| `needs_you` / `fyi` / `folded` | Nothing prepared, by tier | Needs you / FYI / Folded | Needs you / FYI / Folded |
+| `done_replied` / `done_manager` / `done_user` / `done_read` / `done_dismissed` / `done_muted` / `done_superseded` | Done, by `done_by`; a muted item is `read` and its newest `done` entry has `by: "muted"` | Done | You replied / Assistant checked: nothing to do / You marked it done / Read elsewhere / You dismissed it / Muted / Replaced by a newer item |
+
+**Chain.** An entry may carry `via`, where its step happened: a source's id (the item's `source`, or another source's), `agent`, `assistant` or `user`; entries from before have none and the apps go by `kind`. A `done` entry may carry `by`, how it filed the item as a value (a `done_by`, or `muted`). New kinds, each with its `text` written by the manager so older apps draw it generically:
+
+| kind | Recorded when |
+| --- | --- |
+| `reopened` | New messages reopened a handled event |
+| `waiting` | The processing conversation waits on the other side, until a time to look again |
+| `check` | It was looked at again when that time came |
+| `agent_stopped` | An Agent started for it stopped, with its last words |
+| `reported` | A step the assistant or an Agent says it took (an email it sent itself) that the program did not see: drawn apart from the program's own steps |
+
+Handing an item to a conversation or an Agent records `handling` or `agent` with the session's link (an app that sent the text to a new conversation or an Agent itself records it with `POST /api/v1/inbox/{id}/handoff` and `{session: {machine_id, session_id}, kind: "agent" | "conversation", title, client_id}` without `text`: nothing is sent, and a hub from before answers 400 because `text` is missing, so nothing goes to the main conversation by mistake); a reply the user made in the source is `self_replied` with the source's `via`. Consecutive `received` entries merge as they are written (`count` adds up, `at` is the newest, `messages` keeps the newest ten), so a busy group does not push older steps out of the 50 kept. The apps show the three newest steps folded and every step expanded, with icons by `via` (`spec/fixtures/inbox/timeline.json`); the row's third line and the detail's small line read `where · sender: preview`, with `where` said once when it is the sender (a direct chat) (`spec/fixtures/inbox/row.json`). `spec/fixtures/inbox/showcase.json` is the scenario every client draws for side-by-side screenshots.
+
+**Read and replied state from a grouping connector.** `hub.capabilities` gains `inbox_group_state` (`extension.HubInboxGroupState`), listed once the manager handles it. With it, a grouping connector may hand, in its collect answer, one thing per event the user read or replied to in the source: `{thread, kind, id: <the event's item id>, group: {batch: "", new: []}, read, done: "" | "replied", at, last}`, with no messages. The manager takes only `read` and `done` from it, never the title, summary, tier, count or meta. An event with a processing conversation records `self_replied` and wakes it to close the matter or wait on the other side; one without is filed: replied always, read only when it is FYI or folded. The same capability says the hub takes a fallback plan's messages for events already handled. Without it a connector behaves as before.
+
 ## AI twin: handling chats and suggestions (from phase 1, 2026-11-05)
 
 The AI twin becomes a **handling chat**. With `inbox.agent.enabled` on, every Needs you item goes to the manager (no longer filtered by model 2), **one chat per item**,
@@ -516,6 +558,7 @@ conversation the item was handed to ("Item actions", Hand to AI), rejecting othe
 
 - `confirm`: execute exactly what is shown; supplied `text` replaces suggestion text (edit then confirm; chain `edited: true`, chat learns the changed text).
 - `reject`: record rejection, clear the suggestion, and return to the handling chat to reconsider. `instruct` requires `text` (such as "Do not reply this way; ask about timing first"; absent text returns 400), records your words, clears the suggestion, and asks the chat for a new one.
+  Without a current suggestion, `instruct` with `version: 0` records your words and wakes or queues the handling chat; `confirm`, `reject`, and nonzero versions still return `suggestion_stale`.
 - Responses: `200` item; `409 {"code":"suggestion_stale","error":"建议已更新","item":{…}}` ("Suggestion updated": version is no longer current or no suggestion exists; App shows the notice and redraws from the returned item,
   including the second tap on the same suggestion); `409 inbox_item_done`; `409 mail_reply_target_changed` (the message the reply suggestion answered is no longer the item's target; nothing was sent); `400`; `403`: reply-only devices (Watch) may confirm only replies / conclusions, as text (no Agent creation, handback, rejection, instructions, document-status changes, or `/agent …` sends;
   hub allows the route for Watch, while the manager checks the actual suggestion); `502 assistant_in_doubt` (as `/reply`: it may already have sent; confirming again gives 409); other 502 errors.

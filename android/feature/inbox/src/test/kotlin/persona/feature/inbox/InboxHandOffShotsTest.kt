@@ -90,6 +90,7 @@ class InboxHandOffShotsTest {
         assertEquals(0, repository.doneCalls)
         assertEquals("laptop", repository.requests.single().machineId)
         assertEquals("agent", repository.requests.single().sessionId)
+        assertEquals("Example agent", repository.requests.single().targetTitle)
         assertEquals(listOf(ChatRoute("laptop", "agent", ConversationKind.Agent,
             source = RouteSource.InboxItem("mail:example"))), navigator.routes)
         assertTrue(navigator.tabs.isEmpty())

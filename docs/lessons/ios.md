@@ -2323,3 +2323,27 @@ closures in `AssistantView.sidebar(column:)`, and Knowledge, Scheduled Tasks, Pr
 way into a place goes through `show`, and a UI test walks it on the iPad too (`testAPlaceKeepsItsStackBesideTheIPadColumn`).
 Against a mock hub XCUITest calls the shell's switch not hittable under the status window, which takes no touches: tap it
 with `ShellFinger` and check the probe, never `isHittable` (`DrawerSwipeTests` failed on `main` for this).
+
+## A modal sheet presented on RootView's window relays out the chat under it (2026-11-13, #6235)
+
+Presenting a `UISheetPresentationController` (`detents = [.medium(), .large()]`) on the shell window's `rootViewController`
+(`UIHostingController<RootView>`) dims `tintAdjustmentMode` and updates the modal card backing traits on `RootView`'s
+hosting view. Inside `-[UISheetPresentationController _sheetLayoutInfoLayout:]` → `-[UIView layoutBelowIfNeeded]`, UIKit
+synchronously flushes `RootView`'s dirtied SwiftUI graph (`ChatView`, `ChatTranscript`, `ChatFooter`, `ShellSwitch`,
+`ShellComposerBar`) and re-rasterizes its text layers on both open and close, even when the sheet itself is empty.
+
+- Present reusable modal panels in a dedicated scene `UIWindow` (`AttachSheetWindow` in
+  `apple/Persona/Views/Chat/AttachSheet.swift`, `windowLevel = .normal + 0.25`, below `ScreenWindow` and `ToastWindow`)
+  whose `rootViewController` is a bare `UIViewController`, so the sheet dims an empty `UIView` and `ChatView` evaluates
+  zero bodies.
+- Copy `overrideUserInterfaceStyle` and `tintColor` from the shell window, call `Keyboard.dismiss()` before `makeKey()` so
+  closing the sheet does not restore the composer's keyboard, and hide the sheet window plus restore `makeKey()` to the
+  previous key window (only if the sheet window is still key) before running any follow-up presentation on the shell window.
+- Keep one stable `UIHostingController` `rootView` fed by an `@Observable` state object instead of reassigning `vc.rootView`,
+  defer a cold `LazyVGrid` mount to a later frame via `LiftFrames` (`apple/Persona/Views/Chat/MessageLift.swift`, skipping one
+  display-link tick), cap warm retention to a single controller across the process, reset the `ScrollView` identity after a
+  scrolled dismissal so off-screen cell state is freed, and evict warm resources on memory warnings.
+- `UIViewRepresentable.updateUIView` runs inside an active `@Observable` tracking scope (`PlatformViewChild.updateValue()`).
+  Reading and mutating the same `@Observable` property there (such as `&+= 1` via `_modify`) subscribes the representable to
+  its own write and causes an endless `updateUIView` loop; compare against `@ObservationIgnored` shadow fields and write via
+  pure setter assignment.

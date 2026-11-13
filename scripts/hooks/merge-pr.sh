@@ -5,11 +5,26 @@
 # with this machine's private values (docs/operations/testing.md "Privacy scan"), then squash-merges exactly the head
 # and the message it scanned and deletes the branch. CI cannot do this: it does not have the values.
 set -euo pipefail
+if [ -z "${PR_WATCH_MERGE_LOCKED:-}" ]; then
+  export PR_WATCH_MERGE_LOCKED=1
+  root="$(git rev-parse --show-toplevel)"
+  git_common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)"
+  python3 - "$git_common/persona-pr-merge.lock" "$root/scripts/hooks/merge-pr.sh" "$@" <<'PY'
+import fcntl, os, subprocess, sys
+fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600)
+fcntl.flock(fd, fcntl.LOCK_EX)
+with open(sys.argv[2], "rb") as source:
+    result = subprocess.run(["bash", "-s", "--"] + sys.argv[3:], stdin=source, env=os.environ)
+raise SystemExit(result.returncode)
+PY
+  exit "$?"
+fi
 pr="${1:?usage: scripts/hooks/merge-pr.sh <PR number>}"
 case "$pr" in *[!0-9]*) echo "merge-pr: not a PR number: $pr" >&2; exit 2 ;; esac
 root="$(git rev-parse --show-toplevel)"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/merge-pr.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
+# The snapshot and all later writes run while holding persona-pr-merge.lock.
 # One snapshot, so every field comes from the same moment. The squash message is passed to the merge instead of being
 # left to GitHub, which would take the title and body as they are when it merges, edits after the scan included.
 gh pr view "$pr" --json headRefOid,headRefName,isCrossRepository,baseRefName,title,body > "$tmp/pr.json"

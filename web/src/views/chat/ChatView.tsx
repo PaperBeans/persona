@@ -148,8 +148,9 @@ const ChatSearch = lazyDialog(() => import("./ChatSearch").then((m) => m.ChatSea
 const LinkTodoDialog = lazyDialog(() => import("../LinkTodoDialog").then((m) => m.LinkTodoDialog));
 const SharingDialog = lazyOverlay(() => import("../../sharing/SharingDialog").then((m) => m.default));
 const TerminalPanel = lazy(() => loadTerminal().then((m) => ({ default: m.TerminalPanel })));
-// only on an Agent's page opened from a conversation's hand-off card (#5096): not part of the first screen
+// Full pages opened from a conversation's hand-off card or belonging to an Inbox item load their way-back strip on demand.
 const HandoffBack = lazy(() => import("./HandoffBack").then((m) => ({ default: m.HandoffBack })));
+const InboxBack = lazy(() => import("./InboxBack").then((m) => ({ default: m.InboxBack })));
 // the plan's pill and its flyout load once a plan wants it shown, off the first screen
 const PlanPill = lazy(() => import("./PlanCard").then((m) => ({ default: m.PlanPill })));
 // "Wrap up: <item>" over the main conversation's composer (#5932): with the hand-off card's chunk, not the first screen's
@@ -282,8 +283,13 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   landAt?: string;
 }) {
   const { session, detail, retry: retryDetail } = useRuntimeSession(mid, sid);
-  // opened from a conversation's hand-off card (#5096): the way back to it, until put away
-  const [cameFrom, setCameFrom] = useState<HandoffFrom | undefined>(() => (inPage && !assistant ? handoffFrom() : undefined));
+  // The main conversation is always Persona (#1313): not its first message, the node's title for it.
+  const mainConversation = useStore((s) => s.assistant?.main);
+  const isMain = Boolean(assistant && (mainCache || sid === mainConversation));
+  // Full Agent pages and non-main Persona conversations may offer a way back; side panels, Team panels and the main chat do not.
+  const backPage = Boolean(!embedded && !chrome && (inPage || (assistant && !isMain)));
+  // A conversation's hand-off strip wins over the Inbox item's when both are present; null keeps it hidden after ✕.
+  const [cameFrom, setCameFrom] = useState<HandoffFrom | null | undefined>(() => (backPage ? handoffFrom() : undefined));
   // the main conversation, with a hub that clears its context in place: /clear in its command list (#5095)
   const clears = useStore((s) => Boolean(assistant) && s.assistant?.main === sid && hubHas(s.features, CLEAR_MAIN_FEATURE));
   // an archived agent (lib/agent-archives.ts) is not in the lists: its chat says so and offers Restore
@@ -456,9 +462,6 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
     () => (switchable ? setView("term") : navigate({ name: "session", mid, sid, view: "term" })),
     [switchable, setView, mid, sid],
   );
-  // The main conversation is always Persona (#1313): not its first message, the node's title for it.
-  const mainConversation = useStore((s) => s.assistant?.main);
-  const isMain = Boolean(assistant && (mainCache || sid === mainConversation));
   // No row for this chat yet is not "you may not write": the box takes typing and says it is connecting, or, when the hub
   // answered that the session is gone, says that instead. Only the main conversation may already send; every other chat
   // waits for its row, because the node would start an Agent for an id nobody has. A lookup that found nothing leaves
@@ -1816,7 +1819,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
       />}
       {isMain && !embedded && <MainRuntimeSlot sid={sid} />}
       {!embedded && banner}
-      {cameFrom && <Suspense fallback={null}><HandoffBack from={cameFrom} onDismiss={() => setCameFrom(undefined)} /></Suspense>}
+      {backPage && (cameFrom ? <Suspense fallback={null}><HandoffBack from={cameFrom} onDismiss={() => setCameFrom(null)} /></Suspense> : cameFrom === undefined ? <Suspense fallback={null}><InboxBack key={`${mid}/${sid}`} mid={mid} sid={sid} session={session} /></Suspense> : null)}
       {/* a known session keeps its chat: a failed background read is retried quietly (runtime-session.ts) */}
       {archivedHere ? <ArchivedNotice session={archivedHere} /> : noDetails && <SessionDetailNotice error={detail.error} retry={retryDetail} />}
 

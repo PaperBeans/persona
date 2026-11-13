@@ -258,7 +258,7 @@ struct AssistantProfileView: View {
                         renameError = nil
                         renaming = true
                     } label: {
-                        Image(systemName: Theme.Icon.edit)
+                        ThemedIcon(Theme.Icon.edit)
                             .font(Theme.Font.heading)
                             .foregroundStyle(.secondary)
                             .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)

@@ -544,6 +544,37 @@ extension Launcher {
     }
 }
 
+/// The launcher / model / effort picked for one of the assistant's conversations, which its next messages run on
+/// (#5033, `model_pick` on the session; docs/assistant/model-config.md "A conversation's own model"). Absent: the
+/// conversation follows Model configuration › Main chat (the main one) or keeps what it started with.
+nonisolated struct ModelPick: Codable, Hashable, Sendable {
+    var launcher: String
+    var model: String?
+    var effort: String?
+}
+
+/// A launcher or provider the main chat can't run on a machine, and why in the hub's words
+/// (`unavailable` of `GET …/machines/{id}/launchers?purpose=assistant`, #5033).
+nonisolated struct UnavailableLauncher: Codable, Identifiable, Hashable, Sendable {
+    var name: String
+    var displayName: String?
+    /// launcher | api
+    var kind: String?
+    var agent: String?
+    /// A direct API provider's protocol: messages | responses | chat.
+    var api: String?
+    /// The hub's machine-readable refusal code (`launcher_out_of_scope`, `api_protocol`…).
+    var code: String?
+    /// The refusal, in the request's language.
+    var reason: String
+    var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name, kind, agent, code, reason
+        case displayName = "display_name", api
+    }
+}
+
 /// What a launcher's agent offers in its own /model menu (`GET /api/v1/machines/{id}/launchers/{name}/models`,
 /// docs/assistant/model-config.md「Choosing a model for a new Agent」): Claude Code's aliases and its gateway's models, or Codex's model/list.
 nonisolated struct LauncherModels: Codable, Hashable, Sendable {
@@ -767,6 +798,9 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     /// The levels `effort` may be set to when they are not Claude Code's (`SessionModes.effortOptions`): a Codex thread
     /// the hub drives through its app-server, where only the effort changes (node/codex_effort.go). Nil elsewhere.
     var efforts: [String]? = nil
+    /// The launcher / model / effort picked for this assistant conversation (#5033, `model_pick`); nil: it follows the
+    /// Main chat default or keeps what it runs. Only the manager names it, on assistant conversations.
+    var modelPick: ModelPick? = nil
     /// What the model saw in the agent's latest reply, and the model's window (#3289, node: `context_tokens` /
     /// `context_window`, #2430); nil while the node cannot tell (no reply yet, a window it does not know, an older node).
     var contextTokens: Int? = nil
@@ -1109,6 +1143,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         case listWaiting = "waiting", listBackgroundCount = "background_count", listRunningSubagents = "running_subagents", listRunningWorkflows = "running_workflows"
         case listBackgroundTasksCount = "background_tasks_count", listWorkflowProgress = "workflow_progress"
         case title, cwd, status, launcher, model, agent, effort, efforts, capabilities, attached
+        case modelPick = "model_pick"
         case canFork = "can_fork"
         case sourceKind = "source_kind", sourceThreadID = "source_thread_id", sourceInstanceID = "source_instance_id",
              parentThreadID = "parent_thread_id", readOnlyReason = "read_only_reason"

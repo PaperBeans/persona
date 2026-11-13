@@ -1,9 +1,10 @@
 import XCTest
 
-/// A direction row's one activity mark (#6626): a 常驻 lead spins exactly while something under it runs (the hub's
-/// `running`, not its working count) and says in words only what waits on you ("等你 N"), never "在做 N"; the To-dos
-/// page's 常驻 sections end the same way. Against scripts/mock/mock_hub.py with MOCK_LEADERS=1 (PERSONA_LEADERS_HUB),
-/// whose tree has a lead with an Agent at work (基础设施) and one counting a working to-do whose Agent has stopped (增长).
+/// A direction row's one activity mark (#6626): a standing (「常驻」) lead spins exactly while something under it runs
+/// (the hub's `running`, not its working count) and says in words only what waits on you (「等你 N」), never 「在做 N」;
+/// the To-dos page's standing sections end the same way. Against scripts/mock/mock_hub.py with MOCK_LEADERS=1
+/// (PERSONA_LEADERS_HUB), whose tree has a lead with an Agent at work (「基础设施」) and one counting a working to-do whose
+/// Agent has stopped (「增长」).
 /// SHOT_DIR keeps the screenshots.
 final class DirectionRowsUITests: XCTestCase {
     private var hub: String!
@@ -71,7 +72,7 @@ final class DirectionRowsUITests: XCTestCase {
         let growth = lead("增长")
         XCTAssertTrue(growth.exists, "no 增长 lead")
         XCTAssertFalse(growth.label.contains("工作中"), "增长 spins with nothing running under it: \(growth.label)")
-        // One meaning, one expression: no lead says 在做 N beside its spinner.
+        // One meaning, one expression: no lead says 「在做 N」 beside its spinner.
         let leads = app.buttons.matching(identifier: "sidebar-conversation").allElementsBoundByIndex
         for row in leads where ["基础设施", "增长", "支付对账", "Persona 产品"].contains(where: { row.label.hasPrefix($0) }) {
             XCTAssertFalse(row.label.contains("在做"), "a lead still says 在做: \(row.label)")
@@ -91,7 +92,7 @@ final class DirectionRowsUITests: XCTestCase {
         for h in headers {
             XCTAssertFalse(h.label.contains("在做"), "a 常驻 section still says 在做: \(h.label)")
         }
-        // the spinner exactly where something runs: 基础设施 has an Agent at work, 增长's working to-do has none
+        // the spinner exactly where something runs: 「基础设施」 has an Agent at work, 「增长」's working to-do has none
         let infra = headers.first { $0.label.hasPrefix("基础设施") }
         XCTAssertTrue(infra?.label.contains("工作中") == true, "基础设施's section does not spin: \(infra?.label ?? "missing")")
         let growth = headers.first { $0.label.hasPrefix("增长") }

@@ -153,6 +153,88 @@ class InboxHandOffRepositoryTest {
         }
     }
 
+    @Test fun agentHandOffRecordsInTheBackgroundForTheItemsManager() = runTest {
+        val directory = Files.createTempDirectory("inbox-agent-handoff-record").toFile()
+        val recordingStarted = CompletableDeferred<Unit>()
+        val finishRecording = CompletableDeferred<Unit>()
+        val recordingFinished = CompletableDeferred<Unit>()
+        try {
+            AssistantManagerChoice.choose("hub", null, "assistant")
+            val transport = ItemsTransport(buildJsonArray {
+                add(buildJsonObject { put("id", "item"); put("kind", "mail"); put("title", "Example"); put("manager", "m-2") })
+            })
+            val agents = RecordingSender()
+            val main = RecordingMain()
+            val calls = mutableListOf<List<Any?>>()
+            transport.onRecordAgentHandOff = { item, session, title, client ->
+                assertEquals(1, agents.sent.size) // Recording starts only after the outbox accepts the message.
+                calls += listOf(item, session, title, client, currentCoroutineContext()[RequestManager]?.id)
+                recordingStarted.complete(Unit)
+                try {
+                    finishRecording.await()
+                    buildJsonObject {
+                        put("item", buildJsonObject { put("id", "item"); put("kind", "mail"); put("title", "Recorded") })
+                    }
+                } finally { recordingFinished.complete(Unit) }
+            }
+            val repository = repository(transport, directory, backgroundScope, main = main, agents = agents)
+            repository.snapshot.first { it.contentSource != null }
+            repository.refresh()
+            val id = repository.snapshot.value.records.single().item.id
+            val key = SessionKey("laptop", "agent")
+            val result = withTimeout(1_000) {
+                repository.handOff(InboxHandOffRequest(id, "Handle this", "laptop", "agent", "op-agent",
+                    targetTitle = "Example agent"))
+            }
+            assertEquals(key, result) // The still-running record request must not hold this return.
+            assertEquals(listOf(Triple(key, "Handle this", "op-agent")), agents.sent)
+            recordingStarted.await()
+            assertEquals(listOf<List<Any?>>(listOf("item", key, "Example agent", "op-agent", "m-2")), calls)
+            assertEquals("Example", repository.snapshot.value.records.single().item.title)
+            finishRecording.complete(Unit)
+            recordingFinished.await()
+            assertTrue(main.sent.isEmpty())
+            assertEquals("Example", repository.snapshot.value.records.single().item.title) // The next refresh, not this response, updates the row.
+            assertEquals("m-2", repository.snapshot.value.records.single().manager)
+        } finally {
+            finishRecording.complete(Unit)
+            AssistantManagerChoice.reset()
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test fun agentHandOffRecordingFailuresNeverResendOrFailTheAcceptedMessage() = runTest {
+        val directory = Files.createTempDirectory("inbox-agent-handoff-record-failure").toFile()
+        try {
+            val transport = ItemsTransport(JsonArray(emptyList()))
+            val agents = RecordingSender()
+            val main = RecordingMain()
+            val failures = listOf(HttpFailure(400), java.io.IOException("offline"), HttpFailure(502),
+                UnsupportedOperationException("old transport"))
+            var attempts = 0
+            val repository = repository(transport, directory, backgroundScope, main = main, agents = agents)
+            val key = SessionKey("laptop", "agent")
+            failures.forEachIndexed { index, failure ->
+                val attempted = CompletableDeferred<Unit>()
+                transport.onRecordAgentHandOff = { _, _, _, _ ->
+                    attempts++
+                    assertEquals(index + 1, agents.sent.size)
+                    try { throw failure } finally { attempted.complete(Unit) }
+                }
+                val result = withTimeout(1_000) {
+                    repository.handOff(InboxHandOffRequest("item", "Handle this", "laptop", "agent",
+                        "op-$index", targetTitle = "Example agent"))
+                }
+                assertEquals(key, result)
+                attempted.await()
+                assertEquals(index + 1, attempts)
+            }
+            assertEquals(failures.size, attempts)
+            assertEquals(failures.indices.map { Triple(key, "Handle this", "op-$it") }, agents.sent)
+            assertTrue(main.sent.isEmpty())
+        } finally { directory.deleteRecursively() }
+    }
+
     /** Another manager's item handed to Persona with no Agent: its own manager's main conversation, not this phone's main queue. */
     @Test fun anotherManagersItemGoesToItsOwnMainConversation() = runTest {
         val directory = Files.createTempDirectory("inbox-handoff-manager").toFile()
@@ -350,6 +432,11 @@ class InboxHandOffRepositoryTest {
             throw UnsupportedOperationException("Inbox hand-off route unavailable")
         }
         override suspend fun handOff(itemId: String, text: String, clientId: String) = onHandOff(itemId, text, clientId)
+        var onRecordAgentHandOff: suspend (String, SessionKey, String, String) -> JsonObject = { _, _, _, _ ->
+            throw UnsupportedOperationException("Inbox Agent hand-off route unavailable")
+        }
+        override suspend fun recordAgentHandOff(itemId: String, session: SessionKey, title: String, clientId: String) =
+            onRecordAgentHandOff(itemId, session, title, clientId)
         override suspend fun inbox() = buildJsonObject { put("items", items); triage?.let { put("triage", it) } }
         override suspend fun setDone(itemId: String, done: Boolean) = JsonObject(emptyMap())
         override suspend fun reply(itemId: String?, feedId: String?, text: String, clientId: String) = JsonObject(emptyMap())
