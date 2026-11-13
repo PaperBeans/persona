@@ -426,6 +426,24 @@ It also lists the transcript every unarchived session of the index runs, however
 - **Launcher and model:** the app resumes the session with its own settings. A launcher or model picked on the phone for resuming does not apply to it.
 - Tests: `node/claudedesktop_open_test.go`.
 
+### New sessions in the desktop app (#5480)
+
+`node/claudedesktop_new.go`. New Agent with the launcher `claude-desktop` starts the session in Claude's desktop app: it is in the app's sidebar under its folder, and the app runs it from the first message on. No client needs a release: it is a launcher like a runtime's.
+
+- **Offered:** `launchers.list` has `{name: "claude-desktop", source: "claude_desktop", agent: "claude"}` on a Mac whose desktop app keeps Claude Code sessions (`claude-code-sessions` in either data directory) and where the node finds the `claude` CLI. A login-shell launcher of that name runs instead, as for a runtime's. It needs no terminal engine: the start goes to the app before the engine check.
+- **Why this way:** the app's new-session links only fill its composer (a prompt from outside is never sent without the person at the computer). The app does import a session the CLI wrote, at `claude://resume?session=<transcript id>` (what the CLI's `/desktop` hands over with): the transcript becomes one of its sessions (`local_<id>`), and the app runs it from then on.
+- **The start:**
+  1. The CLI writes the session in the folder: `claude -p --session-id <new id> "/rename <title>"` runs a local command only, so there is no model request and the terminal's `claude` need not be signed in (the app runs the session on its own provider). It runs without the variables of a running Claude Code and the assistant's (`agentenv.go`) and without `CLAUDE_CONFIG_DIR` (the app reads `~/.claude`). The title is the first line of the first message, spaces folded, at most 40 characters, or of the start's `name_hint` when the message goes after the start (as the apps send it); with neither, the folder's name. The app gives an imported session no title of its own (measured: an import seeded with `/cost` stayed untitled after its first turn).
+  2. The app is asked to import it (`open -g`; the app comes to the front and shows the session all the same), and the node waits up to 15 seconds for its index entry. Then the start is answered.
+  3. The first message goes as any message to a session of the app (`send` → `sendThroughDesktopApp` above): the app starts the session's claude with its inbox, and the message goes in.
+  - Measured 2026-11-12 (Claude.app 5.1231.2 on a third-party provider, Claude Code 2.1.311): the start answered after 3.4 s; the first message was taken 2 s later and answered 6 s after the start.
+- **The folder:** a folder picked that is not there yet is made when the folder it goes in is there (New Agent's new folder); a relative path, a file, or a folder whose parent is missing is refused. With none (`cwd` empty), the session runs in the scratch folder `临时会话` in the folder that holds most of the app's sessions' folders (none yet: `~/Documents`, or the home folder), made when it is missing; the sessions started there are one group in the app's sidebar.
+- **What the app decides:** the session runs on the app's provider, model, permission mode and effort, as one the app opens itself (an imported session starts in the app's default mode). `launchers.models` answers no models, with `locked` saying so; Settings › Models' Test has nothing to run.
+- **Refused before anything is written:** a read-only plan start (`readonly_unsupported`: the app runs its own mode, and an approval waiting there could not be answered from the phone), a first message that is a slash command (`peer_command`: the inbox runs none), a folder that is not there, a `secret_ticket` (`secret_env_agent`: no terminal to start through). An import that does not come in time is `desktop_open_failed`; the transcript the CLI wrote stays, and the app may still import it later.
+- A first message that does not go in is logged on the node: the session is in the app and the list, and the message can be sent again.
+- **No terminal runs it:** Run Agent Here with it and a switch of a running session to it are refused (a terminal would type `claude-desktop` into a shell); a resume that names it (New Agent's launcher, which the hub sends for a session nothing says the launcher of) runs plain `claude` (`terminalLauncher`).
+- Only macOS: the index is read there alone. Tests: `node/claudedesktop_new_test.go`.
+
 ## Blocking configuration directories (#676)
 
 Platform sessions sharing a configuration directory with personal sessions (cannot separate directories) are filtered by that platform's extension using in-session markers; see `docs/extensions/extensions.md` (“Agent filtering”).

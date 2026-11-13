@@ -58,6 +58,9 @@ func (n *Node) launcherModels(ctx context.Context, name, agentType string, refre
 	if name != "claude" && !shellcmd.NameRe.MatchString(name) {
 		return proto.LauncherModels{}, fmt.Errorf("invalid launcher %q", name)
 	}
+	if isDesktopLauncher(name) { // the app runs its session on the model it picks (claudedesktop_new.go)
+		return proto.LauncherModels{Agent: "claude", Models: []proto.AgentModel{}, Locked: desktopModelLocked}, nil
+	}
 	if res, ok := n.runtimeLauncherModels(name); ok { // a runtime's launcher: static advertisement or native discovery
 		return n.liveRuntimeModels(ctx, name, refresh, res)
 	}
@@ -142,6 +145,10 @@ func (n *Node) knownLauncher(ctx context.Context, name string) bool {
 	}
 	if _, ok := n.managedLauncher(name); ok {
 		return true
+	}
+	if isDesktopLauncher(name) {
+		_, offered := n.withDesktopLauncher(nil)
+		return offered
 	}
 	if n.runtimes.launcherRuntime(name) != nil || shellLauncherNames()[name] {
 		return true // the shell's last list will do: no login shell to wait for when the models are kept anyway

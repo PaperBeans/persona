@@ -224,6 +224,9 @@ func (n *Node) runAgentInPane(ctx context.Context, pane, launcher string) (*prot
 	if launcher == "" {
 		return nil, errors.New("launcher is required")
 	}
+	if isDesktopLauncher(launcher) {
+		return nil, errDesktopLauncherInTerminal
+	}
 	p, err := n.listedPane(ctx, pane)
 	if err != nil {
 		return nil, err

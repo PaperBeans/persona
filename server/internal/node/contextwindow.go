@@ -11,14 +11,15 @@ import (
 // and, for Codex, the window its rollout records. Nothing here reads a file.
 
 const (
-	claudeWindow   = 200_000   // every Claude model without the 1M variant
-	claudeWindow1M = 1_000_000 // the [1m] variants
+	claudeWindow   = 200_000   // a Claude model's window without the 1M variant
+	claudeWindow1M = 1_000_000 // the [1m] variants, and the models whose window is 1M without it
 )
 
 // contextWindowOf is the model's context window in tokens, 0 when it cannot be told. recorded is the window the
-// transcript itself says (Codex); otherwise Claude models are known by id: a "[1m]" suffix means the 1M variant,
-// and so does a reply that already saw more than 200k (the transcript records the id without the suffix). A model
-// that is not a Claude one (a gateway's own) has no window we know: the apps then show the tokens only.
+// transcript itself says (Codex); otherwise Claude models are known by id: a "[1m]" suffix means the 1M variant, so
+// does a model whose window is 1M without it (claudeNative1M), and so does a reply that already saw more than 200k
+// (the transcript records the id without the suffix). A model that is not a Claude one (a gateway's own) has no window
+// we know: the apps then show the tokens only.
 func contextWindowOf(model string, recorded, used int) int {
 	if recorded > 0 {
 		return recorded
@@ -28,12 +29,57 @@ func contextWindowOf(model string, recorded, used int) int {
 	case strings.Contains(id, "[1m]"):
 		return claudeWindow1M
 	case strings.HasPrefix(id, "claude-"):
-		if used > claudeWindow {
+		if used > claudeWindow || claudeNative1M(id) {
 			return claudeWindow1M
 		}
 		return claudeWindow
 	}
 	return 0
+}
+
+// claudeNative1M reports a Claude model whose window is 1M without the "[1m]" opt-in, as Claude Code's own model list
+// has them (2.1.311, #5758): Opus from 4.7, Sonnet and Haiku from 5, every Fable and Mythos. Opus and Sonnet 4.6 run
+// with 200k there unless "[1m]" is chosen, though the API (and the model catalog, models_catalog.json) allows them 1M.
+// id is lower case, claude-<family>-<major>[-<minor>], perhaps with a date ("-20250929", or Vertex's "@20250929").
+// Older ids that put the version first (claude-3-5-sonnet-…) are 200k.
+func claudeNative1M(id string) bool {
+	id, _, _ = strings.Cut(id, "@")
+	parts := strings.Split(strings.TrimPrefix(id, "claude-"), "-")
+	if len(parts) < 2 {
+		return false
+	}
+	major, ok := modelVersionPart(parts[1])
+	if !ok {
+		return false
+	}
+	minor := 0
+	if len(parts) > 2 {
+		minor, _ = modelVersionPart(parts[2]) // a date, or no number, is no minor version
+	}
+	switch parts[0] {
+	case "fable", "mythos":
+		return true
+	case "opus":
+		return major > 4 || major == 4 && minor >= 7
+	case "sonnet", "haiku":
+		return major >= 5
+	}
+	return false
+}
+
+// modelVersionPart is one component of a model's version: one or two digits (a date's eight are not).
+func modelVersionPart(s string) (int, bool) {
+	if s == "" || len(s) > 2 {
+		return 0, false
+	}
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n, true
 }
 
 // setContext copies cached title provenance and cumulative output alongside the context fields.

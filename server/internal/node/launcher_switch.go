@@ -391,6 +391,9 @@ func (n *Node) checkSwitchLauncher(ctx context.Context, id, launcher, model stri
 	if h, _ := n.startRuntime(launcher); h != nil {
 		return "", false, refusal(proto.CodeSwitchOtherAgent, fmt.Sprintf("launcher %s belongs to a runtime, not to Claude Code", launcher), nil)
 	}
+	if isDesktopLauncher(launcher) { // it starts a new session in the app, never this one in its terminal
+		return "", false, refusal(proto.CodeSwitchOtherAgent, fmt.Sprintf("launcher %s starts a new session in Claude's desktop app, not this one in its terminal", launcher), nil)
+	}
 	if agent := n.launcherModelsAgent(ctx, launcher, ""); agent != "claude" {
 		return "", false, refusal(proto.CodeSwitchOtherAgent, fmt.Sprintf("launcher %s runs %s, not Claude Code", launcher, agent), nil)
 	}
