@@ -111,7 +111,7 @@ export function FileInfoDialog({
         <Button tone="primary" onClick={onClose}>{t("files-info.done")}</Button>
       </>
     }>
-      <div className="flex flex-col gap-3 text-[13px]" data-testid="file-info">
+      <div className="flex flex-col gap-3 text-xs" data-testid="file-info">
         <p className="text-ink-2">{kind}</p>
         {symlink && says !== undefined && (
           <Group title={t("files-info.link")}>
@@ -146,7 +146,7 @@ export function FileInfoDialog({
           </Group>
         )}
         {loading && <Loading label={t("files-info.loading")} />}
-        {note && <p className="text-[12px] text-ink-3">{note}</p>}
+        {note && <p className="text-xs text-ink-3">{note}</p>}
       </div>
     </Dialog>
   );
@@ -165,7 +165,7 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   return (
     <div className="flex items-start justify-between gap-4 px-3 py-2">
       <span className="shrink-0 text-ink-2">{label}</span>
-      <span className={mono ? "min-w-0 text-right font-mono text-[12px] break-all text-ink" : "min-w-0 text-right text-ink"}>{value}</span>
+      <span className={mono ? "min-w-0 text-right font-mono text-xs break-all text-ink" : "min-w-0 text-right text-ink"}>{value}</span>
     </div>
   );
 }

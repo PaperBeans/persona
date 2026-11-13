@@ -24,7 +24,7 @@ export function ForwardGroupBar({ forwards, onRemove }: { forwards: readonly Pic
   return (
     <Bar heading={heading} title={[heading, ...lines].join("\n")} route={forwards.find((f) => f.route)?.route} remove={onRemove && { label: t("chat-forwardto.remove_group"), run: onRemove }} group={forwards.length}>
       {lines.slice(0, GROUP_LINES).map((l, i) => (
-        <span key={i} className="line-clamp-1 text-[12.5px] leading-[1.5] text-ink-2 [overflow-wrap:anywhere]">
+        <span key={i} className="line-clamp-1 text-xs leading-[1.5] text-ink-2 [overflow-wrap:anywhere]">
           {l}
         </span>
       ))}
@@ -66,7 +66,7 @@ export function ForwardGroupBlock({ group }: { group: Context[] }) {
     <div className="flex min-w-0 gap-2 rounded-[8px] bg-ink/[0.05] py-1.5 pr-2.5 pl-2 whitespace-normal" data-forward data-forward-group={group.length}>
       <span aria-hidden className="w-[3px] shrink-0 self-stretch rounded-full bg-ink/20" />
       <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
-        <span className="flex max-w-full min-w-0 items-center gap-1 text-[12px] font-medium whitespace-nowrap text-ink-3">
+        <span className="flex max-w-full min-w-0 items-center gap-1 text-xs font-medium whitespace-nowrap text-ink-3">
           <Icon name="forward" size={12} className="shrink-0" />
           <span className="min-w-0 truncate">{heading}</span>
         </span>
@@ -77,7 +77,7 @@ export function ForwardGroupBlock({ group }: { group: Context[] }) {
           <button
             type="button"
             onClick={() => setAll(true)}
-            className="-ml-1 rounded-[6px] px-1 text-[12px] font-medium whitespace-nowrap text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink-2"
+            className="-ml-1 rounded-[6px] px-1 text-xs font-medium whitespace-nowrap text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink-2"
           >
             {t("chat-forwardto.more", { count: more })}
           </button>
@@ -104,7 +104,7 @@ function GroupLine({ c }: { c: Context }) {
         aria-expanded={open || undefined}
         className="grid w-full min-w-0 grid-cols-[minmax(0,auto)] rounded-[6px] text-left"
       >
-        <span className="line-clamp-2 text-[13px] leading-[1.55] text-ink-2 [overflow-wrap:anywhere]">{line}</span>
+        <span className="line-clamp-2 text-xs leading-[1.55] text-ink-2 [overflow-wrap:anywhere]">{line}</span>
       </button>
       {open && (
         <div className="max-h-[320px] w-full overflow-y-auto text-ink-2 [overflow-wrap:anywhere]" data-scroll-box>

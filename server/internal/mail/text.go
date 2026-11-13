@@ -38,9 +38,9 @@ func snippetOf(sections []imapclient.FetchBodySectionBuffer) string {
 		body = dropSplitQPEscape(body)
 	}
 	raw := append(append([]byte{}, header...), body...)
-	text := textFromRaw(raw)
+	text := textFromRawCut(raw, cut)
 	if text == "" {
-		text = textFromRaw(body) // no usable header: try the body alone
+		text = textFromRawCut(body, cut) // no usable header: try the body alone
 	}
 	if cut {
 		text = dropSplitRune(text)
@@ -79,8 +79,27 @@ func dropSplitRune(s string) string {
 	return s
 }
 
+// splitReference is the start of an HTML character reference at the end of a text: its "&" and what of the name or
+// number follows, without the ";" that would end it.
+var splitReference = lazyre.New(`&(?:#[0-9]{0,7}|#[xX][0-9a-fA-F]{0,6}|[A-Za-z][A-Za-z0-9]{0,31})?$`)
+
+// dropSplitReference drops a character reference a byte cut left unfinished at the end of s: html.UnescapeString would
+// leave "&nb" as it is, and read "&#82", the start of "&#8212;", as an "R".
+func dropSplitReference(s string) string {
+	if i := strings.LastIndexByte(s, '&'); i >= 0 && len(s)-i <= 34 {
+		if loc := splitReference.FindStringIndex(s[i:]); loc != nil {
+			return s[:i]
+		}
+	}
+	return s
+}
+
 // textFromRaw extracts readable text from a possibly truncated raw message.
-func textFromRaw(raw []byte) string {
+func textFromRaw(raw []byte) string { return textFromRawCut(raw, false) }
+
+// textFromRawCut is textFromRaw for a raw message that was cut where cut says so: a character reference the cut left
+// unfinished at the end of an HTML part is dropped (dropSplitReference).
+func textFromRawCut(raw []byte, cut bool) string {
 	if len(raw) == 0 {
 		return ""
 	}
@@ -90,14 +109,14 @@ func textFromRaw(raw []byte) string {
 	if e == nil {
 		return ""
 	}
-	return textFromEntity(e, 0)
+	return textFromEntity(e, 0, cut)
 }
 
 const textFromEntityMaxDepth = 20 // real mail is shallow; a cap stops a crafted nest from blowing the stack
 
 // textFromEntity returns the first non-empty text/* part, depth-first; multipart parts (e.g. alternative inside mixed)
 // are descended into.
-func textFromEntity(e *gomessage.Entity, depth int) string {
+func textFromEntity(e *gomessage.Entity, depth int, cut bool) string {
 	if depth > textFromEntityMaxDepth {
 		return ""
 	}
@@ -111,7 +130,7 @@ func textFromEntity(e *gomessage.Entity, depth int) string {
 			if p == nil || (err != nil && !gomessage.IsUnknownCharset(err)) {
 				return "" // end of this multipart (or a truncated tail)
 			}
-			if text := textFromEntity(p, depth+1); text != "" {
+			if text := textFromEntity(p, depth+1, cut); text != "" {
 				return text
 			}
 		}
@@ -120,7 +139,7 @@ func textFromEntity(e *gomessage.Entity, depth int) string {
 	if !strings.HasPrefix(mt, "text/") {
 		return ""
 	}
-	return renderText(mt, readAllTolerant(e.Body, 8<<10))
+	return renderText(mt, readAllTolerant(e.Body, 8<<10), cut)
 }
 
 // readAllTolerant reads at most n bytes, ignoring decode errors at a truncated
@@ -135,8 +154,11 @@ func readAllTolerant(r io.Reader, n int) string {
 }
 
 // renderText converts text/plain or text/html to preview text.
-func renderText(mediaType string, s string) string {
+func renderText(mediaType string, s string, cut bool) string {
 	if strings.HasPrefix(mediaType, "text/html") {
+		if cut {
+			s = dropSplitReference(s)
+		}
 		return stripHTML(s)
 	}
 	return s

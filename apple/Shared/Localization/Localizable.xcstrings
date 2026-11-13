@@ -1,6 +1,22 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "This File Is Empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This file is empty" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "このファイルは空です" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个文件是空的" } }
+      }
+    },
+    "Reload to check for new content." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reload to check for new content." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "再読み込みして新しい内容を確認できます。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点右上角菜单里的“刷新”，查看是否有新内容。" } }
+      }
+    },
     "%@ Wants to Run a Command" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -66,6 +82,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@の設定"
+          }
+        }
+      }
+    },
+    "%@: open %@, high %@, low %@, close %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@: open %2$@, high %3$@, low %4$@, close %5$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@：开 %2$@，高 %3$@，低 %4$@，收 %5$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@：始値 %2$@、高値 %3$@、安値 %4$@、終値 %5$@"
+          }
+        }
+      }
+    },
+    ", volume %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": ", volume %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "，量 %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "、出来高 %@"
           }
         }
       }
@@ -296,6 +356,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Claude Code 提醒这条命令可能有风险"
+          }
+        }
+      }
+    },
+    "Close [Candle]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "終値"
           }
         }
       }
@@ -599,6 +681,50 @@
         }
       }
     },
+    "Flat at %@, low %@, high %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flat at %1$@, low %2$@, high %3$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "持平在 %1$@，最低 %2$@，最高 %3$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ で横ばい、最安 %2$@、最高 %3$@"
+          }
+        }
+      }
+    },
+    "High [Candle]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "High"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "高"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "高値"
+          }
+        }
+      }
+    },
     "Hub": {
       "extractionState": "manual",
       "localizations": {
@@ -687,6 +813,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "言語と音声入力"
+          }
+        }
+      }
+    },
+    "Low [Candle]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Low"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "低"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安値"
           }
         }
       }
@@ -894,6 +1042,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "現在のアシスタントの設定だけを表示しています。別のアシスタントを変更するには切り替えてください。"
+          }
+        }
+      }
+    },
+    "Open [Candle]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "始値"
           }
         }
       }
@@ -1519,6 +1689,50 @@
         }
       }
     },
+    "Trending down, from %@ to %@, low %@, high %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trending down, from %1$@ to %2$@, low %3$@, high %4$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "走势向下，从 %1$@ 到 %2$@，最低 %3$@，最高 %4$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下降傾向、%1$@ から %2$@、最安 %3$@、最高 %4$@"
+          }
+        }
+      }
+    },
+    "Trending up, from %@ to %@, low %@, high %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trending up, from %1$@ to %2$@, low %3$@, high %4$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "走势向上，从 %1$@ 到 %2$@，最低 %3$@，最高 %4$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上昇傾向、%1$@ から %2$@、最安 %3$@、最高 %4$@"
+          }
+        }
+      }
+    },
     "Type: %@": {
       "extractionState": "manual",
       "localizations": {
@@ -1538,6 +1752,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "種類：%1$@"
+          }
+        }
+      }
+    },
+    "Volume [Candle]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Volume"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "量"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出来高"
           }
         }
       }
@@ -48936,6 +49172,29 @@
       },
       "extractionState" : "manual"
     },
+    "This warning is for the default model connection. This conversation uses another model connection." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This warning is for the default model connection. This conversation uses another model connection."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この警告はデフォルトのモデル接続に関するものです。この会話では別のモデル接続を使用しています。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这是默认模型连接的限流提醒；当前对话使用另一个模型连接。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Default: %@" : {
       "localizations" : {
         "en" : {
@@ -69478,6 +69737,121 @@
           "stringUnit": {
             "state": "translated",
             "value": "需要时由它的提供方给出 Key，Persona 只保存引用。"
+          }
+        }
+      }
+    },
+    "The hub keeps only the reference and fetches the key from its provider when it's needed.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The hub keeps only the reference and fetches the key from its provider when it's needed."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブは参照だけを保存し、キーが必要になったときに提供元から取得します。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 只保存引用，需要 Key 时再从它的提供方取。"
+          }
+        }
+      }
+    },
+    "The hub keeps only the reference and fetches the key from its provider when it's needed. The key is handed to the computer only at launch and never sent back to apps.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The hub keeps only the reference and fetches the key from its provider when it's needed. The key is handed to the computer only at launch and never sent back to apps."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブは参照だけを保存し、キーが必要になったときに提供元から取得します。キーは起動時にのみそのコンピューターへ渡され、クライアントには返されません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 只保存引用，需要 Key 时再从它的提供方取；启动时才交给那台电脑，不会返回到客户端。"
+          }
+        }
+      }
+    },
+    "Choose Bearer if the gateway only accepts Authorization: Bearer (ANTHROPIC_AUTH_TOKEN). The hub keeps only the reference and fetches the key from its provider when it's needed.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Bearer if the gateway only accepts Authorization: Bearer (ANTHROPIC_AUTH_TOKEN). The hub keeps only the reference and fetches the key from its provider when it's needed."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ゲートウェイがAuthorization: Bearer（ANTHROPIC_AUTH_TOKEN）のみ受け付ける場合はBearerを選びます。ハブは参照だけを保存し、キーが必要になったときに提供元から取得します。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网关只认 Authorization: Bearer（ANTHROPIC_AUTH_TOKEN）时选 Bearer。hub 只保存引用，需要 Key 时再从它的提供方取。"
+          }
+        }
+      }
+    },
+    "Enter an address compatible with the selected protocol. The hub keeps only the reference and fetches the key from its provider when it's needed.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter an address compatible with the selected protocol. The hub keeps only the reference and fetches the key from its provider when it's needed."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択したプロトコルに対応するアドレスを入力してください。ハブは参照だけを保存し、キーが必要になったときに提供元から取得します。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "填写所选协议兼容的地址。hub 只保存引用，需要 Key 时再从它的提供方取。"
+          }
+        }
+      }
+    },
+    "Enter an address compatible with the selected protocol. The hub keeps only the reference and fetches the key from its provider when it's needed. Choose Bearer if the gateway only accepts Authorization: Bearer (ANTHROPIC_AUTH_TOKEN).": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter an address compatible with the selected protocol. The hub keeps only the reference and fetches the key from its provider when it's needed. Choose Bearer if the gateway only accepts Authorization: Bearer (ANTHROPIC_AUTH_TOKEN)."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択したプロトコルに対応するアドレスを入力してください。ハブは参照だけを保存し、キーが必要になったときに提供元から取得します。ゲートウェイがAuthorization: Bearer（ANTHROPIC_AUTH_TOKEN）のみ受け付ける場合はBearerを選択してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "填写所选协议兼容的地址。hub 只保存引用，需要 Key 时再从它的提供方取。网关只认 Authorization: Bearer（ANTHROPIC_AUTH_TOKEN）时选 Bearer。"
           }
         }
       }
@@ -126523,6 +126897,98 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Step %lld of %lld · %@ [Todo Stage Bar]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Step %1$lld of %2$lld · %3$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$lldステップ中%1$lld · %3$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %1$lld 步，共 %2$lld 步 · %3$@"
+          }
+        }
+      }
+    },
+    "%@, step %lld of %lld, done [Todo Stage Bar]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, step %2$lld of %3$lld, done"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@、%3$lldステップ中%2$lld、完了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@，第 %2$lld 步，共 %3$lld 步，已完成"
+          }
+        }
+      }
+    },
+    "%@, step %lld of %lld, current step [Todo Stage Bar]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, step %2$lld of %3$lld, current step"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@、%3$lldステップ中%2$lld、現在のステップ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@，第 %2$lld 步，共 %3$lld 步，当前步骤"
+          }
+        }
+      }
+    },
+    "%@, step %lld of %lld, still ahead [Todo Stage Bar]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, step %2$lld of %3$lld, still ahead"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@、%3$lldステップ中%2$lld、これから"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@，第 %2$lld 步，共 %3$lld 步，还没到"
+          }
+        }
+      }
     },
     "Staged" : {
       "localizations" : {

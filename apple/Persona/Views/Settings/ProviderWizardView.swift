@@ -346,7 +346,8 @@ struct ProviderWizard: View {
                 }
                 .accessibilityElement(children: .combine)
                 ProviderKeyField(title: String(localized: "Paste the API key"), filled: String(localized: "Filled in"), text: $wizard.presetKey,
-                                 byReference: $wizard.presetKeyByReference, references: wizard.keyReferences, identifier: "wizard.preset.key")
+                                 byReference: $wizard.presetKeyByReference, references: wizard.keyReferences, identifier: "wizard.preset.key",
+                                 explainedBelow: true)
                     .onChange(of: wizard.presetKey) { wizard.keyChanged() }
                 if let url = p.signup {
                     Button { link = LinkTarget(url: url) } label: {
@@ -355,7 +356,8 @@ struct ProviderWizard: View {
                     .accessibilityIdentifier("wizard.preset.signup")
                 }
             } header: { stepHeader(2, String(localized: "Paste the key")) } footer: {
-                Text([p.keyHint, String(localized: "The key is stored encrypted on the hub and never sent back to clients.")].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: "\n"))
+                Text([p.keyHint, wizard.presetKeyByReference ? String(localized: "The hub keeps only the reference and fetches the key from its provider when it's needed.")
+                      : String(localized: "The key is stored encrypted on the hub and never sent back to clients.")].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: "\n"))
             }
             if wizard.presetKeyByReference {
                 Section {
@@ -614,10 +616,14 @@ struct ProviderWizard: View {
             }
             ProviderKeyField(title: wizard.hasStoredKey ? String(localized: "API Key (leave empty to keep)") : "API Key", filled: String(localized: "Filled in"),
                              text: $wizard.apiKey, byReference: $wizard.apiKeyByReference, references: wizard.keyReferences,
-                             stored: wizard.existing?.keyReference, identifier: "wizard.key")
+                             stored: wizard.existing?.keyReference, identifier: "wizard.key", explainedBelow: true)
         } header: { Text("Gateway") } footer: {
-            Text(wizard.kind == .anthropic ? String(localized: "The key is stored encrypted on the hub, handed to the computer only at launch, and never sent back to apps.")
-                 : String(localized: "Choose Bearer if the gateway only accepts Authorization: Bearer (ANTHROPIC_AUTH_TOKEN). The key is stored encrypted on the hub and never sent back to apps."))
+            switch (wizard.kind == .anthropic, wizard.apiKeyByReference) {
+            case (true, false): Text(String(localized: "The key is stored encrypted on the hub, handed to the computer only at launch, and never sent back to apps."))
+            case (true, true): Text(String(localized: "The hub keeps only the reference and fetches the key from its provider when it's needed. The key is handed to the computer only at launch and never sent back to apps."))
+            case (false, false): Text(String(localized: "Choose Bearer if the gateway only accepts Authorization: Bearer (ANTHROPIC_AUTH_TOKEN). The key is stored encrypted on the hub and never sent back to apps."))
+            case (false, true): Text(String(localized: "Choose Bearer if the gateway only accepts Authorization: Bearer (ANTHROPIC_AUTH_TOKEN). The hub keeps only the reference and fetches the key from its provider when it's needed."))
+            }
         }
         if wizard.isAPI {
             Section {

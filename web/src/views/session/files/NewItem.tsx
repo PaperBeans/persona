@@ -53,7 +53,7 @@ export function NewItemDialog({ mid, cwd, dir, folderName, kind, onClose, onMade
       }
     >
       <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); void create(); }}>
-        <p className="text-[12.5px] text-ink-2">{kind === "folder" ? t("files-new.in_folder", { name: folderName }) : t("files-new.in_folder_opens", { name: folderName })}</p>
+        <p className="text-xs text-ink-2">{kind === "folder" ? t("files-new.in_folder", { name: folderName }) : t("files-new.in_folder_opens", { name: folderName })}</p>
         <input
           autoFocus
           value={name}
@@ -64,9 +64,9 @@ export function NewItemDialog({ mid, cwd, dir, folderName, kind, onClose, onMade
             e.target.setSelectionRange(0, dot > 0 ? dot : e.target.value.length);
           }}
           aria-label={t("files-new.name")}
-          className="h-9 rounded-control bg-field px-3 text-[13px] text-ink outline-none focus:shadow-[inset_0_0_0_1px_var(--accent)]"
+          className="h-9 rounded-control bg-field px-3 text-xs text-ink outline-none focus:shadow-[inset_0_0_0_1px_var(--accent)]"
         />
-        {error && <p role="alert" className="text-[12px] text-red">{error}</p>}
+        {error && <p role="alert" className="text-xs text-red">{error}</p>}
       </form>
     </Dialog>
   );

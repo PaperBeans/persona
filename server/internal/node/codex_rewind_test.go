@@ -189,10 +189,12 @@ func TestCodexPaginatedHistoryKeepsThePrefixAndAnEmptyConversation(t *testing.T)
 	if b, _ := os.ReadFile(f.Where()); strings.Count(string(b), "\n") != 1 {
 		t.Fatalf("want a header-only canonical history: %s", b)
 	}
+	// The continuation writes new turns under its own rollout ID, leaving the base segment's rows unchanged.
+	turns[0].thread = remoteOther
 	turns[0].id, turns[0].items = "replacement", [][2]string{userItem("new", "new branch")}
 	writeCodexHistory(t, home, turns)
 	n.refreshCodexAppHistory(id)
-	fresh, err := f.Refresh()
+	fresh, err := transcript.NewFile(f.Where()).Refresh()
 	if err != nil || !strings.Contains(historyText(fresh), "new branch") || strings.Contains(historyText(fresh), "retained prefix") {
 		t.Fatalf("replacement: %s %v", historyText(fresh), err)
 	}

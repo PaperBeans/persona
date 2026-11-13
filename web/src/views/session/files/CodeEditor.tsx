@@ -57,7 +57,7 @@ function lexed(lang: Lang) {
 
 /** In the app's look: its fonts, colors and fields (index.css variables), in light and dark alike. */
 const look = EditorView.theme({
-  "&": { height: "100%", fontSize: "12.5px", backgroundColor: "var(--page)", color: "var(--ink)" },
+  "&": { height: "100%", fontSize: "var(--text-xs)", backgroundColor: "var(--page)", color: "var(--ink)" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { fontFamily: "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)", lineHeight: "19px" },
   ".cm-gutters": { backgroundColor: "var(--page)", color: "var(--ink-3)", border: "none" },
@@ -67,8 +67,8 @@ const look = EditorView.theme({
   ".cm-searchMatch": { backgroundColor: "color-mix(in srgb, #ffcc00 40%, transparent)" },
   ".cm-searchMatch-selected": { backgroundColor: "color-mix(in srgb, #ff9500 60%, transparent)" },
   ".cm-panels": { backgroundColor: "var(--inset)", color: "var(--ink)", borderColor: "var(--line)" },
-  ".cm-panel.cm-search": { padding: "6px 8px", fontSize: "12.5px" },
-  ".cm-panel.cm-search input, .cm-panel.cm-search button": { fontSize: "12.5px", borderRadius: "6px" },
+  ".cm-panel.cm-search": { padding: "6px 8px", fontSize: "var(--text-xs)" },
+  ".cm-panel.cm-search input, .cm-panel.cm-search button": { fontSize: "var(--text-xs)", borderRadius: "6px" },
   ".cm-textfield": { backgroundColor: "var(--field)", border: "1px solid var(--line)", color: "var(--ink)" },
   ".cm-button": { backgroundImage: "none", backgroundColor: "var(--page)", border: "1px solid var(--line)", color: "var(--ink)" },
 });

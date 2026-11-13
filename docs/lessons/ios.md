@@ -243,6 +243,14 @@ from colliding with its buttons.
   line half an em in (a little in, before an opening bracket). Lines ending in ，。、”： match. `LiftUITextView.wrappedStart` measures how
   far a wrapped line starts past its indent and `LineSnap` moves it back; the narrower bracket stays (the highlight of a whole line
   reaches the words' edge anyway).
+- **Over lines a layout manager's delegate moved, find the line yourself.** `LineSnap` puts each line on the chat's
+  (`shouldSetLineFragmentRect`); the highlight (`selectionRects`) and the paragraphs' accessibility frames follow. The text view's own
+  lookups did not (#6099). In the mock's long answer, `closestPosition(to:)` found the table for a point on the line under it and the
+  heading for one on the first paragraph, and `caretRect(for:)` put the end 57 pt under the last line. A line moved up can also start
+  inside the one before it (a table picture's line is taller than the chat's table), and there the layout manager's own
+  `characterIndex(for:in:fractionOfDistanceBetweenInsertionPoints:)` took the earlier line too. A second long press picked a word above
+  the one pressed; a handle dragged onto the line under a table ended before the table. `LiftUITextView.closestPosition(to:)` takes the
+  last line starting at or above the point, then the nearest place in it; `caretRect(for:)` is still the system's.
 - A `UIScrollView` subclass cannot have a property named `dragging`: its Objective-C getter is `isDragging`'s, and the override fails.
   `Layout` methods are not on the main actor: what they write must be `nonisolated`.
 - **UIKit only scrolls a text view's own content while a selection handle is held at its edge.** With `isScrollEnabled = false` inside a

@@ -221,19 +221,23 @@ final class AttachMenuTests: XCTestCase {
         }
     }
 
-    /// The largest accessibility text size: the menu and the Quick Commands submenu still read (screenshots only).
+    /// The largest accessibility text size: the menu and the Quick Commands submenu still read (screenshots only). The
+    /// menu scrolls at this size, so Mention and Quick Commands, the rows furthest from the +, are scrolled to (#6112).
     @MainActor func testTheMenuAtTheLargestTextSize() throws {
         guard shots else { throw XCTSkip("screenshots only") }
         let largest = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         let app = launch(Self.persona + largest, scheme: "light")
         openMenu(app)
-        XCTAssertTrue(item(app, "composer-menu-mention").waitForExistence(timeout: 5), "no menu:\n\(app.debugDescription)")
+        XCTAssertTrue(item(app, "composer-menu-voice").waitForExistence(timeout: 5), "no menu:\n\(app.debugDescription)")
         shot("attach-menu-persona-largest-text", "light")
+        XCTAssertTrue(scrolledTo(app, item(app, "composer-menu-mention")), "Mention can't be scrolled to:\n\(app.debugDescription)")
+        shot("attach-menu-persona-largest-text-top", "light")
         app.terminate()
         let agent = launch(Self.agent + largest, scheme: "light")
         openMenu(agent)
+        XCTAssertTrue(item(agent, "composer-menu-voice").waitForExistence(timeout: 5), "no menu:\n\(agent.debugDescription)")
         let quick = commands(agent)
-        XCTAssertTrue(quick.waitForExistence(timeout: 5), "no Quick Commands:\n\(agent.debugDescription)")
+        XCTAssertTrue(scrolledTo(agent, quick), "no Quick Commands:\n\(agent.debugDescription)")
         quick.tap()
         shot("attach-menu-agent-commands-largest-text", "light")
         agent.terminate()
@@ -255,9 +259,24 @@ final class AttachMenuTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["mention-menu"].firstMatch.waitForExistence(timeout: 5),
                       "Mention did not open the @ list:\n\(app.debugDescription)")
         XCTAssertTrue((field.value as? String)?.hasSuffix("@") == true, "Mention did not type @: \(String(describing: field.value))")
-        // The conversation keeps its draft: the "@" goes again, or the next screenshots show it.
+        // The conversation keeps its draft: the "@" goes again, or the next screenshots show it. The app saves a draft
+        // a second after its last change (`AppModel.drafts`), so the empty one is saved before the app is ended (#6112).
         let typed = (field.value as? String)?.count ?? 0
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed))
+        XCTAssertFalse((field.value as? String ?? "").contains("@"), "the @ stayed: \(String(describing: field.value))")
+        sleep(2)
+    }
+
+    /// Swipes the menu down until `row` is on screen. At the largest text sizes the menu scrolls: it opens upward with
+    /// its first row next to the +, and a row it hasn't scrolled to is not in the accessibility tree (#6112).
+    @MainActor private func scrolledTo(_ app: XCUIApplication, _ row: XCUIElement) -> Bool {
+        let rows = ["语音对话", "拍照", "扫描文稿", "录音", "提及文件或会话", "作为上下文", "快捷指令"]
+        let menu = app.collectionViews.containing(NSPredicate(format: "label IN %@", rows)).firstMatch
+        for _ in 0..<5 where !(row.exists && row.isHittable) {
+            menu.swipeDown()
+            sleep(1)
+        }
+        return row.exists && row.isHittable
     }
 
     @MainActor private func plusButton(_ app: XCUIApplication) -> XCUIElement {

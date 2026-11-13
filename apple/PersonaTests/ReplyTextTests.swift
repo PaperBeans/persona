@@ -183,6 +183,62 @@ struct ReplyTextTests {
         #expect(one.count == 1 && (one.first?.rect.minX ?? 1) < 0.5 && (one.first?.rect.maxX ?? 320) < 160, "\(one.map(\.rect))")
     }
 
+    /// A point on a line moved onto the chat's (`snap`) finds that line's words (#6099). Moved up under a table, a line
+    /// starts inside the table picture's line, where the system's own lookup found the table: a handle dragged onto the
+    /// line under a table ended before the table. Moved down, it passes the blank line after it, which stays.
+    @Test(arguments: [-40, 40] as [CGFloat]) func aPointOnALineMovedOntoTheChatsFindsItsWords(by shift: CGFloat) throws {
+        let v = LiftUITextView()
+        v.frame = CGRect(x: 0, y: 0, width: 370, height: 1000)
+        v.show("开头一段。\n\n| 页面 | 风险 |\n| --- | --- |\n| 首页 | 低 |\n| 价格页 | 中 |\n\n步骤：\n\n结尾一段。", .reply(quiet: false))
+        v.layoutIfNeeded()
+        let text = v.text as NSString
+        func rect(_ words: String) throws -> CGRect {
+            let r = text.range(of: words)
+            let from = try #require(v.position(from: v.beginningOfDocument, offset: r.location))
+            let to = try #require(v.position(from: from, offset: r.length))
+            let range = try #require(v.textRange(from: from, to: to))
+            return try #require(v.selectionRects(for: range).first).rect
+        }
+        let first = try rect("开头一段"), steps = try rect("步骤："), last = try rect("结尾一段")
+        // The chat's rows: its first line where TextKit put it, the two under the table `shift` lower.
+        v.snap(to: [first.midY, steps.midY + shift, last.midY + shift])
+        let moved = [("步骤：", try rect("步骤：")), ("结尾一段", try rect("结尾一段"))]
+        #expect(abs(moved[0].1.minY - steps.minY - shift) < 10, "步骤： did not move \(shift): \(steps) → \(moved[0].1)")
+        for (words, box) in moved {
+            let r = text.range(of: words)
+            let at = try #require(v.closestPosition(to: CGPoint(x: box.minX + 4, y: box.midY)))
+            let i = v.offset(from: v.beginningOfDocument, to: at)
+            #expect(i >= r.location && i <= NSMaxRange(r), "a point on \(words) found \(i), not \(r.location)…\(NSMaxRange(r))")
+        }
+        // Past a line's end: that line's end, not the next line's start.
+        let end = try #require(v.closestPosition(to: CGPoint(x: 360, y: first.midY)))
+        #expect(v.offset(from: v.beginningOfDocument, to: end) == NSMaxRange(text.range(of: "开头一段。")))
+    }
+
+    /// A folded quote's lines past its fold lie at its card's bottom, hidden: a point there finds the last line that
+    /// shows, not a hidden one (#6099).
+    @Test func aPointAtAFoldedQuotesBottomFindsItsLastLineThatShows() throws {
+        let v = LiftUITextView()
+        v.frame = CGRect(x: 0, y: 0, width: 370, height: 1000)
+        v.show("> 第一行\n> 第二行\n> 第三行\n> 第四行\n\n后面一段。", .reply(quiet: false))
+        v.layoutIfNeeded()
+        let text = v.text as NSString
+        func rect(_ words: String) throws -> CGRect {
+            let r = text.range(of: words)
+            let from = try #require(v.position(from: v.beginningOfDocument, offset: r.location))
+            let to = try #require(v.position(from: from, offset: r.length))
+            let range = try #require(v.textRange(from: from, to: to))
+            return try #require(v.selectionRects(for: range).first).rect
+        }
+        let one = try rect("第一行"), two = try rect("第二行")
+        // The chat folds the quote after two lines; the paragraph after it starts under the card.
+        let card = one.minY...(two.maxY + 6)
+        v.snap(to: [one.midY, two.midY, card.upperBound + 20], folds: [card])
+        let at = try #require(v.closestPosition(to: CGPoint(x: two.minX + 4, y: card.upperBound - 2)))
+        let i = v.offset(from: v.beginningOfDocument, to: at), r = text.range(of: "第二行")
+        #expect(i >= r.location && i <= NSMaxRange(r), "a point at the card's bottom found \(i), not \(r.location)…\(NSMaxRange(r))")
+    }
+
     /// Pixels with (nearly) full alpha: the words, not the faint rules and rows.
     private func ink(_ image: UIImage) throws -> Int {
         let cg = try #require(image.cgImage)

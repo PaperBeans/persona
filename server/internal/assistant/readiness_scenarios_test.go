@@ -110,6 +110,12 @@ func TestReadinessScenariosGolden(t *testing.T) {
 					t.Fatal(err)
 				}
 				r["checked_at"] = ""
+				for _, raw := range r["steps"].([]any) {
+					step := raw.(map[string]any)
+					if _, ok := step["occurrence"]; ok {
+						step["occurrence"] = ""
+					}
+				}
 				out[lang] = r
 			}
 			got, err := json.MarshalIndent(out, "", "  ")

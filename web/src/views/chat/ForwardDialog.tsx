@@ -221,7 +221,7 @@ export function ForwardDialog({ batch, open, onClose }: { batch: ForwardBatch; o
                   <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-control bg-field text-ink-2 shadow-hairline">
                     <Icon name="check" size={14} />
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{t("chat-forwardto.select_messages")}</span>
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink">{t("chat-forwardto.select_messages")}</span>
                 </button>
               )}
               {select && <hr aria-hidden className="mx-2.5 my-1 border-line" />}

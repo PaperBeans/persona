@@ -308,7 +308,7 @@ Each block lists: Severity, Platform, Location, Violates, Problem, Evidence, Fix
 - **Violates**: [Typography][typo]: minimize truncation; stack at large sizes.
 - **Problem**: about 95 `minimumScaleFactor` uses. The stage bar draws six stage names at 0.7 in one sixth of the width each; the checklist sentence is one line at 0.8. Scaling happens only on overflow (likely at large sizes or long translations), where it can pass below 11pt. Shrinking a numeric cell (`UsageCharts.swift`) is fine.
 - **Evidence**: `.lineLimit(1).minimumScaleFactor(0.7)` on `Theme.Font.caption`.
-- **Fix**: let sentences wrap; show only the current stage (or stack) when `isAccessibilitySize`; limit shrink to about 0.85.
+- **Fix**: let sentences wrap; show only the current stage (or stack) when `isAccessibilitySize`; limit shrink to about 0.85 (the stage bar is done, #5892: at the accessibility sizes its dots have no names and one line names the current step and its place).
 
 #### HIG-028 Fixed-size text below 11pt ignores Dynamic Type
 - **Severity**: P2. **Platform**: iOS.

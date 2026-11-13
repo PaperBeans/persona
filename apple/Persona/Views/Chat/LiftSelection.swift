@@ -433,6 +433,41 @@ final class LiftUITextView: UITextView, UITextViewDelegate, UIEditMenuInteractio
         #endif
     }
 
+    /// The place between two characters nearest a point, on the lines as they show (`LineSnap`): in the last line that
+    /// starts at or above it (the first, above them all), the nearest place, its end before its line break. A folded
+    /// quote's hidden lines are not where they lie. The system's lookup missed the moved lines: a second long press
+    /// picked a word above the one pressed, a handle dragged onto the line under a table ended before the table (#6099).
+    /// A moved line can start inside the one before it (a table picture's, taller here than the chat's table), where the
+    /// layout manager's lookup takes the earlier line too.
+    override func closestPosition(to point: CGPoint) -> UITextPosition? {
+        guard storage.length > 0, let container = layout.textContainers.first else { return super.closestPosition(to: point) }
+        let p = CGPoint(x: point.x - textContainerInset.left, y: point.y - textContainerInset.top)
+        // Not the first line holding the point: the lines are in order, but one can start above the end of the one before.
+        var line: (rect: CGRect, used: CGRect, glyphs: NSRange)?
+        layout.enumerateLineFragments(forGlyphRange: layout.glyphRange(for: container)) { rect, used, _, glyphs, _ in
+            guard !self.snapper.hidden.contains(glyphs.location), line == nil || rect.minY <= p.y else { return }
+            line = (rect, used, glyphs)
+        }
+        guard let line else { return super.closestPosition(to: point) }
+        let text = storage.string as NSString
+        let chars = layout.characterRange(forGlyphRange: line.glyphs, actualGlyphRange: nil)
+        var end = NSMaxRange(chars)
+        if end > chars.location, UnicodeScalar(text.character(at: end - 1)).map(CharacterSet.newlines.contains) == true { end -= 1 }
+        var best = chars.location, distance = CGFloat.infinity, at = chars.location
+        while at <= end {
+            let x = at < end ? line.rect.minX + layout.location(forGlyphAt: layout.glyphIndexForCharacter(at: at)).x : line.used.maxX
+            if abs(x - p.x) < distance { (best, distance) = (at, abs(x - p.x)) }
+            at = at < end ? min(NSMaxRange(text.rangeOfComposedCharacterSequence(at: at)), end) : end + 1
+        }
+        return position(from: beginningOfDocument, offset: best)
+    }
+
+    override func closestPosition(to point: CGPoint, within range: UITextRange) -> UITextPosition? {
+        guard let at = closestPosition(to: point) else { return nil }
+        if compare(at, to: range.start) == .orderedAscending { return range.start }
+        return compare(at, to: range.end) == .orderedDescending ? range.end : at
+    }
+
     /// The selection's highlight, the same on every line: a line it covers to its end reaches across the whole width,
     /// a table's line and the last line as much as a paragraph's (the system's stopped at a table's edge and at the
     /// last word). Where the selection starts or ends inside a line, the highlight does too; the end handle stays after

@@ -1,5 +1,12 @@
 # Lessons: testing and validation
 
+- A counter of a shared resource (lists, calls, reads) must not include what a fixture's own background passes do
+  (#6121). `TestIdlePassesReadWhatRuns` counted `closeDoneTaskAgents`'s machine lists, but `liveLoop`'s signal-driven
+  pass (a 100 ms coalescing window) listed the same machine from the fixture's earlier calls, so the count was 0 or 1
+  depending on the race (32 failures in 200 runs). Settle the counter before the measurement: wait until no list has
+  happened for a quiet window longer than the background pass's coalescing delay, then count only what the call under
+  test adds. Never fix this class with a plain `time.Sleep` before the call — that only moves the race.
+
 - A test that calls an entry point which sets the process environment must `t.Setenv` that variable first, so the
   test puts it back (#4581). `nodeclient.RunHook` with `--persona-home <dir>` sets `PERSONA_HOME`; one test left it
   pointing at its removed `t.TempDir()`, and every later `internal/node` test put `node.sock` there. On macOS that path
@@ -1002,3 +1009,13 @@ To check that a failure is this, move `dev.json` aside in the app's data contain
 - `testhome` now resolves `GOENV`, `GOPATH`, `GOMODCACHE` and `GOCACHE` with the real home before swapping it and pins
   them. Anything else that reads the home directory for its own config (git, ssh, a CLI's login) has the same problem
   under testhome: pin what the child needs, or give the test its own config.
+
+## A throw-away HOME also hides Docker's CLI plugins (2026-11-13, #6131)
+
+- The Compose config checks run `docker compose` under a temporary `HOME`, so Docker reads an empty config directory and
+  finds no `docker-compose` plugin where Docker Desktop and Colima register it (`cliPluginsExtraDirs` in the user's
+  `~/.docker/config.json`). The checks skipped only on the text `is not a docker command`; Docker 29 prints
+  `unknown shorthand flag: 'f' in -f` for the same missing plugin, so they failed instead, on `main` too.
+- Don't detect a missing tool by one wording of its error: ask it directly in the test's own environment
+  (`scripts/test/compose_cli.py` runs `docker compose version`) and skip with how to enable the check
+  (`PERSONA_TEST_DOCKER_CONFIG`, `docs/operations/hub-update.md`).

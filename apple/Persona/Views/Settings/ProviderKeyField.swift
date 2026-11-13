@@ -13,6 +13,8 @@ struct ProviderKeyField: View {
     /// The stored key is this reference.
     var stored: SecretReference?
     var identifier: String
+    /// The section's footer says what a reference keeps (the provider forms): a new reference's caption would say it twice.
+    var explainedBelow = false
 
     var body: some View {
         if references {
@@ -29,10 +31,13 @@ struct ProviderKeyField: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .accessibilityIdentifier(identifier + ".reference")
-                Text(stored.map(ExtensionText.referenceState) ?? String(localized: "Its provider gives the key whenever this provider needs it. Persona keeps only the reference."))
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let caption = stored.map(ExtensionText.referenceState)
+                    ?? (explainedBelow ? nil : String(localized: "Its provider gives the key whenever this provider needs it. Persona keeps only the reference.")) {
+                    Text(caption)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         } else {
             SecretField(title, filled: filled, text: $text, identifier: identifier)

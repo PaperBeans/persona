@@ -123,7 +123,7 @@ export function ForwardBlock({ c }: { c: Context }) {
  *  and until that chunk is in, a line saying how many ("2 forwarded messages"). */
 export function ForwardCards({ blocks, count }: { blocks: Context[]; count: number }) {
   return (
-    <Suspense fallback={<span className="text-[12px] font-medium text-ink-3" data-forward-group-pending>{t("chat-forward.group_heading", { count })}</span>}>
+    <Suspense fallback={<span className="text-xs font-medium text-ink-3" data-forward-group-pending>{t("chat-forward.group_heading", { count })}</span>}>
       <ForwardGroupCards blocks={blocks} />
     </Suspense>
   );

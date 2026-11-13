@@ -771,7 +771,7 @@ struct LauncherEditor: View {
             ProviderKeyField(title: isNew || existing?.hasKey != true ? "API Key" : String(localized: "API Key (leave empty to keep)"),
                              filled: String(localized: "Filled in; tap Save [Extension Market Views 94348c]"), text: $apiKey,
                              byReference: $keyByReference, references: model.hubFeatures.contains("launcher_secret_references"),
-                             stored: existing?.keyReference, identifier: "launcher.editor.key")
+                             stored: existing?.keyReference, identifier: "launcher.editor.key", explainedBelow: true)
             if !usesResponses {
                 Picker("Authentication [Model Launchers View d1ff8f]", selection: $auth) {
                     Text("x-api-key").tag("api_key")
@@ -779,8 +779,12 @@ struct LauncherEditor: View {
                 }
             }
         } header: { Text("Gateway") } footer: {
-            Text(usesResponses ? String(localized: "Enter an address compatible with the selected protocol. The key is stored encrypted on the hub and never sent back to clients.")
-                : String(localized: "Enter an address compatible with the selected protocol. The key is stored encrypted on the hub and never sent back to clients. Choose Bearer if the gateway only accepts Authorization: Bearer (ANTHROPIC_AUTH_TOKEN)."))
+            switch (usesResponses, keyByReference) {
+            case (true, false): Text(String(localized: "Enter an address compatible with the selected protocol. The key is stored encrypted on the hub and never sent back to clients."))
+            case (true, true): Text(String(localized: "Enter an address compatible with the selected protocol. The hub keeps only the reference and fetches the key from its provider when it's needed."))
+            case (false, false): Text(String(localized: "Enter an address compatible with the selected protocol. The key is stored encrypted on the hub and never sent back to clients. Choose Bearer if the gateway only accepts Authorization: Bearer (ANTHROPIC_AUTH_TOKEN)."))
+            case (false, true): Text(String(localized: "Enter an address compatible with the selected protocol. The hub keeps only the reference and fetches the key from its provider when it's needed. Choose Bearer if the gateway only accepts Authorization: Bearer (ANTHROPIC_AUTH_TOKEN)."))
+            }
         }
         Section {
             TextField(String(localized: "Default Model"), text: $modelName).textInputAutocapitalization(.never).autocorrectionDisabled()

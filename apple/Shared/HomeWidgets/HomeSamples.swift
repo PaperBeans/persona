@@ -26,7 +26,7 @@ enum HomeSamples {
         s.at = ago(1)
         s.paired = true
         s.look = package
-            ? .init(name: t("Milk Frog", "奶蛙"), package: "nwverse/sample", primaryLight: 0xF6_C2_3E, primaryDark: 0xF6_C2_3E)
+            ? .init(name: t("Milk Frog", "奶蛙"), package: "example-persona/sample", primaryLight: 0xF6_C2_3E, primaryDark: 0xF6_C2_3E)
             : .init(name: "Mochi")
         s.agents.rows = [
             .init(id: "studio/s1", title: t("Fix the sign-in redirect", "修好登录后的跳转"), state: .needsYou, kind: .coding, machine: "studio", place: t("Studio", "工作室"),

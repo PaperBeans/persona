@@ -20,6 +20,19 @@ nonisolated struct FileContent: Decodable, Sendable {
     var stream: Bool?
     var revision: String?
 
+    /// MIME parameters do not change how the payload is previewed.
+    var mediaType: String { (mime ?? "").split(separator: ";", maxSplits: 1).first?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "" }
+
+    /// Sniff UTF-8 plain text without an extension allowlist. Called off the main actor for byte payloads.
+    func decodedText() -> String? {
+        if let text { return text }
+        guard let data, let bytes = Data(base64Encoded: data) else { return nil }
+        if mediaType.hasPrefix("text/") { return String(decoding: bytes, as: UTF8.self) }
+        // Binary control bytes (including ZIP's PK header) must not turn Office files into code previews.
+        guard !bytes.contains(where: { $0 < 0x20 && $0 != 0x09 && $0 != 0x0a && $0 != 0x0c && $0 != 0x0d && $0 != 0x1b }) else { return nil }
+        return String(data: bytes, encoding: .utf8)
+    }
+
     enum CodingKeys: String, CodingKey {
         case path, name, size, mime, text, data, truncated, entries, offset, next, stream, revision
         case isDir = "is_dir"
@@ -309,6 +322,10 @@ struct FileViewer: View {
                 if let preview = page.preview { QuickLookFileView(model: preview) }
             case .audio:
                 if let audio = page.audio { AudioFileView(model: audio) }
+            case .empty:
+                EmptyStateView(symbol: Theme.Icon.document, title: String(localized: "This File Is Empty"),
+                               message: String(localized: "Reload to check for new content."))
+                    .accessibilityIdentifier("file-empty")
             case .binary:
                 EmptyStateView(symbol: Theme.Icon.missingFile, title: String(localized: "Can't Preview"),
                                message: "\(file.mime ?? String(localized: "Binary file")) · \(file.size.storageText)")
@@ -379,6 +396,11 @@ struct FileViewer: View {
 
     private var menu: some View {
         Menu {
+            Button { Task { await open() } } label: {
+                Label("Refresh", systemImage: Theme.Icon.reload)
+            }
+            .disabled(page != nil && page?.file == nil && page?.error == nil)
+            .accessibilityIdentifier("file-reload")
             #if os(iOS)
             editItem
             #endif
@@ -444,6 +466,7 @@ struct FileViewer: View {
         } label: { ThemedIcon(Theme.Icon.moreMenu) }
         .arrowlessMenu()
         .accessibilityLabel("More")
+        .accessibilityIdentifier("file-menu")
     }
 
     /// The path, the size, and what is not shown yet: pages still on the machine, lines past the coloring caps, why
@@ -550,7 +573,7 @@ private struct MarkdownFile: View {
 /// the code document, the JSON outline or the Markdown pieces off the main thread, and fetches further pages.
 @MainActor @Observable
 final class FileViewerModel {
-    enum Kind { case directory, markdown, json, code, image, pdf, video, audio, quickLook, table, notebook, html, binary }
+    enum Kind { case directory, empty, markdown, json, code, image, pdf, video, audio, quickLook, table, notebook, html, binary }
 
     let ref: FileRef
     @ObservationIgnored private let api: APIClient?
@@ -625,7 +648,7 @@ final class FileViewerModel {
 
     func load() async {
         guard let api else { return }
-        let f: FileContent
+        var f: FileContent
         do {
             f = try await api.file(machine: ref.machineID, path: ref.path, cwd: ref.cwd, stream: stream)
         } catch {
@@ -639,6 +662,22 @@ final class FileViewerModel {
             kind = .directory
             return
         }
+        // The node omits an empty `text` field. Size, not a missing field or the extension, identifies an empty file.
+        if f.size == 0, (f.text ?? "").isEmpty, (f.data ?? "").isEmpty {
+            kind = .empty
+            text_ = [""]
+            next = 0
+            return
+        }
+        do {
+            f = try await resolveText(f, api: api)
+        } catch {
+            file = nil
+            self.error = error.shown
+            return
+        }
+        file = f
+        next = f.next ?? 0
         if f.text == nil, TableFileType.isWorkbook(f.name) {
             kind = .table
             table = TableFileModel(ref: ref, file: f, api: api)
@@ -693,6 +732,39 @@ final class FileViewerModel {
         }
         if f.truncated, f.next == nil { note = String(localized: "File too large; showing the first \(Int64(text.utf8.count).storageText)") }
     }
+
+    /// Keep binary-only streaming for known viewers. Unknown streamed files get the bounded preview page for UTF-8
+    /// sniffing, rather than downloading a potentially huge binary just to decide whether it is text.
+    private func resolveText(_ original: FileContent, api: APIClient) async throws -> FileContent {
+        guard original.text == nil else { return original }
+        var f = original
+        let mime = f.mediaType
+        let textMIME = mime.hasPrefix("text/")
+        // An explicit media type keeps its dedicated viewer; text/* still overrides a media-looking filename.
+        if mime.hasPrefix("image/") || mime.hasPrefix("video/") || mime.hasPrefix("audio/") || mime == "application/pdf" {
+            return f
+        }
+        if f.data == nil, f.stream == true, !textMIME,
+           !QuickLookFileType.matches(name: f.name, text: nil),
+           !AudioFileType.matches(name: f.name, mime: f.mime), !VideoFileType.matches(name: f.name, mime: f.mime) {
+            f = try await api.file(machine: ref.machineID, path: ref.path, cwd: ref.cwd, stream: false)
+        }
+        if f.text == nil, f.data == nil, textMIME {
+            file = nil // immediate loading feedback while getting the payload
+            // A large text file still uses the node's paged preview, not an unbounded download.
+            if f.size > Self.maxTextFallbackBytes {
+                f = try await api.file(machine: ref.machineID, path: ref.path, cwd: ref.cwd, stream: false)
+            } else {
+                let bytes = try await api.fileBytes(machine: ref.machineID, path: f.path, cwd: ref.cwd)
+                f.text = await Task.detached(priority: .userInitiated) { String(decoding: bytes, as: UTF8.self) }.value
+            }
+        }
+        let payload = f
+        f.text = await Task.detached(priority: .userInitiated) { payload.decodedText() }.value
+        return f
+    }
+
+    private static let maxTextFallbackBytes: Int64 = 2 << 20
 
     /// Opened at a line (a message's `path:12`): the source, read up to that line, with the line marked. Rendered
     /// Markdown, a JSON outline, a table have no lines to go to.

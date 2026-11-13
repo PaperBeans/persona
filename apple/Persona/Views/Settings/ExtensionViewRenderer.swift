@@ -339,6 +339,8 @@ struct ExtensionItemRow: View {
             .font(Theme.Font.label).foregroundStyle(.secondary)
             ExtensionChangingText(m.value).font(Theme.Font.title.monospacedDigit()).foregroundStyle(ExtensionUIStyle.ink(m.tone)).lineLimit(1)
                 .minimumScaleFactor(0.6)
+            // UI version 6: its trend under the number, as wide as the metric.
+            if let spark = m.spark { ExtensionSparkLine(spark: spark, width: nil).frame(maxWidth: .infinity) }
             if let d = m.detail, !d.isEmpty { Text(d).font(Theme.Font.label).foregroundStyle(.secondary) }
         }
         .padding(.vertical, Theme.Space.xxs)

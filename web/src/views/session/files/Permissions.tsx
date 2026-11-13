@@ -90,10 +90,10 @@ export function PermissionsDialog({ mid, cwd, path, mode, onClose, onChanged }: 
         }
       >
         {old === null ? (
-          error ? <p className="text-[12.5px] text-red">{error}</p> : <div className="flex h-24 items-center justify-center"><Loading label={t("files-info.loading")} /></div>
+          error ? <p className="text-xs text-red">{error}</p> : <div className="flex h-24 items-center justify-center"><Loading label={t("files-info.loading")} /></div>
         ) : (
           <div className="flex flex-col gap-3" data-testid="permissions">
-            <table className="w-full text-[13px]">
+            <table className="w-full text-xs">
               <thead>
                 <tr className="text-[11.5px] text-ink-3">
                   <th />
@@ -125,9 +125,9 @@ export function PermissionsDialog({ mid, cwd, path, mode, onClose, onChanged }: 
                 ))}
               </tbody>
             </table>
-            <p className="font-mono text-[12px] text-ink">{modeSymbolic(bits)} · {modeOctal(bits)}{old !== bits && <span className="text-ink-3"> ({t("files-perm.before", { code: `${modeSymbolic(old)} · ${modeOctal(old)}` })})</span>}</p>
-            <p className="text-[12px] text-ink-3">{t("files-perm.run_hint")}</p>
-            {error && <p role="alert" className="text-[12px] text-red">{error}</p>}
+            <p className="font-mono text-xs text-ink">{modeSymbolic(bits)} · {modeOctal(bits)}{old !== bits && <span className="text-ink-3"> ({t("files-perm.before", { code: `${modeSymbolic(old)} · ${modeOctal(old)}` })})</span>}</p>
+            <p className="text-xs text-ink-3">{t("files-perm.run_hint")}</p>
+            {error && <p role="alert" className="text-xs text-red">{error}</p>}
           </div>
         )}
       </Dialog>
@@ -142,8 +142,8 @@ export function PermissionsDialog({ mid, cwd, path, mode, onClose, onChanged }: 
           </>
         }
       >
-        <p className="text-[13px] text-ink-2">{old !== null && modeChangeWords(old, bits)}</p>
-        <p className="mt-2 font-mono text-[12px] text-ink-2">{old !== null && `${modeSymbolic(old)} (${modeOctal(old)}) → ${modeSymbolic(bits)} (${modeOctal(bits)})`}</p>
+        <p className="text-xs text-ink-2">{old !== null && modeChangeWords(old, bits)}</p>
+        <p className="mt-2 font-mono text-xs text-ink-2">{old !== null && `${modeSymbolic(old)} (${modeOctal(old)}) → ${modeSymbolic(bits)} (${modeOctal(bits)})`}</p>
       </Dialog>
     </>
   );

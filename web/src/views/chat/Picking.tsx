@@ -96,7 +96,7 @@ export function PickBar({ pick, chat, onEnd }: PickBarProps) {
       <Button tone="quiet" onClick={onEnd} testId="pick-cancel">
         {t("common.cancel")}
       </Button>
-      <span className="min-w-0 flex-1 truncate text-center text-[12.5px] text-ink-3 tabular-nums" aria-live="polite" data-pick-count>
+      <span className="min-w-0 flex-1 truncate text-center text-xs text-ink-3 tabular-nums" aria-live="polite" data-pick-count>
         {t("chat-forwardto.selected", { count })}
       </span>
       <Button tone="primary" icon="forward" disabled={!count} onClick={() => forward(chat(), pick.picks(), onEnd)} testId="pick-forward">

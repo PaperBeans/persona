@@ -106,7 +106,7 @@ export function FileEdit({ mid, cwd, file, text, onDone }: {
     <div className="flex min-h-0 flex-1 flex-col" data-testid="file-edit">
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13.5px] font-semibold text-ink">{fileName(file.path)}</p>
+          <p className="truncate text-sm font-semibold text-ink">{fileName(file.path)}</p>
           <p className="truncate text-[11.5px] text-ink-3">{dirty ? t("files-editor.edited") : t("files-editor.editing")}</p>
         </div>
         <Button onClick={() => (dirty ? setAsking("discard") : onDone(false))}>{t("files-editor.cancel")}</Button>
@@ -134,7 +134,7 @@ export function FileEdit({ mid, cwd, file, text, onDone }: {
           </>
         }
       >
-        <p className="text-[13px] text-ink-2">{t("files-editor.discard_detail")}</p>
+        <p className="text-xs text-ink-2">{t("files-editor.discard_detail")}</p>
       </Dialog>
       <Dialog
         open={asking === "changed"}
@@ -150,7 +150,7 @@ export function FileEdit({ mid, cwd, file, text, onDone }: {
           </>
         }
       >
-        <p className="text-[13px] text-ink-2">{t("files-editor.changed_detail")}</p>
+        <p className="text-xs text-ink-2">{t("files-editor.changed_detail")}</p>
       </Dialog>
       <Dialog
         open={asking === "overwrite"}
@@ -163,7 +163,7 @@ export function FileEdit({ mid, cwd, file, text, onDone }: {
           </>
         }
       >
-        <p className="text-[13px] text-ink-2">{t("files-editor.overwrite_detail")}</p>
+        <p className="text-xs text-ink-2">{t("files-editor.overwrite_detail")}</p>
       </Dialog>
     </div>
   );

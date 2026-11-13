@@ -211,12 +211,12 @@ export function FilesPanel({ mid, sid, cwd, path, file, highlight: marked, onClo
                 title="Git"
                 aria-label={(changes ? t("session-filespanel.git_changes", { count: changes }) : "Git") + (sync ? ` ${sync}` : "")}
                 onClick={() => openPanel({ kind: "git", mid, sid, cwd })}
-                className="flex h-7 shrink-0 items-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium whitespace-nowrap text-ink-2 transition-colors hover:bg-hover hover:text-ink"
+                className="flex h-7 shrink-0 items-center gap-1.5 rounded-[8px] px-2 text-xs font-medium whitespace-nowrap text-ink-2 transition-colors hover:bg-hover hover:text-ink"
               >
                 <Icon name="git" size={14} />
                 Git
-                {sync && <span className="text-[11px] text-ink-3 tabular-nums">{sync}</span>}
-                {changes > 0 && <span className="rounded-full bg-field px-1.5 text-[11px] text-ink-2 tabular-nums">{changes}</span>}
+                {sync && <span className="text-xs text-ink-3 tabular-nums">{sync}</span>}
+                {changes > 0 && <span className="rounded-full bg-field px-1.5 text-xs text-ink-2 tabular-nums">{changes}</span>}
               </button>
               {here_dir && (hubHas(features, FILE_MKDIR_FEATURE) || hubHas(features, FILE_WRITE_FEATURE)) && (
                 <IconButton icon="plus" label={t("files-new.new")} onClick={newMenu.open} active={Boolean(newMenu.anchor)} />
@@ -433,18 +433,18 @@ function PathBar({ shown, home, session, writable, history, onBack, onForward, g
                 aria-label={s.home ? t("files-nav.home") : undefined}
                 title={s.path}
                 className={cx(
-                  "flex h-6 items-center gap-1 rounded-full px-2 text-[12px] whitespace-nowrap transition-colors",
+                  "flex h-6 items-center gap-1 rounded-full px-2 text-xs whitespace-nowrap transition-colors",
                   current ? "bg-field font-semibold text-ink" : "text-ink-2 hover:bg-hover hover:text-ink",
                 )}
               >
                 {s.home ? <Icon name="home" size={13} /> : s.title}
-                {session === s.path && <span className="rounded-full bg-accent/15 px-1.5 text-[10.5px] font-medium text-accent">{t("files-nav.session")}</span>}
+                {session === s.path && <span className="rounded-full bg-accent/15 px-1.5 text-xs font-medium text-accent">{t("files-nav.session")}</span>}
               </button>
             </span>
           );
         })}
         {!writable && (
-          <span className="ml-1 flex shrink-0 items-center gap-1 rounded-full bg-field px-2 py-0.5 text-[11px] text-ink-2">
+          <span className="ml-1 flex shrink-0 items-center gap-1 rounded-full bg-field px-2 py-0.5 text-xs text-ink-2">
             <Icon name="lock" size={11} />
             {t("files-nav.read_only")}
           </span>
@@ -509,13 +509,13 @@ function FindResults({ mid, dir, query, onOpen }: { mid: string; dir: string; qu
         <button key={h.path} type="button" onClick={() => onOpen(h)} title={h.path} className="flex w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-hover">
           <FileGlyph name={hitName(h)} dir={h.dir} />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] text-ink">{hitName(h)}</span>
-            <span className="block truncate font-mono text-[11px] text-ink-3">{(hitFolder(h) || ".") + "/"}</span>
+            <span className="block truncate text-xs text-ink">{hitName(h)}</span>
+            <span className="block truncate font-mono text-xs text-ink-3">{(hitFolder(h) || ".") + "/"}</span>
           </span>
           {h.dir && <Icon name="chevronRight" size={13} stroke={2.2} className="shrink-0 text-ink-3" />}
         </button>
       ))}
-      {list.truncated && <p className="px-4 py-2 text-[11.5px] text-ink-3">{t("files-nav.find_truncated")}</p>}
+      {list.truncated && <p className="px-4 py-2 text-xs text-ink-3">{t("files-nav.find_truncated")}</p>}
     </div>
   );
 }
@@ -545,7 +545,7 @@ function EntryRow({ mid, e, full, mark, marked, onOpen, ops }: { mid: string; e:
         <FileGlyph name={e.name} dir={e.dir} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1">
-            <span className={cx("truncate text-[13px]", e.ignored ? "text-ink-3" : hidden ? "text-ink-2" : "text-ink")}>{e.name}</span>
+            <span className={cx("truncate text-xs", e.ignored ? "text-ink-3" : hidden ? "text-ink-2" : "text-ink")}>{e.name}</span>
             {e.symlink && (
               <span role="img" aria-label={e.link_broken ? t("files-nav.broken_link") : t("files-nav.link")} className="flex shrink-0">
                 <Icon name={e.link_broken ? "alertCircle" : "link"} size={11} className={e.link_broken ? "text-red" : "text-ink-3"} />
@@ -553,11 +553,11 @@ function EntryRow({ mid, e, full, mark, marked, onOpen, ops }: { mid: string; e:
             )}
           </span>
           {e.link_broken ? (
-            <span className="block truncate text-[11.5px] text-red">{t("files-nav.link_broken", { target: e.link_target ?? "" })}</span>
+            <span className="block truncate text-xs text-red">{t("files-nav.link_broken", { target: e.link_target ?? "" })}</span>
           ) : e.symlink && e.link_target ? (
-            <span className="block truncate text-[11.5px] text-ink-3">{t("files-nav.link_to", { target: e.link_target })}</span>
+            <span className="block truncate text-xs text-ink-3">{t("files-nav.link_to", { target: e.link_target })}</span>
           ) : (
-            <span className="flex gap-2 text-[11.5px] whitespace-nowrap text-ink-3 tabular-nums">
+            <span className="flex gap-2 text-xs whitespace-nowrap text-ink-3 tabular-nums">
               {!e.dir && <span>{bytes(e.size)}</span>}
               {e.mtime && <span title={new Date(e.mtime).toLocaleString("zh-CN")}>{ago(e.mtime)}</span>}
             </span>
