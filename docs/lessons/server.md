@@ -1713,7 +1713,7 @@ A connector that folds several notifications into one thread (GitHub CI failures
 ## Hot paths: re-reading every row of a list that barely changed, a catalog tried end to end (2026-11-09, #1986)
 
 - A list decorated again on every publish re-read every row's question (`transcript.AskOf` on the last words of each of 8,200 sessions). Keep the answer per machine and session with the text it was read from, and read again only when the text differs (`asksMemo`); a complete list drops the rows it no longer carries, a subset keeps them. Prove it with a table of lists that change between calls, each decorated warm and fresh.
-- To find out whether a list changed since it was last sent, compare its bytes as they are encoded (`changedWriter`), not after encoding them into a new slice: an unchanged list then costs no copy.
+- To find out whether a list changed since it was last sent, do not keep a copy of each list sent: keep its length and digest and encode into one reused buffer (`sentList`; #3197, "A digest instead of the last bytes, a mirror without the lists" below).
 - An allocation bound read from `runtime.ReadMemStats` counts every goroutine in the process: in a full package run, work other tests left behind pushed the smallest bounds over. Run such a test in a process of its own (`isolated` in `assistant/profile_bench_test.go`, `isolatedSessionAllocation` in `hub/sessions_push_test.go`, #2050). Repeated garbage collection clears pools but does not stop unrelated goroutines; a synchronized allocation in another goroutine is still included in the measured callback's `TotalAlloc` delta. Rerun the whole test in the child, preserving its fixtures, functional assertions, collection cadence and allocation ceilings. Bound and reap the child, propagate its failures, and verify a child receipt rather than treating an early return as isolation. Check the source revision before attributing two failures to the same missing guard: a newer revision may already isolate one of them.
 - A literal gate still checks every template of a catalog on a text that matches none (265 for `InboxText`): index the templates by the first byte of their first literal, and try the ones that start with a placeholder for every text (`i18n.templateIndex`).
 - Background tasks, subagents and a subagent's latest tool are written by hand too, each type under its own layout hash (`backgroundWireLayout`, `subagentWireLayout`, `workflowToolWireLayout`). A field added to one needs its line in `session_wire.go` and that hash; until then that type goes back to reflection.
@@ -2068,6 +2068,28 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
   fold differently and the rows decorated alone (`foldSubset`) would pick it up. Only a complete list refreshes it.
 - A per-minute pass that walks finished tasks pays for every task ever finished, since their agent links are kept: look
   each agent's row up (a missing row is a map lookup) rather than listing its machine.
+
+## A digest instead of the last bytes, a mirror without the lists (2026-11-13, #3197)
+
+- To tell a list only when it changed, `publishList` kept each machine's last `fleet.sessions` bytes for as long as the
+  manager ran: 3.6 MB of 36 MB live at 20 computers of 200 sessions. Keep the length and SHA-256 of the JSON instead
+  (`sentList`), encode every list into one buffer reused under the lock that orders the sends (`sentMu`), and copy out
+  only a list that is told: bytes handed to `Tell` must never be written again, and a test that keeps what the hub was
+  told catches a reused buffer at once. Prove it against a model of the old way step for step, with a list that does
+  not encode (a time past year 9999) and a reconnect (`TestSentDigestsTellWhatTheBytesDid`).
+- A mirror refreshed on every lookup pays for all it copies on every lookup: the extensions manager looks a computer
+  up for each port stream data, ack and close, and each lookup copied every computer's sessions out of
+  `Devices.Views` (6.3 MB at 20 x 200). Keep in a mirror only what most readers need, and let the rare readers ask the
+  owner (`Devices.FindSession`: a callback over the listed machine's rows in place, under its lock, no copy). Look the
+  machine up the way the mirror's ids were made (`listed`, the first in `machinesNow` with the id), not through
+  `machineByID`, which also resolves absorbed entries.
+- A field a refresh rewrites under a lock its readers do not take is a data race even when the value is the same:
+  the race detector flags the write. `extmgr.machinesNow` rewrote `Machine.cfg` under `m.mu` on every lookup while
+  about a hundred callers read `m.cfg.ID` and `m.cfg.Name` without it. Write identity fields once when the object is
+  made, and put the rare change (a rename) behind an `atomic.Pointer` read through accessors (`name()`, `sshHost()`).
+- To benchmark another package over the real type, export a fixture in `export_test.go` (seen only by the package's
+  tests) and write the benchmark in the external `_test` package, which may import a package that imports this one
+  (`devices_test` importing `extmgr`: `BenchmarkExtensionsPortStreamEvent`).
 
 ## `http.DefaultTransport` drops a push connection after 90 s idle (2026-11-11, #4800)
 
