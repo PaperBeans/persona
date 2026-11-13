@@ -119,7 +119,11 @@ type Node struct {
 	files   map[string]*transcript.File // session id -> parsed transcript
 	paths   map[string]string           // session id -> transcript path
 	pathsAt map[string]time.Time        // when a path was last reported or chosen (transcriptPath looks again after 30 s)
-	watches map[string]*watch
+	// projectGlobs counts globProjects calls, each a read of every projects directory: one per row looked up again
+	// was a few hundred a list on a computer with many parked sessions, past the half minute a found path is trusted for.
+	projectGlobs atomic.Int64
+	listPush     listPush // the list pushes sends ask for, one build at a time (notifySessionsSoon)
+	watches      map[string]*watch
 	// pumping: the shared watch pump runs (session_watch.go watchPump); it stops when watches is empty.
 	pumping bool
 	// waiting: watches of sessions with no transcript yet (watchFor), so session.unwatch finds them (#5389).
@@ -292,8 +296,8 @@ type Node struct {
 	hookFlights   hookFlights  // hook calls in progress by session: their process waits on them (model_restore.go)
 
 	// screens: live-screen hardware video channel (#3954). Login binding per `pair` and the busy count (screen.go).
-	// screenStart is the capture/encode helper seam (Persona Screen.app) filled by the PoC on a real Mac; while it is
-	// nil, screen.dial returns video_unavailable, so a node without the helper keeps today's RFB-only behaviour.
+	// screenStart starts the capture/encode helper (Persona Screen.app) for a stream: startScreenHelper on a Mac
+	// (screenhelper.go), nil elsewhere, where screen.dial returns video_unavailable and the screen stays RFB only.
 	screens     *screenLogins
 	screenStart func(ctx context.Context, id, pair string, keepAwake bool, done func()) error
 }
@@ -350,6 +354,9 @@ func New(version string) (*Node, error) {
 	n.sessionScope = scope
 	if n.uid, err = LoadMachineUID(dir); err != nil {
 		n.logger.Printf("machine uid: %v", err) // the hubs then treat this computer as theirs alone
+	}
+	if runtime.GOOS == "darwin" {
+		n.screenStart = n.startScreenHelper // Persona Screen, the live screen's video helper (#3954)
 	}
 	n.configureCodex(proto.CodexConfig{})
 	n.hosts = host.NewRegistry(nodeHosts(proto.EngineHerdr, false, n.logger.Printf)...) // herdr until engine.use, botmux until the hub says
@@ -1256,6 +1263,25 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			id, err := send()
 			if err == nil && id != "" {
 				n.expectFirstLine(id, opts.ClientMsgID, p.Text, len(p.Images), at)
+			}
+			return map[string]any{"session_id": id}, err
+		}
+		var once struct {
+			OnceID string `json:"once_id"`
+		}
+		_ = json.Unmarshal(params, &once)
+		if p.NewSessionID == "" && p.SessionID != "" && once.OnceID != "" {
+			// A message its sender may try again under the same once_id (the manager's relays between conversations,
+			// relay_once.go): sent once. The sender waits a bounded time and asks again when no answer came in it; the
+			// first send may have written the line already, and a second one made the conversation read it twice. The
+			// id is no client_msg_id: a line that carries one reads as the owner's own message.
+			var id string
+			err := n.sends.once(once.OnceID, func() (err error) {
+				id, err = send()
+				return err
+			})
+			if err == nil && id == "" {
+				id = p.SessionID // the same message asked again while it went: the conversation it went to
 			}
 			return map[string]any{"session_id": id}, err
 		}

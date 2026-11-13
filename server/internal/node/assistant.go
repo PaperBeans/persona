@@ -531,7 +531,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			return "", fmt.Errorf("send to codex: %w", err)
 		}
 		commit()
-		n.notifySessions()
+		awaitList(n.notifySessionsSoon())
 		return id, nil
 	}
 
@@ -565,6 +565,9 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		} else {
 			controlErr = n.syncAssistantModes(ctx, p) // a retry has its own new process
 		}
+		if controlErr != nil {
+			n.notifySessionsSoon() // the modes it kept, or went back to
+		}
 		var unconfirmed *assistantControlUnconfirmed
 		timing.mark("preparation_joined", controlErr == nil) // context may have fallen back; this marks the join, not snapshot success
 		if controlErr != nil && (!fresh || ctx.Err() != nil || !errors.As(controlErr, &unconfirmed)) {
@@ -586,6 +589,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		switch {
 		case werr != nil && !fresh:
 			n.stopAssistantProcess(id)
+			n.notifySessionsSoon() // the modes it took, and the process gone
 			return "", fmt.Errorf("send to claude: %w", werr)
 		case werr != nil:
 			werr = p.startFailure() // it is gone already: say why, not that the pipe is closed (#2581)
@@ -631,7 +635,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		n.noteAssistantRecoveryProcess(ctx, p) // the replacement is the process the recovery follows now (#3495)
 	}
 	commit()
-	n.notifySessions()
+	awaitList(n.notifySessionsSoon())
 	return id, nil
 }
 
@@ -743,7 +747,7 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 			p.controlResponse(ev.Response)
 		case "command_lifecycle":
 			if p.commandLifecycle(ev.Command, ev.State) {
-				n.notifySessions() // the queue strip shows it, or no longer
+				n.notifySessionsSoon() // the queue strip shows it, or no longer
 			}
 		case "stream_event":
 			if ev.ParentToolUseID != nil && *ev.ParentToolUseID != "" {
@@ -790,7 +794,7 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 						p.id[:8], u.Input+u.CacheRead+u.CacheCreate, u.CacheRead, u.CacheCreate)
 				}
 				if resumed {
-					n.notifySessions()
+					n.notifySessionsSoon()
 				}
 				if had {
 					n.emitDelta(p.id, "")
@@ -852,7 +856,7 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 			}
 			n.emitDelta(p.id, "")
 			if !recovering {
-				n.notifySessions()
+				n.notifySessionsSoon() // not here on the reader: a long build held up the control answers a send waits on
 				go n.checkTurnUsage(p, ev.IsError && promptTooLong(ev.Result))
 			}
 		}
@@ -1070,6 +1074,76 @@ func (n *Node) notifySessions() {
 		return
 	}
 	n.notifyList(n.sessionList(context.Background(), false))
+}
+
+// notifySessionsSoon is notifySessions without holding the caller for the list. A message's send returns once its
+// line is written (after awaitList's short wait): building the list reads every row's transcript and the hosts'
+// panes, and on a computer with a few hundred sessions that took longer than the manager waits for the send (90 s),
+// so a delivered message was reported failed and sent again. Asks that come while a list is being built fold into one
+// more build after it, so the last list pushed has them all, and sends in a row build one list at a time. The channel
+// closes once a list built after the ask has gone out.
+func (n *Node) notifySessionsSoon() <-chan struct{} {
+	done := make(chan struct{})
+	if n.peer == nil {
+		close(done)
+		return done
+	}
+	b := &n.listPush
+	b.mu.Lock()
+	if b.building {
+		b.again = true
+		b.next = append(b.next, done) // the build running began before this ask: the one after it answers
+		b.mu.Unlock()
+		return done
+	}
+	b.building = true
+	b.current = append(b.current, done)
+	b.mu.Unlock()
+	go func() {
+		for {
+			n.notifySessions()
+			b.mu.Lock()
+			b.pushed++
+			for _, c := range b.current {
+				close(c)
+			}
+			b.current = nil
+			if !b.again {
+				b.building = false
+				b.mu.Unlock()
+				return
+			}
+			b.again, b.current, b.next = false, b.next, nil
+			b.mu.Unlock()
+		}
+	}()
+	return done
+}
+
+// listPush is notifySessionsSoon's state: a build running, an ask that came during it, who waits for which build,
+// and how many builds went out.
+type listPush struct {
+	mu       sync.Mutex
+	building bool
+	again    bool
+	current  []chan struct{} // closed when the build running now has gone out
+	next     []chan struct{} // closed when the build after it has
+	pushed   int
+}
+
+// listPushWait is how long a send waits for the list that shows its conversation working, so its answer goes after
+// that list as it did when the list was built inside the send (the manager drains its queues and counts rounds by
+// the lists it is pushed). A list slower than this is not waited for: the answer goes first, and the list after it.
+var listPushWait = 3 * time.Second
+
+// awaitList waits for done at most listPushWait.
+func awaitList(done <-chan struct{}) {
+	t := time.NewTimer(listPushWait)
+	defer t.Stop()
+	select {
+	case <-done:
+	case <-t.C:
+	}
 }
 
 // notifyList is notifySessions with the list built.

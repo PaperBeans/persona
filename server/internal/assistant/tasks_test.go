@@ -875,7 +875,7 @@ func TestTaskPlanStartsWhatTheUserAskedFor(t *testing.T) {
 	if res, err := s2.toolTaskPlan(context.Background(), "conv1", plan(true)); err != nil || !strings.Contains(res, "nothing has started") {
 		t.Fatalf("with the setting off: %q %v", res, err)
 	}
-	time.Sleep(50 * time.Millisecond)
+	waitFor(t, "the start reservation to settle", func() bool { return s2.taskStarting.Load() == 0 })
 	f2.mu.Lock()
 	defer f2.mu.Unlock()
 	if len(f2.starts) != 0 {
