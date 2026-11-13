@@ -22,13 +22,14 @@ type inboxNote struct {
 	Name    string `json:"name"`
 	Text    string `json:"text,omitempty"`
 	Edited  bool   `json:"edited,omitempty"`
+	Failed  bool   `json:"failed,omitempty"`
 	Context string `json:"context,omitempty"`
 	Machine string `json:"machine,omitempty"`
 	Session string `json:"session,omitempty"`
 }
 
 func renderNote(n inboxNote, owner string) string {
-	return prompts.RenderInboxHandlingNote(n.Name, prompts.InboxHandlingNote{Owner: owner, Text: n.Text, Edited: n.Edited,
+	return prompts.RenderInboxHandlingNote(n.Name, prompts.InboxHandlingNote{Owner: owner, Text: n.Text, Edited: n.Edited, Failed: n.Failed,
 		Context: n.Context, Machine: n.Machine, Session: n.Session})
 }
 
@@ -130,8 +131,8 @@ func (b *inboxBook) closeHandling(it *InboxItem, why string, now time.Time) bool
 	return true
 }
 
-// ownSend: the source says the newest message of the item is the user's, and it is the reply Persona sent for a
-// confirmed suggestion (nothing came in since): not the user's own reply. Under b.mu.
+// ownSend: the source says the newest message of the item is the user's, and it is a reply Persona sent (nothing came
+// in since): not a separate reply the user made in the source. Under b.mu.
 func ownSend(it *InboxItem, last string) bool {
 	a, h := it.Agent, it.Handling
 	return a != nil && h != nil && h.State == HandlingWaiting && a.SentOf != "" && a.SentOf == it.Last && (last == "" || last == it.Last)
@@ -160,6 +161,9 @@ func (b *inboxBook) escalate(since, now time.Time) []*inboxWrite {
 			continue
 		}
 		w := beginWrite(it)
+		if it.Follow != nil {
+			it.Follow.Checks, it.Follow.Due = 0, false
+		}
 		if a == nil {
 			a = &InboxAgent{State: AgentQueued}
 			it.Agent = a

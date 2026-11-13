@@ -26,6 +26,7 @@ const (
 // Chain entry kinds (InboxChainEntry.Kind).
 const (
 	ChainReceived    = "received"
+	ChainMerged      = "merged" // rows merged by hand, or split again (inbox_merge.go)
 	ChainTriaged     = "triaged"
 	ChainHandling    = "handling"
 	ChainSent        = "sent"
@@ -68,12 +69,16 @@ const (
 	LinkSource  = "source"
 	LinkSession = "session"
 	LinkItem    = "item"
+	LinkTodo    = "todo" // a to-do the row was turned into (inbox_todo.go, #6480)
 )
 
 // InboxChainEntry is one key call on an event.
 type InboxChainEntry struct {
-	ID       string              `json:"id"`
-	At       time.Time           `json:"at"`
+	ID string    `json:"id"`
+	At time.Time `json:"at"`
+	// TurnAt is the node's session activity time (the transcript's last activity), written only on agent_stopped.
+	// At stays hub-side and nondecreasing for display; the once-per-stop check compares only TurnAt with the node's time.
+	TurnAt   *time.Time          `json:"turn_at,omitempty"`
 	Kind     string              `json:"kind"`
 	Text     string              `json:"text"`
 	Edited   bool                `json:"edited,omitempty"`
@@ -165,6 +170,7 @@ func listedChain(it *InboxItem) []InboxChainEntry {
 	}
 	out := slices.Clone(it.Chain)
 	for i := range out {
+		out[i].TurnAt = nil // node-side dedup bookkeeping, never sent to the apps
 		if out[i].Kind == ChainConcluded {
 			out[i].Link = nil
 		}
