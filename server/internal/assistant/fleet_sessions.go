@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"math"
@@ -184,22 +185,25 @@ func (s *Service) publishList(machine string) []proto.Session {
 		list = kept
 	}
 	msg := assistantwire.FleetSessions{MachineID: machine, Sessions: list, Muted: s.mutedSessions(machine, list)}
-	// json.Marshal's bytes, compared with the list told last as they are written: a list that is the same (most of them)
-	// is not kept, and one that differs is copied once.
-	w := changedWriter{old: f.sent[machine]}
+	// json.Marshal's bytes, encoded into the one buffer and compared with the list told last by length and SHA-256: a
+	// list that is the same (most of them) is not told again, and none of them is kept (#3197: 3.6 MB at 20 computers
+	// of 200 sessions, when each computer's last bytes were).
+	f.enc.Reset()
 	var b []byte // nil when the list does not encode, as json.Marshal gives
-	if jsonv2.MarshalWrite(&w, msg, json.DefaultOptionsV1()) == nil {
-		if w.same() {
+	var told sentList
+	if jsonv2.MarshalWrite(&f.enc, msg, json.DefaultOptionsV1()) == nil {
+		told = sentList{n: f.enc.Len(), sum: sha256.Sum256(f.enc.Bytes())}
+		if told == f.sent[machine] {
 			return list
 		}
-		b = w.written()
-	} else if len(w.old) == 0 {
+		b = bytes.Clone(f.enc.Bytes()) // enc is the next list's: what is told is never written again
+	} else if f.sent[machine].n == 0 {
 		return list
 	}
 	if f.sent == nil {
-		f.sent = map[string][]byte{}
+		f.sent = map[string]sentList{}
 	}
-	f.sent[machine] = b // kept and told: never written again
+	f.sent[machine] = told
 	f.shownMu.Lock()
 	if f.shown == nil {
 		f.shown = map[string][]proto.Session{}
@@ -227,34 +231,11 @@ func awaitingReply(list []proto.Session) []proto.Session {
 	return out
 }
 
-// changedWriter takes an encoding and compares it with old as it comes, copying it out only once it differs.
-type changedWriter struct {
-	old []byte
-	n   int    // how many bytes came, while they are old's
-	out []byte // all of them, once they differ from old
-}
-
-func (w *changedWriter) Write(p []byte) (int, error) {
-	if w.out == nil {
-		if len(p) <= len(w.old)-w.n && bytes.Equal(p, w.old[w.n:w.n+len(p)]) {
-			w.n += len(p)
-			return len(p), nil
-		}
-		w.out = append(make([]byte, 0, max(len(w.old), w.n+len(p))), w.old[:w.n]...)
-	}
-	w.out = append(w.out, p...)
-	return len(p), nil
-}
-
-// same: what came is old.
-func (w *changedWriter) same() bool { return w.out == nil && w.n == len(w.old) }
-
-// written is everything that came, when it was not old.
-func (w *changedWriter) written() []byte {
-	if w.out == nil {
-		return slices.Clone(w.old[:w.n]) // a prefix of old: never handed on as old's own bytes
-	}
-	return w.out
+// sentList is what is kept of the list last told the hub for a machine: the length and SHA-256 of its JSON. Zero: none,
+// or one that did not encode (told as null), so the next list that encodes is told.
+type sentList struct {
+	n   int
+	sum [sha256.Size]byte
 }
 
 // decorated returns a machine's sessions as the apps get them: the unified states, the pending interaction counts,
