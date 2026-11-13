@@ -66,9 +66,9 @@ func BenchmarkFleetSessionsKept(b *testing.B) {
 				s.publishSessions(id)
 				n++
 			}
-			want := 0
+			want := len(ids) // the first lists
 			if event == "changed" {
-				want = n
+				want += n
 			}
 			if got := h.toldOf(assistantwire.EventFleetSessions); got != want {
 				b.Fatalf("told %d lists in %d rounds, want %d", got, n, want)
