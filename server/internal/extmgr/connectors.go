@@ -603,7 +603,7 @@ func (h *Manager) registerConnectors() {
 	if gh.Configured() {
 		name := gh.Auth.FromMachine
 		if m := h.localMachine(name); m != nil {
-			name = m.cfg.Name
+			name = m.name()
 		}
 		ghc = github.New(gh, name, h.ghToken(gh.Auth.FromMachine))
 	} else {
@@ -650,7 +650,7 @@ func (h *Manager) ghToken(machine string) github.TokenSource {
 		case errors.As(err, &re) && re.Code == proto.CodeNotSignedIn:
 			return "", github.ErrNotSignedIn
 		case err != nil:
-			return "", fmt.Errorf("%s: %s", m.cfg.Name, github.Scrub(err.Error()))
+			return "", fmt.Errorf("%s: %s", m.name(), github.Scrub(err.Error()))
 		case out.Token == "":
 			return "", github.ErrNotSignedIn
 		}

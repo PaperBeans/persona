@@ -776,11 +776,12 @@ func (d *Devices) listed(id string) *Machine {
 	return nil
 }
 
-// View is one machine with what its node said of itself (node.info), and its sessions as the node listed them.
+// View is one machine with what its node said of itself (node.info). Its sessions are not in it: the extensions'
+// code looks one up on every node event it takes (each port stream's data, ack and close), and copying every
+// machine's list for that was 6.3 MB a lookup at 20 machines of 200 sessions (#3197); FindSession reads them.
 type View struct {
 	Summary
-	Info     proto.NodeInfo
-	Sessions []proto.Session
+	Info proto.NodeInfo
 }
 
 // Views are the machines with their node.info (the extensions' code reads the computers' OS, programs, capabilities).
@@ -789,13 +790,31 @@ func (d *Devices) Views() []View {
 	for _, m := range d.machinesNow() {
 		m.mu.Lock()
 		v := View{Summary: Summary{ID: m.cfg.ID, Name: m.name(), Kind: m.cfg.Kind, SSHHost: m.cfg.SSHHost, Home: m.info.Home,
-			DataDir: m.info.DataDir, Online: m.online || m.warmLocked(time.Now())}, Info: m.info, Sessions: slices.Clone(m.sessions)}
+			DataDir: m.info.DataDir, Online: m.online || m.warmLocked(time.Now())}, Info: m.info}
 		m.mu.Unlock()
 		v.Trust = d.machineTrust(m)
 		v.Reachable = m.reachable()
 		out = append(out, v)
 	}
 	return out
+}
+
+// FindSession reports whether match accepts one of the sessions of the machine Views lists as id, as its node listed
+// them, stopping at the first it accepts; false when Views lists none. match reads each session in place, under the
+// machine's lock: it must not change or keep it, nor call the devices.
+func (d *Devices) FindSession(id string, match func(*proto.Session) bool) bool {
+	m := d.listed(id)
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.sessions { // by index: a range value copies every (large) session it passes
+		if match(&m.sessions[i]) {
+			return true
+		}
+	}
+	return false
 }
 
 // Relist asks a machine's node for its sessions again and passes the list on (what it leaves out changed: the

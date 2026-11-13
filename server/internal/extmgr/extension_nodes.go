@@ -355,7 +355,7 @@ func (h *Manager) checkRenameNodeCapabilities(ctx context.Context, p *extension.
 			continue
 		}
 		m.mu.Lock()
-		name := cmp.Or(m.cfg.Name, m.cfg.ID)
+		name := cmp.Or(m.name(), m.cfg.ID)
 		m.mu.Unlock()
 		if !m.isOnline() {
 			unreachable = append(unreachable, name)
@@ -698,7 +698,7 @@ func (h *Manager) serveNodeExtensionHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if !m.isOnline() {
-		writeErrCode(w, http.StatusConflict, extensionNodeOffline, i18n.Err("hub-extension_nodes.offline", i18n.Args{"name": m.cfg.Name}))
+		writeErrCode(w, http.StatusConflict, extensionNodeOffline, i18n.Err("hub-extension_nodes.offline", i18n.Args{"name": m.name()}))
 		return
 	}
 	id = p.Record.ID // Owner aliases route to the exact current node program.
@@ -729,10 +729,10 @@ func (h *Manager) serveNodeExtensionHTTP(w http.ResponseWriter, r *http.Request)
 			w.Header().Set("Cache-Control", "no-store")
 			var re *rpc.Error
 			if errors.As(err, &re) && re.Code == "not_running" {
-				writeErrCode(w, http.StatusBadGateway, "not_running", fmt.Errorf("plugin %s is not running on %s", id, m.cfg.Name))
+				writeErrCode(w, http.StatusBadGateway, "not_running", fmt.Errorf("plugin %s is not running on %s", id, m.name()))
 				return
 			}
-			writeErr(w, http.StatusBadGateway, fmt.Errorf("plugin %s is not answering on %s: %w", id, m.cfg.Name, err))
+			writeErr(w, http.StatusBadGateway, fmt.Errorf("plugin %s is not answering on %s: %w", id, m.name(), err))
 		},
 	}
 	w.Header().Del("Cache-Control")
@@ -745,7 +745,7 @@ func (h *Manager) serveNodeExtensionHTTP(w http.ResponseWriter, r *http.Request)
 func dialNodeExtension(ctx context.Context, m *Machine, id string) (net.Conn, error) {
 	mux := m.portStreams()
 	if mux == nil {
-		return nil, fmt.Errorf("%s: %w", m.cfg.Name, errOffline)
+		return nil, fmt.Errorf("%s: %w", m.name(), errOffline)
 	}
 	if mux.Len() >= maxPortStreams {
 		return nil, errors.New("too many connections to this machine")

@@ -290,7 +290,7 @@ func (h *Manager) withUI(ctx context.Context, id, uiID string, in uiRequest, cal
 			return res, errNoMachine
 		}
 		m.mu.Lock()
-		params.Machine = &extension.UIMachine{ID: m.cfg.ID, Name: m.cfg.Name, OS: m.info.OS, Online: m.online}
+		params.Machine = &extension.UIMachine{ID: m.cfg.ID, Name: m.name(), OS: m.info.OS, Online: m.online}
 		m.mu.Unlock()
 	case "inbox_item":
 		if in.Context.Item == "" {
