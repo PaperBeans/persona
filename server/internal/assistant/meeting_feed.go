@@ -320,6 +320,10 @@ type feedBatch struct {
 	// topics: the room has meeting_topics_set, so the batch shows it its topics so far (topicsSoFar) to update.
 	topics      bool
 	topicsSoFar []kb.LiveTopic
+	// highlights: the room has meeting_highlights_set, so the batch shows it its highlights so far (highlightsSoFar)
+	// to update.
+	highlights      bool
+	highlightsSoFar []kb.LiveHighlight
 }
 
 func (b feedBatch) empty() bool { return len(b.lines) == 0 && len(b.answers) == 0 }
@@ -374,11 +378,13 @@ func feedMeetingName(r kb.Recording, loc *time.Location) string {
 // feedText is batch b of meeting r as the session reads it (prompts/meeting/feed.md), in the user's language and
 // time zone.
 func feedText(r kb.Recording, b feedBatch, lang string, loc *time.Location) string {
-	at := func(sec float64) string {
-		return r.StartedAt.Add(time.Duration(sec * float64(time.Second))).In(loc).Format("15:04")
-	}
+	at := func(sec float64) string { return kb.LiveClock(r, sec, loc) } // what a highlight's said_at names
 	d := prompts.MeetingFeed{Lang: lang, Title: feedMeetingName(r, loc), Role: r.AttendanceRole(), SoFar: b.soFar, LeftOut: b.leftOut,
-		Ended: b.end, Room: b.room, Topics: b.room && b.topics, TopicsSoFar: meetingTopics(b.topicsSoFar)}
+		Ended: b.end, Room: b.room, Topics: b.room && b.topics, TopicsSoFar: meetingTopics(b.topicsSoFar),
+		Highlights: b.room && b.highlights}
+	for _, h := range b.highlightsSoFar {
+		d.HighlightsSoFar = append(d.HighlightsSoFar, prompts.MeetingHighlight{At: at(h.At), Text: oneLine(h.Text)})
+	}
 	for _, sg := range b.lines {
 		d.Lines = append(d.Lines, prompts.MeetingFeedLine{At: at(sg.Start), Text: sg.Text})
 	}

@@ -927,4 +927,7 @@ func TestRuntimePageWithCounts(t *testing.T) {
 	if !slices.Contains(h.features(), featureSessionsPageCounts) || slices.Contains(proto.Features, featureSessionsPageCounts) {
 		t.Error("sessions_page_counts must be advertised by the hub")
 	}
+	if !slices.Contains(h.features(), featureAgentsPageCounts) || slices.Contains(proto.Features, featureAgentsPageCounts) {
+		t.Error("agents_page_counts must be advertised by the hub")
+	}
 }

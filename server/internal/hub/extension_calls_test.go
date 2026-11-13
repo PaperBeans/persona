@@ -158,6 +158,14 @@ func (m *relayedManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // routes with a relayedManager; the apps reach it at the server returned.
 func relayTestHub(t *testing.T) (*Hub, *relayedManager, *fakeExt, *httptest.Server) {
 	t.Helper()
+	m := &relayedManager{ended: make(chan string, 8)}
+	h, fx, srv := relayTestHubServing(t, m)
+	return h, m, fx, srv
+}
+
+// relayTestHubServing is relayTestHub with the manager serving what the hub relays to it with serve.
+func relayTestHubServing(t *testing.T, serve http.Handler) (*Hub, *fakeExt, *httptest.Server) {
+	t.Helper()
 	h := newTestHub(t)
 	h.store = &pairStore{tokenStore: tokenStore{memStore: *newMemStore(), rows: map[string]db.DeviceToken{}, rev: map[string]bool{}},
 		pairs: map[string]db.PairToken{}}
@@ -168,16 +176,15 @@ func relayTestHub(t *testing.T) (*Hub, *relayedManager, *fakeExt, *httptest.Serv
 	h.busRoutes(busMux)
 	busSrv := httptest.NewServer(busMux)
 	t.Cleanup(busSrv.Close)
-	m := &relayedManager{ended: make(chan string, 8)}
 	var token string
-	x := &relayingExt{fakeExt: fakeExtOf(h), serve: m, dial: func(ctx context.Context, query string) (*websocket.Conn, error) {
+	x := &relayingExt{fakeExt: fakeExtOf(h), serve: serve, dial: func(ctx context.Context, query string) (*websocket.Conn, error) {
 		return bus.DialAt(ctx, busSrv.URL, token, busSrv.Client(), devicewire.RelayPath, query)
 	}}
 	a := dialAssistant(t, h, busSrv.URL, false, func(o *assistant.BusOptions) { o.Extensions = x })
 	token = a.token
 	srv := httptest.NewServer(h.routes())
 	t.Cleanup(srv.Close)
-	return h, m, x.fakeExt, srv
+	return h, x.fakeExt, srv
 }
 
 // relayDevice makes a device token of kind ("phone": full, "watch": answer-only) with by's credential.

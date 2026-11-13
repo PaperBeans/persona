@@ -2,8 +2,9 @@
 // the model's name, a star and Customize that show under the pointer (or on keyboard focus, or always on a touch screen),
 // and on the right what a pick applies: the Agent's mark, the effort, ⚡ for Fast. The second: where it comes from (All,
 // Recent, Favorites) or what the model is (a provider's own view). The model that runs now has a whole-row fill and no
-// check mark. Enter or Space picks it, ← or a right-click opens its setup flyout.
-import type { ButtonHTMLAttributes, KeyboardEvent, MouseEvent } from "react";
+// check mark. Enter or Space picks it, ← or a right-click opens its setup flyout. A name cut short shows the model's whole
+// ID as its second line (a touch screen has no tooltip), and a touch screen shows the ID instead of the provider's name.
+import { useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent, type MouseEvent } from "react";
 import { t } from "../../i18n";
 import { priceTier, shownEffort, type PanelRow } from "../../lib/model-panel";
 import { effortTitle } from "../../lib/session-actions";
@@ -72,6 +73,25 @@ export function Row({ row, second, describes, blocked, customizable, flyoutOpen,
   // is not announced as disabled (its pick is a no-op anyway, and Enter does nothing while blocked)
   const ariaOff = off && !(row.current && customizable && !frozen);
   const starOff = Boolean(frozen) || (Boolean(blocked) && !starRemoves) || row.kind === "typed";
+  // the name is cut short (measured again as the panel resizes): its second line becomes the whole ID
+  const nameEl = useRef<HTMLSpanElement>(null);
+  const [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const el = nameEl.current;
+    if (!el) return;
+    const measure = () => {
+      const c = el.scrollWidth > el.clientWidth + 1;
+      setCut((v) => (v === c ? v : c));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [name]);
+  // a typed ID's row is its ID already; a preset's second line describes it
+  const hasId = row.kind !== "typed" && row.kind !== "preset";
+  const idLine = hasId && cut ? "always" : hasId && !describes && model.id !== name ? "touch" : null;
   const key = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget || e.nativeEvent.isComposing) return;
     if (e.key === "ArrowLeft") {
@@ -115,7 +135,7 @@ export function Row({ row, second, describes, blocked, customizable, flyoutOpen,
         <span className="flex size-[18px] shrink-0 items-center justify-center text-ink-2">
           <ProviderMark name={provider.name} />
         </span>
-        <span title={row.kind === "typed" ? model.id : name} className={cx("min-w-0 truncate leading-5 font-medium", model.custom && stars && "font-mono")}>{name}</span>
+        <span ref={nameEl} title={row.kind === "typed" ? model.id : name} className={cx("min-w-0 truncate leading-5 font-medium", model.custom && stars && "font-mono")}>{name}</span>
         {tier && (
           <span data-price-tier={tier} aria-label={t("ui-modelpanel.price_tier", { tier })} title={t("ui-modelpanel.price_tier", { tier })} className="shrink-0 text-[11px] leading-none font-semibold tracking-[0.5px] text-ink-2">
             {"$".repeat(tier)}
@@ -157,9 +177,16 @@ export function Row({ row, second, describes, blocked, customizable, flyoutOpen,
           </span>
         </span>
       </div>
-      {second && (
-        <div title={second} className={cx("min-w-0 truncate pt-px pl-[26px] text-[12px] leading-[1.4] text-ink-2", describes && "max-w-[30ch]")}>
+      {second && idLine !== "always" && (
+        <div title={second} className={cx("min-w-0 truncate pt-px pl-[26px] text-[12px] leading-[1.4] text-ink-2", describes && "max-w-[30ch]", idLine === "touch" && "[@media(hover:none)]:hidden")}>
           {second}
+        </div>
+      )}
+      {idLine && (
+        <div data-row-id={idLine} className={cx("min-w-0 pt-px pl-[26px]", idLine === "touch" && "hidden [@media(hover:none)]:block")}>
+          <div title={model.id} className="line-clamp-2 font-mono text-xs leading-[1.4] break-all text-ink-2">
+            {model.id}
+          </div>
         </div>
       )}
     </div>

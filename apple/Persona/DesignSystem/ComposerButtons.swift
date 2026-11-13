@@ -55,11 +55,8 @@ extension Dictation {
         if isListening { stop(); return }
         let typed = text.wrappedValue
         let base = typed.isEmpty || typed.last?.isWhitespace == true ? typed : typed + " "
-        let told = [typed] + hints()
-        Task {
-            if let problem = await start(hints: told, update: { heard in text.wrappedValue = base + heard }) {
-                AppModel.shared.toast = Toast(problem, style: .error)
-            }
+        start(hints: [typed] + hints(), update: { heard in text.wrappedValue = base + heard }) { problem in
+            AppModel.shared.toast = Toast(problem, style: .error)
         }
     }
 }

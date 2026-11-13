@@ -240,6 +240,14 @@
     }
   },
   "size": {
+    "cardColumn": {
+      "$type": "dimension",
+      "$value": {
+        "value": 330,
+        "unit": "px"
+      },
+      "$description": "Theme.Size.cardColumn: minimum adaptive card column; 330 iOS pt / Android dp in each platform's logical units, not physical pixels"
+    },
     "iconXS": {
       "$type": "dimension",
       "$value": {
@@ -391,6 +399,14 @@
         "unit": "px"
       },
       "$description": "Theme.Size.box280: the widest a pill above the composer gets (the pill while a chat's model operates a Mac)"
+    },
+    "box300": {
+      "$type": "dimension",
+      "$value": {
+        "value": 300,
+        "unit": "px"
+      },
+      "$description": "Theme.Size.box300: the conversation list column beside the assistant's chat on a wide window"
     },
     "slimBar": {
       "$type": "dimension",

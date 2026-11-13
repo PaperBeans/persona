@@ -1,5 +1,29 @@
 # Lessons: web UI and interactions
 
+## Removing a client-only prompt includes its hooks and fixture documentation (#6570)
+
+The star toast was browser-local, but readiness refresh and successful Agent creation loaded its rule lazily.
+Remove those producers as well as the rendered prompt and all language namespaces; do not reset real setup or
+conversation state to retire an unused local-storage value. Keep shared fixtures while another client consumes
+them, and update their README's test paths. A readiness regression should wait for dynamic imports to settle:
+a synchronous negative assertion can miss the delayed toast that caused the report.
+
+## Pending cards need exact session metadata outside the loaded page (#6432)
+
+A task row can render from `taskRows` even when `getSession` has no row for its Agent. On a paging hub, hydrate every
+pending card's missing session, not only `folded_under` children, before checking approval capabilities. Keep missing
+and explicitly read-only sessions disabled. Test a root Agent outside the list window, and type without submitting.
+An expanded Needs you title opens the asking Agent; keep folding on its separate chevron, never on that title.
+
+## A grey text selection over sidebar rows reads as a stuck highlight (#6458)
+
+The theme paints `::selection` with `--accent-tint`, a neutral grey in the default theme close to the hover fill. A
+press-and-drag that started on a group's always-shown explanation (trying to drag an Agent onto a to-do) selected the
+group titles, state words and explanations below it, line by line, and pressing the fold buttons afterwards kept it
+(a press on a button does not move the selection), so the owner reported it as a highlight style leaking. Rows that
+fold or group (`Section`'s heading, `TreeBranch`) are `select-none`; a drag test in `web/e2e/todo-grouping.mjs` keeps
+it so. Before calling a stray grey block a style bug, check `String(getSelection())`.
+
 ## Live acceptance must distinguish a lookup POST from a mutation (#5753)
 
 The live composer driver rejected the app's normal `POST /api/v1/launchers/catalog`, although the handler is a
@@ -88,6 +112,18 @@ every later alias moves on by one, the list reorders and every first-screen impo
 grew 9 B, but the ja count grew 255 B and `main` failed the build, with no first-screen code changed. `firstScreenBytes`
 now counts imported names as one fixed string and export lists as empty ones. To check a surprising move, compare the
 number of entries in each first-screen chunk's `export{…}` between the two builds.
+
+## A change's first-screen cost depends on the main it is measured on (#6348)
+
+The paged Agents list's groups measured +1,402 B for ja on one `main`, then +1,510 B, +1,396 B and +1,501 B on the
+next three, within two hours and with the change's own code untouched: brotli counts a change against everything around it,
+and each merge moved what it compresses against. For the same reason a lazy split saves far less than the module weighs
+alone: the sections' view is about 1.5 KB minified and compressed on its own, and moving it to its own chunk took 407 B
+off. Measure the branch and `main` at the same commit, after the last merge, and write that pair beside
+`FIRST_SCREEN_BUDGET`; never carry a delta over from an earlier base, and never estimate a split from a module's own
+size. A build under its budget prints no numbers: build a scratch checkout with the constant set to 1 B, and the error
+names every language's count. While the PR waits, `main` may raise the budget for its own changes: merge it, keep its
+note, and append yours with a new pair.
 
 ## An idle-contracted chunk's growth raises the idle budget, it cannot move to on-intent (#5386)
 
@@ -1143,3 +1179,17 @@ for old items. Parse a textual card envelope only inside one source message, and
 keep incomplete or unknown card shapes readable. Capability errors need their own
 code; a 409 without `Threads` is different from a temporary failure or lost access.
 A failed page refresh must not erase a loaded page or its pending reply draft.
+
+## A conversation link is not an answer to a task decision (#5929)
+
+Carry the task and its original decision round when offering Answer in chat. An ordinary chat message, an Agent
+question's answer in the task's ledger, and a pending needs-user closeout are distinct: a decision record alone
+does not settle that closeout. Reuse explicit task routing, show what the next message will answer, reject stale
+rounds, and refresh the pending card only after delivery and recording. A parked review likewise takes precedence
+over stopped/seen turn signals: seeing a turn cannot complete the task.
+
+Keep completed session ownership separate from active task membership. Filling active `session.todo` with a closed
+task would make older consumers treat history as current work. The optional `completed_todo` display reference keeps
+the Web menu useful without changing active links, supervision, counts or quiet rules.
+Put its completion marker before the variable-length title: end truncation can hide a suffix even when a DOM-text
+test finds it. Regress the order in every translation and inspect the actual long-title menu.

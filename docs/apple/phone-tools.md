@@ -6,6 +6,7 @@ Route: Claude calls a `phone_*` tool → `personad mcp` → node.sock → hub �
 the app queries/writes locally → `tool_result` returns along the same route.
 
 Device tool descriptions and schemas are registered by the app (iOS `apple/Persona/PhoneTools/`, Android `android/platform/phonetools/` (`PhoneToolCatalog.kt`)). The hub adds an optional `queue_if_offline` parameter to confirmed writes and supplies its own queue management tools from `server/internal/prompts/mcp/phone/` (`docs/assistant/prompts.md`, "MCP tools"). `personad mcp` adds `file` and `trim` to `phone_clipboard_set` (see "Copying a file to the clipboard").
+A conversation lists its tools once (`personad mcp` says `listChanged: false`): when the manager can't reach the hub for the phone's tools then, it asks again briefly, then lists the ones the hub last gave, so a hub restart does not leave a conversation without them (#6422).
 Descriptions and parameters for tools with the same name must match exactly on both platforms (the hub merges tools from all phones by name; `PhoneToolCatalogTest` compares against the catalog exported by iOS).
 
 Mail tools `mail_*` use the same `personad mcp`, but execute on the hub without going through the phone; see "Mail tools (mail_*)" below.
@@ -60,7 +61,7 @@ See `docs/android/android.md` ("App shell and direct page navigation," the Setti
 | `phone_location_search {query, limit?}` | Location | No | Finds a place by name or address (MapKit): name, address, latitude, longitude, up to 10 |
 | `phone_maps_search_nearby {query, latitude?, longitude?, radius_meters?, limit?}` | Location | No | Places around the current fix (or the given point), nearest first: name, address, coordinates, distance, category, phone, website and the source (#2281). MapKit gives apps no opening hours; the result says so |
 | `phone_maps_navigate {latitude, longitude, name?, mode?}` | None (foreground) | No | Opens directions in Apple Maps (`driving` / `walking` / `transit`) and returns `opened: maps`: navigation runs in Maps, not in Persona |
-| `phone_maps_route {latitude, longitude, name?, mode?, from_latitude?, from_longitude?}` | Location | No | Works out a route with `MKDirections` and opens nothing (#5544): from Maps' own idea of where the phone is (`MKMapItem.forCurrentLocation()`, already in the map's coordinates in mainland China) or the start given, to the destination, by `driving` / `walking` / `transit`. Returns the distance in meters, the expected time in seconds, the route's name and its line simplified to at most 48 points (`RouteLine`, Douglas–Peucker); transit has the time and distance only, as Apple Maps gives apps no transit line. The prompt asks for it on "how far / how long" and keeps `phone_maps_navigate` for when the user wants to go |
+| `phone_maps_route {latitude, longitude, name?, mode?, from_latitude?, from_longitude?}` | Location | No | Works out a route with `MKDirections` and opens nothing (#5544): from Maps' own idea of where the phone is (`MKMapItem.forCurrentLocation()`) or the start given, to the destination, by `driving` / `walking` / `transit`. Returns the distance in meters, the expected time in seconds, the route's name and its line simplified to at most 48 points (`RouteLine`, Douglas–Peucker); transit has the time and distance only, as Apple Maps gives apps no transit line. The prompt asks for it on "how far / how long" and keeps `phone_maps_navigate` for when the user wants to go |
 | `phone_health_summary {metrics?, days?}` | Health (read) | No | Defaults to steps over the last 7 days; metrics steps / distance / active_energy / heart_rate / resting_heart_rate / sleep / weight |
 | `phone_health_write_sample {metric, value?, start, end?}` | Health (write) | **Yes** | Writes one sample: steps (integer) / distance (meters) / active_energy (kilocalories) / weight (kilograms, one instant) / sleep (an asleep interval, no value); intervals at most 24 hours, not in the future; one sample at a time, no bulk import or deletion |
 | `phone_photos_recent {limit?, days?, screenshots_only?}` | Photos (read) | No | Recent photo/video metadata: local id, time, type, dimensions, screenshot/favorite flags, duration, latitude/longitude |
@@ -88,7 +89,17 @@ See `docs/android/android.md` ("App shell and direct page navigation," the Setti
 | `phone_home_run_scene {scene_id}` | Home | **Yes** | Runs a scene; the card says when it touches a security accessory |
 | `phone_notifications_list {limit?}` | None | No | **Android only**: Persona's own currently displayed notifications (id, title, body, time), newest first, default 50, maximum 100; excludes confirmation-card notifications and cannot see other apps' notifications |
 
-In the Persona chat on iPhone, the results of `phone_location_current`, `phone_location_search` and `phone_maps_search_nearby` are also drawn as a map card under the turn's work line, with numbered pins and Directions to Apple Maps (#5543), a route `phone_maps_route` worked out as its line with the mode, time and distance and Start in Maps (#5544), and directions `phone_maps_navigate` opened in Maps as the destination's card with its mode and a button that opens them again (#5545; instant result cards in `docs/assistant/unified-entry.md`). The tool calls stay folded.
+In the Persona chat on iPhone, the results of `phone_location_current`, `phone_location_search` and `phone_maps_search_nearby` are also drawn as a map card under the turn's work line, with numbered pins and Directions to Apple Maps (#5543), a route `phone_maps_route` worked out as its line with the mode, time and distance and a labeled Start in Maps (#5544, #6177), and directions `phone_maps_navigate` opened in Maps as the destination's card with its mode and a button that opens them again (#5545; instant result cards in `docs/assistant/unified-entry.md`). The tool calls stay folded.
+
+Coordinates are WGS-84 everywhere, mainland China included: Core Location, MapKit's search (`MKLocalSearch`, `CLGeocoder`), `MKMapSnapshotter` and `MKDirections` take and give WGS-84, and MapKit shifts the mainland map (GCJ-02) itself. Nothing in Persona converts, so a place found by search, the phone's own fix and a saved place agree, and a reminder's circle is where the user meant (`docs/lessons/ios.md`, "MapKit speaks WGS-84 in mainland China too").
+
+### Reminders imported as to-dos (#4009)
+
+Under Settings › Phone data, once Reminders is on, **Import into To-dos** (off by default) sends the incomplete
+reminders of the lists the user leaves on (all of them at first) to the hub, which makes to-dos of them, one way
+(`RemindersImport`, `RemindersImporter`; `docs/assistant/todos.md`, "Imported from Reminders"). It runs on launch, on
+return to the foreground and when the Reminders database changes while the app is in front, and sends nothing when the
+batch is the same as the last one the hub took.
 
 ### Reminders by place (#6564)
 
@@ -111,7 +122,7 @@ The places reminders by place go off at belong to the user, not to the assistant
 The circle on the map follows the reminder's radius. Delete from the list (swipe or context menu) asks first, like the editor's Delete, and a full swipe does nothing.
 
 - **Kept by the manager** in its settings (`assistant.places`, `server/internal/assistant/places.go`), per manager. `GET/POST /api/v1/assistant/places`, `PUT/DELETE /api/v1/assistant/places/{id}` (`docs/protocol/protocol.md`); names are unique (case aside), writes need full credentials.
-- **The assistant** reads them with `list_places` before a reminder by place. When a place is missing, it finds it with the user (`phone_location_current` there, or `phone_location_search` and the user's pick) and keeps it with `save_place`, which adds the place or changes the one of the same name; so whatever it uses, the user sees and can correct.
+- **The assistant** reads them with `list_places` before a reminder by place, and before a route or directions to or from a place the user names ("how long to get home", "directions to the office": the saved place's coordinates go to `phone_maps_route` or `phone_maps_navigate`, #6386) instead of searching Apple Maps for "home". When a place is missing, it finds it with the user (`phone_location_current` there, or `phone_location_search` and the user's pick) and keeps it with `save_place`, which adds the place or changes the one of the same name; so whatever it uses, the user sees and can correct.
 - Changing a saved place does not move the reminders already set: each reminder keeps the coordinates it was made with.
 
 Tools by platform:

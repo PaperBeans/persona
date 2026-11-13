@@ -865,7 +865,7 @@ func toolSummary(name string, input json.RawMessage) string {
 // agentToolNames): reporting to its supervisor, reading and noting the decisions of the todo it works on, binding
 // that todo to a chat thread, handing a subtask to another computer and reading it back (assistant/dispatch.go), and a
 // task leader's task_plan and task_review (assistant/task_leader.go).
-var callerTools = []string{"report_to_supervisor", "todo_decisions", "todo_decision_add", "todo_bind_thread", "dispatch_start", "dispatch_read", "task_plan", "task_review"}
+var callerTools = []string{"report_to_supervisor", "todo_decisions", "todo_decision_add", "todo_bind_thread", "dispatch_start", "dispatch_read", "task_plan", "task_review", "task_spawn"}
 
 // mcpCaller is the session an MCP call of tool name goes to the hub with: the one it names, else, for an agent's
 // tools that need to know whose call it is (callerTools), the session its pane runs. The rest go on as before, with

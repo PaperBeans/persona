@@ -14,6 +14,11 @@ type PeerMessage struct {
 
 func RenderPeerMessage(m PeerMessage) string { return render("agents/peer_message", m) }
 
+// PeerStop is what the phone's Stop sends a Claude session outside Persona's terminals, as the user's words of a peer
+// message at priority now (node/claudebg.go interruptOutside): the turn it runs ends there, and it says where it stopped
+// (agents/peer_stop). The session's transcript shows it as the stop it is (transcript/peer.go).
+func PeerStop() string { return render("agents/peer_stop", nil) }
+
 // peerMessageHead is what agents/peer_message puts before the user's words, rendered on first use: rendering it in a
 // package variable would parse every template whenever personad starts, a hook too (#1308).
 var peerMessageHead = sync.OnceValue(func() string {

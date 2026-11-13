@@ -244,7 +244,6 @@
     <string name="chat_links_context_default">参考上面的内容。</string>
     <string name="chat_menu_copied">已拷贝</string>
     <string name="chat_menu_no_share">没有能分享的应用</string>
-    <string name="chat_menu_select_title">选择文本</string>
     <string name="chat_menu_copy">复制</string>
     <string name="chat_menu_select">选择</string>
     <string name="chat_menu_quote">引用</string>
@@ -355,6 +354,9 @@
     <string name="chat_queue_send_now_message">现在就把排队的消息发给 Agent。它正在跑的命令会转到后台继续跑；正在写的回复会带上你的消息重新开始。</string>
     <string name="chat_queue_send_now_message_persona">%1$s 会马上收到，不用等到下一步。它手头的这一步会停下，能转到后台的会在后台继续，然后带上你的消息重新开始。</string>
     <string name="chat_queue_relayed_note">对话空闲后送达</string>
+    <plurals name="chat_queue_relayed_summary">
+        <item quantity="other">还有 %1$d 条别的对话在排队</item>
+    </plurals>
     <string name="chat_queue_sent_now">已立即发给 Agent</string>
     <string name="chat_composer_photos_only">请看图片</string>
     <string name="chat_composer_photo_placeholder">[图片]</string>

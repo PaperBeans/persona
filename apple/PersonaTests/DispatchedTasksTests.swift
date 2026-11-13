@@ -37,7 +37,7 @@ struct DispatchedTasksTests {
     @Test func oneTaskKeepsItsExactTodoTarget() throws {
         let entries = try #require(DispatchedTasks.entries(for: feed(.task, ref: "new"), plans: [:],
                                                           titleOf: { $0 == "new" ? "Current title" : nil }, fallback: "Task"))
-        #expect(entries == [.init(id: "todo:new", todoID: "new", title: "Current title")])
+        #expect(entries == [.init(id: "todo:new", todoID: "new", title: "Current title", conversation: "main")])
     }
 
     @Test func severalTasksKeepPlanOrderAndLiveTitles() throws {
@@ -92,5 +92,31 @@ struct DispatchedTasksTests {
             #expect(DispatchedTasks.entries(for: feed(.plan), plans: [p.id: p], titleOf: { _ in nil }, fallback: "Task") == nil)
         }
         #expect(DispatchedTasks.entries(for: feed(.message), plans: [:], titleOf: { _ in nil }, fallback: "Task") == nil)
+    }
+}
+
+/// A failed start says why once, on the receipt when the conversation has one for the task (the web's `withFailureBelow`).
+@MainActor
+struct DispatchHandoffFailureTests {
+    private func feed(_ json: String) throws -> FeedItem { try JSON.decoder.decode(FeedItem.self, from: Data(json.utf8)) }
+
+    @Test func aFailedReceiptForTheTaskTakesTheReasonOffTheHandoffCard() throws {
+        let failed = try feed(#"{"id":"r1","conversation":"c","at":"2026-11-13T09:00:00Z","kind":"receipt","ref":"t1","body":{"state":"failed","title":"x"}}"#)
+        let done = try feed(#"{"id":"r2","conversation":"c","at":"2026-11-13T09:00:00Z","kind":"receipt","ref":"t2","body":{"state":"done","title":"x"}}"#)
+        #expect(DispatchHandoffCard.hasFailedReceipt([failed, done], todo: "t1"))
+        #expect(!DispatchHandoffCard.hasFailedReceipt([failed, done], todo: "t2"))
+        #expect(!DispatchHandoffCard.hasFailedReceipt([], todo: "t1"))
+    }
+
+    @Test func aFailedStartWithAReceiptBelowIsOnlyDidntStart() {
+        #expect(DispatchHandoffCard.failedMeta("boom", receiptBelow: true) == .failedBelow)
+        #expect(DispatchHandoffCard.failedMeta("boom", receiptBelow: false) == .failed("boom"))
+    }
+
+    @Test func theUsageLimitBranchNeedsAStoppedAgentAndAnOpenTaskThatDoesNotNeedYou() throws {
+        let limited = try JSON.decoder.decode(Session.self, from: Data(#"{"machine_id":"mac","session_id":"s","title":"s","cwd":"/p","state":"idle","status":"idle","updated_at":"2026-11-13T09:00:00Z","turn_error":"You've hit your usage limit.","turn_error_kind":"usage_limit"}"#.utf8))
+        #expect(DispatchHandoffCard.limited(state: .working, closed: false, lead: limited))
+        #expect(!DispatchHandoffCard.limited(state: .needsYou, closed: false, lead: limited))
+        #expect(!DispatchHandoffCard.limited(state: .working, closed: true, lead: limited))
     }
 }

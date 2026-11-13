@@ -7,7 +7,7 @@
 - img/paper.webp: the mascot alone, cut from Apple Vision Pro's front icon layer (the drawing without its paper).
 - img/recording.webp: the README's demo-mode recording (docs/assets/readme/hero-dark.zh-CN.webp), copied as is.
 - fonts/persona-serif.woff: Noto Serif CJK SC Bold, subset to the characters the pages set in it (h1, h2 and .hello
-  of the home page and the extensions page),
+  of the home page, the extensions page and the releases page),
   so the headlines look the same on every system for about 20 KB. The source font is not in the repository: pass it
   with --serif-font (an .otf, or a .ttc with --font-number), or let the script find a system copy.
 """
@@ -20,7 +20,8 @@ from html.parser import HTMLParser
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SITE = os.path.join(ROOT, "site", "public")
 # the pages whose headlines are set in the serif
-PAGES = [os.path.join(SITE, "index.html"), os.path.join(SITE, "extensions", "index.html")]
+PAGES = [os.path.join(SITE, "index.html"), os.path.join(SITE, "extensions", "index.html"),
+         os.path.join(SITE, "releases", "index.html")]
 FRONT = os.path.join(ROOT, "apple/Persona/Resources/Assets.xcassets/AppIcon-Vision.solidimagestack",
                      "Front.solidimagestacklayer/Content.imageset/front.png")
 RECORDING = os.path.join(ROOT, "docs/assets/readme/hero-dark.zh-CN.webp")

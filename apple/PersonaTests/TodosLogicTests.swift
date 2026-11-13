@@ -97,8 +97,8 @@ struct TodosLogicTests {
         #expect(groups[1].sessions.map(\.sessionID) == ["s_unassigned"])
     }
 
-    /// Agents opened by hand in herdr with no todo get "Started Manually", open, before Unassigned; Persona's own and other hosts' stay
-    /// in Unassigned (#2917).
+    /// Agents opened by hand in herdr with no todo get "Started Manually" before Unassigned (open here: one needs you);
+    /// Persona's own and other hosts' stay in Unassigned (#2917).
     @Test func manualHerdrAgentsGetTheirOwnSection() throws {
         func agent(_ id: String, kind: String?, byPersona: Bool, state: AgentState = .working) throws -> Session {
             let kindField = kind.map { ",\"space_kind\":\"\($0)\"" } ?? ""
@@ -124,6 +124,42 @@ struct TodosLogicTests {
         // Nothing opened by hand: no empty section.
         let none = TodosLogic.buildTodoAgentGroups(sessions: [onTodo, spawned], todos: [todo], isMuted: { _ in false })
         #expect(none.map(\.key) == ["todo:t1", "todo:none"])
+    }
+
+    /// The groups of agents on no to-do (#6458): folded below the to-dos unless one of their agents needs you, open as
+    /// the whole list, listed while empty with `keepEmpty`, each saying what it holds (no engine name), and their count
+    /// colored by the most urgent of their agents' states, in a to-do's order.
+    @Test func groupsOnNoTodoFoldSayWhatTheyHoldAndStayWhileEmpty() throws {
+        func agent(_ id: String, byPersona: Bool, state: AgentState) throws -> Session {
+            let json = #"{"machine_id":"m","session_id":"\#(id)","title":"\#(id)","cwd":"/tmp","status":"idle","state":"\#(state.rawValue)","started_by_persona":\#(byPersona),"space_kind":"herdr"}"#
+            return try JSON.decoder.decode(Session.self, from: Data(json.utf8))
+        }
+        let onTodo = try agent("on_todo", byPersona: false, state: .working)
+        let working = try agent("manual_working", byPersona: false, state: .working)
+        let unread = try agent("manual_unread", byPersona: false, state: .unread)
+        let todo = TodoItem(id: "t1", title: "Todo 1", doneAt: nil, createdAt: Date(), agents: [TodoItem.Agent(machineID: "m", sessionID: "on_todo")])
+
+        let groups = TodosLogic.buildTodoAgentGroups(sessions: [onTodo, working, unread], todos: [todo], isMuted: { _ in false })
+        #expect(groups.map(\.key) == ["todo:t1", "todo:manual"])
+        #expect(groups[1].folded)
+        #expect(groups[1].mostUrgent == .unread)
+        let hint = try #require(groups[1].hint)
+        #expect(!hint.isEmpty)
+        #expect(!hint.localizedCaseInsensitiveContains("herdr"))
+        #expect(groups[0].hint == nil)
+
+        let kept = TodosLogic.buildTodoAgentGroups(sessions: [onTodo, working, unread], todos: [todo], isMuted: { _ in false }, keepEmpty: true)
+        #expect(kept.map(\.key) == ["todo:t1", "todo:manual", "todo:none"])
+        #expect(kept[2].sessions.isEmpty)
+        #expect(kept[2].folded)
+        #expect(kept[2].mostUrgent == nil)
+        #expect(kept[2].hint != nil && kept[2].hint != kept[1].hint)
+
+        // with no to-do above them they are the whole list: open
+        let alone = TodosLogic.buildTodoAgentGroups(sessions: [working], todos: [], isMuted: { _ in false }, keepEmpty: true)
+        #expect(alone.map(\.key) == ["todo:manual", "todo:none"])
+        #expect(alone.map(\.folded) == [false, false])
+        #expect(alone[0].mostUrgent == .working)
     }
 
     /// The host from the pane ref, as the hub's host.ParsePane: herdr's ids go bare and may hold a colon (#1836).

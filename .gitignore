@@ -39,3 +39,12 @@ florak/
 # App Store Connect API keys and asc's repo-local config stay on the machine (docs/operations/release.md "Releasing with asc").
 *.p8
 /.asc/
+
+# HarmonyOS local toolchain and generated outputs.
+/harmony/.hvigor/
+/harmony/.idea/
+/harmony/oh_modules/
+/harmony/**/oh_modules/
+/harmony/**/build/
+/harmony/local.properties
+/harmony/signing/

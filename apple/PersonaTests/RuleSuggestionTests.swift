@@ -17,7 +17,7 @@ struct RuleSuggestionTests {
     {"id":"rs_start","kind":"plan_start","text":"You started this 3 times. Always start these directly?",
      "scope":{"machine_id":"example-node","machine":"Example node","directory":"/code/example"},"creates":"tasks.trust","count":3}
     """#
-    private static let delegate = #"{"id":"rs_delegate","kind":"delegate","text":"You took the recommendation 3 times. Let Persona answer agents' own-call questions for you? You can turn this on in Settings.","scope":{},"creates":"","setting":"agents.delegate","count":3}"#
+    private static let delegate = #"{"id":"rs_delegate","kind":"delegate","text":"You took the recommendation 3 times. Let Persona answer agents' own-call questions for you?","scope":{},"creates":"","setting":"agents.delegate","count":3}"#
 
     private func suggestion(_ json: String) throws -> RuleSuggestion {
         try JSON.decoder.decode(RuleSuggestion.self, from: Data(json.utf8))

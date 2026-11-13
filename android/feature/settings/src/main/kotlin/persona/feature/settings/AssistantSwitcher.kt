@@ -33,6 +33,7 @@ import persona.core.designsystem.InlineTone
 import persona.core.designsystem.JAction
 import persona.core.designsystem.JAssistantSwitcherHeader
 import persona.core.designsystem.JAssistantSwitcherRow
+import persona.core.designsystem.JDefaultManagerFace
 import persona.core.designsystem.JInlineStatus
 import persona.core.designsystem.JManagerAvatar
 import persona.core.designsystem.JMenu
@@ -146,7 +147,12 @@ internal fun AssistantSwitcherContent(
     Box(modifier.fillMaxWidth().onSizeChanged { width = with(density) { it.width.toDp() } }) {
         if (head != null) head(current, current.id == default, expanded, onToggle)
         else JAssistantSwitcherHeader(current.shownName, switcherLine(res, current, now), expanded, onToggle, headModifier,
-            avatar = { JManagerAvatar(current, current.id == default, presence = true, alert = others && !expanded) }, trailing = trailing,
+            // The default assistant shows the look's face (one identity with its main conversation, #6401);
+            // any other keeps its first-letter monogram.
+            avatar = {
+                if (current.id == default) JDefaultManagerFace(current, presence = true, alert = others && !expanded)
+                else JManagerAvatar(current, false, presence = true, alert = others && !expanded)
+            }, trailing = trailing,
             othersWaiting = others && !expanded)
         JMenu(expanded, onDismiss, listOf(
             JAction(stringResource(R.string.settings_managers_new), PhIcons.Plus, onClick = onNew),

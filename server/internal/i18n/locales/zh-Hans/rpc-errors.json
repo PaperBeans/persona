@@ -1,4 +1,5 @@
 {
+  "skill_unavailable": "所选技能已不可用或执行环境已变化，请移除后重新选择。消息未发送。",
   "readonly_unsupported": "此启动方式无法应用只读模式。请选择支持只读且没有冲突权限参数的终端启动器。",
   "timeout": "请求超时：电脑可能正忙或网络不稳。请先确认刚才的操作是否已生效，稍后再试。",
   "unreachable": "和这台电脑的连接断了。请重新连接，确认刚才的操作是否已生效，然后再试。",
@@ -45,6 +46,7 @@
   "codex_first_unconfirmed": "消息已经输入 Codex，但它的会话没有及时出现。再发之前先在电脑上看看。",
   "codex_waiting": "Codex 还没收到第一条消息，等它有了会话才能这样做。",
   "codex_no_box": "Codex 已经在电脑上的新标签里打开了，但一分钟内没看到它的输入框。",
+  "codex_no_box_here": "Codex 已经在你选的窗格里启动了，但一分钟内没看到它的输入框。窗格保持原样。",
   "switch_unsupported": "只有在终端里运行、并且 Persona 能认出所用供应商的 Claude Code Agent 才能换到另一个模型供应商。要用那个供应商，请新开一个对话。",
   "switch_launcher_missing": "这台电脑上没有这个模型供应商，请换一个。",
   "switch_other_agent": "这个模型供应商运行的是另一种 Agent，不是 Claude Code。要用它，请新开一个对话。",
@@ -56,6 +58,7 @@
   "switch_stale": "在你选这个模型供应商之后，Agent 已经换到了别的供应商。先看看它现在用的是哪个，再重新选。",
   "switch_pick_model": "Persona 看不出这个模型供应商默认用哪个模型；不指定模型的话，对话会继续用现在的模型。请选一个这个供应商的模型。",
   "switch_under_way": "Agent 正在换到另一个模型供应商。等它运行起来再试，这次什么都没做。",
+  "switch_busy": "Agent 现在正忙（在干活、在等你、正在启动，或者后台还有任务在跑），所以没有换到另一个模型供应商。这次什么都没发；等它停下来再试。",
   "rewind_busy": "请等待会话空闲后再回退。",
   "rewind_unsupported": "此会话不支持所选的回退操作。",
   "rewind_mismatch": "所选消息的位置发生了变化，请刷新对话后再回退。",

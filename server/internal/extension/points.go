@@ -80,6 +80,14 @@ type VoiceItem struct {
 	Name string `json:"name,omitempty"`
 }
 
+// TranscriptionItem is a contribution to transcription: transcribing a meeting's audio on the hub for the manager
+// (docs/assistant/meeting-minutes.md "The `transcription` extension point"). Only the manager dials it, over the
+// extension's own socket under /transcription/<id>/ (extwire.TranscriptionProtocol); the apps' forward never reaches it.
+type TranscriptionItem struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+}
+
 // ComputerItem is a contribution to computer: operating the user's computers for the assistant (the built-in plugin
 // cua, docs/extensions/computer-use.md).
 type ComputerItem struct {
@@ -720,6 +728,18 @@ var Points = map[string]Point{
 		}
 		if !idPattern.MatchString(v.ID) {
 			return v.ID, fmt.Errorf("voice id %q: a-z0-9_-", v.ID)
+		}
+		return v.ID, nil
+	}},
+	// transcription: a meeting's audio to text, for the manager only (TranscriptionItem); served over the program's
+	// HTTP socket like voice.
+	"transcription": {Name: "transcription", Namespace: "transcription", Version: 1, NeedsHTTP: true, Item: func(raw json.RawMessage) (string, error) {
+		var v TranscriptionItem
+		if err := strict(raw, &v); err != nil {
+			return "", err
+		}
+		if !idPattern.MatchString(v.ID) {
+			return v.ID, fmt.Errorf("transcription id %q: a-z0-9_-", v.ID)
 		}
 		return v.ID, nil
 	}},

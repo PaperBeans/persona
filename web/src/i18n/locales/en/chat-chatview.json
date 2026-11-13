@@ -1,4 +1,5 @@
 {
+  "skills_route": "Selected skills belong to this assistant. Cancel task routing before sending.",
   "share": "Share…",
   "forked": "Branched to a new chat",
   "fork_failed": "Couldn't branch: {error}",
@@ -111,6 +112,8 @@
   "codex_first_placeholder": "First message to Codex",
   "handoff_from": "Came from {title} · click to return",
   "handoff_dismiss": "Hide the way back",
+  "inbox_back_title": "Back to “{title}”",
+  "inbox_back_generic": "Back to this Inbox item",
   "team": "Team",
   "team_needs_you": "Team: a worker needs you",
   "more_actions": "More actions",
@@ -129,7 +132,9 @@
   "search_no_progress": "Nothing earlier came in. Try again later.",
   "search_page_cap": "Loaded 20 pages. You can load more.",
   "search_not_found": "Can't find this one in the chat right now. You can go back to where you were.",
+  "message_further_up": "This message is further up in the chat.",
   "search_origin_changed": "Where you were has changed. Carry on from here.",
   "search_return": "Back to where you were",
-  "search_menu": "Search in chat"
+  "search_menu": "Search in chat",
+  "todo_completed_label": "To-do (Completed): {title}"
 }

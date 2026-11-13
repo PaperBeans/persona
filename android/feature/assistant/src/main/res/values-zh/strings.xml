@@ -32,6 +32,8 @@
     <string name="assistant_voice_chat">语音对话</string>
     <string name="assistant_compact">压缩上下文</string>
     <string name="assistant_new_main">新建主对话</string>
+    <string name="assistant_clear_context">清理上下文</string>
+    <string name="assistant_clear_context_failed">没能清理上下文：%1$s</string>
     <string name="assistant_archive">归档</string>
     <string name="assistant_archived">已归档</string>
     <string name="assistant_copy_session_id">拷贝会话 ID</string>
@@ -106,8 +108,13 @@
     <string name="assistant_open_settings">设置</string>
     <string name="assistant_make_leader">设为常驻</string>
     <string name="assistant_end_leader">取消常驻</string>
-    <string name="assistant_leader_working">在做 %1$d</string>
+    <string name="assistant_make_leader_title">设为常驻？</string>
+    <string name="assistant_make_leader_text">这个对话会移到常驻区，不再出现在「最近」。</string>
+    <string name="assistant_end_leader_title">取消常驻？</string>
+    <string name="assistant_end_leader_text">「%1$s」会回到「最近」；还在办的任务交还主对话督办，不会关闭或删除。</string>
     <string name="assistant_leader_needs_you">等你 %1$d</string>
+    <string name="assistant_direction_todos_of">%1$s 的待办</string>
+    <string name="assistant_direction_agents_of">%1$s 的 Agent</string>
     <string name="assistant_conversation_actions">对话操作</string>
     <string name="assistant_demo_title">体验模式</string>
     <string name="assistant_demo_notice">内容仅保存在本次体验中。</string>

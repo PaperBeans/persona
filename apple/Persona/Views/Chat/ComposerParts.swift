@@ -48,6 +48,7 @@ struct ComposerRow<MenuItems: View>: View {
                         .padding(.top, Theme.Space.s)
                 }
                 TextField(placeholder, text: $text, selection: $selection, axis: .vertical)
+                    .readingContent() // what is typed grows past the interface's cap, as in Messages
                     .lineLimit(1...6)
                     #if os(macOS)
                     .textFieldStyle(.plain) // the surface below is the field's box; the Mac's own bezel drew a second one inside
@@ -192,7 +193,7 @@ final class StarterDraft {
                                    : String(localized: "Please look at the image [Assistant View 5ad878]"))
             : typed
         let body = AttachedFile.message(said, files: files)
-        return quotes.isEmpty ? body : quotes.map(\.xml).joined(separator: "\n") + "\n\n" + body
+        return ContextRef.message(quotes, body: body)
     }
 }
 

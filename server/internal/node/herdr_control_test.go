@@ -93,6 +93,13 @@ func waitCalls(t *testing.T, f *fakeHerdr, method string, n int) {
 	}
 }
 
+// waitReports waits until the resume report for pane has completed its per-pane turn. It follows the actual
+// asynchronous work rather than sleeping for a guessed amount of time before asserting that nothing was sent.
+func waitReports(n *Node, pane string) {
+	unlock := n.resumes.lock(pane)
+	unlock()
+}
+
 func personaDir(home string) string { return filepath.Join(home, ".persona") }
 
 func mkdir(t *testing.T, p string) string {
@@ -341,6 +348,7 @@ func TestHerdrStartFailsWhenTheTabCannotBeMade(t *testing.T) {
 // before its first start, not on package variables: a start another test left running still reads its own node's.
 func withStartWaits(n *Node, start, ready time.Duration) {
 	n.claudeStart, n.claudeReady = start, ready
+	n.readyPoll = 0 // timing-sensitive tests keep the production cadence
 }
 
 // A busy machine's shell takes longer than claude's whole ready wait to run claude (#1396: ~/.zshrc took 54 s with a

@@ -91,8 +91,7 @@ func lastLine(screen string) string {
 // reaches the tty before the shell does (#5450). A startup question on the last line is waited out for
 // shellQuestionWait; one still there ends the start: shellWaiting.
 func (n *Node) settleShell(ctx context.Context, pane string) error {
-	if n.shellPause > 0 {
-		time.Sleep(n.shellPause)
+	if n.shellSettled {
 		return nil
 	}
 	settle, quiet, ask := n.shellWaits()

@@ -120,6 +120,19 @@ describe("a sidebar row's ⋯", () => {
     expect(keys(session({ ...live, attached: true } as Partial<Session>))).not.toContain("attach");
     expect(keys(session())).not.toContain("attach");
   });
+  it("offers 重命名 and 关闭 Agent on a runtime's session where its node says so (#6294)", () => {
+    const keys = (s: Session) => agentRowMenuItems(s, { pinned: false, muted: false, onRename: () => {}, onDelete: () => {}, onCloseAgent: () => {} }).map((i) => i.key);
+    const paseo = { source_kind: "runtime", agent: "claude", capabilities: { read: true, send: true, interrupt: true, approve: true, close: true, rename: true } } as Partial<Session>;
+    expect(keys(session(paseo))).toEqual(expect.arrayContaining(["rename", "close"]));
+    const refused = keys(session({ ...paseo, capabilities: { read: true, send: true, close: false, rename: false } } as Partial<Session>));
+    expect(refused).not.toContain("rename");
+    expect(refused).not.toContain("close");
+    // an older node says neither: a source keeps neither, as before
+    const older = keys(session({ ...paseo, capabilities: { read: true, send: true } } as Partial<Session>));
+    expect(older).not.toContain("rename");
+    expect(older).not.toContain("close");
+    expect(keys(session())).toEqual(expect.arrayContaining(["rename", "close"])); // the user's own Agent keeps both
+  });
   it("offers 删除对话 on a finished or seen desktop thread, which has no terminal to close it from", () => {
     const thread = { source_kind: "codex_app_server", capabilities: { read: true, send: true } } as Partial<Session>;
     for (const status of ["done", "unknown", "interrupted"]) {

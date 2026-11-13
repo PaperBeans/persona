@@ -73,12 +73,15 @@ private fun SpaceDestination(route: SpaceRoute, navigator: Navigator, dependenci
         }
         val creationService = LocalAgentCreationService.current
         val starPrompt = persona.core.designsystem.LocalStarPrompt.current
+        // As Agents' "New session": the first message goes once the hub answers, with its attachments (#2321).
+        val uploads = rememberNewAgentUploads()
         val creationModel = creationService?.let { service ->
             viewModel(key = "space-new-agent:${service.scope}:${System.identityHashCode(service)}") {
                 NewAgentViewModel(service, wiring.creationPreferences?.let { AgentCreationPreferences(context, it) }
                     ?: AgentCreationPreferences(context), dependencies.sessions().machines,
+                    sender = dependencies.sender(), adopt = dependencies.sessions()::adopt,
                     usage = dependencies.machines()?.let { m -> { id: String -> m.usageWindows(id) } },
-                    launched = { starPrompt?.launched() })
+                    launched = { starPrompt?.launched() }, uploads = uploads)
             }
         }
         SpacePage(route, model, navigator, creationModel)

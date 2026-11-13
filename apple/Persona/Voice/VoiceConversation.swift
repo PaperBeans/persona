@@ -123,6 +123,38 @@ nonisolated enum VoiceTimbre {
     }
 }
 
+/// A meeting call (#3862 phase 4, docs/assistant/meeting-minutes.md「Phase 4: realtime voice in the meeting」): bound to the
+/// recording's room, on the recorder's capture, hearing only Talk spans. It is not a phone call: the recording holds the
+/// microphone (the call never claims it), the screen may lock, it never ends after idle minutes, and after the three
+/// reconnects it goes on trying every `retryEvery` while the meeting records.
+nonisolated struct VoiceMeeting: Equatable, Sendable {
+    var recordingID: UUID
+
+    /// How often a meeting call tries again once its three reconnects failed.
+    static let retryEvery: Duration = .seconds(30)
+    /// The feature an extension lists in `/info` and `ready` when it takes meeting calls.
+    static let feature = "meeting"
+}
+
+/// Only Send What I Just Said (docs/assistant/voice.md 6.7, #5904): whether the extension's user-speech gate holds back what
+/// the voice hands over when the user was not heard asking for it just before, remembered on this device per group and
+/// extension. On unless the user turned it off; the call's `start` says which (`speech_gate`).
+nonisolated enum VoiceSpeechGate {
+    static func key(group: String, extensionID: String) -> String {
+        "voice.speechGate." + (group.isEmpty ? "-" : group) + "." + extensionID
+    }
+
+    static func isOn(group: String, extensionID: String) -> Bool {
+        UserDefaults.standard.object(forKey: key(group: group, extensionID: extensionID)) as? Bool ?? true
+    }
+
+    /// On is the default: kept as no value.
+    static func set(_ on: Bool, group: String, extensionID: String) {
+        let k = key(group: group, extensionID: extensionID)
+        if on { UserDefaults.standard.removeObject(forKey: k) } else { UserDefaults.standard.set(false, forKey: k) }
+    }
+}
+
 /// What a call needs from the rest of the app; the tests hand in fakes (`FakeVoiceSocket`, `FakeVoiceAudio`, a clock
 /// they move by hand).
 struct VoiceDeps {
@@ -139,6 +171,9 @@ struct VoiceDeps {
     var session: (SessionKey) -> Session?
     /// The voice picked on this device for the group's extension.
     var voice: (_ group: String, _ extensionID: String) -> String?
+    /// Whether the user-speech gate is on for the group's extension on this device (`VoiceSpeechGate`; the tests set
+    /// its preference under their own group).
+    var speechGate: (_ group: String, _ extensionID: String) -> Bool = VoiceSpeechGate.isOn(group:extensionID:)
 
     static func live(group: String) -> VoiceDeps {
         VoiceDeps(api: { AppModel.shared.api(group) },
@@ -152,7 +187,8 @@ struct VoiceDeps {
                   },
                   mic: SystemMicPermission(), microphone: .shared, idleTimer: SystemIdleTimer(), clock: SystemVoiceClock(),
                   session: { AppModel.shared.latest($0) },
-                  voice: { VoiceTimbre.chosen(group: $0, extensionID: $1) })
+                  voice: { VoiceTimbre.chosen(group: $0, extensionID: $1) },
+                  speechGate: { VoiceSpeechGate.isOn(group: $0, extensionID: $1) })
     }
 }
 
@@ -160,6 +196,8 @@ struct VoiceDeps {
     let key: SessionKey
     let surface: VoiceSurface
     let extensionID: String
+    /// A meeting call's recording; nil for every other call.
+    let meeting: VoiceMeeting?
 
     private(set) var phase: VoicePhase = .connecting {
         didSet { if isOver != phase.isEnded { isOver = phase.isEnded } }
@@ -183,6 +221,8 @@ struct VoiceDeps {
     private(set) var tools: [VoiceTool] = []
     private(set) var model: String?
     private(set) var voice: String?
+    /// The user-speech gate as this device has it for the call (Only Send What I Just Said), said in `start`.
+    private(set) var speechGate = true
     /// Instructions that did not go whose line the user put away (Never Mind): the bar no longer offers anything for them.
     private(set) var dismissed: Set<String> = []
     /// The microphone sends silence while muted; the voice still speaks.
@@ -191,6 +231,17 @@ struct VoiceDeps {
     }
     /// About 20 times a second: read by the orb only.
     let levels = VoiceLevels()
+    /// A meeting call's Talk span is open (`talk(_:)`).
+    private(set) var talking = false
+    /// The voice is playing: changes only as it starts or stops, so a page can offer Stop Speaking without being drawn
+    /// again on every phase (#3862 phase 4).
+    private(set) var speaking = false
+    /// The extension said `ready` on the connection that is up: changes only as it connects, drops or ends, so the
+    /// meeting page can send Talk to the call without being drawn again on every phase (#3862 phase 4).
+    private(set) var connected = false
+    /// A meeting call's latest answer: the voice's newest final caption. Changes only when one is final, so the Live
+    /// Activity can show it (#3862 phase 4) without following every word of the captions; nil in every other call.
+    private(set) var lastAnswer: VoiceCaption?
 
     /// 1, 4 and 10 seconds before each of the three reconnects (docs/assistant/voice.md 1.2 M).
     static let retryDelays: [Duration] = [.seconds(1), .seconds(4), .seconds(10)]
@@ -230,11 +281,13 @@ struct VoiceDeps {
     @ObservationIgnored private var epoch = 0
     @ObservationIgnored private var timers: [String: Task<Void, Never>] = [:]
 
-    init(key: SessionKey, extensionID: String, surface: VoiceSurface, recent: [VoiceLine] = [], deps: VoiceDeps) {
+    init(key: SessionKey, extensionID: String, surface: VoiceSurface, recent: [VoiceLine] = [], meeting: VoiceMeeting? = nil,
+         deps: VoiceDeps) {
         self.key = key
         self.extensionID = extensionID
         self.surface = surface
         self.recent = recent
+        self.meeting = meeting
         self.deps = deps
         format = Self.formats[Self.formatKey(key.group, extensionID)] ?? .provisional
         lastActivity = deps.clock.now
@@ -255,12 +308,15 @@ struct VoiceDeps {
         attempt = 0
         ready = false
         everReady = false
-        guard await deps.mic.request() else { return end(.permissionDenied, epoch: epoch) }
-        guard isCurrent(epoch) else { return }
-        guard deps.microphone.claim(microphoneOwner, givingWay: { [weak self] in self?.end(.microphoneTaken) }) else {
-            return end(.microphoneBusy)
+        // A meeting call is on the recorder's capture: the recording has the permission and holds the microphone.
+        if meeting == nil {
+            guard await deps.mic.request() else { return end(.permissionDenied, epoch: epoch) }
+            guard isCurrent(epoch) else { return }
+            guard deps.microphone.claim(microphoneOwner, givingWay: { [weak self] in self?.end(.microphoneTaken) }) else {
+                return end(.microphoneBusy)
+            }
         }
-        uplink = VoiceUplink()
+        uplink = VoiceUplink(gated: meeting != nil)
         uplink.isMuted = muted
         uplink.onLevel { @Sendable [weak self] level in
             Task { @MainActor in
@@ -278,7 +334,8 @@ struct VoiceDeps {
             return end(.audioFailed)
         }
         self.audio = audio
-        if surface == .phone, idleTimerWas == nil {
+        // A meeting call keeps no screen on: the meeting goes on with the phone locked.
+        if surface == .phone, meeting == nil, idleTimerWas == nil {
             idleTimerWas = deps.idleTimer.isDisabled
             deps.idleTimer.isDisabled = true
         }
@@ -294,7 +351,9 @@ struct VoiceDeps {
             voice = deps.voice(key.group, extensionID)
             resolved = true
         }
-        watchIdle(epoch)
+        speechGate = deps.speechGate(key.group, extensionID)
+        // A meeting call never ends after idle minutes: it runs for the whole meeting (decision 7).
+        if meeting == nil { watchIdle(epoch) }
         connect()
     }
 
@@ -321,12 +380,15 @@ struct VoiceDeps {
             idleTimerWas = nil
         }
         ready = false
+        if connected { connected = false }
         playing = false
         hearing = false
+        if talking { talking = false }
         tools = []
         askingID = nil
         link = .live
         levels.reset()
+        if speaking { speaking = false }
         phase = .ended(reason)
     }
 
@@ -347,6 +409,26 @@ struct VoiceDeps {
         lastActivity = deps.clock.now
     }
 
+    /// A meeting call's Talk span opens or closes (#3862 phase 4): the `talk` frame, and between `on` and `off` the
+    /// microphone's audio goes up (`VoiceUplink.talk`). A span opens only while the call is ready; false when it didn't
+    /// (the caller asks without the call then). Closing always succeeds; with the socket away the span is gone already.
+    @discardableResult func talk(_ on: Bool) -> Bool {
+        guard meeting != nil else { return false }
+        if on {
+            guard ready, let socket, !talking else { return false }
+            uplink.talk(true) { socket.send(text: VoiceMessage.talk(true)) }
+            talking = true
+            lastActivity = deps.clock.now
+            return true
+        }
+        guard talking else { return true }
+        talking = false
+        let socket = ready ? socket : nil
+        uplink.talk(false) { socket?.send(text: VoiceMessage.talk(false)) }
+        lastActivity = deps.clock.now
+        return true
+    }
+
     /// Interrupt Voice: stops what the voice says (never the agent). What was queued is dropped here at once.
     func interruptSpeech() {
         guard ready, let socket else { return }
@@ -355,16 +437,22 @@ struct VoiceDeps {
         lastActivity = deps.clock.now
     }
 
-    /// Whether Resend / Clear and Send can go for a run: refused, and reported by the connection that is up now. A reconnect
-    /// rebuilds only the open runs (`resume`), so after one the extension no longer knows a refused run and the bar
-    /// offers no button for it (docs/assistant/voice.md 3.2).
+    /// Whether Resend / Clear and Send / Send Anyway can go for a run: refused, and reported by the connection that is up
+    /// now. A reconnect rebuilds only the open runs (`resume`), so after one the extension no longer knows a refused run
+    /// and the bar offers no button for it (docs/assistant/voice.md 3.2). One the user-speech gate held back (`unprompted`)
+    /// only with an extension that keeps it (`speech_gate`, #5904), and only with a task: the extension keeps none
+    /// without one, and an older extension none at all, so a resend would do nothing.
     func canResend(_ runID: String) -> Bool {
         guard ready, socket != nil, let run = runs.first(where: { $0.id == runID }) else { return false }
+        if run.code == "unprompted", !run.resendable || !features.contains(VoiceInfo.speechGateFeature)
+            || run.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return false
+        }
         return run.state == .refused && runSeen[runID] == generation
     }
 
-    /// Resend / Clear and Send a run a 409 refused: the same id; `clearingDraft` sends the hub's `clearable` text for the node
-    /// to clear first. Clear and Send is offered only when the run has one (`run.clearable`).
+    /// Resend / Clear and Send / Send Anyway a refused run: the same id; `clearingDraft` sends the hub's `clearable` text
+    /// for the node to clear first. Clear and Send is offered only when the run has one (`run.clearable`).
     @discardableResult func resend(_ runID: String, clearingDraft: Bool = false) -> Bool {
         guard canResend(runID), let socket, let run = runs.first(where: { $0.id == runID }) else { return false }
         if clearingDraft, run.clearable == nil { return false }
@@ -377,6 +465,15 @@ struct VoiceDeps {
     func change(voice: String?) {
         guard voice != self.voice else { return }
         self.voice = voice
+        reopen()
+    }
+
+    /// Only Send What I Just Said turned on or off on the settings page while the call ran: a new connection that
+    /// picks the call up with it (the gate is the extension's, set by `start`).
+    func change(speechGate: Bool) {
+        guard speechGate != self.speechGate else { return }
+        guard meeting == nil else { return } // its start says nothing of the gate
+        self.speechGate = speechGate
         reopen()
     }
 
@@ -403,11 +500,16 @@ struct VoiceDeps {
 
     // MARK: Socket
 
-    /// What `start` says now: the target, the conversation's last turns, whether the microphone cancels echo, and when
-    /// it picks up again the captions so far and the runs not over yet, each as last reported.
+    /// What `start` says now: the target, the conversation's last turns, whether the microphone cancels echo, the
+    /// user-speech gate on or off (always said: it also tells the extension this app has Send Anyway, #5904), and when
+    /// it picks up again the captions so far and the runs not over yet, each as last reported. A meeting call says its
+    /// mode and recording, and nothing of the gate: the meeting page has no Send Anyway, and the extension keeps the
+    /// gate on for what goes to the room as the owner's words.
     var startFrame: VoiceStart {
         VoiceStart(model: model, voice: voice, target: VoiceTarget(key), recent: recent, history: history,
-                   resume: runs.filter { $0.state.isOpen }, echoCancellation: audio?.cancelsEcho)
+                   resume: runs.filter { $0.state.isOpen }, echoCancellation: audio?.cancelsEcho,
+                   speechGate: meeting == nil ? speechGate : nil,
+                   mode: meeting == nil ? nil : VoiceStart.meetingMode, recordingID: meeting?.recordingID.uuidString.lowercased())
     }
 
     var history: [VoiceLine] {
@@ -444,7 +546,9 @@ struct VoiceDeps {
         socket?.close()
         socket = nil
         ready = false
+        if connected { connected = false }
         uplink.hold()
+        if talking { talking = false }
         dropSpeech()
         attempt = 0
         phase = .connecting
@@ -470,14 +574,19 @@ struct VoiceDeps {
         guard generation == self.generation, !phase.isEnded else { return }
         timers["ready"]?.cancel()
         ready = false
+        if connected { connected = false }
         tools = []
         uplink.hold()
+        // The span went with the socket; the extension ends it with the connection.
+        if talking { talking = false }
         dropSpeech()
         if let status = close.status, refusedForGood(status) { return end(.rejected(status: status)) }
         attempt += 1
-        guard attempt <= Self.retryDelays.count else { return end(.lost) }
+        // A meeting call goes on trying while the meeting records (every `retryEvery` after the three tries).
+        guard attempt <= Self.retryDelays.count || meeting != nil else { return end(.lost) }
         phase = .reconnecting(attempt: attempt)
-        after(Self.retryDelays[attempt - 1], "retry") { me in
+        let delay = attempt <= Self.retryDelays.count ? Self.retryDelays[attempt - 1] : VoiceMeeting.retryEvery
+        after(delay, "retry") { me in
             guard me.generation == generation, !me.phase.isEnded else { return }
             me.connect()
         }
@@ -500,6 +609,7 @@ struct VoiceDeps {
         audio?.clear()
         playing = false
         hearing = false
+        if speaking { speaking = false }
     }
 
     private func handle(_ frame: VoiceFrame) {
@@ -545,6 +655,9 @@ struct VoiceDeps {
         // iOS has no protocol 1 client: an older extension would hand everything to the main conversation instead of
         // the one the call was opened from.
         guard r.protocolVersion >= 2, r.target.map({ $0.matches(key) }) ?? true else { return end(.incompatible) }
+        // A meeting call on an extension that doesn't take them would be an ordinary call bound to the room, with its
+        // tools in front of the room (#3862 phase 4).
+        if meeting != nil, !r.features.contains(VoiceMeeting.feature) { return end(.incompatible) }
         timers["ready"]?.cancel()
         let wanted = VoiceAudioFormat(inputRate: r.inputRate, outputRate: r.outputRate)
         if wanted != format {
@@ -553,6 +666,7 @@ struct VoiceDeps {
         }
         Self.formats[Self.formatKey(key.group, extensionID)] = wanted
         ready = true
+        if !connected { connected = true }
         everReady = true
         attempt = 0
         features = r.features
@@ -579,6 +693,10 @@ struct VoiceDeps {
                 captions.append(caption)
             }
             if captions.count > Self.captionLimit { captions.removeFirst(captions.count - Self.captionLimit) }
+        }
+        if meeting != nil, t.final, t.role == VoiceLine.assistant, let said = captions.last(where: { $0.id == id }),
+           !said.text.isEmpty, lastAnswer != said {
+            lastAnswer = said
         }
         lastActivity = deps.clock.now
         if t.role == VoiceLine.user {
@@ -610,6 +728,7 @@ struct VoiceDeps {
     }
 
     private func refreshPhase() {
+        if speaking != (playing && ready && !phase.isEnded) { speaking = playing && ready && !phase.isEnded }
         guard ready, !phase.isEnded else { return }
         let next = VoicePhase.live(playing ? .speaking : hearing ? .hearing : .listening)
         if phase != next { phase = next }

@@ -209,7 +209,9 @@ describe("the sidebar's assistant switcher", () => {
     expect(head().textContent).toContain("助手");
     expect(head().textContent).toContain("在线 · server");
     expect(head().getAttribute("data-assistant-switcher")).toBe("assistant");
-    expect(head().querySelector("[data-assistant-avatar]")?.getAttribute("data-assistant-avatar")).toBe("assistant");
+    // The default assistant's head is the look's face, not the first-letter disc (#6401).
+    expect(head().querySelector("[data-assistant-avatar]")).toBeNull();
+    expect(head().querySelector("svg")).not.toBeNull();
     expect(head().querySelector("[data-avatar-status=green]")).not.toBeNull();
     expect(head().querySelector("[data-avatar-waiting]")).toBeNull();
     await open();
@@ -233,7 +235,9 @@ describe("the sidebar's assistant switcher", () => {
     expect(head().textContent).toContain("离线");
     expect(head().textContent).not.toContain("Persona");
     expect(head().getAttribute("data-assistant-switcher")).toBe("m-only");
-    expect(head().querySelector("[data-assistant-avatar]")?.getAttribute("data-assistant-avatar")).toBe("m-only");
+    // It is the roster's default, so its head is the look's face even with a custom name (#6401).
+    expect(head().querySelector("[data-assistant-avatar]")).toBeNull();
+    expect(head().querySelector("svg")).not.toBeNull();
     expect(head().querySelector("[data-avatar-status=grey]")).not.toBeNull();
     await open();
     expect(document.body.querySelectorAll("[role=menuitemradio]")).toHaveLength(1);
@@ -244,7 +248,8 @@ describe("the sidebar's assistant switcher", () => {
     setRoster({ default: "assistant", managers: [ROSTER.managers[0], ROSTER.managers[3]] });
     await render();
     expect(head().textContent).toContain("助手");
-    expect(head().querySelector("[data-assistant-avatar]")).not.toBeNull();
+    expect(head().querySelector("[data-assistant-avatar]")).toBeNull();
+    expect(head().querySelector("svg")).not.toBeNull();
     expect(head().querySelector("[data-avatar-waiting]")).toBeNull();
     await open();
     expect(document.body.querySelector<HTMLElement>("[role=menu]")!.style.width).toBe("264px");
@@ -331,7 +336,8 @@ describe("the sidebar's assistant switcher", () => {
     setRoster({ default: "assistant", managers: [ROSTER.managers[0], ROSTER.managers[1]] });
     await render();
     expect(head().textContent).toContain("助手");
-    expect(head().querySelector("[data-assistant-avatar]")).not.toBeNull();
+    expect(head().querySelector("[data-assistant-avatar]")).toBeNull();
+    expect(head().querySelector("svg")).not.toBeNull();
     await open();
     expect(document.body.querySelectorAll("[role=menuitemradio]")).toHaveLength(2);
     await choose("工作");
@@ -342,7 +348,8 @@ describe("the sidebar's assistant switcher", () => {
     expect(shownManager()).toBe("assistant");
     expect(head().textContent).toContain("助手");
     expect(head().textContent).not.toContain("Persona");
-    expect(head().querySelector("[data-assistant-avatar]")).not.toBeNull();
+    expect(head().querySelector("[data-assistant-avatar]")).toBeNull();
+    expect(head().querySelector("svg")).not.toBeNull();
     expect(head().querySelector("[data-avatar-waiting]")).toBeNull();
     await open();
     const radios = [...document.body.querySelectorAll<HTMLElement>("[role=menuitemradio]")];

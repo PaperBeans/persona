@@ -642,6 +642,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			s.Capabilities.Send = true
 			s.ReadOnlyReason = ""
 			n.placeCodexDesktop(&s, src, src.thread, false)
+			n.codexDesktopEffortRow(&s, src, m) // codex_desktop_effort.go
 		} else if o := readCodexOrigin(src.path); o.desktop {
 			switch {
 			case o.parent != "":
@@ -655,6 +656,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 				s.Capabilities.Send = true
 				s.ReadOnlyReason = ""
 				n.placeCodexDesktop(&s, src, src.thread, false)
+				n.codexDesktopEffortRow(&s, src, m)
 			}
 		} else if o.cli {
 			s.AgentName, s.AgentSurface = "Codex CLI", transcript.SurfaceCLI
@@ -676,6 +678,9 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			// brings it back in a new tab (session.start, codex_resume.go).
 			s.Capabilities.Terminal = true
 			s.ReadOnlyReason = stoppedReason
+		}
+		if s.SourceKind == "codex_history" && !s.Capabilities.Send && !s.IsSubagent && !n.codexBlocked(id) {
+			s.Capabilities.Takeover = n.codexTakeoverRow(id, src, m, liveRollouts[id] != "")
 		}
 		if n.codexBlocked(id) {
 			markCodexConflict(&s)

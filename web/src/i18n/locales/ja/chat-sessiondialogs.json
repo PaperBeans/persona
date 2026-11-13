@@ -65,5 +65,8 @@
   "speed_fast": "Fast",
   "header_mode": "権限モード：{mode}",
   "leave_bypass_confirm": "{mode}に切り替え",
-  "leave_bypass_detail": "このエージェントはフルアクセスで起動していないため、切り替えるとここからは戻せません。"
+  "leave_bypass_detail": "このエージェントはフルアクセスで起動していないため、切り替えるとここからは戻せません。",
+  "bypass_restart_detail": "このターンが終わるとセッションを再起動して適用します。会話はそのまま続きます",
+  "bypass_pending": "このターンが終わるとセッションを再起動してフルアクセスに切り替えます",
+  "bypass_next_message": "次のメッセージから適用されます"
 }

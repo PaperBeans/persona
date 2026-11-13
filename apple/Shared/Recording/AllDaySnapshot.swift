@@ -130,7 +130,7 @@ nonisolated struct AllDaySnapshot: Codable, Equatable, Sendable {
 }
 
 /// The links the All-Day Recording complication opens (`persona://allday?action=start|continue|open`), and how the
-/// watch app reads them. A host of its own: `persona://record` is the Meeting Recording complication's.
+/// watch app reads them. A host of its own: `persona://record` is the Record complication's.
 nonisolated enum AllDayLink {
     nonisolated enum Action: String, Sendable {
         case start

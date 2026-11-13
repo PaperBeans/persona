@@ -138,11 +138,12 @@ func (h *Manager) extensionBusy(id string) string {
 	if hp := h.extensions.get(id); hp != nil && hp.proc != nil && !hp.proc.Idle() {
 		return i18n.T(h.userLang(), "hub-extension_autoupgrade.busy_extension")
 	}
+	working := func(s *proto.Session) bool {
+		return s.Assistant && (s.State == proto.StateWorking || s.Status == proto.StatusWorking)
+	}
 	for _, m := range h.machinesNow() {
-		for _, s := range h.decorated(m) {
-			if s.Assistant && (s.State == proto.StateWorking || s.Status == proto.StatusWorking) {
-				return i18n.T(h.userLang(), "hub-extension_autoupgrade.busy_assistant")
-			}
+		if h.findSession(m, working) {
+			return i18n.T(h.userLang(), "hub-extension_autoupgrade.busy_assistant")
 		}
 	}
 	return ""

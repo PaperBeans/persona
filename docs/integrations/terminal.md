@@ -496,6 +496,7 @@ Previously streams (sections 2/11) resolved pane from session id (`paneFor`: `ag
 
 On an address, node validates the pane against the host's latest snapshot (refresh once if missing); otherwise `pane … is not running`, never pointing outside snapshots.
 Web opens panes with Agent sessions by **session id** (sharing the exact hub stream with chat terminal panels, same control/taken rules); only sessionless panes use addresses.
+The iOS app opens a plain terminal by its address too (the Terminals page, Open Terminal Here); such an address has no session row, so the app's gate for streams and keys lets it through on its own (section 30).
 
 ### List panes: `panes.list`
 
@@ -508,7 +509,11 @@ A pane with no Agent carries `foreground`, the program in front as the host name
 ### New terminal: `panes.new` (optional, explicit action)
 
 `POST /api/v1/machines/{mid}/panes {workspace_id, kind?}` → node calls host `CreateSlot` (herdr `tab create --no-focus`, computer view doesn't jump) to open a tab in that space,
-named `shell` (`-2` suffix on collision), at **the space's own directory** (host-reported, otherwise home); **request cannot specify directory**. Returns `{pane, terminal, tab_id}`, then web opens it. Only called when user clicks + beside a space.
+named `shell` (`-2` suffix on collision), at **the space's own directory** (host-reported, otherwise home). Returns `{pane, terminal, tab_id}`, then web opens it. Called when the user clicks + beside a space, or Open Terminal Here in the file page.
+
+**No workspace yet**: a computer whose engine opens tabs (`new_tab`) but has no workspace still gets a terminal. Where the hub has the `pane_new_space` feature, clients show "No terminals open on this computer." with **New Terminal** (and a home-folder entry in the computer's menu), which sends `{kind, cwd: "~", new_space: true}`. The node finds no workspace to put the tab in and calls the host's `CreateSpace` in that folder (the home folder for `~`), the way an Agent start does, and names its first tab `shell`; Open Terminal Here on such a computer takes the same path. A node without the `pane_new_space` capability would answer "no workspace", so the hub answers 409 `node_outdated` ("update this computer") to `new_space` instead. With no host that opens tabs, or a hub without `pane_new_space`, clients say terminals appear when an Agent starts there.
+
+**Open Terminal Here** (#5832; hub feature and node capability `pane_cwd`): the request may carry `cwd`, a folder (`~/…` or absolute). The node checks it with the read guard (a key folder or iCloud Drive is refused) and that it is a folder, and gives it to the host as the new tab's starting directory; with `cwd` and no `workspace_id` the tab opens in the first workspace of a host that opens tabs. The folder is never typed into the shell, so a request still cannot run a command (the rule below). The hub answers 409 `node_outdated` for `cwd` to a node without the capability rather than open the terminal elsewhere. The earlier rule that a request could not name a directory is relaxed for this: a full device can `cd` anywhere in the shell it opens, so starting there gives nothing more.
 
 ### Permissions
 
@@ -586,7 +591,7 @@ Correct implementation needs node to include herdr scroll offset in frames or a 
 - Output URLs: `@xterm/addon-web-links`, http(s) only, click through `openLink`; no simultaneous `terminal_click` (`linkHit`).
 - Context menu: Copy / Paste / Select All / Find… / Clear Selection, existing `Menu` in `ui/atoms.tsx` unchanged. Since `Menu` anchors only to elements, a zero-size fixed element is placed at the mouse position. Blur xterm while menu is open (focused xterm swallows keys; Esc goes to program instead of closing menu).
 - Mac line-editing keys: ⌘⌫ → `\x15`, ⌘← → `\x01`, ⌘→ → `\x05`, only while controlling and with ⌘ alone (`lineEditBytes`).
-- Options: cursor style, blink, WebGL rendering (`@xterm/addon-webgl`, dynamically loaded on first enable; disable/context loss/no WebGL disposes and falls back to DOM); `persona.terminal.cursorStyle / cursorBlink / webgl`, defaults don't write keys.
+- Options: cursor style, blink, WebGL rendering (`@xterm/addon-webgl`, dynamically loaded on first enable; disable/context loss/no WebGL disposes and falls back to DOM); `persona.terminal.cursorStyle / cursorBlink / webgl`, defaults don't write keys. Appearance (light / dark apart from the page) is section 29.
 - Focus: under control, clicking panel or refocusing window returns keyboard to terminal unless text is selected, a dialog/menu/popover is open, focus is in another input (including Find) or outside-panel control, or terminal is hidden beneath another retained terminal (`inert`).
 
 ### Verification
@@ -607,7 +612,10 @@ with node methods `panes.close` / `panes.split` / `panes.agent` / `panes.git` / 
 - **Run Agent Here…**: only panes at shell prompts (no Agent, no bound session, all foreground programs shells; unreadable foreground also rejected). `panes.agent {pane, launcher}` reuses the full `start` pipeline—
   same launcher command, trust-dialog handling, readiness wait, pane binding, continuation command—without creating a tab, replacing `newTab` with selected pane in `context` (`withAdoptedPane`). Failure **doesn't** close this pane (new-tab failures do close the new tab).
   It answers `{session_id}`, and the clients open that agent's chat as New Agent opens the one it starts (#3287).
-  Web and iOS list only Claude Code launchers: a Codex start that fails closes its pane (`closeCodexStart`, `node/codex_start.go`), which here would be the user's own shell, so Codex starts from New Agent in a tab of its own (#5275). iOS's footer says so only on a computer that has a Codex launcher (`NodeMenu.runHereFooter`).
+  Web and iOS list Claude Code launchers, and Codex launchers that carry `run_here: true` (#5504; web `launchableHere` in `web/src/lib/node-actions.ts`, iOS `NodeMenu.launchableHere`).
+  The node starts such a Codex in the pane with no first message and answers its waiting row (`docs/integrations/codex.md`, "Starting without a first message"), which the clients open. A start that fails never closes the pane or queues it for cleanup (`startCodex`, `node/codex_start.go`); a Codex whose box never comes is `codex_no_box_here`.
+  An older node's Codex launchers lack `run_here`: there a failed start would close its pane, here the user's own shell, so they stay out and Codex starts from New Agent in a tab of its own (#5275). iOS's footer says so only on a computer with such a launcher (`NodeMenu.runHereFooter`).
+  Tests: `node/run_here_codex_test.go` (the start in a shell pane with history above Codex, its waiting row and first message; a failed start leaving the pane), `assistant/models_launchers_runhere_test.go`, the clients' unit tests. Checked live on a Mac (Codex 0.153.4, herdr 0.9.3, 2026-11-12): Codex came up in a scratch shell pane under its history, the pane listed as its waiting row, and `/quit` left the shell.
 - **Git**: run in pane directory (workspace uses its own), reject non-repositories (`not_a_repository`).
   Results and refusals are codes (#1888): success carries an `outcome` (`fetched`, `up_to_date`, `pulled`, `nothing_to_push`, `pushed`) that web and iOS say in their own strings, with an English `message` for older clients; each refusal is a coded 409 the hub words in the client's language (`rpc-errors`: `no_directory`, `detached_head`, `no_upstream`, `uncommitted_changes`, `not_fast_forward`, `push_rejected`; `pull_failed` / `push_failed` / `fetch_failed` carry git's words), the node's words as `detail`. **Pull** uses existing `gitPull`: fast-forward only, reject uncommitted changes; **Fetch** `git fetch --no-recurse-submodules`.
   **Push** asks first in every client (#1883, like the Git panel's Push; Pull and Fetch don't change the remote and run at once). It requires branch/upstream and pending commits (otherwise the `nothing_to_push` outcome), explicit `refs/heads/<branch>:<upstream branch>` without `+`, preventing force push even if `remote.<name>.push = +…` is configured. A remote that rejects a branch behind it is `push_rejected` (pull first; git's words in `detail`).
@@ -632,6 +640,11 @@ Moshi switches Term/Chat in the same session page's center (top segmented contro
 
 Workspace context/⋯ menu New Worktree… (W), same command in palette. Dialog has **Branch** and **Checkout Path**; Create and Open adds a worktree on the computer, opens it as a herdr workspace grouped under the original, and navigates web to its first terminal.
 Same shape as Moshi `worktree/prepare` + `worktree/create`.
+
+The Agents space menu also offers **New child worktree…**. A native space uses its catalog identity. A runtime-only
+space can suggest supported native workspaces at its verified Git worktree directory, with the source shown in the
+creation dialog. Several matches open a source submenu. An unavailable source leaves the entry disabled with guidance.
+These suggestions apply only to creation and do not establish ownership for closing or deleting runtime spaces.
 
 - **Routes** (`nodeActions` in `hub/panes.go`, **`full` devices only** like other menu actions, `answer`/extension tokens 403, `route_scopes.txt` `-`):
   - `POST /machines/{mid}/worktree/prepare {workspace_id, kind?}` → `{root, repoName, branch, path}`: `root` Git top-level, `repoName` repo name (main repo name even from linked worktree), `branch` workspace branch (empty for detached HEAD), `path` herdr checkout directory `<worktrees directory>/<repo name>`.
@@ -666,6 +679,13 @@ Same shape as Moshi `worktree/prepare` + `worktree/create`.
 ### Advanced Orca worktree actions
 
 The local Orca adapter also provides a capability-gated composer, GitHub issue/PR source lookup, sparse presets and preview-confirmed workspace removal. The exact HTTP fields, adapter/runtime capability distinction, receipt handling and deletion reconciliation are specified in [the protocol](../protocol/protocol.md#orca-worktree-composer-and-removal). Legacy branch/path creation remains available. Removal keeps branches by default, unregisters folder workspaces without deleting their directories, and requires a fresh instance-bound preview when identity or dirty content changes. A background acknowledgement is not completion; clients reconcile without automatically repeating the destructive request.
+
+The sidebar also offers **Close workspace** for herdr. Confirmation ends its terminals and keeps the directory, files
+and branches, including a main checkout or a workspace whose directory has disappeared. A linked Git checkout also
+offers **Delete worktree** after its directory is verified. Deletion previews the checkout's changed files and keeps
+its branch by default. The optional merged-branch cleanup uses Git's safe branch deletion. Each confirmation binds
+the workspace, pane membership, available native socket identity and, for deletion, the checkout and reviewed file contents.
+An uncertain response is reconciled through the live catalog and filesystem. Reconciliation preserves one-use dispatch. A herdr parent with linked workspaces requires closing those child workspaces first.
 
 ### A new agent in a worktree (#6115)
 
@@ -752,6 +772,7 @@ hub → browser: `herdr_state {id, state: "open", cols, rows}`, `herdr_data {id,
   Shares key bar, Find (⌘F / Ctrl+Shift+F), context menu (Copy / Paste / Select All / Find… / Clear Selection), saved commands with Single pane. With herdr mouse reporting on, right-click belongs to herdr; Persona menu via Shift+right-click (section 26, old "web menu only with selection" removed). Shift-drag uses xterm selection.
 - **Answer herdr queries** (same as Moshi): at startup herdr asks `CSI ? 996 n` (color scheme), enables DEC 2031 (scheme notifications), asks `OSC 10;? / 11;?` (foreground/background), `CSI ? u` (kitty keyboard), DA1, `CSI 16 t`. Web answers `CSI ? 997 ; 1|2 n` (dark/light), `CSI ? 2031 ; 1|2 $ y`;
   appearance changes proactively report colors/scheme if herdr enabled 2031; xterm answers OSC 10/11 and DA1 itself. (Section 18's unreachable color queries refer to Single pane; they reach the browser here.)
+  The scheme and colors are the terminal's, which are the page's unless Terminal settings › Appearance says Light or Dark (section 29).
 - **Flow control**: after each xterm `write` callback, accumulate parsed bytes; send `herdr_ack` at 64 KB or 250ms since last ack (same Moshi thresholds).
 - **State**: header dot + Connecting / Connected / Disconnected / Error / Unsupported / No Permission, plus grid size; reason on hover. On end, muted reason line in terminal (like Moshi `close.reason`), Reconnect floating at bottom.
   Hub WebSocket reconnect: old view died with connection; clear screen and open new view automatically.
@@ -1037,3 +1058,55 @@ herdr sidebar/tab pane changes didn't change Persona page/sidebar; choosing anot
 - Exact client attribution: herdr doesn't provide the field, so heuristic; if client ids appear in events later, replace `focusSource` with exact attribution.
 - Chat-view pages following herdr (Moshi also follows only in terminal view).
 - When a tab has several panes but Persona session page shows one Agent, switching between them in herdr navigates pages (one page per Agent pane); non-Agent panes use terminal page.
+
+## 29. Appearance: the web terminal's light / dark apart from the page's (web, #6260)
+
+Both surfaces took their colors from the page (`terminalPalette` over `<html>`'s tokens), and Full view answered herdr's color questions with the page's scheme, so the page's theme decided which scheme herdr heard from the browser.
+The herdr server is the one the computer's own herdr window uses too. iOS keeps its terminal's colors apart from the app's (Ink and Midnight always dark, Persona and Solarized follow the system; section 5); the web now has the light / dark part of that.
+
+### Setting
+
+- Terminal settings › **Appearance**: Match page (the default, no key stored) / Light / Dark, `persona.terminal.appearance`, kept in this browser (`web/src/lib/terminal-appearance.ts`). One setting for both surfaces.
+- Single pane's gear menu has it with the other options. Full view's header has a gear with only this row: Full view is the default surface and the one herdr hears the answer from.
+- The row is the menu's segmented control with the icons Settings uses for the same choices (app window, sun, moon): the three words do not fit beside the label in the 280 px menu. Each choice is named for screen readers and on hover, and the line under the label says the one chosen.
+
+### Colors: the page's tokens of the terminal's scheme
+
+- Match page reads `<html>`'s tokens, as before.
+- Light / Dark: `[data-terminal-scheme="light"]` / `[data-terminal-scheme="dark"]` is in the selector lists of `web/src/styles.css`'s light and dark token blocks (the main pair and the pair with `--term-magenta` / `--term-cyan`), so an element with it has that scheme's values whatever the page's.
+  A theme color adds its tokens on the same scope (`accentCSS` in `web/src/ui/look.ts`, `[data-accent] [data-terminal-scheme=…]`) and an extension theme adds its own above that (`scopedThemeCSS` in `web/src/ui/extension-theme.ts`, `:root[data-extension-theme] [data-terminal-scheme=…]`), the order they have on `<html>`. No palette of its own.
+- The feeds read the palette and the find marks off a hidden element with the attribute (`terminal/colors.ts`): a custom property is read where it is declared, and the result does not wait for React to have rendered the attribute.
+  The screen box (Single pane's viewport, Full view's) carries the attribute and `bg-page`, so its padding, the find marks of the rows the page draws and xterm's IME box are in the terminal's scheme; the header, the overlays and the key bar keep the page's.
+- The attribute goes before `:root` / `.dark` in those selector lists. `web/page-tokens.ts` and the contrast tests find the blocks with a regular expression that ends at the brace, and it matches inside comments too: a comment quoting a selector and its brace is found first.
+
+### What herdr is told (Full view)
+
+- `CSI ? 996 n` → `CSI ? 997 ; 1|2 n` with the terminal's scheme; xterm answers `OSC 10;?` / `OSC 11;?` from its theme, which is the terminal's palette.
+- With DEC 2031 on: a page switch under Match page sends OSC 10/11 and `CSI ? 997` as before; under Light or Dark it sends nothing, since the terminal did not change. Changing Appearance sends them when what herdr would hear changes (Match page on a light page → Light sends nothing).
+- herdr keeps what each client reports and applies the **foreground (most recently active) client's** report to the panes and, with `[theme] auto_switch = true`, to its own theme. Read in herdr v0.9.3's source (its theme sync, and the headless server test `client_shell_host_theme_follows_foreground_client`), not measured.
+  So with the computer's herdr window in a light terminal and Full view dark, herdr follows whichever client was used last; giving the web terminal the computer terminal's scheme stops that.
+
+### Tests
+
+- `cd web && npm test`: `lib/terminal-appearance.test.ts` (default, stored values, notifications), `terminal/colors.test.ts` (`styles.css` scopes every token the terminal reads; a dark terminal on a light page is Match page on a dark page, with a theme color and with an extension theme), `terminal/appearance.test.ts` (both feeds: palette; Full view's 996 answers and 2031 reports on page and setting changes), `terminal/TerminalOptions.test.tsx` (the row), `terminal/FullTerminal.test.tsx` (Full view's gear: only Appearance).
+
+## 30. A subscription nobody answers: the wait is bounded (iOS and web, #6327)
+
+Open Terminal Here on the iPhone sat on **Taking over…** with a spinner for good. The app never sent `terminal_subscribe`: it allowed streams and keys only for a session whose row says it has a terminal (`canTerminal`), and a `pane:` address (section 19) has no row. `AppModel.canUseTerminal` now lets a `pane:` address through for the subscription, the keys, the wheel, clicks and the mouse. `keys()` over HTTP stays session-only, as the node's `session.keys` does. The mock UI tests had missed it because they run without `MOCK_TERMINAL_STREAM`, where the feed polls `GET …/screen` and never subscribes.
+
+The same page could also wait forever on a subscription the hub never answers, for example a takeover whose `terminal.watch` went with a node connection that a deploy closed. Both feeds (`TerminalFeed.swift`, `web/src/views/session/terminal/feed.ts`) now bound that wait:
+
+- **What counts as an answer**: a subscription from a whole frame is answered by its first frame. One that asks to drive needs the hub's `terminal_control` too, together with a frame or the screen it continues. A subscription that continues the frames the page already has, and only watches, is not timed: an idle pane sends nothing.
+- **From 4 seconds** without a first screen, the link status says **No terminal yet · Waiting for the computer…** with Retry, as the web already did (`TerminalLinkStatus` counts from `waitingSince` until a screen came).
+- **At 10 seconds** (`answerLimit`, `ANSWER_LIMIT_MS`) the feed unsubscribes at the hub and fails with a reason: **<computer> is offline** when the hub lists it offline, else **<computer> isn't answering**. The spinner gives way to the reason, and the backoff (1, 2, 4, 8, 15 s) subscribes again from a whole frame. A hub error for an offline computer is shown in those words too, never the hub's raw text, which can name the machine by id.
+- **Retry** while a subscription is still unanswered unsubscribes first. Otherwise the hub would treat it as the same subscription again and start no new watch (`terminalSubscribe`: same device, same size).
+- **The computer comes back online** (the `machines` push): the feed subscribes again, and takes the terminal over, at once rather than at the backoff's turn.
+- **The size chip** (iOS) and the size label (web) say **Taking over…** between tries: the feed still takes the terminal over, and the next try asks again. Before, a failed try set it back to off, and the chip showed Wrap (the web: View only), the controls of a mirror that had given up. Only a session that isn't running, or a node that can't stream (the feed reads the screen instead), goes back to watching. On iOS the chip also goes back to Taking over… while the hub link is down, as the web's does: the hub no longer knows who drives.
+
+Hub: when a computer's connection ends (`connectionEnded` → `terminalsEnded`), a `terminal.watch` still on its way to that connection is cancelled (`termRelay.life`). Before, it held the session's call lock until its 20-second deadline, so the next takeover, on the node's new connection, waited behind it. A node's own `terminal.end` does not cancel anything: watches to a live connection stay one at a time.
+
+### Tests
+
+- Hub: `terminal_reconnect_test.go`. The node's connection closes with the takeover's watch on its way: the app is told at once, and subscribing again takes over on the new connection. The hub hears of the reconnect before the old call fails: the next takeover goes through within 3 seconds, not after 20.
+- iOS: `TerminalTakeoverTests` (a `pane:` terminal takes over and takes keys; the 10-second limit, its reason and the fresh subscription; Retry unsubscribes first; back online subscribes at once). `TerminalTakeoverHangTests` is the UI flow with screenshots, against the mock's `/mock/terminal_node?state=stalled|gone|back`.
+- Web: `terminal/feed.test.ts` (the same three cases).

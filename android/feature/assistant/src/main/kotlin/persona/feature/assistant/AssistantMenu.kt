@@ -20,6 +20,8 @@ internal enum class AssistantMenuItem(val icon: PhIcon, @StringRes val label: In
     BackToMain(PersonaIcons.home, R.string.assistant_back_to_main), CopyDirectory(PersonaIcons.folder, R.string.assistant_copy_directory),
     CopyInfo(PersonaIcons.copy, R.string.assistant_copy_info), CopySessionId(PersonaIcons.id, R.string.assistant_copy_session_id),
     CopyDiagnostics(PersonaIcons.diagnostics, R.string.assistant_copy_diagnostics), Compact(PersonaIcons.compactContext, R.string.assistant_compact),
+    // Clear context takes the web's mark for it (#5095): the icon set has no meaning of iOS's eraser.
+    ClearContext(PersonaIcons.retry, R.string.assistant_clear_context),
     NewMain(PersonaIcons.newConversation, R.string.assistant_new_main), SessionInfo(PersonaIcons.info, R.string.assistant_info_session),
     Interrupt(PersonaIcons.interrupt, R.string.assistant_interrupt),
 }
@@ -28,18 +30,20 @@ internal enum class AssistantMenuItem(val icon: PhIcon, @StringRes val label: In
  * The title menu's items in iOS's order and sections (#4339 C18): while the hub is out of reach Connection details,
  * then Knowledge, Details (the assistant's own page, iOS's profile), Voice chat (Android's, while the hub runs a voice
  * extension) and Back to main chat (off the main conversation); the copies (the directory and the info always, the
- * session ID and diagnostics with a conversation open); the main conversation's Compact context and New main chat; Session
+ * session ID and diagnostics with a conversation open); the main conversation's Compact context, Clear context (#5100,
+ * between them as on the web) and New main chat; Session
  * info and, while it works, Interrupt. The per-conversation launcher and model are #5055's pill and panel, not menu items,
  * and the menu's heading names them ([AssistantCopyText.menuTitle]); Screen is not done: Android has no live screen. Each
  * list is one section; a rule goes above every section after the first.
  */
 internal fun assistantMenu(offline: Boolean, voice: Boolean, main: SessionKey?, active: SessionKey?, compact: Boolean,
-                           newMain: Boolean, working: Boolean): List<List<AssistantMenuItem>> = listOf(
+                           newMain: Boolean, working: Boolean, clear: Boolean = false): List<List<AssistantMenuItem>> = listOf(
     listOfNotNull(AssistantMenuItem.ConnectionDetails.takeIf { offline }, AssistantMenuItem.Knowledge, AssistantMenuItem.Details,
         AssistantMenuItem.Voice.takeIf { voice }, AssistantMenuItem.BackToMain.takeIf { main != null && main != active }),
     listOfNotNull(AssistantMenuItem.CopyDirectory, AssistantMenuItem.CopyInfo,
         AssistantMenuItem.CopySessionId.takeIf { active != null }, AssistantMenuItem.CopyDiagnostics.takeIf { active != null }),
-    listOfNotNull(AssistantMenuItem.Compact.takeIf { compact }, AssistantMenuItem.NewMain.takeIf { newMain }),
+    listOfNotNull(AssistantMenuItem.Compact.takeIf { compact }, AssistantMenuItem.ClearContext.takeIf { clear },
+        AssistantMenuItem.NewMain.takeIf { newMain }),
     listOfNotNull(AssistantMenuItem.SessionInfo.takeIf { active != null }, AssistantMenuItem.Interrupt.takeIf { active != null && working }),
 ).filter { it.isNotEmpty() }
 

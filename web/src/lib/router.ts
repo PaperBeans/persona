@@ -23,7 +23,9 @@ export type Route =
   // `mid` / `manager`: the computer the conversation runs on and its manager when another than the default
   // (`?machine=…&manager=…`, lib/conversation-page.ts): with several assistants a reload, a new tab or a link finds it
   // where it runs, whichever assistant is current
-  | { name: "persona"; sid?: string; mid?: string; manager?: string }
+  // `at`: a message to open the chat at (`?at=<item id>`, a search hit's, #6283): the chat lands on it, paging back when it
+  // is further up
+  | { name: "persona"; sid?: string; mid?: string; manager?: string; at?: string }
   // "All chats"; `origin` filters it (lib/conversation-origins.ts): the sidebar's "Automatic" rows open it so
   | { name: "history"; origin?: string }
   // the health space (docs/assistant/health.md): `/health` opens its latest conversation (#4329), `/health/new` its new
@@ -57,11 +59,12 @@ export type Route =
   | { name: "subscriptions" };
 
 /** A conversation page's `?machine=` and `?manager=` (routePath writes them), each only when there. */
-function conversationQuery(search: string): { mid?: string; manager?: string } {
+function conversationQuery(search: string): { mid?: string; manager?: string; at?: string } {
   const q = new URLSearchParams(search);
   const mid = q.get("machine");
   const manager = q.get("manager");
-  return { ...(mid ? { mid } : {}), ...(manager ? { manager } : {}) };
+  const at = q.get("at");
+  return { ...(mid ? { mid } : {}), ...(manager ? { manager } : {}), ...(at ? { at } : {}) };
 }
 
 /** `?view=term|chat` of an agent page's address; anything else is no choice. */
@@ -153,6 +156,7 @@ export function routePath(r: Route): string {
       const q = new URLSearchParams();
       if (r.mid) q.set("machine", r.mid);
       if (r.manager) q.set("manager", r.manager);
+      if (r.at) q.set("at", r.at);
       const query = q.toString();
       return `/persona/${encodeURIComponent(r.sid)}${query ? `?${query}` : ""}`;
     }

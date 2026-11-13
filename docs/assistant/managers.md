@@ -10,10 +10,39 @@ A manager is the assistant's process, `personad assistant` (`docs/assistant/assi
 ## Repository references
 
 Repository bindings (#5330) belong to one manager's Settings entry `assistant.repositories`, not a hub-wide catalog.
-The document uses Settings CAS and a revision; at most 200 active records contain a stable ID, provider, HTTPS
+The document uses Settings CAS and a revision; at most 200 active records contain a stable ID, provider, HTTP(S)
 instance, full namespace path, canonical URL, optional name/aliases/purpose and `verified_at`. No credentials,
-computer or checkout are stored. HTTPS, `git@host:path.git` and `ssh://git@host/path.git` normalize to the same
+computer or checkout are stored. HTTP(S), `git@host:path.git` and `ssh://git@host/path.git` normalize to the same
 identity. GitHub Enterprise and self-hosted GitLab require an explicit provider; nested GitLab groups are preserved.
+
+The web form parses locally on every URL/provider change and immediately shows the provider, full repository path,
+canonical web root and an explicit not-yet-checked state. No preview button or remote request is needed. The server
+reparses on preview and save; both parsers share `spec/fixtures/repository-remotes.json`. GitHub repository pages
+(such as `/pull/5581`) and GitLab's `/-/` project pages discard their page suffix, ordinary query and fragment.
+GitLab paths without `/-/` keep every namespace segment; ambiguous old page URLs are not guessed by taking two
+segments. Explicit credential-bearing URLs and credential query parameters remain invalid. Only exact known
+aliases (`www.github.com`, `api.github.com/repos/...`, SSH `ssh.github.com` and `altssh.gitlab.com`) map to public
+providers; lookalike subdomains never imply trust. Public HTTP/SSH references become HTTPS web roots. Custom
+instances keep their web scheme/port, while an unknown SSH port cannot imply a web port. No `.git`, page suffix,
+query, fragment or clone form is stored. Static parsing never claims remote existence.
+
+The checker makes one anonymous GitHub REST or GitLab projects metadata GET, never a Git subprocess, clone, content
+fetch or model call. Its total budget stays eight seconds (including DNS/body), with three-second TCP/TLS limits,
+a four-second header limit and no request retry. All DNS answers pass policy before numeric dials start; attempts
+are staggered by 250 ms with at most four in flight, and losing connections are canceled/closed. This prevents a
+stalled first address from hiding another reachable one without relaxing DNS pinning. Cancellation has its own
+error, distinct from deadline expiry. The browser allows the server's budget plus five seconds for mutations; an
+expired browser wait is an unconfirmed write, so the draft stays and the user is told to refresh before retrying.
+Late replies cannot replace a different assistant or a new draft. Public GitHub checks use this manager's
+`github.proxy` when configured; otherwise checks use the process's `HTTP_PROXY` / `HTTPS_PROXY` and `NO_PROXY`
+(including lowercase spellings). Explicit `github.proxy` takes priority over environment bypass rules, as for the
+extension market. GitLab and self-hosted instances use the environment rules. An invalid explicit GitHub proxy
+fails the check rather than falling back to another route; a selected proxy failure never falls back to direct.
+Proxy tunnels carry only validated numeric destinations (HTTP CONNECT or SOCKS5); destination DNS is never
+delegated to the proxy. HTTP(S) and SOCKS5 environment proxies are supported; plain HTTP repository endpoints
+also require the HTTP proxy to permit CONNECT to their port. A rate limit is not a timeout diagnosis.
+The shared server routes serve every caller; repository binding UI currently exists only on the web, not Apple or
+Android. Browser fixtures cover synthetic saves, while Go route and isolated database tests cover persistence.
 
 The manager-owned `/api/v1/assistant/repositories` routes list/create; `/{id}` reads/updates/unbinds;
 `/preview` parses without contacting a remote. Mutations require full access. `/{id}/restore` accepts the unbind
@@ -25,8 +54,9 @@ repositories). Descriptive edits and reads do not probe or synchronize. Checks a
 existence, never identity, membership, ownership, roles or push permission. Hidden/private 404, login HTML,
 authentication failures, rate limits, timeouts and ambiguous metadata cannot pass verification.
 
-Checks allow HTTPS only, reject redirects, use no ambient proxy/cookies/credentials, cap body/headers/time, validate
-all DNS answers and dial pinned numeric destinations with ordinary TLS hostname verification. Special, metadata,
+Checks retain a self-hosted instance's HTTP(S) scheme and web port, reject redirects, use no repository
+cookies/credentials, cap body/headers/time, validate all DNS answers and dial pinned numeric destinations with
+ordinary TLS hostname verification. Configured proxy credentials go only to the proxy, never to the repository. Special, metadata,
 loopback and link-local addresses are always refused. Private RFC1918/ULA destinations require an operator's
 explicit `repository_trusted_targets` entry in this manager's `manager.json`; no Web/API input can grant trust:
 
@@ -34,7 +64,7 @@ explicit `repository_trusted_targets` entry in this manager's `manager.json`; no
 {"repository_trusted_targets":[{"instance_url":"https://code.example.com","networks":["<private CIDR>"]}]}
 ```
 
-The exact HTTPS instance (including nondefault port) and private CIDR must both match. Broad public/default-route
+The exact HTTP(S) instance (including nondefault port) and private CIDR must both match. Broad public/default-route
 CIDRs cannot opt in private networks. Configure only infrastructure the operator trusts; this is not a connector
 or sign-in system. Public-only installations need no configuration.
 
@@ -198,6 +228,7 @@ The answers of `POST /api/v1/managers` and `POST /api/v1/managers/{id}/code` car
 - `personad manager install [--dir D]`: first sets up its database (its own container, see "Database"; a database it was given is just used), then on Linux writes the systemd user unit `persona-manager-<id>.service` (`Restart=always`, `RestartPreventExitStatus=2`, with a reminder about linger); on a Mac the launchd agent `com.persona.manager.<id>` (its log is `manager.log` in its directory). The binary it runs is the hub machine's `~/.persona/bin/personad` when there is one (so it upgrades with the hub), else the current one. On other systems, or without a systemd user instance, it says how to keep it running yourself.
 - `personad manager uninstall [--dir D] [--purge]`: stops and removes the service and says what happens to the data. Its database container is stopped and **its volume, with all the data, stays**; `install` again picks it up. **`--purge` removes the container and the volume**, so the data is gone and the next install starts with an empty database. A database given with `--database-url` is never touched. The directory stays either way (deleting the manager in the app is what makes the hub stop accepting its token).
 - `personad manager status [--dir D]`: this computer's managers, with directory, hub, database (and whether its container runs; Docker not running or missing is said as such) and service state.
+- `personad manager search-reindex [--dir D]`: empties the manager's chat search index in its database (its `manager.json`'s, never the hub's), and it reads its chats again from the start: at its next sweep when it runs, else when it starts (`docs/assistant/assistant.md` ("Chat search (#6282)"); the built-in manager's is `personad assistant search-reindex`).
 
 ### Containers
 
@@ -709,6 +740,8 @@ An app shows one assistant at a time, the **current assistant**, picked in a swi
 
 - **Names**: what people read says assistant (助手, アシスタント): New assistant, Manage assistants…, Settings › Assistants, Default assistant; the settings row for the assistant's own profile is Assistant profile (助手资料). Code, the protocol, `manager.json` and these docs keep `manager`.
 - **The pick** is kept on the device, per hub, across launches. A device that never picked follows the hub's default, and a pick whose manager left the roster (deleted, or never installed) goes back to it. Requests name the pick with `X-Persona-Manager: <id>`; with the default current none is sent, so a hub with one manager gets the requests it always got. Until the roster is read after a launch, the kept pick already counts: the pages list its things only and the switcher shows the name the roster last gave it, rather than every assistant's and the hub's own name for a moment.
+- **One identity for the default assistant (#6401)**: the default manager is the Persona of the main conversation, so every client shows the chosen look's face in the switcher's head — not the first-letter monogram every other assistant keeps — with the same presence and needs-you corner marks. Changing the look changes that face. Its name is the manager name the hub keeps (`PATCH /api/v1/managers/{id}`), shown in the switcher's head, the main conversation's row, the profile and the composer; on web and Apple the profile edits it directly (a pencil on the name), and every client can rename it from Settings › Assistants. A hub without a roster keeps the look's own name and the earlier header, read-only.
+
 - **The switcher** shows the current assistant's avatar, name and status (Online · its computer, Offline · last synced …). It opens the roster: the installed managers, the default first and tagged Default, the current one checked, an offline one's whole row faded (avatar, name and line) but still selectable (its pages show what the app last read, as below); then the ones still installing (Installing · code expires in n minutes), where choosing one opens its install code and commands instead of switching; then **New assistant** and **Manage assistants…** (Settings › Assistants). With one installed manager, web, Android and Apple show the same switcher and a one-row roster without a Default tag; New assistant and Manage assistants… remain available. New assistant also remains in Settings › Assistants. With two or more installed managers, all three use the switcher above, including offline managers; pending installs alone do not enable it. On Apple, a hub without a roster keeps the persona's name as the sidebar's title; web and Android keep their earlier header and controls.
 - **Avatars** are a disc with the first character of the name. The default manager's is the AI purple; any other takes one of five hues by the sum of its id's UTF-8 bytes modulo 5, in the order blue, green, orange, pink, indigo, each client using its own design system's color of that name. A mark at its foot gives its status (online green, offline neutral, installing orange), and on the sidebar's head a mark at its top says another assistant has something waiting. Where a client already shows the user's chosen Persona look, it keeps the look and changes only the name beside it.
 - **Counts** (one definition on every client): an assistant's count = its agents waiting for the user + its `inbox_needs_you` from the roster (`docs/protocol/protocol.md`; absent counts as 0). An agent waiting is a session of that assistant that is not a quiet task's, is not muted, and has at least one pending card or is in Needs you; each session counts once. A pending card on no session counts 1 each. The current assistant's row shows no count. The mark on the sidebar's avatar means another assistant's count is above 0. Clients count from the sessions and cards the hub already pushes with their `manager`, and again after every `managers` push. The Apple apps get no session pushes from a hub with bounded lists (`sessions_list`), so there they read the hub's sessions in Needs you for it.

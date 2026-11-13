@@ -3,6 +3,7 @@ import { SessionList, compareListIds } from "./session-list";
 import { foldedState } from "./child-sessions";
 import { t } from "../i18n";
 import type { Session } from "./types";
+import type { SessionPlace } from "./session-groups";
 
 // Match Go's JSON tuple spelling, including HTML and line-separator escaping.
 const GO_JSON_ESCAPE = new RegExp("[<>&" + String.fromCharCode(8232, 8233) + "]", "g");
@@ -14,6 +15,9 @@ export const runtimeIdentity = (s: Session) => {
   if (key === undefined) { key = tupleKey([s.machine_id, s.session_id]); identities.set(s, key); }
   return key;
 };
+/** The identity of the row a session is drawn under (`parent_agent_id`, #5935, lib/side-sessions.ts), as runtimeIdentity
+ *  keys rows: on the session's own machine. */
+export const runtimeParentIdentity = (s: Session) => s.parent_agent_id ? tupleKey([s.machine_id, s.parent_agent_id]) : undefined;
 export function runtimeRemoval(id: string): string {
   try {
     const tuple: unknown = JSON.parse(id);
@@ -35,6 +39,9 @@ export const runtimeActiveAt = (s: Session) => Date.parse(s.updated_at ?? "");
 /** Needs the user by the hub's rule for `state.needs_you` counts, not the client's answered-here state: by the folded
  *  state, which a child that waits gives its parent (`roots=1` counts it so, #5120). */
 export const runtimeNeedsYou = (s: Session) => foldedState(s) === "needs_you";
+/** Where a row is, by the attributes the hub groups and filters it by (docs/protocol/protocol.md "Bounded Agents
+ *  lists"): its computer, its project directory and its space. */
+export const runtimePlace = (s: Session): SessionPlace => ({ machine: s.machine_id, project: s.repo_root || s.workspace_cwd || s.cwd || "", group: s.space_id || s.workspace_id || "" });
 export const SESSIONS_LOOKUP_FEATURE = "sessions_lookup";
 export const SESSIONS_PAGE_COUNTS_FEATURE = "sessions_page_counts";
 let pageCounts = false;

@@ -98,6 +98,7 @@ export function parseQueued(raw: string, photosBeside = 0): QueuedParts {
   const contexts: QueuedContext[] = [];
   let rest = raw.replace(CONTEXT_RE, (_, attrs: string, body: string) => {
     const { kind = "context", title = "", url = "", ...extra } = tagAttrs(attrs);
+    if (kind === "skill-instructions") return "";
     contexts.push({ kind, title, url, text: body.trim(), ...(Object.keys(extra).length ? { attrs: extra } : {}) });
     return "";
   });

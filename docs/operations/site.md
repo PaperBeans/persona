@@ -35,8 +35,14 @@ own `site/public/style.css`.
   finds a system copy or takes `--serif-font`.
 - **Motion** only starts with JavaScript; without it every section is visible and static, and with reduced motion
   the page shows its finished state (the switches on, the underline drawn, no moving packets).
-- **The version in the top bar** is `/dl/VERSION`, written by `scripts/release/publish.sh`; the badge stays hidden
-  when the file is missing.
+- **The version in the top bar** is the latest stable GitHub release from `/releases/data.json` ("最新 v0.4.0"), the
+  same one the download page leads with, and links there; it stays hidden until the data arrives. It used to show
+  `/dl/VERSION` (the hub update channel's build, e.g. `personad v0.1.17-177-…`), which could be far behind the
+  release it linked to and named a program visitors don't know.
+- **Download section** (`#download`, the top bar's 下载): one tile per device with the latest stable files straight
+  from GitHub, filled from `/releases/data.json` with the releases page's own `model.js` (same file choice, same
+  fallback to an older release while one is uploading, same address check). Without the data each tile links to its
+  card on `/releases/`; the visitor's device is marked, and the web app tile says how to open it instead.
 - **Light only.** The previous page also had a dark variant; this one follows the app icon's paper in both schemes.
 
 ## Legal pages and support
@@ -53,7 +59,7 @@ description, version and downloads, most downloaded first, with search (name, id
 uses the home page's palette, type and footer; the home page's top bar, extensions section and footer link to it.
 Unlike the home page it follows the system's dark scheme (#4810): every color is a variable at the top of its CSS, and
 `prefers-color-scheme: dark` swaps paper and ink for a warm night set; text on orange and amber and the install card
-keep their colors in both. Add a color as a variable with both values, never as a literal in a rule, or one scheme breaks. Its h1 and h2 are set in the serif too: `make_site_assets.py serif` reads both pages.
+keep their colors in both. Add a color as a variable with both values, never as a literal in a rule, or one scheme breaks. Its h1 and h2 are set in the serif too: `make_site_assets.py serif` reads the home, extensions and releases pages.
 
 - **Data**: the page reads `/extensions/catalog.json`, which `site/extensions.mjs` builds from the market's signed
   index (`persona-extensions.json` on the market repository's `main`; `EXTENSIONS_CATALOG_URL` overrides it). It keeps
@@ -61,6 +67,20 @@ keep their colors in both. Add a color as a variable with both values, never as 
   reached the old copy is served (marked `stale`, the page says so) for up to 30 days. With no copy at all it answers
   503 and the page offers a retry and the market on GitHub. The signatures are not checked: the page only displays,
   and a hub checks them before it installs anything.
+- **Catalog updates do not deploy the site** (#6132): the signed index is read at request time, not bundled into the
+  static page. The next request reaching the Worker after its 10-minute freshness interval replaces the entire
+  catalog, including removals, versions and icon URLs. Fresh catalog responses also carry `Cache-Control: public,
+  max-age=300`, so browsers and the entry proxy can continue showing a cached response for another five minutes.
+  This is request-driven, not a scheduled rebuild; an already-open page reads again only on reload or Retry.
+  Neither a site rebuild nor a repository-dispatch workflow is needed when the market publishes a new index.
+- **When a new extension appears late**: compare the site's `/extensions/catalog.json` fields `source_commit`,
+  `fetched_at`, `stale` and extension IDs against the signed index's payload. Use `curl --compressed` because the
+  entry can serve a compressed response, then check a newly loaded search page and the icon's actual load.
+  A `stale` response means the Worker could not refresh upstream; an entry `X-Cache: STALE` header describes the
+  proxy cache instead and does not by itself mean the JSON catalog is old. Keep the failing response and headers
+  before claiming which cache layer caused the delay. Test successful replacements with
+  `node --test site/worker.test.mjs`; its expiry regression verifies removal, version and logo changes without
+  restarting the Worker.
 - **Only the public market** (#4816): the Worker rejects a catalog whose `generation.repository` is not
   `nwverse/persona-extensions`, and each extension's source link is its `homepage` only when that points into the
   repository, otherwise `tree/main/extensions/<id>` there (many manifests declare no homepage).
@@ -73,6 +93,62 @@ keep their colors in both. Add a color as a variable with both values, never as 
   only (at most 512 KB), and sends `nosniff` and a sandboxing CSP so an SVG opened on its own runs nothing here.
 - Both routes are in `run_worker_first` in `site/wrangler.jsonc`: with `not_found_handling` set, a path that is not a
   static file never reaches the Worker otherwise.
+
+## Releases page
+
+`/releases/` (`site/public/releases/index.html`, redesigned in #6338) is the download page. It is for people installing
+Persona who may not know GitHub's release layout: they should see the latest version, get the file for the device they
+are on in one click, and still reach every other device, component and earlier version.
+
+- **Layout**: a "ticket" for the latest stable version (the version large in the brand face, its date, feature and fix
+  counts) with the download for the visitor's device; one card per device (iPhone and Apple
+  Watch through TestFlight, Android, HarmonyOS phones and foldables, Mac, Windows, Linux, and the web app, which has no download: its card and tab give
+  the three steps to open it from the hub, sign in with a connected phone and install it as an app, `WEB_GUIDE` in
+  `model.js`, matching `docs/operations/getting-started.md`); components and checksum files behind a
+  disclosure; and the version history, newest first, each version expandable to its highlights and packages with a link
+  to its full notes on GitHub. Same palette, type, top bar and footer as the home page; light and dark, with every color
+  a variable at the top of its CSS (the extensions page's night set).
+- **The visitor's device** (`site/public/releases/model.js`, `detectPlatform`) picks the ticket's selected device tab
+  (a row of tabs switches the ticket to any other device) and the highlighted card. HarmonyOS / OpenHarmony user agents
+  are recognized before Android or Linux. Chromium's architecture hint corrects the guess; Safari reports Intel on Apple silicon, so a Mac
+  defaults to Apple silicon and both files are always shown. iPads asking for the desktop site count as iPhone.
+- **HarmonyOS**: the native phone/foldable client is visible beside Android. `Persona-<version>-harmony.hap` is a
+  first-class app asset (formal release only, once signing is configured); when no signed HAP has been published, the card and ticket link to the source-build guide
+  instead of claiming a package exists. A debug or unsigned HAP must not be attached to satisfy this presentation.
+  Production identity, signing and DevEco toolchain configuration are separate release prerequisites (#6734).
+- **A release still uploading**: when the latest version has no file for a device, the page offers the newest stable
+  release that has one and says so ("v0.4.0's Mac package is still uploading…"). Prereleases are listed in the history
+  but never offered as a download.
+- **Highlights** (shown inside each history row) come from GitHub's generated notes (`summarizeNotes` in `site/releases.mjs`): counts of `feat` / `fix`
+  items and up to four feature titles, one per area, areas people use first (assistant, iPhone, Android, web …) and
+  build, test and release plumbing never. Handles, links and PR numbers are removed; the titles stay in English, as
+  the page says.
+- **Text and links**: `page.js` builds everything from the data with text nodes; `innerHTML` is used only for its fixed
+  icon markup. A link is drawn only when its address passes `isDirectDownload` (exactly
+  `https://github.com/nwverse/persona/releases/download/<tag>/<name>`) or is the release's own GitHub page.
+- **States**: loading shows placeholders; without data the ticket offers Retry and GitHub, and the device cards link to
+  GitHub's latest release; a stale copy is marked with its age; without JavaScript a note links to GitHub.
+
+### Metadata and bandwidth
+
+- `/releases/data.json` (`site/releases.mjs`) reads the public GitHub API (at most 100 releases) and keeps only semver
+  `v*` tags that are published (no drafts, no media releases such as `promo-v1`), each with its tag, date, release page,
+  note summary and files: name, size, kind (`app`, `computer`, `web`, `component`, `checksum`, `installer`, `other`),
+  platform and architecture from the file name, and GitHub's SHA-256 digest when present. `latest` is the highest stable
+  version, not the newest tag. The repository, API address and download origin are fixed; no URL or token is configured.
+- **Cache**: the slim copy stays in the edge cache, fresh for 10 minutes; after that GitHub is asked again, and when it
+  cannot be reached the old copy is served marked `stale` for up to 30 days. With no copy the route answers 503 and
+  `no-store`. A new release appears without a site deployment.
+- **No package bandwidth on this site**: every download goes from the browser straight to `github.com`. A file whose
+  `browser_download_url` is not exactly GitHub's address for this repository, tag and name is dropped. Only
+  `/releases/data.json` is in `run_worker_first`; there is no download or redirect route under `/releases/`, and no
+  package passes through the Hong Kong entry, the Worker or R2. `install.sh` is not offered on this page: it fetches
+  from this site's `/dl/`, which stays for hub and node updates (`docs/operations/release.md`, "Publishing personad").
+- **Tests**: `node --test site/worker.test.mjs site/releases.test.mjs` covers version filtering and ordering, file
+  classification, hostile download addresses, note summaries, caching, stale fallback, the per-device fallback to an
+  older release, platform detection and the page's text-only drawing. After editing the page's `h1` / `h2` / `.hello`
+  text, run `python3 scripts/assets/make_site_assets.py serif`. The ticket's title is set by script, so it uses the sans
+  face, not the subset serif.
 
 ## Current routing (since 2026-11-04, #1134)
 

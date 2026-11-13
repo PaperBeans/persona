@@ -11,6 +11,7 @@
 | [connection.json](connection.json) | WS `hello`、`revs`；GET `/api/v1/health` | 调用 `Hub.hello`、`Hub.health`；revs 使用实际信封结构和 `client.sendJSON` |
 | [sessions.json](sessions.json) | GET `/api/v1/sessions`；WS `sessions` | `proto.Session` 经 `agentState`、`fillStateMarks` 后，用列表及事件的 map 结构发送 |
 | [machines.json](machines.json) | GET `/api/v1/machines`；WS `machines` | 调用 `Machine.snapshot`，再经 `writeJSON` 或 `sendJSON` |
+| [machines-concern.json](machines-concern.json) | Anonymous machines for Android concern-grid tests | `writeJSON` encodes the machine input |
 | [items.json](items.json) | GET `/api/v1/sessions/{mid}/{sid}/items` | `proto.Item`、`WithoutImageData`、`FoldWork`；增量和展开页调用 `Hub.sessionItems` |
 | [item_events.json](item_events.json) | WS `items`，含订阅后的补发 | 调用 `Hub.itemsToSubscribers`、`Hub.sendBacklog`，读取客户端发送队列 |
 | [interactions.json](interactions.json) | GET `/api/v1/interactions`；WS `interaction`、`interaction_resolved` | `proto.Interaction` 使用实际列表或信封结构；屏幕经 `ParseDialog`、`SecretPrompt` 处理 |

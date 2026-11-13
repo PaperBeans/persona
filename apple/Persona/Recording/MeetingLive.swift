@@ -3,7 +3,7 @@ import Foundation
 import Observation
 
 /// The live sentences of a meeting Persona attends (#2981, docs/assistant/meeting-minutes.md「Live sentences」): every
-/// finished sentence that ended while Persona attended, and isn't Persona's own voice, goes into the recording's
+/// finished sentence that ended while Persona attended, and isn't Persona's echo (#5905), goes into the recording's
 /// append-only live log (`RecordingAttendance.live`), and from there to `POST /api/v1/recordings/{id}/live`, from the
 /// position the hub holds (`next`). Nothing goes before the hub has stored an upload with the meeting's current
 /// attendance (`RecordingSync.attendanceSettled`). The live log only feeds the attending session and the answers; the
@@ -41,8 +41,9 @@ final class MeetingLive {
         var settled: (RecordingEntry) -> Bool
         /// The hub needs the upload first, even if this phone thinks it was stored (`RecordingSync.reupload`).
         var upload: (UUID) -> Void
-        /// The stretch Persona is saying now (`MeetingSpeaker.openSpan`).
-        var openSpan: (UUID) -> RecordingSpan?
+        /// The stretches Persona is saying now, each with what it is saying (`MeetingSpeaker.openSpan`, and the meeting
+        /// call's voice: `MeetingCall.openSpan`).
+        var openSpans: (UUID) -> [RecordingSpan]
         var wait: (Duration) async -> Void
         /// Every `200` of `…/live`: the meeting conversation keeps what it says of the room (`MeetingConversation.applyLive`)
         /// and, without the socket, reads the room's topics (`MeetingConversation.liveAccepted`).
@@ -83,18 +84,19 @@ final class MeetingLive {
     }
 
     /// Adds the sentences of segments transcribed since last time: those that ended while Persona attended and are not
-    /// its own voice. Positions already given never move. Returns whether any were added.
+    /// its echo (`RecordingAttendance.echo`, the answer being said too). Positions already given never move. Returns
+    /// whether any were added.
     @discardableResult
     func append(_ id: UUID) -> Bool {
         guard let entry = library.entry(id), entry.isMeeting, entry.source == .phone, let attendance = entry.attendance else { return false }
         let fresh = entry.segments.sorted { $0.index < $1.index }
             .filter { $0.sentences != nil && !attendance.liveSegments.contains($0.index) }
         guard !fresh.isEmpty else { return false }
-        let open = deps.openSpan(id)
+        let open = deps.openSpans(id)
         var lines: [RecordingSentence] = []
         for segment in fresh {
             for line in segment.sentences ?? [] where !line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                if attendance.attended(line), !attendance.spokenBy(line, open: open) { lines.append(line) }
+                if attendance.attended(line), !attendance.echo(line), !open.contains(where: { $0.echoes(line) }) { lines.append(line) }
             }
         }
         library.change(id) { e in
@@ -209,7 +211,7 @@ extension MeetingLive.Deps {
              },
              settled: { RecordingSync.shared.attendanceSettled($0) },
              upload: { RecordingSync.shared.reupload($0) },
-             openSpan: { MeetingSpeaker.shared.openSpan(for: $0) },
+             openSpans: { [MeetingSpeaker.shared.openSpan(for: $0), MeetingCall.shared.openSpan(for: $0)].compactMap { $0 } },
              wait: { try? await Task.sleep(for: $0) },
              report: { id, answer in
                  MeetingConversation.shared.applyLive(id, room: answer.room, privateMark: answer.privateMark, followup: answer.followup)

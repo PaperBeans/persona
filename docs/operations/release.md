@@ -409,7 +409,11 @@ curl -fsSL <publish.site_url>/install.sh | sh   # install to ~/.persona/bin/pers
 
 ## Publishing a release (`.github/workflows/release.yml`)
 
-A `v*` tag publishes the hub container image and creates a GitHub Release. Docker hubs (`docs/operations/docker.md`) use the ghcr image, linux/amd64 + linux/arm64:
+A `v*` tag publishes the hub container image and creates a GitHub Release. **Only `chyroc` may create, update or delete a `v*` tag, dispatch an image release or rerun its jobs.** The repository's `Release tags: administrators only` ruleset permits only the administrator role to bypass its create/update/delete restrictions; other collaborators cannot publish a version tag. The workflow independently requires both the run's actor and its triggering actor to be `chyroc` before any checkout, build or upload, including manual dispatches and reruns. The Release's `github-actions[bot]` author identifies the workflow that created it, not the person who pushed the tag; the Actions run records that triggering actor.
+
+This boundary covers automated publication; collaborators retain their existing write permissions. GitHub does not offer a separate release-only permission on this organization, so those permissions still allow a manual GitHub Release from an existing ref. Restricting manual releases too would require a separate collaborator-permission change, outside this policy.
+
+Docker hubs (`docs/operations/docker.md`) use the ghcr image, linux/amd64 + linux/arm64:
 
 ```sh
 git tag v1.2.0 && git push origin v1.2.0
@@ -418,7 +422,7 @@ git tag v1.2.0 && git push origin v1.2.0
 ```
 
 - Smoke-test first (amd64 + compose), then build and push both architectures only after it passes. Once image publication succeeds, the same job creates a GitHub Release named for the full tag with automatically generated notes. Prerelease tags containing `-` (`v1.3.0-rc1`) only push the version image, without touching `latest`, and mark the GitHub Release as a prerelease. Creating the Release does not push another tag.
-- To get an image of the current branch without a tag or GitHub Release: manually run release in Actions (`edge`, `sha-<commit>`).
+- To get an image of the current branch without a tag or GitHub Release, `chyroc` can manually run release in Actions (`edge`, `sha-<commit>`).
 - Image smoke tests run through an explicit workflow dispatch; only the documented `v*` release-tag event starts image and GitHub Release publication automatically (`packages: write` and `contents: write` are granted only to the publish job). This exception supplies the version and `latest` images used by Docker installations; no branch push or PR starts it. A manual dispatch never creates a GitHub Release.
 - If Release creation fails after the images were pushed, rerun the failed job for the same tag. Rebuilding and pushing the same immutable image tags does not advance `latest` to another source revision; fix any reported tag or Release conflict rather than creating a replacement tag.
 - The image's personad uses the tag minus `v` as its version (`personad version`); when node differs, the App prompts to redeploy, using the image's own builds or the release's (`docs/operations/docker.md` ("Node builds")).

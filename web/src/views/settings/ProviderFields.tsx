@@ -3,6 +3,7 @@
 // status line.
 import { useId, useState } from "react";
 import { Collapse, cx, SECRET_INPUT, Spinner, Switch } from "../../ui/atoms";
+import { CheckMark } from "../../ui/CheckMark";
 import { Icon } from "../../ui/icons";
 import { inputClass, textareaClass } from "../assistant/parts";
 import { t } from "../../i18n";
@@ -144,14 +145,8 @@ export function Disclosure({ title, open, onToggle, children, badge }: { title: 
   );
 }
 
-/** The tick of a role="checkbox" row; round for a role="radio" one. */
-export function CheckMark({ on, round, className }: { on: boolean; round?: boolean; className?: string }) {
-  return (
-    <span aria-hidden className={cx("flex size-4 shrink-0 items-center justify-center transition-colors duration-150", round ? "rounded-full" : "rounded-chip", on ? "bg-accent text-white" : "shadow-[inset_0_0_0_1.5px_var(--line-strong)]", className)}>
-      {on && <Icon name="check" size={10} stroke={3} />}
-    </span>
-  );
-}
+// The tick of a role="checkbox" row (ui/CheckMark.tsx, which the chat draws too); Inbox imports it from here.
+export { CheckMark };
 
 /** Arrow keys move a radio group's choice to the next or previous of `count` (around the ends; from none, the first or
  *  the last), and focus follows (`attr` holds each option's index). */

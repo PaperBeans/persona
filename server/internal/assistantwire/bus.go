@@ -43,11 +43,43 @@ const (
 	// "Phase 2: live view"). The hub lists meeting_live_view only while the default manager names it beside
 	// CapabilityMeetingConversation.
 	CapabilityMeetingLiveView = "meeting_live_view"
+	// CapabilityMeetingHighlights: the manager takes the meeting conversation's phase 2b, its highlights (highlights and
+	// highlights_at on GET …/live, the room's meeting_highlights_set, highlights in meeting_live and in GET …/live's
+	// revs and parts; docs/assistant/meeting-minutes.md "Phase 2b: highlights"). The hub lists meeting_highlights only
+	// while the default manager names it beside CapabilityMeetingLiveView.
+	CapabilityMeetingHighlights = "meeting_highlights"
+	// CapabilityMeetingEcho: the manager takes Persona's echo marked on a meeting's upload (#5905: the segments' echo
+	// and the spoken spans, its own copy of the rule, echo lines kept but left out of the minutes, the summary and the
+	// follow-up; docs/assistant/meeting-minutes.md "Persona's echo"). The hub lists meeting_echo only while the default
+	// manager names it beside CapabilityMeetingAttendance; until then a phone leaves echo lines out of the upload.
+	CapabilityMeetingEcho = "meeting_echo"
+	// CapabilityMeetingTranscription: the manager transcribes meetings on the hub (#3862 phase 5: the upload's
+	// transcription and timeline, the audio socket GET …/audio and the gap uploads PUT …/audio, the hub's transcript of
+	// record, the meeting_transcription_* settings; docs/assistant/meeting-minutes.md "Phase 5: hub transcription").
+	// The hub lists meeting_transcription only while the default manager names it beside CapabilityMeetingConversation
+	// and CapabilityMeetingLiveView.
+	CapabilityMeetingTranscription = "meeting_transcription"
 	// CapabilityRecordingDay: the manager takes all-day recordings and writes their daily recap (the upload's kind
 	// day, POST …/segments, detail.recap, recap_state; #4741). The hub lists the recording_day feature only while the
 	// default manager names it.
 	CapabilityRecordingDay = "recording_day"
+	// CapabilityAssistantSearch: the manager answers GET /api/v1/assistant/search from its index of the chats' messages
+	// (#6282, docs/protocol/protocol.md "Assistant chat search"). The hub lists the assistant_search feature only while
+	// the default manager names it; the apps keep filtering titles and last messages without it.
+	CapabilityAssistantSearch = "assistant_search"
+	// CapabilityHTTPBodyStream: the manager takes MethodHTTPStreamed, a forwarded request whose body comes on a relay
+	// stream of its own instead of inside the bus message (#6574). The hub sends a large body that way only to a
+	// manager that names it; any other gets MethodHTTP as before.
+	CapabilityHTTPBodyStream = "http_body_stream"
 )
+
+// BodyStream is where MethodHTTPStreamed's body comes from: the relay the hub holds with ID (devicewire.RelayPath
+// ?id=, only the manager the request is for may take it), which carries exactly Size bytes as a body stream
+// (bus.WriteBody) and then closes normally.
+type BodyStream struct {
+	ID   string `json:"id"`
+	Size int64  `json:"size"`
+}
 
 // The methods and events, by direction. The assistant's handshake is manager.hello {id, host, os, arch, deploy,
 // version, capabilities}; its answer is Hello (with the hub's name, role and managers besides).
@@ -61,11 +93,16 @@ const (
 	EventBroadcast = "ws.broadcast" // one way
 
 	// The hub calls the assistant (Handler).
-	MethodHTTP    = "http.request" // HTTPRequest → HTTPResponse
-	MethodTools   = "assistant.tools"
-	MethodTool    = "assistant.tool"
-	MethodContext = "assistant.context"
-	MethodAction  = "manager.action"
+	MethodHTTP = "http.request" // HTTPRequest → HTTPResponse
+	// MethodHTTPStreamed is MethodHTTP for a large body: HTTPRequest without Body, with BodyStream saying where the
+	// body comes from. The manager reads it whole before the route runs, so the bus carries no message of its size
+	// and other calls are not held up behind it (#6574). A body that does not arrive whole is refused with
+	// CodeBodyIncomplete before anything runs.
+	MethodHTTPStreamed = "http.request_streamed"
+	MethodTools        = "assistant.tools"
+	MethodTool         = "assistant.tool"
+	MethodContext      = "assistant.context"
+	MethodAction       = "manager.action"
 
 	// The hub tells the assistant (one way).
 	EventUserSpoke           = "session.user_spoke"
@@ -106,6 +143,9 @@ const (
 	// conversation (Data: conversation_agent, launcher, launcher_agent, delivered "none"): the hub answers 409, nothing
 	// was sent, and the conversation keeps its agent (docs/assistant/assistant.md, #4662).
 	CodeLauncherOtherKind = "launcher_other_kind"
+	// CodeBodyIncomplete: MethodHTTPStreamed's body did not arrive whole (the relay was not there, broke or carried
+	// another size). Nothing ran: the hub sends the request again as MethodHTTP.
+	CodeBodyIncomplete = "body_incomplete"
 )
 
 // HTTPRequest is http.request's params: an app's request on one of Routes, with an escaped URL path (header without
@@ -124,7 +164,10 @@ type HTTPRequest struct {
 	Path   string              `json:"path"`
 	Query  string              `json:"query,omitempty"`
 	Header map[string][]string `json:"header,omitempty"`
-	Body   []byte              `json:"body,omitempty"`
+	// BodyStream is set on MethodHTTPStreamed only, in place of Body: where the body comes from.
+	BodyStream *BodyStream `json:"body_stream,omitempty"`
+	// Body stays the last field: hub/bus_forward.go httpParams appends it to the rest as written.
+	Body []byte `json:"body,omitempty"`
 }
 
 // HTTPResponse is http.request's answer, written back to the app unchanged.
@@ -138,6 +181,7 @@ type HTTPResponse struct {
 // Routes are the routes the assistant answers (net/http patterns): the hub relays the apps' requests on them as
 // http.request. The assistant registers exactly these (assistant.TestRoutesAreTheWireOnes).
 var Routes = []string{
+	"POST /api/v1/skills/import",
 	"POST /api/v1/assistant/health/workouts",
 	"GET /api/v1/sessions/archived",
 	"POST /api/v1/sessions/{mid}/{sid}/archive",
@@ -223,6 +267,7 @@ var Routes = []string{
 	"POST /api/v1/todos/{id}/done-check",
 	"POST /api/v1/todos/{id}/retry",
 	"POST /api/v1/todos/retitle",
+	"POST /api/v1/todos/import/reminders",
 	// Its settings and its main conversation (profile.go, start.go).
 	"GET /api/v1/assistant",
 	"PUT /api/v1/assistant",
@@ -233,6 +278,7 @@ var Routes = []string{
 	"PUT /api/v1/assistant/memory/{name}",
 	"DELETE /api/v1/assistant/memory/{name}",
 	"GET /api/v1/assistant/capabilities",
+	"GET /api/v1/assistant/skills",
 	"POST /api/v1/assistant/conversations",
 	"POST /api/v1/assistant/conversations/{id}/compact",
 	"PUT /api/v1/assistant/conversations/{id}/model", // the model a conversation's next messages run on (model_pick.go, #5033)
@@ -265,6 +311,8 @@ var Routes = []string{
 	"GET /api/v1/kb/chats/{id}/context",
 	"GET /api/v1/kb/chats/{id}/days/{day}",
 	"GET /api/v1/kb-search",
+	// The assistant's chat search (search_routes.go there, docs/protocol/protocol.md "Assistant chat search", #6282).
+	"GET /api/v1/assistant/search",
 	// The selection: what the knowledge base brings in and keeps (kb_selection.go there).
 	"GET /api/v1/kb/selection",
 	"PUT /api/v1/kb/selection",
@@ -290,4 +338,13 @@ var Routes = []string{
 	"GET /api/v1/recordings/{id}/photos",
 	"GET /api/v1/recordings/{id}/photos/{n}",
 	"DELETE /api/v1/recordings/{id}/photos/{n}",
+	// Hub transcription's gap uploads (meeting_transcribe.go there, "Phase 5: hub transcription"); its audio socket is
+	// one of SocketRoutes.
+	"PUT /api/v1/recordings/{id}/audio",
 }
+
+// SocketRoutes are the assistant's routes that upgrade to a WebSocket. The hub relays them over a relay stream
+// (extwire.MethodAccept) to the default manager, as it relays the extensions' routes, never as http.request; the
+// manager's extensions layer hands them to the assistant (extmgr.Options.AssistantSocket). The assistant serves exactly
+// these on its socket handler (assistant.Service.ServeSocket).
+var SocketRoutes = []string{"GET /api/v1/recordings/{id}/audio"}

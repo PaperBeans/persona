@@ -19,6 +19,9 @@ struct MacTodosPage: View {
     /// List or calendar, and the calendar's day / week / month (#2029): the Mac starts on the week.
     @StoredValue("todos.view") private var viewMode = TodosViewMode.list
     @StoredValue("todos.calendar.mode") private var calendarMode = TodoCalendarMode.week
+    /// The list by status section (default) or by Pinned direction (#4352), as on the phone; only a hub with the
+    /// direction tree offers the second.
+    @StoredValue("todos.grouping") private var grouping = TodosGrouping.status
     @State private var calendarAnchor = Date.now
     @State private var quickAdd: TodoCalendarSlot?
     /// The calendar shows the selected to-do beside it once one is opened from it, until closed.
@@ -182,7 +185,7 @@ struct MacTodosPage: View {
 
     private var listColumn: some View {
         VStack(spacing: 0) {
-            TodosModeBar(view: $viewMode, mode: $calendarMode)
+            TodosModeBar(view: $viewMode, mode: $calendarMode, grouping: model.directionTree == nil ? nil : $grouping)
             searchField
             let result = triaged
             List(selection: $selectedTodoID) {
@@ -191,50 +194,11 @@ struct MacTodosPage: View {
                         .font(Theme.Font.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    ForEach(TodoSection.allCases, id: \.self) { section in
-                        let groups = result.groups(section)
-                        if !groups.isEmpty {
-                            let folded = isFolded(section, result)
-                            Section {
-                                if !folded {
-                                    ForEach(groups) { group in
-                                        if group.related.isEmpty {
-                                            row(group.lead, section: group.section)
-                                        } else {
-                                            DisclosureGroup {
-                                                ForEach(group.related) { row($0, section: group.triage[$0.id]?.section) }
-                                            } label: {
-                                                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                                                    row(group.lead, section: group.section)
-                                                    Text("\(group.related.count) related")
-                                                        .font(Theme.Font.caption)
-                                                        .foregroundStyle(.secondary)
-                                                        .lineLimit(1)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            } header: {
-                                Button {
-                                    guard section.startsFolded else { return }
-                                    if unfolded.contains(section) { unfolded.remove(section) } else { unfolded.insert(section) }
-                                } label: {
-                                    HStack(spacing: Theme.Space.xs) {
-                                        Text("\(section.title) · \(result.todoCounts[section] ?? groups.count)")
-                                            .font(Theme.Font.sectionHeader)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                        if section.startsFolded {
-                                            Image(systemName: folded ? Theme.Icon.disclosure : Theme.Icon.expand)
-                                                .font(Theme.Font.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
+                    if TodosGrouping.resolved(grouping, hasTree: model.directionTree != nil) == .direction,
+                       let tree = model.directionTree {
+                        directionSections(tree, result)
+                    } else {
+                        ForEach(TodoSection.allCases, id: \.self) { section in statusSection(section, result) }
                     }
                 }
             }
@@ -274,6 +238,80 @@ struct MacTodosPage: View {
             .frame(height: Theme.Size.macToolbarHeight)
             .ignoresSafeArea(.container, edges: .top)
         }
+    }
+
+    /// One status section (docs/assistant/todo-status-sop.md): its to-dos, related ones under their lead; folded ones
+    /// show only the header, which opens them.
+    @ViewBuilder private func statusSection(_ section: TodoSection, _ result: TodoTriageResult) -> some View {
+        let groups = result.groups(section)
+        if !groups.isEmpty {
+            let folded = isFolded(section, result)
+            Section {
+                if !folded {
+                    ForEach(groups) { group in
+                        if group.related.isEmpty {
+                            row(group.lead, section: group.section)
+                        } else {
+                            DisclosureGroup {
+                                ForEach(group.related) { row($0, section: group.triage[$0.id]?.section) }
+                            } label: {
+                                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                                    row(group.lead, section: group.section)
+                                    Text("\(group.related.count) related")
+                                        .font(Theme.Font.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Button {
+                    guard section.startsFolded else { return }
+                    if unfolded.contains(section) { unfolded.remove(section) } else { unfolded.insert(section) }
+                } label: {
+                    HStack(spacing: Theme.Space.xs) {
+                        Text("\(section.title) · \(result.todoCounts[section] ?? groups.count)")
+                            .font(Theme.Font.sectionHeader)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        if section.startsFolded {
+                            Image(systemName: folded ? Theme.Icon.disclosure : Theme.Icon.expand)
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// By Pinned direction (#4352): a section per direction of the hub's tree with a to-do, in its order (the
+    /// secretary's last), headed by its name and its counts, its to-dos in the tree's order; then Done, as by status.
+    @ViewBuilder private func directionSections(_ tree: DirectionTree, _ result: TodoTriageResult) -> some View {
+        let triage = result.sections.values.joined().reduce(into: [String: TodoTriage]()) { all, g in
+            all.merge(g.triage) { first, _ in first }
+        }
+        ForEach(DirectionTodoSections.build(tree, todos: store.byID, keep: matchesQuery)) { d in
+            Section {
+                ForEach(d.todos) { todo in row(todo, section: triage[todo.id]?.section) }
+            } header: {
+                HStack(spacing: Theme.Space.s) {
+                    Text(model.directionTitle(d.direction))
+                        .font(Theme.Font.sectionHeader)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: Theme.Space.s)
+                    DirectionCountsLine(direction: d.direction)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("todos.direction")
+            }
+        }
+        statusSection(.done, result)
     }
 
     private func row(_ todo: TodoItem, section: TodoSection? = nil) -> some View {

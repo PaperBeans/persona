@@ -56,6 +56,10 @@
     <string name="agents_count_pair">%1$s、%2$s</string>
     <string name="agents_flag_space_pinned">ピン留め中のスペース</string>
     <string name="agents_flag_space_muted">ミュート中のスペース</string>
+    <string name="agents_kind_todo">ToDo</string>
+    <plurals name="agents_count_todos">
+        <item quantity="other">ToDo %1$d件</item>
+    </plurals>
     <string name="agents_kind_space">スペース</string>
     <string name="agents_view_todo">ToDoを表示</string>
     <string name="agents_history_unknown_folder">不明なフォルダ</string>
@@ -71,6 +75,7 @@
     <string name="agents_grouping_state">状態別</string>
     <string name="agents_grouping_todo">ToDo別</string>
     <string name="agents_grouping_project">プロジェクト別</string>
+    <string name="agents_grouping_direction">常駐別</string>
     <string name="agents_menu_compact">コンパクト表示</string>
     <string name="agents_menu_detailed">詳細表示</string>
     <string name="agents_menu_display">表示</string>
@@ -518,6 +523,9 @@
     <string name="agents_todos_filter_button">絞り込みと並べ替え</string>
     <string name="agents_todos_filter_show">表示</string>
     <string name="agents_todos_sort_by">並べ替え</string>
+    <string name="agents_todos_group_by">グループ化</string>
+    <string name="agents_todos_group_status">状態</string>
+    <string name="agents_todos_group_direction">常駐</string>
     <string name="agents_todos_filter_all">すべて</string>
     <string name="agents_todos_filter_no_due">期限なし</string>
     <string name="agents_todos_filter_today">今日</string>

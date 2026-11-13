@@ -13,6 +13,30 @@ export interface FsEntry {
   mtime?: string;
   /** Git ignores it (the tree dims it); only set inside a repository. */
   ignored?: boolean;
+  /** A symlink's text and whether it leads nowhere (hub feature `file_info`, docs/protocol/protocol.md "File details and links"). */
+  link_target?: string;
+  link_broken?: boolean;
+}
+
+/** One path's details (`/stat?detail=1`, the Info dialog); an older node sends only path, kind and size. */
+export interface FileInfo {
+  path: string;
+  /** file, dir, link (a broken symlink), denied, missing */
+  kind: string;
+  size?: number;
+  /** Permission bits as chmod takes them. */
+  mode?: number;
+  owner?: string;
+  group?: string;
+  mtime?: string;
+  ctime?: string;
+  birthtime?: string;
+  items?: number;
+  items_more?: boolean;
+  symlink?: boolean;
+  link_target?: string;
+  link_real?: string;
+  link_broken?: boolean;
 }
 
 export interface FsListing {

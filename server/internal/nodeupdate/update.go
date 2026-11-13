@@ -66,6 +66,22 @@ type Options struct {
 	Supervised bool
 	// RequireResidentHandover rejects uploaded legacy images before installation, not after arming their watchdog.
 	RequireResidentHandover bool
+	// Signer signs each build before it runs here (nodesign: a Mac whose node has a code signing certificate set up,
+	// docs/operations/mac-node-signing.md); nil installs builds as they come.
+	Signer Signer
+	// Logf is where signing says what it did, and why a build went on ad hoc; nil is the standard logger (the node's
+	// stderr, node-attach.log).
+	Logf func(format string, args ...any)
+}
+
+// Signer signs builds with this computer's certificate (nodesign.Signer).
+type Signer interface {
+	// Meets says whether path is signed as configured.
+	Meets(ctx context.Context, path string) bool
+	// Sign signs path, a file nothing has run yet, with the certificate, and checks the result meets the setting.
+	Sign(ctx context.Context, path string) error
+	// AdHoc signs path ad hoc under the configured identifier: what an update installs when Sign fails.
+	AdHoc(ctx context.Context, path string) error
 }
 
 // psNoStart is the reason a declared supervisor's node gives when ps cannot report a process's start time (BusyBox's
@@ -87,6 +103,8 @@ type Manager struct {
 	sweep                   *time.Timer
 	closed                  bool
 	requireResidentHandover bool
+	signer                  Signer
+	logf                    func(format string, args ...any)
 	// Tests can shorten deadlines without modifying the production environment.
 	timeout    time.Duration
 	startWatch func(string, string, string) error
@@ -95,7 +113,7 @@ type Manager struct {
 // New resolves the actual running file once. The executable is never inferred
 // from HOME, PATH, an attach socket, or the spelling of argv[0].
 func New(version string, restart func(), opts Options) *Manager {
-	m := &Manager{version: version, restart: restart, timeout: ConfirmTimeout, startWatch: startWatchdog, requireResidentHandover: opts.RequireResidentHandover}
+	m := &Manager{version: version, restart: restart, timeout: ConfirmTimeout, startWatch: startWatchdog, requireResidentHandover: opts.RequireResidentHandover, signer: opts.Signer, logf: opts.Logf}
 	xpc := os.Getenv("XPC_SERVICE_NAME")
 	systemd := runtime.GOOS == "linux" && os.Getenv("INVOCATION_ID") != ""
 	launchd := runtime.GOOS == "darwin" && xpc != "" && xpc != "0"
@@ -287,7 +305,11 @@ func (m *Manager) Commit(ctx context.Context, id string, idle func() error) (pro
 	if err := validateReplacement(ctx, u.Path, u.Spec, m.requireResidentHandover); err != nil {
 		return proto.NodeUpdateCommitResult{}, err
 	}
+	// What is installed: with a Signer, a signed copy of the upload. From here on the transaction's confirmation and
+	// rollback compare the installed program with that file's sha256, not the upload's (the hub compares versions).
+	stage, newHash := m.signedStage(ctx, u)
 	if err := ctx.Err(); err != nil {
+		dropCopy(stage, u.Path)
 		return proto.NodeUpdateCommitResult{}, err
 	}
 	err := locked(m.exe, func() error {
@@ -318,7 +340,7 @@ func (m *Manager) Commit(ctx context.Context, id string, idle func() error) (pro
 			_ = os.Remove(backup)
 			return err
 		}
-		p := pending{ID: id, Exe: m.exe, Backup: backup, Stage: u.Path, Version: u.Spec.Version, From: m.version, OldHash: oldHash, NewHash: u.Spec.SHA256, PID: os.Getpid(), ProcessStart: birth, ProcessPrecise: osproc.Identify(os.Getpid()).Start, Deadline: time.Now().Add(m.timeout)}
+		p := pending{ID: id, Exe: m.exe, Backup: backup, Stage: stage, Version: u.Spec.Version, From: m.version, OldHash: oldHash, NewHash: newHash, PID: os.Getpid(), ProcessStart: birth, ProcessPrecise: osproc.Identify(os.Getpid()).Start, Deadline: time.Now().Add(m.timeout)}
 		if err := savePending(p); err != nil {
 			_ = os.Remove(backup)
 			return err
@@ -344,15 +366,20 @@ func (m *Manager) Commit(ctx context.Context, id string, idle func() error) (pro
 		// deployment (a plain copy, a package manager) never takes it. The swap
 		// lands only while the installed file is still the one this transaction
 		// examined, checked through one descriptor right before the rename.
-		if err := renameStill(u.Path, m.exe, oldHash); err != nil {
+		if err := renameStill(stage, m.exe, oldHash); err != nil {
 			_ = cleanupPendingOnly(p)
 			return err
+		}
+		if stage != u.Path {
+			// Its signed copy is installed; the upload stayed as it came only for a retried commit.
+			_ = os.Remove(u.Path)
 		}
 		// Once renamed, keep the marker and backup even if directory fsync fails:
 		// the watchdog can still restore the old executable.
 		return syncDir(filepath.Dir(m.exe))
 	})
 	if err != nil {
+		dropCopy(stage, u.Path)
 		return proto.NodeUpdateCommitResult{}, err
 	}
 	u.Accepted = true
@@ -522,18 +549,15 @@ func validateReplacement(ctx context.Context, path string, spec proto.NodeUpdate
 	if err := os.Chmod(path, 0o755); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, path, "node-update-check")
-	var output limitedBuffer
-	cmd.Stdout, cmd.Stderr = &output, io.Discard
-	cmd.WaitDelay = time.Second
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("node executable self-check: %w", err)
-	}
-	var check Check
-	if err := json.Unmarshal(output.Bytes(), &check); err != nil {
-		return fmt.Errorf("node executable self-check output: %w", err)
+	return selfCheck(ctx, path, spec, requireHandover)
+}
+
+// selfCheck runs path's node-update-check: it must start here and say the target version, this platform and, when
+// required, the listener handover.
+func selfCheck(ctx context.Context, path string, spec proto.NodeUpdateBeginParams, requireHandover bool) error {
+	check, err := runCheck(ctx, path)
+	if err != nil {
+		return err
 	}
 	if check.Version != spec.Version || check.OS != runtime.GOOS || check.Arch != runtime.GOARCH {
 		return errors.New("node executable self-check version or platform mismatch")
@@ -549,6 +573,24 @@ func validateReplacement(ctx context.Context, path string, spec proto.NodeUpdate
 	}
 	defer f.Close()
 	return f.Sync()
+}
+
+// runCheck is what path's node-update-check says.
+func runCheck(ctx context.Context, path string) (Check, error) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "node-update-check")
+	var output limitedBuffer
+	cmd.Stdout, cmd.Stderr = &output, io.Discard
+	cmd.WaitDelay = time.Second
+	if err := cmd.Run(); err != nil {
+		return Check{}, fmt.Errorf("node executable self-check: %w", err)
+	}
+	var check Check
+	if err := json.Unmarshal(output.Bytes(), &check); err != nil {
+		return Check{}, fmt.Errorf("node executable self-check output: %w", err)
+	}
+	return check, nil
 }
 
 type limitedBuffer struct{ bytes.Buffer }

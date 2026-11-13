@@ -141,6 +141,11 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	if a.UserCheck && verdict != reviewAccepted {
 		return "", fmt.Errorf("user_check applies to accepted only")
 	}
+	if verdict == reviewAccepted { // done_needs_delivery: its PR is live first (supervise_review_delivery.go)
+		if err := s.acceptedDeliveryError(ctx, t, strings.TrimSpace(a.Link), a.Outcome); err != nil {
+			return "", err
+		}
+	}
 	// A conversation supervises what it handed out (task_plan, quietAgentTask): a task without a ledger
 	// gets none here either, or its signals would go into the main conversation's supervision messages (#4262). It can still
 	// be closed; rework, needs_user and parked are what supervision is for.

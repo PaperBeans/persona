@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import worker from "./worker.mjs";
+import { FRESH_MS } from "./extensions.mjs";
 
 test("legal pages link to the existing product support footer without placeholder contacts", async () => {
   const home = await readFile(new URL("./public/index.html", import.meta.url), "utf8");
@@ -318,6 +319,46 @@ test("the catalog is fetched once while fresh, and a stale copy outlives GitHub"
   assert.equal(d.stale, true);
   assert.deepEqual(d.extensions.map((e) => e.id), ["github"]);
   assert.equal(calls.length, 2);
+});
+
+test("catalog replacements and icons refresh after expiry without a site deployment", async () => {
+  const store = edge();
+  let current = index([
+    entry("lark-bridge", "Lark Bridge", { icon_url: "https://icons.example/bridge.png" }),
+  ]);
+  const calls = upstream((url) => url.endsWith("persona-extensions.json")
+    ? Response.json(current)
+    : new Response("PNGDATA", { headers: { "content-type": "image/png" } }));
+  const ids = (data) => data.extensions.map((e) => e.id);
+  assert.deepEqual(ids(await (await catalog()).json()), ["lark-bridge"]);
+
+  current = index([
+    entry("larkx", "LarkAgentX", { icon_url: "https://icons.example/larkx.png" }, { version: "0.2.0" }),
+  ], { generation: { repository: "nwverse/persona-extensions", source_commit: "replacement" } });
+  assert.deepEqual(ids(await (await catalog()).json()), ["lark-bridge"], "still cached before expiry");
+  assert.equal(calls.length, 1);
+
+  // Expire the cached response without a real-time wait or a Worker restart.
+  const [key, response] = [...store.entries()][0];
+  const old = await response.json();
+  store.set(key, Response.json({ ...old, fetched_at: new Date(Date.now() - FRESH_MS - 1000).toISOString() }));
+  const refreshed = await (await catalog()).json();
+  assert.deepEqual(ids(refreshed), ["larkx"], "the removed entry is replaced, not appended to");
+  assert.equal(refreshed.source_commit, "replacement");
+  assert.equal(refreshed.stale, undefined);
+  assert.equal(refreshed.extensions[0].version, "0.2.0");
+  assert.equal(refreshed.extensions[0].icon, "/extensions/icons/larkx?v=0.2.0");
+  assert.ok(Date.now() - Date.parse(refreshed.fetched_at) < FRESH_MS, "the replacement has a fresh timestamp");
+  assert.equal(calls.length, 2, "the same Worker fetches the changed upstream catalog");
+  assert.deepEqual(ids(await (await catalog()).json()), ["larkx"]);
+  assert.equal(calls.length, 2, "the replacement is cached too");
+
+  const icon = (id) => worker.fetch(new Request(`https://site.example/extensions/icons/${id}?v=0.2.0`), { ASSETS: assets }, { waitUntil() {} });
+  assert.equal((await icon("lark-bridge")).status, 404);
+  const image = await icon("larkx");
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get("content-type"), "image/png");
+  assert.equal(calls.at(-1), "https://icons.example/larkx.png", "the new catalog's logo is served");
 });
 
 test("with no copy and GitHub down the catalog is 503; writes are refused", async () => {

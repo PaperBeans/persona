@@ -258,9 +258,15 @@ func (n *Node) recoverAssistantResult(p *assistantProc, failed bool, result stri
 // That identity check prevents a result delayed by process replacement from restarting a turn the user has cancelled.
 func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTurnRecovery, failed bool, result string, kinds ...string) bool {
 	// A model this chain switched to that the gateway does not have was the recovery's pick, not the user's: it is
-	// spent, and the chain goes on to the next one (#4283). One the user asked for stays theirs to fix.
-	unavailable := failed && assistantModelUnavailable(result) && n.recoverySwitched(p.id)
-	if !unavailable && !assistantRecoverable(failed, result, kinds) {
+	// spent, remembered for the launcher, and the chain goes on to the next one (#4283, #5234). One the user asked for
+	// stays theirs to fix, unless it answered here within the hour: then the gateway failed for a moment (#5234).
+	missing := failed && assistantModelUnavailable(result)
+	unavailable := missing && n.recoverySwitched(p.id)
+	p.mu.Lock()
+	transient404 := missing && !unavailable && p.replyModel != "" && !p.repliedAt.IsZero() &&
+		time.Since(p.repliedAt) < assistantAnsweredRecently
+	p.mu.Unlock()
+	if !unavailable && !transient404 && !assistantRecoverable(failed, result, kinds) {
 		return false
 	}
 	p.mu.Lock()
@@ -324,6 +330,12 @@ func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTu
 		p.busy = true
 		p.mu.Unlock()
 		return true
+	}
+	if unavailable {
+		n.noteUnavailable(launcher, key)
+		if replyModel != "" && replyModel != key {
+			n.noteUnavailable(launcher, replyModel)
+		}
 	}
 	if unavailable || p.agent == "claude" && assistantSafeguardsRefusal(result) {
 		// Claude Code continues a safeguards refusal once by itself ("continuing once with that noted"): a resend on the
@@ -463,6 +475,9 @@ func (n *Node) runAssistantRecovery(p *assistantProc, r *assistantTurnRecovery, 
 		if resolved := resolvedAssistantDefault(list, current); resolved != "" {
 			r.used[resolved] = true // the default that failed before naming its model: never selected again (#3495)
 		}
+		n.mu.Lock()
+		n.markUnavailableUsed(launcher, r.used) // a model another chain found the gateway does not serve (#5234)
+		n.mu.Unlock()
 		next, ok := nextAssistantModel(list, current, r.used)
 		if !ok {
 			n.finishAssistantRecovery(p, r)

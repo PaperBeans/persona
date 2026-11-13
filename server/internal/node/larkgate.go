@@ -84,6 +84,7 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	if slices.ContainsFunc(cfg.Gates, func(g proto.CommandGate) bool { return g.Auth != nil }) {
 		n.gates() // the proxy goes by this Node's config from now on (a resident node's next connection)
 	}
+	analysisCommand := normalizeLarkCommand(command, cwd)
 	v := classifyLark(command, cfg.Gates, cwd, n.larkCLIRisk(cfg))
 	if v.deny != "" {
 		return "deny", v.deny, nil
@@ -107,7 +108,7 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 			}
 		}
 		for _, g := range cfg.Gates {
-			if _, write := gateWrite([]proto.CommandGate{g}, command); write && g.Auth != nil {
+			if _, write := gateWrite([]proto.CommandGate{g}, analysisCommand); write && g.Auth != nil {
 				return "deny", "写操作要单独一条 `" + g.Command + " METHOD PATH [BODY]` 发：不放进循环、脚本或 $(…) 里，输出可以接 jq / head / grep，" +
 					"或者用 -o 写到 /tmp。这样手机上能逐条确认，确认过的才发得出去。", nil
 			}
@@ -119,10 +120,10 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 		if bypass && safe {
 			return "allow", "Conversation permission mode allows these classified calls.", nil
 		}
-		g, write := gateWrite(cfg.Gates, command)
-		if write || v.cliWrite || v.unknown || larkCLIRe.MatchString(command) && !safe {
+		g, write := gateWrite(cfg.Gates, analysisCommand)
+		if write || v.cliWrite || v.unknown || larkCLIRe.MatchString(analysisCommand) && !safe {
 			ix.Kind = proto.IxPermission
-			title := wholeCommandTitle(cfg.Gates, v, command, g, write)
+			title := wholeCommandTitle(cfg.Gates, v, analysisCommand, g, write)
 			if title != "" {
 				ix.ToolName, ix.Summary = title, "以你的身份在"+title+"上写（命令较复杂，整条显示）\n"+prettyBody(command)
 			} else {

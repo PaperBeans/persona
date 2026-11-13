@@ -27,6 +27,8 @@ The final handoff alone misses progress while an agent still works or waits on b
 
 A pending plan-approval card is reliable; `working` and a reply mentioning a plan are not. Show plan as a temporary view of a pending `IxPlan`, and recompute it when agent ownership changes, including the old task. Stored progress is forward-only, including delivery writes; only an explicit review can withdraw verification. Run the deploy gate before applying stored delivery to an unconfirmed keyword guess, and never cap a confirmed deploy with old delivery. Record explicit verification only after acceptance is saved, not when a supervisor submits `accepted` while the owner still needs to verify. Default to code unless read-only or the acceptance criteria explicitly describe non-code work without code wording.
 
+Every path that closes a task has to apply the delivery rule, not only the judge's finish: a supervisor's `task_review accepted` used to close a task with an open draft PR while `done_needs_delivery` was on and the stage ledger already said "not in the running hub" (#6428). Acceptance criteria that only ask for a PR do not override the switch.
+
 ## Not done yet
 
 - The iOS / Mac to-do cards do not yet show where delivery is stuck (web and Android already do).

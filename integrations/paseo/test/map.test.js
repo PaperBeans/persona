@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   agentRoot, agentRow, archivedUnderOwnId, codexThreadOf, backgroundOf, defaultProvider, interactionOf, launchersOf, linkedWorktree,
-  parentAgentId, paseoMode, providerRoots, responseOf, rowStatus, projectSpaces, sessionIdOf, slotNameOf, spaceIdOf, strayRecord,
-  timelineItems, toolCall, transcriptOf,
+  parentAgentId, paseoMode, promptKey, providerRoots, responseOf, rewindOf, rowStatus, projectSpaces, sessionIdOf, slotNameOf, spaceIdOf,
+  strayRecord, timelineItems, toolCall, transcriptOf,
 } from '../lib/map.js'
 import { agentSnapshot, entry } from './fake-paseo.js'
 
@@ -89,6 +89,7 @@ test('a row: its space, the agent the apps know, model, modes and transcript', (
     rev: Date.parse('2026-11-04T10:00:00.000Z'), space_id: 'prj', space_name: 'proj', slot_name: '登录修复',
     agent: 'claude', launcher: 'my-claude', started_at: '2026-11-04T09:58:00.000Z',
     model: 'claude-x[1m]', permission_mode: 'acceptEdits', effort: 'max', transcript: CLAUDE_SID,
+    capabilities: { rewind: false, rewind_code: false },
   })
   const g = agentRow(agentSnapshot({ id: 'g1', provider: 'grok', cwd: '/w/x', currentModeId: 'yolo', status: 'error', lastError: 'boom' }),
     { roots, labels: { grok: 'Grok · Official' }, lastText: 'ignored' })
@@ -98,6 +99,20 @@ test('a row: its space, the agent the apps know, model, modes and transcript', (
   assert.equal(g.permission_mode, undefined, "a mode Persona does not have is not shown")
   assert.equal(g.last_text, '出错了：boom')
   assert.equal(agentRow(agentSnapshot({ provider: 'grok', archivedAt: '2026-01-01T00:00:00Z' }), { roots }), undefined)
+})
+
+test("a rewind's reach is the provider's, and a prompt compares as the user typed it", () => {
+  assert.deepEqual(rewindOf(agentSnapshot({ capabilities: { supportsRewindConversation: true, supportsRewindFiles: true, supportsRewindBoth: true } })),
+    { conversation: true, code: true }, 'Claude Code')
+  assert.deepEqual(rewindOf(agentSnapshot({ capabilities: { supportsRewindConversation: true } })), { conversation: true, code: false }, 'Codex, pi, omp')
+  assert.deepEqual(rewindOf(agentSnapshot({ capabilities: { supportsRewindBoth: true } })), { conversation: false, code: false }, 'OpenCode: both at once only')
+  assert.deepEqual(rewindOf(agentSnapshot({ capabilities: {} })), { conversation: false, code: false }, 'a Paseo that does not say')
+  assert.equal(promptKey('  fix  the\nbug '), 'fixthebug')
+  assert.equal(promptKey('<persona-context kind="selection" title="a.ts">const x = 1</persona-context>\n fix it'), 'fixit')
+  assert.equal(promptKey('<persona-context>\nnow: 10:00\n</persona-context>\nhi'), 'hi')
+  for (const typed of ['[Request interrupted by user]', '<command-name>/clear</command-name>', '<local-command-stdout></local-command-stdout>', '', undefined]) {
+    assert.equal(promptKey(typed), '', `not the user's own words: ${typed}`)
+  }
 })
 
 test("an archived agent keeps its row when its id is not its transcript's: a session Persona started, not one of Paseo's own (#4771)", () => {

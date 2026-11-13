@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import persona.android.PersonaApp
 import persona.android.mainActivityIntent
 import persona.core.contracts.api.PairingRequest
+import persona.core.designsystem.AdaptiveProbe
 import java.net.URI
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -23,6 +24,7 @@ class DebugEntryActivity : ComponentActivity() {
     }
 
     private fun forward(source: Intent) {
+        if (source.getBooleanExtra("debug.automation", false)) AdaptiveProbe.enable(this)
         // Captures of several hub groups: `--es debug.addMockAddress http://<loopback>:<port>` pairs one more mock hub
         // next to the existing ones (settings › hub › "Add hub" does the same with a real pairing link).
         source.getStringExtra("debug.addMockAddress")?.let { address ->

@@ -42,7 +42,7 @@ The App takes over the pairing, the computer's name on the hub and the node serv
 The App picks its data directory in this order: `PERSONA_HOME` (or its former name) in its own environment, then the one the node service file names, then the default.
 These steps assume the App's own environment sets neither variable, as when it starts from Finder, `open` or as a login item; if yours does, change that first.
 One persona-link runs per data directory (the `link.json.run` lock beside `link.json`): while the command-line one runs there, the App's helper exits at once and the App keeps restarting it.
-The steps name the command-line program `<link>` and its data directory `<dir>`, as steps 1 and 2 record them. The App's menu is in Chinese only for now; the bold menu names below are English renderings of its items.
+The steps name the command-line program `<link>` and its data directory `<dir>`, as steps 1 and 2 record them. The App's menu, windows and messages follow the system language (English, Simplified Chinese, Japanese); the bold menu names below are the English items.
 
 1. Record how the command-line Link runs:
    - `pgrep -fl 'link run'` prints its process id `<pid>`; the pattern also finds the program under its former name.
@@ -640,7 +640,7 @@ For Linux see "Linux (headless)" below: build `persona-link`, then `persona-link
 - A standalone SwiftPM package (not in `apple/project.yml`, no shared code with the Persona App), built with `xcodebuild`: on this development machine, `swift build`'s default build system reports "Developer directory not found".
 - persona-link and persona-node are built into `Contents/Helpers/` (persona-node is for the resident node; see "The device's program").
 - The App's newer text is in `Resources/Localizable.xcstrings` (en / zh-Hans / ja); the build copies its resource bundle into `Contents/Resources/`.
-  `scripts/i18n/apple_l10n.py check` checks that catalog apart from the apps' and keeps the older hard-coded Chinese from growing (`LINK_CJK`, counts per file that may only go down).
+  `scripts/i18n/apple_l10n.py check` checks that catalog apart from the apps' and keeps hard-coded Chinese or Japanese out of the Swift sources (`LINK_CJK`, now empty; text that must stay Chinese, such as persona-link's own output, is marked `// i18n-ignore`).
 - Unit tests: `xcrun swift test --package-path apple/PersonaLink`; the Apple CI packages lane runs them (`scripts/ci/apple.sh`).
 - Local ad-hoc signing (Sign to Run Locally), no hard-coded team.
 - Default bundle id is the placeholder `com.example.persona.link`, overrideable by `mac.link_bundle_id` in `~/.config/persona/config.json` or environment variable

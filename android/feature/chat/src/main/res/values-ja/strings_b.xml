@@ -244,7 +244,6 @@
     <string name="chat_links_context_default">上の内容を参考にしてください。</string>
     <string name="chat_menu_copied">コピーしました</string>
     <string name="chat_menu_no_share">共有できるアプリがありません</string>
-    <string name="chat_menu_select_title">テキストを選択</string>
     <string name="chat_menu_copy">コピー</string>
     <string name="chat_menu_select">選択</string>
     <string name="chat_menu_quote">引用</string>
@@ -355,6 +354,9 @@
     <string name="chat_queue_send_now_message">送信待ちのメッセージを今すぐエージェントに送ります。実行中のコマンドはバックグラウンドで続き、書いている途中の返信はあなたのメッセージを含めてやり直します。</string>
     <string name="chat_queue_send_now_message_persona">%1$s は次のステップを待たずにすぐ受け取ります。今の作業は止まるか、できるものはバックグラウンドで続き、あなたのメッセージを含めてやり直します。</string>
     <string name="chat_queue_relayed_note">この会話が空いたら届きます</string>
+    <plurals name="chat_queue_relayed_summary">
+        <item quantity="other">別の会話からのメッセージが %1$d 件待機中</item>
+    </plurals>
     <string name="chat_queue_sent_now">今すぐエージェントに送りました</string>
     <string name="chat_composer_photos_only">画像を見てください</string>
     <string name="chat_composer_photo_placeholder">[画像]</string>

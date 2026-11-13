@@ -26,5 +26,9 @@
   "window_7d": "過去 7 日間",
   "window_30d": "過去 30 日間",
   "earlier": "それ以前",
-  "earlier_hint": "選択した期間（{window}）より前に最後にアクティブだった {count} 件のセッション"
+  "earlier_hint": "選択した期間（{window}）より前に最後にアクティブだった {count} 件のセッション",
+  "no_folder": "フォルダなし",
+  "no_space": "スペースなし",
+  "more_groups": "あと {count} 件を表示",
+  "places": "チェックアウト先"
 }

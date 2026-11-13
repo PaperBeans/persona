@@ -241,7 +241,12 @@ const emit = (p: Partial<ListState>) => {
 
 let bounded = false;
 export const personalOrder = (a: AgentSession, b: AgentSession) => b.rankTimeMs - a.rankTimeMs || compareListIds(a.id, b.id);
-export const personalSessions = new SessionList<AgentSession>("/agents/sessions", (s) => s.id, personalOrder);
+export const AGENTS_PAGE_COUNTS_FEATURE = "agents_page_counts";
+let pageCounts = false;
+/** Set from hello: whether this hub reads a personal page's counts with it (`with_counts`, #6496), one request per
+ *  refresh instead of two. A filtered personal list follows (PagedSessionList). */
+export function setPersonalPageCounts(on: boolean) { pageCounts = on; }
+export const personalSessions = new SessionList<AgentSession>("/agents/sessions", (s) => s.id, personalOrder, undefined, undefined, { pageCounts: () => pageCounts });
 export function setAgentListMode(enabled: boolean) {
   bounded = enabled;
 }

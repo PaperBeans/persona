@@ -11,13 +11,14 @@ import {
 import { conversationRoute, docChangeLine, isDone, itemKey, itemRoute, suggestionAct, useInbox, type InboxItem } from "../../lib/inbox";
 import { otherManager } from "../../lib/manager-choice";
 import { openLink } from "../../lib/links";
-import { navigate, type Route } from "../../lib/router";
+import { type Route } from "../../lib/router";
 import { openFromInbox } from "../../lib/inbox-nav";
 import { useStore } from "../../lib/store";
 import { t } from "../../i18n";
 import { Button, cx, Shimmer, Spinner } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
 import { useFoldScroll } from "../chat/fold-scroll";
+import { useInboxView } from "../../lib/inbox-view-memory";
 import { InboxLine } from "./InboxLine";
 import { Glyph, Spark } from "./InboxParts";
 
@@ -137,7 +138,7 @@ function HandlingLine({ item }: { item: InboxItem }) {
   const word = handlingWord(item);
   const to = h.machine_id && h.session_id ? conversation(h.machine_id, h.session_id) : undefined;
   const open = to && (
-    <button type="button" onClick={() => navigate(to)} className="-mx-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1 text-[12px] font-medium whitespace-nowrap text-accent-ink transition-colors hover:bg-hover">
+    <button type="button" onClick={() => openFromInbox(to)} className="-mx-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1 text-[12px] font-medium whitespace-nowrap text-accent-ink transition-colors hover:bg-hover">
       {t("inbox-inboxevent.open_conversation")}
       <Icon name="chevronRight" size={11} stroke={2.4} />
     </button>
@@ -283,7 +284,16 @@ function ChainIcon({ kind }: { kind: string }) {
 
 /** The handling chain: folded to the newest entry, "Show all (N)" shows them all, oldest first. */
 export function Chain({ item, onSource }: { item: InboxItem; onSource: (at: SourceAt) => void }) {
-  const [open, setOpen] = useState(false);
+  const view = useInboxView();
+  const key = itemKey(item);
+  const revision = view.revision;
+  const [open, setOpen] = useState(() => view.chainOpen(key));
+  const [seen, setSeen] = useState({ key, revision });
+  if (seen.key !== key || seen.revision !== revision) {
+    setSeen({ key, revision });
+    setOpen(view.chainOpen(key));
+  }
+  useEffect(() => view.setChainOpen(key, open), [view, key, open]);
   const conversation = useConversation();
   const all = item.chain ?? [];
   if (!all.length) return null;

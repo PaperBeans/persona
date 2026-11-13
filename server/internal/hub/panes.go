@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/nodeproto"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // A terminal addressed by pane ("pane:<id>", docs/integrations/terminal.md "Standalone terminal") is a shell on the computer, agent or not.
@@ -30,8 +32,12 @@ func paneAddressFullOnly(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// newShell opens a shell tab in one of a machine's workspaces. Only the user's click gets here; the node picks the
-// directory (the workspace's own), the request cannot name one.
+// newShell opens a shell tab in one of a machine's workspaces. Only the user's click gets here. The node starts it in the
+// workspace's own directory, or with cwd (the file page's Open Terminal Here, #5832) in that folder: a folder the read
+// guard lets the device see, handed to the host as the tab's starting directory and never typed into the shell, so a
+// request still cannot run a command. A node without the pane_cwd capability gets no cwd: 409 node_outdated instead.
+// new_space (#6362: New Terminal on a computer with no workspace yet) asks the node to open a workspace in cwd; a node
+// without pane_new_space would answer "no workspace", so it gets the same 409.
 func (h *Hub) newShell(w http.ResponseWriter, r *http.Request, m *Machine) {
 	if principalOf(r.Context()).Role != roleFull {
 		writeErr(w, http.StatusForbidden, errors.New("opening a terminal needs a full device"))
@@ -39,10 +45,16 @@ func (h *Hub) newShell(w http.ResponseWriter, r *http.Request, m *Machine) {
 	}
 	var body struct {
 		Kind        string `json:"kind"`
-		WorkspaceID string `json:"workspace_id"`
+		WorkspaceID string `json:"workspace_id,omitempty"`
+		Cwd         string `json:"cwd,omitempty"`
+		NewSpace    bool   `json:"new_space,omitempty"`
 	}
-	if err := decodeJSONBody(w, r, &body, 4<<10); err != nil || body.WorkspaceID == "" {
+	if err := decodeJSONBody(w, r, &body, 4<<10); err != nil || (body.WorkspaceID == "" && body.Cwd == "") {
 		writeBodyErr(w, err, errors.New("workspace_id is required"))
+		return
+	}
+	if (body.Cwd != "" && !m.hasCapability(nodeproto.PaneCwd)) || (body.NewSpace && !m.hasCapability(nodeproto.PaneNewSpace)) {
+		writeCode(w, http.StatusConflict, proto.CodeNodeOutdated, i18n.T(h.requestLang(r), "hub-fileedit.outdated_feature", i18n.Args{"name": m.cfg.Name}), nil)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -174,7 +186,7 @@ var nodeActions = map[string]nodeAction{
 		requiredUnless: map[string][]string{"auto_name": {"branch", "path"}}},
 	"worktree/source": {method: "worktree.source", timeout: 35 * time.Second, required: []string{"workspace_id", "kind"}, optional: []string{"query", "locale"}},
 	"worktree/preset": {method: "worktree.preset", timeout: 30 * time.Second, required: []string{"workspace_id", "kind", "name", "directories"}, optional: []string{"locale"}},
-	"worktree/delete": {method: "worktree.delete", timeout: 150 * time.Second, required: []string{"workspace_id", "kind"}, optional: []string{"preview_token", "locale"}, flags: []string{"preview", "reconcile", "force", "delete_branch"}, strictFlags: []string{"preview", "reconcile", "force", "delete_branch"}},
+	"worktree/delete": {method: "worktree.delete", timeout: 150 * time.Second, required: []string{"workspace_id", "kind"}, optional: []string{"preview_token", "locale"}, flags: []string{"preview", "reconcile", "force", "delete_branch", "close_only"}, strictFlags: []string{"preview", "reconcile", "force", "delete_branch", "close_only"}},
 	// #6115 a new agent in a worktree of its own: made from its folder, told apart, removed when it is closed and the
 	// user says so (the node refuses uncommitted work and unmerged branches unless force, which the user confirms).
 	"worktree/add":    {method: "worktree.add", timeout: 150 * time.Second, required: []string{"cwd"}, optional: []string{"branch", "name_hint", "kind"}},

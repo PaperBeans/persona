@@ -25,7 +25,7 @@ import (
 
 // liveMeeting is a product sync said in three languages, each line a few seconds of the recording.
 var liveMeeting = []string{
-	"好，我们开始吧，今天主要看三件事：导出、发布时间、还有缓存的问题。",
+	"好，我们开始吧，今天在三楼会议室，主要看三件事：导出、发布时间、还有缓存的问题。",
 	"First, the export. Ada, can you give us the status?",
 	"Sure. The export drops any entry over 4 MB, and users only notice when the file is incomplete.",
 	"那我们这一版先保留 4 MB 的上限，但是要在界面上提示用户。",
@@ -180,6 +180,11 @@ func TestMinutesLanguageLive(t *testing.T) {
 		miss := s.wrongLanguage(tc.lang)
 		if m.Language != tc.lang || !strings.Contains(m.Markdown, tc.heading) {
 			miss = strings.TrimSpace(miss + fmt.Sprintf(" language %q, headings %q", m.Language, m.Markdown[:min(len(m.Markdown), 200)]))
+		}
+		// The place is kept only as it was said (buildMinutes checks it against the transcript): written in another
+		// language it would be dropped.
+		if m.Where == "" {
+			miss = strings.TrimSpace(miss + " no place (where): translated, so it did not match what was said")
 		}
 		row(tc.tag, "minutes", m.Title, counts, s, miss)
 

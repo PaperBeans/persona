@@ -55,7 +55,7 @@ const toggle = () => host.querySelector<HTMLButtonElement>("[data-supervision] >
 describe("quiet supervision rendering", () => {
   it("defaults to one gray line, keeping a later queued user input in the open", () => {
     draw([...initial, next]);
-    expect(toggle().textContent).toBe("@督办巡检 · 督办已处理");
+    expect(toggle().textContent).toBe("@督办巡检 · 已在后台处理");
     expect(toggle().getAttribute("aria-expanded")).toBe("false");
     expect(toggle().className).toContain("text-ink-3");
     expect(toggle().className).toContain("whitespace-nowrap");
@@ -91,12 +91,12 @@ describe("quiet supervision rendering", () => {
 
   it("keeps the running line quiet while live prose changes, and shows that prose when opened", () => {
     draw([u, thought], true, "Fictional streamed reply");
-    expect(toggle().textContent).toBe("@督办巡检 · 督办处理中…");
+    expect(toggle().textContent).toBe("@督办巡检 · 正在后台处理…");
     expect(host.textContent).not.toContain("Fictional streamed reply");
     act(() => toggle().click());
     expect(host.querySelector('[data-answer="streaming"]')?.textContent).toBe("Fictional streamed reply");
     draw(initial);
-    expect(toggle().textContent).toBe("@督办巡检 · 督办已处理");
+    expect(toggle().textContent).toBe("@督办巡检 · 已在后台处理");
     expect(toggle().getAttribute("aria-expanded")).toBe("true");
   });
 
@@ -130,9 +130,9 @@ describe("quiet supervision rendering", () => {
   });
 
   it.each([
-    ["en", "@Supervision · Supervision handled"],
-    ["zh-Hans", "@督办巡检 · 督办已处理"],
-    ["ja", "@進捗チェック · タスクの確認済み"],
+    ["en", "@Supervision · Handled in the background"],
+    ["zh-Hans", "@督办巡检 · 已在后台处理"],
+    ["ja", "@進捗チェック · バックグラウンドで処理済み"],
   ] as const)("localizes the %s compact line", async (lang, expected) => {
     await initI18n(lang);
     draw(initial);

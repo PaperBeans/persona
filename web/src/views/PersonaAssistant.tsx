@@ -13,7 +13,7 @@ import { codedFailure, helpTopic, passesBySelf, refreshReadiness, type CodedFail
 import { conversationPage } from "../lib/conversation-page";
 import { navigate } from "../lib/router";
 import { hubHas, refreshAssistant, useStore } from "../lib/store";
-import { effectiveLauncher, NEW_CONVERSATION, pickedEffort, pickedLauncher, pickedModel, pickEffort, pickLauncher } from "../lib/assistant-chat";
+import { effectiveLauncher, NEW_CONVERSATION, pickedEffort, pickedLauncher, pickedModel, pickEffort, pickLauncher, usePickedLauncher } from "../lib/assistant-chat";
 import { adoptedConversation, noteSent, outboxMessage } from "../lib/outbox";
 import { CLEAR_MAIN_FEATURE, isClearCommand, mainCommands, useMainCleared } from "../lib/main-clear";
 import { Button, cx, EASE, IconButton, Loading } from "../ui/atoms";
@@ -48,7 +48,6 @@ const NO_SESSIONS: never[] = [];
 const noop = () => {};
 
 // @ in a new conversation: other sessions as context; no chat yet, so no files it touched (typed / and ~ paths still browse)
-const NEW_MENTION: MentionSource = { self: "persona-new", files: () => [], workspaces: true };
 
 /** What a conversation's address says of it (lib/conversation-page.ts): the computer it runs on, its manager when
  *  another than the default. */
@@ -113,7 +112,7 @@ function useAssistantMachine(manager: string | undefined): { machine: string; er
   return manager && state.manager === manager ? state : { machine: "", error: "" };
 }
 
-export function PersonaAssistant({ sid, fresh, routed, onToggleSidebar }: { sid?: string; fresh?: boolean; routed?: RoutedConversation; onToggleSidebar: () => void }) {
+export function PersonaAssistant({ sid, fresh, routed, at, onToggleSidebar }: { sid?: string; fresh?: boolean; routed?: RoutedConversation; at?: string; onToggleSidebar: () => void }) {
   const assistant = useStore((s) => s.assistant);
   const assistantError = useStore((s) => s.assistantError);
   const loaded = useStore((s) => s.loaded);
@@ -184,6 +183,7 @@ export function PersonaAssistant({ sid, fresh, routed, onToggleSidebar }: { sid?
         refreshError={id === main ? assistantError ?? undefined : undefined}
         onRefresh={id === main ? () => void refreshAssistant().catch(() => {}) : undefined}
         offline={offline?.composer}
+        landAt={at}
       />
     );
   }
@@ -229,6 +229,11 @@ function Centered({ children }: { children: React.ReactNode }) {
  *  cleared (`cleared`, as Cindy's /clear leaves an empty chat), the conversation's own layout with nothing in it yet. */
 function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?: boolean; onToggleSidebar: () => void }) {
   const assistant = useStore((s) => s.assistant);
+  const manager = useShownManager();
+  const selectedLauncher = usePickedLauncher(NEW_CONVERSATION);
+  const mention = useMemo<MentionSource>(() => ({ self: "persona-new", files: () => [], workspaces: true,
+    skills: { manager, launcher: selectedLauncher, environment: assistant?.launcher ?? "" },
+  }), [manager, selectedLauncher, assistant?.launcher]);
   // the starter names the current assistant's computers, the ones it can work on
   const machines = useScopedMachines();
   const persona = usePersona();
@@ -410,7 +415,7 @@ function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?:
           {gate.dialog}
           {/* the box: in the page's middle, or docked at the bottom as the conversation's (ChatView's dock) while the start is on its way */}
           <div ref={box} className={docked ? "mx-auto flex w-full max-w-[880px] flex-col justify-end gap-2 px-4 pb-4 sm:px-7 [@media(max-height:500px)]:pb-2" : undefined}>
-            <Composer key={seed} blocked={offline ? undefined : gate.blocked} disabled={Boolean(offline) || Boolean(sending)} draftKey="persona-new" placeholder={offline ? offline.composer : t("personaassistant.ask_placeholder", { name: persona.name })} machineId={assistant?.machine_id} mention={NEW_MENTION} onSend={start} autoFocus commands={commands} trailing={assistant && !sending ? <AssistantModelPill /> : undefined} />
+            <Composer key={seed} blocked={offline ? undefined : gate.blocked} disabled={Boolean(offline) || Boolean(sending)} draftKey="persona-new" placeholder={offline ? offline.composer : t("personaassistant.ask_placeholder", { name: persona.name })} machineId={assistant?.machine_id} mention={mention} onSend={start} autoFocus commands={commands} trailing={assistant && !sending ? <AssistantModelPill /> : undefined} />
           </div>
           {!docked && (
           <div className="mt-4 grid grid-cols-1 gap-1.5 sm:grid-cols-2">

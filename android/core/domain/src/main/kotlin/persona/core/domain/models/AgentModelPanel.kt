@@ -74,9 +74,15 @@ object AgentModelPanel {
     /** An agent name as an engine id: "" (an older hub) is Claude Code. */
     fun engineId(agent: String?): String = agent?.trim()?.lowercase()?.takeIf(String::isNotEmpty) ?: "claude"
 
-    /** Its model can be switched while it runs: Claude Code of the user's own, running and taking messages (the node types `/model`). */
-    fun canSwitchModel(s: Session): Boolean =
-        !s.assistant && !s.hasSource && s.isClaude && s.canSend && s.agentState != AgentState.Offline && s.isLive
+    /**
+     * Its model can be switched while it runs and takes messages. The node's capabilities.model wins where it says (a
+     * runtime that takes a model through `POST …/modes`, #6294; the web's `canSwitchModel`); without it, Claude Code of
+     * the user's own (the node types `/model`).
+     */
+    fun canSwitchModel(s: Session): Boolean {
+        if (s.assistant || !s.canSend || s.agentState == AgentState.Offline || !s.isLive) return false
+        return s.capabilities?.model ?: (!s.hasSource && s.isClaude)
+    }
 
     /** What the pill and the panel can change now: its model, its effort. Neither: the pill is a label. */
     fun switches(s: Session): Pair<Boolean, Boolean> = canSwitchModel(s) to (s.isLive && (s.canChangeModes || s.canChangeEffortOnly))
@@ -84,8 +90,13 @@ object AgentModelPanel {
     /** Why the model can't be switched right now: the agent works or waits on the user (the node refuses then too). */
     fun busy(s: Session): PanelReason? = PanelReason.Busy.takeIf { s.agentState == AgentState.Working || s.agentState == AgentState.NeedsYou }
 
-    /** Whether [s] may move to another launcher of its engine: on a hub that does it, a Claude Code Agent whose model the app switches. */
-    fun switchesLauncher(s: Session, features: Set<String>): Boolean = LAUNCHER_SWITCH in features && engine(s) == "claude" && canSwitchModel(s)
+    /**
+     * Whether [s] may move to another launcher of its engine: on a hub that does it, a Claude Code Agent whose model the app
+     * switches. Not a session with a source: the node moves no runtime's session to another launcher; it only picks a model
+     * of its own.
+     */
+    fun switchesLauncher(s: Session, features: Set<String>): Boolean =
+        LAUNCHER_SWITCH in features && !s.hasSource && engine(s) == "claude" && canSwitchModel(s)
 
     /** The model a launcher runs given none ([AgentModel.isDefault]). */
     fun defaultModel(models: List<AgentModel>): AgentModel? = models.firstOrNull { it.isDefault }

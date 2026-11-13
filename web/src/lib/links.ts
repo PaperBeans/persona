@@ -317,7 +317,7 @@ export interface ContextRef {
   id: string;
   /** "workspace": a folder on a computer picked in the @ menu, carrying `machine` and `cwd` (docs/protocol/protocol.md "Tags in messages").
    *  "forward": a message forwarded from another chat (lib/forward.ts, docs/protocol/protocol.md "Forwarded messages"). */
-  kind: "context" | "edit" | "workspace" | "forward";
+  kind: "context" | "edit" | "workspace" | "forward" | "skill";
   title: string;
   url: string;
   text: string;
@@ -360,7 +360,7 @@ export function getContexts(key: string): ContextRef[] {
 export function addContext(key: string, ref: ContextRef) {
   const cur = getContexts(key);
   // the same passage of the same page once
-  if (cur.some((c) => c.url === ref.url && c.text === ref.text && c.kind === ref.kind)) return;
+  if (cur.some((c) => ref.kind === "skill" ? c.kind === "skill" && c.attrs?.ref === ref.attrs?.ref : c.url === ref.url && c.text === ref.text && c.kind === ref.kind)) return;
   pending.set(key, [...cur, ref]);
   emitContexts();
 }

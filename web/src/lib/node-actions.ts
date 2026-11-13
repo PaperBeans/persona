@@ -41,7 +41,7 @@ export interface MenuNode {
   canWorktree?: boolean;
   /** The node's fold: the row it hangs under folds and opens (the sidebar's and the terminal page's `fold:` keys). */
   fold?: { folded: boolean; toggle: () => void };
-  /** "New terminal" in this workspace (the terminal page). */
+  /** "New terminal" in this workspace, or on this computer when it has no workspace yet (the terminal page). */
   onOpenShell?: () => void;
   /** Read the list again (the terminal page). */
   onRefresh?: () => void;
@@ -96,9 +96,13 @@ export const canChangeHost = (host: string | undefined) => !host || host === "he
 /** Renaming a workspace or a tab is herdr's and Tern's (the capability table in docs/integrations/engines.md). */
 export const canRenameIn = (host: string | undefined) => canChangeHost(host) || host === "tern";
 
-/** Only Claude Code. Codex starts from "New agent" in a tab of its own: a Codex start that fails closes its pane, which
- *  here is the user's own shell (#5275). */
-export const launchableHere = (l: Launcher) => (l.agent_type || l.agent || "claude") === "claude";
+/** Claude Code, and a launcher the computer says it starts in a pane the user picked, keeping that pane when the start
+ *  fails (`run_here`: its Codex launchers, #5504). An older computer's failed Codex start closes its pane, here the
+ *  user's own shell (#5275): there Codex starts from "New agent" in a tab of its own. Never one that starts the session
+ *  in a desktop app (#5480, lib/desktop-start.ts's sources, spelled out here so that module stays off the first screen):
+ *  typed into a shell it would run nothing, and the computer refuses it. */
+export const launchableHere = (l: Launcher) =>
+  l.source !== "claude_desktop" && l.source !== "codex_app" && (l.run_here || (l.agent_type || l.agent || "claude") === "claude");
 
 export const GIT_OPS = [
   { op: "pull", label: t("lib-node-actions.git_pull"), accel: "p", done: "lib-node-actions.git_pull_done" },
@@ -153,7 +157,7 @@ export function nodeActions(node: MenuNode, deps: NodeActionDeps, opts: NodeActi
   group(
     node.fold && { key: "node-fold", label: node.fold.folded ? t("lib-node-actions.expand") : t("lib-node-actions.collapse"), icon: node.fold.folded ? "arrowDown" : "chevron", accel: "z", onSelect: node.fold.toggle },
     node.kind === "workspace" && online && Boolean(node.cwd) && { key: "node-new-agent", label: t("lib-node-actions.new_agent"), icon: "agent", accel: "n", onSelect: () => deps.newAgent(mid, node.cwd!) },
-    node.kind === "workspace" && online && node.onOpenShell && { key: "node-shell", label: t("lib-node-actions.new_terminal"), icon: "terminal", accel: "t", onSelect: node.onOpenShell },
+    (node.kind === "workspace" || node.kind === "machine") && online && node.onOpenShell && { key: "node-shell", label: t("lib-node-actions.new_terminal"), icon: "terminal", accel: "t", onSelect: node.onOpenShell },
     node.kind === "machine" && node.onRefresh && { key: "node-refresh", label: t("lib-node-actions.refresh"), icon: "retry", accel: "r", onSelect: node.onRefresh },
   );
 

@@ -122,6 +122,10 @@ func (h *Manager) registerRoutes(api *http.ServeMux) {
 	h.adminExtensionRoutes(api) // with the old /api/v1/admin/plugins paths
 	h.subscriptionRoutes(api)
 	api.HandleFunc("POST /api/v1/error-reports", h.postErrorReports)
+	// The assistant's WebSocket routes, relayed like the extensions' (a relay stream), are the assistant's to answer.
+	for _, pattern := range assistantwire.SocketRoutes {
+		api.HandleFunc(pattern, h.assistantSocket)
+	}
 	withMachine := func(fn func(http.ResponseWriter, *http.Request, *Machine)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			m := h.localMachine(r.PathValue("mid"))
@@ -160,11 +164,22 @@ func (h *Manager) registerRoutes(api *http.ServeMux) {
 	}
 }
 
+// assistantSocket hands one of assistantwire.SocketRoutes to the assistant in this process (Options.AssistantSocket).
+func (h *Manager) assistantSocket(w http.ResponseWriter, r *http.Request) {
+	if h.opts.AssistantSocket == nil {
+		writeErr(w, http.StatusNotFound, errors.New(http.StatusText(http.StatusNotFound)))
+		return
+	}
+	h.opts.AssistantSocket(w, r)
+}
+
 // ServeHTTP serves one request the hub relayed: who asked is in the hub's headers (principalFrom); the extensions'
 // parts of the API (extension_api.go) come before the rest, as at the hub.
 func (h *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.serving.Add(1)
-	defer h.serving.Add(-1)
+	if !isAssistantSocket(r) {
+		h.serving.Add(1)
+		defer h.serving.Add(-1)
+	}
 	if !h.ready(r.Context()) {
 		writeErrCode(w, http.StatusServiceUnavailable, assistantwire.CodeAssistantOffline, errAssistantOffline)
 		return
@@ -186,8 +201,25 @@ func (h *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // Serving is how many requests the hub relayed to the extensions are being served now; a WebSocket (a voice call, an
-// extension's live view) counts for as long as it is open.
+// extension's live view) counts for as long as it is open. A meeting's audio socket (assistantwire.SocketRoutes) does
+// not: it is open for as long as the meeting records, and a redeploy may end it (the phone sends again from where the
+// hub's audio ends, docs/assistant/meeting-minutes.md "Audio from the phone").
 func (h *Manager) Serving() int64 { return h.serving.Load() }
+
+// socketRoutes matches assistantwire.SocketRoutes, as the manager's own mux does.
+var socketRoutes = sync.OnceValue(func() *http.ServeMux {
+	mux := http.NewServeMux()
+	for _, pattern := range assistantwire.SocketRoutes {
+		mux.HandleFunc(pattern, func(http.ResponseWriter, *http.Request) {})
+	}
+	return mux
+})
+
+// isAssistantSocket says whether r is one of assistantwire.SocketRoutes.
+func isAssistantSocket(r *http.Request) bool {
+	_, pattern := socketRoutes().Handler(r)
+	return pattern != ""
+}
 
 // localeWriter lets apierr translate errors after the hub has relayed the request to this process.
 type localeWriter struct {

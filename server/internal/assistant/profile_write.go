@@ -23,8 +23,11 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var in struct {
 		Settings
-		Permission       json.RawMessage `json:"default_permission_mode"`
-		MinutesRetention json.RawMessage `json:"minutes_days"`
+		Permission             json.RawMessage `json:"default_permission_mode"`
+		MinutesRetention       json.RawMessage `json:"minutes_days"`
+		TranscriptionMode      json.RawMessage `json:"meeting_transcription_default"`
+		Glossary               json.RawMessage `json:"meeting_glossary"`
+		TranscriptionExtension json.RawMessage `json:"meeting_transcription_extension"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		apierr.Write(w, http.StatusBadRequest, err)
@@ -79,6 +82,10 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if m := in.MeetingAttendanceDefault; m != nil && !slices.Contains(meetingRoles, *m) {
 		apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-meeting.bad_default_role"))
+		return
+	}
+	if code := s.readMeetingTranscriptionSettings(&in.Settings, in.TranscriptionMode, in.Glossary, in.TranscriptionExtension); code != "" {
+		apierr.WriteCode(w, http.StatusBadRequest, code, i18n.Err("assistant-meeting."+code))
 		return
 	}
 	if p := in.ReviewSamplePercent; p != nil && (*p < 0 || *p > 100) {
@@ -183,6 +190,16 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		if in.MeetingAttendanceDefault != nil {
 			v.MeetingAttendanceDefault = in.MeetingAttendanceDefault
 		}
+		if in.MeetingTranscriptionDefault != nil {
+			v.MeetingTranscriptionDefault = in.MeetingTranscriptionDefault
+		}
+		if in.MeetingGlossary != nil {
+			v.MeetingGlossary = in.MeetingGlossary
+		}
+		if in.MeetingTranscriptionExtension != nil {
+			v.MeetingTranscriptionExtension = in.MeetingTranscriptionExtension
+			v.MeetingTranscriptionInstall = in.MeetingTranscriptionInstall // readMeetingTranscriptionSettings's, never the body's
+		}
 		if in.IdleCloseHours != nil {
 			v.IdleCloseHours = in.IdleCloseHours
 		}
@@ -213,6 +230,9 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		if in.InboxSignals != nil {
 			v.InboxSignals = in.InboxSignals
 		}
+		if in.InboxPost != nil {
+			v.InboxPost = in.InboxPost
+		}
 		if in.NextSuggestions != nil {
 			v.NextSuggestions = in.NextSuggestions
 		}
@@ -228,6 +248,9 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.settingsChanged(ctx)
+	if in.MeetingTranscriptionExtension != nil {
+		s.transcriptionReadinessChanged() // named again: probed again (the answer stands meanwhile)
+	}
 	if in.Main != "" && in.Main != "-" && in.Main != before.Main {
 		s.handOverMainTasks(context.WithoutCancel(ctx), before.Main, in.Main) // its open tasks follow the main conversation (main_handover.go)
 	}

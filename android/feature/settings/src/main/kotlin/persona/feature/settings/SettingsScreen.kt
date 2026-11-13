@@ -122,6 +122,22 @@ private fun SettingsContent(
     val updateStatus by updateController.state.collectAsState()
     val update = updateStatus.latest
     val updateMessage = updateStatus.message
+    val updateNow by produceState(java.time.Instant.now(), page, updateStatus.lastChecked) {
+        if (page == "about") while (true) {
+            value = java.time.Instant.now()
+            delay(60_000)
+        }
+    }
+    val updateSubtitle = listOfNotNull(
+        updateStatus.lastChecked?.let { stringResource(R.string.settings_update_last_checked,
+            agoText(context.resources, java.time.Instant.ofEpochMilli(it), updateNow)) },
+        services.hubAddress?.let { stringResource(R.string.settings_update_source, it) },
+    ).joinToString("\n").ifEmpty { null }
+    val updateIncompatibility = when (updateStatus.result) {
+        AppUpdateState.Result.PackageMismatch -> R.string.settings_update_package_mismatch_detail
+        AppUpdateState.Result.SignatureMismatch -> R.string.settings_update_signature_mismatch_detail
+        else -> null
+    }
     val busy = updateStatus.checking
     val installing = updateStatus.installing
     fun checkUpdate() { scope.launch { updateController.check(manual = true) } }
@@ -390,16 +406,21 @@ private fun SettingsContent(
         "about" -> JListPage(title = stringResource(R.string.settings_home_about), onBack = back) {
             item { AboutSettingsPage() }
             item { JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.m)) {
-                JRow(stringResource(R.string.settings_update_check), value = when {
+                JRow(stringResource(R.string.settings_update_check), subtitle = updateSubtitle, subtitleLines = 6, value = when {
                     busy -> stringResource(R.string.settings_update_checking)
                     installing -> stringResource(R.string.settings_update_installing)
+                    updateStatus.result == AppUpdateState.Result.Failed -> stringResource(R.string.settings_update_check_failed)
                     update != null -> stringResource(R.string.settings_update_found)
                     services.demo -> stringResource(R.string.settings_demo_mode)
+                    updateStatus.result == AppUpdateState.Result.UpToDate -> stringResource(R.string.settings_update_up_to_date)
+                    updateStatus.result == AppUpdateState.Result.NoApk -> stringResource(R.string.settings_update_no_apk)
+                    updateStatus.result == AppUpdateState.Result.PackageMismatch -> stringResource(R.string.settings_update_package_mismatch)
+                    updateStatus.result == AppUpdateState.Result.SignatureMismatch -> stringResource(R.string.settings_update_signature_mismatch)
                     else -> updateMessage?.let { stringResource(it) } ?: stringResource(R.string.settings_update_check_hint)
                 }, enabled = !services.demo && !busy && !installing, onClick = ::checkUpdate)
             } }
             if (!services.demo) item { AppUpdateRecovery(updateController) }
-            if (update != null || updateMessage != null) item {
+            if (update != null || updateMessage != null || updateIncompatibility != null) item {
                 JCard(Modifier.padding(top = Tokens.Space.m)) {
                     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
                         update?.let { latest ->
@@ -407,6 +428,7 @@ private fun SettingsContent(
                             if (latest.releaseNotes.isNotBlank()) Text(latest.releaseNotes, style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2)
                             AppUpdateInstallButton(updateController)
                         }
+                        if (updateMessage == null) updateIncompatibility?.let { SettingsCaption(stringResource(it)) }
                         updateMessage?.let { SettingsCaption(stringResource(it)) }
                     }
                 }

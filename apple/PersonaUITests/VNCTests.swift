@@ -199,7 +199,9 @@ final class VNCTests: XCTestCase {
 
         // Help.
         app.buttons["vnc-help"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["vnc-help-page"].firstMatch.waitForExistence(timeout: 5))
+        let helpPage = app.descendants(matching: .any)["vnc-help-page"].firstMatch
+        XCTAssertTrue(helpPage.waitForExistence(timeout: 5))
+        for _ in 0..<3 where !app.staticTexts["触控板模式"].exists { helpPage.swipeUp() } // below the fold on an iPhone (#6196's Landscape row)
         XCTAssertTrue(app.staticTexts["触控板模式"].exists, "\(app.debugDescription)")
         rest(2)
         shot(app, "vnc-help")
@@ -399,9 +401,9 @@ final class VNCTests: XCTestCase {
         XCTAssertTrue(more.waitForExistence(timeout: 10), "no ⋯:\n\(app.debugDescription)")
         let screen = app.windows.firstMatch.frame
         var buttons: [CGRect] = []
-        for id in ["screen-close", "vnc-pip", "vnc-help", "vnc-more", "vnc-clipboard", "vnc-keyboard"] {
+        for id in ["screen-close", "vnc-pip", "vnc-help", "vnc-more", "vnc-clipboard", "vnc-rotate", "vnc-keyboard"] {
             let b = app.buttons[id].firstMatch
-            if id == "vnc-pip", !b.exists { continue }
+            if id == "vnc-pip" || id == "vnc-rotate", !b.exists { continue } // vnc-rotate: an app from before #6196
             XCTAssertTrue(screen.contains(b.frame), "\(id) on the screen: \(b.frame) in \(screen)")
             buttons.append(b.frame)
         }
@@ -430,8 +432,8 @@ final class VNCTests: XCTestCase {
         try railMenusWithTheKeyboardUp([], name: "vnc-landscape-keyboard-menus")
     }
 
-    /// Turned on its side with the keyboard up: Close, Help, ⋯, the clipboard and the keyboard button in sight above the
-    /// keyboard, then ⋯ and the clipboard open their menus. A menu hides the keyboard and the rails get room; the app
+    /// Turned on its side with the keyboard up: Close, Help, ⋯, the clipboard, the rotate button (#6196) and the keyboard
+    /// button in sight above the keyboard, then ⋯ and the clipboard open their menus. A menu hides the keyboard and the rails get room; the app
     /// keeps running (#5289: a rail that put other views in for the roomier way lost the menu's button under its morph
     /// and the app stopped), and Picture in Picture is in one place, under Close or in ⋯.
     @MainActor private func railMenusWithTheKeyboardUp(_ more: [String], name: String) throws {
@@ -444,6 +446,7 @@ final class VNCTests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: wide, object: nil)], timeout: 10), .completed,
                        "the page did not turn: \(window.frame)")
         rest(2)
+        hold(name + "-before-keyboard")
         let keys = app.keyboards.firstMatch
         func keyboardUp(_ when: String) {
             for _ in 0..<2 where !keys.waitForExistence(timeout: 3) { app.buttons["vnc-keyboard"].firstMatch.tap() }
@@ -452,23 +455,25 @@ final class VNCTests: XCTestCase {
         }
         keyboardUp("at first")
         let top = keys.frame.minY
-        for id in ["screen-close", "vnc-pip", "vnc-help", "vnc-more", "vnc-clipboard", "vnc-keyboard"] {
+        for id in ["screen-close", "vnc-pip", "vnc-help", "vnc-more", "vnc-clipboard", "vnc-rotate", "vnc-keyboard"] {
             let b = app.buttons[id].firstMatch
-            if id == "vnc-pip", !b.exists { continue }
+            if id == "vnc-pip" || id == "vnc-rotate", !b.exists { continue } // vnc-rotate: an app from before #6196
             XCTAssertTrue(b.isHittable && window.frame.contains(b.frame) && b.frame.maxY <= top + 1,
                           "\(id) in sight above the keyboard: \(b.frame), the keyboard from \(top) in \(window.frame)")
         }
         shot(app, name); hold(name)
 
         menu.tap()
-        XCTAssertTrue(app.buttons["指针居中"].firstMatch.waitForExistence(timeout: 5), "⋯ opened:\n\(app.debugDescription)")
+        // Its first item: at the largest text sizes the rest are below the menu's fold.
+        let first = app.buttons["鼠标模式"].firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 5), "⋯ opened:\n\(app.debugDescription)")
         rest()
         XCTAssertEqual(app.state, .runningForeground, "the app went on ⋯")
         let item = app.buttons.matching(NSPredicate(format: "label == '小窗' AND identifier != 'vnc-pip'")).firstMatch
         XCTAssertNotEqual(app.buttons["vnc-pip"].exists, item.exists, "Picture in Picture under Close or in ⋯, once:\n\(app.debugDescription)")
         shot(app, name + "-more"); hold(name + "-more")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.15)).tap()
-        XCTAssertTrue(app.buttons["指针居中"].firstMatch.waitForNonExistence(timeout: 5), "⋯ closed")
+        XCTAssertTrue(first.waitForNonExistence(timeout: 5), "⋯ closed")
 
         keyboardUp("after ⋯")
         clipboard.tap()
@@ -666,6 +671,208 @@ final class VNCTests: XCTestCase {
             XCTAssertEqual(size.count, 2, value)
             XCTAssertGreaterThanOrEqual(size.last ?? 0, 22, "\(bg): the pointer is drawn readable: \(value)")
         }
+    }
+
+    // MARK: #6196
+
+    /// The rotate button: right of the clipboard on an iPhone, as large; a tap turns the page on its side, where it sits
+    /// under the clipboard down the trailing rail and says it turns back, and the page stays on its side however the phone
+    /// is held; there ⋯ and the clipboard open with the keyboard up (#5289). A second tap turns it upright, and it stays
+    /// so. Closed and opened again, the page turns with the phone as before.
+    @MainActor func testTheRotateButton() throws {
+        let (app, vnc) = try signedInMachinePage()
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let window = app.windows.firstMatch
+        let wide = NSPredicate { _, _ in window.frame.width > window.frame.height }
+        let tall = NSPredicate { _, _ in window.frame.width < window.frame.height }
+        func turned(_ p: NSPredicate) -> XCTWaiter.Result { XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: p, object: nil)], timeout: 10) }
+        let rotate = app.buttons["vnc-rotate"].firstMatch, clipboard = app.buttons["vnc-clipboard"].firstMatch
+        let keyboard = app.buttons["vnc-keyboard"].firstMatch, menu = app.buttons["vnc-more"].firstMatch
+        let screen = app.descendants(matching: .any)["vnc-screen"].firstMatch
+        XCTAssertTrue(rotate.waitForExistence(timeout: 10), "no rotate button:\n\(app.debugDescription)")
+        var c = clipboard.frame, r = rotate.frame
+        XCTAssertGreaterThanOrEqual(r.minX, c.maxX, "right of the clipboard: \(r) vs \(c)")
+        XCTAssertLessThanOrEqual(r.minX - c.maxX, 16, "next to the clipboard: \(r) vs \(c)")
+        XCTAssertEqual(r.midY, c.midY, accuracy: 1, "on the clipboard's line")
+        XCTAssertEqual(r.width, c.width, accuracy: 1)
+        XCTAssertEqual(r.height, c.height, accuracy: 1)
+        XCTAssertEqual(rotate.label, "转为横屏")
+        rest()
+        shot(app, "vnc-rotate-portrait"); hold("vnc-rotate-portrait")
+
+        rotate.tap()
+        XCTAssertEqual(turned(wide), .completed, "the button did not turn the page: \(window.frame)")
+        rest(2)
+        c = clipboard.frame; r = rotate.frame
+        let s = screen.frame
+        XCTAssertGreaterThanOrEqual(r.minX, s.maxX - 1, "down the trailing rail: \(r) vs \(s)")
+        XCTAssertGreaterThanOrEqual(r.minY, c.maxY - 1, "under the clipboard: \(r) vs \(c)")
+        XCTAssertLessThanOrEqual(r.minY - c.maxY, 16, "next to the clipboard: \(r) vs \(c)")
+        XCTAssertEqual(r.midX, c.midX, accuracy: 1)
+        XCTAssertTrue(window.frame.contains(r) && rotate.isHittable, "on screen: \(r)")
+        XCTAssertEqual(rotate.label, "转为竖屏")
+        XCTAssertGreaterThan(s.height, window.frame.height * 0.85, "the picture takes the height: \(s)")
+        shot(app, "vnc-rotate-landscape"); hold("vnc-rotate-landscape")
+
+        // Turned by the button it stays on its side, the phone held upright or not.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        rest(2)
+        XCUIDevice.shared.orientation = .portrait
+        rest(2)
+        XCTAssertGreaterThan(window.frame.width, window.frame.height, "kept on its side with the phone upright: \(window.frame)")
+
+        // The keyboard up on its side (#5289): ⋯ and the clipboard open their menus and the app keeps running.
+        func keyboardUp(_ when: String) {
+            for _ in 0..<2 where !app.keyboards.firstMatch.waitForExistence(timeout: 3) { keyboard.tap() }
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "the keyboard \(when):\n\(app.debugDescription)")
+            rest()
+        }
+        keyboardUp("at first")
+        XCTAssertTrue(rotate.isHittable, "the rotate button reachable over the keyboard: \(rotate.frame)")
+        shot(app, "vnc-rotate-landscape-keyboard"); hold("vnc-rotate-landscape-keyboard")
+        menu.tap()
+        XCTAssertTrue(app.buttons["指针居中"].firstMatch.waitForExistence(timeout: 5), "⋯ opened:\n\(app.debugDescription)")
+        XCTAssertEqual(app.state, .runningForeground, "the app went on ⋯")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.15)).tap()
+        XCTAssertTrue(app.buttons["指针居中"].firstMatch.waitForNonExistence(timeout: 5), "⋯ closed")
+        keyboardUp("after ⋯")
+        clipboard.tap()
+        XCTAssertTrue(app.buttons["从 iPhone 粘贴"].firstMatch.waitForExistence(timeout: 5), "the clipboard opened:\n\(app.debugDescription)")
+        XCTAssertEqual(app.state, .runningForeground, "the app went on the clipboard")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.15)).tap()
+        XCTAssertTrue(app.buttons["从 iPhone 粘贴"].firstMatch.waitForNonExistence(timeout: 5), "the clipboard closed")
+        if app.keyboards.firstMatch.exists { keyboard.tap() }
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+
+        // The second tap: upright, and kept so with the phone on its side.
+        rotate.tap()
+        XCTAssertEqual(turned(tall), .completed, "the button did not turn the page back: \(window.frame)")
+        rest(2)
+        XCTAssertEqual(rotate.label, "转为横屏")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        rest(2)
+        XCTAssertLessThan(window.frame.width, window.frame.height, "kept upright with the phone on its side: \(window.frame)")
+
+        // Closed (the app upright), then opened again: it turns with the phone as before the tap.
+        app.buttons["screen-close"].tap()
+        XCTAssertTrue(vnc.waitForExistence(timeout: 10))
+        XCUIDevice.shared.orientation = .portrait
+        rest(2)
+        XCTAssertLessThan(window.frame.width, window.frame.height, "upright with the page closed: \(window.frame)")
+        vnc.tap() // kept: the small window where there is one, else (the simulators) the whole page
+        guard rotate.waitForExistence(timeout: 20) else { throw XCTSkip("the small window instead of the page: nothing to turn") }
+        XCTAssertTrue(live(app), "the page again, live")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertEqual(turned(wide), .completed, "opened again, it turns with the phone: \(window.frame)")
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertEqual(turned(tall), .completed)
+    }
+
+    /// Two fingers: in Trackpad Mode they only scroll, so a scroll whose fingers drift 30% apart, and a pinch, leave the
+    /// picture as it was while the scroll reaches the Mac. In Mouse Mode the same scroll scrolls and does not zoom, and a
+    /// pinch zooms; ⋯ › Zoom to Fit goes back. ⋯ › Zoom In zooms Trackpad Mode in, and the picture follows the pointer
+    /// to the Mac's edge. TEST_RUNNER_PERSONA_VNC_PAUSE slows it down for a screen recording (with MOCK_SCREEN_SCROLL=1
+    /// the Mac's window shows the scroll).
+    @MainActor func testTwoFingers() throws {
+        let (app, _) = try signedInMachinePage()
+        let screen = app.descendants(matching: .any)["vnc-screen"].firstMatch
+        XCTAssertTrue(screen.waitForExistence(timeout: 10))
+        func more(_ label: String) { // an item of ⋯
+            app.buttons["vnc-more"].tap()
+            app.buttons[label].firstMatch.tap()
+            rest()
+        }
+        func scrolls() throws -> Int { (try mockState()["clicks"] as? [[String: Any]] ?? []).filter { $0["scroll"] != nil }.count }
+        // A scroll up the middle of the view whose fingers open from 80 to 104 points.
+        func driftingScroll() throws {
+            let r = screen.frame, steps = 30, by: CGFloat = 150
+            var a: [CGPoint] = [], b: [CGPoint] = []
+            for i in 0...steps {
+                let k = CGFloat(i) / CGFloat(steps), half = (80 + 24 * k) / 2, y = r.midY + by / 2 - by * k
+                a.append(CGPoint(x: r.midX - half, y: y))
+                b.append(CGPoint(x: r.midX + half, y: y))
+            }
+            try TouchScript.twoFingers(a, b, step: 0.03) // about a second: slow enough to see in a recording
+            rest(2)
+        }
+
+        // TEST_RUNNER_PERSONA_HOLD: the host records Trackpad Mode, then Mouse Mode (hold-vnc-rec-start / -end, one
+        // recording each).
+        more("触控板模式")
+        hold("vnc-rec-start")
+        try mock(hub!, "/mock/screen-password?clear=1")
+        try driftingScroll()
+        XCTAssertGreaterThan(try scrolls(), 0, "Trackpad Mode: the scroll reached the Mac")
+        XCTAssertEqual(readout(screen).zoom, 1, accuracy: 0.01, "Trackpad Mode: the scroll did not zoom")
+        hold("vnc-trackpad-scrolled")
+        screen.pinch(withScale: 4, velocity: 3) // XCUITest's fingers start ~12 pt apart: the first 10 pt only decide
+        rest(2)
+        XCTAssertEqual(readout(screen).zoom, 1, accuracy: 0.01, "Trackpad Mode: a pinch does not zoom")
+        shot(app, "vnc-trackpad-two-fingers"); hold("vnc-trackpad-pinched")
+        hold("vnc-rec-end")
+
+        more("鼠标模式")
+        hold("vnc-rec-start")
+        try mock(hub!, "/mock/screen-password?clear=1")
+        try driftingScroll()
+        XCTAssertGreaterThan(try scrolls(), 0, "Mouse Mode: the scroll reached the Mac")
+        XCTAssertEqual(readout(screen).zoom, 1, accuracy: 0.01, "Mouse Mode: the scroll did not zoom")
+        hold("vnc-mouse-scrolled")
+        screen.pinch(withScale: 4, velocity: 3) // XCUITest's fingers start ~12 pt apart: the first 10 pt only decide
+        rest(2)
+        XCTAssertGreaterThan(readout(screen).zoom, 1.5, "Mouse Mode: a pinch zooms")
+        shot(app, "vnc-mouse-pinched"); hold("vnc-mouse-pinched")
+        // Zoomed in, two fingers move the picture.
+        let before = readout(screen).at
+        try TouchScript.twoFingers((0...20).map { CGPoint(x: screen.frame.midX - 40 - CGFloat($0) * 4, y: screen.frame.midY) },
+                                   (0...20).map { CGPoint(x: screen.frame.midX + 40 - CGFloat($0) * 4, y: screen.frame.midY) }, step: 0.03)
+        rest(2)
+        XCTAssertLessThan(readout(screen).at.x, before.x - 20, "zoomed in, two fingers moved the picture: \(before) → \(readout(screen).at)")
+        hold("vnc-mouse-moved")
+        more("还原")
+        XCTAssertEqual(readout(screen).zoom, 1, accuracy: 0.01, "Zoom to Fit")
+        hold("vnc-rec-end")
+
+        // Trackpad Mode zoomed in from ⋯: the picture follows the pointer to the Mac's right edge.
+        more("触控板模式")
+        more("指针居中")
+        app.buttons["vnc-more"].tap()
+        XCTAssertTrue(app.buttons["放大"].firstMatch.waitForExistence(timeout: 5), "Zoom In offered while fitted")
+        XCTAssertFalse(app.buttons["还原"].firstMatch.exists, "and not Zoom to Fit")
+        rest()
+        shot(app, "vnc-more-fitted"); hold("vnc-more-fitted")
+        app.buttons["放大"].firstMatch.tap()
+        rest()
+        XCTAssertEqual(readout(screen).zoom, 2, accuracy: 0.01, "Zoom In")
+        app.buttons["vnc-more"].tap()
+        XCTAssertTrue(app.buttons["还原"].firstMatch.waitForExistence(timeout: 5), "Zoom to Fit offered once zoomed in")
+        XCTAssertFalse(app.buttons["放大"].firstMatch.exists, "and not Zoom In")
+        rest()
+        shot(app, "vnc-more-zoomed"); hold("vnc-more-zoomed")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).tap() // outside the menu: it closes
+        XCTAssertTrue(app.buttons["还原"].firstMatch.waitForNonExistence(timeout: 5), "⋯ closed")
+        rest()
+        for _ in 0..<4 {
+            screen.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5))
+                .press(forDuration: 0.05, thenDragTo: screen.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
+            rest()
+        }
+        let pointer = try mockState()["pointer"] as? [Int] ?? []
+        XCTAssertGreaterThan(pointer.first ?? 0, 470, "the pointer at the Mac's right edge: \(pointer)")
+        let at = readout(screen).at
+        XCTAssertTrue(at.x >= 0 && at.x <= screen.frame.width + 1, "the picture followed it: drawn at \(at) in \(screen.frame)")
+        shot(app, "vnc-trackpad-zoomed"); hold("vnc-trackpad-zoomed")
+        more("还原")
+        more("鼠标模式")
+    }
+
+    /// The DEBUG readout of the page's picture (VNCScreenUIView.place): its zoom (1: fitted) and where the pointer is
+    /// drawn, in the view's points.
+    @MainActor private func readout(_ screen: XCUIElement) -> (zoom: Double, at: CGPoint) {
+        let parts = (screen.value as? String ?? "").split(separator: ";")
+        func field(_ k: String) -> String? { parts.first { $0.hasPrefix(k + "=") }.map { String($0.dropFirst(k.count + 1)) } }
+        let at = field("at")?.split(separator: ",").compactMap { Double($0) } ?? []
+        return (Double(field("zoom") ?? "") ?? -1, at.count == 2 ? CGPoint(x: at[0], y: at[1]) : CGPoint(x: -1, y: -1))
     }
 
     // MARK: Helpers

@@ -5,7 +5,7 @@ extension SettingsPage {
         switch self {
         case .models, .agents, .assistant, .claude, .codex, .modelConfiguration, .triage, .connectors, .plugins, .channels,
              .mail, .feishuBot, .sent, .skills,
-             .knowledgeSelection, .pluginMarket, .marketExtension, .pluginMarkets, .inboxSources, .computers:
+             .knowledgeSelection, .pluginMarket, .marketExtension, .pluginMarkets, .inboxSources, .sourcesGraph, .computers:
             true
         case .connector(_, let manager), .plugin(_, let manager), .pluginPage(_, _, _, let manager), .channel(_, let manager),
              .subscriptions(_, let manager), .feishu(let manager):

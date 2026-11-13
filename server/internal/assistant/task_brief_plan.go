@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -40,6 +41,64 @@ func briefRequired(t *PlanTask) error {
 	}
 	return fmt.Errorf("%s needs %s; nothing was planned. Add them and call task_plan again (a task that takes over from another "+
 		"gives continues and continues_why instead and keeps that task's brief)", kind, strings.Join(missing, " and "))
+}
+
+// openSuccessor is an open to-do that already carries on to-do id (continues, directly or down a chain of to-dos that
+// did): a second continuation of id would be a second to-do for the same work (#6427). False when there is none.
+func (s *Service) openSuccessor(id string) (Todo, bool) {
+	seen := map[string]bool{id: true}
+	next := []string{id}
+	for len(next) > 0 {
+		b := &s.tbriefs
+		b.mu.Lock()
+		b.init()
+		var found []string
+		for todo, l := range b.links {
+			if l.Continues != "" && slices.Contains(next, l.Continues) && !seen[todo] {
+				found = append(found, todo)
+			}
+		}
+		b.mu.Unlock()
+		slices.Sort(found)
+		next = nil
+		for _, todo := range found {
+			seen[todo] = true
+			if t, ok := s.todoNow(todo); ok && t.DoneAt == nil && !t.Cancelled() {
+				return t, true
+			}
+			next = append(next, todo)
+		}
+	}
+	return Todo{}, false
+}
+
+// errContinued refuses a task that continues prev when to-do succ already does.
+func errContinued(prev string, succ Todo) error {
+	return fmt.Errorf("continues: %s is already carried on by to-do %s (%q), which is still open. Do not open a second "+
+		"to-do for the same work: plan the task with todo_id %s (it runs on that to-do), or send its agent what is new "+
+		"(agent_send)", prev, succ.ID, succ.Title, succ.ID)
+}
+
+// takeOver settles where a task that continues another runs (#6427), before its todo_id is checked: an earlier to-do
+// still open whose agents all stopped is carried on in itself (todo_id), not in a new to-do; one another open to-do
+// already carries on is refused (that one is where the work goes on). An earlier to-do that is closed, one whose agent
+// may still run (a retry elsewhere while its computer is offline), or one this conversation may not take, gets a new
+// to-do with its brief as before.
+func (s *Service) takeOver(ctx context.Context, conversation string, t *PlanTask) error {
+	if t.Continues == "" || t.ReuseTodo != "" {
+		return nil
+	}
+	if succ, ok := s.openSuccessor(t.Continues); ok {
+		return errContinued(t.Continues, succ)
+	}
+	prev, ok := s.todoNow(t.Continues)
+	if !ok || prev.DoneAt != nil || prev.Cancelled() {
+		return nil
+	}
+	if _, err := s.reusableTodo(ctx, conversation, prev.ID, false); err == nil {
+		t.ReuseTodo = prev.ID
+	}
+	return nil
 }
 
 // planBriefs gives each task of a plan from conversation (on machine) its brief as it will be kept, for the card to

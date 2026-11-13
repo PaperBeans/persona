@@ -690,12 +690,17 @@ func (e *Engine) photosRemakeMinutes(r *Recording) error {
 	return e.Store.putEntity(KindRecording, r.ID, r, &r.Tagging, false)
 }
 
-// photosRemake has recording r's minutes made again after a photo was added or deleted; whether r changed (the caller
-// writes it). Minutes written are made again quietly: that generation is not pushed (MinutesQuiet). While a generation
-// is pending (the first, or one the owner asked for) it is only invalidated, so that a model call running now does not
-// settle it, and it is pushed as it would have been. Nothing for a trimmed recording (no transcript to make them from)
-// or before the transcript is complete (the first minutes read the photos then).
-func (e *Engine) photosRemake(r *Recording) bool {
+// photosRemake has recording r's minutes made again after a photo was added or deleted (remakeQuiet); whether r
+// changed (the caller writes it).
+func (e *Engine) photosRemake(r *Recording) bool { return e.remakeQuiet(r) }
+
+// remakeQuiet has recording r's minutes made again from what it has now (a photo added or deleted, its final
+// transcript stored); whether r changed (the caller writes it). Minutes written are made again quietly: that
+// generation is not pushed (MinutesQuiet). While a generation is pending (the first, or one the owner asked for) it is
+// only invalidated, so that a model call running now does not settle it, and it is pushed as it would have been.
+// Nothing for a trimmed recording (no transcript to make them from) or before the transcript is complete (the first
+// minutes read it then).
+func (e *Engine) remakeQuiet(r *Recording) bool {
 	if r.Trimmed() || !r.Complete || r.Chars == 0 || !r.isMeeting() {
 		return false
 	}
@@ -921,6 +926,7 @@ func (s *Store) trimPhotosLocked(r *Recording, zone *time.Location) (changed, re
 		return changed, rev, err
 	}
 	for _, f := range files {
+		// Only a kept photo's regular file stays: anything else (attachments/audio/ above all) goes with the transcript.
 		if keep[f.Name()] && f.Type().IsRegular() {
 			continue
 		}

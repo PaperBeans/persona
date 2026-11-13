@@ -11,6 +11,8 @@ export const RUNTIME = 'paseo'
 export const SESSION_LABEL = 'persona.session'
 /** The label Paseo puts on an agent another agent created (its create_agent tool): the creating agent's id. */
 export const PARENT_LABEL = 'paseo.parent-agent-id'
+/** The label on the agent a launcher check runs (bridge.js check): never a session, deleted once it answered. */
+export const CHECK_LABEL = 'persona.check'
 /** Persona's effort levels, weakest first (proto.EffortLevels). */
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 /** Persona's permission modes (proto.PermissionModes): Claude Code's, which Paseo's Claude providers take as they are. */
@@ -194,6 +196,29 @@ export function archivedUnderOwnId(agent, roots = {}) {
 }
 
 /**
+ * How Paseo can rewind an agent's conversation (agent.rewind.request), by what its provider says it supports:
+ * conversation: back to before a message of the user's; code: the files too in the same step (Paseo's "both").
+ * Claude Code does both; Codex, pi and omp the conversation only; OpenCode only both at once, which is no conversation
+ * rewind of Persona's. A Paseo too old to say does neither.
+ */
+export function rewindOf(agent) {
+  const c = agent?.capabilities ?? {}
+  const conversation = c.supportsRewindConversation === true
+  return { conversation, code: conversation && c.supportsRewindBoth === true }
+}
+
+/**
+ * A user message as a rewind compares it (bridge.js rewind): Persona's context blocks left out (the chat shows them as
+ * rows of their own), white space ignored. Empty for what the user did not type (a command's echo, an interruption).
+ */
+export function promptKey(text) {
+  if (typeof text !== 'string') return ''
+  const t = text.replace(/<persona-context\b[^>]*>[\s\S]*?<\/persona-context>/g, '').trim()
+  if (/^<(command-name|command-message|local-command-[a-z]+)>/.test(t) || /^\[Request interrupted/.test(t)) return ''
+  return t.replace(/\s+/g, '')
+}
+
+/**
  * A session row's status for an agent: needing you while a request waits, working, "Offline" when closed. Stopped (idle,
  * or a turn that failed): done while Paseo says it waits for you to look at it (requiresAttention, cleared once you
  * open it in Paseo), idle — seen — once it does not (#2831), as herdr's done / idle carry herdr's own seen state.
@@ -357,6 +382,9 @@ export function agentRow(agent, o = {}) {
   if (mode) row.permission_mode = mode
   const effort = agent.effectiveThinkingOptionId ?? agent.thinkingOptionId
   if (EFFORTS.includes(effort)) row.effort = effort
+  // How far a rewind goes here: the node offers it, and the files with it, only where Paseo's provider can.
+  const rewind = rewindOf(agent)
+  row.capabilities = { rewind: rewind.conversation, rewind_code: rewind.code }
   const t = transcriptOf(agent, roots)
   if (t) row.transcript = t
   const thread = codexThreadOf(agent, roots)

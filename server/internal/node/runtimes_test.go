@@ -277,6 +277,31 @@ func TestRuntimeCloseCapabilityIsIndependentOfTerminal(t *testing.T) {
 	}
 }
 
+// A runtime row says whether it can be renamed (#6294): what the runtime declared, for its own sessions; a session
+// another one started never says so, whatever the runtime declared.
+func TestRuntimeRenameCapability(t *testing.T) {
+	for _, allowed := range []bool{false, true} {
+		t.Run(fmt.Sprint(allowed), func(t *testing.T) {
+			n, _ := runtimeNode(t)
+			hello := dshHello()
+			hello["caps"].(map[string]any)["rename"] = allowed
+			host := dialRuntime(t, n, hello)
+			_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
+				{"session_id": "rename-capability", "status": "idle"},
+				{"session_id": "rename-child", "status": "idle", "is_subagent": true, "parent_session_id": "rename-capability"},
+			}})
+			waitFor(t, "runtime sessions listed", func() bool { _, ok := listed(t, n)["rename-child"]; return ok })
+			got := listed(t, n)
+			if caps := got["rename-capability"].Capabilities; caps == nil || caps.Rename == nil || *caps.Rename != allowed || caps.Terminal {
+				t.Fatalf("rename %v listed as %+v", allowed, caps)
+			}
+			if caps := got["rename-child"].Capabilities; caps == nil || caps.Rename == nil || *caps.Rename {
+				t.Fatalf("a sub-Agent's row lists rename: %+v", caps)
+			}
+		})
+	}
+}
+
 func TestRuntimeSessionsAreListedAndPushed(t *testing.T) {
 	n, hub := runtimeNode(t)
 	host := dialRuntime(t, n, dshHello())

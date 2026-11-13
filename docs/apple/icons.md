@@ -73,6 +73,7 @@ A new style that has its own icons sets `icons` in its `ComponentSpec`; nothing 
 | A Settings row that opens a page / a Settings switch with a mark | `SettingsRow(title:symbol:tint:)` / `SettingsSwitchRow(title:symbol:tint:isOn:)`; never a page's own `Toggle` + `Label` |
 | A component that takes a symbol name (`Chip`, `EmptyStateView`, BeautifulUI's pills, tool chips, sidebar rows) | pass `Theme.Icon.styled(Theme.Icon.x)`; the design-system components already do |
 | A system control that draws its own symbol (`Label(_:systemImage:)` in a menu, a swipe action, a tab) | `Theme.Icon.x` as written |
+| A row on the watch's home list (all-day recording, Mark Meeting, Meeting Recording, Meeting Minutes, Record) | `Label(_:systemImage:)` with `.labelStyle(.watchRow)`: every row's symbol in one column (`Theme.Size.icon`, larger with the text), a symbol wider than it drawn a size smaller, so titles line up and none is overdrawn (#6046) |
 | A brand, an iPhone app, a Linux distribution | `BrandMark`, `BrandTile`, `BrandBadge` with `Theme.Brand` (never `Image("…")`) |
 
 `ThemedIcon` takes its size and color from the caller like `Image(systemName:)`. Where the symbol must be an `Image`

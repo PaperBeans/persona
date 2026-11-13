@@ -98,6 +98,12 @@ const (
 	DeviceAssistantSend = "assistant.send" // {session_id, text, resume_only?, permission_mode?, …model} → {session_id}
 	DeviceSessionSend   = "session.send"   // {session_id, text} → {}
 	DeviceSessionStart  = "session.start"  // {cwd, prompt, launcher?, model?, permission_mode?, tab_name?, workspace_id?} → {session}
+	// DeviceSessionModes: {session_id, launcher?, from?, model?, effort?, permission_mode?} → {}; a launcher other than
+	// the session's own is a switch to it, carried out by a session.send with apply_switch (docs/protocol/protocol.md).
+	DeviceSessionModes = "session.modes"
+	// DeviceSessionSwitch: {session_id} → {}, the switch session.modes just picked carried out now with no message
+	// (capability launcher_switch_idle, the assistant's batch switch).
+	DeviceSessionSwitch = "session.switch"
 	// DeviceWorktreePrepare / DeviceWorktreeCreate: "New worktree…" (docs/integrations/terminal.md), the workspace named by a directory
 	// in it: {cwd} → WorktreePrepare; {cwd, branch, path} → WorktreeCreateResult.
 	DeviceWorktreePrepare = "worktree.prepare"

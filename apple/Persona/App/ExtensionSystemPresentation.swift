@@ -71,6 +71,20 @@ extension AppModel {
         Task { await askPersona(text) }
         return true
     }
+
+    /// The pages' Source Relationships row (#5741): Settings › Inbox Sources › Source Relationships, from Settings or from
+    /// the Inbox's sheet of the pages (which closes as Settings opens).
+    func openIfSourcesGraph(_ url: URL) -> Bool {
+        guard SubscriptionsUI.isGraph(url) else { return false }
+        extensionOpen = nil
+        settingsPath = NavigationPath([SettingsPage.inboxSources, SettingsPage.sourcesGraph])
+        #if os(macOS)
+        MacShellState.shared.go(.settings, self)
+        #else
+        selectedTab = .settings
+        #endif
+        return true
+    }
 }
 
 /// Whose extension settings an extension's settings link opens (`AppModel.openIfExtensionSettings`).

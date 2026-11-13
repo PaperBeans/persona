@@ -21,6 +21,10 @@ struct RecordingsSection: View {
     @State private var capture = RecordingCapture.shared
     /// Which day is today's and whether a paired watch has Persona, worked out outside `body` (P4).
     @State private var days = RecordingDayBoard.shared
+    #if os(iOS)
+    /// The start's choices when the page has none to share (Knowledge › Recordings): the line under Record reads them too.
+    @State private var ownForm = RecordingStartForm()
+    #endif
     /// The recording a swipe asked to delete (its row shows the confirmation), and why a delete failed.
     @State private var pendingDelete: UUID?
     @State private var failure: String?
@@ -37,16 +41,28 @@ struct RecordingsSection: View {
         let recents = library.entries.filter { !(capturing && $0.id == capture.recordingID) && $0.id != today }
         Section {
             #if os(iOS)
-            RecordingCaptureControls(part: startAtBottom ? .options : .inline, sharedForm: form)
+            RecordingCaptureControls(part: startAtBottom ? .options : .inline, sharedForm: form ?? ownForm)
             #else
             RecordingCaptureControls()
             #endif
         } footer: {
             // Read once, before a recording: not under the controls of one that runs.
             if capture.state == .idle {
+                #if os(iOS)
+                Text(startPrivacy)
+                    .accessibilityIdentifier("recording-start-privacy")
+                #else
                 Text("Audio stays on this device. Its text syncs to Knowledge and is kept for \(sync.store.days) days.")
+                #endif
             }
         }
+        #if os(iOS)
+        // Whether the hub's voice extension takes meeting calls, for the line under Record (#3862 phase 4).
+        .task(id: MeetingAttendees.conversation(model)) {
+            guard MeetingAttendees.conversation(model), let hub = model.hub else { return }
+            await VoiceSupport.shared.refresh(group: hub.group, api: hub.api)
+        }
+        #endif
         #if os(iOS)
         // All-day recording: with a paired watch that has Persona (it offers the mode whatever the hub supports: the
         // phone keeps the text until the hub takes it, docs/assistant/day-recap.md「Compatibility」), and once a day
@@ -125,6 +141,22 @@ struct RecordingsSection: View {
 }
 
 #if os(iOS)
+extension RecordingsSection {
+    /// The line under Record: what leaves the phone. Where the next meeting's Talk would send its spans to the voice
+    /// service (a room meeting taking part, on a hub whose voice extension takes meeting calls; #3862 phase 4), the
+    /// contract's Wording, before the meeting starts; elsewhere the audio stays on this device, as before.
+    private var startPrivacy: String {
+        let form = form ?? ownForm
+        let role = form.pickedRole ?? MeetingAttendees.defaultRole(model)
+        let voice = model.hub.flatMap { MeetingCall.shared.voiceExtension(group: $0.group) }
+        if form.pickedKind == .meeting,
+           MeetingCallRule.talkSendsAudio(conversation: MeetingAttendees.conversation(model), role: role, voice: voice) {
+            return String(localized: "Audio stays on this iPhone, except while you hold Talk: what is said then goes to the voice service. Its text syncs to Knowledge and is kept for \(sync.store.days) days.")
+        }
+        return String(localized: "Audio stays on this device. Its text syncs to Knowledge and is kept for \(sync.store.days) days.")
+    }
+}
+
 /// An option row's title with what it means under it, both starting at the title's edge (not the icon's).
 private struct RowTitle: View {
     var title: LocalizedStringKey
@@ -566,6 +598,7 @@ struct RecordingCaptureControls: View {
     private func record() {
         let start = RecordingStart.make(form.pickedKind, offered: MeetingAttendees.offered(model), conversation: MeetingAttendees.conversation(model),
                                         photos: MeetingAttendees.photos(model), liveView: MeetingAttendees.liveView(model),
+                                        highlights: MeetingAttendees.highlights(model),
                                         role: role, privateMark: form.pickedPrivate,
                                         attendee: chosenAttendee)
         form.pickedRole = nil; form.pickedAttendee = nil; form.pickedPrivate = false; form.pickedKind = .meeting
@@ -934,7 +967,7 @@ struct RecordingDetailView: View {
             ForEach(Array(entry.sentences.enumerated()), id: \.offset) { index, sentence in
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Text(RecordingFormat.clock(sentence.start)).font(Theme.Font.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    Text(sentence.text).font(Theme.Font.body).textSelection(.enabled)
+                    Text(sentence.text).readingContent().font(Theme.Font.body).textSelection(.enabled)
                 }
                 .id(ids[index])
                 .listRowBackground(lit == index ? Theme.accentTint : nil)

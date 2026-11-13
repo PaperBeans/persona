@@ -345,7 +345,9 @@ struct ProviderWizard: View {
                     }
                 }
                 .accessibilityElement(children: .combine)
-                SecretField(String(localized: "Paste the API key"), filled: String(localized: "Filled in"), text: $wizard.presetKey, identifier: "wizard.preset.key")
+                ProviderKeyField(title: String(localized: "Paste the API key"), filled: String(localized: "Filled in"), text: $wizard.presetKey,
+                                 byReference: $wizard.presetKeyByReference, references: wizard.keyReferences, identifier: "wizard.preset.key",
+                                 explainedBelow: true)
                     .onChange(of: wizard.presetKey) { wizard.keyChanged() }
                 if let url = p.signup {
                     Button { link = LinkTarget(url: url) } label: {
@@ -354,12 +356,20 @@ struct ProviderWizard: View {
                     .accessibilityIdentifier("wizard.preset.signup")
                 }
             } header: { stepHeader(2, String(localized: "Paste the key")) } footer: {
-                Text([p.keyHint, String(localized: "The key is stored encrypted on the hub and never sent back to clients.")].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: "\n"))
+                Text([p.keyHint, wizard.presetKeyByReference ? String(localized: "The hub keeps only the reference and fetches the key from its provider when it's needed.")
+                      : String(localized: "The key is stored encrypted on the hub and never sent back to clients.")].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: "\n"))
             }
-            Section {
-                keyTestRow(p)
-            } header: { Text("Test") } footer: {
-                if p.testable { Text("Once pasted, it's tested once: a very short request that may cost a little.") }
+            if wizard.presetKeyByReference {
+                Section {
+                    Text("Checked when you save it: the reference must resolve. The connection test runs after that.")
+                        .font(Theme.Font.secondary).foregroundStyle(.secondary)
+                } header: { Text("Test") }
+            } else {
+                Section {
+                    keyTestRow(p)
+                } header: { Text("Test") } footer: {
+                    if p.testable { Text("Once pasted, it's tested once: a very short request that may cost a little.") }
+                }
             }
             if p.runsClaude {
                 Section {
@@ -604,11 +614,16 @@ struct ProviderWizard: View {
                 }
                 .lineLimit(1)
             }
-            SecretField(wizard.hasStoredKey ? String(localized: "API Key (leave empty to keep)") : "API Key", filled: String(localized: "Filled in"), text: $wizard.apiKey,
-                        identifier: "wizard.key")
+            ProviderKeyField(title: wizard.hasStoredKey ? String(localized: "API Key (leave empty to keep)") : "API Key", filled: String(localized: "Filled in"),
+                             text: $wizard.apiKey, byReference: $wizard.apiKeyByReference, references: wizard.keyReferences,
+                             stored: wizard.existing?.keyReference, identifier: "wizard.key", explainedBelow: true)
         } header: { Text("Gateway") } footer: {
-            Text(wizard.kind == .anthropic ? String(localized: "The key is stored encrypted on the hub, handed to the computer only at launch, and never sent back to apps.")
-                 : String(localized: "Choose Bearer if the gateway only accepts Authorization: Bearer (ANTHROPIC_AUTH_TOKEN). The key is stored encrypted on the hub and never sent back to apps."))
+            switch (wizard.kind == .anthropic, wizard.apiKeyByReference) {
+            case (true, false): Text(String(localized: "The key is stored encrypted on the hub, handed to the computer only at launch, and never sent back to apps."))
+            case (true, true): Text(String(localized: "The hub keeps only the reference and fetches the key from its provider when it's needed. The key is handed to the computer only at launch and never sent back to apps."))
+            case (false, false): Text(String(localized: "Choose Bearer if the gateway only accepts Authorization: Bearer (ANTHROPIC_AUTH_TOKEN). The key is stored encrypted on the hub and never sent back to apps."))
+            case (false, true): Text(String(localized: "Choose Bearer if the gateway only accepts Authorization: Bearer (ANTHROPIC_AUTH_TOKEN). The hub keeps only the reference and fetches the key from its provider when it's needed."))
+            }
         }
         if wizard.isAPI {
             Section {
@@ -641,13 +656,17 @@ struct ProviderWizard: View {
                     }
                 }
             }
-            .disabled(!wizard.connectionReady || wizard.discovering)
+            .disabled(!wizard.connectionReady || wizard.discovering || wizard.referencePending)
             .accessibilityIdentifier("wizard.discover")
             if let e = wizard.discoverError {
                 Text(e).font(Theme.Font.label).foregroundStyle(Theme.danger).lineLimit(4)
             }
         } header: { Text("Check") } footer: {
-            Text("Testing the connection sends a real, very small request (\(wizard.testModel.isEmpty ? String(localized: "get the model list first") : wizard.testModel)), which may cost a little.")
+            if wizard.referencePending {
+                Text("Checked when you save it: the reference must resolve. The connection test runs after that.")
+            } else {
+                Text("Testing the connection sends a real, very small request (\(wizard.testModel.isEmpty ? String(localized: "get the model list first") : wizard.testModel)), which may cost a little.")
+            }
         }
     }
 

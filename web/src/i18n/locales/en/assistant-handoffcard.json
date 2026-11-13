@@ -11,5 +11,7 @@
   "later_line": "Waiting in your Inbox: {title}",
   "wrap_up": "Wrap up: {title}",
   "wrap_up_ask": "Let's wrap this up: write the final summary and reply back to this Inbox item.",
-  "wrap_up_failed": "Couldn't ask to wrap up: {error}"
+  "wrap_up_failed": "Couldn't ask to wrap up: {error}",
+  "wrap_up_to_send": "To send",
+  "wrap_up_to_confirm": "To confirm"
 }

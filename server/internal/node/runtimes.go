@@ -88,6 +88,9 @@ type runtimeHello struct {
 		// (#3974): its permission cards that offer always get the node's key for the tool. A runtime that keeps its own
 		// rule (opencode's save rule, Paseo's suggestions) does not say it, so its grant is never widened to the tool.
 		KeepAlways bool `json:"keep_always"`
+		// Seen: session.seen goes to it when the user saw one of its sessions in Persona (#6299), for a runtime that
+		// keeps an unread mark of its own (Paseo's requiresAttention) to clear it there too.
+		Seen bool `json:"seen"`
 		// Archive: session.archive / session.unarchive go to it, for its own reversible archive (archive.go): a
 		// session the user archives in Persona is archived there too, and restored with it.
 		Archive bool `json:"archive"`

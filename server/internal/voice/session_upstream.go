@@ -111,7 +111,7 @@ func (c *conversation) connect(woken bool) error {
 	// not: a request the user made just before the drop still counts.
 	if words := agentWords(snap); words != c.snapWords {
 		if !first {
-			c.gate.told(c.connectedAt)
+			c.gate.told(c.connectedAt, agentReconnect)
 		}
 		c.snapWords = words
 	}
@@ -147,7 +147,11 @@ func (c *conversation) connect(woken bool) error {
 	if len(resume) > 0 {
 		c.runs.resume(resume)
 	}
-	if c.version >= 2 {
+	switch {
+	case c.meeting != nil:
+		// Only what the call hands over is said: the room's own turns (batches, heard asks, photos) are not
+		// followed (meeting.go).
+	case c.version >= 2:
 		c.runs.observeTarget(linkKey{c.target.MachineID, c.target.SessionID}) // after the runs handed back
 	}
 	return nil
@@ -157,9 +161,18 @@ func (c *conversation) connect(woken bool) error {
 // the rate of its audio. A failure closes up; the service's refusal is a *sessionRefused.
 func (c *conversation) startSession(ctx context.Context, up upLink, w wire, p *Provider, model, voice string,
 	in prompts.VoiceInstructions, tools []string) (int, error) {
-	in.Tools = c.toolMode(tools)
-	s := session{Model: model, Voice: voice, InputRate: p.inputRate(), Instructions: fitInstructions(in), Tools: toolDecls(tools)}
+	s := session{Model: model, Voice: voice, InputRate: p.inputRate(), Instructions: c.instructions(in, tools), Tools: toolDecls(tools, c.meeting != nil)}
 	return startUpstream(ctx, up, w, p, s)
+}
+
+// instructions are what a session that declares tools is told: voice/instructions, or a meeting call's voice/meeting
+// (only the owner's name of in's owner fields, never their notes).
+func (c *conversation) instructions(in prompts.VoiceInstructions, tools []string) string {
+	if c.meeting != nil {
+		return fitMeeting(meetingInstructions(in, len(tools) > 0))
+	}
+	in.Tools = c.toolMode(tools)
+	return fitInstructions(in)
 }
 
 // startUpstream sends session s's start on up and waits for the service to start it: the rate of its audio. A failure
@@ -289,6 +302,10 @@ func (c *conversation) toolSet() []string {
 	switch {
 	case !declare || c.toolless.Load():
 		return nil
+	case c.meeting != nil:
+		// A meeting call hands every question to the room, and has nothing else: the room may hear what a tool
+		// brings back (meeting.go).
+		return meetingTools
 	case c.version >= 2:
 		// Bound to a conversation: what hands work over goes to it (delegate_task); send_to_agent and ask_persona would
 		// go past it. The measured service hands nothing over without a tool (docs/lessons/voice.md "Other behavior").
@@ -305,6 +322,8 @@ func (c *conversation) tools() bool { return len(c.toolSet()) > 0 }
 // toolMode is what the instructions say of tools (prompts.VoiceInstructions.Tools) for a session that declares tools.
 func (c *conversation) toolMode(tools []string) string {
 	switch {
+	case c.meeting != nil && len(tools) > 0:
+		return "meeting" // the log's word: voice/meeting has its own (meeting.go)
 	case c.target != nil && len(tools) > 0:
 		return "bound"
 	case len(tools) == len(toolNames):
@@ -393,7 +412,7 @@ func (c *conversation) handle(gen int, e event) {
 		spoke := c.spokeAt(time.Now()) // by the user's words before these
 		if strings.TrimSpace(e.text) != "" {
 			c.gate.user = time.Now()
-			c.userAt = c.gate.user
+			c.gate.caption, c.userAt = c.gate.user, c.gate.user
 		}
 		c.userLineDone(c.userText(e.text, e.replace, e.final, spoke)) // a line the service ends itself (codex)
 	case evAssistant:
@@ -480,7 +499,7 @@ func (c *conversation) handle(gen int, e event) {
 		if s := c.unacked[e.eventID]; s != nil {
 			delete(c.unacked, e.eventID)
 			if s.agent {
-				c.gate.told(time.Now()) // the model has read them only now
+				c.gate.told(time.Now(), agentAcked) // the model has read them only now
 			}
 		}
 	case evError:

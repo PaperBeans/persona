@@ -12,7 +12,8 @@ import Foundation
 /// The type keeps its name (it was Record a Meeting until #5243): shortcuts people made with it go on working.
 struct StartMeetingRecordingIntent: AudioRecordingIntent {
     nonisolated static let title: LocalizedStringResource = "Record [Recordings Section ef2821]"
-    nonisolated static let description = IntentDescription("Starts recording a meeting in Persona, named after the calendar event happening now. The audio stays on this device; its transcript goes to Knowledge.")
+    // The contract's Wording (#3862 phase 4): a room meeting taking part may send what is said while Talk is held.
+    nonisolated static let description = IntentDescription("Starts recording a meeting in Persona, named after the calendar event happening now. Audio stays on this device, except while you hold Talk: what is said then goes to the voice service. The transcript goes to Knowledge.")
     nonisolated static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }
 
     nonisolated init() {}
@@ -70,6 +71,34 @@ struct AskPersonaInMeetingIntent: LiveActivityIntent {
     nonisolated func perform() async throws -> some IntentResult {
         #if !WIDGET_EXTENSION
         await MeetingRecorder.shared.ask(recordingID: recordingID)
+        #endif
+        return .result()
+    }
+}
+
+/// The recording activity's Talk and Done, in a room meeting Persona can be asked in (#3862 phase 4): its buttons can't be
+/// held, so a tap on Talk opens a talk window, which ends on Done, 2 seconds of silence after speech, 20 seconds without
+/// speech or 60 seconds. With the meeting call live what is said then goes to the voice service; without it the phone
+/// transcribes it and asks the room. From the Lock Screen too, without unlocking, as Ask is. `open` carries what the
+/// button showed (Talk: true, Done: false), so a Done tapped just after the window closed by itself opens nothing; nil
+/// (an activity drawn before the parameter existed) toggles, as it did.
+struct TalkInMeetingIntent: LiveActivityIntent {
+    nonisolated static let title: LocalizedStringResource = "Talk to Persona in the Meeting"
+    nonisolated static let isDiscoverable = false
+    nonisolated static var authenticationPolicy: IntentAuthenticationPolicy { .alwaysAllowed }
+
+    @Parameter(title: "Recording") var recordingID: String?
+    @Parameter(title: "Open a Talk Window") var open: Bool?
+
+    nonisolated init() {}
+    nonisolated init(recordingID: String?, open: Bool? = nil) {
+        self.recordingID = recordingID
+        self.open = open
+    }
+
+    nonisolated func perform() async throws -> some IntentResult {
+        #if !WIDGET_EXTENSION
+        await MeetingRecorder.shared.talk(recordingID: recordingID, open: open)
         #endif
         return .result()
     }

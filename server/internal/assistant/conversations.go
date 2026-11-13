@@ -236,6 +236,16 @@ type relayBook struct {
 	draining map[string]bool
 	holds    map[string]*time.Timer // by conversation: drains its queue again when the hold for the owner ends
 	stuck    map[string]relayMsg    // by conversation: the message that could not go in at the last drain (pickLocked)
+	// ownerTurns: the conversations whose round the owner is on, in memory only (#6394). While one is set, every
+	// queued message waits, whatever its rank: the owner's own message always goes before the queue. A restart falls
+	// back on the persisted Spoke presence window (relay_presence.go).
+	ownerTurns map[string]ownerTurn
+}
+
+// ownerTurn is one conversation's owner-turn gate (#6394).
+type ownerTurn struct {
+	at      time.Time // when the owner last spoke during it; a later message refreshes the safety limits
+	working bool      // a session list has shown the conversation working since the owner spoke
 }
 
 func (s *Service) relayLocked(ctx context.Context) bool {
@@ -262,6 +272,7 @@ func (s *Service) relayLocked(ctx context.Context) bool {
 	b.st, b.loaded = rs, true
 	b.sent, b.draining, b.holds = map[[2]string][]time.Time{}, map[string]bool{}, map[string]*time.Timer{}
 	b.stuck = map[string]relayMsg{}
+	b.ownerTurns = map[string]ownerTurn{}
 	return true
 }
 

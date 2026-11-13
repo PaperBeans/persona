@@ -128,7 +128,7 @@ export function ModelPicker({ models, model, followed = {}, ownModel, open, onTo
             )}
             <IconButton icon="retry" label={t("ui-modelpicker.reload")} size={24} iconSize={12} disabled={loading} onClick={onReload} />
           </div>
-          <div role="listbox" aria-label={t("ui-modelpicker.list_label")} className="max-h-60 overflow-y-auto p-1">
+          <div role="listbox" aria-label={t("ui-modelpicker.list_label")} className="max-h-[min(50vh,360px)] overflow-y-auto p-1">
             {showDefault && <ModelRow name={t("ui-modelpicker.default")} detail={defaultDetail(all, followed)} note={defaultModel(all)?.description} selected={!picked && !unlisted} onPick={() => onPick("")} />}
             {unlisted && !query.trim() && <ModelRow name={modelName({ id: unlisted })} note={typing ? t("ui-modelpicker.typed") : t("ui-modelpicker.current_unlisted")} selected onPick={() => onPick(unlisted)} mono />}
             {own.map((m) => (

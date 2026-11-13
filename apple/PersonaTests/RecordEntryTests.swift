@@ -2,10 +2,11 @@ import Foundation
 import Testing
 @testable import Persona
 
-/// One Record entry on the iPhone (#5243, docs/apple/recording.md「Meeting recordings」): Record always records a meeting, the
-/// calendar only names it, and Note is a secondary choice: before the start on the Recordings page (`RecordingStart`), and
-/// while it records from the live sheet's page menu (`MeetingRecorder.switched`, the pure half of `setMeeting`). What each
-/// way round uploads (`kind`, the attendance or the room), what Persona does then, and that every entry point says Record.
+/// One Record entry on the iPhone (#5243, docs/apple/recording.md「Meeting recordings」) and the watch (#5493): Record
+/// always records a meeting, the calendar only names it, and Note is a secondary choice: before the start on the
+/// Recordings page (`RecordingStart`), and while it records from the live sheet's page menu (`MeetingRecorder.switched`,
+/// the pure half of `setMeeting`). What each way round uploads (`kind`, the attendance or the room), what Persona does
+/// then, what the watch marks, and that every entry point says Record.
 @MainActor struct RecordEntryTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private let agent = SessionKey(machineID: "mac", sessionID: "s1")
@@ -69,6 +70,21 @@ import Testing
         #expect(RecordingKindChoice.note.title == String(localized: "Note [Recording Kind]"))
         #expect(RecordingKindChoice(recording(meeting: RecordingMeeting())) == .meeting)
         #expect(RecordingKindChoice(recording()) == .note)
+    }
+
+    /// The watch (#5493) reads no calendar: its Record marks a meeting with an empty one for the phone to name, its Note
+    /// marks nothing; each reads back as what was picked, and every message to the phone says which it is.
+    @Test func theWatchMarksAMeetingAndNotANote() {
+        #expect(RecordingKindChoice.meeting.watchMeeting == RecordingMeeting())
+        #expect(RecordingKindChoice.note.watchMeeting == nil)
+        for kind in RecordingKindChoice.allCases {
+            var made = RecordingEntry(id: UUID(), createdAt: now, source: .watch, active: true)
+            made.meeting = kind.watchMeeting
+            #expect(RecordingKindChoice(made) == kind)
+            let segment = RecordingTransfer(entry: made, segment: RecordingSegment(index: 0, start: 0, duration: 30))
+            #expect((segment.meeting == true) == (kind == .meeting), "every segment says whether it is a meeting")
+            #expect((RecordingTransfer(entry: made).meeting == true) == (kind == .meeting), "and so does the end message")
+        }
     }
 
     // MARK: While it records: Meeting → Note

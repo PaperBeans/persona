@@ -1,4 +1,5 @@
 {
+  "skills_route": "選択したスキルはこのアシスタント用です。タスクへの転送を解除してから送信してください。",
   "share": "共有…",
   "forked": "新しいチャットに分岐しました",
   "fork_failed": "分岐できませんでした：{error}",
@@ -111,6 +112,8 @@
   "codex_first_placeholder": "Codex への最初のメッセージ",
   "handoff_from": "{title} から移動しました · クリックして戻る",
   "handoff_dismiss": "戻るヒントを閉じる",
+  "inbox_back_title": "「{title}」に戻る",
+  "inbox_back_generic": "受信トレイのこの項目に戻る",
   "team": "コラボ",
   "team_needs_you": "コラボ：対応を待っている Worker があります",
   "more_actions": "その他の操作",
@@ -129,7 +132,9 @@
   "search_no_progress": "以前の記録は読み込まれませんでした。後でもう一度お試しください",
   "search_page_cap": "今回は 20 ページ読み込みました。続けて読み込めます",
   "search_not_found": "この記録の位置を特定できません。検索前の位置に戻れます",
+  "message_further_up": "このメッセージはさらに上にあります。",
   "search_origin_changed": "元の記録が変わりました。現在の記録をご覧ください",
   "search_return": "検索前の位置に戻る",
-  "search_menu": "会話内を検索"
+  "search_menu": "会話内を検索",
+  "todo_completed_label": "To-do（完了）：{title}"
 }

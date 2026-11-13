@@ -69,3 +69,27 @@ func TestWithInjectedInboxNote(t *testing.T) {
 		}
 	}
 }
+
+func TestWithInjectedAskLater(t *testing.T) {
+	h := &Hub{}
+	later := prompts.RenderAskLater(prompts.AskLater{When: "11-13 12:48", Questions: []string{"什么时候提醒？"},
+		Answers: []prompts.AskTodoChoice{{Question: "什么时候提醒？", Choice: "到家时"}}})
+	got := h.withInjected([]proto.Item{{ID: "1", Role: "user", Kind: proto.KindText, Text: later}})
+	in := got[0].Injected
+	if in == nil || in.Kind != proto.InjectedSystem || in.State != "ask_answered" || in.Title != "到家时" || in.Line != "你回答了：到家时" {
+		t.Fatalf("ask_later: %+v", in)
+	}
+	if got[0].Text != later {
+		t.Fatal("the text the model read changed")
+	}
+	for l, want := range map[i18n.Lang]string{i18n.En: "You answered: 到家时", i18n.Ja: "回答しました：到家时"} {
+		if line := injectedLine(l, in); line != want {
+			t.Errorf("%s: %q, want %q", l, line, want)
+		}
+	}
+	for state, want := range map[string]string{"ask_expired": "The question timed out unanswered", "ask_closed": "The question was closed without an answer"} {
+		if line := injectedLine(i18n.En, &proto.Injected{Kind: proto.InjectedSystem, State: state}); line != want {
+			t.Errorf("%s: %q, want %q", state, line, want)
+		}
+	}
+}

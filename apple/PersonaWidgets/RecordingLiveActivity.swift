@@ -40,14 +40,16 @@ struct RecordingLiveActivity: Widget {
                         }
                         .padding(.horizontal, IslandMetrics.gap)
                         RecordingAnswer(state: state).foregroundStyle(.white.opacity(0.85)).padding(.horizontal, IslandMetrics.gap)
-                        RecordingButtons(id: id, onDark: true, attends: state.persona != nil, recording: state.phase == .recording)
+                        RecordingButtons(id: id, onDark: true, attends: state.persona != nil, recording: state.phase == .recording,
+                                         talking: state.talking)
                             .padding(.horizontal, IslandMetrics.recordingIslandButtonsInset)
                     }
                     .environment(\.locale, LanguageStore.drawingLocale)
                 }
             } compactLeading: {
                 IslandWidth { _ in
-                    RecordingMark(phase: state.phase, size: IslandMetrics.face).padding(.leading, IslandMetrics.edge)
+                    RecordingMark(phase: state.phase, size: IslandMetrics.face, talking: state.talking == true)
+                        .padding(.leading, IslandMetrics.edge)
                 }
             } compactTrailing: {
                 IslandWidth { limited in
@@ -61,7 +63,7 @@ struct RecordingLiveActivity: Widget {
                     }
                 }
             } minimal: {
-                RecordingMark(phase: state.phase, size: IslandMetrics.limitedContent)
+                RecordingMark(phase: state.phase, size: IslandMetrics.limitedContent, talking: state.talking == true)
             }
             .widgetURL(RecordingLink.page)
             .keylineTint(Palette.recordingRed)
@@ -70,15 +72,22 @@ struct RecordingLiveActivity: Widget {
     }
 }
 
-/// The recording's mark: a red disc with a waveform while it records, a pause sign while it doesn't.
+/// The recording's mark: a red disc with a waveform while it records, a pause sign while it doesn't, and the talk mark
+/// while a talk window is open (#3862 phase 4; still, no repeating animation: they don't run in Live Activities).
 struct RecordingMark: View {
     var phase: RecordingActivityAttributes.ContentState.Phase
     var size: CGFloat
+    var talking = false
+
+    private var symbol: String {
+        guard phase == .recording else { return RecordingSymbol.paused }
+        return talking ? RecordingSymbol.talking : RecordingSymbol.recording
+    }
 
     var body: some View {
         ZStack {
             Circle().fill(Palette.recordingRed.opacity(phase == .recording ? 1 : 0.6))
-            Image(systemName: phase == .recording ? RecordingSymbol.recording : RecordingSymbol.paused)
+            Image(systemName: symbol)
                 .font(.system(size: size * 0.48, weight: .bold))
                 .foregroundStyle(.white)
         }
@@ -142,21 +151,34 @@ struct RecordingSubtitle: View {
 
 /// Bookmark and Stop: neutral and red, white words on the red (as the Fleet activity's Allow on blue). A meeting Persona
 /// attends (#2981) leads with Ask Persona (a tap asks about what was just said), and Bookmark, Turn Off (Persona stops
-/// attending) and Stop give up their words for their marks so the four fit; each keeps its name for VoiceOver.
+/// attending) and Stop give up their words for their marks so the four fit; each keeps its name for VoiceOver. A room
+/// meeting with Talk (#3862 phase 4, `talking` not nil) leads with Talk instead: a tap opens a talk window, and while it
+/// is open the button reads Done and ends it (each tap says which it was, `TalkInMeetingIntent.open`).
 struct RecordingButtons: View {
     var id: String
     var onDark = false
-    /// Persona attends: Turn Off joins the row, and while it records, Ask Persona.
+    /// Persona attends: Turn Off joins the row, and while it records, Ask Persona (or Talk).
     var attends = false
     var recording = true
+    /// The meeting's Talk: nil without it, true while a talk window is open.
+    var talking: Bool? = nil
 
     var body: some View {
         HStack(spacing: IslandMetrics.buttonGap) {
             if attends && recording {
-                Button(intent: AskPersonaInMeetingIntent(recordingID: id)) { label("Ask Persona", RecordingSymbol.ask) }
-                    .buttonStyle(.bordered)
-                    .tint(onDark ? .white : .primary)
-                    .layoutPriority(1)
+                Group {
+                    if let talking {
+                        // What the button shows goes with the tap: a stale Done can't open a window.
+                        Button(intent: TalkInMeetingIntent(recordingID: id, open: !talking)) {
+                            if talking { label("Done [Talk Window]", RecordingSymbol.talking) } else { label("Talk [Meeting Talk]", RecordingSymbol.talk) }
+                        }
+                    } else {
+                        Button(intent: AskPersonaInMeetingIntent(recordingID: id)) { label("Ask Persona", RecordingSymbol.ask) }
+                    }
+                }
+                .buttonStyle(.bordered)
+                .tint(onDark ? .white : .primary)
+                .layoutPriority(1)
             }
             Button(intent: AddRecordingBookmarkIntent(recordingID: id)) { label("Bookmark", RecordingSymbol.bookmark, iconOnly: attends) }
                 .buttonStyle(.bordered)
@@ -220,7 +242,11 @@ struct RecordingAnswer: View {
 
     var body: some View {
         if let persona = state.persona {
-            if let answer = state.answer, !answer.isEmpty {
+            if state.talking == true, state.phase == .recording {
+                // A talk window is open (#3862 phase 4): what Persona hears now, in place of the answer or the line.
+                Label { Text("Listening to you…").lineLimit(1) } icon: { Image(systemName: RecordingSymbol.talking) }
+                    .font(.caption.weight(.medium))
+            } else if let answer = state.answer, !answer.isEmpty {
                 Label { Text(answer).lineLimit(lines) } icon: { Image(systemName: RecordingSymbol.persona) }
                     .font(.caption.weight(.medium))
                     .accessibilityLabel(Text("Persona: \(answer)"))
@@ -274,7 +300,7 @@ struct RecordingLockScreen: View {
                     .frame(width: IslandMetrics.recordingLockTimerWidth, alignment: .trailing)
             }
             RecordingAnswer(state: state, lines: RecordingAnswer.lockLines(state)).foregroundStyle(.secondary)
-            RecordingButtons(id: id, attends: state.persona != nil, recording: state.phase == .recording)
+            RecordingButtons(id: id, attends: state.persona != nil, recording: state.phase == .recording, talking: state.talking)
         }
         .padding(IslandMetrics.lockPadding)
     }
@@ -298,4 +324,8 @@ enum RecordingSymbol {
     static let persona = "sparkle"
     /// The app's quote (`Theme.Icon.quote`): the meeting's latest line (#3862 phase 2).
     static let line = "text.quote"
+    /// The app's Talk (`Theme.Icon.talk`, #3862 phase 4): the button that opens a talk window.
+    static let talk = "mic.circle"
+    /// The talk mark: on the red disc while a talk window is open, and its Done (the bare microphone, as the disc is drawn).
+    static let talking = "mic.fill"
 }

@@ -3,6 +3,7 @@ the meeting conversation, `lines` on GET …/live?from= (at most 500, `more`, 40
 `topics_at`, the room setting made-up topics after a batch with a meeting_topics_set call and the tool's limits,
 `lines` and `topics` in meeting_live, in `revs` and in `?parts=`, the follow-up's seed listing the topics, the trim taking
 the live log (lines, asks and topics, their revisions 0 again, no event); and managers without it."""
+import os
 import re
 import time
 import unittest
@@ -12,6 +13,12 @@ import test_meeting_conversation_mock as conversation
 from test_meeting_attendance_mock import Hub, start
 
 LINES = conversation.LINES
+
+
+def block(text, title):
+    """A batch's context block of that title, its body only (None when there is none)."""
+    found = re.search(rf'<persona-context kind="context" title="{re.escape(title)}" url="">\n(.*?)</persona-context>', text, re.S)
+    return found and found.group(1)
 
 
 class MeetingLiveViewMockTests(conversation.Conversation, unittest.TestCase):
@@ -103,19 +110,23 @@ class MeetingLiveViewMockTests(conversation.Conversation, unittest.TestCase):
             {"title": "Next steps", "state": "open"}])
         self.assertRegex(live["topics_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
         self.assertEqual(live["revs"]["topics"], 1)
-        # The batch shows the topics so far in a block after the lines' (the apps read the first block as the lines),
-        # then the room calls meeting_topics_set and writes nothing.
+        # The batch shows the topics so far after the lines in their block (as the hub's: no line of them starts with
+        # "[", which the apps read as a line of the meeting), then the room calls meeting_topics_set and writes nothing.
         items = self.items(room["session_id"])
         batch = next(x for x in reversed(items) if x["kind"] == "text")
         self.assertIn("update the topics with meeting_topics_set", batch["text"])
-        self.assertLess(batch["text"].index("Design review · live"), batch["text"].index('title="Topics so far"'))
-        self.assertIn("None yet.", batch["text"])
+        self.assertIn("[14:00] Ada: Today we look at the export flow.\n\nTopics so far: none yet.\n", block(batch["text"], "Design review · live"))
+        self.assertEqual(batch["text"].count("<persona-context kind=\"context\""), 1)
         self.assertTrue(batch["text"].rstrip().endswith("</persona-context>"))  # not the end batch, which has words after its block
         after = items[items.index(batch) + 1:]
-        self.assertEqual([(x["role"], x["kind"]) for x in after], [("assistant", "tool_use"), ("user", "tool_result")])
+        # The topics' call first; with highlights (phase 2b, test_meeting_highlights_mock.py) the highlights' follows it.
+        highlights = [] if os.environ.get("MOCK_NO_MEETING_HIGHLIGHTS") == "1" else ["mcp__persona__meeting_highlights_set"]
+        self.assertEqual([(x["role"], x["kind"]) for x in after], [("assistant", "tool_use"), ("user", "tool_result")] * (1 + len(highlights)))
+        self.assertEqual([x["tool_name"] for x in after if x["kind"] == "tool_use"], ["mcp__persona__meeting_topics_set"] + highlights)
         self.assertEqual((after[0]["tool_name"], after[0]["tool_input"]), ("mcp__persona__meeting_topics_set", {"topics": live["topics"]}))
         self.assertEqual((after[1]["text"], after[1]["is_error"]), ("Saved.", False))
-        # The meeting moved on: the current topic is done, the new one current, the open one stays.
+        # The meeting moved on: the current topic is done, the new one current, the open one stays. ?parts=topics is the
+        # topics only (the highlights are a part of their own).
         self.post_lines(rid, 1, LINES[1:])
         moved = self.live(rid, "?parts=topics")
         self.assertEqual(set(moved), {"topics", "topics_at", "revs"})
@@ -123,7 +134,9 @@ class MeetingLiveViewMockTests(conversation.Conversation, unittest.TestCase):
                          [("Today we look at the export flow", "done"), ("Who owns the regression test", "current"), ("Next steps", "open")])
         self.assertEqual(moved["revs"], {"topics": 2})
         second = self.last_text(room["session_id"])
-        self.assertIn("(now) Today we look at the export flow · from 0:05 · Raised by Ada at 0:05.", second["text"])
+        topics = block(second["text"], "Design review · live").split("Topics so far:\n")[1]
+        self.assertTrue(topics.startswith("- current: Today we look at the export flow (from 0:05 into the meeting): Raised by Ada at 0:05.\n"
+                                          "- open: Next steps\n"), topics)
         # It did not: the same topic again changes nothing.
         self.post_lines(rid, 2, [{"start": 1830, "end": 1833, "text": "Bo: Who owns the regression test?"}])
         self.assertEqual(self.live(rid)["revs"]["topics"], 2)

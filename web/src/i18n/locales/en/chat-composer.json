@@ -1,4 +1,5 @@
 {
+  "skills_changed": "Execution environment changed. Your draft is kept; remove selected skills and select them again.",
   "cmd_continue_word": "/continue",
   "cmd_continue_desc": "Keep going",
   "cmd_continue_text": "Continue",
@@ -40,5 +41,6 @@
   "more_actions": "More actions",
   "add_more": "Add files, images and more",
   "queue": "Queue message",
-  "queue_hint": "Queue message: it goes once the agent finishes (Enter)"
+  "queue_hint": "Queue message: it goes once the agent finishes (Enter)",
+  "cmd_permissions_desc": "Switch permission mode"
 }

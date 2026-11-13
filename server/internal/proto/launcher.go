@@ -9,7 +9,7 @@ type Launcher struct {
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url"`
 	Model   string `json:"model"`
-	// Source: "zshrc" (a function in the machine's ~/.zshrc), "path" (a wrapper script on its PATH, node/pathlaunchers.go) or "persona" (managed in Settings › Models, the manager's assistant/models_launchers.go). Empty
+	// Source: "zshrc" (a function in the machine's ~/.zshrc), "path" (a wrapper script on its PATH, node/pathlaunchers.go), "persona" (managed in Settings › Models, the manager's assistant/models_launchers.go) "claude_desktop" (claude-desktop, a new session in Claude's desktop app, node/claudedesktop_new.go) or "codex_app" (codex-app, a new chat in the Codex App, node/codexapp_new.go). Empty
 	// from an older node: zshrc.
 	Source string `json:"source,omitempty"`
 	// Agent is what it starts when not Claude Code: "codex" (plain codex, or an alias running it; docs/integrations/codex.md
@@ -18,6 +18,10 @@ type Launcher struct {
 	// PromptOptional: a Codex launcher this node starts with no first message too (docs/integrations/codex.md
 	// "Starting without a first message"). Older nodes leave it out: their Codex starts need the first message.
 	PromptOptional bool `json:"prompt_optional,omitempty"`
+	// RunHere: a Codex launcher this node starts in a shell pane the user picked (Run Agent Here) and never closes or
+	// queues that pane for cleanup when the start fails (#5504; docs/integrations/terminal.md, section 21). Older
+	// nodes leave it out: Run Agent Here offers them Claude Code only.
+	RunHere bool `json:"run_here,omitempty"`
 	// Assistant: a runtime's launcher that may run the Persona assistant (docs/integrations/runtimes.md "Assistant"), whatever its agent.
 	Assistant bool `json:"assistant,omitempty"`
 }

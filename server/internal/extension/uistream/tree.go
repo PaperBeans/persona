@@ -47,6 +47,23 @@ type node struct {
 type Tree struct {
 	header wire.UIStreamSnapshot
 	root   *node
+	// view is root's serialization, filled once check accepts the tree; a
+	// checked tree never changes, so every later reader shares these bytes.
+	view json.RawMessage
+	// ownFrame: DecodeSnapshot made the tree from its own frame (MarshalJSON),
+	// byte for byte, so decoding that frame again gives the same tree.
+	ownFrame bool
+}
+
+// Decodes reports whether DecodeSnapshot(raw) gives t again: t was decoded
+// from its own frame and raw is that frame byte for byte. DecodeSnapshot reads
+// only raw, so a caller holding t need not decode and check raw again.
+func (t *Tree) Decodes(raw []byte) bool {
+	if t == nil || !t.ownFrame {
+		return false
+	}
+	frame, err := t.MarshalJSON()
+	return err == nil && bytes.Equal(frame, raw)
 }
 
 // Delta retains the validated raw presence of operation payloads alongside the
@@ -64,10 +81,19 @@ func (t *Tree) RootKey() string { return t.header.RootKey }
 
 // ViewJSON returns a detached lossless native View. Snapshot returns the generated
 // DTO projection for reading/fitting; serialize Tree itself, never this projection.
-func (t *Tree) ViewJSON() json.RawMessage { return t.root.json() }
+func (t *Tree) ViewJSON() json.RawMessage { return bytes.Clone(t.viewJSON()) }
+
+// viewJSON is ViewJSON without the defensive copy, for readers in this
+// package that never modify or retain the bytes.
+func (t *Tree) viewJSON() json.RawMessage {
+	if t.view != nil {
+		return t.view
+	}
+	return t.root.json()
+}
 func (t *Tree) Snapshot() wire.UIStreamSnapshot {
 	out := t.header
-	_ = decodeDTO(t.ViewJSON(), &out.View)
+	_ = decodeDTO(t.viewJSON(), &out.View)
 	return out
 }
 func (t *Tree) MarshalJSON() ([]byte, error) {
@@ -80,7 +106,7 @@ func (t *Tree) MarshalJSON() ([]byte, error) {
 	}
 	var obj map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &obj)
-	obj["view"] = t.ViewJSON()
+	obj["view"] = t.viewJSON()
 	return json.Marshal(obj)
 }
 func (d *Delta) Frame() wire.UIStreamDelta {
@@ -119,7 +145,7 @@ func DecodeSnapshot(raw []byte) (*Tree, error) {
 	root := parseNode(obj["view"], "view", frame.RootKey)
 	frame.View = wire.View{} // never retain a mutable DTO tree internally
 	t := &Tree{header: frame, root: root}
-	if err := t.check(); err != nil {
+	if err := t.check(raw); err != nil { // raw passed validateRaw above
 		return nil, rejected(err)
 	}
 	return t, nil
@@ -139,7 +165,7 @@ func (t *Tree) AcceptSnapshot(raw []byte) (*Tree, error) {
 	if next.Session() != t.Session() || next.Epoch() != t.Epoch() || next.RootKey() != t.RootKey() || next.Version() < t.Version() {
 		return nil, rejected(errors.New("snapshot identity or version mismatch"))
 	}
-	if next.Version() == t.Version() && !bytes.Equal(next.ViewJSON(), t.ViewJSON()) {
+	if next.Version() == t.Version() && !bytes.Equal(next.viewJSON(), t.viewJSON()) {
 		return nil, rejected(errors.New("conflicting same-version snapshot"))
 	}
 	return next, nil
@@ -494,15 +520,27 @@ func (n *node) find(key string) (found, parent *node, index int) {
 	}
 	return nil, nil, 0
 }
-func (t *Tree) check() error {
+
+// check checks the whole tree. validated is a frame the caller already put
+// through validateRaw as a UIStreamSnapshot (nil: none); validateRaw reads
+// only the bytes, so the tree's own frame is not validated again when it is
+// the same frame.
+func (t *Tree) check(validated []byte) error {
+	// Serialize the finished tree once; the frame check below and every
+	// accessor after it reuse these bytes.
+	t.view = t.root.json()
 	frame, err := t.MarshalJSON()
 	if err != nil {
 		return err
 	}
-	if err := validateRaw("UIStreamSnapshot", frame, FrameMost); err != nil {
-		return err
+	if validated == nil || !bytes.Equal(frame, validated) {
+		if err := validateRaw("UIStreamSnapshot", frame, FrameMost); err != nil {
+			return err
+		}
+	} else {
+		t.ownFrame = true // only a tree check accepts is returned
 	}
-	raw := t.ViewJSON()
+	raw := t.view
 	// Unknown native nested fields must not hide code/config behind legacy schemas
 	// that intentionally tolerate additional properties on snapshot-only models.
 	var v wire.View

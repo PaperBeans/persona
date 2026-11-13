@@ -40,5 +40,6 @@
   "presets": "プリセット",
   "how_to_fix": "直し方",
   "engine_via": "{provider} で実行",
-  "effort_unset": "モデルのデフォルト"
+  "effort_unset": "モデルのデフォルト",
+  "show_all": "{count} 件をすべて表示"
 }

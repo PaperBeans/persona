@@ -24,6 +24,7 @@ type fakeBuiltins struct {
 	unmuted  []string
 	mutesErr error
 	setErr   error
+	migrated []string // "<id>=<on>" as switched (#6345)
 }
 
 func newBuiltins() *fakeBuiltins {
@@ -43,6 +44,19 @@ func newBuiltins() *fakeBuiltins {
 }
 
 func (b *fakeBuiltins) List(context.Context) []Builtin { return b.list }
+
+func (b *fakeBuiltins) SetMigrated(_ context.Context, id string, on bool, _ subscriptions.Actor) error {
+	if b.setErr != nil {
+		return b.setErr
+	}
+	b.migrated = append(b.migrated, id+"="+map[bool]string{true: "on", false: "off"}[on])
+	for i := range b.list {
+		if b.list[i].ID == id && b.list[i].Via != nil {
+			b.list[i].Via.On, b.list[i].Via.Subscription = on, subscriptions.MigrationID(id)
+		}
+	}
+	return nil
+}
 
 func (b *fakeBuiltins) SetFeed(_ context.Context, id string, inbox, on bool, _ subscriptions.Actor) error {
 	if b.setErr != nil {

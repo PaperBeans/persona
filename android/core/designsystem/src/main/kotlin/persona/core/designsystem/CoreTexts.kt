@@ -94,6 +94,7 @@ private fun resourceOf(key: CoreText.Key): Int = when (key) {
     CoreText.Key.CloseAgentTitle -> R.string.designsystem_core_close_agent_title
     CoreText.Key.CloseAgentMessageTab -> R.string.designsystem_core_close_agent_message_tab
     CoreText.Key.CloseAgentMessagePane -> R.string.designsystem_core_close_agent_message_pane
+    CoreText.Key.CloseAgentMessageRuntime -> R.string.designsystem_core_close_agent_message_runtime
     CoreText.Key.DeleteSessionTitle -> R.string.designsystem_core_delete_session_title
     CoreText.Key.DeleteSessionOnMachineCommand -> R.string.designsystem_core_delete_session_on_machine_command
     CoreText.Key.DeleteSessionOnMachine -> R.string.designsystem_core_delete_session_on_machine
@@ -128,6 +129,7 @@ private fun resourceOf(key: CoreText.Key): Int = when (key) {
     CoreText.Key.StateWaiting -> R.string.designsystem_core_state_waiting
     CoreText.Key.StateMuted -> R.string.designsystem_core_state_muted
     CoreText.Key.StateIdle -> R.string.designsystem_core_state_idle
+    CoreText.Key.CodexWaiting -> R.string.designsystem_core_codex_waiting
     CoreText.Key.StateNotRunning -> R.string.designsystem_core_state_not_running
     CoreText.Key.StateUnknown -> R.string.designsystem_core_state_unknown
     CoreText.Key.AgentsNoTodo -> R.string.designsystem_core_agents_no_todo
@@ -140,6 +142,14 @@ private fun resourceOf(key: CoreText.Key): Int = when (key) {
     CoreText.Key.CountIdle -> -R.plurals.designsystem_core_count_idle
     CoreText.Key.ListSeparator -> R.string.designsystem_core_list_separator
     CoreText.Key.RepoOther -> R.string.designsystem_core_repo_other
+    CoreText.Key.DirectionDoing -> R.string.designsystem_core_direction_doing
+    CoreText.Key.DirectionNeedsYou -> R.string.designsystem_core_direction_needs_you
+    CoreText.Key.DirectionStuck -> R.string.designsystem_core_direction_stuck
+    CoreText.Key.DirectionReview -> R.string.designsystem_core_direction_review
+    CoreText.Key.DirectionPlanned -> R.string.designsystem_core_direction_planned
+    CoreText.Key.DirectionSecretary -> R.string.designsystem_core_direction_secretary
+    CoreText.Key.DirectionUntitled -> R.string.designsystem_core_direction_untitled
+    CoreText.Key.DirectionCountNeedsYou -> R.string.designsystem_core_direction_count_needs_you
     CoreText.Key.InboxAction -> R.string.designsystem_core_inbox_action
     CoreText.Key.InboxFyi -> R.string.designsystem_core_inbox_fyi
     CoreText.Key.InboxNoise -> R.string.designsystem_core_inbox_noise

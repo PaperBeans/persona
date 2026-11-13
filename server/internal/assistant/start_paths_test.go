@@ -36,6 +36,7 @@ var supervisedStarts = map[string]string{
 	"toolConversationNew": "toolConversationNew", // conversation_new: followed until it reports back (spawned.go, #4669)
 	"runTool":             "quietAgentTask",      // agent_start: a quiet task of the main conversation, or of assistant.agent_tasks (#3638, #3617)
 	"dispatchStart":       "superviseDispatched", // dispatch_start: adopted as the main conversation's task (#3442)
+	"taskSpawn":           "taskSpawn",           // joins the caller's verified task and keeps its existing ledger
 	// a task whose agents all stopped goes on with a new agent on the same task, its ledger kept (#4754)
 	"startTaskSuccessor": "startTaskSuccessor",
 }

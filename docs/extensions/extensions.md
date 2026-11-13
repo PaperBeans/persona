@@ -107,6 +107,7 @@ What an extension contributes where is written in the manifest's `contributes`: 
 | --- | --- | --- | --- | --- |
 | `connectors` (version 2) | `connector.` | The manifest fields of the connector protocol: `id` (`^[a-z][a-z0-9]*$`), `name`, `capabilities`, `hosts`, `agent_tools`, `unlisted`, `confirm_always?` (globs of write-operation names; `connector_gate`'s `allow` is also always clamped to confirm-on-phone, `deny` unchanged), `poll_seconds`, `kinds`, plus `kind_descriptions?` (kind → one line "Type: …" shown to the model, used by Inbox triage, drafting and the AI twin), `archive_sources?` (other names the archive may also go under), `cli?` (a command line on the assistant's PATH, see `docs/protocol/connector-protocol.md` ("Command line")), `sends_as_user?` (the connector sends messages in the user's name by itself, outside the write gate; see "Sent as the user: `sent.record`" below) | Process speaks the protocol | The connector registry (**Settings › Connectors**, Inbox, knowledge base, the assistant's tools); methods in `docs/protocol/connector-protocol.md`, including optional `catalog` source discovery/read calls and recipes (`docs/extensions/subscriptions.md`) |
 | `voice` (version 1) | — | `id`, `name?` | `runtime.http` | The App's voice chat; contract under "Voice" below |
+| `transcription` (version 1) | — | `id`, `name?` | `runtime.http` | Meeting transcription on the hub, for the manager only (#3862 phase 5); contract under "Transcription" below |
 | `computer` (version 1) | — | `id`, `name?` | — | The assistant's computer-control tools and the toggle on the machine page (only the built-in `cua`), see [computer-use.md](computer-use.md) |
 | `browser` (version 1) | — | `id`, `name?` | — | The assistant's browser tools (`browser_run` / `browser_look`) and **Browser** on the machine page (only the built-in `ego`), see [plan-ego-browser.md](../plans/plan-ego-browser.md) |
 | `iphone` (version 1) | — | `id`, `name?` | — | The assistant's phone-control tools (`iphone_status` / `iphone_look` / `iphone_do`), **Phone Control** on a computer's page and **Control of This iPhone** on the iPhone (only the built-in `iphone`), see [iphone.md](iphone.md) |
@@ -1864,6 +1865,9 @@ Quota extensions contribute `quota` and answer a launcher's quota (`docs/integra
    methods are GET / POST / PUT / DELETE / HEAD only, request body at most 1 MB, response at most 4 MB, and redirects are only followed to the same origin.
 3. The extension returns `{report}` (`Report` in `server/internal/quota`: `key_name`, `usage`, `budget`, `pools`, `note`…; when `gateway` / `gateway_name` are omitted, the contribution's id / name are used; the app shows `gateway_name`);
    if it is not its gateway, it returns the error code `unsupported` and the hub asks the next one.
+   Each `usage` entry may say what its `label` covers in `period`: `day`, `week` or `month`, in the user's `tz`. Clients
+   add up only entries that say (the iPhone's Usage widget takes the `cost_usd` of the `day` ones); an entry without it
+   is shown by its label alone.
 
 **Outside the launcher page** (#2846): sidebar pages (`nav_page`), cards and widgets have no launcher context, so extensions that accepted `launcher_keys` can look up launchers themselves:
 
@@ -2510,8 +2514,8 @@ A hub picture that fails to load may have outlived its token, so the page is dra
 A row's extra actions open from a right click, a half-second press on a touch screen and the … button at its end (no swipe on the web).
 The component showcase's version 6 pages are `web/src/showcase/v6` (with their pictures in `web/src/showcase/images`) until the showcase extension's own snapshots have them.
 
-**iOS** (#827) draws it in parts and sends 6 only when all of it is drawn, after the rest of UI version 5; meanwhile the hub downgrades it as for any older app. Drawn so far: row controls
-(see "App: Settings › Extensions" below). One difference from the web and Android: a switch that asks first has already moved when the alert shows (a system switch cannot be held where it was), and Cancel puts it back.
+**iOS** (#827) draws it in parts and sends 6 only when all of it is drawn, after the rest of UI version 5; meanwhile the hub downgrades it as for any older app. Drawn so far: row controls, the styles
+(the 45 icons, named colors, `title` / `headline`), row actions, charts and sparks, tiles (grid, carousel), the new fields and pictures, that is all of it; reporting 6 is the last step; see "App: Settings › Extensions" below. One difference from the web and Android: a switch that asks first has already moved when the alert shows (a system switch cannot be held where it was), and Cancel puts it back.
 
 ## System-level placements (#1858)
 
@@ -2952,6 +2956,35 @@ Views, components, actions, responses, placements and context all use schema-gen
   `GET /mock/invalidate` syncs one note and sends `ui.invalidate`; UI test `ExtensionV3Tests` (list, filters, more, search to empty state, push note page, edit/save/pop, invalidate),
   unit tests `ExtensionUIv3Tests`, `PersonaCardTests`. `MOCK_EXTENSION_CARDS=1` with `ExtensionAssistantCardTests` checks in a real assistant chat that
   `persona-view` and old `persona-card` share the renderer, actions are not tappable, links remain, and saves light/dark screenshots. Four-client showcase comparison depends on #1852, not replaceable by notes screenshots.
+- UI version 6's styles (#827): every name of the icon set (UI version 4's code hosting and version 6's 45 for homes and markets) is drawn as the app's own symbol
+  (`ExtensionUIStyle.icon`; meanings the app already has, such as home, lock, camera, play, use its own); the 11 named colors are `Theme.Hue`'s (`ExtensionUIStyle.color`), on marks only:
+  a row's icon in its color on the design system's `IconTile`, a metric's icon before its label, an empty state's mark, and a badge as a soft tint of the color behind words in the text's
+  own color (a tone, when it has one, wins). `text` takes `title` and `headline` (heading levels for VoiceOver). Unit tests `ExtensionStylesTests` read the schema's names; screenshots of
+  `showcase › styles` with `ExtensionShowcaseShotsUITests`.
+- UI version 6's row actions (#827, `ExtensionRowActions.swift`): a row's `actions` in a long press's menu (a right click on the Mac), usual ones first and destructive ones red and last,
+  with their icons; those with `swipe` also under a swipe from the trailing edge (the destructive one at the edge, a full swipe runs none); one with `confirm` asks in an alert with **Cancel**
+  (a stream page asks in its own way); VoiceOver has them as the row's actions; on a card without a page they are left out. Screenshots of `showcase › row-actions`.
+- UI version 6's charts (#827): `area` (`DataChart`'s areas: overlapping and see-through with their lines, or stacked), `candlestick` (`CandleChart`: one series of open / high / low /
+  close, volume bars under it when every point has one, rising green unless `rising` is red, the falling one the other color; holding a candle reads its prices), a series' named `color`
+  (after its tone); `spark` (`TrendLine`) before a row's value, under a metric's number and a stat's, in its named color, else its tone's, else the quiet ink. Unit tests
+  `ExtensionChartsTests`; screenshots of `showcase › chart-v6` and `showcase › spark`.
+- UI version 6's tiles (#827, `ExtensionTiles.swift`): a `grid` in as many columns as fit (two on a phone, at most `max_columns`, 4 when absent), a `carousel` in one line that scrolls
+  sideways and snaps to a tile (narrow, regular, or wide: most of the width), both on the page's background as wide as the sections. A tile has its picture across the top (https; a hub one
+  comes with pictures) or its icon in its color, the title, a state line, a value and a spark, a badge and a switch in its corner (the controls' model: shown at once, confirm asks); `active`,
+  or its switch on, lays its color under and around it, the text staying in the ink. Tapping does its action, a long press shows its `actions`; VoiceOver reads it as one element. Unit tests
+  `ExtensionTilesTests`; screenshots of `showcase › grid`, `carousel` and `home-demo`.
+- UI version 6's fields (#827, `ExtensionFields.swift`, `ExtensionFieldValues.swift`): `date`, `time` and `datetime` with the system's picker, held to `earliest`…`latest` (a pair the wrong
+  way round allows any), written as the wire writes them in the page's time zone (this device's, `context.tz`); empty, the row says **Not Set** and a tap sets it to now (held to the range)
+  rather than showing a date nobody chose, and a set one has a clear button. `multichoice`: a menu of toggles that stays open while picking, the chosen ones named beside the label, sent as a
+  JSON array in the choices' order (anything else reads as none chosen). `multiline`: a field that grows from 3 to 8 lines. A field's `detail` is a line of help under it. Unit tests
+  `ExtensionFieldValuesTests`; screenshots of `showcase › inputs-v6`.
+- UI version 6's pictures (#827, `ExtensionMedia.swift`): an `image` in its shape (`aspect`; `auto` from `width` / `height`), cropped or fitted (`fit`), its caption under it, VoiceOver
+  reading its `alt`; a tap opens the app's `ImageViewer` unless `no_zoom`. A tile's picture, a row's thumbnail and avatar likewise. A `url` loads without the app's credentials; a `path`
+  only when it is the hub's image route for the page's own extension (`ExtensionViewModel.isHubPicture`), through the page with the device's credentials and `w` about as many pixels as it
+  is drawn; when a hub picture fails (its token may have run out) the page is drawn again, at most once a minute. Not loaded: the plain fill; failed: the alt text over a broken-picture mark.
+  Mock: `showcase` pages get a `path` beside every `ref` and the route answers a made-up picture of its shape (`missing`: 404). Unit tests `ExtensionMediaTests`; screenshots of `showcase › image`.
+  A section whose every component this app leaves out (one it doesn't know) is not drawn, rather than its title alone over
+  nothing; a section sent with no components keeps its title (`ExtensionParts.of`).
 - UI version 5's code review (#827, "UI version 5: code review"), drawn in parts (pages send 4 until all of version 6 is drawn too, so the hub strips these fields for iOS meanwhile).
   Reading (`ExtensionCodeReview.swift`, the code page): the words that changed in a removed and added pair on a stronger fill (PersonaKit's `LineDiff` word comparison, worked out once per hunk);
   generated files and lockfiles (by the extension's `generated` or the web's path list), changes over 400 lines and viewed files start folded with a line saying why and **Show**; a generated
@@ -3522,6 +3555,24 @@ Closing the WebSocket ends this conversation.
   Recording uses `VOICE_COMMUNICATION` plus system echo cancellation (so the model does not hear itself on speaker), see `docs/android/android.md`.
 - iOS: duplex voice chat in CarPlay (`docs/apple/carplay.md`), using the plugin's default model and voice.
 
+## Transcription
+
+The `transcription` point (#3862 phase 5) turns a meeting's audio into text on the hub, for the manager, which writes the live log and the hub's transcript from it;
+the program stores nothing. The contract (the job's frames both ways, which contribution transcribes, the built-in one's sessions) is
+[meeting-minutes.md](../assistant/meeting-minutes.md) "The `transcription` extension point"; this is the extension's side in short.
+
+- **Endpoints**, on the program's own socket under the contribution's id, apart from the voice point's `GET /info` and `GET /ws`:
+  `GET /transcription/{cid}/info` → `{"protocol": 1, "features": ["live", "replay", "interim"], "setup"?: …}` (`extwire.TranscriptionInfo`), and
+  `GET /transcription/{cid}/ws`, one job per connection (`extwire.TranscriptionFrame` both ways, PCM16 little-endian mono 16 kHz in binary frames). A `cid` the program does not contribute is `404`.
+- **Only the manager dials them** (`extmgr` `TranscriptionInfo` and `TranscriptionDial`), straight to the socket, with no credential and no `X-Persona-*` headers.
+  The apps' forward to an extension (`/api/v1/extensions/<id>/…`, the old `/api/v1/plugins/<id>/…`, and a computer's `…/-/machines/<mid>/…`) answers `404 not_found` for every path under
+  `/transcription/`, however it is spelled (escaped, another case, dot segments) and whatever the credential, `extensions.call:<id>` included.
+- **Which one transcribes**: the built-in voice extension's `gpt-live`, unless the owner names another in the assistant's `meeting_transcription_extension`
+  (`"<extension id>/<contribution id>"`): installing an extension never sends it meeting audio. A contribution is used only while its extension is enabled and running and
+  the contribution is not switched off ("Turning contributions on and off"); an extension started by requests is started for `/info`, as for any relayed request.
+- **A job is a request**: it holds the program's open request (`host.Proc.BeginHTTP`) until it ends, so an extension started by requests is not stopped mid-meeting.
+  The phone's audio socket to the manager, by contrast, does not count in the manager's open requests (`Manager.Serving`): a meeting never holds a redeploy, and the phone sends again from where the hub's audio ends.
+
 ## Built-in voice extension (`personad voice`)
 
 personad includes a kind = `voice` extension, using a real-time service speaking the **GPT-Live protocol** (code `server/internal/voice`, prompts
@@ -3598,8 +3649,12 @@ The form's upstream has no `tools` switch, so it is auto: it declares the functi
   - **Prefer deletion on failure**: delete whether or not key-presence can be read (idempotent); unreadable presence still returns `secrets_cleared`. If deletion fails, save nothing, return 500 `secret_not_cleared`;
     if config save fails after deletion (database write failure, 409), the error also includes `secrets_cleared` and the old address remains. Invalid form config (400) changes nothing and keeps the key.
 - **Model fallback**: if the selected model's upstream disappears (address cleared, manager.json changed), no error/disconnect: use default model and voice, then send nonfatal `error{code: "model_unavailable"}` after connecting.
-- **`GET /info`**: `{"protocol": 2, "features": ["target", "runs", "asks", "resume", "suspend", "speak"], "setup"?: "…", "warnings"?: ["…"]}`, without keys or upstream list. `protocol` is the highest voice-frame version this extension speaks (2 since #3502; clients not sending `protocol: 2` in `start` still use protocol 1 from this section); `features` lists only implemented capabilities (`docs/assistant/voice.md` ("Version negotiation")).
+- **`GET /info`**: `{"protocol": 2, "features": ["target", "runs", "asks", "resume", "suspend", "speak", "meeting"], "setup"?: "…", "warnings"?: ["…"]}`, without keys or upstream list. `protocol` is the highest voice-frame version this extension speaks (2 since #3502; clients not sending `protocol: 2` in `start` still use protocol 1 from this section); `features` lists only implemented capabilities (`docs/assistant/voice.md` ("Version negotiation")).
 - **`POST /speak`** (#5004, feature `speak`): `{"text", "model"?, "voice"?, "lang"?}` read aloud in its own upstream session (no tools, instructions to say the text exactly as written); answers `200` `audio/pcm` with `X-Persona-Audio-Rate` and the reply's PCM16 as it comes, or, before any audio, `{"error", "code"}` with `400 bad_request`, `403 forbidden` (not a full device), `503 no_upstream`, `502 upstream_forbidden`, `503 upstream_unavailable`, `502 upstream_failed` or `504 no_audio`. The iPhone says meeting answers with it outside a call; details in `docs/assistant/voice.md` ("Reading a text aloud").
+- **Meeting calls** (#3862 phase 4, feature `meeting`): a protocol 2 `start` with `mode: "meeting"` and `recording_id`, bound to a recorded meeting's room, that hears only what the owner says while holding Talk (`talk` frames) and hands every question to the room; a room takes no other call (`meeting_room`). Details in `docs/assistant/voice.md` ("Meeting calls").
+- **Meeting transcription** (#3862 phase 5): the manifest also contributes `transcription: [{"id": "gpt-live", "name": "GPT-Live"}]` beside its voice (its kind stays `voice`), with the same upstreams and key.
+  It transcribes only through a GPT-Live (`live` dialect) upstream: the default model's when its upstream is one, else the first `live` upstream's default; with none,
+  `GET /transcription/gpt-live/info` says `setup: "live_upstream"`. See "Transcription" above and [meeting-minutes.md](../assistant/meeting-minutes.md) "The built-in adapter".
 - **Extension env vars**: `PERSONA_EXTENSION_CONFIG` (form values with defaults), `PERSONA_EXTENSION_SECRETS` (`{"key": "…"}`, decrypted only in process environment),
   `PERSONA_VOICE_HUB_CONFIG` (original `config` of the taken-over entry), entry `env`, and `PERSONA_HUB_URL` / `PERSONA_HUB_TOKEN` (manifest `hub_api`, as before);
   legacy `PERSONA_PLUGIN_*` names are also supplied and accepted.

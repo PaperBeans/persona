@@ -2,6 +2,14 @@
 
 Pitfalls, odd behavior, and the trade-offs made at the time (formerly in `CLAUDE.md`, index in `docs/lessons/README.md`). Add new lessons to the matching section; create a section if none fits.
 
+## Supervised handoffs and runtime children (#5751)
+
+Codex sidecar parent/root metadata establishes display ancestry, not a to-do link. A standalone `create_thread` can
+have no parent metadata at all. Use `task_spawn` for a separate session on the current supervised task; never work
+around missing task tools by extracting the hub token. Codex's shared daemon may carry an old pane environment, so
+its per-turn `CODEX_THREAD_ID` must resolve unambiguously in the node's registry before a CLI handoff. Unknown
+threads must not fall back to whichever task an inherited pane happens to run.
+
 - An Agent SDK guest must register its session id and tools before the node starts: its bridge lists tools before
   `assistant.send` returns. A later `guestSet` makes the first list empty, and a connected MCP server with no tools
   does not fail by itself. On SDK 0.3.318 / Claude Code 2.1.322, use `tools: []` for no built-ins and register the
@@ -404,6 +412,7 @@ passed in the login shell and reset the launcher to `ok`, so the assistant kept 
 - Keep a refusal's code through every hop (`control.go` used to wrap it into text with the screen tail; `startLog.finish` kept only `err.Error()`): the apps and the hub can only word what still has its code.
 - Match what the programs really print, not what they mean to: `personad launch` ends through `log.Fatal`, whose default flags put the date and time in front (a pattern anchored at the start of the line never matched it);
   dash, ksh and busybox say `not found` of a missing path; fish follows an error inside a function with a backtrace that repeats the function's arguments, the session id with them.
+- Don't read a shell's lines by their English words alone (#6122): bash translates them through gettext (about 40 catalogs) and glibc translates `strerror`, and Homebrew's bash on a Mac follows the system language even without `LANG` (`bash: nosuch: 未找到命令`), so the start waited out its timeout on any non-English machine. Read the line's shape instead (a shell's name first, then colon or full-width colon parts, one of them the start's own command), and only for the command the start itself typed, so rc noise in any language still never ends a start.
 - Don't compare a node's timestamps with the manager's clock: a node whose clock ran behind made a first failed start look counted already. Keep what was counted instead (with the health records, across restarts).
 
 ## Don't default to bare claude when resuming externally created sessions (2026-11-05, #411)
@@ -414,6 +423,9 @@ passed in the login shell and reset the launcher to `ok`, so the assistant kept 
 - Keep the session's original model on resume (`sessionState.Model`); switch to the "New Agent" model only when using the hub-selected launcher.
 
 ## `--resume` without `--model` brings back the session's last model (2026-11-09, #2487, 2.1.296)
+
+- A model's `model_not_found` is not automatically a configuration error (#5234). The live main conversation's model answered normally, then the gateway returned 404 on later turns; treating every user-selected model as final left each turn on an error card. Record when a model last answered in this conversation: a `model_not_found` within an hour gets the same bounded same-model retry as a 5xx, then the normal model chain. Never replay a model that has not answered here, and remember a missing recovery-chosen fallback for its launcher across conversations and resident handovers so it is not offered again at once.
+- An Agent SDK bridge has no `initialize` control request. Its own task-list control must supply an explicit empty background-task inventory before a model switch may restart it. Unknown or refused inventories must still block the switch.
 
 - Claude Code restores the model a resumed session last ran on. Only `--model`, `ANTHROPIC_MODEL` or an `ANTHROPIC_DEFAULT_*_MODEL` stops it; `"model"` in `settings.json` or `--settings` does not.
   The main chat had no model configured, so the app said "Claude Code default", but every `--resume` kept the model an earlier start had used. When the gateway dropped that model, every turn failed (`model_not_found`, later a 503 retried ten times), and changing Claude Code's settings changed nothing.
@@ -432,6 +444,8 @@ passed in the login shell and reset the launcher to `ok`, so the assistant kept 
   - When herdr already detects the Agent process in the pane (Claude, Codex, pi…), `pane.report_agent_session` accepts and persists `resume_argv` directly without `pane.report_agent`. Do **not** claim detected panes with a one-shot `pane.report_agent {state: "idle"}`: in herdr 0.9.x a custom reporter's `hook_authority` overrides screen and OSC state detection in `recompute_effective_state`, locking `agent_status` to `idle` for the lifetime of the Agent (#4657). Clear any stale `custom:persona` authority with `pane.clear_agent_authority {source}` (never without `source`, which would also drop `herdr:pi`'s full-lifecycle authority), and fall back to `pane.report_agent` only when `pane.report_agent_session` returns `resume_not_accepted` (an Agent process herdr doesn't detect natively, such as a compatible CLI, where `traexAgents` reads state itself and must still merge session-less entries in `snap.Agents`). Releasing authority via CLI (`herdr pane release-agent`) also requires `--seq` greater than the last reported `seq`, or `accept_hook_report` drops the release.
   - herdr types argv into the pane shell: quote only necessary elements (an alias as the first element still expands); elements must not contain single quotes.
   - If official integration later reports the same or another session id, herdr retains the original `resume_argv`: after a session id change, explicitly report again or it restores the old session.
+  - herdr before 0.9.2 answers `ok` to `resume_argv` and drops it (2026-11-13: a dev machine ran 0.9.0 for days; the upgrade to 0.9.5 by live handoff carried nothing over, the node believed it had reported, and the next restart resumed Persona's Agents bare). A report holds only for the server that took it: the node records the server instance (`herdr.Client.ServerID`, the socket's mtime, new on every restart, handoff and upgrade) and `backfillResume` reports again when a Persona pane's server changed.
+  - The argv is `eval "<the start command with --resume <id>>"`: herdr only checks that the first word is a plain name (`eval` passes) and types it into the pane's shell, so `CLAUDE_CONFIG_DIR=…` prefixes and launchers that are shell functions work without a wrapper script on PATH. herdr also refuses control characters and more than 8 KiB (`resumeSayable`). Real-Claude check in a throwaway named session: `herdrresume_live_test.go`.
 
 
 ## Claude status line (2026-11-05, #1963)
@@ -561,6 +575,13 @@ Recorded screens: `server/internal/screen/testdata/claude-2.1.318-rewind-*`; par
 - Clear input: single-line uses `ctrl+k ctrl+u` (no notice); multiline needs one `ctrl+c`, which shows `Press Ctrl-C again to exit` below. Press once only, and only after confirming the box holds that message.
 - Tests: `claudeSim` in `node/rewind_sim_test.go` renders the recorded screens, and `TestClaudeSimMatchesRecordedScreens` compares each row, so flow tests use actual screen appearances. Its restore gate can hold the prompt back after the panel closes, making the late-restore race deterministic instead of relying on a sleep.
   Live testing runs only in a disposable session (`go test -tags herdrlive -run TestLiveRewind`, `PERSONA_LIVE_PANE` / `PERSONA_LIVE_PROMPT`), with an isolated herdr server and a fresh directory, never the agent's working herdr or a real conversation.
+
+## Paseo's rewind of a Claude Code agent forks its session (2026-11-12, #6293, Paseo 0.14)
+
+- `agent.rewind.request` with `mode: "conversation"` forks the Claude session at the last answered turn before the target (the Agent SDK's `forkSession`): a new `<id>.jsonl` beside the old one, which stays untouched, and the agent moves to the new id (`persistence.sessionId`). With no answered turn before it, the agent gets a fresh id and no transcript until its next prompt.
+- A Persona session listed under its Claude session id would therefore come back under another id. Pin it first: `update_agent_request {labels: {"persona.session": <id>}}` (labels merge; one cannot be removed over the wire, so the pin is for good, as for a session Persona started).
+- `messageId` is the timeline `user_message.messageId`: the transcript entry's uuid for history Paseo loaded, else the client message id, which Paseo maps to the provider's id (and refuses before the provider acknowledged the prompt). The handler does not load the agent: read its timeline first (that loads it).
+- Which providers can: the agent snapshot's `capabilities.supportsRewindConversation` / `supportsRewindFiles` / `supportsRewindBoth` (Claude Code all three; Codex, pi, omp the conversation; OpenCode both at once only).
 
 ## herdr reports terminal-blocking Claude notices as done (2026-11-05, #2553)
 
@@ -910,6 +931,10 @@ sees a wait it can't name, and a following `dequeue` pops whatever it guessed. G
 `cancelled: false` as "it went in": writing it again would send it twice. Check such behavior against the real CLI with a short
 `claude -p` script before building on it; the requests are not in the public docs.
 
+## Herdr workspace directories come from panes (#4761)
+
+herdr's `workspace.list` does not report a workspace cwd, even though panes do (#4761). Resolve cwd-only worktree requests from each session's `pane.list` and optional worktree metadata, with canonical deepest-prefix matching. Only associate a pane-derived directory when the workspace's panes agree: herdr creates from the workspace source, so a matching later pane must not select another repository (#5524). A linked-worktree workspace holds only its checkout, not its main repository: herdr refuses it as a worktree source. A workspace that contains the path can still belong to an ancestor repository. Use it for native creation only when its matched directory is inside the requested Git root; otherwise use Git. Use foreground directories only when the workspace has no stable pane directory. Test with workspace records that omit cwd and a matching second pane from another repository. A repository with no matching terminal workspace can still use Git worktree creation and open a plain workspace: checkout isolation remains, but terminal parent grouping is unavailable.
+
 ## A published runtime stream must end after its viewer leaves (#5247)
 
 The Hub caches the latest live text for new subscribers. The runtime SDK's watch state can disappear before the
@@ -917,6 +942,37 @@ prompt finishes, while that published text still exists. `streamEnd` uses the st
 watch to send its empty boundary, and cancels pending throttled text first. A native transcript may have a
 middle-truncated copy of the reply, so text reconciliation alone cannot retire the Hub's full cached copy.
 Cover unwatch before completion, a pending batch, and a later watcher in the SDK and AGY lifecycle tests.
+
+## A `-c` moves a Codex into the pane's environment (2026-11-12, #4860, codex-cli 0.167.1)
+
+- From 0.163, `codex` with any `-c` override other than a feature switch runs its own app-server in the pane instead
+  of joining the shared daemon (`codex-rs/tui/src/daemon_startup.rs`, `config_exclusion`). The tier effort
+  (`-c model_reasoning_effort=…`) counts. Besides the terminal-only route, Codex then makes its startup requests
+  with the pane's environment rather than the daemon's.
+- One computer reached `chatgpt.com` only through a proxy. The user's `codex` shell function set the proxy, and the
+  daemon had inherited it. `personad codex-start` ran the `codex` on `PATH` (#4876 covers that part), so a tier
+  with an effort made every start fail with `account/read failed during TUI bootstrap: … workspace routing discovery
+  timed out`. The same launcher with no effort worked, and so did a manual `codex`.
+- To tell the two modes apart, look in Codex's log database (`<CODEX_HOME>/logs_2.sqlite`, table `logs`). The span
+  for `account/read` says `rpc.transport="in-process"` (its own app-server) or `unix_socket` (the daemon). The TUI
+  also shows a warning that it runs without the shared background server.
+- An effort the Codex already runs at is now left out (`node/codex_start_effort.go`). A different effort still needs
+  `-c`, and that start still runs with the pane's environment.
+- Bare `codex` may instead be a shell function preserved by #4876. Its profile or `-c` can change the effective
+  effort without appearing in the node's words. Keep the tier's flag when that function exists or its resolution
+  cannot be checked; an explicit executable path does not go through the function.
+
+## herdr's published state can be a reporter's word, not the screen's (2026-11-12, #4865)
+
+- `herdr agent get` / `agent list` / the snapshot give the pane's published `agent_status`; `herdr agent explain <pane>` runs the
+  screen detection again and names the rule it matched. When they disagree (explain says `working` from `osc_title_working`,
+  get says `idle`), a reporter holds the pane and its last report wins: on herdr 0.7.5 a single `pane.report_agent` with
+  `state: idle` kept a running Codex `idle` until the reporter released it (#4657). Compare the two before suspecting Persona's
+  own judgment, and test reporter behavior only on an isolated server (`env -i`, its own HOME and XDG directories).
+- An agent Persona can judge itself must not take herdr's word alone. Claude panes already had `claudeStatus`; a Codex pane
+  joined on its app-server listed Idle for a whole turn while the node knew the turn ran (its `turn/started`), and its chat
+  page showed Working from the live words, so the two pages disagreed. `codexStatus` counts the app-server's turn and Codex's
+  title spinner over the host's done / idle / unknown.
 
 ## Native preview exports can silently truncate assistant replies (#5644)
 

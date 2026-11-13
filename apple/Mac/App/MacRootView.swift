@@ -412,6 +412,7 @@ struct MacMachinesPage: View {
             MachinesView()
                 .environment(\.macBelowTitleRow, true) // below the section's title, not scrolling through it (#1243)
                 .navigationDestination(for: MachineDetailRoute.self) { r in MachineDetailView(ref: r.ref) }
+                .navigationDestination(for: TerminalsRoute.self) { r in TerminalsView(only: r.machine) }
                 .navigationDestination(for: SessionKey.self) { key in ChatView(key: key).id(key) }
         }
         .environment(\.macSectionStack, true) // a machine's page: its ‹ and name in the title row (#2318)

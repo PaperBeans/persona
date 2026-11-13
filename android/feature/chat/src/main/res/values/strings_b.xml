@@ -251,7 +251,6 @@
     <string name="chat_links_context_default">See the content above.</string>
     <string name="chat_menu_copied">Copied</string>
     <string name="chat_menu_no_share">No app can share this</string>
-    <string name="chat_menu_select_title">Select text</string>
     <string name="chat_menu_copy">Copy</string>
     <string name="chat_menu_select">Select</string>
     <string name="chat_menu_quote">Quote</string>
@@ -364,6 +363,10 @@
     <string name="chat_queue_send_now_message">Sends the queued messages to the agent now. A command it is running keeps running in the background; a reply it is writing starts again with your message.</string>
     <string name="chat_queue_send_now_message_persona">%1$s gets them right away instead of at its next step. What it is doing now stops, or goes on in the background when it can, and it starts again with your messages.</string>
     <string name="chat_queue_relayed_note">Arrives when this chat is free</string>
+    <plurals name="chat_queue_relayed_summary">
+        <item quantity="one">%1$d message from another conversation is waiting</item>
+        <item quantity="other">%1$d messages from other conversations are waiting</item>
+    </plurals>
     <string name="chat_queue_sent_now">Sent to the agent now</string>
     <string name="chat_composer_photos_only">Please look at the photos</string>
     <string name="chat_composer_photo_placeholder">[Photo]</string>

@@ -166,20 +166,30 @@ internal fun ChatQueueStrip(
         onNotice(resources.getString(R.string.chat_queue_sent_now))
     }
     val sendNowLabel = stringResource(R.string.chat_queue_send_now)
-    val relayedNote = stringResource(R.string.chat_queue_relayed_note)
     val photoMark = stringResource(R.string.chat_composer_photo_placeholder)
     val videoMark = stringResource(R.string.chat_composer_video_placeholder)
     // Glass says how many photos a Persona message carries under its words (iOS's "N images", from what this phone sent), not as a mark among them.
-    val photoCounts = if (persona != null && PersonaTheme.style == AppStyle.Glass) queued.mapIndexed { index, text -> if (index < own) composerPhotoCount(text) else 0 }
+    val photoCounts = if (persona != null && PersonaTheme.style == AppStyle.Glass) queued.take(own).mapIndexed { _, text -> composerPhotoCount(text) }
         else emptyList()
-    // A new session's queue starts folded (Glass), as each chat's does on iOS.
+    // The owner's own rows and the ones other conversations sent in are separate: since #6394 the latter collapse to
+    // one summary line inside QueueStrip instead of spreading over the composer.
+    val ownItems = queued.take(own).mapIndexed { index, text ->
+        composerMessagePreview(text, if (photoCounts.getOrElse(index) { 0 } > 0) "" else photoMark, videoMark)
+    }
+    val relayedItems = queued.drop(own).map { text -> composerMessagePreview(text, photoMark, videoMark) }
+    val relayedSummary = relayedItems.takeIf { it.isNotEmpty() }?.let {
+        resources.getQuantityString(R.plurals.chat_queue_relayed_summary, it.size, it.size)
+    }
+    // A new session's queue starts folded (Glass), as each chat's does on iOS. The title counts everything waiting;
+    // inside, the owner's own rows stay editable and the relayed backlog is the collapsed summary line (#6394).
     key(session.key) {
         QueueStrip(queueTitle(queued.size, persona ?: session.agentLabel, resources),
-            queued.mapIndexed { index, text -> composerMessagePreview(text, if (photoCounts.getOrElse(index) { 0 } > 0) "" else photoMark, videoMark) },
+            ownItems,
             onItem = { index -> queued.getOrNull(index)?.let { picked = index to it } }, busy = busy, enabled = enabled,
             sendNow = sendNowLabel.takeIf { steers && own > 0 }, onSendNow = { confirmSend = true },
-            notes = queued.indices.map { index -> relayedNote.takeIf { index >= own } }, initiallyExpanded = initiallyExpanded,
-            photos = photoCounts)
+            initiallyExpanded = initiallyExpanded, photos = photoCounts,
+            relayedItems = relayedItems, relayedSummary = relayedSummary,
+            onRelayedItem = { index -> queued.getOrNull(index)?.let { picked = index to it } })
     }
     if (confirmSend) JDialog(onDismiss = { confirmSend = false }, title = stringResource(R.string.chat_queue_send_now_title),
         text = persona?.let { stringResource(R.string.chat_queue_send_now_message_persona, it) }

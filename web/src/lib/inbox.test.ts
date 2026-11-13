@@ -10,7 +10,7 @@ vi.mock("./store", () => ({
 vi.mock("../ui/atoms", () => ({ toast: vi.fn() }));
 
 import {
-  badgeCount, bulkMessage, bulkScope, bulkScopeName, canDraft, cardText, connectorReference, connectorSources, contextXML, openTitle, openURL, sourceLine, conversationRoute, docChangeLine, emojiLabel, fromLine, getInbox, handOffMessage, interactionAsk,
+  badgeCount, bulkMessage, bulkScope, bulkScopeName, canDraft, cardText, connectorReference, connectorSources, contextXML, openTitle, openURL, sourceLine, conversationRoute, docChangeLine, emojiLabel, fromLine, repeatsSummary, getInbox, handOffMessage, interactionAsk,
   interactionMuted, interactionTitle, itemPath, kindLabel, labelIsUrgent, mailAccounts, mergeMessages, momentText, nextLarkPosition, partRuns, reloadInbox,
   replyLarkMessage, resetInboxForTests, sections, sendLarkMessage, sendReply, setAllDone, setDocStatus, setDone, shortTime, triage, triageBanner, TRIAGE_REASONS, TRIAGE_SETTINGS,
   listInboxMutes, muteCovers, muteItem, muteLine, muteShortName, muteTitle, unmuteInbox,
@@ -997,5 +997,17 @@ describe("静音的文字", () => {
     expect(muteCovers("lark", o, item("b", { mutes: [o], done_at: at(1) }))).toBe(false);
     expect(muteCovers("lark", o, item("c", { mutes: [{ ...o, value: "f2" }] }))).toBe(false);
     expect(muteCovers("github", o, item("d", { mutes: [o] }))).toBe(false);
+  });
+});
+
+describe("the assistant's own rows (#6430)", () => {
+  const row = (patch: Partial<InboxItem> = {}) => item("assistant:s1", { source: "assistant", sender: "Assistant", preview: "Three meetings today", summary: "Three meetings today", connector: { thread: "m/s" }, ...patch });
+  it("says the text without a sender prefix, and not twice under the summary", () => {
+    expect(fromLine(row())).toBe("Three meetings today");
+    expect(repeatsSummary(row())).toBe(true);
+    expect(repeatsSummary(row({ preview: "Three meetings today, the review moved to 15:00" }))).toBe(true); // starts with the summary
+    expect(repeatsSummary(row({ preview: "Something else" }))).toBe(false);
+    expect(repeatsSummary(row({ summary: undefined }))).toBe(false);
+    expect(repeatsSummary({ ...row(), source: "github" })).toBe(false); // other sources draw as before
   });
 });

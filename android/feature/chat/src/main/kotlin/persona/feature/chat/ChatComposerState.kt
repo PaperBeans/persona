@@ -69,6 +69,7 @@ class ChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()) {
     /** What [message] says for videos sent without words or photos ("Please look at the video", iOS); kept like [photosOnlyText]. */
     var videosOnlyText: String = ""
     var value by mutableStateOf(TextFieldValue(initial.text, TextRange(initial.text.length)))
+    var draftLoaded by mutableStateOf(false)
     private var attachmentList by mutableStateOf(initial.attachments)
     /** Edited photos' sources, edits and history by attachment id (#4992): kept in memory beside the draft, never sent. */
     internal var photoEdits by mutableStateOf<Map<String, PhotoEdits>>(emptyMap())
@@ -130,6 +131,7 @@ class ChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()) {
         value = TextFieldValue(draft.text, TextRange(draft.text.length))
         attachments = draft.attachments
         sessionVersion = draft.sessionVersion
+        draftLoaded = true
     }
 
     fun editMessage(text: String) {
@@ -206,8 +208,11 @@ class ChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()) {
 }
 
 @Composable
-fun rememberChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()): ChatComposerState =
-    rememberSaveable(saver = ChatComposerState.Saver) { ChatComposerState(initial) }
+fun rememberChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()): ChatComposerState {
+    val state = rememberSaveable(saver = ChatComposerState.Saver) { ChatComposerState(initial) }
+    SideEffect { state.draftLoaded = true }
+    return state
+}
 
 internal fun quoteComposerPath(path: String): String =
     if (path.any { it.isWhitespace() || it in "'\"\\\$`;&|<>()[]{}*?!" }) "'${path.replace("'", "'\\''")}'" else path

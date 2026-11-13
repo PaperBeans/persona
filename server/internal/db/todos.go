@@ -805,6 +805,30 @@ func (d *DB) linkTodoAgentWithSource(ctx context.Context, todoID, machineID, ses
 	return releasedTodoIDs, nil
 }
 
+// ReleaseTodoAgent lets go of an agent still linked to a todo (released_at only: it stays in the todo's history, unlike
+// UnlinkTodoAgent's dismissal). A link already let go is left as it is. A new agent taking over the todo after this one
+// stopped does it (#6427).
+func (d *DB) ReleaseTodoAgent(ctx context.Context, todoID, machineID, sessionID string, at time.Time) error {
+	conn, err := d.pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+	return pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		if _, err := lockTodoAgentMembership(ctx, tx, todoID, machineID, sessionID); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE todo_agents SET released_at = $4
+			WHERE todo_id = $1 AND machine_id = $2 AND session_id = $3 AND released_at IS NULL`,
+			todoID, machineID, sessionID, at.UTC())
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE todos SET updated_at = $2 WHERE id = $1`, todoID, at.UTC())
+		return err
+	})
+}
+
 // UnlinkTodoAgent marks the agent as released and dismissed on a todo (soft unlink, #762).
 func (d *DB) UnlinkTodoAgent(ctx context.Context, todoID, machineID, sessionID string) error {
 	conn, err := d.pool.Acquire(ctx)

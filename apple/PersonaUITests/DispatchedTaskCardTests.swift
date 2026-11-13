@@ -85,8 +85,9 @@ final class DispatchedTaskCardTests: XCTestCase {
     @MainActor func testStandaloneOpensItsAgentAndBackReturnsToAssistant() throws {
         let app = launch()
         let one = link(app, "todo_task_widget")
-        XCTAssertTrue(one.label.contains("派出 1 件：修小组件横屏崩溃"), one.label)
-        XCTAssertTrue(one.label.contains("打开"), one.label)
+        // one card: the title, how the Agent came to it, when it last moved and its state, in one element
+        XCTAssertTrue(one.label.contains("修小组件横屏崩溃"), one.label)
+        XCTAssertFalse(one.label.contains("派出"), "the old \"Dispatched\" line is back: \(one.label)")
         try shot(app, "one")
         one.tap()
         assertPush(app, title: "给天气 App 加主屏幕小组件", session: "macbook/a1f3c2d4-0000-4000-8000-000000000001")
@@ -101,7 +102,7 @@ final class DispatchedTaskCardTests: XCTestCase {
         let app = launch()
         let starting = link(app, "todo_dispatch_starting")
         starting.tap()
-        XCTAssertTrue(app.staticTexts["正在开 Agent"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["正在开 Agent"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.staticTexts["检查启动状态"].exists, "another task's detail opened")
         XCTAssertFalse(app.otherElements["action-tray.running"].exists)
         try shot(app, "starting")
@@ -109,11 +110,13 @@ final class DispatchedTaskCardTests: XCTestCase {
         XCTAssertTrue(app.buttons["关闭"].firstMatch.waitForNonExistence(timeout: 5))
 
         let first = link(app, "todo_task_tests")
-        XCTAssertTrue(first.label.contains("补齐网络层的单元测试") && first.label.contains("打开"), first.label)
+        XCTAssertTrue(first.label.contains("补齐网络层的单元测试"), first.label)
         XCTAssertEqual(app.buttons.matching(identifier: "dispatch.task.todo_task_tests").count, 1, "duplicate per-task feed link")
         XCTAssertEqual(app.buttons.matching(identifier: "dispatch.task.todo_task_release").count, 1)
-        XCTAssertTrue(app.staticTexts["未启动的计划任务"].exists)
-        XCTAssertFalse(app.buttons["未启动的计划任务"].exists, "failed plan slot has an invented target")
+        let unstarted = app.descendants(matching: .any)["dispatch.unstarted"].firstMatch
+        XCTAssertTrue(unstarted.exists)
+        XCTAssertTrue(unstarted.label.contains("未启动的计划任务") && unstarted.label.contains("Unavailable"), unstarted.label)
+        XCTAssertFalse(app.buttons["dispatch.unstarted"].exists, "failed plan slot has an invented target")
         try shot(app, "many")
         first.tap()
         assertPush(app, title: "补齐网络层的单元测试", session: "macbook/a1f3c2d4-0000-4000-8000-000000000002")

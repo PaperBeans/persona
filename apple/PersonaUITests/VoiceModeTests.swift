@@ -16,7 +16,7 @@ final class VoiceModeTests: XCTestCase {
     private static let samples: [(name: String, shows: String)] = [
         ("listening", "voice-bar"), ("working", "voice-line-stop"), ("asking", "voice-asking"), ("approval", "voice-bar"),
         ("refused", "voice-line-clear"), ("plan_feedback", "voice-line-plan"), ("paused", "voice-bar"), ("speaking", "voice-bar"),
-        ("ended", "voice-continue"), ("setup", "去设置"),
+        ("ended", "voice-continue"), ("setup", "去设置"), ("unprompted", "voice-line-anyway"),
     ]
 
     private var hub: String {

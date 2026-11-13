@@ -19,6 +19,7 @@ import (
 	"github.com/nwverse/persona/server/internal/nodeupdate"
 	"github.com/nwverse/persona/server/internal/office"
 	"github.com/nwverse/persona/server/internal/osproc"
+	"github.com/nwverse/persona/server/internal/procs"
 	"github.com/nwverse/persona/server/internal/scriptcli"
 	"github.com/nwverse/persona/server/internal/toolcli"
 )
@@ -38,7 +39,7 @@ const Usage = `  personad hook             Claude Code hook entry (reads hook JS
   personad notify "title" [body] [--silent] [--error] [--strict]
                            one notification to the phone; exit 0 whatever happens unless --strict (docs/integrations/script-cli.md)
   personad tool <tool> [<json args> | -] | --cli <connector> [--format json|text] <words…>
-                           a connector's tools and command line from the assistant's shell, through the hub
+                           a connector's tools from the assistant's shell, or task_spawn from a supervised Agent's pane
                            (docs/protocol/connector-protocol.md "Command line"; personad tool --help)
   personad office docx|pptx|xlsx|check …
                            write a Word document or a deck from Markdown, a workbook from JSON / CSV, or say what is in
@@ -125,7 +126,7 @@ func runNode(ctx context.Context, args []string, b Build) error {
 			// runResident replaces itself on a restart or update (syscall.Exec): what the previous image started (the
 			// update watchdog, the herdr server, bridges) is this one's child now, and only this reaps it.
 			osproc.ReapInherited()
-			capProcs()
+			procs.AtStart()
 			return runResident(ctx, b, supervised)
 		case "tailcat":
 			return runNodeTailcat(ctx, args[1:])
@@ -148,7 +149,7 @@ func runNode(ctx context.Context, args []string, b Build) error {
 	// What a parent left inheritable (an older hub's listening socket, through its manager) stops here, not in every
 	// agent and program the node starts. Here, not in main: other commands of this binary hand descriptors on by exec.
 	osproc.SealInherited()
-	capProcs() // the resident node's too, above
+	procs.AtStart() // the resident node's too, above
 	relayed, err := node.Relay(ctx, os.Stdin, os.Stdout)
 	if relayed {
 		if errors.Is(err, io.EOF) {

@@ -6,7 +6,7 @@ import { openNewAgent } from "../lib/new-agent";
 import { useStore } from "../lib/store";
 import { useWorkspaceCatalog, workspaceTarget } from "../lib/workspace-catalog";
 import type { WorkspaceTarget } from "../lib/workspace-target";
-import { createdWorkspace, creationSession, repositoryDraft, samePlacement, sourceKey, type WorktreeCreationSession } from "../lib/worktree-creation";
+import { createdWorkspace, creationSession, repositoryDraft, samePlacement, sourceKey, unsupportedWorktreeParent, type WorktreeCreationSession } from "../lib/worktree-creation";
 import { openCreated, prepareWorktree, saveWorktreePreset, suggestedPath, typeBranch, typePath, worktreeAdmission,
   worktreeProblem, worktreeSources, WORKTREE_COPY, type WorktreePrepare, type WorktreeRequest, type WorktreeSource, type WorktreeTarget } from "../lib/worktree";
 import { Button, cx, Dialog, Spinner } from "../ui/atoms";
@@ -219,7 +219,7 @@ function Composer({ session, request, onClose }: { session: WorktreeCreationSess
             <Notice>{t("worktree-composer.legacy")}</Notice>
             <p className="truncate text-xs text-ink-3" title={info.root}>{info.branch ? t("worktree.repo_on_branch", { repo: info.repoName, branch: info.branch }) : t("worktree.repo_detached", { repo: info.repoName })}</p>
             {repo.basic && <Notice>{t("worktree-composer.basic_help")}</Notice>}
-            {(draft.name || draft.note || repo.baseRef || repo.preset || repo.provider || draft.parent !== undefined && !info.choose_parent) && <Button tone="quiet" onClick={() => {
+            {(draft.name || draft.note || repo.baseRef || repo.preset || repo.provider || unsupportedWorktreeParent(draft, info)) && <Button tone="quiet" onClick={() => {
               session.update({ name: "", note: "", ...(!info.choose_parent ? { parent: undefined } : {}) }); session.updateRepository({ baseRef: "", preset: "", provider: undefined });
             }}>{t("worktree-composer.clear_advanced")}</Button>}
             {info.automatic_name && <Select label={t("worktree-composer.naming")} value={draft.automaticName ? "auto" : "manual"} onChange={(v) => session.update({ automaticName: v === "auto" })}>

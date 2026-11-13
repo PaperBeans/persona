@@ -50,5 +50,6 @@
   "follow_row": "モデル設定に従う",
   "carry_dropped": "{computer} では {name} を使えないため、このコンピューターのデフォルトに戻しました。",
   "preset_picked": "プリセット {name} · {what}",
-  "typed_now": "今回入力したモデル ID"
+  "typed_now": "今回入力したモデル ID",
+  "temporary_session": "一時セッション"
 }

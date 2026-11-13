@@ -3,6 +3,13 @@
     <string name="machines_title">机器监控</string>
     <string name="machines_title_detail">机器详情</string>
     <string name="machines_summary">%1$d/%2$d 台在线，%3$d 台需要注意</string>
+    <string name="machines_summary_with_agents">%1$d/%2$d 台在线，%3$s，%4$s</string>
+    <plurals name="machines_attention">
+        <item quantity="other">%d 台需要注意</item>
+    </plurals>
+    <plurals name="machines_agents_needs_you">
+        <item quantity="other">%d 个 Agent 需要你</item>
+    </plurals>
     <string name="machines_refresh">刷新</string>
     <string name="machines_sessions_failure">机器和会话列表暂未更新。</string>
     <string name="machines_empty_title">还没有电脑</string>
@@ -54,6 +61,8 @@
     <string name="machines_disk_total">磁盘（共 %1$s）</string>
     <string name="machines_sessions_title">运行中的会话</string>
     <string name="machines_no_sessions">这台机器还没有运行中的会话</string>
+    <string name="machines_agents_show_all">显示全部 %1$d 个</string>
+    <string name="machines_agents_show_less">收起</string>
     <string name="machines_system_title">系统信息</string>
     <string name="machines_system_os">系统</string>
     <string name="machines_system_version">版本</string>

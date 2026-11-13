@@ -192,6 +192,8 @@ describe("meeting fields", () => {
     expect(hasMaterial(rec({ meta: { kind: "note", chars: 120 } }))).toBe(true);
     expect(hasMaterial(rec({ segments: [{ start: 0, end: 4, text: "Call the vendor." }] }))).toBe(true);
     expect(hasMaterial(rec({ meta: { chars: 0 }, segments: [{ start: 0, end: 4, text: "  " }] }))).toBe(false);
+    // Persona's echo is no material (#5905): the hub's chars leave it out too.
+    expect(hasMaterial(rec({ meta: { chars: 0 }, segments: [{ start: 0, end: 4, text: "You kept the cap.", echo: true }] }))).toBe(false);
     expect(hasMaterial(rec({ minutes }))).toBe(true);
     // A trimmed recording keeps only its minutes.
     expect(hasMaterial(rec({ meta: { chars: 120, trimmed_at: "2026-11-10T07:00:00Z" } }))).toBe(false);

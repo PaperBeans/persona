@@ -15,6 +15,7 @@ struct PersonaApp: App {
             RootView()
                 #if DEBUG && os(iOS)
                 .modifier(TreeSwapFlip()) // `-swapTreeAway YES` (#2836)
+                .overlay { HomeGalleryOverlay() } // `-showHomeWidgets YES`: every widget, every size (docs/apple/home-widgets.md)
                 #endif
                 .environment(model)
                 .task(id: model.fleetLook) { LiveActivityController.shared.look(model.fleetLook) { model.fleetFaces } }
@@ -30,6 +31,7 @@ struct PersonaApp: App {
                         return
                     }
                     if RecordingLink.matches(url) { MeetingRecorder.openRecordings(); return } // the recording's activity
+                    if let kind = HomeWidgetLink.kind(url) { model.openWidget(kind); return } // a Home Screen widget
                     #endif
                     if let link = ExtensionSystemLink(url: url) { model.openExtension(link); return }
                     if SentSettingsLink.matches(url) { model.openSentRecords(); return }
@@ -77,6 +79,9 @@ struct PersonaApp: App {
                 PushRegistrar.shared.foreground() // notifications allowed in Settings since a denial: register now (#1861)
                 model.resumeLinks()
                 model.refreshExtensionSurfaces()
+                #if os(iOS)
+                HomeWidgetWriter.shared.tellHub() // whether the hub should wake it for its widgets (#5721)
+                #endif
                 // Rolling recordings expire even when no segment arrives and the recording page stays closed.
                 RecordingRollingKeeper.shared.schedule()
                 // All-day recording: what waited while the app was away (a model can download now, a 403 pause ends), and
@@ -96,6 +101,7 @@ struct PersonaApp: App {
                 }
                 #if os(iOS)
                 ClipboardOfferWatcher.shared.returned(model) // copied something elsewhere: offer to send it to a computer
+                RemindersImporter.shared.activate(model) // Reminders imported as to-dos, when that is on (#4009)
                 #endif
             } else if new == .background {
                 #if os(iOS)
@@ -181,14 +187,30 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         }
         // `-openRecapsFresh YES`: no away recap closed yet, so the newest shows open again (RecapInFlowTests).
         if d.bool(forKey: "openRecapsFresh") { d.removeObject(forKey: "closedRecaps") }
-        // `-openDraftsFresh YES`: nothing left typed in any chat's box from an earlier run (SelectTextTests read a copy by
-        // pasting it there; a long one left behind makes the box tall and moves the chat, #603).
-        if d.bool(forKey: "openDraftsFresh") { AppModel.shared.drafts = [:] }
+        // `-openDraftsFresh YES`: nothing left in any chat's box from an earlier run, typed or over it (SelectTextTests
+        // read a copy by pasting it there; a long one left behind makes the box tall and moves the chat, #603; a forward
+        // a failed run left over a box takes the place of the same message forwarded again, #3838).
+        if d.bool(forKey: "openDraftsFresh") {
+            let model = AppModel.shared
+            model.drafts = [:]
+            model.composerContexts = [:]
+            model.composerComments = [:]
+        }
         // `-openScreenFresh YES`: no Mac's Screen Sharing sign-in remembered, One-Tap Unlock off (ScreenPasswordTests, #1322).
         if d.bool(forKey: "openScreenFresh") {
             ScreenCredentials.forgetAll()
             ScreenUnlock.forgetAll()
         }
+        #if DEBUG
+        // `-openScreenDemo YES`: open the live-screen page on a placeholder Mac (no hub needed) for screenshots of the
+        // picture switcher and the connection-stats overlay; pair with -showScreenStatsDemo / -showScreenFallbackDemo (#3954).
+        if d.bool(forKey: "openScreenDemo") {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(600))
+                AppModel.shared.screenOpen = ScreenOpen(machine: MachineRef(id: "Studio"))
+            }
+        }
+        #endif
         // `-showLarkSendFresh YES`: no Feishu draft and no outbox (unsent, failed messages) from an earlier run:
         // LarkSendTests found earlier runs' failed messages and drafts in the chat (#1627).
         if d.bool(forKey: "showLarkSendFresh") {
@@ -265,6 +287,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                 try? Data(PushCrypto.publicKey(key).utf8).write(to: dir.appending(path: "push-key.txt"))
             }
         }
+        #if os(iOS)
+        // `-showHomeWidgetSample YES` (or `ticked`): the widgets draw the gallery's made-up snapshot, written at once
+        // (Home Screen screenshots without a hub, docs/apple/home-widgets.md「Screenshots」).
+        if let sample = d.string(forKey: "showHomeWidgetSample"), sample != "NO" { HomeWidgetWriter.shared.showSample(sample) }
+        #endif
         if let phase = d.string(forKey: "showFleetSample") {
             LiveActivityController.shared.showSample(phase, details: d.bool(forKey: "fleetDetails"), island: d.string(forKey: "fleetIsland"),
                                                      count: d.integer(forKey: "showFleetCount"))
@@ -358,8 +385,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // That group's hub (`hub_id`, the key); unknown: every group.
         let group = AppModel.shared.pushGroup(info)
         AppModel.shared.wakeLinks(group)
+        #if os(iOS)
+        HomeWidgetData.shared.refresh() // the calendar, Health and the usage the widgets show, when due
+        #endif
         nonisolated(unsafe) let done = completionHandler
         DispatchQueue.main.asyncAfter(deadline: .now() + 25) {
+            #if os(iOS)
+            HomeWidgetWriter.shared.flush() // the hub woke it for the widgets (#5721), or anything they show changed
+            #endif
             if UIApplication.shared.applicationState == .background { AppModel.shared.suspendLinks() }
             done(.newData)
         }
