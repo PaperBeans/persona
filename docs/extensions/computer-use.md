@@ -447,8 +447,9 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
   Persona Link.app (`Contents/Helpers/Persona Screen.app`, bundle id `<link id>.screen`) that captures one display
   with ScreenCaptureKit and encodes it with VideoToolbox (HEVC Main, else H.264 High). It is an app bundle so its
   Screen Recording grant is its own, not the node's: the node starts it through LaunchServices
-  (`open -g -n -b <id>.screen --args --socket <path> --token <t>`), and it connects back over a 0600 Unix socket, one
-  per stream, whose first line is the token. `--request-permission` calls `CGRequestScreenCaptureAccess()` and exits;
+  (`open -g -n <helper> --args --socket <path> --token <t>`), and it connects back over a 0600 Unix socket, one
+  per stream, whose first line is the token. `mac-link.sh` builds it the same way every time (no timestamp), so an
+  unchanged helper keeps its ad-hoc signature, and its grant, across Persona Link updates. `--request-permission` calls `CGRequestScreenCaptureAccess()` and exits;
   `--preflight` prints whether Screen Recording is granted without asking (`CGPreflightScreenCaptureAccess()`), which
   the node reports as `screen_video.permission`.
   - **Capture** (`ScreenCaptureSource`): the encoder settings gate ① measured (`RealTime`, low-latency rate control,
@@ -461,11 +462,25 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
     fresh `hello`, `format` and keyframe. `paused` says why capture stopped (`permission`, `locked`, `login_window`,
     `display_gone`, `busy`); when the Mac unlocks it sends `resumed` and starts again. The stream closing ends the
     helper.
-- **Node** (`screen.dial {id, pair, keep_awake}`): starts the helper and joins its socket to the stream, or refuses
-  with `video_unavailable` (no helper or no permission), `not_signed_in` (no RFB stream with this `pair` past Screen
-  Sharing's SecurityResult) or `busy` (two streams already open). It binds the video to the signed-in 5900 stream
-  carrying the same `pair` and follows that handshake's security types (30, 2, 1) to confirm the login; video ends when
-  that RFB stream closes. `keep_awake` works as it does for 5900 (`node/awake.go`).
+- **Node** (`screen.dial {id, pair, keep_awake}`, `node/screen.go`, `node/screenhelper.go`): starts the helper and
+  joins its socket to the stream, or refuses with `video_unavailable` (no helper or no permission), `not_signed_in` (no
+  RFB stream with this `pair` past Screen Sharing's SecurityResult) or `busy` (two streams already open). It binds the
+  video to the signed-in 5900 stream carrying the same `pair` and follows that handshake's security types (30, 2, 1)
+  to confirm the login; video ends when that RFB stream closes. `keep_awake` works as it does for 5900
+  (`node/awake.go`).
+  - **Which helper**: the one in Persona Link.app under `/Applications` or `~/Applications`. On a Mac with a node
+    signing certificate (`docs/operations/mac-node-signing.md`) the node runs its own copy instead,
+    `~/.persona/bin/Persona Screen.app`, signed with that certificate under the helper's bundle id, so its grant lasts
+    through helper updates too. It copies and signs again only when Persona Link installs another helper (a hash of its
+    executable and `Info.plist`, kept beside the copy), never touches the one inside Persona Link (that would break the
+    app's seal), and runs the installed one when signing fails.
+  - **Start**: the socket is in the user's own temporary directory (0700), 0600 itself, and goes as soon as the helper
+    is connected; the token is 16 random bytes, compared in constant time, and the line is read unbuffered so no
+    stream bytes go with it. The helper has 10 s to connect and say it.
+  - **Permission**: the helper's `--preflight`, run through LaunchServices (so it is about the helper's grant), at most
+    once a minute. `screen_video {version, codecs, permission}` carries it; the node leaves `screen_video` out of the
+    statuses (`advertiseScreenVideo`) until the iPhone's decoder is in the official TestFlight build, since apps
+    before it would show a picture switcher they can't use. `screen.dial` works either way.
 - **Hub** (`GET …/screen/video/connect?pair=…`): a binary WebSocket with the same checks as `…/ports/5900/connect`
   (full device, `cua` or `ego` on), counted against the same 64 streams per machine. It calls `screen.dial` and relays
   the bytes without parsing them.

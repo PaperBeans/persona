@@ -381,6 +381,17 @@ its task decision together before sending it to a hook. A plan approval must sel
 mode can fall back to bypass permissions on the node. Count confirmation dispatch at `tellUser`, not interaction
 creation or app presentation; quiet tasks and supervisor routing also show cards without ringing the user.
 
+## The supervision fingerprint only sees the agent's words (#6027)
+
+`digestFingerprint` (`supervise_dedup.go`) folds a signal into the one told in the last 30 minutes when its agent's
+last words are unchanged, because a new turn or a periodic sweep is not news. Some signals carry news that is not in the
+agent's words: the owner's answer to a decision's round, a recheck or undecidable review of a new round, a start
+attempt's failure or start. They were dropped: the owner's "You decide" after "Tell me the background first" ended the
+card but never reached the supervisor, and a retry that failed with the first try's error was never told although
+`task_retry` promised it. Such kinds now hash their key too (`keyIsNews`), and a failed start's key names its attempt.
+A new signal kind whose key names one event, rather than moving with every turn, belongs in `keyIsNews`; test it with
+the agent's words unchanged, which is the case that hides the drop (the task's agent is usually stopped while it waits).
+
 ## A card the chat waits on must be in the chat (#4883)
 
 A Persona conversation's first Bash waited three and a half minutes for approval while its card was only inside the
@@ -481,13 +492,20 @@ by their own deadlines) and act on the first signal that settles it (the 200), n
 fixing a suspected leak, count: a stress test over every exit path with the counter read afterwards settles it
 faster than reading the code again.
 
-## The supervision fingerprint only sees the agent's words (#6027)
+## A send whose answer came too late may have gone in (2026-11-12)
 
-`digestFingerprint` (`supervise_dedup.go`) folds a signal into the one told in the last 30 minutes when its agent's
-last words are unchanged, because a new turn or a periodic sweep is not news. Some signals carry news that is not in the
-agent's words: the owner's answer to a decision's round, a recheck or undecidable review of a new round, a start
-attempt's failure or start. They were dropped: the owner's "You decide" after "Tell me the background first" ended the
-card but never reached the supervisor, and a retry that failed with the first try's error was never told although
-`task_retry` promised it. Such kinds now hash their key too (`keyIsNews`), and a failed start's key names its attempt.
-A new signal kind whose key names one event, rather than moving with every turn, belongs in `keyIsNews`; test it with
-the agent's words unchanged, which is the case that hides the drop (the task's agent is usually stopped while it waits).
+The manager waits 90 s for a relayed message (`drainRelays`) and kept it queued when no answer came. The node had
+written it after the first of two session-list rebuilds inside the send and was still building the second when the
+time ran out, so every later drain wrote it again: one conversation read the same message 32 times in an hour, and the
+messages queued behind it waited. A send in doubt is not a failure. Relays now carry one `once_id` per message
+(`relayMsgID`), which the node sends once (`sentLog`); a try in doubt first looks for the message's line in the
+conversation's latest turns (`relayArrived`: context blocks left out, no line older than the try, the sending
+conversation as its source), and one not found then is looked for again before the next try (`relayLanded`), which
+covers a line that lands late and a node restarted in between; and the send pushes the session list in the background, waiting for it only briefly
+(`notifySessionsSoon`, `listPushWait`). The id is deliberately not a `client_msg_id`: a line tied to one reads as the
+owner's own message everywhere (its source label, task briefs, user-input counts, extensions). The web had the same
+blind spot for the owner's own sends: a send answered 502 `delivered: "unknown"` stayed a failed bubble unless the hub
+tied a transcript line to its id, so the owner sent it again; a send in doubt now also settles by its words written
+after it (`inDoubt` in `web/src/lib/outbox.ts`; `isEcho` in `web/src/lib/echo.ts` allows 5 s for the clocks, not
+`CLOCK_SLACK_MS`); one whose copy arrived before the answer did was already settled while it went (`flight.echoed()`
+in ChatView). A refusal never settles by words.

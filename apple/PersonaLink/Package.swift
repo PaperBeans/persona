@@ -13,8 +13,9 @@ let package = Package(
                           swiftSettings: [.define("NATIVE_MIGRATION_STORAGE_ONLY")]),
         .testTarget(name: "PersonaLinkTests", dependencies: ["PersonaLink"], path: "Tests/PersonaLinkTests"),
         // Persona Screen: the iOS live-screen video helper (#3954, docs/extensions/computer-use.md). PersonaScreenKit
-        // is the pure wire protocol (shared with the app later); PersonaScreen is the app bundle the node launches.
-        // The real ScreenCaptureKit + VideoToolbox capture lands in the PoC on a real Mac; the skeleton stubs it.
+        // is the pure wire protocol and the capture decisions (shared with the app later); PersonaScreen is the app
+        // bundle the node launches, capturing with ScreenCaptureKit and encoding with VideoToolbox. mac-link.sh
+        // embeds it in Persona Link.app.
         .target(name: "PersonaScreenKit", path: "Sources/PersonaScreenKit"),
         .executableTarget(name: "PersonaScreen", dependencies: ["PersonaScreenKit"], path: "Sources/PersonaScreen"),
         .testTarget(name: "PersonaScreenKitTests", dependencies: ["PersonaScreenKit"], path: "Tests/PersonaScreenKitTests")

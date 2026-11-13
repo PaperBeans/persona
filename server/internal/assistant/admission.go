@@ -1,9 +1,13 @@
 package assistant
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,10 +56,12 @@ type AdmissionSettings struct {
 	Enabled *bool `json:"enabled,omitempty"`
 	// LoadPerCore refuses when load1 exceeds cores times this (4 by default).
 	LoadPerCore *float64 `json:"load_per_core,omitempty"`
-	// DirectionCap is the most running execution Agents one direction may have (8 by default); DirectionCapByProject
-	// overrides it for a knowledge-base project slug (the Persona product's line is configured to 8 there).
-	DirectionCap          *int           `json:"direction_cap,omitempty"`
-	DirectionCapByProject map[string]int `json:"direction_cap_by_project,omitempty"`
+	// DirectionCap is the most running execution Agents one direction may have (8 by default). DirectionCapByDirection
+	// overrides it for one supervising conversation id or the direction's displayed name, and DirectionCapByProject for
+	// a knowledge-base project slug; the direction map wins over the project map.
+	DirectionCap            *int           `json:"direction_cap,omitempty"`
+	DirectionCapByDirection map[string]int `json:"direction_cap_by_direction,omitempty"`
+	DirectionCapByProject   map[string]int `json:"direction_cap_by_project,omitempty"`
 	// Generic machine lines.
 	MinMemoryBytes *int64 `json:"min_memory_bytes,omitempty"`
 	MaxClaudeProcs *int   `json:"max_claude_procs,omitempty"`
@@ -142,8 +148,8 @@ func positiveOrFloat(v *float64, def float64) float64 {
 	return def
 }
 
-// limitsFor resolves the lines for machineID and the starting task's project.
-func (s *Service) limitsFor(ctx context.Context, machineID, project string, cfg AdmissionSettings) admissionLimits {
+// limitsFor resolves the lines for machineID and the starting task's direction and project.
+func (s *Service) limitsFor(ctx context.Context, machineID, direction, project string, cfg AdmissionSettings) admissionLimits {
 	hubMachine := s.settings(ctx).MachineID
 	minMemory := positiveOr64(cfg.MinMemoryBytes, admissionMinMemoryBytes)
 	maxProcs := positiveOrInt(cfg.MaxClaudeProcs, admissionMaxClaudeProcs)
@@ -155,17 +161,42 @@ func (s *Service) limitsFor(ctx context.Context, machineID, project string, cfg 
 		minMemory = positiveOr64(over.MinMemoryBytes, minMemory)
 		maxProcs = positiveOrInt(over.MaxClaudeProcs, maxProcs)
 	}
-	directionCap := admissionDirectionCap
-	if cap, ok := cfg.DirectionCapByProject[project]; ok && cap > 0 {
-		directionCap = cap
-	} else {
-		directionCap = positiveOrInt(cfg.DirectionCap, admissionDirectionCap)
-	}
+	directionCap := s.directionCap(ctx, direction, project, cfg)
 	loadPerCore := positiveOrFloat(cfg.LoadPerCore, admissionLoadPerCore)
 	if over, ok := cfg.Machines[machineID]; ok {
 		loadPerCore = positiveOrFloat(over.LoadPerCore, loadPerCore)
 	}
 	return admissionLimits{minMemory: minMemory, maxProcs: maxProcs, loadPerCore: loadPerCore, directionCap: directionCap}
+}
+
+// directionCap resolves one start's direction line. The count is taken per supervising conversation, so the first and
+// exact match is DirectionCapByDirection keyed by that conversation id; the same map also accepts the direction's
+// displayed name for a hand-written setting. A task's knowledge-base project stays as the fallback the original gate
+// shipped with, then the global DirectionCap, then the code default.
+func (s *Service) directionCap(ctx context.Context, direction, project string, cfg AdmissionSettings) int {
+	if direction != "" {
+		if cap, ok := cfg.DirectionCapByDirection[direction]; ok && cap > 0 {
+			return cap
+		}
+		if name, ok := s.directionDisplayName(ctx, direction); ok {
+			if cap, ok := cfg.DirectionCapByDirection[name]; ok && cap > 0 {
+				return cap
+			}
+		}
+	}
+	if cap, ok := cfg.DirectionCapByProject[project]; ok && cap > 0 {
+		return cap
+	}
+	return positiveOrInt(cfg.DirectionCap, admissionDirectionCap)
+}
+
+// directionDisplayName is the displayed name of a current leader conversation (the directions tree's name), so a
+// direction_cap_by_direction entry written with a name resolves to the same line as one written with the id. False
+// for a conversation that is not a current leader (the main conversation): configure its line by id.
+func (s *Service) directionDisplayName(ctx context.Context, id string) (string, bool) {
+	_, names := s.currentLeaders(ctx, s.settings(ctx))
+	name, ok := names[id]
+	return name, ok && strings.TrimSpace(name) != ""
 }
 
 // admissionMachineFacts is the resource view the gate uses for one machine.
@@ -271,7 +302,7 @@ func (s *Service) recommendMachine(ctx context.Context, except string, suitable 
 		if !managed || why != nil {
 			continue
 		}
-		if s.machineViolation(ctx, d.ID, s.limitsFor(ctx, d.ID, "", cfg)) != nil {
+		if s.machineViolation(ctx, d.ID, s.limitsFor(ctx, d.ID, "", "", cfg)) != nil {
 			continue
 		}
 		candidates = append(candidates, candidate{d: d, loadRate: facts.load1 / float64(facts.cores), free: facts.available})
@@ -298,7 +329,8 @@ func (s *Service) admitTaskStart(ctx context.Context, t *PlanTask) (func(), erro
 		return func() {}, nil
 	}
 	cfg := s.admissionSettings(ctx)
-	lim := s.limitsFor(ctx, t.Machine, t.Project, cfg)
+	direction := s.taskDirection(ctx, t)
+	lim := s.limitsFor(ctx, t.Machine, direction, t.Project, cfg)
 	if violation := s.machineViolation(ctx, t.Machine, lim); violation != nil {
 		if t.MachinePolicy != machineFlexible {
 			return nil, s.admissionRefused(ctx, t.Machine, violation)
@@ -309,9 +341,8 @@ func (s *Service) admitTaskStart(ctx context.Context, t *PlanTask) (func(), erro
 		}
 		from, _ := s.machineByName(ctx, t.Machine)
 		s.reroutePlanTask(ctx, t, from, alt, violation.Text(s.lang(ctx)))
-		lim = s.limitsFor(ctx, t.Machine, t.Project, cfg)
+		lim = s.limitsFor(ctx, t.Machine, direction, t.Project, cfg)
 	}
-	direction := s.taskDirection(ctx, t)
 	// Atomic decision: evaluate against the current claims and reserve the slot in one critical section, so two
 	// concurrent starts cannot both observe room and both take the last slot.
 	release, violation := s.claimIfAllowed(ctx, t.Machine, direction, lim)
@@ -376,7 +407,7 @@ func (s *Service) checkAgentStart(ctx context.Context, machineID string) error {
 		return nil
 	}
 	cfg := s.admissionSettings(ctx)
-	if violation := s.machineViolation(ctx, machineID, s.limitsFor(ctx, machineID, "", cfg)); violation != nil {
+	if violation := s.machineViolation(ctx, machineID, s.limitsFor(ctx, machineID, "", "", cfg)); violation != nil {
 		return s.admissionRefused(ctx, machineID, violation)
 	}
 	return nil
@@ -390,7 +421,7 @@ func (s *Service) admitAgentStart(ctx context.Context, machineID string) (func()
 		return func() {}, nil
 	}
 	cfg := s.admissionSettings(ctx)
-	lim := s.limitsFor(ctx, machineID, "", cfg)
+	lim := s.limitsFor(ctx, machineID, "", "", cfg)
 	release, violation := s.claimIfAllowed(ctx, machineID, "", lim)
 	if violation != nil {
 		return nil, s.admissionRefused(ctx, machineID, violation)
@@ -458,25 +489,50 @@ func (s *Service) taskDirection(ctx context.Context, t *PlanTask) string {
 	return t.Supervisor
 }
 
-// directionCountLocked is the ledger part of a direction's in-flight count: open tasks of the direction that already
-// have an active agent link. It only reads the todo book (its RLock), never the admission lock, so it is safe to call
-// while admission.mu is held.
+// directionCountLocked is the ledger part of a direction's in-flight count: open tasks of the direction whose linked
+// execution Agent is actually working a turn in the fleet's latest session snapshot. A task that is parked, waiting
+// for the owner's decision, or finished and held short of live keeps its agent linked but idle, so it occupies no
+// direction slot, and neither does an agent whose session is not working. It only reads the todo book (its RLock),
+// never the admission lock, so it is safe to call while admission.mu is held. The fleet snapshot is read after the
+// todo lock is released, so this never nests the fleet lock under the todo lock.
 func (s *Service) directionCountLocked(direction string) int {
-	n := 0
+	type linkedAgent struct{ machine, session string }
+	var candidates []linkedAgent
 	s.todos.mu.RLock()
 	for _, t := range s.todos.todos {
 		if t.DoneAt != nil || t.Cancelled() || t.Supervision == nil || t.Supervision.Supervisor != direction {
 			continue
 		}
+		if directionIdle(t) {
+			continue
+		}
 		for _, a := range t.Agents {
 			if a.active() {
-				n++
-				break
+				candidates = append(candidates, linkedAgent{a.MachineID, a.SessionID})
+				break // one slot per task, however many agents it links
 			}
 		}
 	}
 	s.todos.mu.RUnlock()
+	n := 0
+	for _, a := range candidates {
+		if s.seenWorking(a.machine, a.session) {
+			n++
+		}
+	}
 	return n
+}
+
+// directionIdle says an open task's linked agent is not consuming a direction slot: parked tasks, tasks waiting for
+// the owner to decide (a needs_user review or the done judge's owner wait), and tasks whose work is finished and held
+// short of live (stopped at a PR, merged but not deployed, or deployed off by default).
+func directionIdle(t *Todo) bool {
+	if v := t.Supervision; v != nil {
+		if v.parking() != nil || v.State == reviewNeedsUser || v.Waits != nil {
+			return true
+		}
+	}
+	return t.Delivery != nil && t.Delivery.held()
 }
 
 // directionInFlight counts a direction's linked active agents plus starts admitted but not linked yet. Used by tests
@@ -503,4 +559,100 @@ func humanBytes(n int64) string {
 		}
 	}
 	return fmt.Sprintf("%.1f %s", value, symbol)
+}
+
+// ---- persona_settings: read and change assistant.admission with the phone approval card ----
+
+// getAdmission renders the whole admission setting for persona_settings (the code defaults fill every nil field, so
+// the reader always sees the effective lines).
+func (s *Service) getAdmission(ctx context.Context) (string, error) {
+	raw, err := json.Marshal(s.admissionSettings(ctx))
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// setAdmission replaces the admission setting after the user approves the change card. A half-filled document is
+// valid: every pointer field nil means "keep the code default", but an explicitly non-positive line is refused.
+func (s *Service) setAdmission(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var in AdmissionSettings
+	if err := json.Unmarshal(v, &in); err != nil {
+		return nil, fmt.Errorf("value must be an AdmissionSettings JSON object: %v", err)
+	}
+	if err := in.validate(); err != nil {
+		return nil, err
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	before, _ := json.Marshal(s.admissionSettings(ctx))
+	after, _ := json.Marshal(in)
+	if bytes.Equal(before, after) {
+		return &ownChange{summary: "assistant.admission did not change"}, nil
+	}
+	return &ownChange{cardText: func(l i18n.Lang) string {
+		return i18n.T(l, "assistant-settings_tool.change_admission", i18n.Args{
+			"before": clipped(l, string(before)), "after": clipped(l, string(after))})
+	},
+		apply: func(ctx context.Context) (string, error) {
+			if err := s.putSetting(ctx, admissionSettingsKey, &in); err != nil {
+				return "", err
+			}
+			// Drop the cache so the next gate decision reads the new lines (the 5-second freshness window cannot hold
+			// an old setting past an approved change).
+			s.admission.mu.Lock()
+			s.admission.cached, s.admission.at = nil, time.Time{}
+			s.admission.mu.Unlock()
+			return "assistant.admission updated; the next execution-agent start uses the new lines.", nil
+		}}, nil
+}
+
+// validate refuses an explicitly non-positive line rather than letting positiveOr* silently ignore it, and keeps every
+// map key non-empty so a setting cannot carry dead entries.
+func (cfg AdmissionSettings) validate() error {
+	bad := func(field string) error { return fmt.Errorf("%s must be a positive number when set", field) }
+	if cfg.LoadPerCore != nil && *cfg.LoadPerCore <= 0 {
+		return bad("load_per_core")
+	}
+	if cfg.DirectionCap != nil && *cfg.DirectionCap <= 0 {
+		return bad("direction_cap")
+	}
+	if cfg.MinMemoryBytes != nil && *cfg.MinMemoryBytes <= 0 {
+		return bad("min_memory_bytes")
+	}
+	if cfg.MaxClaudeProcs != nil && *cfg.MaxClaudeProcs <= 0 {
+		return bad("max_claude_procs")
+	}
+	if cfg.HubMinMemoryBytes != nil && *cfg.HubMinMemoryBytes <= 0 {
+		return bad("hub_min_memory_bytes")
+	}
+	if cfg.HubMaxClaudeProcs != nil && *cfg.HubMaxClaudeProcs <= 0 {
+		return bad("hub_max_claude_procs")
+	}
+	for k, cap := range cfg.DirectionCapByDirection {
+		if strings.TrimSpace(k) == "" || cap <= 0 {
+			return fmt.Errorf("direction_cap_by_direction entries need a non-empty direction id or name and a positive cap")
+		}
+	}
+	for k, cap := range cfg.DirectionCapByProject {
+		if strings.TrimSpace(k) == "" || cap <= 0 {
+			return fmt.Errorf("direction_cap_by_project entries need a non-empty project slug and a positive cap")
+		}
+	}
+	for id, m := range cfg.Machines {
+		if strings.TrimSpace(id) == "" {
+			return fmt.Errorf("machines entries need a machine id")
+		}
+		if m.MinMemoryBytes != nil && *m.MinMemoryBytes <= 0 {
+			return bad("machines.min_memory_bytes")
+		}
+		if m.MaxClaudeProcs != nil && *m.MaxClaudeProcs <= 0 {
+			return bad("machines.max_claude_procs")
+		}
+		if m.LoadPerCore != nil && *m.LoadPerCore <= 0 {
+			return bad("machines.load_per_core")
+		}
+	}
+	return nil
 }
