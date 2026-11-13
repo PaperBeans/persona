@@ -361,6 +361,17 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 - Background builds/tests require pinned source snapshots; do not merge branches or edit their worktree while running. On 2026-11-05, targeted Go regression enumerated old files before a merge introduced a new caller, producing undefined-method compilation errors. Mixed snapshots cannot judge commits or count as passes. Freeze a commit in a separate detached worktree and rerun.
 - A Go test wrapper embedding a narrow `Store` interface does not gain methods by assigning real Postgres to it. Once card handlers checked optional persistence interfaces first, admin-page tests returned 503; old handlers rejected bad JSON first and hid the fixture gap. Real bus regressions explicitly pass the full DB to the assistant, while hub admin login keeps its wrapper. Retain status assertions, not longer waits or 503 as a pass.
 
+## A test that loads a native library must declare the library as an input (2026-11-13, #6871)
+
+`:core:rustcore`'s tests load a host build of the shared Rust core. They find it through a system property that holds its
+path, and Gradle treats that path as the only input. A change to the Rust code rebuilt the library at the same path, and
+Gradle then called the tests up to date and skipped them. A deliberately broken rule still "passed". The fix:
+
+- The Exec task that builds the library declares it with `outputs.file(...)`.
+- The test task takes that task's outputs as inputs, with `inputs.files(buildHostCore)`.
+
+**To check the setup**, break one rule on purpose and confirm the binding tests fail before trusting them.
+
 ## Running the hosted CI lanes on a Mac (2026-11-09)
 
 The `scripts/ci/` lanes are written for the hosted runners; on a Mac developer machine:
@@ -375,6 +386,20 @@ The `scripts/ci/` lanes are written for the hosted runners; on a Mac developer m
 - `TRUNCATE` gives every table it names new files, whether it had a row or not, so clearing two dozen mostly empty tables before each test cost more than many of the tests. Check the tables the cascade reaches in one statement and truncate only those with a row (`db.truncateNonEmpty`). Don't replace it with `DELETE`: it does not cascade, and `devices` has a `BEFORE DELETE` trigger (`devices_guarded_delete`, hub 0435) that refuses an unguarded delete with "push retirement requires a guarded writer".
 - A database copied with `CREATE DATABASE ... TEMPLATE` keeps none of its template's `ALTER DATABASE ... SET` settings: set `synchronous_commit` on every copy (`dbtest.create`). Nothing may be connected to the template; Postgres waits up to 5 s on its own for backends that are closing, so no sleep after `Close` is needed. Use `STRATEGY wal_log`: `file_copy` checkpoints the whole server twice.
 - Since Postgres 15, every `DROP DATABASE` forces a checkpoint of the whole server, which writes whatever other tests left dirty. On a loaded machine, one drop took 0.07-3.8 s. Count that before giving more tests a database of their own.
+
+## An edit a watcher must see once is written whole (2026-11-13, #2174)
+
+- `TestFsWatchGitStatusChanges` failed its final quiet check under the deploy's test load: one more Git `fs.changed`.
+  The watcher was right. `os.WriteFile` truncates and then writes, and a look in between sees an empty file, a real
+  change of its own; the finished write is a second one. A trace of every Git look (the status text, each listed
+  file's size and time) showed `a.txt` at size 0 in every failing run. The window is well under a millisecond, so
+  about 400 runs at the test's own intervals never hit it, with CPU burners or fsync writers alongside too. With the
+  watcher looking continuously, plain writes failed 8 of 200 runs and whole writes none.
+- Write such an edit beside the watched place and rename it in (`writeWhole` in
+  `server/internal/node/fswatch_test.go`), staged outside a watched Git repository: a staged file inside it is an
+  untracked change. Keep the quiet check; don't lengthen waits or debounce the watcher to hide a state that is real.
+- To catch a narrow window, shorten the watcher's interval in a scratch copy and print the trace only on failure,
+  rather than loading the machine and waiting.
 
 ## "TempDir RemoveAll cleanup: directory not empty" after an assistant test (2026-11-12, #5510)
 

@@ -17,7 +17,7 @@ struct InboxConnectorDetailView: View {
     }
 
     var body: some View {
-        if thread.loaded && (thread.unavailable || thread.chat.map { !$0.isChat && !$0.isGitHub } == true) {
+        if thread.loaded && (thread.unavailable || thread.chat.map { !Self.isConversation($0, source: item.source) } == true) {
             InboxConnectorTextView(item: item, problem: thread.failure, reread: reread)
         } else if thread.chat?.isGitHub == true {
             GitHubThreadView(model: thread, item: item)
@@ -25,10 +25,17 @@ struct InboxConnectorDetailView: View {
                 .navigationBarTitleDisplayMode(.inline)
         } else {
             ConnectorThreadView(model: thread, source: item.accountName)
-                .navigationTitle(thread.chat?.name ?? item.title)
+                .navigationTitle(thread.chat.flatMap { $0.name.isEmpty ? nil : $0.name } ?? item.title)
                 .navigationSubtitle(ThreadLayout.subtitle(thread.chat, source: item.accountName))
                 .navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    /// A page drawn as a conversation: a chat's, or GitHub's thread. A Lark one from a hub that could not say its kind
+    /// (lark-cli's message list says nothing of the chat, and such a hub sent an empty kind) is a chat too, as the web
+    /// takes it: before, it opened as the item's plain text, every message of the chat run together.
+    static func isConversation(_ chat: ThreadChat, source: String) -> Bool {
+        chat.isChat || chat.isGitHub || source == "larkcli" && chat.kind.isEmpty
     }
 
     /// The text page's Retry reads the conversation page again first and says whether that page now takes the text's
@@ -70,7 +77,7 @@ struct InboxConnectorTextView: View {
                         }
                         Text([item.accountName, connector?.reference ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
                             .font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
-                        if let label = item.kindLabel {
+                        if let label = item.kindLabel, !item.isAssistantRow { // the assistant's own row: the source line already says it
                             Chip(text: label, look: item.kind == "mention" ? .tone(StatusPalette.needsYou) : .neutral)
                         }
                     }
@@ -79,7 +86,7 @@ struct InboxConnectorTextView: View {
                 .padding(.vertical, Theme.Space.xs)
                 if let url = connector?.url.flatMap(URL.init(string:)) {
                     Button { link = LinkTarget(url: url, manager: model.linkManager(item.manager)) } label: {
-                        Label(ConnectorText.tightCJK(String(localized: "Open in \(item.accountName) [Inbox Connector Views 0e0e38]")), systemImage: Theme.Icon.safari).lineLimit(1)
+                        Label(item.isAssistantRow ? String(localized: "Open the Chat") : ConnectorText.tightCJK(String(localized: "Open in \(item.accountName) [Inbox Connector Views 0e0e38]")), systemImage: Theme.Icon.safari).lineLimit(1)
                     }
                 }
             } footer: {
@@ -94,6 +101,7 @@ struct InboxConnectorTextView: View {
                     if reread != nil { retryButton }
                 }
             }
+            if !item.onlyTitleAndSummary(context) {
             Section("Content") {
                 if let context {
                     // Nothing collected: the item's preview, as the web shows it, rather than a spinner that never ends.
@@ -104,6 +112,7 @@ struct InboxConnectorTextView: View {
                 } else {
                     ProgressView().frame(maxWidth: .infinity)
                 }
+            }
             }
         }
         .themedPage()

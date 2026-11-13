@@ -336,6 +336,8 @@ final class LiftUITextView: UITextView, UITextViewDelegate, UIEditMenuInteractio
         accessibilityIdentifier = "lift-text"
         addInteraction(menuInteraction)
         addGestureRecognizer(FingerFollower { [weak self] in self?.follow($0) })
+        // Reading content: not under the window's cap (`WindowTextSize`).
+        traitOverrides.preferredContentSizeCategory = WindowTextSize.readingCategory
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitUserInterfaceStyle.self]) { (v: LiftUITextView, _) in
             v.render(width: v.laidOut)
         }

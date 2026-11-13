@@ -204,7 +204,10 @@ Relations chain (A shares a PR with B, B an issue with C: one row). A closed to-
 ## Accepted tasks
 
 When `task_review` accepts a task, the hub closes it. If its agent is then sent more work, the hub reopens it
-(`taskWorking` → `reopenTodo`, `docs/assistant/todos.md`) while the supervision still says `accepted`. Earlier the
+(`taskWorking` → `closedTurnReopens` → `reopenTodo`, `docs/assistant/todos.md`) while the supervision still says
+`accepted`. For a task with no plan (an adopted agent, often kept on for other work), only the task's conversation
+sending more (`agent_send`, or the owner's message on its card) reopens it; that agent's other turns leave it closed
+(#6726). Earlier the
 page treated every reopened task as not reviewed: it showed "Follow up", its badge "Supervising", and criteria added
 with the extra work (`agent_supervise` / `agent_send` replace `done_when`, so the list grew from 5 to 8) as open
 with a clock and counted them ("5/8").

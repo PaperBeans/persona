@@ -681,6 +681,76 @@ func transientStartErr(err error) bool {
 		errors.As(err, &re) && (re.Message == rpc.ErrClosed.Error() || re.Code == proto.CodeTerminalNotReady)
 }
 
+// taskPlanWithdrawnEvent: a conversation withdrew a plan card of its own (task_plan_withdraw). Detail: plan,
+// conversation, reason, tasks (their titles).
+const taskPlanWithdrawnEvent = "task_plan_withdrawn"
+
+// withoutWithdrawn is plans less those their own conversation withdrew (task_plan_withdrawn in events): dismissed as
+// the owner's Dismiss leaves them, but the owner did not answer them, so they say nothing about which kinds of task the
+// owner starts or turns down (rulePlanRuns, the setup suggestions).
+func withoutWithdrawn(plans []*TaskPlan, events []db.WorkEvent) []*TaskPlan {
+	withdrawn := map[string]bool{}
+	for _, e := range events {
+		if id, _ := e.Detail["plan"].(string); e.Kind == taskPlanWithdrawnEvent && id != "" {
+			withdrawn[id] = true
+		}
+	}
+	if len(withdrawn) == 0 {
+		return plans
+	}
+	out := make([]*TaskPlan, 0, len(plans))
+	for _, p := range plans {
+		if !withdrawn[p.ID] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// toolTaskPlanWithdraw is task_plan_withdraw: the conversation that put up plan card plan_id takes it down while nothing
+// of it has started, as the owner's Dismiss does (dismissPlan), its reason kept as a task_plan_withdrawn work event
+// (#6739). A card whose work was done elsewhere, or that the owner dropped, otherwise waited for "Start" in every list
+// of what is the owner's to handle until they dismissed it themselves. Another conversation's plan, and one that
+// started or was dismissed, are refused, and nothing changes.
+func (s *Service) toolTaskPlanWithdraw(ctx context.Context, self string, args json.RawMessage) (string, error) {
+	var a struct {
+		PlanID string `json:"plan_id"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	reason, err := remedyReason(a.Reason)
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(a.PlanID)
+	if id == "" {
+		return "", errors.New("plan_id is required: the plan's id, as task_plan's answer or the snapshot's plans waiting to start give it")
+	}
+	p, err := s.loadPlan(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("plan %s: %w", id, err)
+	}
+	if p.Conversation != self {
+		return "", fmt.Errorf("plan %s was put up by another conversation: only that one withdraws it (or the user dismisses it); nothing was changed", id)
+	}
+	if p.State != planOpen {
+		return "", fmt.Errorf("plan %s is %s, no longer waiting for Start: nothing was withdrawn", id, p.State)
+	}
+	if p, err = s.dismissPlan(ctx, id); err != nil {
+		return "", fmt.Errorf("plan %s: %w; nothing was withdrawn", id, err)
+	}
+	titles := make([]string, 0, len(p.Tasks))
+	for _, t := range p.Tasks {
+		titles = append(titles, t.Title)
+	}
+	s.workEvent("", self, taskPlanWithdrawnEvent, map[string]any{"plan": id, "conversation": self, "reason": reason, "tasks": titles})
+	s.logf("plan %s: withdrawn by its conversation %s: %s", id, short(self), reason)
+	return fmt.Sprintf("Withdrew plan %s (%d task(s): %s): its card no longer waits for Start. Reason kept: %s", id, len(titles),
+		strings.Join(titles, "; "), reason), nil
+}
+
 func (s *Service) dismissPlan(ctx context.Context, id string) (*TaskPlan, error) {
 	p, err := s.loadPlan(ctx, id)
 	if err != nil {

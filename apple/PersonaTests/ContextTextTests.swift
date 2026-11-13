@@ -95,7 +95,7 @@ struct ContextTextTests {
         let parsed = ContextRef.parse(interject)
         #expect(parsed.refs.isEmpty)
         #expect(parsed.rest == "先停一下，帮我查个东西")
-        // the watch shows the owner's words with no 〔插话〕 mark
+        // the watch shows the owner's words with no 「〔插话〕」 mark
         #expect(WatchText.shown(interject) == "先停一下，帮我查个东西")
         // a normal picked context next to it still becomes a quote
         let mixed = interject + #"\#n<persona-context kind="context" title="需求文档" url="https://x">摘要</persona-context>"#

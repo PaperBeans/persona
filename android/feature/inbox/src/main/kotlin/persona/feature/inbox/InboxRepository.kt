@@ -32,6 +32,8 @@ interface InboxRepository : persona.core.contracts.api.InboxRepository {
     val replyComposers: StateFlow<ReplyComposers?> get() = emptyReplyComposers
     suspend fun readingStore(): LarkReadingStore? = null
     val snapshot: StateFlow<InboxSnapshot>
+    /** The listed or paged-back record, else one read by id from the hub; null only when every lookup answers 404. */
+    suspend fun item(itemId: String): InboxRecord? = throw UnsupportedOperationException("Inbox item lookup unavailable")
     val mailTransport: StateFlow<MailTransport?> get() = disconnectedMail
     val personaOutbox: StateFlow<List<OutboxMessage>> get() = emptyPersonaOutbox
     val connectionState: Flow<ConnectionState> get() = flowOf(ConnectionState.Connecting)
@@ -236,6 +238,9 @@ object InboxItemKey {
 
     fun hubId(key: String): String = key.substringBefore(SEPARATOR)
 
+    /** The manager an app id carries, or null for a bare hub id and for the default manager. */
+    fun managerOf(key: String): String? = key.substringAfter(SEPARATOR, "").takeIf { it.isNotBlank() }
+
     /** The app's id of the item [hubId] of [manager] (null: unstamped). */
     fun appId(hubId: String, manager: String?): String =
         if (manager.isNullOrBlank() || manager == persona.core.contracts.api.ManagerRoster.ASSISTANT_MANAGER) hubId else of(hubId, manager)
@@ -433,7 +438,8 @@ enum class ReplyDelivery { Ready, Queued, WaitingForNetwork, Sending, Unknown, V
 
 /**
  * One "Hand to AI". No [machineId] / [sessionId]: Persona's main conversation. [operationId] stays the same while the same
- * text goes to the same place, so a retry after an unclear failure is not queued twice.
+ * text goes to the same place, so a retry after an unclear failure is not queued twice. [targetTitle] is the Agent's display
+ * title, sent only when recording its accepted hand-off on the item.
  */
 @Serializable
 data class InboxHandOffRequest(
@@ -442,6 +448,7 @@ data class InboxHandOffRequest(
     val machineId: String? = null,
     val sessionId: String? = null,
     val operationId: String = UUID.randomUUID().toString(),
+    val targetTitle: String? = null,
 )
 
 /**

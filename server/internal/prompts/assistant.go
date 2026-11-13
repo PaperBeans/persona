@@ -146,6 +146,7 @@ type SnapshotFollowup struct {
 // SnapshotPlan is a plan card in the main conversation still waiting for the user's "Start" (#4453): nothing of it has
 // started, and it shows nowhere else.
 type SnapshotPlan struct {
+	ID     string    // the plan's id, for task_plan_withdraw (#6739)
 	At     time.Time // when it was put up, in the user's zone
 	Titles []string  // its tasks' titles (at most three)
 	Tasks  int       // how many tasks it has

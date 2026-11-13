@@ -122,7 +122,7 @@ struct DirectionTreeTests {
         #expect(DirectionTree.TaskState.stuck.text == "卡住")
         #expect(DirectionTree.TaskState.review.text == "待验收")
         #expect(DirectionTree.TaskState.planned.text == "未开始")
-        // A direction's words are the sidebar's lead-row words (#4331): what waits on you, never "在做 N" (#6626: what
+        // A direction's words are the sidebar's lead-row words (#4331): what waits on you, never 「在做 N」 (#6626: what
         // runs is the row's spinner alone).
         #expect(DirectionTree.Counts(working: 2, needsYou: 1).label == "等你 1")
         #expect(DirectionTree.Counts(working: 3).label == nil)

@@ -92,7 +92,8 @@ internal fun InboxHandOffSheet(
             try {
                 val text = handoffPrompt(res, handOffItem(record, context ?: repository.personaContext(itemId)), instruction)
                 val operation = attempt.operationId(text, target)
-                val session = repository.handOff(InboxHandOffRequest(itemId, text, target?.machineId, target?.sessionId, operation))
+                val session = repository.handOff(InboxHandOffRequest(itemId, text, target?.machineId, target?.sessionId, operation,
+                    targetTitle = target?.title))
                 attempt.done()
                 memoryKey?.let { key ->
                     val entries = InboxHandOffMemory.remember(memory.orEmpty(), key, target?.let(InboxHandOffMemory::agent) ?: InboxHandOffMemory.MAIN)

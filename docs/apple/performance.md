@@ -384,6 +384,10 @@ Start from a reproduction, measure the base, change one thing, measure again.
    restart the simulator with `sim-boot.sh --reslim`, or use `--profile stock`.
 3. **Find the main thread's time.**
    - `sample <pid> 10 1 -file out.txt` while reproducing: no Instruments authorization needed; aggregate the main thread.
+     In `scripts/app/perf-test.sh`, `PERF_SAMPLE` waits a fixed 25 s after the test starts, which can miss `measureFrames`
+     when a test pairs, seeds state or warms a panel first (for example `PerfComposerTests/testComposerPlusPanel`). Check
+     `frames.json`'s `long` `[offset_s, duration_ms]` timestamps and sample inside the measured window, then run the final
+     before / after numbers without `sample` attached so `task_suspend` does not inflate frame intervals (#6235).
    - Instruments: Time Profiler (attach to the simulator app's PID); Hangs (reports main-thread blocks over the
      threshold you set, 250 ms by default; set it lower to find 100 ms blocks); SwiftUI (Xcode 26: view body updates,
      their causes and long updates); App Launch; Allocations and Leaks. Animation Hitches needs a device.
@@ -391,7 +395,9 @@ Start from a reproduction, measure the base, change one thing, measure again.
      Points of Interest) marks moments. For a span, use an `OSSignposter` interval in the same subsystem, compiled under
      `#if DEBUG || PERF_SIGNPOST`.
 4. **Count redraws.** Add `PerfTrace.body("ViewName")` at the top of a heavy `body`; launch with `-perfCounts YES`.
-   `PerfCount` counts bodies and the main thread's time from each push to the next idle run loop.
+   `PerfCount` counts bodies and the main thread's time from each push to the next idle run loop. When a modal sheet or
+   overlay hitches, check the background page's counters too (`ChatView`, `ChatTranscript.body`): presenting on the shell
+   window's `rootViewController` dims `RootView` and flushes the conversation under it (`docs/lessons/ios.md`, #6235).
 5. **Catch main-thread blocks.** DEBUG and PERF_SIGNPOST builds start `MainThreadWatchdog` with the root view. A background
    thread pings the main run loop every 25 ms. If a ping takes at least 100 ms, the watchdog suspends the main Mach thread,
    copies its registers and frame-pointer chain, resumes it, and symbolicates the addresses afterwards. Raw addresses and a

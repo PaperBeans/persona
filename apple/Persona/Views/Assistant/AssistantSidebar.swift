@@ -802,7 +802,7 @@ struct AssistantSidebar: View {
     @State private var picked: SessionKey?
     @State private var autoList: AutoConversationsRoute?
     /// Whether Recent is folded, kept on this device (#6228): default open, the choice survives relaunches.
-    @AppStorage("assistant.sidebar.recent.folded") private var recentFolded = false
+    @StoredValue("assistant.sidebar.recent.folded") private var recentFolded = false
     @State private var feed = SidebarFeed()
     private let taskChats = AssistantTaskChatsStore.shared
     @FocusState private var searching: Bool

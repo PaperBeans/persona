@@ -20,6 +20,8 @@ class InboxSuggestionStale(val item: JsonObject?) : IllegalStateException("sugge
 interface InboxAssistantTransport {
     val scope: String
     suspend fun inbox(): JsonObject
+    /** One item by its hub id, including a done item the list no longer carries; 404 means it does not exist. */
+    suspend fun item(itemId: String): JsonObject = throw UnsupportedOperationException("Inbox item lookup unavailable")
     suspend fun larkConversations(cursor: String? = null): JsonObject = throw UnsupportedOperationException("Conversation metadata unavailable")
     suspend fun larkConversationsForAccount(account: Int?, cursor: String? = null): JsonObject {
         require(account == null) { "Account-specific conversation metadata unavailable" }
@@ -54,6 +56,12 @@ interface InboxAssistantTransport {
     /** Hands an item to its manager's main chat (`POST /api/v1/inbox/{id}/handoff`), answering `{item, session}`. */
     suspend fun handOff(itemId: String, text: String, clientId: String): JsonObject =
         throw UnsupportedOperationException("Inbox hand-off route unavailable")
+    /**
+     * Records an item's hand-off to the Agent [session] that accepted its existing outbox message
+     * (`POST /api/v1/inbox/{id}/handoff` with `kind=agent` and no text), answering the hub's object. A blank [title] is omitted.
+     */
+    suspend fun recordAgentHandOff(itemId: String, session: SessionKey, title: String, clientId: String): JsonObject =
+        throw UnsupportedOperationException("Inbox Agent hand-off route unavailable")
     /**
      * Acts on an item's suggestion (`POST /api/v1/inbox/{id}/suggestion`, inbox phase 1): [action] is confirm, reject or
      * instruct, [version] the suggestion's as shown, [text] the edited text (confirm) or the words (instruct). Answers

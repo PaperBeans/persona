@@ -1,6 +1,7 @@
 package persona.core.hub
 
 import persona.core.contracts.JsonCodec
+import persona.core.contracts.SessionKey
 
 import persona.core.contracts.api.InboxAssistantTransport
 import persona.core.contracts.api.InboxBulkAction
@@ -71,6 +72,7 @@ class HttpInboxAssistantTransport private constructor(
     // Connectors' items too (`sources=all`): each opens as its connector's thread (#2726); without it the hub lists
     // Feishu and mail only.
     override suspend fun inbox() = json(url("api", "v1", "inbox").newBuilder().addQueryParameter("sources", "all").build())
+    override suspend fun item(itemId: String) = json(url("api", "v1", "inbox", itemId))
     override suspend fun doneHistory(manager: String?, before: String?, beforeId: String?, limit: Int) =
         json(url("api", "v1", "inbox", "done").newBuilder().addQueryParameter("sources", "all").addQueryParameter("limit", limit.toString())
             .apply { if (before != null) { addQueryParameter("before", before); beforeId?.let { addQueryParameter("before_id", it) } } }
@@ -129,6 +131,18 @@ class HttpInboxAssistantTransport private constructor(
         require(itemId.isNotBlank() && text.isNotBlank() && clientId.isNotBlank())
         return json(url("api", "v1", "inbox", itemId, "handoff"), buildJsonObject {
             put("text", text); put("client_id", clientId)
+        })
+    }
+    override suspend fun recordAgentHandOff(itemId: String, session: SessionKey, title: String, clientId: String): JsonObject {
+        require(itemId.isNotBlank() && session.machineId.isNotBlank() && session.sessionId.isNotBlank() && clientId.isNotBlank())
+        return json(url("api", "v1", "inbox", itemId, "handoff"), buildJsonObject {
+            put("session", buildJsonObject {
+                put("machine_id", session.machineId)
+                put("session_id", session.sessionId)
+            })
+            put("kind", "agent")
+            title.takeIf { it.isNotBlank() }?.let { put("title", it) }
+            put("client_id", clientId)
         })
     }
     override suspend fun suggestion(itemId: String, version: Long, action: String, text: String?, clientId: String): JsonObject {
@@ -368,7 +382,7 @@ class HttpInboxAssistantTransport private constructor(
             val http = client.newBuilder().followRedirects(false).followSslRedirects(false)
                 .retryOnConnectionFailure(false).build()
             return { path, method, body, buffered ->
-                val target = base.hubUrl(path)
+                val target = base.hubUrl(path).withRequestManager()
                 http.newCall(Request.Builder().url(target).header("Authorization", "Bearer $token")
                     .method(method, body).build()).awaitResponse(buffered = buffered).also { response ->
                     if (!response.isSuccessful) throw response.use { HubFailure.from(it) }

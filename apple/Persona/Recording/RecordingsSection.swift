@@ -967,7 +967,7 @@ struct RecordingDetailView: View {
             ForEach(Array(entry.sentences.enumerated()), id: \.offset) { index, sentence in
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Text(RecordingFormat.clock(sentence.start)).font(Theme.Font.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    Text(sentence.text).font(Theme.Font.body).textSelection(.enabled)
+                    Text(sentence.text).readingContent().font(Theme.Font.body).textSelection(.enabled)
                 }
                 .id(ids[index])
                 .listRowBackground(lit == index ? Theme.accentTint : nil)

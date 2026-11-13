@@ -467,3 +467,34 @@ check, such as a verbatim quote from the chosen candidate.
   trailing send; a typewriter effect has to pace by the stream's average rate, not the last burst, or it finishes each
   burst early and waits. Measure on recorded streams (`scripts/mock/stream_traces/`, `/mock/say?trace=…`) and report the
   gaps between visible text changes and the added lag, not only frames: an evenly timed mock stream hides all of this.
+
+## "Busy" must mean a request is out, and one probe must not strand the rest (#6698)
+
+A report said Inbox triage stayed "the model is at its concurrency limit" forever after a short upstream outage,
+with nothing in flight, and suspected a slot released only on success. The gate (`server/internal/ai/limit.go`)
+pairs every `admit` with a `done` and no error path skips it (`TestEveryExitGivesItsSlotBack`); what kept the
+status wrong was how a pause ended. One request went out to find out and every other was put off at once, until
+that request's whole streamed answer had been read: a round right after a pause sorted one item and reported the
+rest as busy until a later round, and a 404 or 5xx during the outage showed as busy too, because only the probe
+reached the upstream. When one request finds something out for many, let the others wait for the finding (bounded
+by their own deadlines) and act on the first signal that settles it (the 200), not on the end of the work. Before
+fixing a suspected leak, count: a stress test over every exit path with the counter read afterwards settles it
+faster than reading the code again.
+
+## A send whose answer came too late may have gone in (2026-11-12)
+
+The manager waits 90 s for a relayed message (`drainRelays`) and kept it queued when no answer came. The node had
+written it after the first of two session-list rebuilds inside the send and was still building the second when the
+time ran out, so every later drain wrote it again: one conversation read the same message 32 times in an hour, and the
+messages queued behind it waited. A send in doubt is not a failure. Relays now carry one `once_id` per message
+(`relayMsgID`), which the node sends once (`sentLog`); a try in doubt first looks for the message's line in the
+conversation's latest turns (`relayArrived`: context blocks left out, no line older than the try, the sending
+conversation as its source), and one not found then is looked for again before the next try (`relayLanded`), which
+covers a line that lands late and a node restarted in between; and the send pushes the session list in the background, waiting for it only briefly
+(`notifySessionsSoon`, `listPushWait`). The id is deliberately not a `client_msg_id`: a line tied to one reads as the
+owner's own message everywhere (its source label, task briefs, user-input counts, extensions). The web had the same
+blind spot for the owner's own sends: a send answered 502 `delivered: "unknown"` stayed a failed bubble unless the hub
+tied a transcript line to its id, so the owner sent it again; a send in doubt now also settles by its words written
+after it (`inDoubt` in `web/src/lib/outbox.ts`; `isEcho` in `web/src/lib/echo.ts` allows 5 s for the clocks, not
+`CLOCK_SLACK_MS`); one whose copy arrived before the answer did was already settled while it went (`flight.echoed()`
+in ChatView). A refusal never settles by words.
