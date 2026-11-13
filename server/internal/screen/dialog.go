@@ -24,6 +24,9 @@ const (
 	CursorSubmit      = dialogwire.CursorSubmit
 	KindChat          = dialogwire.KindChat
 	KindTypeSomething = dialogwire.KindTypeSomething
+	RiskDelete        = dialogwire.RiskDelete
+	DeadlineDeny      = dialogwire.DeadlineDeny
+	DeadlineAllow     = dialogwire.DeadlineAllow
 )
 
 // DialogLines is how much of the screen a dialog is read from, the same when the card is made (hub) and when its
@@ -362,13 +365,40 @@ func describe(d *Dialog, lines []string, first int) {
 		}
 	}
 	var quoted, plain []string
-	for _, l := range lines[top:first] {
+	var box command // the rows between the dashed rules around a command (╌╌╌)
+	above := -1     // how many plain rows were above that box (-1: no box)
+	rows := lines[top:first]
+	for i := 0; i < len(rows); i++ {
+		l := rows[i]
 		t := strings.TrimSpace(l)
+		if dashedRE.MatchString(t) {
+			if !box.open && above < 0 {
+				above = len(plain)
+			}
+			box.open = !box.open
+			box.width = max(box.width, displayWidth(l))
+			continue
+		}
+		if box.open {
+			// The command, whatever its rows start with: 2.1.322 draws a │ before each, as before the warning under it,
+			// which left the command out of the card and out of Rev. Its rows are what is asked, as in 2.1.316.
+			row := strings.TrimSpace(strings.TrimPrefix(t, "│"))
+			box.rows = append(box.rows, row)
+			if row != "" {
+				plain = append(plain, row)
+			}
+			continue
+		}
+		if text, n := deadlineRows(rows[i:]); n > 0 {
+			// The countdown, wrapped onto two or three rows on a narrow pane: read as a question row, its seconds
+			// moved Rev every second, and every answer was refused (#5265).
+			d.Deadline, d.DeadlineAction, d.DeadlineIn = text, deadlineAction(text), deadlineSeconds(text)
+			i += n - 1
+			continue
+		}
 		m := tabsRE.FindStringSubmatch(t)
 		switch {
-		case t == "" || dashedRE.MatchString(t): // the dashed rules around a command (╌╌╌)
-		case deadlineRE.MatchString(t):
-			d.Deadline = strings.TrimSpace(strings.TrimPrefix(t, "⚠"))
+		case t == "":
 		case m != nil:
 			// One question: its tab is the header. Several: which one is shown is only told by color, so no header;
 			// the steps say which are answered.
@@ -419,7 +449,60 @@ func describe(d *Dialog, lines []string, first int) {
 		d.Question, d.Header = d.Header, ""
 		asked = d.Question
 	}
+	// A shell command's permission prompt: "Bash command", the agent's words for it, the command in its box.
+	if above > 0 && commandPromptRE.MatchString(plain[0]) {
+		d.Command = box.text()
+		d.Description = joinWrapped(plain[1:above])
+	}
+	if strings.HasPrefix(d.Warning, "Dangerous rm operation") {
+		d.Risk = RiskDelete
+	}
 	hash(d, asked, "")
+}
+
+// commandPromptRE is the first row of a permission prompt for a shell command.
+var commandPromptRE = lazyre.New(`^(Bash|PowerShell) command\b`)
+
+// command is the box a permission prompt draws a command in: its rows, and the width of the rules around it (the
+// pane's).
+type command struct {
+	rows  []string
+	width int
+	open  bool
+}
+
+// text is the command with the rows the terminal wrapped joined back: a row was wrapped when the next row's first
+// word would not have fitted after it (Claude Code 2.1.322 fills a box row up to the rule's width less 2, its " │ "
+// included, and breaks between words), otherwise the command has a line break there. A word too long for a row is
+// broken inside it, and gets a space where it was broken. Only for showing it: Rev leaves out all white space.
+func (c command) text() string {
+	var b strings.Builder
+	for i, r := range c.rows {
+		if i > 0 {
+			prev := c.rows[i-1]
+			next, _, _ := strings.Cut(r, " ")
+			if prev != "" && r != "" && displayWidth(" │ "+prev)+1+displayWidth(next) > c.width-2 {
+				b.WriteByte(' ')
+			} else {
+				b.WriteByte('\n')
+			}
+		}
+		b.WriteString(r)
+	}
+	return strings.Trim(b.String(), "\n")
+}
+
+// displayWidth is how many columns s takes in a terminal: two for wide (CJK) characters.
+func displayWidth(s string) int {
+	n := 0
+	for _, r := range s {
+		if cjk(r) {
+			n += 2
+		} else {
+			n++
+		}
+	}
+	return n
 }
 
 // hash sets Rev from what the dialog asks (asked: its question and detail rows, in screen order) and offers, and
@@ -466,9 +549,61 @@ func legacyHash(d *Dialog, window string) {
 // block this request in 1:59, to avoid holding up an unattended session"; earlier builds say deny), and the dashed
 // rules it draws around the command asked about.
 var (
-	deadlineRE = lazyre.New(`(?i)^⚠?\s*.*\bwill automatically (block|deny|allow|approve|accept|reject)\b.*\bin \d+:\d{2}\b`)
-	dashedRE   = lazyre.New(`^[╌┄┈╍┅┉-]{8,}$`)
+	deadlineRE = lazyre.New(`(?i)^⚠?\s*.*\bwill automatically (block|deny|allow|approve|accept|reject)\b.*\bin (\d+):(\d{2})\b`)
+	// deadlineEndRE ends its sentence.
+	deadlineEndRE = lazyre.New(`(?i)(\bunattended session|\.)$`)
+	dashedRE      = lazyre.New(`^[╌┄┈╍┅┉-]{8,}$`)
 )
+
+// deadlineRows reads the countdown from the first of rows, the rows of it a narrow pane wrapped it onto with it: its
+// text, and how many rows it takes (0: rows[0] does not start one). It ends where its sentence does (a wider pane may
+// leave only "session" on its last row, which is still the countdown), else at a blank row, a box or the question.
+func deadlineRows(rows []string) (string, int) {
+	first := strings.TrimSpace(rows[0])
+	if !strings.HasPrefix(first, "⚠") && !strings.Contains(strings.ToLower(first), "will automatically") {
+		return "", 0
+	}
+	var parts []string
+	for n, l := range rows[:min(len(rows), 4)] {
+		t := strings.TrimSpace(l)
+		if n > 0 && (t == "" || isRule(t) || dashedRE.MatchString(t) || strings.HasPrefix(t, "⚠") ||
+			strings.HasPrefix(t, "│") || strings.HasPrefix(t, "|") || strings.ContainsAny(t, "?？")) {
+			break
+		}
+		parts = append(parts, t)
+		if j := joinWrapped(parts); deadlineRE.MatchString(j) && deadlineEndRE.MatchString(j) {
+			return strings.TrimSpace(strings.TrimPrefix(j, "⚠")), len(parts)
+		}
+	}
+	if j := joinWrapped(parts); deadlineRE.MatchString(j) {
+		return strings.TrimSpace(strings.TrimPrefix(j, "⚠")), len(parts)
+	}
+	return "", 0
+}
+
+// deadlineAction is what the countdown in text does when it runs out (DeadlineDeny, DeadlineAllow).
+func deadlineAction(text string) string {
+	m := deadlineRE.FindStringSubmatch(text)
+	if m == nil {
+		return ""
+	}
+	switch strings.ToLower(m[1]) {
+	case "allow", "approve", "accept":
+		return DeadlineAllow
+	}
+	return DeadlineDeny
+}
+
+// deadlineSeconds is how long the countdown in text has left.
+func deadlineSeconds(text string) int {
+	m := deadlineRE.FindStringSubmatch(text)
+	if m == nil {
+		return 0
+	}
+	min, _ := strconv.Atoi(m[2])
+	sec, _ := strconv.Atoi(m[3])
+	return min*60 + sec
+}
 
 // joinWrapped puts rows the terminal wrapped back into one text: no space where a row ends inside CJK text.
 func joinWrapped(rows []string) string {

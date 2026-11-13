@@ -40,7 +40,7 @@ func TestCodexRolloutItemsReadAsARollout(t *testing.T) {
 	if len(answer) != 1 || answer[0].Role != "assistant" || answer[0].Kind != proto.KindText || answer[0].Text != "Done: the CSV is UTF-8 now." {
 		t.Fatalf("answer = %+v", answer)
 	}
-	if note := parse("agentMessage", `{"type":"agentMessage","id":"a2","text":"Looking at the writer.","phase":"commentary"}`); len(note) != 1 || note[0].Kind != proto.KindThinking {
+	if note := parse("agentMessage", `{"type":"agentMessage","id":"a2","text":"Looking at the writer.","phase":"commentary"}`); len(note) != 1 || note[0].Kind != proto.KindText || !note[0].Narration {
 		t.Fatalf("commentary = %+v", note)
 	}
 	if r := parse("reasoning", `{"type":"reasoning","id":"r1","summary":["Check the encoder"],"content":[]}`); len(r) != 1 || r[0].Kind != proto.KindThinking {

@@ -137,7 +137,12 @@ func TestPeerCommandsOnAHubThatNeverAnswers(t *testing.T) {
 // hub stays on one line, so a hostile name cannot run terminal sequences or print a fake line.
 func TestPeerListPrintsOtherHubsTextInert(t *testing.T) {
 	const hostile = `Office\u001b]0;pwned\u0007\r\nfake line`
+	var mu sync.Mutex
+	var accept string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		accept = r.Header.Get("Accept-Language")
+		mu.Unlock()
 		switch r.URL.Path {
 		case "/api/v1/admin/cli/peers":
 			io.WriteString(w, `{"peers":[{"hub_id":"h1\u009b2J","name":"`+hostile+`","state":"offline","error":"dial\u001b[31m\nfailed","machines":1,"role":"member"}],`+
@@ -151,24 +156,71 @@ func TestPeerListPrintsOtherHubsTextInert(t *testing.T) {
 	t.Cleanup(srv.Close)
 	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
 	peerCLIHubAt(t, port)
-	var out strings.Builder
-	if err := PeerCommand(context.Background(), []string{"list"}, strings.NewReader(""), &out); err != nil {
-		t.Fatal(err)
-	}
-	got := out.String()
-	if strings.ContainsFunc(got, func(r rune) bool { return r != '\n' && unicode.Is(unicode.Cc, r) }) {
-		t.Errorf("raw control characters in %q", got)
-	}
-	if n := strings.Count(got, "\n"); n != 3 || strings.Contains(got, "\nfake line") {
-		t.Errorf("%d lines, want 3 (center, one peer, one discovered) and no injected line: %q", n, got)
-	}
 	const name = "Office<ESC>]0;pwned<U+0007><U+000D><U+000A>fake line"
-	for _, want := range []string{"中心是「" + name + "」（h1，",
-		"h1<U+009B>2J  " + name + "  成员  连不上：dial<ESC>[31m<U+000A>failed  1 台电脑\n",
-		"局域网里发现：h2  " + name + "  https://192.0.2.6:18662<U+0007>\n"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing %q in %q", want, got)
+	for _, tt := range []struct {
+		lang string // PERSONA_LANG: the terminal's language (#5520)
+		want []string
+	}{
+		{"zh-Hans", []string{"中心是「" + name + "」（h1，",
+			"h1<U+009B>2J  " + name + "  成员  连不上：dial<ESC>[31m<U+000A>failed  1 台电脑\n",
+			"局域网里发现：h2  " + name + "  https://192.0.2.6:18662<U+0007>\n"}},
+		{"en", []string{"The primary hub is “" + name + "” (h1, online, term 3).",
+			"h1<U+009B>2J  " + name + "  member  unreachable: dial<ESC>[31m<U+000A>failed  1 computer\n",
+			"Found on the local network: h2  " + name + "  https://192.0.2.6:18662<U+0007>\n"}},
+	} {
+		t.Run(tt.lang, func(t *testing.T) {
+			t.Setenv("PERSONA_LANG", tt.lang)
+			var out strings.Builder
+			if err := PeerCommand(context.Background(), []string{"list"}, strings.NewReader(""), &out); err != nil {
+				t.Fatal(err)
+			}
+			got := out.String()
+			if strings.ContainsFunc(got, func(r rune) bool { return r != '\n' && unicode.Is(unicode.Cc, r) }) {
+				t.Errorf("raw control characters in %q", got)
+			}
+			if n := strings.Count(got, "\n"); n != 3 || strings.Contains(got, "\nfake line") {
+				t.Errorf("%d lines, want 3 (center, one peer, one discovered) and no injected line: %q", n, got)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("missing %q in %q", want, got)
+				}
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if accept != tt.lang {
+				t.Errorf("asked the hub for %q, want %q", accept, tt.lang)
+			}
+		})
+	}
+}
+
+// `peer center` adds the --confirm hint by the hub's code, not by its text, so it still does in any language (#5520).
+func TestPeerCenterAsksForConfirmByCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		if strings.HasSuffix(r.URL.Path, "/h-confirm/center") {
+			io.WriteString(w, `{"error":"The current primary hub can’t be reached","code":"confirm_required"}`)
+		} else {
+			io.WriteString(w, `{"error":"Can’t reach that hub","code":"unreachable"}`)
 		}
+	}))
+	t.Cleanup(srv.Close)
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	peerCLIHubAt(t, port)
+	t.Setenv("PERSONA_LANG", "en")
+	err := PeerCommand(context.Background(), []string{"center", "h-confirm"}, strings.NewReader(""), io.Discard)
+	if err == nil || err.Error() != "The hub answered 409: The current primary hub can’t be reached (add --confirm to go ahead)" {
+		t.Fatalf("confirm_required: %v", err)
+	}
+	var refused *adminCallError
+	if !errors.As(err, &refused) || refused.status != http.StatusConflict {
+		t.Fatalf("the hub's refusal is not kept: %#v", err)
+	}
+	err = PeerCommand(context.Background(), []string{"center", "h-other"}, strings.NewReader(""), io.Discard)
+	if err == nil || strings.Contains(err.Error(), "--confirm") {
+		t.Fatalf("unreachable: %v", err)
 	}
 }
 

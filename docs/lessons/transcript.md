@@ -71,13 +71,14 @@ Use synthetic conversations for screenshots, not the user's real main conversati
 - User images take two paths: ordinary messages contain user image blocks; messages sent while Claude is working are "absorbed mid-turn" as `attachment/queued_command`, with images in the prompt's block array
   (before 2026-10-29, the parser took only text blocks, so bubbles showed no images). In App turns awakened by background tasks (`pickAnswerAcrossWakes`), keep the user's images together with their message in the original position, not in the work trace.
 - A long chat's slow first screen is not caused by the hub / node (cold read: 0.12 s), but by the page being too large: one long Codex session's last two turns contained 1412 entries and 1.08 MB, with just 6 reply entries; the rest were tools and thinking already collapsed in the UI.
-  The App requests `fold_work`. Pages read backward from the end replace each work segment with one `kind: fold` entry (counts and ranges only). Expanding a work row fetches it with `from_seq` / `through_seq`
+- Codex commentary is assistant text, not `Reasoning` (#5853). Keep an internal-only `Narration` marker so folding can handle completed narration without exposing a new wire kind or counting it as thinking. Only the latest page leaves the newest commentary visible until a final answer follows; a historical page may end before a final answer stored on the next page. Changing only the item kind let 110 commentary rows escape the fold and broke the long-session 40-item / 32 KB budget; cover real running pages, completed folds, expansion merging and golden output together.
+- The App requests `fold_work`. Pages read backward from the end replace each work segment with one `kind: fold` entry (counts and ranges only). Expanding a work row fetches it with `from_seq` / `through_seq`
   (`docs/protocol/protocol.md`, "Folded work"). `after_seq` catch-up and live pushes are not folded. Neither are tool_use entries still running or tool_result entries whose other half is outside the page, or they cannot be paired.
 - Claude Code writes `&gt;`, `&lt;`, and `&amp;` itself into the summary / event / result of background task notifications (`<task-notification>`); decode them during parsing. For background commands without a description,
   the summary is the whole command (a heredoc can span dozens of lines). Do not use the summary as notice text: the node parses it into `Item.task`, and the App renders a single tool-style row (`TaskNoteRow`).
   Monitor events carry only task-id; map them back to the call using the tool_result `Monitor started (task <id>` (`TaskIndex`).
-- The App merges its on-disk chat cache by item id. If the hub changes the contents of a type of item (for example, adding fields to notices), new pages do not overwrite old cached items. When the item structure changes,
-  bump the `ChatCache` directory version (`chats-v3`).
+- The App merges its on-disk chat cache by item id. If the hub changes the contents of a type of item (for example, adding fields to notices), new pages do not overwrite old cached items. When the item structure or the hub's kind / text for an existing item changes,
+  bump the `ChatCache` directory version (`ChatCache.folder`) so the old representation is dropped.
 - Backward pagination has a parsing budget, but must not return an empty page while earlier content remains. An empty page + `has_more: true` leaves the App with no seq to fetch next, making earlier history permanently inaccessible (large Codex rollouts can have tens of MB of lines that produce no entries between two turns).
 - Parsing `<persona-context>` must not assume all attributes are present or in a fixed order (2026-11-03, #876). iOS once recognized it only when all three of `kind`, `title`, and `url` were present. Lark /agent contexts had no `url`, so the tag went unrecognized, leaving the whole prompt and large blank areas in the bubble.
   Truncating user messages for pagination must also avoid cutting through tags: a cut in the middle leaves an unclosed `<persona-context`, which every client displays as body text (`lightContexts` in `transcript/contexts.go` trims only the body of each block).
@@ -268,3 +269,33 @@ A view that fetches once per id cannot recover when the store puts the same id b
   same split again. Leave `cwd` as recorded: it is what the session's own record says.
 - A test that makes a repository under `t.TempDir()` and compares paths needs the physical temporary directory
   (`physicalTempDir`): macOS's is behind a link, so the test passes on Linux and fails on a Mac.
+
+## The background scan never sees a long line (2026-11-13, #6003)
+
+- The node's background scan (`node/bgscan.go`) parses only lines of at most 64 KiB that name a marker: request blobs
+  repeat the whole conversation, markers included, and are 100–500 KB each. Lines over its 256 KiB buffer come in
+  pieces and are skipped too. Anything the session list needs from that scan has to be readable from a short line.
+- A Workflow call carries its script inline (`input.script`), so the call is as long as the script: a 42 KB script
+  made a 94 KB call line. The call was skipped, never parked in `bgPending`, and its short result ("Workflow launched in
+  background. Task ID: …") then registered nothing, so a running workflow had no card. The result names the task, the
+  run (`Run ID`, `Transcript dir`) and the script file on its own, so `backgroundStarted` now starts the run from it
+  when the call was not read; it only takes a result that starts with those words and names a run.
+- Before blaming the line limit, measure the lines: in the same session the earlier runs' calls were 2–27 KB and listed
+  fine; the 69–115 KB lines near them were request blobs and attachments.
+
+## A per-row lookup slower than its cache's life is never cached (2026-11-12)
+
+- Each row of the session list whose transcript path was found more than 30 seconds ago is looked up again
+  (`findTranscriptPath`), and each lookup globbed `<projects>/*/<id>.jsonl`: Go's `filepath.Glob` reads and sorts every
+  project directory to match one name, so a lookup costs a read of the whole tree (66 ms for 2,600 directories and
+  27,000 transcripts). A chat bridge kept 567 compatible-CLI threads listed; with 58 live Claude sessions that was 625
+  lookups, 41 s a rebuild, longer than the 30 s the found paths were trusted for, so every rebuild found them all expired
+  again and the cache never hit. Five rebuild sources overlapped, and the node used up to four cores, half of it in the
+  kernel reading directories.
+- Below the threshold (rows × lookup < trust window) the cost is near zero; above it it jumps to the full price. Check
+  per-row work against the list's real size, not a dozen test rows.
+- A rollout (Codex, the compatible CLI) has no copy in Claude's projects directories: once found it stays the thread's
+  file while it exists, and a live rollout agent is looked up in its rollouts only (`isClaudeTranscript`,
+  `rolloutAgent`). Claude rows still look again every half minute; a shared read per list pass would bound them, but it
+  must not hide a newer copy that appears in another config directory meanwhile
+  (`TestAssistantResumeKeepsARunningProcessProfile`).

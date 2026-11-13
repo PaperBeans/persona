@@ -16,8 +16,8 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
-// The done items' history (GET /api/v1/inbox/done, #2200): the list shows done items for inboxKeepDone and the manager
-// holds them for inboxForget, but the database keeps them for inboxKeepHistory; this pages them, newest done first. A
+// The done items' history (GET /api/v1/inbox/done, #2200): the list shows the newest inboxListDone of the items done
+// within inboxKeepDone (inbox_list_done.go) and the manager holds them for inboxForget, but the database keeps them for inboxKeepHistory; this pages them, newest done first. A
 // manager without a database pages the done items it holds. The pages are one manager's: the hub stamps the items
 // with it but does not merge managers (each one's cursor is its own), the apps ask each manager and merge.
 //

@@ -1,4 +1,8 @@
 {
   "hide": "Hide",
-  "show": "Show"
+  "show": "Show",
+  "use_reference": "Use a reference",
+  "reference_placeholder": "op://vault/item/field",
+  "reference_hint": "Its provider gives the key whenever this provider needs it. Persona keeps only the reference.",
+  "reference_saved": "Checked when you save it: the reference must resolve. The connection test runs after that."
 }

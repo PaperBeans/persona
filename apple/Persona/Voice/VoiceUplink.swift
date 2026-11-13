@@ -90,9 +90,16 @@ nonisolated enum VoicePCM {
 /// Muting sends silence of the same length (docs/assistant/voice.md 1.2 K): the extension keeps hearing time pass and the upstream's
 /// turn-taking does not stall. The input level (about 20 a second, for the orb) is measured before muting and is 0
 /// while muted.
+///
+/// A meeting call's uplink is gated (#3862 phase 4, docs/assistant/meeting-minutes.md「Hearing only Talk」): nothing is
+/// held or sent outside a Talk span (`talk(_:frame:)`), so the meeting's audio never reaches the voice service between
+/// spans, before `ready` included.
 nonisolated final class VoiceUplink: @unchecked Sendable {
     let seconds: Double
+    /// Sends only inside a Talk span, and never holds (a meeting call).
+    let gated: Bool
     private let lock = NSLock()
+    private var talking = false
     private var held: [(pcm: Data, rate: Int)] = []
     private var sink: (@Sendable (Data) -> Void)?
     private var sinkRate = 0
@@ -105,8 +112,22 @@ nonisolated final class VoiceUplink: @unchecked Sendable {
     /// What is sent at a time when held audio goes out: a tenth of a second.
     static let chunkSeconds = 0.1
 
-    init(seconds: Double = 3) {
+    init(seconds: Double = 3, gated: Bool = false) {
         self.seconds = seconds
+        self.gated = gated
+    }
+
+    /// A Talk span is open (gated uplinks only).
+    var isTalking: Bool { lock.withLock { talking } }
+
+    /// Opens or closes a Talk span of a gated uplink. `frame` sends the `talk` frame, under the same lock as every push:
+    /// the socket keeps the order of its sends, so no buffer of the span goes before its `talk on` or after its
+    /// `talk off` (the extension would replace it by silence and log a phone bug).
+    func talk(_ on: Bool, frame: () -> Void) {
+        lock.withLock {
+            guard gated, !closed else { return }
+            if on { frame(); talking = true } else { talking = false; frame() }
+        }
     }
 
     var isMuted: Bool {
@@ -135,7 +156,10 @@ nonisolated final class VoiceUplink: @unchecked Sendable {
             levelSum += VoicePCM.sumOfSquares(pcm)
             levelCount += pcm.count / 2
             let out = mutedFlag ? VoicePCM.silence(bytes: pcm.count) : pcm
-            if let sink {
+            if gated {
+                // Outside a span, or while the socket is away, the audio goes nowhere: never held for later.
+                if talking, let sink { sink(sinkRate == rate ? out : VoicePCM.resample(out, from: rate, to: sinkRate)) }
+            } else if let sink {
                 sink(sinkRate == rate ? out : VoicePCM.resample(out, from: rate, to: sinkRate))
             } else {
                 hold(out, rate: rate)
@@ -175,6 +199,8 @@ nonisolated final class VoiceUplink: @unchecked Sendable {
         lock.withLock {
             sink = nil
             sinkRate = 0
+            // A span is the socket's: one that went away took it along.
+            talking = false
         }
     }
 
@@ -185,6 +211,7 @@ nonisolated final class VoiceUplink: @unchecked Sendable {
             sink = nil
             held = []
             levelSink = nil
+            talking = false
         }
     }
 

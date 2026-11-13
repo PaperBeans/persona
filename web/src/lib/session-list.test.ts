@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "./api";
 import { t } from "../i18n";
-import { ListCounts, ListPage, ListFilters, PAGE_SIZE, SESSIONS_LIST_FEATURE, SessionList, type SessionListOptions } from "./session-list";
+import { filterQuery, listPair, ListCounts, ListPage, ListFilters, PAGE_SIZE, SESSIONS_LIST_FEATURE, SessionList, type SessionListOptions } from "./session-list";
 
 vi.mock("./api", async (original) => ({ ...await original<typeof import("./api")>(), api: vi.fn() }));
 
@@ -1088,5 +1088,154 @@ describe("generation isolation and inflight coalescing", () => {
     await current;
     expect(ids(list)).toEqual(["current"]);
     expect(list.getSnapshot().loading).toBe(false);
+  });
+});
+
+describe("counts read with the page (sessions_page_counts, #4858)", () => {
+  const withCounts = (sessions: Row[], patch: Partial<ListPage<Row>> = {}, revision = "page") => page(sessions, { counts: counts(revision), ...patch });
+
+  it("reads a first page and each delta in one request, the counts riding on the page", async () => {
+    pages.mockResolvedValueOnce(withCounts(rows(50), { has_more: true, next_cursor: "frozen/one+" }, "first"));
+    const list = make(undefined, { pageCounts: () => true });
+    expect(list.usesPageCounts()).toBe(true);
+    await list.load();
+    expect(list.getSnapshot()).toMatchObject({ loaded: true, total: 8_000, counts: counts("first") });
+    pages.mockResolvedValueOnce(withCounts([row("new", 20_000)], { revision: "next" }, "next"));
+    await list.load();
+    expect(ids(list)[0]).toBe("new");
+    expect(list.getSnapshot().counts).toEqual(counts("next"));
+    expect(requestParams()).toEqual([
+      { summary: "1", limit: "50", with_counts: "1" },
+      { summary: "1", limit: "50", since: "baseline", with_counts: "1" },
+    ]);
+    expect(aggregates).not.toHaveBeenCalled();
+    expect(api).toHaveBeenCalledTimes(2);
+  });
+
+  it("takes two requests per refresh without the feature, as before", async () => {
+    const list = make();
+    expect(list.usesPageCounts()).toBe(false);
+    await list.load();
+    pages.mockResolvedValueOnce(page([row("new", 20_000)], { revision: "next" }));
+    await list.load();
+    expect(api).toHaveBeenCalledTimes(4);
+    expect(requestParams().every((query) => !("with_counts" in query))).toBe(true);
+    expect(aggregates).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks for counts on a delta's first page only, with the filters it reads", async () => {
+    const list = make(undefined, { pageCounts: () => true });
+    pages.mockResolvedValueOnce(withCounts(rows(50)));
+    await list.setFilters({ state: "working" });
+    pages
+      .mockResolvedValueOnce(withCounts([row("a", 20_000)], { revision: "next", has_more: true, next_cursor: "delta/two" }, "next"))
+      .mockResolvedValueOnce(page([row("b", 19_999)], { revision: "next" }));
+    await list.load();
+    expect(ids(list).slice(0, 2)).toEqual(["a", "b"]);
+    expect(requestParams().slice(1)).toEqual([
+      { state: "working", summary: "1", limit: "50", since: "baseline", with_counts: "1" },
+      { state: "working", summary: "1", limit: "50", since: "baseline", cursor: "delta/two" },
+    ]);
+    expect(list.getSnapshot().counts).toEqual(counts("next"));
+    expect(aggregates).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the separate counts read when a page comes back without valid counts", async () => {
+    const list = make(undefined, { pageCounts: () => true });
+    pages.mockResolvedValueOnce(page(rows(10)));
+    await list.load();
+    expect(list.getSnapshot()).toMatchObject({ loaded: true, counts: counts() });
+    pages.mockResolvedValueOnce(page([], { revision: "next", counts: { total: 1 } as ListCounts }));
+    aggregates.mockResolvedValueOnce(counts("separate"));
+    await list.load();
+    expect(list.getSnapshot().counts).toEqual(counts("separate"));
+    expect(aggregates.mock.calls.map(([path]) => Object.fromEntries(params(path)))).toEqual([{ counts: "1" }, { counts: "1" }]);
+  });
+
+  it("keeps a failed page's checkpoint so the retry sees the same changes", async () => {
+    const list = make(undefined, { pageCounts: () => true });
+    pages.mockResolvedValueOnce(withCounts(rows(10)));
+    await list.load();
+    pages.mockRejectedValueOnce(new Error("offline"));
+    await expect(list.load()).rejects.toThrow("offline");
+    expect(list.getSnapshot()).toMatchObject({ error: "offline", counts: counts("page") });
+    pages.mockResolvedValueOnce(withCounts([row("new", 20_000)], { revision: "next" }, "next"));
+    await list.retry();
+    expect(requestParams().slice(1).map((query) => query.since)).toEqual(["baseline", "baseline"]);
+    expect(list.getSnapshot()).toMatchObject({ error: null, counts: counts("next") });
+    expect(aggregates).not.toHaveBeenCalled();
+  });
+});
+
+describe("machine and value pairs (sessions_catalog)", () => {
+  const app = [listPair("mac", "/Users/me/code/app"), listPair("pc", "C:\\code\\app")];
+
+  it("sends each place and space as its own value, with every read of the list", async () => {
+    const list = make();
+    await list.setFilters({ place: app, state: "working" });
+    const first = params(pages.mock.calls[0][0]);
+    expect(first.getAll("place")).toEqual(['["mac","/Users/me/code/app"]', '["pc","C:\\\\code\\\\app"]']);
+    expect(first.get("state")).toBe("working");
+    expect(params(aggregates.mock.calls[0][0]).getAll("place")).toEqual(first.getAll("place"));
+    await list.more();
+    expect(params(pages.mock.calls[1][0]).getAll("place")).toEqual(first.getAll("place"));
+    list.invalidate();
+    await tick();
+    expect(params(pages.mock.calls[2][0]).getAll("place")).toEqual(first.getAll("place"));
+
+    await list.setFilters({ space: [listPair("mac", "w1"), listPair("mac", "")] });
+    const spaced = params(pages.mock.calls.at(-1)![0]);
+    expect(spaced.getAll("space")).toEqual(['["mac",""]', '["mac","w1"]']);
+    expect(spaced.has("place")).toBe(false);
+  });
+
+  it("takes the same pairs in another order, or twice, as the same filter: the list is not read again", async () => {
+    const list = make();
+    await list.setFilters({ place: app });
+    const reads = pages.mock.calls.length;
+    await list.setFilters({ place: [app[1], app[0], app[1]] });
+    expect(pages.mock.calls.length).toBe(reads);
+    await list.setFilters({ place: [app[0]] });
+    expect(pages.mock.calls.length).toBe(reads + 1);
+    await list.setFilters({ place: [] });
+    expect(params(pages.mock.calls.at(-1)![0]).has("place")).toBe(false);
+  });
+
+  it("spells a scope the same whichever way its filters were put together", () => {
+    expect(filterQuery({ state: "idle", q: "x", place: [app[1], app[0]] })).toBe(filterQuery({ place: [app[0], app[1], app[0]], q: "x", state: "idle" }));
+    expect(filterQuery({})).toBe("counts=1");
+    expect(filterQuery({ q: "" , place: [] })).toBe("counts=1");
+    expect(new URLSearchParams(filterQuery({ space: [listPair("mac", "w1")] }, { catalog: "1" })).getAll("space")).toEqual(['["mac","w1"]']);
+    expect(filterQuery({ q: "x" }, {})).toBe("q=x");
+  });
+});
+
+describe("a list that only shows rows (counts: false)", () => {
+  it("never reads counts: not on its first page, a refresh, a page with counts or an expired cursor", async () => {
+    const list = make(undefined, { counts: false, pageCounts: () => true });
+    await list.setFilters({ machine_id: "demo" });
+    expect(list.getSnapshot()).toMatchObject({ loaded: true, counts: null, total: 8_000 });
+    expect(list.getSnapshot().rows).toHaveLength(50);
+    list.invalidate();
+    await tick();
+    // an expired cursor reads a fresh view two pages deep: rows only, as every other read of it
+    pages.mockRejectedValueOnce(failure(409, "cursor_expired"));
+    pages.mockResolvedValueOnce(page(rows(50), { has_more: true, next_cursor: "fresh/one", revision: "fresh" }));
+    pages.mockResolvedValueOnce(page(rows(50, 50), { revision: "fresh" }));
+    await list.more();
+    expect(list.getSnapshot().rows).toHaveLength(100);
+    expect(aggregates).not.toHaveBeenCalled();
+    expect(pages.mock.calls.every(([path]) => !params(path).has("with_counts"))).toBe(true);
+  });
+
+  it("retries a failed next page as a next page", async () => {
+    const list = make(undefined, { counts: false });
+    await list.load();
+    pages.mockRejectedValueOnce(new Error("offline"));
+    await expect(list.more()).rejects.toThrow("offline");
+    pages.mockResolvedValueOnce(page(rows(10, 50), { has_more: false }));
+    await list.retry();
+    expect(params(pages.mock.calls.at(-1)![0]).get("cursor")).toBe("frozen/one+");
+    expect(list.getSnapshot().rows).toHaveLength(60);
   });
 });

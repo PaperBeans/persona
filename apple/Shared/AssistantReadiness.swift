@@ -24,11 +24,14 @@ nonisolated struct AssistantReadiness: Codable, Hashable, Sendable {
         var version: String?
         var title: String?
         var detail: String?
+        /// A rate limit's main turn time, health-only reset window, or other newest evidence time.
+        var occurrence: String?
         var action: Action?
         var altActions: [Action]?
 
         enum CodingKeys: String, CodingKey {
             case id, state, code, machine, launcher, version, title, detail, action
+            case occurrence
             case altActions = "alt_actions"
         }
 

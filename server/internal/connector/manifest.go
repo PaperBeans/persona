@@ -97,6 +97,9 @@ type Manifest struct {
 	ConfirmAlways []string
 	// Poll is how often the hub asks Archive for changes; 0 is the hub's default.
 	Poll time.Duration
+	// InboxSwitch: it brings things into the Inbox through a path of the manager's own, not Collect (mail, #5307), and
+	// has the Add to Inbox switch (FeedInbox) all the same; without CapInbox it answers no inbox round itself.
+	InboxSwitch bool
 	// Kinds are the kinds its inbox things have (InboxThing.Kind): prompts/inbox/kinds/<id>.md tells the models what
 	// each means. A thing of a kind not here is still taken, and logged.
 	Kinds []string

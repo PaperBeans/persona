@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Smaller details of an Agent's chat in iOS's words (docs/plans/android-ios-alignment/chats.md, C9). -->
+<resources>
+    <string name="chat_placeholder_agent">%1$sにメッセージ</string>
+    <string name="chat_getting_ready">%1$sが準備中…</string>
+    <string name="chat_recap_open_spoken">不在中のまとめ：%1$s。タップして閉じる</string>
+    <string name="chat_plan_sheet_title">プラン</string>
+    <string name="chat_plan_sheet_step">全 %2$d ステップ中 %1$d ステップ目</string>
+    <plurals name="chat_plan_sheet_all_done">
+        <item quantity="other">全 %1$d ステップ完了</item>
+    </plurals>
+    <string name="chat_plan_sheet_summary">%1$s · %2$s</string>
+    <string name="chat_plan_pill_opens">プランを表示します</string>
+    <string name="chat_info_runtime">実行方法</string>
+    <string name="chat_info_runtime_fallback">CLIに戻しました：%1$s</string>
+    <string name="chat_info_route">接続</string>
+    <string name="chat_info_route_app_server">app-server（構造化）</string>
+    <string name="chat_info_route_terminal">ターミナル（画面読み取り）</string>
+    <string name="chat_info_context_left">コンテキストの残り</string>
+    <string name="chat_info_context_left_value">残り%1$d%%</string>
+    <string name="chat_info_context_spoken">コンテキスト%1$s、%2$d%%使用、ウィンドウ%3$s</string>
+    <string name="chat_info_delegated_section">アシスタントが代理回答した質問</string>
+    <string name="chat_info_delegated_no_answer">（未回答）</string>
+    <string name="chat_info_delegated_why">理由：%1$s</string>
+    <string name="chat_viewed_screenshot">スクリーンショット</string>
+    <string name="chat_viewed_browser">Webページのスクリーンショット</string>
+    <string name="chat_viewed_image">画像</string>
+    <string name="chat_viewed_view">大きく表示</string>
+    <string name="chat_outbox_retry_now">今すぐ再試行</string>
+    <string name="chat_outbox_dont_send">送信しない</string>
+    <string name="chat_outbox_resend">再送信</string>
+    <string name="chat_outbox_waiting_spoken">ネットワーク待ち。接続後に自動で送信します</string>
+    <string name="chat_outbox_failed_spoken">送信に失敗しました。再送信または削除してください</string>
+</resources>

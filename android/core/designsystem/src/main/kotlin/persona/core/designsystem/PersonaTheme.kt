@@ -74,7 +74,15 @@ internal object Shapes {
     )
     val Brief = PersonaShapes(card = 24.dp, panel = 28.dp, control = 16.dp, chip = 50.dp, button = 50.dp, sheet = 28.dp)
     val Board = PersonaShapes(card = 10.dp, panel = 10.dp, control = 8.dp, chip = 6.dp, button = 8.dp, sheet = 14.dp)
-    fun of(style: AppStyle) = when (style) { AppStyle.Glass -> Glass; AppStyle.Brief -> Brief; AppStyle.Board -> Board }
+    fun of(style: AppStyle): PersonaShapes {
+        // The style's radii, rounded less in Compact density (#5564); pills stay pills.
+        val base = when (style) { AppStyle.Glass -> Glass; AppStyle.Brief -> Brief; AppStyle.Board -> Board }
+        val r = LayoutDensity.radiusScale
+        if (r == 1f) return base
+        fun Dp.pill() = if (value >= 50f) this else this * r
+        return base.copy(card = base.card * r, panel = base.panel * r, control = base.control * r, chip = base.chip.pill(),
+            button = base.button.pill(), sheet = base.sheet * r)
+    }
 }
 
 internal object Motions {
@@ -188,7 +196,7 @@ private fun PersonaType.material() = Typography(
 )
 
 private fun PersonaShapes.material() = Shapes(
-    extraSmall = RoundedCornerShape(minOf(chip, 8.dp)), small = RoundedCornerShape(control),
+    extraSmall = RoundedCornerShape(minOf(chip, 8.dp.corner)), small = RoundedCornerShape(control),
     medium = RoundedCornerShape(card), large = RoundedCornerShape(panel), extraLarge = RoundedCornerShape(sheet),
 )
 

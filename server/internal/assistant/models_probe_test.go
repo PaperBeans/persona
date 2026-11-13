@@ -44,8 +44,9 @@ func probeResult(t *testing.T, mux http.Handler, path, body string) map[string]a
 	return out
 }
 
-// The test request carries both credential headers, the version, the custom headers and a 1-token "ping".
-func TestProviderTestSendsBothAuthHeaders(t *testing.T) {
+// Without auth, a stored provider or a preset (an app from before auth was read, typing a gateway) the test request
+// carries both credential headers, the version, the custom headers and a 1-token "ping".
+func TestProviderTestWithoutAuthSendsBothHeaders(t *testing.T) {
 	_, mux := launcherTestService(t)
 	var got *http.Request
 	var body map[string]any

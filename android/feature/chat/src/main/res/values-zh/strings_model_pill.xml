@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_modelpill_spoken">选择模型。当前：%1$s</string>
+    <string name="chat_modelpill_spoken_effort">选择模型。当前：%1$s，思考强度：%2$s</string>
+    <string name="chat_modelpill_spoken_pending">选择模型。下条消息：%1$s · %2$s</string>
+    <string name="chat_modelpill_spoken_pending_effort">选择模型。下条消息：%1$s · %2$s，思考强度：%3$s</string>
+    <string name="chat_modelpill_loading">正在读取模型…</string>
+    <string name="chat_modelpill_failed">模型读取失败</string>
+    <string name="chat_modelpill_default_model">默认模型</string>
+    <string name="chat_modelpill_effort_xhigh_short">很高</string>
+    <string name="chat_modelpill_header_default">跟随默认 · %1$s</string>
+    <string name="chat_modelpill_header_own">沿用这个对话开始时的模型 · %1$s</string>
+    <string name="chat_modelpill_header_picked">本对话单独选择 · %1$s</string>
+    <string name="chat_modelpill_header_picked_page">本对话单独选择，离开对话后恢复 · %1$s</string>
+    <string name="chat_modelpill_header_new">用于这个新对话 · %1$s</string>
+    <string name="chat_modelpill_follow_default">恢复跟随默认</string>
+    <string name="chat_modelpill_undo_pick">撤销单独选择</string>
+    <string name="chat_modelpill_provider_gone">这台电脑上已经没有这个服务商了</string>
+    <string name="chat_modelpanel_other_provider">运行中的 Agent 暂时不能换供应商</string>
+    <string name="chat_modelpanel_other_engine">从 %1$s 换到 %2$s 需要新开对话</string>
+    <string name="chat_modelpanel_model_fixed">运行中的 %1$s 会话不能换模型</string>
+    <string name="chat_modelpanel_locked">这个启动器固定了自己的模型，在这里选了也不会生效。</string>
+    <string name="chat_modelpanel_busy">Agent 正在工作，这一轮结束后再切换模型</string>
+    <string name="chat_modelpanel_pending_note">下一条消息时切换：Agent 会在 %1$s 上重启，对话保留</string>
+    <string name="chat_modelpanel_engine_note">切换引擎会重建上下文，可能丢失内容</string>
+    <string name="chat_modelpanel_switch_scheduled">已登记切换：下一条消息发出时，Agent 会换到 %1$s</string>
+    <string name="chat_model_changed">模型已从 %1$s 切换到 %2$s</string>
+</resources>

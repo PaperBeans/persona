@@ -66,6 +66,41 @@ struct WorkingIndicator: View {
     }
 }
 
+/// A dense row's state at its end (the Assistant sidebar's main chat and Directions, All Chats, #4538): Needs You a
+/// still blue dot, Working the amber spinner, Unread a green dot, nothing for the rest. Still in a dense list, so only
+/// the spinner turns; the row's own label says the state in words.
+struct RowStateMark: View {
+    var state: AgentState
+    /// A lead row whose Agents work while its own conversation is idle spins the same mark (#6230). A row that itself
+    /// needs the user or is unread keeps its dot, so the quiet activity never hides something that asks for attention.
+    var working = false
+
+    /// The dot's color; nil where the mark is the spinner or nothing.
+    nonisolated static func dot(_ state: AgentState) -> Color? {
+        switch state {
+        case .needsYou: StatusPalette.needsYou.dot
+        case .unread: StatusPalette.unread.dot
+        default: nil
+        }
+    }
+
+    /// Whether this row carries the working spinner (#6230): its own turn at work, or a lead whose Agents work while the
+    /// conversation itself is idle. A row that needs the user or is unread keeps its dot, so quiet activity never hides
+    /// something that asks for attention.
+    var spins: Bool {
+        state == .working || (working && Self.dot(state) == nil)
+    }
+
+    var body: some View {
+        if spins {
+            WorkingIndicator()
+        } else if let color = Self.dot(state) {
+            Circle().fill(color).scaledFrame(width: Theme.Size.dot, height: Theme.Size.dot)
+                .accessibilityLabel(state.label)
+        }
+    }
+}
+
 /// Machine glyph inside a soft tinted squircle with the state dot in the corner.
 struct SessionAvatar: View {
     var machine: Machine?
@@ -188,6 +223,10 @@ struct Chip: View {
     var compact = false
 
     var body: some View {
+        chipBody.accessibilityShowsLargeContentViewer()
+    }
+
+    @ViewBuilder private var chipBody: some View {
         if compact {
             Text(text).lineLimit(1)
                 .font(Theme.Font.label)
@@ -278,8 +317,6 @@ struct LinkBadge: View {
     }
 }
 
-/// A count on a row or a section header: bold digits on a capsule, "99+" past 99. `.solid` is white on a color —
-/// `Theme.countBadge` gray, the accent when it is about you (@Me); `.tone` is a state's words on its tint.
 /// A chip that turns a filter or a choice on and off (the inbox's sources, the Feishu accounts): in the BeautifulUI
 /// style its filter chip; otherwise a capsule filled with the accent while on. `count` follows the title.
 struct FilterChip: View {
@@ -318,24 +355,45 @@ struct FilterChip: View {
     }
 }
 
+/// A count on a row or a section header: bold digits on a capsule, nothing at zero, "99+" past 99, the exact number to
+/// VoiceOver. Its looks share the web's names (#4538): `.needs` Needs You's words on its tint, `.neutral` white on
+/// `Theme.countBadge` gray, `.accent` white on the accent; `.tone` is any other state's words on its tint.
 struct CountBadge: View {
     enum Look {
         case solid(Color)
         case tone(StatusTone)
+
+        /// What waits for the user to act (#4538): Needs You's words on its neutral tint, as the web's `needs` tone.
+        static var needs: Look { .tone(StatusPalette.needsYou) }
+        /// A passive total: unread messages, items in a group.
+        static var neutral: Look { .solid(Theme.countBadge) }
+        /// The selected item's count, or one about you (@Me).
+        static var accent: Look { .solid(Theme.accent) }
     }
 
     var count: Int
-    var look: Look = .solid(Theme.countBadge)
+    var look: Look = .neutral
+    /// What VoiceOver says for it ("3 need you"); by default the exact number, past 99 too.
+    var label: String? = nil
+
+    /// What it shows: nothing at zero, "99+" past 99.
+    nonisolated static func text(_ count: Int) -> String? {
+        count > 0 ? (count > 99 ? "99+" : "\(count)") : nil
+    }
 
     var body: some View {
-        Text(count > 99 ? "99+" : "\(count)")
-            .font(Theme.Font.labelHeavy.monospacedDigit())
-            .contentTransition(.numericText(value: Double(count)))
-            .foregroundStyle(words)
-            .padding(.horizontal, Theme.Space.sm)
-            .padding(.vertical, Theme.Space.xxs)
-            .background(fill, in: .capsule)
-            .fixedSize()
+        if let text = Self.text(count) {
+            Text(text)
+                .font(Theme.Font.labelHeavy.monospacedDigit())
+                .contentTransition(.numericText(value: Double(count)))
+                .foregroundStyle(words)
+                .padding(.horizontal, Theme.Space.sm)
+                .padding(.vertical, Theme.Space.xxs)
+                .background(fill, in: .capsule)
+                .fixedSize()
+                .accessibilityLabel(label ?? String(count))
+                .accessibilityShowsLargeContentViewer()
+        }
     }
 
     private var words: Color {
@@ -521,8 +579,14 @@ struct CloseAgentSheet: View {
             .padding(.horizontal, Theme.Space.xl)
 
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                fact(Theme.Icon.end, String(localized: "Stops the current task, quits \(session.agentLabel), and closes its terminal tab (only this pane when split)"))
-                fact(Theme.Icon.retry, String(localized: "The chat history is kept; continue later with \(session.resumeCommand)"))
+                if session.canTerminal {
+                    fact(Theme.Icon.end, String(localized: "Stops the current task, quits \(session.agentLabel), and closes its terminal tab (only this pane when split)"))
+                    fact(Theme.Icon.retry, String(localized: "The chat history is kept; continue later with \(session.resumeCommand)"))
+                } else {
+                    // A session without a terminal (a runtime's, #6294) ends where it runs; whether its history stays is
+                    // its runtime's, so the sheet does not promise it.
+                    fact(Theme.Icon.end, String(localized: "Stops the current task and ends this session"))
+                }
             }
             .padding(Theme.Space.l)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -867,4 +931,25 @@ extension View {
     func firstFittingText(_ text: String) -> some View {
         accessibilityElement(children: .ignore).accessibilityLabel(text).accessibilityAddTraits(.isStaticText)
     }
+}
+
+/// A toggle drawn as a box that is ticked or not, beside its label: a mark the user sets on an item in a list of many
+/// (a file viewed in a code review, #827), where a switch would weigh more than the item. Tapping the box or the label
+/// flips it; VoiceOver reads it as the toggle it is. On iOS, never for a setting: settings use `Toggle`'s switch.
+struct TickBoxToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button { configuration.isOn.toggle() } label: {
+            HStack(spacing: Theme.Space.xs) {
+                ThemedIcon(configuration.isOn ? Theme.Icon.checkedBox : Theme.Icon.uncheckedBox)
+                    .foregroundStyle(configuration.isOn ? Theme.positive : Color.secondary)
+                configuration.label
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+extension ToggleStyle where Self == TickBoxToggleStyle {
+    static var tickBox: TickBoxToggleStyle { TickBoxToggleStyle() }
 }

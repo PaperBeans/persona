@@ -4,14 +4,14 @@
   "quote": "引用",
   "me": "自分",
   "edit": "編集して再送信",
-  "fork": "新しいチャットに分岐",
+  "fork": "新しいセッションで続ける",
   "copy_message": "メッセージをコピー",
   "copy_reply": "返信をコピー",
   "more": "その他",
   "done": "完了",
   "copy_all": "すべてコピー",
-  "hand_to_persona": "Personaに任せる",
   "use_as_context": "コンテキストにする",
   "context_title": "{title} · メッセージ",
-  "handoff_ask": "このメッセージを見て、どう対応すればよいか教えてください。"
+  "fork_chat": "新しいチャットで続ける",
+  "cut_short": "この返信は完了しませんでした。内容は参考情報としてご覧ください。"
 }

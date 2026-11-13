@@ -9,7 +9,7 @@ vi.hoisted(() => {
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
 });
 // the stand-ins record each render's open prop (undefined: not mounted)
-const seen = vi.hoisted(() => ({ palette: undefined as boolean | undefined, newAgent: undefined as boolean | undefined, mounts: 0, fail: false, failNewAgent: false, failed: 0 }));
+const seen = vi.hoisted(() => ({ help: undefined as boolean | undefined, helpMounts: 0, palette: undefined as boolean | undefined, newAgent: undefined as boolean | undefined, mounts: 0, fail: false, failNewAgent: false, failed: 0 }));
 vi.mock("./views/Palette", async () => {
   const { useEffect } = await import("react");
   return {
@@ -32,7 +32,16 @@ vi.mock("./views/Sidebar", () => ({ Sidebar: () => null, SidebarRail: () => null
 vi.mock("./views/Home", () => ({ Home: () => null }));
 vi.mock("./views/NewWorktreeHost", () => ({ NewWorktreeHost: () => null }));
 vi.mock("./views/SidePanel", () => ({ SidePanel: () => null }));
-vi.mock("./views/ShortcutHelp", () => ({ ShortcutHelp: () => null }));
+vi.mock("./views/ShortcutHelp", async load => {
+  const real = await load<typeof import("./views/ShortcutHelp")>();
+  const { useEffect } = await import("react");
+  const { useHelpOpen } = await import("./lib/shortcut-help");
+  return { ...real, ShortcutHelp: () => {
+    seen.help = useHelpOpen();
+    useEffect(() => void seen.helpMounts++, []);
+    return <real.ShortcutHelp />;
+  } };
+});
 const reported = vi.hoisted(() => ({ list: [] as { boundary: string; chunk: boolean }[] }));
 vi.mock("./lib/error-reports", async (load) => ({
   ...(await load<typeof import("./lib/error-reports")>()),
@@ -43,6 +52,7 @@ import { refresh, reset } from "./lib/store";
 import { setToken } from "./lib/api";
 import { closePalette, openPalette } from "./lib/palette";
 import { openNewAgent } from "./lib/new-agent";
+import { closeHelp } from "./lib/shortcut-help";
 import { App } from "./App";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -73,7 +83,8 @@ const until = async (check: () => void) => {
 beforeEach(() => {
   localStorage.clear();
   setToken("tok");
-  seen.palette = seen.newAgent = undefined;
+  seen.palette = seen.newAgent = seen.help = undefined;
+  seen.helpMounts = 0;
   seen.mounts = seen.failed = 0;
   seen.fail = seen.failNewAgent = false;
   reported.list = [];
@@ -88,11 +99,31 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   closePalette();
+  closeHelp();
   reset();
   vi.unstubAllGlobals();
 });
 
 describe("the palette and the new-agent dialog", () => {
+  it("keeps the help shortcut live before the dialog loads and retains its mount across close and reopen", async () => {
+    await act(() => refresh());
+    await act(async () => root.render(<App />)); await flush();
+    expect(seen.help).toBeUndefined(); expect(seen.helpMounts).toBe(0);
+    const open = async () => {
+      const key = new KeyboardEvent("keydown", { key: "/", ctrlKey: true, bubbles: true, cancelable: true });
+      await act(async () => { dispatchEvent(key); });
+      expect(key.defaultPrevented).toBe(true);
+      await until(() => expect(seen.help).toBe(true));
+      expect(document.querySelector('[role="dialog"] ul li')).not.toBeNull();
+    };
+    await open();
+    await act(async () => { dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); }); await flush();
+    expect(seen.help).toBe(false);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await open();
+    expect(seen.helpMounts).toBe(1);
+  });
+
   it("mount on their first open and stay mounted when closed", async () => {
     await act(() => refresh());
     act(() => root.render(<App />));

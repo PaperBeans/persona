@@ -34,6 +34,9 @@ var (
 	larkRiskRe        = lazyre.New(`(?m)^\s*Risk:\s*([a-z-]+)`)
 	// larkCLIRe: a lark-cli call anywhere in a command the gate cannot parse.
 	larkCLIRe = lazyre.New("(^|[\\s;&|(\"'`])(\\S*/)?lark-cli(\\s|[\"']|$)")
+	// larkCLINamed: lark-cli as a word of its own anywhere in a command, a variable's value (`L=lark-cli; $L …`)
+	// included; what lets a whole-command card say it acts on Lark (wholeCommandTitle).
+	larkCLINamed = lazyre.New(`(^|[^A-Za-z0-9_.-])lark-cli([^A-Za-z0-9_.-]|$)`)
 )
 
 func isLarkCLI(name string) bool { return name == "lark-cli" || filepath.Base(name) == "lark-cli" }
@@ -43,17 +46,34 @@ func isLarkCLI(name string) bool { return name == "lark-cli" || filepath.Base(na
 func parseLarkCLI(args []string, risk larkRisk) (c larkCall, deny string, ok bool) {
 	c = larkCall{Gate: -1, CLI: true, Method: "CLI", Args: args}
 	var words, flags []string
-	for i, a := range args {
-		if strings.HasPrefix(a, "-") {
-			flags = args[i:]
-			break
-		}
-		words = append(words, a)
-	}
-	for _, f := range flags {
+	for _, f := range args {
 		if f == "--profile" || strings.HasPrefix(f, "--profile=") {
 			return c, "lark-cli 的配置档由管理者定（manager.json 的 lark.cli.profile），不要自己传 --profile。", false
 		}
+	}
+	i := 0
+	for i < len(args) && strings.HasPrefix(args[i], "-") {
+		name, _, inline := strings.Cut(args[i], "=")
+		if !strings.Contains(" --as --format -q --jq -o --output ", " "+name+" ") {
+			break
+		}
+		flags = append(flags, args[i])
+		i++
+		if !inline {
+			if i == len(args) {
+				return c, "", false
+			}
+			flags = append(flags, args[i])
+			i++
+		}
+	}
+	for ; i < len(args); i++ {
+		a := args[i]
+		if strings.HasPrefix(a, "-") {
+			flags = append(flags, args[i:]...)
+			break
+		}
+		words = append(words, a)
 	}
 	if strings.Contains(strings.Join(words, " "), "$") {
 		return c, "", false // a variable names the command: its risk is unknown
@@ -231,11 +251,10 @@ func flagValue(flags []string, name string) string {
 	return value
 }
 
-// larkCLIRisk asks lark-cli for the risk level of each command it is given, once per command; nil without lark-cli
-// in the hub's config.
+// larkCLIRisk asks lark-cli for the risk level of each command it is given, once per command.
 func (n *Node) larkCLIRisk(cfg proto.AssistantLark) larkRisk {
 	if cfg.CLI == nil {
-		return nil
+		cfg.CLI = &proto.LarkCLI{}
 	}
 	return func(words []string) string {
 		key := cfg.CLI.Profile + "\x00" + strings.Join(words, " ")

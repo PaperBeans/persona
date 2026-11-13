@@ -240,12 +240,13 @@ type (
 
 // Search finds lines containing every word of the query (case-insensitive) in summaries, metadata, timelines, the
 // Markdown of the ExtraDirs and (when messages is set) the message archive; newest message days first. At most limit
-// hits.
-func (e *Engine) Search(query string, messages bool, limit int) []Hit {
+// hits. A line skip says yes to is passed over (not a hit, and not counted against limit).
+func (e *Engine) Search(query string, messages bool, limit int, skip ...func(line string) bool) []Hit {
 	s := e.newSearcher(query, limit, true)
 	if s == nil {
 		return nil
 	}
+	s.skip = skip
 	// The data dir's files come from Find's walk (searchFiles), kept while no directory changed: profile files, the
 	// ExtraDirs, the message days newest first, then the Moments archive (moments.go), thousands of posts read after
 	// everything else so they never crowd it out.
@@ -291,8 +292,8 @@ func (e *Engine) Search(query string, messages bool, limit int) []Hit {
 // files under that kind's directory, by entry, those whose name has every word of the query first, then as List ranks
 // them (the walk alone goes by id, and a recording's id is random, so "last week's" one could come after older ones);
 // with messages, the chats' message days after them, newest first. Never the ExtraDirs or the Moments posts. Nil for
-// any other kind.
-func (e *Engine) SearchKind(query, kind string, messages bool, limit int) []Hit {
+// any other kind. skip as for Search.
+func (e *Engine) SearchKind(query, kind string, messages bool, limit int, skip ...func(line string) bool) []Hit {
 	switch kind {
 	case KindProject, KindChat, KindPerson, KindDoc, KindMeeting, KindEvent, KindRecording, KindTopic:
 	default:
@@ -302,6 +303,7 @@ func (e *Engine) SearchKind(query, kind string, messages bool, limit int) []Hit 
 	if s == nil {
 		return nil
 	}
+	s.skip = skip
 	list := e.List(kind, "")
 	if kind == KindRecording { // kb_list's order for recordings, newest first (List ranks them by the model's importance)
 		start := map[string]time.Time{}
@@ -365,6 +367,7 @@ type searcher struct {
 	recording map[string]map[string][]byte
 	limit     int
 	hits      []Hit
+	skip      []func(line string) bool // lines never to give (Search's skip)
 }
 
 // newSearcher starts a search; nil when there is nothing to find. Files come through Find's cache (findCache.text): a
@@ -404,10 +407,19 @@ func (s *searcher) scan(p string) {
 		if s.full() {
 			return
 		}
-		if s.match(l) {
+		if s.match(l) && !s.skipped(l) {
 			s.hits = append(s.hits, Hit{Path: rel, Line: clip(strings.TrimSpace(l), 300)})
 		}
 	}
+}
+
+func (s *searcher) skipped(l string) bool {
+	for _, f := range s.skip {
+		if f(l) {
+			return true
+		}
+	}
+	return false
 }
 
 // clip cuts s to its first n runes plus an ellipsis (textfmt.Clip).

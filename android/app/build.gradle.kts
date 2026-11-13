@@ -104,6 +104,7 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
     implementation(libs.compose.preview)
+    implementation(libs.coil.compose)
     debugImplementation(libs.compose.tooling)
 
     implementation(libs.androidx.work)

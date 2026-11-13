@@ -1,17 +1,10 @@
 {
-  "label_loop": "循环中，{loop}",
-  "label_background_other": "{count} 个后台任务",
-  "label_loop_and_background_other": "循环中，{loop}，{count} 个后台任务",
-  "open_label": "{label}，点按查看",
-  "background_chip": "后台",
-  "title_loop": "循环",
-  "title_background": "后台任务",
-  "title_both": "循环与后台任务",
-  "looping": "循环中",
-  "looping_every": "循环中 · {cadence}",
+  "section_running": "运行中",
+  "section_completed": "已完成",
+  "empty": "这个会话还没有后台任务",
+  "back": "返回",
+  "loop": "循环",
   "stop_loop": "停止循环",
   "stop_loop_explain": "会给 Agent 发一条消息，让它不再安排下一次唤醒。正在执行的这一轮会先做完。",
-  "background_count": "后台任务 {count}",
-  "copy_command": "拷贝命令",
-  "view_output": "看输出"
+  "copy_command": "拷贝命令"
 }

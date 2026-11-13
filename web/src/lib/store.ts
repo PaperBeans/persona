@@ -6,14 +6,15 @@ import { chosenManager, defaultKnown, defaultManager, fromShownManager, noteConv
 import { BASE } from "./base";
 import { mainConversationMachine, clearMemoryPages, discardFeedCache, feedCacheScope, readFeedCache } from "./feed-cache";
 import { useRef, useSyncExternalStore } from "react";
-import { agentsChanged, refreshAgentPrefs, refreshAgentSessions, resetAgents, setAgentListMode } from "./agents";
-import { onRuntimeChanges, runtimeIdentity, runtimeRemoval, runtimeSessions, SESSIONS_LOOKUP_FEATURE } from "./runtime-list";
+import { AGENTS_PAGE_COUNTS_FEATURE, agentsChanged, refreshAgentPrefs, refreshAgentSessions, resetAgents, setAgentListMode, setPersonalPageCounts } from "./agents";
+import { onRuntimeChanges, runtimeIdentity, runtimeRemoval, runtimeSessions, SESSIONS_LOOKUP_FEATURE, SESSIONS_PAGE_COUNTS_FEATURE, setRuntimePageCounts } from "./runtime-list";
 import { sameValue } from "./stable-lines";
 import { SESSIONS_LIST_FEATURE, type ListCounts } from "./session-list";
+import { SESSIONS_HIERARCHY_FEATURE } from "./child-sessions";
 import { applySessionDelta, SESSIONS_DELTA_FEATURE, sessionRefreshed, sessionSnapshot } from "./sessions-delta";
 import { dueMarks, heldRows, liveMarks, markOver, newMark, nextDue, unansweredMarks, type SeenMark, type SeenMarks } from "./seen-outbox";
 import { probeEdge } from "./edge-auth";
-import { api, ApiError, CLIENT_FEATURES, CLIENT_PONG_TIMEOUT, CLIENT_PLATFORM, CLIENT_VERSION, errorText, getToken, sessionPath } from "./api";
+import { api, ApiError, CLIENT_FEATURES, CLIENT_PONG_TIMEOUT, CLIENT_PLATFORM, CLIENT_VERSION, errorText, getToken, credentialOwner, sessionPath } from "./api";
 import { currentLanguage } from "../i18n";
 import type { AgentMutes } from "./agent-groups";
 import { stateOf } from "./format";
@@ -29,6 +30,10 @@ import { dropElicitationDraft } from "./elicitation";
 import type { OutboxEntry } from "./outbox";
 import { NO_LINK, RESTARTING_MS, type ConnLink } from "./connection";
 import { setOfflineProbe } from "./feedback";
+import { readDirectionTree } from "./direction-names";
+import { unnamedTaskConversations } from "./background-supervisor";
+import { directionTreeAwaitsHello } from "./direction-tree";
+import { configureMessageFeedback, resetMessageFeedback } from "./message-send";
 import { afterEvent, afterHello, graceUntil, isResumed, NO_CURSOR, RESTART_FAST_MS, retryDelay, shownConn, wsQuery, type Drop, type EventCursor } from "./reconnect";
 
 export type Conn = "connecting" | "online" | "offline";
@@ -287,6 +292,33 @@ async function lookUpTaskAgents() {
   }
 }
 
+const cardRowsAsked = new Set<string>();
+let cardRowsFor: Interaction[] | null = null;
+/** A pending card whose session no list holds: a paging hub can leave both child and off-page root sessions out of
+ *  the Agents list's pages. One exact lookup for its row (`sessions_lookup`) puts it among the row hints, so the
+ *  card can be answered wherever it shows (the main chat's Needs you, the Inbox), not only on its parent's open page. */
+async function lookUpCardSessions() {
+  if (state.interactions === cardRowsFor || !state.features.includes(SESSIONS_LOOKUP_FEATURE)) return;
+  cardRowsFor = state.interactions;
+  const missing = new Set(state.interactions.filter((ix) => ix.session_id && !getSession(ix.machine_id, ix.session_id))
+    .map((ix) => runtimeIdentity({ machine_id: ix.machine_id, session_id: ix.session_id } as Session)));
+  for (const id of [...missing].filter((x) => !cardRowsAsked.has(x)).slice(0, 20)) {
+    cardRowsAsked.add(id);
+    const [mid, sid] = JSON.parse(id) as [string, string];
+    const params = new URLSearchParams({ summary: "1", limit: "1", machine_id: mid, session_id: sid });
+    try {
+      const page = await api<{ sessions?: Session[] }>(`/sessions?${params}`);
+      const row = page?.sessions?.[0];
+      if (row && runtimeIdentity(row) === id) {
+        rememberSessionRow(row);
+        notify(); // what reads getSession for the card (can it be answered) reads it again
+      }
+    } catch {
+      cardRowsAsked.delete(id); // asked again with the next change of the cards or connection
+    }
+  }
+}
+
 /** A clicked filtered row may not belong to the unfiltered first page. Keep a small hint until exact lookup finishes. */
 export function rememberSessionRow(row: Session) {
   const id = runtimeIdentity(row);
@@ -366,6 +398,8 @@ export const subscribe = (l: () => void) => {
     listeners.delete(l);
   };
 };
+// a child session's card may need its row looked up (lookUpCardSessions): checked as the cards change
+subscribe(() => void lookUpCardSessions());
 
 export function useStore<T>(select: (s: State) => T): T {
   const last = useRef<{ v: T } | null>(null);
@@ -487,8 +521,9 @@ export function onAppSocket(listener: (connected: boolean) => void) {
   socketListeners.add(listener);
   return () => { socketListeners.delete(listener); };
 }
+let receiptOwner: string | undefined;
 function socketChanged(connected: boolean) {
-  if (!connected) authenticatedSocket = null;
+  if (!connected) { authenticatedSocket = null; receiptOwner = undefined; }
   socketListeners.forEach((listener) => listener(connected));
 }
 /** A WebSocket open event or cached features cannot substitute for this connection's authenticated hello. */
@@ -539,12 +574,14 @@ export function connect() {
   socketChanged(false);
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   socketToken = getToken();
+  directionTreeAwaitsHello(true); // its hello reads the direction tree: the screens wait for that read
   const sock = new WebSocket(`${proto}//${location.host}${BASE}/api/v1/ws?${wsQuery(socketToken, cursor, [SESSIONS_LIST_FEATURE, SESSIONS_DELTA_FEATURE, SESSION_LIVE_FEATURE, "extension_ui_stream_v1", "persona_contracts_v1"])}`);
   ws = sock;
   restartNotice = false;
   // an attempt does not move offline back to connecting: the pill stays on one phase while the hub is down instead of
   // flipping at every backoff tick (the app's ConnectionTitle); shownConn decides it when the attempt fails
   sock.onopen = () => {
+    socketOpenedAt = Date.now(); // a direction tree read since then serves this hello (lib/direction-tree.ts)
     // the interface language: this connection's text, and the user's language for pushes and the assistant (docs/protocol/i18n.md)
     // and what it can render: MCP forms and links come only to a socket that says so
     sock.send(JSON.stringify({ type: "client_hello", platform: CLIENT_PLATFORM, version: CLIENT_VERSION, features: CLIENT_FEATURES, locale: currentLanguage(), heartbeat: { pong_timeout: CLIENT_PONG_TIMEOUT } }));
@@ -576,6 +613,7 @@ export function connect() {
     }
   };
   sock.onclose = (ev) => {
+    if (ws === sock) directionTreeAwaitsHello(false); // no hello: whoever waited for the tree reads it now
     if (ws !== sock) return;
     const wasLive = authenticatedSocket === sock;
     ws = null;
@@ -678,6 +716,27 @@ if (typeof window !== "undefined") {
   window.addEventListener("offline", () => set({ link: { ...state.link, networkUp: false } }));
 }
 
+/** The tree read again: its leaders become the assistant's (a new one not listed yet: the assistant is read again). */
+/** When the socket last opened. */
+let socketOpenedAt = 0;
+
+async function followDirections(changed = false) {
+  if (pageOf() !== "") return; // the tree is the default assistant's (docs/protocol/protocol.md)
+  const ids = await readDirectionTree(changed, changed ? undefined : socketOpenedAt);
+  const a = state.assistant;
+  if (!ids || !a) return;
+  const known = new Set(a.conversations.map((c) => c.session_id));
+  if (ids.some((id) => !known.has(id))) void refreshAssistant().catch(() => {});
+  else if (JSON.stringify(ids) !== JSON.stringify((a.leaders ?? []).filter((id) => id !== a.main))) set({ assistant: { ...a, leaders: ids } });
+}
+
+const helloHooks = new Set<() => void>();
+/** Runs `f` on every hello (lib/new-version.ts asks for the shell then); loaded after the first screen, so it is not in it. */
+export function onHello(f: () => void): () => void {
+  helloHooks.add(f);
+  return () => void helloHooks.delete(f);
+}
+
 // The assistant's live updates about the page itself rather than one conversation: only the shown manager's count.
 const PAGE_EVENTS = new Set(["assistant_schedule"]);
 
@@ -685,6 +744,8 @@ function onMessage(msg: Record<string, unknown>) {
   cursor = msg.type === "hello" ? afterHello(cursor, msg) : afterEvent(cursor, msg);
   switch (msg.type) {
     case "hello": {
+      receiptOwner = msg.message_send_state === 1 ? credentialOwner() : undefined;
+      helloHooks.forEach((f) => f()); // e.g. a hub that came back may serve a new web build (lib/new-version.ts)
       setCompatibilityFeatures(Array.isArray(msg.features) ? msg.features as string[] : []);
       const mesh = (msg.mesh as { hubs?: MeshHub[] } | undefined)?.hubs;
       set({
@@ -699,8 +760,14 @@ function onMessage(msg: Record<string, unknown>) {
       const summaryMode = state.features.includes(SESSIONS_LOOKUP_FEATURE);
       if (runtimeSessions.isSummary() !== summaryMode) listedFull.clear();
       runtimeSessions.setSummary(summaryMode);
+      // a hub that folds child sessions (#5120): the Agents list and its counts leave them out, each parent counted once
+      runtimeSessions.setRoots(state.features.includes(SESSIONS_HIERARCHY_FEATURE));
+      setRuntimePageCounts(state.features.includes(SESSIONS_PAGE_COUNTS_FEATURE));
+      setPersonalPageCounts(state.features.includes(AGENTS_PAGE_COUNTS_FEATURE));
       setAgentListMode(state.features.includes(SESSIONS_LIST_FEATURE));
       taskRowsAsked.clear();
+      cardRowsAsked.clear();
+      cardRowsFor = null;
       void lookUpTaskAgents();
       // subscriptions are per connection: chats resubscribe from what they have either way
       sessionListeners.forEach((ls) => ls.forEach((l) => l.reconnected?.()));
@@ -708,12 +775,19 @@ function onMessage(msg: Record<string, unknown>) {
       resendSeen();
       // resumed: the hub replays every broadcast missed since the cursor, nothing needs refetching
       if (!isResumed(msg)) {
+        void followDirections(); // the direction tree again: a `directions` may have been missed while away
         void refresh();
         void refreshAgentSessions();
         void refreshAgentPrefs();
       }
+      directionTreeAwaitsHello(false); // after followDirections started its read: those waiting share it
       break;
     }
+    case "directions":
+      // the direction tree changed (#4352): a leader made or ended anywhere, a name, a task's state. The sidebar's 常驻
+      // follow at once (#4331: a sixth leader stayed hidden until a reload); a read already out may predate the change
+      void followDirections(true);
+      break;
     case "hub_restarting":
       restartNotice = true; // the close that follows is a restart: retry at once, stay quiet longer
       break;
@@ -933,11 +1007,20 @@ export function upsertSession(s: Session) {
   set({ sessions: { ...state.sessions, [s.machine_id]: next }, ...syncAssistant(s.machine_id, [s]) });
 }
 
+/** The conversations the assistant was read again for (unnamedTaskConversations): once each, whatever it answered. */
+const askedForUnnamed = new Set<string>();
+
 // The assistant's conversations are sessions on its machine too: the change that keeps the copy in `assistant`
 // current, to go with the sessions' own (one update, not two).
 function syncAssistant(mid: string, list: Session[]): Partial<State> {
   const a = state.assistant;
   if (!a || a.machine_id !== mid) return {};
+  // a background supervisor the hub made since the assistant was read (#5082): read again, so it is the built-in one
+  const unnamed = unnamedTaskConversations(a, list).filter((id) => !askedForUnnamed.has(id));
+  if (unnamed.length) {
+    unnamed.forEach((id) => askedForUnnamed.add(id));
+    void refreshAssistant().catch(() => {});
+  }
   let changed = false;
   const convs = a.conversations.map((c) => {
     const s = list.find((x) => x.session_id === c.session_id);
@@ -1415,6 +1498,7 @@ function resendSeen() {
 
 export function reset() {
   disconnect();
+  resetMessageFeedback();
   cursor = NO_CURSOR; // another login: another stream
   ixChanges.clear();
   resolvedSeen.clear();
@@ -1433,6 +1517,8 @@ export function reset() {
   resetAgents();
   rowHints.clear();
   taskRowsAsked.clear();
+  cardRowsAsked.clear();
+  cardRowsFor = null;
   listedFull.clear();
   runtimeSessions.reset();
   clearMemoryPages();
@@ -1466,3 +1552,5 @@ export function reset() {
     link: { ...NO_LINK, networkUp: networkUp() },
   });
 }
+
+configureMessageFeedback({ getSession, send, onHubEvent, subscribe, receiptsAllowed: () => appSocketReady() && receiptOwner === credentialOwner() });

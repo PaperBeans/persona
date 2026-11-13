@@ -47,7 +47,11 @@ internal fun spaceItemKey(machineId: String, space: TermSpace) = "space-$machine
 internal fun tabItemKey(machineId: String, space: TermSpace, tab: TermTab) = "tab-$machineId-${space.key}/${tab.id}"
 /** "New tab"'s in-flight marker: the workspace on its machine and host. */
 internal fun openingKey(machineId: String, space: TermSpace) = "$machineId\n${space.key}"
+internal fun homeOpeningKey(machineId: String, kind: String) = "$machineId\n$kind"
 internal fun paneItemKey(machineId: String, space: TermSpace, pane: TermPane) = "pane-$machineId-${space.host}/${pane.pane}"
+
+/** The host that opens a home-directory terminal when this computer has no workspace yet. */
+fun homeShellHost(response: PanesResponse?): String? = response?.hosts?.firstOrNull { it.newTab }?.kind
 
 /**
  * [machineId]'s workspaces → tabs → panes. [sessions] are the machine's agent sessions (their titles and states);

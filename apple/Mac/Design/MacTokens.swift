@@ -72,6 +72,17 @@ extension Theme {
     static let macOnTint = Color.white
     /// The words' color, fixed (not `.primary`, which a selected list row turns white).
     static let macLabel = Color(nsColor: .labelColor)
+
+    /// The style's Mac chrome (`StyleSpec.MacChrome`): read through the tokens below, never by a page.
+    private static var macChrome: StyleSpec.MacChrome { StyleSpec.current.mac }
+    /// The sections column, and the connection state that stands in for it at the page's foot while it is folded away.
+    static var macSidebar: Color { macChrome.sidebar ?? systemSidebar }
+    /// The side column beside a page's list (Inbox's filters); nil, the page's color shows through.
+    static var macSideColumn: Color? { macChrome.sideColumn }
+    /// A selected row's icon: the accent where the style marks selection with it (Lark), the label's color otherwise.
+    static var macSelectedIcon: Color { macChrome.selectionTint == nil ? Color.primary : accent }
+    /// A selected row's title weight: Feishu's navigation sets the open entry in a heavier weight; nil leaves it.
+    static var macSelectedWeight: SwiftUI.Font.Weight? { macChrome.selectionTint == nil ? nil : .semibold }
 }
 
 extension Theme.Icon {
@@ -91,15 +102,21 @@ extension Theme.Icon {
 extension Theme.Fill {
     /// The selected row in the shell's sidebar and the inbox list: the label color at 18 %, about AppKit's own
     /// unemphasized selection. It was `well` until the fills became the phone's (#1169); a selection that faint was
-    /// hard to find in the sidebar's material.
-    static let macSelected = Color(nsColor: .tertiaryLabelColor.withAlphaComponent(0.18))
-    /// A row under the pointer in those lists: half the selected row's.
-    static let macHover = macSelected.opacity(0.5)
+    /// hard to find in the sidebar's material. A style may mark it with a wash of the accent instead
+    /// (`StyleSpec.MacChrome.selectionTint`, Lark).
+    static var macSelected: Color { StyleSpec.current.mac.selectionTint.map { Theme.accent.opacity($0) } ?? macGrayWell }
+    /// The system look's selected row: the label color at 18 %.
+    private static let macGrayWell = Color(nsColor: .tertiaryLabelColor.withAlphaComponent(0.18))
+    /// A row under the pointer in those lists: half the gray well, or the style's own (Lark: a neutral shade, not the
+    /// accent's, so a row under the pointer never looks selected).
+    static var macHover: Color { StyleSpec.current.mac.hover ?? macGrayWell.opacity(0.5) }
+    /// The selected row in the sections column: the style's raised block (Lark: Feishu's white one), or `macSelected`.
+    static var macSidebarSelected: Color { StyleSpec.current.mac.sidebarSelected ?? macSelected }
     /// `macSelected` drawn inside a sidebar-style list's row (Settings', #2318): the list blends what a row draws (its
     /// vibrancy), and the full shade came out about twice as dark as the sections column's, in light and dark alike.
     /// Half of it measures the same as the sections column's (offscreen shots, 2026-11-05). The same value as
     /// `macHover` by measurement, not by meaning: change them apart.
-    static let macSelectedInSidebarList = macSelected.opacity(0.5)
+    static var macSelectedInSidebarList: Color { macSelected.opacity(0.5) }
     /// The faint dim behind ⌘K (a click on it closes the panel).
     static let macScrim = Color.black.opacity(0.12)
     /// Floating panels over the page (⌘K): the window background, opaque like Xcode's Open Quickly.

@@ -63,5 +63,6 @@
   "load_older": "さらに読み込む",
   "loading_older": "読み込み中…",
   "older_failed": "以前の項目を読み込めませんでした：{error}",
-  "subscriptions": "購読"
+  "subscriptions": "購読",
+  "sources": "受信箱のソース"
 }

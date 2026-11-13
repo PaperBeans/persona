@@ -1,6 +1,7 @@
 import { SNAPSHOT_RE, SNAPSHOT_END_RE } from '../../runtime-sdk/lib/compat.js'
 // Mapping between Antigravity CLI (agy) transcripts / ACP updates and Persona runtime items.
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { basename, join } from 'node:path'
 import { appToolName, clipInput, light, snippet } from '../../runtime-sdk/index.js'
 
@@ -127,6 +128,8 @@ export function stepsToItems(steps, opts = {}) {
   const pendingCalls = []
   let maxSeq = 0
   let lastText = ''
+  let turnError
+  let afterWork = false
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
@@ -139,14 +142,18 @@ export function stepsToItems(steps, opts = {}) {
     switch (step.type) {
       case 'USER_INPUT': {
         if (step.source && step.source !== 'USER_EXPLICIT') break
+        // A new prompt answers the previous reply. Only assistant words can ask the user for a response.
+        lastText = ''
+        turnError = undefined
+        afterWork = false
         const text = cleanUserText(step.content)
         if (!text) break
-        lastText = snippet(text)
         const item = { id: `${seq}#0`, seq, role: 'user', kind: 'text', text, ts }
         items.push(opts.full ? item : light(item))
         break
       }
       case 'PLANNER_RESPONSE': {
+        turnError = undefined
         let sub = 0
         if (typeof step.thinking === 'string' && step.thinking.trim()) {
           const item = { id: `${seq}#${sub++}`, seq, role: 'assistant', kind: 'thinking', text: step.thinking.trim(), ts }
@@ -155,10 +162,12 @@ export function stepsToItems(steps, opts = {}) {
         if (typeof step.content === 'string' && step.content.trim()) {
           const text = step.content.trim()
           lastText = snippet(text)
+          afterWork = true
           const item = { id: `${seq}#${sub++}`, seq, role: 'assistant', kind: 'text', text, ts }
           items.push(opts.full ? item : light(item))
         }
         const calls = Array.isArray(step.tool_calls) ? step.tool_calls : []
+        if (calls.length) afterWork = true
         for (let k = 0; k < calls.length; k++) {
           const tc = calls[k]
           if (!tc || typeof tc !== 'object') continue
@@ -181,6 +190,7 @@ export function stepsToItems(steps, opts = {}) {
         break
       }
       case 'GENERIC': {
+        afterWork = true
         const paired = pendingCalls.shift()
         const callId = paired ? paired.callId : `call_${seq}_0`
         let rawOut = step.error || step.content || ''
@@ -224,7 +234,10 @@ export function stepsToItems(steps, opts = {}) {
       }
       case 'ERROR_MESSAGE': {
         const text = step.error || step.content || 'Error'
-        items.push({ id: `${seq}#0`, seq, role: 'system', kind: 'notice', text: String(text), ts })
+        turnError = { turn_error: String(text), ...step.turn_error, turn_error_after_work: afterWork }
+        // Clients display this shared API-error format outside the collapsed work summary.
+        const message = String(text).startsWith('API Error:') ? String(text) : `API Error: ${text}`
+        items.push({ id: `${seq}#0`, seq, role: 'assistant', kind: 'text', text: message, ts })
         break
       }
       default:
@@ -232,27 +245,72 @@ export function stepsToItems(steps, opts = {}) {
     }
   }
 
-  return { items, toSeq: maxSeq, lastText }
+  return { items, toSeq: maxSeq, lastText, turnError }
 }
 
+const transcriptCache = new Map()
+const MAX_CACHED_TRANSCRIPTS = 16
+const MAX_TRANSCRIPT_CACHE_BYTES = 64 * 1024 * 1024
+let transcriptCacheBytes = 0
+
 export function readTranscriptSteps(brainDir, full = false) {
+  return readTranscript(brainDir, full).steps
+}
+
+export function readTranscript(brainDir, full = false) {
   const file = join(brainDir, '.system_generated', 'logs', full ? 'transcript_full.jsonl' : 'transcript.jsonl')
   const fallback = full ? join(brainDir, '.system_generated', 'logs', 'transcript.jsonl') : null
   const target = existsSync(file) ? file : fallback && existsSync(fallback) ? fallback : null
-  if (!target) return []
+  if (!target) return { steps: [], branch: '' }
   try {
+    const info = statSync(target, { bigint: true })
+    const version = [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':')
+    // Fast same-size native rewrites can share a filesystem timestamp tick.
+    const settled = Math.max(Number(info.mtimeMs), Number(info.ctimeMs)) <= Date.now() - 1000
+    const cached = transcriptCache.get(target)
+    if (cached) {
+      transcriptCache.delete(target)
+      transcriptCacheBytes -= cached.size
+      if (settled && cached.version === version) {
+        transcriptCache.set(target, cached)
+        transcriptCacheBytes += cached.size
+        return cached.transcript
+      }
+    }
     const raw = readFileSync(target, 'utf8')
     const out = []
+    let branch = ''
     for (const line of raw.split('\n')) {
       const trimmed = line.trim()
       if (!trimmed) continue
       try {
-        out.push(JSON.parse(trimmed))
+        const step = JSON.parse(trimmed)
+        const previous = out.at(-1)
+        const index = step?.step_index
+        if (Number.isInteger(index) && Number.isInteger(previous?.step_index) && index <= previous.step_index) {
+          // Native exports append replacement steps after a rewind. A status update keeps the step's identity.
+          if (index < previous.step_index || step.type !== previous.type || step.created_at !== previous.created_at) {
+            branch = createHash('sha256').update(trimmed).digest('hex').slice(0, 20)
+          }
+          while (out.length && out.at(-1).step_index >= index) out.pop()
+        }
+        out.push(step)
       } catch {}
     }
-    return out
+    const transcript = { steps: out, branch }
+    const size = Number(info.size)
+    if (settled && size <= MAX_TRANSCRIPT_CACHE_BYTES) {
+      while (transcriptCache.size >= MAX_CACHED_TRANSCRIPTS || transcriptCacheBytes + size > MAX_TRANSCRIPT_CACHE_BYTES) {
+        const oldest = transcriptCache.keys().next().value
+        transcriptCacheBytes -= transcriptCache.get(oldest).size
+        transcriptCache.delete(oldest)
+      }
+      transcriptCache.set(target, { version, size, transcript })
+      transcriptCacheBytes += size
+    }
+    return transcript
   } catch {
-    return []
+    return full ? readTranscript(brainDir, false) : { steps: [], branch: '' }
   }
 }
 

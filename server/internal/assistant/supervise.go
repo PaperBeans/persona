@@ -96,6 +96,11 @@ type TaskReview struct {
 	Recommend     string           `json:"recommend,omitempty"`
 	Options       []DecisionOption `json:"options,omitempty"`
 	CostOfWaiting string           `json:"cost_of_waiting,omitempty"`
+	// Deadline and Reversible: the needs_user decision's deadline and whether its recommendation can be undone, as the
+	// supervisor's task_review said them (decision_deadline.go); absent when it gave none, and on reviews from before
+	// they were kept.
+	Deadline   *time.Time `json:"deadline,omitempty"`
+	Reversible *bool      `json:"reversible,omitempty"`
 	// A parked review's (parked.go): until when it waits, what kind of thing it waits on (Reason says what), how many
 	// parks in a row this one is with no agent turn in between, and when a supervision message carried its parked_due.
 	Until     time.Time `json:"until,omitzero"`
@@ -318,6 +323,11 @@ func taskHealth(t Todo, agents []proto.Session, now time.Time) (string, int) {
 		return "已取消", 8
 	case reviewParked: // waits on purpose (parked.go): below everything that needs the assistant
 		return parkedHealth(v.parked(), now.Location()), 6
+	}
+	if t.DoneAt != nil && t.StartError != "" && !t.Cancelled() {
+		// Its agent never started: stored done (#1077) but nothing was done. Only the supervisor can retry it, so it
+		// heads the list rather than sitting among the finished ones.
+		return "启动失败，待你处理（重试只有你能做）", 0 // i18n-ignore: the snapshot is the assistant's prompt
 	}
 	if t.DoneAt != nil {
 		return "", 8

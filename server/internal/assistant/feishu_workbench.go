@@ -363,9 +363,14 @@ func wbGist(it InboxItem) string {
 	return ""
 }
 
+// wbSource is where an item came from, in words: a connector's label for it, else its source's name (a subscription's
+// one row has no label, its title being the subscription's name, #5671), never an id when there is a name.
 func wbSource(l i18n.Lang, it InboxItem) string {
 	if it.Connector != nil && it.Connector.Label != "" {
 		return it.Connector.Label
+	}
+	if it.Connector != nil && strings.TrimSpace(it.AccountName) != "" {
+		return it.AccountName
 	}
 	if it.Mail != nil || it.Source == "mail" {
 		return wbT(l, "source_mail")
@@ -519,13 +524,17 @@ func inboxCanReply(it InboxItem) bool {
 	return it.Lark != nil || it.Mail != nil
 }
 
+// workbenchItem is the item a card's button names, as listed, while it is open or done within inboxKeepDone (the list
+// carries only the newest of those, inbox_list_done.go, so it is looked up by id rather than in a list).
 func (s *Service) workbenchItem(id string) (InboxItem, bool) {
-	for _, it := range s.inboxList(true) {
-		if it.ID == id {
-			return it, true
-		}
+	b := &s.inbox
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	it, ok := b.items[id]
+	if !ok || it.DoneAt != nil && it.DoneAt.Before(time.Now().Add(-inboxKeepDone)) {
+		return InboxItem{}, false
 	}
-	return InboxItem{}, false
+	return it.listed(), true
 }
 
 // workbenchInboxAction answers an Inbox button ({a: ib, op, id}): done and mute change the list card in place;

@@ -79,6 +79,12 @@ func (s *Service) launcherParams(ctx context.Context, machine, name string, para
 // its PATH ("path", node/pathlaunchers.go); its page shows its text and what a probe found.
 func machineSource(source string) bool { return source == "zshrc" || source == "path" }
 
+// listedRCLauncher: Settings › Model providers lists l from a computer's list. A runtime's launcher without model
+// configuration (DSH, node/runtimes.go) is not.
+func listedRCLauncher(l proto.Launcher) bool {
+	return l.Source == "" || machineSource(l.Source) || l.Agent == "agy" || l.Agent == "omp"
+}
+
 // launcherViews is the whole list: managed first (newest last), then ~/.zshrc ones by name; hidden ones flagged.
 func (s *Service) launcherViews(ctx context.Context) []LauncherView {
 	return s.launcherViewsOf(ctx, s.zshrcLaunchers(ctx, false))
@@ -100,8 +106,8 @@ func (s *Service) launcherViewsFrom(ctx context.Context, zshrc []zshrcLaunchers,
 	var names []string
 	for _, m := range zshrc {
 		for _, l := range m.Launchers {
-			if managed[l.Name] || l.Name == "claude" || (l.Source != "" && !machineSource(l.Source) && l.Agent != "agy" && l.Agent != "omp") {
-				continue // a runtime's launcher without model configuration (DSH, node/runtimes.go) is not listed here
+			if managed[l.Name] || l.Name == "claude" || !listedRCLauncher(l) {
+				continue
 			}
 			v := byName[l.Name]
 			if v == nil {
@@ -166,7 +172,7 @@ func launcherSyncList(zshrc []zshrcLaunchers) []LauncherSync {
 }
 
 // machineLaunchers is what a machine can start (the pickers: new chat, the assistant's model): its own launchers
-// (the node's list) but the hidden ones, then the managed ones.
+// (the node's list) but the hidden ones, its reported built-in claude, then the managed ones.
 func (s *Service) machineLaunchers(ctx context.Context, machine string) ([]proto.Launcher, error) {
 	var res struct {
 		Launchers []proto.LauncherEnvelope `json:"launchers"`
@@ -190,11 +196,24 @@ func (s *Service) machineLaunchers(ctx context.Context, machine string) ([]proto
 		}
 		out = append(out, l)
 	}
+	// A node that starts its own Codex launchers with no first message starts a managed one so too (they share
+	// codex-start, node/codex_waiting.go); an older node's Codex starts all need it.
+	codexOptional := slices.ContainsFunc(res.Launchers, func(l proto.LauncherEnvelope) bool { return l.Agent == "codex" && l.PromptOptional })
+	// Likewise in a pane the user picked (Run Agent Here, #5504): the same start, which keeps that pane when it fails.
+	codexHere := slices.ContainsFunc(res.Launchers, func(l proto.LauncherEnvelope) bool { return l.Agent == "codex" && l.RunHere })
+	// The node leaves plain claude out when its shell has another Claude launcher. devices.list's version is the
+	// same installation signal used by the built-in provider and Agent-start fallback, and works with older nodes.
+	d, _ := s.device(ctx, machine)
+	if d.ClaudeVersion != "" && !slices.Contains(hidden, "claude") &&
+		!slices.ContainsFunc(out, func(l proto.Launcher) bool { return l.Name == "claude" }) {
+		out = append(out, proto.Launcher{Name: "claude", Source: "builtin"})
+	}
 	for _, m := range managed {
 		if m.Kind == "api" {
 			continue
 		}
-		out = append(out, proto.Launcher{Name: m.Name, BaseURL: m.BaseURL, Model: m.Model, Source: "persona", Agent: m.Agent, Assistant: m.Agent == "agy"})
+		out = append(out, proto.Launcher{Name: m.Name, BaseURL: m.BaseURL, Model: m.Model, Source: "persona", Agent: m.Agent, Assistant: m.Agent == "agy",
+			PromptOptional: m.Agent == "codex" && codexOptional, RunHere: m.Agent == "codex" && codexHere})
 	}
 	return out, nil
 }
@@ -335,5 +354,16 @@ func (s *Service) askLauncherModels(ctx context.Context, machine, name string, r
 	if res.Models == nil {
 		res.Models = []proto.AgentModel{}
 	}
-	return s.presetModels(ctx, machine, name, res), nil
+	res = s.presetModels(ctx, machine, name, res)
+	for i, m := range res.Models {
+		id := m.ID
+		if m.Resolved != "" {
+			id = m.Resolved
+		}
+		res.Models[i].Price = nil
+		if c, ok := catalogModel(id); ok && c.InheritedFrom == "" {
+			res.Models[i].Price = c.Price
+		}
+	}
+	return res, nil
 }

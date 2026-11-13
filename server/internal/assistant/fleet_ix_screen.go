@@ -405,6 +405,9 @@ func (s *Service) screenDialog(ctx context.Context, machine, session string) (st
 	d := screen.ParseDialog(scr.Text)
 	if d != nil {
 		d.Rev = cmp.Or(scr.DialogRev, d.LegacyRev)
+		if d.DeadlineIn > 0 { // the countdown's end, for the apps to count down to (it is not in Rev: the card stays)
+			d.DeadlineAt = time.Now().Add(time.Duration(d.DeadlineIn) * time.Second).UTC().Truncate(time.Second)
+		}
 	}
 	return scr.Text, d, nil
 }

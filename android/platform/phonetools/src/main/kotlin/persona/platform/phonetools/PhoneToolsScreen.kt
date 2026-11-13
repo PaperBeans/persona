@@ -23,6 +23,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
+import persona.core.designsystem.dense
 import persona.core.navigation.Navigator
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
@@ -60,7 +61,7 @@ fun PhoneToolsScreen(runtime: PhoneToolsRuntime, navigator: Navigator) {
     JListPage(title = stringResource(R.string.phonetools_title), onBack = navigator::back) {
         item {
             Text(stringResource(R.string.phonetools_intro),
-                Modifier.padding(bottom = 16.dp), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2)
+                Modifier.padding(bottom = 16.dp.dense), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2)
         }
         items(PhoneSource.entries, key = { it.name }) { source ->
             val status = remember(revision, source, healthGranted) {
@@ -80,17 +81,17 @@ fun PhoneToolsScreen(runtime: PhoneToolsRuntime, navigator: Navigator) {
             val storeFailed = stringResource(R.string.phonetools_error_store)
             val settingsFailed = stringResource(R.string.phonetools_error_settings)
             val systemSettingsFailed = stringResource(R.string.phonetools_error_system_settings)
-            JGroupItem(GroupPosition.Single, Modifier.padding(bottom = 12.dp)) {
+            JGroupItem(GroupPosition.Single, Modifier.padding(bottom = 12.dp.dense)) {
                 JSwitchRow(stringResource(source.title), checked = source in enabled, subtitle = subtitle, onCheckedChange = { value ->
                     scope.launch {
                         try { runtime.settings.setEnabled(source, value); error = null }
                         catch (_: Exception) { error = toggleFailed }
                     }
                 })
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp.dense).padding(bottom = 16.dp.dense), verticalArrangement = Arrangement.spacedBy(8.dp.dense)) {
                     JTag(runtime.permissions.statusText(source, status))
                     if (source == PhoneSource.Health) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp.dense)) {
                             if (!Health.available(context)) {
                                 JButton(stringResource(R.string.phonetools_get), {
                                     try { context.startActivity(Health.installIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
@@ -110,7 +111,7 @@ fun PhoneToolsScreen(runtime: PhoneToolsRuntime, navigator: Navigator) {
                             }
                         }
                     } else if (runtime.permissions.permissions(source).isNotEmpty() || source == PhoneSource.Notifications) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp.dense)) {
                             JButton(stringResource(if (status == PhoneAccess.Partial) R.string.phonetools_choose_again else R.string.phonetools_allow_access), {
                                 val permissions = runtime.permissions.permissions(source)
                                 if (permissions.isNotEmpty()) launcher.launch(permissions)
@@ -129,7 +130,7 @@ fun PhoneToolsScreen(runtime: PhoneToolsRuntime, navigator: Navigator) {
             Text(stringResource(R.string.phonetools_footnote),
                 style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)
         }
-        error?.let { item { JNotice(it, Modifier.padding(top = 12.dp), status = Status.NeedsYou) } }
+        error?.let { item { JNotice(it, Modifier.padding(top = 12.dp.dense), status = Status.NeedsYou) } }
     }
 }
 

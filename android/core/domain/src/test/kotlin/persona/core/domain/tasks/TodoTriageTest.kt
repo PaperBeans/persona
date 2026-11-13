@@ -280,6 +280,64 @@ class TodoTriageTest {
         )
     }
 
+    // #5707: seen (Got it, or opening it) at or after the moment that put it in Just finished, it is Done at once
+    private fun minutesAgo(m: Int) = Instant.ofEpochMilli(now - m * 60_000L).toString()
+
+    @Test
+    fun aSeenToDoGoesToDoneAtOnceOneSeenBeforeItGotThereStays() {
+        val closed = { seenMinutesAgo: Int -> at(todo("t", doneAt = hoursAgo(3)).copy(seenAt = minutesAgo(seenMinutesAgo))) }
+        assertEquals(TriageSection.Done, closed(120).section)
+        assertEquals(TriageRule.Closed, closed(120).rule)
+        assertEquals(TriageSection.Done, closed(180).section)
+        assertEquals(TriageSection.JustDone, closed(240).section)
+        val accepted = at(todo("t", supervision = acceptedReopened(), agents = listOf(agent("idle"))).copy(seenAt = hoursAgo(4)))
+        assertEquals(TriageSection.Done to TriageRule.Accepted, accepted.section to accepted.rule)
+        val deployed = at(todo("t", delivery = TodoDelivery(state = "live", at = hoursAgo(2))).copy(seenAt = hoursAgo(1)))
+        assertEquals(TriageSection.Done to TriageRule.Deployed, deployed.section to deployed.rule)
+    }
+
+    @Test
+    fun aFinishedTurnSeenSinceItLastMovedIsDoneUnlessItsPrIsOpen() {
+        // the unseen session last moved an hour ago
+        val seen = at(todo("t", agents = listOf(agent("unseen"))).copy(seenAt = minutesAgo(30)))
+        assertEquals(TriageSection.Done to TriageRule.Seen, seen.section to seen.rule)
+        val movedSince = at(todo("t", agents = listOf(agent("unseen"))).copy(seenAt = hoursAgo(2)))
+        assertEquals(TriageSection.JustDone to TriageRule.FinishedUnseen, movedSince.section to movedSince.rule)
+        val pr = at(todo("t", agents = listOf(agent("unseen")), prUrl = "https://example.com/pull/1").copy(seenAt = minutesAgo(30)))
+        assertEquals(TriageSection.Pr to TriageRule.PrOpen, pr.section to pr.rule)
+        // seen, it is no longer open work
+        assertEquals(TodoBucket.Closed, todo("t", agents = listOf(agent("unseen"))).copy(seenAt = minutesAgo(30)).bucket(lookup, now))
+        assertEquals(TodoBucket.Open, todo("t", agents = listOf(agent("unseen"))).bucket(lookup, now))
+    }
+
+    @Test
+    fun unfinishedSectionsComeFirstAndOpenShelvedAndDoneFoldedDoneLast() {
+        assertEquals(
+            listOf(TriageSection.Waiting, TriageSection.Working, TriageSection.Pr, TriageSection.Other, TriageSection.JustDone, TriageSection.Shelved, TriageSection.Done),
+            TriageSection.entries.toList(),
+        )
+        assertEquals(listOf(TriageSection.Shelved, TriageSection.Done), TriageSection.entries.filter { it.folded })
+    }
+
+    @Test
+    fun unfinishedToDosLeadARowAndComeBeforeJustFinishedSeenOnesAreDone() {
+        val look = lookupOf(session("unseen", "unread"), session("unseen2", "unread"), session("idle", "idle", 2))
+        val r = triageTodos(
+            listOf(
+                todo("fix", title = "Fix #512 crash on launch", agents = listOf(agent("unseen"))),
+                todo("test", title = "#512 crash: add a regression test", updated = 2, agents = listOf(agent("idle"))),
+                todo("notes", title = "Write the release notes", updated = 3, doneAt = hoursAgo(3)).copy(seenAt = minutesAgo(150)),
+                todo("speed", title = "Speed up the web page", agents = listOf(agent("unseen2"))).copy(seenAt = minutesAgo(30)),
+                todo("logs", title = "Rotate the logs", updated = 3, doneAt = hoursAgo(3)),
+            ),
+            look, now, zone = zone,
+        )
+        assertEquals(listOf(listOf("test", "fix")), r.rows(TriageSection.Other).map { g -> g.members.map { it.id } })
+        assertEquals(listOf("logs"), r.rows(TriageSection.JustDone).map { it.lead.id })
+        assertEquals(listOf("speed", "notes"), r.rows(TriageSection.Done).map { it.lead.id })
+        assertEquals(listOf(2, 0, 3), listOf(r.open, r.shelved, r.finished))
+    }
+
     @Test
     fun aRestoreDropsOnesThatWouldHaveShelvedAgain() {
         val kept = withRestore(mapOf("old" to now - SHELVE_AFTER_MS - 1), "new", now)

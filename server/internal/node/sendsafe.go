@@ -11,6 +11,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/herdr"
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/screen"
 )
@@ -113,6 +114,15 @@ type sendOpts struct {
 	Model            string `json:"model"`
 	Effort           string `json:"effort"`
 	ModelFingerprint string `json:"model_fingerprint"`
+	// ApplySwitch: the user's own message from the chat of a session with a pending launcher switch, which carries the
+	// switch out before it is typed (launcher_switch.go). Without it (any other sender) the message goes on the launcher
+	// the agent runs on and the switch keeps waiting.
+	ApplySwitch bool `json:"apply_switch"`
+	// SwitchNow: the assistant's agent_switch (#5973), which picked the switch a moment before. It is carried out with
+	// this message now or not at all: where apply_switch alone would type the message on the launcher the agent runs on
+	// and keep the switch waiting (the agent busy, a draft or a dialog in the box), the message is refused with nothing
+	// typed and the switch is dropped, so none waits for the user's next message (switchNowRefusal).
+	SwitchNow bool `json:"switch_now"`
 	// readBox: a screen that cannot be read refuses (unreadBoxMessage) instead of passing for an empty box. After a
 	// command that may still sit in the box (ultracode.go), not knowing is not enough to type after it.
 	readBox bool
@@ -492,7 +502,7 @@ const (
 func (n *Node) orcaContinues(id string) bool { return n.claudeTranscript(id, true) != "" }
 
 func (n *Node) notRunningRefusal(ctx context.Context, id string) error {
-	h := n.defaultHost()
+	h := n.hosts.Get(n.startKind(ctx))
 	if h == nil {
 		return nil
 	}
@@ -515,6 +525,6 @@ func (n *Node) notRunningRefusal(ctx context.Context, id string) error {
 		return nil
 	}
 	log.Printf("send %s: not on the live list (last pane %q): refused as not running", id, pane)
-	name := n.defaultEngineName()
+	name := proto.EngineNames[h.Kind()]
 	return refusal(notRunning, fmt.Sprintf("这个会话现在没有在运行（可能被挂起或已退出），%s 里的会话要在电脑上重新打开，这次没有发送。", name), nil)
 }

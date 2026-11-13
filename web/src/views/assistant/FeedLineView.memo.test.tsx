@@ -30,7 +30,7 @@ vi.mock("../../ui/AssistantCard", async (orig) => ({
   },
 }));
 
-import { applyMachine, refresh, refreshTodos } from "../../lib/store";
+import { refreshTodos } from "../../lib/store";
 import { FeedLineView } from "./Tasks";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -46,7 +46,7 @@ function Chat({ items }: { items: FeedItem[] }) {
   return (
     <div data-n={n}>
       {items.map((it) => (
-        <FeedLineView key={it.id} item={it} />
+        <FeedLineView key={it.id} item={it} simplified />
       ))}
     </div>
   );
@@ -87,14 +87,13 @@ describe("FeedLineView in the main chat", () => {
   it("follows the plan it shows", () => {
     emit("task_plan", { plan: plan("补测试") });
     act(() => root.render(<Chat items={[item({ id: "f2", kind: "plan", ref: "p1" })]} />));
-    expect(host.textContent).toContain("补测试");
+    expect(host.textContent).toBe(""); // an open plan waits in the Needs you tray, not in the chat
     act(() => bump());
     emit("task_plan", { plan: plan("补测试", "started") });
-    expect(host.textContent).not.toContain("补测试");
-    expect(host.textContent).toContain("开了 1 个任务");
+    expect(host.textContent).toContain("补测试"); // started: the hand-off card of its task
   });
 
-  it("follows the todo its task card shows", async () => {
+  it("follows the todo its hand-off card shows", async () => {
     todos.list = [todo("修登录")];
     await act(() => refreshTodos());
     act(() => root.render(<Chat items={[item({ id: "f3", kind: "task", ref: "t1" })]} />));
@@ -103,21 +102,5 @@ describe("FeedLineView in the main chat", () => {
     todos.list = [todo("修登录和注册")];
     await act(() => refreshTodos());
     expect(host.textContent).toContain("修登录和注册");
-  });
-
-  it("follows the name of the machine its task card shows", async () => {
-    const agent = { machine_id: "m1", session_id: "s1", linked_at: now, cwd: "/w/app" };
-    todos.list = [{ ...todo("修登录"), agents: [agent] }];
-    todos.machines = [];
-    await act(() => refresh());
-    act(() => root.render(<Chat items={[item({ id: "f4", kind: "task", ref: "t1" })]} />));
-    expect(host.textContent).toContain("m1 · app");
-    act(() => bump());
-    // the machine list arrives after the card first drew; then the machine is renamed
-    todos.machines = [{ id: "m1", name: "Mac mini", online: true }];
-    await act(() => refresh());
-    expect(host.textContent).toContain("Mac mini · app");
-    act(() => applyMachine({ id: "m1", name: "Studio", online: true }));
-    expect(host.textContent).toContain("Studio · app");
   });
 });

@@ -69,6 +69,10 @@ nonisolated enum IslandMetrics {
     static let recordingTimerWidth: CGFloat = 54
     /// The expanded island's time, at `.title3`: "1:23:45" whole.
     static let recordingExpandedTimerWidth: CGFloat = 92
+    /// The Lock Screen's time, at `.title2` (capped at the default text size there): "1:23:45" whole (81 pt), with the
+    /// expanded island's margin. Fixed, as `Text(timerInterval:)` takes all the width it is offered: the name and the
+    /// subtitle beside it got half the row, and a meeting's topic after Persona's role little of it (#3862 phase 2).
+    static let recordingLockTimerWidth: CGFloat = 100
     /// The recording's mark on the Lock Screen.
     static let recordingMark: CGFloat = 40
     /// Between the Lock Screen's and the expanded island's two buttons.
@@ -76,6 +80,9 @@ nonisolated enum IslandMetrics {
     /// The mark of a button that shows only its mark (Bookmark, Turn Off, Stop beside Ask Persona in a meeting Persona
     /// attends, #2981): with the capsule's own padding the button is over 44 pt wide, and Ask Persona keeps its words.
     static let recordingIconButton: CGFloat = 24
+    /// The expanded island's button row's inset from its sides (#5819): the row sits at the island's bottom, where the
+    /// corners round in, and with Ask Persona taking the width the Stop capsule ran into the right corner and was cut.
+    static let recordingIslandButtonsInset: CGFloat = 12
     /// The Lock Screen's inset from the activity's edges.
     static let lockPadding: CGFloat = 16
 

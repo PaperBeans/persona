@@ -10,9 +10,18 @@ struct AssistantProfileView: View {
     @State private var runs: [APIClient.ScheduleRun]?
     @State private var memoryCount: Int?
     @State private var placeCount: Int?
+    /// The rename sheet (the assistant's own name, #6401).
+    @State private var renaming = false
+    @State private var newName = ""
+    @State private var renameError: String?
     #if DEBUG
     @State private var debugPage: String?
     #endif
+
+    /// The assistant's name shown across the app: the current manager's when the hub has a roster, else the look's own.
+    private var displayName: String { model.assistantShownName }
+    /// A hub with a roster lets the assistant be renamed; an older hub is read-only.
+    private var canRename: Bool { model.currentAssistant != nil }
 
     private var machineID: String { model.assistantConfig?.machineID ?? model.hubMachineID }
     private var assistantCwd: String {
@@ -34,6 +43,15 @@ struct AssistantProfileView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }
+        .alert(String(localized: "Change the assistant's name"), isPresented: $renaming) {
+            TextField(String(localized: "Name your assistant"), text: $newName)
+                .onChange(of: newName) { renameError = nil }
+            Button(String(localized: "Cancel"), role: .cancel) {}
+            Button(String(localized: "Save")) { Task { await saveName() } }
+                .disabled(!ManagersText.validName(newName) || newName.trimmingCharacters(in: .whitespacesAndNewlines) == displayName)
+        } message: {
+            if let renameError { Text(renameError) }
+        }
         #if DEBUG
         .onAppear {
             if debugPage == nil, let p = UserDefaults.standard.string(forKey: "openAssistantPage"),
@@ -116,6 +134,16 @@ struct AssistantProfileView: View {
                     Text(Self.foldFooter)
                 }
             }
+            if let own = ownTasks {
+                Section {
+                    Toggle(isOn: own) {
+                        Label(Self.ownTasksTitle, systemImage: Theme.Icon.supervised).lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                    .accessibilityIdentifier("assistant-main-supervises-own-tasks")
+                } footer: {
+                    Text(Self.ownTasksFooter)
+                }
+            }
             Section {
                 NavigationLink { SkillsPage() } label: { row("Skills", Theme.Icon.skills, detail: nil) }
                 LabeledContent("Runs On", value: machineName)
@@ -190,6 +218,14 @@ struct AssistantProfileView: View {
                         }
                     }
                 }
+                if let own = ownTasks {
+                    BUIListSection(footer: Self.ownTasksFooter) {
+                        BUIListRow(Self.ownTasksTitle) { IconTile(Theme.Icon.supervised, tint: Theme.accent) } trailing: {
+                            Toggle(Self.ownTasksTitle, isOn: own).labelsHidden()
+                                .accessibilityIdentifier("assistant-main-supervises-own-tasks")
+                        }
+                    }
+                }
                 BUIListSection(String(localized: "Settings"), footer: String(localized: "Each chat runs Claude in the background in this directory on \(machineName), outside herdr. Choose the model in Settings › Models › Main Chat; change it for a single chat from that chat's menu.")) {
                     NavigationLink { SkillsPage() } label: { buiRow("Skills", Theme.Icon.skills, detail: nil) }
                     BUIListRow(String(localized: "Runs On"), value: machineName)
@@ -214,7 +250,25 @@ struct AssistantProfileView: View {
         VStack(spacing: Theme.Space.m) {
             PersonaAvatar(size: 88, working: working)
                 .shadow(color: Theme.persona.opacity(0.3), radius: 16, y: 6)
-            Text(model.persona.name).font(Theme.Font.display).fontDesign(.rounded)
+            HStack(spacing: Theme.Space.xs) {
+                Text(displayName).font(Theme.Font.display).fontDesign(.rounded).lineLimit(1).minimumScaleFactor(0.7)
+                if canRename {
+                    Button {
+                        newName = displayName
+                        renameError = nil
+                        renaming = true
+                    } label: {
+                        ThemedIcon(Theme.Icon.edit)
+                            .font(Theme.Font.heading)
+                            .foregroundStyle(.secondary)
+                            .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                            .contentShape(.circle)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(String(localized: "Edit name"))
+                    .accessibilityIdentifier("assistant-rename")
+                }
+            }
             Text("Your personal assistant · on \(machineName)")
                 .font(Theme.Font.secondary)
                 .foregroundStyle(.secondary)
@@ -257,14 +311,23 @@ struct AssistantProfileView: View {
     private static let quietTitle = String(localized: "Notify Only in Main Chat")
     private static let quietFooter = String(localized: "Tasks started from the main chat stay out of the Dynamic Island, notifications, and badges. Persona tells you in the main chat when they finish, need your answer, or fail. Only affects tasks started from now on.")
 
-    /// The main conversation folds its background rounds (docs/apple/ios.md "Background rounds"); nil (no switch) from a
-    /// hub without the setting.
+    /// The main conversation and the leader conversations fold their background rounds (docs/apple/ios.md
+    /// "Background rounds", #6595); nil (no switch) from a hub without the setting.
     private var backgroundFolded: Binding<Bool>? {
         guard let on = model.assistantConfig?.mainBackgroundFolded else { return nil }
         return Binding(get: { on }, set: { v in Task { await model.setMainBackgroundFolded(v) } })
     }
     private static let foldTitle = String(localized: "Fold background rounds")
-    private static let foldFooter = String(localized: "Rounds that another conversation, a scheduled task or a follow-up started in the main chat show as one line you can open. Rounds that ask or tell you something stay shown.")
+    private static let foldFooter = String(localized: "Rounds that another conversation, a scheduled task or a follow-up started in the main chat or a leader conversation show as one line you can open. Rounds that ask or tell you something stay shown.")
+
+    /// The main conversation follows up its own tasks instead of the background supervisor (#5083,
+    /// docs/assistant/unified-entry.md "Background supervisor"); nil (no switch) from a hub without the setting.
+    private var ownTasks: Binding<Bool>? {
+        guard let on = model.assistantConfig?.mainSupervisesOwnTasks else { return nil }
+        return Binding(get: { on }, set: { v in Task { await model.setMainSupervisesOwnTasks(v) } })
+    }
+    private static let ownTasksTitle = String(localized: "Main Chat Supervises Its Own Tasks")
+    private static let ownTasksFooter = String(localized: "While this is off, the background supervisor follows up the tasks Persona hands out, so the main chat answers you first.")
 
     // Where Persona asks before acting on your behalf: the Mac app asks in the app, iOS asks on the phone (#4068).
     // The push itself still goes to the iPhone, so "notify you" stays in both.
@@ -306,7 +369,8 @@ struct AssistantProfileView: View {
         async let m = try? api.assistantMemory()
         async let p = try? api.savedPlaces()
         // The switch shows once the hub says it has the setting (#1731): a hub updated since the app read it, too.
-        if model.assistantConfig?.mainTasksQuiet == nil || model.assistantConfig?.mainBackgroundFolded == nil { await model.refreshAssistant() }
+        let held = model.assistantConfig
+        if held?.mainTasksQuiet == nil || held?.mainBackgroundFolded == nil || held?.mainSupervisesOwnTasks == nil { await model.refreshAssistant() }
         tasks = await r
         runs = await h
         if let files = await m { memoryCount = files.filter { $0.name != AssistantMemoryEntry.index }.count }
@@ -316,6 +380,25 @@ struct AssistantProfileView: View {
     /// Saved Places' row detail: how many there are, nothing when none.
     private var placesDetail: String? {
         placeCount.flatMap { $0 > 0 ? String(localized: "\($0) places", comment: "Saved places count") : nil }
+    }
+
+    /// Renames the current assistant (PATCH /managers/{id}); the hub keeps the name and pushes it to every device.
+    private func saveName() async {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let manager = model.currentAssistant, let api = model.api,
+              ManagersText.validName(name), name != displayName else {
+            renaming = false
+            return
+        }
+        do {
+            try await api.renameManager(manager.id, to: name)
+            if let group = model.hub?.group { await model.refreshManagerRoster(group) }
+            Haptics.success()
+            model.toast = Toast(String(localized: "Name saved"), style: .success)
+            renaming = false
+        } catch {
+            renameError = error.shown ?? String(localized: "Can't reach the hub")
+        }
     }
 }
 

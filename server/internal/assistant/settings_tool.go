@@ -114,6 +114,9 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "off, listener or participant"},
 			get: func(ctx context.Context) (string, error) { return s.meetingAttendanceDefault(ctx), nil },
 			set: s.setMeetingAttendanceDefault},
+		{Setting: Setting{Key: "assistant.meeting_transcription_default", Title: i18n.T(i18n.Default, "assistant-settings_tool.title_meeting_transcription_default"), Actions: getSet,
+			About: prompts.RenderMeetingTranscriptionSetting(), Value: "device or hub"},
+			get: s.getMeetingTranscriptionDefault, set: s.setMeetingTranscriptionDefault},
 		{Setting: Setting{Key: "assistant.done_needs_delivery", Title: "上线并实测才算做完", Actions: getSet,
 			About: "off (the default): a task_plan task closes when its work is judged done; on: only once it is live and checked " +
 				"(or has nothing to ship): stopped at a PR, merged or off by default it stays open with where it is held, its agent is told " +
@@ -140,7 +143,10 @@ func (s *Service) ownSettings() []ownSetting {
 		{Setting: Setting{Key: "assistant.interject_background", Title: "Move running work to the background when I interject", Actions: getSet,
 			About: "off (the default): a message the user sends while a Claude conversation is still answering waits until the command " +
 				"or subagent running in the foreground ends; on: that work moves to the background (it goes on and reports when done) " +
-				"and the message is answered at once. Needs Claude Code 2.1.139 or later on the conversation's computer; applies from the next message",
+				"and the message is answered at once. " +
+				"Either way, a message the user sends into a round they did not start (supervision, a scheduled task or follow-up, another " +
+				"conversation's message, a task's notice) moves that round's work to the background. " +
+				"Needs Claude Code 2.1.139 or later on the conversation's computer; applies from the next message",
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.interjectBackground(ctx)), nil },
 			set: s.setInterjectBackground},
@@ -165,6 +171,16 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.inboxSignalsOn(ctx)), nil },
 			set: s.setInboxSignals},
+		{Setting: Setting{Key: "assistant.main_supervises_own_tasks", Title: "The main chat supervises its own tasks", Actions: getSet,
+			About: "off (the default): the background supervisor, one built-in Persona conversation made on first use, follows up " +
+				"every supervised task no leader supervises: their supervision messages go to it and it reviews them with task_review, " +
+				"so the main conversation stays free to answer the user. The main conversation still hears of failed starts and of " +
+				"what the background supervisor hands to the user, and may review any of these tasks itself. on: the main conversation " +
+				"gets these supervision messages itself, as before the background supervisor existed. Applies to signals raised from " +
+				"the change on (a supervision message already with the background supervisor is finished there); tasks keep running",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.mainSupervisesOwnTasks(ctx)), nil },
+			set: s.setMainSupervisesOwnTasks},
 		{Setting: Setting{Key: "assistant.launcher", Title: "Persona 的启动器", Actions: getSet,
 			About: "which launcher (model) new Persona conversations start with by default",
 			Value: "a launcher name from this setting's get"},
@@ -177,6 +193,14 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: modelTiersValue},
 			get: s.getModelTiers,
 			set: s.setModelTiers},
+		{Setting: Setting{Key: admissionSettingsKey, Title: "Execution Agent admission gate", Actions: getSet,
+			About: "the lines an execution Agent's start is checked against on every computer: enabled, load_per_core, min_memory_bytes, " +
+				"max_claude_procs (and the hub machine's own hub_* lines, per-machine overrides), and the per-direction cap. " +
+				"direction_cap_by_direction keys are a supervisor conversation id or a direction's displayed name and win over " +
+				"direction_cap_by_project, which wins over direction_cap and the code default; get first and send the whole object",
+			Value: "the full AdmissionSettings JSON object from get; a nil pointer keeps the code default, every set line must be positive"},
+			get: s.getAdmission,
+			set: s.setAdmission},
 	}
 }
 
@@ -294,9 +318,11 @@ var settingTitles = map[string]string{standingAuthorizationsKey: "title_standing
 	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher",
 	"assistant.recording_days": "title_recording_days", "assistant.done_needs_delivery": "title_done_needs_delivery",
 	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders",
-	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "assistant.inbox_signals": "title_inbox_signals", "model_profiles.tiers": "title_model_tiers",
-	"assistant.meeting_attendance_default": "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",
-	"assistant.kb_topics": "title_kb_topics", "assistant.main_background_folded": "title_main_background_folded"}
+	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "assistant.inbox_signals": "title_inbox_signals", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "model_profiles.tiers": "title_model_tiers",
+	"assistant.meeting_transcription_default": "title_meeting_transcription_default",
+	"assistant.meeting_attendance_default":    "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",
+	"assistant.kb_topics": "title_kb_topics", "assistant.main_background_folded": "title_main_background_folded",
+	admissionSettingsKey: "title_admission"}
 
 // clipped is a value as the card shows it, in l.
 func clipped(l i18n.Lang, s string) string {
@@ -561,6 +587,14 @@ func (s *Service) setInboxSignals(ctx context.Context, v json.RawMessage) (*ownC
 		return i18n.T(l, "assistant-settings_tool.change_inbox_signals", i18n.Args{"before": before, "after": after})
 	}, func(v *Settings) **bool { return &v.InboxSignals },
 		"assistant.inbox_signals is %v from the next new Inbox message on (signals already waiting go out only while it is on).")
+}
+
+func (s *Service) setMainSupervisesOwnTasks(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	return s.setBoolSetting(ctx, v, s.mainSupervisesOwnTasks, "assistant.main_supervises_own_tasks is unchanged", func(l i18n.Lang, before, after string) string {
+		return i18n.T(l, "assistant-settings_tool.change_main_supervises_own_tasks", i18n.Args{"before": before, "after": after})
+	}, func(v *Settings) **bool { return &v.MainSupervisesOwnTasks },
+		"assistant.main_supervises_own_tasks is %v for the signals raised from now on (open tasks keep running; what the "+
+			"background supervisor was already sent it finishes).")
 }
 
 // launchers are the launchers of the assistant's machine, as the apps list them.

@@ -46,7 +46,8 @@ extension VoiceSupport {
             model.settingsPath = NavigationPath([SettingsPage.plugins])
             model.selectedTab = .settings
         case .voiceExtension(let id):
-            model.settingsPath = NavigationPath([SettingsPage.plugins, SettingsPage.plugin(id)])
+            // The default assistant's copy, which calls talk to (`VoiceSupport` reads it naming none), whichever is current.
+            model.settingsPath = NavigationPath([SettingsPage.plugins, SettingsPage.plugin(id, manager: model.settingsRoute(nil))])
             model.selectedTab = .settings
         case .model:
             break
@@ -135,7 +136,8 @@ struct VoiceEndedStrip: View {
         } message: {
             Text(note.details ?? "")
         }
-        .modelConfigurationSheet(isPresented: $showModel, purposeID: "plugin." + call.extensionID)
+        // The default assistant's: calls talk to its voice extension.
+        .modelConfigurationSheet(isPresented: $showModel, purposeID: "plugin." + call.extensionID, owner: .defaultAssistant)
     }
 }
 

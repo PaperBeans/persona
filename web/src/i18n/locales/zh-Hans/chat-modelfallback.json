@@ -21,5 +21,8 @@
   "refusal_no_switch": "记录里没有说改用了其他模型",
   "refusal_category": "类别：{category}",
   "refusal_explanation": "说明：{text}",
-  "refusal_text": "拒绝原文"
+  "refusal_text": "拒绝原文",
+  "details": "详情",
+  "plain_refused_switched": "上游拒绝了这次请求，已改用 {model}。",
+  "plain_card": "上游拒绝了一次请求，这个对话现在用 {model} 回复。"
 }

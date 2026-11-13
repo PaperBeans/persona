@@ -1,0 +1,21 @@
+{
+  "more_actions": "その他のメッセージ操作",
+  "worth": "価値 {cost}",
+  "tokens": "{tokens} tokens",
+  "approx": "約 {cost}",
+  "details_title": "リクエストの明細",
+  "value_line": "このターンの token 価値: {cost}",
+  "by_model": "モデル別:",
+  "model_cost": "· {model} {cost}",
+  "token_line": "トークン: 合計 {total} · 入力 {input} · 出力 {output}",
+  "cache_line": "キャッシュ内訳: 読み取り {read} · 書き込み {write} · ヒット率 {rate}",
+  "cache_line_no_rate": "キャッシュ内訳: 読み取り {read} · 書き込み {write}",
+  "time_line": "時間 {duration}",
+  "model_line": "モデル: {model}",
+  "models_other": "{count} 個のモデル",
+  "suggestion_line": "提案: {suggestion}",
+  "low_cache": "キャッシュヒット率が低く、このターンでは多くのコンテキストが再課金されています",
+  "no_cost": "このターンの料金は現在取得できないため、使用量のみ表示しています",
+  "persona_cost": "この返信は約 {cost}（公開価格での概算）",
+  "persona_title": "この返信の概算費用"
+}

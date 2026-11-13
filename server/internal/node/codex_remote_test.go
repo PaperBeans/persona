@@ -36,6 +36,8 @@ type remoteFixture struct {
 	hangup        string // a call to it closes the connection instead of an answer
 	resumeRequest bool
 	ephemeral     string
+	// active: thread/read and thread/resume say a turn runs in the threads (status "active"), as while one does.
+	active bool
 	// models answers model/list; threadModel / threadEffort are the threads' configured model and effort (codex_effort.go).
 	models                    any
 	threadModel, threadEffort string
@@ -44,6 +46,7 @@ type remoteFixture struct {
 	// backgroundReply overrides the versioned inventory fixture's terminal response.
 	backgroundReply map[string]any
 	backgroundPages map[string]map[string]any
+	response        func(string, map[string]any) (any, bool)
 }
 
 func (f *remoteFixture) serve(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +74,11 @@ func (f *remoteFixture) serve(w http.ResponseWriter, r *http.Request) {
 		models, model, effort, archive := f.models, f.threadModel, f.threadEffort, f.archive
 		background := f.backgroundReply
 		backgroundPages := f.backgroundPages
+		status := map[string]any{"type": "idle"}
+		if f.active {
+			status = map[string]any{"type": "active", "activeFlags": []string{}}
+		}
+		response := f.response
 		f.mu.Unlock()
 		if code == 0 {
 			code = -32600
@@ -105,12 +113,18 @@ func (f *remoteFixture) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(m.Params, &p)
 		var result any = map[string]any{}
 		thread, _ := p["threadId"].(string)
-		d := map[string]any{"id": thread, "name": "合成会话", "cwd": f.home, "status": map[string]any{"type": "idle"}}
+		d := map[string]any{"id": thread, "name": "合成会话", "cwd": f.home, "status": status}
 		if model != "" {
 			d["model"] = model
 		}
 		if effort != "" {
 			d["reasoningEffort"] = effort
+		}
+		if response != nil {
+			if value, handled := response(m.Method, p); handled {
+				f.push(map[string]any{"id": m.ID, "result": value})
+				continue
+			}
 		}
 		switch m.Method {
 		case "initialize":

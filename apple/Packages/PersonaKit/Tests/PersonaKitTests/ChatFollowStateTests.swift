@@ -220,4 +220,126 @@ struct ChatFollowStateTests {
         drag(&f, to: 900)
         #expect(f.mode == .reading && f.holdsBack && !f.anchored)
     }
+
+    /// #3005: a tool row opened at the newest end of a running turn. Following on, the next step took the list to the
+    /// newest end and the row off the screen; now it is held there until the user decides.
+    @Test func aRowToggledWhileFollowingAnchors() {
+        var f = ChatFollow()
+        let anchored = f.toggledRow()
+        #expect(anchored == .kept, "the chat keeps the row where it is")
+        #expect(f.mode == .holding && f.anchored)
+        #expect(!f.follows && !f.holdsBack, "what comes in shows, but does not move the list")
+        f.endHold()
+        #expect(f.mode == .holding, "not for a moment only: until the user decides")
+        f.scrolled(gap: 900)
+        #expect(f.arrow, "↓ to what came in past the screen")
+        f.follow()
+        #expect(f.mode == .following && !f.anchored, "↓ or sending follows again")
+    }
+
+    /// #3757: opened at the newest end while following, the row rises (what opened grows up from the newest end) and is
+    /// kept once it reaches the top bar; closed there, the list stays following, back at the newest end.
+    @Test func aRowToggledAtTheNewestEndRisesOrFollows() {
+        var f = ChatFollow()
+        #expect(f.toggledRow(closing: true, atNewest: true) == .moment, "closed at the newest end: still following")
+        #expect(f.mode == .following && f.follows && !f.anchored)
+        #expect(f.toggledRow(atNewest: true) == .rising)
+        #expect(f.mode == .holding && f.anchored, "kept once it has risen to the top bar")
+        f.scrolled(gap: 0)
+        #expect(!f.arrow, "still at the newest end while it rises")
+        f.scrolled(gap: 900)
+        #expect(f.arrow, "risen to the top bar, what comes in goes past the screen: ↓")
+        // Closed again where it was kept: kept still, as anywhere off the newest end.
+        #expect(f.toggledRow(closing: true, atNewest: false) == .kept)
+        #expect(f.mode == .holding && f.anchored)
+        // Anchored with the newest end still on screen (a work line opened there, its steps short of the top bar):
+        // another row opened, or closed, there rises with what comes in, as one opened while following does.
+        #expect(f.toggledRow(atNewest: true) == .rising)
+        #expect(f.toggledRow(closing: true, atNewest: true) == .rising)
+        #expect(f.mode == .holding && f.anchored)
+    }
+
+    /// Closed at the newest end just after a header was held for a moment (it goes back to following): following.
+    @Test func aRowClosedAtTheNewestEndDuringAShortHoldFollows() {
+        var f = ChatFollow()
+        f.hold()
+        #expect(f.toggledRow(closing: true, atNewest: true) == .moment)
+        f.endHold()
+        #expect(f.mode == .following)
+    }
+
+    @Test func aRowToggledAtTheNewestEndWhileReadingStaysReading() {
+        var f = ChatFollow()
+        drag(&f, to: 900)
+        #expect(f.toggledRow(atNewest: true) == .moment)
+        #expect(f.mode == .reading)
+    }
+
+    @Test func aRowToggledInAnAnchoredOpenStaysAnchored() {
+        var f = ChatFollow()
+        f.hold(anchored: true) // the work line opened at the newest end
+        let opened = f.toggledRow()
+        #expect(opened == .kept)
+        #expect(f.mode == .holding && f.anchored)
+        let closed = f.toggledRow()
+        #expect(closed == .kept, "closed again: still where the user reads")
+        #expect(f.mode == .holding && f.anchored)
+        drag(&f, to: 40)
+        #expect(f.mode == .following && !f.anchored, "the user's own scroll near the newest follows again")
+    }
+
+    /// Just after a header held for a moment while following (it will follow again): anchored as well.
+    @Test func aRowToggledDuringAShortHoldWhileFollowingAnchors() {
+        var f = ChatFollow()
+        f.hold()
+        let anchored = f.toggledRow()
+        #expect(anchored == .kept)
+        f.endHold()
+        #expect(f.mode == .holding && f.anchored)
+    }
+
+    @Test func aRowToggledWhileReadingStaysReading() {
+        var f = ChatFollow()
+        drag(&f, to: 900)
+        let whileReading = f.toggledRow()
+        #expect(whileReading == .moment, "nothing comes in while reading: nothing to hold")
+        #expect(f.mode == .reading && !f.anchored)
+        f.hold() // a header opened while reading
+        let afterAHeader = f.toggledRow()
+        #expect(afterAHeader == .moment)
+        f.endHold()
+        #expect(f.mode == .reading)
+    }
+
+    /// The row's action runs on the tap's touch-up, the scroll view still tracking the finger: it anchors all the same,
+    /// and the finger lifting without a scroll (`tapped`) decides nothing.
+    @Test func aRowTappedOpenStaysAnchoredWhenTheFingerLifts() {
+        var f = ChatFollow()
+        f.touched()
+        let anchored = f.toggledRow()
+        #expect(anchored == .kept)
+        f.scrolled(gap: 300) // what opened pushed the newest end away
+        f.tapped()
+        #expect(f.mode == .holding && f.anchored, "a tap is not a scroll: still held where the user reads")
+        #expect(!f.touching && !f.holdsBack)
+    }
+
+    /// A tap anywhere in the list scrolls nothing: whatever the list was doing goes on.
+    @Test func aTapIsNotAScroll() {
+        var f = ChatFollow()
+        f.touched()
+        f.tapped()
+        #expect(f.mode == .following && f.follows && !f.holdsBack)
+        var r = ChatFollow()
+        drag(&r, to: 900)
+        r.touched()
+        r.tapped()
+        #expect(r.mode == .reading, "still reading")
+        var a = ChatFollow()
+        a.hold(anchored: true)
+        a.scrolled(gap: 50)
+        a.touched()
+        a.tapped()
+        #expect(a.mode == .holding && a.anchored, "near the newest, but the user did not scroll there: still anchored")
+    }
 }

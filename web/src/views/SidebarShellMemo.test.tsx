@@ -151,7 +151,10 @@ async function mount() {
   expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("20");
   expect(buildTodoTree).toHaveBeenCalled();
   expect(buildTodoAgentGroups).toHaveBeenCalled();
-  for (const [, count] of shellReads()) expect(count).toBeGreaterThan(0);
+  for (const [name, count] of shellReads()) {
+    if (name === "link") expect(count).toBe(0); // closed dialog code now loads only on intent
+    else expect(count).toBeGreaterThan(0);
+  }
   clearCounts();
 }
 
@@ -209,8 +212,12 @@ describe("the sidebar shell across store pushes", () => {
       await flush();
       const link = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((b) => b.textContent?.includes(t("agentmenus.link_to_todo")))!;
       expect(link).toBeTruthy();
-      act(() => link.click());
+      await act(async () => {
+        link.click();
+        await import("./LinkTodoDialog"); // wait for the same chunk the click requested
+      });
       await flush();
+      expect(renders.get("link")).toBeGreaterThan(0);
       return document.querySelector('[role="dialog"][aria-modal="true"]');
     };
     expect((await openLink())?.textContent).toContain("Build app");

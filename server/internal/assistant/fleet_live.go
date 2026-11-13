@@ -16,6 +16,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
@@ -107,7 +108,7 @@ func (s *Service) tellLive(st FleetState) {
 	if same {
 		return
 	}
-	if s.hub.Tell(assistantwire.EventFleetLive, json.RawMessage(b)) == nil {
+	if s.hub.Tell(assistantwire.EventFleetLive, rpc.Marshaled(b)) == nil { // json.Marshal's bytes: into the line as they are
 		l.mu.Lock()
 		l.sent = string(b)
 		l.mu.Unlock()
@@ -345,8 +346,10 @@ func needItem(l i18n.Lang, n needer) FleetItem {
 			item.Detail = i18n.T(l, "push.private_card")
 		}
 		item.Interaction, item.Since = ix.ID, unixSeconds(ix.CreatedAt)
-		if len(ix.Fields) > 0 {
-			item.Interaction = "" // what it asks for (a password) is filled in in the app: no Allow / Deny on the activity
+		if len(ix.Fields) > 0 || ix.ToolName == proto.SecretHandoffTool {
+			// What it asks for (a password) is filled in in the app, or (a hand-off) approved on the card only
+			// (hub/secret_handoff.go): no Allow / Deny on the activity.
+			item.Interaction = ""
 		}
 	}
 	return item

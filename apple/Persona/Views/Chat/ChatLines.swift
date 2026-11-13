@@ -29,6 +29,44 @@ struct ChatLines {
         }
     }
 
+    /// The lines without the raw `<closeout …>…</closeout>` block of the last reply (#3612): the card in the chat's
+    /// header says it, so the reply does not say it again as text. Exactly that block goes (`Closeout.strip`), from
+    /// the last exchange's last words only; a reply that was nothing but the block is not drawn at all. An earlier
+    /// turn's block stays as it was written: the card is about the turn that just ended.
+    /// What `hidingCloseout` adds to the id of the reply it draws without its block.
+    static let closeoutShownSuffix = "#closeout-shown"
+
+    static func hidingCloseout(_ lines: [ChatLine]) -> [ChatLine] {
+        for index in lines.indices.reversed() {
+            switch lines[index].content {
+            case .row(.assistant(let item)):
+                guard let text = item.text, Closeout.holdsBlock(text) else { return lines }
+                let stripped = Closeout.strip(text)
+                var out = lines
+                if stripped.isEmpty, item.fullSize == nil {
+                    out.remove(at: index)
+                } else {
+                    var shown = item
+                    shown.text = stripped
+                    // Its own id for what is worked out from the words: a message's Markdown is kept by its id
+                    // (`RowMemo`, filled off the main thread as items arrive), which may already hold the reply with
+                    // its block, and that was drawn in place of these words. The line keeps the reply's id, so the
+                    // list keeps its place when the card comes or goes.
+                    shown.id = item.id + Self.closeoutShownSuffix
+                    var line = ChatLine.replacing(lines[index], with: .assistant(shown))
+                    line.showsSource = lines[index].showsSource
+                    out[index] = line
+                }
+                return out
+            case .row(.user), .supervisionInput:
+                return lines // a message after the last reply: that exchange has no closing words yet
+            default:
+                continue
+            }
+        }
+        return lines
+    }
+
     /// Work lines the user opened; `openAll` flips them all (DEBUG `-openAllWork`).
     var openWork: Set<String>
     var openAll = false
@@ -51,17 +89,20 @@ struct ChatLines {
     /// away: every sentence of a running turn moved the chat up two lines and down three (2026-11-04).
     /// Supervision folding is independent of the optional conversation layout, and only enabled for Persona chats.
     var foldSupervision = false
-    /// Background rounds fold too (docs/apple/ios.md "Background rounds"): only the main conversation, with the hub's
-    /// `main_background_folded` on. Needs `foldSupervision`.
+    /// Background rounds fold too (docs/apple/ios.md "Background rounds"): the main conversation and the leader
+    /// conversations (`AssistantInfo.leaders`, #6595), with the hub's `main_background_folded` on. Needs `foldSupervision`.
     var foldBackground = false
     var openSupervision: Set<String> = []
     var openAllSupervision = false
     var active = false
 
-    /// Whether a chat folds background rounds: an assistant chat that is the main conversation, with the switch on.
-    static func foldsBackground(assistant: Bool, conversation: String, main: String?, on: Bool) -> Bool {
-        guard assistant, on, let main, !main.isEmpty else { return false }
-        return conversation == main
+    /// Whether a chat folds background rounds: an assistant chat that is the main conversation or one of the hub's
+    /// leader conversations, with the switch on.
+    static func foldsBackground(assistant: Bool, conversation: String, main: String?, on: Bool,
+                                leaders: Set<String> = []) -> Bool {
+        guard assistant, on, !conversation.isEmpty else { return false }
+        if let main, !main.isEmpty, conversation == main { return true }
+        return leaders.contains(conversation)
     }
 
     /// The sources whose rounds are background rounds: a supervising conversation's message, a follow-up, a scheduled run.
@@ -271,9 +312,12 @@ struct ChatLines {
                         out += work.filter { if case .notice(let i) = $0 { i.compact != nil } else { false } }.map { .row($0) }
                     } else if !items.isEmpty || live {
                         let id = "w-" + (seg.user?.id ?? seg.rows.first?.id ?? t.id)
+                        // The answer and an interrupt end the exchange too; an idle compaction after it does not.
+                        let ending = seg.rows.indices.filter { !after.contains($0) }.map { seg.rows[$0] }
+                            + (k == segments.count - 1 ? t.trailing : [])
                         out.append(.work(id: id, items: items, live: live,
                                          start: seg.user?.firstTS ?? (k == 0 ? wokeAt : nil) ?? seg.rows.first?.firstTS ?? t.startedAt,
-                                         end: work.last?.lastTS ?? seg.rows.last?.lastTS))
+                                         end: Self.workEnd(ending) ?? seg.rows.last?.lastTS))
                     }
                     // Between the work and the answer: what the work looked at. Its id stays as pictures come in and
                     // the answer changes, so the strip grows sideways in place.
@@ -285,6 +329,17 @@ struct ChatLines {
             }
         }
         return Self.foldRecaps(Self.foldAPIErrors(out))
+    }
+
+    /// Where a finished work line's time stops (#5119): the latest thing its exchange recorded, the answer included,
+    /// and parallel calls at whichever finished last (web `work-groups.ts` counts the same span). The running line
+    /// counts to now, so ending at the last tool step took the wait for the answer off the time as the answer came in
+    /// (8m 17s, then 8m 12s); Claude Code writes its own end of the turn within a fraction of a second of the answer.
+    static func workEnd(_ rows: [ChatRow]) -> Date? {
+        rows.compactMap { row in
+            if case .tools(let steps) = row { return steps.compactMap(\.lastTS).max() }
+            return row.lastTS
+        }.max()
     }
 
     /// Claude Code writes a recap each time an idle session is looked at again: several in a row (nothing else

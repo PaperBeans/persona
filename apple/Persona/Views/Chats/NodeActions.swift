@@ -19,15 +19,18 @@ nonisolated struct TerminalPanes: Decodable, Sendable, Equatable {
         var worktree: Bool
         var tabs: [Tab]
         var panes: [Pane]
+        /// The host's workspaces (the Terminals page's New Terminal, #4754).
+        var workspaces: [Workspace] = []
 
-        enum CodingKeys: String, CodingKey { case kind, tabs, panes, newTab = "new_tab", worktree }
+        enum CodingKeys: String, CodingKey { case kind, tabs, panes, workspaces, newTab = "new_tab", worktree }
 
-        init(kind: String, newTab: Bool = false, worktree: Bool = false, tabs: [Tab] = [], panes: [Pane] = []) {
+        init(kind: String, newTab: Bool = false, worktree: Bool = false, tabs: [Tab] = [], panes: [Pane] = [], workspaces: [Workspace] = []) {
             self.kind = kind
             self.newTab = newTab
             self.worktree = worktree
             self.tabs = tabs
             self.panes = panes
+            self.workspaces = workspaces
         }
 
         init(from decoder: Decoder) throws {
@@ -37,6 +40,19 @@ nonisolated struct TerminalPanes: Decodable, Sendable, Equatable {
             worktree = try c.decodeIfPresent(Bool.self, forKey: .worktree) ?? false
             tabs = try c.decodeIfPresent([Tab].self, forKey: .tabs) ?? []
             panes = try c.decodeIfPresent([Pane].self, forKey: .panes) ?? []
+            workspaces = try c.decodeIfPresent([Workspace].self, forKey: .workspaces) ?? []
+        }
+    }
+
+    nonisolated struct Workspace: Decodable, Sendable, Equatable {
+        var id: String
+        var label: String
+        enum CodingKeys: String, CodingKey { case id, label }
+        init(id: String, label: String = "") { self.id = id; self.label = label }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
         }
     }
 
@@ -56,10 +72,42 @@ nonisolated struct TerminalPanes: Decodable, Sendable, Equatable {
         var title: String? = nil
         var cwd: String? = nil
         var sessionID: String? = nil
+        /// The address its terminal streams by (`pane:<id>`).
+        var terminal: String = ""
+        /// The program in front of a plain pane ("zsh", "vim"…), as the host names it (#4754).
+        var foreground: String? = nil
+        /// The stopped Agent whose terminal this is: a pane Persona opened for that session, no Agent in it now (#4754).
+        var agentSession: String? = nil
         var id: String { pane }
         enum CodingKeys: String, CodingKey {
-            case pane, agent, title, cwd
-            case tabID = "tab_id", workspaceID = "workspace_id", sessionID = "session_id"
+            case pane, agent, title, cwd, terminal, foreground
+            case tabID = "tab_id", workspaceID = "workspace_id", sessionID = "session_id", agentSession = "agent_session"
+        }
+        init(pane: String, tabID: String, workspaceID: String, agent: String? = nil, title: String? = nil, cwd: String? = nil,
+             sessionID: String? = nil, terminal: String = "", foreground: String? = nil, agentSession: String? = nil) {
+            self.pane = pane
+            self.tabID = tabID
+            self.workspaceID = workspaceID
+            self.agent = agent
+            self.title = title
+            self.cwd = cwd
+            self.sessionID = sessionID
+            self.terminal = terminal.isEmpty ? "pane:" + pane : terminal
+            self.foreground = foreground
+            self.agentSession = agentSession
+        }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            pane = try c.decode(String.self, forKey: .pane)
+            tabID = try c.decodeIfPresent(String.self, forKey: .tabID) ?? ""
+            workspaceID = try c.decodeIfPresent(String.self, forKey: .workspaceID) ?? ""
+            agent = try c.decodeIfPresent(String.self, forKey: .agent)
+            title = try c.decodeIfPresent(String.self, forKey: .title)
+            cwd = try c.decodeIfPresent(String.self, forKey: .cwd)
+            sessionID = try c.decodeIfPresent(String.self, forKey: .sessionID)
+            terminal = try c.decodeIfPresent(String.self, forKey: .terminal) ?? "pane:" + pane
+            foreground = try c.decodeIfPresent(String.self, forKey: .foreground)
+            agentSession = try c.decodeIfPresent(String.self, forKey: .agentSession)
         }
     }
 }
@@ -79,8 +127,10 @@ nonisolated struct PaneAgentResult: Decodable, Sendable {
 }
 
 extension APIClient {
-    func terminalPanes(machine: String) async throws -> TerminalPanes {
-        try await get("/api/v1/machines/\(machine)/panes", as: TerminalPanes.self)
+    /// `requestID`: sent as `X-Client-Request-Id` (the hub logs it), for a page that shows it.
+    func terminalPanes(machine: String, requestID: String? = nil) async throws -> TerminalPanes {
+        let headers = requestID.map { ["X-Client-Request-Id": $0] } ?? [:]
+        return try JSON.decoder.decode(TerminalPanes.self, from: try await request("GET", "/api/v1/machines/\(machine)/panes", extraHeaders: headers))
     }
 
     /// One of the node menu's routes, `POST /machines/{mid}/<path>`; only allowlisted fields and boolean flags reach the node.
@@ -206,8 +256,22 @@ nonisolated enum NodeMenu {
         return tab.isEmpty ? detail : "\(tab) · \(detail)"
     }
 
-    /// Only the agents a launcher starts without a first message: Claude Code (a Codex start needs one).
-    static func launchableHere(_ l: Launcher) -> Bool { (l.agent ?? "").isEmpty || l.agent == "claude" }
+    /// Claude Code, and a launcher the computer says it starts in a pane the user picked, keeping that pane when the
+    /// start fails (`runHere`: its Codex launchers, #5504), as the web's `launchableHere`. An older computer's failed
+    /// Codex start closes its pane, here the user's own shell (#5275): there Codex starts from New Session in a tab of its own.
+    /// Not the one that starts the session in Claude's desktop app (#5480): it never runs in this terminal.
+    static func launchableHere(_ l: Launcher) -> Bool {
+        !l.startsInDesktopApp && (l.runHere == true || (l.agent ?? "").isEmpty || l.agent == "claude")
+    }
+
+    /// Run Agent Here's footer: the agent starts in the picked shell; where the computer has a Codex launcher it doesn't
+    /// offer here, also that Codex starts from New Session (#5275). Codex is not mentioned where it is offered or absent,
+    /// nor for the Codex App's launcher: its chat starts in the App, not in a tab.
+    static func runHereFooter(_ launchers: [Launcher]) -> String {
+        launchers.contains(where: { $0.isCodex && !$0.startsInDesktopApp && !launchableHere($0) })
+            ? String(localized: "Starts in the selected shell without opening a new tab. Codex starts in a tab of its own: use New Session.")
+            : String(localized: "Starts in the selected shell without opening a new tab.")
+    }
 
     /// The chat of the agent Run Agent Here started on `machine`, from what `panes/agent` answered: it opens the way New
     /// Session opens the one it starts (#3287). nil when the answer names no session: the list stays in front.
@@ -528,7 +592,7 @@ struct RunAgentHereSheet: View {
                         // The pane's shell is a terminal's too: what New Agent grays out is said here (#1643), not hidden.
                         LauncherBlockLine(block: block)
                     } else {
-                        Text("Starts in the selected shell without opening a new tab. Codex needs a first message, so use New Session.")
+                        Text(NodeMenu.runHereFooter(loaded.launchers))
                     }
                 }
             }

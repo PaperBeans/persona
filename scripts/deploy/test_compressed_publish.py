@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -39,6 +40,7 @@ class InstallTestCase(unittest.TestCase):
         self.installed = self.home / ".persona/bin/personad"
         self.installed.parent.mkdir(parents=True)
         self.installed.write_bytes(b"previous-install")
+        self.install_sh = SCRIPTS / "install.sh"
 
     def script(self, name, text):
         path = self.tools / name
@@ -53,7 +55,7 @@ class InstallTestCase(unittest.TestCase):
         return path
 
     def run_install(self):
-        return subprocess.run(["/bin/sh", str(SCRIPTS / "install.sh")], env=self.env,
+        return subprocess.run(["/bin/sh", str(self.install_sh)], env=self.env,
                               cwd=self.root, capture_output=True, text=True, timeout=30)
 
     def assert_keeps_previous(self, result, message):
@@ -234,7 +236,33 @@ class InstallNodeServiceTests(unittest.TestCase):
         self.assertIn("--node --pair", result.stdout)
 
 class InstallHerdrTests(InstallTestCase):
-    """install.sh and ensure-herdr.sh add herdr when the computer has none; a failed herdr install only warns."""
+    """install.sh and ensure-herdr.sh add herdr when the computer has none; a failed herdr install only warns.
+
+    Besides PATH and HOME, has_herdr() in both scripts looks in fixed system directories. The tests run copies that look
+    in directories inside the test's root instead, so a herdr installed on the computer running the tests (Homebrew's
+    /opt/homebrew/bin, /usr/local/bin) does not count as this fake computer's (#5434).
+    """
+
+    SYSTEM_DIRS = "/opt/homebrew/bin /usr/local/bin"
+
+    def setUp(self):
+        super().setUp()
+        self.system_dirs = [self.root / "system/opt/homebrew/bin", self.root / "system/usr/local/bin"]
+        for directory in self.system_dirs:
+            directory.mkdir(parents=True)
+        # Same layout as the checkout: install.sh runs the service resolver at $(dirname "$0")/../persona_identity.py.
+        (self.root / "scripts/deploy").mkdir(parents=True)
+        (self.root / "scripts/persona_identity.py").symlink_to(SCRIPTS.parent / "persona_identity.py")
+        self.install_sh = self.with_test_system_dirs("install.sh")
+        self.ensure_sh = self.with_test_system_dirs("ensure-herdr.sh")
+
+    def with_test_system_dirs(self, name):
+        source = (SCRIPTS / name).read_text()
+        # Exactly one place to rewrite: if has_herdr's list changes, update SYSTEM_DIRS rather than test the real ones.
+        self.assertEqual(source.count(self.SYSTEM_DIRS), 1, f"{name}: has_herdr's system directories changed")
+        path = self.root / "scripts/deploy" / name
+        path.write_text(source.replace(self.SYSTEM_DIRS, " ".join(shlex.quote(str(d)) for d in self.system_dirs)))
+        return path
 
     def herdr_installer(self, ok=True):
         body = ('#!/bin/sh\nmkdir -p "$HOME/.local/bin"\nprintf "#!/bin/sh\\n" > "$HOME/.local/bin/herdr"\n'
@@ -261,6 +289,23 @@ class InstallHerdrTests(InstallTestCase):
         self.assertIn("herdr: already installed", result.stdout)
         self.assertFalse(self.herdr().exists())
 
+    def test_a_herdr_only_in_a_system_directory_counts(self):
+        self.herdr_installer(ok=False)
+        for directory in self.system_dirs:
+            with self.subTest(directory=str(directory.relative_to(self.root))):
+                herdr = directory / "herdr"
+                herdr.write_text("#!/bin/sh\n")
+                herdr.chmod(0o755)
+                try:
+                    result = self.run_install()
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn("herdr: already installed", result.stdout)
+                    result = self.run_ensure()
+                    self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+                    self.assertFalse(self.herdr().exists())
+                finally:
+                    herdr.unlink()
+
     def test_failed_herdr_install_still_installs_personad(self):
         self.herdr_installer(ok=False)
         result = self.run_install()
@@ -277,7 +322,7 @@ class InstallHerdrTests(InstallTestCase):
         self.assertNotIn("herdr", result.stdout)
 
     def run_ensure(self):
-        return subprocess.run(["/bin/sh", str(SCRIPTS / "ensure-herdr.sh")], env=self.env,
+        return subprocess.run(["/bin/sh", str(self.ensure_sh)], env=self.env,
                               cwd=self.root, capture_output=True, text=True, timeout=30)
 
     def test_ensure_herdr_installs_when_missing(self):

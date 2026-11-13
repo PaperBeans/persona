@@ -238,6 +238,8 @@ struct MacInboxPage: View {
                     .modifier(MacBelowTitleRow())
                     .frame(width: Theme.Size.macInboxFiltersWidth)
                     .frame(maxHeight: .infinity)
+                    // The style's side column (Lark: Feishu's lighter one), up behind the title as the divider goes.
+                    .background { if let side = Theme.macSideColumn { side.ignoresSafeArea(.container, edges: .top) } }
                     .transition(.move(edge: .leading).combined(with: .opacity))
                 // Up into the title bar's row, as the shell's divider: the list reaches up there and the filters do not,
                 // so a divider stopping under the row left a step between them (#1736, as #830).

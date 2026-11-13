@@ -119,4 +119,51 @@ class AgentsFoldAllTest {
         startModel()
         assertEquals(setOf(id), model.page.value.settings.folded)
     }
+
+    // #4338 A5, as iOS: By Status's Seen starts folded and opens from its header; opening it is kept, "Expand all" opens it,
+    // and rows under a section that names their state leave the word out (Muted mixes states, so its rows keep it).
+    @Test fun byStatusSeenOpensFromItsHeaderAndRowsLeaveTheirStateOut() = runTest {
+        startModel(listOf(Session("shown", "seen", state = "idle", title = "Seen one")))
+        model.grouping(AgentGrouping.State)
+        runCurrent()
+        fun seen() = model.page.value.list.groups.single { it.id == StateSeenGroup }
+        assertTrue(seen().folded)
+        model.fold(seen())
+        runCurrent()
+        assertFalse(seen().folded)
+        assertEquals(setOf(StateSeenOpened), preferences.snapshots.first().folds[AgentGrouping.State])
+        model.fold(seen())
+        runCurrent()
+        assertTrue(seen().folded)
+        assertTrue(preferences.snapshots.first().folds[AgentGrouping.State].orEmpty().isEmpty())
+        model.foldAll(true)
+        runCurrent()
+        model.foldAll(false)
+        runCurrent()
+        assertFalse(seen().folded)
+        val rows = agentTreeEntries(model.page.value.list, "").filterIsInstance<TreeRowEntry>()
+        assertTrue(rows.isNotEmpty())
+        assertTrue(rows.all { it.inStateSection })
+    }
+
+    // #4338 A11, as iOS's Collapse All: the sections fold, the computer headings stay as they are.
+    @Test fun collapseAllLeavesTheComputerHeadingsAsTheyAre() = runTest {
+        startModel()
+        model.foldAll(true)
+        runCurrent()
+        assertTrue(model.page.value.list.machines.isNotEmpty())
+        assertTrue(model.page.value.list.machines.none { it.folded })
+        assertTrue(model.page.value.list.groups.all { it.folded })
+        // The list settings say Collapse all is done, the computers open as they are.
+        assertTrue(model.page.value.list.allCollapsed)
+        model.foldAll(false)
+        runCurrent()
+        val hidden = model.page.value.list.machines.single { it.machine.id == "hidden" }
+        model.fold(hidden)
+        runCurrent()
+        model.foldAll(true)
+        runCurrent()
+        assertTrue(model.page.value.list.machines.single { it.machine.id == "hidden" }.folded)
+        assertFalse(model.page.value.list.machines.single { it.machine.id == "shown" }.folded)
+    }
 }

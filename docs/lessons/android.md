@@ -1,8 +1,82 @@
 # Lessons: Android
 
+## Selecting a message's words in place: what `SelectionContainer` leaves to you (#4210 T5)
+
+`rememberSelectionState()` and `SelectionContainer(state, …)` are public in Compose Foundation 1.12: `selectAll()`, `clear()`
+and the read-only `selectedTexts` / `getSelectableTexts()` are all a select-in-place needs. Nothing starts from the word under a
+point (`select` takes a range of the container's text, and the Markdown renderer exposes no text layouts to find an offset by), so
+Select takes the whole message and a long press on a word picks that word. The words register as the container is laid out, so wait
+until `getSelectableTexts()` lists them (a frame or two) before `selectAll()`; a message with no words never lists any, and must not be
+left selecting.
+
+- A `SelectionContainer` inside another takes its text out of the outer one: a code block that opens its own was missing from a
+  select-all. A block joins by checking `LocalSelectionAbove` (`SelectableOnItsOwn`); buttons, title bars and cards are wrapped in
+  `DisableSelection`, or "Copy" and the language name are copied with the code.
+- A selection over rendered Markdown copies one selectable a line: a list item's marker is a text of its own ("•", newline, the item),
+  a table cell a line, and the thin spaces that pad inline code come out in a terminal as a character the shell takes for a word. Copy goes
+  through `LocalClipboard`, so a wrapper clipboard cleans what the container copies (`pickedWords`); Quote reads `selectedTexts` and cleans the same way.
+- Wrapping content in a container only while something is selected rebuilds it and loses what it remembers (an opened quote, an unfolded
+  code block). Keep it as one `movableContentOf` that moves between the two places, with a test that opens something first.
+- Don't end the selection the moment `selectedTexts` is empty: a long press on another word lets go of the old words before it picks
+  the new ones. Wait a few frames, counted with `withFrameNanos`; a `delay` inside a `LaunchedEffect` is not driven by `waitForIdle`
+  or `mainClock.advanceTimeBy` in these tests.
+- Robolectric: a long press that lands on a glyph starts the platform Magnifier, which throws (`Magnifier.dismiss`, no Surface); long press blank
+  space, or assert the long-click semantics instead. The handles are roots of their own (`onRoot()` finds three), so send keys to
+  `onAllNodes(isRoot()).onFirst()`. The floating menu is not drawn, but `LocalTextContextMenuToolbarProvider` takes `data()` of what it would show,
+  and a `TextContextMenuItem.onClick` can be run.
+- A tap outside the selected message ends the selection without taking the tap from what it hit: watch it from the page in
+  `PointerEventPass.Initial` with `awaitFirstDown(requireUnconsumed = false)` and consume nothing; a move past the touch slop is a scroll,
+  not a tap, so the chat can be scrolled while words are selected.
+
+## Explicit home selection is not detail-stack restoration (#5638)
+
+Keeping visited tabs composed prevents loading flashes, but keeping their entire back stacks can make the Agents
+home control reopen a session instead of its list. Treat explicit Agents selection separately from a targeted session
+entry: remove only destinations above the existing Agents root, and preserve Assistant's current conversation.
+Do not route task entries or notification/session links through that reset. Exercise the production home control after
+those entry paths and after a restored stack; a navigator test that expects the old detail to survive a tab selection
+can accidentally pin the bug rather than prevent it.
+
+## A drag on the chat list hides the keyboard; Robolectric hands the focus back (#4210)
+
+`ChatListEffects` clears the focus and hides the keyboard on the list's `DragInteraction.Start`, which only a finger past the touch slop starts. Do not use `isScrollInProgress` for this: it is also true while the page's own `scrollToItem` or `animateScrollToItem` runs (following the newest message while someone types, a jump to a message, a search hit), and those must leave the keyboard up. A bare touch is not enough either, since it may still be a tap on a field inside the list (iOS tells the two apart as `.tracking` and `.interacting`).
+
+Test it by what the page asks of the focus manager and the keyboard controller, wrapped around the real ones (`KeyboardProbe`), and by the field losing focus once, not by the field staying unfocused: Robolectric is not in touch mode, where Android gives the focus straight back to the first field after `clearFocus()`, and in one test every second drag did. Aim the swipe at a message in the middle of the page: a swipe injected on the last message of the semantics tree never reached an Agent chat's list, because the top bar is drawn over it. Check that a test of this kind fails without the change; the tests that guard a tap, a long press and a scroll the page starts pass either way, by design.
+
+## Keep a worktree fixed while Gradle verifies it (#5233)
+
+Do not merge main or edit source while a multi-task Gradle invocation is running in that worktree. Earlier tasks can
+compile the old contracts and later tasks read newly merged tests, producing misleading missing-field and constructor
+errors. Finish or stop that invocation first, update the branch, then verify the fixed revision. A failure is not an
+inherited main defect until a clean, independent main worktree reproduces it.
+
+## Reusing an onboarding checklist for ordinary settings (#5233)
+
+Reusing the full phone-check list is not enough: an ordinary Notifications and background page must also suppress
+assistant/computer setup, skipped-computer summaries and first-run completion/dismissal actions. Otherwise leaving
+settings can clear first-run pending state or dismiss assistant setup. Keep these behaviors behind an explicit
+`backgroundOnly` mode with an unchanged default for onboarding. Preserve old route names separately from new home
+labels, and test owner-switch closure and parent Back navigation after adding a group page.
+
 ## A design-system signature change compiles every caller (#4145)
 
 #4124 added a `Boolean` after `JSectionHeader`'s composable slot. A caller passing the slot as a trailing lambda then bound it to the `Boolean`, and `main` stopped compiling for every Android build. No hosted CI runs on PRs, so the module's own build passing was not enough. Before merging a change to a `core/designsystem` component's parameters, compile `:app:compileDebugKotlin` (every feature's main code) and the test code of the modules that call it. Keep a composable slot last; `scripts/app/android_slot_order.py` checks that (#4146).
+
+## A swipe's actions for a screen reader go on the row's own node (#4210)
+
+TalkBack focuses a Compose node that merges its descendants (a clickable row) or a leaf, not an ancestor that only carries custom actions, and a merging parent leaves a clickable child separate. So `JSwipeActions` cannot put the actions on its own container: it provides them through a composition local, and the row applies `swipeActionSemantics()` on the node that carries its click. Apply it in every branch that draws the row's click: `MessageItem` draws a Glass Needs You item through `JCard` and the others through its own `click` modifier, and a first version that covered only the second left the most important rows without the action. Test it on the merged node (`config[SemanticsActions.CustomActions]` of the node found by its text and `hasClickAction()`), in each state the swipe can be absent: busy, picking, done.
+
+In a test, a row with no swipe takes a held sideways drag as a press that moves: after the long-press time (400 ms) it opens what its long press opens (a selection, a sheet), so keep a drag that must show nothing well under it, and do not read `onClick` counts after a fast swipe on such a row: a sideways drag that nobody consumes and ends on the row counts as a tap. The color of a revealed action can be read from the captured image at the row's end edge, outside the icon's padding (Robolectric native graphics, a flat fill).
+
+## Adaptive evidence must survive serialization, re-chunking and cleanup
+
+A new `@Serializable` type in an Android module also needs `org.jetbrains.kotlin.plugin.serialization` in that module. The encoder's missing-serializer exception can otherwise disappear behind a `runCatching`, leaving an empty evidence file while production calls look successful. Robolectric also returns PID 0 by default: use `ShadowProcess.setPid` for tests of real positive-PID validation rather than weakening the production check.
+
+When a lazy item is a row chunked by the current column count, a width change can expose the new row key together with the old absolute item index. Keep the previous stable key, index, pixel offset and grid start, and restore the previous row's leftmost machine after re-chunking; testing only unchanged-column keys does not catch this. Cover 1→2→3→1 columns with a nonzero offset. Shared Go wire golden files contain wire input, not a client's presentation fixture: register the input through the production encoder and keep ordering, metrics and expected card presentation under Android test resources.
+
+`adb shell am start --es` creates a String extra, not a Boolean. A debug entry that reads `getBooleanExtra("debug.automation", false)` therefore never enables the probe when passed `--es debug.automation true`; use `--ez` for that Boolean. Only the initial launch needs DebugEntryActivity: subsequent debug opens must target MainActivity directly so `onNewIntent` applies the route without restarting the process. `mCurrentRotation=ROTATION_90` and `mCommittedState=Optional[DeviceState{name='…'}]` are normal platform output forms, not missing evidence; parse their names and the current `cur=WxH` rather than assuming numeric or physical-size fields.
+
+A live scene has not passed until its own cleanup has passed. Poll assertions for fresh Compose/probe evidence, print the final PASS only after cleanup, and preserve the original failure while making any additional cleanup failure visible. Shell cleanup must check its own ADB/reverse/mock/clock operations too; `|| true` and a PASS printed before the EXIT trap hide real leftover device state.
 
 ## Receipt navigation inside task details (#3841)
 
@@ -133,6 +207,10 @@ stream fixtures. Fixture screenshots do not establish live transport routing; ve
 
 A bounded, filtered session list cannot establish that a task has no agent. Keep navigation from the durable todo binding even when its session is outside the window; request exact metadata only for watched task agents and never add those rows to the paged list. Refresh that metadata on list invalidations and reconnect. Serialize todo reads so an older unbound or completed snapshot cannot overwrite a later linked or reopened snapshot in memory or on disk. A metadata failure falls back to the binding and never starts another agent.
 
+## Every list of sessions takes the subtask rule, not only the Agents list (#4769)
+
+#4686 made an agent another Paseo agent created a subtask, folded under its creator and left out of the Agents list's counts, but the floating capsule and the main chat's dock each filtered the session list by state on their own: an orchestrator with five working reviewers was six dock rows, and every finished Codex subagent an unread capsule entry with its own notice. A new place that lists or counts sessions by state takes the same rule from `CodexTaskForest.kt`: `isNestedSubtask` for a count, `foldedSubtasks` for a flat list that draws rows of its own (left out only while the list shows the session above it). Do not write a second parent lookup; the forest's (parent session, then the Codex thread, then the root, on the same computer) is the one the Agents list uses. Test with a runtime subtask, a Codex subagent and a subtask that needs the user, beside a list without subtasks that must stay as it was.
+
 ## Completion edges must retain evidence of the current run (#2124)
 
 Comparing only adjacent Working → Unread snapshots misses Working → NeedsYou → Unread; a turn can finish directly after waiting for a question or permission midway through work. Retain a current-run marker through NeedsYou and consume it at completion; clear it on Idle, removal, or disconnect. A rev-only change is not a new completion, and old unread versions must not replay when unmuted.
@@ -144,6 +222,15 @@ Pitfalls in the new multi-module Android App (`android/`, `docs/android/android.
 - Plugin alerts `notify.kind=alert` have no interaction ID, and one session may have multiple distinct alerts. Notification tags must distinguish individual alerts, not reuse completion alerts' `kind:machine/session` replacement rule (#1654). Empty machine or session identifiers mean a generic alert; do not use them to refresh session lists or create empty-session deep links. Check the `input` preference at both delivery and notification construction, so disabling it during async refresh does not still show an alert.
 
 ## UI and Compose
+
+- Composer growth needs a real field-bounds test, not only a formula test (#5648). The old viewport-share rule
+  showed seven lines on a 400 × 640 dp Native JVM Compose render and could shrink to three with the keyboard up.
+  Assistant and Agents now share the fixed six-line `ComposerGrowLines` token. Test short and tall viewports,
+  wrapped text, and large text; a manual swipe's bitmap must stay unchanged across idle cursor-blink frames,
+  while typing and selection movement must restore the visible caret. Native renders do not verify a real IME.
+  Full-screen dialogs own another Android view: override system font scale with `RuntimeEnvironment.setFontScale`
+  as well as Compose's density, complete the Activity recreation before mounting the fixture, and assert the dialog's
+  actual text-layout density before labelling a capture large. Inspect its rendered line height and pixels too.
 
 - **A big page must not read a state that changes on every scroll frame** (#4039). `ChatListState.position` holds the
   reading anchor's pixel offset, written each frame; `ChatPage` read `position.expanded`, so a scroll re-ran the whole
@@ -171,6 +258,7 @@ Pitfalls in the new multi-module Android App (`android/`, `docs/android/android.
 - A full-page Compose `Dialog(usePlatformDefaultWidth = false)` does not extend under system bars by default, leaving gray strips at the status bar and gesture bar (the scrim behind it).
   After adding `decorFitsSystemWindows = false`, the dialog's status-bar icons still do not follow the Activity and remain white on a light page (seen on historical sessions). Use `JFullScreen` for all full-page overlays.
 - Glass-page scroll edges assume the page starts at the screen top. A `JPage` embedded below another UI (a Lark document in a link card) has no top bar, and top blur obscures its first content line. Do not draw a top edge without a top bar (`PageFrame`).
+- The blurred top edge reaches 28dp below the bar, and a plain `JPage` draws it all the time. Controls kept still at the content top (the to-dos List / Calendar and Day / Week / Month toggles) sat inside that band; on a phone some frames drew it at full strength to a hard line, hiding the top half of their text (#6159). Robolectric does not render the blur, so screenshots there look fine. Pass `JPage(underTop = …)` with what can actually be under the bar.
 - Haze blurs content at about 0.78× resolution by default. Pages with many overlays (chat top bar, task bar, status row, input bar) doubled frame time on a phone. Setting `LocalHazePerformanceMode`
   to `Performance` (0.25×) produced no visible screenshot difference (`PersonaTheme`). The simulator GPU is emulated; glass takes over 100 ms per frame. Measure performance only on physical devices (`scripts/diag/android_scroll_perf.py`).
 - Several causes of Android page-switch flicker (isolated frame by frame 2026-11-01): ① Nav3 `NavDisplay` composes only the current tab; changing `key(selected)` rebuilds the whole page, flashing empty state, spinner,
@@ -247,6 +335,10 @@ Pitfalls in the new multi-module Android App (`android/`, `docs/android/android.
 
 ## Testing
 
+- A shot diff against `main` needs the images' own noise first (2026-11-12, #4339). `android_shots_diff.py` on one run of `main` and one of a branch with no relevant change calls hundreds of the ~1,700 images different: live clocks ("21:30"), a shimmer, the dither of dark Brief and Board, text heights that jump by 4 px between two runs of the same code. Run each side at least twice (`clean…UnitTest` and `--no-build-cache`, or Gradle replays the results without redrawing a picture), take the pixels that differ between two runs of one side as that image's noise, and count only the differences outside it, with a pixel of margin; what is left is what the change drew, and it is looked at by eye. Shots drawn by tests whose class name does not end in `ShotsTest` need a `--tests` pattern of their own.
+
+- A fixture time fed to code that reads the real clock is a time bomb (2026-11-12, #5530). The Assistant's trays build In progress with `System.currentTimeMillis()`, and an open task that hasn't moved for 48 hours, with nothing running, is shelved (`SHELVE_AFTER_MS`). `AssistantTraysShotsTest` and `CloseoutShotsTest` pinned their tasks to `2026-11-10T08:00:00Z`. They passed on the day they merged and failed from 2026-11-12T08:00Z on every commit, so a bisect over the day's merges pointed at nothing. Build such times from `Instant.now()` (as the chat shot tests do), or pass the code a fixed `now` when it takes one (`TodosScreen(now = …)`). To see whether a test will break later, move its date literals back N days in a scratch copy and run it: to code that reads the real clock, that is the same test N days later.
+
 - A screenshot test's fake image loader is global state (#2546). `SingletonImageLoader.setUnsafe` survives into later Robolectric classes using the same sandbox. Reset the singleton and shut down the test-owned loader in teardown. Otherwise a later image-fallback assertion can fail because it receives a successful synthetic bitmap; running only that later class hides the leak. Reproduce with the showcase and native-stream classes together, and retain the original fallback assertion.
 
 - `OkHttpHubConnection` publishes `Revoked` before it reports the last refusing hub through `onMemberRevoked`, outside the lock (HubGroupConnectionTest). A test that reads the callback list right after seeing `Revoked` can miss that last entry under load; one hosted run failed `theConnectionIsRevokedOnlyWhenNoHubOfTheGroupIsLeft` this way while main passed. Widening the gap with a temporary sleep before that report fails the old test every time (`but was:<[(hub-a, true), (hub-b, true)]>`). Production consumers launch their cleanup asynchronously and reach the same end state in either order, so the test now waits for the report it asserts, then checks the exact list.
@@ -285,6 +377,7 @@ Pitfalls in the new multi-module Android App (`android/`, `docs/android/android.
 - Decode images with `ImageDecoder` (corrects EXIF orientation), not `BitmapFactory` (ignores it, displaying camera originals sideways). Bitmaps to draw into / reencode need `ALLOCATOR_SOFTWARE`; hardware bitmaps cannot be drawn into software Canvas. Flatten transparent areas onto white before saving JPEG: JPEG has no alpha, and the encoder otherwise makes them black (`jpegBytes`).
 - `Offset` is a value class with bitwise equality. `coerceIn(-0f, 0f)` can produce `-0f`, unequal to `Offset.Zero`. Return `0f` directly when no range exists (`ImageMath.clampPan`); use tolerance for computed floating-point offsets in tests.
 - Robolectric's default window is 320×470 dp (2026-11-09, #1581). `performClick` taps the node's centre; a node laid out below the window (a tall card set straight into `setContent`, no scroll container) gets nothing, and the test fails as if the button ignored the tap. Give the test a window that fits (`@Config(qualifiers = "zh-w400dp-h1200dp")`) or bring the node into view with `performScrollTo()` first.
+- A Compose dialog that holds a text field never gets idle under Robolectric unless the window is Robolectric's default 320×470 dp (2026-11-12, #4339). A bare `Dialog { BasicTextField(…) }` hung every finder for 60 seconds (`AppNotIdleException`, once an `OutOfMemoryError`) with `w400dp-h1200dp`, `w400dp-h900dp`, `w360dp-h800dp` and `w400dp-h480dp` alike, focusable or not, and passed at the default size; a dialog without the field and the field without the dialog were fine. Test and shoot such a dialog (the history's Rename…, `ConversationRenameTest`) in a class whose qualifiers leave the size alone (`zh-xhdpi`), and reach rows below the window with `performScrollToNode`. On a device the same dialog works (the Agents rename dialog is the same pair).
 
 ## System capabilities
 
@@ -572,6 +665,27 @@ Keep a message's last rendered parse while its next parse runs; switching to raw
 
 Measure pending and parsed frames with the real chat row and reverse list. A fixed scroll index and offset can still accompany visible height oscillation. Replay both Assistant and Agent styles, completion, rapid deltas, history reading and return-to-latest. Check selection and exact copied text in the APK as well. Write a PASS evidence file only after every assertion has completed; cleanup must not turn an earlier failure into a successful verdict.
 
+## Bound divider settling frames (#4756)
+
+A non-bouncy spring can still overshoot with a fling velocity. Clamp every divider animation frame to the current drag range before writing PaneExpansionState; negative widths can collide with its unset sentinel. Exercise the production splitter in a measured two-pane scaffold at both edges, including collapse and expand. State-only tests miss the visible width reset.
+
 ## Pairing fixtures must follow the default sign-in page (#4623)
 
 Skipping onboarding does not skip password sign-in. Tests of manual or scan pairing must select the localized pairing alternative from that default page before using the existing controls. Keep initial-link fixtures on their direct confirmation path, and retain back-stack, field-retention, invalid-input and screenshot assertions rather than changing the product default to fit older fixtures.
+
+## A box that animates its size must already have its final width (#4339)
+
+`Modifier.animateContentSize` animates both axes. The composer's @ list sat in a wrapper `Column` as wide as its content, so while the list had no rows the wrapper was 0 by 0, and when rows came the list swept in diagonally from a corner. A settled screenshot and a test on the final tree both looked right; only frames taken with `mainClock.autoAdvance = false` and `advanceTimeBy` showed it. Give the wrapper `fillMaxWidth()` so its width is the constraint's and only its height moves, and review a motion by its frames (`NewChatMentionsMotionShotsTest`), not by its last picture.
+
+## First-message handoff must cross decorators and filtered lists (#4999)
+
+The composer decorator posts messages itself, so handling a successful response only in its underlying transport misses the production send and manual-refusal retry paths. Share the successful-response handler with the decorator and test that path. Keep a start/send receipt's session metadata separately from a paged list's membership: a newly started idle pane, or its working thread, may be excluded by the current filter. Bind a send reply to its exact previous waiting session; scanning old receipts by pane can select an earlier run after the pane is reused. For a terminal first message, match the same computer and pane only in current rows. If the current list excludes the thread, keep the waiting page without fetching extra pages. Never infer the new thread from its directory.
+
+## A swap inside a slot the frame moves between rows must be movable content (#4210 T3)
+
+`ComposerFrame` draws its trailing content in the field's row while the composer is closed and in a second row once it opens (`expanded = focused || hasContent`), so the content is disposed in one place and composed in the other. An `AnimatedContent` inside it then starts again in its last state: a draft written while the box was not focused (as `ChatComposerSwapTest` writes it) opens the composer and gives the slot its new button in the same frame, and the swap was drawn in its final frame, which only a test with the clock paused showed (`send is 48.0 dp in its first frame`). On Glass the frame now invokes `trailing` through `movableContentWithReceiverOf` (the latest lambda through `rememberUpdatedState`), which moves the composition state, running transitions included, with it; a test flips `expanded` and the content in one frame, and again in the middle of the swap, and fails without it (`ComposerActionSlotTest`, `ChatComposerSwapTest`). More learned on the way:
+- Put everything a button draws in the `AnimatedContent` state (a data class without lambdas, keyed by `contentKey` on its kind) and read the taps through `rememberUpdatedState`. Compose 1.12 recomposes the content that is leaving with the latest values its lambda captures (probed: a text read from a state and from a plain parameter both changed on the leaving content), so a send that was loading would turn into a fresh, enabled one while it shrinks; what is in the state it left with stays. A change of look with the same kind happens in place, and a state that held a lambda would either start a swap on every recomposition or keep calling a stale callback.
+- The leaving button is composed for the whole exit: make it inert (`clickable(enabled = false)`) and `hideFromAccessibility()`, or a tap on the stop that is leaving would still interrupt the Agent. Test finders still find a hidden node, so the test asserts `assertIsNotEnabled()` and the `HideFromAccessibility` property, and taps its centre.
+- Drive scale, fade and blur from `transition.animateFloat` inside the content, with `EnterTransition.None` and `ExitTransition.None` on the `ContentTransform`: the content stays until those animations finish, and the order is yours. `Modifier.blur` outside the scaling `graphicsLayer` keeps its radius while the button is small, as SwiftUI's `scaleEffect(…).blur(…)` does; inside it the blur shrinks with the scale. `SizeTransform(clip = false)` keeps the slot's width glide from clipping the blur. A node's `boundsInRoot` follows the layer's scale, so a motion test can read the size from semantics; an entering animation starts one frame after the change and a leaving one up to two.
+- Pass a lambda, not a reference to a local function: `::send` compared equal to the reference from the last composition whatever each captured (a probe: `make(1) == make(2)` is true for `::f` of a local `fun f` in `make(x)`), so `ComposerActionSlot` and `SendButton` were skipped and the button kept calling the `send` from before a quote joined New chat's draft, which then went without it. Six assistant tests that tap Send failed on it (`NewChatMentionsTest`, `AssistantDraftScopeTest`, `AssistantSwitchingShotsTest`) while the design-system and chat tests passed; run the callers' suites after moving a button's call site, not only the module's own.
+- Robolectric's native graphics do draw `Modifier.blur`, a render effect (the edge of the disc ramps over about 12 px at 80 ms), so its frames show it; Haze's glass is the blur the lesson above says it does not draw. Press feedback scales the circle inside the 48 dp button and leaves the button alone, so the touch target does not move under the finger.

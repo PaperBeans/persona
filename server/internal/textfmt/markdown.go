@@ -1,7 +1,9 @@
 package textfmt
 
 import (
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/net/html"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 var plainParser = goldmark.New(goldmark.WithExtensions(extension.GFM)).Parser()
@@ -123,7 +126,11 @@ func plain(md string, dropDangling, htmlWords bool) string {
 		switch n := n.(type) {
 		case *ast.Text:
 			if entering {
-				b.Write(n.Segment.Value(src))
+				if p := n.Parent(); p != nil && p.Kind() == ast.KindCodeSpan {
+					b.Write(n.Segment.Value(src)) // code is its source text
+				} else {
+					writeResolved(&b, n.Segment.Value(src))
+				}
 				if n.SoftLineBreak() || n.HardLineBreak() {
 					b.WriteByte(' ')
 				}
@@ -175,6 +182,66 @@ func plain(md string, dropDangling, htmlWords bool) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// writeResolved writes a text node's source the way a CommonMark renderer does: a backslash before ASCII punctuation
+// gives the punctuation, and a character reference (&amp;, &#39;, &#x27;) the character it stands for. An escaped &
+// starts no reference; a backslash before anything else, an unknown name and a bare & stay as written.
+func writeResolved(b *strings.Builder, src []byte) {
+	for i := 0; i < len(src); i++ {
+		switch c := src[i]; {
+		case c == '\\' && i+1 < len(src) && util.IsPunct(src[i+1]):
+			i++
+			b.WriteByte(src[i])
+		case c == '&':
+			if n, r := characterReference(src[i:]); n > 0 {
+				b.WriteString(r)
+				i += n - 1
+			} else {
+				b.WriteByte(c)
+			}
+		default:
+			b.WriteByte(c)
+		}
+	}
+}
+
+// characterReference reads the reference at the start of s (which starts with &): its length and the text it stands
+// for, or 0 when s starts with none. Like a renderer, it takes decimal references of up to 7 digits, hexadecimal ones
+// of up to 6 and the HTML5 entity names; a code point that is no character is U+FFFD.
+func characterReference(s []byte) (int, string) {
+	if len(s) < 3 {
+		return 0, ""
+	}
+	if s[1] == '#' {
+		base, digits, from := 10, util.IsNumeric, 2
+		if s[2] == 'x' || s[2] == 'X' {
+			base, digits, from = 16, util.IsHexDecimal, 3
+		}
+		end := from
+		for end < len(s) && digits(s[end]) {
+			end++
+		}
+		if n := end - from; n == 0 || n > 7 || base == 16 && n > 6 || end >= len(s) || s[end] != ';' {
+			return 0, ""
+		}
+		v, err := strconv.ParseUint(string(s[from:end]), base, 32)
+		if err != nil || v == 0 || !utf8.ValidRune(rune(v)) {
+			return end + 1, string(utf8.RuneError)
+		}
+		return end + 1, string(rune(v))
+	}
+	end := 1
+	for end < len(s) && util.IsAlphaNumeric(s[end]) {
+		end++
+	}
+	if end == 1 || end >= len(s) || s[end] != ';' {
+		return 0, ""
+	}
+	if entity, ok := util.LookUpHTML5EntityByName(string(s[1:end])); ok {
+		return end + 1, string(entity.Characters)
+	}
+	return 0, ""
 }
 
 // PlanTitle is what a plan card is called where it shows in one line (a push, the live activity, a row in the Agent

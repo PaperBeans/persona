@@ -5,7 +5,7 @@ import {
   checkError, clearedSecrets, clearExtensionSecret, compact, configError, fieldTitle, isDirty, listItems, listExtensions, listSummary, numberProblems, placeholder, extensionDetail,
   machineStatus, extensionState, extensionTone, readNumber, rebaseDraft, runNote, same, secretState, setAt, setExtensionConfig, setExtensionEnabled, setExtensionSecret, sourceText,
   stateLine, valueAt, morePermissions, extensionUpgrades, setExtensionAutoUpgrade, setExtensionUpgrades, upgradeAction, upgradeDetail, upgradeNote,
-  type HubExtension, type ExtensionField, type ExtensionUpgrade, nodeProgramStatus, exitText, saveFooter, channelOf, sandboxEgress, sandboxState,
+  type HubExtension, type ExtensionField, type ExtensionUpgrade, nodeProgramStatus, exitText, saveFooter, channelOf, sandboxState,
 } from "./extensions";
 
 const extension = (status: string, extra: Partial<HubExtension> = {}): HubExtension => ({ id: `p-${status}`, name: status, kind: "connectors", status, ...extra });
@@ -310,8 +310,6 @@ describe("sandbox and channel", () => {
     expect(sandboxState({ enabled: true, active: true })).toBe("沙箱正在生效");
     expect(sandboxState({ enabled: true, active: false, why: "no bwrap" })).toBe("要求了沙箱，但现在没开起来");
     expect(sandboxState({ enabled: false, active: false })).toBe("未启用沙箱");
-    expect(sandboxEgress({ enabled: true, active: true })).toBeNull();
-    expect(sandboxEgress({ enabled: true, active: true, egress: { allowed: 12, denied: 1, last_denied: "example.com:443" } })).toBe("经出网代理：放行 12 次 · 拒绝 1 次");
   });
 
   it("finds the channel an extension contributes", () => {

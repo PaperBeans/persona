@@ -4,6 +4,7 @@
 // when this page is opened at localhost (a hub on the agent's computer, iOS #2696).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openLink, opensInApp, previewTarget } from "./links";
+import { setAgentOpenMode } from "./agent-open";
 import { closePanel, getPanel } from "./panel";
 import { getState } from "./store";
 import type { Machine, Session } from "./types";
@@ -20,6 +21,8 @@ describe("a localhost link on an agent's page", () => {
   });
   afterEach(() => {
     vi.unstubAllGlobals();
+    setAgentOpenMode("panel");
+    closePanel();
     Object.assign(getState(), { features: [], sessions: {}, machines: [] });
     history.replaceState(null, "", "/");
   });
@@ -50,13 +53,21 @@ describe("a localhost link on an agent's page", () => {
     expect(previewTarget("http://localhost:80/app")).toBeNull();
   });
 
-  it("is not one of this hub's own pages: an agent's chat at this page's origin opens in the agent panel", () => {
+  it("is not one of this hub's own pages: an agent's chat at this page's origin opens in the agent panel (#5424)", () => {
     const own = `${location.origin}/s/m1/s9`;
     expect(new URL(own).hostname).toBe("localhost"); // jsdom serves the page at localhost, as a hub on that computer would
     expect(previewTarget(own)).toBeNull();
     expect(opensInApp(own)).toBe(true);
     openLink(own);
     expect(getPanel()).toMatchObject({ kind: "agent", mid: "m1", sid: "s9" });
+  });
+
+  it("is not one of this hub's own pages: set to Full page, an agent's chat at this page's origin opens as its page (#5096)", () => {
+    setAgentOpenMode("page");
+    const own = `${location.origin}/s/m1/s9`;
+    openLink(own);
+    expect(getPanel()).toBeNull();
+    expect(location.pathname).toBe("/s/m1/s9");
   });
 
   it("keeps the hub's own pages ahead of an explicit default-port preview", () => {
@@ -66,6 +77,13 @@ describe("a localhost link on an agent's page", () => {
     expect(opensInApp(own)).toBe(true);
     openLink(own);
     expect(getPanel()).toMatchObject({ kind: "agent", mid: "m1", sid: "s9" });
+    closePanel();
+    setAgentOpenMode("page");
+    const push = vi.spyOn(history, "pushState");
+    openLink(own);
+    expect(getPanel()).toBeNull();
+    expect(push.mock.calls.at(-1)?.[2]).toBe("/s/m1/s9");
+    push.mockRestore();
   });
 
   it("is nothing on a hub without previews", () => {

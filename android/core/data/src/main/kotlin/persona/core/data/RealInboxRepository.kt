@@ -429,6 +429,33 @@ class RealInboxRepository(
         }
     }
 
+    private val itemReadLock = Mutex()
+
+    /**
+     * One record by app or hub id: the live list first, then the done history already paged back, finally the hub's own
+     * copy. A bare id uses its noted manager, else the default, as the hub routes any other request that names no manager.
+     */
+    override suspend fun item(itemId: String): InboxRecord? = itemReadLock.withLock {
+        recordOf(itemId)?.let { return it }
+        val hubId = InboxItemKey.hubId(itemId)
+        val manager = InboxItemKey.managerOf(itemId) ?: AssistantManagerChoice.itemManager(listOf("inbox", hubId))
+        // A bare id may name an item already cached by its manager-aware app id; never alias different managers' records.
+        if (manager != null) recordOf(InboxItemKey.appId(hubId, manager))?.let { return it }
+        val transport = requireTransport()
+        val data = try {
+            asStamped(manager) { transport.item(hubId) }
+        } catch (e: Exception) {
+            if ((e as? persona.core.contracts.api.HubCodedFailure)?.status == 404) return null
+            throw e
+        }
+        if (!owns(transport)) throw CancellationException("Pairing changed")
+        val stamped = if (manager.isNullOrBlank() || data["manager"] != null) data
+            else JsonObject(data + ("manager" to JsonPrimitive(manager)))
+        val record = listed(listOf(stamped), transport).firstOrNull { it.hubItemId == InboxItemKey.hubId(itemId) } ?: return null
+        notePagedBack(transport, listOf(record))
+        return record
+    }
+
     /**
      * One page of a manager's done history (#2200, #2576), its items as the list's records (the app's ids, the manager
      * stamped). Kept out of the snapshot: the inbox page merges it under Done. An old hub (404) has none.
@@ -580,6 +607,17 @@ class RealInboxRepository(
         if (!machine.isNullOrBlank() && !session.isNullOrBlank()) {
             val key = SessionKey(machine, session)
             checkNotNull(messageSender) { "agent message sender not wired" }.send(key, request.text, request.operationId)
+            // The message is already accepted: open it now and record the hand-off without holding the sheet open.
+            scope.launch {
+                quietly {
+                    val transport = requireTransport()
+                    val old = recordOf(request.itemId)
+                    val hubItemId = old?.hubItemId ?: request.itemId
+                    asItem(old) {
+                        transport.recordAgentHandOff(hubItemId, key, request.targetTitle.orEmpty(), request.operationId)
+                    }
+                }
+            }
             return key
         }
         // Main-chat hand-offs need a receipt from the item's manager, not merely a local queue entry.

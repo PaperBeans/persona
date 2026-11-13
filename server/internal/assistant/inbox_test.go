@@ -109,6 +109,22 @@ func TestInboxMailThreads(t *testing.T) {
 	}
 }
 
+func TestInboxMailReadKeepsConclusionUntilGotIt(t *testing.T) {
+	now := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
+	a := assistantwire.InboxMailAccount{ID: "a1", Email: "me@example.com"}
+	msgs := []assistantwire.InboxMailSummary{{UID: 88, Subject: "周报", Date: now.Add(-time.Hour).Format(time.RFC3339)}}
+	b := newInbox()
+	it := b.applyMail(a, msgs, now)[0]
+	it.Tier = TierFYI
+	it.Suggestion = &InboxSuggestion{Version: 1, Kind: SuggestConclusion, Text: "只读结论", At: now}
+
+	msgs[0].Seen = true // opening the embedded body marks it seen; the next collection must not file the conclusion
+	changed := b.applyMail(a, msgs, now)
+	if len(changed) != 1 || !it.open() || !it.Read || it.DoneBy != "" || currentSuggestion(it) == nil {
+		t.Fatalf("the conclusion was filed before Got it: %+v", it)
+	}
+}
+
 // A round's mail: new mail becomes items, and the new ones' full text is read (once) into their preview and context.
 func TestInboxMailRoundReadsTheText(t *testing.T) {
 	h := newInboxHub(t)
@@ -346,5 +362,29 @@ func TestInboxReplyInDoubtIsSentOnce(t *testing.T) {
 	}
 	if a, b := replySendID("i", "收到", "00000000-0000-4000-8000-000000000001", nil), replySendID("i", "又一条", "00000000-0000-4000-8000-000000000001", nil); a != b {
 		t.Fatal("the app's own send id was not taken")
+	}
+}
+
+// The reply box's AI draft with nothing the hub can call for it: a coded 503 the apps can explain, saying where to set a
+// model up, not a bare 502 whose text never reaches the screen. With a model the draft comes back; an unknown item is 404.
+func TestInboxDraftRouteWithoutAModel(t *testing.T) {
+	h := agentHub(t)
+	it := actionItem("lark:f1:11", time.Now())
+	h.inbox.mu.Lock()
+	h.inbox.items[it.ID] = it
+	h.inbox.mu.Unlock()
+	code, out := inboxCall(t, h.routes(), "POST", "/api/v1/inbox/lark:f1:11/draft", `{}`)
+	if msg, _ := out["error"].(string); code != http.StatusServiceUnavailable || out["code"] != assistantwire.CodeModelUnavailable ||
+		!strings.Contains(msg, "设置 › 模型供应商") {
+		t.Fatalf("a draft with no model: %d %v", code, out)
+	}
+	h.in.mu.Lock()
+	h.in.models[purposeDraft] = fakeModel(t, "好的，周四给")
+	h.in.mu.Unlock()
+	if code, out := inboxCall(t, h.routes(), "POST", "/api/v1/inbox/lark:f1:11/draft", `{}`); code != http.StatusOK || out["text"] != "好的，周四给" {
+		t.Fatalf("a draft: %d %v", code, out)
+	}
+	if code, _ := inboxCall(t, h.routes(), "POST", "/api/v1/inbox/lark:f1:99/draft", `{}`); code != http.StatusNotFound {
+		t.Fatalf("an unknown item: %d", code)
 	}
 }

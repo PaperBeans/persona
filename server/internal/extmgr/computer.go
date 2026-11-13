@@ -424,7 +424,7 @@ func (h *Manager) callComputerTool(ctx context.Context, sessionID, name string, 
 	for _, x := range h.appsOn(ctx, m, apps, known) {
 		if protectedApp(x) {
 			h.logf("[%s] computer_run refused: protected app %s", m.cfg.ID, strings.TrimPrefix(x.BundleID, "name:"))
-			return proto.TextResult(refusedText(m.cfg.Name, "it would operate "+x.Name), true)
+			return proto.TextResult(refusedText(m.name(), "it would operate "+x.Name), true)
 		}
 	}
 	// LCU asks before touching any app, and those questions are refused for these (computer_lcu.go).
@@ -437,7 +437,7 @@ func (h *Manager) callComputerTool(ctx context.Context, sessionID, name string, 
 			return &res
 		case len(found) > 0:
 			h.logf("[%s] computer_run refused: protected app on screen", m.cfg.ID)
-			res := proto.TextResult(refusedText(m.cfg.Name, strings.Join(found, ", ")+" is open on its screen"), true)
+			res := proto.TextResult(refusedText(m.name(), strings.Join(found, ", ")+" is open on its screen"), true)
 			return &res
 		}
 		return nil
@@ -447,7 +447,7 @@ func (h *Manager) callComputerTool(ctx context.Context, sessionID, name string, 
 			return *res
 		}
 	}
-	what := computerSummary(h.userLang(), m.cfg.Name, tool, a.Script, a.Steps)
+	what := computerSummary(h.userLang(), m.name(), tool, a.Script, a.Steps)
 	asked, ok := h.approveApps(ctx, m, h.assistantAsker(sessionID, m.cfg.ID), name, apps, whole, args, known)
 	refused := !ok || (h.cua().Confirm && !asked && !h.approve(ctx, h.assistantAsker(sessionID, m.cfg.ID), name, what, args))
 	if refused {
@@ -473,7 +473,7 @@ func (h *Manager) callComputerTool(ctx context.Context, sessionID, name string, 
 	}
 	if stopped != "" {
 		h.logf("[%s] computer_run refused partway: protected app on screen", m.cfg.ID)
-		return proto.TextResult(refusedText(m.cfg.Name, stopped), true)
+		return proto.TextResult(refusedText(m.name(), stopped), true)
 	}
 	return computerResult(res)
 }

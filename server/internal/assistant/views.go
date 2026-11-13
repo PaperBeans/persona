@@ -45,9 +45,6 @@ func storedView(row db.AssistantViewRow) (wire.AssistantView, error) {
 }
 
 func (s *Service) toolView(ctx context.Context, machine, conversation, name string, raw json.RawMessage) (string, error) {
-	if !s.hello(ctx).PersonaView {
-		return "", errors.New("assistant views are disabled")
-	}
 	if machine == "" || conversation == "" {
 		return "", errors.New("forbidden: view tools require the calling assistant conversation")
 	}

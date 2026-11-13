@@ -117,6 +117,25 @@ extension View {
         scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget, alignment: alignment)
             .frame(minWidth: Theme.Size.tapTarget, minHeight: Theme.Size.tapTarget, alignment: alignment)
     }
+
+    /// At least as tall as a finger needs (`Theme.Size.tapTarget`), as wide as it is: a row or a heading that is a button
+    /// and draws less than that (#3753). Grows with the text like `tapTargetFrame`, never below the token.
+    func tapTargetHeight(alignment: Alignment = .center) -> some View {
+        scaledFrame(minHeight: Theme.Size.tapTarget, alignment: alignment)
+            .frame(minHeight: Theme.Size.tapTarget, alignment: alignment)
+    }
+
+    /// A line of text that is a button, hit like a finger-sized row without taking a row's room: the touch area grows
+    /// `Theme.Space.l` above and below (a caption line plus that is about `Theme.Size.tapTarget`), the layout does not.
+    /// For links in a row under a card, where a taller row would push the card's own buttons under the composer (#5392).
+    /// `.all` for a glyph or a small well that must stay where it is drawn (a field's clear ×, a card's corner ×): it
+    /// grows that much on every side, so a 17 pt glyph is hit as a 49 pt square (#6577). Not for a `Menu`'s label: a
+    /// menu is hit only in the frame its label lays out, so it takes `tapTargetFrame` there.
+    func tapTargetOutset(_ edges: Edge.Set = .vertical) -> some View {
+        padding(edges, Theme.Space.l)
+            .contentShape(.rect)
+            .padding(edges, -Theme.Space.l)
+    }
 }
 
 extension View {

@@ -13,8 +13,8 @@
     <string name="chat_assistant_dispatch_open">開く</string>
     <string name="chat_assistant_dispatch_open_line">· %1$s</string>
     <!-- #4314: a background round of the main conversation folded into one line. -->
-    <string name="chat_background_round">%1$s · バックグラウンドのラウンド</string>
-    <string name="chat_background_round_live">%1$s · バックグラウンドで実行中</string>
+    <string name="chat_background_round">%1$s · バックグラウンドからの報告</string>
+    <string name="chat_background_round_live">%1$s · バックグラウンドで作業中…</string>
     <!-- Needs you grouped by supervising conversation: a conversation without a title. -->
     <string name="chat_tray_other_conversation">別の会話</string>
 </resources>

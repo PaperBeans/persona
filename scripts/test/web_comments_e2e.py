@@ -25,12 +25,14 @@ Prints one line per check and a verdict; exits 1 on the first failure. Runs ligh
 import argparse
 import json
 import os
+import re
 import sys
 
 from playwright.sync_api import expect, sync_playwright
 
 SIZES = {"wide": {"width": 1280, "height": 900}, "narrow": {"width": 390, "height": 844}}
 AGENT = "/s/macbook/a1f3c2d4-0000-4000-8000-000000000001"  # a chat in the weather folder
+SEND = re.compile(r"^(发送|排队发送)$")  # the round button queues while the agent works (#5324)
 WORDS = "接下来把中号布局的降雨条做成和 App 里一样的样式"
 PARAGRAPH = "小组件的时间线已经能按小时刷新了"
 
@@ -200,7 +202,7 @@ def transcript_case(browser, base, size, theme, shots):
     box.fill("按这些评论改")
     page.wait_for_timeout(300)
     shot(page, shots, f"comments-{size}-{theme}-two")
-    page.get_by_role("button", name="发送", exact=True).click()
+    page.get_by_role("button", name=SEND).click()
     page.wait_for_timeout(1200)
     body = text_of(sent(posts, "按这些评论改"))
     for want in ("> Comment 1", "> Selected text:", f"> > {WORDS}", "> 这句没有必要", "> Comment 2", "> 降雨条的颜色也要和 App 一样", "按这些评论改"):
@@ -286,7 +288,7 @@ def code_case(browser, base, size, theme, shots):
         page.get_by_role("button", name="关闭面板").first.click()
     box = page.locator("textarea:not([aria-label^='评论'])").last
     box.fill("请看这条评论")
-    page.get_by_role("button", name="发送", exact=True).click()
+    page.get_by_role("button", name=SEND).click()
     page.wait_for_timeout(1200)
     body = text_of(sent(posts, "请看这条评论"))
     for want in ("> Code comment 1", "> File: Sources/App.swift:2-4", "> ```swift", "> 这几行要抽成函数", "请看这条评论"):
@@ -345,7 +347,7 @@ def diff_case(browser, base, size, theme, shots):
         page.get_by_role("button", name="关闭面板").first.click()
     field = page.locator("textarea:not([aria-label^='评论'])").last
     field.fill("diff 的评论")
-    page.get_by_role("button", name="发送", exact=True).click()
+    page.get_by_role("button", name=SEND).click()
     page.wait_for_timeout(1200)
     body = text_of(sent(posts, "diff 的评论"))
     for want in ("> Code comment 1", "> Diff: unstaged", "> ```diff", "> +", "> 这里漏了错误处理", "diff 的评论"):

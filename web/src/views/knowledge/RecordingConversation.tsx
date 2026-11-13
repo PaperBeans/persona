@@ -1,9 +1,16 @@
 // A recorded meeting's conversation on its Knowledge detail (#3862, docs/assistant/meeting-minutes.md "Meeting conversation
 // (#3862)", "What the phone and the web do"): the private switch for every meeting, and for a room meeting the one thread
 // (the room's questions and answers, then **After the meeting** and the follow-up conversation), the room's state and the
-// follow-up's first message. Only on a hub that lists `meeting_conversation`; older hubs see the page as before.
+// follow-up's first message. **Talk about this meeting** (phase 6, "Phase 6: talk about this meeting") is that first
+// message for any recording with text or minutes but an all-day one (its page is the day recap), once it has ended and
+// `…/live` has answered for it. Only on a hub that lists `meeting_conversation`; older hubs see the page as before.
 // It reads `GET /api/v1/recordings/{id}/live` once, then only the parts a content-free `meeting_live` event says are
-// newer (`?parts=`), and every 5 seconds while the meeting runs as a fallback.
+// newer (`?parts=`), and every 5 seconds while the meeting runs as a fallback. On a hub that also lists `meeting_photos`
+// (phase 3) it reads a meeting's photos (`GET …/photos`) after that first read, again when their revision moves, and
+// shows a photo the room was sent as one entry of the thread (RecordingPhotos.tsx). On a hub that also lists
+// `meeting_live_view` (phase 2) a room meeting's topics and newest live lines are read the same way while Persona attends
+// it and the recording is partial (`lines` with `?from=` the page's own next position, `topics` as a part) and shown by
+// RecordingLiveView.tsx.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { api, ApiError, enc, errorText, imageURL, sessionPath } from "../../lib/api";
@@ -12,17 +19,39 @@ import { uuid } from "../../lib/format";
 import {
   countsAsMeeting,
   meetingConversation,
+  meetingKind,
   meetingMeta,
   meetingRoom,
+  recordingPhotos,
   type KBDetail,
+  type LiveLine,
   type MeetingConversation,
   type MeetingRoom,
+  type MeetingTopic,
   type RecordingAsk,
   type RecordingLive,
+  type RecordingPhoto,
   type RecordingView,
 } from "../../lib/kb";
 import { messageManager } from "../../lib/manager-choice";
-import { followupThread, MEETING_CONVERSATION_FEATURE, meetingRunning, newerParts, roomState, roomThread, type MeetingLine, type ThreadEntry } from "../../lib/meeting-thread";
+import {
+  followupThread,
+  linesFrom,
+  liveLines,
+  liveLinesEnd,
+  MEETING_CONVERSATION_FEATURE,
+  MEETING_LIVE_VIEW_FEATURE,
+  MEETING_PHOTOS_FEATURE,
+  meetingRunning,
+  meetingTopics,
+  mergeLiveLines,
+  newerParts,
+  offersTalk,
+  roomState,
+  roomThread,
+  type MeetingLine,
+  type ThreadEntry,
+} from "../../lib/meeting-thread";
 import { href, navigate, onLinkClick, type Route } from "../../lib/router";
 import { listenSession, onHubEvent, useStore } from "../../lib/store";
 import type { ItemsPage, Item } from "../../lib/types";
@@ -32,11 +61,14 @@ import { Icon, type IconName } from "../../ui/icons";
 import { Markdown } from "../../ui/Markdown";
 import { Card, SectionTitle } from "./KBParts";
 import { askFailure, AskRow } from "./RecordingAsks";
+import { PhotoThumb, usePhotoImages, type MeetingPhotos } from "./RecordingPhotos";
 
 type Auth = { token: string; tokenOwner: string; headers: Record<string, string> };
-/** The parts this page reads again when they change (an event may name more from later phases). */
+/** The parts this page reads again when they change (an event may name more from later phases); the live view's
+ *  (phase 2) only while it shows. */
 const PARTS = ["room", "asks", "private", "followup"] as const;
-type Part = (typeof PARTS)[number];
+const LIVE_PARTS = ["lines", "topics"] as const;
+type Part = (typeof PARTS)[number] | (typeof LIVE_PARTS)[number];
 /** The fallback read while the meeting runs (the event is the main path). */
 const POLL_MS = 5000;
 /** A conversation page this long is enough for one meeting's room or follow-up; more says where the rest is. */
@@ -49,11 +81,20 @@ export interface MeetingState {
   meeting: boolean;
   /** A room meeting (its upload carried `room`). */
   roomMeeting: boolean;
+  /** Any recording with text or minutes but an all-day one, once `…/live` answered for it: **Talk about this meeting**
+   *  is offered once it has ended (phase 6). */
+  talk: boolean;
   room?: MeetingRoom;
   followup?: MeetingConversation;
   private?: boolean;
   /** `asks` of `GET …/live`, once read. */
   asks?: RecordingAsk[];
+  /** The meeting's photos (phase 3), which the minutes, the thread and **Photos** share. */
+  photos: MeetingPhotos;
+  /** The live view (phase 2): a room meeting's topics and newest live lines while Persona attends it (its room starting,
+   *  ready or unavailable) and it records, on a hub that lists `meeting_live_view`; absent otherwise (Persona off, the
+   *  meeting ended, complete, trimmed or gone). `topics` / `lines` stay absent until read. */
+  live?: MeetingLive;
   /** Goes up whenever the room's or the follow-up's thread should be read again. */
   roomTick: number;
   followupTick: number;
@@ -63,15 +104,29 @@ export interface MeetingState {
   madeFollowup: (f: MeetingConversation) => void;
 }
 
-type Read = { room?: MeetingRoom; followup?: MeetingConversation; private?: boolean; asks?: RecordingAsk[] };
+export interface MeetingLive {
+  topics?: MeetingTopic[];
+  lines?: LiveLine[];
+  /** Earlier lines were skipped or let go: a read started past the page's own next position (it keeps to the newest
+   *  LIVE_KEEP), or more than LIVE_KEEP were read. A blank position before the first line shown is not one. */
+  cut?: boolean;
+}
 
-/** A recording's meeting conversation parts: detail.meta until `…/live` answers, then what it reads. */
-export function useRecordingMeeting(detail: KBDetail | null | undefined, rec: RecordingView | null, auth: Auth, current: () => boolean, manager: string): MeetingState {
+type Read = { room?: MeetingRoom; followup?: MeetingConversation; private?: boolean; asks?: RecordingAsk[]; topics?: MeetingTopic[] };
+
+/** A recording's meeting conversation parts: detail.meta until `…/live` answers, then what it reads. `reload` reads the
+ *  detail again (true once one read has: false when another read took its place), after a change of the photos: the hub
+ *  may have taken a deleted photo's items out of the minutes, or be making them again. */
+export function useRecordingMeeting(detail: KBDetail | null | undefined, rec: RecordingView | null, auth: Auth, current: () => boolean, manager: string, reload?: () => Promise<boolean>): MeetingState {
   const on = useStore((s) => s.features.includes(MEETING_CONVERSATION_FEATURE));
+  const photosFlag = useStore((s) => s.features.includes(MEETING_PHOTOS_FEATURE));
+  const liveFlag = useStore((s) => s.features.includes(MEETING_LIVE_VIEW_FEATURE));
   const meta = detail?.kind === "recordings" ? detail.meta : undefined;
   const fromMeta = useMemo(() => meetingMeta(meta), [meta]);
   const meeting = on && !!detail && detail.kind === "recordings" && countsAsMeeting(meta);
-  const wanted = on && !!detail && detail.kind === "recordings" && (meeting || !!fromMeta.room || !!fromMeta.followup);
+  const offers = on && offersTalk(detail);
+  // Any recording that may have a follow-up reads it, so one made on another device joins the thread.
+  const wanted = on && !!detail && detail.kind === "recordings" && (meeting || offers || !!fromMeta.room || !!fromMeta.followup);
   const id = detail?.id ?? "";
   // What …/live said of this recording, part by part: a part it answered (even as absent) replaces detail.meta's. Kept
   // with the recording it is of, so another recording on the same page starts from its own detail.meta.
@@ -87,6 +142,27 @@ export function useRecordingMeeting(detail: KBDetail | null | undefined, rec: Re
   shown.current = id;
   const request = useRef(auth);
   request.current = auth;
+  // Photos come with the conversation, on a recording whose kind is meeting (the only kind that takes them).
+  const photosOn = on && photosFlag && detail?.kind === "recordings" && meetingKind(meta);
+  const photosWanted = useRef(photosOn);
+  photosWanted.current = photosOn;
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
+  const [photos, setPhotos] = useState<{ id: string; list?: RecordingPhoto[] }>({ id });
+  // The photos' revision read (`ack`, only once a list read succeeded; a reconnect forgets it), the last one a list read
+  // acknowledged (`had`, kept across a reconnect) and the newest one heard of (`seen`). `changed`: a change of the photos
+  // was heard that no successful list read has followed yet; `stale`: one has, and no detail read since has succeeded
+  // (`reloads` counts the detail reads asked for, `reloading` while the last one runs).
+  const photoRevs = useRef<{ id: string; ack?: number; had?: number; first?: number; seen: number; changed?: boolean; stale?: boolean; reloads: number; reloading?: boolean }>({ id, seen: 0, reloads: 0 });
+  if (photoRevs.current.id !== id) photoRevs.current = { id, seen: 0, reloads: 0 };
+  const photoList = photos.id === id ? photos.list : undefined;
+  const images = usePhotoImages(id, photoList, auth, current);
+  // The live view's lines (phase 2): the newest read (absent until the live log is known), the page's own next position
+  // in the live log (absent until a read of lines answered) and the newest length heard of (`revs.lines`); `cut` once
+  // earlier lines were skipped or let go.
+  const [lineState, setLines] = useState<{ id: string; list?: LiveLine[]; cut?: boolean }>({ id });
+  const linePos = useRef<{ id: string; next?: number; length: number }>({ id, length: 0 });
+  if (linePos.current.id !== id) linePos.current = { id, length: 0 };
 
   // Nothing of it on a hub without the flag: detail.meta may still name a room or a follow-up (a manager that has
   // meeting.json while the hub does not list the feature), and the page stays as it was then, its threads unread.
@@ -95,15 +171,27 @@ export function useRecordingMeeting(detail: KBDetail | null | undefined, rec: Re
     followup: read.got.followup ? read.v.followup : fromMeta.followup,
     private: read.got.private ? read.v.private : fromMeta.private,
     asks: read.v.asks,
+    topics: read.v.topics,
   } : {};
+  // The live view shows while Persona attends a room meeting that records, on a hub that lists meeting_live_view: its room
+  // starting, ready or unavailable (an unknown state reads as starting), never `none` (Persona off from the start, so no
+  // topics or room lines come), `ended` (the room's part read says so before the detail is read again) or `deleted`.
+  // detail.meta never carries lines or topics: only `…/live` does.
+  const attends = ["starting", "ready", "unavailable"].includes(roomState(merged.room) ?? "");
+  const liveOn = on && liveFlag && attends && !!rec?.partial && !rec.trimmedAt && !read.gone;
+  const liveWanted = useRef(liveOn);
+  liveWanted.current = liveOn;
 
   // One read at a time; parts asked for meanwhile go in the next (all of them when any asked for everything).
   const queue = useRef<{ busy: boolean; next: Set<Part> | "all" | null }>({ busy: false, next: null });
-  const apply = useCallback((of: string, parts: readonly Part[], r: RecordingLive) => {
+  /** What a read of `…/live` answered; true when the live log has more lines to read (`more`, or a length past the page's
+   *  position), only after a read that brought lines, so a log that returns none is not asked again at once. */
+  const apply = useCallback((of: string, parts: readonly Part[], r: RecordingLive, from?: number): boolean => {
     const moved = { room: false, followup: false };
     const known = revs.current.of;
     for (const [part, rev] of Object.entries(r.revs ?? {})) {
-      if (typeof rev !== "number") continue;
+      // The photos' revision counts as read only once their list is (readPhotos), the lines' as far as they were read.
+      if (typeof rev !== "number" || part === "photos" || part === "lines") continue;
       // Only a part that moved since a read: the threads read themselves when they first show.
       const before = known[part];
       if ((part === "room" || part === "asks") && before !== undefined && rev !== before) moved.room = true;
@@ -118,11 +206,102 @@ export function useRecordingMeeting(detail: KBDetail | null | undefined, rec: Re
         if (part === "followup") v.followup = meetingConversation(r.followup);
         if (part === "private") v.private = typeof r.private === "boolean" ? r.private : undefined;
         if (part === "asks") v.asks = Array.isArray(r.asks) ? r.asks : [];
+        if (part === "topics") v.topics = meetingTopics(r.topics);
       }
       return { got, v };
     });
     if (moved.room || moved.followup) setTicks((x) => ({ room: x.room + (moved.room ? 1 : 0), followup: x.followup + (moved.followup ? 1 : 0) }));
+    const pos = linePos.current;
+    if (pos.id !== of) return false;
+    if (typeof r.revs?.lines === "number") pos.length = Math.max(pos.length, r.revs.lines);
+    if (parts.includes("lines") && from !== undefined) {
+      const got = liveLines(r.lines);
+      // Positions between the page's next one and `from` were never read (the read keeps to the newest LIVE_KEEP).
+      const skipped = from > (pos.next ?? 0);
+      pos.next = Math.max(pos.next ?? 0, from, liveLinesEnd(r.lines));
+      known.lines = pos.next;
+      setLines((prev) => {
+        const have = prev.id === of ? prev.list ?? [] : [];
+        const list = mergeLiveLines(have, got);
+        const dropped = list.length < new Set([...have, ...got].map((l) => l.n)).size;
+        return { id: of, list, cut: (prev.id === of && !!prev.cut) || skipped || dropped };
+      });
+      return Array.isArray(r.lines) && r.lines.length > 0 && (r.more === true || pos.length > pos.next);
+    }
+    if (!liveWanted.current) return false;
+    if (pos.length > (pos.next ?? 0)) return true;
+    // Nothing in the live log yet: no lines to wait for.
+    setLines((prev) => (prev.id === of && prev.list ? prev : { id: of, list: [] }));
+    return false;
   }, [setRead]);
+
+  // The detail read again after a change of the photos (`stale`): after the list read that follows the change, then on
+  // the next poll, reconnect or event until one such read succeeds (one at a time). Never for the page's first list read.
+  const readDetail = useCallback(() => {
+    const revs = photoRevs.current;
+    const reload = reloadRef.current;
+    if (!revs.stale || revs.reloading || !reload) return;
+    const n = ++revs.reloads;
+    revs.reloading = true;
+    const settle = (ok: boolean) => {
+      if (revs.reloads !== n) return;
+      revs.reloading = false;
+      if (ok) revs.stale = false;
+    };
+    reload().then(settle, () => settle(false));
+  }, []);
+  // The photos' list, one read at a time (one asked for meanwhile follows). A successful read acknowledges the newest
+  // revision heard of before it started; a failed one keeps the list shown, and the next event or read tries again. One
+  // that follows a change of the photos reads the detail again (readDetail); with another read to follow, after that one.
+  const photoQueue = useRef({ busy: false, again: false });
+  const readPhotos = useCallback(() => {
+    const q = photoQueue.current;
+    if (q.busy) { q.again = true; return; }
+    if (!photosWanted.current || !current() || shown.current !== id) return;
+    q.busy = true;
+    const revs = photoRevs.current;
+    const asked = revs.seen;
+    const changed = !!revs.changed;
+    revs.changed = false;
+    api<unknown>(`/recordings/${enc(id)}/photos`, request.current)
+      .then((r) => {
+        if (!current() || shown.current !== id || photoRevs.current !== revs) return;
+        const list = recordingPhotos(r);
+        revs.ack = Math.max(revs.ack ?? asked, asked);
+        revs.had = Math.max(revs.had ?? asked, asked);
+        setPhotos({ id, list });
+        if (changed) {
+          // A detail read running now may have started before the change: it settles nothing.
+          revs.stale = true;
+          revs.reloads++;
+          revs.reloading = false;
+        }
+        if (!q.again) readDetail();
+      })
+      .catch(() => { if (changed) revs.changed = true; })
+      .finally(() => {
+        q.busy = false;
+        if (q.again) { q.again = false; latestPhotos.current(); }
+      });
+  }, [id, current, readDetail]);
+  const latestPhotos = useRef(readPhotos);
+  latestPhotos.current = readPhotos;
+  /** A photos revision heard of: the list is read until one read succeeds, then when the revision is newer than the one
+   *  read. An event without a number is read anyway; a whole `…/live` read without one has no photos to tell of. A
+   *  revision newer than the last list read's is a change (an event's also before any list read: the detail may be older
+   *  than it); with no list to read, a detail read that failed is tried again. */
+  const heardPhotos = useCallback((rev: unknown, fromLive = false) => {
+    const revs = photoRevs.current;
+    const n = typeof rev === "number" ? rev : undefined;
+    if (n !== undefined) revs.seen = Math.max(revs.seen, n);
+    // Before any list read, the page's first `…/live` read is the base (`first`): a later one newer than it, while that
+    // first list read runs, is a change too.
+    const base = revs.had ?? revs.first;
+    if ((n === undefined || base === undefined) ? !fromLive : n > base) revs.changed = true;
+    if (fromLive && n !== undefined && revs.first === undefined) revs.first = n;
+    if (revs.ack === undefined || (n === undefined ? !fromLive : n > revs.ack)) readPhotos();
+    else readDetail();
+  }, [readPhotos, readDetail]);
   const readLive = useCallback((parts: readonly Part[] | "all") => {
     const q = queue.current;
     if (q.busy) {
@@ -130,16 +309,33 @@ export function useRecordingMeeting(detail: KBDetail | null | undefined, rec: Re
       return;
     }
     if (!current() || shown.current !== id) return;
+    // The live view's parts only while it shows; a whole read takes the topics then, and the lines once the live log's
+    // length is known (else it would start at the meeting's first line).
+    const liveNow = liveWanted.current;
+    const pos = linePos.current;
+    const asked: Part[] = parts === "all"
+      ? [...PARTS, ...(liveNow ? (["topics"] as const) : []), ...(liveNow && (pos.next !== undefined || pos.length > 0) ? (["lines"] as const) : [])]
+      : parts.filter((p) => liveNow || !(LIVE_PARTS as readonly string[]).includes(p));
+    if (!asked.length) return;
     q.busy = true;
-    const asked = parts === "all" ? PARTS : parts;
-    const path = `/recordings/${enc(id)}/live${parts === "all" ? "" : `?parts=${asked.join(",")}`}`;
+    // The new lines from the page's own next position (at most LIVE_KEEP behind the newest).
+    const from = asked.includes("lines") ? linesFrom(pos.next, pos.length) : undefined;
+    const query = [parts === "all" ? "" : `parts=${asked.join(",")}`, from !== undefined ? `from=${from}` : ""].filter(Boolean).join("&");
+    const path = `/recordings/${enc(id)}/live${query ? `?${query}` : ""}`;
     api<RecordingLive>(path, request.current)
-      .then((r) => { if (current() && shown.current === id) apply(id, asked, r); })
+      .then((r) => {
+        if (!current() || shown.current !== id) return;
+        if (apply(id, asked, r, from)) latest.current(["lines"]);
+        // The photos after the first whole read (and every whole read after): its revision says whether they moved.
+        if (photosWanted.current && parts === "all") heardPhotos(r.revs?.photos, true);
+      })
       .catch((err) => {
         // No route (an older manager), no upload, or deleted: detail.meta is all there is.
         if (err instanceof ApiError && (err.status === 404 || err.status === 410) && shown.current === id) {
           setState((prev) => (prev.id === id ? { ...prev, gone: true } : { id, got: {}, v: {}, gone: true }));
-        }
+        } else if (photosWanted.current && parts === "all") readPhotos();
+        // Lines not read: the live view says it has none yet rather than wait; the next poll or event reads them.
+        if (asked.includes("lines") && shown.current === id) setLines((prev) => (prev.id === id && prev.list ? prev : { id, list: [] }));
       })
       .finally(() => {
         q.busy = false;
@@ -148,26 +344,49 @@ export function useRecordingMeeting(detail: KBDetail | null | undefined, rec: Re
         // What was asked meanwhile goes to the recording shown now (its own first read may be among it).
         if (next) latest.current(next === "all" ? "all" : [...next]);
       });
-  }, [id, current, apply]);
+  }, [id, current, apply, heardPhotos, readPhotos]);
   const latest = useRef(readLive);
   latest.current = readLive;
+  // A room that comes up after the page's first read (`none` until the hub starts it, or Persona turned on later): its
+  // topics and lines are read as soon as the room part says it attends, not at the next poll.
+  const wasLive = useRef({ id, on: liveOn });
+  useEffect(() => {
+    const was = wasLive.current;
+    wasLive.current = { id, on: liveOn };
+    if (liveOn && was.id === id && !was.on && wanted && !read.gone) readLive(["topics", "lines"]);
+  }, [id, liveOn, wanted, read.gone, readLive]);
 
   // The fallback read is a room meeting's: a #2981 meeting's asks are read by "Questions in the meeting" already, and
   // its private mark and follow-up come with the event.
   const running = !!rec && !!merged.room && (rec.partial || ["starting", "ready", "unavailable"].includes(roomState(merged.room) ?? ""));
   const live = wanted && !read.gone;
+  // **Talk about this meeting** only once `…/live` has answered for this recording: hello's `meeting_conversation` is the
+  // default manager's, and a recording of another manager's knowledge base (X-Persona-Manager) may have no `…/followup`
+  // to write to; that read is then a 404 (gone), and no composer shows.
+  const talk = offers && !!read.got.followup && !read.gone;
   useEffect(() => {
     if (!live) return;
     readLive("all");
-    // A reconnect may have missed events: read everything again.
-    const offHello = onHubEvent("hello", () => readLive("all"));
+    // A reconnect may have missed events: read everything again, the photos' list too once that read is in.
+    const offHello = onHubEvent("hello", () => {
+      photoRevs.current.ack = undefined;
+      readLive("all");
+    });
     const offEvent = onHubEvent("meeting_live", (msg) => {
       if (String(msg.recording_id ?? "").toLowerCase() !== id.toLowerCase() || messageManager(msg) !== manager) return;
-      const parts = newerParts(msg.changed, msg.revs, revs.current.of).filter((p): p is Part => (PARTS as readonly string[]).includes(p));
+      const ack = photoRevs.current.ack;
+      const newer = newerParts(msg.changed, msg.revs, { ...revs.current.of, ...(ack !== undefined ? { photos: ack } : {}) });
+      // `photos` has no field on `…/live`: its list is `GET …/photos`.
+      if (photosWanted.current && newer.includes("photos")) heardPhotos((msg.revs as Record<string, unknown> | undefined)?.photos);
+      else readDetail();
+      // The live log's length the event names: where the lines read starts depends on it.
+      const length = (msg.revs as Record<string, unknown> | undefined)?.lines;
+      if (typeof length === "number" && linePos.current.id === id) linePos.current.length = Math.max(linePos.current.length, length);
+      const parts = newer.filter((p): p is Part => (PARTS as readonly string[]).includes(p) || (liveWanted.current && (LIVE_PARTS as readonly string[]).includes(p)));
       if (parts.length) readLive(parts);
     });
     return () => { offHello(); offEvent(); };
-  }, [live, id, manager, readLive]);
+  }, [live, photosOn, id, manager, readLive, heardPhotos, readDetail]);
   useEffect(() => {
     if (!live || !running) return;
     // visiblePoll reads at once when the page is shown; the mount's read above already did. A page mounted hidden reads
@@ -186,8 +405,11 @@ export function useRecordingMeeting(detail: KBDetail | null | undefined, rec: Re
     setTicks((x) => ({ ...x, followup: x.followup + 1 }));
   }, [id, setRead]);
 
+  const { topics, ...parts } = merged;
   return {
-    on, meeting, roomMeeting: on && !!merged.room, ...merged,
+    on, meeting, roomMeeting: on && !!merged.room, talk, ...parts,
+    photos: { on: photosOn, list: photosOn ? photoList : undefined, images },
+    ...(liveOn ? { live: { topics, lines: lineState.id === id ? lineState.list : undefined, cut: lineState.id === id && !!lineState.cut } } : {}),
     roomTick: ticks.room, followupTick: ticks.followup, setPrivate, madeFollowup,
   };
 }
@@ -289,7 +511,8 @@ type Props = {
   manager: string;
 };
 
-/** **Conversation**: the one thread of a room meeting (or of any recording with a follow-up). */
+/** **Conversation**: the one thread of a room meeting or of any recording with a follow-up, and **Talk about this
+ *  meeting** for one that has none yet. */
 export function RecordingConversation({ detail, rec, meeting, auth, current, manager }: Props) {
   const heading = useId();
   const { room, followup } = meeting;
@@ -297,8 +520,11 @@ export function RecordingConversation({ detail, rec, meeting, auth, current, man
     ? { machine_id: room.machine_id, session_id: room.session_id } : undefined;
   const roomPart = useThread(roomIds, meeting.roomTick, auth, current);
   const followPart = useThread(followup, meeting.followupTick, auth, current);
-  if (!meeting.on || (!meeting.roomMeeting && !followup)) return null;
-  const asks = meeting.asks ?? [];
+  const running = meetingRunning(detail.meta, room);
+  // Any other recording shows the section once it has a follow-up, or can make one: it has ended and has material.
+  if (!meeting.on || (!meeting.roomMeeting && !followup && (!meeting.talk || running))) return null;
+  // A #2981 meeting's asks stay under **Questions in the meeting**; only a room meeting's are part of its thread.
+  const asks = meeting.roomMeeting ? meeting.asks ?? [] : [];
   const roomEntries = roomIds && roomPart.items ? roomThread(roomPart.items, detail.id, asks) : [];
   const followEntries = followup && followPart.items ? followupThread(followPart.items) : [];
   // A room that never came up shows the questions asked of the meeting's material instead, as #3746 does; one that went
@@ -310,7 +536,6 @@ export function RecordingConversation({ detail, rec, meeting, auth, current, man
   const askById = new Map(asks.map((a) => [a.id.toLowerCase(), a]));
   const showAsks = shownAsks.length > 0;
   const before = roomEntries.length > 0 || showAsks;
-  const running = meetingRunning(detail.meta, room);
   const status = meeting.roomMeeting ? roomLine(room, rec.attendance, !!rec.trimmedAt) : null;
   const roomRoute = roomIds ? conversationPage(roomIds.session_id, roomIds.machine_id, manager) : null;
   const followRoute = followup ? conversationPage(followup.session_id, followup.machine_id, manager) : null;
@@ -333,7 +558,7 @@ export function RecordingConversation({ detail, rec, meeting, auth, current, man
             {roomPart.more && <p className="px-4 pt-2 text-[11.5px] text-ink-3">{t("knowledge-kbdetail.conversation_earlier")}</p>}
             {roomPart.error && <p role="alert" className="px-4 py-2 text-[12.5px] break-words text-red">{t("knowledge-kbdetail.conversation_load_failed", { error: roomPart.error })}</p>}
             {loadingRoom && <div className="flex justify-center py-3"><Spinner /></div>}
-            {roomEntries.length > 0 && <Thread entries={roomEntries} conv={roomIds!} asks={askById} room />}
+            {roomEntries.length > 0 && <Thread entries={roomEntries} conv={roomIds!} asks={askById} room photos={meeting.photos} />}
             {showAsks && (
               <ol className="divide-y divide-line">
                 {shownAsks.map((ask) => <AskRow key={ask.id} ask={ask} startedAt={rec.startedAt} />)}
@@ -366,7 +591,7 @@ export function RecordingConversation({ detail, rec, meeting, auth, current, man
           </div>
         ) : meeting.roomMeeting && running ? (
           <p className="px-4 py-2.5 text-[11.5px] leading-relaxed text-ink-3">{t("knowledge-kbdetail.conversation_read_only")}</p>
-        ) : meeting.roomMeeting && (
+        ) : (meeting.roomMeeting || meeting.talk) && (
           <FollowupComposer id={detail.id} auth={auth} current={current} manager={manager} onMade={meeting.madeFollowup} />
         )}
       </Card>
@@ -406,7 +631,7 @@ function at(ts?: string): string {
 
 const VIA_ICON: Record<string, IconName> = { typed: "keyboard", spoken: "voice", owner: "person" };
 
-function Thread({ entries, conv, asks, room = false }: { entries: ThreadEntry[]; conv: MeetingConversation; asks?: ReadonlyMap<string, RecordingAsk>; room?: boolean }) {
+function Thread({ entries, conv, asks, room = false, photos }: { entries: ThreadEntry[]; conv: MeetingConversation; asks?: ReadonlyMap<string, RecordingAsk>; room?: boolean; photos?: MeetingPhotos }) {
   // An ask asked again has a message per attempt: its state shows under the last one.
   const last = new Map<string, string>();
   for (const e of entries) if ((e.kind === "question" || e.kind === "heard") && e.ask) last.set(e.ask, e.id);
@@ -414,7 +639,7 @@ function Thread({ entries, conv, asks, room = false }: { entries: ThreadEntry[];
     <ol className="flex flex-col py-1">
       {entries.map((e) => {
         const ask = (e.kind === "question" || e.kind === "heard") && e.ask && last.get(e.ask) === e.id ? asks?.get(e.ask) : undefined;
-        return <li key={e.id} data-thread={e.kind}><Entry entry={e} conv={conv} room={room} />{ask && <AskState ask={ask} />}</li>;
+        return <li key={e.id} data-thread={e.kind}><Entry entry={e} conv={conv} room={room} photos={photos} />{ask && <AskState ask={ask} />}</li>;
       })}
     </ol>
   );
@@ -428,7 +653,7 @@ function AskState({ ask }: { ask: RecordingAsk }) {
   return null;
 }
 
-function Entry({ entry: e, conv, room }: { entry: ThreadEntry; conv: MeetingConversation; room: boolean }) {
+function Entry({ entry: e, conv, room, photos }: { entry: ThreadEntry; conv: MeetingConversation; room: boolean; photos?: MeetingPhotos }) {
   switch (e.kind) {
     case "joined":
       return <Muted icon="spark" text={t("knowledge-kbdetail.thread_joined")} time={at(e.ts)} />;
@@ -466,7 +691,37 @@ function Entry({ entry: e, conv, room }: { entry: ThreadEntry; conv: MeetingConv
             className="max-h-40 max-w-[240px] rounded-control bg-field object-cover" />
         </div>
       );
+    case "photo":
+      return <ThreadPhoto entry={e} photos={photos} />;
   }
+}
+
+/** The thumbnail's height in the thread, and the bounds of its width (the photo's own shape between them). */
+const THREAD_PHOTO = { height: 144, min: 96, max: 240 };
+
+/** A photo the room was sent, resolved by its id in `GET …/photos` (never the room's own copy of the image): its
+ *  thumbnail and the room's note; "Photo removed" once a list read lacks it; only "Photo" until a list is read. */
+function ThreadPhoto({ entry: e, photos }: { entry: Extract<ThreadEntry, { kind: "photo" }>; photos?: MeetingPhotos }) {
+  const photo = photos?.on ? photos.list?.find((p) => p.id.toLowerCase() === e.photo) : undefined;
+  const time = at(e.ts);
+  if (!photo && photos?.on && photos.list) return <Muted icon="image" text={t("knowledge-kbdetail.photo_removed")} time={time} />;
+  const ratio = photo && photo.width > 0 && photo.height > 0 ? photo.width / photo.height : 4 / 3;
+  const width = Math.round(Math.min(THREAD_PHOTO.max, Math.max(THREAD_PHOTO.min, THREAD_PHOTO.height * ratio)));
+  return (
+    <div className="px-4 pt-2.5 pb-1">
+      <div className="flex items-center gap-2.5 text-[12px] text-ink-3">
+        <Icon name="camera" size={13} className="shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{photo ? t("knowledge-kbdetail.photo_label", { n: photo.n }) : t("knowledge-kbdetail.thread_image")}</span>
+        {time && <span className="shrink-0 whitespace-nowrap text-[11.5px] tabular-nums">{time}</span>}
+      </div>
+      {photo && photos && (
+        <div className="pt-1.5 pl-[23px]">
+          <PhotoThumb photo={photo} images={photos.images} className="max-w-full rounded-control" style={{ width, height: THREAD_PHOTO.height }} />
+          {photo.note && <p className="mt-1.5 text-[13px] leading-relaxed break-words whitespace-pre-wrap text-ink-2 select-text">{photo.note}</p>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Muted({ icon, text, time }: { icon: IconName; text: string; time: string }) {

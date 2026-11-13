@@ -6,6 +6,7 @@ import SwiftUI
 /// Read by the hub (a Persona launcher) or by a machine that has the launcher (a ~/.zshrc one: the key stays there).
 struct LauncherQuotaSection: View {
     @Environment(AppModel.self) private var model
+    private let requestScope = AssistantSettingsRequestScope(AppModel.shared)
     var name: String
     @State private var answer: LauncherQuotaAnswer?
     @State private var loading = false
@@ -75,7 +76,7 @@ struct LauncherQuotaSection: View {
     }
 
     private func load(refresh: Bool) async {
-        guard let api = model.api else { return }
+        guard let api = requestScope.api(model) else { return }
         loading = true
         defer { loading = false }
         do {

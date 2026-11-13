@@ -18,6 +18,9 @@ nonisolated extension Theme.Size {
     static let recordingMeterBar: CGFloat = 3
     static let recordingMeterGap: CGFloat = 3
     static let recordingMeterHeight: CGFloat = 44
+    /// The widest a topic's chip on the meeting page gets (#3862 phase 2) at the default text size: a title of up to 80
+    /// characters is cut there, so the row shows the topics around the current one rather than one long title.
+    static let meetingTopicChip: CGFloat = 240
 }
 
 nonisolated extension Theme {
@@ -56,5 +59,51 @@ nonisolated extension Theme {
         /// How often the spoken time (VoiceOver's value for the timer) is refreshed, and the marker's number.
         static let spokenTimeRefresh: TimeInterval = 60
         static let gapRefresh: TimeInterval = 5
+        /// The meeting page (#3862): its title (the live header, the status card after the meeting) takes at most this
+        /// many lines.
+        static let pageTitleLines = 2
+        /// How many of the newest transcript lines its Live box shows, and how many lines of text each may take: the
+        /// box says what is being said now, the whole transcript is one tap away.
+        static let liveLines = 3
+        static let liveLineLength = 2
+        /// The step, in seconds, of the Live box's "About N s behind" (so it changes a few times a minute).
+        static let liveBehindStep = 5
+        /// How many lines of text a highlight on the meeting page's top card takes at the regular text sizes (#3862 phase
+        /// 2b), cut at the end (VoiceOver reads it whole): four highlights stay a glance, and the thread under the card,
+        /// which alone scrolls there, keeps its height.
+        static let highlightLines = 2
+        /// How many exchanges Show Earlier brings of the room conversation: each batch of lines is a turn of its own,
+        /// so the chat's two would bring little.
+        static let earlierTurns = 6
+        /// A photo in the meeting's thread: its thumbnail's side.
+        static let photoSide: CGFloat = Theme.Size.box80
+        /// The meeting's material (the follow-up's first message) opened: this many lines show until Show All, which a
+        /// text longer than that, or than this many characters, offers.
+        static let materialLines = 12
+        static let materialPreview = 1200
+        /// How often the page after the meeting asks the hub for the minutes while they are on their way, in seconds,
+        /// as the wrap-up and the recording's page do.
+        static let minutesPoll: TimeInterval = 15
+        /// A meeting photo's thumbnail in the thread (#3862 phase 3), in points (its pixels: × the screen's scale): the
+        /// side of the room's other pictures, so the two look alike, and large enough to tell one whiteboard from another.
+        static let photoThumbSide: CGFloat = photoSide
+        /// How many lines of a photo's caption, or of the text read in it, show beside its thumbnail: what it is about,
+        /// not all of it (the room's note says what matters).
+        static let photoTextLines = 3
+        /// How many photos the library's picker takes at once: each is prepared and uploaded on its own, about a
+        /// megabyte each, while the meeting records.
+        static let photoPickLimit = 4
+        /// How long "Persona is looking at the photo…" waits for the room's note after the photo was added, in seconds:
+        /// a room that never writes one doesn't keep the spinner turning for the rest of the meeting.
+        static let photoNoteWait: TimeInterval = 120
+        /// A Summary item opened in place (#5026): the transcript line its time picks, with this many lines before it
+        /// and after it. One before says what led to it; two after hold the reply or the follow-up, since an item is
+        /// stamped as its sentence begins. Few enough that the card stays a summary.
+        static let contextBefore = 1
+        static let contextAfter = 2
+        /// How much the meeting page's Talk grows while it is held (#3862 phase 4): the finger covers it, so the change
+        /// that says "Persona hears you" is its color and the words over the field; the size only confirms the touch.
+        /// None under Reduce Motion.
+        static let talkHeldScale: CGFloat = 1.06
     }
 }

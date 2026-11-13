@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -20,6 +21,10 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -124,7 +129,10 @@ class SettingsGroupsShotsTest {
         val services = services()
         rule.setContent {
             PersonaTheme(darkTheme = dark(), reduceMotion = true, style = style()) {
-                CompositionLocalProvider(LocalManagerRoster provides roster, LocalAssistantWaiting provides mapOf("m-3fa21c" to 3)) {
+                val density = LocalDensity.current
+                val fontScale = androidx.compose.ui.platform.LocalConfiguration.current.fontScale
+                CompositionLocalProvider(LocalManagerRoster provides roster, LocalAssistantWaiting provides mapOf("m-3fa21c" to 3),
+                    LocalDensity provides Density(density.density, fontScale)) {
                     Box(Modifier.testTag("shot").fillMaxSize().background(PersonaTheme.palette.background)) {
                         SettingsScreen(services, initialPage = page, onNavigate = {})
                     }
@@ -142,19 +150,55 @@ class SettingsGroupsShotsTest {
         // 1. The current assistant's: its head, its rows in their order, its footnote.
         rule.onNodeWithText("助手 的设置").assertExists()
         rule.onNodeWithText("只显示「助手」自己的内容。要改别的助手，先切换过去。").assertExists()
-        val first = listOf("模型供应商", "模型配置", "助手资料", "会话分诊", "连接器", "扩展", "Claude Code 设置", "Codex 设置")
+        val first = listOf("模型", "助手资料", "连接器", "扩展", "Agent")
         first.zipWithNext().forEach { (a, b) -> assertTrue("$a before $b", top(a) < top(b)) }
         // 2. This device's, then 3. the hub's, with the footnote that says neither is an assistant's.
-        assertTrue(top("Codex 设置") < top("这台设备"))
-        val device = listOf("这台设备", "界面风格", "通知", "翻译", "存储空间")
+        assertTrue(top("Agent") < top("这台设备"))
+        val device = listOf("这台设备", "界面风格", "通知与后台", "翻译", "存储空间", "关于与更新")
         device.zipWithNext().forEach { (a, b) -> assertTrue("$a before $b", top(a) < top(b)) }
         assertTrue(top("存储空间") < top("Hub"))
-        val hub = listOf("Hub", "hub", "hub 版本", "助手", "配对", "形象", "设备")
+        val hub = listOf("Hub", "连接", "Hub 连接", "Hub 版本", "助手", "形象", "设备")
         hub.zipWithNext().forEach { (a, b) -> assertTrue("$a before $b", top(a) < top(b)) }
         rule.onNodeWithText("这两组和当前是哪个助手无关。").assertExists()
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
             capture("settings-${s.key}-${if (d) "dark" else "light"}")
+        }
+    }
+
+    @Config(qualifiers = "zh-w400dp-h950dp-xhdpi")
+    @Test fun phoneHomeAndSearchInEveryStyleAndScheme() {
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        AssistantManagerChoice.choose("hub", null, "assistant")
+        show({ style }, { dark })
+        fun image(name: String) {
+            rule.waitForIdle()
+            val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
+            File(out(), "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        for (s in AppStyle.entries) for (d in listOf(false, true)) {
+            style = s; dark = d
+            rule.onNode(hasSetTextAction()).performTextClearance()
+            image("settings-phone-${s.key}-${if (d) "dark" else "light"}")
+            rule.onNode(hasSetTextAction()).performTextInput("Codex")
+            rule.onNodeWithText("Agent").assertExists()
+            assertEquals(0, rule.onAllNodesWithText("这台设备").fetchSemanticsNodes().size)
+            image("settings-search-${s.key}-${if (d) "dark" else "light"}")
+            rule.onNode(hasSetTextAction()).performTextClearance()
+            rule.onNode(hasSetTextAction()).performTextInput("不存在的设置")
+            rule.onNodeWithText("没有找到相关设置").assertExists()
+            image("settings-search-empty-${s.key}-${if (d) "dark" else "light"}")
+        }
+    }
+
+    @Test fun formerFullNamesSearchTheirGroupedHomeEntries() {
+        show()
+        for ((query, entry) in listOf("模型供应商" to "模型", "Claude Code 设置" to "Agent", "后台保活" to "通知与后台",
+            "悬浮胶囊" to "通知与后台", "检查更新" to "关于与更新", "连接诊断" to "连接")) {
+            rule.onNode(hasSetTextAction()).performTextClearance()
+            rule.onNode(hasSetTextAction()).performTextInput(query)
+            rule.onNodeWithText(entry).assertExists()
         }
     }
 
@@ -187,6 +231,7 @@ class SettingsGroupsShotsTest {
                 }
             }
         }
+        rule.onNode(hasText("Agent") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.onNode(hasText("Codex 设置") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForIdle()
         assertEquals(0, rule.onAllNodesWithText("助手 的设置").fetchSemanticsNodes().size)
@@ -220,7 +265,7 @@ class SettingsGroupsShotsTest {
         assertEquals(0, rule.onAllNodesWithText("切换").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("的设置", substring = true).fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("只显示", substring = true).fetchSemanticsNodes().size)
-        assertTrue(top("Persona") < top("模型供应商"))
+        assertTrue(top("Persona") < top("模型"))
         rule.onNodeWithText("这两组和当前是哪个助手无关。").assertExists()
     }
 
@@ -264,9 +309,17 @@ class SettingsGroupsShotsTest {
 
     @Config(qualifiers = "zh-w400dp-h4000dp-xhdpi", fontScale = 2f) // tall enough for the whole page at 200 %
     @Test fun atTheLargestTextSize() {
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
         AssistantManagerChoice.choose("hub", null, "assistant")
-        show()
+        show({ style }, { dark })
         rule.onNodeWithText("助手 的设置").assertExists()
-        capture("settings-glass-light-large")
+        for (s in AppStyle.entries) for (d in listOf(false, true)) {
+            style = s; dark = d
+            rule.onNode(hasSetTextAction()).performTextClearance()
+            capture("settings-${s.key}-${if (d) "dark" else "light"}-large")
+            rule.onNode(hasSetTextAction()).performTextInput("Codex")
+            capture("settings-search-${s.key}-${if (d) "dark" else "light"}-large")
+        }
     }
 }

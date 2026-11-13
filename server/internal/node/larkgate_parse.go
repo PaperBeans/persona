@@ -8,6 +8,8 @@ import (
 
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/shellcmd"
+	"github.com/nwverse/persona/server/internal/textfmt"
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -30,9 +32,10 @@ func classifyLark(cmd string, gates []proto.CommandGate, cwd string, risk larkRi
 func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk larkRisk, depth int) larkVerdict {
 	var v larkVerdict
 	if depth > 16 {
-		v.other, v.unparsed, v.unknown = true, true, larkCLIRe.MatchString(cmd)
+		v.other, v.unparsed, v.unknown = true, true, true
 		return v
 	}
+	v.unknown = shellCommandUnknown(cmd, false, depth)
 	merge := func(child larkVerdict) {
 		v.calls = append(v.calls, child.calls...)
 		if child.deny != "" {
@@ -40,6 +43,7 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 		}
 		v.unknown = v.unknown || child.unknown || child.unparsed && larkCLIRe.MatchString(cmd)
 		v.cliWrite = v.cliWrite || child.cliWrite
+		v.unread = append(v.unread, child.unread...)
 	}
 	for _, g := range gates {
 		for _, name := range g.Secret {
@@ -57,35 +61,50 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 		v.deny = "不要读或改 lark-cli 的配置和凭据（~/.lark-cli）：飞书用 lark-cli 命令，它自己带登录。"
 		return v
 	}
-	segs, ok := shellSegments(cmd)
+	if commands, ok := literalLarkLoopCommands(cmd, gates); ok {
+		v.unknown, v.other = false, true
+		for _, command := range commands {
+			child := classifyLarkDepth(command, gates, cwd, risk, depth+1)
+			merge(child)
+			v.unsure = v.unsure || child.unsure
+			v.unparsed = v.unparsed || child.unparsed
+			// Loop expansion proves reads only. Writes (including GET deletion
+			// routes) keep the whole-command approval and proxy restrictions.
+			for _, call := range child.calls {
+				v.unknown = v.unknown || !larkRead(call) || !larkBypassSafe(call)
+			}
+		}
+		return v
+	}
+	cmd = normalizeLarkCommand(cmd, cwd)
+	v.unknown = shellCommandUnknown(cmd, false, depth)
+	segs, ok := shellcmd.Split(cmd)
 	if !ok {
-		v.other, v.unparsed, v.unknown = true, true, larkCLIRe.MatchString(cmd) || unparsedLarkCommand(cmd)
+		v.other, v.unparsed, v.unknown = true, true, v.unknown || gateNamed(gates, cmd) || larkCLIRe.MatchString(cmd) || shellCommandUnknown(cmd, true, depth)
 		return v
 	}
 	vars := map[string]string{}
-	unsafeRedirect := false
+	varsStable := larkVariableScopeStable(cmd, gates)
 	executableEnv := false
 	for _, s := range segs {
-		if s.subst {
-			v.unsure, v.other = true, true
-			v.unknown = v.unknown || larkCLIRe.MatchString(cmd)
-		}
-		for _, nested := range s.nested {
+		nestedUnsure := false
+		for _, nested := range s.Nested {
 			child := classifyLarkDepth(nested, gates, cwd, risk, depth+1)
 			if len(child.calls) > 0 || child.unknown || child.unparsed {
 				v.other = true
 			}
+			nestedUnsure = nestedUnsure || !larkFilterSubstitution(nested) || child.unknown || child.unparsed || child.unsure
 			merge(child)
+		}
+		// Output filters in a substitution do not make the enclosing command
+		// opaque. Gated calls and unresolved execution inside it still do.
+		if s.ArgSubst && nestedUnsure {
+			v.unsure, v.other = true, true
 		}
 		if v.deny != "" {
 			return v
 		}
-		// Every redirection participates, including redirects on output filters. A command
-		// outside the small redirect grammar cannot be treated as a classified read.
-		if s.redirect != "" && !safeRedirect(s.redirect) {
-			unsafeRedirect = true
-		}
-		words := s.words
+		words := s.Words
 		// Loop bodies may prefix the invocation with both a shell keyword and environment assignments.
 		for len(words) > 0 && (words[0] == "do" || words[0] == "then" || words[0] == "else") {
 			words = words[1:]
@@ -109,18 +128,32 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 			words = words[1:]
 		}
 		if len(words) == 0 {
-			for _, a := range env {
-				k, val, _ := strings.Cut(a, "=")
-				vars[k] = val
+			if varsStable {
+				for _, a := range env {
+					k, val, _ := strings.Cut(a, "=")
+					vars[k] = val
+				}
 			}
 			continue
 		}
-		// `timeout 20 ol …` (the prompt asks for timeouts), `command -v ol`.
-		if len(words) > 2 && words[0] == "timeout" && timeoutArg.MatchString(words[1]) {
-			words = words[2:]
+		for _, word := range words {
+			if isAssignment(word) {
+				k, _, _ := strings.Cut(word, "=")
+				executableEnv = executableEnv || larkExecutableEnv[k]
+			}
 		}
-		if len(words) > 1 && words[0] == "command" && (words[1] == "-v" || words[1] == "-V") {
-			words = []string{"which"}
+		var parsed bool
+		words, parsed = unwrapCommand(words)
+		if !parsed {
+			v.other = true
+			v.unknown = v.unknown || larkCLIRe.MatchString(s.Text)
+			for _, word := range words {
+				v.unknown = v.unknown || strings.ContainsAny(word, "$`*?[]{}")
+			}
+			continue
+		}
+		if len(words) == 0 {
+			continue
 		}
 		name := words[0]
 		gate := -1
@@ -133,9 +166,12 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 			gate = gateOf(gates, name)
 		}
 		switch {
-		case (name == "sh" || name == "bash") && len(words) == 3 && (words[1] == "-c" || words[1] == "-lc"):
+		case shellScriptIndex(words) >= 0:
 			v.other = true
-			merge(classifyLarkDepth(words[2], gates, cwd, risk, depth+1))
+			merge(classifyLarkDepth(words[shellScriptIndex(words)], gates, cwd, risk, depth+1))
+		case name == "eval":
+			v.other = true
+			merge(classifyLarkDepth(strings.Join(words[1:], " "), gates, cwd, risk, depth+1))
 		case isLarkCLI(name):
 			if strings.ContainsAny(strings.Join(words[1:], " "), "$`") {
 				v.other, v.unknown = true, true
@@ -149,9 +185,6 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 				v.other, v.cliWrite, v.unknown = true, true, true
 				continue
 			}
-			if s.redirect != "" && !safeRedirect(s.redirect) {
-				v.other = true
-			}
 			if !c.cliRead() {
 				v.cliWrite = true
 			}
@@ -163,6 +196,11 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 					v.other = true
 				}
 			}
+			if s.ArgSubst || splitGateArguments(s.Text) {
+				v.other, v.unknown = true, true
+				v.unread = append(v.unread, gate)
+				continue
+			}
 			c, deny, ok := parseGateCall(g, words[1:], vars, cwd)
 			if deny != "" {
 				v.deny = deny
@@ -170,28 +208,26 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 			}
 			if !ok {
 				v.other, v.unknown = true, true
+				v.unread = append(v.unread, gate)
 				continue
 			}
 			c.Gate = gate
-			if s.redirect != "" && !safeRedirect(s.redirect) {
-				v.other = true
-			}
 			v.calls = append(v.calls, c)
 		case name == "curl" || name == "wget" || name == "http" || name == "xh":
-			if g, ok := gateAimed(gates, s.text); ok {
+			if g, ok := gateAimed(gates, s.Text); ok {
 				v.deny = "不要直接 curl " + g.Title + " 的接口：用 " + g.Command + "，写操作要先在手机上确认。"
 				return v
 			}
 			v.other = true
-		case larkFilters[name] && len(env) == 0 && (s.redirect == "" || safeRedirect(s.redirect)):
+		case larkFilters[name] && len(env) == 0:
 		default:
 			v.other = true
-			if larkCLIRe.MatchString(s.text) || strings.ContainsAny(name, "$`*?[]{}") || larkCLIRe.MatchString(cmd) && indirectLarkCommand(name) {
+			if larkCLIRe.MatchString(s.Text) || dynamicCommandName(name) || larkCLIRe.MatchString(cmd) && indirectLarkCommand(name) {
 				v.unknown = true // an interpreter, wrapper or script may invoke the CLI
 			}
 		}
 	}
-	if (unsafeRedirect || executableEnv) && (len(v.calls) > 0 || larkCLIRe.MatchString(cmd)) {
+	if executableEnv && (len(v.calls) > 0 || larkCLIRe.MatchString(cmd)) {
 		v.other, v.unknown = true, true
 	}
 	if len(v.calls) == 0 {
@@ -200,42 +236,23 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 	return v
 }
 
-// The small classifier grammar rejects groups and here-strings. Inspect only command
-// names in their syntax tree so argument substitutions and quoted code remain outside
-// the CLI gate, while expanded or escaped command names still require confirmation.
-func unparsedLarkCommand(cmd string) bool {
-	// Shells may execute complete lines before a later syntax error. Parse retains
-	// those statements, so inspect the partial tree even when it returns an error.
-	tree, _ := syntax.NewParser().Parse(strings.NewReader(cmd), "")
-	unknown := false
-	syntax.Walk(tree, func(node syntax.Node) bool {
-		if unknown {
+// larkFilterSubstitution reports whether a command substitution only formats
+// or prints data. Other programs keep the enclosing gated call conservative.
+func larkFilterSubstitution(cmd string) bool {
+	segs, ok := shellcmd.Split(cmd)
+	if !ok || len(segs) == 0 {
+		return false
+	}
+	for _, s := range segs {
+		if s.Subst || len(s.Words) == 0 {
 			return false
 		}
-		call, ok := node.(*syntax.CallExpr)
-		if !ok || len(call.Args) == 0 {
-			return !unknown
+		words, ok := unwrapCommand(s.Words)
+		if !ok || len(words) == 0 || len(words) != len(s.Words) || !larkFilters[words[0]] {
+			return false
 		}
-		var name strings.Builder
-		dynamic := false
-		syntax.Walk(call.Args[0], func(part syntax.Node) bool {
-			switch p := part.(type) {
-			case *syntax.Lit:
-				name.WriteString(strings.ReplaceAll(p.Value, "\\", ""))
-			case *syntax.SglQuoted:
-				name.WriteString(p.Value)
-				return false
-			case nil, *syntax.Word, *syntax.DblQuoted:
-			default:
-				dynamic = true
-				return false
-			}
-			return true
-		})
-		unknown = dynamic || isLarkCLI(name.String()) || strings.ContainsAny(name.String(), "*?[]{}")
-		return !unknown
-	})
-	return unknown
+	}
+	return true
 }
 
 func isAssignment(w string) bool {
@@ -256,6 +273,9 @@ func isAssignment(w string) bool {
 // indirectLarkCommand identifies opaque execution in a command already naming the CLI.
 // Without that context, interpreters and script files stay outside this gate.
 func indirectLarkCommand(name string) bool {
+	if name == "[" || name == "[[" {
+		return false
+	}
 	if strings.ContainsAny(name, "$`*?[]{}~") {
 		return true
 	}
@@ -293,8 +313,8 @@ var larkInterpreter = lazyre.New(`^(?:python|node|perl|ruby|lua|php)(?:[0-9]+(?:
 
 var redirectFD = lazyre.New(`^[0-9]*[<>]&[0-9]+$`)
 
-// safeRedirect checks every target after cleaning it: output stays inside /tmp,
-// or is folded into another descriptor or dropped. Unsupported targets require confirmation.
+// safeRedirect is used only by readsOnlyMemory. It accepts /tmp and /dev/null;
+// readsOnlyMemory rejects /tmp separately. Lark redirect targets are not checked here.
 func safeRedirect(r string) bool {
 	for _, t := range strings.Fields(r) {
 		if strings.ContainsAny(t, "$`*?[]{}~\"'\\") {
@@ -336,6 +356,208 @@ func gateAimed(gates []proto.CommandGate, text string) (proto.CommandGate, bool)
 	return proto.CommandGate{}, false
 }
 
+// gateNamed reports literal gate command words in a command the shell
+// splitter could not read. The AST preserves names next to redirections;
+// the fallback is deliberately conservative about quoted text.
+func gateNamed(gates []proto.CommandGate, cmd string) bool {
+	tree, err := syntax.NewParser().Parse(strings.NewReader(cmd), "")
+	if err == nil {
+		found := false
+		syntax.Walk(tree, func(node syntax.Node) bool {
+			call, ok := node.(*syntax.CallExpr)
+			if !ok || len(call.Args) == 0 || found {
+				return !found
+			}
+			words := make([]string, len(call.Args))
+			for i, word := range call.Args {
+				words[i], _ = executionWord(word)
+			}
+			suffix, ok := unwrapCommand(words)
+			if ok && len(suffix) > 0 {
+				found = gateOf(gates, suffix[0]) >= 0
+				if !found && (suffix[0] == "bash" || suffix[0] == "sh") && len(suffix) > 1 {
+					found = gateOf(gates, suffix[1]) >= 0
+				}
+			}
+			return !found
+		})
+		return found
+	}
+	cmd = strings.NewReplacer("<", " ", ">", " ").Replace(cmd)
+	for _, word := range strings.Fields(cmd) {
+		if gateOf(gates, strings.Trim(word, "'\"`;&|()")) >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// larkVariableScopeStable reports whether straight-line assignments can be
+// used to expand a later route. Only known read-only commands can appear
+// between those assignments and the gated call.
+func larkVariableScopeStable(cmd string, gates []proto.CommandGate) bool {
+	tree, err := syntax.NewParser().Parse(strings.NewReader(cmd), "")
+	if err != nil {
+		return false
+	}
+	stable := true
+	syntax.Walk(tree, func(node syntax.Node) bool {
+		if !stable {
+			return false
+		}
+		switch n := node.(type) {
+		case *syntax.IfClause, *syntax.ForClause, *syntax.WhileClause, *syntax.CaseClause, *syntax.FuncDecl, *syntax.DeclClause:
+			stable = false
+			return false
+		case *syntax.Stmt:
+			if n.Background || n.Negated || n.Coprocess {
+				stable = false
+				return false
+			}
+		case *syntax.BinaryCmd:
+			stable = false
+			return false
+		case *syntax.Assign:
+			if n.Append || n.Index != nil || n.Array != nil || n.Value == nil {
+				stable = false
+				return false
+			}
+		case *syntax.ArithmExp:
+			stable = false
+			return false
+		case *syntax.ParamExp:
+			if n.Exp != nil {
+				stable = false
+				return false
+			}
+		case *syntax.CallExpr:
+			if len(n.Args) == 0 {
+				return true
+			}
+			words := make([]string, len(n.Args))
+			for i, word := range n.Args {
+				words[i], _ = executionWord(word)
+			}
+			suffix, ok := unwrapCommand(words)
+			if !ok || len(suffix) == 0 {
+				stable = false
+				return false
+			}
+			name := suffix[0]
+			allowed := gateOf(gates, name) >= 0 || isLarkCLI(name)
+			if !allowed && (name == "bash" || name == "sh") && len(suffix) > 1 {
+				allowed = gateOf(gates, suffix[1]) >= 0
+			}
+			if !allowed {
+				allowed = map[string]bool{"cat": true, "tee": true, "ls": true, "git": true, "go": true, "pwd": true, "sleep": true, "false": true, ":": true}[name] ||
+					larkFilters[name] && name != "printf" && name != "cd"
+			}
+			if !allowed {
+				stable = false
+				return false
+			}
+		}
+		return true
+	})
+	return stable
+}
+
+// scalarParameter is a plain quoted scalar expansion, not "$@", an array
+// expansion, or a parameter operation whose result needs further parsing.
+func scalarParameter(p *syntax.ParamExp) bool {
+	return p != nil && p.Param != nil && p.Param.Value != "@" && p.Param.Value != "*" &&
+		!p.Excl && !p.Length && !p.Width && p.Index == nil && p.Slice == nil && p.Repl == nil && p.Exp == nil && p.Names == 0
+}
+
+// braceExpansion recognizes braces across the literal and quoted parts of one
+// word. Quoted content is a placeholder because it does not itself expand.
+func braceExpansion(word *syntax.Word) bool {
+	var text strings.Builder
+	for _, part := range word.Parts {
+		if lit, ok := part.(*syntax.Lit); ok {
+			text.WriteString(lit.Value)
+		} else {
+			text.WriteByte('_')
+		}
+	}
+	value := text.String()
+	return strings.Contains(value, "{") && strings.Contains(value, "}") && strings.Contains(value, ",")
+}
+
+// wordExpandsToMany reports shell syntax that can produce extra arguments.
+// Double quotes protect scalar variables, but not "$@" or array expansions.
+func wordExpandsToMany(word *syntax.Word) bool {
+	if braceExpansion(word) {
+		return true
+	}
+	found := false
+	syntax.Walk(word, func(node syntax.Node) bool {
+		switch n := node.(type) {
+		case *syntax.SglQuoted:
+			return false
+		case *syntax.DblQuoted:
+			syntax.Walk(n, func(inner syntax.Node) bool {
+				if p, ok := inner.(*syntax.ParamExp); ok && !scalarParameter(p) {
+					found = true
+					return false
+				}
+				return true
+			})
+			return false
+		case *syntax.ParamExp, *syntax.BraceExp, *syntax.ArithmExp, *syntax.CmdSubst, *syntax.ProcSubst, *syntax.ExtGlob:
+			found = true
+			return false
+		case *syntax.Lit:
+			if strings.ContainsAny(n.Value, "*?[") {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+
+// splitGateArguments reports an expansion that can produce extra arguments.
+// Redirect targets are excluded.
+func splitGateArguments(cmd string) bool {
+	cmd = strings.TrimSpace(cmd)
+	for {
+		stripped := false
+		for _, keyword := range []string{"do", "then", "else"} {
+			if len(cmd) > len(keyword) && cmd[:len(keyword)] == keyword && strings.ContainsRune(" \t\n", rune(cmd[len(keyword)])) {
+				cmd = strings.TrimSpace(cmd[len(keyword):])
+				stripped = true
+			}
+		}
+		if !stripped {
+			break
+		}
+	}
+	tree, err := syntax.NewParser().Parse(strings.NewReader(cmd), "")
+	if err != nil {
+		return true
+	}
+	found := false
+	syntax.Walk(tree, func(node syntax.Node) bool {
+		if found {
+			return false
+		}
+		call, ok := node.(*syntax.CallExpr)
+		if !ok {
+			return true
+		}
+		for _, arg := range call.Args {
+			found = wordExpandsToMany(arg)
+			if found {
+				break
+			}
+		}
+		return false
+	})
+	return found
+}
+
 // parseGateCall reads `METHOD PATH [BODY] [curl flags]` after a gated command.
 func parseGateCall(g proto.CommandGate, args []string, vars map[string]string, cwd string) (larkCall, string, bool) {
 	expand := func(s string) (string, bool) {
@@ -351,12 +573,17 @@ func parseGateCall(g proto.CommandGate, args []string, vars map[string]string, c
 		})
 		return out, !strings.Contains(out, "$")
 	}
-	if len(args) < 2 || !httpMethod.MatchString(strings.ToUpper(args[0])) && !strings.Contains(args[0], "$") {
+	// A literal method is part of the call's identity: even a previously
+	// assigned variable could change before a loop invokes it. A literal GET
+	// can keep variables in its query, but an unresolved route could hide a
+	// deletion action or a configured deny rule.
+	if len(args) < 2 || !httpMethod.MatchString(strings.ToUpper(args[0])) {
 		return larkCall{}, "", false // a subcommand of its own (ol events …): not a call the rules know
 	}
-	method, ok1 := expand(strings.ToUpper(args[0]))
-	path, ok2 := expand(args[1])
-	if !ok1 || !ok2 {
+	method := strings.ToUpper(args[0])
+	path, resolved := expand(args[1])
+	route, _, _ := strings.Cut(path, "?")
+	if strings.Contains(route, "$") || strings.Contains(path, "$(") || strings.Contains(path, "`") || !resolved && method != "GET" {
 		return larkCall{}, "", false
 	}
 	c := larkCall{Method: method}
@@ -420,10 +647,7 @@ func readBodyFile(p, cwd string) string {
 	if err != nil {
 		return "（读不到 " + p + "）"
 	}
-	if len(b) > 4000 {
-		b = append(b[:4000], "…"...)
-	}
-	return string(b)
+	return textfmt.Clip(string(b), 4000)
 }
 
 var httpMethod = lazyre.New(`^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$`)

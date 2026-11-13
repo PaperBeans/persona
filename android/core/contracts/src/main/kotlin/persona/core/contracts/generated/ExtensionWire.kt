@@ -39,6 +39,11 @@ data class ExtensionManifest(
     val publisher: String? = null,
     val homepage: String? = null,
     /**
+     * Source-only square PNG artwork: 256–4096 pixels, at most 2 MiB. Catalog entry icon carries this path; strip it
+     * from packaged and runtime manifests for compatibility.
+     */
+    val icon: String? = null,
+    /**
      * What the market shows and searches (docs "Extension market"): at most 16, each 1 to 24 characters. Packages and
      * indexes carry the manifest without them (hubs before tags refuse an unknown field); the index entry carries
      * them instead.
@@ -83,6 +88,20 @@ data class ExtensionManifest(
      */
     val tools: List<ExtensionToolSpec>? = null,
     val auth: ExtensionAuthSpec? = null,
+    /**
+     * Configured host CLI integrations the program may use through a bounded, read-only typed RPC. IDs never name an
+     * executable; writes and arbitrary command lines are not part of this contract.
+     */
+    @SerialName("host_integrations") val hostIntegrations: List<ExtensionHostIntegrationSpec>? = null,
+)
+
+/**
+ * A configured CLI integration, selected by a closed ID rather than by an extension-provided executable.
+ */
+@Serializable
+data class ExtensionHostIntegrationSpec(
+    val id: String = "",
+    val version: String = "",
 )
 
 /**
@@ -371,6 +390,7 @@ data class ExtensionStoragePermission(
 data class ExtensionContributes(
     val connectors: List<ExtensionConnectorItem>? = null,
     val voice: List<ExtensionNamedItem>? = null,
+    val transcription: List<ExtensionNamedItem>? = null,
     val computer: List<ExtensionNamedItem>? = null,
     val browser: List<ExtensionNamedItem>? = null,
     val iphone: List<ExtensionNamedItem>? = null,
@@ -403,6 +423,7 @@ data class ExtensionContributes(
 private data class ExtensionContributesKnown(
     val connectors: List<ExtensionConnectorItem>? = null,
     val voice: List<ExtensionNamedItem>? = null,
+    val transcription: List<ExtensionNamedItem>? = null,
     val computer: List<ExtensionNamedItem>? = null,
     val browser: List<ExtensionNamedItem>? = null,
     val iphone: List<ExtensionNamedItem>? = null,
@@ -431,7 +452,7 @@ private data class ExtensionContributesKnown(
 
 object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
     private val known = ExtensionContributesKnown.serializer()
-    private val keys = setOf<String>("connectors", "voice", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "messaging")
+    private val keys = setOf<String>("connectors", "voice", "transcription", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "messaging")
     override val descriptor: SerialDescriptor = known.descriptor
 
     override fun deserialize(decoder: Decoder): ExtensionContributes {
@@ -442,6 +463,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
         return ExtensionContributes(
             connectors = fields.connectors,
             voice = fields.voice,
+            transcription = fields.transcription,
             computer = fields.computer,
             browser = fields.browser,
             iphone = fields.iphone,
@@ -475,6 +497,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
         val fields = ExtensionContributesKnown(
             connectors = value.connectors,
             voice = value.voice,
+            transcription = value.transcription,
             computer = value.computer,
             browser = value.browser,
             iphone = value.iphone,
@@ -507,16 +530,29 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
 
 /**
  * A skill (docs "Declarative contributions"): a directory of the package with SKILL.md, put in with the assistant's
- * skills.
+ * skills. With source data (docs "Assistant content from the data directory"): a directory of the extension's data
+ * directory whose subdirectories with a SKILL.md are skills its program writes (Markdown files only, 256 KB and 32
+ * skills per extension).
  */
 @Serializable
 data class ExtensionSkillItem(
     val id: String = "",
     /**
-     * The directory, relative to the package.
+     * The directory, relative to the package (or to the data directory with source data).
      */
     val dir: String = "",
+    val source: String? = null,
 )
+
+/**
+ * Where a skill's or a prompt's files are: package (the default) or data, the extension's data directory, which its
+ * program writes and upgrades keep.
+ */
+object ExtensionContentSource {
+    const val PACKAGE = "package"
+    const val DATA = "data"
+    val ALL = listOf("package", "data")
+}
 
 /**
  * Values of PromptKind.
@@ -524,21 +560,36 @@ data class ExtensionSkillItem(
 object ExtensionPromptKind {
     const val INSTRUCTIONS = "instructions"
     const val QUICK = "quick"
-    val ALL = listOf("instructions", "quick")
+    const val PROJECT_CONTEXT = "project_context"
+    const val INBOX_CONTEXT = "inbox_context"
+    val ALL = listOf("instructions", "quick", "project_context", "inbox_context")
 }
 
 /**
- * A prompt: instructions (a .md of the package added to the assistant's CLAUDE.md) or quick (a template the apps
- * offer in the message box).
+ * A prompt: instructions (a .md of the package, or with source data of the data directory, added to the assistant's
+ * CLAUDE.md), quick (a template the apps offer in the message box), project_context (a directory of the data
+ * directory whose <project slug>.md files go into a new Agent's project background) or inbox_context (a .md of the
+ * data directory added to the Inbox's triage and draft prompts).
  */
 @Serializable
 data class ExtensionPromptItem(
     val id: String = "",
     val kind: String = "",
+    val source: String? = null,
     /**
-     * instructions: the .md file.
+     * instructions: the .md file (with source data: at most 6 KB, adopted at most once a day); inbox_context: the .md
+     * file (1 KB used).
      */
     val file: String? = null,
+    /**
+     * project_context: the directory of <project slug>.md files (1.5 KB of each used).
+     */
+    val dir: String? = null,
+    /**
+     * inbox_context: a text file of sentences, one a line, a draft must not repeat word for word (64 KB used); only
+     * checked, never in a prompt.
+     */
+    @SerialName("never_quote") val neverQuote: String? = null,
     /**
      * quick: what the apps show.
      */
@@ -857,7 +908,7 @@ data class ExtensionConnectorItem(
 )
 
 /**
- * A contribution with only an id and a name: voice, computer, browser.
+ * A contribution with only an id and a name: voice, transcription, computer, browser.
  */
 @Serializable
 data class ExtensionNamedItem(

@@ -8,7 +8,8 @@ import { join } from 'node:path'
 // The keys of persona_start's options passed on to query() (docs: CONTRACT §3). Anything else is dropped and named
 // (only the name) on stderr: a typo must not silently become a CLI default.
 export const OPTION_KEYS = new Set([
-  'model', 'cwd', 'resume', 'sessionId', 'permissionMode', 'allowedTools', 'tools', 'mcpServers', 'plugins', 'settings',
+  'model', 'cwd', 'resume', 'sessionId', 'permissionMode', 'allowedTools', 'tools', 'mcpServers', 'strictMcpConfig', 'plugins', 'settings',
+  'guestMcpServers',
   'pathToClaudeCodeExecutable', 'includePartialMessages', 'effort', 'extraArgs',
 ])
 
@@ -116,9 +117,11 @@ export function userMessage(line) {
   return { parent_tool_use_id: null, ...line }
 }
 
-// The control requests the node sends (node/modes.go syncAssistantModes, and interrupt), each to its Query method.
+// The control requests the node sends (node/modes.go syncAssistantModes, interrupt, and the background-task list a
+// model switch needs: node/assistant_tasks.go syncSDKTasks), each to its Query method.
 const CONTROLS = {
   interrupt: (q) => q.interrupt(),
+  persona_background_tasks: (q) => q.persona_background_tasks(),
   set_permission_mode: (q, r) => q.setPermissionMode(r.mode),
   set_model: (q, r) => q.setModel(r.model),
   apply_flag_settings: (q, r) => q.applyFlagSettings(r.settings ?? {}),

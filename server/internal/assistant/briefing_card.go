@@ -50,6 +50,15 @@ func (s *Service) briefCard(f *briefFacts, label, answer string) (card *feishubo
 	}
 	room := briefBudget{bytes: reportCardMaxBytes - briefTailBytes - len(c.JSON()), els: reportCardMaxElements - briefSpareEls - len(c.Body.Elements)}
 
+	// The north star first: the report opens with it (north_star.go).
+	var star []briefBlock
+	for _, line := range f.NorthStarLines {
+		star = append(star, briefBlock{md: feishubot.EscapeMarkdown(line), plain: line})
+	}
+	if len(star) > 0 {
+		room.section(c, &plain, l, i18n.T(l, "assistant-north_star.heading"), star, len(star))
+	}
+
 	var confirmations []briefBlock
 	confirmations = append(confirmations, briefBlock{md: feishubot.EscapeMarkdown(f.Confirmations.summary(l)), plain: f.Confirmations.summary(l)})
 	for _, line := range f.ConfirmationLines {
@@ -134,6 +143,17 @@ func (s *Service) briefCard(f *briefFacts, label, answer string) (card *feishubo
 			working = append(working, briefBlock{md: md, plain: fmt.Sprintf("%d. %s", i+1, clip(oneLine(p.Title), 60))})
 		}
 		room.section(c, &plain, l, i18n.T(l, "assistant-briefing.head_progress", i18n.Args{"n": f.ProgressTotal}), working, f.ProgressTotal)
+	}
+
+	// The recommended setup, on the week's first briefing when the numbers name something (setup_suggest.go): what each
+	// mechanism would have removed, its cost and where it is turned on. Nothing is turned on from here.
+	if f.Setup != nil && len(f.Setup.Suggestions) > 0 {
+		intro := i18n.T(l, "assistant-setup_suggest.intro")
+		setup := []briefBlock{{md: feishubot.EscapeMarkdown(intro), plain: intro}}
+		for _, sg := range f.Setup.Suggestions {
+			setup = append(setup, briefBlock{md: feishubot.EscapeMarkdown(sg.Text) + briefLink(l, sg.Link), plain: sg.Text})
+		}
+		room.section(c, &plain, l, i18n.T(l, "assistant-setup_suggest.heading"), setup, len(setup))
 	}
 
 	c.Note(i18n.T(l, "assistant-briefing.note", i18n.Args{"time": f.clock(f.At)}))

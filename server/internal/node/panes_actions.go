@@ -224,6 +224,9 @@ func (n *Node) runAgentInPane(ctx context.Context, pane, launcher string) (*prot
 	if launcher == "" {
 		return nil, errors.New("launcher is required")
 	}
+	if _, err := terminalLauncher(launcher, ""); err != nil { // an app's launcher (claudedesktop_new.go)
+		return nil, err
+	}
 	p, err := n.listedPane(ctx, pane)
 	if err != nil {
 		return nil, err

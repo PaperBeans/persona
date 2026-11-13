@@ -7,7 +7,11 @@ import Observation
 @Observable final class LauncherPresetModel {
     struct Deps {
         var api: () -> APIClient?
-        static var live: Deps { .init(api: { AppModel.shared.api }) }
+        static var live: Deps {
+            let app = AppModel.shared
+            let scope = AssistantSettingsRequestScope(app)
+            return .init(api: { scope.api(app) })
+        }
     }
 
     private(set) var presets: [LauncherPreset] = []

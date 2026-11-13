@@ -52,10 +52,13 @@ type ModelUse struct {
 
 // ModelPurpose is one purpose (a category, or a use under one) with what it runs on.
 type ModelPurpose struct {
-	ID            string       `json:"id"`
-	CategoryID    string       `json:"category_id,omitempty"`
-	Uses          []ModelUse   `json:"uses,omitempty"`
-	Name          string       `json:"name"`
+	ID         string     `json:"id"`
+	CategoryID string     `json:"category_id,omitempty"`
+	Uses       []ModelUse `json:"uses,omitempty"`
+	Name       string     `json:"name"`
+	// Description is what the use is for, in a sentence in the request's language (#5086): wording only, it names no
+	// model and changes no binding. Built-in uses have one; a scheduled task's own, an extension's and a plugin's do not.
+	Description   string       `json:"description,omitempty"`
 	Group         string       `json:"group"`
 	Kind          string       `json:"kind"`
 	Launch        string       `json:"launch,omitempty"` // derived from the purpose, never stored or edited
@@ -94,9 +97,10 @@ func (p ModelPurpose) launch() string {
 
 var modelCategoryIDs = []string{"assistant", "agent.new", "kb", "inbox.triage", "agent.delegate"}
 
-// The catalog also includes the opt-in overrides of Agents (agentsOverride), in the order of Agents' uses;
-// category-default assignment must not write them.
-var modelConfigIDs = append(slices.Clone(modelCategoryIDs), purposeAgent, purposeLarkAgent)
+// The catalog also includes the uses set apart from their category: the opt-in overrides of Agents (agentsOverride),
+// in the order of Agents' uses, then the background supervisor's (#5806), last so the rows the apps drew before it was
+// listed keep their order; category-default assignment must not write them.
+var modelConfigIDs = append(slices.Clone(modelCategoryIDs), purposeAgent, purposeLarkAgent, purposeSupervise)
 
 // agentsOverride: a use of Agents the user may set apart, the AI twin (#4232) or Lark /agent. With nothing saved it
 // follows Agents; every other use follows its category only.
@@ -131,10 +135,23 @@ var modelPurposes = []ModelPurpose{
 	{ID: assistantwire.PurposeSubscriptionRecipe, Group: "group_processing", Kind: "api", Parent: "kb"},
 	// Answers to the questions asked in an attended meeting (meeting_ask.go): one call with no tools, from meeting material only.
 	{ID: purposeMeetingAnswer, Group: "group_processing", Kind: "api", Parent: "kb"},
+	// The next-message suggestion over an empty composer (suggest_next.go, #4644): one short call with no tools after a turn.
+	{ID: purposeSuggestNext, Group: "group_processing", Kind: "api", Parent: "kb"},
 	// Scheduled tasks (the morning briefing…) run in the assistant's directory with its instructions, memory and tools: they are the
 	// assistant's conversations, on the main chat's model, not new Agents (#1544; #697 had them under Agents, plain Claude Code
 	// by default, which is not logged in on every hub machine).
 	{ID: "schedule", Group: "group_assistant", Kind: "launcher", Parent: "assistant"},
+	// The background supervisor (supervise_background.go, #4927): the main chat's model until it is given its own, which
+	// may be a cheaper or a stronger one. In the catalog the apps list (modelConfigIDs, #5806): each app that asked for
+	// it by its own id draws it once, and one from before draws the row with the name sent here.
+	{ID: purposeSupervise, Group: "group_assistant", Kind: "launcher", Parent: "assistant"},
+}
+
+// ownModelRecord: a use under a category that keeps a record of its own, so it can be set apart from the category:
+// the opt-in overrides of Agents, a scheduled task's own use and the background supervisor's. With nothing saved it
+// follows its category.
+func ownModelRecord(id string) bool {
+	return agentsOverride(id) || isTaskPurpose(id) || id == purposeSupervise
 }
 
 // mc is a assistant-models text in l.
@@ -147,9 +164,14 @@ func purposeName(l i18n.Lang, id string) string {
 	return mc(l, "name_"+strings.ReplaceAll(id, ".", "_"))
 }
 
+// purposeDescription is what a built-in use is for, in a sentence in l (assistant-models desc_<id>).
+func purposeDescription(l i18n.Lang, id string) string {
+	return mc(l, "desc_"+strings.ReplaceAll(id, ".", "_"))
+}
+
 // localized is a built-in use's definition with its texts in l.
 func (p ModelPurpose) localized(l i18n.Lang) ModelPurpose {
-	p.Name, p.Group = purposeName(l, p.ID), mc(l, p.Group)
+	p.Name, p.Group, p.Description = purposeName(l, p.ID), mc(l, p.Group), purposeDescription(l, p.ID)
 	if len(p.Uses) > 0 {
 		uses := make([]ModelUse, len(p.Uses))
 		for i, u := range p.Uses {
@@ -198,8 +220,8 @@ func modelRecordKey(id string) string {
 }
 
 func modelRecordID(p ModelPurpose) string {
-	// The AI twin, Lark /agent, an extension's purpose and a task's own use have records of their own.
-	if p.CategoryID != "" && !agentsOverride(p.ID) && !isExtensionPurpose(p.ID) && !isTaskPurpose(p.ID) {
+	// The AI twin, Lark /agent, an extension's purpose, a task's own use and the background supervisor's have records of their own.
+	if p.CategoryID != "" && !ownModelRecord(p.ID) && !isExtensionPurpose(p.ID) {
 		return p.CategoryID
 	}
 	return p.ID
@@ -355,6 +377,14 @@ func (s *Service) voicePlugins(ctx context.Context) []assistantwire.VoicePlugin 
 	return res.Plugins
 }
 
+// viewAgent is the CLI a launcher runs, its name telling when it says none.
+func viewAgent(v LauncherView) string {
+	if v.Agent == "" && slices.Contains([]string{"codex", "traex", "agy", "omp"}, v.Name) {
+		return v.Name
+	}
+	return v.Agent
+}
+
 func (s *Service) modelProviders(ctx context.Context) []ModelProvider {
 	l := s.requestCtxLang(ctx)
 	out := []ModelProvider{}
@@ -379,8 +409,8 @@ func (s *Service) modelProviders(ctx context.Context) []ModelProvider {
 			apiName = "messages"
 		}
 		agent := v.Agent
-		if agent == "" && kind == "launcher" && (v.Name == "codex" || v.Name == "traex" || v.Name == "agy" || v.Name == "omp") {
-			agent = v.Name
+		if kind == "launcher" {
+			agent = viewAgent(v)
 		}
 		out = append(out, ModelProvider{ID: "launcher." + v.Name, Name: cmp.Or(v.DisplayName, v.Name), Kind: kind, Agent: agent, API: apiName, Model: v.Model, Machines: v.Machines, Hidden: v.Hidden, HasKey: v.HasKey})
 	}

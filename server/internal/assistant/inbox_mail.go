@@ -24,7 +24,9 @@ func (s *Service) collectMail(ctx context.Context, read *assistantwire.InboxMail
 	b.readSource("mail", "邮箱")
 	var changed []*InboxItem
 	for _, a := range read.Accounts {
-		changed = append(changed, b.applyMail(a, a.Messages, time.Now())...)
+		now := time.Now()
+		changed = append(changed, b.applyMail(a, a.Messages, now)...)
+		changed = append(changed, s.settleMailOffPage(ctx, a, now)...)
 		b.mu.Lock()
 		var unread []*InboxItem
 		b.each(func(it *InboxItem) {
@@ -79,6 +81,18 @@ func (s *Service) readMailBody(ctx context.Context, a assistantwire.InboxMailAcc
 	it.Context = fmt.Sprintf("邮箱 %s 收到的未读邮件（共 %d 封，下面是最新一封）：\n发件人：%s <%s>\n收件人：%s\n抄送：%s\n时间：%s\n主题：%s\n\n%s",
 		a.Email, len(it.Mail.UIDs), m.From.Name, m.From.Email, strings.Join(to, ", "), strings.Join(cc, ", "), m.Date, m.Subject, clip(text, 3000))
 	return true
+}
+
+// mailReadElsewhere is an open mail item whose mail is all read in another client, gone from the mailbox or past the
+// window, under b.mu: read, and done unless it needs the user. An FYI conclusion is still waiting for Got it: the
+// source is read, but the card is never filed before that explicit confirmation (#5471).
+func (b *inboxBook) mailReadElsewhere(it *InboxItem, now time.Time) {
+	b.roundWrite(it)
+	it.Read = true
+	g := currentSuggestion(it)
+	if it.Tier != TierAction && it.Tier != "" && (g == nil || g.Kind != SuggestConclusion) {
+		b.file(it, now, "read")
+	}
 }
 
 var replyPrefix = lazyre.New(`(?i)^\s*((re|fw|fwd|aw|回复|答复|转发)\s*[:：]\s*|\[[^\]]{1,30}\]\s*)+`)
@@ -156,13 +170,9 @@ func (b *inboxBook) applyMail(a assistantwire.InboxMailAccount, msgs []assistant
 			unseen = slices.DeleteFunc(unseen, func(m assistantwire.InboxMailSummary) bool { return held[m.UID] })
 		}
 		if len(unseen) == 0 {
-			// Read in another client: done unless it needs the user.
+			// Read in another client (or past the window): done unless it needs the user (mailReadElsewhere).
 			if open != nil && !open.Read {
-				b.roundWrite(open)
-				open.Read = true
-				if open.Tier != TierAction && open.Tier != "" {
-					b.file(open, now, "read")
-				}
+				b.mailReadElsewhere(open, now)
 				changed = append(changed, open)
 			}
 			continue

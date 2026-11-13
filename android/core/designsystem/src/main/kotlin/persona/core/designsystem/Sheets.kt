@@ -35,6 +35,11 @@ object MenuTokens {
     const val disabledSubtitle = 0.7f
 }
 
+/** [JActionSheet]'s preview: as many lines as iOS's conversation preview shows (`AssistantSidebar.row`). */
+object ActionSheetTokens {
+    const val previewLines = 6
+}
+
 /** One action in a menu or action sheet. */
 @Immutable
 data class JAction(
@@ -86,7 +91,7 @@ fun JSheet(
         sheetState = sheetState,
         shape = PersonaTheme.shapes.sheetShape, containerColor = container, contentColor = palette.ink,
         scrimColor = palette.scrim, tonalElevation = 0.dp,
-        dragHandle = if (!showDragHandle) null else ({ Box(Modifier.padding(top = 10.dp, bottom = 6.dp).size(36.dp, 4.dp).clip(CircleShape).background(palette.ink3.copy(alpha = 0.5f))) }),
+        dragHandle = if (!showDragHandle) null else ({ Box(Modifier.padding(top = 10.dp.dense, bottom = 6.dp.dense).size(36.dp, 4.dp).clip(CircleShape).background(palette.ink3.copy(alpha = 0.5f))) }),
     ) {
         // Opaque over a scrim: glass inside the sheet must not sample (and show through) the page behind it.
         androidx.compose.runtime.CompositionLocalProvider(LocalReadingInset provides 0.dp, LocalGlassSource provides null) {
@@ -96,10 +101,10 @@ fun JSheet(
             .onSizeChanged {
                 if (skipPartiallyExpanded && sheetState.targetValue == SheetValue.Expanded) scope.launch { sheetState.expand() }
             }
-            .then(if (scrollable) Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()) else Modifier).padding(horizontal = contentPadding ?: pagePadding).padding(bottom = bottomPadding ?: 16.dp)) {
+            .then(if (scrollable) Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()) else Modifier).padding(horizontal = contentPadding ?: pagePadding).padding(bottom = bottomPadding ?: 16.dp.dense)) {
             title?.let {
                 Text(it, style = PersonaTheme.type.title, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(12.dp.dense))
             }
             content()
         }
@@ -107,25 +112,45 @@ fun JSheet(
     }
 }
 
-/** A long-press or overflow menu as a bottom sheet: easy to reach, room for a note under the actions. */
+/**
+ * A long-press or overflow menu as a bottom sheet: easy to reach, room for a note under the actions. [preview] is what
+ * the thing pressed last said, under the [title] and above the actions, with [previewCaption] (when) under it: iOS's
+ * context-menu preview of a conversation (`AssistantSidebar.row`).
+ */
 @Composable
-fun JActionSheet(actions: List<JAction>, onDismiss: () -> Unit, title: String? = null, note: String? = null) {
+fun JActionSheet(
+    actions: List<JAction>, onDismiss: () -> Unit, title: String? = null, note: String? = null,
+    preview: String? = null, previewCaption: String? = null,
+) {
     val palette = PersonaTheme.palette
     // When some actions have an icon, the others keep its place, so every label starts in one column.
     val iconColumn = actions.any { it.icon != null }
     JSheet(onDismiss, title = title) {
+        if (preview != null || previewCaption != null) {
+            Column(Modifier.padding(horizontal = Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+                preview?.let { Text(it, style = PersonaTheme.type.callout, color = palette.ink2, maxLines = ActionSheetTokens.previewLines, overflow = TextOverflow.Ellipsis) }
+                previewCaption?.let { Text(it, style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1) }
+            }
+            JDivider(Modifier.padding(vertical = Tokens.Space.s))
+        }
         Column(Modifier.weight(1f, fill = false).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
-        actions.forEach { action ->
-            if (action.separatorBefore) JDivider(Modifier.padding(vertical = 6.dp))
+        actions.forEachIndexed { index, action ->
+            if (action.separatorBefore || (action.section != null && index > 0)) JDivider(Modifier.padding(vertical = 6.dp.dense))
+            // A group's title, as [JMenu] draws it (the Agents page's Display), over its labels' column.
+            action.section?.let {
+                Text(it, style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = Tokens.Space.s + if (iconColumn) Tokens.Size.iconS + Tokens.Space.l else Tokens.Space.flush,
+                        end = Tokens.Space.s, top = MenuTokens.sectionPadding, bottom = MenuTokens.sectionPadding).semantics { heading() })
+            }
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(PersonaTheme.shapes.controlShape)
+                Modifier.fillMaxWidth().heightIn(min = 52.dp.row).clip(PersonaTheme.shapes.controlShape)
                     .clickable(enabled = action.enabled, role = Role.Button) { onDismiss(); action.onClick() }
-                    .stableAlpha(if (action.enabled) 1f else 0.4f).padding(horizontal = 8.dp),
+                    .stableAlpha(if (action.enabled) 1f else 0.4f).padding(horizontal = 8.dp.dense),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val color = if (action.destructive) palette.danger.text else palette.ink
                 val icon = action.icon
-                if (icon != null) { JIcon(icon, null, size = 22.dp, tint = if (action.destructive) palette.danger.dot else palette.ink2); Spacer(Modifier.width(16.dp)) }
+                if (icon != null) { JIcon(icon, null, size = 22.dp, tint = if (action.destructive) palette.danger.dot else palette.ink2); Spacer(Modifier.width(16.dp.dense)) }
                 else if (iconColumn) Spacer(Modifier.width(22.dp + 16.dp))
                 Text(action.label, style = PersonaTheme.type.body, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 if (action.checked) JIcon(persona.core.designsystem.icons.PhIcons.Check, null, size = 18.dp, tint = palette.ink)
@@ -133,8 +158,8 @@ fun JActionSheet(actions: List<JAction>, onDismiss: () -> Unit, title: String? =
         }
         }
         note?.let {
-            Spacer(Modifier.height(8.dp))
-            Text(it, style = PersonaTheme.type.caption, color = palette.ink3, modifier = Modifier.padding(horizontal = 8.dp))
+            Spacer(Modifier.height(8.dp.dense))
+            Text(it, style = PersonaTheme.type.caption, color = palette.ink3, modifier = Modifier.padding(horizontal = 8.dp.dense))
         }
     }
 }

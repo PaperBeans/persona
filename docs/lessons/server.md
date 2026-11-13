@@ -1,5 +1,130 @@
 # Lessons: hub / node and networking
 
+## An update waits only for what its restart interrupts (2026-11-13, #6364)
+
+A node update counted every session on the computer as busy: working, background tasks, running subagents, questions on the phone. On a computer whose terminal Agents always run a background workflow it never went through, and the queued update survived hub restarts. The resident node restarts by exec in place and stops only its own headless conversations (`ResidentReload.Prepare`); terminal Agents are other processes and keep running. Before adding a wait in front of a restart, list what that restart actually stops and wait for that, as the hub self-update's `updateBusy` does. When the rule lives on both sides of a connection, gate the new rule on a capability: the hub's lighter wait in front of an old node's strict commit check would re-send the whole build on every refusal. And let the side that enforces the rule report its verdict rather than have the other side rebuild it from rows: the hub first rebuilt the node's check from `sessions.list` rows, but a node never marks its headless rows `Assistant` (the hub's assistant manager adds that later), so the hub saw a busy main chat as idle and re-sent the build until it settled. The node now answers `update_busy`.
+
+## A saved position that fails must be able to expire (2026-11-13, #6310)
+
+Paginated source subscriptions (#5990) commit the next page's cursor with each page, and a failed run kept it, so every
+retry asked for the same page. A page token that expired between pages (a manager restart, a connector outage, a long
+backoff) is refused every time: the subscription failed for days while a call without the cursor answered fine, and
+only editing the recipe got it out. Before pagination a failed run simply pulled again. Any resumable position (a
+cursor, an offset, an upload id) needs a way back to a fresh start that does not depend on the user: here a page
+that fails in two runs in a row is dropped and the pull starts again from the window's start, the dedup keys holding
+back what was delivered, while one transient failure still resumes. Test a position that goes bad between runs, not
+only one that stays good across a restart.
+
+## A name taken from a counter of attempts is not a free name (2026-11-13, #6024)
+
+The hub edge named each new slot by alternating on a counter of slots started (`'a' + slots%2`), assuming every
+start replaces the slot before it. A failed standby does not: after one, the next standby got the serving slot's own
+name and so its socket paths (`slot-<name>-<port>.sock`), and when that standby failed too, the edge's clean-up of
+"its" sockets deleted the serving slot's. The old hub kept running, the edge could no longer dial it, and every
+connection waited `HoldMax` and was closed, with nothing exiting for the service manager to restart. Self-update
+retries a version that failed in standby at the next hourly check, so two failed attempts were enough. Name a
+resource after what is in use now (the slot that served last), not after how many attempts were made, and let a
+process's clean-up remove only what it made: the edge notes any socket file already at a slot's path when it starts
+it and leaves that file alone. A test of one failed switch passed for this reason; test failures in a row.
+
+## A new file in the knowledge base is searched unless `searchable` says otherwise (2026-11-13, #5991)
+
+Search reads every `.md` and `.json` file of the data dir it is not told to skip, profile files before any message
+day, and every file under a `messages/` directory as a day. Live ingestion's receipts (`chats/<id>/.receipts.json`,
+the source and every message id and time on one line) were documented as "not searched" but never added to
+`searchable` (`server/internal/kb/find.go`), nor were the ingestion intent (`.ingest.json`) and a chat's zone marker
+(`messages/.zone`). A query of digits, a date or the source's name matched the receipts of every chat and filled the
+limit before any message was read; Chinese queries looked fine, so nobody noticed. Whoever writes a new bookkeeping
+file into the data dir adds it to `searchable` in the same change and checks it with a search over real ingested
+chats that asks for digits and ASCII words, not only with a fixture line that names the file.
+
+## An app connection's read loop must not wait for a node (2026-11-13, #5915)
+
+`subscribe` and `unsubscribe` called the node (`session.watch` / `session.unwatch`, up to 10 s each) from the app
+connection's only read loop, and the cleanup after a disconnect did the same for each session in turn. While such a
+call waited, nothing else the app sent was read: its `ping`, a phone tool's `tool_result`, terminal keys, and the pong
+of the hub's own protocol ping, so the hub closed a healthy app with `pong_timeout`. No faulty component is needed:
+for 30 s after a manager restart a call for a computer still shown online waits for its node to come back
+(`waitWarm`), and that is when every app subscribes again. One open with a ping behind it took 9.51 s; an open and a
+leave across the hub's ping closed the socket 37 s after it connected.
+
+In the read loop, change only what the hub keeps (the subscription and its count), in the order the messages came,
+and call the node from a goroutine. That is safe because the call is decided by state, not by the message:
+`syncWatch` takes the session's turn (`watchLock`) and looks at the subscriber count when its turn comes, so the
+goroutines may run in any order. The count cannot move to the goroutine too: a leave that ran ahead of its join would
+find nothing to take away, and the join would stay counted for good. What must keep its order with the app's other
+messages (terminal keys) is a one-way `notify` written in place, never a call.
+
+Test it by keeping the node's answer back, waiting until the call is at the node, and then checking that a message
+sent behind it is taken: the fix is told apart by whether the hub reads, not by how long something took. Run the
+scenario through the manager as well, where the wait is the manager's own
+(`server/internal/hub/subscribe_readloop_test.go`). As of this change `fs_watch` still calls the node from the read
+loop (`fsWatchSet`, up to 10 s).
+
+## A Go file named after a platform builds only there (#5563)
+
+Go reads a file name's last `_<word>` (before `_test`) as a build constraint when the word is a GOOS or GOARCH:
+`selfupdate_android_test.go` compiled only for `GOOS=android`, so `go test ./internal/hub/` passed without running its
+tests. Name feature files so they do not end in `_android`, `_ios`, `_linux`, `_darwin`, `_windows`, `_js`, `_wasm`
+and the like (`selfupdate_androidsync_test.go`; `android.go` alone is fine), and check a new test file with
+`go test -list <name>` or `-v`: "no tests to run" for a test you just wrote means it was never compiled.
+
+## Resident exec must drain replies before closing transport (#5277)
+
+Stopping idle assistant processes after Attach closes spends the node's reconnect grace on SIGTERM/SIGKILL waits.
+Drain and reap them while the old transport still serves, then retain the Unix listener and run-lock descriptors across exec.
+The listener keeps the socket inode and accept backlog, not the active RPC connection or process-local assistant keeper.
+A same-PID descriptor ticket must be consumed before children start; protect the close-on-exec change with the fork lock.
+
+A handler returning is not proof its reply reached the manager. Hold admission through the reply write, announce reload,
+suspend new outgoing manager calls, and acknowledge an ordered state.load barrier only after preceding pending replies drain.
+Retry only explicit before-execution refusals and known-unsent calls; never replay an ambiguous dropped write.
+A failed barrier must resume calls and clear its reload window, and an old peer must not change a new peer's state.
+Context cancellation cannot interrupt an arbitrary writer already in progress: close an unconfirmed announcement's physical peer so a late event cannot
+suspend a surviving manager. Publish a received reply before removing its pending entry, and prefer it over a simultaneous close.
+Legacy images cannot consume a retained run lock: require their explicit handover support before install/ordinary reload; startup rollback releases both fds.
+Measure actual RPC waiting separately from signal-to-readiness: preflight and idle-process drain can take time while requests
+still succeed. Online flags and successful retries alone do not prove uninterrupted blue-green transport.
+
+## A preference clients report is not "the last one wins" (#5238)
+
+The user language was whatever full-role client sent `client_hello.locale` last. An English test simulator paired with
+a real hub, or simply an English Mac next to a Chinese iPhone, flipped it at every reconnect, and with it the Inbox
+summaries, folder names, the assistant's answers and pushes. Connecting is not choosing: remember what each device
+last reported and take only a device's own change (`server/internal/hub/locale.go`, `docs/protocol/i18n.md` "Protocol:
+telling hub the language"). Apply the same rule to any hub-wide value inferred from what several devices report.
+
+## Extension feature strings are not transport authority (#5258)
+
+Old hubs merge extension reports into `hello.features`. A new client cannot trust a newly reserved receipt type merely
+because that array contains its name: an older manager can declare both the feature and an unreserved event. Reserve the
+hub's event against manager broadcasts, and advertise its transport version in a dedicated hub-owned hello field that
+old report merging cannot manufacture. Bind trust to the current authenticated connection and clear it on reconnect or
+credential changes; cached UI capabilities are not live socket proof. Test both old feature injection and old-socket frames.
+
+## Authority handover must include the trusted keeper roster (#5228)
+
+A machine its manager keeps has moved out of hub.json, but its hub-owned keeper
+record still authorizes routing. Building sharing authority from cfgEntries alone
+leaves that manager's authority map empty while per-request routing produces a
+valid authority: creation skips as authority_stale and persists no receipt.
+Use knownEntries for this authority handover, retain entryOwner and database
+routing checks, and leave the separate machine-config handover alone. A manager's
+report is not a keeper record. Test a kept machine through the real handover, not
+only by injecting a matching authority map into both sides of a fixture.
+
+## A creation reply is not a durable receipt (#5215)
+
+A successful runtime reply and `ownership_unbound` do not reveal whether the
+manager prepared an intent, the node emitted its receipt, or the database accepted
+its state. Trace each boundary with bounded session IDs and fixed outcome codes;
+compare prepared/returned identities in memory without logging them. A one-way
+notification's successful write is not a database acknowledgement. Log its failure
+without raw error text, which may contain private input, and preserve existing
+reconnect handling. Missing diagnostics from an old node or inaccessible stream
+are not evidence of a missing receipt. Keep the actual-node callback regression
+separate from the HTTP/manager/stub-node durable integration test.
+
 ## Virtual-file sizes and EOF (#4425)
 
 Some Linux sysfs attributes report a stable page-sized length even when their readable contents are shorter. A short
@@ -68,6 +193,12 @@ The web production build typechecks test files. A JSON fixture imported from `sp
 `.dockerignore` exception and a `COPY` into the web stage at the same relative path. A native build sees the
 whole checkout and can pass while the Docker build fails with TS2307. The Docker entrypoint suite now checks
 shared JSON imports, including globs, against both files, catching new fixture groups before an image build.
+
+Checking was not enough (2026-11-12, #5197): PRs run no hosted CI, so #4968 merged a test reading
+`spec/fixtures/forward/` with neither line, and every image build from `main` failed, the fourth time after #2666,
+#2517 and #4260. The image now carries all of `spec/fixtures/` (about 2 MB, web stage only) with one exception and one
+`COPY`, and the guard checks that no per-folder lines come back. A fixture-only change now rebuilds the web stage; that
+cost is smaller than a broken image. When something has to be listed by hand in two files, prefer a rule that needs no list.
 
 ## Sharing frontiers and migration lanes (#3604)
 
@@ -299,6 +430,10 @@ A custom `http.Transport.DialContext` conservatively disables Go's automatic HTT
 `update.SwapProgram` recorded `Prev: ""` when copying the old program to `.prev` or putting the new build in place failed, and `Prev: ""` is how a swap says the program was new, so going back deleted a program the failed swap had never touched.
 A failing step reports what it actually changed: `copyFile` writes `.new` and renames, so a failed swap changed nothing (the zero `Swapped`, which `RestoreAll` skips) or only wrote `.prev` (putting that back is harmless).
 Don't add a `pending.json` field for it: older edges and watchdogs read the same file and know only `Prev == ""`.
+
+## Test a staged node before stopping the resident one (#5097)
+
+A completed gzip stream and `chmod 755` prove that bytes arrived, not that the target machine can execute them. The SSH deploy therefore runs the staged binary's `version` command before the atomic rename and before `pkill`: an `exec format error` or another failed self-test removes `.new`, preserves the installed binary, and leaves the working node running. Package selection still validates GOOS / GOARCH through Go build info; the remote self-test is the final target-side guard, not a duplicate package check. Exercise this boundary through the real login-shell deploy script with an isolated HOME and a fake `pkill`, never by replacing or stopping a development machine's resident node.
 
 ## Migrating a long-poll channel without duplicate consumers (#2020)
 
@@ -900,6 +1035,14 @@ back) and only keeps the entry. Tell them apart by git's `CONFLICT` lines plus `
 
 ## Knowledge base (docs/assistant/knowledge.md)
 
+- An ascending GitHub search cursor cannot use `updated_at` alone when a page ends inside one second (#4461). Keep the
+  completed thread identities at that boundary, resume an unfinished thread across restarts, and rescan a tied boundary
+  instead of trusting a page number across reordered results. Checkpoint matching-generation scans across quota windows,
+  verify every ID again immediately before moving on, and retry a changing search. More than 1,000 threads in one second,
+  or repeatedly lacking enough quota for that final check, is an explicit retryable limit. Search has no atomic snapshot:
+  a result indexed only after the final check cannot be guaranteed. Test the actual connector against synthetic HTTP,
+  including insertions, reordering, cancellation, repeated limited quota windows and retries.
+
 - A Messages ROWID can be associated with more than one chat (#4440). Deduplicate by canonical conversation and ROWID,
   before page and search limits, and count unread messages by that same identity. A numeric changes cursor can only
   advance after every selected ROWID's associations are read; select the boundary and expand it in one SQLite snapshot,
@@ -910,7 +1053,7 @@ back) and only keeps the entry. Tell them apart by git's `CONFLICT` lines plus `
 
 - Deleting a connector is broader than deleting an archive namespace (#1836): include its alternate chat sources, posts and items, plus indexes and project references. Record the connector at ingestion, separately from a chat's namespace, and stamp item ownership before the unchanged-item fast path. Never infer legacy ownership from an item ID, title or a shared archive alias; use explicit provenance or a known source chat, leaving ambiguous records intact. Deletion tests need another connector's records, shared aliases and unowned legacy data, not only a single source.
 - A connector's knowledge-base switch must gate every ingestion path (#1835): conversations, items (documents, meetings and events), document-title lookups and program-initiated posts. Filtering the source list alone leaves direct calls open after a switch changes. Check both the feed and the main switch at the call boundary too; a shared extension process may keep running after its connector is disabled. `Registry.Feeds` does not include `Registry.Enabled`. Test both switches independently, with a connector that still answers calls, and assert that neither source reads nor post forwarding occur while off.
-- An archive switch must fence the commit as well as the source read (#4500). A response can already have crossed the manager boundary when the user turns the source off. Admit each page under a source generation, reserve the write and cursor together, retire the generation on off, and wait for already reserved commits before reporting success. A failed write can leave a journal that publishes data during recovery: settle it before releasing the reservation. Treat a lost reservation acknowledgement and an unreadable reservation record as uncertain, preserve them across source-manager restart, and test off/on, failure, cancellation, multiple pages and both local and bus adapters. The guarantee needs one authoritative source manager and cannot cover legacy work that never used the protocol.
+- An archive switch must fence the commit as well as the source read (#4500). A response can already have crossed the manager boundary when the user turns the source off. Admit each page under a source generation, reserve the write and cursor together, retire the generation on off, and wait for already reserved commits before reporting success. A failed write can leave a journal that publishes data during recovery: settle it before releasing the reservation. Treat a lost reservation acknowledgement and an unreadable reservation record as uncertain, preserve them across source-manager restart, and test off/on, failure, cancellation, multiple pages and both local and bus adapters. The assistant also needs its own durable begin/settle/end journal with the token, generation and exact source/chat pairs: a replacement must recover it before new reads, never clear unrelated reservations, and fail closed when it cannot be loaded (#4732). The guarantee needs one authoritative source manager and cannot cover legacy work that never used the protocol.
 - An asynchronous dedupe answer must recheck a user's split, record its verdict and merge under the same project-mutation lock as unmerge. The verdict-file mutex prevents lost JSON updates but cannot stop an already queued merge from reversing a completed split. A verdict write failure must stop the merge.
 - A checkpoint after append is a replay window (#1343): connector pages can repeat after a cursor failure, a later batch failure or a process interruption.
   Preserve stable message IDs scoped by exact source and chat, including IDs such as `body` reused across threads. Formatted-text matching loses distinct messages;
@@ -1341,6 +1484,14 @@ allowing concurrent "set key" to pair a key with an unintended address; and only
 checking/deleting under the same operation lock in `SetConfig` / `SetSecret`. Address changes delete unconditionally (idempotent); `SecretsSet` only decides response wording.
 For future safety-driven delete/reject decisions, don't rely on error-swallowing read APIs or split check-then-write in handlers.
 
+## One large message on the bus holds up everything behind it (2026-11-13, #6574)
+
+- The bus between the hub and a manager is one WebSocket: `rpc.Peer` writes one message at a time, coder/websocket writes a message as one frame (it even compresses the whole message into a buffer first), and the reader decodes a whole line before it looks at the next. A 22 MB attachment inside `http.request` became a 30 MB line, and every other call to that manager (cards, to-dos, session lists, phone tools) waited until it was written. Compression makes the blocker smaller, not shorter-lived, and photos, PDFs and audio barely compress anyway.
+- On a slow link the same frame breaks the connection: the keepalive's ping waits at most 5 s for the frame lock (`writeControl`, hard-coded), so a frame that takes longer to drain drops the bus with every call on it, the upload included ("Heartbeat timeouts on slow links" below).
+- Move the bytes, not the request: `http.request_streamed` keeps the whole envelope (auth, caller, receipts, the answer) on the bus and sends only a large body on a relay of its own, in 256 KiB messages, read whole before the route runs. Nothing about the request's meaning changes, so there is nothing to keep in step but the body. A stream that fails is refused before anything ran, so the hub can send the request inline after it without running it twice.
+- Separate HTTP requests were never ordered by the bus (the hub reads each body before calling, the manager runs each call in its own goroutine), so a side stream breaks no order anyone relied on: a flow that needs one request after another waits for the first's answer.
+- Prove a stall with a control: `TestLargeBodyDoesNotHoldUpTheBus` throttles the manager's reads and measures a small call during a large upload both ways (3 ms streamed, 2.5 s inline). Without the inline run failing its own bound, a too-fast test link would pass for a fix.
+
 ## Heartbeat timeouts on slow links (2026-11-06, #3452)
 
 At about 30 KB/s from hub to a computer, its link repeatedly disconnected with "no pong within 5s", failing every message. Ping doesn't jump the queue: it follows bytes already given to TCP,
@@ -1585,7 +1736,7 @@ A connector that folds several notifications into one thread (GitHub CI failures
 ## Hot paths: re-reading every row of a list that barely changed, a catalog tried end to end (2026-11-09, #1986)
 
 - A list decorated again on every publish re-read every row's question (`transcript.AskOf` on the last words of each of 8,200 sessions). Keep the answer per machine and session with the text it was read from, and read again only when the text differs (`asksMemo`); a complete list drops the rows it no longer carries, a subset keeps them. Prove it with a table of lists that change between calls, each decorated warm and fresh.
-- To find out whether a list changed since it was last sent, compare its bytes as they are encoded (`changedWriter`), not after encoding them into a new slice: an unchanged list then costs no copy.
+- To find out whether a list changed since it was last sent, do not keep a copy of each list sent: keep its length and digest and encode into one reused buffer (`sentList`; #3197, "A digest instead of the last bytes, a mirror without the lists" below).
 - An allocation bound read from `runtime.ReadMemStats` counts every goroutine in the process: in a full package run, work other tests left behind pushed the smallest bounds over. Run such a test in a process of its own (`isolated` in `assistant/profile_bench_test.go`, `isolatedSessionAllocation` in `hub/sessions_push_test.go`, #2050). Repeated garbage collection clears pools but does not stop unrelated goroutines; a synchronized allocation in another goroutine is still included in the measured callback's `TotalAlloc` delta. Rerun the whole test in the child, preserving its fixtures, functional assertions, collection cadence and allocation ceilings. Bound and reap the child, propagate its failures, and verify a child receipt rather than treating an early return as isolation. Check the source revision before attributing two failures to the same missing guard: a newer revision may already isolate one of them.
 - The race detector's instrumentation allocates too: under `-race` a decorated copy of 8,200 sessions measured about 89 MB against its 13.7 MB bound. Every such test starts with `if raceEnabled { t.Skip("race instrumentation allocates") }`, before `isolated`, so the parent skips without starting a child (`raceEnabled` comes from `assistant/race_test.go`). Two budgets written without it kept `go test -race ./internal/assistant/` red, and no CI lane runs `-race` to notice (#4582).
 - A literal gate still checks every template of a catalog on a text that matches none (265 for `InboxText`): index the templates by the first byte of their first literal, and try the ones that start with a placeholder for every text (`i18n.templateIndex`).
@@ -1629,6 +1780,16 @@ A connector that folds several notifications into one thread (GitHub CI failures
 - permessage-deflate with context takeover costs each end about 0.85 MB of flate state while idle and, on the writing end, a frame buffer the size of the largest message; on loopback it saves nothing. The hub compresses only when the client offers it, so the hub's own manager (its child, or the built-in manager's service dialing the hub's local address) dials without it (`bus.Client.Uncompressed`) and every other client still offers it. A manager made in the app also runs with deploy `service`: decide by the identity and the address too, not by the deploy alone.
 - Over a real network the takeover is still not worth it (#3506): Persona Link streams kept the same 0.85 MB per end to send a sixth fewer bytes. All four stream ends now ask for no context takeover (`link.StreamCompression`): a replay of 180 s of 10 computers' node traffic took 2.64 MB on the wire instead of 2.18 MB at the same CPU, and an idle pair keeps about 40 KiB instead of 1.7 MiB. Either end asking for no context takeover decides it (RFC 7692, and coder/websocket honours it as acceptor and as dialer), so an old end paired with a new one saves on both; check every old/new pairing, not only new with new (`TestStreamCompressionInterop`). That mode leaves messages under 512 B uncompressed, so measure the wire bytes of a link that carries mostly small messages (the remote bus, mesh peers) before switching it.
 - A smaller first buffer sends the lines just past it through growth on every read (#3506): with `rpc.lineReader` at 16 KiB, a computer's session list of a few dozen rows (16-64 KiB) grew 16 -> 32 -> 64 KiB each time, and reading captured node traffic took 10% longer than with the 64 KiB start. Growing out of the first buffer straight to 64 KiB and not searching the bytes already searched for a newline (`seen`) read it as fast, and an idle connection keeps 18 KiB instead of 68 KiB. Measure the line lengths a reader really gets before choosing its sizes.
+
+## A large upload on its way: read by doubling, encoded three times, decoded twice, kept for minutes (2026-11-12, #3199)
+
+- One 22.4 MB request body relayed to the manager cost the slot 107 MiB of allocation and the manager's route 85 MiB to decode; the slot went from 45 to 180 MB resident and the manager from 56 to 192 MB, and an idle pair still held it all a minute later. `io.ReadAll` grows its buffers by half again and copies them into a final one (49 MiB): with the Content-Length known and within the limit, read into a buffer of exactly that size through the same `MaxBytesReader` (21 MiB), and give anything that differs (more bytes, fewer, an error) the results `io.ReadAll` gives, compared case by case (`TestReadRelayedIsReadAll`).
+- An encoder given a struct with a `[]byte` field writes the base64 into a pooled buffer and copies it out; the envelope's encoder then checks and copies it again, and json keeps the grown buffer in its pool until the second collection (30 MB in the slot). When the large field is the struct's last and has nothing to escape, encode the rest without it, drop the closing brace and append the field straight into the line (`rpc.Appended`, `httpParams`: 58 to 28 MiB and a third of the time per call), sized up front so the frame budget is checked before anything is built. Pin the field order with a test of its own (`TestHTTPRequestBodyIsLast`).
+- A line built by hand must come from the encoder the value would go through, and its oracle must be the code that writes the line today. The first version made the head with `json.Marshal` and one test compared with `json.Marshal` too; meanwhile #2907 had stopped `Call` from escaping `< > &`, so every query with an `&` would have gone out as other bytes, and only the test that compares with a real `Call` of the whole value saw it (`TestHTTPParamsAreJSONMarshals`). `rpc.Marshal` is that encoder; a copy of the old code as oracle proves what the code was, not what it is.
+- In Go 1.27 `encoding/json`'s `Decoder` is jsontext underneath but hides a `*bytes.Buffer` from it, so a body already in memory is read again through growing buffers (85 MiB for 22.4 MB). Decoding the bytes where they are takes what `Decode` does by hand: `jsontext.NewDecoder(bytes.NewBuffer(b), json.DefaultOptionsV1()).ReadValue()` then `jsonv2.Unmarshal` with the same options (21 MiB: the decoded strings). Its errors are not always the Decoder's words, so on any error put the value back to zero and decode the same bytes the old way (`decodeLargeBody`); without `DefaultOptionsV1` field names stop matching case-insensitively, duplicate keys and invalid UTF-8 are refused, which the equivalence table catches (`TestDecodeLargeBodyIsDecodeBody`).
+- After the request nothing allocates in an idle process, so no collection runs (`GODEBUG=gctrace=1` shows none in the minute after) and the pages stay. `debug.FreeOSMemory` a second after a body of 8 MiB or more returns them (`memtrim`); the second lets the request's own buffers become garbage first. A rate limit the first body claims leaves a second upload inside the window with nothing: schedule instead. Each body asks for a trim a second after it, trims run 30 s apart at the closest, and one asked for inside the window gets the next turn (`TestEveryLargeBodyGetsATrim`, on a clock moved by hand).
+- Fewer bytes allocated is not a lower peak. The manager's route allocates 64 MiB less, and its peak stayed (192 to 188 MB): what sets it comes before the route, the bus line read by doubling (64 MiB for a 30 MB line) and the envelope's `json.RawMessage` copying the params once more (30 MB), and the last collection before the peak runs at the same heap size either way. Measure the process end to end (`scripts/diag/relay_body_rss.py`), beside the function's benchmark.
+- RSS means different things per system. On Linux the runtime returns pages with `MADV_DONTNEED` and RSS falls at once. On macOS it marks them reusable: the physical footprint (Activity Monitor's Memory, `proc_pid_rusage`) falls at once, RSS only when the kernel takes the pages; and when the Mac is short of memory it compresses an idle process's pages, so RSS falls though nothing was given back (an unchanged build went from 192 to 70 MB by itself in one round of three). Compare builds by RSS and `VmHWM` on Linux and by the footprint on macOS.
 
 ## Hot paths: a node list copied three times, a list marshalled only to be compared (2026-11-10, #2826)
 
@@ -1831,12 +1992,52 @@ On TestFlight 224 an extension's **Review** spun for two minutes and then failed
 - `proto.Session` is copied row by row all over the hub, the manager and the node, and the allocator rounds every allocation up to a size class. #3897 added two fields (40 bytes) and took the struct from 1,528 to 1,568 bytes. A row copied on its own went from the 1,536-byte class to 1,792 (+256 B), every list copy grew by 40 B a row plus page rounding, and four allocation budgets in the assistant failed at once, none of them near the change. The readers copied no more rows than before.
 - When a budget is over by one size-class step per row it keeps, or by rows × a few bytes, compare the row type's `unsafe.Sizeof` at both commits before hunting for new copies.
 - Make room before raising a budget. The 17 bools sat in 10 separate words, 63 bytes of padding; moving bools beside other bools brought the row back to 1,528 bytes without dropping a field. Reordering fields reorders the reflect encoder's keys, so `appendSession` and `sessionWireLayout` follow, and byte goldens change only in key order (check that every line decodes to the same object). `TestSessionFitsItsSizeClass` now fails in `proto`, listing the bools that sit alone, instead of in another package's budgets.
+- The same happens to a type built as one slice per pass (2026-11-12, #5188). #5150 added three fold fields to `sessionlist.Item` (208 to 240 bytes); the hub reads a machine's 150 items as one `[]Item` each pass, and 36,000 B is past the largest size class (32 KiB), so it took whole pages, 40 KiB, 8 KB more a pass. Moving the fields behind one pointer (`Item.Fold`, nil for a row without a hierarchy) brought it back to 216 bytes. Then allocate the pointer only where it is new: `return &fold` moves `fold` to the heap where it is declared, for every row, even on the paths that return nil; copy it in the branch that returns it (`go build -gcflags=-m` says `moved to heap`).
+
+## A fact about a directory does not go on every row in it (2026-11-13, #994)
+
+- #4637 put a project identity on each session (`inventory` on `proto.Session`, more attributes on `sessionlist.Item`) so the paged list could group a repository across computers. `Item` went from 200 to 328 bytes, a 150-row reindex allocated 17% more, two allocation guards failed, and it was reverted the same day (#4744). `proto.Session` is at 1,528 bytes with one spare byte, so a new string there costs every row copied anywhere 256 bytes.
+- A repository's remote is the same for every row in a directory and changes about never. The catalog (`server/internal/hub/sessions_catalog.go`) keeps it per directory instead: the index counts the filtered rows by machine and project in one scan when a client asks, and the hub asks each directory's computer what it holds (`git.status` with `identity_only`, which the nodes already answer), remembering the answer for 30 minutes. No row, item, push or page changed, and the allocation guards did not move.
+- Before adding a per-row attribute, ask what it is a fact about. If many rows share it through something they already carry (a directory, a machine, a space), keep it beside that key and look it up where it is shown.
+
+## What the port relay costs, hop by hop (2026-11-10, #3067)
+
+`server/cmd/vncbench relay` puts an echo server behind `…/ports/{port}/connect`. With everything on the hub machine
+(client, hub, manager, its own node) a small message's round trip is 1.6 ms, 0.8 ms more than a WebSocket ping to the
+hub, and a download runs at 88 MB/s: the hub, the bus, the manager and the stream mux are not where a live screen's
+latency goes. The hub → node leg (`ssh -T` over Tailscale on the LAN) is where it varies; plain `ssh host cat` shows the
+same spread, and the Mac's `sshd-session` already has TCP_NODELAY (lsof `-T f`: TF flag 0x4), so it is not Nagle.
+## A list of a few entries built the whole catalog to find them (2026-11-12, #3197)
+
+- `marketChannels` called `catalog("", "")` to list the channels the markets offer: every entry of every market with its
+  translations parsed, its permission lines written, every contribution decoded and its install problems checked, to
+  keep the one entry in 83 that contributes a channel. The assistant asks for the channel list every few seconds while
+  agents end turns: 3.6% of the manager's allocation and 4% of its CPU in a soak of 10 computers x 50 sessions, and
+  1.29 ms and 691 KB a call on a synthetic market of that size.
+- Test the cheap condition on the raw entry first (`len(e.Parsed.Contributes["channel"])`, then its items), and build
+  the ones that pass with the function the full list uses (`catalogItem`): 43 µs and 22 KB. Sharing the builder is what
+  keeps the two from drifting; a second, slimmer builder would have to track every later change to names, problems
+  and install state. It happened while this was in review: the catalog began to list the official market's entries
+  most downloaded first (#4909), and the channel list had to keep that order. The comparison with the old path caught
+  it once the test had an official market; the order is a named function both use (`officialCatalogOrder`), a total
+  order, so sorting only the entries kept gives the order the whole catalog has.
+- No cache, so nothing to invalidate when a market is refreshed, an extension installed or the language changed. A
+  cache would have saved the remaining 43 µs and cost a stale channel list on any missed invalidation.
+- Prove it against the old path kept in the test, over every kind of entry the filter tells apart (installed, no
+  package for the platform, a newer hub needed, a refused signature, an empty, null or malformed channel list, an id
+  another entry or the list already has), in every language (`TestMarketChannelsAreTheCatalogs`), and pin what the
+  table holds so that two empty lists do not pass.
 
 ## A child in its own process group outlives a node killed by `exec.CommandContext` (2026-11-11, #4259)
 
 - The manager ran the hub machine's node (`node --stdio`) with `exec.CommandContext` and the default `Cancel`, a SIGKILL. The node puts each assistant process in its own group (`Setpgid`, so `stop()` can end its background tasks), and nothing ties that group to the node: a SIGKILLed node leaves its conversations running. Before blue-green switching, the systemd restart's cgroup kill hid this; a switch keeps the unit, so the old Claude processes went on beside the ones the next node resumed for the same conversations, and the next node rightly refused them the assistant's tools.
 - A child that must not outlive its parent needs the parent to stop it, and the parent needs time to: end such a process the way its peer going away ends it (EOF on stdin) with a bounded grace before the kill (`cmd.Cancel`, `cmd.WaitDelay`), and have it stop its own children and wait for them before it exits. Stopping them in a goroutine is not enough: `Serve` returned and the process exited before the goroutine's SIGKILL fallback ran (`stopAndWait`).
 - A test that kills the parent and looks for the child catches both halves; one that only checks the parent's exit status does not.
+
+## Killing ssh must include its ProxyCommand (2026-11-13, #6251)
+
+- `exec.CommandContext`'s default `Cancel` kills only ssh. Its ProxyCommand stays alive and is adopted by the service manager; when that command holds a relay connection, it can compete with the replacement ssh connection for replies. `WaitDelay` only bounds pipe draining and does not kill the surviving child.
+- Start ssh in its own process group (`osproc.GroupAttr`) and override `cmd.Cancel` to stop its descendants, not only its own pid. On Unix stop the process group and, after `Wait` reaps ssh, call `osproc.SweepGroup` so a child forked concurrently with the signal cannot survive. On Windows `taskkill /T` loses the tree once its root has exited, so walk the remaining descendants in a process snapshot instead. Do not apply this to the hub machine's local node: that one still needs stdin EOF and its graceful-stop grace period. The regression test abandons a real `Machine.connect` handshake with ssh both running and already exited, and checks the ProxyCommand child's pid, not just ssh's exit.
 
 ## A field in `proto.Session` is paid on every copy (#4342)
 
@@ -1845,3 +2046,138 @@ The hub copies sessions by value (decorated lists, readers that keep rows), and 
 One `int` took a 1,528-byte `Session` to 1,536, and those readers went 5 to 12% over. Small fields fit in the padding instead
 (between the bools and the next 8-byte field): check the layout with `reflect` field offsets and keep the size unchanged.
 A new field type also needs wire samples in `session_wire_test.go`.
+
+## Fleet events: bytes checked again on the bus, every machine built to read one (2026-11-12, #3197)
+
+Measured with the fleet soak (`docs/operations/testing.md` "Fleet soak": 10 computers x 50 sessions, a change per
+computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a minute; the shares below are of those.
+
+- `publishList` and `tellLive` handed `Tell` the bytes `json.Marshal` had just written as `json.RawMessage`, so the
+  bus's envelope encoder checked, compacted and copied each list again: 9.6% of the manager's CPU. Bytes that are
+  `json.Marshal`'s go as `rpc.Marshaled`. Prove the wire, not the type: write every told value both ways and compare
+  the lines (`TestFleetEventsGoOutAsTheSameLine`), with HTML characters, U+2028, control characters and invalid UTF-8
+  in the rows, and a list that does not encode (a time past the year 9999), which still goes out as `null`.
+- An allocation ceiling taken with the GC off cannot see a copy that lands in a pooled buffer. Told either way, a
+  200-session list allocated the same 663 KB once json's encoder had grown its `sync.Pool` buffers; in a busy manager
+  a GC empties those pools every few lists. Take such a bound cold: two `runtime.GC()` calls before each run (the pool
+  has two generations) and none during it. The two ways are then 708,868 and 1,224,668 bytes, to the byte
+  (`toldAllocation`), and a second test keeps the old way failing the same limit.
+- A lookup that builds the collection pays for every element's derived fields. `fleetMachine(id)` built every
+  machine's summary (`Devices.List`: each one's trust from all its paths, whether it is reachable) to read one, several
+  times for each list a node sends: 5.2% of the manager's allocation. Ask the owner for the one (`Devices.Summary`,
+  8 bytes where the list of ten was 4,080), build it with the function the list uses, and compare the two in every
+  state the list can be in: before the first regroup, with absorbed and derived machines, and while the entries and
+  the listed order disagree (`TestSummaryIsListsEntry`).
+- The micro benchmarks did not show either share: the fake hub writes no bus line and the fake devices' list is free.
+  A benchmark of a path has to end where production ends (`lineHub` writes the line as `BusHub.Tell` does), and the
+  shares come from profiles of the real programs: the soak lays a sampler over `cmd/personad` at build time
+  (`go build -overlay`), so nothing in the shipped program changes to measure it.
+- CPU time per minute moved by a factor of two and more with the machine's state (an Apple Silicon Mac moves a
+  process between fast and slow cores; a whole run on the slow ones used 3.5 s a minute for the work that took 1.7 s
+  on a quiet minute before), while bytes allocated per minute stayed within 1.5% and repeated within 0.1% between
+  runs. Soaks run one after the other said -3%, +68% and +30% for three changes that each save CPU; even the same
+  function's samples cannot be compared across runs, since code that copies memory slowed 2.3 times where a `write`
+  slowed 1.06. Dividing by the hub's CPU time in the same minute helped, and was still 3 points apart between two
+  sessions. What worked was running the trees at the same time, each with its own hub, manager and database: every
+  minute is then the same machine for all of them, and the head's CPU time over the base's in the same minute came
+  out at 0.943 with every one of the 20 minutes below 1, the unchanged hub's at 0.983 (`pairedCPU`). Measure a noisy
+  quantity against a reference that sees the same noise at the same moment.
+
+## The manager read its own session lists through their JSON (2026-11-13, #3197)
+
+- With the fleet in the manager, `sessions.list` is answered in the same process (`localFleetDeviceCall`), but the
+  manager's own readers (`Service.sessions`, `workView.sessions`) still called it like a remote method: decorate the
+  machine's whole list, `json.Marshal` it, `json.Unmarshal` it again, often to read one row. Encoding and decoding was
+  75-87% of a read. Readers in the same process take the decorated rows themselves (`localSessions`); the rows share
+  their slices and pointers with the devices' list, which is safe only because nothing writes into a row's slices or
+  pointees (`localizeSession` copies before it writes; `Session.Hierarchy` is replaced, never written). Check that
+  before handing out rows in place, and prove the rows equal the answer's encoded (`TestInProcessSessionsAreTheListsRows`).
+- The list carries a row for every archive record of the machine the node no longer lists, and the records are never
+  removed, so a whole-list read grows for months even on a quiet machine. A reader of one row (a turn end, a wake, a
+  done task's agent) reads it alone (`decoratedSession`, `listedSession`; an archived row from its record by key,
+  `archivedRow`), and a pass over what runs reads only the node's rows (`listedSessions`): the archive's rows are
+  offline, and those passes skip offline rows. Prove each against the whole list's row with `reflect.DeepEqual`, folds
+  and archive rows included, and keep the apps' list pinned to the bytes the old code wrote
+  (`TestAppsSessionListUnchanged`, golden written on the base commit with `-update-session-reads`).
+- A subset never stores a fold (`foldInventory`): the fold depends on the archive's rows, so a list without them would
+  fold differently and the rows decorated alone (`foldSubset`) would pick it up. Only a complete list refreshes it.
+- A per-minute pass that walks finished tasks pays for every task ever finished, since their agent links are kept: look
+  each agent's row up (a missing row is a map lookup) rather than listing its machine.
+
+## A digest instead of the last bytes, a mirror without the lists (2026-11-13, #3197)
+
+- To tell a list only when it changed, `publishList` kept each machine's last `fleet.sessions` bytes for as long as the
+  manager ran: 3.6 MB of 36 MB live at 20 computers of 200 sessions. Keep the length and SHA-256 of the JSON instead
+  (`sentList`), encode every list into one buffer reused under the lock that orders the sends (`sentMu`), and copy out
+  only a list that is told: bytes handed to `Tell` must never be written again, and a test that keeps what the hub was
+  told catches a reused buffer at once. Prove it against a model of the old way step for step, with a list that does
+  not encode (a time past year 9999) and a reconnect (`TestSentDigestsTellWhatTheBytesDid`).
+- A mirror refreshed on every lookup pays for all it copies on every lookup: the extensions manager looks a computer
+  up for each port stream data, ack and close, and each lookup copied every computer's sessions out of
+  `Devices.Views` (6.3 MB at 20 x 200). Keep in a mirror only what most readers need, and let the rare readers ask the
+  owner (`Devices.FindSession`: a callback over the listed machine's rows in place, under its lock, no copy). Look the
+  machine up the way the mirror's ids were made (`listed`, the first in `machinesNow` with the id), not through
+  `machineByID`, which also resolves absorbed entries.
+- A field a refresh rewrites under a lock its readers do not take is a data race even when the value is the same:
+  the race detector flags the write. `extmgr.machinesNow` rewrote `Machine.cfg` under `m.mu` on every lookup while
+  about a hundred callers read `m.cfg.ID` and `m.cfg.Name` without it. Write identity fields once when the object is
+  made, and put the rare change (a rename) behind an `atomic.Pointer` read through accessors (`name()`, `sshHost()`).
+- To benchmark another package over the real type, export a fixture in `export_test.go` (seen only by the package's
+  tests) and write the benchmark in the external `_test` package, which may import a package that imports this one
+  (`devices_test` importing `extmgr`: `BenchmarkExtensionsPortStreamEvent`).
+
+## `http.DefaultTransport` drops a push connection after 90 s idle (2026-11-11, #4800)
+
+- The hub's relay client and `apns.Client` were `&http.Client{Timeout: …}` with no transport, so they ran on
+  `http.DefaultTransport`, whose `IdleConnTimeout` is 90 s. Two thirds of one hub's pushes came more than 90 s after the
+  previous one and paid a new TCP + TLS handshake (0.2-0.3 s to the relay; APNs wants one long-lived HTTP/2 connection).
+  Both now use `apns.NewTransport`: their own clone of the default transport with a one-hour idle timeout and HTTP/2
+  health pings (`http.HTTP2Config.SendPingTimeout` / `PingTimeout`).
+- A client that talks to one service often gets its own transport with the idle timeout chosen for that service. The
+  default one is shared with every other client in the process, and its 90 s fits none of them in particular.
+- Test connection reuse with `testing/synctest`: serve TLS on an in-memory `net.Pipe` listener (loopback sockets do not
+  let the bubble go idle), dial it from a clone of the client's real transport, count `http.StateNew` in the server's
+  `ConnState`, and move the gaps with `synctest.Sleep`. The transport's idle timer and pings then run on the fake clock
+  (`TestRelayPushesKeepOneConnection`, `TestSendsKeepOneConnection`). Register the server's and transport's shutdown
+  with `t.Cleanup`, or a failed assertion ends in a synctest deadlock panic.
+
+## `exec.CommandContext` cancels only while the process runs (2026-11-11, #4363)
+
+- `cmd.Cancel` runs only when the context ends before the process exits. A shell that exits at once and leaves a background child holding its stdout or stderr (`sleep 4 & echo $!`) keeps `Wait` reading the pipe until that child exits or `WaitDelay`, counted from the shell's exit, closes it: the deadline passes unnoticed. `secret.run` held a 1-second run for 4 seconds, and the next command, which could no longer start, came back as timed out.
+- Watch the context for as long as `Wait` runs and stop the group at the deadline, sharing one "stopped" flag with `Cancel` so the group gets one SIGTERM (`runSecretCommand`). Classify the result by that flag, not the exit status: the shell exited 0.
+- A command that never started because the time was used up gets no result. A timed-out result for it reads as a command that ran and was stopped, and makes the Agent check the computer for one that never ran.
+
+## An id the node makes up for a message ends up on its line (2026-11-12, #5225)
+
+- The node sent an assistant chat's messages to its agent runtime under a `client_msg_id` of its own, new on every call. The runtime protocol lets a runtime put the id it was sent with on the message's item, and the node forwards an item a runtime tied as it is (`echo.go`). So the line carried an id no app had, the app's pending bubble stayed beside it, and the message showed twice: the same failure as #5200, in another place.
+- Hand a message on with the id it came with, or with none. A made-up id deduplicates nothing either: it is new on every retry. A message without an id leaves its line without one, and the apps match it by its words.
+- In-repo runtimes (DSH, Antigravity) did not tie their lines, so nothing showed it. The test that does is a fake runtime that ties its line as the protocol allows (`TestAssistantOnARuntimeSendsTheMessagesOwnID`).
+
+## The hub tree's GOMAXPROCS: the hub's own children start capped (2026-11-12, #3533)
+
+- The edge, the slot and the built-in manager each kept a P per core: 25 to 30 threads each on a 64-core host, although they are I/O-bound like the node, which caps itself at 4 (#2590 above). A cap set with `runtime.GOMAXPROCS` at a process's entry comes too late for what its start-up already did with every P: the edge, capped at its entry, keeps 25 to 28 threads and about 10 MB anonymous, against 10 threads and 8 MB when it starts with `GOMAXPROCS=4`. Only a process started with the variable gets the whole saving.
+- So the edge caps itself in place (it holds the ports and is never run again) and starts the slot with `GOMAXPROCS=4` and a marker, `PERSONA_GOMAXPROCS_CAP=4`; the slot starts the manager the same way (`procs.ChildEnv`, `server/internal/procs/procs.go`). The marker says the variable is the hub's, not the user's: `procs.AtStart` takes both out, so the node, Agents and tools they start keep their own default, and keeps the cap for its own `ChildEnv`. A `GOMAXPROCS` the user sets has no marker: it wins and passes on unchanged.
+- Measured on a 64-core host, a fresh hub with one local node, 5 alternating rounds against main, paired differences (median [min..max]): tree anonymous memory -8,396 kB [-9,552..-7,620] (slot -3,628, manager -4,396, edge and node within noise), threads -33 [-36..-26] (slot 27 to 11, manager 28 to 11).
+- `/proc/<pid>/environ` is the environment a process started with, not what `os.Unsetenv` left: the slot and the manager still show the cap there. Check what a process hands on in its children's environ (the node's has neither variable).
+
+## A wait for a person takes its deadline from the card, not from the bus default (2026-11-13, #5907)
+
+- `callBus` gives up after two minutes when its context has no deadline. That suits a call a program answers. A call
+  that waits for a person is different, and nothing upstream of the hub gives a tool call a deadline: the MCP
+  process's own timeout is not carried over the socket, so `app.call` arrives without `timeout_ms`. A
+  `persona_settings` card good for 15 minutes was withdrawn after 2.
+- It was worse where the wait is relayed. For the manager's own settings the hub calls `extensions.hub_call`, which
+  was not in the hub peer's `Cancels`. The hub's deadline failed the tool call, the manager never heard of it, its
+  card stayed on the phone, and a later approval made the change after the assistant had been told it failed.
+- A call that waits for a card takes its deadline from the card: its `ExpiresAt` plus a margin when the card is the
+  caller's (`waitInteraction`), none of its own when the card is the other side's (`callBusAsIs`, as
+  `managerSettingsTool` does for a change). The margin lets the side that holds the card end it and say how.
+- Whoever may stop waiting on a call that holds a card says so (`Peer.Cancels`), and the side that holds the card
+  makes no change once its caller is gone: check `ctx.Err()` before a change that does not take the context (adding
+  a mail account). The answer and the caller's end can cross, and the queue still hands back an answer it had taken.
+- What the caller is told and what becomes of the card are one assertion: test both ends together. `protocol.md`
+  already said `extensions.hub_call` sent `rpc.cancel`; no test held the code to it.
+- The hub's real bus endpoint runs inside a `testing/synctest` bubble over a `net.Pipe` (`playManager` in
+  `server/internal/hub/settings_card_wait_test.go`), so fifteen minutes pass at once. Give the hub's end a loopback
+  address (the bus refuses plaintext from an address it cannot place), and let what the hub does after a hang-up
+  (`devicesGone` waits half a second) pass in a cleanup: the bubble's clock stops when the test's goroutine is done.

@@ -82,6 +82,16 @@ func (h *Hub) assistantRoutesRelayed(api *http.ServeMux) {
 			by = h.byTodo
 		}
 		var relay http.HandlerFunc = func(w http.ResponseWriter, r *http.Request) { h.forwardOwned(w, r, by) }
+		if pattern == "GET /api/v1/machines/{mid}/launchers/{name}/start-options" {
+			next := relay
+			relay = h.withMachine(func(w http.ResponseWriter, r *http.Request, m *Machine) {
+				if h.machineUntrusted(m.cfg.ID) {
+					writeErrCode(w, http.StatusConflict, "machine_pending", errors.New("Confirm this computer before starting a session."))
+					return
+				}
+				next(w, r)
+			})
+		}
 		if slices.Contains(storedTerminalTexts, pattern) {
 			relay = h.withoutTerminalControls(relay)
 		}
@@ -118,7 +128,7 @@ func (h *Hub) startConversationOnce() http.HandlerFunc {
 		if !ok {
 			return
 		}
-		r = withManager(r, id)
+		r = withManager(withHumanStart(r), id) // a person's own app: its first message is theirs (secret_handoff.go)
 		if h.busConnOf(id) == nil {
 			writeErrCode(w, http.StatusServiceUnavailable, assistantwire.CodeAssistantOffline, errAssistantOffline)
 			return
@@ -137,7 +147,8 @@ type assistantLink struct{ h *Hub }
 // "manager.json").
 func (l assistantLink) Hello(context.Context) (assistantwire.Hello, error) {
 	h := l.h
-	out := assistantwire.Hello{Locale: string(h.userLang())}
+	// SecretHandoffGate: this hub checks who approves a hand-off card (secret_handoff.go).
+	out := assistantwire.Hello{Locale: string(h.userLang()), SecretHandoffGate: true}
 	if m, ok := h.mutesEvent(); ok { // the hub's mutes, before the manager pushes anything (fleet_link.go)
 		out.Mutes = m.Mutes
 	}
@@ -151,7 +162,7 @@ func (l assistantLink) Hello(context.Context) (assistantwire.Hello, error) {
 			out.Assistant.WorkMachines = append(out.Assistant.WorkMachines, id)
 		}
 	}
-	out.PersonaView, out.HTMLViews = h.assistantCards()
+	out.PersonaView, out.HTMLViews = true, true // for a manager from before #5509, which still reads them
 	out.DoneDelayMS = taskSettleDelay(h.cfg.Notify).Milliseconds()
 	// The finished push's timings: the manager's to apply (fleet_push.go there).
 	out.Notify = assistantwire.NotifyTimings{DoneDelayMS: taskSettleDelay(h.cfg.Notify).Milliseconds(),
@@ -530,14 +541,14 @@ func (h *Hub) assistantConnected() {
 	}
 	h.managerConnected() // agents_link.go
 	h.fleetConnected()   // what of the apps it needs (fleet_link.go)
-	generation := h.assistantToolsGeneration()
 	if err := h.callBus(ctx, assistantwire.AssistantID, assistantwire.MethodTools, nil, &res); err != nil {
 		h.logf("assistant: tools: %v", err)
 		return
 	}
-	if !h.storeAssistantTools(generation, res.Tools) {
-		return
-	}
+	a := &h.assistant
+	a.toolsMu.Lock()
+	a.tools = res.Tools
+	a.toolsMu.Unlock()
 }
 
 // ---- on the bus: what the hub asks of the assistant ----
@@ -568,7 +579,17 @@ func (a assistantRemote) to(ctx context.Context) string {
 var errAssistantOffline = i18n.Err("hub-assistant_link.offline")
 
 func (a assistantRemote) call(ctx context.Context, method string, params, out any) error {
-	err := a.h.callBus(ctx, a.to(ctx), method, params, out)
+	return assistantOffline(a.h.callBus(ctx, a.to(ctx), method, params, out))
+}
+
+// callAsIs is call with ctx's own deadline, or none (callBusAsIs): a card is waited for as long as it lives
+// (waitInteraction).
+func (a assistantRemote) callAsIs(ctx context.Context, method string, params, out any) error {
+	return assistantOffline(a.h.callBusAsIs(ctx, a.to(ctx), method, params, out))
+}
+
+// assistantOffline is a bus call's error as the assistant's callers get it: assistant_offline while it is not connected.
+func assistantOffline(err error) error {
 	if errors.Is(err, errBusOffline) {
 		return &rpc.Error{Code: assistantwire.CodeAssistantOffline, Message: errAssistantOffline.Error()}
 	}

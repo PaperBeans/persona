@@ -1,0 +1,27 @@
+{
+  "ok": true,
+  "data": {
+    "chats": [
+      {
+        "chat_id": "oc_lag_dm",
+        "name": "Lag Peer",
+        "chat_mode": "p2p",
+        "p2p_target_type": "user",
+        "p2p_target_id": "ou_lag_peer"
+      },
+      {
+        "chat_id": "oc_lag_group",
+        "name": "Lag Group",
+        "chat_mode": "group"
+      },
+      {
+        "chat_id": "oc_lag_bot",
+        "name": "Approval Bot",
+        "chat_mode": "p2p",
+        "p2p_target_type": "bot",
+        "p2p_target_id": "ou_lag_bot"
+      }
+    ],
+    "has_more": false
+  }
+}

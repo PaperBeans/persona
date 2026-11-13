@@ -107,6 +107,9 @@ function validItem(value: unknown): value is Item {
       && strings(task, ["replace", "source_item_id", "source_tool_use_id"]) && numbers(task, ["source_seq"])
       && Array.isArray(task.entries) && task.entries.every((entry) => object(entry) && typeof entry.id === "string"
         && strings(entry, ["subject", "description", "status"]))))) return false;
+    if (fold.changes != null && (!Array.isArray(fold.changes) || !fold.changes.every((change) => object(change) && typeof change.path === "string"
+      && typeof change.add === "number" && typeof change.del === "number" && Number.isFinite(change.add) && Number.isFinite(change.del)
+      && typeof change.exact === "boolean"))) return false;
   }
   return true;
 }

@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.flowOf
 import persona.core.contracts.*
 import persona.core.contracts.api.*
 
-/** Supplies the real question editor with isolated in-memory repositories. */
+/** Supplies the real question editor (and the chat page around it) with isolated in-memory repositories. */
 class QuestionTestApplication : Application(), GeneratedComponentManager<Any> {
     private val chats = object : ChatRepository {
         override fun observe(session: SessionKey) = flowOf(ChatSnapshot())
@@ -21,9 +21,15 @@ class QuestionTestApplication : Application(), GeneratedComponentManager<Any> {
         override suspend fun resolve(id: String, resolution: Resolution) = error("Resolutions belong to the test callback")
     }
     private val store by lazy { RequestDraftStore(this, chats, interactions) }
-    private val component = object : RequestEditorServices, GeneratedComponent {
+    // The chat page reads its renamer from the app too: one that renames nothing.
+    private val renamer = object : persona.core.domain.sort.SessionRenamer {
+        override fun project(source: kotlinx.coroutines.flow.Flow<List<Session>>) = source
+        override suspend fun rename(session: Session, title: String?, tabName: String?) = false
+    }
+    private val component = object : RequestEditorServices, ChatRenameServices, GeneratedComponent {
         override fun requestDrafts() = store
         override fun chats() = chats
+        override fun sessionRenamer() = renamer
     }
     override fun generatedComponent(): Any = component
 }

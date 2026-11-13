@@ -18,6 +18,10 @@ export const COUNT_MS = 400;
 /** The running bar after its turn: how long it stays as it was, then how long it fades out. */
 export const LINGER_MS = 1000;
 export const FADE_OUT_MS = 400;
+/** The bar under a turn's last reply (#5314, cindy's MessageActionBar): how long it stays after the pointer leaves (a
+ *  quick way back in keeps it steady), then how long it takes to fade out. */
+export const REPLY_BAR_LINGER_MS = 250;
+export const REPLY_BAR_FADE_MS = 250;
 
 /** `cubic-bezier(x1, y1, x2, y2)` as a function of the progress (0…1), so JS moves with the same curve as CSS. */
 export function bezier(css: string): (p: number) => number {

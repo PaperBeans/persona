@@ -7,6 +7,7 @@
   "chat_off": "The Lark bot's chat is off (app Settings › Connectors › Lark bot).",
   "agent_not_found": "Can't find this agent ({id}). Send /agents to pick again",
   "agent_read_only": "This agent is view-only: {reason}",
+  "agent_stopped": "This agent has stopped: its conversation and terminal stay, but it takes no messages. Resume it from its terminal page in Persona, or start a new agent.",
   "no_assistant_machine": "The assistant's machine isn't set up",
   "new_chat": "New chat",
   "main_chat": "Main chat",
@@ -84,6 +85,7 @@
   "step_call": "Call",
   "step_maps_nearby": "Search nearby",
   "step_maps_navigate": "Open directions in Maps",
+  "step_maps_route": "Work out a route",
   "step_shortcut_run": "Run shortcut",
   "step_media_play": "Play music",
   "step_home_control": "Control accessory",
@@ -147,5 +149,6 @@
   "source_noreply_choice": "Don't report back to where it was asked",
   "source_report_unreachable": "Couldn't post the outcome where it was asked: {error}",
   "source_report_notice": "Will be posted under the original message in {minutes} minutes: {text} (send /noreply to cancel)",
-  "source_report_notice_chat": "Will be posted under the original message in {minutes} minutes: {text} (reply to this with /noreply to cancel)"
+  "source_report_notice_chat": "Will be posted under the original message in {minutes} minutes: {text} (reply to this with /noreply to cancel)",
+  "answer_below": "Answered below"
 }

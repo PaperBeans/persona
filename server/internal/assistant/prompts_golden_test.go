@@ -97,6 +97,8 @@ func TestGoldenTaskPrompt(t *testing.T) {
 		{"interval_continued_late", Task{Title: "巡检", Prompt: "巡检", Repeat: repeatInterval, EveryMinutes: 30}, 3 * time.Hour, false, true, true},
 		// A task that pushes only what the run sends (#2396): the run is told so above its prompt.
 		{"interval_push_asked", Task{Title: "新邮件", Prompt: "看看邮箱有没有新邮件，有就告诉我", Repeat: repeatInterval, EveryMinutes: 5, Push: pushAsked}, 0, false, false, false},
+		{"interval_inbox_worthy", Task{Title: "价格监控", Prompt: "看看我关注的商品有没有降价", Repeat: repeatInterval, EveryMinutes: 30, Push: pushAsked, Inbox: inboxWorthy}, 0, false, false, false},
+		{"daily_inbox_every", Task{Title: "早报", Prompt: "给我今天的早报", Repeat: repeatDaily, Time: "09:00", Inbox: inboxEvery}, 0, false, false, false},
 		{"daily_continued_push_asked", Task{Title: "日报", Prompt: "有要紧的事才告诉我", Repeat: repeatDaily, Push: pushAsked}, 0, false, true, true},
 	} {
 		golden(t, "task_prompt."+c.name, taskPrompt(c.task, due, due.Add(c.late), loc, c.manual, c.kb, c.continued))
@@ -127,6 +129,24 @@ func TestGoldenBriefFacts(t *testing.T) {
 	due := time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC)
 	golden(t, "task_prompt.daily_facts", taskPrompt(Task{Title: "早报", Prompt: prompts.RenderMorningRoutine(), Repeat: repeatDaily, Facts: true, factsText: facts},
 		due, due, loc, false, false, false))
+}
+
+// The evening routine's facts with today's all-day recording (#4741, briefing_day.go): the coverage, each part's recap
+// or state, the timeline's titles and the to-dos not confirmed, said to the model even when the card lists the rest;
+// what the section's bound left out is counted.
+func TestGoldenBriefFactsDay(t *testing.T) {
+	golden(t, "routine_facts.day", prompts.RenderBriefFacts(prompts.BriefFacts{Card: true, Hours: 12, DoneTotal: 1, Done: []string{"整理周报"},
+		Day: &prompts.BriefDay{Date: "2026-11-11", From: "08:02", To: "21:00", Transcribed: "20:58", GapReasonsLeft: 2, GapsLeft: 3, GapMinutesLeft: 7, PartsLeft: 1,
+			Gaps: []prompts.BriefDayGap{{Reason: "interrupted", Count: 2, Minutes: 25, Ranges: []string{"10:20–10:35", "15:00–15:10"}},
+				{Reason: "paused", Count: 7, Minutes: 95, Ranges: []string{"12:00–12:40", "18:10–18:30"}, More: true}, {Reason: "erased", Count: 1, Minutes: 10,
+					Ranges: []string{"16:05–16:15"}}, {Reason: "watch_reboot", Count: 1, Minutes: 3, Ranges: []string{"19:00–19:03"}}},
+			Parts: []prompts.BriefDayPart{{Part: 1, Made: "21:00", Upto: "20:58", Final: false, State: "pending", Summary: "上午主要在评审导出功能，下午和平台组吃饭时定了上传测试的事。"},
+				{Part: 3, State: "none", Recorded: 12}},
+			Timeline: []prompts.BriefDayEntry{{From: "09:00", To: "09:55", Meeting: true, Title: "导出功能评审"}, {From: "12:10", To: "12:50", Title: "和平台组吃午饭"},
+				{From: "20:00", To: "20:30", Title: "整理明天的发布清单"}},
+			Left:        4,
+			Actions:     []prompts.BriefDayAction{{Who: "Bo", What: "看一下不稳定的上传测试"}, {What: "发周报"}},
+			ActionsLeft: 1}}))
 }
 
 func TestGoldenTodoTitle(t *testing.T) {

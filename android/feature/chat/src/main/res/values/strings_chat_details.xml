@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Smaller details of an Agent's chat in iOS's words (docs/plans/android-ios-alignment/chats.md, C9). -->
+<resources>
+    <string name="chat_placeholder_agent">Message %1$s</string>
+    <string name="chat_getting_ready">%1$s is getting ready…</string>
+    <string name="chat_recap_open_spoken">Recap while you were away: %1$s. Tap to close</string>
+    <string name="chat_plan_sheet_title">Plan</string>
+    <string name="chat_plan_sheet_step">Step %1$d of %2$d</string>
+    <plurals name="chat_plan_sheet_all_done">
+        <item quantity="one">%1$d step done</item>
+        <item quantity="other">All %1$d steps done</item>
+    </plurals>
+    <string name="chat_plan_sheet_summary">%1$s · %2$s</string>
+    <string name="chat_plan_pill_opens">Shows the plan</string>
+    <string name="chat_info_runtime">How it runs</string>
+    <string name="chat_info_runtime_fallback">Fell back to CLI: %1$s</string>
+    <string name="chat_info_route">Connect</string>
+    <string name="chat_info_route_app_server">app-server (structured)</string>
+    <string name="chat_info_route_terminal">Terminal (screen reading)</string>
+    <string name="chat_info_context_left">Context remaining</string>
+    <string name="chat_info_context_left_value">%1$d%% left</string>
+    <string name="chat_info_context_spoken">Context %1$s, %2$d%% used, window %3$s</string>
+    <string name="chat_info_delegated_section">Questions the assistant answered</string>
+    <string name="chat_info_delegated_no_answer">(No answer)</string>
+    <string name="chat_info_delegated_why">Why: %1$s</string>
+    <string name="chat_viewed_screenshot">Screenshot</string>
+    <string name="chat_viewed_browser">Web page screenshot</string>
+    <string name="chat_viewed_image">Image</string>
+    <string name="chat_viewed_view">View full size</string>
+    <string name="chat_outbox_retry_now">Retry now</string>
+    <string name="chat_outbox_dont_send">Don\'t send</string>
+    <string name="chat_outbox_resend">Resend</string>
+    <string name="chat_outbox_waiting_spoken">Waiting for network, will send once connected</string>
+    <string name="chat_outbox_failed_spoken">Failed to send. Resend or delete.</string>
+</resources>

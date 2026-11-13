@@ -22,8 +22,10 @@ import (
 //
 // A phone that drives the terminal takes it instead (`herdr terminal session control` at the phone's grid): the
 // pane's programs see the phone's size and lay themselves out for it, the frames are the same kind, and the phone's
-// keys go straight in (terminal.input). Letting go — the hub says so, the lease runs out, this process dies — puts
-// the pane back to its own size (herdr does that when the control client goes, however it goes).
+// keys go straight in (terminal.input). Letting go — the hub says so, the lease runs out — first resizes the pane back
+// to the size it had when the phone took it: herdr lays a released pane out at its client's size only while a herdr
+// client is attached, and with none would leave it at the phone's (#5339). A control handed straight to the next one
+// keeps that first size and skips the resize in between.
 
 const (
 	// termReplayLimit: base64 bytes of diffs after a whole frame before a fresh observe (a new whole frame).
@@ -175,6 +177,39 @@ type termStream struct {
 	// leaseFor is termLease when terminalControl made the stream (0 for an observing one, which has no lease):
 	// controlLoop outlives the call that started it, so neither it nor leaseOver reads the package variable again.
 	leaseFor time.Duration
+	// home is the size the pane's programs saw before the first phone took it: what letGo gives back.
+	home termSize
+	// handover: the next control takes the pane straight over, so letting go gives no size back.
+	handover bool
+	// leaving: letting go has begun; frames after it (the resize back) are not the phone's to see.
+	leaving bool
+}
+
+type termSize struct{ cols, rows int }
+
+// letGo ends the control: at home (host.Releaser) unless it is handed over or herdr already ended it.
+func (s *termStream) letGo(c host.Control) {
+	s.mu.Lock()
+	s.leaving = true
+	home, handover := s.home, s.handover
+	s.mu.Unlock()
+	select {
+	case <-c.Done(): // taken over, the pane gone: whoever took it owns its size
+		c.Close()
+		return
+	default:
+	}
+	if r, ok := c.(host.Releaser); ok && !handover {
+		r.CloseAt(home.cols, home.rows)
+		return
+	}
+	c.Close()
+}
+
+func (s *termStream) isLeaving() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.leaving
 }
 
 // termLease: a controlled terminal goes back to its own size when the hub said nothing about it for this long (it
@@ -290,9 +325,14 @@ func (n *Node) termStreamOf(id string) *termStream {
 // terminalControl takes the session's terminal at the phone's size. The stream before it (an observe) stops first,
 // so its frames are not mixed into the new epoch; when the slot is busy the hub starts an observe again.
 func (n *Node) terminalControl(ctx context.Context, id string, ctlr host.Controller, pane host.PaneRef, p termControl) (map[string]any, error) {
+	var home termSize
+	handedOver := false
 	if old := n.termStreamOf(id); old != nil {
 		old.mu.Lock()
 		prev := old.ctl
+		if prev != nil { // the pane is at the last phone's size: keep the size from before, give nothing back in between
+			old.handover, home, handedOver = true, old.home, true
+		}
 		old.mu.Unlock()
 		n.setTermStream(id, nil)
 		if prev != nil { // ours holds the slot until it is gone: taking it again too soon finds it busy
@@ -302,11 +342,17 @@ func (n *Node) terminalControl(ctx context.Context, id string, ctlr host.Control
 			}
 		}
 	}
+	if home.cols <= 0 {
+		home = paneHome(ctx, ctlr, pane)
+	}
 	sctx, cancel := context.WithCancel(rpc.ConnContext(ctx)) // ends with the connection, as terminalWatch's (#5331)
-	s := &termStream{cancel: cancel, lease: time.Now(), leaseFor: termLease}
+	s := &termStream{cancel: cancel, lease: time.Now(), leaseFor: termLease, home: home}
 	epoch := strconv.FormatInt(time.Now().UnixNano(), 36)
 	frames, replay := 0, 0
 	gate := &frameGate{send: func(f host.Frame) {
+		if s.isLeaving() {
+			return
+		}
 		frames++
 		if f.Full {
 			replay = 0
@@ -329,9 +375,15 @@ func (n *Node) terminalControl(ctx context.Context, id string, ctlr host.Control
 			_ = r.Redraw()
 		}
 	}}
-	c, err := ctlr.Control(sctx, pane, p.Cols, p.Rows, p.Takeover, gate.put)
+	// Not sctx: a control ends with its context, which would beat controlLoop's letGo to it and leave the pane at the
+	// phone's size. controlLoop ends it whenever sctx ends (the connection included, #5331); starting is bounded by
+	// the host (herdr: controlWait).
+	c, err := ctlr.Control(context.WithoutCancel(sctx), pane, p.Cols, p.Rows, p.Takeover, gate.put)
 	if err != nil {
 		cancel()
+		if handedOver { // the control before let go at the phone's size for this one, which did not come
+			go giveBack(ctlr, pane, home)
+		}
 		if errors.Is(err, host.ErrAttachBusy) {
 			return nil, &rpc.Error{Code: "attach_busy", Message: err.Error()}
 		}
@@ -345,12 +397,44 @@ func (n *Node) terminalControl(ctx context.Context, id string, ctlr host.Control
 	return map[string]any{"cols": p.Cols, "rows": p.Rows, "control": true}, nil
 }
 
+// paneHome is the size the pane's programs see before a phone takes it (host.Streamer's PaneSize: herdr's is the
+// pane's terminal's, not its layout's). Zero when it does not say; letting go is then a plain release.
+func paneHome(ctx context.Context, h host.Controller, pane host.PaneRef) termSize {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if st, ok := h.(host.Streamer); ok {
+		if c, r, err := st.PaneSize(ctx, pane); err == nil && c > 0 && r > 0 {
+			return termSize{c, r}
+		}
+	}
+	return termSize{}
+}
+
+// giveBack puts a pane released at a phone's size back to home: a control at home, let go at once (with no herdr
+// client attached herdr keeps a released pane's last size; with one it lays the pane out at that client's). A slot
+// someone else holds now is theirs, size and all: nothing is taken over.
+func giveBack(ctlr host.Controller, pane host.PaneRef, home termSize) {
+	if home.cols <= 0 || home.rows <= 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, err := ctlr.Control(ctx, pane, home.cols, home.rows, false, func(host.Frame) {})
+	if err != nil {
+		return
+	}
+	c.Close()
+	select {
+	case <-c.Done():
+	case <-ctx.Done():
+	}
+}
+
 // controlLoop holds the terminal until the hub lets it go (unwatch, or a watch that replaces it), the lease runs out
 // or herdr ends it (someone took the slot over, the pane went away): then terminal.end tells the hub, which goes
 // back to watching.
 func (n *Node) controlLoop(ctx context.Context, id string, s *termStream, gate *frameGate) {
 	c := s.control()
-	defer c.Close()
 	t := time.NewTicker(s.leaseFor / 5)
 	defer t.Stop()
 	var why error
@@ -358,6 +442,7 @@ func (n *Node) controlLoop(ctx context.Context, id string, s *termStream, gate *
 		select {
 		case <-ctx.Done():
 			gate.flush()
+			s.letGo(c)
 			return
 		case <-c.Done():
 			why = c.Err()
@@ -368,6 +453,7 @@ func (n *Node) controlLoop(ctx context.Context, id string, s *termStream, gate *
 		}
 	}
 	gate.flush()
+	s.letGo(c)
 	n.mu.Lock()
 	mine := n.terms[id] == s
 	if mine {

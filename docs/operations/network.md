@@ -32,7 +32,7 @@ Domains are examples; replace with your configuration. HTTP addresses should be 
 | Field | Default and behavior |
 | --- | --- |
 | `listen` | HTTP default `:18660`, retained for LAN / VPN. `hub pair` also requires IPv4 loopback access |
-| `public_url` | QR `url`, also added to candidates; keep an address old clients can reach |
+| `public_url` | Primary pairing URL (see the [local app QR exception](../protocol/protocol.md#temporary-pairing)), also added to candidates; keep an address old clients can reach |
 | `public.tls_listen` | Empty string disables TLS; setting it adds separate HTTPS / WSS listening |
 | `public.cert_file` / `public.key_file` | Both empty means managed self-signed certificates; custom certificates require both file paths, preferably absolute |
 | `public.advertise` | Additional candidates; full HTTPS URLs recommended, also accepts domains, IPs, or hosts with ports. Missing scheme / port is filled from current listener. Advertising does not start listeners, open firewalls, or update DNS |
@@ -135,6 +135,17 @@ Hub's advertised list may be incomplete: discovery may miss addresses on physica
 - Manual candidates do not prove reachability, just as `seen_at` is not a connectivity test. Clients may probe unauthenticated `GET /api/v1/health` only as evidence "This address reaches the already-pinned hub," never deriving initial trust from response fingerprints.
 
 Android implementation: [android.md](../android/android.md#连接地址设置--连接诊断); computer links: [link.md](link.md).
+
+iOS implementation (#4670): Settings › hub › Addresses keeps a paired hub's other addresses on the device, in the pairing (`PairedHub.addresses`, `apple/Shared/Hubs.swift`); pairings saved before this have none and work as before. The paired address always comes first; added ones can be removed and reordered.
+
+- Each added address may carry its own Cloudflare Access service token, sent only to that address's origin (see [Behind Cloudflare Access](#behind-cloudflare-access)). The pairing's own token stays with the paired address.
+- `HubRoute` probes every address of the hub at once, together with the group's other candidates, on connect, reconnect and network change (another Wi-Fi, a VPN switched on or off). It takes the first address in the user's order that answers; a later one only when every earlier one failed, or none answered within `HubRoute.centerGrace` of the first answer. Nothing answering: the paired address, for the socket's own retries.
+- On a later address, the app asks the earlier ones again on every network change and every `HubRoute.centerRecheck`, and moves back once one answers.
+- An added address must answer the health probe with the paired hub's `hub_id` (once the app knows it). An answer without a `hub_id` fails the probe, and a hello from another hub on an added address changes nothing in the pairing. HTTPS uses system trust and hostname verification; there is no fingerprint pinning on iOS yet.
+- Known gap against the spec above: iOS does not hold plain HTTP to the LAN or check the peer address. An `http://` address works as the paired one does, on any host, and the device token goes over it unencrypted. Add `http://` addresses only for networks you trust (a VPN overlay, the LAN).
+- Settings › hub shows the address in use under the hub's name, and the Addresses page marks it **In Use**.
+- Not yet: the hub's own list (`/api/v1/endpoints`) does not feed this list, and the watch, widgets and other extensions keep the paired address.
+- DEBUG builds: `-seedHubAddresses <base64 of a [HubAddress] JSON>` sets the first hub's added addresses, and `-tab settings -openHubAddresses YES` opens its page (screenshots).
 
 ## Allowing IPv6 ingress
 
@@ -439,6 +450,7 @@ TUN proxy automatic routes may send public-connection responses into the proxy, 
 | `403 master_token_local_only` | Use temporary pairing or device tokens publicly |
 | `429 rate_limited` | Wait `Retry-After`, stop repeated reconnects with invalid tokens |
 | Public-key mismatch | Changed key, wrong hub, TLS-terminating proxy; re-pair through a trusted channel, never skip pinning |
+| Public-key mismatch only away from home | A LAN address the hub advertised (`public_url` or `advertise_lan`) is another device on that network. Android treats such a private address as unreachable and keeps trying the others; to stop handing it out, set `public_url` to a name and `public.advertise_lan` to `false` |
 | `hub pair` cannot connect locally | Hub running, HTTP supports IPv4 loopback, command configuration matches running instance |
 | TLS inaccessible after enabling `security.proxy_protocol` | `proxy protocol: refused …` logs: upstream not sending headers, or direct bypass ([PROXY protocol](#proxy-protocol)) |
 

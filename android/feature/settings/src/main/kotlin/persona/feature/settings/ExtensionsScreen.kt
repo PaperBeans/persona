@@ -73,6 +73,8 @@ internal fun ExtensionsPage(extensions: ExtensionManagement?, onBack: () -> Unit
     LaunchedEffect(model) { model.watchAuth() }
     // The current assistant's alone (docs/assistant/managers.md "Clients"): a merged list is filtered by each one's stamp.
     val assistant = currentAssistant()
+    val logoApi = rememberPinned(extensions, listOf(listOf("extensions"), listOf("plugins")), assistant.id)
+    val logoLoader = rememberExtensionLogoLoader(logoApi)
     val list = state.extensions?.filter { assistant.owns(it.manager) }
     val roster = LocalManagerRoster.current
     val detail = LocalDetailKey.current
@@ -103,7 +105,9 @@ internal fun ExtensionsPage(extensions: ExtensionManagement?, onBack: () -> Unit
                     "plugin-${it.manager.orEmpty()}-${it.id}" + if ((it.manager.orEmpty() to it.id) in repeated) "-$index" else ""
                 }) { index, extension ->
                     JGroupItem(GroupPosition.of(index, shown.size)) {
-                        JRow(extension.name.ifBlank { extension.id }, subtitle = ExtensionText.listLine(res, extension), leadingIcon = PhIcons.PuzzlePiece,
+                        val downloads = catalogDownloads(res, extension.downloads)
+                        val subtitle = listOfNotNull(ExtensionText.listLine(res, extension), downloads).joinToString("\n")
+                        JRow(extension.name.ifBlank { extension.id }, subtitle = subtitle, subtitleLines = installedSubtitleLines(downloads), leading = { ExtensionLogo(extension.iconUrl, logoApi, logoLoader) },
                             trailing = { ExtensionStateMark(extension) }, chevron = true,
                             selected = (detail as? ExtensionRoute)?.let { it.extensionId == extension.id && roster.ownerOrDefault(it.manager) == roster.ownerOrDefault(extension.manager) } == true,
                             onClick = { onExtension(extension.id, extension.manager?.takeIf { it != roster?.defaultManagerId }) })
@@ -120,6 +124,9 @@ internal fun ExtensionsPage(extensions: ExtensionManagement?, onBack: () -> Unit
         }
     }
 }
+
+/** Legacy installed rows keep JRow's two-line subtitle unless a real count needs another line. */
+internal fun installedSubtitleLines(downloads: String?): Int = if (downloads == null) 2 else 3
 
 /** The mark beside an extension's state: the style's status dot, or a warning in the danger colour when it is broken. */
 @Composable
@@ -167,7 +174,9 @@ fun ExtensionPage(
     val api = rememberPinned(extensions, extensionPrefixes(extensionId) + listOf(listOf("extensions", "-", "catalog"),
         listOf("extensions", "-", "upgrades"), listOf("plugins", "-", "catalog"), listOf("plugins", "-", "upgrades")), owner)
     val res = LocalResources.current
+    val uri = LocalUriHandler.current
     val model = remember(api, extensionId, res, owner) { ExtensionModel(api, extensionId, res, owner) }
+    val logoLoader = rememberExtensionLogoLoader(api)
     val state by model.state.collectAsState()
     val scope = rememberCoroutineScope()
     val feedback = LocalAppFeedback.current
@@ -249,7 +258,7 @@ fun ExtensionPage(
             if (model.setAutoUpgrade(on)) feedback?.notice(res.getString(if (on) R.string.settings_ext_auto_upgrade_on else R.string.settings_ext_auto_upgrade_off))
         } }, onCheck = { scope.launch { model.checkForUpdates() } }, onUpgrade = onUpgrade, onUninstall = { removing = true },
         configuration = {
-            header(extensionId, state, res, onRetry = { scope.launch { model.load() } })
+            header(extensionId, state, res, api, logoLoader, onRetry = { scope.launch { model.load() } })
             if (detail != null) {
                 if (auth != null) extensionSignIn(auth, enabled = !state.loadFailed, starting = signInState.bind.sending && signInState.bind.prompt == null,
                     error = signInState.bind.error?.resolve(res)?.takeIf { signInState.bind.prompt == null } ?: signOutError, busy = state.busy,
@@ -281,7 +290,8 @@ fun ExtensionPage(
         }, information = {
             if (detail != null) {
                 contributions(detail, state.busy || state.saving || state.loadFailed, res) { item, on -> scope.launch { model.setContribution(item, on) } }
-                sandbox(detail.extension.sandbox)
+                sandbox(detail.extension.sandbox, detail.extension.name.ifBlank { extensionId },
+                    onAllow = api.adminNetworkUrl(extensionId)?.let { url -> { uri.openUri(url) } })
                 permissions(detail)
             }
         })
@@ -344,12 +354,16 @@ fun ExtensionPage(
 @Composable
 private fun Note(text: String) = SettingsCaption(text, Modifier.padding(horizontal = rowPadding, vertical = Tokens.Space.s))
 
-private fun LazyListScope.header(id: String, state: ExtensionState, res: Resources, onRetry: () -> Unit) {
+private fun LazyListScope.header(id: String, state: ExtensionState, res: Resources, api: ExtensionManagement,
+    logoLoader: coil3.ImageLoader?, onRetry: () -> Unit) {
     val extension = state.detail?.extension
     item("header") {
         JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.s)) {
-            JRow(extension?.name?.ifBlank { null } ?: id, subtitle = extension?.let { ExtensionText.stateLine(res, it) } ?: stringResource(if (state.loading) R.string.settings_ext_loading else R.string.settings_ext_unavailable),
-                leadingIcon = PhIcons.PuzzlePiece, trailing = { if (extension == null && state.loading) JSpinner() else ExtensionStateMark(extension) })
+            val line = extension?.let { ExtensionText.stateLine(res, it) } ?: stringResource(if (state.loading) R.string.settings_ext_loading else R.string.settings_ext_unavailable)
+            val downloads = catalogDownloads(res, extension?.downloads)
+            val subtitle = listOfNotNull(line, downloads).joinToString("\n")
+            JRow(extension?.name?.ifBlank { null } ?: id, subtitle = subtitle, subtitleLines = installedSubtitleLines(downloads),
+                leading = { ExtensionLogo(extension?.iconUrl, api, logoLoader) }, trailing = { if (extension == null && state.loading) JSpinner() else ExtensionStateMark(extension) })
         }
     }
     extension?.description?.takeIf { it.isNotBlank() }?.let { item("description") { Note(it) } }

@@ -95,6 +95,35 @@ struct ConnectorThreadTests {
         #expect(tg.failure == "Telegram 限流：还要 248 秒")
     }
 
+    /// An item with no conversation of its own (#5537): a subscription's (its source is the subscription) or a
+    /// connector's without threads. The hub answers a page that is none; an older hub said no such connector (404) or
+    /// none to open (409 without a code). None of them is an error to show over the content; signed out still is.
+    @Test func noConversation() async throws {
+        let hub = FakeHub()
+        let path = "/api/v1/connectors/sub_example1/thread"
+        hub.on("GET", path, json: #"{"chat":{"id":"sub:sub_example1:t1","name":"","kind":"none"},"messages":[]}"#)
+        let none = ConnectorThreadModel(connector: "sub_example1", thread: "sub:sub_example1:t1", api: { hub.client })
+        await none.load()
+        #expect(none.loaded && !none.unavailable && none.failure == nil && none.messages.isEmpty)
+        #expect(none.chat?.isChat == false && none.chat?.isGitHub == false)
+
+        for older in [APIError(status: 404, message: #"no connector "sub_example1""#),
+                      APIError(status: 409, message: "Example has no conversations to open")] {
+            hub.on("GET", path) { _ in throw older }
+            let m = ConnectorThreadModel(connector: "sub_example1", thread: "sub:sub_example1:t1", api: { hub.client })
+            await m.load()
+            #expect(m.loaded && m.unavailable)
+            #expect(m.failure == nil, "\(older.status) said over the content")
+        }
+
+        hub.on("GET", "/api/v1/connectors/telegram/thread") { _ in
+            throw APIError(status: 409, message: "Telegram: not signed in", fields: ["code": "unavailable"])
+        }
+        let signedOut = ConnectorThreadModel(connector: "telegram", thread: "u1", api: { hub.client })
+        await signedOut.load()
+        #expect(signedOut.unavailable && signedOut.failure == "Telegram: not signed in")
+    }
+
     /// The fields of a page decode as the hub sends them: media, a quote, an event.
     @Test func decodes() throws {
         let raw = #"""
@@ -160,6 +189,32 @@ struct ConnectorThreadTests {
         #expect(!ThreadLayout.endsRun(a, before: b))
         #expect(ThreadLayout.endsRun(b, before: c))
         #expect(ThreadLayout.endsRun(late, before: nil))
+    }
+
+    /// A Lark conversation's words: lark-cli writes one interactive message as a `<card title="…">` envelope and a post
+    /// as Markdown; both are drawn rather than shown with their marks, a picture's image key as [Image]. Words that only
+    /// hold a card, and another connector's card-like words, stay as they are.
+    @Test func larkRichText() throws {
+        func parse(_ text: String, markdown: Bool = true, lark: Bool = true) -> ThreadRichText? {
+            ThreadRichText.parse(text, markdown: markdown, larkCard: lark, image: "[图片]")
+        }
+        #expect(parse("<card title=\"示例通知\">\n**第一项** 已完成\n![Image](img_example)\n</card>") == ThreadRichText(cardTitle: "示例通知", body: "**第一项** 已完成\n[图片]"))
+        #expect(parse("<card>\n示例正文\n</card>", markdown: false) == ThreadRichText(cardTitle: "", body: "示例正文"))
+        #expect(parse("**示例** ![Image](img_v3_example) ![x](https://example.com/a.png)") == ThreadRichText(cardTitle: nil, body: "**示例** [图片] ![x](https://example.com/a.png)"))
+        #expect(parse("示例 <card>里面</card>", markdown: false) == nil)
+        #expect(parse("<card title=\"a\"><card>b</card></card>", markdown: false) == nil)
+        #expect(parse("<card>示例</card>", markdown: false, lark: false) == nil)
+        #expect(parse("**示例** ![Image](key)", lark: false) == ThreadRichText(cardTitle: nil, body: "**示例** ![Image](key)"))
+    }
+
+    /// A Lark item opens as its conversation: a hub that could not say the chat's kind (lark-cli's message list says
+    /// nothing of it) sent an empty kind, and the item opened as its plain text, every message run together.
+    @Test func larkPageIsAConversation() {
+        func chat(_ kind: String) -> ThreadChat { ThreadChat(id: "larkcli:chat:oc_example", name: "", kind: kind) }
+        #expect(InboxConnectorDetailView.isConversation(chat(""), source: "larkcli"))
+        #expect(InboxConnectorDetailView.isConversation(chat("group"), source: "larkcli"))
+        #expect(!InboxConnectorDetailView.isConversation(chat(""), source: "examplechat"))
+        #expect(!InboxConnectorDetailView.isConversation(chat("none"), source: "larkcli"))
     }
 
     /// The watch lists a connector's item under its connector's name and the label the connector gave it (#2727).

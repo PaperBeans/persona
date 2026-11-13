@@ -2,15 +2,18 @@ import AppIntents
 import Foundation
 
 // Recording on the phone without going through the app (docs/apple/recording.md「Meeting recordings」): Siri, Shortcuts, the
-// Action button and the Control start a meeting recording; the recording Live Activity's buttons stop it and bookmark it.
+// Action button and the Control start a meeting recording (Record, #5243); the recording Live Activity's buttons stop it
+// and bookmark it.
 // Compiled into the app and the widget extension (the Control and the activity draw them); every body runs in the app.
 
-/// Starts a meeting recording, named after the calendar event happening now. An `AudioRecordingIntent`: it may open the
-/// microphone without bringing the app to the front, and the recording shows a Live Activity for as long as it lasts
-/// (the system stops a recording without one). Before the microphone has ever been allowed it opens the app to ask.
+/// Record: starts a meeting recording, named after the calendar event happening now. An `AudioRecordingIntent`: it may
+/// open the microphone without bringing the app to the front, and the recording shows a Live Activity for as long as it
+/// lasts (the system stops a recording without one). Before the microphone has ever been allowed it opens the app to ask.
+/// The type keeps its name (it was Record a Meeting until #5243): shortcuts people made with it go on working.
 struct StartMeetingRecordingIntent: AudioRecordingIntent {
-    nonisolated static let title: LocalizedStringResource = "Record a Meeting"
-    nonisolated static let description = IntentDescription("Starts recording a meeting in Persona, named after the calendar event happening now. The audio stays on this device; its transcript goes to Knowledge.")
+    nonisolated static let title: LocalizedStringResource = "Record [Recordings Section ef2821]"
+    // The contract's Wording (#3862 phase 4): a room meeting taking part may send what is said while Talk is held.
+    nonisolated static let description = IntentDescription("Starts recording a meeting in Persona, named after the calendar event happening now. Audio stays on this device, except while you hold Talk: what is said then goes to the voice service. The transcript goes to Knowledge.")
     nonisolated static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }
 
     nonisolated init() {}
@@ -68,6 +71,34 @@ struct AskPersonaInMeetingIntent: LiveActivityIntent {
     nonisolated func perform() async throws -> some IntentResult {
         #if !WIDGET_EXTENSION
         await MeetingRecorder.shared.ask(recordingID: recordingID)
+        #endif
+        return .result()
+    }
+}
+
+/// The recording activity's Talk and Done, in a room meeting Persona can be asked in (#3862 phase 4): its buttons can't be
+/// held, so a tap on Talk opens a talk window, which ends on Done, 2 seconds of silence after speech, 20 seconds without
+/// speech or 60 seconds. With the meeting call live what is said then goes to the voice service; without it the phone
+/// transcribes it and asks the room. From the Lock Screen too, without unlocking, as Ask is. `open` carries what the
+/// button showed (Talk: true, Done: false), so a Done tapped just after the window closed by itself opens nothing; nil
+/// (an activity drawn before the parameter existed) toggles, as it did.
+struct TalkInMeetingIntent: LiveActivityIntent {
+    nonisolated static let title: LocalizedStringResource = "Talk to Persona in the Meeting"
+    nonisolated static let isDiscoverable = false
+    nonisolated static var authenticationPolicy: IntentAuthenticationPolicy { .alwaysAllowed }
+
+    @Parameter(title: "Recording") var recordingID: String?
+    @Parameter(title: "Open a Talk Window") var open: Bool?
+
+    nonisolated init() {}
+    nonisolated init(recordingID: String?, open: Bool? = nil) {
+        self.recordingID = recordingID
+        self.open = open
+    }
+
+    nonisolated func perform() async throws -> some IntentResult {
+        #if !WIDGET_EXTENSION
+        await MeetingRecorder.shared.talk(recordingID: recordingID, open: open)
         #endif
         return .result()
     }

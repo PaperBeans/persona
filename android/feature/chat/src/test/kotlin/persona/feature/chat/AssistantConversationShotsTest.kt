@@ -100,7 +100,9 @@ class AssistantConversationShotsTest {
             rule.setContent {
                 PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
                     val context = LocalContext.current
-                    checkedLabel = context.resources.getQuantityString(R.plurals.chat_assistant_checked, 2, 2)
+                    // Glass draws Persona's work line as the Agent chat's, as iOS does (#4339 C13)
+                    checkedLabel = if (style == AppStyle.Glass) context.resources.getString(R.string.chat_work_tools, 2)
+                        else context.resources.getQuantityString(R.plurals.chat_assistant_checked, 2, 2)
                     dispatchedLabel = androidx.compose.ui.res.stringResource(R.string.chat_assistant_dispatched_one, "Tidy the conversation")
                     val loader = remember { ImageLoader.Builder(context).build() }
                     DisposableEffect(loader) { onDispose { loader.shutdown() } }

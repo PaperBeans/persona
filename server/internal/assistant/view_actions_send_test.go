@@ -60,7 +60,6 @@ func TestViewOutboxDeliveryAndSafeRetry(t *testing.T) {
 			id := "view_" + randomHex(8)
 			at := time.Now().UTC()
 			f := newFakeHub().withMachine()
-			f.hello.PersonaView = true
 			f.setSessions("server", proto.Session{SessionID: conversation, Assistant: true})
 			hub := &viewSendHub{fakeHub: f, sendError: tc.firstError}
 			s := withSettings(t, f, New(Options{Hub: hub, Store: func() Store { return database }, Logf: testLogf(t)}))

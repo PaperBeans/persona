@@ -55,7 +55,9 @@ final class PairLinkTests: XCTestCase {
         XCTAssertEqual(PairLink.parse("persona://open?machine=a&session=b"), .otherApp)
         XCTAssertEqual(PairLink.parse("persona://connector?addr=192.0.2.20%3A18663&code=jc_x"), .otherApp)
         XCTAssertNotNil(PairLink.notice(for: .otherApp))
-        XCTAssertTrue(PairLink.notice(for: .otherApp)!.contains("这是给手机 / Mac App 用的链接"))
+        try withLinkLanguage("zh-Hans") {
+            XCTAssertTrue(PairLink.notice(for: .otherApp)!.contains("这是给手机 / Mac App 用的链接"))
+        }
     }
 
     func testMissingTokenIsIncomplete() throws {

@@ -484,6 +484,77 @@ func (r *Runner) ListMessages(ctx context.Context, chatID, thread, before string
 	return page, nil
 }
 
+// GetChat reads one chat's own record (`im chats get`): its mode (group,
+// topic, p2p) and name. The message lists carry neither (lark-cli 1.0.98 to
+// 1.0.100); only a search result does, for the chats it found.
+func (r *Runner) GetChat(ctx context.Context, chatID string) (Chat, error) {
+	if chatID == "" {
+		return Chat{}, errors.New("chat_id is required")
+	}
+	out, err := r.execute(ctx, []string{"im", "chats", "get", "--chat-id", chatID}, outputJSON)
+	if err != nil {
+		return Chat{}, err
+	}
+	var chat Chat
+	if err := decodeData(out, &chat); err != nil {
+		return Chat{}, cliError(KindOther, errors.New("invalid chat JSON"))
+	}
+	chat.ChatID = chatID
+	return chat, nil
+}
+
+// ListDirectChats lists the user's direct (p2p) chats, most recently active
+// first. It needs the user identity, like every Inbox read.
+func (r *Runner) ListDirectChats(ctx context.Context, limit int) (ChatList, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	out, err := r.execute(ctx, []string{"im", "+chat-list", "--types", "p2p", "--sort", "active_time", "--page-size", fmt.Sprint(limit)}, outputJSON)
+	if err != nil {
+		return ChatList{}, err
+	}
+	var page ChatList
+	if err := decodeData(out, &page); err != nil {
+		return ChatList{}, cliError(KindOther, errors.New("invalid chat list JSON"))
+	}
+	return page, nil
+}
+
+// ListMessagesSince reads one chat's messages created at or after start
+// (RFC 3339), newest page only, returned oldest first. Unlike message search it
+// reads the chat history itself, which has no indexing delay.
+func (r *Runner) ListMessagesSince(ctx context.Context, chatID, start string, limit int) (MessagePage, error) {
+	if chatID == "" {
+		return MessagePage{}, errors.New("chat_id is required")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	args := []string{"im", "+chat-messages-list", "--chat-id", chatID}
+	if start != "" {
+		args = append(args, "--start", start)
+	}
+	args = append(args, "--order", "desc", "--page-size", fmt.Sprint(limit), "--no-reactions")
+	out, err := r.execute(ctx, args, outputJSON)
+	if err != nil {
+		return MessagePage{}, err
+	}
+	var page MessagePage
+	if err := decodeData(out, &page); err != nil {
+		return MessagePage{}, cliError(KindOther, errors.New("invalid message list JSON"))
+	}
+	for i, j := 0, len(page.Messages)-1; i < j; i, j = i+1, j-1 {
+		page.Messages[i], page.Messages[j] = page.Messages[j], page.Messages[i]
+	}
+	return page, nil
+}
+
 // SearchMessages searches the user's messages. It deliberately disables
 // reaction enrichment: reactions are an optional second permission and are not
 // needed by the read-tool contract.
@@ -835,22 +906,40 @@ func wikiPageLimit(limit int) int {
 // Message search is typed; the other supported kinds are returned as the CLI's
 // normalized JSON data because their schemas belong to later connector steps.
 func (r *Runner) Search(ctx context.Context, kind, query string) (json.RawMessage, error) {
+	return r.SearchLimit(ctx, kind, query, 0)
+}
+
+// SearchLimit bounds the requested search page. A nonpositive limit preserves
+// the CLI's default page size; message search retains its existing default.
+func (r *Runner) SearchLimit(ctx context.Context, kind, query string, limit int) (json.RawMessage, error) {
+	var args []string
+	maximum := 0
 	switch kind {
 	case "", "messages":
-		page, err := r.SearchMessages(ctx, query, SearchOptions{})
+		page, err := r.SearchMessages(ctx, query, SearchOptions{Limit: limit})
 		if err != nil {
 			return nil, err
 		}
 		return json.Marshal(page)
 	case "chats":
-		return r.rawSearch(ctx, []string{"im", "+chat-search", "--query", query})
+		args = []string{"im", "+chat-search", "--query", query}
+		maximum = 50
 	case "docs":
-		return r.rawSearch(ctx, []string{"drive", "+search", "--query", query})
+		args = []string{"drive", "+search", "--query", query}
+		maximum = 20
 	case "people":
-		return r.rawSearch(ctx, []string{"contact", "+search-user", "--query", query})
+		args = []string{"contact", "+search-user", "--query", query}
+		maximum = 30
 	default:
 		return nil, fmt.Errorf("unknown search kind %q", kind)
 	}
+	if limit > 0 {
+		if limit > maximum {
+			limit = maximum
+		}
+		args = append(args, "--page-size", fmt.Sprint(limit))
+	}
+	return r.rawSearch(ctx, args)
 }
 
 // SendText sends a plain text message as the bot identity. The idempotency key

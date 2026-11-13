@@ -2,6 +2,7 @@
 // which computers it runs on, when its key travels, whether it stands back where the harness has a service of its own,
 // and keys for single computers. The editor's form, its check, the summary the detail dialog shows, the fields of the
 // POST / PUT body, and the list's grouping by harness. Pure: views/settings/ProviderScope.tsx only renders it.
+import type { SecretReference } from "./secret-reference";
 import { formatList, t } from "../i18n";
 import type { Machine } from "./types";
 
@@ -20,6 +21,8 @@ export interface ScopeView {
   own_service?: OwnService;
   /** Computers with a key of their own (the keys are never returned). */
   key_machines?: string[];
+  /** Those whose own key is a secret provider's reference, by computer. */
+  machine_key_references?: Record<string, SecretReference>;
   /** Saved before scopes existed: all + push + use, work computers included, until a scope field is saved. */
   legacy_scope?: boolean;
 }
@@ -35,6 +38,8 @@ export interface ScopeForm {
   own_service: OwnService | null;
   /** Keys typed for single computers; never prefilled. */
   keys: Record<string, string>;
+  /** Computers whose key field takes a secret provider's reference instead of a key. */
+  key_refs: Record<string, boolean>;
   /** Computers whose stored key is to be removed. */
   remove: string[];
 }
@@ -43,7 +48,7 @@ type MachineLike = Pick<Machine, "id" | "trust">;
 
 /** What the hub gives a new provider (launchers.md "Defaults"). */
 export function newScope(): ScopeForm {
-  return { share: "all", machines: [], work: [], delivery: "on_demand", own_service: null, keys: {}, remove: [] };
+  return { share: "all", machines: [], work: [], delivery: "on_demand", own_service: null, keys: {}, key_refs: {}, remove: [] };
 }
 
 /** The scope an existing provider opens with; null when its hub does not know scopes. */
@@ -57,6 +62,7 @@ export function scopeFromView(v: ScopeView | null): ScopeForm | null {
     work: v.share === "all" ? ids : [],
     delivery: v.delivery ?? "on_demand",
     own_service: v.own_service ?? "skip",
+    key_refs: Object.fromEntries(Object.keys(v.machine_key_references ?? {}).map((id) => [id, true])),
   };
 }
 
@@ -124,10 +130,14 @@ export function scopeBody(f: ScopeForm, old: ScopeView | null, machines: Machine
     if (f.own_service !== null && own !== (assign ? "use" : "skip")) body.own_service = own;
   }
   const keys: Record<string, string> = {};
+  const refs: Record<string, string> = {};
   const allowed = [...keyMachines(f, machines), ...(old?.key_machines ?? [])];
-  for (const [id, key] of Object.entries(f.keys)) if (key.trim() && allowed.includes(id)) keys[id] = key.trim();
-  for (const id of f.remove) if (!(id in keys)) keys[id] = "";
+  for (const [id, key] of Object.entries(f.keys)) {
+    if (key.trim() && allowed.includes(id)) (f.key_refs?.[id] ? refs : keys)[id] = key.trim();
+  }
+  for (const id of f.remove) if (!(id in keys) && !(id in refs)) keys[id] = "";
   if (Object.keys(keys).length) body.machine_keys = keys;
+  if (Object.keys(refs).length) body.machine_key_references = refs;
   return body;
 }
 

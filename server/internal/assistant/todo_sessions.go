@@ -21,8 +21,13 @@ import (
 
 // Node methods the todos call through device.call.
 const (
-	deviceTodoTokens    = "todo.sync_session_tokens" // {tokens: {session_id: {name: value}}} → {}
-	deviceSessionRetire = "session.retire"           // {session_id} → {closed} (tasks_close.go)
+	deviceTodoTokens = "todo.sync_session_tokens" // {tokens: {session_id: {name: value}}} → {}
+	// {session_id, close_terminal: true} → {closed}: the user's "Archive and close" (agent_archive_close.go); without
+	// close_terminal a node since #4754 only stops the agent.
+	deviceSessionRetire = "session.retire"
+	// {session_id, retire?} → {stopped}: the agent quits, its terminal stays (tasks_close.go, tasks_idle.go,
+	// supervise_leader.go; node retire.go). A node before #4754 does not know it: a refusal, nothing closed.
+	deviceSessionStop = "session.stop"
 )
 
 // todosSessionsChanged: machine's node sent its session list.
@@ -565,11 +570,33 @@ func (s *Service) todoReport(ctx context.Context) *TodoReport {
 			r.Links = append(r.Links, TodoLink{MachineID: key[0], SessionID: key[1], TodoID: t.ID, Title: t.Title, Task: t.Origin != ""})
 		}
 	}
+	completed := map[[2]string]*Todo{}
+	for _, t := range s.todos.todos {
+		if t.DoneAt == nil {
+			continue
+		}
+		for _, a := range t.Agents {
+			key := [2]string{a.MachineID, a.SessionID}
+			if a.DismissedAt != nil || s.todos.activeBySession[key] != "" {
+				continue
+			}
+			old := completed[key]
+			if old == nil || t.DoneAt.After(*old.DoneAt) || t.DoneAt.Equal(*old.DoneAt) && t.ID > old.ID {
+				completed[key] = t
+			}
+		}
+	}
+	for key, t := range completed {
+		r.Completed = append(r.Completed, TodoLink{MachineID: key[0], SessionID: key[1], TodoID: t.ID, Title: t.Title})
+	}
 	for key := range s.quietSessionsLocked(now) {
 		r.Quiet = append(r.Quiet, SessionRef{MachineID: key[0], SessionID: key[1]})
 	}
 	sort.Slice(r.Links, func(i, j int) bool {
 		return r.Links[i].MachineID+"/"+r.Links[i].SessionID < r.Links[j].MachineID+"/"+r.Links[j].SessionID
+	})
+	sort.Slice(r.Completed, func(i, j int) bool {
+		return r.Completed[i].MachineID+"/"+r.Completed[i].SessionID < r.Completed[j].MachineID+"/"+r.Completed[j].SessionID
 	})
 	sort.Slice(r.Quiet, func(i, j int) bool {
 		return r.Quiet[i].MachineID+"/"+r.Quiet[i].SessionID < r.Quiet[j].MachineID+"/"+r.Quiet[j].SessionID

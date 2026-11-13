@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 )
 
@@ -40,6 +41,8 @@ type setupOptions struct {
 	json      bool
 	// managerService: an existing hub's built-in manager becomes a service of its own (a new install's is anyway).
 	managerService bool
+	// lang: the language the installer ran in (--lang, else PERSONA_INSTALL_LANG), for a new hub.json's initial_locale.
+	lang i18n.Lang
 }
 
 // The database `personad hub setup` creates: scripts/deploy/db.sh's container, so deploy.sh keeps working with it.
@@ -51,7 +54,7 @@ const (
 )
 
 // SetupCommand is `personad hub setup [--yes] [--listen :18660] [--tls :18662] [--outside] [--no-service]
-// [--manager-service] [--json]`.
+// [--manager-service] [--json] [--lang en|zh-Hans|ja]`.
 func SetupCommand(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("hub setup", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -63,11 +66,15 @@ func SetupCommand(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	flags.BoolVar(&o.noService, "no-service", false, "不装常驻服务（自己运行 personad hub run）；hub 自己拉起内置管理者")
 	flags.BoolVar(&o.managerService, "manager-service", false, "已有的 hub：把内置管理者改成自己的常驻服务（新装的本来就是）")
 	flags.BoolVar(&o.json, "json", false, "一行一个 JSON：每步 {step, ok, detail, next}，最后 {done, …}")
+	lang := flags.String("lang", "", "a new install's initial user language, en, zh-Hans or ja (default: PERSONA_INSTALL_LANG, which install.sh sets)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("hub setup 不接受位置参数")
+	}
+	if o.lang = i18n.Lang(*lang); o.lang != "" && !i18n.Valid(o.lang) {
+		return fmt.Errorf("--lang must be en, zh-Hans or ja")
 	}
 	if o.noService && o.managerService {
 		return fmt.Errorf("--manager-service 要装内置管理者的常驻服务，不能和 --no-service 一起用")

@@ -90,6 +90,78 @@ class HubRestartTest {
         }
     }
 
+    @Test fun receiptTrustIsCurrentSocketOwnedAndClearsBeforeAnOldHubsHelloDuringOnlineGrace() = runBlocking {
+        Fixture().use { fixture ->
+            val modern = """{"type":"hello","hub_id":"test-hub","message_send_state":1,"features":["message_send_state"]}"""
+            val frame = """{"type":"message_send_state","machine_id":"m","session_id":"s","client_msg_id":"message","state":"processing","at":"2026-11-12T10:00:00Z","socketGeneration":999}"""
+            fixture.hello = { modern }
+            val first = fixture.start()
+            val firstHello = requireNotNull(fixture.connection.currentHello.value)
+            assertEquals(1, firstHello.hello.messageSendState)
+            val receipts = mutableListOf<persona.core.contracts.MessageSendStateEvent>()
+            val watcher = Job()
+            CoroutineScope(StandardTestDispatcher(fixture.scheduler) + watcher).launch {
+                fixture.connection.events.collect { if (it is persona.core.contracts.MessageSendStateEvent) receipts += it }
+            }
+            fixture.scheduler.runCurrent()
+            try {
+                first.receive(frame)
+                fixture.scheduler.runCurrent()
+                assertEquals(firstHello.generation, receipts.single().socketGeneration)
+                // The replacement sends a forged receipt before any hello, while the UI deliberately stays Online.
+                fixture.hello = { frame }
+                first.close(1001, "hub restarting")
+                assertNull(fixture.connection.currentHello.value)
+                assertSame(firstHello.hello, fixture.connection.lastHello)
+                fixture.advance(1_000)
+                val second = fixture.awaitSocket(2)
+                assertEquals(ConnectionState.Online, fixture.connection.state.value)
+                assertNull(fixture.connection.currentHello.value)
+                assertEquals(1, receipts.size)
+                second.receive("""{"type":"hello","hub_id":"test-hub","features":["message_send_state"]}""")
+                fixture.scheduler.runCurrent()
+                second.receive(frame)
+                fixture.scheduler.runCurrent()
+                assertNull(fixture.connection.currentHello.value?.hello?.messageSendState)
+                assertEquals(1, receipts.size)
+                fixture.hello = { modern }
+                second.close(1001, "hub restarting")
+                fixture.advance(1_000)
+                val third = fixture.awaitSocket(3)
+                val current = requireNotNull(fixture.connection.currentHello.value)
+                assertTrue(current.generation > firstHello.generation)
+                third.receive(frame)
+                fixture.scheduler.runCurrent()
+                assertEquals(current.generation, receipts.last().socketGeneration)
+                assertEquals(2, receipts.size)
+                second.fail() // A retired socket cannot clear the new one's proof.
+                assertSame(current, fixture.connection.currentHello.value)
+            } finally { watcher.cancel() }
+        }
+    }
+
+    @Test fun aQueuedHelloCannotReauthorizeReceiptsAfterItsSocketAlreadyFailed() = runBlocking {
+        Fixture().use { fixture ->
+            fixture.hello = { """{"type":"hello","hub_id":"test-hub","message_send_state":1}""" }
+            fixture.afterOpening = { socket ->
+                socket.receive("""{"type":"message_send_state","machine_id":"m","session_id":"s","client_msg_id":"message","state":"processing","at":"2026-11-12T10:00:00Z"}""")
+                socket.fail() // Both text frames are queued; onFailure runs before the socket loop consumes either.
+            }
+            val receipts = mutableListOf<persona.core.contracts.MessageSendStateEvent>()
+            val watcher = Job()
+            CoroutineScope(StandardTestDispatcher(fixture.scheduler) + watcher).launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                fixture.connection.events.collect { if (it is persona.core.contracts.MessageSendStateEvent) receipts += it }
+            }
+            try {
+                fixture.start()
+                fixture.scheduler.runCurrent()
+                assertEquals(1, fixture.connection.lastHello?.messageSendState)
+                assertNull(fixture.connection.currentHello.value)
+                assertTrue("a queued hello cannot revive a socket's already revoked proof", receipts.isEmpty())
+            } finally { watcher.cancel() }
+        }
+    }
+
     @Test fun aRestartingHubIsRetriedQuicklyWhileTheStateStaysOnline() = runBlocking {
         Fixture().use { fixture ->
             val first = fixture.start()
@@ -300,6 +372,7 @@ class HubRestartTest {
         val scheduler = TestCoroutineScheduler()
         val sockets = mutableListOf<FakeSocket>()
         @Volatile var hello: () -> String = { """{"type":"hello","hub_id":"test-hub","features":[]}""" }
+        @Volatile var afterOpening: (FakeSocket) -> Unit = {}
         /** False: each socket fails as soon as it is opened (a hub not yet answering). */
         @Volatile var reachable = true
         @Volatile var rosterFailure = false
@@ -327,6 +400,7 @@ class HubRestartTest {
                     listener.onOpen(socket, Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
                         .code(101).message("Switching Protocols").build())
                     socket.receive(hello())
+                    afterOpening(socket)
                     return socket
                 }
             },

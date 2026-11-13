@@ -108,7 +108,7 @@ extension AppModel {
         guard let cfg = ServerConfig(pairURL: url.absoluteString) else { return }
         guard MacPairing.accepts(isPaired: isPaired, isDemo: isDemo) else {
             let host = config?.url.host() ?? String(localized: "a hub")
-            toast = Toast(String(localized: "Already connected to \(host). To switch hubs, disconnect in Settings › Server first."), style: .error)
+            toast = Toast(String(localized: "Already connected to \(host). To switch hubs, disconnect in Settings › Hub › Devices & Pairing first."), style: .error)
             return
         }
         Task {
@@ -227,6 +227,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
         #endif
         AppModel.shared.start()
         MacAttentionWatcher.shared.start(AppModel.shared)
+        AppIconBadgeWatcher.shared.start(AppModel.shared) // the Dock badge (#5824)
         MacMenuBarState.shared.start(AppModel.shared)
         MacShellState.shared.watchKeyWindow()
         #if DEBUG
@@ -240,6 +241,12 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
         MacPerfHarness.scheduleIfAsked(AppModel.shared) // `-showPerfRun …`: measure smoothness from inside (#1337)
         #endif
         PushRegistrar.shared.registerIfPossible()
+    }
+
+    /// Back from System Settings › Notifications with Persona allowed after a denial: register now, not at the next
+    /// launch (#1861).
+    func applicationDidBecomeActive(_ notification: Notification) {
+        PushRegistrar.shared.foreground()
     }
 
     func application(_ application: NSApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

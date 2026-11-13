@@ -49,9 +49,15 @@ final class ChannelSettingsTests: XCTestCase {
         XCTAssertLessThan(entry.frame.maxY, connectors.frame.minY, "渠道 must precede 连接器")
         shot(app, "settings")
 
+        let about = app.buttons["settings-about"]
+        for _ in 0..<12 where !about.isHittable { settings.swipeUp() }
+        XCTAssertTrue(about.exists)
+        about.tap()
+        let diagnostics = app.descendants(matching: .any)["settings-diagnostics"].firstMatch
+        XCTAssertTrue(diagnostics.waitForExistence(timeout: 10))
+        diagnostics.tap()
         let build = text(app, containing: "构建")
-        for _ in 0..<12 where !build.isHittable { settings.swipeUp() }
-        XCTAssertTrue(text(app, containing: "版本").exists && build.exists, "关于 must keep version and build")
+        XCTAssertTrue(text(app, containing: "版本").exists && build.exists, "About must keep version and build under Diagnostics")
         XCTAssertFalse(app.buttons["settings-about-persona"].exists)
         XCTAssertFalse(text(app, containing: "认识 ").exists, "the duplicate profile entry must be gone")
         shot(app, "about")

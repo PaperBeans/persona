@@ -34,5 +34,8 @@
   "got_it": "知道了",
   "recommend": "推荐：{option}",
   "noted": "已收下",
-  "taken": "已按推荐来"
+  "taken": "已按推荐来",
+  "setup_head": "建议的设置",
+  "setup_intro": "根据 Persona 自己过去 7 天的记录算出，写明了自己时间范围的那一项除外。什么都没有改动：下面每一项在你自己改动之前都保持原样。",
+  "setup_open": "打开设置"
 }

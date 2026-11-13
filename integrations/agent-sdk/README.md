@@ -13,9 +13,12 @@ cwd 是助手目录，env 是 node 按供应商算好的那份（`ANTHROPIC_*` �
 **stdin**，每行一个 JSON：
 
 1. `{"type":"persona_start","options":{…}}`，必须是第一行。`options` 对应 SDK `query()` 的 Options，只认这些键：
-   `model`、`cwd`、`resume`、`sessionId`、`permissionMode`、`allowedTools`、`mcpServers`、`plugins`、`settings`、
-   `pathToClaudeCodeExecutable`、`includePartialMessages`、`effort`、`extraArgs`。别的键丢掉，在 stderr 记一行键名。
+   `model`、`cwd`、`resume`、`sessionId`、`permissionMode`、`allowedTools`、`tools`、`mcpServers`、`strictMcpConfig`、
+   `guestMcpServers`、`plugins`、`settings`、`pathToClaudeCodeExecutable`、`includePartialMessages`、`effort`、`extraArgs`。别的键丢掉，在 stderr 记一行键名。
    桥自己补上 `env: process.env`，`includePartialMessages` 固定为 true。
+   `guestMcpServers` 只给 guest：桥先连接其中的 Persona stdio MCP server，把它声明的工具注册成进程内 SDK server，
+   再以 `tools: []` 关闭内置工具、`settingSources: []` 排除用户设置。它不是任意 MCP 配置入口；manager 仍只列出并允许 guest 的工具。
+   空工具目录直接启动失败，不带着空目录调用模型。
    `settings` 是对象时，桥把它写进一个私有临时目录（0700）里的 `settings.json`（0600），交给 SDK 的是文件路径：
    SDK 把对象原样放在 claude 的 `--settings` 参数里，里面的 env（key、请求头）用 `ps` 就能看到。桥退出（包括 SIGTERM / SIGINT / SIGHUP）时删掉这个目录。
 2. 之后每行和写给 `claude -p` 的一样：
@@ -27,6 +30,7 @@ cwd 是助手目录，env 是 node 按供应商算好的那份（`ANTHROPIC_*` �
      | `set_permission_mode {mode}` | `q.setPermissionMode(mode)` |
      | `set_model {model}` | `q.setModel(model)` |
      | `apply_flag_settings {settings}` | `q.applyFlagSettings(settings)`（`effortLevel` 走这里） |
+     | `persona_background_tasks` | 桥自己答：`{"tasks": …}`，是 SDK 转来的最近一条 `background_tasks_changed` 的列表；还没有过但已有一轮结束时是 `[]`，第一轮结束前是 `null`（不知道）。node 换模型重启前用它确认没有后台任务（#5234） |
 
      每个请求回一行 `{"type":"control_response","response":{"subtype":"success","request_id",["response":<方法的返回值>]}}`，
      失败或不认识的 subtype 回 `{"subtype":"error","request_id","error":"…"}`，和 CLI 的一样（node 只看 `response.subtype` 和 `response.error`）。

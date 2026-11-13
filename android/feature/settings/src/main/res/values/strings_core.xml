@@ -5,6 +5,7 @@
     <string name="settings_style_transparency">Transparency</string>
     <string name="settings_style_glass_auto">Refractive glass on Android 13 and later, blurred glass on earlier versions; switches to opaque panels in battery saver or when scrolling drops frames.</string>
     <string name="settings_style_glass_reduced">All overlays use opaque panels: the most battery-friendly, with the clearest text.</string>
+    <string name="settings_agents_layout">Agents list layout</string>
     <string name="settings_default">Default</string>
     <string name="settings_preview_row1_title">Add unit tests for the network layer</string>
     <string name="settings_preview_row1_preview">Which framework for the network layer tests?</string>
@@ -271,6 +272,14 @@
     <string name="settings_network_unreadable">Couldn\'t read the network status</string>
     <string name="settings_update_none">No update available yet.</string>
     <string name="settings_update_check_failed">Couldn\'t check for updates. Try again later.</string>
+    <string name="settings_update_up_to_date">Up to date</string>
+    <string name="settings_update_no_apk">Hub has no APK</string>
+    <string name="settings_update_package_mismatch">Different app</string>
+    <string name="settings_update_package_mismatch_detail">The release APK is for a different Android app and cannot update this installation.</string>
+    <string name="settings_update_signature_mismatch">Signature mismatch</string>
+    <string name="settings_update_signature_mismatch_detail">The release APK is signed with another key. Uninstall this app, then install the release APK from GitHub. Uninstalling removes local app data.</string>
+    <string name="settings_update_last_checked">Last checked %1$s</string>
+    <string name="settings_update_source">Hub: %1$s</string>
     <string name="settings_off">Off</string>
     <string name="settings_retry_cleanup">Retry cleanup</string>
     <string name="settings_try_demo">No hub? Try the demo</string>
@@ -371,6 +380,7 @@
     <string name="settings_ready_cellular_test">Cellular test</string>
     <string name="settings_ready_skipped_item">%1$s: skipped</string>
     <string name="settings_ready_skip_note">You can skip for now. Items not set up may affect notifications and the background connection after locking; come back here to finish them later.</string>
+    <string name="settings_ready_set_up_later">Set up later</string>
     <string name="settings_ready_skip_rest">Skip the rest</string>
     <string name="settings_cancel">Cancel</string>
     <string name="settings_done">Done</string>

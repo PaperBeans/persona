@@ -33,7 +33,7 @@ async function fixture(t) {
     await until(`live text ${expected}`, () => node.last('session.delta')?.text === expected, 15_000)
   }
   const promptCount = (count) => until(`${count} prompts started`, () => calls().filter((r) => r.method === 'session/prompt').length === count, 15_000)
-  return { node, calls, update, chunk, promptCount }
+  return { node, directory, calls, update, chunk, promptCount }
 }
 
 test('AGY streams one assistant message at a time across tool calls', { timeout: 20_000 }, async (t) => {
@@ -80,4 +80,81 @@ test('each prompt clears any live text before its first response', { timeout: 20
   await chunk('First reply.')
   assert.equal(node.last('session.delta').text, 'First reply.', 'a new turn may legitimately repeat earlier words')
   update({ end: true })
+})
+
+test('AGY completion retires the cached reply after the viewer leaves', { timeout: 20_000 }, async (t) => {
+  const { node, update, chunk, promptCount } = await fixture(t)
+  await node.peer.call('session.send', { session_id: SESSION, text: 'First request.' })
+  await promptCount(1)
+  await chunk('Previous reply.')
+  await node.peer.call('session.unwatch', { session_id: SESSION })
+  update({ end: true })
+  await until('unwatched completion clears the reply', () => node.last('session.delta')?.text === '', 2000)
+  await node.peer.call('session.watch', { session_id: SESSION })
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Second request.' })
+  await promptCount(2)
+  assert.equal(node.last('session.delta').text, '')
+  await chunk('New reply.')
+  update({ end: true })
+})
+
+function transcripts(directory, compact, complete) {
+  const logs = join(directory, 'config/brain', RAW, '.system_generated/logs')
+  mkdirSync(logs, { recursive: true })
+  for (const [file, rows] of [['transcript.jsonl', compact], ['transcript_full.jsonl', complete]]) {
+    writeFileSync(join(logs, file), rows.map((row) => JSON.stringify(row)).join('\n') + '\n')
+  }
+}
+
+const userStep = (index, text) => ({ step_index: index, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', content: text })
+const replyStep = (index, text) => ({ step_index: index, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', content: text })
+
+test('normal AGY pages recover the complete native reply through the same source as full items', async (t) => {
+  const { node, directory } = await fixture(t)
+  const complete = '## Report\n' + 'A complete result with Unicode 字段.\n'.repeat(80) + 'End of report.'
+  transcripts(directory,
+    [userStep(0, 'Read the report.'), { ...replyStep(1, '## Report\n<truncated 4840 bytes>\nEnd of report.'), truncated_fields: ['content'] }],
+    [userStep(0, 'Read the report.'), replyStep(1, complete)])
+  const page = await node.peer.call('session.items', { session_id: SESSION })
+  const reply = page.items.find((item) => item.role === 'assistant' && item.kind === 'text')
+  assert.equal(reply.text, complete)
+  assert.equal(reply.full_size, undefined)
+  assert.equal(page.to_seq, 2)
+  assert.notEqual(page.history, `agy:${RAW}`, 'compact transcript caches use a different history')
+  const full = await node.peer.call('session.item', { session_id: SESSION, item_id: reply.id })
+  assert.equal(full.text, complete)
+})
+
+test('live AGY items apply Persona page limits to the complete native reply', async (t) => {
+  const { node, directory, update } = await fixture(t)
+  const complete = '## Report\n' + 'A detailed report row.\n'.repeat(2000) + 'Literal example: <truncated 7 bytes>.'
+  transcripts(directory,
+    [userStep(0, 'Read the report.'), { ...replyStep(1, '## Report\n<truncated 40000 bytes>\nEnd.'), truncated_fields: ['content'] }],
+    [userStep(0, 'Read the report.'), replyStep(1, complete)])
+  update({ sessionUpdate: 'tool_call', toolCallId: 'read-report', title: 'Read' })
+  await until('the reply is pushed', () => node.last('session.items')?.to_seq === 2)
+  const reply = node.last('session.items').items.find((item) => item.role === 'assistant' && item.kind === 'text')
+  assert.equal(reply.full_size, Buffer.byteLength(complete))
+  assert.ok(reply.text.startsWith('## Report\nA detailed report row.'))
+  const full = await node.peer.call('session.item', { session_id: SESSION, item_id: reply.id })
+  assert.equal(full.text, complete)
+  assert.ok(full.text.includes('Literal example: <truncated 7 bytes>.'))
+})
+
+test('AGY watch cursors follow the complete export while its compact export is ahead', async (t) => {
+  const { node, directory, update } = await fixture(t)
+  const old = [userStep(0, 'First request.'), replyStep(1, 'First reply.')]
+  const nextUser = userStep(2, 'Second request.')
+  transcripts(directory, [...old, nextUser], old)
+  const page = await node.peer.call('session.items', { session_id: SESSION })
+  assert.equal(page.to_seq, 2)
+  update({ sessionUpdate: 'tool_call', toolCallId: 'read-first', title: 'Read' })
+  await until('the initial complete export is pushed', () => node.last('session.items')?.to_seq === 2)
+  await node.peer.call('session.unwatch', { session_id: SESSION })
+  await node.peer.call('session.watch', { session_id: SESSION })
+  const complete = [...old, nextUser, replyStep(3, 'Second reply.')]
+  transcripts(directory, complete, complete)
+  update({ sessionUpdate: 'tool_call', toolCallId: 'read-next', title: 'Read' })
+  await until('the complete export catches up', () => node.last('session.items')?.to_seq === 4)
+  assert.deepEqual(node.last('session.items').items.map((item) => item.seq), [3, 4])
 })

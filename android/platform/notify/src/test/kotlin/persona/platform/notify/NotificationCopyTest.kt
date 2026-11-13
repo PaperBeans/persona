@@ -80,6 +80,16 @@ class NotificationCopyTest {
         val secretRun = Interaction("s", kind = "permission", toolName = "secret_run", summary = "Mac mini\n\$ sudo -S -k -p '' true",
             toolInput = kotlinx.serialization.json.buildJsonObject { put("machine_name", kotlinx.serialization.json.JsonPrimitive("Mac mini")) })
         assertEquals("用你的密码在 Mac mini 上运行" to "Mac mini\n\$ sudo -S -k -p '' true", requestCopy(context, secretRun))
+        assertEquals("用你的密码在 Mac mini 上运行" to "Mac mini\n\$ sudo -S -k -p '' true",
+            requestCopy(context, secretRun.copy(toolTitle = "Ignored for a password card")))
+    }
+
+    @Test fun permissionNotificationsUseTheHubsToolTitle() {
+        val titled = mcpPermission.copy(toolTitle = "Create a GitHub issue")
+        val expected = "请求使用 Create a GitHub issue：Fix login"
+        assertEquals(expected to expected, requestCopy(context, titled))
+        assertEquals("请求使用 github · create issue：Fix login" to "请求使用 github · create issue：Fix login",
+            requestCopy(context, titled.copy(toolTitle = " ")))
     }
 
     private fun options(vararg labels: String) = labels.map { QuestionOption(label = it) }

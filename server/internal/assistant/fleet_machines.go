@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -38,18 +39,18 @@ func (s *Service) fleetMachines() []fleetMachine {
 	return out
 }
 
-// fleetMachine is the machine id names (an id another one absorbed: that one); false when there is none.
+// fleetMachine is the machine id names (an id another one absorbed: that one); false when there is none. The devices
+// are asked for that one machine: every list a node sends asks several times, and building every machine's summary
+// to pick one read each machine's trust and connection for nothing.
 func (s *Service) fleetMachine(id string) (fleetMachine, bool) {
 	if s.devs == nil || id == "" {
 		return fleetMachine{}, false
 	}
-	canon := s.devs.Canonical(id)
-	for _, m := range s.fleetMachines() {
-		if m.ID == canon {
-			return m, true
-		}
+	d, ok := s.devs.Summary(id)
+	if !ok {
+		return fleetMachine{}, false
 	}
-	return fleetMachine{}, false
+	return fleetMachine{ID: d.ID, Name: d.Name, Home: d.Home, DataDir: d.DataDir, manager: s.id}, true
 }
 
 // machineName is the machine's name, its id when there is none.
@@ -137,11 +138,32 @@ func (s *Service) placeCard(ix *proto.Interaction) {
 	}
 }
 
-// isAssistantSession identifies manager's headless conversations in its directory dir, or its health space's. A host
-// pane is stronger evidence than a shared working directory. Another manager's directory, left on a machine moved
-// away from it, is not this one's (docs/assistant/managers.md "Directories on a computer").
+// isMeetingRoomCwd checks whether cwd is a meeting room conversation's working directory (<state dir>/guest-meeting/<id>).
+func isMeetingRoomCwd(cwd string) bool {
+	if cwd == "" {
+		return false
+	}
+	clean := filepath.Clean(filepath.ToSlash(identity.NodePath(cwd))) // a Windows node's too, on any hub (#6419)
+	parent := filepath.Base(filepath.Dir(clean))
+	if parent != "guest-meeting" {
+		return false
+	}
+	name := filepath.Base(clean)
+	return name != "" && name != "." && name != "/"
+}
+
+// isAssistantSession identifies manager's headless conversations in its directory dir, its health space's,
+// or a meeting room guest conversation (guest-meeting/<id>, #6048). A host pane is stronger evidence than
+// a shared working directory. Another manager's directory, left on a machine moved away from it, is not
+// this one's (docs/assistant/managers.md "Directories on a computer").
 func isAssistantSession(sess *proto.Session, dir, manager string) bool {
-	if sess.PaneID != "" || dir == "" || sess.Cwd == "" {
+	if sess.PaneID != "" || sess.Cwd == "" {
+		return false
+	}
+	if isMeetingRoomCwd(sess.Cwd) || sess.Origin == OriginMeeting {
+		return true
+	}
+	if dir == "" {
 		return false
 	}
 	// The working directory may go through a symlinked home; runtimes and offline assistants have no host pane.

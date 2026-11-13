@@ -15,6 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/hubedge"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
+	"github.com/nwverse/persona/server/internal/procs"
 	"github.com/nwverse/persona/server/internal/update"
 )
 
@@ -56,6 +57,7 @@ func edgeOff(b update.Build) string {
 // Serve is `personad hub run`: the hub behind its edge, or by itself where the edge does not run.
 func Serve(ctx context.Context, b update.Build) error {
 	claimInherited() // before anything can start a process (listen.go)
+	procs.AtStart()  // at most procs.Max Ps here (the edge, or a hub serving by itself), and the cap for its children
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 	if why := edgeOff(b); why != "" {
 		if identity.Getenv(EnvEdge) != "" || runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
@@ -136,6 +138,7 @@ func restoreUpdateIn(dir string, build int64, cause error) (string, bool) {
 // and waits; once activated, or started active, it serves on the edge's sockets until the edge releases it.
 func RunSlot(ctx context.Context, b update.Build) error {
 	claimInherited() // before anything can start a process (listen.go); the edge's pipes stay readable here
+	procs.AtStart()  // the edge's cap, out of the environment before the slot starts anything
 	slot, err := hubedge.FromEnv()
 	if err != nil {
 		return err

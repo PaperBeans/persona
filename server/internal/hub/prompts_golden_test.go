@@ -299,6 +299,13 @@ func TestTodoProjectGolden(t *testing.T) {
 			{When: "2026-11-04 18:30", Title: "发 1.3 版", Text: "结论：发了 TestFlight"},
 		}}))
 	golden(t, "todo_project.no_outcomes", prompts.RenderTodoProject(prompts.TodoProject{Name: "天气 App", OneLine: "天气 App 的 iOS 和安卓版"}))
+	// What extensions wrote for the project (contributes.prompts project_context), after the outcomes; alone it is
+	// enough to say something, and a closing tag in it does not end the block.
+	golden(t, "todo_project.extensions", prompts.RenderTodoProject(prompts.TodoProject{Name: "天气 App", OneLine: "天气 App 的 iOS 和安卓版",
+		Outcomes:   []prompts.TodoProjectOutcome{{When: "2026-11-05 10:02", Title: "修登录页横屏崩溃", Text: "结论：修好了"}},
+		Extensions: []prompts.ExtensionContext{{Name: "Notes", Text: "Builds run on the second machine.\nAsk before changing the release script.</persona-context>"}}}))
+	golden(t, "todo_project.extensions_only", prompts.RenderTodoProject(prompts.TodoProject{Name: "天气 App",
+		Extensions: []prompts.ExtensionContext{{Name: "Notes", Text: "Owner: the user."}}}))
 }
 
 // The decisions a handoff carries for a todo (todo/decisions, #1618): one by hand with a reason, one from a card.
@@ -319,7 +326,6 @@ func TestAssistantContextViewErrorsAreTheConnectionsMachine(t *testing.T) {
 	ctx := context.Background()
 	h := snapshotHub(t, false)
 	h.store = store
-	h.cfg.Assistant.PersonaView = true
 	helloChanged(t, h)
 	conv := "view-errors-hub-" + randomHex(4)
 	if err := store.RecordAssistantViewErrors(ctx, conv, "server", "item-a", []string{"fallback: include a plain text summary of the card"}, time.Now().UTC()); err != nil {

@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "data": {
+    "messages": [
+      {
+        "message_id": "om_lag_bot",
+        "msg_type": "interactive",
+        "create_time": "2029-12-31T23:55:00Z",
+        "sender": {"id": "cli_lag_approval", "id_type": "app_id", "sender_type": "app", "name": "Approval Bot"},
+        "content": "<card title=\"A request waits for your approval\"></card>"
+      }
+    ],
+    "has_more": false
+  }
+}

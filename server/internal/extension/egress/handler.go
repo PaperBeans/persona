@@ -82,6 +82,11 @@ func (p *Proxy) handler(fixed string) http.Handler {
 					allowed, configured = true, true
 				}
 			}
+			// A host the owner allowed is reached the way a settings address is (dialConfigured): never this machine
+			// by name, and each answer of its name checked (#5697).
+			if !allowed && rule.owned(host, port) && !IsLoopbackHost(host) {
+				allowed, configured = true, true
+			}
 		}
 		p.count(ext, host, allowed)
 		if !allowed {

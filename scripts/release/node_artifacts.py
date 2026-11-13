@@ -161,7 +161,9 @@ def prepare_nodes(root, staged, manifest):
                 if platform == 'linux-amd64':
                     checked = json.loads(subprocess.check_output([str(binary), 'node-update-check'], timeout=20))
                     expected = dict(version=manifest['version'], os='linux', arch='amd64', program='personad')
-                    if checked != expected:
+                    # The identity must match exactly; capabilities the node announces beside it
+                    # (nodeupdate.Self, e.g. resident_handover) may grow from release to release.
+                    if not isinstance(checked, dict) or {key: checked.get(key) for key in expected} != expected:
                         raise ValueError('Native node self-check differs from its manifest')
                 with (temporary / (binary.name + '.version')).open('w') as sidecar:
                     sidecar.write(manifest['version'] + '\n')

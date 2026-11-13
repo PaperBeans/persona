@@ -16,8 +16,9 @@ import (
 // Control is `herdr terminal session control <pane> --cols C --rows R`: the terminal's one attach slot, held over
 // pipes. While it runs the pane's programs see C × R (Claude Code lays itself out again for it), what is written in
 // goes to them as if typed, and the frames coming out are herdr's redraws of that grid — the same as an observer's.
-// Ending it in any way (Close, the process killed, this process gone: its stdin closes) gives the slot back and herdr
-// puts the pane back to its own size.
+// Ending it in any way (Close, the process killed, this process gone: its stdin closes) gives the slot back; herdr puts
+// the pane back to its own size only while a herdr client is attached, so the node ends it with CloseAt the size the
+// pane had before.
 type Control struct {
 	cmd    *exec.Cmd
 	in     io.WriteCloser
@@ -143,6 +144,10 @@ func (s *Control) writeLoop() {
 	for {
 		select {
 		case b := <-s.writes:
+			if b == nil { // CloseAt: what was queued before is written
+				s.Close()
+				return
+			}
 			if _, err := s.in.Write(b); err != nil {
 				return
 			}
@@ -290,8 +295,30 @@ func (s *Control) Done() <-chan struct{} { return s.done }
 // Err is why it ended (after Done): ErrTakenOver when someone took the slot.
 func (s *Control) Err() error { return s.endError("") }
 
-// Close gives the slot back: stdin closes, herdr detaches and puts the pane back to its size. A process that does not
-// exit soon after is killed (that releases it as well).
+// CloseAt gives the slot back after resizing the pane to cols × rows: stdin closes once the resize is written. herdr
+// lays a released pane out at its client's size only while a herdr client is attached; with none it leaves the pane at
+// the size it last had, so a control that ends with Close leaves the pane at the controller's size (measured, herdr
+// 0.9.3; docs/integrations/terminal.md section 11). Without a size (0), at the size it already has, or when the resize
+// cannot be queued, it is Close.
+func (s *Control) CloseAt(cols, rows int) {
+	s.mu.Lock()
+	same := cols == s.cols && rows == s.rows
+	s.mu.Unlock()
+	if cols <= 0 || rows <= 0 || same || s.Resize(cols, rows) != nil {
+		s.Close()
+		return
+	}
+	select {
+	case s.writes <- nil: // the write loop closes stdin when it gets here, after the resize
+	case <-s.done:
+	case <-time.After(2 * time.Second): // herdr stopped reading
+		s.Close()
+	}
+}
+
+// Close gives the slot back: stdin closes, herdr detaches and, while a herdr client is attached, lays the pane out at
+// that client's size again (with none it keeps the size it has: CloseAt). A process that does not exit soon after is
+// killed (that releases it as well).
 func (s *Control) Close() {
 	s.once.Do(func() {
 		_ = s.in.Close()

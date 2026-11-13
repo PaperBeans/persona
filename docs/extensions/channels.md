@@ -74,7 +74,7 @@ they're listed in the channel table but don't go through the unified pipeline.
 | `account` | Bound account `{id?, name}`: display only (WeChat uses the last few characters of the id from iLink; Lark uses the owner's name), no phone number or email |
 | `capabilities` | See the table below |
 | `target` | Which chat messages go to: `{kind: "main"}` (main chat, default), `{kind: "conversation", machine_id, session_id, title}` (a particular chat), `{kind: "new"}` (the next message starts a new chat, then becomes `conversation`). The Lark bot also has `{kind: "agent", …}` (the Agent selected with `/agents`) |
-| `features` | Features this channel can toggle individually, a list of `{id, title, description, on}`: the App draws switches from this list, even for unknown features. For the Lark bot: `main`, `cards`, `all_cards`, `pushes`, `sync`, `agents`, `reports`, `board`, `only_conclusions` (`docs/extensions/bots.md` ("What it can do")); extension channels uniformly use `asks` (Questions and approvals), `all_asks` (All agents' questions), `pushes` (Send notifications here too), `sync` (Sync main chat turns started elsewhere), shown according to capabilities |
+| `features` | Features this channel can toggle individually, a list of `{id, title, description, on}`: the App draws switches from this list, even for unknown features. For the Lark bot: `main`, `cards`, `all_cards`, `pushes`, `sync`, `agents`, `reports`, `board`, `only_conclusions`, `report_steps`, `answer_new_card`, `workbench` (`docs/extensions/bots.md` ("What it can do")); extension channels uniformly use `asks` (Questions and approvals), `all_asks` (All agents' questions), `pushes` (Send notifications here too), `sync` (Sync main chat turns started elsewhere), shown according to capabilities |
 | `bind` | How to bind: `qr` (scan a QR code), `code` (the App gives a pairing code to send to the bot in IM), `fields` (enter credentials, possibly followed by a `code` step), `none` (no binding needed: `app`, `voice`), `config` (only configurable in the manager's manager.json; no channel uses it since #1571) |
 | `owner` | Not in the API: **who can use it** is always the one person who bound it (the WeChat account that scanned, the paired Lark account). Only that person's messages go into chats; others receive only "This bot only works for the person who bound it" (once per person per 10 minutes), and groups are never handled. Identifying the owner is the channel's job (only it understands IM identities); the hub receives only the owner's messages |
 
@@ -166,7 +166,7 @@ While the assistant process is restarting or disconnected from hub, **receivers 
 - **Which channel receives them**: a channel "drives" the chat if it is the channel's target, has a run waiting on it, or has a thread binding from the last 24 hours (`threads`), and `asks` is on;
   with `all_asks` on, all Agents' questions are sent. Questions from other Agents on the computers still only appear in the App.
 - **`asks: buttons`** (Lark bot): the assistant draws cards, and button answers use the same hub `resolve` (`interactions.resolve`).
-- **`asks: text`** (WeChat, future Telegram): the assistant renders text (`channel.AskText`), and the user's next message is the answer (`channel.ReadAnswer`):
+- **`asks: text`** (WeChat, future Telegram): the assistant renders text (`channel.AskText`), and the user's next message is the answer (`channel.ReadAnswer`). The one exception is the assistant's `ask_user` raised with `wait: false` (`channel.Ask.Later`): no turn waits on it, so only a reply that names one of its options answers it, and other words are an ordinary message (`docs/assistant/assistant.md`, "Asking without holding the turn"). The rules:
 
   | Card | How to answer |
   | --- | --- |
@@ -316,7 +316,7 @@ if the assistant is disconnected, return `503 assistant_offline`; fields are unc
   - With `settings_url` (Lark bot), an extra "More Settings" row opens the old page.
 - **Connector page**: existing WeChat connector and Lark bot entries in Settings › Connectors remain; a top explanation says it's a chat channel and links to "Settings › Channels". Apple says "Set it up in Settings › Channels". Binding on the channel page and login on the connector page use the same API; either works identically.
 - **Chat page**: a small "From WeChat" line below channel-origin user messages (channel icon + name, secondary color); no marker for App-origin messages.
-- **Chat list**: if session `channels` is nonempty, show a small icon of the most recent channel beside the title.
+- **Chat list**: if session `channels` is nonempty, show a small icon of the most recent channel beside the title. A chat an extension opened (`origin` `lark_agent` / `extension`) shows its source's mark there instead, and its first message gets "From Lark /agent" / "From an extension" (iOS / iPadOS and the web; Android #4203; `docs/protocol/protocol.md` "Origin of assistant chats", #3758).
 
 ## 8. Steps
 

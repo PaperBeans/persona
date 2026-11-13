@@ -2,12 +2,13 @@
 import SwiftUI
 import UIKit
 
-/// Acting on the app (docs/operations/runtime-cli.md「Actions and screenshots」): `activate`, `scroll`, `type`, `dismiss-keyboard`, `snapshot`,
-/// `pasteboard`, `share`.
+/// Acting on the app (docs/operations/runtime-cli.md「Actions and screenshots」): `activate`, `alert`, `scroll`, `type`, `dismiss-keyboard`,
+/// `snapshot`, `pasteboard`, `share`.
 /// A real touch (a menu's items, which take no accessibility activation) is `personactl.py tap`'s fallback: `idb`.
 extension RuntimeCLI {
     static let actionCommands: [String: Command] = [
         "activate": { a in activate(a) },
+        "alert": { a in await alert(a) },
         "scroll": { a in scroll(a) },
         "type": { a in type(a) },
         "dismiss-keyboard": { _ in windows.forEach { $0.endEditing(true) }; return [:] },
@@ -31,11 +32,26 @@ extension RuntimeCLI {
         return ["changeCount": UIPasteboard.general.changeCount, "hasImages": UIPasteboard.general.hasImages]
     }
 
-    /// The system's share sheet for `text` (and `url`, when given), from the key window: where Share › Persona
-    /// (`PersonaShare`) is listed, without a share button to find on the page.
+    /// The system's share sheet for `text` (and `url`, `images` solid pictures and `files` small PDFs, when given), from
+    /// the key window: where Share › Persona (`PersonaShare`) is listed, without a share button to find on the page.
     private static func share(_ a: Args) -> Reply {
         var items: [Any] = [a["text"] as? String ?? "Persona"]
         if let u = (a["url"] as? String).flatMap(URL.init(string:)) { items.append(u) }
+        let colors: [UIColor] = [.systemTeal, .systemOrange, .systemIndigo, .systemPink]
+        for i in 0..<min(colors.count, max(0, a["images"] as? Int ?? 0)) {
+            let size = CGSize(width: 800, height: 600)
+            let format = UIGraphicsImageRendererFormat.default()
+            format.scale = 1
+            items.append(UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+                colors[i].setFill()
+                ctx.fill(CGRect(origin: .zero, size: size))
+            })
+        }
+        for i in 0..<min(4, max(0, a["files"] as? Int ?? 0)) {
+            let url = FileManager.default.temporaryDirectory.appending(path: i == 0 ? "Quarterly report.pdf" : "Notes \(i + 1).pdf")
+            try? Data("%PDF-1.4\n%Persona share test\n%%EOF\n".utf8).write(to: url)
+            items.append(url)
+        }
         guard var top = windows.first(where: \.isKeyWindow)?.rootViewController ?? windows.first?.rootViewController else {
             return fail("no window")
         }
@@ -48,17 +64,57 @@ extension RuntimeCLI {
     }
 
     /// What VoiceOver's double tap does to the element `target` finds: a button's action, a menu opening.
-    /// `activated` false when the element does not take it (a menu's items).
+    /// `activated` false when the element does not take it (a menu's items). `action`: the element's custom action of
+    /// that name instead (VoiceOver's Actions rotor), as a failed bubble's Resend: a menu's item without a touch.
     private static func activate(_ a: Args) -> Reply {
         switch target(a) {
         case .failure(let f): return fail(f.why)
-        case .success(let e): return ["activated": e.object.accessibilityActivate(), "element": e.json]
+        case .success(let e):
+            guard let name = a["action"] as? String else {
+                return ["activated": e.object.accessibilityActivate(), "element": e.json]
+            }
+            let actions = e.object.accessibilityCustomActions ?? []
+            guard let action = actions.first(where: { $0.name == name }) else {
+                return fail("no action \(name): \(actions.map(\.name))")
+            }
+            if let run = action.actionHandler { return ["activated": run(action), "element": e.json] }
+            guard let t = action.target as? NSObject else { return fail("action \(name) does nothing") }
+            _ = t.perform(action.selector, with: action)
+            return ["activated": true, "element": e.json]
         }
+    }
+
+    /// The alert the app shows (SwiftUI's `.alert` is a `UIAlertController`): its `title` and `buttons`; with `button`,
+    /// that one pressed, as a tap does (the alert goes, then its action runs). Its buttons take no accessibility
+    /// activation, and a touch needs idb.
+    private static func alert(_ a: Args) async -> Reply {
+        var shown: UIAlertController?
+        for w in windows where !w.isHidden {
+            var vc = w.rootViewController
+            while let v = vc, shown == nil {
+                if let alert = v as? UIAlertController, !alert.isBeingDismissed { shown = alert }
+                vc = v.presentedViewController
+            }
+        }
+        guard let shown else { return fail("no alert") }
+        let buttons = shown.actions.compactMap(\.title)
+        guard let title = a["button"] as? String else { return ["title": shown.title ?? "", "buttons": buttons] }
+        guard let action = shown.actions.first(where: { $0.title == title }) else { return fail("no button \(title): \(buttons)") }
+        // The action's handler is UIKit's to keep (no public way to press it): the alert's own block, as a tap calls it.
+        typealias Handler = @convention(block) (UIAlertAction) -> Void
+        let handler = (action.value(forKey: "handler") as AnyObject?).map { unsafeBitCast($0, to: Handler.self) }
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            shown.dismiss(animated: false) { done.resume() }
+        }
+        handler?(action)
+        return ["pressed": title, "buttons": buttons]
     }
 
     /// The largest scroll view on screen, moved by `pages` screens (negative: up; 0.8 of its height each) or `to` top /
     /// bottom, without animation (no deceleration: what is under test is where things land, not the fling). Only one
     /// that is drawn: the shell's page behind has a list as large as the one on screen (`frame`: which one moved).
+    /// `at` [x, y] (screen points): the smallest one under that point instead, a list inside a panel over the page
+    /// (the Needs You tray over the chat).
     private static func scroll(_ a: Args) -> Reply {
         AgentsFeed.pagingProbe?.reader.cancel()
         var views: [UIScrollView] = []
@@ -69,9 +125,15 @@ extension RuntimeCLI {
             v.subviews.forEach(collect)
         }
         windows.forEach(collect)
-        guard let s = views.max(by: { $0.bounds.width * $0.bounds.height < $1.bounds.width * $1.bounds.height }) else {
-            return fail("no scroll view")
+        let area = { (v: UIScrollView) in v.bounds.width * v.bounds.height }
+        let picked: UIScrollView?
+        if let at = a["at"] as? [Double], at.count == 2 {
+            let point = CGPoint(x: at[0], y: at[1])
+            picked = views.filter { $0.convert($0.bounds, to: nil).contains(point) }.min { area($0) < area($1) }
+        } else {
+            picked = views.max { area($0) < area($1) }
         }
+        guard let s = picked else { return fail("no scroll view") }
         let top = -s.adjustedContentInset.top
         let bottom = max(top, s.contentSize.height + s.adjustedContentInset.bottom - s.bounds.height)
         var y = s.contentOffset.y

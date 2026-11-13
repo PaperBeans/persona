@@ -296,10 +296,10 @@ def run(base, shots):
             size = page.evaluate("parseFloat(getComputedStyle(document.querySelector('main header h1')).fontSize)")
             if h1["width"] < size * 9.5:
                 fail(f"360: the title gets {h1['width']:.0f} px ({h1['width'] / size:.1f} characters)")
-            if page.locator("main header").get_by_text("需要你").count() or page.locator("main header").get_by_text("工作中").is_visible():
-                fail("360: the state pill should be only the dot")
-            if page.locator("main header").get_by_text("同空间", exact=True).is_visible():
-                fail("360: 同空间 should be an icon and a number")
+            if page.locator("main header").get_by_text("需要你").count() or page.locator("main header").get_by_text("工作中").count():
+                fail("360: the header says no state (#5421, cindy's: the running bar and the sidebar say it)")
+            if page.locator("main header").get_by_text("同空间").count():
+                fail("360: 同空间 is a row of ⋯, not a header button (#5421)")
             crowded(page, f"360×740 {theme}")
             if theme == "light":
                 ok(f"360: the title gets {h1['width']:.0f} px ({h1['width'] / size:.1f} characters)")

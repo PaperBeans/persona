@@ -10,6 +10,9 @@
     <string name="designsystem_status_unknown">Unknown</string>
     <string name="designsystem_status_waiting">Waiting</string>
     <string name="designsystem_status_muted">Muted</string>
+    <!-- Layout density (Settings › Appearance › Layout density) -->
+    <string name="designsystem_density_standard">Standard</string>
+    <string name="designsystem_density_compact">Compact</string>
     <!-- Interface styles (Settings › Appearance › Interface style) and glass -->
     <string name="designsystem_style_glass">Glass</string>
     <string name="designsystem_style_glass_summary">Frosted glass floats over the status light and glows amber when something is waiting for you</string>
@@ -50,8 +53,8 @@
     <string name="designsystem_processing">Working…</string>
     <string name="designsystem_with_state">%1$s, %2$s</string>
     <!-- Requests that need the user (Agents page) -->
-    <string name="designsystem_decision_command">Needs your permission</string>
-    <string name="designsystem_decision_tool">Needs your permission</string>
+    <string name="designsystem_decision_command">Waiting for your approval</string>
+    <string name="designsystem_decision_tool">Waiting for your approval</string>
     <string name="designsystem_decision_plan">Plan awaiting approval</string>
     <string name="designsystem_decision_question">Has a question</string>
     <string name="designsystem_decision_form">Needs a few answers</string>
@@ -59,12 +62,14 @@
     <string name="designsystem_decision_other">Needs you</string>
     <string name="designsystem_decision_open_chat">Open chat</string>
     <string name="designsystem_decision_open_full">Open full page</string>
-    <string name="designsystem_decision_previous">Previous</string>
-    <string name="designsystem_decision_next">Next</string>
     <string name="designsystem_decision_advice">Persona: %1$s</string>
     <string name="designsystem_decision_recommended">Suggested</string>
-    <string name="designsystem_decision_position">Request %1$d of %2$d</string>
     <string name="designsystem_decision_option_position">Option %1$d of %2$d</string>
+    <!-- The pending requests above a chat's composer while they scroll (iOS PendingCards). -->
+    <plurals name="designsystem_decision_pending">
+        <item quantity="one">%1$d pending</item>
+        <item quantity="other">%1$d pending</item>
+    </plurals>
     <!-- Where an outgoing message stands -->
     <string name="designsystem_pending_sending">Sending</string>
     <string name="designsystem_pending_waiting">Sends when connected</string>
@@ -83,6 +88,8 @@
         <item quantity="other">Computer offline; status may be out of date (%1$d minutes ago)</item>
     </plurals>
     <string name="designsystem_line_answering">Sending your choice…</string>
+    <string name="designsystem_message_sending">Sending</string>
+    <string name="designsystem_message_processing">Processing</string>
     <string name="designsystem_line_sending">Sending…</string>
     <string name="designsystem_line_unconfirmed">Last action\'s result is unconfirmed</string>
     <plurals name="designsystem_line_needs_you_count">
@@ -142,20 +149,63 @@
     </plurals>
     <!-- A herdr tab of several agents (#2320) -->
     <string name="designsystem_tab_launcher">Lead</string>
+    <!-- An Agents row's third line on Glass (#4338 A9): the to-do chip and the muted bell, for TalkBack -->
+    <string name="designsystem_row_todo">To-do: %1$s</string>
+    <string name="designsystem_row_muted">Notifications muted</string>
+    <string name="designsystem_row_style_avatar">Avatar</string>
+    <string name="designsystem_row_style_two_lines">Two lines</string>
+    <string name="designsystem_row_style_cards">State cards</string>
+    <string name="designsystem_row_style_list">Compact list</string>
+    <string name="designsystem_row_style_avatar_summary">The agent\'s avatar, its title and time, two lines of what it last said, and where it runs.</string>
+    <string name="designsystem_row_style_two_lines_summary">Two lines per agent: its title and time, then one line of what it last said.</string>
+    <string name="designsystem_row_style_cards_summary">A card per agent, its state\'s color down the side; the one waiting for you is tinted.</string>
+    <string name="designsystem_row_style_list_summary">One line per agent: its state, title and time.</string>
     <plurals name="designsystem_tab_agents">
         <item quantity="one">%1$d agent</item>
         <item quantity="other">%1$d agents</item>
     </plurals>
+    <!-- An agent's card on the space page (#4338 A11): its state, then the tab's starter and its pending requests -->
+    <string name="designsystem_space_card_starter">%1$s · Started it</string>
+    <plurals name="designsystem_space_card_pending">
+        <item quantity="one">%1$s · %2$d pending</item>
+        <item quantity="other">%1$s · %2$d pending</item>
+    </plurals>
     <string name="designsystem_group_expand">Expand group</string>
     <string name="designsystem_group_collapse">Collapse group</string>
+    <string name="designsystem_show_all">Show All %1$d</string>
+    <string name="designsystem_show_fewer">Collapse</string>
+    <string name="designsystem_count_waiting_background">%1$d waiting in the background</string>
     <string name="designsystem_machine_monitor">Machine monitor</string>
+    <!-- A computer's projects page (iOS MachineSpacesView, #4338 A11): the capsule that opens it, and a project's pin -->
+    <string name="designsystem_machine_projects">All projects on %1$s</string>
+    <string name="designsystem_project_pinned">Pinned</string>
     <string name="designsystem_details">Details</string>
     <string name="designsystem_space">space</string>
+    <string name="designsystem_repository">Repository</string>
+    <string name="designsystem_main_worktree">Main worktree</string>
+    <string name="designsystem_worktree">Worktree</string>
+    <string name="designsystem_worktree_primary">Primary</string>
+    <string name="designsystem_worktree_detached">Detached HEAD</string>
+    <string name="designsystem_worktree_offline">This computer is offline</string>
+    <string name="designsystem_worktree_idle">Idle</string>
     <string name="designsystem_expand_named">Expand %1$s</string>
     <string name="designsystem_collapse_named">Collapse %1$s</string>
     <plurals name="designsystem_idle_more">
         <item quantity="one">%1$d more idle</item>
         <item quantity="other">%1$d more idle</item>
+    </plurals>
+    <!-- By Repository's idle line (iOS RepoIdleLine, #4338 A8): "2 idle · review · research", then "Hide 2 Idle" -->
+    <plurals name="designsystem_idle_count">
+        <item quantity="one">%1$d idle</item>
+        <item quantity="other">%1$d idle</item>
+    </plurals>
+    <plurals name="designsystem_idle_hide">
+        <item quantity="one">Hide %1$d Idle</item>
+        <item quantity="other">Hide %1$d Idle</item>
+    </plurals>
+    <plurals name="designsystem_idle_show">
+        <item quantity="one">Show %1$d idle agent</item>
+        <item quantity="other">Show %1$d idle agents</item>
     </plurals>
     <string name="designsystem_folded">Collapsed</string>
     <!-- Attachments, brands -->
@@ -216,6 +266,23 @@
     <string name="designsystem_editor_picture">Image to edit</string>
     <string name="designsystem_editor_undo">Undo</string>
     <string name="designsystem_editor_clear">Clear</string>
+    <!-- The image editor's crop, turn, widths and redo (#4992, iOS ImageEditor) -->
+    <string name="designsystem_markup_crop">Crop</string>
+    <string name="designsystem_editor_rotate">Rotate</string>
+    <string name="designsystem_editor_reset">Reset</string>
+    <string name="designsystem_editor_redo">Redo</string>
+    <string name="designsystem_editor_shape">Aspect Ratio</string>
+    <string name="designsystem_editor_shape_free">Freeform</string>
+    <string name="designsystem_editor_shape_original">Original</string>
+    <string name="designsystem_editor_shape_square">Square</string>
+    <string name="designsystem_editor_width">Line Width</string>
+    <string name="designsystem_editor_width_thin">Thin</string>
+    <string name="designsystem_editor_width_medium">Medium</string>
+    <string name="designsystem_editor_width_thick">Thick</string>
+    <string name="designsystem_editor_shape_4x3" translatable="false">4:3</string>
+    <string name="designsystem_editor_shape_3x4" translatable="false">3:4</string>
+    <string name="designsystem_editor_shape_16x9" translatable="false">16:9</string>
+    <string name="designsystem_editor_shape_9x16" translatable="false">9:16</string>
     <string name="designsystem_viewer_load_failed">Couldn\'t load the image</string>
     <string name="designsystem_viewer_action_failed">That didn\'t finish. Try again.</string>
     <!-- Formulas and diagrams in Markdown -->
@@ -260,6 +327,11 @@
     <string name="designsystem_qr_code">QR code</string>
     <string name="designsystem_queue_actions">Queued message actions</string>
     <string name="designsystem_queue_item">Item %1$d: %2$s</string>
+    <string name="designsystem_queue_item_note">Item %1$d: %2$s. %3$s</string>
+    <plurals name="designsystem_queue_photos">
+        <item quantity="one">%1$d image</item>
+        <item quantity="other">%1$d images</item>
+    </plurals>
     <string name="designsystem_draft_ready">Persona drafted a reply</string>
     <!-- Connection details (the title's sheet while the hub is out of reach) -->
     <string name="designsystem_connection_online">Connected to the hub</string>

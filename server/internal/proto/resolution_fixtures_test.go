@@ -505,7 +505,7 @@ func TestResolutionFixtureSourceEvidence(t *testing.T) {
 	root := answerFixtureRoot(t)
 	evidence := map[string][]string{
 		"apple/Persona/Views/Interactions/InteractionViews.swift": {
-			".disabled(!canAdvance || sending)", ".disabled(sending)", "if interaction.offersAlways {",
+			".disabled(!canAdvance || isSending)", ".disabled(isSending)", "if interaction.offersAlways {",
 			"if rejecting {", "rejecting = false", ".disabled(text.isEmpty)",
 			"if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {",
 			"let t = text.trimmingCharacters(in: .whitespacesAndNewlines)",

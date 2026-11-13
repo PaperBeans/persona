@@ -84,7 +84,7 @@ private fun StepRow(s: ExtensionOpStep, kind: String) {
     val fraction = OperationText.fraction(s)
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            Box(Modifier.size(Tokens.Space.l), contentAlignment = Alignment.Center) { StepMark(s.state) }
+            Box(Modifier.size(Tokens.Space.Standard.l), contentAlignment = Alignment.Center) { StepMark(s.state) }
             Text(OperationText.step(res, s.id, kind), style = type.callout, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 color = when (s.state) { "pending" -> palette.ink3; "failed" -> palette.danger.text; else -> palette.ink })
             if (detail.isNotEmpty()) Text(detail, style = type.caption, color = palette.ink3, maxLines = 1)
@@ -107,7 +107,7 @@ private fun ToolRow(s: ExtensionOpStep, t: ExtensionOpTool) {
     val indent = Modifier.padding(start = Tokens.Space.l + Tokens.Space.s)
     Column(indent, verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            Box(Modifier.size(Tokens.Space.l), contentAlignment = Alignment.Center) { StepMark(t.state) }
+            Box(Modifier.size(Tokens.Space.Standard.l), contentAlignment = Alignment.Center) { StepMark(t.state) }
             Text(t.name, style = PersonaTheme.type.caption.copy(fontFamily = PersonaTheme.type.code.fontFamily), maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 color = when (t.state) { "pending" -> palette.ink3; "failed" -> palette.danger.text; else -> palette.ink2 })
@@ -121,9 +121,9 @@ private fun ToolRow(s: ExtensionOpStep, t: ExtensionOpTool) {
 private fun StepMark(state: String) {
     val palette = PersonaTheme.palette
     when (state) {
-        "running" -> JSpinner(Modifier.size(Tokens.Space.m))
+        "running" -> JSpinner(Modifier.size(Tokens.Space.Standard.m))
         "done" -> JIcon(PhIcons.Check, stringResource(R.string.settings_ext_op_step_done), size = Tokens.Space.m, tint = palette.positive)
         "failed" -> JIcon(PhIcons.X, stringResource(R.string.settings_ext_op_step_failed), size = Tokens.Space.m, tint = palette.danger.dot)
-        else -> Box(Modifier.size(Tokens.Space.s).clip(CircleShape).background(palette.line))
+        else -> Box(Modifier.size(Tokens.Space.Standard.s).clip(CircleShape).background(palette.line))
     }
 }

@@ -21,8 +21,9 @@ final class AgentSync {
     nonisolated static let workingGap = AgentSyncPacing.workingGap
 
     private var known: [SessionKey: Int64] = [:]
-    /// When each session's rev last changed here: a chat on screen that got no items since has lost some (`checkStall`).
-    private var revMoved: [SessionKey: Date] = [:]
+    /// Each session's rev moves heard here and what its chat's reads cover: a chat on screen whose rev moved since its
+    /// newest read was sent may have lost a push (`checkStall`, `AgentSyncPacing.RevReads`).
+    private var revReads: [SessionKey: AgentSyncPacing.RevReads] = [:]
     /// What has been pulled, by rev ("<machine>/<session>" → rev); kept across launches, beside the chats' disk cache it
     /// describes (`StateCache`). Not in UserDefaults: it changes with nearly every push, and each write to UserDefaults
     /// draws every `@AppStorage` view in the app again; the Agents list re-laid itself out under the finger
@@ -41,6 +42,7 @@ final class AgentSync {
 
     private init() {
         synced = StateCache.load(Self.stateName) ?? [:]
+        saved = synced
         // Where it was kept before 2026-11-01: the recent chats are pulled once more.
         UserDefaults.standard.removeObject(forKey: "agentSync.revs")
     }
@@ -66,8 +68,26 @@ final class AgentSync {
 
     /// A session's rev as the hub has it now. The first one heard is no move: a chat's backlog is its baseline.
     private func heard(_ rev: Int64, for key: SessionKey) {
-        if let old = known[key], old != rev { revMoved[key] = .now }
+        if let old = known[key], old != rev { revReads[key, default: .init()].moved(at: .now) }
         known[key] = rev
+    }
+
+    /// A chat's subscription is being sent (opening it, or again after a reconnect): its backlog holds every line
+    /// written by now, which the moves of its rev heard so far were for.
+    func subscribing(_ key: SessionKey) {
+        revReads[key, default: .init()].subscribed()
+    }
+
+    /// Tests only: forget the revs heard and the catch-ups asked, as a fresh launch does. The sync scenarios replay one
+    /// case after another for the same session in one process (PersonaTests/Sync), and a catch-up of the case before
+    /// would pace the next case's.
+    func forgetChatsForTests() {
+        known = [:]
+        revReads = [:]
+        lastCatchUp = [:]
+        caughtUpFor = [:]
+        stallChecks = [:]
+        catchingUp = []
     }
 
     /// After a burst of events, look once.
@@ -87,11 +107,19 @@ final class AgentSync {
         let up = Set(model.groupIDs.filter { model.isLive($0) })
         guard !up.isEmpty else { return }
         let cutoff = Date.now.addingTimeInterval(-Self.recentWindow)
-        let recent = model.sessionsByMachine.values.joined()
-            .filter { up.contains($0.group) }
-            .filter { $0.status != .offline || ($0.updatedAt ?? .distantPast) > cutoff }
-            .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
-            .prefix(Self.maxSessions)
+        // Sorted by place, not by value: sorting the full `Session` values copied every one of them on each plan, which
+        // took 130–265 ms of main thread a minute on a hub with about 230 sessions (#4683).
+        let lists = Array(model.sessionsByMachine.values)
+        var order: [(at: Date, list: Int, row: Int)] = []
+        for (l, rows) in lists.enumerated() {
+            for r in rows.indices {
+                let at = rows[r].updatedAt ?? .distantPast
+                guard up.contains(rows[r].group), rows[r].status != .offline || at > cutoff else { continue }
+                order.append((at, l, r))
+            }
+        }
+        order.sort { $0.at > $1.at }
+        let recent = order.prefix(Self.maxSessions).map { lists[$0.list][$0.row] }
         var due: [SessionKey] = []
         var later: Date?
         let now = Date.now
@@ -148,19 +176,22 @@ final class AgentSync {
         else { return }
         let updatedAt = model.latest(key)?.updatedAt // `session(_:)` keeps an older one on purpose
         guard let at = AgentSyncPacing.catchUpAt(updatedAt: updatedAt, newestLine: store.newestLineAt,
-                                                revMoved: revMoved[key], lastArrival: store.arrivedAt,
+                                                rev: revReads[key], lastArrival: store.arrivedAt,
                                                 lastPull: lastCatchUp[key], pulledFor: caughtUpFor[key])
         else { return }
         guard at <= .now else { return lookAgain(key, at: at) }
         guard let api = model.api(key.group) else { return }
         lastCatchUp[key] = .now
         catchingUp.insert(key)
+        let sent = revReads[key]?.sending ?? 0 // a move heard while this read is on its way is asked about again
         ChatTrace.shared.note(key, "catch up: no items after covered=\(store.covered)")
         Task {
             do {
                 // Not asked again for this write once one page held all of it: the write may have added no line. After
                 // more pages (`fill`, `reload`, which keep their failures to themselves) the next look asks once more.
-                if try await Self.pullInto(store, key, api, model: model) == .none { caughtUpFor[key] = updatedAt }
+                let gap = try await Self.pullInto(store, key, api, model: model)
+                revReads[key, default: .init()].answered(sent)
+                if gap == .none { caughtUpFor[key] = updatedAt }
             } catch is CancellationError {
                 // Its last visible owner left; the next subscription owns missed-sequence replay.
             } catch {
@@ -221,8 +252,14 @@ final class AgentSync {
         }
     }
 
+    /// What the file holds once the write waiting in `saver` is done: every plan saves, and most plans change nothing
+    /// (#4684).
+    private var saved: [String: Int64]?
+
     private func save() {
+        guard synced != saved else { return }
         let snapshot = synced
+        saved = snapshot
         saver.run { StateCache.save(Self.stateName, snapshot) }
     }
 

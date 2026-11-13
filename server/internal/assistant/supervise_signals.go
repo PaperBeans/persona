@@ -43,6 +43,8 @@ var (
 	superviseNeedsAfter = 3 * time.Minute
 	// superviseStallMin is the least time without progress that counts as stuck (or 1.5× what the task should take).
 	superviseStallMin = 20 * time.Minute
+	// superviseSilentMin is the least time with nothing new in an agent's transcript, in any state, that is told.
+	superviseSilentMin = 2 * time.Hour
 	// superviseTick is how often the tasks are looked at.
 	superviseTick = 30 * time.Second
 	// superviseHoldMax bounds how long the main conversation's turns stay unpushed after a supervision message went in.
@@ -118,6 +120,11 @@ func (g superviseSignal) urgent() bool {
 	return false
 }
 
+// immediate: a signal that does not wait out the gap after the last message, only p.gather. A start that failed is
+// the supervisor's to retry and nobody else's; the gap is shared by every supervisor, so a message just sent to
+// another (the background supervisor) held it back for minutes while the task sat as if finished.
+func (g superviseSignal) immediate() bool { return g.Kind == sigFailed }
+
 type superviseBook struct {
 	mu      sync.Mutex
 	writeMu sync.Mutex // one ledger write at a time (updateSupervision)
@@ -132,8 +139,9 @@ type superviseBook struct {
 	timerAt time.Time
 	hold    map[string]time.Time // conversation → when a supervision message went in: its turn's finish is not pushed
 	visible map[string]bool      // an explicit user action makes the current triage turn visible
-	// failSeen: tasks whose failed start a supervision message carried, and when (start_remedy.go remedyTurnEnded)
-	failSeen map[string]time.Time
+	// failSeen: tasks whose failed start a supervision message carried, when, and for which conversation
+	// (start_remedy.go remedyTurnEnded)
+	failSeen map[string]failSeen
 	// lines are the reports being paraphrased for the Progress row (report_line.go; the tests wait on them).
 	lines sync.WaitGroup
 }
@@ -144,7 +152,7 @@ func (b *superviseBook) init() {
 		b.visible = map[string]bool{}
 	}
 	if b.failSeen == nil {
-		b.failSeen = map[string]time.Time{}
+		b.failSeen = map[string]failSeen{}
 	}
 }
 
@@ -171,12 +179,12 @@ func (s *Service) superviseTimings() superviseTimings {
 }
 
 // digestWait is how long until the pending signals are due (false: none): each waits p.gather after it came, and
-// p.every (p.urgent for an urgent one) after the last message (last; zero: none yet).
+// p.every (p.urgent for an urgent one) after the last message (last; zero: none yet), except an immediate one.
 func digestWait(now, last time.Time, pending []superviseSignal, p superviseTimings) (time.Duration, bool) {
 	var due time.Time
 	for _, g := range pending {
 		at := g.At.Add(p.gather)
-		if !last.IsZero() {
+		if !last.IsZero() && !g.immediate() {
 			gap := p.every
 			if g.urgent() {
 				gap = p.urgent
@@ -273,7 +281,8 @@ func (s *Service) retryDigestLocked(d time.Duration) {
 
 // watchSignals are what t and its agents show now that the supervisor should hear of, by their state alone: a task
 // waiting for review (told once per review: again after a restart of the assistant, which forgot what it told), an
-// agent waiting for an answer (at once for a quiet task), or working without progress for long. Nothing more for a
+// agent waiting for an answer (at once for a quiet task), working without progress for long, or in any other state
+// with nothing new in its transcript for longer still (silentAfter, #5124). Nothing more for a
 // task waiting for review or for the user, only that its time came for a parked one, and nothing for one done or not
 // supervised. A task nobody works on any more
 // is told from what the minute pass found (orphanSignal, tasks_orphan.go), since that asks whether its computers answer.
@@ -294,7 +303,8 @@ func watchSignals(t Todo, agents []proto.Session, now time.Time) []superviseSign
 		return nil
 	}
 	var out []superviseSignal
-	for _, c := range agents {
+	// An agent the task was handed over from is not watched: it would raise stalled from its last update forever (#6483).
+	for _, c := range currentTaskAgents(agents, supersededAgents(t, agents)) {
 		base := superviseSignal{Todo: t.ID, Machine: c.MachineID, Session: c.SessionID}
 		switch {
 		case c.State == proto.StateNeedsYou || c.PendingInteractions > 0:
@@ -304,12 +314,20 @@ func watchSignals(t Todo, agents []proto.Session, now time.Time) []superviseSign
 				g.Kind, g.Key, g.Minutes = sigNeedsYou, c.SessionID+"@"+since.UTC().Format(time.RFC3339), int(wait.Minutes())
 				out = append(out, g)
 			}
-		case c.State == proto.StateWorking:
+		case c.Assistant && c.State != proto.StateWorking:
+			// An assistant conversation (a task leader) waits on its workers, each told of on its own; a message always reaches it.
+		default:
 			moved := c.UpdatedAt
 			if c.ActivityAt != nil && c.ActivityAt.After(moved) {
 				moved = *c.ActivityAt
 			}
-			if still := now.Sub(moved); !moved.IsZero() && still >= stallAfter(v.ExpectMinutes) {
+			// Working: stuck past stallAfter. Any other state (waiting on background work, a wake, stopped or gone)
+			// is told past silentAfter, so a state that should end by itself and never does is still heard of (#5124).
+			after := silentAfter(v.ExpectMinutes)
+			if c.State == proto.StateWorking {
+				after = stallAfter(v.ExpectMinutes)
+			}
+			if still := now.Sub(moved); !moved.IsZero() && still >= after {
 				g := base
 				g.Kind, g.Key, g.Minutes = sigStalled, c.SessionID+"@"+moved.UTC().Format(time.RFC3339), int(still.Minutes())
 				g.Detail = strings.TrimSpace(c.Activity)
@@ -328,6 +346,12 @@ func stallAfter(expect int) time.Duration {
 	return max(superviseStallMin, time.Duration(expect)*time.Minute*3/2)
 }
 
+// silentAfter is how long a supervised task's agent may write nothing to its transcript, whatever its state, before
+// the supervisor hears of it: the fallback for a wait nothing ends (#5124).
+func silentAfter(expect int) time.Duration {
+	return max(superviseSilentMin, time.Duration(expect)*time.Minute*3/2)
+}
+
 // superviseLoop looks at the supervised tasks every superviseTick, and lets the supervision messages go out.
 func (s *Service) superviseLoop(ctx context.Context) {
 	t := time.NewTicker(superviseTick)
@@ -339,7 +363,10 @@ func (s *Service) superviseLoop(ctx context.Context) {
 		case <-t.C:
 		}
 		s.rehomeLeaderlessWorkers(ctx) // a worker whose leader's task closed is rehomed even with no signal of its own
+		s.handOverFormerMainTasks(ctx) // what a replaced main conversation still holds goes to the main one (main_handover.go)
+		s.backgroundStranded(ctx)      // what waits for a background supervisor that is gone is told again (supervise_background.go)
 		s.superviseWatch(ctx, time.Now())
+		s.drainHeldRelays(ctx, time.Now()) // nothing held for the owner is left behind (relay_presence.go)
 	}
 }
 

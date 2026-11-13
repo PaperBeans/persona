@@ -48,11 +48,7 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if err := checkModelID(p.Tasks[i].Model); err != nil { // typed on the card (#1644): refused before anything starts
 			return nil, planInvalid{err}
 		}
-		// A plan saved before the rule, or edited on the card, is held to it too (task_plan checks it as it makes a plan).
 		p.Tasks[i].Permission = strings.TrimSpace(p.Tasks[i].Permission)
-		if err := p.Tasks[i].checkWritablePermission(); err != nil {
-			return nil, planInvalid{fmt.Errorf("task %d: %w. Nothing was started", i+1, err)}
-		}
 		if m, ok := s.machineByName(ctx, p.Tasks[i].Machine); ok && p.Tasks[i].Role == roleLeader && s.isWorkMachine(m.ID) {
 			return nil, planInvalid{fmt.Errorf("task %d: role \"leader\" cannot run on %s: a work-trust computer gives its agents only "+
 				"the reporting tools, so it could not supervise workers. Put the task leader on a computer you own", i+1, m.Name)}
@@ -63,8 +59,17 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if err := s.resolveTaskWorkspace(ctx, &p.Tasks[i]); err != nil {
 			return nil, planInvalid{err}
 		}
+		// A card left waiting while another plan carried on the same to-do would open a second one for the same work.
+		if t := p.Tasks[i]; t.Continues != "" && t.ReuseTodo == "" {
+			if succ, ok := s.openSuccessor(t.Continues); ok {
+				return nil, planInvalid{fmt.Errorf("task %d: %w", i+1, errContinued(t.Continues, succ))}
+			}
+		}
 	}
 	p.State = planStarted
+	for i := range p.Tasks {
+		p.Tasks[i].OwnerStarted = ownerStarts(ctx)
+	}
 	ok, err := s.movePlan(ctx, p, planOpen)
 	if err != nil {
 		return nil, err
@@ -110,8 +115,15 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 			if t.Supervisor != "" && s.isLeader(ctx, t.Supervisor) {
 				sup = t.Supervisor
 				if t.ReuseTodo == "" {
-					s.taskCard(ctx, sup, todo.ID) // the leader sees its task's card too; the plan's stays where it was made
+					s.taskCard(ctx, sup, todo.ID, "") // the leader sees its task's card too; the plan's stays where it was made
 				}
+			}
+			s.superviseTodo(ctx, todo.ID, sup, t.DoneWhen, t.ExpectMinutes)
+		} else if sup, ok := s.defaultPlanSupervisor(ctx, p.Conversation, t.Parent); ok {
+			// Any other conversation's task is its own to supervise: its signals go to the conversation that planned it,
+			// which also sees its card and reviews it. No second card when that is the planning conversation itself.
+			if t.ReuseTodo == "" && sup != p.Conversation {
+				s.taskCard(ctx, sup, todo.ID, "")
 			}
 			s.superviseTodo(ctx, todo.ID, sup, t.DoneWhen, t.ExpectMinutes)
 		}
@@ -149,37 +161,64 @@ func notReusable(id, why string) error {
 }
 
 // reusableTodo says whether a task of a plan from conversation may run on todo id (task_plan's todo_id): the todo is
-// one that conversation opened, is not done, has no agent on it (one linked and not let go or dismissed) and is not
-// taken by a plan that started and has not linked its agent yet. taking: that last one is what the caller is about
-// to claim itself, so it is not looked at (takeTodoForTask holds it).
-func (s *Service) reusableTodo(conversation, id string, taking bool) error {
+// one that conversation opened or supervises (a handover after its agent stopped carries on in the same to-do, #6427),
+// is not done, has no live agent on it and is not taken by a plan that started and has not linked its agent yet. An
+// agent linked and never let go whose session stopped (its terminal kept, tasks_close.go), was archived or whose
+// computer the hub no longer knows is no agent working on it: those links are answered as stopped, for the taker to
+// let go (releaseStoppedAgents). A computer that cannot be reached is not an answer: its agent counts as working.
+// taking: the plan hold is what the caller is about to claim itself, so it is not looked at (takeTodoForTask holds it).
+func (s *Service) reusableTodo(ctx context.Context, conversation, id string, taking bool) (stopped []TodoAgent, err error) {
 	t, ok := s.todoNow(id)
 	switch {
 	case !ok:
-		return notReusable(id, "there is no such todo")
-	case conversation == "" || t.Origin != conversation:
-		return notReusable(id, "it was not opened from this conversation")
+		return nil, notReusable(id, "there is no such todo")
+	case conversation == "" || t.Origin != conversation && (t.Supervision == nil || t.Supervision.Supervisor != conversation):
+		return nil, notReusable(id, "it was not opened from this conversation, nor is it supervised by it")
 	case t.DoneAt != nil:
-		return notReusable(id, "it is already done")
+		return nil, notReusable(id, "it is already done")
 	}
 	for _, a := range t.Agents {
-		if a.ReleasedAt == nil && a.DismissedAt == nil {
-			return notReusable(id, "an agent is already working on it")
+		if a.ReleasedAt != nil || a.DismissedAt != nil {
+			continue
 		}
+		if !s.todoAgentStopped(ctx, a) {
+			return nil, notReusable(id, "an agent is already working on it")
+		}
+		stopped = append(stopped, a)
 	}
 	if !taking {
 		s.tasks.mu.Lock()
 		busy := s.tasks.reusing[id]
 		s.tasks.mu.Unlock()
 		if busy {
-			return notReusable(id, "another plan is starting an agent on it")
+			return nil, notReusable(id, "another plan is starting an agent on it")
 		}
 	}
-	return nil
+	return stopped, nil
+}
+
+// todoAgentStopped: nothing runs agent a now, so a new agent may take over its to-do: its session is listed stopped
+// (switchStopped) or archived, or its computer is gone from the hub. Not listed at all, or the computer not reached,
+// is not known to be stopped.
+func (s *Service) todoAgentStopped(ctx context.Context, a TodoAgent) bool {
+	list, err := s.sessions(ctx, a.MachineID)
+	if errors.Is(err, ErrNoDevice) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	for _, c := range list {
+		if c.SessionID == a.SessionID {
+			return c.Archived || switchStopped(c)
+		}
+	}
+	return false
 }
 
 // takeTodoForTask is the todo a started plan's task runs on (PlanTask.ReuseTodo), checked again now (it may have been
-// closed or taken since the plan was made) and held until the task's agent is linked (releaseTakenTodo).
+// closed or taken since the plan was made) and held until the task's agent is linked (releaseTakenTodo). The stopped
+// agents still linked to it are let go first: the new agent is the one working on it.
 func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation, id string) (Todo, error) {
 	s.tasks.mu.Lock()
 	if s.tasks.reusing[id] {
@@ -188,33 +227,91 @@ func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation, id 
 	}
 	s.tasks.reusing[id] = true
 	s.tasks.mu.Unlock()
-	if err := s.reusableTodo(conversation, id, true); err != nil {
+	stopped, err := s.reusableTodo(ctx, conversation, id, true)
+	if err != nil {
 		s.releaseTakenTodo(id)
 		return Todo{}, err
 	}
 	// TodoID is the execution binding; ReuseTodo preserves each historical plan's intended target.
 	// Retire old bindings while this takeover holds the to-do, before the new agent can ask for approval.
-	// Creation order is not start order, and a later retry can change an old plan's UpdatedAt.
-	plans, err := s.conversationPlans(ctx, conversation)
-	if err != nil {
-		s.releaseTakenTodo(id)
-		return Todo{}, err
+	// Creation order is not start order, and a later retry can change an old plan's UpdatedAt. A supervisor taking
+	// over a to-do another conversation opened retires that conversation's bindings too.
+	convs := []string{conversation}
+	if t, ok := s.todoNow(id); ok && t.Origin != "" && t.Origin != conversation {
+		convs = append(convs, t.Origin)
 	}
-	for _, p := range plans {
-		if p.ID == planID {
-			continue
+	for _, conv := range convs {
+		plans, err := s.conversationPlans(ctx, conv)
+		if err != nil {
+			s.releaseTakenTodo(id)
+			return Todo{}, err
 		}
-		for i, task := range p.Tasks {
-			if task.TodoID == id {
-				if err := s.patchPlanTask(ctx, p.ID, i, func(t *PlanTask) { t.TodoID = "" }); err != nil {
-					s.releaseTakenTodo(id)
-					return Todo{}, err
+		for _, p := range plans {
+			if p.ID == planID {
+				continue
+			}
+			for i, task := range p.Tasks {
+				if task.TodoID == id {
+					if err := s.patchPlanTask(ctx, p.ID, i, func(t *PlanTask) { t.TodoID = "" }); err != nil {
+						s.releaseTakenTodo(id)
+						return Todo{}, err
+					}
 				}
 			}
 		}
 	}
+	if err := s.releaseStoppedAgents(ctx, id, stopped); err != nil {
+		s.releaseTakenTodo(id)
+		return Todo{}, err
+	}
 	t, _ := s.todoNow(id)
 	return formatTodo(t), nil
+}
+
+// todoAgentReleaser is the store's letting go of one agent link (released_at only); a store without it keeps that in
+// memory only.
+type todoAgentReleaser interface {
+	ReleaseTodoAgent(ctx context.Context, todoID, machineID, sessionID string, at time.Time) error
+}
+
+var _ todoAgentReleaser = (*db.DB)(nil)
+
+// releaseStoppedAgents lets go of the stopped agents still linked to todo id (reusableTodo), so the agent taking it
+// over is the one the to-do and its follow-up see. They stay in its history.
+func (s *Service) releaseStoppedAgents(ctx context.Context, id string, stopped []TodoAgent) error {
+	if len(stopped) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	s.todos.writing.Lock()
+	if st, ok := s.todoDB().(todoAgentReleaser); ok {
+		for _, a := range stopped {
+			if err := st.ReleaseTodoAgent(ctx, id, a.MachineID, a.SessionID, now); err != nil {
+				s.todos.writing.Unlock()
+				return err
+			}
+		}
+	}
+	s.todos.mu.Lock()
+	if t, ok := s.todos.todos[id]; ok {
+		for _, a := range stopped {
+			for i := range t.Agents {
+				if t.Agents[i].MachineID == a.MachineID && t.Agents[i].SessionID == a.SessionID && t.Agents[i].ReleasedAt == nil {
+					t.Agents[i].ReleasedAt = &now
+				}
+			}
+			if key := [2]string{a.MachineID, a.SessionID}; s.todos.activeBySession[key] == id {
+				delete(s.todos.activeBySession, key)
+			}
+		}
+		t.UpdatedAt = now
+	}
+	s.todos.mu.Unlock()
+	s.todos.writing.Unlock()
+	s.logf("task %s: let go of %d stopped agent(s) for the agent taking it over", id, len(stopped))
+	s.linksChanged(ctx)
+	s.todosChanged(ctx)
+	return nil
 }
 
 // releaseTakenTodo lets go of a todo takeTodoForTask held; id "" is nothing.
@@ -263,28 +360,32 @@ func (s *Service) startPlanTaskAsync(planID, conversation string, i int, t PlanT
 func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTask, retry bool) {
 	t.planID, t.planIndex = planID, i
 	defer s.releaseTaskWorkspace(t.TodoID)
+	// The admission claim (if the gate took one) is released when this start body ends either way: on success the
+	// agent is linked into the todo by then so the ledger's direction count carries it, and on failure nothing runs.
+	defer func() {
+		if t.admissionRelease != nil {
+			t.admissionRelease()
+			t.admissionRelease = nil
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), taskStartTimeout)
 	defer cancel()
-	placed, placedWhy := t.Machine, t.Why
+	placed, placedWhy, placedPermission := t.Machine, t.Why, t.Permission
 	if t.Role == roleLeader { // its tools are listed once it is linked: a list asked for meanwhile waits (task_leader.go)
 		s.leaderStarts.Add(1)
 		defer s.leaderStarts.Add(-1)
 	}
-	// The permission rule holds on every start of a plan task, a retry, a remedy or a recovered start included, whatever a
-	// saved plan says: nothing is started and the failure says why (task_plan, startPlan and retryTask also refuse earlier).
 	t.Permission = strings.TrimSpace(t.Permission)
-	var mid, sid string
-	var err error
-	if perr := t.checkWritablePermission(); perr != nil {
-		err = perr
-	} else {
-		mid, sid, err = s.startTaskAgent(ctx, &t, retry)
-	}
-	if err != nil && ctx.Err() == nil && !startStalled(err) && !errors.Is(err, errPermissionRule) {
+	mid, sid, err := s.startTaskAgent(ctx, &t, retry)
+	if err != nil && ctx.Err() == nil && !startStalled(err) {
 		// The machine's link dropped (a node restarting, a tunnel blinking): try once more after a moment. Any other
 		// launcher failure may move a flexible task, after verifying its directory on the destination.
-		shouldRetry := transientStartErr(err)
-		if !shouldRetry && t.MachinePolicy == machineFlexible {
+		// An unknown result (the wait ran out or the link dropped while the answer was out) already went through
+		// adoption inside startTaskAgent: neither a blind retry nor a reroute may run, since the node can still be
+		// creating that first session and either one would open a second agent (#6540).
+		unknown := startResultUnknown(err)
+		shouldRetry := transientStartErr(err) && !unknown
+		if !shouldRetry && t.MachinePolicy == machineFlexible && !unknown {
 			shouldRetry = s.healthyPlace(ctx, &t)
 		}
 		if shouldRetry {
@@ -296,15 +397,22 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 			}
 		}
 	}
-	if t.Machine != placed || t.Why != placedWhy { // workspace admission already persisted the actual checkout
+	if t.Machine != placed || t.Why != placedWhy || t.Permission != placedPermission { // workspace admission already persisted the actual checkout
 		s.updatePlanTask(ctx, planID, i, t)
 	}
 	if err == nil {
-		err = s.linkPlanAgent(ctx, t, mid, sid, false)
+		// The start's own context can be spent already: an unanswered start whose session was just reconciled
+		// (#6540) reaches here after taskStartTimeout, and a database write on that context fails at once, which
+		// would fail the task although its agent is running. The link gets its own time, like the bookkeeping below.
+		linkCtx, linkCancel := context.WithTimeout(context.WithoutCancel(ctx), taskFailTimeout)
+		err = s.linkPlanAgent(linkCtx, t, mid, sid, false)
+		linkCancel()
 		if errors.Is(err, db.ErrTodoCompleted) {
 			// The user tapped "Done" while the agent was starting (a busy machine takes minutes, #1396). The task stays
 			// done and its agent stays in it: nothing reads failed, and the close loop still finds the agent to retire.
-			err = s.linkPlanAgent(ctx, t, mid, sid, true)
+			retryCtx, retryCancel := context.WithTimeout(context.WithoutCancel(ctx), taskFailTimeout)
+			err = s.linkPlanAgent(retryCtx, t, mid, sid, true)
+			retryCancel()
 			if err != nil {
 				s.logf("task %s: link to the finished task: %v", t.TodoID, err)
 			}
@@ -433,12 +541,7 @@ func (s *Service) retryTask(ctx context.Context, todoID string) (json.RawMessage
 	}
 	p.Tasks[i].normalizeReadonlyPermission()
 	t := p.Tasks[i]
-	// A plan saved before task_plan required bypassPermissions of a writable task, or edited since, is held to it here too,
-	// before anything is reopened or started.
 	t.Permission = strings.TrimSpace(t.Permission)
-	if err := t.checkWritablePermission(); err != nil {
-		return nil, fmt.Errorf("%w; nothing was started", err)
-	}
 	m, ok := s.machineByName(ctx, t.Machine)
 	if !ok {
 		return nil, i18n.Err("assistant-tasks.no_machine", i18n.Args{"machine": strconv.Quote(t.Machine)})
@@ -518,6 +621,16 @@ func (s *Service) continueTask(ctx context.Context, cur Todo) (json.RawMessage, 
 		delete(s.tasks.retrying, cur.ID)
 		s.tasks.mu.Unlock()
 	}
+	if stoppedAgent(cut) { // it stopped since (read-only, #4754): a new agent goes on with the task (tasks_successor.go)
+		defer release()
+		if live, _ := liveTaskAgents(s.taskAgents(ctx, cur)); len(live) > 0 {
+			return s.todoView(ctx, cur.ID) // another agent of the task still runs: it is that one's
+		}
+		if _, err := s.startTaskSuccessor(ctx, cur, cut, continueText); err != nil {
+			return nil, err
+		}
+		return s.todoView(ctx, cur.ID)
+	}
 	if err := s.call(ctx, cut.MachineID, DeviceSessionSend, map[string]any{"session_id": cut.SessionID, "text": continueText}, nil); err != nil {
 		release()
 		return nil, err
@@ -566,6 +679,76 @@ func transientStartErr(err error) bool {
 	var re *rpc.Error
 	return errors.Is(err, rpc.ErrClosed) || errors.Is(err, apierr.ErrOffline) ||
 		errors.As(err, &re) && (re.Message == rpc.ErrClosed.Error() || re.Code == proto.CodeTerminalNotReady)
+}
+
+// taskPlanWithdrawnEvent: a conversation withdrew a plan card of its own (task_plan_withdraw). Detail: plan,
+// conversation, reason, tasks (their titles).
+const taskPlanWithdrawnEvent = "task_plan_withdrawn"
+
+// withoutWithdrawn is plans less those their own conversation withdrew (task_plan_withdrawn in events): dismissed as
+// the owner's Dismiss leaves them, but the owner did not answer them, so they say nothing about which kinds of task the
+// owner starts or turns down (rulePlanRuns, the setup suggestions).
+func withoutWithdrawn(plans []*TaskPlan, events []db.WorkEvent) []*TaskPlan {
+	withdrawn := map[string]bool{}
+	for _, e := range events {
+		if id, _ := e.Detail["plan"].(string); e.Kind == taskPlanWithdrawnEvent && id != "" {
+			withdrawn[id] = true
+		}
+	}
+	if len(withdrawn) == 0 {
+		return plans
+	}
+	out := make([]*TaskPlan, 0, len(plans))
+	for _, p := range plans {
+		if !withdrawn[p.ID] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// toolTaskPlanWithdraw is task_plan_withdraw: the conversation that put up plan card plan_id takes it down while nothing
+// of it has started, as the owner's Dismiss does (dismissPlan), its reason kept as a task_plan_withdrawn work event
+// (#6739). A card whose work was done elsewhere, or that the owner dropped, otherwise waited for "Start" in every list
+// of what is the owner's to handle until they dismissed it themselves. Another conversation's plan, and one that
+// started or was dismissed, are refused, and nothing changes.
+func (s *Service) toolTaskPlanWithdraw(ctx context.Context, self string, args json.RawMessage) (string, error) {
+	var a struct {
+		PlanID string `json:"plan_id"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	reason, err := remedyReason(a.Reason)
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(a.PlanID)
+	if id == "" {
+		return "", errors.New("plan_id is required: the plan's id, as task_plan's answer or the snapshot's plans waiting to start give it")
+	}
+	p, err := s.loadPlan(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("plan %s: %w", id, err)
+	}
+	if p.Conversation != self {
+		return "", fmt.Errorf("plan %s was put up by another conversation: only that one withdraws it (or the user dismisses it); nothing was changed", id)
+	}
+	if p.State != planOpen {
+		return "", fmt.Errorf("plan %s is %s, no longer waiting for Start: nothing was withdrawn", id, p.State)
+	}
+	if p, err = s.dismissPlan(ctx, id); err != nil {
+		return "", fmt.Errorf("plan %s: %w; nothing was withdrawn", id, err)
+	}
+	titles := make([]string, 0, len(p.Tasks))
+	for _, t := range p.Tasks {
+		titles = append(titles, t.Title)
+	}
+	s.workEvent("", self, taskPlanWithdrawnEvent, map[string]any{"plan": id, "conversation": self, "reason": reason, "tasks": titles})
+	s.logf("plan %s: withdrawn by its conversation %s: %s", id, short(self), reason)
+	return fmt.Sprintf("Withdrew plan %s (%d task(s): %s): its card no longer waits for Start. Reason kept: %s", id, len(titles),
+		strings.Join(titles, "; "), reason), nil
 }
 
 func (s *Service) dismissPlan(ctx context.Context, id string) (*TaskPlan, error) {

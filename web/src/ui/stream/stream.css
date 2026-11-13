@@ -5,10 +5,13 @@
 @keyframes stream-word-in { from { opacity: 0; } to { opacity: 1; } }
 /* ::marker animates color only; the end is the marker's own color. */
 @keyframes stream-marker-in { from { color: transparent; } }
-/* The running status bar breathes once per change in its token count (views/chat/RunningStatusBar.tsx). */
+/* The running status bar breathes once per change in its words or token count, and its "Done" pops once, transform
+   only so it never covers the fade (cindy's status-bar-shimmer and status-bar-done; views/chat/RunningStatusBar.tsx). */
 .status-breath { animation: status-breath 1.5s steps(18, end) 1; }
 @keyframes status-breath { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
-@media (prefers-reduced-motion: reduce) { .stream-word, [data-stream-marker]::marker, .status-breath { animation: none; } }
+.status-done { animation: status-done-pop .4s cubic-bezier(.34, 1.56, .64, 1) both; }
+@keyframes status-done-pop { 0% { transform: scale(.85); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .stream-word, [data-stream-marker]::marker, .status-breath, .status-done { animation: none; } }
 
 /* Markdown in the chat (cindy's markdown rules): headings 20 / 18 / 16 at 500, inline code with a 6px corner, code
    blocks with a 12px corner that wrap instead of scrolling. `.prose-j.prose-j` outranks styles.css whatever the order

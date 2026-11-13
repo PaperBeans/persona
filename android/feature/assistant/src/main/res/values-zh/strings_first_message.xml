@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A new conversation's first message while it starts, or after its start failed (iOS FirstMessagePending, FailedStart). -->
+<resources>
+    <string name="assistant_first_sending">正在发送…</string>
+    <string name="assistant_first_resend">重发</string>
+</resources>

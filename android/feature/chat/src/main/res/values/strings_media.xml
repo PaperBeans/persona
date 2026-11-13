@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Share as a picture, videos and pasted pictures in the composer (iOS MessageShareSheet, VideoAttachments, PasteImageChip). -->
+<resources>
+    <string name="chat_composer_videos_only">Please look at the video</string>
+    <string name="chat_composer_video_placeholder">[Video]</string>
+    <string name="chat_paste_image">Paste</string>
+    <string name="chat_paste_dont">Don\'t paste</string>
+    <string name="chat_share_card_title">Message card</string>
+    <string name="chat_share_card_me">Me</string>
+    <string name="chat_share_card_brand">Persona</string>
+    <string name="chat_share_card_share_text">Share Text</string>
+    <string name="chat_share_card_light">Light</string>
+    <string name="chat_share_card_dark">Dark</string>
+</resources>

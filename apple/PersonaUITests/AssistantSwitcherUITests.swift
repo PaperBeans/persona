@@ -51,6 +51,29 @@ final class AssistantSwitcherUITests: XCTestCase {
         shot(app, "switcher-installing-code")
     }
 
+    /// Every other assistant's row says how much waits there and the current one's says none; after a switch it is
+    /// the other way round. Against the mock hub, whose default assistant and m-3fa21c each have inbox items that need the user.
+    @MainActor func testTheListCountsWhatWaitsAtTheOtherAssistants() throws {
+        let app = openList()
+        let home = element(app, "assistant-switcher-row-assistant"), work = element(app, "assistant-switcher-row-m-3fa21c")
+        XCTAssertTrue(work.waitForExistence(timeout: 10), "no row for 工作:\n\(app.debugDescription)")
+        XCTAssertTrue(work.label.contains("件等你处理"), "no count beside 工作: \(work.label)")
+        XCTAssertFalse(home.label.contains("件等你处理"), "the current assistant's row shows no count: \(home.label)")
+        shot(app, "switcher-counts")
+
+        work.tap()
+        let header = app.buttons.matching(NSPredicate(format: "identifier == %@ OR (identifier == %@ AND label BEGINSWITH %@)",
+                                                      "assistant-switcher", "assistant-sidebar", "工作")).firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 10), "the header does not name 工作:\n\(app.debugDescription)")
+        // The switch's toast is gone and the roster's counts are in before the list opens again.
+        sleep(2)
+        header.tap()
+        XCTAssertTrue(home.waitForExistence(timeout: 10), "the list did not open again:\n\(app.debugDescription)")
+        XCTAssertTrue(home.label.contains("件等你处理"), "no count beside the default assistant: \(home.label)")
+        XCTAssertFalse(work.label.contains("件等你处理"), "the current assistant's row shows no count: \(work.label)")
+        shot(app, "switcher-counts-switched")
+    }
+
     /// At the largest text size New Assistant and Manage Assistants… are still whole and can be tapped: the rows scroll
     /// above them.
     @MainActor func testAtTheLargestTextSizeBothActionsCanBeTapped() throws {
@@ -87,14 +110,35 @@ final class AssistantSwitcherUITests: XCTestCase {
         shot(app, "switcher-switched-closes-page")
     }
 
+    /// The default moving under the current assistant is no switch, since who is shown stays: a to-do being written
+    /// keeps its sheet and its text. The mock hub's default is put back for the tests after this one.
+    @MainActor func testTheDefaultMovingUnderTheCurrentAssistantLeavesItsPageAlone() throws {
+        defer { makeDefault("assistant") }
+        let app = launch(["-openAssistantPage", "todos"], manager: "m-3fa21c")
+        let add = app.buttons["新建待办"].firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 20), "the to-dos did not open:\n\(app.debugDescription)")
+        sleep(3) // the roster read and `-openAssistantManager`'s pick: that one is a switch
+        add.tap()
+        let title = app.textFields.matching(NSPredicate(format: "label == %@ OR placeholderValue == %@", "标题", "标题")).firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 10), "no sheet for a new to-do:\n\(app.debugDescription)")
+        title.tap()
+        title.typeText("call the bank")
+
+        makeDefault("m-3fa21c")
+        sleep(4) // the roster's push and its read
+        XCTAssertTrue(title.exists, "the sheet closed when the default moved:\n\(app.debugDescription)")
+        XCTAssertEqual(title.value as? String, "call the bank", "the text being written went with it")
+        shot(app, "switcher-default-moved")
+    }
+
     // MARK: -
 
-    /// The app on the Persona page, its sidebar out, on the default assistant.
-    @MainActor private func launch(_ extra: [String] = []) -> XCUIApplication {
+    /// The app on the Persona page, its sidebar out, on the default assistant (or on `manager`, the sidebar in).
+    @MainActor private func launch(_ extra: [String] = [], manager: String = "assistant") -> XCUIApplication {
         let app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
-        app.launchArguments = ["-pairURL", pair, "-tab", "assistant", "-app.tab", "assistant", "-openAssistantSidebar", "YES",
-                               "-openAssistantManager", "assistant"] + extra
+        app.launchArguments = ["-pairURL", pair, "-tab", "assistant", "-app.tab", "assistant",
+                               "-openAssistantSidebar", manager == "assistant" ? "YES" : "NO", "-openAssistantManager", manager] + extra
         app.launchPinned()
         // A fresh install asks for notifications first, and the app waits inactive (no roster) until it is answered.
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -117,6 +161,18 @@ final class AssistantSwitcherUITests: XCTestCase {
         header.tap()
         XCTAssertTrue(element(app, "assistant-switcher-new").waitForExistence(timeout: 10), "the list did not open:\n\(app.debugDescription)")
         return app
+    }
+
+    /// The mock hub's default assistant from now on (PATCH /api/v1/managers/{id}): its roster push follows.
+    private func makeDefault(_ id: String) {
+        var req = URLRequest(url: URL(string: hub + "/api/v1/managers/" + id)!)
+        req.httpMethod = "PATCH"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(UITestToken.device)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["default": true])
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: req) { _, _, _ in done.signal() }.resume()
+        _ = done.wait(timeout: .now() + 5)
     }
 
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {

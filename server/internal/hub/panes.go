@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/nodeproto"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // A terminal addressed by pane ("pane:<id>", docs/integrations/terminal.md "Standalone terminal") is a shell on the computer, agent or not.
@@ -30,8 +32,12 @@ func paneAddressFullOnly(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// newShell opens a shell tab in one of a machine's workspaces. Only the user's click gets here; the node picks the
-// directory (the workspace's own), the request cannot name one.
+// newShell opens a shell tab in one of a machine's workspaces. Only the user's click gets here. The node starts it in the
+// workspace's own directory, or with cwd (the file page's Open Terminal Here, #5832) in that folder: a folder the read
+// guard lets the device see, handed to the host as the tab's starting directory and never typed into the shell, so a
+// request still cannot run a command. A node without the pane_cwd capability gets no cwd: 409 node_outdated instead.
+// new_space (#6362: New Terminal on a computer with no workspace yet) asks the node to open a workspace in cwd; a node
+// without pane_new_space would answer "no workspace", so it gets the same 409.
 func (h *Hub) newShell(w http.ResponseWriter, r *http.Request, m *Machine) {
 	if principalOf(r.Context()).Role != roleFull {
 		writeErr(w, http.StatusForbidden, errors.New("opening a terminal needs a full device"))
@@ -39,10 +45,16 @@ func (h *Hub) newShell(w http.ResponseWriter, r *http.Request, m *Machine) {
 	}
 	var body struct {
 		Kind        string `json:"kind"`
-		WorkspaceID string `json:"workspace_id"`
+		WorkspaceID string `json:"workspace_id,omitempty"`
+		Cwd         string `json:"cwd,omitempty"`
+		NewSpace    bool   `json:"new_space,omitempty"`
 	}
-	if err := decodeJSONBody(w, r, &body, 4<<10); err != nil || body.WorkspaceID == "" {
+	if err := decodeJSONBody(w, r, &body, 4<<10); err != nil || (body.WorkspaceID == "" && body.Cwd == "") {
 		writeBodyErr(w, err, errors.New("workspace_id is required"))
+		return
+	}
+	if (body.Cwd != "" && !m.hasCapability(nodeproto.PaneCwd)) || (body.NewSpace && !m.hasCapability(nodeproto.PaneNewSpace)) {
+		writeCode(w, http.StatusConflict, proto.CodeNodeOutdated, i18n.T(h.requestLang(r), "hub-fileedit.outdated_feature", i18n.Args{"name": m.cfg.Name}), nil)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -157,11 +169,14 @@ func anyActionFlag(params map[string]any, flags []string) bool {
 // nodeActions are the routes of those menu items, by path under /api/v1/machines/{mid}/.
 var nodeActions = map[string]nodeAction{
 	"panes/close": {method: "panes.close", timeout: 30 * time.Second, required: []string{"pane"}},
-	"panes/split": {method: "panes.split", timeout: 30 * time.Second, required: []string{"pane", "direction"}},
-	"panes/agent": {method: "panes.agent", timeout: 120 * time.Second, required: []string{"pane", "launcher"}},
-	"panes/git":   {method: "panes.git", timeout: 90 * time.Second, required: []string{"op"}, optional: []string{"pane", "workspace_id", "kind"}},
-	"tabs/close":  {method: "tabs.close", timeout: 30 * time.Second, required: []string{"tab_id"}, optional: []string{"kind"}},
-	"tabs/rename": {method: "tabs.rename", timeout: 30 * time.Second, required: []string{"tab_id", "label"}, optional: []string{"kind"}},
+	// #4754 "Close finished terminals": the terminals stopped agents left, those the user confirmed (panes, comma-separated);
+	// preview lists them and closes nothing.
+	"panes/close_finished": {method: "panes.close_finished", timeout: 60 * time.Second, optional: []string{"panes"}, flags: []string{"preview"}},
+	"panes/split":          {method: "panes.split", timeout: 30 * time.Second, required: []string{"pane", "direction"}},
+	"panes/agent":          {method: "panes.agent", timeout: 120 * time.Second, required: []string{"pane", "launcher"}},
+	"panes/git":            {method: "panes.git", timeout: 90 * time.Second, required: []string{"op"}, optional: []string{"pane", "workspace_id", "kind"}},
+	"tabs/close":           {method: "tabs.close", timeout: 30 * time.Second, required: []string{"tab_id"}, optional: []string{"kind"}},
+	"tabs/rename":          {method: "tabs.rename", timeout: 30 * time.Second, required: []string{"tab_id", "label"}, optional: []string{"kind"}},
 	// #2431 "New worktree…": the repository of a workspace the host lists, and a Git worktree of it opened as a workspace.
 	// The branch and the path are typed in the dialog; the node refuses a path that holds something and never forces.
 	"worktree/prepare": {method: "worktree.prepare", timeout: 30 * time.Second, required: []string{"workspace_id"}, optional: []string{"kind", "locale"}, flags: []string{"composer"}, strictFlags: []string{"composer"}},
@@ -171,7 +186,7 @@ var nodeActions = map[string]nodeAction{
 		requiredUnless: map[string][]string{"auto_name": {"branch", "path"}}},
 	"worktree/source": {method: "worktree.source", timeout: 35 * time.Second, required: []string{"workspace_id", "kind"}, optional: []string{"query", "locale"}},
 	"worktree/preset": {method: "worktree.preset", timeout: 30 * time.Second, required: []string{"workspace_id", "kind", "name", "directories"}, optional: []string{"locale"}},
-	"worktree/delete": {method: "worktree.delete", timeout: 150 * time.Second, required: []string{"workspace_id", "kind"}, optional: []string{"preview_token", "locale"}, flags: []string{"preview", "reconcile", "force", "delete_branch"}, strictFlags: []string{"preview", "reconcile", "force", "delete_branch"}},
+	"worktree/delete": {method: "worktree.delete", timeout: 150 * time.Second, required: []string{"workspace_id", "kind"}, optional: []string{"preview_token", "locale"}, flags: []string{"preview", "reconcile", "force", "delete_branch", "close_only"}, strictFlags: []string{"preview", "reconcile", "force", "delete_branch", "close_only"}},
 	// #6115 a new agent in a worktree of its own: made from its folder, told apart, removed when it is closed and the
 	// user says so (the node refuses uncommitted work and unmerged branches unless force, which the user confirms).
 	"worktree/add":    {method: "worktree.add", timeout: 150 * time.Second, required: []string{"cwd"}, optional: []string{"branch", "name_hint", "kind"}},
@@ -187,6 +202,7 @@ func (h *Hub) paneRoutes(api *http.ServeMux) {
 	api.HandleFunc("POST /api/v1/machines/{mid}/panes", h.withMachine(h.newShell))
 	// close / split / run an agent / git in a pane, close / rename a tab: full devices only (panes.go)
 	api.HandleFunc("POST /api/v1/machines/{mid}/panes/close", h.nodeAction(nodeActions["panes/close"]))
+	api.HandleFunc("POST /api/v1/machines/{mid}/panes/close_finished", h.nodeAction(nodeActions["panes/close_finished"]))
 	api.HandleFunc("POST /api/v1/machines/{mid}/panes/split", h.nodeAction(nodeActions["panes/split"]))
 	api.HandleFunc("POST /api/v1/machines/{mid}/panes/agent", h.nodeAction(nodeActions["panes/agent"]))
 	api.HandleFunc("POST /api/v1/machines/{mid}/panes/git", h.nodeAction(nodeActions["panes/git"]))

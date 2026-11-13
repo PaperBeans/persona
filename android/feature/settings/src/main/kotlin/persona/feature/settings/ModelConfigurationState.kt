@@ -36,8 +36,12 @@ internal fun agentsOverrideMode(res: Resources, purpose: ModelPurpose): String? 
             R.string.settings_src_model_agents_separate else R.string.settings_src_model_agents_follow
     )
 
-/** A purpose's row: what is in effect, then the hub's status or where it inherits from. */
+/** How many lines a purpose's row may take: three for what is in effect, and room for what it is for when the hub says so. */
+internal fun purposeSubtitleLines(purpose: ModelPurpose): Int = if (purpose.about != null) 6 else 3
+
+/** A purpose's row: what it is for (#5086, the hub's sentence), what is in effect, then the hub's status or where it inherits from. */
 internal fun purposeSubtitle(res: Resources, purpose: ModelPurpose, catalog: ModelCatalog): String = listOfNotNull(
+    purpose.about,
     summaryWords(res, purpose, catalog.providers).joinToString(res.getString(R.string.settings_src_model_summary_separator))
         .ifEmpty { res.getString(R.string.settings_src_state_not_configured) },
     agentsOverrideMode(res, purpose),
@@ -68,15 +72,39 @@ internal data class ModelCatalogState(
     val unsupported: Boolean = false,
 )
 
+/**
+ * [purposes] with [own], a use the hub's catalog leaves out, after the last one of its group (the hub's order within the
+ * group stands), or at the end when no listed use is in that group. Unchanged when the catalog lists it already.
+ */
+internal fun modelPurposesWith(purposes: List<ModelPurpose>, own: ModelPurpose): List<ModelPurpose> {
+    if (purposes.any { it.id == own.id }) return purposes
+    val last = purposes.indexOfLast { it.group == own.group }
+    return if (last < 0) purposes + own else purposes.subList(0, last + 1) + own + purposes.subList(last + 1, purposes.size)
+}
+
 internal class ModelCatalogModel(private val api: ModelConfiguration) {
     private val mutable = MutableStateFlow(ModelCatalogState())
     val state = mutable.asStateFlow()
+
+    /**
+     * The background supervisor's use (#4927, [BackgroundSupervisor.PURPOSE]). A hub since #5806 lists it in its catalog,
+     * last of its group, which is where this page always drew it: nothing more is asked for. A hub from before leaves it
+     * out, and it is read by its own id and put after the last use of its group (docs/assistant/model-config.md). A hub
+     * without it, or one that cannot answer now, lists the catalog as it is.
+     */
+    private suspend fun withBackgroundSupervisor(catalog: ModelCatalog): ModelCatalog {
+        if (catalog.purposes.any { it.id == BackgroundSupervisor.PURPOSE }) return catalog
+        val own = try { api.purpose(BackgroundSupervisor.PURPOSE).purpose }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { return catalog }
+        return if (own.id == BackgroundSupervisor.PURPOSE) catalog.copy(purposes = modelPurposesWith(catalog.purposes, own)) else catalog
+    }
 
     suspend fun load() {
         if (state.value.loading) return
         mutable.update { it.copy(loading = true) }
         try {
-            val catalog = api.catalog()
+            val catalog = withBackgroundSupervisor(api.catalog())
             mutable.update { it.copy(catalog = catalog, error = null, unsupported = false) }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: ModelConfigurationUnsupported) { mutable.update { it.copy(unsupported = true, error = null) } }

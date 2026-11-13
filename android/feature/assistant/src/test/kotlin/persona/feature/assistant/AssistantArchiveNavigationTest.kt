@@ -25,6 +25,7 @@ import persona.core.contracts.SessionKey
 import persona.core.contracts.api.*
 import persona.core.designsystem.AppFeedback
 import persona.core.designsystem.LocalAppFeedback
+import persona.core.designsystem.feedbackType
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 
@@ -37,6 +38,8 @@ class AssistantArchiveNavigationTest {
     private val first = Session(machineId = "hub", sessionId = "a", title = "第一个任务")
     private val second = Session(machineId = "hub", sessionId = "b", title = "第二个任务")
     private val navigations = mutableListOf<Any>()
+    private val notices = mutableListOf<Pair<String, persona.core.designsystem.FeedbackStyle>>()
+    private val haptics = mutableListOf<androidx.compose.ui.hapticfeedback.HapticFeedbackType>()
     private val navigator = object : Navigator {
         override fun navigate(key: NavKey) { navigations += key }
         override fun back() { navigations += "back" }
@@ -53,6 +56,14 @@ class AssistantArchiveNavigationTest {
                     return true
                 }
                 override fun notice(message: String) = false
+                override fun notice(message: String, style: persona.core.designsystem.FeedbackStyle): Boolean {
+                    notices += message to style
+                    return true
+                }
+            }, androidx.compose.ui.platform.LocalHapticFeedback provides object : androidx.compose.ui.hapticfeedback.HapticFeedback {
+                override fun performHapticFeedback(hapticFeedbackType: androidx.compose.ui.hapticfeedback.HapticFeedbackType) {
+                    haptics += hapticFeedbackType
+                }
             }) {
                 AssistantScreen(navigator, hub, hub, startConversation = { error("Unexpected creation") },
                     requestedSession = active.key, management = hub, composerService = null,
@@ -82,7 +93,19 @@ class AssistantArchiveNavigationTest {
         assertTrue(navigations.isEmpty())
     }
 
-    @Test fun archivingTheActiveConversationClearsItsSelectionWithoutClosingTheList() {
+    // As iOS (#4209, DESIGN_SYSTEM.md 4.3): a tap on archiving, then "Archived" once the hub has it.
+    @Test fun archivingIsFeltAndSaysArchived() {
+        show()
+        haptics.clear()
+        archiveFirst()
+        rule.runOnIdle {
+            assertTrue(persona.core.designsystem.Haptic.Tap.feedbackType() in haptics)
+            assertEquals(listOf("已归档" to persona.core.designsystem.FeedbackStyle.Success), notices)
+        }
+    }
+
+    // There is no home page (#4339 C11): the main conversation takes the archived one's place.
+    @Test fun archivingTheActiveConversationOpensTheMainOneWithoutClosingTheList() {
         val hub = show(first)
         archiveFirst()
         rule.onAllNodesWithText(first.title!!).assertCountEquals(0)
@@ -90,6 +113,7 @@ class AssistantArchiveNavigationTest {
         assertEquals(listOf(first.key, second.key), hub.archived)
         rule.runOnIdle { rule.activity.onBackPressedDispatcher.onBackPressed() }
         rule.onAllNodesWithText("chat:a").assertCountEquals(0)
+        rule.onNodeWithText("chat:main").assertExists()
         assertTrue(navigations.isEmpty())
     }
 
@@ -116,7 +140,7 @@ class AssistantArchiveNavigationTest {
     }
 
     private inner class Hub : AssistantRepository, MessageSender, AssistantManagement {
-        override val assistant = MutableStateFlow(AssistantSnapshot(main.key, listOf(main, first, second)))
+        override val assistant = MutableStateFlow(AssistantSnapshot(main.key, listOf(main, first, second), leaders = listOf(first.sessionId, second.sessionId)))
         override val outbox = MutableStateFlow(emptyList<OutboxMessage>())
         val archived = mutableListOf<SessionKey>()
         var fail = false

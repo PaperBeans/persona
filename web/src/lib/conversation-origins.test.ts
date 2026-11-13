@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { autoConversations, autoOrigin, matchesOrigin, parseOriginFilter } from "./conversation-origins";
-import type { Session } from "./types";
+import { autoConversations, autoOrigin, externalFrom, externalOpening, externalOrigin, matchesOrigin, originMarkLabel, parseOriginFilter, recentConversations } from "./conversation-origins";
+import type { Item, Session } from "./types";
 
 const conv = (id: string, extra: Partial<Session> = {}) => ({ machine_id: "hub", session_id: id, title: id, cwd: "", status: "idle", ...extra }) as Session;
 
@@ -43,5 +43,79 @@ describe("conversation origins (docs/protocol/protocol.md「Origin of assistant 
     expect(matchesOrigin(conv("a", { origin: "inbox" }), "inbox")).toBe(true);
     expect(matchesOrigin(conv("a", { origin: "task" }), "inbox")).toBe(false);
     expect(matchesOrigin(conv("a", { origin: "task" }), "all")).toBe(true);
+  });
+
+  it("counts only Lark /agent and other extensions as external, by the trimmed origin (#3758)", () => {
+    expect(externalOrigin(conv("a", { origin: "lark_agent" }))).toBe("lark_agent");
+    expect(externalOrigin(conv("a", { origin: " extension " }))).toBe("extension");
+    for (const origin of [undefined, "", "user", "channel", "inbox", "task", "spawned", "other", "something_new", "Extension"]) {
+      expect(externalOrigin(conv("a", { origin })), String(origin)).toBeUndefined();
+    }
+    expect(externalOrigin(undefined)).toBeUndefined();
+  });
+
+  it("says where an external conversation came from with the channel line's words (tests run in zh-Hans)", () => {
+    expect(externalFrom("lark_agent")).toBe("来自 飞书 /agent");
+    expect(externalFrom("extension")).toBe("来自扩展");
+  });
+
+  it("finds the message an external conversation was opened with only once the items reach its start", () => {
+    const item = (id: string, role: string, kind: string, extra: Partial<Item> = {}) => ({ id, seq: 0, role, kind, ...extra }) as Item;
+    const items = [item("n", "assistant", "notice"), item("tool-pic", "user", "image", { tool_use_id: "t1" }), item("u1#0", "user", "text"), item("a1", "assistant", "text"), item("u2#0", "user", "text")];
+    const lark = conv("c", { origin: "lark_agent" });
+    expect(externalOpening(lark, items, false)).toEqual({ id: "u1#0", origin: "lark_agent" });
+    // earlier items still to load: the first one here is not the first
+    expect(externalOpening(lark, items, true)).toBeUndefined();
+    // a message that starts with a picture is opened by that picture's item, as lib/turns.ts groups it
+    expect(externalOpening(conv("c", { origin: "extension" }), [item("p1#0", "user", "image"), item("p1#1", "user", "text")], false)).toEqual({ id: "p1#0", origin: "extension" });
+    expect(externalOpening(lark, [item("a1", "assistant", "text")], false)).toBeUndefined();
+    expect(externalOpening(conv("c", { origin: "channel" }), items, false)).toBeUndefined();
+    expect(externalOpening(conv("c"), items, false)).toBeUndefined();
+  });
+});
+
+describe("the sidebar's Recent (#4873, #5195)", () => {
+  const at = (h: number) => new Date(Date.UTC(2026, 10, 12, 12) - h * 3_600_000).toISOString();
+  const list = [
+    conv("main", { updated_at: at(0) }),
+    conv("lead", { updated_at: at(0.5) }),
+    conv("bg", { origin: "task", updated_at: at(0.05) }),
+    conv("inbox", { origin: "inbox", updated_at: at(0.2) }),
+    conv("gone", { archived: true, updated_at: at(0.1) }),
+    conv("a", { origin: "user", updated_at: at(1) }),
+    conv("lark", { origin: "lark_agent", updated_at: at(1.5) }),
+    conv("b", { updated_at: at(2) }),
+    conv("wx", { origin: "channel", updated_at: at(3) }),
+    conv("task", { origin: "task", updated_at: at(4) }),
+    conv("e2", { updated_at: at(5) }),
+    conv("e1", { updated_at: at(5) }),
+    conv("never"),
+  ];
+
+  it("is every chat newest first whoever opened it, never the main one, a leader, an archived one or the background supervisor", () => {
+    expect(recentConversations(list, "main", ["lead"], "bg").map((c) => c.session_id)).toEqual(["inbox", "a", "lark", "b", "wx", "e1", "e2", "never"]);
+  });
+
+  it("leaves the scheduled tasks' own chats out of Recent, however new they are (#6228): they keep their entry on Scheduled Tasks and All chats", () => {
+    const taskFirst = [conv("main", { updated_at: at(0) }), conv("task", { origin: "task", updated_at: at(0.1) }), conv("mine", { origin: "user", updated_at: at(1) })];
+    expect(recentConversations(taskFirst, "main", []).map((c) => c.session_id)).toEqual(["mine"]);
+    // the background supervisor is a task-origin chat: a hub without its id still keeps it out of Recent, in All chats
+    expect(recentConversations(list, "main", ["lead"]).map((c) => c.session_id)).not.toContain("bg");
+  });
+
+  it("takes an ended leader back and is empty when nothing else is left", () => {
+    expect(recentConversations(list, "main", [], "bg").map((c) => c.session_id).slice(0, 3)).toEqual(["inbox", "lead", "a"]);
+    expect(recentConversations(list.slice(0, 3), "main", ["lead"], "bg")).toEqual([]);
+  });
+});
+
+describe("a row's origin mark (#5195)", () => {
+  it("is named as All chats' filter for its group, an external one by where it came from", () => {
+    expect(originMarkLabel("inbox")).toBe("收件箱");
+    expect(originMarkLabel("task")).toBe("定时任务");
+    expect(originMarkLabel("spawned")).toBe("对话派生");
+    expect(originMarkLabel("other")).toBe("其他");
+    expect(originMarkLabel("lark_agent")).toBe(externalFrom("lark_agent"));
+    expect(originMarkLabel("extension")).toBe(externalFrom("extension"));
   });
 });

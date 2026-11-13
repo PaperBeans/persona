@@ -409,7 +409,17 @@ function TargetPicker({ open, current, onClose, onPick }: { open: boolean; curre
 
 // ── binding, a step at a time ────────────────────────────
 
-function BindSteps({ c, onDone }: { c: Channel; onDone: () => Promise<void> }) {
+/**
+ * Binding `c` a step at a time. The Lark bot's page reuses it to create the bot's app by scanning (#5818), with its own
+ * `title`, `footer` and `startLabel` for the first button; everything after the first press is the same steps.
+ */
+export function BindSteps({ c, onDone, title, footer: startFooter, startLabel }: {
+  c: Pick<Channel, "id" | "name" | "bind">;
+  onDone: () => Promise<void>;
+  title?: string;
+  footer?: string;
+  startLabel?: string;
+}) {
   const [prompt, setPrompt] = useState<ChannelPrompt | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -448,13 +458,13 @@ function BindSteps({ c, onDone }: { c: Channel; onDone: () => Promise<void> }) {
   // A QR code or a code on screen: ask again every interval until it is scanned / sent.
   useStepPolling(isPolled(prompt) ? prompt : null, (step) => send(step, {}, true), 3);
 
-  const footer = c.bind === "qr" ? t("settings-channels.qr_footer", { name: c.name }) : undefined;
+  const footer = startFooter ?? (c.bind === "qr" ? t("settings-channels.qr_footer", { name: c.name }) : undefined);
   if (!prompt) {
     return (
-      <Group title={t("settings-channels.binding")} footer={footer ?? t("settings-channels.bind_footer")}>
+      <Group title={title ?? t("settings-channels.binding")} footer={footer ?? t("settings-channels.bind_footer")}>
         <div className="px-4 py-3">
-          <Button tone="accent" icon={c.bind === "qr" ? "image" : "link"} busy={busy} onClick={() => void send("", {})}>
-            {bindTitle(c)}
+          <Button tone="accent" icon={c.bind === "qr" || startLabel ? "image" : "link"} busy={busy} onClick={() => void send("", {})}>
+            {startLabel ?? bindTitle(c)}
           </Button>
         </div>
       </Group>
@@ -462,7 +472,7 @@ function BindSteps({ c, onDone }: { c: Channel; onDone: () => Promise<void> }) {
   }
   const canSend = canSendStep(prompt, values) && !busy;
   return (
-    <Group title={bindTitle(c)}>
+    <Group title={title ?? bindTitle(c)}>
       {(prompt.hint || prompt.error) && (
         <div className="flex flex-col gap-1 px-4 py-2.5">
           {prompt.hint && <p className="text-[12.5px] leading-relaxed text-ink-2">{prompt.hint}</p>}

@@ -39,6 +39,8 @@ type Manifest struct {
 	Description     string `json:"description,omitempty"`
 	Publisher       string `json:"publisher,omitempty"`
 	Homepage        string `json:"homepage,omitempty"`
+	// Icon is source-only catalog metadata, omitted by PackagedManifest.
+	Icon string `json:"icon,omitempty"`
 	// Tags are what the market shows and searches (docs/extensions/extensions.md "Extension market"). Packages and indexes carry the
 	// manifest without them (PackagedManifest): hubs before tags read manifests strictly and would refuse it.
 	Tags             []string                   `json:"tags,omitempty"`
@@ -65,6 +67,9 @@ type Manifest struct {
 	// Hubs before them refuse the manifest (strict), so an extension using them asks for a newer hub in engines.
 	Tools []ToolSpec `json:"tools,omitempty"`
 	Auth  *AuthSpec  `json:"auth,omitempty"`
+	// HostIntegrations declares typed, read-only access to a configured host
+	// CLI. Unlike Tools, it never installs a program or accepts a command line.
+	HostIntegrations []HostIntegrationSpec `json:"host_integrations,omitempty"`
 }
 
 // Engines are what the extension runs on.
@@ -176,6 +181,9 @@ func Parse(data []byte) (*Manifest, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
+	if !ValidIconPath(m.Icon) {
+		m.Icon = ""
+	}
 	return &m, nil
 }
 
@@ -205,18 +213,20 @@ func checkTags(tags []string) error {
 	return nil
 }
 
-// PackagedManifest is the manifest as a package and a market index carry it: data without tags, which the market
-// entry carries instead. A hub from before tags reads manifests strictly (no unknown fields) and would refuse one
-// with them; the same bytes go in as persona-extension.json and as LegacyManifestFile.
+// PackagedManifest removes source-only tags and icon metadata for strict older hubs.
+// Catalog entries carry these fields instead; both package manifest names use the same bytes.
 func PackagedManifest(data []byte) ([]byte, error) {
 	var fields map[string]json.RawMessage
 	if err := strict(data, &fields); err != nil {
 		return nil, fmt.Errorf("%s: %w", ManifestFile, err)
 	}
-	if _, ok := fields["tags"]; !ok {
+	_, tags := fields["tags"]
+	_, icon := fields["icon"]
+	if !tags && !icon {
 		return data, nil
 	}
 	delete(fields, "tags")
+	delete(fields, "icon")
 	out, err := json.MarshalIndent(fields, "", "  ")
 	if err != nil {
 		return nil, err

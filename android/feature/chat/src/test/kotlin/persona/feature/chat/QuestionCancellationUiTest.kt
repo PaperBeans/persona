@@ -61,7 +61,8 @@ class QuestionCancellationUiTest {
         assertEquals(2, sent.size)
     }
 
-    @Test fun cardInViewStaysWhenAnEarlierCardLeaves() {
+    /** The cards stack (iOS PendingCards): each is answered where it is, and one leaving moves none of the others. */
+    @Test fun everyCardIsInTheStackAndOneLeavingLeavesTheOthers() {
         fun card(id: String, text: String) = question.copy(id = id,
             questions = listOf(Question(text, options = listOf(QuestionOption("JSON"), QuestionOption("CSV")))))
         val first = card("first", "First card?")
@@ -71,38 +72,25 @@ class QuestionCancellationUiTest {
         val sent = mutableListOf<String>()
         rule.setContent {
             PersonaTheme(reduceMotion = true) {
-                InteractionPanel(requests, null, 600.dp, null, emptySet(), { ix, _ -> sent += ix.id }, null, {})
+                InteractionPanel(requests, null, 2000.dp, null, emptySet(), { ix, _ -> sent += ix.id }, null, {})
             }
         }
-        rule.onNodeWithText("Next").performClick()
-        rule.onAllNodesWithText("Second card?").onFirst().assertIsDisplayed()
-        // answered on another device: the card in view stays, it does not hand its place to the third
+        for (text in listOf("First card?", "Second card?", "Third card?")) rule.onAllNodesWithText(text).onFirst().assertIsDisplayed()
+        // answered on another device: the others stay where they are
         requests = listOf(second, third)
+        rule.onAllNodesWithText("First card?").assertCountEquals(0)
         rule.onAllNodesWithText("Second card?").onFirst().assertIsDisplayed()
-        rule.onAllNodesWithText("Third card?").assertCountEquals(0)
-        rule.onNodeWithText("1 / 2").assertIsDisplayed()
-        // a card sorted in front of it does not take its place either
-        requests = listOf(first, second, third)
-        rule.onAllNodesWithText("Second card?").onFirst().assertIsDisplayed()
-        rule.onNodeWithText("2 / 3").assertIsDisplayed()
-        rule.onNodeWithText("1. JSON").performClick()
+        rule.onNode(hasText("1. JSON") and hasAnyAncestor(hasTestTag("pending-card-second"))).performClick()
         assertEquals(listOf("second"), sent)
-        // once it leaves, the card that took its place is shown
-        requests = listOf(first, third)
-        rule.onAllNodesWithText("Third card?").onFirst().assertIsDisplayed()
-        rule.onNodeWithText("2 / 2").assertIsDisplayed()
-        assertEquals(1, requestIndex(listOf(first, third), "second", 1))
-        assertEquals(0, requestIndex(listOf(third), "second", 1))
-        assertEquals(1, requestIndex(listOf(first, second), "second", 0))
+        rule.onNode(hasText("1. JSON") and hasAnyAncestor(hasTestTag("pending-card-third"))).performClick()
+        assertEquals(listOf("second", "third"), sent)
     }
 
     @Test fun triageCollapseDoesNotSubmitAndLaterKeepsOriginalAnswerForServerIntent() {
-        var collapsed by mutableStateOf(false)
         val sent = mutableListOf<Resolution>()
         rule.setContent {
             PersonaTheme(reduceMotion = true) {
-                InteractionPanel(listOf(triageQuestion), null, 600.dp, null, emptySet(), { _, resolution -> sent += resolution },
-                    null, {}, collapsed = collapsed, onCollapsedChange = { collapsed = it })
+                InteractionPanel(listOf(triageQuestion), null, 600.dp, null, emptySet(), { _, resolution -> sent += resolution }, null, {})
             }
         }
         rule.onNodeWithContentDescription("Collapse").performClick()
@@ -143,7 +131,7 @@ class QuestionCancellationUiTest {
             PersonaTheme(reduceMotion = true) {
                 InteractionPanel(requests, null, 500.dp, busy, emptySet(), { ix, resolution ->
                     sent += resolution; busy = ix.id
-                }, null, {}, collapsed = true)
+                }, null, {}, folds = RequestFolds(setOf(question.id)))
             }
         }
         rule.onNodeWithContentDescription(close).performClick()
@@ -160,7 +148,7 @@ class QuestionCancellationUiTest {
         rule.setContent {
             PersonaTheme(reduceMotion = true) {
                 InteractionPanel(listOf(request), null, 500.dp, null, uncertain,
-                    { _, _ -> fail("Must not resolve") }, null, {}, collapsed = true, blockedReason = blocked)
+                    { _, _ -> fail("Must not resolve") }, null, {}, folds = RequestFolds(setOf(question.id)), blockedReason = blocked)
             }
         }
         rule.onNodeWithContentDescription(close).assertDoesNotExist()
@@ -175,12 +163,10 @@ class QuestionCancellationUiTest {
     }
 
     @Test fun collapseDoesNotAnswerAndNormalOptionStillAnswers() {
-        var collapsed by mutableStateOf(false)
         val sent = mutableListOf<Resolution>()
         rule.setContent {
             PersonaTheme(reduceMotion = true) {
-                InteractionPanel(listOf(question), null, 600.dp, null, emptySet(), { _, resolution -> sent += resolution },
-                    null, {}, collapsed = collapsed, onCollapsedChange = { collapsed = it })
+                InteractionPanel(listOf(question), null, 600.dp, null, emptySet(), { _, resolution -> sent += resolution }, null, {})
             }
         }
         rule.onNodeWithContentDescription("Collapse").performClick()

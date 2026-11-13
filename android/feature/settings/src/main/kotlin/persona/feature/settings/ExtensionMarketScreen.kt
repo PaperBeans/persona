@@ -35,12 +35,62 @@ import persona.core.designsystem.icons.PhIcons
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Duration
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import coil3.request.ImageRequest
+import coil3.compose.AsyncImagePainter
+import coil3.compose.rememberAsyncImagePainter
+import java.net.URI
+import java.text.NumberFormat
 import java.time.Instant
 
 // Settings › Extensions › Extension market (docs/extensions/extensions.md "Extension market"): the catalog, one extension of it, and the markets. The models are
 // in ExtensionMarketState.kt.
 
 private const val SearchDelayMillis = 300L
+
+/** Catalog logos use Coil's ordinary anonymous HTTPS loader and its shared memory/disk caches, never hub credentials. */
+internal fun catalogLogoUrl(value: String?): String? = value?.takeIf { url ->
+    runCatching {
+        val uri = URI(url)
+        uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank() &&
+            uri.rawUserInfo == null && (uri.port == -1 || uri.port in 1..65535)
+    }.getOrDefault(false)
+}
+
+/** GHCR package downloads across all versions, not installs or unique users; zero is a count, absence is not. */
+internal fun catalogDownloads(res: Resources, value: Long?): String? = value?.takeIf { it >= 0 }?.let {
+    val count = NumberFormat.getIntegerInstance(res.configuration.locales[0]).format(it)
+    res.getQuantityString(R.plurals.settings_ext_downloads, if (it == 1L) 1 else 2, count)
+}
+
+/** The same decorative mark on catalog rows, catalog details and installed extensions, including every fallback state. */
+@Composable
+internal fun ExtensionLogo(url: String?, api: ExtensionManagement? = null, pictures: coil3.ImageLoader? = null) {
+    val hubPath = remember(url, api) { url?.let { api?.iconPath(it) } }
+    val safe = remember(url, hubPath) { hubPath?.let(::ExtensionHubPicture) ?: catalogLogoUrl(url) }
+    val context = LocalContext.current
+    val pixels = with(LocalDensity.current) { Tokens.Size.iconS.roundToPx() }
+    key(safe, pictures) {
+        val request = remember(safe, context, pixels) { safe?.let { ImageRequest.Builder(context).data(it).size(pixels).build() } }
+        val painter = request?.let {
+            if (safe is ExtensionHubPicture) pictures?.let { loader -> rememberAsyncImagePainter(it, loader) }
+            else rememberAsyncImagePainter(it)
+        }
+        val loaded = painter?.state?.collectAsState()?.value is AsyncImagePainter.State.Success
+        // JRow's custom-leading gap is 2 dp shorter than its legacy leading-icon gap; keep the old title alignment.
+        Box(Modifier.padding(end = Tokens.Space.xxs).size(Tokens.Size.iconS).testTag(if (loaded) "extension-logo-loaded" else "extension-logo-fallback")) {
+            if (loaded && painter != null) Image(painter, null,
+                Modifier.size(Tokens.Size.iconS).background(PersonaTheme.palette.catalogLogoBackground), contentScale = ContentScale.Fit)
+            else JIcon(PhIcons.PuzzlePiece, null, size = Tokens.Size.iconS, tint = PersonaTheme.palette.ink2, decorative = true)
+        }
+    }
+}
 
 /** The catalog: search, narrow to a market, each extension's version, words, tags and how it stands here. */
 @Composable
@@ -50,7 +100,10 @@ fun ExtensionMarketPage(extensions: ExtensionManagement?, onBack: () -> Unit, on
         return
     }
     val res = LocalResources.current
-    val model = remember(extensions, res) { CatalogModel(extensions, res) }
+    val assistant = currentAssistant()
+    val api = rememberPinned(extensions, listOf(listOf("extensions"), listOf("plugins")), assistant.id)
+    val model = remember(api, res) { CatalogModel(api, res) }
+    val logoLoader = rememberExtensionLogoLoader(api)
     val state by model.state.collectAsState()
     val scope = rememberCoroutineScope()
     val feedback = LocalAppFeedback.current
@@ -93,7 +146,7 @@ fun ExtensionMarketPage(extensions: ExtensionManagement?, onBack: () -> Unit, on
             itemsIndexed(list, key = { _, it -> "plugin-${it.market}-${it.id}" }) { index, extension ->
                 JGroupItem(GroupPosition.of(index, list.size)) {
                     JRow(extension.label, subtitle = catalogSubtitle(res, extension, showMarket = state.market == null && state.markets.size > 1), subtitleLines = 4,
-                        leadingIcon = PhIcons.PuzzlePiece,
+                        leading = { ExtensionLogo(extension.iconUrl, api, logoLoader) },
                         trailing = CatalogText.badge(res, extension)?.let { badge -> { JTag(badge, standingTone(extension)) } },
                         chevron = true, onClick = { onExtension(extension) })
                 }
@@ -122,6 +175,7 @@ fun ExtensionMarketPage(extensions: ExtensionManagement?, onBack: () -> Unit, on
 private fun catalogSubtitle(res: Resources, p: CatalogExtension, showMarket: Boolean): String = listOfNotNull(
     p.description?.takeIf { it.isNotBlank() },
     CatalogText.line(res, p),
+    catalogDownloads(res, p.downloads),
     listOfNotNull(p.tags.orEmpty().takeIf { it.isNotEmpty() }?.joinToString(" · ") { "#$it" },
         p.marketName?.takeIf { showMarket && it.isNotBlank() }).joinToString(res.getString(R.string.settings_ext_tags_separator)).takeIf { it.isNotBlank() },
 
@@ -206,6 +260,7 @@ fun ExtensionCatalogPage(
     val api = rememberPinned(extensions, listOf("extensions", "plugins").flatMap { base ->
         listOf(listOf(base, extensionId), listOf(base, "-", "catalog"), listOf(base, "-", "install"), listOf(base, "-", "operations"))
     }, owner)
+    val logoLoader = rememberExtensionLogoLoader(api)
     val model = remember(api, marketId, extensionId, res, manager) {
         CatalogExtensionModel(api, marketId, extensionId, res, manager = manager)
     }
@@ -246,7 +301,7 @@ fun ExtensionCatalogPage(
                 JEmptyState(stringResource(R.string.settings_ext_market_missing_title), stringResource(R.string.settings_ext_market_missing_text), icon = PhIcons.Cube)
             }
         }
-        if (extension != null) catalogExtensionBody(extension, state, res, onOpenInstalled = { onInstalled(extension.id) },
+        if (extension != null) catalogExtensionBody(extension, state, res, api, logoLoader, onOpenInstalled = { onInstalled(extension.id) },
             operation = { op -> OperationSteps(op, busy = state.acting, modifier = Modifier.padding(top = Tokens.Space.m),
                 onRetry = { scope.launch { model.retry() } }, onClose = { scope.launch { model.closeOperation() } },
                 onReview = { scope.launch { model.review() } }) })
@@ -283,14 +338,16 @@ fun ExtensionCatalogPage(
 }
 
 private fun LazyListScope.catalogExtensionBody(
-    extension: CatalogExtension, state: CatalogExtensionState, res: Resources, onOpenInstalled: () -> Unit,
+    extension: CatalogExtension, state: CatalogExtensionState, res: Resources, extensions: ExtensionManagement,
+    logoLoader: coil3.ImageLoader?, onOpenInstalled: () -> Unit,
     operation: @Composable (ExtensionOperation) -> Unit,
 ) {
     item("header") {
         JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.s)) {
             // Why it cannot be installed is said in red below; the header keeps to the version.
             val line = if (CatalogText.standing(extension) == CatalogStanding.Unavailable) extension.version else CatalogText.line(res, extension)
-            JRow(extension.label, subtitle = line, subtitleLines = 3, leadingIcon = PhIcons.PuzzlePiece,
+            val subtitle = listOfNotNull(line, catalogDownloads(res, extension.downloads)).joinToString("\n")
+            JRow(extension.label, subtitle = subtitle, subtitleLines = 3, leading = { ExtensionLogo(extension.iconUrl, extensions, logoLoader) },
                 trailing = CatalogText.badge(res, extension)?.let { badge -> { JTag(badge, standingTone(extension)) } })
         }
     }

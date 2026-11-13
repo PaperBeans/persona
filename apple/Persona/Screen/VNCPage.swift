@@ -3,6 +3,7 @@ import SwiftUI
 /// A Mac's VNC on the whole screen (#1343), where it can be operated: its picture, the touches as the mode says (Mouse /
 /// Trackpad), the clipboard both ways, the keyboard with a row of the Mac's shortcuts, Help, and Picture in Picture back to picture in
 /// picture. When the agent whose chat opened it waits on the user, 「我完成了」 hands the Mac back (closing does too).
+/// On an iPhone a button next to the clipboard turns the page on its side and back (#6196).
 struct VNCPage: View {
     @Environment(AppModel.self) private var model
     let ref: MachineRef
@@ -14,12 +15,25 @@ struct VNCPage: View {
     @State private var help = false
     @State private var typing = false
     @State private var unlocked = false
+    /// Which of its ways each rail is in on an iPhone on its side (`fittingRail`, #5289).
+    @State private var topRailFit = 0
+    @State private var bottomRailFit = 0
     #if os(iOS) || os(visionOS)
     @State private var screenView: VNCScreenUIView?
+    /// The picture is zoomed in (a pinch, or ⋯ › Zoom In): ⋯ offers Zoom to Fit instead of Zoom In.
+    @State private var zoomed = false
     @State private var modifiers = VNCModifiers()
     /// The display shown alone (`VNCDisplay.id`, kept per Mac, #80); nil: all of them.
     @State private var display: String?
     @State private var pipLog = false
+    /// The picture channel for this Mac (#3954): hardware video or VNC. Loaded from the per-Mac pref on appear.
+    @State private var picture: ScreenPicture = .vnc
+    /// The video channel's quality bias (#3954, interface for #6396), per Mac.
+    @State private var quality: ScreenQuality = .auto
+    /// Whether the connection-stats overlay is shown (#3954), per Mac, off by default.
+    @State private var statsOn = false
+    /// A one-line reason shown when the video channel falls back to VNC (#3954); nil when there's nothing to explain.
+    @State private var fallbackReason: String?
     /// The app went to the background with the page up (not just Control Center or an alert over it).
     @State private var wentBackground = false
     /// When the app came back from the background with the connection not (yet) known to be down: a drop reported
@@ -37,21 +51,41 @@ struct VNCPage: View {
     private var name: String { model.machine(ref)?.name ?? ref.id }
     /// The agent that opened it waits on the user: there is something to hand back.
     private var waiting: Bool { from.flatMap { model.session($0) }?.state == .needsYou }
+    #if os(iOS) || os(visionOS)
+    @Environment(\.verticalSizeClass) private var verticalSize
+    /// An iPhone on its side (#3075): the bars become rails down either side, so the Mac's picture gets the whole height.
+    private var railed: Bool { verticalSize == .compact }
+    #else
+    private let railed = false
+    #endif
 
     var body: some View {
-        VStack(spacing: 0) {
+        // One layout either way round: the picture (and the keyboard's catcher) stay the same views as the phone turns.
+        let layout = railed ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+        layout {
             topBar
-            TimelineView(.periodic(from: .now, by: 1)) { ctx in
-                if let a = model.computerActivities[ref], a.shown(at: ctx.date) { stepLine(a) }
+            VStack(spacing: 0) {
+                TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    if let a = model.computerActivities[ref], a.shown(at: ctx.date) { stepLine(a) }
+                }
+                #if os(iOS) || os(visionOS)
+                if let reason = fallbackReason { fallbackBanner(reason) }
+                #endif
+                ZStack {
+                    Color.black
+                    if let s = session { content(s) }
+                    #if os(iOS) || os(visionOS)
+                    if statsOn, let stats = currentStats {
+                        ScreenStatsOverlay(stats: stats) { statsOn = false; ScreenStatsPref.set(false, for: ref) }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    }
+                    #endif
+                }
+                #if os(iOS) || os(visionOS)
+                // Over the keyboard while it is up (the bars ride above it).
+                if typing, let s = session { VNCShortcutBar(session: s, modifiers: modifiers) }
+                #endif
             }
-            ZStack {
-                Color.black
-                if let s = session { content(s) }
-            }
-            #if os(iOS) || os(visionOS)
-            // Over the keyboard while it is up (the bars ride above it).
-            if typing, let s = session { VNCShortcutBar(session: s, modifiers: modifiers) }
-            #endif
             bottomBar
         }
         .background(Color.black.ignoresSafeArea())
@@ -61,6 +95,21 @@ struct VNCPage: View {
             mode = VNCMode.of(ref)
             #if os(iOS) || os(visionOS)
             display = VNCDisplayChoice.of(ref)
+            // Picture defaults to VNC until the video channel's client wiring lands (it then defaults to video when the
+            // computer advertises `screen_video` and Screen Recording is granted); a saved choice always wins.
+            picture = ScreenPicture.of(ref) ?? .vnc
+            quality = ScreenQuality.of(ref)
+            statsOn = ScreenStatsPref.of(ref)
+            #if DEBUG
+            let args = ProcessInfo.processInfo.arguments
+            // `-showScreenVideoDemo` stands in for a node that advertises the video channel (videoAdvertised), and picks
+            // the video channel, so a screenshot shows the Picture and Quality items the switcher offers.
+            if args.contains("-showScreenVideoDemo") { picture = .video }
+            if args.contains("-showScreenStatsDemo") { statsOn = true }
+            if args.contains("-showScreenFallbackDemo") {
+                fallbackReason = String(localized: "Video couldn’t connect, switched to VNC: no route to the computer on this network.")
+            }
+            #endif
             #endif
         }
         .onDisappear {
@@ -124,29 +173,162 @@ struct VNCPage: View {
 
     // MARK: Bars
 
-    private var topBar: some View {
-        HStack(spacing: Theme.Space.s) {
-            Button { close() } label: { barIcon(Theme.Icon.close) }
+    /// The bottom bar: a row across the page, or on an iPhone on its side a rail down it, closer together when it does
+    /// not fit (the keyboard up), and scrolling when even that does not (the largest text sizes).
+    @ViewBuilder private func bar<Content: View>(spacing: CGFloat, @ViewBuilder _ content: @escaping () -> Content) -> some View {
+        if railed {
+            fittingRail([RailWay(), RailWay(tight: true), RailWay(tight: true, scrolls: true)], spacing: spacing, fit: $bottomRailFit) { _ in
+                content()
+            }
+        } else {
+            row(spacing: spacing, content)
+        }
+    }
+
+    /// A row of buttons across the page.
+    private func row<Content: View>(spacing: CGFloat, @ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: spacing) { content() }
+            .padding(.horizontal, Theme.Space.page)
+            .padding(.vertical, Theme.Space.s)
+    }
+
+    /// One way a rail can sit down the page's side: closer together, Picture in Picture in ⋯, scrolling.
+    private struct RailWay {
+        var tight = false, pipButton = true, scrolls = false
+    }
+
+    /// A rail down the page's side in the first of `ways` that fits its height, as `ViewThatFits` picks, but drawn as the
+    /// same views whichever it is (#5289). Opening a menu from a rail hides the keyboard, the page gets taller and a
+    /// roomier way fits; had that put other views in, the menu's morph out of its button (iOS 26) would find the button
+    /// gone and stop the app. So hidden copies of the ways are measured, the one picked says so, and the rail shown only
+    /// changes its spacing, what `content` does with the way, and whether it scrolls.
+    private func fittingRail<Content: View>(_ ways: [RailWay], spacing: CGFloat, fit: Binding<Int>,
+                                            @ViewBuilder _ content: @escaping (RailWay) -> Content) -> some View {
+        let way = ways[min(max(fit.wrappedValue, 0), ways.count - 1)]
+        return ViewThatFits(in: .vertical) {
+            ForEach(0..<ways.count, id: \.self) { i in
+                Group {
+                    if ways[i].scrolls {
+                        ScrollView(.vertical) { rail(spacing: spacing, tight: ways[i].tight) { content(ways[i]) } }
+                    } else {
+                        rail(spacing: spacing, tight: ways[i].tight) { content(ways[i]) }
+                    }
+                }
+                .onAppear { fit.wrappedValue = i }
+            }
+        }
+        .hidden()
+        .accessibilityHidden(true)
+        .overlay {
+            GeometryReader { g in
+                ScrollView(.vertical) {
+                    rail(spacing: spacing, tight: way.tight) { content(way) }
+                        .frame(height: way.scrolls ? nil : g.size.height)
+                }
+                .scrollDisabled(!way.scrolls)
+                .scrollIndicators(.hidden)
+            }
+        }
+    }
+
+    /// A rail's buttons down the page's side, `tight` closer together.
+    private func rail<Content: View>(spacing: CGFloat, tight: Bool, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(spacing: tight ? Theme.Space.xxs : spacing) { content() }
+            .padding(.horizontal, Theme.Space.s)
+            .padding(.vertical, tight ? Theme.Space.xxs : Theme.Space.s)
+    }
+
+    @ViewBuilder private var topBar: some View {
+        #if os(iOS)
+        let pip = VNCPiP.supported
+        #else
+        let pip = false
+        #endif
+        if railed {
+            // Down the leading rail, Picture in Picture under Close (#3075). Short of room (the keyboard up) the buttons
+            // close up first, then (the largest text sizes) Picture in Picture goes into ⋯ so Close, Help and ⋯ stay in
+            // sight, and only then does the rail scroll.
+            fittingRail([RailWay(), RailWay(tight: true), RailWay(pipButton: false), RailWay(tight: true, pipButton: false),
+                         RailWay(tight: true, pipButton: false, scrolls: true)], spacing: Theme.Space.s, fit: $topRailFit) { way in
+                topButtons(pipButton: pip && way.pipButton, nameInRow: false)
+            }
+        } else {
+            // One line where it fits, Picture in Picture right of Close (#3075). At the largest text sizes the name goes
+            // under the buttons rather than being squeezed to a letter, and where the buttons themselves don't fit,
+            // Picture in Picture goes into ⋯ as before.
+            ViewThatFits(in: .horizontal) {
+                topRow(pipButton: pip, nameBelow: false)
+                topRow(pipButton: pip, nameBelow: true)
+                topRow(pipButton: false, nameBelow: false)
+                topRow(pipButton: false, nameBelow: true)
+            }
+        }
+    }
+
+    private func topRow(pipButton: Bool, nameBelow: Bool) -> some View {
+        VStack(spacing: .zero) {
+            row(spacing: Theme.Space.s) { topButtons(pipButton: pipButton, nameInRow: !nameBelow) }
+            if nameBelow {
+                nameAndPhase
+                    .padding(.horizontal, Theme.Space.page)
+                    .padding(.bottom, Theme.Space.s)
+            }
+        }
+    }
+
+    /// The top bar's buttons, across the page or down its leading rail; Picture in Picture next to Close or in ⋯.
+    @ViewBuilder private func topButtons(pipButton: Bool, nameInRow: Bool) -> some View {
+        Button { close() } label: { barIcon(Theme.Icon.close) }
             .themedButton()
             .accessibilityLabel("Close Screen")
             .accessibilityIdentifier("screen-close")
-            Spacer(minLength: Theme.Space.s)
-            HStack(spacing: Theme.Space.xs) {
-                Circle().fill(dot).scaledFrame(width: Theme.Size.dot, height: Theme.Size.dot)
-                Text(name).font(Theme.Font.bodyStrong).lineLimit(1)
-                Text(phaseLabel).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("screen-phase")
-            Spacer(minLength: Theme.Space.s)
-            Button { help = true } label: { barIcon(Theme.Icon.help) }
+        if pipButton {
+            Button { toPictureInPicture() } label: { barIcon(Theme.Icon.pictureInPicture) }
                 .themedButton()
-                .accessibilityLabel("Help")
-                .accessibilityIdentifier("vnc-help")
-            moreMenu
+                .accessibilityLabel("Picture in Picture")
+                .accessibilityIdentifier("vnc-pip")
         }
-        .padding(.horizontal, Theme.Space.page)
-        .padding(.vertical, Theme.Space.s)
+        Spacer(minLength: Theme.Space.s)
+        if railed {
+            // No room for the name down a rail: the dot, with the name and the phase for VoiceOver.
+            Circle().fill(dot).scaledFrame(width: Theme.Size.dot, height: Theme.Size.dot)
+                .accessibilityElement()
+                .accessibilityLabel(name)
+                .accessibilityValue(phaseLabel)
+                .accessibilityIdentifier("screen-phase")
+            Spacer(minLength: Theme.Space.s)
+        } else if nameInRow {
+            // Whatever the buttons leave, not a third of it beside the two spacers.
+            nameAndPhase.layoutPriority(1)
+            Spacer(minLength: Theme.Space.s)
+        }
+        Button { help = true } label: { barIcon(Theme.Icon.help) }
+            .themedButton()
+            .accessibilityLabel("Help")
+            .accessibilityIdentifier("vnc-help")
+        moreMenu(pipItem: !pipButton)
+    }
+
+    /// The dot, the Mac's name and the stage. Measured (`ViewThatFits`) as the dot, the name's first four letters and the
+    /// stage, so a row is picked only where at least that much reads ("MacB…"); laid out, it takes the room it is given
+    /// and the name is cut short, the stage kept whole.
+    private var nameAndPhase: some View {
+        let least = name.count > 4 ? String(name.prefix(4)) + "…" : name
+        return nameLine(least).hidden().accessibilityHidden(true)
+            .frame(maxWidth: .infinity)
+            .overlay {
+                nameLine(name)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("screen-phase")
+            }
+    }
+
+    private func nameLine(_ shown: String) -> some View {
+        HStack(spacing: Theme.Space.xs) {
+            Circle().fill(dot).scaledFrame(width: Theme.Size.dot, height: Theme.Size.dot)
+            Text(shown).font(Theme.Font.bodyStrong).lineLimit(1)
+            Text(phaseLabel).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1).layoutPriority(1)
+        }
     }
 
     /// A top-bar button's glyph in one square for every button: a themed button is sized by its label, and glyphs differ
@@ -155,7 +337,7 @@ struct VNCPage: View {
         ThemedIcon(name).font(Theme.Font.labelStrong).scaledFrame(width: Theme.Size.icon, height: Theme.Size.icon)
     }
 
-    private var moreMenu: some View {
+    private func moreMenu(pipItem: Bool) -> some View {
         Menu {
             #if os(iOS) || os(visionOS)
             // On the Mac updateNSView never reads the mode; the picker would only change the iPhone's setting (#3893).
@@ -163,6 +345,31 @@ struct VNCPage: View {
                 Label("Mouse Mode", systemImage: Theme.Icon.pointer).tag(VNCMode.mouse)
                 Label("Trackpad Mode", systemImage: Theme.Icon.trackpad).tag(VNCMode.trackpad)
             }
+            // Picture channel and its quality bias (#3954), remembered per Mac — only when this Mac's node advertises the
+            // video channel, so no Mac shows a control it can't use (the switcher stays hidden until it does). Input stays
+            // on RFB in both; only the picture path changes. Video falls back to VNC on its own and says why on the page.
+            if videoAdvertised {
+                Picker(selection: Binding(get: { picture }, set: { picture = $0; ScreenPicture.set($0, for: ref) })) {
+                    ForEach(ScreenPicture.allCases, id: \.self) { p in Label(p.label, systemImage: p.icon).tag(p) }
+                } label: {
+                    Label("Picture", systemImage: Theme.Icon.video)
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("screen-picture")
+                if picture == .video {
+                    Picker(selection: Binding(get: { quality }, set: { quality = $0; ScreenQuality.set($0, for: ref) })) {
+                        ForEach(ScreenQuality.allCases, id: \.self) { q in Text(q.label).tag(q) }
+                    } label: {
+                        Label("Quality", systemImage: Theme.Icon.pluginGauge)
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("screen-quality")
+                }
+            }
+            Toggle(isOn: Binding(get: { statsOn }, set: { statsOn = $0; ScreenStatsPref.set($0, for: ref) })) {
+                Label("Connection Stats", systemImage: Theme.Icon.pluginChart)
+            }
+            .accessibilityIdentifier("screen-stats-toggle")
             let displays = offeredDisplays
             if displays.count > 1 {
                 Picker(selection: Binding(get: { shownDisplay?.id }, set: { display = $0; VNCDisplayChoice.set($0, for: ref) })) {
@@ -176,9 +383,23 @@ struct VNCPage: View {
                 .pickerStyle(.menu)
                 .accessibilityIdentifier("vnc-displays")
             }
+            // The only zoom in Trackpad Mode, which has no pinch (#6196); one tap back to the whole screen in either.
+            if zoomed {
+                Button { screenView?.zoomToFit() } label: { Label("Zoom to Fit", systemImage: Theme.Icon.zoomOut) }
+                    .accessibilityIdentifier("vnc-zoom-fit")
+            } else {
+                Button { screenView?.zoomIn() } label: { Label("Zoom In", systemImage: Theme.Icon.zoomIn) }
+                    .accessibilityIdentifier("vnc-zoom-in")
+            }
             #endif
             Button { centerPointer() } label: { Label("Center Pointer", systemImage: Theme.Icon.pointerCenter) }
-            #if os(iOS) || os(visionOS)
+            #if os(iOS)
+            // Picture in Picture itself is the button right of Close, here only when the row has no room for it.
+            if pipItem, VNCPiP.supported {
+                Button { toPictureInPicture() } label: { Label("Picture in Picture", systemImage: Theme.Icon.pictureInPicture) }
+            }
+            Button { pipLog = true } label: { Label("Picture in Picture Diagnostics", systemImage: Theme.Icon.help) }
+            #elseif os(visionOS)
             if VNCPiP.supported {
                 Button { toPictureInPicture() } label: { Label("Picture in Picture", systemImage: Theme.Icon.pictureInPicture) }
             }
@@ -187,7 +408,7 @@ struct VNCPage: View {
             Button { toPictureInPicture() } label: { Label("Picture in Picture", systemImage: Theme.Icon.pictureInPicture) }
             #endif
             #if DEBUG
-            if let s = session { Text(String(format: "%.0f 帧/秒", s.fps) + (s.latency.map { String(format: " · %.0f 毫秒", $0) } ?? "")) } // i18n-ignore
+            if let s = session { Text(String(format: "%.0f 帧/秒 · %.1f Mbit/s", s.fps, s.mbps) + (s.latency.map { String(format: " · %.0f 毫秒", $0) } ?? "")) } // i18n-ignore
             #endif
         } label: {
             barIcon(Theme.Icon.more)
@@ -198,7 +419,7 @@ struct VNCPage: View {
     }
 
     private var bottomBar: some View {
-        HStack(spacing: Theme.Space.m) {
+        bar(spacing: Theme.Space.m) {
             Menu {
                 Button { Task { await pasteFromPhone(andPaste: true) } } label: { Label(Self.fromPhone, systemImage: Theme.Icon.paste) }
                 Button { Task { await pasteFromPhone(andPaste: false) } } label: { Label("Copy to Mac's Clipboard Only", systemImage: Theme.Icon.clipboard) }
@@ -209,10 +430,18 @@ struct VNCPage: View {
             .themedButton()
             .accessibilityLabel("Clipboard")
             .accessibilityIdentifier("vnc-clipboard")
+            #if os(iOS)
+            if AppOrientation.phone { rotateButton }
+            #endif
             Spacer(minLength: Theme.Space.s)
             if waiting {
                 Button { handBack() } label: {
-                    Label("I'm Done", systemImage: Theme.Icon.handBack).font(Theme.Font.labelStrong).lineLimit(1)
+                    if railed {
+                        Label("I'm Done", systemImage: Theme.Icon.handBack).labelStyle(.iconOnly).font(Theme.Font.heading)
+                            .scaledFrame(width: Theme.Size.icon, height: Theme.Size.icon)
+                    } else {
+                        Label("I'm Done", systemImage: Theme.Icon.handBack).font(Theme.Font.labelStrong).lineLimit(1)
+                    }
                 }
                 .themedButton(prominent: true)
                 .accessibilityIdentifier("vnc-done")
@@ -227,12 +456,24 @@ struct VNCPage: View {
             .accessibilityIdentifier("vnc-keyboard")
             #endif
         }
-        .padding(.horizontal, Theme.Space.page)
-        .padding(.vertical, Theme.Space.s)
         #if os(iOS) || os(visionOS)
         .background { if let s = session { VNCKeyCatcher(session: s, modifiers: modifiers, typing: $typing).frame(width: Theme.Size.hairline, height: Theme.Size.hairline) } }
         #endif
     }
+
+    #if os(iOS)
+    /// Next to the clipboard (#6196): upright, it turns the page on its side; on its side (down the trailing rail, under
+    /// the clipboard), back upright. Only on an iPhone: an iPad is not made to turn.
+    private var rotateButton: some View {
+        Button { ScreenWindow.shared.turn() } label: {
+            ThemedIcon(railed ? Theme.Icon.rotateToPortrait : Theme.Icon.rotateToLandscape).font(Theme.Font.heading)
+                .scaledFrame(width: Theme.Size.icon, height: Theme.Size.icon)
+        }
+        .themedButton()
+        .accessibilityLabel(railed ? String(localized: "Rotate to Portrait") : String(localized: "Rotate to Landscape"))
+        .accessibilityIdentifier("vnc-rotate")
+    }
+    #endif
 
     #if os(iOS) || os(visionOS)
     static let fromPhone = String(localized: "Paste from iPhone"), toPhone = String(localized: "Copy to iPhone")
@@ -248,19 +489,65 @@ struct VNCPage: View {
             .accessibilityIdentifier("screen-step")
     }
 
+    #if os(iOS) || os(visionOS)
+    /// A one-line reason under the bars when the video channel falls back to VNC (#3954).
+    private func fallbackBanner(_ reason: String) -> some View {
+        HStack(spacing: Theme.Space.xs) {
+            ThemedIcon(Theme.Icon.info).font(Theme.Font.caption).foregroundStyle(Theme.caution)
+            Text(reason).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Theme.Space.page)
+        .padding(.bottom, Theme.Space.xs)
+        .accessibilityIdentifier("screen-fallback")
+    }
+
+    /// The reading the stats overlay draws (#3954). The video channel isn't wired on the client yet, so today the live
+    /// picture is RFB and these are VNC-mode numbers; a `-showScreenStatsDemo` build shows sample video-mode numbers.
+    private var currentStats: ScreenStats? {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-showScreenStatsDemo") { return .demoVideo }
+        #endif
+        guard let s = session else { return nil }
+        return ScreenStats(mode: .vnc, path: .relay,
+                           bitrateMbps: s.mbps > 0 ? s.mbps : nil,
+                           fps: s.fps > 0 ? s.fps : nil,
+                           roundTripMs: s.latency)
+    }
+
+    /// Whether this Mac's node advertises the hardware video channel (#3954): the Picture and Quality items appear only
+    /// then, so no Mac shows a control it can't use. A `-showScreenVideoDemo` build forces it on for screenshots.
+    private var videoAdvertised: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-showScreenVideoDemo") { return true }
+        #endif
+        return model.screenVideoAdvertised(ref)
+    }
+    #endif
+
     // MARK: Content
 
     @ViewBuilder private func content(_ s: RFBSession) -> some View {
         switch s.phase {
         case .live:
             #if os(iOS) || os(visionOS)
-            VNCScreen(session: s, mode: mode, interactive: true, region: shownDisplay?.frame) { v in DispatchQueue.main.async { screenView = v } }
+            VNCScreen(session: s, mode: mode, interactive: true, region: shownDisplay?.frame,
+                      onView: { v in DispatchQueue.main.async { screenView = v; zoomed = false } }, onZoom: { zoomed = $0 })
             #else
             VNCScreen(session: s, mode: mode, interactive: true)
             #endif
         case .signIn(let failed):
-            VNCSignIn(name: name, account: Self.account(model.machine(ref)?.home), failed: failed) { account, password, remember in
+            let form = VNCSignIn(name: name, account: Self.account(model.machine(ref)?.home), failed: failed) { account, password, remember in
                 s.signIn(account: account, password: password, remember: remember)
+            }
+            if railed {
+                // On its side the form is taller than the page (more so with the keyboard up for the password): it scrolls.
+                GeometryReader { g in
+                    ScrollView { form.frame(maxWidth: .infinity, minHeight: g.size.height) }
+                        .scrollBounceBehavior(.basedOnSize)
+                }
+            } else {
+                form
             }
         case .connecting:
             VStack(spacing: Theme.Space.s) {
@@ -343,7 +630,15 @@ struct VNCPage: View {
 
     private func pasteFromPhone(andPaste: Bool) async {
         #if os(iOS) || os(visionOS)
-        let text = UIPasteboard.general.string
+        // Off the main thread: when iOS asks Allow Paste, the read waits for the answer, and the picture and the session
+        // must keep going meanwhile (#3075).
+        let text = await Task.detached { UIPasteboard.general.string }.value
+        // Text there that iOS would not hand over (Allow Paste not tapped, or not allowed in Settings): say so, not
+        // that there is none (#3075).
+        if text == nil, UIPasteboard.general.hasStrings {
+            model.toast = Toast(String(localized: "Couldn't read this iPhone's clipboard: tap Allow Paste when asked, or allow Paste from Other Apps for this app in Settings"), style: .error)
+            return
+        }
         #else
         let text = NSPasteboard.general.string(forType: .string)
         #endif
@@ -449,7 +744,12 @@ struct VNCHelp: View {
                 Section("Moving Around") {
                     #if !os(macOS)
                     row(Theme.Icon.pointer, String(localized: "Mouse mode (default)"), String(localized: "Tap to click there. Drag with one finger to drag. Drag with two fingers to scroll. Two-finger tap or touch and hold to right-click."))
-                    row(Theme.Icon.search, String(localized: "Zoom"), String(localized: "Pinch to zoom in and out. When zoomed in, dragging with two fingers moves the view instead of scrolling."))
+                    row(Theme.Icon.search, String(localized: "Zoom"), String(localized: "In Mouse Mode, pinch to zoom in and out; when zoomed in, dragging with two fingers moves the view instead of scrolling. In either mode, “…” › Zoom In zooms in around the pointer and Zoom to Fit shows the whole screen again. In Trackpad Mode two fingers only scroll, and a zoomed view follows the pointer."))
+                    #if os(iOS)
+                    if AppOrientation.phone {
+                        row(Theme.Icon.rotateToLandscape, String(localized: "Landscape"), String(localized: "Tap the rotate button next to the clipboard to turn the screen sideways for a larger view, and tap it again to turn it back upright. Once tapped, the screen keeps that orientation until you close it."))
+                    }
+                    #endif
                     row(Theme.Icon.displays, String(localized: "Displays"), String(localized: "When the Mac has more than one display, choose one in “…” › Displays to show only that display. Zooming, taps and the pointer then stay on it."))
                     #else
                     row(Theme.Icon.pointer, String(localized: "Mouse"), String(localized: "Click for the left mouse button; right-click (or Control-click) for the right button; press and hold the mouse button and move to drag."))
@@ -471,7 +771,11 @@ struct VNCHelp: View {
                 }
                 #endif
                 Section("Picture in Picture") {
+                    #if os(iOS)
+                    row(Theme.Icon.pictureInPicture, String(localized: "Picture in Picture"), String(localized: "The Picture in Picture button next to Close floats the screen over other apps and the Home Screen; tap it to come back here. Picture in Picture is view-only, and closing it disconnects."))
+                    #else
                     row(Theme.Icon.pictureInPicture, String(localized: "Picture in Picture"), String(localized: "“Picture in Picture” in “…” floats the screen over other apps and the Home Screen; tap it to come back here. Picture in Picture is view-only, and closing it disconnects."))
+                    #endif
                 }
                 Section("Handing Back the Computer") {
                     row(Theme.Icon.handBack, String(localized: "I'm Done"), String(localized: "When an agent is waiting for you to do something on the computer, tap “I'm Done” in the bottom bar when you're finished and it carries on. Closing the screen also hands it back."))
@@ -504,15 +808,14 @@ struct VNCHelp: View {
 
 extension RFBSession {
     /// One-Tap Unlock (#1507 a-2): a Shift wakes the lock screen and puts the cursor in its password field, then the kept
-    /// password and Return; the hub only notes that it was unlocked.
+    /// password and Return; the hub only notes that it was unlocked. The pause counts from when the Shift goes out: just
+    /// signed in, the keys wait out the session's first seconds (RFBInputQueue, #3075).
     func unlockWithKeptPassword() {
         guard let kept = ScreenCredentials.load(ref) else { return }
         press(Self.shift)
-        Task {
-            try? await Task.sleep(for: .milliseconds(800))
-            for ch in kept.password.unicodeScalars { press(Self.keysym(ch)) }
-            press(VNCKeys.enter)
-            _ = try? await AppModel.shared.api(ref.group)?.computerJob(machine: ref.id, "unlocking")
-        }
+        pause(.milliseconds(800))
+        for ch in kept.password.unicodeScalars { press(Self.keysym(ch)) }
+        press(VNCKeys.enter)
+        Task { _ = try? await AppModel.shared.api(ref.group)?.computerJob(machine: ref.id, "unlocking") }
     }
 }

@@ -129,15 +129,6 @@ struct MacAttentionTests {
         #expect(ping(old, new, prefs: short) == ["a:unread", "b:unread", "c:needs_you"])
     }
 
-    @Test func dockBadgeCountsWaitingCards() throws {
-        // Two cards for one already-waiting agent (#4081), one for another, a muted one's, and the Persona
-        // conversation's ask: cards are the unit, muted stays out, the Persona conversation keeps counting.
-        let list = try [interaction("a1", session: "a"), interaction("a2", session: "a"),
-                        interaction("b1", session: "b"), interaction("j1", session: "j")]
-        #expect(MacAttention.badge(list, muted: { $0.sessionID == "b" }) == "3")
-        #expect(MacAttention.badge([], muted: { _ in false }) == nil)
-    }
-
     /// An agent already in Needs You gets a second card (a sub-agent's authorization, another confirmation): the
     /// state never flips, but the card is new, so it gets its own banner.
     @Test func secondCardForAnAlreadyWaitingAgentPings() throws {

@@ -1169,7 +1169,8 @@
       "description": "带调用标识的工具图片归工具卡，用户图片单独显示。",
       "source": [
         "ios/Shared/ChatStore.swift: buildRows / ChatBlock.build",
-        "ios/Persona/Views/Chat/ChatView.swift: chatLines / workItems / unfoldWork"
+        "ios/Persona/Views/Chat/ChatView.swift: chatLines / workItems / unfoldWork",
+        "apple/Persona/Views/Chat/ChatLines.swift: flatLines / viewed (the images the work looked at, before the answer)"
       ],
       "input": {
         "items": [
@@ -1306,6 +1307,14 @@
             "is_input": false,
             "separator_before": true,
             "type": "work_end"
+          },
+          {
+            "id": "vi-1#0",
+            "image_ids": [
+              "d:5#0"
+            ],
+            "is_input": false,
+            "type": "viewed"
           },
           {
             "id": "6#0",

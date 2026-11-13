@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, enc, errorText } from "../../lib/api";
 import { conversationPage } from "../../lib/conversation-page";
-import { shownManager } from "../../lib/manager-choice";
+import { shownManager, useChosenManager } from "../../lib/manager-choice";
+import { namedLauncher, providerIdNote, useProviderNames } from "../../lib/provider-names";
 import { href, navigate, onLinkClick } from "../../lib/router";
 import { isAutoConversation } from "../../lib/conversation-origins";
 import {
@@ -301,7 +302,11 @@ export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 type TaskChat = { sid: string; title?: string; at?: string };
 
 function TaskRow({ task, now, chats, onOpen, onMenu, onToggle }: { task: Task; now: Date; chats: TaskChat[]; onOpen: () => void; onMenu: (at: MenuAt) => void; onToggle: (on: boolean) => void }) {
-  const with_ = runsWith(task);
+  // its launcher by the provider's display name, the startup ID in the line's tooltip (#5029): the current assistant's
+  // providers, as its tasks are
+  const names = useProviderNames(useChosenManager() ?? "");
+  const with_ = runsWith(task, names);
+  const launcherId = task.launcher ? providerIdNote(namedLauncher(task.launcher, names)) : "";
   const last = lastRunText(task, now);
   const next = nextText(task, now);
   const until = untilText(task, now);
@@ -336,13 +341,16 @@ function TaskRow({ task, now, chats, onOpen, onMenu, onToggle }: { task: Task; n
           {ruleText(task)}
           {/* "Push when done" on the rule's line, not as a pill: two pills squeezed the title away on a phone */}
           {task.push === "asked" && ` · ${t("assistant-routines.push_asked")}`}
+          {/* and the Inbox setting beside it, so the list shows which tasks land in the Inbox */}
+          {task.inbox === "worthy" && ` · ${t("assistant-routines.inbox_worthy")}`}
+          {task.inbox === "every" && ` · ${t("assistant-routines.inbox_every")}`}
         </div>
         {until ? <div className="mt-0.5 truncate text-[11.5px] text-ink-3 tabular-nums">{until}</div> : null}
         {next && <div className="mt-0.5 truncate text-[11.5px] text-ink-3 tabular-nums">{next}</div>}
         {with_ && (
           <div className={cx("mt-0.5 flex items-center gap-1 truncate text-[11.5px]", with_.danger ? "font-medium text-red" : "text-ink-3")}>
             <Icon name={with_.danger ? "info" : "gear"} size={11} className="shrink-0" />
-            <span className="truncate">{with_.text}</span>
+            <span className="truncate" title={launcherId || undefined}>{with_.text}</span>
           </div>
         )}
         {last && (

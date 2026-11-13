@@ -130,6 +130,14 @@ Now every side says which way pushes take and, when none, why:
   | `direct` / `relay` | `push_failed` | The way is there, but the last push to the device's token did not go (`detail`: APNs' or the relay's answer, or the hub's own reason when it did not send the push: `seal: …` for a relay push it could not seal, `push of N bytes is over APNs' 4096-byte limit` for a direct push too long even shortened). In memory, until a push goes or the device registers a new token / relay. A Live Activity push goes to the activity's own token: its answer neither sets nor clears this |
 
   `GET /api/v1/auth/tokens` adds `push` (credential id → the way of the device it registered last) for **Settings › Devices**; `GET /api/v1/devices/push` lists every device (`personad hub doctor` prints it under "推送").
+- **App, later** (#1859): the way the registration answered is kept from launch or pairing, so a `push_failed` that came later (or went away) showed in Settings › Devices but not in Settings › Notifications. Settings › Notifications now reads `push[current]` from `GET /api/v1/auth/tokens` each time it opens and when the App comes back while it is open (`PushRegistrar.refreshRoute`): no entry for this credential means no push registration from it at that hub; a hub that sends no `push` leaves what is known. When that read or the registration's `POST /api/v1/devices` fails, the page says "Unknown · Couldn't check with the hub (…)" until the next read, instead of an older way as if current.
+
+## Connections
+
+The hub's relay client and the relay's APNs client (`apns.Client`, also a hub's own key) each keep their connection between pushes
+(`apns.NewTransport`, #4800): an idle connection lives for an hour, and an HTTP/2 ping after a minute without traffic finds one that died
+silently. Before, both closed after 90 s idle, so most pushes paid a new TCP + TLS handshake. The Worker's request to the tunnel and the
+tunnel's own connection are Cloudflare's and are not affected.
 
 ## Deployment (publisher)
 

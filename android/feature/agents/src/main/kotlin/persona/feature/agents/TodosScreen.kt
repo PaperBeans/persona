@@ -13,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
@@ -40,18 +41,24 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 import persona.core.domain.tasks.moveTo
 import persona.core.domain.tasks.TodoListFilter
 import persona.core.domain.tasks.TodoListSort
+import persona.core.domain.tasks.TodoListGrouping
+import persona.core.domain.tasks.directionFoldKey
+import persona.core.domain.tasks.todoRows
 import persona.core.domain.tasks.filterCounts
 import persona.core.domain.tasks.hiddenWaiting
 import persona.core.domain.tasks.listed
 import persona.core.domain.tasks.matches
 import persona.core.domain.tasks.sortedRows
 import persona.core.domain.tasks.weekStart
+import persona.core.domain.tasks.CalendarMode
 import persona.core.contracts.*
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.answer.askingLine
 import persona.core.domain.answer.firstBySession
@@ -61,6 +68,7 @@ import persona.core.navigation.NewTodoRequests
 import android.text.format.DateFormat
 import androidx.compose.ui.platform.LocalConfiguration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
 import java.time.format.DateTimeFormatter
@@ -115,6 +123,8 @@ fun TodosScreen(
     newTodoRequests: NewTodoRequests? = null,
     /** The assistant whose to-dos [todos] are: while it is offline its list is out of reach, not empty (JAssistantOffline). */
     assistant: persona.core.contracts.api.CurrentAssistant? = null,
+    /** The hub's direction tree (#4352): the list can then be grouped by direction. Null (an older hub): status only. */
+    directions: DirectionTree? = null,
 ) {
     val cards = remember(pending) { pending.firstBySession() }
     var query by rememberSaveable { mutableStateOf("") }
@@ -132,12 +142,22 @@ fun TodosScreen(
     val calendarPrefs = remember(context) { TodoCalendarPrefs(context) }
     var view by remember(calendarPrefs) { mutableStateOf(calendarPrefs.view) }
     var showDone by remember(calendarPrefs) { mutableStateOf(calendarPrefs.showDone) }
+    // Day | Week | Month (#4200), kept on this device; the day the calendar shows, today when the page opens.
+    var calendarMode by remember(calendarPrefs) { mutableStateOf(calendarPrefs.mode) }
+    val setCalendarMode = { m: CalendarMode -> calendarMode = m; calendarPrefs.mode = m }
+    var calendarAnchor by rememberSaveable { mutableStateOf(now.atZone(ZoneId.systemDefault()).toLocalDate().toString()) }
+    // A new to-do being made on the calendar, due where it was tapped (CalendarSlot.saved).
+    var adding by rememberSaveable { mutableStateOf<String?>(null) }
     // The list's filter and sort (#3740), kept on this device.
     val listPrefs = remember(context) { TodoListPrefs(context) }
     var listFilter by remember(listPrefs) { mutableStateOf(listPrefs.filter) }
     var listSort by remember(listPrefs) { mutableStateOf(listPrefs.sort) }
     val setFilter = { f: TodoListFilter -> listFilter = f; listPrefs.filter = f }
     val setSort = { o: TodoListSort -> listSort = o; listPrefs.sort = o }
+    // Status | Direction (#4352), kept on this device; by direction only while the hub has the tree.
+    var listGrouping by remember(listPrefs) { mutableStateOf(listPrefs.grouping) }
+    val setGrouping = { g: TodoListGrouping -> listGrouping = g; listPrefs.grouping = g }
+    val grouping = if (directions == null) TodoListGrouping.Status else listGrouping
     val zone = ZoneId.systemDefault()
     // The week is the calendar's ([weekStart], the region of the app's language).
     val appLocale = LocalConfiguration.current.locales[0]
@@ -145,6 +165,8 @@ fun TodosScreen(
 
     val sessionMap = remember(sessions) { sessions.associateBy { it.key } }
     val sessionLookup: (SessionKey) -> Session? = remember(sessionMap) { { key: SessionKey -> sessionMap[key] } }
+    val hubFeatures = tasks?.features?.collectAsState()
+    val seenOn = hubFeatures?.value?.contains("todo_seen") == true
 
     val searched = remember(todos, query) {
         if (query.isBlank()) todos
@@ -164,7 +186,10 @@ fun TodosScreen(
             showDone = showDone,
             onShowDone = { showDone = it; calendarPrefs.showDone = it },
             modifier = modifier,
-            listControls = { TodoListControls(listFilter, listSort, counts, setFilter, setSort) },
+            mode = calendarMode,
+            onMode = setCalendarMode,
+            listControls = { TodoListControls(listFilter, listSort, counts, setFilter, setSort,
+                grouping = grouping, onGrouping = setGrouping.takeIf { directions != null }) },
         )
     }
 
@@ -182,15 +207,9 @@ fun TodosScreen(
     val hidden = remember(searched, filtered, sessionMap, restored, nowMs, listFilter, superseded) {
         if (listFilter == TodoListFilter.All) 0 else hiddenWaiting(searched, filtered, sessionLookup, nowMs, restored, superseded = superseded)
     }
-    // Which sections the user folded or unfolded: Other open, Shelved and Done start folded.
+    // Which sections the user folded or unfolded: Shelved and Done start folded, the rest open (#5707).
     var toggled by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    // Other open starts unfolded when the open sections above it are empty, so the list never opens on nothing.
-    val quietAbove = listOf(TriageSection.Waiting, TriageSection.Working, TriageSection.JustDone, TriageSection.Pr).all { triaged.rows(it).isEmpty() }
-    fun isFolded(section: TriageSection): Boolean {
-        // a filter narrows, so what it leaves in Other open shows (as iOS); Shelved and Done stay folded
-        val byDefault = section.folded && !(section == TriageSection.Other && (quietAbove || listFilter != TodoListFilter.All))
-        return byDefault != (section.name in toggled)
-    }
+    fun isFolded(section: TriageSection): Boolean = section.folded != (section.name in toggled)
     var expanded by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val setDone: (Todo, Boolean) -> Unit = { todo, done ->
         scope.launch {
@@ -207,6 +226,26 @@ fun TodosScreen(
     val feedback = LocalAppFeedback.current
     val haptics = rememberHaptics()
     val locale = LocalConfiguration.current.locales[0]
+    fun seenFailed(e: Exception) {
+        if (feedback?.failure(e) != true) onError(res.getString(R.string.agents_todo_seen_failed, e.message.orEmpty()))
+    }
+    val gotIt: (Todo, Long) -> Unit = gotIt@{ todo, after ->
+        val store = tasks ?: return@gotIt
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            // The local move finishes before the click returns; the hub write does not hold Undo (#5707, principle 7).
+            val undo = FeedbackAction(res.getString(R.string.agents_todo_seen_undo)) {
+                scope.launch {
+                    try { store.setTodoSeen(todo.id, false) }
+                    catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { seenFailed(e) }
+                }
+            }
+            feedback?.notice(res.getString(R.string.agents_todo_seen_moved), undo)
+            try { store.setTodoSeen(todo.id, true, after) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { seenFailed(e) }
+        }
+    }
     fun moveFailed(e: Exception) {
         if (feedback?.failure(e) != true) onError(res.getString(R.string.agents_todo_calendar_move_failed, e.message.orEmpty()))
     }
@@ -300,11 +339,29 @@ fun TodosScreen(
         }
     }
 
+    adding?.let { CalendarSlot.parse(it) }?.let { slot ->
+        TodoQuickAddSheet(
+            slot = slot,
+            onAdd = { title, due -> tasks?.createTodo(title, "", due) },
+            onFailed = { e -> if (feedback?.failure(e) != true) onError(res.getString(R.string.agents_todo_create_failed, e.message.orEmpty())) },
+            onDismiss = { adding = null },
+        )
+    }
+
+    val listState = rememberLazyListState()
+    // The view toggles stay put below the bar, inside the reach of its blurred edge: show the edge only while the
+    // list has scrolled under it. Nothing on the calendar ever does; its grid and time axis scroll in their own boxes.
+    val underTop = remember(view) { if (view == TodosView.Calendar) { { false } } else { { listState.canScrollBackward } } }
     JPage(
         title = stringResource(R.string.agents_todos_title),
         onBack = onBack,
+        underTop = underTop,
         actions = {
-            JIconButton(PhIcons.Plus, stringResource(R.string.agents_todo_new), { creating = true })
+            // on the calendar a new to-do is due on the day it shows, all day (iOS TodosView)
+            JIconButton(PhIcons.Plus, stringResource(R.string.agents_todo_new), {
+                if (view == TodosView.Calendar && tasks != null) adding = CalendarSlot(LocalDate.parse(calendarAnchor), null).saved()
+                else creating = true
+            })
         },
         bottomBar = if (view == TodosView.Calendar) ({
             TodoCalendarUndatedBar(todos, onShowList = { view = TodosView.List; calendarPrefs.view = TodosView.List })
@@ -313,7 +370,11 @@ fun TodosScreen(
         if (view == TodosView.Calendar) {
             Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding() + Tokens.Space.s)) {
                 viewBar(Modifier.padding(horizontal = Tokens.Space.l))
-                TodoCalendarMonth(
+                TodoCalendar(
+                    mode = calendarMode,
+                    onMode = setCalendarMode,
+                    anchor = LocalDate.parse(calendarAnchor),
+                    onAnchor = { calendarAnchor = it.toString() },
                     todos = todos,
                     sessionLookup = sessionLookup,
                     showDone = showDone,
@@ -322,12 +383,14 @@ fun TodosScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     modifier = Modifier.weight(1f),
                     onMove = if (tasks != null) moveTodo else null,
+                    onAdd = if (tasks != null) { slot -> adding = slot.saved() } else null,
                 )
             }
             return@JPage
         }
         LazyColumn(
             Modifier.fillMaxSize(),
+            state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + Tokens.Space.s,
                 bottom = padding.calculateBottomPadding() + Tokens.Space.l,
@@ -378,15 +441,64 @@ fun TodosScreen(
                     )
                 }
             } else {
+                // By direction (#4352): one section per direction of the hub's tree, in its order, with its two counts; the
+                // rows are the tree's to-dos in its order (those the search and filter leave); the rest keep their status sections.
+                val tree = directions?.takeIf { grouping == TodoListGrouping.Direction }
+                val directionRows = if (tree == null) emptyList() else {
+                    val placed = triaged.sections.values.flatten()
+                        .flatMap { group -> group.members.map { member -> member.id to (member to group.triage.getValue(member.id)) } }.toMap()
+                    tree.todoRows(placed) { (_, triage) -> triage.section == TriageSection.Done }
+                }
+                if (tree != null) {
+                    for ((direction, rows) in directionRows) {
+                        val foldKey = directionFoldKey(direction.id)
+                        val folded = foldKey in toggled
+                        item(key = "direction:${direction.id}") {
+                            JSectionHeader(
+                                direction.localizedTitle,
+                                onClick = { toggled = if (folded) toggled - foldKey else toggled + foldKey },
+                                open = !folded,
+                                action = {
+                                    JDirectionCounts(direction)
+                                    Spacer(Modifier.width(Tokens.Space.s))
+                                    JIcon(if (folded) PersonaIcons.expand else PersonaIcons.collapse, null, size = Tokens.Space.l, tint = PersonaTheme.palette.ink3)
+                                },
+                            )
+                        }
+                        if (folded) continue
+                        items(rows, key = { "direction-row:${direction.id}/${it.first.id}" }) { (todo, triage) ->
+                            TodoTriageRow(
+                                todo = todo,
+                                triage = triage,
+                                related = 0,
+                                relatedOpen = false,
+                                onToggleRelated = {},
+                                sessionLookup = sessionLookup,
+                                cards = cards,
+                                now = now,
+                                onOpen = { onOpenTodo(todo.id) },
+                                onDone = setDone,
+                                onDelete = delete,
+                                onRestore = { restored = restores.restore(todo.id, System.currentTimeMillis()) },
+                                onSeen = if (seenOn && triage.section == TriageSection.JustDone) ({
+                                    gotIt(todo, triage.last)
+                                }) else null,
+                            )
+                        }
+                    }
+                }
+                // The to-dos the tree does not list (shelved ones, Completed, any other the hub leaves out) keep their
+                // status sections after the directions, so grouping by direction hides none of them.
+                val rest = triaged.without(directionRows.flatMap { (_, rows) -> rows.map { it.first.id } }.toSet())
                 // No "N open · N shelved · N done" line: each section title carries its count (#3712).
                 for (section in TriageSection.entries) {
-                    val rows = sortedRows(triaged.rows(section), listSort, zone)
+                    val rows = sortedRows(rest.rows(section), listSort, zone)
                     if (rows.isEmpty()) continue
                     val folded = isFolded(section)
                     item(key = "section:${section.name}") {
                         JSectionHeader(
                             section.label,
-                            count = triaged.listed(section),
+                            count = rest.listed(section),
                             status = section.status,
                             countTone = section.status ?: Status.Idle,
                             onClick = { toggled = if (section.name in toggled) toggled - section.name else toggled + section.name },
@@ -412,6 +524,9 @@ fun TodosScreen(
                                 onDone = setDone,
                                 onDelete = delete,
                                 onRestore = { restored = restores.restore(group.lead.id, System.currentTimeMillis()) },
+                                onSeen = if (seenOn && section == TriageSection.JustDone) ({
+                                    gotIt(group.lead, group.triage.getValue(group.lead.id).last)
+                                }) else null,
                             )
                             if (open) {
                                 for (m in group.members.drop(1)) {
@@ -485,6 +600,7 @@ private fun TodoTriageRow(
     onDone: (Todo, Boolean) -> Unit,
     onDelete: (Todo) -> Unit,
     onRestore: () -> Unit,
+    onSeen: (() -> Unit)?,
 ) {
     val res = agentResources()
     // a failed start waiting on the owner reads open, says why in red, and its checkbox closes it (#3713)
@@ -506,7 +622,7 @@ private fun TodoTriageRow(
                     val tickName = stringResource(R.string.agents_todo_done_action)
                     val tickLabel = stringResource(if (finished) R.string.agents_todo_reopen else R.string.agents_todo_done_action)
                     Box(
-                        Modifier.size(Tokens.Space.xl).clip(CircleShape)
+                        Modifier.size(Tokens.Space.Standard.xl).clip(CircleShape)
                             .clickable(onClickLabel = tickLabel, role = Role.Checkbox) { onDone(todo, !finished) }
                             .semantics {
                                 contentDescription = tickName
@@ -553,6 +669,10 @@ private fun TodoTriageRow(
                         TodoHoldLine(it, Modifier.padding(start = Tokens.Space.xxl))
                     }
                     TodoPlanLine(todo, Modifier.padding(start = Tokens.Space.xxl))
+                    // A decision held for the next briefing (#4930): nothing was pushed for it, and the row says so.
+                    if (todo.ask?.forBriefing == true) Text(stringResource(R.string.agents_todo_for_briefing),
+                        Modifier.padding(start = Tokens.Space.xxl).testTag("todo-for-briefing-${todo.id}"),
+                        style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (triage.section == TriageSection.Pr) {
                     // PR to merge: the PR, and how long since anything of it moved, however old (#3206)
@@ -588,7 +708,9 @@ private fun TodoTriageRow(
                         )
                     }
                     Spacer(Modifier.weight(1f))
-                    if (triage.section == TriageSection.Shelved) {
+                    if (onSeen != null) {
+                        JTextButton(stringResource(R.string.agents_todo_seen), onSeen)
+                    } else if (triage.section == TriageSection.Shelved) {
                         JTextButton(stringResource(R.string.agents_todo_restore), onRestore, icon = PhIcons.ArrowUUpLeft)
                     } else if (!finished && todo.currentAgents.isNotEmpty()) {
                         Text(pluralStringResource(R.plurals.agents_todo_agents, todo.currentAgents.size, todo.currentAgents.size),

@@ -27,7 +27,7 @@ IOS_ONLY_TOOLS = {
     "phone_health_write_sample",
     "phone_calendar_update_event", "phone_calendar_delete_event",
     "phone_contacts_create", "phone_contacts_update",
-    "phone_maps_search_nearby", "phone_maps_navigate",
+    "phone_maps_search_nearby", "phone_maps_navigate", "phone_maps_route",
     # Android has no place search yet (the fixture never had it; --check failed on main before #2281).
     "phone_location_search",
 }

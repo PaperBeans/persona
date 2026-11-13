@@ -19,8 +19,8 @@ internal fun isDetailDestination(key: NavKey): Boolean = when (key) {
     is SettingsPageRoute, PairingRoute, PhoneToolsRoute, MachinesRoute, is MachineDetailRoute, is AddComputerRoute, TerminalPanesRoute,
     is EngineRoute, is ModelPurposeRoute, is ModelProviderRoute, AssistantSettingsRoute, is ExtensionRoute, is ExtensionUiRoute,
     ExtensionMarketRoute, is ExtensionCatalogRoute, ExtensionMarketsRoute, is LauncherRoute, is ChannelRoute, is ManagerRoute, is ConnectorRoute -> true
-    // A space's page opens beside the Agents list too; a conversation opened from it goes on top of it.
-    is SpaceRoute -> true
+    // A space's page and a computer's projects open beside the Agents list too; a conversation opened from them goes on top.
+    is SpaceRoute, is MachineSpacesRoute -> true
     else -> false
 }
 

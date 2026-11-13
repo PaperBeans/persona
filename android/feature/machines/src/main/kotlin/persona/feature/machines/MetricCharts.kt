@@ -27,6 +27,7 @@ import persona.core.designsystem.JCard
 import persona.core.designsystem.PersonaPalette
 import persona.core.designsystem.PersonaTheme
 import kotlin.math.max
+import persona.core.designsystem.dense
 
 /** [percent] kinds are drawn against a fixed 0–100 axis. Disk points carry a percentage ([diskPercentPoints]). */
 internal enum class MetricKind(@StringRes val label: Int, val percent: Boolean = false) {
@@ -55,13 +56,13 @@ internal fun MetricChart(
 ) {
     val picked = remember(points, selection, step) { selection?.let { selectedPoint(points, it, step) } }
     val locale = currentLocale
-    JCard(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+    JCard(Modifier.fillMaxWidth().padding(bottom = 12.dp.dense)) {
         Text(title, style = PersonaTheme.type.title, color = PersonaTheme.palette.ink)
         Text(selection?.let { MetricFormat.time(it, locale) } ?: stringResource(R.string.machines_now), style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3)
         kinds.forEachIndexed { index, kind ->
             val value = if (selection != null) picked?.let(kind::value) else nowValues.getOrNull(index)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.padding(top = 6.dp).size(8.dp).background(kind.color(PersonaTheme.palette), PersonaTheme.shapes.controlShape))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp.dense)) {
+                Box(Modifier.padding(top = 6.dp.dense).size(8.dp).background(kind.color(PersonaTheme.palette), PersonaTheme.shapes.controlShape))
                 Text("${stringResource(kind.label)} ${kind.format(value, locale)}", style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink)
             }
         }

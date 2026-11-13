@@ -76,6 +76,9 @@ class HttpChatComposerService internal constructor(
             put("text", persona.core.contracts.ProtocolCompatibility.messageForHub(message.text))
             put("client_msg_id", message.opId)
             message.clearDraft?.let { put("clear_draft", it) }
+            message.launcher?.let { put("launcher", it) }
+            message.model?.let { put("model", it) }
+            if (message.applySwitch) put("apply_switch", true)
         }.toString().toRequestBody(jsonType)
         return try {
             request(api("sessions", message.session.machineId, message.session.sessionId, "messages"), body, message.headers).use { response ->
@@ -85,6 +88,9 @@ class HttpChatComposerService internal constructor(
                         record(message, ComposerDelivery(DeliveryState.Unknown))
                         return@use MessageTransportResult.NoReceipt
                     }
+                    try { transport.onAccepted(message.session, fields) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { /* Confirmed delivery survives a metadata presentation failure. */ }
                     refused.remove(message.clientMessageId)
                     record(message, ComposerDelivery(DeliveryState.Sent))
                     MessageTransportResult.Accepted

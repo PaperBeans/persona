@@ -121,9 +121,9 @@ class AgentsListInfoTest {
 
     @Test fun anotherAgentsCardSaysWhoAsks() {
         val claude = Interaction("ix", kind = "permission", toolName = "Bash")
-        assertEquals("需要你授权", claude.cardTitle(res))
-        assertEquals("Codex 需要你授权", claude.copy(agent = "codex").cardTitle(res))
-        assertEquals("需要你授权", claude.copy(toolName = "mcp__persona__mail_send").cardTitle(res))
+        assertEquals("在等你批准", claude.cardTitle(res))
+        assertEquals("Codex 在等你批准", claude.copy(agent = "codex").cardTitle(res))
+        assertEquals("在等你批准", claude.copy(toolName = "mcp__persona__mail_send").cardTitle(res))
         assertEquals("DSH 在问你", claude.copy(kind = "question", agent = "dsh", agentLabelHint = "DSH").cardTitle(res))
         assertEquals("Claude 在问你", claude.copy(kind = "question", agent = "claude").cardTitle(res))
     }
@@ -133,9 +133,39 @@ class AgentsListInfoTest {
         assertEquals("普通文字", markdownPreview("普通文字"))
     }
 
+    /** #4338 A1: Needs You is one row per waiting session, as iOS's `AgentsNeedsYou` and the tab's badge count them. */
+    @Test fun needsYouIsOneRowPerWaitingSessionMutedAndTerminalOnlyIncluded() {
+        val waiting = Session("machine", "a", state = "needs_you", title = "A")
+        val sessions = listOf(waiting, waiting.copy(sessionId = "muted"), waiting.copy(sessionId = "terminal"),
+            waiting.copy(sessionId = "idle", state = "idle"), waiting.copy(machineId = "other", sessionId = "elsewhere"),
+            waiting.copy(sessionId = "assistant", assistant = true))
+        val cards = listOf(Interaction("a1", "machine", "a", kind = "permission", createdAt = "2026-01-01T00:00:00Z"),
+            Interaction("a2", "machine", "a", kind = "question", createdAt = "2026-01-01T00:01:00Z"),
+            Interaction("m1", "machine", "muted", kind = "permission", createdAt = "2026-01-01T00:02:00Z"),
+            Interaction("x1", "machine", "assistant", kind = "permission", createdAt = "2026-01-01T00:03:00Z"),
+            Interaction("o1", "other", "elsewhere", kind = "permission", createdAt = "2026-01-01T00:04:00Z"))
+        val all = AgentListSettings()
+        val rows = agentNeedsYouRows(cards, sessions, all) { false }.associateBy { it.key.path }
+        // The muted session shows (only the badge leaves it out), the terminal-only wait is a row of its own with no card, the
+        // idle session and the Persona tab's own conversation are not rows, and two cards on one session make one row.
+        assertEquals(setOf("machine/a", "machine/muted", "machine/terminal", "other/elsewhere"), rows.keys)
+        assertEquals(listOf("a1", "a2"), rows.getValue("machine/a").cards.map { it.id })
+        assertTrue(rows.getValue("machine/terminal").cards.isEmpty())
+        assertEquals(rows.keys, agentNeedsYouRows(cards, sessions, all.copy(quick = AgentQuickFilter.NeedsYou)) { false }.map { it.key.path }.toSet())
+        // The computer filter applies; a closed session leaves; searching and the other quick filters hide the section.
+        assertEquals(setOf("machine/a", "machine/muted", "machine/terminal"),
+            agentNeedsYouRows(cards, sessions, all.copy(machineFilter = "machine")) { false }.map { it.key.path }.toSet())
+        assertTrue(agentNeedsYouRows(cards, sessions, all) { it.path == "machine/a" }.none { it.key.path == "machine/a" })
+        assertTrue(agentNeedsYouRows(cards, sessions, all.copy(query = "A")) { false }.isEmpty())
+        assertTrue(agentNeedsYouRows(cards, sessions, all.copy(quick = AgentQuickFilter.Working)) { false }.isEmpty())
+    }
+
     @Test fun byToDoIsOfferedOnlyWhileTheHubHasToDos() {
         assertEquals(listOf(AgentGrouping.Repo, AgentGrouping.MachineSpace, AgentGrouping.State, AgentGrouping.Todo), offeredGroupings(true))
         assertEquals(listOf(AgentGrouping.Repo, AgentGrouping.MachineSpace, AgentGrouping.State), offeredGroupings(false))
+        // By pinned only with the hub's direction tree (#4352), after the rest.
+        assertEquals(listOf(AgentGrouping.Repo, AgentGrouping.MachineSpace, AgentGrouping.State, AgentGrouping.Todo, AgentGrouping.Direction),
+            offeredGroupings(true, directions = true))
         // A saved By To-do on a hub without to-dos shows By project; the others stay.
         assertEquals(AgentGrouping.MachineSpace, resolvedGrouping(AgentGrouping.Todo, false))
         assertEquals(AgentGrouping.Todo, resolvedGrouping(AgentGrouping.Todo, true))

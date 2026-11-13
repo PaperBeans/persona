@@ -13,10 +13,11 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import { api, ApiError, enc, errorText, getToken } from "./api";
 import { BASE } from "./base";
 import type { AgentMutes } from "./agent-groups";
+import type { ContextRef } from "./links";
 import { connectorOpenTitle } from "./connectors";
 import { contextBody } from "./context-body";
 import { larkPath } from "./lark-accounts";
-import { baseName } from "./format";
+import { baseName, uuid } from "./format";
 import { conversationPage } from "./conversation-page";
 import type { Route } from "./router";
 import { isResumed } from "./reconnect";
@@ -25,6 +26,7 @@ import { onHubEvent } from "./store";
 import type { AssistantInfo, Interaction, Session } from "./types";
 import { toast } from "../ui/atoms";
 import { byTime } from "./times";
+import { homeKey } from "./folded-rows";
 import { inFolderFilter } from "./inbox-folders";
 import { actedText, actOnSuggestion, statusOf, type ChainEntry, type InboxHandling, type InboxRelated, type InboxStatus, type InboxSuggestion, type SuggestionAction } from "./inbox-events";
 
@@ -68,6 +70,8 @@ export interface InboxDoc {
 }
 
 export interface InboxAgent {
+  /** The business task this event is about; distinct from its draft-processing session. */
+  todo_id?: string;
   state: string; // skipped | queued | running | drafted | failed
   task?: string;
   reason?: string;
@@ -89,6 +93,8 @@ export interface InboxItem {
   account: string;
   account_name: string;
   title: string;
+  /** Where the matter happens: a group's name, the other person of a direct chat, or a repository. */
+  where?: string;
   sender?: string;
   avatar?: string;
   preview: string;
@@ -129,6 +135,10 @@ export interface InboxItem {
   // ── events (docs/assistant/inbox.md "Events and handling chain"; lib/inbox-events.ts): absent from an older hub ──
   /** The section of an open item; absent: by `tier` as before. */
   status?: InboxStatus;
+  /** What or whom it waits on, the next step, and when to look again. */
+  follow?: { who?: string; next?: string; check_at?: string };
+  /** The manager's state key; apps translate it with the shared table in spec/fixtures/inbox/now.json. */
+  now?: string;
   /** Urgent: stays in "Needs you" while the AI prepares a suggestion. */
   urgent?: boolean;
   /** Summary by the manager: background, progress, where it is stuck. */
@@ -355,6 +365,7 @@ export function docTypeName(type?: string): string {
 /** Who wrote what: the row's line under the summary (or its second line before triage); `preview` is the hub's
  * translation of a foreign mail's when it is shown. */
 export function fromLine(it: InboxItem, preview?: string): string {
+  if (it.source === "assistant") return it.preview; // the assistant's own row: the tag already says who, so no "Assistant:" prefix
   if (it.doc) return `${docTypeName(it.doc.type)} · ${it.preview}`; // the preview names who: "<name> mentioned you"
   if (it.moment) return t("lib-inbox.sender_line", { sender: it.sender ?? "", text: it.preview });
   if (it.connector) {
@@ -366,6 +377,13 @@ export function fromLine(it: InboxItem, preview?: string): string {
   // a Feishu direct chat's title already is the sender
   if (!it.sender || (isLark(it) && it.lark && !it.lark.is_group)) return it.preview;
   return t("lib-inbox.sender_line", { sender: it.sender, text: it.preview });
+}
+
+/** The row's text under the summary says what the summary already says (the assistant's own rows: its text is the summary), so it is not drawn twice. */
+export function repeatsSummary(it: InboxItem): boolean {
+  const summary = it.summary?.trim();
+  const text = it.preview?.trim();
+  return it.source === "assistant" && !!summary && !!text && (text === summary || text.startsWith(summary));
 }
 
 /** Where it came from, for the detail page's subtitle. */
@@ -488,7 +506,7 @@ export function matches(it: InboxItem, f: InboxFilter): boolean {
     const ok = it.kind === f.kind || (f.kind === "mention" && (it.kind === "doc" || (it.kind === "moment" && kindLabel(it) === AT_ME)));
     if (!ok) return false;
   }
-  return hasText([it.title, it.sender, it.preview, it.summary], f.query);
+  return hasText([it.title, it.sender, it.preview, it.summary, it.where], f.query);
 }
 
 const byUpdated = (a: InboxItem, b: InboxItem) => byTime(b.updated_at, a.updated_at) || a.id.localeCompare(b.id);
@@ -535,8 +553,11 @@ export function mailAccounts(accounts: MailAccount[], items: InboxItem[]): MailA
 
 // ── agents waiting on the user (they head "Needs you") ────────
 
-/** Muted: the agent itself, or its space unless the agent was turned back on there (the hub's rule). */
+/** Muted: the agent itself, or its space unless the agent was turned back on there (the hub's rule). A child session's
+ *  card goes by its parent's (#5120): the child has no row of its own to mute it from, and the switcher's count
+ *  (lib/manager-attention.ts) mutes it the same way. */
 export function interactionMuted(ix: Interaction, sessions: Record<string, Session[]>, mutes: AgentMutes): boolean {
+  if (ix.folded_under) return interactionMuted({ ...ix, session_id: ix.folded_under, folded_under: undefined }, sessions, mutes);
   const key = `${ix.machine_id}/${ix.session_id}`;
   if (mutes.sessions.includes(key)) return true;
   if (mutes.allowed?.includes(key)) return false;
@@ -578,9 +599,21 @@ export function interactionAgentTitle(ix: Interaction): string {
 
 export function waitingAgents(interactions: Interaction[], sessions: Record<string, Session[]>, mutes: AgentMutes, f: InboxFilter): Interaction[] {
   if (f.source || f.folder || (f.kind && f.kind !== "agent")) return [];
-  return interactions
+  const shown = interactions
     .filter((ix) => !interactionMuted(ix, sessions, mutes) && hasText([ix.session_title, ix.summary, interactionTitle(ix), interactionAsk(ix)], f.query))
     .sort((a, b) => byTime(a.created_at, b.created_at) || a.id.localeCompare(b.id));
+  return withChildCardsUnderParents(shown);
+}
+
+/** A child session's cards come with its parent's (#5120), where the parent's oldest card (or its first child card) is;
+ *  the rest keep their order. The same list when no card is a child's. */
+function withChildCardsUnderParents(cards: Interaction[]): Interaction[] {
+  if (!cards.some((ix) => ix.folded_under)) return cards;
+  const homes = new Set(cards.filter((ix) => ix.folded_under).map(homeKey));
+  const group = (ix: Interaction) => (ix.session_id && homes.has(homeKey(ix)) ? homeKey(ix) : `card:${ix.id}`);
+  const at = new Map<string, number>();
+  for (const ix of cards) if (!at.has(group(ix))) at.set(group(ix), at.size);
+  return [...cards].sort((a, b) => at.get(group(a))! - at.get(group(b))!);
 }
 
 /** A conversation's page: the assistant's are in Persona (/persona/<sid>, naming its computer and manager with several
@@ -608,6 +641,13 @@ export function contextXML(kind: string, title: string, url: string, text: strin
 
 /** The item as context the chat shows as a chip, then what to do with it (InboxHandOffSheet.message). */
 export function handOffMessage(it: InboxItem, ask: string): string {
+  const ref = handOffContext(it);
+  return `${contextXML(ref.kind, ref.title, ref.url, ref.text)}\n\n${ask.trim() || HANDOFF_PRESETS[0]}`;
+}
+
+/** The item as a `<persona-context kind="context">` (InboxHandOffSheet.contextRef): where it came from, its words, and how
+ *  the agent reads more or answers. "New Agent…" (#5933) puts it over New agent's first message as its card. */
+export function handOffContext(it: InboxItem): ContextRef {
   const title = `${it.connector ? it.account_name || it.source : isLark(it) ? t("lib-inbox.lark") : t("lib-inbox.kind_mail")} · ${it.title}`;
   let text = it.context?.trim() ? it.context : [it.sender ?? "", it.preview].filter(Boolean).join(t("lib-inbox.sender_separator"));
   if (it.lark) {
@@ -618,7 +658,7 @@ export function handOffMessage(it: InboxItem, ask: string): string {
   if (it.connector?.url) text += `\n\n${t("lib-inbox.handoff_connector", { name: it.account_name || it.source, url: it.connector.url })}`;
   const uid = it.mail?.uids[it.mail.uids.length - 1];
   if (it.mail && uid !== undefined) text += `\n\n${t("lib-inbox.handoff_mail", { account: it.mail.account_id, mailbox: it.mail.mailbox, uid })}`;
-  return `${contextXML("context", title, "", text)}\n\n${ask.trim() || HANDOFF_PRESETS[0]}`;
+  return { id: `inbox:${it.id}`, kind: "context", title, url: "", text };
 }
 
 /** "Hand to AI" to Persona's main conversation (docs/assistant/inbox.md "Item actions"): the item's manager sends text there
@@ -627,6 +667,26 @@ export function handOffMessage(it: InboxItem, ask: string): string {
 export async function handOffToMain(item: InboxItem, text: string, clientID: string): Promise<InboxHandoff> {
   const r = await api<{ session: InboxHandoff }>(`${itemPath(item.id)}/handoff`, { method: "POST", json: { text, client_id: clientID }, headers: itemRequest(item) });
   return r.session;
+}
+
+/** Best-effort record of a hand-off the client already delivered itself; no text means the manager must not send it again.
+ *  Old managers reject a record-only request (400, or 404 / 405 without the route). Every failure is quiet: delivery
+ *  already succeeded, so recording never interrupts the close and navigation that follow it. */
+export async function recordHandOff(item: InboxItem, session: Pick<Session, "machine_id" | "session_id">, kind: "agent" | "conversation", title?: string): Promise<void> {
+  try {
+    await api<void>(`${itemPath(item.id)}/handoff`, {
+      method: "POST",
+      json: {
+        session: { machine_id: session.machine_id, session_id: session.session_id },
+        kind,
+        title: title ?? "",
+        client_id: uuid(),
+      },
+      headers: itemRequest(item),
+    });
+  } catch {
+    // A missing record is not a failed hand-off; do not toast, retry or change the dialog.
+  }
 }
 
 // ── Feishu messages (docs/protocol/protocol.md "Lark API") ──────
@@ -902,9 +962,11 @@ interface InboxState {
   groupLoading: string[];
   /** Done groups whose items have all come, by "<manager>|<group key>": a page of theirs reached the group's start. */
   groupComplete: string[];
+  /** Items a route names being read from the hub (loadRoutedItem), by "<manager>\u0000<id>". */
+  routing: string[];
 }
 
-const EMPTY: InboxState = { items: [], triage: null, loaded: false, loading: false, error: "", sending: [], moving: [], history: [], historyMore: [""], historyLoading: false, historyError: {}, doneDays: {}, groupLoading: [], groupComplete: [] };
+const EMPTY: InboxState = { items: [], triage: null, loaded: false, loading: false, error: "", sending: [], moving: [], history: [], historyMore: [""], historyLoading: false, historyError: {}, doneDays: {}, groupLoading: [], groupComplete: [], routing: [] };
 let state: InboxState = EMPTY;
 const listeners = new Set<() => void>();
 /** A Map that tells its watchers when it changes. The unsent replies live outside InboxState: a keystroke in the draft
@@ -1279,7 +1341,7 @@ export async function loadDoneGroup(manager: string | undefined, key: string, ra
   if (state.groupLoading.includes(id) || state.groupComplete.includes(id)) return;
   set({ groupLoading: [...state.groupLoading, id] });
   const q = new URLSearchParams({ sources: "all", limit: "100" });
-  const cur = groupNext.get(id);
+  const cur = groupNext.get(id) ?? pastListed(manager, range);
   if (cur) {
     q.set("before", cur.before);
     q.set("before_id", cur.before_id);
@@ -1307,11 +1369,51 @@ export async function loadDoneGroup(manager: string | undefined, key: string, ra
   }
 }
 
+/**
+ * Where a group's first page starts when the list already holds its newest done items: just past the oldest one the
+ * list holds of that manager, if it falls in the group. The list's done items are the newest of the history (every
+ * open item and the newest 200 done within three days, #5549), so a page from the group's end would bring only rows
+ * the list has, and its Show older would seem to do nothing.
+ */
+function pastListed(manager: string | undefined, range: { start: number; end: number }): DoneCursor | undefined {
+  // the history's order is done_at, then id, both descending; a mark of this app's is not the hub's done_at
+  let oldest: InboxItem | undefined;
+  let at = Infinity;
+  for (const it of state.items) {
+    if (!it.done_at || !sameManager(it.manager, manager) || pendingDone.has(itemKey(it))) continue;
+    const t = Date.parse(it.done_at);
+    if (t < at || (t === at && oldest && it.id < oldest.id)) [oldest, at] = [it, t];
+  }
+  return oldest && at >= range.start && at < range.end ? { before: oldest.done_at!, before_id: oldest.id } : undefined;
+}
+
 /** Done as the list shows it: the list's done items, then the history's it doesn't have (the list's copy is newer). */
 export function doneWithHistory(done: InboxItem[], history: InboxItem[], f: InboxFilter): InboxItem[] {
   const listedKeys = new Set(done.map(itemKey));
   const older = history.filter((it) => isDone(it) && matches(it, f) && !listedKeys.has(itemKey(it)));
   return older.length ? [...done, ...older].sort(byDoneAt) : done;
+}
+
+/** The routes asked for an item neither the list nor the loaded history had (loadRoutedItem): each once. */
+const routesAsked = new Set<string>();
+
+/**
+ * An item a route names that neither the list nor the loaded history has, such as a link to one done past what the
+ * list carries (only the newest done items, #5549): the hub's copy joins `history`, where the route finds it. Asked
+ * once per item; an open one comes with the list, and one the hub doesn't have stays gone. `routing` holds it meanwhile.
+ */
+export function loadRoutedItem(id: string, manager: string | undefined): void {
+  const key = `${manager ?? ""}\u0000${id}`;
+  if (routesAsked.has(key)) return;
+  routesAsked.add(key);
+  set({ routing: [...state.routing, key] });
+  void api<InboxItem>(itemPath(id), { headers: itemHeaders(manager) })
+    .then((r) => {
+      const it = r?.id === id && isDone(r) ? (manager && !r.manager ? { ...r, manager } : r) : undefined;
+      if (it && !state.history.some((x) => sameItem(x, it)) && !listed(it)) set({ history: [...state.history, it] });
+    })
+    .catch(() => undefined)
+    .finally(() => set({ routing: state.routing.filter((x) => x !== key) }));
 }
 
 /** Move back on an item only the history has (done before the list's days): the hub takes it back into its list. */
@@ -1586,8 +1688,10 @@ export async function setAllDone(items: InboxItem[], action: BulkAction | boolea
   const a: BulkAction = action === true ? "done" : action === false ? "reopen" : action;
   const done = a !== "reopen";
   const seen = new Set<string>();
+  // Undo reopens what the hub said it moved, listed or not: the list carries only the newest done items (#5549), so
+  // after a large Clean up all most of them are no longer in it.
   const targets = items
-    .map((it) => listed(it))
+    .map((it) => listed(it) ?? (!done && !undoable ? it : undefined))
     .filter((it): it is InboxItem => !!it && isDone(it) !== done && !seen.has(itemKey(it)) && !!seen.add(itemKey(it)));
   if (!targets.length) return;
   const before = new Map(targets.map((it) => [itemKey(it), it]));
@@ -1750,6 +1854,7 @@ export function resetInboxForTests() {
   state = EMPTY;
   historyNext.clear();
   groupNext.clear();
+  routesAsked.clear();
   started = false;
   inFlight = null;
   again = false;

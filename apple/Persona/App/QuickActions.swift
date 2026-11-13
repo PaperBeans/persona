@@ -2,10 +2,11 @@
 import UIKit
 
 /// The home screen icon's long-press menu (#3199): the last conversation opened here (#2191, `RecentChatsStore`), then
-/// Record a Meeting, New Chat and Inbox; the system shows four at most, so Agents is not among them (the tab bar has it).
-/// They only open a page; with no hub paired the app stays on its welcome page. Record a Meeting starts recording too
+/// Record, New Chat and Inbox; the system shows four at most, so Agents is not among them (the tab bar has it).
+/// They only open a page; with no hub paired the app stays on its welcome page. Record starts recording a meeting too
 /// (docs/apple/recording.md「Meeting recordings」), with or without a hub: the text syncs once there is one.
 enum QuickAction: String, CaseIterable {
+    /// The type is the item's identity: kept from when it was called Record a Meeting.
     case meetingRecording = "persona.meeting-recording"
     case newConversation = "persona.new-conversation"
     case inbox = "persona.inbox"
@@ -14,7 +15,7 @@ enum QuickAction: String, CaseIterable {
 
     var item: UIApplicationShortcutItem {
         let (title, symbol): (String, String) = switch self {
-        case .meetingRecording: (String(localized: "Record a Meeting"), Theme.Icon.recording)
+        case .meetingRecording: (String(localized: "Record [Recordings Section ef2821]"), Theme.Icon.recording)
         case .newConversation: (String(localized: "New Chat [Quick Actions ea4b29]"), Theme.Icon.compose)
         case .inbox: (String(localized: "Inbox"), Theme.Icon.inbox)
         }

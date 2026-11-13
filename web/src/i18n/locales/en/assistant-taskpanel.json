@@ -6,5 +6,7 @@
   "start_failed": "Agent didn't start",
   "retry": "Retry",
   "remove": "Remove task",
-  "starting": "Starting the agent. Its chat will show up here once it's running."
+  "starting": "Starting the agent. Its chat will show up here once it's running.",
+  "open_in_new_window": "Open in new window",
+  "switch_agent": "Switch agent"
 }

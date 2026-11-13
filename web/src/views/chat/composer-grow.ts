@@ -1,22 +1,10 @@
-// The phone composer grows with the draft, then offers Expand (#5688; Android ComposerExpand.kt, iOS ShellComposerBar):
-// up to a line limit taken from the visible height the box only grows; past it, it stops, scrolls inside, and a small
-// ↗↙ at the text's top right opens the draft full screen. Desktop keeps its own box (INPUT_MAX, no button).
+// The shared composer grows to six lines, then scrolls. Phones also offer the existing full-screen editor.
+// The dock's CSS input cap retains toolbar space in exceptionally short visible viewports.
 
 /** Where the compact composer applies: a phone-width screen, or a touch screen narrower than the sidebar breakpoint
- *  (a phone on its side). Desktop layouts keep the box they have. */
+ *  (a phone on its side). */
 export const COMPACT_COMPOSER = "(max-width: 639px), (hover: none) and (max-width: 1023px)";
-
-/** Share of the visible height (above the keyboard) the box may grow into before it scrolls and offers Expand. */
-const GROW_SHARE = 0.22;
-const MIN_LINES = 3;
-const MAX_LINES = 8;
-
-/** Lines the box grows to: 22% of what is visible in lines of `lineHeight` (iOS ComposerGrowth's share and cap), so a
- *  small phone with its keyboard up gets about 3 and a tall screen more, between 3 and 8. */
-export function growLines(visible: number, lineHeight: number): number {
-  if (!(visible > 0) || !(lineHeight > 0)) return MIN_LINES;
-  return Math.min(MAX_LINES, Math.max(MIN_LINES, Math.floor((visible * GROW_SHARE) / lineHeight)));
-}
+export const COMPOSER_LINES = 6;
 
 /** The draft's wrapped lines, from the text's height (the box's scrollHeight less its vertical padding). */
 export function lineCount(contentHeight: number, lineHeight: number): number {

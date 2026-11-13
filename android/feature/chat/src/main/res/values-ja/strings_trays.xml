@@ -23,7 +23,7 @@
     <string name="chat_tray_waiting">待機中</string>
     <string name="chat_tray_background_tasks_running">バックグラウンドタスク %1$d 件が実行中</string>
     <string name="chat_tray_subagents_running">サブエージェント %1$d 件が実行中</string>
-    <string name="chat_tray_background_running">バックグラウンドで作業中</string>
+    <string name="chat_tray_background_running">作業中（バックグラウンド）</string>
     <string name="chat_tray_background_workflow">バックグラウンドワークフロー</string>
     <string name="chat_tray_workflow_more">ほか %1$d 件</string>
     <string name="chat_tray_expanded">展開済み</string>
@@ -52,4 +52,8 @@
     <string name="chat_tasks_dismiss_draft">対応しない</string>
     <string name="chat_tasks_draft_dismissed">対応を見送りました。下書きは送信していません。</string>
     <string name="chat_tasks_undo_draft">元に戻す</string>
+    <!-- Over a task's card above Persona's composer: how many more its tasks ask (iOS TaskQuestions). -->
+    <plurals name="chat_stack_more">
+        <item quantity="other">ほか%1$d件</item>
+    </plurals>
 </resources>

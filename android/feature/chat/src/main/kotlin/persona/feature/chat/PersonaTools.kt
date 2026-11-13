@@ -1,6 +1,5 @@
 package persona.feature.chat
 
-import android.content.res.Resources
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -91,96 +90,5 @@ internal object AskUserAnswers {
     fun typed(q: AskUserQuestion, answer: String?): String? =
         answer?.takeIf { a -> q.options.none { picked(it, a, q.multiSelect) } }
 }
-
-/**
- * What a tool that operates a computer does, in words (iOS `ComputerSteps`, #1323): "Click AC → 6 → × → 7 → =" rather
- * than its JSON.
- */
-internal object ComputerSteps {
-    /** A computer_run's subject when it says what it does (steps or a script): "MacBook · Click AC → 6 → ×"; null otherwise. */
-    fun subject(res: Resources, name: String, input: JsonObject?): String? {
-        if (PersonaTools.base(name) != "computer_run" || input == null) return null
-        val what = describe(res, input) ?: return null
-        val machine = (input["machine"] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
-        return listOfNotNull(machine, what).joinToString(" · ")
-    }
-
-    /** The steps (or the script) in words; null when the call has neither. */
-    fun describe(res: Resources, input: JsonObject): String? {
-        val steps = input["steps"] as? JsonArray
-        val script = (input["script"] as? JsonPrimitive)?.contentOrNull
-        return when {
-            !steps.isNullOrEmpty() -> join(res, steps.mapNotNull { step(res, it) })
-            script != null -> firstLine(script.trim()).let { if (it.isEmpty()) res.getString(R.string.chat_computer_script) else res.getString(R.string.chat_computer_script_named, it) }
-            else -> null
-        }
-    }
-
-    /** Steps in a line, clicks after a click joined by → alone (Click AC → 6 → ×). */
-    private fun join(res: Resources, words: List<Pair<String, String?>>): String {
-        var clicking = false
-        return words.joinToString(" → ") { (word, clicked) ->
-            (if (clicked != null && clicking) clicked else word).also { clicking = clicked != null }
-        }
-    }
-
-    /** One run_steps step: {"click": {…}} or {"tool": "click", "args": {…}}; with what a click hit, for [join]. */
-    private fun step(res: Resources, value: JsonElement): Pair<String, String?>? {
-        val o = value as? JsonObject ?: return null
-        (o["tool"] as? JsonPrimitive)?.contentOrNull?.let { return action(res, it, o["args"] as? JsonObject ?: JsonObject(emptyMap())) }
-        o.entries.firstOrNull { it.key !in setOf("wait_for", "expect", "args", "tool") }?.let { (key, args) ->
-            return action(res, key, args as? JsonObject ?: JsonObject(emptyMap()))
-        }
-        return if (o["expect"] != null || o["wait_for"] != null) res.getString(R.string.chat_computer_check) to null else null
-    }
-
-    private fun action(res: Resources, tool: String, args: JsonObject): Pair<String, String?>? {
-        val target = args.text("name") ?: args.text("label") ?: args.text("text")
-        val shown = target?.takeIf(String::isNotEmpty)?.let { symbols[it] ?: short(it) }
-        val spot = shown ?: res.getString(R.string.chat_computer_somewhere)
-        return when (tool) {
-            "click" -> res.getString(R.string.chat_computer_click, spot) to spot
-            "double_click" -> res.getString(R.string.chat_computer_double_click, spot) to null
-            "right_click" -> res.getString(R.string.chat_computer_right_click, spot) to null
-            "type_text" -> res.getString(R.string.chat_computer_type, short(args.text("text").orEmpty())) to null
-            "set_value" -> res.getString(R.string.chat_computer_set_value, short(args.text("value").orEmpty())) to null
-            "press_key" -> res.getString(R.string.chat_computer_press, key(res, args.text("key").orEmpty())) to null
-            "hotkey" -> res.getString(R.string.chat_computer_press, (args["keys"] as? JsonArray).orEmpty()
-                .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.joinToString("") { key(res, it) }) to null
-            "scroll" -> res.getString(R.string.chat_computer_scroll) to null
-            "drag" -> res.getString(R.string.chat_computer_drag) to null
-            "launch_app" -> res.getString(R.string.chat_computer_launch, args.text("name") ?: args.text("bundle_id") ?: "App") to null
-            "bring_to_front" -> (args.text("app") ?: args.text("name"))?.let { res.getString(R.string.chat_computer_front, it) to null }
-            "get_window_state" -> res.getString(R.string.chat_computer_window) to null
-            "get_desktop_state", "screenshot" -> res.getString(R.string.chat_computer_screenshot) to null
-            "get_accessibility_tree", "list_windows", "list_apps" -> res.getString(R.string.chat_computer_tree) to null
-            "zoom" -> res.getString(R.string.chat_computer_zoom) to null
-            else -> null
-        }
-    }
-
-    /** Calculator's buttons read as on its keys. */
-    private val symbols = mapOf(
-        "All Clear" to "AC", "Clear" to "C", "Multiply" to "×", "Divide" to "÷", "Add" to "+", "Plus" to "+", "Subtract" to "−",
-        "Minus" to "−", "Equals" to "=", "Percent" to "%", "Decimal" to ".", "Change Sign" to "±", "Negate" to "±",
-    )
-
-    private fun key(res: Resources, k: String): String = when (k.lowercase()) {
-        "cmd", "command" -> "⌘"
-        "shift" -> "⇧"
-        "option", "alt" -> "⌥"
-        "ctrl", "control" -> "⌃"
-        "return", "enter" -> "⏎"
-        "escape", "esc" -> "esc"
-        "tab" -> "⇥"
-        "space" -> res.getString(R.string.chat_computer_space)
-        "delete", "backspace" -> "⌫"
-        else -> if (k.length == 1) k.uppercase() else k
-    }
-
-    private fun short(s: String): String = firstLine(s).let { if (it.length > 24) it.take(23) + "…" else it }
-}
-
-private fun firstLine(s: String): String = s.lineSequence().firstOrNull { it.isNotEmpty() } ?: s
 
 private fun JsonObject.text(key: String): String? = (get(key) as? JsonPrimitive)?.contentOrNull

@@ -14,6 +14,52 @@ not how far the session has progressed **in its work**. The Agents page ends up 
 - Which stopped only because of a transient error such as `API Error: 503`, and simply need a "continue" message;
 - Authorization links that expire within minutes and are already invalid by the time the user sees them.
 
+## Automatic session names (#4812)
+
+Settings › Assistant › Agents can correct recognizable placeholder names with the model configured for
+**Information screening** (`inbox.triage`, the same purpose as Inbox sorting). The default is one successful
+correction per Agent, with periodic updates off; it does not classify every meaningful title with a model.
+Turning automatic naming off prevents further calls but keeps already chosen names and saved advanced options.
+
+The manager owns the title override in Postgres setting `agent.naming.v1`, keyed by computer and session
+as an encoded pair. It decorates `session.title` on session lists and lookups, so the existing web, iOS,
+Android, watch, Mac and Vision selectors all see the same name. Automatic naming never writes into the
+Agent's input or transcript, and never renames herdr/Orca tabs. `todo.title` and plan titles name separate work
+objects and are unchanged. Native-title comparisons ignore leading terminal spinner frames and whitespace;
+animation does not hide a saved name or discard an in-flight result (#5254). Explicit Claude sessions with
+proven `prompt` source also keep a saved name when switching between recognizable bad tool and first-message
+fallbacks (#5269). This exception does not treat another runtime/tool, a meaningful native title or unknown
+provenance as the same fallback, and it never resets the successful-change count.
+
+Candidates are empty names, tool-only names (including terminal spinners), plain directory names,
+new-chat placeholders, and instruction/template openings in Chinese, English or Japanese. A meaningful but
+out-of-date name is refreshed only with periodic naming enabled. Native custom titles are protected even
+when they look like placeholders. Old nodes and runtimes that cannot establish title provenance are skipped
+rather than guessing that a title was not chosen by the user. Claude nodes provide `title_source`,
+`title_manual` and cached cumulative `output_tokens`; unknown sources do not establish eligibility.
+
+`agent_auto_naming_max` is a total successful-change limit (1–1000), including periodic refreshes.
+`agent_auto_naming_interval_hours` is 0 by default; a positive integer (1–8760) enables refresh after that
+interval only while the Agent is working, its activity is recent, and cumulative output grew since its last
+name. A meaningful original title starts with an observation baseline when periodic naming is enabled.
+Changing the maximum does not erase the ledger. A native or app rename stops automatic naming permanently
+for that session; app/API rename intent is persisted before contacting the node, even when its reply is uncertain.
+
+Cost controls: list events coalesce into one worker, dispatching at most one candidate per 30-second pass.
+Queue-local one-shot wakes drain existing matches even without another list event, then stop; they do not
+install a timer on any node. A successful check that keeps the name advances its interval baseline without
+counting another name change, so a daily choice does not retry hourly.
+Input keeps at most 2000 characters of the first user message and 4000 of recent dialogue; images and tool
+payloads are excluded. Calls time out after 45 seconds and request at most 256 output tokens on every protocol.
+Responses relays that refuse the output bound fail closed, without retrying unbounded. A persisted ten-minute
+lease precedes dispatch; failures back off from ten minutes and stop after three consecutive failures.
+Before committing, the worker checks settings, counters, current provenance, native title and eligibility again.
+
+Only web settings controls are added here. iOS and Android can read effective fields from
+`GET /api/v1/assistant` and send sparse `PUT /api/v1/assistant` updates with the selected assistant's
+`X-Persona-Manager` header. They must check all three fields are present before showing controls,
+and verify the returned manager and effective values before showing a save as confirmed.
+
 ## Model
 
 In work terms, each session is in exactly one of three states (`proto.Session.work.phase`):
@@ -178,7 +224,7 @@ waiting: <for status="blocked": who or what it waits for>
 - **Checked by the hub** (`checkCloseout`): when the closeout names a GitHub pull request by its link, triage looks at it with the deploy check that deliveries use (`deploy_check.go`: the pull request's merge, and whether the running hub contains the merge commit) and keeps the result beside the claim as `closeout.checked {merged, deployed}`, each `yes`, `no` or absent when it could not tell. `deployed` is about the running hub, so it is known only for the hub's own repository; for another repository only `merged` is. A closeout that says merged or deployed when the check says it is not is never `done`: the turn is "Not finished" (above), Unread with the closeout and the finding kept and a line naming the claim. Supervision messages show the finding under the closeout.
 - **Snapshot**: in the main chat's live snapshot an Agent's line ends with what its closeout claims of merging and deploying, marked as its own account, and with the hub's finding where that differs from the claim (`prompts/assistant/snapshot_closeout.md`, `snapshotCloseout`); nothing is added when the closeout says neither. A turn that is not finished is under "Unread" with its line.
 - **Delivery**: a reply with a closeout and no delivery line of its own (`docs/assistant/todos.md` "Delivery") states its delivery through the closeout: deployed `yes` is live, merged `yes` is merged and not live, merged `no` with a pull request is held at the PR, and a done closeout that says neither is "nothing to ship". A delivery line in the same reply wins.
-- **Not done yet** (follow-ups of #3612): the web and Android draw the closeout and have the switch (`docs/web/web.md`, "Pages": **Closeout**; `docs/android/android.md`, "Closeout, decisions and tasks nobody works on"), iOS and Mac do not yet; only Android gives a turn that is not finished a mark of its own (elsewhere it shows as the plain line of an Unread row); Codex has no held stop and no starting context, so a Codex session started without a task prompt writes a closeout only if it is asked to (one it writes is read all the same); a session already running when the switch is turned on learns the form at its next start or held stop; the form reaches a task's Agent on Claude Code twice (prompt and starting context).
+- **Not done yet** (follow-ups of #3612): the web (`docs/web/web.md`, "Pages": **Closeout**; the web also has `closeout_ask`, #3616), Android (`docs/android/android.md`, "Closeout, decisions and tasks nobody works on") and the iOS app ("Clients" below) draw the closeout and have the switch, the Mac app and the watch do not; only Android gives a turn that is not finished a mark of its own (on the web and iOS it shows as the plain line of an Unread row, with a claim the hub found untrue marked in the suffix); Codex has no held stop and no starting context, so a Codex session started without a task prompt writes a closeout only if it is asked to (one it writes is read all the same); a session already running when the switch is turned on learns the form at its next start or held stop; the form reaches a task's Agent on Claude Code twice (prompt and starting context).
 
 ## Automatic actions
 
@@ -186,7 +232,7 @@ An Agent still linked to a completed to-do, with no open to-do linked to it, rec
 wakeup or triage card. Triage can record its work state, but checks the current to-do links before acting; pending
 wakes are checked again before sending. Released and dismissed links do not count. A later manual message is allowed;
 to resume follow-ups while keeping the completed link, reopen the to-do or link the Agent to an open to-do (see
-`docs/assistant/todos.md`, "Close Agents for completed tasks"). If the to-do state cannot be read, triage and wakes retry
+`docs/assistant/todos.md`, "Stop Agents of completed tasks"). If the to-do state cannot be read, triage and wakes retry
 later without sending.
 
 ### Transient errors: automatic continuation
@@ -242,6 +288,7 @@ A subscription's 5-hour or weekly usage limit (#1710) is no failure to report an
 - **Otherwise Persona continues it** about a minute after the reset, spread over 30 seconds so that the agents of one account do not all start in the same second (`limitContinueAt`), with `prompts/agents/limit_continue.md`; event `limit_continued`. It is the `auto_continue` switch's, not `wake`'s: off (or turned off before the continuation went), the line stays and nothing is sent; the lists then name the line as the wait's `wait`, so they keep the session for the user instead of showing a wait that ends by itself. The apps show the continuation as one line ("Usage limit reset: Persona told it to go on", `injected` state `limit_continue`). None of a wait's other checks apply (risky next step, `check_minutes`): it goes on with what the limit stopped. Right before sending, the session is read again: when it now says it goes on by itself, nothing is sent; when its limit now resets later, the continuation moves to then.
 - **At most 3 continuations without a productive turn** (`maxLimitContinues`): a reset read too early is refused again at once. Then a card, "It was continued automatically 3 times after the usage limit reset, and hit the limit again each time", with options "Try again" / "Leave it"; the card keeps `resets_at`, so a turn refused again while it is up (a background task's report woke it) is the user's too. A turn that did some work before the limit refused it again (`turn_error_after_work`), or a later reset (the next window: the earlier reset was read right), starts the count again; an ordinary external wait never takes over a usage limit's count, nor the other way round.
 - **The user's actions cancel it** as any automatic action ("Avoid conflicting with manual user actions"): a message, looking at it in herdr, queued input, a pending card.
+- **Moving it to another provider instead of waiting** (`agent_switch`, #5973): when the user asks, the main conversation moves a Claude Code agent its limit stopped to another launcher on its computer and sends it `prompts/agents/limit_continue.md` there, at once ([claude-integration.md](../integrations/claude-integration.md) "Switching a running Agent to another provider"). It is now or not at all: a busy agent is refused with nothing typed and no switch left waiting. The continuation that was due is not sent afterwards: the agent's turn moved on, and `workGuard` drops the wake. Persona never switches on its own; agents_list marks the agents a limit stopped (`usage_limit`) and their launcher. `agents_switch` (#6008) does the same for many agents in one call: the ones a limit stopped are switched and continued, idle ones switched with nothing sent, busy ones queued until their turn ends, stopped ones Persona started pointed at the new launcher for their next Resume.
 - **No misleading notices while it waits** (`limitTakenUp`: the reset is known and at most 10 minutes past, and the CLI said it goes on by itself, or Persona's continuation or its card is set): no "Completed" or "Interrupted" push for the turn. The turn stays followed, so the end after the reset is the one pushed, timed from the turn's start. A task dispatched from the main chat gets no receipt meanwhile; it is looked at again when the wait is over, so a turn that did not go on after all (its continuation cancelled) still gets its "Interrupted" receipt. A limit nothing takes up (the switches off and a CLI that does not go on by itself, or no reset known) is told as the turn ends, as a usage limit ("Usage limit reached; continue it once the limit resets: …"), never as "the model service failed". For the main assistant, a task waiting for the reset reads as `usage_limit` in its snapshot, not `interrupted`. A sign-in that is gone ("Please run /login · …", "Login expired · …") is no usage limit: it reads as interrupted (`turn_error_code` `auth_failed` / `not_logged_in`), never as "Completed".
 - **Scheduled tasks** (`watchScheduledRun`): a run whose conversation stopped on a usage limit with a known reset is retried a minute or so after the reset instead of after 3 minutes; that wait is not cut by the watcher's 30 minutes, and `retryStillDue` decides at that time as before (a retry that fails again is not retried); a conversation that went on meanwhile (its turn is no longer the one the limit stopped) is not retried, so what the run does is not done twice. A conversation that goes on by itself is not retried. The failure push is unchanged.
 - **Known limits**: the waits are kept in `session_work` like any wakeup and come back after a restart, but only for turns that ended within the last two days (a weekly limit can be longer); a scheduled run's retry waits in memory and is lost when the manager restarts.
@@ -354,7 +401,7 @@ Inbox (`POST /api/v1/inbox/{ref}/reply`, with `card` and `text`) and records `se
 The existing **Later** action only collapses the inbox ref in that client's memory;
 it does not record a decision and does not survive a reload.
 
-**Do not handle** records a decision on this exact draft without sending anything.
+**Don't handle** records a decision on this exact draft without sending anything.
 It removes only this card from **Needs you**. The Inbox item stays open, and the task,
 its Agents, supervision, permissions and unrelated pending questions are unchanged.
 The card retains its original draft and adds `dismissed_at` and `dismissal_id`; it
@@ -442,7 +489,7 @@ A process can be redeployed and cleared at any time, so triage results, retry co
 
 - `session_work`: one row per session, with the latest turn's work state (`work` JSON), turn-end time `turn_at`, next action `wake_at`, retry / wakeup counts, and card id.
   On startup the manager restores recent turns and, beyond the usual 48-hour window, CI watches with a pending wake, including prepared messages, and recently retired turns. The 30-day cleanup retains active CI watches until they finish or are cancelled, and retains recent retirement markers even when their original turn is older. A todo that ends while its agent's turn is settling records its retirement and, when available, that stopped turn's node timestamp, preventing it from registering a new wake without comparing the node's clock to the manager's. Before scheduling automatic follow-ups or sending a wake, the manager also checks the current todo links, so a failed retirement-state write cannot revive follow-ups for a still-linked completed todo unless there is an open todo too. If todo state cannot be read during triage, the turn stays untriaged and the usual backfill retries it after ten minutes while it remains unread and within the 24-hour catch-up window; a later read failure for an existing watch postpones its next attempt. A later turn-start event or a newer node turn verified against the retired turn can clear the retirement marker, but automatic follow-ups still require that no completed todo blocks them. Reopening the todo or linking the Agent to an open todo allows new follow-ups, including after a restart. A persisted CI proof from an older manager never overrides a currently completed todo. If the retired turn's identity and a new turn-start event are both unavailable, the manager conservatively waits for another start. Continue due actions and restore unanswered cards only if still the same stopped turn, with the same id; wait for the computer to connect before restoring cards.
-- `session_work_events`: one row per triage, automatic continuation, wakeup, card creation, card answer, and wait completion (30 days), for evaluation below.
+- `session_work_events`: one row per triage, automatic continuation, wakeup, card creation, card answer, and wait completion (30 days), for evaluation below. A `resumed` row (the agent went on after a stop: `after`, `phase`, `on`, `by` `user` or `hub`) also carries `hand` (`decide`, `auto_continue` or `wake`) when that triage action alone, its switch being off, would have gone on with the stop and the session then went on by hand: with no message of the manager's before the turn and not by the agent itself; the weekly setup block counts by it (`docs/assistant/assistant.md` ("Recommended setup")). The availability metrics add `reply_wait`, `round`, `queue_wait` and `ask_outcome` rows for the assistant's conversations (`docs/assistant/assistant.md` ("Availability metrics")).
 
 ## What Persona knows
 
@@ -506,6 +553,7 @@ Pre-launch baseline (evening of 2026-11-04, non-assistant sessions on the hub): 
 - iOS / Mac (#2895): Agents-list and space-page card previews (`Session.listPreview`) switch to the same line when the session is stopped and the hub has triaged it (`Session.workLine`, `apple/Shared/Models.swift`).
   Host-provided reasons for needing the user (botmux) and failure notices still take precedence. Sessions the hub waits for go into "Waiting", not collapsed into idle (`WorkState.hubWaits`, `Session.isWaiting`). Unit tests: `SessionWorkTests`.
   **Settings › Session Triage** (below the assistant, `TriageSettingsView` / `TriageSettingsModel`) has the main switch, triage model (opens `agent.triage` in Model Settings), and three action switches (disabled when the main switch is off). Failed changes revert to the old value with an explanation; old hubs (404) report unsupported. Unit tests: `TriageSettingsTests`; DEBUG `-tab settings -openTriageSettings YES`.
+- iOS (#3612; iPad and Vision through the same views, not the frozen Mac app): a stopped Agent session's closeout is a card in its chat's header, above the transcript (`CloseoutCard`): the status, "The agent's own report", what changed, artifacts, merged and deployed each with the hub's finding (confirmed, contradicted in the caution color with the warning mark, or not checked), verified and still needs. While it shows, the last reply is drawn without its raw `<closeout>` block (`ChatLines.hidingCloseout`). List rows keep their line and add where the closeout stands ("merged ✓ · not deployed", "✗ says merged, isn't"; `Session.closeoutPreview`); a turn with an empty phase and a line shows that line. **Settings › Session Triage** has **Ask for a Closeout** (`closeout`; no row on a hub that does not name the switch, and nothing for `closeout_ask`). Details, tests and the DEBUG samples: `docs/apple/ios.md` ("Closeout, orphaned tasks and answerable decisions (#3612, #3618, #3804)").
 - Watch: list rows do not show last words; work previews are not displayed yet.
 
 ## Steps

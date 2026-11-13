@@ -15,8 +15,8 @@
     <string name="chat_assistant_dispatch_open">Open</string>
     <string name="chat_assistant_dispatch_open_line">· %1$s</string>
     <!-- #4314: a background round of the main conversation folded into one line. -->
-    <string name="chat_background_round">%1$s · Background round</string>
-    <string name="chat_background_round_live">%1$s · Running in the background</string>
+    <string name="chat_background_round">%1$s · Reported from the background</string>
+    <string name="chat_background_round_live">%1$s · Working in the background…</string>
     <!-- Needs you grouped by supervising conversation: a conversation without a title. -->
     <string name="chat_tray_other_conversation">Another conversation</string>
 </resources>

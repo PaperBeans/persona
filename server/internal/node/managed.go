@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +23,7 @@ import (
 	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/shellcmd"
 )
 
 // Launchers kept by the hub ("Settings › Model", docs/integrations/launchers.md): the manager names the ones in this
@@ -260,20 +263,86 @@ func managedSettingsEnv(l proto.ManagedLauncher) map[string]string {
 	return pinnedEnv(providerEnv(l, "", "", false))
 }
 
+var (
+	agentExecutableMu    sync.Mutex
+	agentExecutableCache = map[string]string{}
+)
+
+// agentSystemDirs are the system-wide install directories agentExecutable and commonNodePaths look in (Homebrew,
+// /usr/local). A test that must not find the machine's own install points them elsewhere, as it does PATH and HOME.
+var agentSystemDirs = []string{"/opt/homebrew/bin", "/usr/local/bin"}
+
+// distroNodeDir is where a Linux distribution's package manager puts node, and so where `npm install -g` with that
+// node puts claude. commonNodePaths looks there after agentSystemDirs; a test points it elsewhere with them (#6257).
+var distroNodeDir = "/usr/bin"
+
 // claudeExecutable finds claude: PATH first, then the usual install spots. A node started by launchd (macOS) has a
 // minimal PATH that misses /opt/homebrew/bin, and nothing in `personad launch`'s own path adds it.
 func agentExecutable(bin string) (string, error) {
 	if p, err := exec.LookPath(bin); err == nil {
 		return p, nil
 	}
-	home, _ := os.UserHomeDir()
-	for _, p := range []string{filepath.Join(home, ".local", "bin", bin), "/opt/homebrew/bin/" + bin,
-		"/usr/local/bin/" + bin, filepath.Join(home, ".claude", "local", bin)} {
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+	home := userHome()
+	var candidates []string
+	if jsEnv := strings.TrimSpace(os.Getenv("PERSONA_NODEJS")); jsEnv != "" {
+		candidates = append(candidates, filepath.Join(filepath.Dir(jsEnv), bin))
+	}
+	candidates = append(candidates, filepath.Join(home, ".local", "bin", bin))
+	for _, dir := range agentSystemDirs {
+		candidates = append(candidates, filepath.Join(dir, bin))
+	}
+	candidates = append(candidates,
+		filepath.Join(home, ".claude", "local", bin),
+		filepath.Join(home, ".volta", "bin", bin),
+	)
+	nvmDirs, _ := filepath.Glob(filepath.Join(home, ".nvm", "versions", "node", "*", "bin", bin))
+	sort.Sort(sort.Reverse(sort.StringSlice(nvmDirs)))
+	candidates = append(candidates, nvmDirs...)
+	for _, np := range commonNodePaths() {
+		candidates = append(candidates, filepath.Join(filepath.Dir(np), bin))
+	}
+	seen := map[string]bool{}
+	for _, p := range candidates {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		if st, err := os.Stat(p); err == nil && !st.IsDir() && (st.Mode().Perm()&0111 != 0 || runtime.GOOS == "windows") {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("%s not found in PATH or the usual install locations", bin)
+
+	agentExecutableMu.Lock()
+	cached := agentExecutableCache[bin]
+	agentExecutableMu.Unlock()
+	if cached != "" {
+		if st, err := os.Stat(cached); err == nil && !st.IsDir() && (st.Mode().Perm()&0111 != 0 || runtime.GOOS == "windows") {
+			return cached, nil
+		}
+		agentExecutableMu.Lock()
+		delete(agentExecutableCache, bin)
+		agentExecutableMu.Unlock()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := loginShell(ctx, "command -v "+shellQuote(bin))
+	if out, err := cmd.Output(); err == nil {
+		lines := strings.Split(strings.TrimSpace(terminalEscapes.ReplaceAllString(string(out), "")), "\n")
+		for i := len(lines) - 1; i >= 0; i-- {
+			line := strings.TrimSpace(lines[i])
+			if filepath.IsAbs(line) {
+				if st, err := os.Stat(line); err == nil && !st.IsDir() && (st.Mode().Perm()&0111 != 0 || runtime.GOOS == "windows") {
+					agentExecutableMu.Lock()
+					agentExecutableCache[bin] = line
+					agentExecutableMu.Unlock()
+					return line, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("%s not found in PATH or the usual install locations (node service environment; add its bin directory to PATH and restart the node, or symlink into ~/.local/bin)", bin)
 }
 
 func claudeExecutable() (string, error) { return agentExecutable("claude") }
@@ -344,6 +413,10 @@ func Launch(ctx context.Context, name string, args []string, ticket string) erro
 		env = append(withoutEnv(env, envNames(secrets)), secrets...)
 	}
 	argv := launchArgv(agent, args, resp.Args, resp.Effort, resp.Model, resp.Env)
+	if agent == "codex" && os.Getenv(codexBypassEnv) == "1" {
+		argv = codexBypassArgs(argv)
+	}
+	env = withoutEnv(env, []string{codexBypassEnv})
 	exe, argv, env, _ = launchExec(agent, exe, argv, env)
 	return osproc.Exec(exe, argv, env)
 }
@@ -537,7 +610,7 @@ var secretValue = lazyre.New(`(?i)((?:key|token|secret|password|passwd|auth)[A-Z
 // launcherDefinition is a ~/.zshrc launcher's function body (a wrapper script's text, pathlaunchers.go), for its page
 // in "Settings › Model", with anything that looks like a key or token replaced by •••.
 func (n *Node) launcherDefinition(ctx context.Context, name string) (string, error) {
-	if !nameRe.MatchString(name) {
+	if !shellcmd.NameRe.MatchString(name) {
 		return "", fmt.Errorf("invalid launcher %q", name)
 	}
 	if path := n.scriptLauncher(ctx, name); path != "" {

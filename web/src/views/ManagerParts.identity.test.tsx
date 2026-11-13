@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Conversation chrome follows the same installed-roster rule as the sidebar.
+// Conversation chrome keeps its multi-assistant gate even though the sidebar shows identity whenever a roster exists.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

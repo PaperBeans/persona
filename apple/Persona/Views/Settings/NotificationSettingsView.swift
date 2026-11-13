@@ -137,6 +137,7 @@ struct NotificationSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .overlay { if page?.spinning != false { ProgressView() } }
         .task { await load() }
+        .task { await refreshPush() } // the hub's way to this device now, not the one kept since launch (#1859)
         .onChange(of: model.isLive) { _, live in
             if live { Task { await page?.reloadIfNeeded() } } // the hub is back: read what failed
         }
@@ -154,6 +155,7 @@ struct NotificationSettingsView: View {
             Task {
                 system = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
                 await page?.reloadIfNeeded()
+                await refreshPush()
             }
             #if os(iOS)
             activitiesAllowed = ActivityAuthorizationInfo().areActivitiesEnabled
@@ -180,7 +182,7 @@ struct NotificationSettingsView: View {
     private var pushStatus: PushStatus {
         var health = PushHealthStore.shared.health
         #if DEBUG
-        // `-showPushHealth refused | moved | unreachable | relay | direct | failed | unknown`: a sample, for screenshots.
+        // `-showPushHealth refused | moved | unreachable | relay | direct | failed | unknown | unchecked`: a sample, for screenshots.
         if let sample = UserDefaults.standard.string(forKey: "showPushHealth") { health = .sample(sample, group: model.hub?.group ?? "") }
         #endif
         return health.status(group: model.hub?.group ?? "", allowed: system.map { _ in !systemOff })
@@ -253,25 +255,24 @@ struct NotificationSettingsView: View {
         }
     }
 
-    /// Optimistic like `save`, but only `quiet` goes, with this device's time zone.
+    /// Shown at once like a control's change (`NotificationSettingsModel.change`), but only `quiet` goes, with this
+    /// device's time zone, through its own endpoint.
     private func saveQuiet(_ quiet: QuietHours) {
-        guard let api = model.api, var next = prefs else { return }
-        let before = prefs
+        guard let api = model.api, prefs != nil else { return }
         var quiet = quiet
         quiet.tz = TimeZone.current.identifier
-        next.quiet = quiet
-        prefs = next
+        page?.showQuiet(quiet)
         quietRequest += 1
         let request = quietRequest
         Task {
             do {
                 let saved = try await api.setQuietHours(device: PushRegistrar.deviceID, quiet)
                 guard request == quietRequest else { return }
-                prefs = saved
+                page?.quietSaved(saved)
                 model.savedNotifyPrefs(saved)
             } catch {
                 guard request == quietRequest else { return }
-                prefs = before
+                page?.quietFailed()
                 model.show(error)
             }
         }
@@ -281,16 +282,17 @@ struct NotificationSettingsView: View {
         Binding {
             (prefs ?? NotifyPrefs())[keyPath: path]
         } set: { value in
-            guard var next = prefs else { return }
-            next[keyPath: path] = value
-            save(next)
+            page?.change { $0[keyPath: path] = value } // in order, over the hub's last answer (#1913)
         }
     }
 
-    /// The prefs as read and as the optimistic saves leave them (nil until read).
-    private var prefs: NotifyPrefs? {
-        get { page?.prefs }
-        nonmutating set { page?.prefs = newValue }
+    /// The prefs as the page shows them: the hub's last answer with the changes still waiting (nil until read).
+    private var prefs: NotifyPrefs? { page?.prefs }
+
+    /// Background Push's route at this page's hub, read again (#1859).
+    private func refreshPush() async {
+        guard let api = model.api, let group = model.hub?.group, !model.isDemo else { return }
+        await PushRegistrar.shared.refreshRoute(group: group) { try await api.deviceTokens(timeout: 15) }
     }
 
     private func load() async {
@@ -302,26 +304,15 @@ struct NotificationSettingsView: View {
                     guard let api = api() else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
                     return try await api.notifyPrefs(device: PushRegistrar.deviceID)
                 },
-                applied: { LiveActivityController.shared.settings($0) }))
+                save: { next in
+                    guard let api = api() else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
+                    return try await api.setNotifyPrefs(device: PushRegistrar.deviceID, next)
+                },
+                applied: { LiveActivityController.shared.settings($0) },
+                saved: { Haptics.success() },
+                failed: { [model] in model.show($0) }))
         }
         await page?.load()
     }
 
-    /// Optimistic: the control moves at once and goes back if the hub says no.
-    private func save(_ next: NotifyPrefs) {
-        let before = prefs
-        prefs = next
-        LiveActivityController.shared.settings(next)
-        guard let api = model.api else { return }
-        Task {
-            do {
-                prefs = try await api.setNotifyPrefs(device: PushRegistrar.deviceID, next)
-                Haptics.success()
-            } catch {
-                prefs = before
-                if let before { LiveActivityController.shared.settings(before) }
-                model.show(error)
-            }
-        }
-    }
 }

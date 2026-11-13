@@ -43,6 +43,25 @@ describe("i18n catalogs under Vitest", () => {
     it(`${lang}: the inlined admin catalog equals flatten() of its admin-*.json files`, async () => {
       expect((await admin[key]()).default).toEqual(expected(lang, "admin"));
     });
+    it(`${lang}: search menu, jumps, return and load outcomes are cold-ready while dialog text stays deferred`, async () => {
+      const [first, second] = await Promise.all([startup[key](), rest[key]()]);
+      const primary = ["stopped", "busy", "load_failed", "no_progress", "page_cap", "not_found", "origin_changed", "return", "menu"];
+      for (const name of primary) {
+        const k = `chat-chatview.search_${name}`;
+        expect(first.default[k]).toBeTruthy();
+        expect(second.default[k]).toBeUndefined();
+      }
+      expect(Object.keys(first.default).some(k => k.startsWith("chat-chatsearch."))).toBe(false);
+      expect(second.default["chat-chatsearch.title"]).toBe(first.default["chat-chatview.search_menu"]);
+      expect(first.default["chat-chatview.search_load_failed"]).toBeTruthy();
+      expect(second.default["chat-chatsearch.load_failed"]).toBeUndefined();
+      const child = readFileSync(fileURLToPath(new URL("./src/views/chat/ChatSearch.tsx", import.meta.url)), "utf8");
+      expect(child).toContain('t("chat-chatview.search_load_failed")');
+      expect(child).not.toContain("chat-chatsearch.load_failed");
+      const source = readFileSync(fileURLToPath(new URL("./src/views/chat/ChatView.tsx", import.meta.url)), "utf8");
+      expect(source).not.toContain("chat-chatsearch.");
+      for (const name of primary) expect(source).toContain(`chat-chatview.search_${name}`);
+    });
     it(`${lang}: client-startup holds the startup namespaces and client-rest the others, together the client catalog`, async () => {
       const [whole, first, second] = await Promise.all([client[key](), startup[key](), rest[key]()]);
       const listed = (k: string) => startupNamespaces.includes(k.split(".")[0]);

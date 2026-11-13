@@ -74,6 +74,9 @@ nonisolated enum ServerEvent: Sendable {
     /// The hub's roster of managers changed (docs/assistant/managers.md): Settings › Managers reads it again. Sent only to a
     /// socket that asked for feature `managers` (`queryItems`).
     case managers
+    /// The direction tree changed on the hub (#4352): a to-do, an Agent's session, a direction or its name. No payload:
+    /// the clients read `GET /api/v1/assistant/directions/tree` again, and on every (re)connect.
+    case directions
     case assistantFeed(FeedItem)
     case assistantView(ExtensionAssistantView)
     case assistantViewAction(conversation: String, action: ExtensionViewAction)
@@ -88,7 +91,13 @@ nonisolated enum ServerEvent: Sendable {
     /// An extension's data changed (`ui.invalidate`, docs/extensions/extensions.md「ui.invalidate」): its interface `id` (nil: all of
     /// them) is drawn again where it is shown.
     case extensionInvalidate(extension: String, id: String?)
+    /// A meeting's conversation changed (#3862, docs/assistant/meeting-minutes.md「The `meeting_live` event」): content-free,
+    /// only the parts that changed (an open set) and their revisions; the app reads the newer parts with `GET …/live?parts=`.
+    case meetingLive(recordingID: String, changed: [String], revs: [String: Int64])
     case error(SessionKey?, String)
+
+    private struct EventType: Decodable { var type: String }
+    private static let subscriptionType = Data(#""type":"subscription""#.utf8)
 
     private struct Envelope: Decodable {
         var type: String
@@ -176,13 +185,17 @@ nonisolated enum ServerEvent: Sendable {
         /// The manager a manager's own message is from, when not the hub's own assistant (docs/protocol/protocol.md
         /// "Messages to the App"); raw, so another event's `manager` of another shape cannot break the envelope.
         var manager: JSONValue?
+        /// meeting_live's.
+        var recordingID: String?
+        /// meeting_live's list of parts; raw, since other messages use `changed` for other shapes.
+        var changed: JSONValue?
 
         enum CodingKeys: String, CodingKey {
             case type, machines, sessions, upsert, remove, revision, items, backlog, text, status, interaction, id, name, args, event, message, error, revs, fleet, history
             case features, epoch, seq, full, cols, rows, data, unsupported, state, desktops, mesh, channel, build, update, item, view, action, key, conversation, plan
             case plugin, badge, invalidate, cwd, dirs, git, operation, auth, source, conversations, account, reason, answers, resolution, manager
-            case effective
-            case answeredBy = "answered_by"
+            case effective, changed
+            case answeredBy = "answered_by", recordingID = "recording_id"
             case extensionID = "extension"
             case hubID = "hub_id", hubName = "hub_name", protocolVersion = "protocol", minAppBuild = "min_app_build", publicURL = "public_url"
             case settingsChanged = "settings_changed", olAccount = "ol_account"
@@ -208,6 +221,12 @@ nonisolated enum ServerEvent: Sendable {
     }
 
     static func decode(_ data: Data) -> ServerEvent? {
+        // A source subscription was saved, ran or was deleted (#2041): its pages are drawn again, as an invalidate of theirs.
+        // Read before the envelope, whose `revision` is a string where this event's is a number; the hub's compact JSON is
+        // looked for first, so every other message skips the extra decode.
+        if data.range(of: subscriptionType) != nil, (try? JSON.decoder.decode(EventType.self, from: data))?.type == "subscription" {
+            return .extensionInvalidate(extension: SubscriptionsUI.id, id: nil)
+        }
         guard let e = try? JSON.decoder.decode(Envelope.self, from: data) else { return nil }
         let key = e.machineID.flatMap { m in e.sessionID.map { SessionKey(machineID: m, sessionID: $0) } }
         switch e.type {
@@ -269,6 +288,7 @@ nonisolated enum ServerEvent: Sendable {
             guard (e.effective ?? e.id).map({ !$0.isEmpty }) == true else { return nil }
             return .look(id: e.id, effective: e.effective)
         case "managers": return .managers
+        case "directions": return .directions
         case "assistant_feed": return e.item.map { .assistantFeed($0) }
         case "assistant_view":
             guard let view = e.view, !view.id.isEmpty, view.version > 0,
@@ -304,6 +324,13 @@ nonisolated enum ServerEvent: Sendable {
         case "terminal_control":
             guard let key, let state = e.state else { return nil }
             return .terminal(key, .control(state: state, cols: e.cols, rows: e.rows, why: e.error))
+        case "meeting_live":
+            guard let id = e.recordingID, !id.isEmpty else { return nil }
+            let changed = (e.changed?.array ?? []).compactMap { part -> String? in
+                if case .string(let name) = part { return name }
+                return nil
+            }
+            return .meetingLive(recordingID: id, changed: changed, revs: e.revs ?? [:])
         default: return nil
         }
     }
@@ -330,8 +357,8 @@ nonisolated extension ServerEvent {
         case .sessionsDelta(let machine, let upsert, let remove):
             return .sessionsDelta(machineID: machine, upsert: upsert.map { var s = $0; s.group = group; return s }, remove: remove)
         case .sessionsList, .hello, .interactionResolved, .interactionReanswered, .toolCall, .revs, .lark, .messaging, .agents, .inbox, .fleet, .hubUpdate, .desktops, .todos,
-             .personas, .look, .managers, .assistantFeed, .assistantView, .assistantViewAction, .assistantViewBlock, .taskPlan, .pluginBadge,
-             .extensionInvalidate, .fsChanged, .extensionOperation, .extensionAuth: return self
+             .personas, .look, .managers, .directions, .assistantFeed, .assistantView, .assistantViewAction, .assistantViewBlock, .taskPlan, .pluginBadge,
+             .extensionInvalidate, .fsChanged, .extensionOperation, .extensionAuth, .meetingLive: return self
         }
     }
 }

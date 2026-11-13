@@ -46,6 +46,7 @@ class ChatDataRepositories private constructor(
         data.messages.connectActivity { key ->
             sessions.sessions.value.firstOrNull { it.key == key }?.status in setOf("working", "blocked")
         }
+        data.messages.connectSendReceipts(connection, sessions.sessions, chats::withSendSubscription)
     }
 
     @Deprecated("Assemble with ScopedHubData so all stores share the pairing lifetime")
@@ -109,7 +110,7 @@ class ChatDataRepositories private constructor(
         private fun openLegacyCache(context: Context, scope: HubScope): ItemsDatabase {
             val directory = legacyDirectory(context, scope).apply { mkdirs() }
             return Room.databaseBuilder(context.applicationContext, ItemsDatabase::class.java,
-                File(directory, "items.db").absolutePath).addMigrations(ItemsDatabase.MIGRATION_1_2, ItemsDatabase.MIGRATION_3_4).build()
+                File(directory, "items.db").absolutePath).addMigrations(ItemsDatabase.MIGRATION_1_2, ItemsDatabase.MIGRATION_3_4, ItemsDatabase.MIGRATION_4_5).build()
         }
     }
 }

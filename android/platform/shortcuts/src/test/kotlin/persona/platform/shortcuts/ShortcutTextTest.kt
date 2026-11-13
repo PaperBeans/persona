@@ -34,6 +34,16 @@ class ShortcutTextTest {
     private val permission = Interaction("b", "macbook", "tests", sessionTitle = "补测试", kind = "permission",
         createdAt = t.toString(), toolName = "Bash", summary = "Bash: swift test")
 
+    /** #5284: a cut never leaves half of an emoji (a lone surrogate shows as a box). */
+    @Test fun clipsKeepWholeCharacters() {
+        assertEquals("a".repeat(59) + "…", ShortcutText.excerpt("a".repeat(59) + "😀 b", 60))
+        assertEquals("a".repeat(58) + "😀…", ShortcutText.excerpt("a".repeat(58) + "😀 b", 60))
+        val titled = Session("mac", "s", title = "x".repeat(23) + "😀 deploy")
+        assertEquals("x".repeat(23), ShortcutPublisher.shortLabel(titled))
+        val long = ShortcutPublisher.longLabel(context, titled.copy(title = "y".repeat(40) + "🚀🚀🚀🚀"))
+        assertFalse(long, long.last().isHighSurrogate())
+    }
+
     @Test fun picksTheOldestAndSettlesOnlyPermissionsAndPlans() {
         assertEquals("b", ShortcutText.pending(listOf(plan, permission))!!.id)
         assertNull(ShortcutText.pending(emptyList()))
@@ -90,6 +100,18 @@ class ShortcutTextTest {
         assertEquals("任务 new", ShortcutPublisher.shortLabel(picked.first()))
         assertEquals("打开 任务 new", ShortcutPublisher.longLabel(context, picked.first()))
         assertEquals("x".repeat(24), ShortcutPublisher.shortLabel(session("long", 1).copy(title = "x".repeat(40))))
+    }
+
+    @Test fun anAgentAnotherCreatedIsNoRecentAgentWhileItsCreatorIsLive() {
+        fun session(id: String, minutes: Long, parent: String? = null, status: String = "working") = Session(machineId = "mac",
+            sessionId = id, title = "任务 $id", status = status, sourceKind = "runtime", agent = "claude", isSubagent = parent != null,
+            parentSessionId = parent, updatedAt = t.plusSeconds(minutes * 60).toString())
+        // The reviewers it created are newer, but they are reached under the orchestrator in Agents (#4769).
+        assertEquals(listOf("lead", "other"), RecentAgents.pick(listOf(session("lead", 3), session("review", 9, "lead"),
+            session("check", 8, "lead"), session("other", 1))).map { it.sessionId })
+        // Its creator let go: the one still working is a row of its own there, and a recent agent here.
+        assertEquals(listOf("review", "other"), RecentAgents.pick(listOf(session("lead", 3, status = "offline"),
+            session("review", 9, "lead"), session("other", 1))).map { it.sessionId })
     }
 
     @Test fun newTodoShortcutOpensTheTodoListWithItsSheet() {

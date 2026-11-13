@@ -75,9 +75,9 @@ func TestLarkCLIGate(t *testing.T) {
 		{`lark-cli --profile other im +chat-list`, "deny"},
 		{`lark-cli im +chat-list --profile=other`, "deny"},
 		{`cat ~/.lark-cli/config.json`, "deny"},
-		// Not decided here: the usual permission flow asks about the whole command.
+		// Other commands and unresolved calls.
 		{`lark-cli im +chat-list | python3 -c 'import sys'`, "other"},
-		{`lark-cli im +chat-list > ~/chats.json`, "other"},
+		{`lark-cli im +chat-list > ~/chats.json`, "allow"},
 		{`FOO=1 lark-cli im +chat-list`, "allow"},
 		{`lark-cli "$CMD" +chat-list`, "other"},
 		{`lark-cli`, "other"},
@@ -203,9 +203,6 @@ func TestLarkCLIRiskAndWrapper(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
 	if len(lines) != 3 || lines[0] != "--profile work im +chat-list --help" {
 		t.Fatalf("lark-cli asked %d times (cached?): %q", len(lines), lines)
-	}
-	if n.larkCLIRisk(proto.AssistantLark{}) != nil {
-		t.Fatal("no lark.cli, no risk lookups")
 	}
 
 	wrapper := filepath.Join(n.dir, "lark-cli")

@@ -111,12 +111,12 @@ fun JWorkflowCallCard(
     val action = stringResource(if (open) R.string.designsystem_workflow_collapse else R.string.designsystem_workflow_expand, title)
     val state = stringResource(if (open) R.string.designsystem_expanded else R.string.designsystem_collapsed)
     val shape = PersonaTheme.shapes.cardShape
-    Column(modifier.fillMaxWidth().padding(vertical = 6.dp).clip(shape).background(palette.surface).border(1.dp, palette.line, shape)
+    Column(modifier.fillMaxWidth().padding(vertical = 6.dp.dense).clip(shape).background(palette.surface).border(1.dp, palette.line, shape)
         .testTag("workflow-call")) {
         Column(
             Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = action) { folds[key] = !open }
                 .semantics { stateDescription = state }
-                .padding(horizontal = CardInset, vertical = 10.dp),
+                .padding(horizontal = CardInset, vertical = 10.dp.dense),
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs),
         ) {
             WorkflowHead(workflow, clock, kind = true, open = open)
@@ -291,7 +291,7 @@ private fun WorkflowProgress(workflow: Workflow, inset: Dp) {
     val colors = segments.map { partColor(it.part) }
     val spoken = WorkflowSummary.agentsDone(workflow).text()
     val calls = workflow.calls?.takeIf { it > 0 && LocalWindowLayout.current.expanded }
-    Column(Modifier.fillMaxWidth().padding(start = inset, end = inset, bottom = Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().padding(start = inset, end = inset, bottom = Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(6.dp.dense)) {
         Box(
             Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(palette.surfaceStrong)
                 .semantics {
@@ -362,7 +362,7 @@ private fun PhaseView(workflow: Workflow, block: PhaseBlock, clock: State<Instan
         Row(
             Modifier.fillMaxWidth().drawBehind { drawRect(lit) }
                 .then(if (opens) Modifier.clickable(role = Role.Button) { folds[key] = !open }.semantics { stateDescription = state } else Modifier)
-                .heightIn(min = 40.dp).padding(horizontal = inset),
+                .heightIn(min = 40.dp.row).padding(horizontal = inset),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             PhaseMark(block)
@@ -424,14 +424,14 @@ private fun PhaseMark(block: PhaseBlock) {
         block.state == PhaseState.Stopped -> R.string.designsystem_workflow_phase_stopped
         else -> R.string.designsystem_workflow_phase_next
     })
-    FadeOnChange(block.state to block.current, Modifier.size(Tokens.Space.l).semantics { contentDescription = label }) {
+    FadeOnChange(block.state to block.current, Modifier.size(Tokens.Space.Standard.l).semantics { contentDescription = label }) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             when (block.state) {
                 PhaseState.Done -> if (block.failed > 0) JIcon(PhIcons.X, null, size = 13.dp, tint = palette.danger.dot)
                     else JIcon(PhIcons.Check, null, size = 13.dp, tint = palette.positive)
-                PhaseState.Current -> Box(Modifier.size(Tokens.Space.s).clip(CircleShape).background(if (block.current) palette.ai else palette.ai.copy(alpha = 0.5f)))
-                PhaseState.Stopped -> Box(Modifier.size(Tokens.Space.s).clip(RoundedCornerShape(2.dp)).background(palette.ink3))
-                PhaseState.Next -> Box(Modifier.size(Tokens.Space.s).border(1.5.dp, palette.ink3, CircleShape))
+                PhaseState.Current -> Box(Modifier.size(Tokens.Space.Standard.s).clip(CircleShape).background(if (block.current) palette.ai else palette.ai.copy(alpha = 0.5f)))
+                PhaseState.Stopped -> Box(Modifier.size(Tokens.Space.Standard.s).clip(RoundedCornerShape(2.dp)).background(palette.ink3))
+                PhaseState.Next -> Box(Modifier.size(Tokens.Space.Standard.s).border(1.5.dp, palette.ink3, CircleShape))
             }
         }
     }
@@ -463,7 +463,7 @@ private fun AgentRow(agent: WorkflowAgent, clock: State<Instant>, fresh: Boolean
         Modifier.fillMaxWidth().graphicsLayer { this.alpha = alpha.value }
             .then(if (onOpen != null) Modifier.clickable(role = Role.Button, onClickLabel = action, onClick = onOpen) else Modifier)
             .semantics(mergeDescendants = true) { stateDescription = word }
-            .heightIn(min = 36.dp).padding(start = inset + Tokens.Space.xl, end = inset)
+            .heightIn(min = 36.dp.row).padding(start = inset + Tokens.Space.xl, end = inset)
             .testTag("workflow-agent:" + agent.id),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -498,7 +498,7 @@ private fun AgentDot(state: AgentState) {
         AgentState.Failed -> {
             val danger = PersonaTheme.palette.danger
             val shape = if (PersonaTheme.style == AppStyle.Board) RoundedCornerShape(2.dp) else CircleShape
-            Box(Modifier.size(Tokens.Space.s).clip(shape).background(danger.dot).border(1.dp, danger.text, shape))
+            Box(Modifier.size(Tokens.Space.Standard.s).clip(shape).background(danger.dot).border(1.dp, danger.text, shape))
         }
     }
 }
@@ -506,14 +506,14 @@ private fun AgentDot(state: AgentState) {
 /** A quiet line among the rows ("12 earlier ones not listed"). */
 @Composable
 private fun Note(text: String, inset: Dp) {
-    Text(text, Modifier.heightIn(min = 32.dp).padding(start = inset + Tokens.Space.xl, end = inset, top = Tokens.Space.s),
+    Text(text, Modifier.heightIn(min = 32.dp.row).padding(start = inset + Tokens.Space.xl, end = inset, top = Tokens.Space.s),
         style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 /** "n more" / "Show fewer" among the rows: words in the accent color, one line. */
 @Composable
 private fun TextAction(text: String, inset: Dp, onClick: () -> Unit) {
-    Box(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).heightIn(min = 36.dp)
+    Box(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).heightIn(min = 36.dp.row)
         .padding(start = inset + Tokens.Space.xl, end = inset), contentAlignment = Alignment.CenterStart) {
         Text(text, style = PersonaTheme.type.caption.copy(fontWeight = FontWeight.Medium), color = PersonaTheme.palette.accent, maxLines = 1)
     }

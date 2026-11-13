@@ -193,16 +193,19 @@ func TestInboxChangesAreListedBeforeTheirSave(t *testing.T) {
 		{"event moved by a group append", func(t *testing.T, h *inboxHub, c *replyRacingConnector, it *InboxItem, listed func() InboxItem) InboxItem {
 			listed()
 			moved := thing("b", time.Now())
-			moved.ID, moved.Title = it.ID, "Moved"
+			moved.ID, moved.Preview = it.ID, "Moved"
 			h.putEvent(assistantwire.InboxSource{ID: it.Source, Name: "Example"}, moved.Thread, plannedEvent{messages: []string{"b"}}, moved, false)
 			return listed()
-		}, func(x InboxItem) bool { return x.Title == "Moved" }},
+		}, func(x InboxItem) bool { return x.Preview == "Moved" }},
 		{"Agent a handed-off conversation started", func(t *testing.T, h *inboxHub, c *replyRacingConnector, it *InboxItem, listed func() InboxItem) InboxItem {
 			listed()
 			h.handoffAgentStarted(&handoffStart{item: it.ID}, "m1", "sess-handed", "look into it")
 			return listed()
 		}, chained(ChainAgent, "sess-handed")},
 		{"event's conversation being started", func(t *testing.T, h *inboxHub, c *replyRacingConnector, it *InboxItem, listed func() InboxItem) InboxItem {
+			// Like a handling pass, own starts while observing them; collection can now queue a pass with the twin off.
+			h.inbox.handing.Lock()
+			defer h.inbox.handing.Unlock()
 			h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = true })
 			h.inbox.mu.Lock()
 			it.Agent = &InboxAgent{State: AgentQueued, Task: "look"}
@@ -280,5 +283,53 @@ func TestInboxListUnchangedAllocations(t *testing.T) {
 	runtime.ReadMemStats(&after)
 	if per := (after.TotalAlloc - before.TotalAlloc) / runs; per > 45130 {
 		t.Fatalf("one GET of 400 unchanged items allocated %d bytes, want at most 45130", per)
+	}
+}
+
+// Items of the same moment list by id, so the same items always give the same bytes: the merged answer's validator
+// depends on it (#4739). The map they come from has no order of its own.
+func TestInboxListOrderIsStable(t *testing.T) {
+	now := time.Now()
+	var items []*InboxItem
+	for i := range 40 {
+		items = append(items, &InboxItem{ID: fmt.Sprintf("mail-%02d", (i*17)%40), Source: "mail", Kind: KindMail, Title: "t", Last: "u"})
+	}
+	h := memoInbox(t, items)
+	h.inbox.mu.Lock()
+	for _, it := range h.inbox.items {
+		it.UpdatedAt = now // all of the same moment
+	}
+	h.inbox.mu.Unlock()
+	first, want := getInbox(t, h, "?sources=all")
+	if !bytes.Equal(first, want) {
+		t.Fatal("the memo's bytes differ from apierr.WriteJSON's")
+	}
+	var list struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(first, &list); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < len(list.Items); i++ {
+		if list.Items[i-1].ID >= list.Items[i].ID {
+			t.Fatalf("items of the same moment out of id order at %d: %s, %s", i, list.Items[i-1].ID, list.Items[i].ID)
+		}
+	}
+	strip := func(b []byte) []byte { // as_of is the moment of each listing
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		delete(m, "as_of")
+		out, _ := json.Marshal(m)
+		return out
+	}
+	for range 20 {
+		again, _ := getInbox(t, h, "?sources=all")
+		if !bytes.Equal(strip(first), strip(again)) {
+			t.Fatal("the same items listed in another order")
+		}
 	}
 }

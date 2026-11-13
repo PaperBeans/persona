@@ -103,10 +103,7 @@ func queuedTexts(q []assistantInput) []string {
 
 // assistantQueueEdit is the answer to an edit: the messages that were queued (the one taken back is the app's to put in
 // its composer) and their images.
-type assistantQueueEdit struct {
-	Queue  []string        `json:"queue"`
-	Images [][]proto.Image `json:"images,omitempty"`
-}
+type assistantQueueEdit = proto.QueueEdit
 
 // assistantQueueProc is the claude running conversation id, or a refusal saying why its queue can't be changed.
 func (n *Node) assistantQueueProc(id string) (*assistantProc, error) {

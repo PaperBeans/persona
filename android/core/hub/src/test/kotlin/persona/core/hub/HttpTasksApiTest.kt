@@ -89,6 +89,51 @@ class HttpTasksApiTest {
         }
     }
 
+    /** #4929: Always and Not now name the suggestion as one escaped segment; what Always made comes back, a stale one is 404. */
+    @Test fun aSuggestedRuleIsAnsweredOnItsTwoRoutes() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody(
+                """{"ok":true,"kind":"standing_authorization","creates":"standing_authorization","authorization":{"id":"a1"},"revision":2}"""))
+            val made = api(server).ruleAlways("rs_merge/one")
+            val always = server.takeRequest()
+            assertEquals("POST", always.method)
+            assertEquals("/api/v1/assistant/rule-suggestions/rs_merge%2Fone/always", always.path)
+            assertEquals("{}", always.body.readUtf8())
+            assertEquals("standing_authorization", made.creates)
+            assertEquals("standing_authorization", made.kind)
+            server.enqueue(MockResponse().setBody("""{"ok":true,"kind":"delegate","creates":"","setting":"agents.delegate"}"""))
+            val delegate = api(server).ruleAlways("rs_delegate")
+            assertEquals("", delegate.creates)
+            assertEquals("agents.delegate", delegate.setting)
+            server.takeRequest()
+            server.enqueue(MockResponse().setBody("""{"ok":true}"""))
+            api(server).ruleNotNow("rs_merge/one")
+            val notNow = server.takeRequest()
+            assertEquals("POST", notNow.method)
+            assertEquals("/api/v1/assistant/rule-suggestions/rs_merge%2Fone/not-now", notNow.path)
+            server.enqueue(MockResponse().setResponseCode(404).setBody("""{"error":"This suggestion is no longer available."}"""))
+            try { api(server).ruleAlways("rs_merge/one"); fail("a stale suggestion was not refused") }
+            catch (error: HubFailure) { assertEquals(404, error.status) }
+        }
+    }
+
+    @Test fun seenAndUndoUseTheExactTodoRouteAndAnswer() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("""{"todo":{"id":"todo/one","title":"Release notes","seen_at":"2026-11-05T09:31:00Z"}}"""))
+            val seen = api(server).setTodoSeen("todo/one", true)
+            val put = server.takeRequest()
+            assertEquals("PUT", put.method)
+            assertEquals("/api/v1/todos/todo%2Fone/seen", put.path)
+            assertEquals("2026-11-05T09:31:00Z", seen.seenAt)
+            server.enqueue(MockResponse().setBody("""{"todo":{"id":"todo/one","title":"Release notes"}}"""))
+            val unseen = api(server).setTodoSeen("todo/one", false)
+            val delete = server.takeRequest()
+            assertEquals("DELETE", delete.method)
+            assertEquals("/api/v1/todos/todo%2Fone/seen", delete.path)
+            assertNull(unseen.seenAt)
+        }
+    }
+
     @Test fun retryPostsAndAnswersTheReopenedTodo() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody("""{"todo":{"id":"todo_1","title":"设置页按钮对齐","origin":"c","plan_id":"p","agents":[]}}"""))
@@ -305,6 +350,22 @@ class HttpTasksApiTest {
             assertEquals("""{"due_date":"2026-11-19"}""", server.takeRequest().body.readUtf8())
             assertEquals("2026-11-19", day.dueDate)
             assertNull(day.dueAt)
+        }
+    }
+
+    // #4200: a to-do made on the calendar is due where it was tapped, by the moment or the day; without one, neither is sent.
+    @Test fun aNewTodoCarriesTheDueDateItWasMadeWith() = runBlocking {
+        MockWebServer().use { server ->
+            repeat(3) { server.enqueue(MockResponse().setBody("""{"todo":{"id":"t$it","title":"Call the bank"}}""")) }
+            api(server).createTodo("Call the bank", due = persona.core.contracts.TodoDue.At(java.time.Instant.parse("2026-11-19T06:30:00Z")))
+            val atReq = server.takeRequest()
+            assertEquals("POST", atReq.method)
+            assertEquals("/api/v1/todos", atReq.path)
+            assertEquals("""{"title":"Call the bank","notes":"","due_at":"2026-11-19T06:30:00Z"}""", atReq.body.readUtf8())
+            api(server).createTodo("Call the bank", due = persona.core.contracts.TodoDue.Day(java.time.LocalDate.parse("2026-11-19")))
+            assertEquals("""{"title":"Call the bank","notes":"","due_date":"2026-11-19"}""", server.takeRequest().body.readUtf8())
+            api(server).createTodo("Call the bank")
+            assertEquals("""{"title":"Call the bank","notes":""}""", server.takeRequest().body.readUtf8())
         }
     }
 

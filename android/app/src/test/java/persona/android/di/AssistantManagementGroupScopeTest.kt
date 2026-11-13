@@ -28,6 +28,7 @@ class AssistantManagementGroupScopeTest {
         override suspend fun memory() = emptyList<MemoryFile>()
         override suspend fun saveMemory(name: String, content: String) = error("unused")
         override suspend fun deleteMemory(name: String) = error("unused")
+        override suspend fun clearMainConversation(expect: String?) = "archived-$expect".also { calls += "$manager clear $expect" }
     }
 
     @Test fun bindingManagerPreservesGroupInputAndOutputTranslationAndLeavesOriginalUnbound() = runBlocking {
@@ -53,5 +54,20 @@ class AssistantManagementGroupScopeTest {
         work.warm()
         default.warm()
         assertEquals(listOf("default config", "work warm", "default warm"), calls)
+    }
+
+    // Clear context (#5100): the group's wrapper hands it to its hub for the bound assistant, `expect` as it is (a session id).
+    @Test fun clearingTheMainConversationGoesThroughTheGroupForTheBoundManager() = runBlocking {
+        val calls = mutableListOf<String>()
+        val work = Management(calls).inGroup(GroupNames("g0a1b2c3d")).forManager("work")
+        assertEquals("archived-main-1", work.clearMainConversation("main-1"))
+        assertEquals(listOf("work clear main-1"), calls)
+    }
+
+    // The routed wrapper the app pairs with (ChatWiringModule) forwards it too: without its own override the app would get
+    // the interface's "unavailable" default.
+    @Test fun theRoutedManagementForwardsClearingTheMainConversation() {
+        val routed = Class.forName("persona.android.di.RoutedAssistantManagement")
+        assertTrue(routed.declaredMethods.any { it.name == "clearMainConversation" })
     }
 }

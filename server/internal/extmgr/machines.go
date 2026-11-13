@@ -39,15 +39,18 @@ type nodeCaller interface {
 	Close(err error)
 }
 
-// Machine is one computer as this code sees it.
+// Machine is one computer as this code sees it. Its sessions are the devices' (sessionFinder): every lookup refreshed
+// a copy of them here, 6.3 MB at 20 computers of 200 sessions (#3197).
 type Machine struct {
-	cfg MachineConfig
+	// cfg is what the Machine was made with, never written again: lookups read its ID without a lock while another
+	// refreshes the mirror (machinesNow). The name and ssh alias the devices list now are config's.
+	cfg    MachineConfig
+	listed atomic.Pointer[MachineConfig] // set by machinesNow once they differ from cfg's
 
-	mu       sync.Mutex
-	peer     nodeCaller
-	info     proto.NodeInfo
-	online   bool
-	sessions []proto.Session
+	mu     sync.Mutex
+	peer   nodeCaller
+	info   proto.NodeInfo
+	online bool
 	// computer: what the node last said of Cua Driver (computer.status), while the plugin cua is on for it
 	// (computer.go); computerAt: when it answered, so an older answer never replaces it (keepComputer).
 	computer   *proto.Computer
@@ -67,16 +70,30 @@ type Machine struct {
 	noLockMu, cursorMu sync.Mutex
 }
 
+// config is the computer's configuration as the devices list it now.
+func (m *Machine) config() MachineConfig {
+	if c := m.listed.Load(); c != nil {
+		return *c
+	}
+	return m.cfg
+}
+
+// name is the computer's name as the devices list it now.
+func (m *Machine) name() string { return m.config().Name }
+
+// sshHost is the computer's ssh alias as the devices list it now.
+func (m *Machine) sshHost() string { return m.config().SSHHost }
+
 func (m *Machine) call(ctx context.Context, method string, params any, out any) error {
 	m.mu.Lock()
 	p := m.peer
 	m.mu.Unlock()
 	if p == nil {
-		return fmt.Errorf("%s: %w", m.cfg.Name, errOffline)
+		return fmt.Errorf("%s: %w", m.name(), errOffline)
 	}
 	select {
 	case <-p.Done():
-		return fmt.Errorf("%s: %w", m.cfg.Name, errOffline)
+		return fmt.Errorf("%s: %w", m.name(), errOffline)
 	default:
 	}
 	return p.Call(ctx, method, params, out)
@@ -132,6 +149,19 @@ type Viewer interface {
 	Views() []devices.View
 }
 
+// sessionFinder reads a computer's sessions where the devices keep them (devices.Devices.FindSession): the mirror
+// keeps none.
+type sessionFinder interface {
+	FindSession(id string, match func(*proto.Session) bool) bool
+}
+
+// findSession reports whether match accepts one of the sessions m's node lists, stopping at the first; false without
+// devices that keep them. match reads each in place under the devices' lock: it must not keep it or call them.
+func (h *Manager) findSession(m *Machine, match func(*proto.Session) bool) bool {
+	f, ok := h.opts.Devices.(sessionFinder)
+	return ok && f.FindSession(m.cfg.ID, match)
+}
+
 // machinesNow are the computers now, as the devices list them (tests set h.machines and h.byID themselves).
 func (h *Manager) machinesNow() []*Machine {
 	v, ok := h.opts.Devices.(Viewer)
@@ -147,14 +177,16 @@ func (h *Manager) machinesNow() []*Machine {
 	}
 	seen := map[string]bool{}
 	for _, d := range views {
+		cfg := MachineConfig{ID: d.ID, Name: d.Name, Kind: d.Kind, SSHHost: d.SSHHost}
 		m := h.byID[d.ID]
 		if m == nil {
-			m = &Machine{cfg: MachineConfig{ID: d.ID}}
+			m = &Machine{cfg: cfg}
 			h.byID[d.ID] = m
+		} else if m.config() != cfg { // renamed: never written into cfg, which lookups read without a lock
+			m.listed.Store(&cfg)
 		}
 		m.mu.Lock()
-		m.cfg = MachineConfig{ID: d.ID, Name: d.Name, Kind: d.Kind, SSHHost: d.SSHHost}
-		m.info, m.online, m.sessions = d.Info, d.Online, d.Sessions
+		m.info, m.online = d.Info, d.Online
 		if d.Reachable {
 			m.peer = devicesPeer{d: h.opts.Devices, id: d.ID}
 		} else {
@@ -187,7 +219,7 @@ func (h *Manager) localMachine(id string) *Machine { return h.machineByID(id) }
 
 func (h *Manager) machineName(id string) string {
 	if m := h.localMachine(id); m != nil {
-		return m.cfg.Name
+		return m.name()
 	}
 	return id
 }
@@ -198,18 +230,11 @@ func (h *Manager) machineByName(id string) *Machine {
 		return m
 	}
 	for _, m := range h.machinesNow() {
-		if strings.EqualFold(m.cfg.Name, id) || strings.EqualFold(m.cfg.SSHHost, id) {
+		if strings.EqualFold(m.name(), id) || strings.EqualFold(m.sshHost(), id) {
 			return m
 		}
 	}
 	return nil
-}
-
-// decorated is m's sessions as its node listed them.
-func (h *Manager) decorated(m *Machine) []proto.Session {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return slices.Clone(m.sessions)
 }
 
 // broadcastMachines: what the apps show of the computers changed here (Cua's, ego's state): the report has it.

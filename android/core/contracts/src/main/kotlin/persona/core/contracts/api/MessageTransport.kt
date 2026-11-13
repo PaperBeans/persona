@@ -5,6 +5,7 @@ import persona.core.contracts.ProtocolCompatibility
 import persona.core.contracts.HubScope
 import persona.core.contracts.SessionKey
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.json.JsonObject
 
 data class MessageRequest(
     val scope: HubScope,
@@ -18,6 +19,11 @@ data class MessageRequest(
      * until the hub answered an attempt as not delivered, then a new one (the hub replays the first answer for an id).
      */
     val opId: String = clientMessageId,
+    /** Persona conversation overrides carried by this message; absent fields keep the hub's default. */
+    val launcher: String? = null,
+    val model: String? = null,
+    /** The user's message that carries out the session's waiting launcher switch first (`apply_switch`, #5035). */
+    val applySwitch: Boolean = false,
 ) {
     val headers: Map<String, String> get() = ProtocolCompatibility.operationHeaders(opId)
 }
@@ -43,6 +49,8 @@ interface MessageTransport {
     val supportsClientOps: Boolean
     /** Forward request.headers, including X-Persona-Op-Id, on every attempt. */
     suspend fun send(request: MessageRequest): MessageTransportResult
+    /** Shared by transports/decorators after confirmed success, including a first message's returned session. */
+    suspend fun onAccepted(session: SessionKey, reply: JsonObject?) = Unit
     /** Read authoritative evidence even before readyToSend is released. Null means unresolved. */
     suspend fun reconcile(request: MessageRequest, createdAt: Long, allowTextMatch: Boolean = true): MessageEvidence? = null
 }

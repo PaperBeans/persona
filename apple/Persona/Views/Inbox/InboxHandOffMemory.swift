@@ -72,6 +72,12 @@ struct InboxHandOffMemory {
         return Self.resolve(recall(key), isListed: isListed)
     }
 
+    /// New Agent… started an Agent with the item (#5933): its source remembers that Agent, never New Agent…, so the next
+    /// item from it starts on that Agent while it can take messages.
+    func rememberStarted(_ item: InboxItem, agent key: SessionKey) {
+        if let source = Self.key(item) { remember(source, target: .agent(key)) }
+    }
+
     /// A group that is gone forgets where its items went.
     static func forget(group: String, defaults: UserDefaults = .standard) {
         defaults.removeObject(forKey: PinsStore.name(base, group))

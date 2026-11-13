@@ -42,33 +42,40 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import persona.core.contracts.api.PersonaInfo
 import persona.core.designsystem.*
+import persona.core.designsystem.corner
+import persona.core.designsystem.dense
 import persona.core.designsystem.icons.PhIcons
+import persona.core.domain.sort.AgentListDisplay
+import persona.core.domain.sort.AgentListDisplaySettings
+import persona.core.domain.sort.AgentRowStyle
 
 /**
  * Settings › Interface style: three styles, applied at once and remembered on this phone, then "Theme color" (iOS `ThemeColor`) and "Appearance"
  * (iOS `ColorSchemeChoice`); both default to what the app always did (the style's own colors, the system's appearance).
- * Each style option shows a small live preview drawn with the real components of that style.
+ * Each style option shows a small live preview drawn with the real components of that style. On Glass, "Agents list
+ * layout" ([agentsDisplay]) last.
  */
 @Composable
-fun AppearanceSettings(modifier: Modifier = Modifier) {
+fun AppearanceSettings(modifier: Modifier = Modifier, agentsDisplay: AgentListDisplaySettings? = null) {
     val store = LocalAppStyleStore.current ?: return
     val current by store.style.collectAsState()
     val glass by store.glass.collectAsState()
     val palette = PersonaTheme.palette
     Column(modifier.fillMaxWidth()) {
         Text(stringResource(R.string.settings_style_intro), style = PersonaTheme.type.callout, color = palette.ink2)
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(Tokens.Space.l))
         AppStyle.entries.forEach { style ->
             StyleOption(style, selected = style == current) { store.setStyle(style) }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(Tokens.Space.m))
         }
         ThemeColorOptions(store)
         ExtensionThemeOptions()
         SchemeOptions(store)
+        DensityOptions(store)
         if (current == AppStyle.Glass) {
             JSectionHeader(stringResource(R.string.settings_style_transparency))
             JSegmented(GlassPreference.entries.map { JSegment(it.label) }, GlassPreference.entries.indexOf(glass), { store.setGlass(GlassPreference.entries[it]) })
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(10.dp.dense))
             Text(
                 stringResource(when (glass) {
                     GlassPreference.Auto -> R.string.settings_style_glass_auto
@@ -77,27 +84,99 @@ fun AppearanceSettings(modifier: Modifier = Modifier) {
                 style = PersonaTheme.type.caption, color = palette.ink3,
             )
         }
+        // Glass draws the Agents list in the chosen row style (#4338 A9); Brief and Board keep Compact and Detailed (decision 8).
+        if (current == AppStyle.Glass && agentsDisplay != null) AgentsListLayout(agentsDisplay)
     }
+}
+
+/**
+ * "Agents list layout" (iOS Settings › Appearance › Agents List Layout, `LayoutSettingsPage`): the four ways Glass draws
+ * the Agents list, each with two agents drawn that way and what it shows; the same choice as the Agents page's ⋯ › Display.
+ */
+@Composable
+private fun AgentsListLayout(settings: AgentListDisplaySettings) {
+    val chosen by settings.display.collectAsState(AgentListDisplay.Default)
+    val scope = rememberCoroutineScope()
+    JSectionHeader(stringResource(R.string.settings_agents_layout))
+    AgentListDisplay.entries.forEach { display ->
+        LayoutOption(display, selected = display == chosen) {
+            scope.launch {
+                // Kept with the list's settings of the hub group the phone is paired with; none to keep while unpaired.
+                try { settings.setDisplay(display) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) {}
+            }
+        }
+        Spacer(Modifier.height(Tokens.Space.m))
+    }
+}
+
+/** One way to draw the Agents list (iOS `LayoutChoice`): its name, two agents drawn that way, and what it shows. */
+@Composable
+private fun LayoutOption(display: AgentListDisplay, selected: Boolean, onClick: () -> Unit) {
+    val palette = PersonaTheme.palette
+    Column(Modifier.option(selected, onClick).testTag("layout-agents-${display.name}").padding(Tokens.Space.m),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(display.label, Modifier.weight(1f), style = PersonaTheme.type.headline, color = palette.ink, maxLines = 1)
+            // The card is the radio button; this one only shows the state, so a screen reader stops once.
+            JRadio(selected, null)
+        }
+        LayoutPreview(display)
+        Text(display.summary, style = PersonaTheme.type.caption, color = palette.ink2)
+    }
+}
+
+/**
+ * The two agents a layout option draws (iOS `LayoutSamples`): one waiting for you, one at work, on the page's color as
+ * the list draws them. A picture: screen readers skip it and taps reach the option around it.
+ */
+@Composable
+private fun LayoutPreview(display: AgentListDisplay) {
+    val claude = AgentMarkSpec(AgentMarkKind.Claude, "Claude Code", null)
+    Box(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.cardShape).background(PersonaTheme.palette.background).clearAndSetSemantics {}) {
+        Column(Modifier.fillMaxWidth().padding(Tokens.Space.s)) {
+            LayoutSamples.forEachIndexed { index, sample ->
+                AgentRow(
+                    stringResource(sample.title), sample.status, onClick = {}, position = GroupPosition.of(index, LayoutSamples.size),
+                    preview = stringResource(sample.preview), time = stringResource(sample.time),
+                    // As the list words them: Needs you before the words; State Cards spell every state out at the foot.
+                    statusText = sample.status.localizedLabel.takeIf { sample.status == Status.NeedsYou || display == AgentListDisplay.Cards },
+                    compact = display == AgentListDisplay.CompactList, style = display.style ?: AgentRowStyle.Default,
+                    agentMark = claude, place = RowPlace(sample.tab),
+                )
+            }
+        }
+        Box(Modifier.matchParentSize().pointerInput(Unit) {})
+    }
+}
+
+/** iOS's two layout samples: the one waiting for you on its "tests" tab, the one at work on its "widget" tab. */
+private val LayoutSamples by lazy { listOf(LayoutSample(PreviewRows[0], "tests"), LayoutSample(PreviewRows[1], "widget")) }
+
+private class LayoutSample(row: PreviewRow, val tab: String) {
+    @StringRes val title = row.title
+    val status = row.status
+    @StringRes val preview = row.preview
+    @StringRes val time = row.time
 }
 
 @Composable
 private fun StyleOption(style: AppStyle, selected: Boolean, onClick: () -> Unit) {
     val palette = PersonaTheme.palette
     Row(
-        Modifier.option(selected, onClick).padding(14.dp),
+        Modifier.option(selected, onClick).padding(14.dp.dense),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StylePreview(style)
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(16.dp.dense))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(style.label, style = PersonaTheme.type.title, color = palette.ink)
-                if (style == AppStyle.Default) { Spacer(Modifier.width(8.dp)); JTag(stringResource(R.string.settings_default)) }
+                if (style == AppStyle.Default) { Spacer(Modifier.width(8.dp.dense)); JTag(stringResource(R.string.settings_default)) }
             }
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(4.dp.dense))
             Text(style.summary, style = PersonaTheme.type.callout, color = palette.ink2)
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(8.dp.dense))
         // The card is the radio button; this one only shows the state, so a screen reader stops once.
         JRadio(selected, null)
     }
@@ -142,7 +221,7 @@ private val PreviewCounts = listOf(Status.NeedsYou to 1, Status.Working to 1)
 private fun StylePreview(style: AppStyle) {
     // A picture: screen readers skip it (the option says which style it is) and taps reach the option around it,
     // not the headings, rows and tabs drawn in it.
-    Box(Modifier.size(96.dp, 132.dp).clip(RoundedCornerShape(14.dp)).clearAndSetSemantics {}) {
+    Box(Modifier.size(96.dp, 132.dp).clip(RoundedCornerShape(14.dp.corner)).clearAndSetSemantics {}) {
         Box(Modifier.requiredSize(320.dp, 440.dp).graphicsLayer { scaleX = 0.3f; scaleY = 0.3f }) {
             PersonaTheme(darkTheme = PersonaTheme.darkTheme, style = style) {
                 CompositionLocalProvider(LocalReadingInset provides 0.dp, LocalGlassSource provides null) {
@@ -252,7 +331,7 @@ fun PersonaSettings(demo: Boolean, modifier: Modifier = Modifier) {
                 }) else null) {
                 Box(contentAlignment = Alignment.Center) {
                     PackAvatar(packs, p, Tokens.Space.xxl * 2)
-                    if (busy) JSpinner(Modifier.size(Tokens.Space.xl))
+                    if (busy) JSpinner(Modifier.size(Tokens.Space.Standard.xl))
                 }
             }
             Spacer(Modifier.height(Tokens.Space.m))
@@ -396,7 +475,17 @@ private fun ColorSwatch(color: androidx.compose.ui.graphics.Color?) {
     val palette = PersonaTheme.palette
     Box(Modifier.size(Tokens.Size.iconXS).clip(CircleShape)
         .background(color ?: palette.surfaceStrong)
-        .border(Tokens.Space.xxs / 2, if (color == null) palette.accent else palette.line, CircleShape))
+        .border(Tokens.Space.Standard.xxs / 2, if (color == null) palette.accent else palette.line, CircleShape))
+}
+
+/** "Layout density": "Standard" (the default) or "Compact", which tightens the space around and between things (#5564). */
+@Composable
+private fun DensityOptions(store: AppStyleStore) {
+    val density by store.density.collectAsState()
+    JSectionHeader(stringResource(R.string.settings_density))
+    JSegmented(LayoutDensity.entries.map { JSegment(it.label) }, LayoutDensity.entries.indexOf(density), { store.setDensity(LayoutDensity.entries[it]) })
+    Spacer(Modifier.height(Tokens.Space.s))
+    SettingsCaption(stringResource(R.string.settings_density_note))
 }
 
 /** "Appearance": "Match system" (the default), "Light", "Dark", on this phone. */

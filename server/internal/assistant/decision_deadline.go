@@ -80,6 +80,7 @@ func defaultReason(l i18n.Lang, loc *time.Location, deadline time.Time) string {
 // sweepDecisionDeadlines handles every decision whose deadline passed unanswered: the supervised tasks' and the
 // questions' that became to-dos.
 func (s *Service) sweepDecisionDeadlines(now time.Time) {
+	s.sweepWaitingDecisions(now) // first: one no briefing brought to the owner is pushed (decision_wait.go)
 	s.sweepTaskDeadlines(now)
 	s.sweepAskDeadlines(now)
 	s.sweepDecisionAges(now) // after the deadlines: a decision taken by default is not rechecked (decision.go)
@@ -123,6 +124,12 @@ func (s *Service) sweepTaskDeadlines(now time.Time) {
 	b.mu.Unlock()
 	slices.Sort(due)
 	for _, id := range due {
+		if t, ok := s.todoNow(id); ok {
+			dismissed, err := s.decisionDismissed(ctx, t)
+			if err != nil || dismissed {
+				continue // Hidden is not answered: neither take its default nor remind it.
+			}
+		}
 		a, ok := s.askCopy(id)
 		if !ok || !taskDeadlineDue(&a, now) {
 			continue
@@ -238,6 +245,33 @@ func readAskDeadline(a askDeadlineArgs, now time.Time) (askDeadline, error) {
 		d.Recommends = append(d.Recommends, rec)
 	}
 	return d, nil
+}
+
+// askRecommend is question i's recommended option as ask_user's arguments name it, when it is one of its options'
+// labels (a deadline requires that; without one a recommend naming no option is left out); "" for none.
+func askRecommend(a askDeadlineArgs, i int, options []proto.QuestionOption) string {
+	if i >= len(a.Questions) {
+		return ""
+	}
+	rec := strings.TrimSpace(a.Questions[i].Recommend)
+	if rec == "" || !slices.ContainsFunc(options, func(o proto.QuestionOption) bool { return strings.TrimSpace(o.Label) == rec }) {
+		return ""
+	}
+	return rec
+}
+
+// keepAskDecision keeps on ask_user card ix what its arguments said of the decision, for the history
+// (docs/protocol/protocol.md "Decision fields"): its deadline when it has one, and reversible as the asker said it (left
+// out when it said nothing; never guessed).
+func keepAskDecision(ix *proto.Interaction, a askDeadlineArgs, d askDeadline) {
+	if !d.At.IsZero() {
+		at := d.At.UTC()
+		ix.Deadline = &at
+	}
+	if a.Reversible != nil {
+		r := *a.Reversible
+		ix.Reversible = &r
+	}
 }
 
 // askDeadlineOf reads back the deadline toolAskUser wrote into ask_user ix's arguments (always an RFC 3339 time there,
@@ -357,6 +391,7 @@ func (s *Service) askTodoDue(ctx context.Context, id string, inline bool, now ti
 				}
 			}
 		}
+		s.recordLateAnswer(a, choices, proto.AnsweredByDefault, reason)
 		s.settleAskClaim(ctx, id, true)
 		s.closeAskTodo(ctx, id)
 		s.logf("ask_user to-do %s: deadline passed unanswered: recommended options taken by default", id)

@@ -54,8 +54,8 @@ struct PairView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Picker("", selection: $tab) {
-                Text("我去连 hub（主动）").tag("active")
-                Text("让 hub 来连（被动）").tag("passive")
+                Text(LinkText.mode(false)).tag("active")
+                Text(LinkText.mode(true)).tag("passive")
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -81,7 +81,7 @@ struct PairView: View {
                 Button {
                     Task { _ = await model.setMode(mode) }
                 } label: {
-                    Text("改用这个").lineLimit(1)
+                    Text(linkText("Use This")).lineLimit(1)
                 }
             }
             .padding(10)
@@ -91,15 +91,15 @@ struct PairView: View {
 
     /// Passive mode's pairing in one sentence; its own function so the view below type-checks in time.
     private static func pairedText(_ p: PassivePairing) -> String {
-        let hub: String = p.hubName.map { "「\($0)」" } ?? ""
-        let machine: String = p.machine.map { "，这台是上面的「\($0)」" } ?? ""
-        return "已经和 hub\(hub)配对\(machine)。再生成链接、换一台 hub 配对，原来的就连不进来了。"
+        let hub: String = p.hubName.map { linkText("paired hub suffix \($0)") } ?? ""
+        let machine: String = p.machine.map { linkText(" (this computer is “\($0)” above)") } ?? ""
+        return linkText("Already paired with the hub\(hub)\(machine). Making a new link and pairing another hub would cut this one off.")
     }
 
     private var passivePairing: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("让 hub 来连这台电脑").font(.title3.weight(.semibold))
-            Text("这台电脑在本机监听一个端口，hub 按配对时拿到的指纹连进来。适合 hub 能直接连到的电脑：固定地址的台式机、服务器。笔记本换网络后 hub 连不到，选「我去连 hub」。")
+            Text(linkText("Let the hub connect to this computer")).font(.title3.weight(.semibold))
+            Text(linkText("This computer listens on a local port, and the hub connects in using the fingerprint it got when pairing. It suits computers the hub can reach directly: a desktop or server with a fixed address. A laptop that changes networks can't be reached; choose “I connect to the hub”."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -111,9 +111,9 @@ struct PairView: View {
                 }
                 .font(.callout)
             }
-            switchBack(to: "passive", paired: model.passivePairing?.paired == true, what: "现在是「我去连 hub」。被动模式的配对还在，不用重新配对。")
+            switchBack(to: "passive", paired: model.passivePairing?.paired == true, what: linkText("Now in “I connect to the hub”. The passive pairing is still there; no need to pair again."))
             HStack(spacing: 10) {
-                Text("监听").font(.callout).foregroundStyle(.secondary)
+                Text(linkText("Listen")).font(.callout).foregroundStyle(.secondary)
                 TextField(":18663", text: $listen)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.callout, design: .monospaced))
@@ -122,14 +122,14 @@ struct PairView: View {
                 Button {
                     Task { await makeInvite() }
                 } label: {
-                    Text(busy ? "生成中…" : "生成配对链接").lineLimit(1)
+                    Text(busy ? linkText("Generating…") : linkText("Make Pairing Link")).lineLimit(1)
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(busy)
             }
             if let invite {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("把这条链接粘贴到 hub 管理界面「电脑 › 添加电脑 › hub 来连」，10 分钟内有效，只能用一次：")
+                    Text(linkText("Paste this link into the hub admin page under “Computers › Add Computer › Hub connects”. It is good for 10 minutes and works once:"))
                         .font(.callout)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(alignment: .top, spacing: 10) {
@@ -145,7 +145,7 @@ struct PairView: View {
                             NSPasteboard.general.setString(invite.link, forType: .string)
                             copied = true
                         } label: {
-                            Label(copied ? "已复制" : "复制", systemImage: copied ? "checkmark" : "doc.on.doc").lineLimit(1)
+                            Label(copied ? linkText("Copied") : linkText("Copy"), systemImage: copied ? "checkmark" : "doc.on.doc").lineLimit(1)
                         }
                     }
                     if !invite.note.isEmpty {
@@ -187,16 +187,17 @@ struct PairView: View {
         var lines: [String] = []
         let addrs = URLComponents(string: link)?.queryItems?.filter { $0.name == "addr" }.compactMap(\.value) ?? []
         if !addrs.isEmpty {
-            lines.append("hub 按顺序试这些地址：\(addrs.joined(separator: "、"))；都连不到时在 hub 管理界面里改地址。")
+            lines.append(linkText("The hub tries these addresses in order: \(addrs.joined(separator: linkText("address list separator"))). If none works, change the addresses in the hub admin page."))
         }
+        // i18n-ignore: persona-link's own output, not UI text
         lines += stderr.split(separator: "\n").map(String.init).filter { $0.hasPrefix("防火墙") }
         return lines.joined(separator: "\n")
     }
 
     private var pairing: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(model.pairedMachine == nil ? "配对这台电脑" : "重新配对").font(.title3.weight(.semibold))
-            switchBack(to: "active", paired: model.pairedMachine != nil, what: "现在是「让 hub 来连」。主动模式的配对还在，不用重新配对。")
+            Text(model.pairedMachine == nil ? linkText("Pair This Computer") : linkText("Pair Again")).font(.title3.weight(.semibold))
+            switchBack(to: "active", paired: model.pairedMachine != nil, what: linkText("Now in “The hub connects to me”. The active pairing is still there; no need to pair again."))
             if let notice = model.incomingNotice {
                 Label {
                     Text(notice).fixedSize(horizontal: false, vertical: true)
@@ -208,7 +209,7 @@ struct PairView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
             }
-            Text("在手机或网页的「添加电脑」里拷贝配对链接，粘贴到这里（或者直接点开那条链接）。链接 10 分钟内有效，只能用一次。")
+            Text(linkText("In the phone or web app, copy the pairing link from “Add Computer” and paste it here (or just open that link). The link is good for 10 minutes and works once."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -221,11 +222,11 @@ struct PairView: View {
             }
             if parsedLink?.machine == nil { // a link made for this computer names it: nothing to fill in then
                 DisclosureGroup(isExpanded: $advanced) {
-                    TextField("机器 id（链接里带了就不用填）", text: $machine)
+                    TextField(linkText("Machine ID (not needed if the link has it)"), text: $machine)
                         .textFieldStyle(.roundedBorder)
                         .padding(.top, 6)
                 } label: {
-                    Text("高级").font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                    Text(linkText("Advanced")).font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             sshSection
@@ -234,7 +235,7 @@ struct PairView: View {
                 Button {
                     Task { await pair() }
                 } label: {
-                    Text(busy ? "配对中…" : "配对").lineLimit(1).frame(minWidth: 56)
+                    Text(busy ? linkText("Pairing…") : linkText("Pair")).lineLimit(1).frame(minWidth: 56)
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(busy || link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -392,20 +393,20 @@ struct PairView: View {
     private func linkSummary(_ l: PairLink) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Label {
-                Text(l.hubHost.map { "要连的 hub：\($0)" } ?? "链接里没写 hub 的地址").textSelection(.enabled)
+                Text(l.hubHost.map { linkText("Hub to connect to: \($0)") } ?? linkText("The link doesn't say the hub's address")).textSelection(.enabled)
             } icon: {
                 Image(systemName: "server.rack").foregroundStyle(.secondary)
             }
             if l.pinned {
                 Label {
-                    Text("已带安全指纹：只连配对时的那台 hub")
+                    Text(linkText("Carries a security fingerprint: connects only to the hub it was made for"))
                 } icon: {
                     Image(systemName: "lock.shield").foregroundStyle(.green)
                 }
             }
             if let m = l.machine {
                 Label {
-                    Text("这台电脑在 hub 上叫「\(m)」")
+                    Text(linkText("This computer is named “\(m)” on the hub"))
                 } icon: {
                     Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
                 }
@@ -460,16 +461,16 @@ struct PairView: View {
         let items = addressItems
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text("hub 的地址").font(.headline)
-                Text("按这个顺序尝试；连上以后 hub 会更新这份列表").font(.caption).foregroundStyle(.secondary)
+                Text(linkText("Hub Addresses")).font(.headline)
+                Text(linkText("Tried in this order; the hub updates this list once connected")).font(.caption).foregroundStyle(.secondary)
             }
             if model.status?.systemTrust == true {
-                Label("\(LinkText.systemTrust)：按系统信任的 CA 和域名校验，没有钉住 hub 的公钥", systemImage: "lock.shield")
+                Label(linkText("\(LinkText.systemTrust): checked against the system's trusted CAs and the domain name; the hub's public key is not pinned"), systemImage: "lock.shield")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             if items.isEmpty {
-                Text("还没有：配对以后会从链接和 hub 那里拿到。").font(.callout).foregroundStyle(.secondary)
+                Text(linkText("None yet: pairing fills these in from the link and the hub.")).font(.callout).foregroundStyle(.secondary)
             } else {
                 VStack(spacing: 0) {
                     ForEach(items) { item in
@@ -485,10 +486,10 @@ struct PairView: View {
                                 .textSelection(.enabled)
                             Spacer(minLength: 8)
                             if item.inUse {
-                                Text("在用").font(.caption.weight(.semibold)).foregroundStyle(.green).lineLimit(1)
+                                Text(linkText("In use")).font(.caption.weight(.semibold)).foregroundStyle(.green).lineLimit(1)
                             }
                             if let url = item.removableURL {
-                                Button("移除") { Task { await model.removeAddress(url) } }
+                                Button(linkText("Remove")) { Task { await model.removeAddress(url) } }
                                     .buttonStyle(.link)
                                     .lineLimit(1)
                             }
@@ -501,13 +502,13 @@ struct PairView: View {
                 .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
             }
             HStack(spacing: 10) {
-                TextField("再加一个地址，比如 hub.example.com", text: $newAddress)
+                TextField(linkText("Add another address, such as hub.example.com"), text: $newAddress)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { Task { await add() } }
                 Button {
                     Task { await add() }
                 } label: {
-                    Text("添加").lineLimit(1).frame(minWidth: 40)
+                    Text(linkText("Add")).lineLimit(1).frame(minWidth: 40)
                 }
                 .disabled(model.pairedMachine == nil || newAddress.trimmingCharacters(in: .whitespaces).isEmpty)
             }

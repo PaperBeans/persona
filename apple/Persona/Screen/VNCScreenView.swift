@@ -15,8 +15,10 @@ enum VNCMode: String, CaseIterable {
 /// The Mac's screen in a layer, aspect-fit and zoomable, its pointer drawn over it, and, when interactive, touches turned
 /// into the Mac's pointer as the mode says:
 /// - Mouse Mode: a tap clicks there; one finger drags; two scroll (or, zoomed in, move the picture); two tapping or one
-///   held down is the right button; pinching zooms.
-/// - Trackpad Mode: one finger moves the pointer by as much; a tap clicks where it is; a tap then a drag drags; two scroll.
+///   held down is the right button; pinching zooms. A two-finger touch is a scroll or a pinch, not both (VNCTwoFingers).
+/// - Trackpad Mode: one finger moves the pointer by as much; a tap clicks where it is; a tap then a drag drags; two only
+///   scroll, never zoom (#6196: pinching zoomed by mistake while scrolling). Zoomed in from ⋯, the picture follows the
+///   pointer.
 /// Two fingers scroll as VNCWheel says: a notch every few points, coasting after a flick.
 /// With `region` set (one of the Mac's displays, #80) only that part of the framebuffer is shown, zoomed and touched;
 /// what is sent still carries whole-framebuffer pixels.
@@ -26,8 +28,10 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
     private let clip = CALayer()
     private let pointerLayer = CALayer()
     weak var session: RFBSession?
-    var mode: VNCMode = .mouse
-    var interactive = false { didSet { gestures.forEach { $0.isEnabled = interactive } } }
+    var mode: VNCMode = .mouse { didSet { if mode != oldValue { enable() } } }
+    var interactive = false { didSet { if interactive != oldValue { enable() } } }
+    /// Zoomed in or back to fitted, for ⋯'s Zoom In / Zoom to Fit (after the change, never during the page's update).
+    var onZoom: (Bool) -> Void = { _ in }
     /// The part of the framebuffer shown, in pixels; nil: all of it. A new one starts unzoomed, with the pointer on it
     /// (moved to its middle when it was elsewhere): Trackpad Mode clicks and drags where the pointer is.
     var region: CGRect? {
@@ -39,8 +43,19 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
         }
     }
     private var gestures: [UIGestureRecognizer] = []
+    private var pinch: UIPinchGestureRecognizer?
     /// Where the Mac's screen is drawn, in this view; nil: fitted (not zoomed).
-    private var shown: CGRect?
+    private var shown: CGRect? {
+        didSet {
+            guard (shown == nil) != (oldValue == nil) else { return }
+            let now = shown != nil
+            DispatchQueue.main.async { [weak self] in self?.onZoom(now) }
+        }
+    }
+    /// The size last laid out: a zoomed-in picture keeps its zoom and middle as the phone turns.
+    private var laidOut = CGSize.zero
+    /// What the two fingers down are doing in Mouse Mode: scrolling or pinching.
+    private var two = VNCTwoFingers()
     /// Two fingers turned into the wheel, and where it goes (a coast keeps going there after they let go).
     private var wheel = VNCWheel()
     private var wheelAt = CGPoint.zero
@@ -70,18 +85,24 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
         hold.minimumPressDuration = 0.5
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:)))
+        self.pinch = pinch
         gestures = [tap, twoTap, pan, twoPan, hold, pinch]
         for g in gestures {
             g.delegate = self
-            g.isEnabled = interactive
             addGestureRecognizer(g)
         }
+        enable()
         isAccessibilityElement = true
         accessibilityLabel = String(localized: "Mac's screen")
         accessibilityIdentifier = "vnc-screen"
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    /// Touches while interactive; pinching only in Mouse Mode (#6196).
+    private func enable() {
+        for g in gestures { g.isEnabled = interactive && (g !== pinch || mode == .mouse) }
+    }
 
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         (g is UIPinchGestureRecognizer && other is UIPanGestureRecognizer) || (other is UIPinchGestureRecognizer && g is UIPanGestureRecognizer)
@@ -101,7 +122,7 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
         return region
     }
 
-    private var fitted: CGRect { AVMakeRect(aspectRatio: visible.size, insideRect: bounds) }
+    private var fitted: CGRect { VNCZoom.fit(visible.size, in: bounds) }
     private var rect: CGRect { shown ?? fitted }
     private var viewport: VNCViewport { VNCViewport(visible: visible, rect: rect) }
 
@@ -115,6 +136,12 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        if bounds.size != laidOut {
+            if let r = shown, laidOut.width > 0 {
+                shown = VNCZoom.turned(r, picture: visible.size, from: CGRect(origin: .zero, size: laidOut), to: bounds)
+            }
+            laidOut = bounds.size
+        }
         place()
     }
 
@@ -127,34 +154,74 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
         display.frame = port.framebufferFrame(screenSize)
         if let s = session {
             let at = toView(s.pointer)
-            if let c = s.cursor, c.width > 0, let image = Self.image(c) {
-                let scale = 1 / port.pixelsPerPoint
-                pointerLayer.contents = image
-                pointerLayer.frame = CGRect(x: at.x - CGFloat(c.hotX) * scale, y: at.y - CGFloat(c.hotY) * scale,
-                                            width: CGFloat(c.width) * scale, height: CGFloat(c.height) * scale)
+            // The Mac's pointer at a size that reads, with the rings it needs (VNCPointerArt, #3075); the app's own arrow
+            // while it sends none (macOS's never does).
+            if let art = pointerArt(s.cursor, natural: 1 / port.pixelsPerPoint) {
+                pointerLayer.contents = art.image
+                pointerLayer.frame = CGRect(x: at.x - art.hot.x, y: at.y - art.hot.y, width: art.size.width, height: art.size.height)
             } else {
-                let side = Theme.Size.icon
-                pointerLayer.contents = Self.arrow
-                pointerLayer.frame = CGRect(x: at.x - side * 0.3, y: at.y - side * 0.15, width: side, height: side)
+                pointerLayer.contents = nil
             }
             pointerLayer.isHidden = s.phase != .live || !port.visible.contains(s.pointer)
             #if DEBUG
-            accessibilityValue = String(format: "fps=%.0f;latency=%.0f;mode=%@", s.fps, s.latency ?? -1, mode.rawValue) // UI tests measure
+            // UI tests measure (the frame rate, the latency) and look (the pointer's size in points, #3075; the zoom and
+            // where the pointer is drawn, #6196).
+            accessibilityValue = String(format: "fps=%.0f;latency=%.0f;mode=%@;pointer=%.0fx%.0f;zoom=%.2f;at=%.0f,%.0f", // i18n-ignore
+                                        s.fps, s.latency ?? -1, mode.rawValue, pointerLayer.frame.width, pointerLayer.frame.height,
+                                        port.rect.width / max(fitted.width, 1), at.x, at.y)
             #endif
         }
         CATransaction.commit()
     }
 
-    private static let arrow: CGImage? = UIImage(systemName: Theme.Icon.pointer)?
-        .withTintColor(.white, renderingMode: .alwaysOriginal)
-        .applyingSymbolConfiguration(.init(pointSize: Theme.Size.icon, weight: .bold))?.cgImage
+    /// The pointer as last drawn: for which cursor, at how many device pixels a pixel of it.
+    private var drawnPointer: (cursor: RFBClient.Cursor, k: CGFloat, art: VNCPointerArt.Art)?
 
-    private static func image(_ c: RFBClient.Cursor) -> CGImage? {
-        guard let provider = CGDataProvider(data: Data(c.pixels) as CFData) else { return nil }
-        return CGImage(width: c.width, height: c.height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: c.width * 4,
-                       space: CGColorSpaceCreateDeviceRGB(),
-                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
-                       provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    /// The Mac's pointer as drawn, `natural` points a pixel of the picture; nil: the app's own arrow.
+    private func pointerArt(_ mac: RFBClient.Cursor?, natural: CGFloat) -> VNCPointerArt.Art? {
+        // The trait's, not the window's screen (which visionOS does not have); 0 only before the view is in a window.
+        let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
+        // The app's own arrow is drawn at the screen's scale already: as it is, a pixel a device pixel.
+        let c: RFBClient.Cursor, perPoint: CGFloat, least: CGFloat
+        if let mac, mac.width > 0 { (c, perPoint, least) = (mac, natural, Theme.Size.pointer) } else { (c, perPoint, least) = (Self.arrow(scale), 1 / scale, 0) }
+        let k = VNCPointerArt.devicePixelsPerPixel(c, natural: perPoint, minHeight: least, scale: scale)
+        if let d = drawnPointer, d.k == k, d.cursor.hotX == c.hotX, d.cursor.hotY == c.hotY, d.cursor.width == c.width, d.cursor.pixels == c.pixels {
+            return d.art
+        }
+        guard let art = VNCPointerArt.render(c, natural: perPoint, minHeight: least, scale: scale) else { return nil }
+        pointerLayer.contentsScale = scale
+        drawnPointer = (c, k, art)
+        return art
+    }
+
+    private static var arrows: [CGFloat: RFBClient.Cursor] = [:]
+
+    /// The app's own arrow, where the Mac's pointer is: macOS's Screen Sharing sends none (it draws its own into the
+    /// picture, at the Mac's size), so this is the one that shows. Black like the Mac's, `Theme.Size.icon` points square
+    /// at this scale, its tip the hot spot, as a cursor of the Mac's: drawn the same way, it gets the white ring the Mac's
+    /// has. It used to come out solid black with nothing around it, lost on a dark screen (#3075): meant white, it was
+    /// tinted before `applyingSymbolConfiguration`, and a symbol's `cgImage` ignores the tint anyway.
+    static func arrow(_ scale: CGFloat) -> RFBClient.Cursor {
+        if let a = arrows[scale] { return a }
+        let side = Int((Theme.Size.icon * scale).rounded())
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        let symbol = UIImage(systemName: Theme.Icon.pointer, withConfiguration: UIImage.SymbolConfiguration(pointSize: Theme.Size.icon, weight: .bold))?
+            .withTintColor(.black, renderingMode: .alwaysOriginal)
+        pixels.withUnsafeMutableBytes { buf in
+            guard let symbol, let ctx = CGContext(data: buf.baseAddress, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                                  space: CGColorSpaceCreateDeviceRGB(),
+                                                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+            else { return }
+            // UIKit's drawing, in points from the top-left: its first row the buffer's first, as a cursor's is.
+            ctx.translateBy(x: 0, y: CGFloat(side))
+            ctx.scaleBy(x: scale, y: -scale)
+            UIGraphicsPushContext(ctx)
+            symbol.draw(in: AVMakeRect(aspectRatio: symbol.size, insideRect: CGRect(x: 0, y: 0, width: Theme.Size.icon, height: Theme.Size.icon)))
+            UIGraphicsPopContext()
+        }
+        let a = RFBClient.Cursor(width: side, height: side, hotX: side * 3 / 10, hotY: side * 3 / 20, pixels: pixels)
+        arrows[scale] = a
+        return a
     }
 
     // MARK: Touches
@@ -199,6 +266,7 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
             s.move(to: port.clamped(CGPoint(x: s.pointer.x + (t.x - lastPan.x) * speed, y: s.pointer.y + (t.y - lastPan.y) * speed)),
                    buttons: dragging ? 1 : 0)
             lastPan = t
+            follow(s)
         case (.trackpad, _):
             if dragging { s.move(to: s.pointer, buttons: 0) }
             dragging = false
@@ -208,6 +276,14 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
 
     @objc private func twoPanned(_ g: UIPanGestureRecognizer) {
         guard let s = session else { return }
+        let lifted = g.state == .ended || g.state == .cancelled || g.state == .failed
+        defer { if lifted { two.ended() } }
+        if g.state == .began { wheel.began() }
+        // Trackpad Mode: only a scroll. Mouse Mode: a scroll or a pinch, whichever the fingers show first; until then the
+        // travel stays in the translation, for the scroll.
+        let meaning: VNCTwoFingers.Meaning = mode == .trackpad ? .scroll
+            : lifted || g.numberOfTouches < 2 ? two.meaning : two.moved(center: g.location(in: self), spread: spread(g))
+        guard meaning != .undecided else { return }
         let t = g.translation(in: self)
         if shown != nil, mode == .mouse { // zoomed in: two fingers move the picture
             var r = rect
@@ -218,9 +294,12 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
             place()
             return
         }
+        guard meaning == .scroll else { // a pinch at the fitted size: no scroll
+            g.setTranslation(.zero, in: self)
+            return
+        }
         let zoom = rect.width / fitted.width
         wheelAt = mode == .mouse ? toScreen(g.location(in: self)) : pointer(s)
-        if g.state == .began { wheel.began() }
         let notches = wheel.moved(t.y, zoom: zoom)
         g.setTranslation(.zero, in: self)
         if notches != 0 { s.scroll(notches: notches, at: wheelAt) }
@@ -252,7 +331,20 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         stopCoast()
+        // The second finger down: a new two-finger touch, from where both are now.
+        let down = Array(event?.touches(for: self)?.filter { $0.phase != .ended && $0.phase != .cancelled } ?? [])
+        if down.count == 2 {
+            let a = down[0].location(in: self), b = down[1].location(in: self)
+            two.began(center: CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2), spread: hypot(a.x - b.x, a.y - b.y))
+        }
         super.touchesBegan(touches, with: event)
+    }
+
+    /// How far apart a gesture's first two fingers are.
+    private func spread(_ g: UIGestureRecognizer) -> CGFloat {
+        guard g.numberOfTouches >= 2 else { return 0 }
+        let a = g.location(ofTouch: 0, in: self), b = g.location(ofTouch: 1, in: self)
+        return hypot(a.x - b.x, a.y - b.y)
     }
 
     override func willMove(toWindow newWindow: UIWindow?) {
@@ -260,34 +352,59 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
         if newWindow == nil { stopCoast() }
     }
 
+    /// Mouse Mode only (Trackpad Mode turns it off, #6196); it zooms once the touch is a pinch (VNCTwoFingers), from
+    /// where the fingers are then, so a scroll that drifts apart a little never zooms.
     @objc private func pinched(_ g: UIPinchGestureRecognizer) {
+        let lifted = g.state == .ended || g.state == .cancelled || g.state == .failed
+        defer { if lifted { two.ended() } }
+        let meaning = lifted || g.numberOfTouches < 2 ? two.meaning : two.moved(center: g.location(in: self), spread: spread(g))
+        guard meaning == .zoom, !lifted else {
+            g.scale = 1
+            return
+        }
         let anchor = g.location(in: self)
         let r = rect, base = fitted
-        let width = min(max(r.width * g.scale, base.width), base.width * 5)
+        let width = min(max(r.width * g.scale, base.width), base.width * VNCZoom.most)
         g.scale = 1
         guard width > base.width * 1.01 else {
             shown = nil
             place()
             return
         }
-        let k = width / r.width
-        shown = clamp(CGRect(x: anchor.x - (anchor.x - r.minX) * k, y: anchor.y - (anchor.y - r.minY) * k,
-                             width: width, height: r.height * k))
+        shown = clamp(VNCZoom.zoomed(r, by: width / r.width, at: anchor))
         place()
     }
 
     /// A zoomed picture kept over the view (centered on an axis it is narrower on).
-    private func clamp(_ r: CGRect) -> CGRect {
-        var r = r
-        r.origin.x = r.width <= bounds.width ? (bounds.width - r.width) / 2 : min(0, max(bounds.width - r.width, r.minX))
-        r.origin.y = r.height <= bounds.height ? (bounds.height - r.height) / 2 : min(0, max(bounds.height - r.height, r.minY))
-        return r
+    private func clamp(_ r: CGRect) -> CGRect { VNCZoom.clamp(r, in: bounds.size) }
+
+    /// ⋯ › Zoom In (#6196): twice the fitted picture, the pointer staying where it is (the middle when it is not on the
+    /// part shown). The only zoom in Trackpad Mode, where the picture then follows the pointer.
+    func zoomIn() {
+        var anchor = CGPoint(x: bounds.midX, y: bounds.midY)
+        if let s = session, visible.contains(s.pointer) { anchor = toView(s.pointer) }
+        shown = clamp(VNCZoom.zoomed(fitted, by: VNCZoom.step, at: anchor))
+        place()
+    }
+
+    /// ⋯ › Zoom to Fit: the whole picture again.
+    func zoomToFit() {
+        shown = nil
+        place()
+    }
+
+    /// Zoomed in, Trackpad Mode's picture moves to keep the pointer in view.
+    private func follow(_ s: RFBSession) {
+        guard let r = shown, mode == .trackpad else { return }
+        let moved = VNCZoom.following(r, keep: toView(s.pointer), in: bounds.size, margin: Theme.Space.xxl)
+        if moved != r { shown = moved }
     }
 
     /// Center Pointer.
     func centerPointer() {
         guard let s = session else { return }
         s.move(to: CGPoint(x: visible.midX, y: visible.midY))
+        follow(s)
         place()
     }
 }
@@ -299,18 +416,22 @@ struct VNCScreen: UIViewRepresentable {
     var interactive = false
     /// One of the Mac's displays to show alone (its frame on the framebuffer); nil: all of them.
     var region: CGRect? = nil
-    /// The view, for the page's Center Pointer.
+    /// The view, for the page's Center Pointer and Zoom In.
     var onView: (VNCScreenUIView) -> Void = { _ in }
+    /// Zoomed in or back to fitted.
+    var onZoom: (Bool) -> Void = { _ in }
 
     func makeUIView(context: Context) -> VNCScreenUIView {
         let v = VNCScreenUIView()
         v.session = session
+        v.onZoom = onZoom
         session.show(in: v.display)
         onView(v)
         return v
     }
 
     func updateUIView(_ v: VNCScreenUIView, context: Context) {
+        v.onZoom = onZoom
         v.mode = mode
         v.interactive = interactive
         v.region = region

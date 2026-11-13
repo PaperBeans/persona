@@ -166,7 +166,7 @@ fun FileAttachmentCard(
     val click = if (onClick != null || onLongClick != null)
         Modifier.combinedClickable(role = Role.Button, onClickLabel = onClickLabel, onLongClickLabel = onLongClickLabel, onClick = onClick ?: {}, onLongClick = onLongClick) else Modifier
     Row(
-        modifier.widthIn(max = 280.dp).width(240.dp).heightIn(min = 64.dp).clip(shape).background(if (board) palette.surface else well)
+        modifier.widthIn(max = 280.dp).width(240.dp).heightIn(min = 64.dp.row).clip(shape).background(if (board) palette.surface else well)
             .then(if (board) Modifier.border(1.dp, palette.line, shape) else Modifier)
             .then(click).padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,

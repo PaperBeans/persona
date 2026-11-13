@@ -394,6 +394,34 @@ func TestDialogKeysAcrossWidths(t *testing.T) {
 	}
 }
 
+// #5265: Claude Code 2.1.322's safety check with its countdown. The card is made at one width; the answer comes a few
+// seconds later (the countdown moved) and after the phone's terminal view narrowed the pane (the countdown wrapped):
+// the same dialog, so the key goes in. Another command at the same place is refused, nothing pressed.
+func TestDialogKeysWhileTheCountdownRuns(t *testing.T) {
+	wide := screenFixture(t, "claude-2.1.322-danger-shell-120.txt")
+	f := &fakePane{screens: []string{wide}}
+	n := &Node{hosts: herdrHosts(f.serve(t)), agents: map[string]host.Agent{"s1": {PaneID: "w1:p1"}}}
+	ctx := context.Background()
+	rev := dialogRev(wide, screen.DialogLines, "", "") // the card's
+	for _, name := range []string{"later-120", "57", "later-57", "40"} {
+		f.screens[0] = screenFixture(t, "claude-2.1.322-danger-shell-"+name+".txt")
+		if keys, _, err := n.dialogKeys(ctx, "s1", rev, "1"); err != nil || strings.Join(keys, ",") != "1" {
+			t.Fatalf("%s: %v %v", name, keys, err)
+		}
+	}
+	narrow := screenFixture(t, "claude-2.1.322-danger-shell-later-57.txt")
+	at := strings.LastIndex(narrow, "epsilon_name") // the command in the dialog's box
+	f.screens[0] = narrow[:at] + "omega_name" + narrow[at+len("epsilon_name"):]
+	if _, _, err := n.dialogKeys(ctx, "s1", rev, "1"); err == nil {
+		t.Fatal("answered another command")
+	} else if code, _ := refusalOf(t, err); code != screen.PromptChanged {
+		t.Fatal(code)
+	}
+	if len(f.keys) != 0 {
+		t.Fatalf("keys pressed: %v", f.keys)
+	}
+}
+
 func screenDialogRev(t *testing.T, s string) string {
 	t.Helper()
 	d := screen.ParseDialog(s)

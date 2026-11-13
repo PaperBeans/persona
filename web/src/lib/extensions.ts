@@ -10,6 +10,7 @@ import { EXTENSIONS_CHANGED } from "./extension-prompts";
 import type { Contribution, DependencyState, PackMember } from "./extension-model";
 import type { ExtensionAuth, ExtensionTool } from "./extension-auth";
 import { clock } from "./format";
+import type { SecretReference } from "./secret-reference";
 import { itemHeaders } from "./manager-choice";
 import { t } from "../i18n";
 
@@ -31,6 +32,12 @@ export interface HubExtension {
   source?: string;
   enabled?: boolean;
   description?: string;
+  /** Public catalog artwork: absolute HTTPS without URL credentials; absent on older hubs. */
+  icon_url?: string;
+  /** Cumulative package downloads across all versions, not users or Persona installations. Explicit zero is meaningful. */
+  downloads?: number;
+  /** When the package-download statistics were last updated. */
+  downloads_updated_at?: string;
   /** The extension points it contributes to, with the ids. */
   contributes?: Record<string, string[]>;
   /** What it still needs before it runs, in words. */
@@ -78,23 +85,16 @@ export interface ExtensionSandbox {
   active: boolean;
   why?: string;
   trusted?: boolean;
-  egress?: { allowed: number; denied: number; last_denied?: string; denied_at?: string };
+  /** recent_denied: the last different hosts the proxy refused, the latest first (#5697). */
+  egress?: { allowed: number; denied: number; last_denied?: string; denied_at?: string; recent_denied?: { target: string; count: number; at: string }[] };
+  /** The hosts the owner allowed it in /admin (#5697): no port is any port. */
+  owner_allowed?: { host: string; port?: string; at?: string }[];
 }
 
 /** The sandbox's state in words: in effect, asked for but not in effect, or off (Android ExtensionModelText.sandbox). */
 export function sandboxState(s: ExtensionSandbox): string {
   if (s.active) return t("lib-extensions.sandbox_active");
   return t(s.enabled ? "lib-extensions.sandbox_inactive" : "lib-extensions.sandbox_off");
-}
-
-/** What it reached through the egress proxy: "through the egress proxy: N allowed · M refused", null without counts. */
-export function sandboxEgress(s: ExtensionSandbox): string | null {
-  const e = s.egress;
-  if (!e) return null;
-  return t("lib-extensions.sandbox_egress", {
-    allowed: t("lib-extensions.sandbox_allowed", { count: e.allowed ?? 0 }),
-    denied: t("lib-extensions.sandbox_denied", { count: e.denied ?? 0 }),
-  });
 }
 
 /** The channel an extension contributes (its first `channel` id), whose page is where it is bound. */
@@ -182,6 +182,33 @@ export interface ExtensionSecret {
   set: boolean;
   /** Its last four characters, when it is set and the extension asked for them (secrets[].hint "last4"); never more. */
   hint?: string;
+  /** It holds a provider's reference, not a value (docs/extensions/secret-providers.md). */
+  reference?: SecretReference;
+}
+
+export type { SecretReference } from "./secret-reference";
+
+/** A setting that holds one of a provider's references: another extension's secret, or a model provider's key. */
+export interface SecretUser {
+  kind: "extension" | "launcher";
+  extension?: string;
+  extension_name?: string;
+  secret?: string;
+  secret_title?: string;
+  launcher?: string;
+  launcher_name?: string;
+  machine?: string;
+  reference: string;
+}
+
+/** An "Always" of a hand-off card: this reference for this launcher on this computer, asked no more. */
+export interface HandoffRule {
+  id: string;
+  reference: string;
+  launcher: string;
+  machine: string;
+  by?: string;
+  at: string;
 }
 
 /** A line of what an extension may do. */
@@ -216,6 +243,9 @@ export interface HubExtensionDetail extends HubExtension {
   pack_off?: string[];
   /** The installed members that are on: the ones switching the pack off switches off, named in its confirmation. */
   pack_on?: { id: string; name: string }[];
+  /** A secret provider's: the settings that hold its references, and its Always rules for hand-offs. */
+  secret_users?: SecretUser[];
+  handoff_rules?: HandoffRule[];
 }
 
 // ── the hub ─────────────────────────────────────────────
@@ -255,6 +285,10 @@ export const setExtensionConfig = (id: string, config: JsonObject) =>
   api<HubExtensionDetail>(`${base(id)}/config`, { method: "PUT", json: { config } }).then(detailOf).then(changed);
 export const setExtensionSecret = (id: string, name: string, value: string) =>
   api<HubExtensionDetail>(`${base(id)}/secrets/${enc(name)}`, { method: "PUT", json: { value } }).then(detailOf).then(changed);
+export const setExtensionSecretReference = (id: string, name: string, reference: string) =>
+  api<HubExtensionDetail>(`${base(id)}/secrets/${enc(name)}`, { method: "PUT", json: { reference } }).then(detailOf).then(changed);
+export const removeHandoffRule = (id: string, rule: string) =>
+  api<HubExtensionDetail>(`${base(id)}/handoff-rules/${enc(rule)}`, { method: "DELETE" }).then(detailOf).then(changed);
 export const clearExtensionSecret = (id: string, name: string) =>
   api<HubExtensionDetail>(`${base(id)}/secrets/${enc(name)}`, { method: "DELETE" }).then(detailOf).then(changed);
 
@@ -448,7 +482,9 @@ export function pickerChoices(f: ExtensionField, current: Json | undefined, mach
   return out;
 }
 
+/** Where a reference's value comes from, in words: "From <provider> · <item>". */
 export function secretState(s: ExtensionSecret): string {
+  if (s.reference) return t("lib-extensions.from_provider", { provider: s.reference.provider_name || s.reference.provider });
   if (s.set) return s.hint ? t("lib-extensions.is_set_hint", { hint: s.hint }) : t("lib-extensions.is_set");
   return s.required ? t("lib-extensions.not_set_required") : t("lib-extensions.not_set");
 }

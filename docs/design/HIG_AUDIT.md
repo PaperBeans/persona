@@ -102,7 +102,7 @@ Each block lists: Severity, Platform, Location, Violates, Problem, Evidence, Fix
 
 #### HIG-002 Tap gestures used as buttons on agent cards and other rows
 - **Severity**: P1. **Platform**: iOS.
-- **Location**: agent question and permission card, loop bar, calendar. `apple/Persona/Views/Interactions/InteractionViews.swift:373`, `apple/Persona/Views/Interactions/InteractionViews.swift:545`, `apple/Persona/Views/Interactions/InteractionViews.swift:1113`, `apple/Persona/Views/Session/SessionPanes.swift:1221`, `apple/Persona/Views/Todos/Calendar/TodoCalendarGrids.swift:347`.
+- **Location**: agent question and permission card, loop bar, calendar. `apple/Persona/Views/Interactions/InteractionViews.swift:373`, `apple/Persona/Views/Interactions/InteractionViews.swift:545`, `apple/Persona/Views/Interactions/InteractionViews.swift:1113`, `apple/Persona/Views/Session/SessionPanes.swift:1221`, `apple/Persona/Views/Todos/Calendar/TodoCalendarGrids.swift:440`.
 - **Violates**: [VoiceOver][vo]: label all key and custom elements; [Accessibility][a11y]: label elements so Voice Control and Switch Control work.
 - **Problem**: `onTapGesture` on a non-Button view with no `isButton` trait, label or action, so VoiceOver reads static text. The "Other answer" rows are the only route to the free-text answer on the Needs You flow. Other sites do it right (`apple/Persona/Views/Assistant/AssistantSidebar.swift:370`). A repo grep shows 42 `onTapGesture` uses; the exact count of unlabeled ones was not established (one cited site, `apple/Persona/Views/Chat/ToolViews.swift:1099`, is fine).
 - **Evidence**: `.contentShape(.rect).onTapGesture { withAnimation(Theme.Motion.standard) { collapsed.toggle() } }`.
@@ -118,7 +118,7 @@ Each block lists: Severity, Platform, Location, Violates, Problem, Evidence, Fix
 
 #### HIG-004 Swipe-to-delete with no confirmation and no Undo
 - **Severity**: P1. **Platform**: iOS, iPadOS.
-- **Location**: `apple/Persona/Views/Todos/TodosView.swift:125`, `apple/Persona/Views/Todos/TodosView.swift:157`, `apple/Persona/App/TodoStore.swift:216`, `apple/Persona/Views/Settings/SavedPlacesView.swift:56`, `apple/Persona/Views/Settings/AssistantProactiveViews.swift:280`.
+- **Location**: `apple/Persona/Views/Todos/TodosView.swift:125`, `apple/Persona/Views/Todos/TodosView.swift:157`, `apple/Persona/App/TodoStore.swift:253`, `apple/Persona/Views/Settings/SavedPlacesView.swift:56`, `apple/Persona/Views/Settings/AssistantProactiveViews.swift:280`.
 - **Violates**: [Undo and redo][undo], [Alerts][alerts], [Design principles][dp] ("help people recover from mistakes"): a destructive action should be undoable or confirmed.
 - **Problem**: the trailing swipe deletes on first tap; to-dos allow full swipe. The store calls the server and removes the item, with no restore. The same items are confirmed on their detail screens, and memory entries confirm, so the behavior is inconsistent. Context-menu Delete in `apple/Persona/Views/Settings/SavedPlacesView.swift:61` and `apple/Persona/Views/Settings/AssistantProactiveViews.swift:286` is also unconfirmed. Repeating scheduled tasks need a deliberate tap, which lowers risk there.
 - **Evidence**: `.swipeActions(edge: .trailing) { Button(role: .destructive) { Task { try await store.delete(id: todo.id) } } ... }`.
@@ -308,7 +308,7 @@ Each block lists: Severity, Platform, Location, Violates, Problem, Evidence, Fix
 - **Violates**: [Typography][typo]: minimize truncation; stack at large sizes.
 - **Problem**: about 95 `minimumScaleFactor` uses. The stage bar draws six stage names at 0.7 in one sixth of the width each; the checklist sentence is one line at 0.8. Scaling happens only on overflow (likely at large sizes or long translations), where it can pass below 11pt. Shrinking a numeric cell (`UsageCharts.swift`) is fine.
 - **Evidence**: `.lineLimit(1).minimumScaleFactor(0.7)` on `Theme.Font.caption`.
-- **Fix**: let sentences wrap; show only the current stage (or stack) when `isAccessibilitySize`; limit shrink to about 0.85.
+- **Fix**: let sentences wrap; show only the current stage (or stack) when `isAccessibilitySize`; limit shrink to about 0.85 (the stage bar is done, #5892: at the accessibility sizes its dots have no names and one line names the current step and its place).
 
 #### HIG-028 Fixed-size text below 11pt ignores Dynamic Type
 - **Severity**: P2. **Platform**: iOS.
@@ -327,6 +327,7 @@ Each block lists: Severity, Platform, Location, Violates, Problem, Evidence, Fix
 - **Fix**: use a minimum-size frame for text containers, or cap the digit with `dynamicTypeSize(...accessibility2)`.
 
 #### HIG-030 Shell top bar and viewer chrome Dynamic Type caps
+- **Deliberate deviation (2026-11-13, #6448)**: the whole interface now stops at xxxLarge, not only the top bars and viewer chrome, and gets the Large Content Viewer; reading content grows to AX5 (`docs/design/DESIGN_SYSTEM.md` section 6.2). This departs from the HIG's advice to support the accessibility sizes in every control. Why: about 35 pull requests since 2026-11-10 patched the accessibility sizes screen by screen, each with a layout of its own, and screens kept breaking (labels cut to "1…", rows stacked into single letters, strips wider than the page). One rule that a test can check replaces them, and what a person reads, the text that matters most to a low-vision reader, still scales to AX5. VoiceOver is unchanged.
 - **Severity**: P2. **Platform**: iOS, iPadOS.
 - **Location**: `apple/Shared/Design/Theme.swift:865`, `apple/Shared/Design/Theme.swift:870`, `apple/Persona/DesignSystem/ShellComponents.swift:377`, `apple/Persona/DesignSystem/ShellComponents.swift:163`, `apple/Persona/DesignSystem/ViewerChrome.swift:34`, `apple/Persona/Views/Chat/ImageViewer.swift:217`, `apple/Persona/Views/Inbox/Lark/LarkConversationsView.swift:289`.
 - **Violates**: [Typography][typo] and [Accessibility][a11y]: support enlargement of at least 200%.
@@ -446,11 +447,11 @@ Each block lists: Severity, Platform, Location, Violates, Problem, Evidence, Fix
 - **Evidence**: `reduceMotion ? Theme.Motion.state : Theme.Motion.composerSwap` changes only the curve.
 - **Fix**: use `.opacity` in both branches when reduced; skip the press scale; gate the pulse with `isActive: listening && !reduceMotion`.
 
-#### HIG-045 Message lift menu and attach bar animate scale and blur without a fallback
+#### HIG-045 Message lift menu animates scale and blur without a fallback
 - **Severity**: P2. **Platform**: iOS.
-- **Location**: `apple/Persona/Views/Chat/MessageLift.swift:94`, `apple/Persona/Views/Chat/MessageLift.swift:119`, `apple/Persona/Views/Chat/MessageLift.swift:160`, `apple/Persona/Views/Chat/MessageMenu.swift:305`, `apple/Persona/Views/Chat/MessageMenu.swift:393`, `apple/Persona/Views/Chat/AttachSheet.swift:360`, `apple/Persona/Views/Chat/AttachSheet.swift:481`.
+- **Location**: `apple/Persona/Views/Chat/MessageLift.swift:94`, `apple/Persona/Views/Chat/MessageLift.swift:119`, `apple/Persona/Views/Chat/MessageLift.swift:160`, `apple/Persona/Views/Chat/MessageMenu.swift:305`, `apple/Persona/Views/Chat/MessageMenu.swift:393`.
 - **Violates**: [Accessibility][a11y] (Reduce Motion); [Motion][motion].
-- **Problem**: long-press blurs the page, the bar scales in from 0.85 and the drag-back spring bounces. `reduceMotion` is declared at `MessageLift.swift:119` but never read. The attach bar-away state scales and blurs by 10.
+- **Problem**: long-press blurs the page, the bar scales in from 0.85 and the drag-back spring bounces. `reduceMotion` is declared at `MessageLift.swift:119` but never read. (The attach panel's bar now cross-fades, without scale or blur, and none with Reduce Motion: #4312.)
 - **Evidence**: `.transition(.scale(scale: 0.85, anchor: p.below ? .top : .bottom).combined(with: .opacity))`.
 - **Fix**: use the declared flag: opacity transition, bounce-0 spring, no blur or scale when reduced.
 

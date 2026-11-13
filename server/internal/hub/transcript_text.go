@@ -66,6 +66,8 @@ func localizedItem(l i18n.Lang, it proto.Item) (proto.Item, bool) {
 		set(&it.Text, taskNoteText(l, it.Task, it.Text))
 	case it.Kind == proto.KindNotice:
 		set(&it.Text, noticeText(l, it.Text))
+	case it.Kind == proto.KindText && it.Role == "user" && it.From == transcript.PersonaPeer && it.Text == transcript.StoppedFromPhone:
+		set(&it.Text, tt(l, "stopped_from_phone"))
 	case it.Kind == proto.KindText && it.Role == "user" && it.From != "":
 		set(&it.From, fromName(l, it.From))
 		set(&it.Text, teammateText(l, it.Text))

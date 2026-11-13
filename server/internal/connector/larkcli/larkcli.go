@@ -37,15 +37,20 @@ type Connector struct {
 	inboxAllChats map[string]struct{}
 	// triageRules are the user's triage rules for lark-cli's Inbox items, in their words (options.triage_rules): the
 	// Inbox's triage reads them instead of the global inbox.rules.
-	triageRules      string
-	inboxState       persistedInboxState
-	inboxStateLoaded bool
-	inboxCollecting  bool
-	inboxStore       StateStore
-	inboxPrefer      string
-	gatewayAvailable func(context.Context) bool
-	inboxPoll        time.Duration
-	inboxPageLimit   int
+	triageRules       string
+	inboxState        persistedInboxState
+	inboxStateLoaded  bool
+	inboxCollecting   bool
+	inboxStore        StateStore
+	inboxPrefer       string
+	gatewayAvailable  func(context.Context) bool
+	inboxPoll         time.Duration
+	inboxPageLimit    int
+	inboxDirectOffset int
+
+	// chatRecords are the chats' own records a conversation page read (threads.go conversationChat), by chat id.
+	recordsMu   sync.Mutex
+	chatRecords map[string]chatRecord
 
 	mu      sync.Mutex
 	pending *adapter.LoginProcess
@@ -98,7 +103,7 @@ func (c *Connector) Profile() string {
 }
 
 func (c *Connector) Manifest() connector.Manifest {
-	return connector.Manifest{Capabilities: []connector.Capability{connector.CapStatus, connector.CapTools, connector.CapEvents, connector.CapInbox, connector.CapOptions, connector.CapLogin}, Kinds: []string{"dm", "bot", "mention", "group", "doc"}}
+	return connector.Manifest{Capabilities: []connector.Capability{connector.CapStatus, connector.CapTools, connector.CapEvents, connector.CapInbox, connector.CapOptions, connector.CapLogin, connector.CapThreads}, Kinds: []string{"dm", "bot", "mention", "group", "doc"}}
 }
 
 func (c *Connector) Tools() []proto.Tool {

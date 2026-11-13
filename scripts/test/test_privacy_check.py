@@ -1,4 +1,5 @@
 from contextlib import redirect_stderr
+import hashlib
 import importlib.util
 import io
 import json
@@ -22,6 +23,7 @@ PUBLIC_URL = "https://registry.npmjs.org/sample/-/sample-1.0.0.tgz"
 UNAPPROVED_URL = "https://registry.example.invalid/sample/-/sample-1.0.0.tgz"
 # Split so the repository scan of this file does not flag it.
 PRIVATE_IP = "10." + "20.30.40"
+PUBLIC_ATTRIBUTION_EMAIL = "author@" + "thirdparty.org"
 
 
 def lockfile(source=PUBLIC_URL, version=3, link=False):
@@ -201,6 +203,12 @@ class AddressHintTests(unittest.TestCase):
         for address in (email, "x9@" + "9-x.io", "a.%@" + "-x.io"):  # every class the hint takes on either side of @
             self.assertEqual(pc.problems("mail " + address + " now", []), [address])
         self.assertEqual(pc.problems("mail " + email + " now", [], emails=False), [])
+
+    def test_personal_company_and_attribution_emails_are_not_allowlisted(self):
+        # #5747: #5559 allow-listed whole domains, which would also let an employee's personal company address through.
+        for address in ("employee.name@" + "bytedance.com", "noreply@" + "moonshot.cn", "noreply@" + "moonshot.ai"):
+            with self.subTest(address=address):
+                self.assertEqual(pc.problems("Co-Authored-By: Someone <" + address + ">", []), [address])
 
     def test_lines_without_the_hint_have_no_addresses(self):
         for line in ["@Override", "a @ b.io", "v1.2", "1. 2. 3. 4", "x@ example", "end."]:
@@ -655,6 +663,77 @@ class PrivacyCheckIntegrationTests(unittest.TestCase):
     def write_lock(self, source=PUBLIC_URL):
         self.lock.write_text(json.dumps(lockfile(source), indent=2) + "\n")
 
+    def write_public_attribution_bundle(self, notice_text=None):
+        ssh = self.repo / "harmony/native/ssh"
+        notice = ssh / "licenses/sample-1.0.0/LICENSE-MIT"
+        sdk_notice = ssh / "licenses/sdk-runtime/component/license.txt"
+        html = self.repo / "harmony/entry/src/main/resources/rawfile/native-ssh-licenses.html"
+        manifest = ssh / "licenses/public-attribution.json"
+        notice.parent.mkdir(parents=True, exist_ok=True)
+        sdk_notice.parent.mkdir(parents=True, exist_ok=True)
+        html.parent.mkdir(parents=True, exist_ok=True)
+        notice_bytes = (notice_text if notice_text is not None else
+                        "Copyright sample authors.\nContact: " + PUBLIC_ATTRIBUTION_EMAIL + "\n").encode()
+        sdk_bytes = b"SDK runtime attribution.\n"
+        html_bytes = ("Offline contact: " + PUBLIC_ATTRIBUTION_EMAIL + "\n").encode()
+        notice.write_bytes(notice_bytes)
+        sdk_notice.write_bytes(sdk_bytes)
+        html.write_bytes(html_bytes)
+
+        cargo_inventory = [{
+            "name": "sample",
+            "version": "1.0.0",
+            "authors": [PUBLIC_ATTRIBUTION_EMAIL],
+            "notices": [{
+                "path": "licenses/sample-1.0.0/LICENSE-MIT",
+                "sha256": hashlib.sha256(notice_bytes).hexdigest(),
+            }],
+        }]
+        supplemental_inventory = {
+            "schema_version": 1,
+            "items": [{
+                "name": "SDK runtime",
+                "version": "1.0.0",
+                "authors": [PUBLIC_ATTRIBUTION_EMAIL],
+                "notices": [{
+                    "path": "licenses/sdk-runtime/component/license.txt",
+                    "sha256": hashlib.sha256(sdk_bytes).hexdigest(),
+                }],
+            }],
+        }
+        inventory_paths = [
+            "harmony/native/ssh/licenses/locked-inventory.json",
+            "harmony/native/ssh/licenses/sdk-runtime/supplemental-inventory.json",
+        ]
+        inventory_bytes = [
+            (json.dumps(cargo_inventory, sort_keys=True, indent=2) + "\n").encode(),
+            (json.dumps(supplemental_inventory, sort_keys=True, indent=2) + "\n").encode(),
+        ]
+        for path, data in zip(inventory_paths, inventory_bytes):
+            target = self.repo / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+
+        manifest_data = {
+            "schema_version": 1,
+            "inventories": [{
+                "path": path,
+                "sha256": hashlib.sha256(data).hexdigest(),
+            } for path, data in zip(inventory_paths, inventory_bytes)],
+            "notices": sorted([
+                {"path": "harmony/native/ssh/licenses/sample-1.0.0/LICENSE-MIT",
+                 "sha256": hashlib.sha256(notice_bytes).hexdigest()},
+                {"path": "harmony/native/ssh/licenses/sdk-runtime/component/license.txt",
+                 "sha256": hashlib.sha256(sdk_bytes).hexdigest()},
+            ], key=lambda item: item["path"]),
+            "generated_html": {
+                "path": "harmony/entry/src/main/resources/rawfile/native-ssh-licenses.html",
+                "sha256": hashlib.sha256(html_bytes).hexdigest(),
+            },
+        }
+        manifest.write_text(json.dumps(manifest_data, sort_keys=True, indent=2) + "\n")
+        return notice, manifest
+
     def scan(self, *args):
         return self.run_command(sys.executable, str(self.repo / "scripts/privacy_check.py"), *args)
 
@@ -687,6 +766,35 @@ class PrivacyCheckIntegrationTests(unittest.TestCase):
         self.git("add", "web/package-lock.json")
         result = self.scan()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_public_site_address_is_allowed_only_in_public_entry_points(self):
+        config = self.home / ".config/persona/config.json"
+        config.parent.mkdir(parents=True)
+        config.write_text(json.dumps({"publish": {"site_url": "https://public-site.notexample.com",
+                                                    "privacy_url": "https://privacy.notexample.com"},
+                                      "lan_host": "hub.notexample.com"}))
+        for path in pc.PUBLIC_SITE_DOCS | {"site/public/index.html"}:
+            target = self.repo / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("Install from https://public-site.notexample.com.\n")
+        (self.repo / "notes.md").write_text(
+            "https://public-site.notexample.com https://privacy.notexample.com hub.notexample.com\n")
+        (self.repo / "README.md").write_text(
+            (self.repo / "README.md").read_text() +
+            "Private privacy host: https://privacy.notexample.com; private hub: hub.notexample.com.\n")
+        # A name that only starts with an allowed doc does not share its allowance (and carries no value itself, so
+        # the report can name it without disclosing anything).
+        (self.repo / "README.md.bak").write_text("Install from https://public-site.notexample.com.\n")
+        self.git("add", ".")
+        result = self.scan()
+        self.assertNotEqual(result.returncode, 0)
+        output = result.stdout + result.stderr
+        self.assertIn("notes.md:1: private value", output)
+        self.assertIn("README.md:2: private value", output)
+        self.assertIn("README.md.bak:1: private value", output)
+        for path in pc.PUBLIC_SITE_DOCS | {"site/public/index.html"}:
+            self.assertNotIn(path + ":1:", output)
+        self.assertNotIn("notexample", output)
 
     def test_config_loopback_is_not_flagged_but_private_ip_is(self):
         config = self.home / ".config/persona/config.json"
@@ -846,6 +954,87 @@ class PrivacyCheckIntegrationTests(unittest.TestCase):
         output = result.stdout + result.stderr
         self.assertIn("commit message:1: private value", output)
         self.assertNotIn(marker, output)
+
+    def test_pinned_public_attribution_suppresses_only_email_pattern(self):
+        words = self.home / ".config/persona/private-words.txt"
+        words.parent.mkdir(parents=True)
+        words.write_text("secretbox\n")
+        notice, _ = self.write_public_attribution_bundle(
+            "Copyright sample authors.\nContact: " + PUBLIC_ATTRIBUTION_EMAIL + "\nsecretbox at " + PRIVATE_IP + "\n")
+        self.git("add", "harmony")
+
+        result = self.scan()
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("LICENSE-MIT:3: private value", output)
+        self.assertIn("LICENSE-MIT:3: private IP", output)
+        self.assertNotIn("LICENSE-MIT:2: email", output)
+        self.assertNotIn(PUBLIC_ATTRIBUTION_EMAIL, output)
+
+    def test_changed_notice_bytes_do_not_receive_email_exemption(self):
+        notice, _ = self.write_public_attribution_bundle()
+        self.git("add", "harmony")
+        with notice.open("a") as source:
+            source.write("Contact: " + PUBLIC_ATTRIBUTION_EMAIL + "\n")
+        self.git("add", str(notice.relative_to(self.repo)))
+
+        result = self.scan()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("LICENSE-MIT:3: email", result.stdout)
+        self.assertNotIn(PUBLIC_ATTRIBUTION_EMAIL, result.stdout + result.stderr)
+
+    def test_outside_path_and_invalid_manifest_do_not_receive_exemption(self):
+        _, manifest = self.write_public_attribution_bundle()
+        outside = self.repo / "harmony/entry/src/main/ets/components/OutsideAttribution.ets"
+        outside.parent.mkdir(parents=True, exist_ok=True)
+        outside.write_text("Contact: " + PUBLIC_ATTRIBUTION_EMAIL + "\n")
+        data = json.loads(manifest.read_text())
+        data["notices"].append({
+            "path": "harmony/entry/src/main/ets/components/OutsideAttribution.ets",
+            "sha256": hashlib.sha256(outside.read_bytes()).hexdigest(),
+        })
+        data["notices"].sort(key=lambda item: item["path"])
+        manifest.write_text(json.dumps(data, sort_keys=True, indent=2) + "\n")
+        self.git("add", "harmony")
+
+        result = self.scan()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("OutsideAttribution.ets:1: email", result.stdout)
+
+        manifest.write_text("{ invalid json\n")
+        result = self.scan()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("LICENSE-MIT:2: email", result.stdout)
+
+    def test_symlinked_notice_does_not_receive_email_exemption(self):
+        notice, _ = self.write_public_attribution_bundle()
+        external = self.root / PUBLIC_ATTRIBUTION_EMAIL
+        external.write_text("not a repository file\n")
+        notice.unlink()
+        notice.symlink_to(os.path.relpath(external, notice.parent))
+        self.git("add", "-A")
+
+        result = self.scan()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("LICENSE-MIT:1: email", result.stdout)
+        self.assertNotIn(PUBLIC_ATTRIBUTION_EMAIL, result.stdout + result.stderr)
+
+    def test_staged_and_range_scans_use_their_git_snapshot_manifest(self):
+        notice, manifest = self.write_public_attribution_bundle()
+        self.git("add", "harmony")
+        self.git("commit", "-q", "--no-verify", "-m", "base attribution bundle")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+
+        self.write_public_attribution_bundle(
+            "Copyright sample authors.\nContact: " + PUBLIC_ATTRIBUTION_EMAIL + "\nUpdated attribution.\n")
+        self.git("add", "harmony")
+        manifest.write_text("{ invalid worktree version\n")
+
+        staged = self.scan("--staged")
+        self.assertEqual(staged.returncode, 0, staged.stdout + staged.stderr)
+        self.git("commit", "-q", "--no-verify", "-m", "update attribution bundle")
+        ranged = self.scan("--range", "origin/main..HEAD")
+        self.assertEqual(ranged.returncode, 0, ranged.stdout + ranged.stderr)
 
     @unittest.skipUnless(shutil.which("npm"), "npm unavailable")
     def test_web_prebuild_blocks_unapproved_lockfile(self):

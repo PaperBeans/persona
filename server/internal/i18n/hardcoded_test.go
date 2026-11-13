@@ -24,7 +24,7 @@ import (
 const hardcodedBaseline = "hardcoded-baseline.json"
 
 // hardcodedDirs are the packages (with their subpackages) whose text can reach a client, relative to server/.
-// Left out on purpose: cmd/ and link/ (command-line output), node/ and transcript/ (node-side text the hub rewrites
+// Left out on purpose: cmd/ and link/ (command-line output: terminalSources' ratchet), node/ and transcript/ (node-side text the hub rewrites
 // by its original, hub/transcript_text.go), kb/ (stored knowledge keeps its language), prompts/ (text for models),
 // lcuconfirm/ (card labels matched back by their original), office/ (document content).
 var hardcodedDirs = []string{
@@ -191,12 +191,47 @@ func TestUpdateHardcodedBaseline(t *testing.T) {
 	}
 }
 
-func TestHardcodedChineseBaseline(t *testing.T) {
+// terminalBaseline is the same ratchet for the command lines (#5520): what they print for people comes from the
+// catalogs in i18n.Terminal's language, so their files may only lose hard-coded Chinese too. A line that has to keep it
+// (it is matched against another program's output, it goes to a model) says `i18n-ignore` the same way.
+const terminalBaseline = "hardcoded-terminal-baseline.json"
+
+// terminalSources are the command lines' code, relative to server/: a directory (with its subpackages) or one file.
+// Files hardcodedDirs already count are not listed again.
+var terminalSources = []string{
+	"cmd",
+	"internal/hubcli",
+	"internal/managercli",
+	"internal/link",
+	"internal/extmgr/extension_cli.go",
+	"internal/extmgr/extension_model_cli.go",
+	"internal/extmgr/extension_devcli.go",
+	"internal/extmgr/extension_build.go",
+	"internal/hub/admin_cli.go",
+	"internal/hub/peer_cli.go",
+	"internal/hub/doctor.go",
+	"internal/hub/setup.go",
+	"internal/hub/setup_config.go",
+	"internal/hub/setup_database.go",
+	"internal/hub/setup_finish.go",
+	"internal/hub/setup_service.go",
+	"internal/hub/setup_manager.go",
+	"internal/node/doctor.go",
+	"internal/node/preflight.go",
+	"internal/manager/join.go",
+	"internal/manager/run.go",
+	"internal/manager/service.go",
+}
+
+// hardcodedCounts are the CJK string literals per file under sources (directories or files, relative to server/),
+// less tests, test kits and the files skip refuses.
+func hardcodedCounts(t *testing.T, sources []string, skip func(rel string) bool) (map[string]int, map[string][]hardcodedHit) {
+	t.Helper()
 	root := filepath.Join("..", "..")
 	counts := map[string]int{}
 	hits := map[string][]hardcodedHit{}
-	for _, dir := range hardcodedDirs {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(p string, d fs.DirEntry, err error) error {
+	for _, source := range sources {
+		err := filepath.WalkDir(filepath.Join(root, source), func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -208,8 +243,7 @@ func TestHardcodedChineseBaseline(t *testing.T) {
 				}
 				return nil
 			}
-			if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") ||
-				strings.HasSuffix(rel, "cli.go") || hardcodedSkip[rel] != "" {
+			if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") || skip(rel) {
 				return nil
 			}
 			src, err := os.ReadFile(p)
@@ -222,15 +256,41 @@ func TestHardcodedChineseBaseline(t *testing.T) {
 			return nil
 		})
 		if err != nil {
-			t.Fatalf("%s: %v", dir, err)
+			t.Fatalf("%s: %v", source, err)
 		}
 	}
+	return counts, hits
+}
+
+func TestHardcodedChineseBaseline(t *testing.T) {
+	counts, hits := hardcodedCounts(t, hardcodedDirs, func(rel string) bool {
+		return strings.HasSuffix(rel, "cli.go") || hardcodedSkip[rel] != ""
+	})
 	for rel := range hardcodedSkip {
-		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+		if _, err := os.Stat(filepath.Join("..", "..", rel)); err != nil {
 			t.Errorf("hardcodedSkip lists %s, which is gone: drop it", rel)
 		}
 	}
-	raw, err := os.ReadFile(hardcodedBaseline)
+	checkHardcodedBaseline(t, hardcodedBaseline, counts, hits, "TestHardcodedChineseBaseline",
+		"move it into locales/ with i18n.T / i18n.Err (or mark text that must stay with // i18n-ignore: <why>)")
+}
+
+func TestHardcodedTerminalBaseline(t *testing.T) {
+	counts, hits := hardcodedCounts(t, terminalSources, func(string) bool { return false })
+	for _, rel := range terminalSources {
+		if _, err := os.Stat(filepath.Join("..", "..", rel)); err != nil {
+			t.Errorf("terminalSources lists %s, which is gone: drop it", rel)
+		}
+	}
+	checkHardcodedBaseline(t, terminalBaseline, counts, hits, "TestHardcodedTerminalBaseline",
+		"move it into locales/ and print it with i18n.T(i18n.Terminal(), …) (or mark text that must stay with // i18n-ignore: <why>)")
+}
+
+// checkHardcodedBaseline fails when a file has more literals than the baseline file name records, and asks for a new
+// record when one has fewer; UPDATE_I18N_BASELINE=1 writes it (never higher).
+func checkHardcodedBaseline(t *testing.T, name string, counts map[string]int, hits map[string][]hardcodedHit, test, fix string) {
+	t.Helper()
+	raw, err := os.ReadFile(name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,18 +317,17 @@ func TestHardcodedChineseBaseline(t *testing.T) {
 	slices.Sort(grew)
 	slices.Sort(stale)
 	if len(grew) > 0 {
-		t.Errorf("more Chinese written into the code: move it into locales/ with i18n.T / i18n.Err "+
-			"(or mark text that must stay with // i18n-ignore: <why>)\n%s", strings.Join(grew, "\n"))
+		t.Errorf("more Chinese written into the code: %s\n%s", fix, strings.Join(grew, "\n"))
 		return // Update mode must not bless an increase either.
 	}
 	if os.Getenv("UPDATE_I18N_BASELINE") != "" {
-		if err := updateHardcodedBaseline(hardcodedBaseline, counts, baseline); err != nil {
+		if err := updateHardcodedBaseline(name, counts, baseline); err != nil {
 			t.Fatal(err)
 		}
 		return
 	}
 	if len(stale) > 0 {
-		t.Errorf("fewer hard-coded strings now: run UPDATE_I18N_BASELINE=1 go test ./internal/i18n/ -run TestHardcodedChineseBaseline\n%s",
-			strings.Join(stale, "\n"))
+		t.Errorf("fewer hard-coded strings now: run UPDATE_I18N_BASELINE=1 go test ./internal/i18n/ -run %s\n%s",
+			test, strings.Join(stale, "\n"))
 	}
 }

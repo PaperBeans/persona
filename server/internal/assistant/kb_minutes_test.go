@@ -73,7 +73,9 @@ func TestMinutesHTTP(t *testing.T) {
 		t.Fatalf("wrote %d", n)
 	}
 	pushes := f.pushed()
-	if len(pushes) != 1 || pushes[0].ID != "ntf_minutes_"+id+"_1" || pushes[0].Kind != NotifyPush || !strings.Contains(pushes[0].Body, "发布评审") {
+	// It names the recording, so an app that knows it opens the meeting's thread (#3862 phase 6).
+	if len(pushes) != 1 || pushes[0].ID != "ntf_minutes_"+id+"_1" || pushes[0].Kind != NotifyPush || !strings.Contains(pushes[0].Body, "发布评审") ||
+		pushes[0].RecordingID != id {
 		t.Fatalf("pushes %+v", pushes)
 	}
 	var detail struct {

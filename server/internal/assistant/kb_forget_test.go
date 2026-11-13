@@ -96,7 +96,7 @@ func TestKBConnectorReadCanSubmitPosts(t *testing.T) {
 		return assistantwire.Archives{Items: []string{"example"}}, nil
 	})
 	h.s = New(Options{Hub: h, KB: &KBOptions{Dir: t.TempDir()}, Logf: testLogf(t)})
-	t.Cleanup(h.s.kbClose)
+	t.Cleanup(h.s.kbEnd)
 	setSettings(t, h.s, func(v *Settings) { v.Timezone = "UTC" })
 	e := kbEng(t, h.s)
 	done := make(chan struct{})

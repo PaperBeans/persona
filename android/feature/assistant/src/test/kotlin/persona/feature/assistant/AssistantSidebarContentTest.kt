@@ -10,6 +10,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -57,23 +59,28 @@ class AssistantSidebarContentTest {
         rule.setContent {
             PersonaTheme(style = AppStyle.Brief, reduceMotion = true) {
                 Box(Modifier.width(400.dp).height(1200.dp)) {
-                    AssistantSidebarContent(snapshot, repository, emptySet(), null, operations, demo = true,
+                    AssistantSidebarContent(snapshot, repository, null, operations, demo = true,
                         onOpen = { opened = it }, onAction = {}, onSettings = { settings = true },
                         onInbox = {}, onKnowledge = {}, onTodos = {}, todoCount = 2, showTodos = true,
                         inboxCount = 3, settingsCount = 0, settingsDot = false, settingsBadge = null,
-                        pages = emptyList(), onPage = {}, onTogglePin = {}, onRetired = {})
+                        pages = emptyList(), onPage = {}, onRetired = {})
                 }
             }
         }
+        // The user's own newest chats are listed under Recent (#4922); every chat but the main one and the leaders also
+        // waits under one All chats row (#4331).
+        rule.onNodeWithText("最近").assertExists()
         rule.onNodeWithText("Saved conversation").assertExists()
+        rule.onNodeWithText("全部对话（1）").performClick()
+        rule.onAllNodesWithText("Saved conversation").assertCountEquals(2)
         rule.onNodeWithContentDescription("设置").performClick()
         assertTrue(settings)
         assertEquals(listOf(AssistantRoute, TodoDetailRoute("unsaved-draft")), hidden)
-        rule.onNodeWithText("Saved conversation").performClick()
+        rule.onAllNodesWithText("Saved conversation")[0].performClick()
         assertEquals(chat.key, opened)
         snapshot = initial.copy(conversations = listOf(chat.copy(title = "Fresh conversation")))
         rule.waitForIdle()
-        rule.onNodeWithText("Fresh conversation").assertExists()
+        rule.onAllNodesWithText("Fresh conversation").assertCountEquals(2)
         rule.onNodeWithText("Saved conversation").assertDoesNotExist()
     }
 }

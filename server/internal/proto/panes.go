@@ -52,6 +52,12 @@ type PaneItem struct {
 	Title     string `json:"title,omitempty"`
 	Cwd       string `json:"cwd,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
+	// Foreground is the program in front of a pane with no agent ("zsh" at its prompt, "vim", "npm"…), as the host
+	// names it; nothing on the screen is read (#4754). "" when the host could not say in time.
+	Foreground string `json:"foreground,omitempty"`
+	// AgentSession is the stopped agent whose terminal this is: a pane Persona opened for that session, with no agent
+	// in it now (#4754). "Close finished terminals" closes these (panes.close_finished).
+	AgentSession string `json:"agent_session,omitempty"`
 }
 
 // NewShellResult is what panes.new opened.
@@ -167,7 +173,7 @@ type WorktreeCreateResult struct {
 	Branch            string `json:"branch"`
 }
 
-// WorktreeDeletePreview binds confirmation to a host-owned instance and an opaque, short-lived node token.
+// WorktreeDeletePreview binds confirmation to a host-owned workspace and an opaque, short-lived node token.
 type WorktreeDeletePreview struct {
 	WorkspaceID  string `json:"workspace_id"`
 	Kind         string `json:"kind"`
@@ -178,6 +184,7 @@ type WorktreeDeletePreview struct {
 	Dirty        int    `json:"dirty"`
 	Folder       bool   `json:"folder"`
 	PreviewToken string `json:"preview_token"`
+	CloseOnly    bool   `json:"close_only,omitempty"`
 }
 
 // WorktreeDeleteResult reports completion separately from runtime acceptance or an ambiguous transport outcome.

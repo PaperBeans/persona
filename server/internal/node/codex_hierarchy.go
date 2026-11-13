@@ -79,6 +79,10 @@ func (n *Node) decorateCodexSession(s *proto.Session, src codexSource, legacy st
 	}
 	if s.IsSubagent {
 		s.Capabilities.Send, s.Capabilities.Attach, s.Capabilities.Interrupt = false, false, false
+		s.Capabilities.Rewind = proto.CanModes(false)
+	}
+	if origin.started != nil && s.Hierarchy == nil {
+		s.Hierarchy = origin.started // when the thread began, read with its origin: no read of its own (#5120)
 	}
 	if !origin.desktop {
 		// An App chat whose rollout is gone is grouped as one with a rollout (codex_appdb.go).
@@ -101,12 +105,15 @@ func (n *Node) decorateCodexSession(s *proto.Session, src codexSource, legacy st
 	// and placeCodexDesktop placed it, whatever folder the App made for it (~/Documents/Codex/<date>/<name>): by its
 	// folder it was a project of its own. A subagent goes by its chat: resolveCodexHierarchy gives it its chat's place,
 	// but not when the chat is not listed (archived in the App, or read from its database without sqlite3).
+	// A project is named as the App names it when its folder is the repository's root (folderName), else by the folder,
+	// and numbered by its place in the App's sidebar (space_index, folderPlace; 0, none, for any other).
 	chat := src.thread
 	if s.IsSubagent {
 		chat = firstNonEmpty(origin.root, s.ParentThreadID, chat)
 	}
 	if s.RepoRoot != "" && !app.inNoProject(chat) {
-		s.SpaceID, s.SpaceName = "codex-project:"+s.RepoRoot, filepath.Base(s.RepoRoot)
+		s.SpaceID, s.SpaceName = "codex-project:"+s.RepoRoot, firstNonEmpty(app.folderName(s.RepoRoot), filepath.Base(s.RepoRoot))
+		s.SpaceIndex = app.folderPlace(s.RepoRoot)
 	} else {
 		s.SpaceID, s.SpaceName = "codex-chats:"+src.home, "Codex 对话"
 	}
@@ -149,7 +156,7 @@ func resolveCodexHierarchy(sessions []proto.Session) {
 		}
 		if rootIndex >= 0 {
 			root := sessions[rootIndex]
-			s.RepoRoot, s.SpaceID, s.SpaceKind, s.SpaceName = root.RepoRoot, root.SpaceID, root.SpaceKind, root.SpaceName
+			s.RepoRoot, s.SpaceID, s.SpaceKind, s.SpaceName, s.SpaceIndex = root.RepoRoot, root.SpaceID, root.SpaceKind, root.SpaceName, root.SpaceIndex
 		}
 	}
 }

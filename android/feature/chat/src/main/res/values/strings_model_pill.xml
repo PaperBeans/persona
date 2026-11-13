@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The composer's model pill and what a chat says in its model panel (#5055), the web's chat-modelpill and chat-modelpanel. -->
+<resources>
+    <string name="chat_modelpill_spoken">Select model. Current: %1$s</string>
+    <string name="chat_modelpill_spoken_effort">Select model. Current: %1$s, thinking effort: %2$s</string>
+    <string name="chat_modelpill_spoken_pending">Select model. Next message: %1$s · %2$s</string>
+    <string name="chat_modelpill_spoken_pending_effort">Select model. Next message: %1$s · %2$s, thinking effort: %3$s</string>
+    <string name="chat_modelpill_loading">Loading model…</string>
+    <string name="chat_modelpill_failed">Model loading failed</string>
+    <string name="chat_modelpill_default_model">Default model</string>
+    <string name="chat_modelpill_effort_xhigh_short">Extra</string>
+    <string name="chat_modelpill_header_default">Following the default · %1$s</string>
+    <string name="chat_modelpill_header_own">Same as when this chat started · %1$s</string>
+    <string name="chat_modelpill_header_picked">Picked for this chat · %1$s</string>
+    <string name="chat_modelpill_header_picked_page">Picked for this chat until you leave it · %1$s</string>
+    <string name="chat_modelpill_header_new">For this new chat · %1$s</string>
+    <string name="chat_modelpill_follow_default">Follow default</string>
+    <string name="chat_modelpill_undo_pick">Undo pick</string>
+    <string name="chat_modelpill_provider_gone">This provider isn\'t on this computer anymore</string>
+    <string name="chat_modelpanel_other_provider">Switching providers in a running Agent isn\'t available yet</string>
+    <string name="chat_modelpanel_other_engine">Switching from %1$s to %2$s needs a new conversation</string>
+    <string name="chat_modelpanel_model_fixed">%1$s can\'t change the model of a running session</string>
+    <string name="chat_modelpanel_locked">This launcher fixes its own model, so a choice here won\'t take effect.</string>
+    <string name="chat_modelpanel_busy">The agent is working. Switch the model after this turn ends</string>
+    <string name="chat_modelpanel_pending_note">Switches on your next message: the Agent restarts on %1$s and keeps this conversation</string>
+    <string name="chat_modelpanel_engine_note">Switching engines rebuilds context and may lose content</string>
+    <string name="chat_modelpanel_switch_scheduled">Switch scheduled: your next message moves the Agent to %1$s</string>
+    <string name="chat_model_changed">Model changed from %1$s to %2$s</string>
+</resources>

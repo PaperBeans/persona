@@ -1,0 +1,44 @@
+[Session handoff · internal context]
+This conversation was previously driven by the Codex engine; from here on you (Claude Code) continue it. Below is the prior record of this conversation — it is the same conversation between you and the user, so continue naturally in the first person. Do not mention this handoff note to the user, do not mention the engine switch, and do not say things like "according to the handoff summary/record". Before making any change, check the actual workspace state (e.g. git status / git diff / reading the relevant files): when the record conflicts with the workspace, the workspace always wins; when you are unsure about an earlier detail, read the real files and code to confirm rather than guessing from the summary.
+
+== Work ledger (auto-extracted) ==
+Files changed:
+- /repo/login.go
+- /repo/cookie.go
+Commands (most recent):
+- go test ./login/... → exit 1
+- go test ./login/... → exit 0
+Failed attempts:
+- go test ./login/... → exit 1
+
+== Recent conversation ==
+[User]
+The login test fails, fix it.
+[Tool] Edit (id=toolu_1): {"file_path":"/repo/login.go","old_string":"a","new_string":"b"}
+[Tool result id=toolu_1; recorded; verify outcome from result]
+The file /repo/login.go has been updated.
+[Tool] Bash (id=toolu_2): {"command":"go test ./login/...","description":"Run the login tests"}
+[Tool result id=toolu_2; failed]
+Exit code 1
+--- FAIL: TestLogin (0.01s)
+[Assistant]
+The handler is fixed; TestLogin still fails on the session cookie.
+---
+[User]
+Fix the cookie too.
+[Tool] Edit (id=cf1-0): {"change":"update","diff":"@@ -1 +1 @@\n-x\n+y","file_path":"/repo/cookie.go"}
+[Tool result id=cf1-0; recorded; verify outcome from result]
+update /repo/cookie.go
+[Tool] Bash (id=cc1): {"command":"go test ./login/..."}
+[Tool result id=cc1; recorded; verify outcome from result]
+ok  	example.com/login	0.3s
+[Assistant]
+Fixed the cookie path; the login tests pass.
+
+== Retrieving earlier verbatim history (use when needed) ==
+This conversation's earlier record is kept word for word in these transcript files on this computer:
+- Claude Code session 0d000000-0000-4000-8000-0000000000c1: <home>/.claude/projects/-repo/0d000000-0000-4000-8000-0000000000c1.jsonl
+- Codex session 0d000000-0000-4000-8000-0000000000c2: <home>/.codex/sessions/2026/01/01/rollout-2026-01-01T10-10-00-0d000000-0000-4000-8000-0000000000c2.jsonl
+The record above is only a hint. Retrieve earlier verbatim text only when an earlier detail is actually needed: search the file for keywords and read only around a hit. Each line is one JSON record and some are very long, so print only part of a matching line (e.g. `grep -o '.\{0,200\}<keyword>.\{0,200\}' <file>`). Never read or print a whole file, and never dump the history into the conversation. Retrieved original text outranks this note; when it conflicts with the current workspace, the workspace wins.
+
+== End of handoff note; the user's new message follows ==

@@ -230,7 +230,7 @@ class ManagersShotsTest {
         assertTrue(rule.onAllNodes(hasText("设为默认")).fetchSemanticsNodes().isEmpty())
     }
 
-    /** Managers sits in Connection above Pairing, opens its page, and is left out where there is no hub (demo mode). */
+    /** Managers stays in the Hub group after Connection, opens its page, and is absent in demo mode. */
     @Test fun theSettingsRowOpensTheManagers() {
         var opened: SettingsPage? = null
         var services by mutableStateOf(settingsServices(FakeManagers()))
@@ -241,8 +241,8 @@ class ManagersShotsTest {
         }
         rule.waitForIdle()
         val row = rule.onNode(hasText("助手") and hasClickAction()).fetchSemanticsNode().boundsInRoot
-        val pairing = rule.onNode(hasText("配对") and hasClickAction()).fetchSemanticsNode().boundsInRoot
-        assertTrue(row.bottom <= pairing.top)
+        val connection = rule.onNode(hasText("连接") and hasClickAction()).fetchSemanticsNode().boundsInRoot
+        assertTrue(connection.bottom <= row.top)
         rule.onNode(hasText("助手") and hasClickAction()).performClick()
         assertEquals(SettingsPage.Managers, opened)
         services = services.copy(demo = true)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -29,7 +30,10 @@ func (f *privacyHub) AppCall(ctx context.Context, p AppCall) (json.RawMessage, e
 	return f.fakeHub.AppCall(ctx, p)
 }
 
-type privacyExt struct{ guestExt }
+type privacyExt struct {
+	guestExt
+	lark proto.AssistantLark
+}
 
 func (e *privacyExt) AgentTools(_ context.Context, assistant bool) ([]proto.Tool, []proto.Tool) {
 	agents := []proto.Tool{{Name: "mail_search"}}
@@ -50,7 +54,7 @@ func (e *privacyExt) CallTool(ctx context.Context, machine, session, name string
 }
 func (e *privacyExt) AssistantLark(context.Context) (proto.AssistantLark, error) {
 	e.called = append(e.called, "assistant.lark")
-	return proto.AssistantLark{}, nil
+	return e.lark, nil
 }
 
 func privacyService(t *testing.T) (*Service, *fleetDevs, *privacyHub, *privacyExt) {
@@ -134,12 +138,29 @@ func TestAssistantMachineAuthorization(t *testing.T) {
 			}
 		})
 	}
+	ext.lark = proto.AssistantLark{
+		Rules:      []proto.LarkRule{{Method: "CLI", Path: "/im/+messages-send", Action: "confirm"}},
+		CLI:        &proto.LarkCLI{Bin: "/opt/lark/bin/lark-cli", Profile: "manager-profile"},
+		Prefer:     "cli",
+		Gates:      []proto.CommandGate{{Command: "gated", Secret: []string{"GATED_TOKEN"}}},
+		MCPServers: []proto.AssistantMCPServer{{ID: "ext", Command: "ext-mcp"}},
+	}
+	if got, err := s.assistantLark(ctx, "server"); err != nil || !reflect.DeepEqual(got, ext.lark) {
+		t.Fatalf("assistant's machine: %+v %v", got, err)
+	}
+	// Another personal machine: the rules and lark-cli's name for its gate (#5479); never the command gates, the
+	// extensions' MCP servers or the manager computer's profile.
+	want := proto.AssistantLark{Rules: ext.lark.Rules, CLI: &proto.LarkCLI{Bin: "lark-cli"}}
+	if got, err := s.assistantLark(ctx, "other"); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("other machine: %+v %v", got, err)
+	}
+	ext.lark.CLI = &proto.LarkCLI{} // the default name stays the default, not filepath.Base's "."
+	if got, _ := s.assistantLark(ctx, "other"); got.CLI == nil || got.CLI.Bin != "" {
+		t.Fatalf("other machine, default bin: %+v", got.CLI)
+	}
 	before := len(ext.called)
-	s.assistantLark(ctx, "server")
-	s.assistantLark(ctx, "other")
-	s.assistantLark(ctx, "work")
-	if len(ext.called) != before+1 {
-		t.Fatal("assistant.lark machine boundary changed")
+	if got, err := s.assistantLark(ctx, "work"); err != nil || !reflect.DeepEqual(got, proto.AssistantLark{}) || len(ext.called) != before {
+		t.Fatalf("work machine: %+v %v", got, err)
 	}
 }
 

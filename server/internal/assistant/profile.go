@@ -50,6 +50,10 @@ type Settings struct {
 	DefaultPermissionMode string `json:"default_permission_mode,omitempty"`
 	// Timezone is the phone's (IANA name): routines and the snapshot read times in it, and the hub its own.
 	Timezone string `json:"timezone,omitempty"`
+	// TimezonePicked: the user picked Timezone by hand (#1855); while true, a device's own sync (a `timezone` written
+	// without `timezone_picked`) leaves it alone. false: it follows the devices again. nil: never said (every write
+	// lands, as before).
+	TimezonePicked *bool `json:"timezone_picked,omitempty"`
 	// Notes, once edited in the app, replace manager.json's assistant.notes.
 	Notes *string `json:"notes,omitempty"`
 	// OwnerAliases are the names the user explicitly adds for kb.owner; an empty list clears them.
@@ -80,6 +84,15 @@ type Settings struct {
 	// MeetingAttendanceDefault: the role a meeting recording pre-selects on the phone (off, listener, participant;
 	// docs/assistant/meeting-minutes.md "Attending a meeting"); nil is off.
 	MeetingAttendanceDefault *string `json:"meeting_attendance_default,omitempty"`
+	// Meeting transcription stays on the device until the user chooses the hub. A nil glossary is empty;
+	// a nil or empty extension reference selects the built-in transcription contribution.
+	MeetingTranscriptionDefault   *string   `json:"meeting_transcription_default,omitempty"`
+	MeetingGlossary               *[]string `json:"meeting_glossary,omitempty"`
+	MeetingTranscriptionExtension *string   `json:"meeting_transcription_extension,omitempty"`
+	// MeetingTranscriptionInstall pins MeetingTranscriptionExtension to the installation the owner named
+	// (transcribers.TranscriptionInstall): set with it on every PUT, never by the apps, never shown. Nil for the
+	// built-in contribution (or a choice stored before pins were kept).
+	MeetingTranscriptionInstall *string `json:"meeting_transcription_install,omitempty"`
 	// DoneNeedsDelivery: a finished task closes only once its work is live and checked; stopped at a PR, merged or
 	// off by default it stays open with where it is held, and its agent is told so with its prompt (#3306,
 	// delivery.go). nil is off (the default).
@@ -87,9 +100,19 @@ type Settings struct {
 	// AgentTasks: every agent Persona starts is on a quiet, supervised todo (#3617, agent_tasks.go). nil is off (the
 	// default).
 	AgentTasks *bool `json:"agent_tasks,omitempty"`
+	// AgentAutoNaming corrects recognizable placeholder names; nil is on. Manual titles are protected.
+	AgentAutoNaming *bool `json:"agent_auto_naming,omitempty"`
+	// AgentAutoNamingMax counts successful automatic title changes per session; nil is one.
+	AgentAutoNamingMax *int `json:"agent_auto_naming_max,omitempty"`
+	// AgentAutoNamingIntervalHours enables refresh after new output; nil or zero is off.
+	AgentAutoNamingIntervalHours *int `json:"agent_auto_naming_interval_hours,omitempty"`
 	// InboxSignals: new Inbox messages the judge links to a supervised task reach its supervisor as the signal inbox
 	// (#4293, supervise_inbox.go). nil is off (the default): each one is a supervisor turn.
 	InboxSignals *bool `json:"inbox_signals,omitempty"`
+	// InboxPost: the assistant may put a conversation into the Inbox (inbox_post, a task's "put it in the Inbox when
+	// done", inbox_post.go). nil is on: a row only comes from the user's own request or a task they set. The Inbox
+	// Sources page's switch for it.
+	InboxPost *bool `json:"inbox_post,omitempty"`
 	// IdleCloseHours: an agent Persona started that has been idle this many hours with nothing going on is closed
 	// (tasks_idle.go); 0 turns it off, nil is 12 (the default).
 	IdleCloseHours *int `json:"idle_close_hours,omitempty"`
@@ -105,8 +128,23 @@ type Settings struct {
 	Leaders []string `json:"leaders,omitempty"`
 	// InterjectBackground: a message the user sends while a Claude conversation is still answering moves what runs in
 	// the foreground (Bash commands, subagents) to the background, so the message is taken up at once instead of after
-	// them (Claude Code 2.1.139 or later, node/assistant_interject.go). nil is off (the default).
+	// them (Claude Code 2.1.139 or later, node/assistant_interject.go). nil is off (the default). A round the
+	// user did not start is moved to the background by their message either way (owner_preempt.go).
 	InterjectBackground *bool `json:"interject_background,omitempty"`
+	// NextSuggestions: chats that have no suggestion of their own (Persona's conversations, Codex and the other
+	// runtimes) get the next message suggested by the suggest.next model after a turn (#4644, suggest_next.go). nil is
+	// off (the default).
+	NextSuggestions *bool `json:"next_suggestions,omitempty"`
+	// MainSupervisesOwnTasks: the main conversation follows up the tasks no leader supervises itself. nil is off (the
+	// default, #4927): the background supervisor does (supervise_background.go).
+	MainSupervisesOwnTasks *bool `json:"main_supervises_own_tasks,omitempty"`
+	// BackgroundSupervisor is the background supervisor's conversation, on BackgroundSupervisorMachineID, started at
+	// BackgroundSupervisorAt: made on first use, "" until then. BackgroundSupervisorAnnounced: the main conversation
+	// was told once that it follows up its tasks. The assistant writes these itself; PUT /api/v1/assistant does not.
+	BackgroundSupervisor          string     `json:"background_supervisor,omitempty"`
+	BackgroundSupervisorMachineID string     `json:"background_supervisor_machine_id,omitempty"`
+	BackgroundSupervisorAt        *time.Time `json:"background_supervisor_at,omitempty"`
+	BackgroundSupervisorAnnounced bool       `json:"background_supervisor_announced,omitempty"`
 }
 
 // FormerMain is a main conversation that was replaced, and until when it was the main one.
@@ -227,7 +265,8 @@ func (s *Service) mainTasksQuiet(ctx context.Context) bool {
 }
 
 // interjectBackground: a message sent while a conversation answers moves its foreground work to the background
-// (interject_background, off by default).
+// (interject_background, off by default). The owner's message to a round they did not start does so whatever this says
+// (owner_preempt.go).
 func (s *Service) interjectBackground(ctx context.Context) bool {
 	v := s.settings(ctx).InterjectBackground
 	return v != nil && *v
@@ -401,11 +440,14 @@ func keptSessions(v Settings, tasks []TaskView, links []TodoLink) []SessionRef {
 	for _, l := range links {
 		add(l.MachineID, l.SessionID)
 	}
+	// The background supervisor: quiet between tasks, still the one their signals go to (supervise_background.go).
+	add(v.BackgroundSupervisorMachineID, v.BackgroundSupervisor)
 	return out
 }
 
 // settingsChanged: the hub learns them (the snapshot's profile) and the next message reads the time in the new zone.
 func (s *Service) settingsChanged(ctx context.Context) {
+	s.transcriptionSettingsChanged(ctx) // only another contribution chosen drops the readiness answer
 	s.ProfileChanged(ctx)
 	s.publish(ctx)
 }
@@ -450,7 +492,11 @@ type assistantView struct {
 	// MainBackgroundFolded is in effect, like MainTasksQuiet.
 	MainBackgroundFolded bool `json:"main_background_folded"`
 	// MeetingAttendanceDefault is in effect (off until changed).
-	MeetingAttendanceDefault string `json:"meeting_attendance_default"`
+	MeetingAttendanceDefault      string   `json:"meeting_attendance_default"`
+	MeetingTranscriptionDefault   string   `json:"meeting_transcription_default"`
+	MeetingGlossary               []string `json:"meeting_glossary"`
+	MeetingTranscriptionExtension string   `json:"meeting_transcription_extension"`
+	MeetingTranscriptionReady     bool     `json:"meeting_transcription_ready"`
 	// IdleCloseHours is in effect (0: off).
 	IdleCloseHours int `json:"idle_close_hours"`
 	// ArchiveClosedDays is in effect (0: off).
@@ -460,9 +506,17 @@ type assistantView struct {
 	// InterjectBackground is in effect, like DoneNeedsDelivery.
 	InterjectBackground bool `json:"interject_background"`
 	// AgentTasks is in effect, like DoneNeedsDelivery.
-	AgentTasks bool `json:"agent_tasks"`
+	AgentTasks                   bool `json:"agent_tasks"`
+	AgentAutoNaming              bool `json:"agent_auto_naming"`
+	AgentAutoNamingMax           int  `json:"agent_auto_naming_max"`
+	AgentAutoNamingIntervalHours int  `json:"agent_auto_naming_interval_hours"`
 	// InboxSignals is in effect, like DoneNeedsDelivery.
 	InboxSignals bool `json:"inbox_signals"`
+	// NextSuggestions is in effect, like DoneNeedsDelivery.
+	NextSuggestions bool `json:"next_suggestions"`
+	// MainSupervisesOwnTasks is in effect, like DoneNeedsDelivery: false means the background supervisor follows up
+	// the tasks no leader supervises.
+	MainSupervisesOwnTasks bool `json:"main_supervises_own_tasks"`
 }
 
 // view is GET /api/v1/assistant; withArchived lists archived conversations too (flagged `archived`). It lists the
@@ -474,6 +528,7 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 		sp = space[0]
 	}
 	v := s.settings(ctx)
+	v.MeetingTranscriptionInstall = nil // the hub's own, never shown
 	if sp == "" {
 		v.MainMachineID = s.confirmedMainMachine(ctx, v)
 	}
@@ -481,14 +536,20 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 	out := assistantView{Settings: v, Manager: s.managerIdentity(), PermissionDefaults: s.permissionDefaults(), Conversations: []proto.Session{}, NotesEffective: s.notes(ctx), MainTasksQuiet: quietOn(v.MainTasksQuiet),
 		StartRequestedTasks: quietOn(v.StartRequestedTasks), RecordingDays: recordingDaysOf(v), MinutesDays: kb.MinutesDaysFor(minutesDaysSetting(v), recordingDaysOf(v)),
 		MeetingAttendanceDefault: meetingAttendanceOf(v), KBTopics: quietOn(v.KBTopics),
+		MeetingTranscriptionDefault: meetingTranscriptionDefaultOf(v), MeetingGlossary: meetingGlossaryOf(v),
+		MeetingTranscriptionExtension: meetingTranscriptionExtensionOf(v), MeetingTranscriptionReady: s.transcriptionReadyNow(),
 		TaskWorkspacePreference: s.taskWorkspacePreference(ctx),
 		MainBackgroundFolded:    quietOn(v.MainBackgroundFolded),
 		DoneNeedsDelivery:       v.DoneNeedsDelivery != nil && *v.DoneNeedsDelivery, IdleCloseHours: int(s.idleCloseAfter(ctx) / time.Hour),
-		ArchiveClosedDays:   int(s.archiveClosedAfter(ctx) / (24 * time.Hour)),
-		ReviewSamplePercent: s.reviewSamplePercent(ctx),
-		InterjectBackground: v.InterjectBackground != nil && *v.InterjectBackground,
-		AgentTasks:          v.AgentTasks != nil && *v.AgentTasks,
-		InboxSignals:        v.InboxSignals != nil && *v.InboxSignals}
+		ArchiveClosedDays:            int(s.archiveClosedAfter(ctx) / (24 * time.Hour)),
+		ReviewSamplePercent:          s.reviewSamplePercent(ctx),
+		InterjectBackground:          v.InterjectBackground != nil && *v.InterjectBackground,
+		AgentTasks:                   v.AgentTasks != nil && *v.AgentTasks,
+		AgentAutoNaming:              quietOn(v.AgentAutoNaming),
+		AgentAutoNamingMax:           agentNamingLimit(v),
+		AgentAutoNamingIntervalHours: agentNamingInterval(v),
+		InboxSignals:                 v.InboxSignals != nil && *v.InboxSignals, MainSupervisesOwnTasks: !s.backgroundOn(v),
+		NextSuggestions: v.NextSuggestions != nil && *v.NextSuggestions}
 	if d, ok := s.device(ctx, v.MachineID); ok {
 		out.Cwd = s.spaceCwd(d, sp)
 		var list []proto.Session
@@ -586,13 +647,28 @@ func (s *Service) profileRoutes() {
 	})
 }
 
-// warm gets a process ready on the assistant's machine (node assistant.warm) for the launcher ("" is the one new
-// conversations start with).
+// warm gets a process ready (node assistant.warm) for the launcher on the assistant's machine; "" is what the main
+// conversation's next message runs on: its pick (model_pick.go) on the main conversation's machine, else the one new
+// conversations start with.
 func (s *Service) warm(launcher string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	machine := s.settings(ctx).MachineID
-	if launcher == "" {
+	cfg := s.settings(ctx)
+	machine := cfg.MachineID
+	pick, picked := modelPick{}, false
+	switch {
+	case launcher != "":
+	case cfg.Main != "":
+		// Kept under the main conversation's machine, where its next message runs: that one is warmed then.
+		if pick, picked = s.modelPickOf(ctx, cfg.mainRouteMachine(), cfg.Main); picked {
+			machine = cfg.mainRouteMachine()
+		}
+	default: // after /clear: the next main conversation starts on the assistant's machine with the carried pick
+		if h := s.loadHandoff(ctx); h.Pick != nil {
+			pick, picked = *h.Pick, true
+		}
+	}
+	if launcher == "" && !picked {
 		launcher = s.launcherNow(ctx)
 	}
 	if _, ok := s.device(ctx, machine); !ok {
@@ -603,7 +679,12 @@ func (s *Service) warm(launcher string) {
 		return
 	}
 	params := map[string]any{"cwd": cwd, "launcher": launcher}
-	if err := s.applyModel(ctx, "assistant", params); err != nil {
+	if picked {
+		err = s.applyPick(ctx, params, pick)
+	} else {
+		err = s.applyModel(ctx, "assistant", params)
+	}
+	if err != nil {
 		s.logf("warm model: %v", err)
 		return
 	}
@@ -625,7 +706,7 @@ func (s *Service) memory(ctx context.Context, op map[string]any, out any) error 
 	}
 	cwd := s.spaceCwd(d, space) // the health space keeps a memory of its own (docs/assistant/health.md)
 	if cwd == "" {
-		return errors.New("assistant machine is offline")
+		return errMemoryMachineOffline
 	}
 	op["cwd"] = cwd
 	return s.call(ctx, d.ID, DeviceAssistantMemory, op, out)

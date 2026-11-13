@@ -1,23 +1,37 @@
-// What you can do with a message (iOS MessageMenu.swift: "Copy" / "Select" / "Quote" / "Edit"): with a mouse, a small bar under it
-// on hover and the same items on right-click; on a touch screen, a long press opens them, or a reply's ⋯ beside its copy button
-// (and "Select" shows the text to select, since the press no longer selects). "Quote" puts it as a quote in front of the draft, "Edit" (your own messages)
-// puts it back in the composer to change and send again. "Hand to Persona" sends an Agent message to the main chat;
-// "Use as context" attaches it to this chat's next message. Sharing as a card is the phone's. A reply's bar ends in a ⋯
-// whose menu has "Branch to new chat" (#2137: a new conversation with what was said up to this reply) when the session can.
-// Beside your own bubbles, the two context actions live in ⋯ to keep the hover bar compact.
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+// What you can do with a message (iOS MessageMenu.swift: "Copy" / "Select" / "Quote" / "Forward" / "Edit"): every item on
+// right-click; on a touch screen, a long press opens them (and "Select" shows the text to select, since the press no longer
+// selects). With a mouse, a small bar on hover too: beside your own bubbles, and under a turn's last reply cindy's bar
+// (ReplyBar, #5314: Copy message, Start a new session, ⋯, the time); the other replies (narration in a work summary, words
+// still streaming) have the menus only, and on a touch screen the last reply has a copy button and a ⋯ under it. "Quote" puts
+// it as a quote in front of the draft, "Edit" (your own messages) puts it back in the composer to change and send again.
+// "Forward" (#3899) opens Forward to: Persona or any Agent, the message over that chat's box with a note to type
+// (lib/forward.ts); it took the place of "Hand to Persona". "Use as context" attaches it to this chat's next message. Sharing
+// as a card is the phone's. "Start a new session" (#2137: a new conversation with what was said up to this reply) is there
+// when the session can branch. Beside your own bubbles, Forward and Use as context live in ⋯ to keep the hover bar compact.
+// While the chat picks messages to forward at once (#3838, Forward to's Select messages…), a message with a Forward has a
+// checkbox over it (Picking.tsx PickRow, which comes with Forward to): a click anywhere on it picks it or unpicks it, the
+// tick before it; its menus and bars are off. Not picking, the row is drawn as it always was.
+import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../../i18n";
 import { clock } from "../../lib/format";
 import { sendDraft, type QuotedTask } from "../../lib/drafts";
-import { errorText } from "../../lib/api";
-import { contextXml } from "../../lib/kb";
+import type { ForwardPick } from "../../lib/forward";
 import { addContext, newContext } from "../../lib/links";
-import { askPersona } from "../../lib/outbox";
-import { Button, copyText, cx, Dialog, Menu, toast, type MenuItem } from "../../ui/atoms";
+import type { Item } from "../../lib/types";
+import { Button, copyText, cx, Dialog, Menu, type MenuItem } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
 import type { RewindRestore } from "../../lib/rewind";
 import { isNoHover, NO_HOVER, useMedia } from "../../ui/media-query";
 import { useChatActions, type ChatActions } from "./chat-actions";
+import { pickParts } from "./picking-parts";
+import { useIsLatestMessage } from "./latest-message-time";
+
+// Hidden until the pointer comes, so it is not part of the first screen (startup-preload.ts): its row is kept while it
+// loads, so nothing moves when it comes.
+const replyBar = () => import("./ReplyBar");
+const ReplyBar = lazy(() => replyBar().then((m) => ({ default: m.ReplyBar })));
+// what the exchange cost, at the end of a touch screen's row (the reply bar has it on hover)
+const TurnUsage = lazy(() => replyBar().then((m) => ({ default: m.TurnUsage })));
 
 
 function pointAnchor(x: number, y: number): HTMLElement {
@@ -35,7 +49,7 @@ export interface Action extends Pick<MenuItem, "hint" | "disabled" | "danger" | 
   onSelect: () => void | Promise<unknown>;
 }
 
-function useActions(text: string, isUser: boolean, ts: string | undefined, task: QuotedTask | undefined, select: () => void): Action[] {
+function useActions(text: string, isUser: boolean, ts: string | undefined, task: QuotedTask | undefined, select: () => void, forward?: ForwardPick, editText?: string): Action[] {
   const chat = useChatActions();
   if (!text.trim()) return [];
   const out: Action[] = [{ key: "copy", label: t("chat-messageactions.copy"), icon: "copy", onSelect: () => void copyText(text) }];
@@ -43,26 +57,19 @@ function useActions(text: string, isUser: boolean, ts: string | undefined, task:
   if (chat?.canCompose) {
     out.push({ key: "quote", label: t("chat-messageactions.quote"), icon: "quote", onSelect: () => void sendDraft(chat.draftKey, { type: "quote", text, from: isUser ? t("chat-messageactions.me") : chat.speaker, ts, task }) });
   }
-  out.push(...messageContextActions(text, chat));
-  if (chat?.canCompose && isUser) out.push({ key: "edit", label: t("chat-messageactions.edit"), icon: "pencil", onSelect: () => void sendDraft(chat.draftKey, { type: "replace", text }) });
+  out.push(...messageContextActions(text, chat, forward));
+  if (chat?.canCompose && isUser) out.push({ key: "edit", label: t("chat-messageactions.edit"), icon: "pencil", onSelect: () => void sendDraft(chat.draftKey, { type: "replace", text: editText ?? text }) });
   return out;
 }
 
-/** The message goes to Persona now, or to its own conversation's next message (Android MessageMenu). */
-export function messageContextActions(text: string, chat: ChatActions | null): Action[] {
+/** The message goes on to another chat (Forward, a message in the transcript: `forward` names it), or to its own
+ *  conversation's next message (Android MessageMenu). */
+export function messageContextActions(text: string, chat: ChatActions | null, forward?: ForwardPick): Action[] {
   if (!chat || !text.trim()) return [];
   const title = t("chat-messageactions.context_title", { title: chat.title });
   const out: Action[] = [];
-  if (chat.isAgent) out.push({
-    key: "handToPersona", label: t("chat-messageactions.hand_to_persona"), icon: "spark",
-    onSelect: async () => {
-      try {
-        await askPersona(`${contextXml({ kind: "context", title, url: "", text })}\n\n${t("chat-messageactions.handoff_ask")}`);
-      } catch (e) {
-        toast(t("lib-agent-actions.send_failed", { error: errorText(e) }), "error");
-      }
-    },
-  });
+  const send = chat.forward;
+  if (send && forward) out.push({ key: "forward", label: t("chat-forward.forward"), icon: "forward", onSelect: () => send(forward) });
   if (chat.canCompose) out.push({
     key: "context", label: t("chat-messageactions.use_as_context"), icon: "clip",
     onSelect: () => addContext(chat.draftKey, newContext("context", title, "", text)),
@@ -70,11 +77,18 @@ export function messageContextActions(text: string, chat: ChatActions | null): A
   return out;
 }
 
-/** What the reply's ⋯ holds (also at the end of its right-click menu): "Branch to new chat" when the session can fork and the
- *  reply is a transcript line of its own (`<uuid>#<n>`; lines without a uuid are `line<seq>`, which the node cannot find). */
-export function moreActions(itemId: string | undefined, fork: ((itemId: string) => void) | undefined): Action[] {
+/** "Start a new session" (cindy's words; "Start a new chat" in a Persona conversation, `chat`), on the reply bar and at the
+ *  end of a reply's right-click menu, when the session can fork and the reply is a transcript line of its own
+ *  (`<uuid>#<n>`; lines without a uuid are `line<seq>`, which the node cannot find). */
+export function moreActions(itemId: string | undefined, fork: ((itemId: string) => void) | undefined, chat?: boolean): Action[] {
   if (!itemId || !fork || itemId.startsWith("line") || !itemId.includes("#")) return [];
-  return [{ key: "fork", label: t("chat-messageactions.fork"), icon: "fork", onSelect: () => fork(itemId) }];
+  return [{ key: "fork", label: t(chat ? "chat-messageactions.fork_chat" : "chat-messageactions.fork"), icon: "fork", onSelect: () => fork(itemId) }];
+}
+
+/** "Delete", last and in red, on a message only on this device (#4626, the apps' long press): in the right-click / long-press
+ *  menu, and for your own bubbles in ⋯. */
+export function deleteActions(onDelete: (() => void) | undefined): Action[] {
+  return onDelete ? [{ key: "delete", label: t("chat-outboxbubbles.delete"), icon: "trash", danger: true, onSelect: onDelete }] : [];
 }
 
 type Rewind = NonNullable<ChatActions["rewind"]>;
@@ -82,7 +96,7 @@ type Rewind = NonNullable<ChatActions["rewind"]>;
 /** "Rewind to here" (#2436) on a message of yours: "Conversation only" / "Code and conversation", the second asking again (it puts files back too). Off
  *  with the reason as its hint while the session cannot ("Claude only", "Working"…). Each choice waits for the node inside the
  *  menu (it drives Claude's own /rewind, up to a minute) and shows the failure there. */
-export function rewindActions(messageId: string | undefined, text: string, rewind: { block: string; run: Rewind["run"] } | undefined): Action[] {
+export function rewindActions(messageId: string | undefined, text: string, rewind: { block: string; code?: boolean; run: Rewind["run"] } | undefined): Action[] {
   if (!messageId || !rewind || !text.trim()) return [];
   const go = (restore: RewindRestore) => () => rewind.run(messageId, text, restore);
   return [
@@ -95,7 +109,7 @@ export function rewindActions(messageId: string | undefined, text: string, rewin
       onSelect: () => {},
       children: [
         { key: "rewind-conversation", label: t("rewind.conversation"), inline: true, onSelect: go("conversation") },
-        { key: "rewind-code", label: t("rewind.code_and_conversation"), danger: true, confirm: t("rewind.confirm_code"), inline: true, onSelect: go("code_and_conversation") },
+        ...(rewind.code === false ? [] : [{ key: "rewind-code", label: t("rewind.code_and_conversation"), danger: true, confirm: t("rewind.confirm_code"), inline: true, onSelect: go("code_and_conversation") }]),
       ],
     },
   ];
@@ -111,44 +125,75 @@ function useWhileOpen(live: Rewind["block"] | undefined, open: boolean, closed: 
   return useSyncExternalStore(on ? on.subscribe : NO_STORE, get, get);
 }
 
-/** Wraps a message: right-click / long press opens its menu. The hover bar goes under it (with the time), or beside it
- *  (`side`, your own bubbles: they had no row under them, so the layout does not move; the time stays the tooltip), or
- *  over its top right corner (`corner`, a task's card: no row under it either). `task`: "Quote" quotes it as that task. */
+/** Wraps a message: right-click / long press opens its menu. A hover bar goes beside it (`side`, your own bubbles: they had
+ *  no row under them, so the layout does not move; the time leads that bar, #5285), over its top right corner (`corner`, a
+ *  task's card: no row under it either), or under it (`bar`, a finished turn's last reply: ReplyBar). Without any of those
+ *  it has the menus only. `task`: "Quote" quotes it as that task. The chat's last message keeps its time on screen
+ *  (#5285): a last reply's in its bar (ReplyBar `pinned`) and the touch row, your own bubble's under it (UserBubble). */
 export function MessageActions({
   text,
+  editText,
   isUser,
   ts,
   side,
   corner,
+  bar,
   task,
   itemId,
   messageId,
+  images,
+  photos,
+  onDelete,
+  usage,
+  usageMs,
   children,
   className,
 }: {
   text: string;
+  /** Explicit selections kept when editing or rewinding; Copy, Quote and Forward use visible words only. */
+  editText?: string;
   isUser?: boolean;
   ts?: string;
   side?: boolean;
   corner?: boolean;
+  bar?: boolean;
   task?: QuotedTask;
-  /** The reply's transcript item: where "Branch to new chat" branches off. */
+  /** The reply's transcript item: where "Start a new session" branches off, and what Forward forwards. */
   itemId?: string;
-  /** Your message (UserMessage.id): where "Rewind to here" goes back to. */
+  /** Your message (UserMessage.id): where "Rewind to here" goes back to, and what Forward forwards. */
   messageId?: string;
+  /** Your message's pictures, which go with a forward of it. */
+  images?: Item[];
+  photos?: string[];
+  /** A message only on this device (a failed send): "Delete" ends its menus (#4626). */
+  onDelete?: () => void;
+  /** With `bar`: what the exchange used (lib/turn-usage.ts usageKey) and its work time, after the time (#5426). */
+  usage?: string;
+  usageMs?: number;
   children: React.ReactNode;
   className?: string;
 }) {
   const [selecting, setSelecting] = useState(false);
   const touch = useMedia(NO_HOVER);
-  const actions = useActions(text, Boolean(isUser), ts, task, () => setSelecting(true));
+  const latest = useIsLatestMessage(ts);
+  const forwarded = itemId ?? messageId;
+  const pick: ForwardPick | undefined = forwarded ? { itemId: forwarded, text, isUser: Boolean(isUser), ts, images, photos } : undefined;
+  const actions = useActions(text, Boolean(isUser), ts, task, () => setSelecting(true), pick, editText);
   const chat = useChatActions();
+  // the chat picks messages to forward (#3838): the checkbox over this one, when it is one to forward
+  const picker = chat?.forward ? chat.pick : undefined;
+  const picking = Boolean(picker);
+  const PickRow = picker && pick && text.trim() ? pickParts.Row : null;
   const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const rewind = isUser ? chat?.rewind : undefined;
   const rewindBlock = useWhileOpen(rewind?.block, Boolean(anchor || moreAnchor), "");
-  const extras = [...moreActions(itemId, chat?.fork), ...rewindActions(messageId, text, rewind && { block: rewindBlock, run: rewind.run })];
-  const contextActions = side ? actions.filter((a) => a.key === "handToPersona" || a.key === "context") : [];
+  const extras = [
+    ...moreActions(itemId, chat?.fork, chat?.assistant),
+    ...rewindActions(messageId, editText ?? text, rewind && { block: rewindBlock, code: rewind.code, run: rewind.run }),
+    ...deleteActions(onDelete),
+  ];
+  const contextActions = side ? actions.filter((a) => a.key === "forward" || a.key === "context") : [];
   const more: MenuItem[] = [...contextActions, ...extras].map((a, i) => ({ ...a, divider: i === contextActions.length && i > 0 }));
   const anchorRef = useRef<HTMLElement | null>(null);
   const press = useRef<{ timer: number; x: number; y: number } | null>(null);
@@ -177,8 +222,10 @@ export function MessageActions({
   const items: MenuItem[] = [...actions, ...extras].map((a, i) => ({ ...a, divider: i === actions.length && i > 0 }));
 
   return (
-    <div className={cx("group/msg", (side || corner) && "relative", className)}>
+    <div className={cx("group/msg", (side || corner || PickRow) && "relative", PickRow && (side ? "isolate" : "isolate pl-7"), className)}>
+      {PickRow && picker && pick && <PickRow pick={picker} message={pick} side={side} />}
       <div
+        inert={picking || undefined}
         className="[@media(hover:none)]:select-none [@media(hover:none)]:[-webkit-touch-callout:none]"
         onContextMenu={(e) => {
           if (Date.now() - opened.current < 1000) {
@@ -221,13 +268,19 @@ export function MessageActions({
       >
         {children}
       </div>
+      {picking ? null : bar ? (
+        <Suspense fallback={<div data-reply-bar="loading" className="mt-1.5 hidden h-6 [@media(hover:hover)]:block" />}>
+          <ReplyBar text={text} ts={ts} pinned={latest} fork={extras.find((a) => a.key === "fork")} more={actions.filter((a) => a.key !== "copy" && a.key !== "select")} usage={usage} usageMs={usageMs} persona={chat?.assistant} />
+        </Suspense>
+      ) : (side || corner) && (
       <div
         className={cx(
           "hidden h-6 items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100 focus-within:opacity-100 [@media(hover:hover)]:flex",
           moreAnchor && "opacity-100", // the ⋯ menu is open: its bar stays while the pointer is in the menu
-          side ? "absolute right-full bottom-0.5 mr-1.5" : corner ? "absolute top-2 right-2 rounded-[8px] bg-surface px-0.5 shadow-hairline" : "mt-1.5",
+          side ? "absolute right-full bottom-0.5 mr-1.5" : "absolute top-2 right-2 rounded-[8px] bg-surface px-0.5 shadow-hairline",
         )}
       >
+        {side && ts && !latest && <span className="mr-1 text-[12px] whitespace-nowrap text-ink-3 tabular-nums">{clock(ts)}</span>}
         {actions
           .filter((a) => a.key !== "select" && !contextActions.includes(a))
           .map((a) => (
@@ -255,9 +308,9 @@ export function MessageActions({
             <Icon name="more" size={14} />
           </button>
         )}
-        {!side && !corner && ts && <span className="ml-1 text-[11px] text-ink-3">{clock(ts)}</span>}
       </div>
-      {touch && !isUser && !side && !corner && (
+      )}
+      {touch && bar && !picking && (
         <div className="mt-1 flex h-6 items-center gap-5">
           <button type="button" aria-label={t("chat-messageactions.copy_reply")} title={t("chat-messageactions.copy")} onClick={() => void copyText(text)} className="touch-hit flex size-6 items-center justify-center rounded-[6px] text-ink-3">
             <Icon name="copy" size={14} />
@@ -273,10 +326,16 @@ export function MessageActions({
           >
             <Icon name="more" size={14} />
           </button>
+          {latest && ts && <span data-latest-time className="-ml-3 text-[12px] whitespace-nowrap text-ink-3 tabular-nums">{clock(ts)}</span>}
+          {usage && (
+            <Suspense fallback={null}>
+              <TurnUsage usage={usage} ms={usageMs} persona={chat?.assistant} touch />
+            </Suspense>
+          )}
         </div>
       )}
-      {anchor && <Menu anchor={anchor} onClose={close} items={items} width={items.some((i) => i.hint) ? 200 : 168} />}
-      {moreAnchor && <Menu anchor={moreAnchor} onClose={() => setMoreAnchor(null)} items={more} side="top" width={more.some((a) => a.hint) ? 200 : 168} />}
+      {anchor && !picking && <Menu anchor={anchor} onClose={close} items={items} width={items.some((i) => i.hint) ? 200 : 168} />}
+      {moreAnchor && !picking && <Menu anchor={moreAnchor} onClose={() => setMoreAnchor(null)} items={more} side="top" width={more.some((a) => a.hint) ? 200 : 168} />}
       <Dialog
         open={selecting}
         onClose={() => setSelecting(false)}

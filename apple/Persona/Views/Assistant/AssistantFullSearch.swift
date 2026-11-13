@@ -58,9 +58,11 @@ struct AssistantFullSearch: View {
                     .autocorrectionDisabled()
                     .accessibilityIdentifier("full-search-field")
                 if !query.isEmpty {
-                    Button { query = "" } label: { ThemedIcon(Theme.Icon.clear).foregroundStyle(.tertiary) }
+                    // Hit as a finger-sized square over the field's end, the glyph where it was (#6577).
+                    Button { query = "" } label: { ThemedIcon(Theme.Icon.clear).foregroundStyle(.tertiary).tapTargetOutset(.all) }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Clear Search")
+                        .accessibilityIdentifier("full-search-clear")
                 }
             }
             .padding(.horizontal, Theme.Space.l)
@@ -83,7 +85,7 @@ struct AssistantFullSearch: View {
     }
 
     private func row(_ s: Session) -> some View {
-        let title = s.key == model.assistantMain ? AssistantSidebar.mainTitle
+        let title = s.key == model.assistantMain ? AssistantSidebar.mainDisplayName(model)
             : s.title.isEmpty || s.title == "Claude Code" ? String(localized: "New Chat [Quick Actions ea4b29]") : s.title
         let preview = s.lastText.map { Fmt.plain($0).replacingOccurrences(of: "\n", with: " ") } ?? ""
         return Button { open(s.key) } label: {

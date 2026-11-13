@@ -23,6 +23,10 @@ final class FrameStats: NSObject {
 
     private var bodiesAtStart: [String: Int] = [:]
     private var pushAtStart = (passes: 0, ms: 0.0)
+    /// The streamed reply's visible length at the last frame, and the frames where it grew: (when, characters added).
+    private var shownAtLastFrame = 0
+    private var textChanges: [(CFTimeInterval, Int)] = []
+    private var cpuAtStart: Double = 0
 
     func start() {
         MainThreadWatchdog.shared.reset()
@@ -32,6 +36,9 @@ final class FrameStats: NSObject {
         busies = []
         busy = 0
         last = 0
+        shownAtLastFrame = StreamCadence.shown
+        textChanges = []
+        cpuAtStart = Self.mainThreadCPU()
         let wake = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue, true, CFIndex.min) { _, _ in
             MainActor.assumeIsolated { FrameStats.shared.passStart = CACurrentMediaTime() }
         }
@@ -57,6 +64,9 @@ final class FrameStats: NSObject {
     @objc private func tick(_ link: CADisplayLink) {
         if last > 0 { deltas.append(link.timestamp - last); busies.append(busy * 1000) }
         busy = 0
+        let shown = StreamCadence.shown
+        if shown > shownAtLastFrame { textChanges.append((link.timestamp, shown - shownAtLastFrame)) }
+        shownAtLastFrame = shown
         expected = max(link.targetTimestamp - link.timestamp, 1.0 / 120)
         last = link.timestamp
     }
@@ -79,6 +89,11 @@ final class FrameStats: NSObject {
         // Typed: in the `Any` literal below Swift 6.2 (Xcode 26.0) took `busy.last` for `last(where:)`, a closure
         // JSONSerialization throws on.
         let busyMax: Double = busy.last ?? 0
+        let cpu = Self.mainThreadCPU() - cpuAtStart
+        // The streamed reply's cadence as the reader sees it: the gaps between frames where its text grew.
+        let gaps = zip(textChanges, textChanges.dropFirst()).map { ($1.0 - $0.0) * 1000 }.sorted()
+        let added = textChanges.map { Double($0.1) }.sorted()
+        func q(_ v: [Double], _ p: Double) -> Double { v.isEmpty ? 0 : v[min(v.count - 1, Int(Double(v.count) * p))] }
         let result: [String: Any] = [
             "label": label,
             "frames": deltas.count,
@@ -99,6 +114,11 @@ final class FrameStats: NSObject {
             "push_passes": PerfCount.passes - pushAtStart.passes, "push_ms": PerfCount.totalMS - pushAtStart.ms,
             "main_thread_blocks": MainThreadWatchdog.shared.report,
             "busy_over_8ms": busy.filter { $0 > 8 }.count, "busy_over_16ms": busy.filter { $0 > 16 }.count,
+            "busy_ms_per_s": total > 0 ? busies.reduce(0, +) / total : 0,
+            "main_cpu_ms_per_s": total > 0 ? cpu * 1000 / total : 0,
+            "text_changes": textChanges.count,
+            "text_gap_p50_ms": q(gaps, 0.5), "text_gap_p95_ms": q(gaps, 0.95), "text_gap_max_ms": gaps.last ?? 0,
+            "text_added_p50": q(added, 0.5), "text_added_p95": q(added, 0.95), "text_added_max": added.last ?? 0,
         ]
         if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
            let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
@@ -107,6 +127,28 @@ final class FrameStats: NSObject {
         }
         return result
     }
+}
+
+extension FrameStats {
+    /// CPU seconds the main thread has used so far (user + system). Called on the main thread.
+    static func mainThreadCPU() -> Double {
+        var info = thread_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<thread_basic_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let thread = mach_thread_self()
+        defer { mach_port_deallocate(mach_task_self_, thread) }
+        let kr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { thread_info(thread, thread_flavor_t(THREAD_BASIC_INFO), $0, &count) }
+        }
+        guard kr == KERN_SUCCESS else { return 0 }
+        func s(_ t: time_value_t) -> Double { Double(t.seconds) + Double(t.microseconds) / 1_000_000 }
+        return s(info.user_time) + s(info.system_time)
+    }
+}
+
+/// The streamed reply's visible length, written where it is drawn (`StreamingText`) and read once a frame by
+/// `FrameStats` (#6651): the frames where it grew are the reply's cadence as the reader sees it.
+@MainActor enum StreamCadence {
+    static var shown = 0
 }
 
 #if os(iOS) || os(visionOS)
@@ -171,6 +213,9 @@ import UIKit
         } else if let list = PagePerf.mainScrollView() {
             context["viewport_height_pt"] = Double(list.bounds.height)
             context["content_height_pt"] = Double(list.contentSize.height)
+            // A chat is told a finger is on its list, as for `-showPagePerf`: otherwise it keeps to its newest end and
+            // the list does not move.
+            PagePerf.touch(list, true)
             list.setContentOffset(CGPoint(x: list.contentOffset.x, y: -list.adjustedContentInset.top), animated: false)
             try? await Task.sleep(for: .milliseconds(500))
             let startY = list.contentOffset.y
@@ -179,6 +224,7 @@ import UIKit
             let moved = abs(list.contentOffset.y - startY)
             await ListGlide.run(list, seconds: 3, speed: -2000)
             let frames = stats.stop(label: "probe-glide")
+            PagePerf.touch(list, false)
             context.merge(frames) { _, measured in measured }
             context["scroll_offset_delta_pt"] = Double(moved)
         } else {
@@ -196,12 +242,32 @@ import UIKit
 
 /// Any page, measured (`-showPagePerf YES`, docs/operations/testing.md「Whole App」): 10 s after launch, 8 s on the page as it is
 /// (a script pushes hub updates meanwhile), then the page's main scroll view (the largest one on screen) glides
-/// down for 3 s and back up for 3 s at 2000 pt/s. Writes Documents/frames-page-idle.json and frames-page-glide.json.
+/// down for 3 s and back up for 3 s at 2000 pt/s. Writes Documents/frames-page-open.json (the first 10 s),
+/// frames-page-idle.json and frames-page-glide.json.
+/// `-showPagePerfSpeed <pt/s>` and `-showPagePerfSeconds <s>` change the glide (a slow read through a long reply, a fling);
+/// `-showPagePerfRepeat <n>` glides n times, each its own file after the first (frames-page-glide-2.json, …): the first
+/// pass lays rows out for the first time, the later ones show what scrolling back over them costs.
 @MainActor enum PagePerf {
+    /// Pages told a finger is on their scroll view (true) and lifted (false), so they treat a glide as the user's
+    /// scrolling (a chat stops following its newest end), by the page (`ChatView` registers its own). Each answers
+    /// only for its own list: several chats can be mounted at once (Persona's conversation stays in the shell).
+    static var touchers: [ObjectIdentifier: (UIScrollView, Bool) -> Void] = [:]
+
+    static func touch(_ list: UIScrollView, _ down: Bool) {
+        for toucher in touchers.values { toucher(list, down) }
+    }
+
     static func runIfAsked() {
-        guard UserDefaults.standard.bool(forKey: "showPagePerf") else { return }
+        let d = UserDefaults.standard
+        guard d.bool(forKey: "showPagePerf") else { return }
+        let speed = d.double(forKey: "showPagePerfSpeed") > 0 ? d.double(forKey: "showPagePerfSpeed") : 2000
+        let seconds = d.double(forKey: "showPagePerfSeconds") > 0 ? d.double(forKey: "showPagePerfSeconds") : 3
+        let repeats = max(1, d.integer(forKey: "showPagePerfRepeat"))
+        // The first 10 s too (frames-page-open.json): launch, the page opening and its first layout.
+        FrameStats.shared.start()
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(10))
+            FrameStats.shared.stop(label: "page-open")
             FrameStats.shared.start()
             // For the script: push now (Documents/page-idle-started).
             if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
@@ -211,12 +277,35 @@ import UIKit
             FrameStats.shared.stop(label: "page-idle")
             try? await Task.sleep(for: .seconds(1))
             guard let list = mainScrollView() else { return }
-            list.setContentOffset(CGPoint(x: list.contentOffset.x, y: -list.adjustedContentInset.top), animated: false)
-            try? await Task.sleep(for: .seconds(1))
-            FrameStats.shared.start()
-            await ListGlide.run(list, seconds: 3, speed: 2000)
-            await ListGlide.run(list, seconds: 3, speed: -2000)
-            FrameStats.shared.stop(label: "page-glide")
+            for n in 1...repeats {
+                touch(list, true)
+                list.setContentOffset(CGPoint(x: list.contentOffset.x, y: -list.adjustedContentInset.top), animated: false)
+                try? await Task.sleep(for: .seconds(1))
+                FrameStats.shared.start()
+                await ListGlide.run(list, seconds: seconds, speed: CGFloat(speed))
+                await ListGlide.run(list, seconds: seconds, speed: CGFloat(-speed))
+                FrameStats.shared.stop(label: n == 1 ? "page-glide" : "page-glide-\(n)")
+                touch(list, false)
+            }
+        }
+    }
+
+    /// `-showListOffset <pt>`: 8 s after launch the page's main scroll view sits that far from its start, and
+    /// Documents/list-offset-set says so: screenshots of the same place in two builds or two switches.
+    static func offsetIfAsked() {
+        let y = UserDefaults.standard.double(forKey: "showListOffset")
+        guard y > 0 else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(8))
+            guard let list = mainScrollView() else { return }
+            touch(list, true)
+            list.setContentOffset(CGPoint(x: list.contentOffset.x, y: -list.adjustedContentInset.top + y), animated: false)
+            try? await Task.sleep(for: .seconds(0.5))
+            touch(list, false)
+            try? await Task.sleep(for: .seconds(2))
+            if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                try? Data().write(to: dir.appending(path: "list-offset-set"))
+            }
         }
     }
 

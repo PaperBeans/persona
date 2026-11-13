@@ -13,7 +13,7 @@ nonisolated enum SessionModes {
         Option(id: "default", title: String(localized: "Ask First"), detail: String(localized: "Asks you before editing files or running commands"), symbol: Theme.Icon.askFirst),
         Option(id: "acceptEdits", title: String(localized: "Auto-Edit"), detail: String(localized: "Edits files without asking, still asks before commands"), symbol: Theme.Icon.editFile),
         Option(id: "plan", title: String(localized: "Plan Only"), detail: String(localized: "Reads code and writes a plan, acts only once you approve"), symbol: Theme.Icon.plan),
-        Option(id: "auto", title: String(localized: "Auto", comment: "Permission mode: the agent judges the risk itself"), detail: String(localized: "Judges the risk itself and does safe things right away"), symbol: "wand.and.sparkles"),
+        Option(id: "auto", title: String(localized: "Auto", comment: "Permission mode: the agent judges the risk itself"), detail: String(localized: "Judges the risk itself and does safe things right away"), symbol: Theme.Icon.autoMode),
         Option(id: "bypassPermissions", title: String(localized: "Allow Everything"), detail: String(localized: "Never asks. Only available when starting"), symbol: Theme.Icon.allowEverything),
     ]
 
@@ -52,9 +52,72 @@ nonisolated enum SessionModes {
         o.id == "bypassPermissions" ? Option(id: o.id, title: o.title, detail: String(localized: "Edits files and runs commands without asking"), symbol: o.symbol) : o
     }
 
-    /// The modes a running session can switch to: every one for an assistant conversation, `switchableModes` otherwise.
+    /// The modes a running session can switch to: every one for an assistant conversation and for an agent that can take
+    /// Allow Everything while it runs (`bypass_available`, as the web offers it, #1379), `switchableModes` otherwise.
     static func switchableModes(_ session: Session?) -> [Option] {
-        session?.assistant == true ? assistantModes : switchableModes
+        session?.assistant == true || session?.bypassAvailable == true ? assistantModes : switchableModes
+    }
+
+    /// The switchable options plus the current one when it is not among them (bypassPermissions, an unknown mode).
+    static func listed(_ list: [Option], current: String?) -> [Option] {
+        guard let current, !list.contains(where: { $0.id == current }) else { return list }
+        return list + [mode(current) ?? .init(id: current, title: current, detail: "", symbol: Theme.Icon.help)]
+    }
+
+    // MARK: The Agents header's mode (#3719)
+
+    /// How much a mode lets the agent do without asking, the tone the header draws its symbol in (`Theme.ModeTone`).
+    enum HeaderTone: Equatable, Sendable { case asks, plans, acts, allowsAll, unknown }
+
+    struct HeaderLook: Equatable, Sendable {
+        var symbol: String
+        var tone: HeaderTone
+    }
+
+    /// The header's look for a mode: the mode menu's own symbol, and its tone. A mode not reported yet, or one this app
+    /// does not know, is the plain permissions symbol: never a guessed Ask First, which would make an agent started in
+    /// Allow Everything look safe.
+    static func headerLook(_ id: String?) -> HeaderLook {
+        let tone: HeaderTone = switch id ?? "" {
+        case "default": .asks
+        case "plan": .plans
+        case "acceptEdits", "auto": .acts
+        case ModeID.bypass: .allowsAll
+        default: .unknown
+        }
+        return HeaderLook(symbol: tone == .unknown ? Theme.Icon.permissions : mode(id)?.symbol ?? Theme.Icon.permissions, tone: tone)
+    }
+
+    /// The header shows an agent's mode when there is one to see or to change: Claude Code's, before its first prompt
+    /// too (it can be set). Not an assistant conversation (its page has its own bar), nor an agent whose mode can be
+    /// neither read nor changed (Codex, TRAEX, runtimes without modes).
+    static func showsInHeader(_ s: Session) -> Bool {
+        !s.assistant && (s.permissionMode != nil || s.canChangeModes)
+    }
+
+    enum ModeID {
+        static let bypass = "bypassPermissions"
+    }
+
+    /// What switching a running agent to a mode asks first (#3719): going into Allow Everything, and leaving it when
+    /// the agent cannot come back to it from here (`bypass_available` false: only a new start picks it). An assistant
+    /// conversation switches without asking, as on the web.
+    enum Confirmation: Equatable, Sendable {
+        case allowEverything
+        case leaveAllowEverything
+    }
+
+    /// Allow Everything as a disabled row of the header's menu, saying why, where the agent cannot take it while it runs.
+    static func bypassUnavailable(_ s: Session) -> Option? {
+        guard !s.assistant, s.canChangeModes, !s.bypassAvailable, s.permissionMode != ModeID.bypass else { return nil }
+        return mode(ModeID.bypass)
+    }
+
+    static func confirmation(_ s: Session?, to mode: String) -> Confirmation? {
+        guard let s, !s.assistant, mode != s.permissionMode else { return nil }
+        if mode == ModeID.bypass { return .allowEverything }
+        if s.permissionMode == ModeID.bypass, !s.bypassAvailable { return .leaveAllowEverything }
+        return nil
     }
 
     static func mode(_ id: String?) -> Option? { permissionModes.first { $0.id == id } }
@@ -67,11 +130,16 @@ nonisolated enum SessionModes {
         return ids.map { id in codexEffortLevels.first { $0.id == id } ?? Option(id: id, title: id, detail: "", symbol: Theme.Icon.effort) }
     }
 
-    /// The model can be switched on the running session (#3119): Claude Code in a herdr pane, which takes `/model`.
-    /// Codex and TRAEX pick theirs in a full-screen menu the phone cannot drive; the assistant's has its own chip.
-    static func switchesModel(_ s: Session?) -> Bool {
-        guard let s else { return false }
-        return s.canSend && s.canTerminal && s.paneID != nil && s.isClaude && !s.isTraex && !s.assistant
+    /// The model can be switched on the running session (#3119): Claude Code in a herdr pane, which takes `/model`, or a
+    /// session whose node takes a model (`Session.switchesModel`, #6294). Codex and TRAEX in a terminal pick theirs in a
+    /// full-screen menu the phone cannot drive; the assistant's has its own chip.
+    static func switchesModel(_ s: Session?) -> Bool { s?.switchesModel == true }
+
+    /// Whether the menus offer model rows now: Claude Code in a pane always (its `/model` aliases until its launcher's list
+    /// is read); a session whose node takes the model once that list is read, since the fixed aliases are Claude Code's
+    /// words, not its runtime's (`Session.picksModelByModes`). `list`: `RunningModelLists.models(_:_:)`.
+    static func offersModels(_ s: Session?, list: [AgentModel]?) -> Bool {
+        switchesModel(s) && (s?.picksModelByModes != true || list != nil)
     }
 
     /// Why the model cannot be switched right now (nil when it can): the node refuses the same cases.
@@ -109,6 +177,13 @@ nonisolated enum SessionModes {
     /// For a mode or effort the session has not reported.
     static var unknown: String { String(localized: "Unknown [Session Modes 4d8c1c]") }
     static func modeLabel(_ id: String?) -> String? { id.map { mode($0)?.title ?? $0 } }
+    /// The permission mode menu's title and its button's accessibility label: "Permission Mode: Ask First" for a mode
+    /// the session reported, just "Permission Mode" before it has one (#5596), as the header capsule shows it. An agent
+    /// has no mode before its first prompt (it comes from the transcript) though the mode can already be changed.
+    static func modeHeading(_ id: String?) -> String {
+        guard let label = modeLabel(id), !label.isEmpty else { return String(localized: "Permission Mode") }
+        return String(localized: "Permission Mode: \(label)")
+    }
     static func effortLabel(_ id: String?) -> String? { id.map { effort($0)?.title ?? $0 } }
 
     /// The shell composer's model button's two words (#1091, #1117), ChatGPT's "6.1 Sol Medium": the model, drawn in the text's
@@ -172,6 +247,9 @@ struct SessionModeBar: View {
     @Environment(AppModel.self) private var model
     let key: SessionKey
     var session: Session?
+    /// A mode picked here goes through the page's `requestMode` (which asks first where `SessionModes.confirmation`
+    /// says so); nil applies it at once.
+    var pick: ((String) -> Void)? = nil
     @State private var changing = false
     /// "Other Model…": a model ID typed by hand (#1644).
     @State private var typingModel = false
@@ -186,7 +264,7 @@ struct SessionModeBar: View {
             if session?.setsEffortOnly != true {
                 Menu {
                     Picker("Permission Mode", selection: Binding(get: { mode ?? "" }, set: { new in change(mode: new) })) {
-                        ForEach(options(SessionModes.switchableModes(session), current: mode)) { o in
+                        ForEach(SessionModes.listed(SessionModes.switchableModes(session), current: mode)) { o in
                             Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }.tag(o.id)
                         }
                     }
@@ -196,7 +274,7 @@ struct SessionModeBar: View {
                              text: SessionModes.modeLabel(mode) ?? String(localized: "Permission Mode"), tint: SessionModes.modeTint(mode), known: mode != nil)
                 }
                 .labelOnlyMenu()
-                .accessibilityLabel("Permission Mode: \(SessionModes.modeLabel(mode) ?? SessionModes.unknown)")
+                .accessibilityLabel(SessionModes.modeHeading(mode))
             }
             Menu {
                 // Claude Code's ultracode (#1307): its own switch under the effort, not a level of it (declared before it where
@@ -210,9 +288,10 @@ struct SessionModeBar: View {
                 .pickerStyle(.inline)
                 if !UltracodeMenuSection.leadsEffort { UltracodeMenuSection(key: key, session: session) }
                 // The model in the same chip (#3119, the web's #2434): Claude Code takes `/model`, typed by the node.
-                if SessionModes.switchesModel(session) {
+                // A session whose node takes the model (#6294) offers its launcher's list once read (`offersModels`).
+                let list = RunningModelLists.shared.models(key, session)
+                if SessionModes.offersModels(session, list: list) {
                     let busy = SessionModes.modelBusy(session)
-                    let list = RunningModelLists.shared.models(key, session)
                     Section("Model [Assistant View c98e11]") {
                         // A typed model (#1644) is a row of its own, by its ID: no alias is ticked for it.
                         Picker("Model [Assistant View c98e11]", selection: Binding(get: { PromptItems.runningModelID(session?.model, list: list) }, set: { id in change(model: id) })) {
@@ -247,20 +326,18 @@ struct SessionModeBar: View {
     /// The effort chip read out, with ", ultracode on" while it carries the mark (#1307).
     private var effortSpoken: String {
         let effort = session?.effort
-        let words = SessionModes.switchesModel(session)
+        let words = SessionModes.offersModels(session, list: RunningModelLists.shared.models(key, session))
             ? String(localized: "Thinking effort and model: \(SessionModes.effortLabel(effort) ?? String(localized: "Unknown [Session Modes 4d8c1c]")), \(SessionModes.modelName(session?.model) ?? String(localized: "Unknown model"))")
             : String(localized: "Thinking effort: \(SessionModes.effortLabel(effort) ?? String(localized: "Unknown [Session Modes 4d8c1c]"))")
         guard let extra = Ultracode.chipMark(session)?.spoken else { return words }
         return words + String(localized: ", ", comment: "List separator") + extra
     }
 
-    /// The switchable options plus the current one when it is not among them (bypassPermissions, an unknown mode).
-    private func options(_ list: [SessionModes.Option], current: String?) -> [SessionModes.Option] {
-        guard let current, !list.contains(where: { $0.id == current }) else { return list }
-        return list + [SessionModes.mode(current) ?? .init(id: current, title: current, detail: "", symbol: Theme.Icon.help)]
-    }
-
     private func change(mode: String? = nil, effort: String? = nil, model picked: String? = nil) {
+        if let mode, let pick {
+            if mode != session?.permissionMode { pick(mode) }
+            return
+        }
         let list = RunningModelLists.shared.models(key, session)
         let newModel = picked.flatMap { SessionModes.modelPatch($0, current: session?.model, list: list) }
         if picked != nil, newModel == nil { return } // the model it runs already
@@ -280,7 +357,8 @@ struct SessionModesMenu: View {
     @Environment(AppModel.self) private var model
     let key: SessionKey
     var session: Session?
-    /// Claude Code in a herdr pane: picking a model sends `/model <alias>`.
+    /// Claude Code in a herdr pane: picking a model sends `/model <alias>`; a session whose node takes the model (#6294,
+    /// `Session.picksModelByModes`) gets the pick through POST …/modes.
     var picksModel = false
     /// Effort and permission mode can change (Claude Code, the assistant; not Codex or TRAEX).
     var setsModes = true
@@ -288,6 +366,11 @@ struct SessionModesMenu: View {
     var setsEffortOnly = false
     /// "Other Model…" where a model can be picked: the composer opens `SessionTypedModelSheet` (#1644).
     var otherModel: (() -> Void)? = nil
+    /// The main Persona chat: opens its conversation model sheet (#6542, the per-conversation pick, #5033). Nil on
+    /// older hubs, which keep the row read-only.
+    var assistantPick: (() -> Void)? = nil
+    /// A mode picked here goes through the page's `requestMode` (`SessionModeBar.pick`); nil applies it at once.
+    var pick: ((String) -> Void)? = nil
 
     /// The button's title for this conversation; the effort carries the workflow mark while ultracode is on (#1307).
     static func title(_ session: Session?, setsModes: Bool) -> SessionModes.ComposerTitle? {
@@ -320,15 +403,28 @@ struct SessionModesMenu: View {
                     .accessibilityIdentifier("sessionModes.otherModel")
                 }
                 // A typed model (#1644) is a row of its own, by its ID: no alias is ticked for it, and Default switches back.
-                Picker("Model [Assistant View c98e11]", selection: Binding(get: { PromptItems.runningModelID(session?.model, list: list) }, set: { id in
-                    guard case .send(let text) = PromptItems.modelPick(id, running: session?.model, list: list) else { return }
-                    model.sendNow(key, text: text, images: []) // photos and quotes stay for the message
-                })) {
-                    ForEach(PromptItems.runningModels(session?.model, list: list), id: \.id) { m in
-                        Text(m.name).tag(m.id)
+                // Switches, not an inline picker, so the section's title is drawn over them (#4322, `MenuChoice`).
+                let running = PromptItems.runningModelID(session?.model, list: list)
+                ForEach(PromptItems.runningModels(session?.model, list: list), id: \.id) { m in
+                    MenuChoice(id: m.id, selected: running, pick: { id in
+                        guard case .send(let text) = PromptItems.modelPick(id, running: session?.model, list: list) else { return }
+                        // A session whose node takes the model (#6294) gets it through POST …/modes, never as a message.
+                        if session?.picksModelByModes == true { Task { await model.setModes(key, model: id) }; return }
+                        model.sendNow(key, text: text, images: []) // photos and quotes stay for the message
+                    }) {
+                        Text(m.name)
                     }
                 }
-                .pickerStyle(.inline)
+            } else if let assistantPick {
+                // The main Persona chat (#6542): the row opens its conversation model sheet (pick kept on the hub, #5033).
+                Button(action: assistantPick) {
+                    Label {
+                        Text(SessionModes.modelName(session?.model) ?? String(localized: "Unknown model"))
+                    } icon: {
+                        ThemedIcon(Theme.Icon.agentChat)
+                    }
+                }
+                .accessibilityIdentifier("sessionModes.assistantModel")
             } else {
                 Text(SessionModes.modelName(session?.model) ?? String(localized: "Unknown model")) // what it runs; changed where it was started
             }
@@ -337,13 +433,12 @@ struct SessionModesMenu: View {
             // Claude Code's ultracode (#1307): its own switch under the effort, not a level of it (declared before it where
             // the menu lists its items the other way round, `UltracodeMenuSection.leadsEffort`).
             if UltracodeMenuSection.leadsEffort { UltracodeMenuSection(key: key, session: session) }
-            Section("Thinking Effort") {
-                Picker("Thinking Effort", selection: Binding(get: { effort ?? "" }, set: { new in change(effort: new) })) {
-                    ForEach(SessionModes.effortOptions(session)) { o in
-                        Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }.tag(o.id)
+            Section("Thinking Effort") { // switches, so the title is drawn (#4322, `MenuChoice`)
+                ForEach(SessionModes.effortOptions(session)) { o in
+                    MenuChoice(id: o.id, selected: effort ?? "", pick: { change(effort: $0) }) {
+                        Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }
                     }
                 }
-                .pickerStyle(.inline)
             }
             if !UltracodeMenuSection.leadsEffort { UltracodeMenuSection(key: key, session: session) }
         }
@@ -354,13 +449,17 @@ struct SessionModesMenu: View {
                     Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }.tag(o.id)
                 }
             } label: {
-                Label("Permission Mode: \(SessionModes.modeLabel(mode) ?? SessionModes.unknown)", systemImage: SessionModes.mode(mode)?.symbol ?? Theme.Icon.askFirst)
+                Label(SessionModes.modeHeading(mode), systemImage: SessionModes.mode(mode)?.symbol ?? Theme.Icon.askFirst)
             }
             .pickerStyle(.menu)
         }
     }
 
     private func change(mode: String? = nil, effort: String? = nil) {
+        if let mode, let pick {
+            if mode != session?.permissionMode { pick(mode) }
+            return
+        }
         guard mode != session?.permissionMode || effort != session?.effort else { return }
         Task { await model.setModes(key, permissionMode: mode, effort: effort) }
     }
@@ -397,6 +496,111 @@ struct BypassWarning: View {
             }
         }
         .tint(Theme.danger)
+    }
+}
+
+/// One of a menu's choices as a switch, on for the current one (#3719, #4322). An iOS menu draws no section header over
+/// an inline picker's options, whether the section is around the picker or inside it, and does over switches
+/// (docs/lessons/ios.md): a titled list of choices is these in a titled `Section`. Picking the current one again does
+/// nothing; another one calls `pick` with its ID.
+struct MenuChoice<Content: View>: View {
+    var id: String
+    var selected: String?
+    var pick: (String) -> Void
+    @ViewBuilder var label: () -> Content
+
+    var body: some View {
+        Toggle(isOn: Binding(get: { id == selected }, set: { on in if on, id != selected { pick(id) } })) { label() }
+    }
+}
+
+/// The agent's permission mode at the end of the Agents header's second row (#3719), as Claude Code keeps its mode in its
+/// footer: the mode's symbol in its tone (`SessionModes.headerLook`), Allow Everything in the warning red. Its words are in
+/// the menu, the VoiceOver label and the pointer's tooltip. A tap opens the mode menu; a pick goes through `pick` (the
+/// page's `requestMode`, which asks first where `SessionModes.confirmation` says so).
+struct HeaderModeButton: View, Equatable {
+    var session: Session
+    var changing = false
+    var pick: (String) -> Void
+
+    /// The header re-evaluates on every hub push for its session (its rev, activity, tokens…); the button only when what
+    /// it draws or offers changes. `pick` is the page's `requestMode`, which reads the session when it runs.
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.changing == b.changing && a.session.permissionMode == b.session.permissionMode
+            && a.session.canChangeModes == b.session.canChangeModes && a.session.bypassAvailable == b.session.bypassAvailable
+            && a.session.assistant == b.session.assistant && a.session.status.isLive == b.session.status.isLive
+    }
+
+    /// The capsule is as tall as the row's tabs; its 44 pt target overhangs the row by this much above and below.
+    static let overhang = (Theme.Size.tapTarget - Theme.Size.wellS) / 2
+
+    var body: some View {
+        #if DEBUG || PERF_SIGNPOST
+        let _ = PerfTrace.body("HeaderModeButton")
+        #endif
+        let mode = session.permissionMode
+        let words = SessionModes.modeHeading(mode)
+        Menu {
+            // "Permission Mode: …" heads the list, as on the web and Android. The modes are switches, the current one on:
+            // an iOS menu draws no section header over an inline picker's options, whether the section is around the
+            // picker or inside it (docs/lessons/ios.md), and does over switches (the composer's ultracode section).
+            Section {
+                ForEach(SessionModes.listed(SessionModes.switchableModes(session), current: mode)) { o in
+                    MenuChoice(id: o.id, selected: mode, pick: pick) {
+                        Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }
+                    }
+                }
+                .disabled(!session.canChangeModes)
+                // Allow Everything where this agent cannot take it while it runs: there, and why under it (a menu draws
+                // no footers; it keeps an item's second `Text`, not a `Label`'s).
+                if let o = SessionModes.bypassUnavailable(session) {
+                    Button {} label: { Text(o.title); Text(o.detail); Theme.Icon.image(o.symbol) }.disabled(true)
+                }
+            } header: {
+                // Why nothing can be picked goes under the title: words, not a grayed item.
+                Text(!session.canChangeModes && !session.status.isLive ? words + "\n" + StateName.notRunning.text : words)
+            }
+        } label: {
+            HeaderModeCapsule(look: SessionModes.headerLook(mode), changing: changing)
+        }
+        .labelOnlyMenu()
+        .disabled(changing)
+        .accessibilityLabel(words)
+        .accessibilityIdentifier("chat.permissionMode")
+        .help(words)
+        .padding(.vertical, -Self.overhang)
+    }
+}
+
+/// `HeaderModeButton`'s drawing: an icon-only capsule as tall as the header's tabs, tinted as `ModeChip` tints a mode
+/// that is not the quiet one; a small spinner in place of the symbol while a change is on its way.
+struct HeaderModeCapsule: View {
+    var look: SessionModes.HeaderLook
+    var changing = false
+
+    static func color(_ tone: SessionModes.HeaderTone) -> Color {
+        switch tone {
+        case .asks, .unknown: .secondary
+        case .plans: Theme.ModeTone.plans
+        case .acts: Theme.ModeTone.acts
+        case .allowsAll: Theme.ModeTone.allowsAll
+        }
+    }
+
+    var body: some View {
+        let tone = Self.color(look.tone)
+        let tinted = look.tone != .asks && look.tone != .unknown
+        ZStack {
+            ThemedIcon(look.symbol).font(Theme.Font.labelStrong).foregroundStyle(tone).opacity(changing ? 0 : 1)
+            if changing { ProgressView().controlSize(.mini) }
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .scaledFrame(height: Theme.Size.wellS)
+        .background(tinted ? AnyShapeStyle(tone.opacity(0.12)) : AnyShapeStyle(Theme.Fill.chip), in: .capsule)
+        .frame(minWidth: Theme.Size.tapTarget, minHeight: Theme.Size.tapTarget)
+        .contentShape(.rect)
+        .animation(Theme.Motion.standard, value: changing)
+        .animation(Theme.Motion.standard, value: look)
     }
 }
 

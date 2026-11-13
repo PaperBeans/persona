@@ -21,25 +21,25 @@ struct MenuView: View {
             }
             VStack(spacing: 2) {
                 if !model.passive { // passive mode: the hub dials, there is nothing to dial again from here
-                    MenuRow(title: "立即重连", symbol: "arrow.clockwise", disabled: !canReconnect) { model.reconnect() }
+                    MenuRow(title: linkText("Reconnect Now"), symbol: "arrow.clockwise", disabled: !canReconnect) { model.reconnect() }
                 }
-                MenuRow(title: model.look == .unpaired ? "粘贴配对链接…" : "配对 / 修改连接…", symbol: "link") {
+                MenuRow(title: model.look == .unpaired ? linkText("Paste Pairing Link…") : linkText("Pair / Change Connection…"), symbol: "link") {
                     openWindow(id: "pair")
                     NSApp.activate(ignoringOtherApps: true)
                 }
                 if model.status?.renamable == true {
-                    MenuRow(title: "给这台电脑改名…", symbol: "pencil") {
+                    MenuRow(title: linkText("Rename This Computer…"), symbol: "pencil") {
                         openWindow(id: "rename")
                         NSApp.activate(ignoringOtherApps: true)
                     }
                 }
                 if let node = model.nodeService, !node.installed {
-                    MenuRow(title: "安装本机 node 服务", symbol: "square.and.arrow.down") {
+                    MenuRow(title: linkText("Install the Local node Service"), symbol: "square.and.arrow.down") {
                         Task { await model.installNode() }
                     }
                 } else if model.look == .nodeMissing {
                     // Installed but not running (or not reachable): set the service up again.
-                    MenuRow(title: "重新安装", symbol: "arrow.down.circle") {
+                    MenuRow(title: linkText("Reinstall"), symbol: "arrow.down.circle") {
                         Task { await model.reinstallNode() }
                     }
                 }
@@ -54,7 +54,7 @@ struct MenuView: View {
             }
             .padding(.horizontal, 6)
             Divider().padding(.vertical, 6)
-            MenuRow(title: "退出 Persona Link", symbol: "power", shortcut: "⌘Q") { model.quit() }
+            MenuRow(title: linkText("Quit Persona Link"), symbol: "power", shortcut: "⌘Q") { model.quit() }
                 .keyboardShortcut("q")
                 .padding(.horizontal, 6)
                 .padding(.bottom, 6)
@@ -91,7 +91,7 @@ struct StatePill: View {
     let look: LinkLook
 
     var body: some View {
-        Text(title)
+        Text(Self.title(look))
             .font(.caption.weight(.semibold))
             .lineLimit(1)
             .padding(.horizontal, 8)
@@ -100,15 +100,15 @@ struct StatePill: View {
             .background(StatusBlock.tint(look).opacity(0.14), in: Capsule())
     }
 
-    private var title: String {
+    static func title(_ look: LinkLook) -> String {
         switch look {
-        case .connected: "已连上"
-        case .awaitingConfirm: "等你确认"
-        case .nodeMissing: "后台服务没在运行"
-        case .connecting: "连接中"
-        case .listening: "等 hub 来连"
-        case .down: "离线"
-        case .unpaired: "未配对"
+        case .connected: linkText("Connected")
+        case .awaitingConfirm: linkText("Awaiting Confirmation")
+        case .nodeMissing: linkText("Service Not Running")
+        case .connecting: linkText("Connecting")
+        case .listening: linkText("Waiting for Hub")
+        case .down: linkText("Offline")
+        case .unpaired: linkText("Not Paired")
         }
     }
 }
@@ -163,7 +163,7 @@ struct StatusBlock: View {
             return [Line(symbol: "exclamationmark.octagon", text: down, primary: true, tint: .red)]
         }
         guard let s = model.status else {
-            return [Line(symbol: "hourglass", text: "正在启动…", primary: true)]
+            return [Line(symbol: "hourglass", text: linkText("Starting…"), primary: true)]
         }
         if s.passive { return passiveLines(s, at: now) }
         var out = activeLines(s, at: now)
@@ -176,50 +176,51 @@ struct StatusBlock: View {
     }
 
     func activeLines(_ s: LinkStatus, at now: Date) -> [Line] {
-        let machine = s.shownMachine.map { Line(symbol: "laptopcomputer", text: "这台是 hub 上的「\($0)」") }
+        let machine = s.shownMachine.map { Line(symbol: "laptopcomputer", text: linkText("This computer is “\($0)” on the hub")) }
         // Which hub, from hubs that say (older ones do not: no line then); its mesh only while connected.
         let hubName = s.hubName.flatMap { $0.isEmpty ? nil : $0 }
         let hub = hubName.map { Line(symbol: "server.rack", text: LinkText.hub(name: $0, mesh: s.state == "connected" ? s.meshHubs : nil)) }
         switch s.state {
         case "connected" where s.pending == true:
             // Paired from a link the phone or the web made: the hub keeps this computer out until it is confirmed there.
-            return [Line(symbol: "hourglass", text: "等你在手机上确认", primary: true, tint: .orange),
-                    Line(symbol: "iphone", text: "在手机 App 里点「是我的电脑」"),
+            return [Line(symbol: "hourglass", text: linkText("Confirm on your phone"), primary: true, tint: .orange),
+                    Line(symbol: "iphone", text: linkText("In the phone app, tap “It's Mine”")),
                     Line(symbol: "point.3.connected.trianglepath.dotted",
-                         text: "\(LinkText.kinds[s.kind ?? ""] ?? "地址") · \(LinkText.host(s.address))")]
+                         text: "\(LinkText.kinds[s.kind ?? ""] ?? linkText("Address")) · \(LinkText.host(s.address))")]
                 + [hub, machine].compactMap { $0 }
         case "connected":
-            var out = [Line(symbol: "checkmark.circle.fill", text: "已连上 hub", primary: true, tint: .green),
+            var out = [Line(symbol: "checkmark.circle.fill", text: linkText("Connected to the hub"), primary: true, tint: .green),
                        Line(symbol: "point.3.connected.trianglepath.dotted",
-                            text: "\(LinkText.kinds[s.kind ?? ""] ?? "地址") · \(LinkText.host(s.address))")]
+                            text: "\(LinkText.kinds[s.kind ?? ""] ?? linkText("Address")) · \(LinkText.host(s.address))")]
             if s.systemTrust { out.append(Line(symbol: "lock.shield", text: LinkText.systemTrust)) }
             if let hub { out.append(hub) }
             if let since = s.since {
-                out.append(Line(symbol: "clock", text: "已连接 \(LinkText.duration(since: since, now: now))"))
+                out.append(Line(symbol: "clock", text: linkText("Connected for \(LinkText.duration(since: since, now: now))")))
             }
             switch s.node {
             case "online":
-                out.append(Line(symbol: "checkmark.circle", text: "本机 node 在线", tint: .green))
+                out.append(Line(symbol: "checkmark.circle", text: linkText("The local node is online"), tint: .green))
             case "offline":
                 // The first line says it: what is wrong is on this computer, not the link.
-                out[0] = Line(symbol: "exclamationmark.triangle", text: "这台电脑上的 Persona 后台服务没在运行", primary: true, tint: .orange)
-                out.insert(Line(symbol: "info.circle", text: "连上了 hub，但 hub 用不上这台电脑：点下面的「重新安装」"), at: 1)
+                out[0] = Line(symbol: "exclamationmark.triangle", text: linkText("The Persona service on this computer isn't running"), primary: true, tint: .orange)
+                out.insert(Line(symbol: "info.circle", text: linkText("Connected to the hub, but the hub can't use this computer: click “Reinstall” below")), at: 1)
                 if let e = s.nodeError, !e.isEmpty { out.append(Line(symbol: "info.circle", text: e)) }
             default:
-                out.append(Line(symbol: "ellipsis.circle", text: "hub 正在连本机的 node…"))
+                out.append(Line(symbol: "ellipsis.circle", text: linkText("The hub is connecting to the local node…")))
             }
             return out + [machine].compactMap { $0 }
         case "connecting":
-            return [Line(symbol: "arrow.triangle.2.circlepath", text: "连接中：正在找 hub…", primary: true, tint: .blue)] + [hub, machine].compactMap { $0 }
+            return [Line(symbol: "arrow.triangle.2.circlepath", text: linkText("Connecting: looking for the hub…"), primary: true, tint: .blue)] + [hub, machine].compactMap { $0 }
         case "unpaired":
-            return [Line(symbol: "link.badge.plus", text: "还没连上 hub", primary: true),
-                    Line(symbol: "info.circle", text: "在手机或网页的「添加电脑」里拿到配对链接，点「粘贴配对链接…」，或者直接点开那条链接")]
+            return [Line(symbol: "link.badge.plus", text: linkText("Not connected to the hub yet"), primary: true),
+                    Line(symbol: "info.circle", text: linkText("Get a pairing link from “Add Computer” in the phone app or the web app, then click “Paste Pairing Link…”, or just open the link."))]
         case "refused":
-            return [Line(symbol: "lock.slash", text: s.error ?? "hub 不认这台的凭据：重新配对", primary: true, tint: .red)] + [hub, machine].compactMap { $0 }
+            return [Line(symbol: "lock.slash", text: s.error ?? linkText("The hub doesn't recognize this computer's credentials: pair again"), primary: true, tint: .red)] + [hub, machine].compactMap { $0 }
         default: // waiting
-            var out = [Line(symbol: "personalhotspot.slash", text: "离线" + (s.retry.map { " · " + LinkText.until($0, now: now) } ?? ""),
+            var out = [Line(symbol: "personalhotspot.slash", text: linkText("Offline") + (s.retry.map { " · " + LinkText.until($0, now: now) } ?? ""),
                             primary: true, tint: .red)]
             // persona-link joins the failures of the addresses it tried with 「；」: one line each.
+            // i18n-ignore: persona-link's own output, not UI text
             var parts = (s.error ?? "").split(separator: "；").map(String.init).filter { !$0.isEmpty }
             if let se = s.sshError {
                 if parts.isEmpty {
@@ -240,39 +241,40 @@ extension StatusBlock {
     /// Passive mode: the hub dials this Mac. Which mode and where it listens first, then what the hub did last.
     func passiveLines(_ s: LinkStatus, at now: Date) -> [Line] {
         let listen = s.listen ?? model.passivePairing?.listen ?? ":18663"
-        let mode = Line(symbol: "arrow.down.left.circle", text: "\(LinkText.mode(true)) · 监听 \(listen)")
-        let machine = s.shownMachine.map { Line(symbol: "laptopcomputer", text: "这台是 hub 上的「\($0)」") }
+        let mode = Line(symbol: "arrow.down.left.circle", text: linkText("\(LinkText.mode(true)) · Listening on \(listen)"))
+        let machine = s.shownMachine.map { Line(symbol: "laptopcomputer", text: linkText("This computer is “\($0)” on the hub")) }
         let hub = s.hubName.flatMap { $0.isEmpty ? nil : $0 }.map { Line(symbol: "server.rack", text: LinkText.hub(name: $0, mesh: nil)) }
         let seen = s.lastSeen.map {
-            Line(symbol: "clock", text: "上一次 hub 连进来：\(LinkText.ago($0, now: now))" + (s.from.map { " · 来自 \($0)" } ?? ""))
+            Line(symbol: "clock", text: linkText("The hub last connected in: \(LinkText.ago($0, now: now))") + (s.from.map { linkText(" · from \($0)") } ?? ""))
         }
         var node: [Line] = []
         if s.node == "offline" {
-            node.append(Line(symbol: "exclamationmark.triangle", text: "hub 连进来了，但本机的 node 没在运行", tint: .orange))
+            node.append(Line(symbol: "exclamationmark.triangle", text: linkText("The hub connected in, but the local node isn't running"), tint: .orange))
             if let e = s.nodeError, !e.isEmpty { node.append(Line(symbol: "info.circle", text: e)) }
         }
         switch s.state {
         case "connected":
-            var out = [Line(symbol: "point.3.connected.trianglepath.dotted", text: "hub 已连进来 · 来自 \(s.address ?? "")", primary: true, tint: .green), mode]
+            var out = [Line(symbol: "point.3.connected.trianglepath.dotted", text: linkText("The hub connected in · from \(s.address ?? "")"), primary: true, tint: .green), mode]
             if let hub { out.append(hub) }
-            if let since = s.since { out.append(Line(symbol: "clock", text: "已连接 \(LinkText.duration(since: since, now: now))")) }
-            out.append(s.node == "online" ? Line(symbol: "checkmark.circle", text: "本机 node 在线", tint: .green) : node.first
-                ?? Line(symbol: "ellipsis.circle", text: "hub 正在连本机的 node…"))
+            if let since = s.since { out.append(Line(symbol: "clock", text: linkText("Connected for \(LinkText.duration(since: since, now: now))"))) }
+            out.append(s.node == "online" ? Line(symbol: "checkmark.circle", text: linkText("The local node is online"), tint: .green) : node.first
+                ?? Line(symbol: "ellipsis.circle", text: linkText("The hub is connecting to the local node…")))
             return out + [machine].compactMap { $0 }
         case "listening":
-            return [Line(symbol: "antenna.radiowaves.left.and.right", text: "在监听，等 hub 连进来", primary: true, tint: .blue), mode]
+            return [Line(symbol: "antenna.radiowaves.left.and.right", text: linkText("Listening, waiting for the hub to connect"), primary: true, tint: .blue), mode]
                 + [hub, seen].compactMap { $0 } + node + [machine].compactMap { $0 }
         case "unpaired":
-            var out = [Line(symbol: "link.badge.plus", text: "在监听，等 hub 来配对", primary: true), mode]
+            var out = [Line(symbol: "link.badge.plus", text: linkText("Listening, waiting for the hub to pair"), primary: true), mode]
             if let until = s.codeExpires, until > now {
-                out.append(Line(symbol: "hourglass", text: "配对链接还剩 \(LinkText.left(until, now: now))：粘贴到 hub 管理界面「电脑 › 添加电脑 › hub 来连」"))
+                out.append(Line(symbol: "hourglass", text: linkText("The pairing link is good for \(LinkText.left(until, now: now)) more: paste it into the hub admin page under “Computers › Add Computer › Hub connects”")))
             } else {
-                out.append(Line(symbol: "info.circle", text: "点「配对 / 修改连接…」生成给 hub 的配对链接"))
+                out.append(Line(symbol: "info.circle", text: linkText("Click “Pair / Change Connection…” to make a pairing link for the hub")))
             }
             return out
         default: // waiting: cannot listen
-            var out = [Line(symbol: "personalhotspot.slash", text: "监听不了" + (s.retry.map { " · " + LinkText.until($0, now: now) } ?? ""),
+            var out = [Line(symbol: "personalhotspot.slash", text: linkText("Can't listen") + (s.retry.map { " · " + LinkText.until($0, now: now) } ?? ""),
                             primary: true, tint: .red), mode]
+            // i18n-ignore: persona-link's own output, not UI text
             for part in (s.error ?? "").split(separator: "；") where !part.isEmpty {
                 out.append(Line(symbol: "xmark.circle", text: String(part)))
             }
@@ -343,7 +345,7 @@ struct LoginRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            MenuRow(title: "登录时启动", symbol: model.launchAtLogin ? "checkmark.square" : "square") {
+            MenuRow(title: linkText("Launch at Login"), symbol: model.launchAtLogin ? "checkmark.square" : "square") {
                 model.setLaunchAtLogin(!model.launchAtLogin)
             }
             if let note = model.loginNote {

@@ -39,6 +39,13 @@
   "disable_failed": "オフにできませんでした",
   "last_event": "最終受信",
   "credentials": "アプリの認証情報",
+  "create_title": "ボットを作成",
+  "create_start": "Lark でスキャンして作成",
+  "create_footer": "スマートフォンの Lark でコードをスキャンして確認すると、Persona がボットのアプリを作成してあなたとペアリングします。入力は不要です。",
+  "create_footer_shared": "スマートフォンの Lark でコードをスキャンして確認すると、Persona がボットと Lark の読み取りに使うアプリを 1 つ作成し、あなたとペアリングします。",
+  "advanced_have_app": "Lark アプリをお持ちですか？認証情報を入力",
+  "advanced_other_app": "詳細：別の Lark アプリを使う",
+  "read_needs_app": "まず上でスキャンしてアプリを作成してください。その後、ここで Persona に Lark の読み取りを許可できます。",
   "credentials_from_config": "現在は manager.json の認証情報を使っています。ここで保存すると、こちらに切り替わります。",
   "credentials_secret_note": "App Secret はハブに暗号化して保存され、再表示されません。",
   "required": "必須",
@@ -95,5 +102,7 @@
   "larkcli_profile_done": "閉じる",
   "larkcli_profile_auto_short": "ボットのアプリに合わせる",
   "larkcli_profile_default": "lark-cli の既定プロファイル",
-  "larkcli_profile_fixed": "{name}（設定ファイルで指定）"
+  "larkcli_profile_fixed": "{name}（設定ファイルで指定）",
+  "feature_answer_new_card_title": "回答を新しいカードで送る",
+  "feature_answer_new_card_detail": "ひと区切りしたら回答をチャットのいちばん下に新しいカードとして送り（Lark が通知します）、進捗カードはその場で折りたたみます。オフのときは回答を進捗カードに書き込みます"
 }

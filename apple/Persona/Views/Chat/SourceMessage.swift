@@ -41,7 +41,7 @@ struct SourceMessage: View, Equatable {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.trailing, Theme.Space.xxl)
             .chatPinned(pinKey)
-            .messageActionBar(id: item.id, text: text, isUser: false, date: item.ts)
+            .messageActionBar(id: item.id, text: text, isUser: false, date: item.ts, from: source.mention)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("message-source-" + item.id)
             .task(id: open) {
@@ -82,6 +82,7 @@ struct SourceMessage: View, Equatable {
                 Markdown(d.markdown)
                     .markdownSoftBreakMode(.lineBreak)
                     .markdownTheme(.persona)
+                    .readingContent()
                     .frame(maxWidth: .infinity, alignment: .leading)
                     #if os(macOS)
                     .textSelection(.enabled)
@@ -97,7 +98,7 @@ struct SourceMessage: View, Equatable {
             }
             if folds {
                 Button {
-                    toggleInPlace(pin, pinKey, animation: Theme.Motion.state) { open.toggle() }
+                    toggleInPlace(pin, pinKey, animation: Theme.Motion.state, closing: open) { open.toggle() }
                 } label: {
                     Text(open ? String(localized: "Collapse") : String(localized: "Expand"))
                         .font(Theme.Font.captionStrong)

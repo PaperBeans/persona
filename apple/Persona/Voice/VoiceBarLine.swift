@@ -45,6 +45,9 @@ nonisolated struct VoiceBarLine: Equatable, Sendable {
         case resend(run: String)
         /// Clear and Send: the computer's unsent line cleared first (`run.clearable`), then the instruction.
         case clearAndSend(run: String)
+        /// Send Anyway: an instruction the user-speech gate held back (`unprompted`: no fresh request was heard) sent
+        /// under its id, the user's tap their confirmation (#5904).
+        case sendAnyway(run: String)
         /// Send Back as Feedback: the plan card answered with the refused words as its feedback (the app's own resolve).
         case returnPlan(card: String, feedback: String, run: String)
         /// Never Mind: the line about it goes away.
@@ -55,6 +58,7 @@ nonisolated struct VoiceBarLine: Equatable, Sendable {
             case .stopAgent: "stop"
             case .resend(let run): "resend-" + run
             case .clearAndSend(let run): "clear-" + run
+            case .sendAnyway(let run): "anyway-" + run
             case .returnPlan(let card, _, let run): "plan-" + card + "-" + run
             case .dismiss(let run): "dismiss-" + run
             }
@@ -73,6 +77,7 @@ nonisolated struct VoiceBarLine: Equatable, Sendable {
             case .stopAgent: "stop"
             case .resend: "resend"
             case .clearAndSend: "clear"
+            case .sendAnyway: "anyway"
             case .returnPlan: "plan"
             case .dismiss: "dismiss"
             }
@@ -145,7 +150,8 @@ nonisolated struct VoiceBarLine: Equatable, Sendable {
     }
 
     /// Why `run` did not go, in the user's words (docs/assistant/voice.md 1.3), and what can be done: send it again (when the
-    /// connection up now still knows it), clear the computer's line first, give it to the plan card as its feedback.
+    /// connection up now still knows it), send anyway what the user-speech gate held back, clear the computer's line
+    /// first, give it to the plan card as its feedback.
     private static func notSent(_ run: VoiceRun, cards: [Interaction], label: String, resendable: Bool) -> VoiceBarLine {
         let dismiss = Action.dismiss(run: run.id)
         func line(_ text: String, _ actions: [Action] = []) -> VoiceBarLine {
@@ -173,7 +179,13 @@ nonisolated struct VoiceBarLine: Equatable, Sendable {
             }
             return line(String(localized: "\(label) is waiting for you to handle the card above"))
         case "unprompted":
-            return line(String(localized: "You didn’t say this, so it wasn’t sent"))
+            // The gate heard no fresh request (docs/assistant/voice.md 4.4): never worded as if someone else said it. What
+            // was held back is quoted, as a draft is: Send Anyway confirms words the user can see (last, so a long one
+            // only loses its end to the bar's line limit).
+            let task = run.task.trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = task.isEmpty ? String(localized: "Didn’t hear you ask for this just now, so it wasn’t sent")
+                : String(localized: "Didn’t hear you ask for this just now, so it wasn’t sent: “\(task)”")
+            return line(text, resendable && !task.isEmpty ? [.sendAnyway(run: run.id)] : [])
         case "on_screen":
             return line(String(localized: "Approve it by tapping on screen"))
         case "empty":

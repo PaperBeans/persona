@@ -60,6 +60,11 @@ data class Machine(
     @SerialName("node_mismatch") val nodeMismatch: Boolean? = null,
     /** The terminal engine chosen for this machine (docs/integrations/engines.md); hubs send it always, herdr when never chosen. */
     @SerialName("engine") val engine: String = "herdr",
+    /**
+     * The terminal hosts this machine enables side by side (#2576 / #3302); empty when none are enabled; null from an older
+     * hub that only sent [engine]. Resume in Terminal (#5565) reads the empty set as "no terminal engine".
+     */
+    @SerialName("engine_hosts") val engineHosts: List<String>? = null,
     /** What the node found there; empty from older hubs and nodes, and while the machine is offline. */
     @SerialName("engines") val engines: List<DetectedEngine> = emptyList(),
     /** The hub is installing its own personad build there ("Redeploy"). */
@@ -220,7 +225,10 @@ data class BackgroundTask(
     val isWorkflow: Boolean get() = kind == "workflow"
 }
 
-/** What a session with a [Session.sourceKind] allows; a missing field is a refusal (docs/protocol/protocol.md "Codex sources and capabilities"). */
+/**
+ * What a session with a [Session.sourceKind] allows; a missing field is a refusal (docs/protocol/protocol.md "Codex sources
+ * and capabilities"), except the optional ones, whose null keeps the app's own rule.
+ */
 @KeepGeneratedSerializer
 @Serializable(with = SessionCapabilitiesSerializer::class)
 data class SessionCapabilities(
@@ -232,6 +240,16 @@ data class SessionCapabilities(
     val attach: Boolean = false,
     /** Null on an older hub: the client keeps its agent-based rule instead of treating the field as a refusal. */
     val modes: Boolean? = null,
+    /** Close the agent, terminal or not (a runtime's session, #6294); null from an older node: the app keeps its terminal rule. */
+    val close: Boolean? = null,
+    /** Rename it, terminal or not (a runtime's session, #6294); null from an older node: the app keeps its terminal rule. */
+    val rename: Boolean? = null,
+    /** Switch its model through `POST …/modes`; null from an older node: the app keeps its Claude-in-a-terminal rule. */
+    val model: Boolean? = null,
+    /** Rewind to before one of your messages; null from an older node: the app keeps its Claude-in-a-terminal rule. */
+    val rewind: Boolean? = null,
+    /** A rewind may put the files back too ("Code and conversation"); null from an older node: as its [rewind] rule says. */
+    @SerialName("rewind_code") val rewindCode: Boolean? = null,
 )
 
 /**
@@ -395,6 +413,11 @@ data class Session(
     @SerialName("state") val state: String? = AgentState.of(null, status).wire,
     @WireTime @SerialName("seen_at") val seenAt: String? = null,
     @SerialName("queued") val queued: List<String>? = null,
+    /**
+     * A Persona conversation's last this many of [queued] came from other conversations or the system and arrive when
+     * the conversation is free (docs/protocol/protocol.md, `queued_relayed`): they are shown, never changed. Absent: none.
+     */
+    @SerialName("queued_relayed") val queuedRelayed: Int? = null,
     @SerialName("background") val background: List<BackgroundTask>? = null,
     /**
      * Its Workflow runs of the last day, newest first (docs/protocol/agent-states.md "Background workflows and Monitor"): a running one is
@@ -450,6 +473,8 @@ data class Session(
     @SerialName("starting") val starting: Boolean = false,
     /** Why starting it failed; the session is offline and sends get the same error. */
     @SerialName("start_error") val startError: String? = null,
+    /** Codex is open in its pane and has no thread until its first message. */
+    @SerialName("awaiting_first_message") val awaitingFirstMessage: Boolean = false,
     /**
      * The channels messages came into this conversation from, newest first (`wechat`, `feishu`; docs/extensions/channels.md
      * "Source marks"): the conversation list draws the latest's mark. Older hubs never send it.
@@ -493,6 +518,38 @@ data class Session(
     /** Newest running workflow; bounded list metadata without its agent or phase arrays. */
     @SerialName("workflow_progress") val workflowProgress: Workflow? = null,
     @SerialName("background_working") val backgroundWorking: Boolean? = null,
+    /**
+     * Working only because of background work that only waits (`sleep`, a `--watch`, `tail -f`; the hub's
+     * `background_waiting`, #6045): set only with `state` working. False from older hubs.
+     */
+    @SerialName("background_waiting") val backgroundWaiting: Boolean = false,
+    /**
+     * How Persona reaches a Codex in a terminal (docs/integrations/codex.md, "Sessions on the daemon"): `app_server` (joined on
+     * its shared app-server) or `terminal` (its screen and session record); [codexRouteNote] says why it is the terminal.
+     */
+    @SerialName("codex_route") val codexRoute: String? = null,
+    @SerialName("codex_route_note") val codexRouteNote: String? = null,
+    /**
+     * What the model saw in the agent's latest reply, and the model's window (docs/protocol/protocol.md, context usage): null
+     * while the node can't tell (no reply yet, a window it does not know, an older node).
+     */
+    @SerialName("context_tokens") val contextTokens: Long? = null,
+    @SerialName("context_window") val contextWindow: Long? = null,
+    /** An assistant conversation set to run on the Agent SDK: `agentsdk` while it does; [runtimeFallback] why the node ran the CLI instead. */
+    @SerialName("runtime") val runtime: String? = null,
+    @SerialName("runtime_fallback") val runtimeFallback: String? = null,
+    /**
+     * What an assistant chat's next messages run on when it was switched to a model in an app (`PUT …/conversations/{id}/model`,
+     * feature `assistant_model_pick`, docs/assistant/model-config.md "A conversation's own model"); null: it follows the
+     * default. Summary rows carry it too.
+     */
+    @SerialName("model_pick") val modelPick: ModelPick? = null,
+    /**
+     * A running Claude Code Agent's switch to another launcher that the user's next message from the chat carries out
+     * (feature `launcher_switch`, docs/protocol/protocol.md "Switching a running Agent to another provider"); null: none
+     * waits. [launcher] stays the one it runs on until then. Summary rows leave it out.
+     */
+    @SerialName("pending_switch") val pendingSwitch: PendingSwitch? = null,
 ) {
     val key: SessionKey get() = SessionKey(machineId, sessionId)
     /** A chat of the health space ([space]), which the assistant's own lists leave out. */
@@ -535,8 +592,13 @@ data class Session(
      */
     val canDelete: Boolean get() = !assistant && !starting && status in setOf("offline", "done", "idle", "unknown", "interrupted")
     val updated: Instant? get() = parseTime(updatedAt)
-    /** Its workflows still running, newest first. */
-    val runningWorkflows: List<Workflow> get() = workflows.orEmpty().filter { it.isRunning }
+    /**
+     * Its workflows still running, newest first. On a summary row (`summary=1`, one with [waiting]) its [workflowProgress],
+     * the newest running run without its agents and phases, stands for them (#5888), even when the row kept an older
+     * complete row's [workflows] (`keepingDetails`): fresh summary counts win, as in `backgroundWork()`.
+     */
+    val runningWorkflows: List<Workflow> get() = if (waiting != null) listOfNotNull(workflowProgress?.takeIf { it.isRunning })
+        else workflows.orEmpty().filter { it.isRunning }
     /**
      * How much runs in the background without counting a workflow twice: its other background tasks and its running
      * workflows. An older hub sends no [workflows]: every background entry counts, as before.
@@ -616,6 +678,11 @@ data class Item(
     val source: MessageSource? = null,
     /** On a notice: a Claude Code model_refusal_* record (#2289, #2528), its public fields only. */
     @SerialName("model_refusal") val modelRefusal: ModelRefusal? = null,
+    /**
+     * The model that wrote this assistant item as the transcript records it (Claude Code's `message.model`, a Codex turn's
+     * model); null where it does not say (user items, older hubs). The chat marks where the replies' model changes by it.
+     */
+    val model: String? = null,
 )
 
 /**
@@ -636,6 +703,51 @@ data class ModelRefusal(
 )
 
 object ModelRefusalSerializer : WireSerializer<ModelRefusal>(ModelRefusal.generatedSerializer())
+
+/** What an assistant chat was switched to in an app (server proto.ModelPick): a launcher and, when picked, its model and effort. */
+@KeepGeneratedSerializer
+@Serializable(with = ModelPickSerializer::class)
+data class ModelPick(
+    val launcher: String = "",
+    val model: String? = null,
+    val effort: String? = null,
+)
+
+object ModelPickSerializer : WireSerializer<ModelPick>(ModelPick.generatedSerializer())
+
+/**
+ * What POST …/queue answers (docs/protocol/protocol.md, `spec/fixtures/wire/queue.json`): the messages that were queued before
+ * the edit, in order ([queue]) and, in a Persona conversation, each one's photos for the composer ([images]: entry i is
+ * message i's, null for a message without photos; empty when no message had any).
+ */
+@KeepGeneratedSerializer
+@Serializable(with = QueueEditSerializer::class)
+data class QueueEdit(
+    val queue: List<String> = emptyList(),
+    val images: List<List<ImagePayload>?> = emptyList(),
+) {
+    /** The photos of the message at [index]; none when it had none. */
+    fun imagesOf(index: Int): List<ImagePayload> = images.getOrNull(index).orEmpty()
+}
+
+object QueueEditSerializer : WireSerializer<QueueEdit>(QueueEdit.generatedSerializer())
+
+/**
+ * A launcher switch waiting for the user's next message (server proto.PendingSwitch): the launcher, the model and effort
+ * picked (null: the launcher's default model, the effort it runs with now), the engine when the switch moves the
+ * conversation to the other one ([agent], `claude` / `codex`), and when it was picked.
+ */
+@KeepGeneratedSerializer
+@Serializable(with = PendingSwitchSerializer::class)
+data class PendingSwitch(
+    val launcher: String = "",
+    val model: String? = null,
+    val effort: String? = null,
+    val agent: String? = null,
+    @WireTime val at: String? = null,
+)
+
+object PendingSwitchSerializer : WireSerializer<PendingSwitch>(PendingSwitch.generatedSerializer())
 
 /** A pending "back to the configured model" (server proto.ModelRestore): `next_start`, the next start asks for [to]. */
 @KeepGeneratedSerializer
@@ -733,6 +845,14 @@ data class ScreenDialog(
     @SerialName("multi") val multi: Boolean = false,
     /** The submit row's own label ("Submit", or "Next" when another question follows). */
     @SerialName("submit") val submit: String? = null,
+    /** Claude Code's command prompt, read off the terminal (#5265); absent on older hubs and other dialogs. */
+    @SerialName("command") val command: String? = null,
+    @SerialName("description") val description: String? = null,
+    @SerialName("warning") val warning: String? = null,
+    @SerialName("risk") val risk: String? = null,
+    @SerialName("deadline") val deadline: String? = null,
+    @SerialName("deadline_action") val deadlineAction: String? = null,
+    @WireTime @SerialName("deadline_at") val deadlineAt: String? = null,
 )
 
 /** Something a permission card asks to fill in before approving (`proto.Field`, a password); see [Interaction.fields]. */
@@ -797,6 +917,12 @@ data class Interaction(
     val fields: List<InteractionField>? = null,
     /** Owning manager, including page permissions; older hubs omit it for the default manager. */
     @SerialName("manager") val manager: String? = null,
+    /** The manager's name for the tool, including what this call does where it adds that ("Report to supervisor · Done"). */
+    @SerialName("tool_title") val toolTitle: String? = null,
+    /** The tool alone, without what this call does, for the scope of "Always allow". */
+    @SerialName("tool_name_title") val toolNameTitle: String? = null,
+    /** The rule a question a supervisor passed up suggests (#4929); the card comes again without it once it was answered. */
+    val suggestion: RuleSuggestion? = null,
 ) {
     val sessionKey: SessionKey get() = SessionKey(machineId, sessionId)
 
@@ -835,8 +961,8 @@ data class Interaction(
             "plan" -> CoreText.of(Key.FleetPlanWaiting)
             // A password card names the computer it runs on; its commands are in the card.
             "permission" -> secretRun?.let { CoreText.of(Key.HeadlineSecretRun, it.machine) } ?: run {
-                // An MCP tool reads "github · create issue", not its raw mcp__github__create_issue (#4806).
-                val tool: Any = toolDisplayName(toolName) ?: CoreText.of(Key.ToolGeneric)
+                // The manager's title is for people; the raw toolName still decides the card's type and icon.
+                val tool: Any = toolTitle?.takeIf(String::isNotBlank) ?: toolDisplayName(toolName) ?: CoreText.of(Key.ToolGeneric)
                 val detail = summary?.takeIf { it.isNotBlank() }
                 val agent = agentDisplayName
                 when {
@@ -880,9 +1006,37 @@ data class Resolution(
     @SerialName("values") val values: Map<String, String>? = null,
     /** Who answered when it was not the user in the app (`assistant`); only in a resolution the hub hands back. */
     @SerialName("answered_by") val answeredBy: String? = null,
+    /** Why the assistant answered so, beside [answeredBy]; only in a resolution the hub hands back. */
+    @SerialName("reason") val reason: String? = null,
     val action: String? = null,
     val content: kotlinx.serialization.json.JsonObject? = null,
 )
+
+/** A row of GET /api/v1/interactions/history (iOS `InteractionRecord`): a session's card, how it ended, its answer and when. */
+@KeepGeneratedSerializer
+@Serializable(with = InteractionRecordSerializer::class)
+data class InteractionRecord(
+    val interaction: Interaction,
+    /** pending, resolved, expired, cancelled or dismissed. */
+    val status: String = "",
+    val resolution: Resolution? = null,
+    @WireTime @SerialName("resolved_at") val resolvedAt: String? = null,
+)
+
+object InteractionRecordSerializer : WireSerializer<InteractionRecord>(InteractionRecord.generatedSerializer())
+
+/**
+ * A question the assistant answered for the user (iOS `DelegatedAnswer`, docs/assistant/assistant.md "Assistant answers
+ * questions first"): the card, what it answered by question text and why, and when (null: unsaid).
+ */
+data class DelegatedAnswer(val interaction: Interaction, val answers: Map<String, String>, val reason: String, val at: Instant?) {
+    val id: String get() = interaction.id
+
+    companion object {
+        /** `answered_by` on a question the assistant answered. */
+        const val ASSISTANT = "assistant"
+    }
+}
 
 @Serializable
 data class Launcher(@SerialName("name") val name: String, @SerialName("base_url") val baseUrl: String? = null, @SerialName("model") val model: String? = null)

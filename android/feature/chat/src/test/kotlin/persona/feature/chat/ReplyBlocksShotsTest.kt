@@ -66,6 +66,8 @@ class ReplyBlocksShotsTest {
                 }
             }
         }
+        // Compose idleness does not wait for the Markdown cache's background parser.
+        rule.waitUntil(10_000) { rule.onAllNodesWithText("复制").fetchSemanticsNodes().size == 2 }
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
             rule.waitForIdle()
@@ -90,6 +92,7 @@ class ReplyBlocksShotsTest {
         rule.waitForIdle()
         // Two code blocks, each with Copy in its bar; the first copies its code, without the fence.
         val copies = rule.onAllNodesWithText("复制")
+        rule.waitUntil(10_000) { copies.fetchSemanticsNodes().size == 2 }
         assertEquals(2, copies.fetchSemanticsNodes().size)
         copies[0].performClick()
         val clipboard = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)

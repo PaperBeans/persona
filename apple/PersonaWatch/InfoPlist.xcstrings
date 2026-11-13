@@ -7,19 +7,19 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Persona records audio you start on Apple Watch, for example a meeting or a spoken note, then transfers it to your iPhone for on-device transcription; only the text is saved to the knowledge base on your hub."
+            "value": "Persona records audio you start on Apple Watch, for example a meeting, a spoken note, or your whole day with All-Day Recording. The audio goes to your iPhone and is transcribed there; only the text is saved to the knowledge base on your hub, which can write a recap of your day from it."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "Apple Watchで録音を始めると、Personaが会議や口頭のメモなどを録音し、iPhoneに転送してデバイス上で文字起こしします。テキストだけがハブのナレッジに保存されます。"
+            "value": "Apple Watchで録音を始めると、Personaが会議や口頭のメモ、終日録音なら1日全体を録音します。音声はiPhoneに送られてデバイス上で文字起こしされ、テキストだけがハブのナレッジに保存されます。ハブはそのテキストから1日のまとめを作成できます。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "你在 Apple Watch 上开始录音时，Persona 会录音，比如一场会议或一段口述笔记，然后传到 iPhone 上本机转写；只有文字存进 hub 上的知识库。"
+            "value": "你在 Apple Watch 上开始录音时，Persona 会录音，比如一场会议、一段口述笔记，或者用全天录音录下一整天。音频传到 iPhone 上本机转写；只有文字存进 hub 上的知识库，hub 可以据此写出当日回顾。"
           }
         }
       }

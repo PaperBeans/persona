@@ -81,6 +81,17 @@ final class RunningChatTests: XCTestCase {
         "top \(r.top.map { String($0.suffix(24)) } ?? "–") y \(r.topY ?? -1) \(r.mode ?? "?") held \((r.held ?? false) ? 1 : 0) frozen \((r.frozen ?? false) ? 1 : 0) gap \(r.gap ?? -1) offset \(r.offset ?? -1) content \(r.content ?? -1) items \(r.items)"
     }
 
+    /// The running turn's work line, by its header (`work-head`): the newest work line on screen, the lowest, which in a
+    /// chat at its newest end is the running one (an opened line's steps have no header of their own). Not by its words:
+    /// since #4249 a running line names the step it is on instead of saying Working (#5394). Each use looks again
+    /// (`var work: XCUIElement { runningWork() }`), as the list's rows come and go.
+    private func runningWork() -> XCUIElement {
+        let heads = app.buttons.matching(identifier: "work-head")
+        let height = app.frame.height
+        let shown = heads.allElementsBoundByIndex.filter { $0.exists && $0.frame.maxY > 0 && $0.frame.minY < height }
+        return shown.max { $0.frame.midY < $1.frame.midY } ?? heads.firstMatch
+    }
+
     func testARunningTurnNeitherBlanksNorJumps() {
         launch()
         var first: Rows?
@@ -93,7 +104,7 @@ final class RunningChatTests: XCTestCase {
         XCTAssertNotNil(first, "the running conversation shows")
         sleep(3) // landed
         // As the user had it: the running work line open, and its first step open on its output.
-        let work = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "正在工作")).firstMatch
+        var work: XCUIElement { runningWork() } // by its header, looked up at each use (#5394)
         XCTAssertTrue(work.waitForExistence(timeout: 10), "the running work line")
         work.tap()
         // Opened at the newest end the header rises under the top bar over about half a second (#1123): asked whether it
@@ -133,7 +144,7 @@ final class RunningChatTests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.2)
         }
         sleep(3) // landed at the newest
-        let work = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "正在工作")).firstMatch
+        var work: XCUIElement { runningWork() } // by its header, looked up at each use (#5394)
         XCTAssertTrue(work.waitForExistence(timeout: 10) && work.isHittable, "the running work line's header on screen")
         let y0 = work.frame.minY
         work.tap() // open
@@ -208,7 +219,7 @@ final class RunningChatTests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.2)
         }
         sleep(3)
-        let work = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "正在工作")).firstMatch
+        var work: XCUIElement { runningWork() } // by its header, looked up at each use (#5394)
         XCTAssertTrue(work.waitForExistence(timeout: 10) && work.isHittable, "the running work line's header on screen")
         let y0 = work.frame.minY
         work.tap() // open
@@ -249,7 +260,7 @@ final class RunningChatTests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.2)
         }
         sleep(3)
-        let work = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "正在工作")).firstMatch
+        var work: XCUIElement { runningWork() } // by its header, looked up at each use (#5394)
         XCTAssertTrue(work.waitForExistence(timeout: 10) && work.isHittable, "the running work line's header on screen")
         let headerY = work.frame.minY
         work.tap() // open

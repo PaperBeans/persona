@@ -14,7 +14,10 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
   with body text appearing in several large full-screen updates. herdr observe can emit a frame every 16 ms; node / hub forward unchanged, merging only frames within 30 ms (`termMinGap`).
   See section 10 of `docs/integrations/terminal.md` for measurements by segment.
 - Phone terminal takeover uses `herdr terminal session control <pane> --cols --rows` (a pipe, not a PTY; shares the slot with `terminal attach`):
-  herdr restores the pane's original size if stdin closes or the process is killed (including -9), so tying the takeover process's lifetime to node prevents it from leaving the computer stuck.
+  herdr puts the pane back to its own size when stdin closes or the process is killed (including -9) **only while a herdr client is attached** (the computer's herdr window, a web Full view).
+  With none attached, herdr leaves the pane at the controller's size, and `pane.layout` then reports herdr's headless default (120 × 40), not what the pane's programs see.
+  So the node reads the pane's terminal size from its tty before taking it (`herdr.Client.TermSize`) and resizes back to it before releasing (`CloseAt`, #5339); a node killed outright still leaves the phone's size until a herdr client attaches.
+  The same goes for observing: `--cols/--rows` at the layout's 120 × 40 cut a larger pane's right edge and bottom rows, so the herdr host's `PaneSize` is the terminal's size too (#5409).
   herdr never provides the program's raw bytes (attach also sends its redrawn grid), and there is no scrollback during takeover. The phone must accumulate history by comparing frames (`TerminalGrid.scrolled`);
   a different terminal emulator library will not solve this. Keys must use RPC events (methods run concurrently on the peer and can arrive out of order). See section 11 of `docs/integrations/terminal.md`.
 - Claude Code (2.1.312, default mode) clears terminal scrollback on a resize and redraws only the current screen. During takeover, its output also does not enter herdr history (a 70-line response still leaves herdr history at 0).
@@ -70,3 +73,18 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 A correct worktree creation result and a successful Agent reply do not prove that hooks belong to the same container. Check the provider session against Orca’s hook entry: a shared app-server daemon may keep the environment of its first terminal. For local Codex starts in Orca, probe the actual terminal executable and use `--no-daemon` when supported; retain explicit remote and already isolated launchers. Exercise the start helper as a process with old/new flag support, preserve the first prompt as one argument, and verify the live hook’s worktree ID before accepting automatic naming.
 
 - Codex compact layouts can place the model/path status and shortcut hints immediately below the composer with no blank separator. Bound the draft at the paired bottom footer, rather than assuming every indented line belongs to the input. Regress both an empty placeholder and genuine multiline drafts, including draft text that resembles footer hints; a false `input_draft` blocks remote messages, while dropping genuine input risks sending unfinished text.
+- A dialog read off the screen is read at whatever width the pane has, and the phone's terminal takeover narrows it to the phone's columns. Every row that is not part of what is asked (a countdown,
+  a warning) has to be recognised across the rows a narrow pane wraps it onto, or it goes into `rev`: Claude Code's "⚠ … will automatically block this request in 1:53, …" wrapped at 57 columns, its seconds
+  went into `rev`, and every answer was refused once the phone had opened the terminal (#5265). Claude Code also redraws its dialogs differently between builds (2.1.322 puts a `│` before each row of
+  the command, as before the warning). Check a parser change against real captures at several widths (120, 100, 57, 40) and a few seconds apart. Capture them from a throwaway `claude` in a private pty
+  with a VT emulator (pyte), with no Persona hooks and outside herdr: no card reaches anyone's phone, and the screen can be resized at will.
+
+## A visible Codex composer does not prove takeover readiness
+
+Codex can draw an empty input box before its folder-trust dialog arrives. A takeover must wait for the original thread to be loaded and joined on the shared app-server, not merely for a running process, a visible composer, or an HTTP success. Test the late dialog after a transient composer, and send a real follow-up from the client. Keep the pending client action mounted when session discovery changes the history row into a live row, or a later failure and its continuation-only fallback can disappear before the request completes (#5739).
+
+## A terminal with no session row, and a wait with no end (#6327)
+
+- A gate keyed on the session row (`session(key)?.canTerminal == true`) silently drops a terminal addressed by its pane (`pane:<id>`, a plain shell), which has no row: iOS sent no `terminal_subscribe` for Open Terminal Here and the page sat on Taking over… for good. When a capability check guards a stream, decide what an address with no row means (`AppModel.terminalUsable`), and let the caller know when nothing went out (`terminalSubscribe` returns false) rather than letting it wait for an answer.
+- A UI test against the mock proves the stream only with `MOCK_TERMINAL_STREAM=1` (and `MOCK_TERMINAL_CONTROL=1` to drive). Without it the feed polls `GET …/screen` over HTTP, which works for any address, so a broken subscribe never shows.
+- Every subscription that is sure to be answered needs a bound on its wait: a reason and Retry when nothing came (docs/integrations/terminal.md section 30). A Retry that only sends the same subscribe again does nothing at the hub (same device, same size: no new watch); drop it first.

@@ -9,5 +9,7 @@
   "engine_path": "工作区引擎未返回绝对检出路径；未启动 Agent",
   "busy": "工作区被任务 {id}（{title}）占用；请等待其结束或选择新建工作区（电脑 {machine}，路径 {path}）",
   "machine_local": "任务工作区已在 {from} 上创建，不能迁移到 {to}",
-  "create": "新任务工作区未创建成功；未启动 Agent"
+  "create": "新任务工作区未创建成功；未启动 Agent",
+  "no_commits": "{machine} 上的 {path} 还没有任何提交，无法从它新建任务工作区；先提交一次，或选择一个已有工作区。未启动 Agent",
+  "busy_no_commits": "{machine} 上的文件夹 {path} 正被任务 {id}（{title}）使用，且没有任何提交，无法新建工作区；请先完成那个任务，或在其他文件夹启动这个任务"
 }

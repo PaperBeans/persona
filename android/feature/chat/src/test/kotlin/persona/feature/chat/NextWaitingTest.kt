@@ -40,12 +40,11 @@ class NextWaitingTest {
     }
 
     @Test fun showsOnlyRightAfterAnAnswerHereWithNoCardLeftTheKeyboardDownAndSomewhereToGo() {
-        assertTrue(showsNextWaiting(offered = true, cardsHere = 0, readOnly = false, assistant = false, canOpen = true, keyboard = false))
-        assertFalse(showsNextWaiting(offered = false, cardsHere = 0, readOnly = false, assistant = false, canOpen = true, keyboard = false))
-        assertFalse(showsNextWaiting(offered = true, cardsHere = 1, readOnly = false, assistant = false, canOpen = true, keyboard = false))
-        assertFalse(showsNextWaiting(offered = true, cardsHere = 0, readOnly = true, assistant = false, canOpen = true, keyboard = false))
-        assertFalse(showsNextWaiting(offered = true, cardsHere = 0, readOnly = false, assistant = true, canOpen = true, keyboard = false))
-        assertFalse(showsNextWaiting(offered = true, cardsHere = 0, readOnly = false, assistant = false, canOpen = false, keyboard = false))
-        assertFalse(showsNextWaiting(offered = true, cardsHere = 0, readOnly = false, assistant = false, canOpen = true, keyboard = true))
+        assertTrue(showsNextWaiting(offered = true, cardsHere = 0, readOnly = false, canOpen = true, keyboard = false))
+        assertFalse(showsNextWaiting(offered = false, cardsHere = 0, readOnly = false, canOpen = true, keyboard = false))
+        assertFalse(showsNextWaiting(offered = true, cardsHere = 1, readOnly = false, canOpen = true, keyboard = false))
+        assertFalse(showsNextWaiting(offered = true, cardsHere = 0, readOnly = true, canOpen = true, keyboard = false))
+        assertFalse(showsNextWaiting(offered = true, cardsHere = 0, readOnly = false, canOpen = false, keyboard = false))
+        assertFalse(showsNextWaiting(offered = true, cardsHere = 0, readOnly = false, canOpen = true, keyboard = true))
     }
 }

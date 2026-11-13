@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -28,20 +30,33 @@ func startHerdr(f *fakeHerdr, pane, status string) {
 // startCmd is the command a Claude start types into its herdr pane (and herdr's resume of it evals): the node's
 // directory in front and the assistant's environment left out (agentenv.go), herdr told the agent is Claude
 // (HERDR_AGENT), then the launcher with Persona's flags.
-func startCmd(launcher, args, dir string) string {
-	return inAgentEnv(dir, "HERDR_AGENT=claude "+launcher+" "+args+" --settings "+shellQuote(filepath.Join(dir, "claude-settings.json"))+
-		" --mcp-config "+shellQuote(filepath.Join(dir, "mcp.json")), shellQuote)
+func startCmd(launcher, args, dir string) string { return claudeCmd(launcher, args, dir, shellQuote) }
+
+// resumeCmd is startCmd as herdr's resume_argv says it (claudeResumeArgv): quoted without apostrophes.
+func resumeCmd(launcher, args, dir string) string { return claudeCmd(launcher, args, dir, dquote) }
+
+func claudeCmd(launcher, args, dir string, q func(string) string) string {
+	return inAgentEnv(dir, "HERDR_AGENT=claude "+launcher+" "+args+" --settings "+q(filepath.Join(dir, "claude-settings.json"))+
+		" --mcp-config "+q(filepath.Join(dir, "mcp.json"))+" --allowedTools "+q(ownToolsRule), q)
 }
 
-// resumeHeld are the two reports that give herdr the pane's resume command (herdrresume.go): the pane held as
-// Persona's, then the session with eval of cmd as its resume_argv.
+// ownToolsRule is the --allowedTools of a Claude Agent Persona starts without its plugin: the Agent's own Persona tools
+// under both registered names (agentAllowedTools); with the plugin the office rule follows (pluginToolsRule).
+var ownToolsRule = strings.Join(compat.MCPAllowedToolNames(assistantwire.AgentOwnTools, true), ",")
+
+func pluginToolsRule(dir string) string {
+	return ownToolsRule + ",Bash(sh " + filepath.Join(dir, "agent-plugin", "skills", "persona-office", "scripts", "office.sh") + " *)"
+}
+
+// resumeHeld are the two reports that give herdr the pane's resume command (herdrresume.go): any stale Persona
+// authority cleared so herdr's screen detection decides state (#4657), then the session with eval of cmd as resume_argv.
 func resumeHeld(pane, id, cmd string) [2]string {
 	return resumeHeldAgent("claude", pane, id, cmd)
 }
 
 func resumeHeldAgent(agent, pane, id, cmd string) [2]string {
 	return [2]string{
-		call("pane.report_agent", map[string]any{"pane_id": pane, "source": resumeSource, "agent": agent, "state": "idle", "seq": 7}),
+		call("pane.clear_agent_authority", map[string]any{"pane_id": pane, "source": resumeSource, "seq": 7}),
 		call("pane.report_agent_session", map[string]any{"pane_id": pane, "source": resumeSource, "agent": agent, "seq": 8,
 			"agent_session_id": id, "resume_argv": []string{"eval", cmd}}),
 	}
@@ -76,6 +91,13 @@ func waitCalls(t *testing.T, f *fakeHerdr, method string, n int) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// waitReports waits until the resume report for pane has completed its per-pane turn. It follows the actual
+// asynchronous work rather than sleeping for a guessed amount of time before asserting that nothing was sent.
+func waitReports(n *Node, pane string) {
+	unlock := n.resumes.lock(pane)
+	unlock()
 }
 
 func personaDir(home string) string { return filepath.Join(home, ".persona") }
@@ -128,8 +150,8 @@ func TestHerdrStartInTheProjectsWorkspace(t *testing.T) {
 		readVisible("w1:p2"), agentGet("w1:p2"), // ready once…
 		readVisible("w1:p2"), agentGet("w1:p2"), // …and twice
 		call("agent.rename", map[string]any{"target": "w1:p2", "name": "j-0e0000"}),
-		resumeHeld("w1:p2", startID, startCmd("claude", "--resume "+startID, personaDir(home)))[0],
-		resumeHeld("w1:p2", startID, startCmd("claude", "--resume "+startID, personaDir(home)))[1],
+		resumeHeld("w1:p2", startID, resumeCmd("claude", "--resume "+startID, personaDir(home)))[0],
+		resumeHeld("w1:p2", startID, resumeCmd("claude", "--resume "+startID, personaDir(home)))[1],
 		call("agent.prompt", map[string]any{"target": "w1:p2", "text": "fix the build"}),
 		call("session.snapshot", nil), // sessionFor
 	})
@@ -177,8 +199,8 @@ func TestHerdrStartCreatesTheWorkspaceAndResumes(t *testing.T) {
 		readVisible("w7:p1"), agentGet("w7:p1"),
 		readVisible("w7:p1"), agentGet("w7:p1"),
 		call("agent.rename", map[string]any{"target": "w7:p1", "name": "j-0e0000"}),
-		resumeHeld("w7:p1", startID, startCmd("work_claude", "--resume "+startID, personaDir(home)))[0],
-		resumeHeld("w7:p1", startID, startCmd("work_claude", "--resume "+startID, personaDir(home)))[1],
+		resumeHeld("w7:p1", startID, resumeCmd("work_claude", "--resume "+startID, personaDir(home)))[0],
+		resumeHeld("w7:p1", startID, resumeCmd("work_claude", "--resume "+startID, personaDir(home)))[1],
 		call("session.snapshot", nil),
 	})
 }
@@ -236,16 +258,16 @@ func TestHerdrStartIntoAGivenWorkspaceReturnsOnABlockedClaude(t *testing.T) {
 		call("pane.send_input", map[string]any{"pane_id": "w2:p5", "keys": []string{"Enter"},
 			"text": inAgentEnv(personaDir(home), "HERDR_AGENT=claude /tmp/persona-test/personad launch work_gw --session-id "+startID+" --settings "+
 				shellQuote(filepath.Join(personaDir(home), "launcher-settings", "work_gw-claude-settings.json"))+
-				" --mcp-config "+shellQuote(filepath.Join(personaDir(home), "mcp.json")), shellQuote)}),
+				" --mcp-config "+shellQuote(filepath.Join(personaDir(home), "mcp.json"))+" --allowedTools "+shellQuote(ownToolsRule), shellQuote)}),
 		readVisible("w2:p5"), agentGet("w2:p5"),
 		call("agent.rename", map[string]any{"target": "w2:p5", "name": "j-0e0000"}),
 		// herdr's restore resumes it through the launcher too, not with a bare `claude --resume` (#1879).
 		resumeHeld("w2:p5", startID, inAgentEnv(personaDir(home), "HERDR_AGENT=claude /tmp/persona-test/personad launch work_gw --resume "+startID+" --settings "+
 			filepath.Join(personaDir(home), "launcher-settings", "work_gw-claude-settings.json")+
-			" --mcp-config "+filepath.Join(personaDir(home), "mcp.json"), dquote))[0],
+			" --mcp-config "+filepath.Join(personaDir(home), "mcp.json")+" --allowedTools "+ownToolsRule, dquote))[0],
 		resumeHeld("w2:p5", startID, inAgentEnv(personaDir(home), "HERDR_AGENT=claude /tmp/persona-test/personad launch work_gw --resume "+startID+" --settings "+
 			filepath.Join(personaDir(home), "launcher-settings", "work_gw-claude-settings.json")+
-			" --mcp-config "+filepath.Join(personaDir(home), "mcp.json"), dquote))[1],
+			" --mcp-config "+filepath.Join(personaDir(home), "mcp.json")+" --allowedTools "+ownToolsRule, dquote))[1],
 		call("session.snapshot", nil),
 	})
 	f.reply("session.snapshot", snapshot(nil, nil, []any{claudeAgent(startID, proto.StatusIdle, "w2:p5", "w2:t5", "w2", home, "")}, nil))
@@ -288,8 +310,8 @@ func TestHerdrStartNamesTheTabOnceItExists(t *testing.T) {
 		readVisible("w2:p6"), agentGet("w2:p6"),
 		readVisible("w2:p6"), agentGet("w2:p6"),
 		call("agent.rename", map[string]any{"target": "w2:p6", "name": "j-0e0000"}),
-		resumeHeld("w2:p6", startID, startCmd("claude", "--resume "+startID, personaDir(home)))[0],
-		resumeHeld("w2:p6", startID, startCmd("claude", "--resume "+startID, personaDir(home)))[1],
+		resumeHeld("w2:p6", startID, resumeCmd("claude", "--resume "+startID, personaDir(home)))[0],
+		resumeHeld("w2:p6", startID, resumeCmd("claude", "--resume "+startID, personaDir(home)))[1],
 		call("session.snapshot", nil),
 	})
 }
@@ -326,6 +348,7 @@ func TestHerdrStartFailsWhenTheTabCannotBeMade(t *testing.T) {
 // before its first start, not on package variables: a start another test left running still reads its own node's.
 func withStartWaits(n *Node, start, ready time.Duration) {
 	n.claudeStart, n.claudeReady = start, ready
+	n.readyPoll = 0 // timing-sensitive tests keep the production cadence
 }
 
 // A busy machine's shell takes longer than claude's whole ready wait to run claude (#1396: ~/.zshrc took 54 s with a
@@ -597,13 +620,22 @@ func TestHerdrSendChecksThePaneAndPressesEnterForAStuckPrompt(t *testing.T) {
 	})
 }
 
-// session.send to a session that is not running: it is resumed (launcher and directory from what is known of it),
-// its pane checked again, then prompted.
+// session.send to a session that is not running: a stopped agent takes no messages (#4754), refused with nothing
+// opened or typed; a branch nothing has started yet (fork.go) is started by its first message (launcher and
+// directory from what is known of it), its pane checked again, then prompted.
 func TestHerdrSendResumesAnOfflineSession(t *testing.T) {
 	n, f, home := herdrNode(t)
 	cwd := mkdir(t, filepath.Join(home, "proj"))
 	writeTranscript(t, home, cwd, sidA, time.Now(),
 		`{"type":"user","timestamp":"2026-01-01T00:00:00Z","cwd":"`+cwd+`","message":{"role":"user","content":"hello"}}`)
+	_, err := request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "go on"})
+	if code, _ := refusalOf(t, err); code != agentStopped {
+		t.Fatalf("a message to a stopped agent: %v", err)
+	}
+	assertTrace(t, f.trace(), []string{call("session.snapshot", nil)}) // is it running? nothing else
+	f.reset()
+
+	n.freshForks = map[string]bool{sidA: true}
 	f.reply("workspace.list", map[string]any{"workspaces": []any{}})
 	f.reply("workspace.create", map[string]any{"workspace": map[string]any{"workspace_id": "w7"},
 		"tab": map[string]any{"tab_id": "w7:t1"}, "root_pane": map[string]any{"pane_id": "w7:p1"}})
@@ -623,16 +655,19 @@ func TestHerdrSendResumesAnOfflineSession(t *testing.T) {
 		readVisible("w7:p1"), agentGet("w7:p1"),
 		readVisible("w7:p1"), agentGet("w7:p1"),
 		call("agent.rename", map[string]any{"target": "w7:p1", "name": "j-0d0000"}),
-		resumeHeld("w7:p1", sidA, startCmd("claude", "--resume "+sidA, personaDir(home)))[0],
-		resumeHeld("w7:p1", sidA, startCmd("claude", "--resume "+sidA, personaDir(home)))[1],
+		resumeHeld("w7:p1", sidA, resumeCmd("claude", "--resume "+sidA, personaDir(home)))[0],
+		resumeHeld("w7:p1", sidA, resumeCmd("claude", "--resume "+sidA, personaDir(home)))[1],
 		call("session.snapshot", nil),
 		readANSI("w7:p1"), // the pane checked again
 		call("agent.prompt", map[string]any{"target": "w7:p1", "text": "go on"}),
 		readANSI("w7:p1"), // the box emptied: no enter
 	})
+	if n.freshFork(sidA) {
+		t.Error("the branch is still fresh after it ran: its next stop would let a message resume it")
+	}
 }
 
-// A session that is not running and that nothing says which launcher it ran with (started outside Persona) is
+// A branch that is not running and that nothing says which launcher it ran with (started outside Persona) is
 // resumed with the launcher the hub sends ("New Agent"'s), not plain claude; the launcher Persona started it with
 // still wins over the hub's.
 func TestHerdrSendResumesWithTheHubsLauncher(t *testing.T) {
@@ -650,6 +685,7 @@ func TestHerdrSendResumesWithTheHubsLauncher(t *testing.T) {
 			if tc.recorded != "" {
 				n.state.put(sidA, sessionState{Launcher: tc.recorded, Cwd: cwd})
 			}
+			n.freshForks = map[string]bool{sidA: true} // only a branch is started by a message (#4754)
 			f.reply("workspace.list", map[string]any{"workspaces": []any{}})
 			f.reply("workspace.create", map[string]any{"workspace": map[string]any{"workspace_id": "w7"},
 				"tab": map[string]any{"tab_id": "w7:t1"}, "root_pane": map[string]any{"pane_id": "w7:p1"}})
@@ -822,7 +858,7 @@ func TestHerdrRenames(t *testing.T) {
 	assertTrace(t, f.trace(), nil)
 }
 
-// markTab is the call that marks a tab the node opened for session id as Persona's (shelltabs.go).
+// markTab is the call that marks a tab the node opened for session id as Persona's (personatab.go).
 func markTab(pane, id string) string {
 	return call("pane.report_metadata", map[string]any{"pane_id": pane, "source": "persona", "tokens": map[string]any{personaTabToken: id}})
 }

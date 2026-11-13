@@ -280,7 +280,7 @@ def css_value(kind, value, path):
         return f"rgb({rgb} / {fmt(value['alpha'])})"
     if kind in ("dimension", "duration"):
         # Font sizes use rem so browser text-size preferences remain effective.
-        if path.startswith("type."):
+        if path.startswith(("type.", "typeGlass.")):
             return fmt(value["value"] / 16) + "rem"
         return fmt(value["value"]) + value["unit"]
     if kind == "string":
@@ -294,7 +294,7 @@ def kotlin_value(kind, value, path):
         # Float components retain alpha (e.g. 0.14), unlike packed 8-bit ARGB.
         return "Color", "Color(" + ", ".join(fmt(v) + "f" for v in channels) + ")"
     if kind == "dimension":
-        unit = "sp" if path.startswith("type.") else "dp"
+        unit = "sp" if path.startswith(("type.", "typeGlass.")) else "dp"
         return ("TextUnit" if unit == "sp" else "Dp"), fmt(value["value"]) + "." + unit
     if kind == "duration":
         return "Int", str(round(value["value"] * (1000 if value["unit"] == "s" else 1)))
@@ -316,17 +316,29 @@ def render_kotlin(catalog, package):
             node = node.setdefault(part, {})
         node[parts[-1]] = path
 
-    def emit(tree, depth):
+    def emit(tree, depth, scaled=False):
         indent = "    " * depth
         for key, child in sorted(tree.items()):
             if isinstance(child, dict):
                 lines.append(f"{indent}object {key[0].upper() + key[1:]} {{")
-                emit(child, depth + 1)
+                # spacing and corner radii follow Settings › Appearance › Layout density (LayoutDensity.kt); `Standard` keeps the values
+                # for the few places that size something with a spacing token
+                emit(child, depth + 1, scaled={"space": "spaceScale", "radius": "radiusScale"}.get(key) if depth == 1 else False)
                 lines.append(indent + "}")
+            elif scaled:
+                kind, value = kotlin_value(catalog.tokens[child]["$type"], catalog.values[child], child)
+                name = kotlin_identifier(key)
+                lines.append(f"{indent}val {name}: {kind} get() = Standard.{name} * LayoutDensity.{scaled}")
             else:
                 kind, value = kotlin_value(catalog.tokens[child]["$type"], catalog.values[child], child)
                 modifier = "const val" if kind in {"Int", "Float", "String"} else "val"
                 lines.append(f"{indent}{modifier} {kotlin_identifier(key)}: {kind} = {value}")
+        if scaled:
+            lines.append(f"{indent}object Standard {{")
+            for key, child in sorted(tree.items()):
+                kind, value = kotlin_value(catalog.tokens[child]["$type"], catalog.values[child], child)
+                lines.append(f"{indent}    val {kotlin_identifier(key)}: {kind} = {value}")
+            lines.append(indent + "}")
     emit(tree, 1)
     lines.append("}")
     return "\n".join(lines) + "\n"

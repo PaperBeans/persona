@@ -25,6 +25,10 @@ import (
 // ignored) and only for PRs of its repo. A PR's merge is found by its subject, as GitHub writes it: a squash merge's
 // "<title> (#N)", a merge commit's "Merge pull request #N from …". Found: deployed. Not found: not in the running hub as
 // far as the file goes (it holds the last few thousand commits); GitHub, when it answers, says more.
+//
+// A build of a local branch can run a PR before it is merged upstream (#4867): the deploy names such PRs by their head
+// commit, "# pr: <N> <full sha>" (scripts/deploy/deployed_commits.py), and the PR counts as deployed when that commit is
+// one the file lists, so in the deployed one's history. A head the file does not list is not believed.
 
 const deployedCommitsName = "deployed-commits.txt"
 
@@ -33,6 +37,8 @@ const deployedCommitsHeader = "# persona deployed commits v1"
 var (
 	squashSubject = lazyre.New(`\(#([0-9]+)\)\s*$`)
 	mergeSubject  = lazyre.New(`^Merge pull request #([0-9]+)\b`)
+	// prHeadLine is a PR the deployed commit contains by its head ("pr: <N> <sha>", after the "#").
+	prHeadLine = lazyre.New(`^pr:\s*#?([0-9]+)\s+([0-9a-fA-F]{40})\s*$`)
 )
 
 // deployedList is one deployed-commits file as read.
@@ -49,6 +55,8 @@ func parseDeployedCommits(text string) *deployedList {
 	sc := bufio.NewScanner(strings.NewReader(text))
 	sc.Buffer(make([]byte, 64*1024), 1<<20)
 	first := true
+	heads := map[int]string{}   // "# pr:" lines: PR number → its head commit, believed once the history lists it
+	listed := map[string]bool{} // the commits the file lists
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if first {
@@ -62,8 +70,13 @@ func parseDeployedCommits(text string) *deployedList {
 			continue
 		}
 		if rest, ok := strings.CutPrefix(line, "#"); ok {
-			if v, ok := strings.CutPrefix(strings.TrimSpace(rest), "repo:"); ok {
+			rest = strings.TrimSpace(rest)
+			if v, ok := strings.CutPrefix(rest, "repo:"); ok {
 				l.repo = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(v), ".git"))
+			} else if m := prHeadLine.FindStringSubmatch(rest); m != nil {
+				if n, err := strconv.Atoi(m[1]); err == nil {
+					heads[n] = strings.ToLower(m[2])
+				}
 			}
 			continue
 		}
@@ -76,6 +89,7 @@ func parseDeployedCommits(text string) *deployedList {
 			l.head = sha
 		}
 		l.count++
+		listed[sha] = true
 		m := squashSubject.FindStringSubmatch(subject)
 		if m == nil {
 			m = mergeSubject.FindStringSubmatch(subject)
@@ -90,6 +104,11 @@ func parseDeployedCommits(text string) *deployedList {
 	}
 	if l.repo == "" || l.head == "" {
 		return nil
+	}
+	for n, sha := range heads {
+		if _, merged := l.prs[n]; !merged && listed[sha] {
+			l.prs[n] = sha // in the deployed commit by its head: run here before (or without) a merge upstream
+		}
 	}
 	return l
 }

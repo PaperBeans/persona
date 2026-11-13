@@ -31,6 +31,7 @@ extension AppModel {
         guard !chat(key).items.contains(where: { PendingMessage.tied($0, to: id) == true }) else { return }
         let msg = PendingMessage(id: id, text: text, images: images)
         chat(key).pending.append(msg)
+        chat(key).beginSendFeedback(msg)
         settleSend(key, msg.id, .sent)
     }
 
@@ -40,6 +41,8 @@ extension AppModel {
     @discardableResult
     func settleSend(_ key: SessionKey, _ id: UUID, _ outcome: SendOutcome) -> SendOutcome? {
         let store = chat(key)
+        // Echo can remove the pending bubble before the HTTP response. Its acknowledgement must not disappear.
+        store.settleSendFeedback(id, state: outcome.state)
         guard let i = store.pending.firstIndex(where: { $0.id == id }) else { return nil }
         let linkUp = outboxLinkUp(key.group)
         let wait = OutboxWait.next(outcome, since: store.pending[i].stalledSince, now: .now, linkUp: linkUp)
@@ -146,6 +149,7 @@ extension AppModel {
                         // Gone, failed with an earlier one, or resent by hand meanwhile: not this pass's to send.
                         guard let i = store.pending.firstIndex(where: { $0.id == msg.id }), store.pending[i].state == .waiting else { continue }
                         store.pending[i].state = .sending
+                        store.beginSendFeedback(store.pending[i])
                         let settled = settleSend(key, msg.id, await sendPending(key, msg))
                         if settled == .waiting { break } // keep the order: the rest go after it
                     }

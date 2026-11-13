@@ -58,6 +58,21 @@ describe("RenameDialog", () => {
     expect(closed).toHaveBeenCalledTimes(1);
   });
 
+  it("renames a runtime's session by its title alone, without the herdr / Claude hint (#6294)", async () => {
+    const runtime = { ...session, source_kind: "runtime", agent: "claude", capabilities: { read: true, send: true, rename: true } } as Session;
+    await act(async () => root.render(<RenameDialog session={runtime} open onClose={closed} />));
+    expect(document.querySelectorAll("[role=dialog] input")).toHaveLength(1);
+    expect(document.querySelector("[role=dialog]")!.textContent).not.toContain("herdr");
+    await type("New name");
+    await enter();
+    expect(JSON.parse(String(posts("/sessions/m/s/rename")[0].init.body))).toEqual({ title: "New name" });
+  });
+
+  it("keeps the hint for an Agent in a terminal", async () => {
+    await act(async () => root.render(<RenameDialog session={session} open onClose={closed} />));
+    expect(document.querySelector("[role=dialog]")!.textContent).toContain("herdr");
+  });
+
   it("sends again once a failed rename has come back", async () => {
     await act(async () => root.render(<RenameDialog session={session} open onClose={closed} />));
     await type("New name");

@@ -150,6 +150,59 @@ import Testing
         #expect(sparse.points.first?.at == nil)
     }
 
+    // MARK: When, in the app's own date style (#4875)
+
+    private func date(_ s: String) throws -> Date { try #require(JSON.parseDate(s)) }
+
+    /// The header's style: the end's time alone on the same day, its date too on another; never the hub's fixed format.
+    @Test(arguments: ["zh_CN", "ja_JP"]) func spanInTheHeadersDateStyle(_ id: String) throws {
+        let locale = Locale(identifier: id), zone = try #require(TimeZone(identifier: "Asia/Shanghai"))
+        let start = try date("2027-01-15T17:00:00+08:00"), end = try date("2027-01-15T17:02:00+08:00")
+        let same = RecordingFormat.span(start, end, locale: locale, timeZone: zone)
+        // The hour and minute in the locale's own way: "17:00" in Chinese, 「17時00分」 in Japanese (as in the header).
+        let times = [#"17\D00"#, #"17\D02"#].allSatisfy { same.range(of: $0, options: .regularExpression) != nil }
+        #expect(same.contains("1月15日") && times, "\(same)")
+        #expect(same.components(separatedBy: "15日").count == 2 && !same.contains("2027"), "\(same)")
+        let lateStart = try date("2027-01-15T23:30:00+08:00"), lateEnd = try date("2027-01-16T00:30:00+08:00")
+        let late = RecordingFormat.span(lateStart, lateEnd, locale: locale, timeZone: zone)
+        #expect(late.contains("1月15日") && late.contains("1月16日"), "\(late)")
+    }
+
+    /// `start` / `end` decoded (RFC 3339 with the offset) and shown, also in Copy and Share; `when` from a hub without
+    /// both, or with one unreadable; nothing without any.
+    @Test func whenFromStartAndEndElseTheHubsWhen() throws {
+        func decode(_ json: String) throws -> RecordingMinutes { try JSONDecoder().decode(RecordingMinutes.self, from: Data(json.utf8)) }
+        let old = try decode(minutesJSON)
+        #expect(old.start == nil && old.whenLine == "2026-11-10 14:00–15:10")
+        let m = try decode(#"{"when": "2026-11-10 14:00–15:10", "start": "2026-11-10T14:00:00+08:00", "end": "2026-11-10T15:10:00+08:00", "where": "Room 3"}"#)
+        let start = try date("2026-11-10T06:00:00Z"), end = try date("2026-11-10T07:10:00Z")
+        #expect(m.start == start && m.end == end)
+        let span = RecordingFormat.span(try #require(m.start), try #require(m.end))
+        #expect(m.whenLine == span)
+        #expect(m.text(title: "x").components(separatedBy: "\n")[1] == "\(span) · Room 3")
+        #expect(try decode(#"{"when": "w", "start": "2026-11-10T14:00:00+08:00"}"#).whenLine == "w")
+        #expect(try decode(#"{"when": "w", "start": "yesterday", "end": "2026-11-10T15:10:00+08:00"}"#).whenLine == "w")
+        #expect(try decode("{}").whenLine == nil)
+        // What the watch is sent keeps them.
+        #expect(try JSONDecoder().decode(RecordingMinutes.self, from: JSONEncoder().encode(m)) == m)
+    }
+
+    /// An item may cite a meeting photo instead of a transcript line (#3862 phase 3, `"photo": 3`): it is read and kept
+    /// (what the watch is sent too), Copy and Share name it after the item as the hub's Markdown does, and a citation of
+    /// another shape reads as none without losing the minutes.
+    @Test func anItemCitesAPhoto() throws {
+        let json = #"{"decisions":[{"text":"Cap exports at 4 MB.","at":1834.2,"photo":3},{"text":"Ship Friday.","at":40}],"#
+            + #""points":[{"text":"Odd","photo":"three"},{"text":"Zero","photo":0}]}"#
+        let m = try JSONDecoder().decode(RecordingMinutes.self, from: Data(json.utf8))
+        #expect(m.decisions.map(\.photo) == [3, nil])
+        #expect(m.points.map(\.photo) == [nil, nil])
+        #expect(try JSONDecoder().decode(RecordingMinutes.self, from: JSONEncoder().encode(m)) == m)
+        let rows = m.text(title: "Weekly").components(separatedBy: "\n")
+        #expect(rows.contains("- Cap exports at 4 MB. [30:34] " + RecordingMinutes.photoMention(3)), "\(rows)")
+        #expect(rows.contains("- Ship Friday. [0:40]"), "no photo, no mention: \(rows)")
+        #expect(RecordingMinutes.photoMention(3).contains("3"))
+    }
+
     @Test func minutesTextHasEverySection() throws {
         let m = try JSONDecoder().decode(RecordingMinutes.self, from: Data(minutesJSON.utf8))
         let text = m.text(title: "fallback")
@@ -185,6 +238,111 @@ import Testing
         #expect(RecordingMinutesModel.state(minutes: nil, status: nil, meeting: false, synced: true) == .none)
         // A note the hub wrote minutes for anyway shows them.
         #expect(RecordingMinutesModel.state(minutes: m, status: nil, meeting: false, synced: true) == .ready(m))
+    }
+
+    // MARK: Action items as to-dos, and Regenerate (#4062)
+
+    /// A meeting recorded, transcribed and done: what the page loads minutes for.
+    private func doneMeeting() -> RecordingEntry {
+        var e = RecordingEntry(id: UUID(), createdAt: now, source: .phone, title: "Weekly", active: false, expectedSegments: 1)
+        e.meeting = RecordingMeeting(title: "Weekly")
+        e.segments = [RecordingSegment(index: 0, start: 0, duration: 60, sentences: [RecordingSentence(start: 1, end: 9, text: "Bo adds the test.")])]
+        return e
+    }
+
+    private func detail(version: Int, added: String = "", state: String = "ready", trimmed: Bool = false) -> String {
+        """
+        {"detail": {"meta": {"minutes_state": "\(state)"\(trimmed ? #", "trimmed_at": "2026-11-20T00:00:00Z""# : "")},
+         "minutes": {"version": \(version), "points": [{"text": "Export", "at": 1}],
+          "actions": [{"id": "a1", "who": "Bo", "what": "Add the test.", "by": "Friday", "due_date": "2026-11-13", "at": 2, "todo_id": "\(added)"},
+                      {"id": "a2", "what": "Write the notes.", "at": 3, "todo_id": ""}]}}}
+        """
+    }
+
+    @Test func actionItemsDecodeTheirIDsAndTodos() throws {
+        let answer = try JSONDecoder().decode(RecordingMinutesModel.Answer.self, from: Data(detail(version: 2, added: "t1", trimmed: true).utf8))
+        let m = try #require(answer.detail.minutes)
+        #expect(m.version == 2)
+        #expect(m.actions.map(\.id) == ["a1", "a2"])
+        #expect(m.actions[0].added && !m.actions[1].added)
+        #expect(m.actions[0].dueDate == "2026-11-13")
+        #expect(answer.detail.meta?.trimmedAt == "2026-11-20T00:00:00Z")
+        // The date it resolves to goes with the deadline as said.
+        #expect(RecordingMinutes.byline(m.actions[0])?.hasPrefix("Bo · Friday · ") == true)
+        // What the watch is sent keeps them.
+        let again = try JSONDecoder().decode(RecordingMinutes.self, from: JSONEncoder().encode(m))
+        #expect(again == m)
+    }
+
+    /// Add sends the version shown and those actions, shows them added, and reads the recording back before anything else.
+    @Test func addSendsTheVersionShownAndReadsBack() async throws {
+        let hub = FakeHub()
+        let entry = doneMeeting()
+        let path = "/api/v1/recordings/\(entry.id.uuidString.lowercased())/minutes/todos"
+        var added = ""
+        hub.on("GET", "/api/v1/kb/recordings/\(entry.id.uuidString.lowercased())") { _ in Data(self.detail(version: 2, added: added).utf8) }
+        hub.on("POST", path) { req in
+            let body = try JSONSerialization.jsonObject(with: req.body ?? Data()) as? [String: Any]
+            #expect(body?["version"] as? Int == 2)
+            #expect(body?["actions"] as? [String] == ["a1", "a2"])
+            added = "t1"
+            return Data(#"{"todos": [{"id": "t1"}], "minutes": {"version": 2, "actions": [{"id": "a1", "what": "Add the test.", "todo_id": "t1"}]}}"#.utf8)
+        }
+        let model = RecordingMinutesModel(api: { hub.client })
+        await model.load(entry, synced: true)
+        await model.add(["a1", "a2"], to: entry, synced: true)
+        #expect(hub.sent("POST", path).count == 1)
+        #expect(hub.sent("GET", "/api/v1/kb/recordings/\(entry.id.uuidString.lowercased())").count == 2)
+        guard case .ready(let m) = model.state else { Issue.record("not ready: \(model.state)"); return }
+        #expect(m.actions[0].added)
+        #expect(!model.asking)
+    }
+
+    /// Rewritten since they were shown: the new ones are read and shown, nothing is sent again, and the page says so.
+    @Test func staleMinutesAreReadAgainNotResent() async throws {
+        let hub = FakeHub()
+        let entry = doneMeeting()
+        let path = "/api/v1/recordings/\(entry.id.uuidString.lowercased())/minutes/todos"
+        var version = 2
+        hub.on("GET", "/api/v1/kb/recordings/\(entry.id.uuidString.lowercased())") { _ in Data(self.detail(version: version).utf8) }
+        hub.on("POST", path) { _ in
+            version = 3
+            throw APIError(status: 409, message: "stale", fields: ["code": "minutes_stale"])
+        }
+        let model = RecordingMinutesModel(api: { hub.client })
+        await model.load(entry, synced: true)
+        await model.add(["a1"], to: entry, synced: true)
+        #expect(hub.sent("POST", path).count == 1)
+        guard case .ready(let m) = model.state else { Issue.record("not ready"); return }
+        #expect(m.version == 3)
+        #expect(!m.actions[0].added)
+        #expect(AppModel.shared.toast?.message.isEmpty == false)
+    }
+
+    /// Regenerate goes with minutes shown only when the transcript is whole on the hub, nothing is being written and it
+    /// hasn't expired; asked, the minutes stay shown as Updating.
+    @Test func regenerateKeepsTheMinutesShown() async throws {
+        let hub = FakeHub()
+        let entry = doneMeeting()
+        let id = entry.id.uuidString.lowercased()
+        var state = "ready", trimmed = false
+        hub.on("GET", "/api/v1/kb/recordings/\(id)") { _ in Data(self.detail(version: 2, state: state, trimmed: trimmed).utf8) }
+        hub.on("POST", "/api/v1/recordings/\(id)/minutes") { _ in Data(#"{"state": "pending"}"#.utf8) }
+        let model = RecordingMinutesModel(api: { hub.client })
+        await model.load(entry, synced: true)
+        #expect(model.canRegenerate(entry, synced: true))
+        #expect(!model.canRegenerate(entry, synced: false))
+        await model.regenerate(entry.id)
+        guard case .ready = model.state else { Issue.record("the minutes went"); return }
+        #expect(model.updating && model.waiting)
+        #expect(!model.canRegenerate(entry, synced: true))
+        state = "pending"
+        await model.load(entry, synced: true)
+        #expect(model.updating)
+        state = "ready"; trimmed = true
+        await model.load(entry, synced: true)
+        #expect(!model.updating && model.trimmed)
+        #expect(!model.canRegenerate(entry, synced: true))
     }
 
     // MARK: The Live Activity

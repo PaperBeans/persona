@@ -31,31 +31,45 @@ import SwiftUI
     @ObservationIgnored private let taken: () -> Void
     /// Writes completion through the shared index so the pending tray updates as soon as the PATCH succeeds.
     @ObservationIgnored private let complete: (String, APIClient) async throws -> Void
+    /// The manager a request about a to-do names (`TodoStore.named`): its own, whichever assistant is current.
+    @ObservationIgnored private let named: (String) -> String?
+    /// The manager a request about a question of a conversation's briefing names (`AppModel.feedManager`), by the
+    /// conversation and its group.
+    @ObservationIgnored private let feedManager: (String, String) -> String?
 
     init(api: @escaping (String) -> APIClient? = { AppModel.shared.api($0) },
          failed: @escaping (String) -> Void = { AppModel.shared.toast = Toast($0, style: .error) },
          taken: @escaping () -> Void = { TasksStore.shared.reloadTodos() },
          complete: @escaping (String, APIClient) async throws -> Void = { id, api in
              _ = try await TodoStore.shared.update(id: id, done: true, api: api)
-         }) {
+         },
+         named: @escaping (String) -> String? = { TodoStore.shared.named($0) },
+         feedManager: @escaping (String, String) -> String? = { AppModel.shared.feedManager(of: $0, group: $1) }) {
         self.api = api
         self.failed = failed
         self.taken = taken
         self.complete = complete
+        self.named = named
+        self.feedManager = feedManager
     }
 
     /// A round of a to-do: the same round listed by two briefings is one button.
-    private static func key(accepting row: BriefBody.Row, group: String) -> String { "\(group)|accept|\(row.id)|\(row.askedAt ?? "")" }
+    private static func key(accepting row: BriefBody.Row, group: String) -> String { key(accepting: row.id, askedAt: row.askedAt, group: group) }
+    private static func key(accepting id: String, askedAt: String?, group: String) -> String { "\(group)|accept|\(id)|\(askedAt ?? "")" }
     private static func key(marking row: BriefBody.Row, group: String) -> String { "\(group)|later|\(row.id)" }
 
     func outcome(accepting row: BriefBody.Row, group: String = "") -> Outcome? { outcomes[Self.key(accepting: row, group: group)] }
+    /// The same, by the to-do and its round: a row that only reads it (`DecisionRow`) need not build a `BriefBody.Row`.
+    func outcome(accepting id: String, askedAt: String?, group: String = "") -> Outcome? {
+        outcomes[Self.key(accepting: id, askedAt: askedAt, group: group)]
+    }
     func outcome(marking row: BriefBody.Row, group: String = "") -> Outcome? { outcomes[Self.key(marking: row, group: group)] }
 
     /// Accept, Got It or Take Recommendation (`POST /api/v1/todos/{id}/accept` with the row's round).
     func accept(_ row: BriefBody.Row, group: String) async {
         guard let take = row.take, let askedAt = row.askedAt, !askedAt.isEmpty else { return }
         await run(Self.key(accepting: row, group: group), group: group, done: .taken(take), took: taken, failure: { String(localized: "Couldn't accept: \($0)") }) {
-            try await $0.acceptTodo(row.id, askedAt: askedAt)
+            try await $0.manager(self.named(row.id)).acceptTodo(row.id, askedAt: askedAt)
         }
     }
 
@@ -69,9 +83,10 @@ import SwiftUI
     }
 
     /// Handled (`POST /api/v1/later/{id}/handled`).
-    func markHandled(_ row: BriefBody.Row, group: String) async {
+    /// `conversation`: the one whose briefing has the question; the route names none, so its manager is named.
+    func markHandled(_ row: BriefBody.Row, group: String, conversation: String = "") async {
         await run(Self.key(marking: row, group: group), group: group, done: .marked, took: {}, failure: { String(localized: "Couldn't mark it as handled: \($0)") }) {
-            try await $0.laterHandled(row.id)
+            try await $0.manager(self.feedManager(conversation, group)).laterHandled(row.id)
         }
     }
 
@@ -96,5 +111,26 @@ import SwiftUI
             outcomes[key] = nil
             failed(failure(error.localizedDescription))
         }
+    }
+}
+
+/// Where a recommended-setup line's Open Settings goes (#5804): the Settings page its mechanism is turned on at.
+@MainActor enum BriefSetupPages {
+    /// The Settings pages to show, in order.
+    static func path(_ page: BriefBody.Setup.Page) -> NavigationPath {
+        var path = NavigationPath()
+        switch page {
+        case .triage:
+            path.append(SettingsPage.triage)
+        case .superviseModel:
+            path.append(SettingsPage.modelConfiguration)
+            path.append(ModelPurposeRoute(id: ModelConfigurationModel.supervise))
+        }
+        return path
+    }
+
+    static func open(_ page: BriefBody.Setup.Page, in model: AppModel = .shared) {
+        model.settingsPath = path(page)
+        model.showSettings()
     }
 }

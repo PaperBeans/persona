@@ -946,6 +946,43 @@ func TestPendingInteractionsIndexed(t *testing.T) {
 
 // Each combination of filters returns the same rows the single OR statement did: newest first, limited, and a
 // session alone matches that session id on every machine.
+// LateAnswer records answers given after a card expired: one question at a time, added up, the status kept; a card
+// that did not expire is never written over, nor is the expiry's own dismissal kept beside an answer.
+func TestLateAnswer(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	at := time.Now().UTC()
+	for _, id := range []string{"ix_expired", "ix_pending"} {
+		if err := d.InsertInteraction(ctx, proto.Interaction{ID: id, MachineID: "m1", SessionID: "s1", Kind: proto.IxQuestion, CreatedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := d.FinishInteraction(ctx, "ix_expired", "expired", &proto.Resolution{Dismiss: true, Reason: proto.DismissedExpired}); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []map[string]string{{"Q1": "A"}, {"Q2": "B"}} {
+		if ok, err := d.LateAnswer(ctx, "ix_expired", a, "", ""); err != nil || !ok {
+			t.Fatalf("late answer %v: %v %v", a, ok, err)
+		}
+	}
+	status, res, err := d.InteractionOutcome(ctx, "ix_expired")
+	if err != nil || status != "expired" || res == nil || !res.Late || res.Dismiss || res.Reason != "" || res.AnsweredBy != "" ||
+		res.Answers["Q1"] != "A" || res.Answers["Q2"] != "B" {
+		t.Fatalf("expired card: %s %+v %v", status, res, err)
+	}
+	if ok, err := d.LateAnswer(ctx, "ix_expired", map[string]string{"Q1": "C"}, proto.AnsweredByDefault, "deadline"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if _, res, _ := d.InteractionOutcome(ctx, "ix_expired"); res.AnsweredBy != proto.AnsweredByDefault || res.Reason != "deadline" || res.Answers["Q1"] != "C" || res.Answers["Q2"] != "B" {
+		t.Fatalf("default: %+v", res)
+	}
+	if ok, err := d.LateAnswer(ctx, "ix_pending", map[string]string{"Q1": "A"}, "", ""); err != nil || ok {
+		t.Fatalf("pending card written: %v %v", ok, err)
+	}
+	if status, res, _ := d.InteractionOutcome(ctx, "ix_pending"); status != "pending" || res != nil {
+		t.Fatalf("pending card: %s %+v", status, res)
+	}
+}
+
 func TestInteractionsFilters(t *testing.T) {
 	d, ctx := open(t), context.Background()
 	base := time.Now().Add(-time.Hour).UTC()
@@ -983,6 +1020,66 @@ func TestInteractionsFilters(t *testing.T) {
 			if strings.Join(got, ",") != strings.Join(want, ",") {
 				t.Fatalf("Interactions(%q, %q, %d) = %v, want %v", c.machine, c.session, c.limit, got, want)
 			}
+		}
+	}
+}
+
+// InteractionsPage pages the history back by time: since, kind and a cursor of (created_at, id), so rows of the same
+// time are neither skipped nor read twice across pages, and a full page names the next one's cursor.
+func TestInteractionsPage(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	base := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	for i := range 9 {
+		kind := proto.IxQuestion
+		if i == 4 {
+			kind = proto.IxPermission
+		}
+		at := base.Add(time.Duration(i/3) * time.Minute) // three rows each minute
+		if err := d.InsertInteraction(ctx, proto.Interaction{ID: fmt.Sprintf("ix%d", i), MachineID: "m1", SessionID: "s1",
+			Kind: kind, CreatedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var pages []string
+	q := InteractionQuery{Kind: proto.IxQuestion, Since: base, Limit: 3}
+	for range 10 {
+		page, err := d.InteractionsPage(ctx, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, r := range page.Records {
+			ids = append(ids, r.Interaction.ID)
+		}
+		pages = append(pages, strings.Join(ids, ","))
+		if page.NextBefore == nil {
+			break
+		}
+		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
+	}
+	if got := strings.Join(pages, " | "); got != "ix8,ix7,ix6 | ix5,ix3,ix2 | ix1,ix0" {
+		t.Fatalf("pages %q", got)
+	}
+	// since leaves the older rows out; before without an id is strictly before; no filter is every row.
+	for _, c := range []struct {
+		q    InteractionQuery
+		want string
+	}{
+		{InteractionQuery{Since: base.Add(2 * time.Minute)}, "ix8,ix7,ix6"},
+		{InteractionQuery{Before: base.Add(time.Minute), Machine: "m1", Session: "s1"}, "ix2,ix1,ix0"},
+		{InteractionQuery{Kind: proto.IxPermission}, "ix4"},
+		{InteractionQuery{Session: "nope", Since: base}, ""},
+	} {
+		page, err := d.InteractionsPage(ctx, c.q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, r := range page.Records {
+			ids = append(ids, r.Interaction.ID)
+		}
+		if got := strings.Join(ids, ","); got != c.want || page.NextBefore != nil {
+			t.Errorf("%+v: %s (next %v), want %s", c.q, got, page.NextBefore, c.want)
 		}
 	}
 }

@@ -125,3 +125,53 @@ func TestSweepPRsWithDeployedCommits(t *testing.T) {
 		t.Fatalf("not named: %q %+v", got.Stage, got.Delivery)
 	}
 }
+
+// A local build runs a PR before it is merged upstream (#4867): the deploy names it by its head commit, "# pr: <N> <sha>",
+// and that counts only when the file lists the commit (the deployed one's history). A merge the file names by its
+// subject wins over a head line.
+func TestDeployedCommitsPRHeads(t *testing.T) {
+	head, unlisted := strings.Repeat("d", 40), strings.Repeat("e", 40)
+	l := parseDeployedCommits(deployedCommitsHeader + "\n# repo: o/r\n# pr: 31 " + strings.ToUpper(head) + "\n# pr: #32 " + unlisted +
+		"\n# pr: 9 " + oldHub + "\n# pr: x " + head + "\n" +
+		newHub + " Merge branch 'fix/31-thing' into local\n" +
+		head + " feat: the open PR's head\n" +
+		mergeSHA + " Merge pull request #9 from someone/branch\n" +
+		oldHub + " fix: an older one (#12)\n")
+	if l == nil || l.head != newHub || l.count != 4 {
+		t.Fatalf("%+v", l)
+	}
+	if l.prs[31] != head || l.prs[9] != mergeSHA || l.prs[12] != oldHub || len(l.prs) != 3 {
+		t.Fatalf("prs %+v", l.prs)
+	}
+}
+
+// GitHub would say the PR is still open; the running hub's file names it by its head: deployed here, asked to verify
+// and verified by the supervising assistant, with GitHub never asked. A file that does not list the head is no evidence:
+// held at the PR.
+func TestDeployedBeforeTheUpstreamMerge(t *testing.T) {
+	s, f, _, _, forge := deployService(t)
+	forge.merged, forge.sha = false, ""
+	head := strings.Repeat("d", 40)
+	writeDeployed(t, s, oldHub, head+" feat: the task's PR, merged into the local branch", "# pr: 9 "+head)
+	todo := startedTask(t, s, f)
+	agentTurn(s, f, proto.StatusWorking, "", 0)
+	agentTurn(s, f, proto.StatusDone, deployedReply, 0)
+	waitFor(t, "verified", func() bool {
+		a := askOf(s, todo.ID)
+		return a != nil && !a.AcceptedAt.IsZero() && todoNow(s, todo.ID).Stage == "verify"
+	})
+	if got := todoNow(s, todo.ID); got.Delivery != nil && got.Delivery.State != deliveryLive || forge.calls != 0 {
+		t.Fatalf("%+v, %d GitHub calls", got.Delivery, forge.calls)
+	}
+
+	s2, f2, _, _, forge2 := deployService(t)
+	forge2.merged, forge2.sha = false, ""
+	writeDeployed(t, s2, oldHub, "# pr: 9 "+head) // its head is not in the deployed history
+	todo2 := startedTask(t, s2, f2)
+	agentTurn(s2, f2, proto.StatusWorking, "", 0)
+	agentTurn(s2, f2, proto.StatusDone, deployedReply, 0)
+	waitFor(t, "held", func() bool { return todoNow(s2, todo2.ID).Delivery != nil })
+	if got := todoNow(s2, todo2.ID); got.Delivery.State != deliveryPR || got.Stage != "review" || askOf(s2, todo2.ID) != nil {
+		t.Fatalf("%q %+v", got.Stage, got.Delivery)
+	}
+}

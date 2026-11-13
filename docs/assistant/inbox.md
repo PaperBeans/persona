@@ -22,7 +22,9 @@ each mail account's latest page, reading at most 4 accounts concurrently and del
 `settle`, event grouping's `group.tool` / `group.fallback` / `group.append`, read hub triage rules, AI twin configuration, and plugin-provided connectors
 (`inbox.config`), and current translation model (`inbox.translate_fingerprint`). On item changes, the manager emits `inbox.changed`; outside the bus read loop, hub
 sends plugins the `inbox.changed` event and Apps `{"type":"inbox"}` (one slow plugin reader does not block others). Hub asks the manager for items needed by plugin detail slot `inbox_item`,
-items when deleting a source's data, and GitHub Settings' muted repositories (`inbox.item`, `inbox.forget`, `inbox.repo_mutes`).
+items when deleting a source's data, and GitHub Settings' muted repositories (`inbox.item`, `inbox.forget`, `inbox.repo_mutes`). The Inbox Sources
+pages (#5278, `docs/extensions/subscriptions.md` "Pages") list and remove a source's mutes (`inbox.mutes`, `inbox.unmute`) and have the triage model try a
+subscription's dry run on request (`inbox.triage_preview`: nothing kept).
 Hub still enforces its own boundary: reply-only devices (Watch) may send only text, not change document state or send `/agent …` (which starts an Agent when sent as the user).
 Hub rejects these before forwarding (403; the manager checks too). Connector settings, including credentials, remain hub APIs; only muted repositories belong to the manager.
 
@@ -67,6 +69,7 @@ or the manager restarts and retries). A previous interrupted send (hub stopped o
 | Lark | Unhandled new messages in one chat (starting at the first new message; later ones merge into it) | `lark:<feedId>:<first message position>` |
 | Lark Docs | One document notification-center card (latest mentions / comments / replies to me in one document) | `doc:<notification id>:<update time in milliseconds>` |
 | Mail | Unread mail in a thread (same subject after stripping Re: / Fwd: / 回复： [reply] / [list name] means the same thread; when nothing is left after stripping, mail is split further by sender address: one person's subject-less mail is one item, different people's are separate items, #4852) | `mail:<account>:<thread>:<first mail uid>` |
+| Subscription | New items of one row: a thread's for `group_by: thread` (an item without a thread is its own), the whole subscription's for `group_by: source` (#5671), like a Lark chat (titled by the subscription, no tag); its count goes up by the items each pull brings | `<subscription>:<hash of the row's thread and first last>`, thread `sub:<subscription>:<thread, uid or all>` ([subscriptions.md](../extensions/subscriptions.md) "Destinations") |
 
 - Subject-less mail used to be one item per account (sender, preview and "sent to me" taken from the latest); since #4852 it is split by sender, so a subject-less back-and-forth among several people also becomes several items.
   The "no subject" item already open before the upgrade (the old thread key): when every unread mail in it on this page has a sender, it is filed (`done_by=superseded`) and the mail goes into each sender's item, each listed once;
@@ -77,12 +80,25 @@ or the manager restarts and retries). A previous interrupted send (hub stopped o
   Later messages always merge into the newest (`UpdatedAt`, ties by ID, `threadIndex.openFor`, #3796); the old item stays unchanged.
 - Included Lark messages: gateway `unread` scope (Lark Unread, excluding muted chats) + `mentions` scope (mentions of me in muted groups still count).
   When `lark.cli` is enabled and is the primary source (or the gateway is absent / unavailable), the built-in `larkcli` connector polls `im +messages-search --start … --as user` every two minutes (minimum one minute, with a bounded page count). It keeps messages that mention me or @all, messages in direct chats, and replies in topics where I posted, replied or was mentioned; my own messages never create an item. Overlapping pages are deduplicated by `message_id`, consecutive messages in one chat/topic are one row, and context comes from `+chat-messages-list` / `+threads-messages-list`. A later message from me marks that row replied. The cursor and topic set are kept in Postgres settings, not files under `~/.persona`.
+  Search indexes most messages at once but some only minutes later (a direct message was seen arriving in search about ten minutes after it was sent), and a message indexed after the cursor passed its time used to be lost. So the cursor stays 10 minutes behind the newest message it saw. Each round also reads up to 10 direct chats from their own history since two hours ago (`+chat-messages-list --start`), rotating through the 50 most recently active direct chats (`+chat-list --types p2p --sort active_time`), which has no indexing delay; the `message_id` ledger drops what was already collected. The window leaves room to recover a missed conversation more than an hour after it was sent, including time spent investigating and rotating through the candidates; each chat read is still capped at 50 messages. Mentions in group chats still rely on search and its 10-minute overlap. A failed direct-chat read keeps what search found that round and reports the error (`server/internal/connector/larkcli/inbox.go`, `sweepDirectChats`).
+  An owner reply settles only earlier incoming activity in the same chat or topic. A later peer follow-up stays open, including one found in the context read before search indexes it. Within a chat, source message positions resolve the CLI's minute-resolution timestamps; an opaque message ID or uncertain order never proves the owner replied later.
   As a maintainer opt-in addition, `larkcli` has an `inbox_all_chats` connector option containing chat ids whose every new incoming message is collected. The default is an empty list; this option is intentionally separate from the L4 collection rules.
   Private chat → `dm`, bot / AI private chat → `bot`, group mentions of me / everyone → `mention`, unmuted group → `group`; unread older than 7 days is excluded.
   Only other people's messages count; your own messages never make a chat Needs you.
 - Messages sent by the app bound to `lark-cli` (the `appId` reported by `lark-cli auth status --json`) are marked seen and omitted to prevent Persona's own bot replies from looping back into the Inbox. If that app id is unavailable, the connector keeps the existing behavior; messages from other apps remain eligible.
 - Mail: unread messages in each account's latest 40 Inbox messages, within 7 days. The list API reads only the first 2 KB of body (HTML mail often contains nothing but `<style>`),
   so new mails fetch the full body again (IMAP `BODY.PEEK`, without marking read) for preview and AI context (`BodyOf` tracks which mail was read).
+- Mail that leaves that page (archived or deleted in the mail client, or pushed off by newer mail) follows the same rules (#5993,
+  `inbox_mail_off_page.go`): after a round applies an account's page, its open, unread mail items with no mail on the page are
+  settled. One whose newest mail is past the 7 days is handled like a mail past the window on the page; for the others the manager asks
+  the hub once a round which of their mails are still in the mailbox, read or not (`inbox.mail_flags`, one read-only IMAP `UID FETCH
+  (FLAGS)`, at most 200 UIDs per account, the longest unasked first). Every mail read or gone means read elsewhere ("Lifecycle"); one still
+  unread keeps the item as it is, and so does a lookup that fails (a hub from before it). Needs you and an FYI conclusion waiting for
+  Got it are only marked read, as on the page.
+- Mail's **Add to Inbox** (#5307; Settings › Connectors › Mail and Settings › Inbox Sources, `PUT /api/v1/connectors/mail/settings {inbox}`) is on
+  until turned off and kept with the other connector switches. Off, the mail rounds read no account (`readMail`), so the mail items the
+  Inbox has stay as they are (and its accounts' read errors as last read); search, replies and the knowledge base go on. Turned on again, the
+  next round is a full one and reads mail at once. `mail` declares no inbox capability: `Manifest.InboxSwitch` gives it the switch.
 
 ## Docs: mentions in sheets, bases, and documents (2026-10-31)
 
@@ -162,6 +178,7 @@ a summary up to 40 characters, and a short reason:
   currently the Lark extension). Hub-owned mail, GitHub, Telegram, and Messages behave unchanged: new items appear immediately, then triage in the background; timing and fallback (no rule tier means noise) remain as before.
   Identify by plugin ownership (`extensionConnectors`, recorded when hub starts a plugin connector and passed each round as `InboxSource.extension`), not name.
   Source subscriptions (#2039) are handed in the same way, one source per subscription with `extension` set: their items carry a fallback tier unless the user chose to wait for the model ([subscriptions.md](../extensions/subscriptions.md) "Destinations").
+  A subscription's rows follow its recipe's `group_by` (#5671): one a thread, or one for the whole subscription, which is triaged as one row like a Lark chat (an item in it that needs the user makes it Needs you). The source also has `counts`, so a move adds the thing's `extra.count` (the items its newest pull brought) to the item's count instead of one; for every other generic connector `extra.count` is not read there and a move counts one. A row is `read` when its recipe maps `seen` and its newest item was seen in the source (#6176), and is then handled like any connector's thing read elsewhere. A subscription that failed its last run, needs a new recipe or was asked to wait carries a `read_error` (#6189), so it is listed as behind like a built-in. A row whose recipe maps `reply_to` can be replied to (#6198): `inbox.reply` for it goes to the subscription's connector with the item's own thread and id.
 - **Triage before admission (#1644)**: hold new plugin-connector items aside for a collection round (`inbox_admit.go`). After collection, triage in the background; only then write to the database and list them:
   - Model succeeds: use its tier and summary.
   - Model fails, fallback exists: admit by fallback with "Rule-based." **That version is final**, with no retriage on model recovery (only new activity triggers it).
@@ -213,19 +230,25 @@ protocol in `docs/protocol/connector-protocol.md`, "Event grouping").
   (prose explaining meta fields; disallowed without `meta`). `group.tool` and `group.fallback` need no declaration; if absent, return `unknown_method`. The model sees unavailable tools; with no fallback, an untriageable batch waits for the next round.
   If either side lacks support, retain one row per chat. Old hubs / plugins do not affect each other (old hubs do not recognize `group`; see protocol "Old hubs").
 - **Model behavior** (`inbox.triage`): prompt = generic association rules (`prompts/inbox/group.md`: replies / quotes, same topic, consecutive messages from one person belong together; a long gap plus new topic starts another;
-  uncertainty merges into an existing event; at most 3 new events per batch; tier criteria shared with triage in `inbox/tiers.md`) + plugin `meta_description` + source rules (`rules`, otherwise global `inbox.rules`)
+  uncertainty merges into an existing event; the prompt asks for at most 3 new events per batch; tier criteria shared with triage in `inbox/tiers.md`) + plugin `meta_description` + source rules (`rules`, otherwise global `inbox.rules`)
   + batch text. Existing events for the chat are preloaded (the no-query result of `events` below), saving one call. Each model response is JSON, either one tool call or a result.
+  The output budget is `256 + 48 × new messages + 160 × min(new messages, candidate events + 3)`, clamped to 1024–4096 tokens on every model call.
+  The batch `context` may interleave the user's own messages by position: their sender is `我（自己说的，不归类）`, they have no message id of their own (a trailing `(回复 <id>)` or `(话题 <id>)` names another message), they are context only, they are not in `new`, and the model must not assign them.
   At most 4 tool calls per batch; at most 2 minutes total, 45 seconds per call.
 - **Tools**: `events` (hub-owned: open events in the same chat plus those handled within 3 days, at most 10, `{id, title, summary, tier, version, done, meta}`; `query` filters text in titles, summaries, meta);
   `messages_before`, `messages_around`, `search` (plugin-owned through `group.tool`, avatars / media stripped, at most 8 KB).
 - **Result**: `assign` (each new message's event: existing ID or `new:1`…) and `events` (title, summary, tier, reason for each touched event; new events may `continues` a handled one).
-  Hub validates: every new message assigned exactly once; existing events must have been queried in this batch and remain unhandled; at most 3 `new:k`; tier must be one of three and title required. **Invalid results mean model unavailable.**
+  For a handled event, the optional `reopen` in its `events` item defaults to true: a genuine follow-up appends to and reopens the same event. Only pure closeout (thanks, acknowledgement or emoji) sets `reopen: false`, which appends and records the messages but keeps the event done; `reopen` has no effect on open or new events.
+  Hub validates: every new message assigned exactly once; existing events must have been queried in this batch; handled events are allowed except done noise events and done events with at least 50 messages, which are excluded from candidates; tier must be one of three and title required. The 3-new-event limit is prompt guidance only: exceeding it does not invalidate the result.
+  An invalid result or unparseable JSON is handed back to the model once for correction, consuming one call allowance without adding a tool call; if no allowance remains, or the correction is still invalid, the model is treated as unavailable and the fallback is used.
 - **Counts**: hub maintains total message `count`, initialized from assigned messages and incremented by newly assigned messages each batch, ignoring plugin `extra.count`. `started_at` is fixed at creation.
 - **Inbox writes**: for connectors maintaining `meta`, call `group.append` once per touched event; retry only failed events, 3 attempts total. Write Inbox items using returned `id`, model title / summary / tier, `triaged_by: "model"`,
-  treating this version as triaged. If the user handled an event meanwhile, create a new continuation instead. An unchanged `last` is a retransmission, with no store / push (push once per ID + version). Muted events remain directly done.
+  treating this version as triaged. Grouping records `title_by: "model"` or `"rules"` when it writes the title; once `title_by` is `"assistant"` or `"user"`, grouping leaves the title and summary unchanged while tier, reason and urgency still advance. If the user handled an event meanwhile, append to and reopen that event rather than replacing it with a new continuation. An unchanged `last` is a retransmission, with no store / push (push once per ID + version). Muted events remain directly done.
 - **Fallback**: unavailable model (unconfigured, no quota, error, timeout) or invalid result invokes plugin `group.fallback` for structural grouping (reply / quote chains, topics, consecutive messages by one person, time gaps).
   Without `group.fallback`, do not write the batch; wait for the model and resubmit next round, like Inbox items without fallback.
-  It receives events under the same rules as `events`. Use plugin `rule_tier`, reason "Rule-based," `triaged_by: "rules"`; do not send this version back to the model. Validate fallback results by the same rules; invalid batches remain unwritten until the next round.
+  It receives events under the same rules as `events`. For an event the fallback opens, use plugin `rule_tier`, reason "Rule-based," `triaged_by: "rules"`; do not send this version back to the model.
+  When fallback messages join an existing event, only the messages and version advance: its title, summary, tier, reason, urgency and `triaged_by` stay unchanged (user policy tiers still apply), and `triaged_at` advances so this version is not retriaged.
+  Validate fallback results by the same rules; invalid batches remain unwritten until the next round.
 - **One pass per batch**: association runs in the background without delaying collection or pull-to-refresh. One batch per chat at a time (resubmitting the same batch or twice in one round still counts as one); at most 4 chats concurrently, others retry next round.
   Once every batch message belongs to an item, the plugin stops submitting it; unfinished batches resubmit remaining messages.
 - **List**: events are ordinary items with added `triaged_by`. `meta` and their chat membership stay on hub, not the list (plugin detail slot `inbox_item` receives meta through `ui.render`, #1681).
@@ -263,10 +286,11 @@ Triage, drafting, AI twin, done state, and retention use hub's generic logic.
   Any notification in the list keeps its thread unread, also one the inbox leaves out (a reason it does not take, a muted repository).
   The time compared is the notification's `updated_at`, kept apart from the thing's time: a CI item the follow-up moved to a later run (GitHub sent no notification of it) is not inferred read while the connector runs, and that run makes a read item unread again (#2149).
   These times are kept in memory only: after a restart the connector rebuilds the item at its notification and may infer that read, which the hub then ignores for an item already at the later run (above).
-  With under one tenth of request quota remaining, poll notifications only and show "Request quota nearly exhausted."
+  With under one tenth of core request quota remaining, poll notifications only and show a localized quota warning with the minutes until reset.
   A rate limit (429, or 403 for a secondary limit or a used-up hour) on any GitHub request pauses the background reads, the poll included: until `Retry-After`; without it, until `X-RateLimit-Reset` only when the hour is used up (`X-RateLimit-Remaining: 0`),
   otherwise for a minute, doubling up to an hour while the limit keeps coming back: within one step of the end of the last such pause, whatever was answered in between (a pause GitHub named is not a step).
   A pause also stops the notification pages still to read. The poll waits it out instead of failing, so the watch is not restarted early.
+  During a pause, the localized status says no content is being read and shows the minutes until the pause ends. This takes precedence over the low-quota notification-only warning, even if the quota resets later.
 - Included `reason`: PRs requesting my review (`review_requested`), mentions (`mention`), team mentions (`team_mention`), new comments / reviews by others on my PRs / issues (`author`),
   CI results (`ci_activity`), assignments (`assign`). Others (`subscribed`, `comment`, `state_change`…) are excluded. One item per PR / issue (`example-org/example-repo#12`).
 - **Noise reduction (2026-11-03, #577)**: the user found it too noisy. A read-only hub count showed all 52 open GitHub items as Needs you, including 42 CI failures on feature / automatic branches (many pushed by Agents using the user's account),
@@ -300,6 +324,16 @@ Triage, drafting, AI twin, done state, and retention use hub's generic logic.
   - With no GitHub items, the UI is unchanged.
   - Mock `MOCK_GITHUB_INBOX=1`; UI tests `InboxConnectorTests`.
 
+## Assistant rows (2026-11-13, #6430)
+
+The assistant can put one of its conversations into the Inbox as a row, so a result is not missed behind a quiet unread dot. It happens only on the user's explicit request (the `inbox_post` tool's description says so; its required `reason` is shown on the row) or when a scheduled task is set to put its runs there (`docs/assistant/assistant.md`, "Put it in the Inbox when done"). Who it serves: the Assistant's everyday users, who say "tell me if there is anything worth a look" or "send me the briefing every time"; no engineering words anywhere.
+
+- **An internal source** `assistant`, made by the manager like a push subscription's: no connector, no hub reading; the hub only forwards `/api/v1/inbox`. Code: `assistant/inbox_post.go`.
+- **The generic row.** An item carries the `connector` block an app draws for a source it does not know (`thread` = `<machine>/<conversation>`, `label` Assistant, `url` the conversation's page in the web app at the hub's `public_url`), `kind` `assistant_post`, the tier the post asked for (`action` or `fyi`) with `reason` as its why, the title and a summary line. Without a `public_url` the row has no `url`: it still draws and its content is in the row. Checked on the mock hub (`MOCK_ASSISTANT_INBOX=1`): the web app draws it in its source group and opens the conversation in the side panel from the row's Open button; the iPhone app takes the same path for any item with a `connector` block (`InboxGroups`, `InboxConnectorViews`). An app that knows the source can open the conversation directly from `thread`.
+- **One row a conversation.** A post for a conversation within 30 minutes of its row's last one updates that row (title, summary, tier, the newest content) and opens it again if it was handled; a later post starts a new row. A task set to every time posts after each run that answered; a failed or empty run posts nothing.
+- **The user's rules still apply**: a policy set for the source (Rules, "Policies") changes the tier like any source's.
+- **One switch.** Inbox Sources lists an **Assistant** row (`b.assistant`, icon robot) whose Add to Inbox switch is `Settings.InboxPost` (`inbox.post` on the bus; on unless turned off). Off, `inbox_post` answers that nothing was added and says to tell the user in the conversation, and tasks set to every time add nothing; rows already there stay. The Relationships view shows it with the other Persona-side sources.
+
 ## Muting (2026-11-03, connector v2 · V3, #670)
 
 All sources work alike. Long-press an Inbox row for Done / Reopen plus available mute targets: Mute repository (GitHub), Mute chat
@@ -307,14 +341,16 @@ All sources work alike. Long-press an Inbox row for Done / Reopen plus available
 Muting handles this item and other covered open items in the same source, reason "Muted: <name>," with toast "Muted ‘…’; future items will not enter the Inbox."
 The handling chain says "Muted, done" for existing items, newly admitted items and grouped events; `done_by=read` stays unchanged for compatibility.
 Muted under More at the Inbox's top right lists all mutes (name, source · repository / chat / sender), with swipe-left or long-press Unmute. Unmuting admits only future items; already handled ones stay handled.
+Settings › Inbox Sources (#5278) shows the same mutes per source on each built-in source's page, with Unmute (`inbox.mutes`, `inbox.unmute`).
 
 - **APIs**: `GET /api/v1/inbox/mutes` (creation order, oldest first); `POST /api/v1/inbox/mutes {item_id, tag}` mutes the item's value for `tag` (read from the item,
   not supplied by the client; nonexistent item 404, missing tag 400), returning `{mute, settled}` with additionally handled items. `DELETE /api/v1/inbox/mutes/{id}` unmutes.
   Item `mutes` lists allowed mute targets, which the menu renders.
 
 - **Manager** (`assistant/inbox_mutes.go`): mutes live in `inbox_mutes` settings (source + tag + value + name). Each collection handles covered open items, so future
-  messages arrive already done. Item mute targets (`mutes`): connector `InboxThing.Tags` (`repo`, `chat`, `sender`); Lark chat (`lark.feed_id`)
-  and latest group speaker (`lark.sender_id`); lowercase mail sender address. Lark Docs and Moments items have none.
+  messages arrive already done. Item mute targets (`mutes`): connector `InboxThing.Tags` (`repo`, `chat`, `sender`; a subscription's rows carry
+  their newest item's `sender`, #5306, by its `sender_id` when the recipe maps one, and its `chat`, #6165); Lark chat (`lark.feed_id`) and latest group speaker (`lark.sender_id`); lowercase mail sender address.
+  Lark Docs and Moments items have none.
 - **GitHub muted repositories**: formerly GitHub connector setting `muted_repos`, now source `github`, tag `repo` mutes. On manager connection,
   hub migrates old entries through `inbox.repo_mutes` and clears them from GitHub settings. Settings › Connectors › GitHub (and old Apps) still read / write `muted_repos`;
   hub translates through the manager, so both entry points share the same data.
@@ -349,7 +385,7 @@ Each item can be filed under a **folder path**: a `/`-separated string such as `
 - **Stability**: an item the model filed keeps its folder when new messages come in. Only unfiled items are asked about. An item the user filed (`folder_by: user`, even into no folder) is never touched by the model.
 - **Paths** are normalized the same way everywhere (`normalizeFolder`, `web/src/lib/inbox-folders.ts`): segments trimmed, inner whitespace collapsed, control characters, empty, `.` and `..` segments dropped, each segment ≤ 40 characters, ≤ 6 levels, ≤ 200 bytes. Case is kept.
 - **Data**: `folder` and `folder_by` (`model` | `user`) on the item (listed), `folder_of` as bookkeeping (not listed). Items are JSON rows in `inbox_items`, so there is no migration. The settings `{enabled, rules}` are kept under the settings key `inbox_folders`. **Off by default**: it spends model calls and adds the folder bar, so the user turns it on.
-- **APIs**: `GET /api/v1/inbox/folders[?sources=all]` → `{enabled, rules, folders: [{path, count, open}]}` (the folders the listed items are filed in, exactly, most used first). `PUT /api/v1/inbox/folders {enabled?, rules?}` → the same (turning it on starts a pass). `PUT /api/v1/inbox/{id}/folder {folder}`: a path files it by hand, `""` takes it out of every folder (the model leaves it alone too), and `null` hands it back to the model. A path that normalizes to nothing is 400, and a failed write is rolled back (500). It answers with the listed item.
+- **APIs**: `GET /api/v1/inbox/folders[?sources=all]` → `{enabled, rules, folders: [{path, count, open}]}` (the folders the items of the list's window are filed in, most used first: open items and those done within 3 days, so `count` also counts done items past the list's newest 200). `PUT /api/v1/inbox/folders {enabled?, rules?}` → the same (turning it on starts a pass). `PUT /api/v1/inbox/{id}/folder {folder}`: a path files it by hand, `""` takes it out of every folder (the model leaves it alone too), and `null` hands it back to the model. A path that normalizes to nothing is 400, and a failed write is rolled back (500). It answers with the listed item.
 - **Web**: with folders on (or any item filed), a folder bar sits under the filter chips: crumbs from **All folders** down to the folder picked, and the folders right under it as chips with their open counts (plus **Unfiled** at the top). Picking a folder filters the list, its sections and **Clean up all** to that folder and everything under it. Agents waiting are left out, and the choice is remembered like the other filters. Rows show their folder when the list is not already in it. **Move to folder…** is in a row's menu and the item's header, with the folders in use as suggestions, **Let AI decide** and **No folder**. **Folders…** in the ⋯ menu turns automatic filing on and edits the folder rules.
 - **Assistant tools** (#3099, `assistant/inbox_folders.go`, descriptions in `prompts/mcp/inbox/`): `inbox_folders` lists the folders in use across every source (path, items, open) and whether automatic filing is on; with `folder` it also lists the items filed there and below, with `unfiled: true` the items in no folder, open first and then newest first, at most 50, each with the id `inbox_move` takes. `inbox_move {items, folder}` makes the same move as `PUT /api/v1/inbox/{id}/folder` (`setInboxFolder`): a path files the items by hand, `""` takes them out of every folder, and the model leaves them alone afterwards. It has no "back to the model" form. Every id is checked first: an unknown id, or a path that normalizes to nothing, moves nothing. A failed write leaves that item as it was and names it in the error.
 - **Not yet**: iOS, Mac and Android browse and move by folder (they ignore the new fields until then), and policies can't target a folder.
@@ -369,20 +405,22 @@ with a chronological **handling chain**. Additive only: IDs, sources, existing f
 | `recap` | Manager-written summary: background, progress, blockers; plain text, up to 600 characters |
 | `handling` | Bound handling chat: `{owner: "manager", state, machine_id?, session_id?, since, error?}`; `state` is `looking` (AI reviewing) / `agent` (its sub-chat working) / `waiting` (confirmed action sent, awaiting response) / `done` (turn finished with suggestion or conclusion) / `failed` (failure / timeout, returns to Needs you without suggestion) |
 | `suggestion` | At most one current suggestion (see "Handling chats and suggestions") |
-| `chain` | Chronological handling chain, oldest first, latest 50 entries at most |
+| `chain` | Chronological handling chain, oldest first, latest 50 entries at most. A list asked with `chain=last` (`docs/protocol/protocol.md`, "Inbox delta") gives a done item its newest entry alone |
+| `chain_count` | Only in a list asked with `chain=last`: how many entries a done item's chain has, when it has more than the one listed |
 | `related` | Cross-atomic relationships: `[{id, title, source}]`; tap to jump to that item, each retaining its own state |
 
 **Section calculation** (`status()`): collapsed stays collapsed (noise never upgrades); reply / Agent suggestion → Needs you; handling chat reviewing / sub-chat working → Working (urgent stays Needs you);
 awaiting response → Working; failure → Needs you; otherwise `tier` (FYI / Needs you; untriaged counts as Needs you). A `conclusion` suggestion uses its chosen tier.
 
-**Handling chain** records only key calls, **written by code where they occur**, not model-authored or investigative steps. Each entry is `{id, at, kind, text, detail?, count?, sender?, messages?, link?, edited?}`.
+**Handling chain** records only key calls, **written by code where they occur**, not model-authored or investigative steps. Each entry is `{id, at, kind, text, detail?, count?, sender?, messages?, link?, via?, edited?}`.
 `text` is a manager-written localized line; Apps may also render by `kind`. `link` is the tap destination: `{type: "source", position?}` (Lark: item's chat at that message),
 `{type: "source", uid}` (mail: that mail in the item), `{type: "source", url}` (connectors / Docs: in-App opening), `{type: "source"}` (item's source page),
 `{type: "session", machine_id, session_id}` (chat / sub-chat), `{type: "item", id}` (another item). Without `link`, tap expands `detail` / `messages` inline.
+A `received` entry's `via` is the item's `source`; a `triaged` entry's is `assistant`.
 
 | kind | Recorded when | Tap destination |
 | --- | --- | --- |
-| `received` | New messages enter this item, **one entry per batch**: "Received 3 messages · A contact" (mail: "Received 2 emails · …"), with `count`, `sender`; `messages` is this batch (up to 10, 200 characters each; Lark from plugin context lines without their trailing notes for the AI (`(id=…, …)`), omitted if unreadable, preview for one message; mail uses summaries). Replies from others also go here. Messages outside this item are not recorded | First batch message's source position: Lark first batch `start_position`, later batches by chat sequence (count backward by new-message count, never earlier than previous batch's last message); mail first uid; others source page |
+| `received` | New messages enter this item: "Received 3 messages · A contact" (mail: "Received 2 emails · …"), with `count`, `sender`; `messages` is this batch (up to 10, 200 characters each; Lark from plugin context lines without their trailing notes for the AI (`(id=…, …)`), omitted if unreadable, preview for one message; mail uses summaries). Consecutive `received` entries merge as they are written: `count` adds up, `at` is the newest, `messages` keeps the newest 10, and `link` and `id` stay those of the first batch in the run. `sender` stays when it is the same and is cleared when it differs, with `text` regenerated from the merged count and sender. Replies from others also go here. Messages outside this item are not recorded | First batch message's source position: Lark first batch `start_position`, later batches by chat sequence (count backward by new-message count, never earlier than previous batch's last message); mail first uid; others source page |
 | `triaged` | Triage: "Triaged: Needs you" / "Triaged: Needs you (urgent)," `detail` = tier · reason. Same-tier retriage with unchanged urgency is not recorded | Expand inline |
 | `handling` | A handling chat takes over this item (once per chat) | That chat |
 | `sent` | Persona sends on your behalf (`/reply`, confirmed reply suggestion): "Sent a Lark message" / "Sent an email" / "Posted a comment" | Lark chat tail (where reply lands); replied mail; others source page |
@@ -399,13 +437,57 @@ awaiting response → Working; failure → Needs you; otherwise `tier` (FYI / Ne
 
 **Event splitting**:
 - **Atomic threads** come from sources: connector `InboxThing.thread` (one Lark chat, mail thread, GitHub PR / issue).
-- **Noise stays one item per atomic thread** (`foldNoise`): all noise events newly created by the model in a grouping batch merge into that chat's open noise event, or one new noise event if absent. Noise events do not absorb higher-tier messages
-  (those create separate items), so noise is never split by topic, merged with other work, or upgraded.
+- **Noise stays one item per atomic thread** (`foldNoise`): all noise events newly created by the model in a grouping batch merge into that chat's open noise event, or one new noise event if absent. `foldNoise` skips done targets: they neither absorb folded noise nor are merged into another event. Noise events do not absorb higher-tier messages
+  (those create separate items), so noise is never split by topic, merged with other work, or upgraded. Fallback messages joining an existing noise event likewise leave its tier and title unchanged.
 - **FYI / Needs you** still split by topic ("Event grouping" above).
 - **New messages follow the existing event**: while it is being handled (`handling` looking / agent / waiting, or a suggestion awaiting you), new messages record only `received`; tier, title, summary, urgency stay unchanged,
-  with no retriage (`TriagedAt` advances directly). Its handling chat decides what to do (below). Inactive items retriage as before.
+  with no retriage (`TriagedAt` advances directly). Its handling chat decides what to do (below). Inactive items retriage as before. A genuine follow-up to an already handled event appends to and reopens it, adding a `reopened` chain entry after `received`; pure closeout stays done with only the `received` record.
 - **Cross-atomic related items**: phase 1 does not merge them, only records `related` on both sides, at most 10, excluding same-atomic-thread items. Currently populated when a connector says an item grew from another (`InboxThing.parent` points to an item in another source / chat),
   and from `related` submitted by a handling chat with its suggestion (only existing Inbox items are accepted).
+
+## Following up (2026-11-13, #6611)
+
+An item stays one matter for as long as it goes on: a handled event takes the messages that continue it and reopens, the processing conversation names it, and the Inbox knows what it waits on and when to look at it again. Nothing here is a new table, section, handling state or endpoint; the fields are optional on the item's JSON (`inbox_follow.go`), so old apps ignore them and new apps keep today's drawing when a hub sends none. This section is the contract the lanes of #6611 build on; each behavior lands in its own PR.
+
+**Item fields**
+
+| Field | Meaning | Listed |
+| --- | --- | --- |
+| `where` | Where the matter happens, for people: a group's name, the other person of a direct chat, a repository. Empty for mail | Yes |
+| `title_by` | Who wrote `title` and `summary`: `model` (grouping), `rules` (the connector's fallback), `assistant` (the processing conversation's `inbox_suggest` `title` / `summary`), `user`. Once `assistant` or `user` wrote them, grouping leaves both alone | No |
+| `follow` | `{who, next, check_at, checks, due}`: who or what it waits on (the model's words), the next step, when to look at it again (RFC 3339; 24 hours when not given), how many times in a row a look found nothing new, and whether that time came with nobody to look (the AI twin off). Apps read only `who`, `next` and `check_at` | Yes |
+| `now` | The item's state key (table below), worked out from the item alone: no clock, no settings, so the list memo holds (`inbox_list_memo.go`) | Yes, never stored |
+
+The manager refreshes `where` from the connector's `chat` tag (else its `repo` tag) on every write, and the mute menu uses it for the chat's name, falling back to the title.
+
+**State keys.** The manager sends a key; every app puts it in words from one table, `spec/fixtures/inbox/now.json` (English, Simplified Chinese and Japanese, with the cases Go and the apps check). Without `now` (an older hub), or with a key an app does not know (a newer hub), the apps keep their own state words. When several states hold, the first wins: done, folded, a suggestion, queued (the agent record says queued and has no session yet, while `handling` already says looking), the processing state (looking, Agent working, waiting, failed), `follow_up_ask`, `check_due`, then the tier. `{reason}` is `handling.error` as it was written (already words, in the language of its time); without it the plain "AI couldn't handle it".
+
+| `now` | When | Section | English |
+| --- | --- | --- | --- |
+| `confirm_reply` / `confirm_agent` / `decide` | A reply or Agent suggestion waits; `decide` when it is handed back (`handback`) | Needs you | Waiting for you to confirm a reply / Waiting for you to start an Agent / Waiting for your decision |
+| `queued` | Queued for the AI twin | In progress (urgent: Needs you) | Queued for the AI |
+| `looking` | A processing conversation is looking | In progress (urgent: Needs you) | AI is looking |
+| `agent_working` | An Agent it started is working | In progress | Agent working |
+| `waiting` | Waiting on the other side | In progress | Waiting for {who} · look again {time}: {next} (parts left out when empty; no `who`: Waiting for a reply) |
+| `follow_up_ask` | Three looks in a row found nothing new | Needs you | Checked 3 times with no news. Keep following? |
+| `check_due` | The time to look again came while the AI twin was off | Needs you | Time to look again: {next} |
+| `failed` | The AI could not finish | Needs you | AI couldn't finish: {reason} |
+| `needs_you` / `fyi` / `folded` | Nothing prepared, by tier | Needs you / FYI / Folded | Needs you / FYI / Folded |
+| `done_replied` / `done_manager` / `done_user` / `done_read` / `done_dismissed` / `done_muted` / `done_superseded` | Done, by `done_by`; a muted item is `read` and its newest `done` entry has `by: "muted"` | Done | You replied / Assistant checked: nothing to do / You marked it done / Read elsewhere / You dismissed it / Muted / Replaced by a newer item |
+
+**Chain.** An entry may carry `via`, where its step happened: a source's id (the item's `source`, or another source's), `agent`, `assistant` or `user`; entries from before have none and the apps go by `kind`. A `done` entry may carry `by`, how it filed the item as a value (a `done_by`, or `muted`). New kinds, each with its `text` written by the manager so older apps draw it generically:
+
+| kind | Recorded when |
+| --- | --- |
+| `reopened` | New messages reopened a handled event |
+| `waiting` | The processing conversation waits on the other side, until a time to look again |
+| `check` | It was looked at again when that time came |
+| `agent_stopped` | An Agent started for it stopped, with its last words |
+| `reported` | A step the assistant or an Agent says it took (an email it sent itself) that the program did not see: drawn apart from the program's own steps |
+
+Handing an item to a conversation or an Agent records `handling` or `agent` with the session's link (an app that sent the text to a new conversation or an Agent itself records it with `POST /api/v1/inbox/{id}/handoff` and `{session: {machine_id, session_id}, kind: "agent" | "conversation", title, client_id}` without `text`: nothing is sent, and a hub from before answers 400 because `text` is missing, so nothing goes to the main conversation by mistake); a reply the user made in the source is `self_replied` with the source's `via`. Consecutive `received` entries merge as they are written (`count` adds up, `at` is the newest, `messages` keeps the newest ten), so a busy group does not push older steps out of the 50 kept. The apps show the three newest steps folded and every step expanded, with icons by `via` (`spec/fixtures/inbox/timeline.json`); the row's third line and the detail's small line read `where · sender: preview`, with `where` said once when it is the sender (a direct chat) (`spec/fixtures/inbox/row.json`). `spec/fixtures/inbox/showcase.json` is the scenario every client draws for side-by-side screenshots.
+
+**Read and replied state from a grouping connector.** `hub.capabilities` gains `inbox_group_state` (`extension.HubInboxGroupState`), listed once the manager handles it. With it, a grouping connector may hand, in its collect answer, one thing per event the user read or replied to in the source: `{thread, kind, id: <the event's item id>, group: {batch: "", new: []}, read, done: "" | "replied", at, last}`, with no messages. The manager takes only `read` and `done` from it, never the title, summary, tier, count or meta. An event with a processing conversation records `self_replied` and wakes it to close the matter or wait on the other side; one without is filed: replied always, read only when it is FYI or folded. The same capability says the hub takes a fallback plan's messages for events already handled. Without it a connector behaves as before.
 
 ## AI twin: handling chats and suggestions (from phase 1, 2026-11-05)
 
@@ -420,11 +502,12 @@ bound to that item (`handling` on the item; chat source `inbox`, `origin_ref` = 
 | --- | --- | --- |
 | 1 Triage | `inbox.triage` (small model) | Triage above, also returning `urgent` |
 | 2 Promote | Code | Triaged Needs you items with triaged content and latest message within `max_age_hours` (default 24) queue a handling chat; `handling.state = looking` (Working; urgent stays Needs you). The task comes from the triage summary and reason |
-| 2′ Link task | `inbox.judge` (small model, only when tasks are active) | Use only its `task_id`: which task the item concerns ([unified-entry.md](unified-entry.md), "Message cards link to tasks"). Its `handle` no longer decides whether to process the item |
+| 2′ Link task | `inbox.judge` (small model, only when tasks are active) | Use only its `task_id`, and only with `evidence` quoted from that task: which task the item concerns, among the tasks the item's repository or thread allows (#6424; [unified-entry.md](unified-entry.md), "Message cards link to tasks"). Before it, the deterministic pass links a GitHub item to the one open task naming its number in its repository: a link, `owner/repo#N`, a bare `#N` in a task of that repository, a PR the task's Agents named earlier, or the PR that says it closes the issue (#6507). Its `handle` no longer decides whether to process the item |
 | 3 Handle | `inbox.agent` (a launcher: Agents' unless set apart, see below) | Headless claude in the assistant directory; investigate, then submit a suggestion and recap through MCP `inbox_suggest` |
 
 - **The twin's model (#4232)**: by default the handling chat runs on **Agents** (`agent.new`): its provider / launcher, model and effort, including later changes there. Because the twin is a high-volume, short-lived job, it can be set apart under **Settings › Model configuration › AI twin runs** to run on a cheaper or faster launcher, model or effort without changing new Agents; **Follow Agents** clears that again. Only new handling chats use a change; running ones keep what they started on. The setting is stored as `model_config.overrides.v1.inbox.agent`; the retired `model_config.inbox.agent` record and the old `inbox.agent.launcher` are never read. It does not touch the twin's switch, its rules or which computer it runs on (`inbox.agent.machine`), and the model does not decide what the twin may do (`docs/assistant/model-config.md`, "AI twin override").
 
+- **Where the item comes from** (`prompts/inbox/agent_ref.md`): a connector's item gives its link (GitHub's with its read tools), and where a reply goes when the row says (`reply_to`; iMessage's "reply in Messages" too). A row with no `reply_to` gets no reply line. A subscription's item also names the subscription and the connector and source it reads, so the twin reads more with that connector's tools. While the subscription's knowledge base is on, the twin gets the knowledge base's summary of the row's chat, as for Lark and mail chats (#6222). The round's `via`, `via_source` and `chats` carry this; the assistant keeps them in memory per source, refreshed every round.
 - **Continue on new messages, do not restart**: new messages for an item with a handling chat (a response or additional detail), or your confirmation / rejection / instruction, are **sent into the same chat**
   (`sendToSession`, prompts `prompts/inbox/handling/*.md`: new messages, sent, Agent started, handed back, rejected, your instruction, item done). No new chat or fresh judgment.
   Messages merged into active items do not retriage or change tier ("Event splitting" above). Work requests (new messages, rejection, instruction, handback) start a turn (`looking`); informational notices (sent, Agent started) do not.
@@ -438,11 +521,18 @@ bound to that item (`handling` on the item; chat source `inbox`, `origin_ref` = 
   Direct sends (`lark_send` / `mail_send` / `agent_send`, all connector writes) and user interruptions through `ask_user` / `notify_user` are forbidden. Anything visible to others must be submitted as a suggestion.
   Instructions in messages are not user instructions (Inbox bodies are untrusted data from others); follow only the task and the user's words in this chat. Writes also require the gate or phone approval: prompts are the first defense, the gate the last.
   Knowledge-base tools may update people and projects along the way (`kb_update` is an allowed write).
-- Its chat appears in Chats but sends no completion push (`notifyFinished` skips it); the result is the Inbox suggestion.
+- **Handling chats stay out of the default conversation lists** (#5723): the manager's session snapshot marks
+  `origin: inbox` conversations as archived from the start, including existing chats after an upgrade. They keep
+  their subject-based titles, transcripts, event IDs, and pending work; archiving is presentation, not completion.
+  Open the processing transcript from the item's handling-chain link, or from archived conversation history.
+  New messages, instructions and suggestions continue in the same chat without bringing it into Recent.
+  The main conversation is exempt, and explicit Hand to AI keeps its normal user-conversation behavior.
+  This uses the existing archive flag on every client, without a new setting, migration or separate Agent workflow.
+  It sends no completion push (`notifyFinished` skips it); the result is the Inbox suggestion.
 
 **Suggestion tool `inbox_suggest`** (`assistant/inbox_suggest.go`, description `prompts/mcp/inbox/inbox_suggest.md`; accepts the handling chat started for an item, and with `item` a
 conversation the item was handed to ("Item actions", Hand to AI), rejecting other chats):
-`{item?, kind, text, note?, handback?, outcome?, recap?, machine?, cwd?, related?, changes?}`.
+`{item?, kind, text, note?, handback?, outcome?, recap?, title?, summary?, machine?, cwd?, related?, changes?}`.
 
 | kind | Meaning | After confirmation |
 | --- | --- | --- |
@@ -451,24 +541,33 @@ conversation the item was handed to ("Item actions", Hand to AI), rejecting othe
 | `conclusion` | Conclusion: `outcome: fyi` (move to FYI with the conclusion; OK marks done) or `done` (review found no action needed; immediately done, `done_by=manager`) | OK marks done (`done_by=user`) |
 
 - `handback: true`: a suggestion requiring your judgment ("Ask a colleague before replying to the client"). Confirmation executes nothing; hand it back to the handling chat as instructions to act, with the normal chain recording.
-- `recap` alone, without `kind`, updates only the summary (for example after a send), up to 600 characters. `related` contains IDs of related Inbox items from other chats / sources, recorded on both sides.
+- `recap` without `kind` updates the recap (for example after a send), up to 600 characters. `related` contains IDs of related Inbox items from other chats / sources, recorded on both sides.
+- `title` names the matter (one line, clipped to 40 characters) and `summary` says where it stands and who is waited on for what (one line, clipped to 80); either may accompany a suggestion or a recap-only call. A non-blank accepted value sets `title_by=assistant`; blank values leave the item unchanged. Only chat events (a grouped event or a built-in chat) accept `title`, and only when they have no mail, document or company-feed block; a grouped event may still carry its connector block. Connector threads (including PRs / issues and iMessage), mail, documents and company-feed posts keep their own title: the tool ignores `title`, says why, and still writes `summary`.
 - Each submission increments `suggestion.version` and invalidates the old suggestion; producing a suggestion sets `handling.state = done`. Chain records "Manager suggests a reply / an Agent / advice awaiting your decision" (`handling`, linked to the handling chat); conclusions record `concluded`.
+- A mail reply suggestion also keeps its exact reply target internally (not in the listed suggestion). Opening mail marks it seen, and a later collection can consequently reduce a thread to an older unread UID; confirmation checks the bound target under the collection lock and returns `409 mail_reply_target_changed` instead of answering that different mail (#5471). A pre-upgrade mail suggestion has no bound target and is refused the same way rather than guessed; non-mail suggestions keep their legacy confirmation path. An FYI conclusion likewise remains open when its mail is read elsewhere: the item becomes `read`, but only **Got it** files it.
 - Old `inbox_draft` (reply only) remains supported, equivalent to `kind: reply`, for chats started before the tool list changed.
 - `item` (an item id) is needed from a conversation the item was handed to (`assistant/inbox_handoff.go`); from the item's own handling chat it changes nothing. A tool error refuses an unknown item,
   one not handed to this conversation (only a conversation in its `handoffs` may write back) and one the user already filed ("answer in the chat instead"; a filed item is not reopened);
-  nothing changes then. Without `item` the tool works as before. A suggestion from a hand-off records where it came from (`suggestion.conversation`), its chain entry links that
+  nothing changes then. The item's own handling chat is likewise refused when it submits a kind after the item was filed: nothing changes, while a recap-only call still updates the recap.
+  Without `item` the tool works as before. A suggestion from a hand-off records where it came from (`suggestion.conversation`), its chain entry links that
   conversation, and the item's `agent` / `handling` stay as they were (no message card, no old-App draft).
 - **Task-related items**: for linked tasks (2′), prompts include task progress; a reply suggestion inserts a message card into the chat that started the task (`message`, retaining sent state after sending).
   When the linked task is supervised and the assistant's `inbox_signals` is on (off by default, #4293), each pass that takes new messages from other people into the item also tells the task's supervisor:
   the signal `inbox` in its next supervision message, naming the item (id, title, sender, one line) and how many messages came ([unified-entry.md](unified-entry.md), "Supervision (#3124)").
   Persona's own confirmed reply and bot chats never raise one, and nothing the handling chat does goes into the Inbox.
+  A link follows the work (#6423): when the linked task is closed (done or cancelled) and exactly one open task carries it on through `continues`
+  (down a line of continuations, at most 8 deep), the next pass moves the item's `agent.todo_id` there and saves it, whatever `inbox_signals` says; the move
+  itself raises no signal. A message is counted as told only once a signal took it, so one that came while the linked task could not hear it reaches
+  the task that carries it on. A link to a closed task that nobody carries on (or that two tasks carry on) counts as none: the next escalation asks the judge again,
+  even when the item already has its handling chat.
 
 **Confirmation API** `POST /api/v1/inbox/{id}/suggestion`: `{version, action, text?, client_id?}`, `action` = `confirm` / `reject` / `instruct`.
 
 - `confirm`: execute exactly what is shown; supplied `text` replaces suggestion text (edit then confirm; chain `edited: true`, chat learns the changed text).
 - `reject`: record rejection, clear the suggestion, and return to the handling chat to reconsider. `instruct` requires `text` (such as "Do not reply this way; ask about timing first"; absent text returns 400), records your words, clears the suggestion, and asks the chat for a new one.
+  Without a current suggestion, `instruct` with `version: 0` records your words and wakes or queues the handling chat; `confirm`, `reject`, and nonzero versions still return `suggestion_stale`.
 - Responses: `200` item; `409 {"code":"suggestion_stale","error":"建议已更新","item":{…}}` ("Suggestion updated": version is no longer current or no suggestion exists; App shows the notice and redraws from the returned item,
-  including the second tap on the same suggestion); `409 inbox_item_done`; `400`; `403`: reply-only devices (Watch) may confirm only replies / conclusions, as text (no Agent creation, handback, rejection, instructions, document-status changes, or `/agent …` sends;
+  including the second tap on the same suggestion); `409 inbox_item_done`; `409 mail_reply_target_changed` (the message the reply suggestion answered is no longer the item's target; nothing was sent); `400`; `403`: reply-only devices (Watch) may confirm only replies / conclusions, as text (no Agent creation, handback, rejection, instructions, document-status changes, or `/agent …` sends;
   hub allows the route for Watch, while the manager checks the actual suggestion); `502 assistant_in_doubt` (as `/reply`: it may already have sent; confirming again gives 409); other 502 errors.
 - **Execution failure** (send fails / times out, Agent fails to start): `handling.state = failed`, return to Needs you without a suggestion; chain `failed` ("Send did not succeed").
 - **Persona's own sends are not your replies**: after a confirmed reply, the next Lark-plugin round reports the chat's latest message as yours (`done: replied`). While the item awaits the other person's response and no new messages arrived (`last` unchanged),
@@ -505,6 +604,7 @@ To-dos do not store a separate tree. Code: `assistant/inbox_parent.go`.
   Moments, and other connectors (their events / setting changes also trigger this full round); mail every 3 minutes. Previously every Lark event read all of them (#674). Pull-to-refresh
   (`POST /api/v1/inbox/refresh`) collects everything immediately (a failed collect answers `502 inbox_refresh_failed` instead of the list, see "Ownership" above). Changes write `inbox_items` and push `{"type":"inbox"}`, prompting App refetch; new plugin-connector items store / push only after triage ("AI triage").
 - **Done** is recorded only in Persona (`done_at`, `done_by=user`; ignored items use `dismissed`, see "Clean up all"; one replaced by the new thread rule uses `superseded`). It does not change Lark or mail read state. Done items remain listed for 3 days, reopenable at the bottom,
+  at most the newest 200 of them by `done_at` (`inboxListDone`; after thousands are marked done at once the list stayed small, and the rest are on Done's history),
   and the manager holds them in memory for 8 days (meanwhile preventing old still-unread Lark messages from resurfacing); it loads only open items and those done within 8 days.
 - **History** (#2200): done rows stay in `inbox_items` for 90 days (`inboxKeepHistory`); the manager deletes older ones at load and from the collection rounds at most hourly.
   `GET /api/v1/inbox/done` pages them newest done first (`inbox_history.go`, `docs/protocol/protocol.md`), keyset on `(done_at, id)`: a bulk action files many items at one instant,
@@ -522,7 +622,7 @@ To-dos do not store a separate tree. Code: `assistant/inbox_parent.go`.
   done page of a build from before it still runs if a hub goes back to that build (`docs/operations/hub-restart.md`); it can be dropped once no such build can run.
   The start read (`InboxItems`) has no `ORDER BY` (the manager keys the items by id) and hands each row to the manager straight from the driver's buffer,
   where it is decoded; the rows are never collected as bytes first. A read that fails midway takes nothing in, as before.
-- Read elsewhere (Lark / another mail client): mark `read`; non-Needs you items become done (`done_by=read`). Needs you remains open, but unread count becomes zero and me / everyone mention flags clear (no longer unread mentions). Rule-tiered items are retiered using current rules after reading; no longer Needs you means done.
+- Read elsewhere (Lark / another mail client; for mail also gone from INBOX or past the window, on the page or off it, #5993): mark `read`; non-Needs you items become done (`done_by=read`). Needs you remains open, but unread count becomes zero and me / everyone mention flags clear (no longer unread mentions). Rule-tiered items are retiered using current rules after reading; no longer Needs you means done.
   Already-read open items with remaining unread count or stale rule tiers (read before a rule change) are reconciled next round (#798).
 - A reply by me in Lark (latest chat message is mine, newer than the item) handles it (`done_by=replied`).
 - Lark collection reads messages without holding a lock. If an item is marked done during the read (manually or in bulk), newly read messages create another item rather than merge into the done one (previously swallowed and invisible, #1105).
@@ -587,14 +687,21 @@ The same rules on the web (`web/src/lib/inbox-groups.ts`) and iOS / iPad (`Perso
 - **Filter chips (web)**: sources (Lark, which also holds lark-cli's items; each mail account; each other connector), then kinds: @me (mentions, plus document and Moments mentions), Direct, Group, Bot (a bot's own chat, no longer under Group), Doc comments, Mail, Agent.
 - **Folding**: every group folds to its title and count; folds are kept on this device per manager, section and group (web `inbox.folds`, Apple `@StoredValue("inbox.folds")`).
   Open at first: every group of Needs you, FYI and Collapsed; in Done only Just now and Today. Group titles stick to the top while their rows scroll by.
+  On iOS, Done's title is a list row while Done lists its groups, not the header of an empty section: as that header (with its Jump To menu)
+  it came out washed like a stuck title's, and on an iPhone the scroll edge blurred every row above it once a title stuck (#4218).
   Done's title has Jump To (its groups with counts; picking one unfolds it, loads it if it isn't, and scrolls to its first row, since an iOS `List` can't scroll to a header)
   and Fold all / Unfold all.
-- **Done's history**: past the list's 3 days, Done reads each manager's `GET /api/v1/inbox/done` ("History" under "Lifecycle"; 100 a page; on iOS the default manager's).
+  On iOS each title a finger taps (a section's and its Mark all seen / Clear all, a group's and, selecting, its tick, Done's and its Jump To) is at least 44 pt tall,
+  its header or row adding no room above or below it (#6576, `InboxTitleTargetUITests`); the tick is a finger wide too, over the header's inset and the gap before the title, with nothing drawn moving (#6658); a tap on Jump To opens its menu and leaves Done's fold beside it alone.
+- **Done's history**: past what the list holds (its 3 days, at most 200 done items), Done reads each manager's `GET /api/v1/inbox/done` ("History" under "Lifecycle"; 100 a page; on iOS the default manager's).
   Items the hub didn't stamp with a manager get the default one when there are several, so the per-manager filter keeps them. Done from history reopens through the item's own manager.
   - **With day counts** (#2969; "Days" under "Lifecycle", #2967): when the list is shown the apps ask for the counts in this device's zone, and Done lists every group they name
     with its exact count, loaded or not (Today less what Just now holds). Groups older than today start folded, so nothing more loads until one opens: opening a group, or
-    picking it in Jump To, loads its first page from its end (`before=<the group's end>`, no `before_id`), and Show Older inside it loads the next, until a page reaches
-    the group's start. The groups the list holds (its 3 days) are complete without a page. Filtered or searched, the hub's counts don't apply: Done shows the groups with
+    picking it in Jump To, loads its first page from its end (`before=<the group's end>`, no `before_id`; on the web, past the oldest done item the list holds when that falls in the group, so the page brings rows the list doesn't have), and Show Older inside it loads the next, until a page reaches
+    the group's start, or (unfiltered) once as many are loaded as the hub counts. The list's own done rows show at once, but its 3 days page like the rest, since it carries
+    only their newest 200 (web, #5549). iOS builds (#5558) and web bundles from before that take the groups of the list's 3 days as complete without a page, so past 200 done
+    items in 3 days they show the newest 200 there and the counts; the history still pages them all. A web link to a done item neither the list nor a loaded page has
+    reads it by id (`GET /api/v1/inbox/{id}`). Filtered or searched, the hub's counts don't apply: Done shows the groups with
     matching items, counted as loaded and "n+" until complete, and Show Older under Done loads the newest group the hub counts that hasn't all come.
   - **Without them** (a hub from before #2967: 404 / 405): the first page from the newest when the list is shown, the next from Show Older at the end of Done; the last
     group's count reads "n+" while older pages remain. Old hubs without the history (404 / 405) quietly have none.
@@ -654,7 +761,41 @@ The same rules on the web (`web/src/lib/inbox-groups.ts`) and iOS / iPad (`Perso
 
 ## Item actions (`Persona/Views/Inbox/InboxActions.swift`)
 
-- **AI Draft Reply**: `POST /api/v1/inbox/{id}/draft {instruction}`. The manager uses the Draft reply model in the user's voice (Lark short and conversational; mail matches the incoming language and formality).
+- **AI Draft Reply**: `POST /api/v1/inbox/{id}/draft {instruction}`. The manager uses the Draft reply model in the user's voice (Lark short and conversational; mail matches the incoming language and formality). With nothing the hub can call directly for it (only launchers such as Claude Code default, no Direct API provider or keyed Messages launcher) it answers `503 model_unavailable`, localized and naming Settings › Model providers and Model configuration; the web shows where to set one up instead of a bare HTTP error. Other failures stay `502`.
+  The draft knows "About me" as the user last edited it in the app (else `assistant.notes` of the manager's config; #5769).
+- **Extension context** (#5771): extensions with an `inbox_context` contribution add a short block (1 KB each) to both the triage and the
+  draft prompts (`prompts/inbox/extension_context.md`), read through the extension manager at most once a minute. Its optional
+  `never_quote` list holds sentences a draft must not repeat word for word (an extension's private notes about people): it is never put
+  in a prompt; after a draft is written the manager compares it with each sentence of at least 6 letters or digits (NFKC, lower case,
+  letters and digits only, so spacing, width and punctuation do not hide a repeat). On a hit it writes the draft once more, told not to
+  copy the background; if that one repeats a sentence too, there is no draft: `422 draft_withheld` with a localized message asking the
+  user to write the reply themselves. Details: `docs/extensions/extensions.md` "Assistant content from the data directory".
+
+- **Recheck task link (maintenance)**: authenticated `POST /api/v1/inbox/{id}/task-link/recheck` reuses `inbox.judge`
+  with all current open tasks, including for an old open event with an existing processing conversation or draft.
+  Judge candidates do not inherit the assistant briefing's item limit or age window; closed/cancelled tasks are excluded.
+  Each candidate includes up to 1200 characters of its original request as subject context. The judge compares the
+  actual requested work, not names or messages merely quoted as examples in another task's notes.
+  An existing event also supplies up to 1600 characters of its investigation recap, marked as possibly stale subject
+  context rather than an instruction or confirmed reply; the current message takes precedence.
+  Eligible events require the AI twin to be enabled and preserve existing links. Bot/app broadcasts are excluded
+  before either exact-link routing or the model judge. Legacy Lark private chats with an explicit user sender
+  identity remain eligible, even if their old kind says `bot`; quoted notification text does not make a human a bot.
+  For an excluded event the maintenance action needs no model or enabled twin: it answers `excluded`, or `cleared`
+  after removing a stale task association through normal rollback-aware writes (`method: "policy"`). It preserves
+  the draft, suggestion, processing conversation and completion state, and publishes no task card or supervisor signal.
+  Other results are `{status, method?, item}`: `linked`
+  or `unmatched` (with `method: "judge"` when the model ran), or `existing`; `409` distinguishes `disabled`, `closed`,
+  `changed` and `task_closed`. Model failures answer `502`, storage failures `503`, and a missing event `404`.
+  A changed message or a task closed during judgment invalidates the result. A new link is persisted through normal
+  Inbox writes before raising the existing supervisor signal; a saved reply draft also gets its task message card.
+  This action never starts processing, sends a reply, changes a suggestion or files an event/task. It does not
+  periodically rejudge old events: an operator explicitly requests each bounded recheck. Normal initial escalation
+  still judges only events without a processing session; refresh alone does not rejudge an existing draft.
+- **Linked work (Web)**: the detail header shows the linked task and its current task-lineage Agents, each as an
+  in-app link. These are the business task's workers, not the Inbox draft-processing conversation. Older hubs without
+  lineage use unreleased workers; a task still starting never substitutes a previous lineage worker. The shared
+  task list supplies live titles and manager ownership, with the task ID as a fallback before it is loaded.
   Do not invent unknown facts or leave 【】 placeholders for the user; omit unknown details. Include `assistant.notes` as About the user. Edit directly in the sheet or enter "Have AI revise: …" to rewrite.
   Send uses `POST /api/v1/inbox/{id}/reply {text}`: the manager asks hub to post in the original Lark chat through its plugin, or reply by mail (Re: subject, In-Reply-To / References,
   quote first 40 lines, using the receiving account), then mark done (`done_by=replied`). Phone and Watch use the same API.
@@ -671,8 +812,20 @@ The same rules on the web (`web/src/lib/inbox-groups.ts`) and iOS / iPad (`Perso
   reply), plus the requested action (default "Summarize this, tell me what I need to do, and suggest a reply," with two other presets), sent as one message.
   Targets: **Persona (main chat)**, the default (#1194, every client): the item's own manager's main conversation (another manager's item goes to that manager's,
   found by asking it; with none yet, the message starts it), which then opens; **Persona (new chat)** starts a new conversation with the item's manager (iOS / Mac switch to the
-  Persona tab); an Agent (latest 8) receives it in its session (navigate there). Only live, writable Agents on online computers are offered. Marked done by default once the message got there, except for the main chat (below).
+  Persona tab); an Agent (latest 8) receives it in its session (navigate there). Only live, writable Agents on online computers are offered. The web, iOS, Mac and Android leave the item open by default for every target after the message arrives.
   Apple sends an Agent hand-off as one pending outbox message: a wait for the connection keeps the same message and operation id through the outbox's retries, not a new send; the item is filed only at the terminal sent state, and a refusal keeps the sheet open with its reason (#1846). The filing intent and whether it was initiated are restored with the outbox, so delivery after an app relaunch still files the item once.
+  On iPhone, iPad and the Mac, after a new chat or Agent (including New Agent) accepts the hand-off, the client records the session with `POST /api/v1/inbox/{id}/handoff` and body `{session: {machine_id, session_id}, kind: "conversation" | "agent", title, client_id}`, with no `text`. This only records and links the session; it sends no second message. A new chat uses the item's title; an Agent uses its session title when listed, with the item's title as the fallback. The main chat's original request already records itself and is not repeated. Any record failure, including an older hub's 400 / 404 / 405, is ignored without changing the successful hand-off or its UI.
+  **New Agent…** (#5933; iOS / iPadOS bar and sheet, the Mac through the same sheet, web; Android later) is the first row of the Agents, shown even when none is running,
+  for giving the item to a fresh Agent in another folder. It reads the item and opens the existing New Agent page prefilled:
+  - **Context:** the item as a card over the first message, sent ahead of it: the same `<persona-context>` an Agent target gets.
+  - **First message:** the typed ask or the chosen preset (the first preset when nothing was typed), editable there.
+  - **Name and computers (Apple):** the item's title as the name hint; only the computers of the item's hub.
+  - **The rest:** computer, folder, runtime and model are chosen there as for any new Agent, from that page's own last choices.
+  - **Confirmation:** nothing is sent before Start there, so there is no Undo toast. Cancel comes back to the item with the ask kept: the bar's field or the sheet / dialog as
+    it was.
+  - **After start:** the Agent opens (on the Mac once the sheet has closed, as for the other targets), and the item's source remembers that Agent, never "New Agent…" (the bar's `inbox.handOffTarget` too), so the next item from it starts there
+    while it can take messages. "Also mark as done" is off by default for every target on the web, iOS and Mac; Android's existing Agent target defaults off too. The user's choice stays, and a checked item is filed once the Agent started (web: once its first message went).
+  - **Hub and manager:** the page's start (`POST /api/v1/sessions`) and first message are New Agent's own; on iPhone, iPad and the Mac, the client records the Agent on the item through the hand-off endpoint above after Start.
   **Write-back to the item** (#1194, web, iOS, Mac and Android): the main-chat target calls `POST /api/v1/inbox/{id}/handoff` `{text, client_id}` on the item's manager (`assistant/inbox_handoff.go`),
   which sends the text after a block naming the item (`prompts/inbox/handoff.md`) to its main conversation through `session.send_once` (the client id is the message id, so the same
   request again sends nothing more), or starts the main conversation with it, and answers `{item, session}`; a work machine is refused, and a failed send records nothing (`apierr.Call`'s status, as for a new conversation).
@@ -683,21 +836,35 @@ The same rules on the web (`web/src/lib/inbox-groups.ts`) and iOS / iPad (`Perso
   so the apps show one line, "Inbox: an update on “title”", not the model's text as a user bubble): reject, instruct, handback, a confirmed reply sent (which files the item as replied:
   nobody there follows the other side's answer) and an Agent started (as that conversation's own task; the chain's `agent` entry links it). A confirmed conclusion files the item as
   usual; a processing conversation still on the item is told it is over.
-  "Also mark as done" is off by default for the main chat (it may still write back) and on for the other targets; switching targets follows that default until the user sets the box,
+  **The write-back in the chat** (#5932): a reply or a conclusion handed in that way is also a card in that conversation (feed kind `inbox_suggestion`,
+  `assistant/inbox_handoff_card.go`; `docs/protocol/protocol.md` "Tasks and the chat feed"), under the turn that wrote it: the item's title and source, its
+  recap folded to three lines, the reply (editable) or the conclusion, and Send / Got It with Later. The card is a snapshot of that suggestion version; the
+  apps read the item for the rest, so the item stays the one home of the request and Needs you counts it once: while the item's suggestion is still that
+  version from that conversation the card confirms it (`POST /api/v1/inbox/{id}/suggestion`, the same path as the item's card); otherwise it says how it
+  ended (replied as you, the user answered at the source, handled without it, or no longer current). An Agent suggestion, a handback and a recap alone
+  get no card. While items handed to the main conversation are open, its composer shows "Wrap up: <title>" for the two most recently handed (web
+  `views/assistant/HandoffCard.tsx`, iOS `HandoffCardView.swift`): it hands the item over again with a fixed ask for the final summary and reply, so the
+  block naming the item goes with it and nothing goes to anyone else. On the web (#6431, `lib/handoff-card.ts` `wrapUpItems` / `wrapUpWait`)
+  an item whose handling is done with no suggestion waiting gets no chip (nothing is left to wrap up; it stays in the Inbox), and a chip whose item has
+  a suggestion waiting says so: "To send" for a reply, "To confirm" for anything else. Needs you still counts the item once, in the Inbox; iOS still
+  shows a chip for every open item handed over. `prompts/inbox/handoff.md` tells the conversation to write back when the user wants
+  a reply or a conclusion or the matter is settled, and again whenever it changes. The web's card has "Open in Inbox"; iOS has no way yet to open an
+  item from the chat, so its card leaves rejecting and instructing to the item's page. Mock: `MOCK_TASKS=1 MOCK_HANDOFF_CARD=1` (`sent`: the reply went).
+  "Also mark as done" is off by default on the web, iOS, Mac and Android for every target. Switching targets follows that default until the user sets the box,
   whose choice then stays. Checked, the item is filed once the hand-off is answered, and a later `inbox_suggest` on it is refused as already filed.
   Not covered: later messages on the item are not forwarded to the main conversation (it reads the source with its tools when asked), and filing the item is not told there.
   **The iPhone's event page** (#2055, `Persona/Views/Inbox/InboxHandOffBar.swift`) has no sheet: a bar pinned to the bottom, like iMessage's, at most two rows high and riding up
   with the keyboard (the page gets its height as a bottom inset). The top row scrolls sideways through one-tap chips: the three presets (Summarize & Suggest Reply, Look Into It,
-  Handle It) and Draft Reply / View Draft, which opens AI Draft Reply's sheet. Under them: a target capsule (a system menu: Main Chat, New Chat, the latest 3 Agents, More… with
-  the next ones), a one-line "Hand to AI…" field and Send. A chip or a send goes without a confirmation, held for 5 s behind a toast at the bottom (`InboxHandOffModel.undoWindow`):
+  Handle It) and Draft Reply / View Draft, which opens AI Draft Reply's sheet. Under them: a target capsule (a system menu: Main Chat, New Chat, then New Agent…, the latest 3
+  Agents and More… with the next ones), a one-line "Hand to AI…" field and Send. A chip or a send goes without a confirmation, held for 5 s behind a toast at the bottom (`InboxHandOffModel.undoWindow`):
   Undo takes it back (a typed ask goes back into the field), View sends it at once and opens the conversation; left alone it goes and the toast says where, with View. Sending
-  never leaves the page. The last target is remembered (`inbox.handOffTarget`); an Agent no longer listed falls back to Main Chat. "Also mark as done" keeps the targets' defaults.
+  never leaves the page. The last target is remembered (`inbox.handOffTarget`); an Agent no longer listed falls back to Main Chat. "Also mark as done" is off, so the toast does not say the item was filed.
   The Mac and the iPhone's source pages (whose own reply composer sits at the bottom) keep the sheet, which opens the conversation after sending.
   **Per source** (#2121, `InboxHandOffMemory`, shared cases in `spec/fixtures/inbox/handoff_memory.json`), the bar and the sheet remember where an item went:
   - **Key:** the item's source plus its most specific mute option (`repo`, else `chat`, else `sender`), in the hub group.
   - **Next item from that source:** starts on that target, marked **Last time**. Nothing is sent until the user sends. An item without one of those options starts as before (the bar's last target, the sheet's Main Chat).
   - **The remembered Agent can't take it now** (it has ended, can't take messages or its computer is offline: the same test as the Agents offered): Main Chat stands in, with a line saying so.
-  - **Visible Mark as Done:** a preselected Agent turns Mark as Done on, so the bar's toast says "· marking done" / "· marked done" and the sheet shows its toggle.
+  - **Visible Mark as Done:** on iPhone, iPad and the Mac, a preselected Agent leaves Mark as Done off, like every other default target; only the user's explicit choice turns it on. The bar's toast says "· marking done" / "· marked done" only for that choice, and the sheet shows its toggle.
   - **Storage:** local to the device, ids only, the 200 most recent sources, not synced, and forgotten with the group (`forgetGroups`, `unpair`).
   iOS and Mac (`InboxHandOffModel`) send it with one `client_id` per hand-off. Whenever the answer leaves open whether the text went (no answer or a timeout, the connection lost
   midway, a 5xx without a `code` from something in front of the hub or from the hub unable to keep its receipt, `assistant_in_doubt`, `delivered: unknown` or `yes`, the node lost

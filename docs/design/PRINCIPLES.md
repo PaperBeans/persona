@@ -1,8 +1,20 @@
 # Persona design principles
+# Design principles
 
-**Persona is a personal Agent that everyday people can use naturally. Defaults are simple and reliable, complex capabilities open up gradually through settings, and with the user's permission an Agent can help manage that complexity.**
+Persona is an Agent product for everyone. Assistant is for everyday people and must stay approachable; Agents is for people who collaborate directly with tools such as Claude Code.
 
-These six principles decide product questions before any visual rule applies. They cover UI, settings and defaults, and how numbers and states are counted, on every client and in the hub. Each one has a few rules and a "How to check" that a reviewer can verify on a PR. Visual and interaction detail lives in `docs/design/DESIGN_SYSTEM.md`; known gaps against Apple's Human Interface Guidelines are in `docs/design/HIG_AUDIT.md`. Ideas taken from the HIG are rewritten here as Persona rules, not quoted.
+**Audience test:** before shipping, answer in one sentence who this design serves. If the answer is "developers", it belongs in Agents or advanced settings, not in an everyday-facing experience.
+
+
+**Persona is a personal Agent product for everyone, not only software developers.** Defaults are simple and reliable, complex capabilities open up gradually through settings, and with the user's permission an Agent can help manage that complexity.
+
+- **Assistant** is for everyday people, with no programming or Agent-tool knowledge required.
+- **Agents** is for people who want to collaborate directly with Claude Code and other Agents.
+- Every design decision starts with **who it serves**. Assistant and other everyday-facing interfaces stay simple and understandable; developer terminology, engineering details and accumulating options must not make them harder to use. Specialist workflows belong in Agents or advanced settings, with details disclosed only when needed.
+
+**How to check the audience**: the issue and PR name the intended audience. For an everyday-facing flow, verify that someone with no programming or Agent-tool knowledge can understand the task and next action without choosing a runtime or repository. For specialist work, name its home in Agents or advanced settings and explain why the detail is needed there.
+
+These seven principles decide product questions before any visual rule applies. They cover UI, settings and defaults, and how numbers and states are counted, on every client and in the hub. Each one has a few rules and a "How to check" that a reviewer can verify on a PR. Visual and interaction detail lives in `docs/design/DESIGN_SYSTEM.md`; known gaps against Apple's Human Interface Guidelines are in `docs/design/HIG_AUDIT.md`. Ideas taken from the HIG are rewritten here as Persona rules, not quoted.
 
 Where they apply: requirements (the issue's acceptance criteria), development (the PR template's self-check) and acceptance (the reviewer checks the evidence below). See "How the principles enter the workflow" at the end.
 
@@ -32,6 +44,7 @@ The user can see, change and undo every behavior; what Persona shows can be expl
 
 - Every behavior-changing setting is visible in Settings with its current value; no hidden flag whose only switch is a chat command or a file.
 - Reversible actions offer Undo; irreversible ones confirm first, with a destructive-styled button and Cancel (`DESIGN_SYSTEM.md` section 4.4). An undo or rollback the user made sticks: no background job silently redoes it.
+- Background work stops things, it never removes what the user may still open: an Agent always runs in a terminal and keeps it after it stops; only the user closes a terminal (`docs/integrations/engines.md`, "Agents run in a terminal").
 - When Persona or an Agent changes a setting for the user, it first says in plain words what changes, where and from when, waits for confirmation, records the change and offers a rollback (reference: model profile switch, `docs/assistant/model-profiles.md`). Every count or status can say what it counts.
 
 **How to check**: for each new setting the PR names where it is shown, how it is changed back, and, if an Agent can change it, the confirmation text and the rollback path (test or screenshot). Each new number has a one-line definition in the docs or in the UI.
@@ -66,6 +79,20 @@ A principle that no one checks is a wish: every rule here ends in evidence someo
 
 **How to check**: the linked issue has acceptance criteria; the PR body has the self-check with evidence (screenshots, test names, commands and their output) for each item marked done.
 
+## 7. Fast, local-first and stateful
+
+Never leave the user waiting without feedback; make the work itself faster, not just its indicator.
+
+- Show local feedback immediately, using local state before network work. A message starts as Sending and becomes
+  Processing when the hub receives it, without waiting for scheduling, process startup or the model's first output.
+- Receipt is not delivery or execution. Reconcile optimistic state with authoritative outcomes; show queued work,
+  uncertain delivery and failure honestly, preserve recoverable input, and never retry an uncertain send as a new one.
+- Measure the full path and remove avoidable waits without changing the user's model, permissions or answer quality.
+
+**How to check**: measure send-to-feedback and send-to-execution separately, before and after in an isolated environment.
+A received message shows Processing within one second in that environment; attach light/dark screenshots and tests for
+failure rollback, delayed execution and stale updates. Name any unmeasured production or model boundary.
+
 ## Cases
 
 Recent examples, so the principles are concrete. Numbers are issues and PRs in this repository.
@@ -75,6 +102,7 @@ Recent examples, so the principles are concrete. Numbers are issues and PRs in t
 | #2315 moved the web sidebar's New chat out of the Persona chats section to its own row under search; #3254 moved it back into that section, the list the new chat joins. | 4 Consistency | Make an entry easier to find (label, visibility) in the place similar entries already use; moving it is a new pattern that needs a reason. |
 | The main chat's Progress said 86 while the To-dos page's "Not done" said 32 (#3331): Progress counted every to-do without a done time, the To-dos page left out shelved and accepted ones. #3340 made both use one rule. | 4 Consistency, 3 User control | The same idea needs one definition, and a number has to be explainable; two counts of "open work" that disagree make both untrustworthy. |
 | A manual rollback of an extension was reinstalled by auto-upgrade about a minute later (#1826); #1951 records the rolled-back version as skipped. | 3 User control | An undo or rollback the user made must stick; background automation never silently reverses it. |
+| A finished task's Agent opened from the iPhone showed "No Terminal" (#4328): the hub had closed its tab when the task was done, and the node closed any Persona tab left with a bare shell after ten minutes. #4754 stops the Agent and keeps its terminal, and a guard test pins every place that may close one. | 3 User control | Automation may stop work, but closing what the user may still want to see (a terminal, a tab) is the user's call. |
 | Agents started from the main chat always ran in "Ask every step", ignoring the permission mode the user had set in the computer's Agent settings (#3026); #3047 follows that setting. | 1 Defaults first, 4 Consistency | A built-in default must not override a choice the user already made, and the same start should behave the same from every entry point. |
 
 ## How the principles enter the workflow

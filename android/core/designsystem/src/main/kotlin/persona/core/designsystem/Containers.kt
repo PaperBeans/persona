@@ -10,7 +10,7 @@ import androidx.compose.ui.unit.dp
 /** The older card, drawn by [JCard] in the active style. */
 @Composable
 fun Card(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    JCard(modifier) { Column(verticalArrangement = Arrangement.spacedBy(8.dp), content = content) }
+    JCard(modifier) { Column(verticalArrangement = Arrangement.spacedBy(8.dp.dense), content = content) }
 }
 
 @Composable

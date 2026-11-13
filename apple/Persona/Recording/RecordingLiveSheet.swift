@@ -8,10 +8,29 @@ import SwiftUI
 /// Asks the hosts' `.recordingLiveSheet()` to present again: a Live Activity tap, a notification or the drawer, while the
 /// Recordings page is already on screen with the sheet swiped away, change the route without the page ever disappearing, so
 /// nothing else would tell it. A counter, bumped by `MeetingRecorder.openRecordings` and by the now-recording card.
+///
+/// `holdOnAppear` is the other way round: the page is opened for something else (the minutes push's meeting,
+/// `MeetingRecorder.openMeeting`, #3862 phase 6), which it pushes over itself, and the sheet presenting itself as the page
+/// appears while a recording runs would cover it. The next appear within `MeetingPageOpener.stale` doesn't present it,
+/// once; the now-recording card stays the way back. An `open` cancels the hold.
 @MainActor @Observable final class RecordingLivePresenter {
     static let shared = RecordingLivePresenter()
     private(set) var serial = 0
-    func open() { serial += 1 }
+    @ObservationIgnored private var heldAt: Date?
+
+    func open() {
+        heldAt = nil
+        serial += 1
+    }
+
+    func holdOnAppear(now: Date = .now) { heldAt = now }
+
+    /// Whether a host appearing now presents the sheet for a running recording: false once after `holdOnAppear`, soon after.
+    func presentsOnAppear(now: Date = .now) -> Bool {
+        guard let heldAt else { return true }
+        self.heldAt = nil
+        return now.timeIntervalSince(heldAt) > MeetingPageOpener.stale
+    }
 }
 
 extension View {
@@ -35,7 +54,9 @@ private struct RecordingLiveSheetPresenter: ViewModifier {
             // A hidden shell page never gets onDisappear: the tab-aware pair keeps one host presenting at a time.
             .onTabVisibility(appear: {
                 visible = true
-                if capturing { presented = true }
+                // Asked whatever runs: a hold left by an appear with nothing recording would hide a later one.
+                let presents = presenter.presentsOnAppear()
+                if capturing, presents { presented = true }
             }, disappear: { visible = false })
             // The observed change, not "tapped here": the drawer, Siri and the quick action open the page before the
             // calendar read and the microphone, so it is already on screen and idle when recording begins.
@@ -51,12 +72,14 @@ private struct RecordingLiveSheetPresenter: ViewModifier {
 /// The sheet: the live view while recording, the wrap-up once it stopped. It remembers the recording's id while capture
 /// runs, and treats the observed change to idle as the stop, however it came (the button, low storage, a failed write, the
 /// audio service reset): `RecordingCapture.stop` clears `recordingID` at once and `MeetingAsk.ended` clears the exchanges,
-/// so the exchanges are mirrored while capture runs and the live view fades out from the mirror.
+/// so the exchanges are mirrored while capture runs and the live view fades out from the mirror. A room meeting (#3862)
+/// shows the meeting page in both places instead (`MeetingPage`, live then after), so its page goes on as the thread.
 struct RecordingLiveSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var capture = RecordingCapture.shared
     @State private var ask = MeetingAsk.shared
+    @State private var library = RecordingLibrary.shared
     /// The recording the sheet is about: live, then wrap-up.
     @State private var held: UUID?
     @State private var wrapUp = false
@@ -69,11 +92,21 @@ struct RecordingLiveSheet: View {
         NavigationStack {
             ZStack {
                 if wrapUp, let held {
-                    RecordingWrapUp(id: held, captureError: stopError, finish: { dismiss() })
-                        .transition(swap(arriving: true))
+                    if roomMeeting(held) {
+                        MeetingPage(id: held, mode: .after, captureError: stopError, close: { dismiss() })
+                            .transition(swap(arriving: true))
+                    } else {
+                        RecordingWrapUp(id: held, captureError: stopError, finish: { dismiss() })
+                            .transition(swap(arriving: true))
+                    }
                 } else if let held {
-                    RecordingLiveView(id: held, exchanges: exchanges, hide: { dismiss() })
-                        .transition(swap(arriving: false))
+                    if roomMeeting(held) {
+                        MeetingPage(id: held, mode: .live, exchanges: exchanges, close: { dismiss() })
+                            .transition(swap(arriving: false))
+                    } else {
+                        RecordingLiveView(id: held, exchanges: exchanges, hide: { dismiss() })
+                            .transition(swap(arriving: false))
+                    }
                 }
             }
             .themedGroupedPage()
@@ -86,6 +119,10 @@ struct RecordingLiveSheet: View {
         .onChange(of: capture.error, initial: true) { if capture.state != .idle { liveError = capture.error } }
         .onChange(of: ask.exchanges) { mirror() }
     }
+
+    /// A meeting recorded here as a room meeting: the one kind whose sheet is the meeting page. Read from the recording
+    /// (not kept when it is held): its attendance is written just after capture begins.
+    private func roomMeeting(_ id: UUID) -> Bool { library.entry(id)?.roomMeeting == true }
 
     /// The live view leaves with `conceal` and the wrap-up arrives with `reveal`: leaving is quicker than arriving.
     private func swap(arriving: Bool) -> AnyTransition {
@@ -139,9 +176,15 @@ struct RecordingSheetCloseButton: View {
 
     var body: some View {
         Button(action: action) {
+            // A finger tall and at least that wide, and as wide as its word: a fixed square (`tapTargetFrame`) cut
+            // "Hide" and "Done" to "…" at the largest text sizes. It grows with the text no further than the sheet's
+            // clock does, so the header row beside it keeps room for the time.
             Text(title).font(Theme.Font.bodyStrong).foregroundStyle(Theme.accent).lineLimit(1)
-                .tapTargetFrame()
+                .fixedSize()
+                .scaledFrame(minWidth: Theme.Size.tapTarget, minHeight: Theme.Size.tapTarget)
+                .frame(minWidth: Theme.Size.tapTarget, minHeight: Theme.Size.tapTarget)
                 .contentShape(.rect)
+                .dynamicTypeSize(...Theme.Recording.timerLargestSize)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(identifier)

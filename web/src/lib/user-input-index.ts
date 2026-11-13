@@ -28,8 +28,15 @@ export function userInputRevision(items: Item[]): string | undefined {
   return items.findLast((item) => item.role === "user" && (item.kind === "text" || item.kind === "image") && !item.tool_use_id)?.id;
 }
 
-/** Exactly one tick per server position, even when the transcript has loaded only its newest two inputs.
- * Unloaded inputs use an ordinal label; previewing never downloads transcript bodies. */
+export const USER_INPUT_PAGE_SIZE = 50;
+
+export function windowUserInputs(index: UserInputIndex, earliestSeq?: number): UserInputIndex {
+  const initial = Math.max(0, index.inputs.length - USER_INPUT_PAGE_SIZE);
+  const loaded = earliestSeq === undefined ? -1 : index.inputs.findIndex((input) => input.seq >= earliestSeq);
+  const start = loaded < 0 ? initial : Math.min(initial, loaded);
+  return { ...index, inputs: index.inputs.slice(start) };
+}
+
 export function indexedNavTicks(index: UserInputIndex, lines: ChatLine[], items: Item[]): NavRailTick[] {
   const owner = new Map<string, string>();
   for (const line of lines) for (const id of lineItemIds(line)) owner.set(entry(id), line.id);
@@ -45,7 +52,7 @@ export function indexedNavTicks(index: UserInputIndex, lines: ChatLine[], items:
     const lineId = owner.get(entry(input.id));
     const tick = lineId ? loaded.get(lineId) : undefined;
     return {
-      id: `seg:${input.id}`, seq: input.seq, lineId, ordinal: i + 1,
+      id: `seg:${input.id}`, seq: input.seq, lineId, ordinal: index.total - index.inputs.length + i + 1,
       preview: navRailPreview(words.get(entry(input.id)) ?? "") || tick?.preview || "",
       ...(tick?.attachmentsOnly ? { attachmentsOnly: tick.attachmentsOnly } : {}),
       ...(tick?.answerExcerpt ? { answerExcerpt: navRailExcerpt(tick.answerExcerpt) } : {}),

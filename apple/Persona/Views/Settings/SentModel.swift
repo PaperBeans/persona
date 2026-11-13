@@ -494,7 +494,10 @@ enum SentText {
 @Observable final class SentModel {
     struct Deps {
         var api: () -> APIClient?
-        static var live: Deps { .init(api: { AppModel.shared.api }) }
+        static var live: Deps {
+            let scope = AssistantSettingsRequestScope(AppModel.shared)
+            return .init(api: { scope.api(AppModel.shared) })
+        }
     }
 
     /// Nil until the first page came in.

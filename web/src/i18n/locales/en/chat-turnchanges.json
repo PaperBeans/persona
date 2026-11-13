@@ -1,0 +1,8 @@
+{
+  "title_one": "Changed {count} file",
+  "title_other": "Changed {count} files",
+  "review": "Review",
+  "show_more_one": "Show {count} more file",
+  "show_more_other": "Show {count} more files",
+  "show_less": "Show less"
+}

@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline'
 import { pathToFileURL } from 'node:url'
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk'
 import { Inbox, ReplayGuard, control, queryOptions, redactor, settingsFile, sweepSettings, transcriptUUIDs, userMessage } from './lib.mjs'
+import { guestMcpServer } from './guest-mcp.mjs'
 
 // A signal ends the process through exit: the exit handlers (the settings file's removal) run.
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => process.exit(143))
@@ -43,9 +44,8 @@ try {
   fail('the first line is not JSON', 2)
 }
 if (start?.type !== 'persona_start') fail(`the first line is ${start?.type ?? 'untyped'}, not persona_start`, 2)
-
 const options = queryOptions(start.options, process.env, log)
-options.stderr = (data) => process.stderr.write(redact(data))
+options.stderr = (data) => { process.stderr.write(redact(data)) }
 if (options.settings && typeof options.settings === 'object') {
   // Its env holds the key: claude gets the file's path, not the JSON on its command line.
   sweepSettings()
@@ -54,6 +54,23 @@ if (options.settings && typeof options.settings === 'object') {
   process.on('exit', () => rmSync(dir, { recursive: true, force: true }))
 }
 const cwd = options.cwd ?? process.cwd()
+let closeGuestMcp = async () => {}
+if (options.guestMcpServers) {
+  let guest
+  try {
+    guest = await guestMcpServer(options.guestMcpServers.persona)
+  } catch (err) {
+    fail(`guest MCP: ${err?.message ?? err}`)
+  }
+  closeGuestMcp = guest.close
+  options.mcpServers = { ...options.mcpServers, persona: guest.server }
+  // The SDK documents [] as no built-ins. Register the stdio server's declared
+  // tools in-process: a CLI --tools selection filters MCP tools too.
+  options.tools = []
+  options.settingSources = []
+  delete options.guestMcpServers
+  process.on('exit', () => { void closeGuestMcp().catch(() => {}) })
+}
 const seen = options.resume ? transcriptUUIDs(options.resume, cwd) : null
 if (options.resume && !seen) log('no transcript found for the resumed session: only replayed results are dropped')
 const guard = new ReplayGuard(seen, Boolean(options.resume))
@@ -77,13 +94,26 @@ const closeWhenIdle = () => {
   }
 }
 
+// The CLI's background tasks as the SDK passes them on (system/background_tasks_changed, each a full list): the node
+// asks for them before a model switch, which restarts the process (persona_background_tasks, #5234). The CLI sends
+// none at start and only on a change, so once a turn has ended with none sent the set is empty; null before that.
+let backgroundTasks = null
+q.persona_background_tasks = () => ({ tasks: backgroundTasks })
+
 const output = (async () => {
   for await (const msg of q) {
+    if (msg.type === 'system' && msg.subtype === 'background_tasks_changed' && Array.isArray(msg.tasks)) {
+      backgroundTasks = msg.tasks
+    }
+    if (msg.type === 'result') backgroundTasks ??= []
     if (!guard.keep(msg, turns > 0)) {
       log(`dropped a replayed ${msg.type}${msg.subtype ? `/${msg.subtype}` : ''}`)
       continue
     }
     emit(msg)
+    if (msg.type === 'system' && msg.subtype === 'init' && options.tools?.length === 0 && options.mcpServers?.persona?.type === 'sdk') {
+      log(`guest tools: ${JSON.stringify({ tools: msg.tools ?? [], mcp_servers: msg.mcp_servers ?? [] })}`)
+    }
     if (msg.type === 'result' && turns > 0) {
       turns--
       closeWhenIdle()
@@ -128,4 +158,5 @@ try {
   if (!closing) fail(`query: ${err?.message ?? err}`)
 }
 event('exit')
+await closeGuestMcp().catch(() => {})
 process.exit(0)

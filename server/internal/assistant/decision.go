@@ -293,6 +293,13 @@ func (s *Service) askRound(id, asked string) (*acceptAsk, error) {
 // "OK" takes it; another is their own choice, kept in the to-do's decisions and sent to the task's agent, which ends
 // the decision. False: the round is over. errDecisionOption: no such option; else acceptTry's errors, or the send's.
 func (s *Service) chooseOption(ctx context.Context, id, asked, label string) (bool, error) {
+	s.reviewDismissals.actions.acquire(id)
+	defer s.reviewDismissals.actions.release(id)
+	if t, ok := s.todoNow(id); ok {
+		if dismissed, err := s.decisionDismissed(ctx, t); err != nil || dismissed {
+			return false, err
+		}
+	}
 	a, err := s.askRound(id, asked)
 	if err != nil || a == nil {
 		return false, err
@@ -301,7 +308,7 @@ func (s *Service) chooseOption(ctx context.Context, id, asked, label string) (bo
 	i := slices.IndexFunc(a.Options, func(o DecisionOption) bool { return o.Label == label })
 	switch {
 	case label == a.Recommend && label != "":
-		return s.acceptTry(ctx, id, "")
+		return s.acceptTryAsDismissalLocked(ctx, id, "", false)
 	case i < 0:
 		return false, errDecisionOption
 	}
@@ -316,18 +323,68 @@ func (s *Service) chooseOption(ctx context.Context, id, asked, label string) (bo
 		return false, err
 	}
 	if st := s.todoDB(); st != nil {
-		at := decisionNow()
-		if ok, err := s.insertDecision(ctx, st, db.TodoDecisionRow{ID: "dec_" + randomHex(8), TodoID: id,
+		at, dec := decisionNow(), "dec_"+randomHex(8)
+		if ok, err := s.insertDecision(ctx, st, db.TodoDecisionRow{ID: dec, TodoID: id,
 			Question: cmp.Or(a.Reason, i18n.T(l, "assistant-reports.verdict_decide")), Choice: decisionText(label),
 			Source: db.DecisionManual, CreatedAt: at}); err != nil {
 			s.logf("task %s: decision: %v", id, err)
 		} else if ok {
+			s.ownerDecided(id, dec, a.WhyOwner)
 			s.decisionsChanged(ctx, id, at)
 		}
 	}
 	s.userDecided(ctx, id)
 	s.endAsk(ctx, id, a.AskedAt, "", label)
 	return true, nil
+}
+
+// routeDecisionAnswer is an explicitly addressed chat answer, not an inference from arbitrary conversation text.
+// The original round fences stale tabs; only a delivered, recorded answer ends the pending decision.
+func (s *Service) routeDecisionAnswer(ctx context.Context, conversation, id, asked, text string) (FeedItem, error) {
+	s.reviewDismissals.actions.acquire(id)
+	defer s.reviewDismissals.actions.release(id)
+	st := s.todoDB()
+	if st == nil {
+		return FeedItem{}, errAcceptStore
+	}
+	if err := s.ensureTodosLoaded(ctx); err != nil {
+		return FeedItem{}, err
+	}
+	t, ok := s.todoNow(id)
+	if !ok || t.Origin != conversation {
+		return FeedItem{}, i18n.Err("assistant-tasks.route_no_task")
+	}
+	if dismissed, err := s.decisionDismissed(ctx, t); err != nil || dismissed {
+		if err != nil {
+			return FeedItem{}, err
+		}
+		return FeedItem{}, i18n.Err("assistant-feishu_cards.already_handled")
+	}
+	a, err := s.askRound(id, asked)
+	if err != nil {
+		return FeedItem{}, err
+	}
+	if a == nil {
+		return FeedItem{}, i18n.Err("assistant-feishu_cards.already_handled")
+	}
+	s.deadlineAnswered(ctx, id, a.AskedAt)
+	item, err := s.routeToTaskChecked(ctx, conversation, id, text, func(cur Todo) bool {
+		return cur.DoneAt == nil && !acceptAskStale(a, cur)
+	})
+	if err != nil {
+		return FeedItem{}, err
+	}
+	at := decisionNow()
+	row := db.TodoDecisionRow{ID: "dec_" + randomHex(8), TodoID: id,
+		Question: cmp.Or(a.Reason, i18n.T(s.botLang(ctx), "assistant-reports.verdict_decide")),
+		Choice:   decisionText(text), Source: db.DecisionManual, SourceMessage: item.ID, CreatedAt: at}
+	if _, err := s.insertDecision(ctx, st, row); err != nil {
+		return FeedItem{}, err
+	}
+	s.decisionsChanged(ctx, id, at)
+	s.userDecided(ctx, id)
+	s.endAsk(ctx, id, a.AskedAt, "", row.Choice)
+	return item, nil
 }
 
 // askCardNow: card is one of the cards of task id's ask as it is now ("" when Feishu does not say: taken as one), so a
@@ -368,6 +425,13 @@ func (s *Service) endAsk(ctx context.Context, id string, asked time.Time, respon
 //
 // False: the round is over, or response is none of them.
 func (s *Service) ownerCannotAnswer(ctx context.Context, id, asked, response string) (bool, error) {
+	s.reviewDismissals.actions.acquire(id)
+	defer s.reviewDismissals.actions.release(id)
+	if t, ok := s.todoNow(id); ok {
+		if dismissed, err := s.decisionDismissed(ctx, t); err != nil || dismissed {
+			return false, err
+		}
+	}
 	if !slices.Contains(ownerResponses, response) {
 		return false, nil
 	}

@@ -170,6 +170,9 @@ func (n *Node) worktreeComposerPrepare(ctx context.Context, kind, id string) (pr
 	if err != nil {
 		return proto.WorktreePrepare{}, err
 	}
+	if err = requireCommit(ctx, repo); err != nil {
+		return proto.WorktreePrepare{}, err
+	}
 	selector, err := orcaRepoSelector(ctx, w)
 	if err != nil {
 		return proto.WorktreePrepare{}, err

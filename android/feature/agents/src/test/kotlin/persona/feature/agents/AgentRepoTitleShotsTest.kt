@@ -88,6 +88,8 @@ class AgentRepoTitleShotsTest {
                             statusText = entry.row.state.takeIf { it != AgentState.Idle }?.label)
                         is TreeChildrenEntry -> error("The fixture has no Codex subtasks")
                         is TreeIdleEntry -> AgentIdleRow(entry.hidden, {}, depth = entry.depth)
+                        is TreeIdleReposEntry -> error("Only Glass's By Repository on the page heads idle repositories")
+                        is TreeShowAllEntry -> AgentShowAllRow(entry.count, entry.expanded, {}, depth = entry.depth)
                         is TreeTabEntry -> error("By repository lists one agent a row")
                     }
                 }

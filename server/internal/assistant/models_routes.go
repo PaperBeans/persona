@@ -40,6 +40,9 @@ func (s *Service) modelPurpose(ctx context.Context, id string, providers []Model
 		return p, err
 	}
 	p.InheritedFrom = inheritedLabel(s.requestCtxLang(ctx), p, base, from, providers)
+	if p.Kind == "api" {
+		p.MachineID = s.settings(ctx).MachineID // where a launcher picked for it runs (models_run.go)
+	}
 	stored := s.storedLaunchers(ctx)
 	p.Fields = []string{"provider", "model"}
 	p.ProviderIDs = []string{}
@@ -71,15 +74,25 @@ func (s *Service) modelPurpose(ctx context.Context, id string, providers []Model
 		if p.Kind == "api" && strings.HasPrefix(p.Effective.Provider, "legacy.") && s.legacyModelConfig(ctx, p.Effective.Provider).BaseURL == "" {
 			p.Status = mc(l, modelNoAPIStatus)
 		}
-	} else if p.Kind == "api" && p.Effective.Model == "" {
-		p.Status = mc(l, "status_no_model")
 	} else if p.Kind == "api" {
-		if config, e := s.apiConfig(ctx, p.Effective); e != nil {
+		config, e := s.apiConfig(ctx, p.Effective)
+		switch {
+		case config.RunLauncher != "": // the launcher's own model when none is chosen
+			if e != nil {
+				p.Status = i18n.Localize(e, l) // no main chat computer
+			} else if d, ok := s.device(ctx, config.ViaMachine); ok && !d.Online {
+				p.Status = mc(l, "status_machine_offline")
+			}
+		case p.Effective.Model == "":
+			p.Status = mc(l, "status_no_model")
+		case e != nil:
 			p.Status = i18n.Localize(e, l)
-		} else if config.APIKey == "" && config.APIKeyFile == "" {
+		case config.APIKey == "" && config.APIKeyFile == "":
 			p.Status = mc(l, "status_no_credentials")
-		} else if pause := ai.Held(config); pause != nil {
-			p.Status, p.Limit = pause.Text(), pause
+		default:
+			if pause := ai.Held(config); pause != nil {
+				p.Status, p.Limit = pause.Text(), pause
+			}
 		}
 	} else if p.Kind == "plugin" {
 		for _, provider := range providers {

@@ -107,6 +107,57 @@ func TestCodexHistoricalHierarchyWithoutDesktop(t *testing.T) {
 	}
 }
 
+// A Guardian approval review is Codex's own check of a tool call before it runs. It writes a rollout next to its chat,
+// but it is no Agent: neither the list nor its chat's sub-Agents have it, while a thread_spawn sub-Agent stays (#5486).
+func TestCodexListLeavesOutGuardianReviews(t *testing.T) {
+	for _, tc := range []struct{ name, originator, source string }{
+		{"Codex App", "Codex Desktop", "vscode"},
+		{"Codex CLI", "codex-tui", "cli"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := remoteTestNode(t)
+			home := canonicalCodexHome(t.TempDir(), n.home)
+			chat, spawned, review := "0e000000-0000-4000-8000-000000000011", "0e000000-0000-4000-8000-000000000012", "0e000000-0000-4000-8000-000000000013"
+			metas := map[string]map[string]any{
+				chat: {"id": chat, "originator": tc.originator, "cwd": "/work/project", "source": tc.source},
+				spawned: {"id": spawned, "originator": tc.originator, "cwd": "/work/project", "session_id": chat, "thread_source": "subagent",
+					"source": map[string]any{"subagent": map[string]any{"thread_spawn": map[string]any{"parent_thread_id": chat, "depth": 1}}}},
+				// As Codex writes it: no parent_thread_id, the chat in session_id and forked_from_id.
+				review: {"id": review, "originator": tc.originator, "cwd": "/work/project", "session_id": chat, "forked_from_id": chat,
+					"thread_source": "subagent", "source": map[string]any{"subagent": map[string]any{"other": "guardian"}}},
+			}
+			for id, payload := range metas {
+				raw, err := json.Marshal(map[string]any{"type": "session_meta", "payload": payload})
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(home, id+".jsonl")
+				if err := os.WriteFile(path, append(raw, '\n'), 0600); err != nil {
+					t.Fatal(err)
+				}
+				n.registerCodex(home, id, path)
+			}
+			if o := readCodexOrigin(filepath.Join(home, review+".jsonl")); !o.guardian || !o.sub {
+				t.Fatalf("guardian origin = %+v", o)
+			}
+			if o := readCodexOrigin(filepath.Join(home, spawned+".jsonl")); o.guardian || o.parent != chat {
+				t.Fatalf("thread_spawn origin = %+v", o)
+			}
+			list := n.codexSessions(map[string]bool{})
+			byThread := map[string]proto.Session{}
+			for _, s := range list {
+				byThread[s.SourceThreadID] = s
+			}
+			if _, listed := byThread[review]; listed || len(list) != 2 {
+				t.Fatalf("%d rows, the guardian review listed: %v", len(list), listed)
+			}
+			if s, root := byThread[spawned], byThread[chat]; !s.IsSubagent || s.RootSessionID != root.SessionID || root.IsSubagent {
+				t.Fatalf("sub-Agent %+v under chat %+v", s, root)
+			}
+		})
+	}
+}
+
 func TestCodexHierarchyCycleTerminates(t *testing.T) {
 	list := []proto.Session{{SessionID: "a", ParentSessionID: "b", IsSubagent: true}, {SessionID: "b", ParentSessionID: "a", IsSubagent: true}}
 	resolveCodexHierarchy(list)
@@ -252,5 +303,125 @@ func TestCodexAppChatInNoProjectIsUnderCodexChats(t *testing.T) {
 	}
 	if s := place("assigned", assignedPath, filepath.Join(root, "x")); s.SpaceID != "codex-project:"+realPath(root) {
 		t.Fatalf("the chat in a project is placed in %q", s.SpaceID)
+	}
+}
+
+// A chat in a project of the App is under the App's name for the project whose folder is the repository's root — a
+// project the user renamed, a ChatGPT project in its g-p-<id> folder — and under the folder's name when no project
+// names that folder. One folder has one name whichever chat asks. No database or git involved.
+func TestCodexAppProjectsGoByTheAppsNames(t *testing.T) {
+	n := &Node{}
+	home := t.TempDir()
+	base := t.TempDir()
+	dir := func(name string) string {
+		p := filepath.Join(base, name)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	renamed, chatgpt := dir("site"), dir(filepath.Join(".chatgpt-projects", "g-p-6aca"))
+	shared, unnamed := dir("shared"), dir("unnamed")
+	assign := func(project string) map[string]string { return map[string]string{"projectId": project} }
+	state := map[string]any{
+		"thread-project-assignments": map[string]any{
+			"renamed": assign("p1"), "chatgpt": assign("p2"), "first": assign("p3"), "second": assign("p4"), "loose": assign("p5"),
+		},
+		"local-projects": map[string]any{
+			"p1": codexAppProject{Name: "Website", RootPaths: []string{renamed}},
+			"p2": codexAppProject{Name: "GenImageX", RootPaths: []string{chatgpt}},
+			"p3": codexAppProject{Name: "Beta", RootPaths: []string{shared}},
+			"p4": codexAppProject{Name: "Alpha", RootPaths: []string{shared + "/"}},
+			"p5": codexAppProject{Name: " ", RootPaths: []string{unnamed}},
+		},
+	}
+	raw, _ := json.Marshal(state)
+	if err := os.WriteFile(filepath.Join(home, ".codex-global-state.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ thread, cwd, want string }{
+		{"renamed", renamed, "Website"},
+		{"chatgpt", chatgpt, "GenImageX"},
+		{"first", shared, "Alpha"},
+		{"second", filepath.Join(shared, "sub"), "Alpha"},
+		{"loose", unnamed, "unnamed"},
+	} {
+		path := filepath.Join(home, c.thread+".jsonl")
+		if err := os.WriteFile(path, []byte(`{"type":"session_meta","payload":{"originator":"Codex Desktop","source":"vscode"}}`+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s := proto.Session{SessionID: c.thread, Cwd: c.cwd, Capabilities: &proto.SessionCapabilities{}}
+		n.decorateCodexSession(&s, codexSource{home: home, thread: c.thread, path: path}, home, map[string]string{})
+		root := realPath(c.cwd)
+		if c.thread == "second" {
+			root = realPath(shared)
+		}
+		if s.SpaceID != "codex-project:"+root || s.SpaceName != c.want {
+			t.Errorf("%s placed in %q %q, want %q", c.thread, s.SpaceID, s.SpaceName, c.want)
+		}
+	}
+}
+
+// A chat's project is numbered by where the App's sidebar lists it (space_index, from 1 down project-order): the first
+// place of an id the order repeats, ids of no project skipped over, a folder of two projects at the first of them. A
+// project the order does not list (a ChatGPT project) and a chat in no project have none. A subagent takes its chat's.
+func TestCodexAppProjectsAreNumberedInTheAppsOrder(t *testing.T) {
+	n := &Node{}
+	home := t.TempDir()
+	base := t.TempDir()
+	dir := func(name string) string {
+		p := filepath.Join(base, name)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	site, tools, shared, chatgpt := dir("site"), dir("tools"), dir("shared"), dir(filepath.Join(".chatgpt-projects", "g-p-1"))
+	assign := func(project string) map[string]string { return map[string]string{"projectId": project} }
+	state := map[string]any{
+		"projectless-thread-ids": []string{"loose"},
+		"thread-project-assignments": map[string]any{
+			"site": assign("p1"), "tools": assign("p2"), "shared": assign("p3"), "chatgpt": assign("p5"),
+		},
+		"local-projects": map[string]any{
+			"p1": codexAppProject{Name: "Site", RootPaths: []string{site}},
+			"p2": codexAppProject{Name: "Tools", RootPaths: []string{tools}},
+			"p3": codexAppProject{Name: "Shared", RootPaths: []string{shared}},
+			"p4": codexAppProject{Name: "Shared too", RootPaths: []string{shared}},
+			"p5": codexAppProject{Name: "GenImageX", RootPaths: []string{chatgpt}},
+		},
+		"project-order": []string{"p2", "p1", "gone", "p4", "p3", "p2"},
+	}
+	raw, _ := json.Marshal(state)
+	if err := os.WriteFile(filepath.Join(home, ".codex-global-state.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		thread, cwd string
+		want        int
+	}{
+		{"tools", tools, 1},
+		{"site", site, 2},
+		{"shared", shared, 4},
+		{"chatgpt", chatgpt, 0},
+		{"loose", dir("loose"), 0},
+	} {
+		path := filepath.Join(home, c.thread+".jsonl")
+		if err := os.WriteFile(path, []byte(`{"type":"session_meta","payload":{"originator":"Codex Desktop","source":"vscode"}}`+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s := proto.Session{SessionID: c.thread, Cwd: c.cwd, Capabilities: &proto.SessionCapabilities{}}
+		n.decorateCodexSession(&s, codexSource{home: home, thread: c.thread, path: path}, home, map[string]string{})
+		if s.SpaceIndex != c.want {
+			t.Errorf("%s (%s) numbered %d, want %d", c.thread, s.SpaceName, s.SpaceIndex, c.want)
+		}
+	}
+	list := []proto.Session{
+		{SessionID: "chat", SpaceKind: "codex_app", SpaceID: "codex-project:" + site, SpaceName: "Site", SpaceIndex: 2},
+		{SessionID: "sub", IsSubagent: true, ParentSessionID: "chat", SpaceKind: "codex_app", SpaceID: "codex-chats:" + home},
+	}
+	resolveCodexHierarchy(list)
+	if list[1].SpaceID != list[0].SpaceID || list[1].SpaceIndex != 2 {
+		t.Errorf("the subagent is in %q numbered %d, want its chat's", list[1].SpaceID, list[1].SpaceIndex)
 	}
 }

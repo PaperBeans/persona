@@ -45,7 +45,6 @@ func TestContextViewErrorsPeekAndAck(t *testing.T) {
 	database := viewErrorsDB(t)
 	ctx := context.Background()
 	f := newFakeHub().withMachine()
-	f.hello.PersonaView = true
 	s := newServiceOn(t, f, database)
 	conv := "view-errors-" + randomHex(8)
 	at := time.Now().UTC().Add(-time.Minute)
@@ -55,17 +54,6 @@ func TestContextViewErrorsPeekAndAck(t *testing.T) {
 	}, at); err != nil {
 		t.Fatal(err)
 	}
-
-	// Rich views off: nothing read, nothing consumed.
-	f.mu.Lock()
-	f.hello.PersonaView = false
-	f.mu.Unlock()
-	if res := nodeContext(t, s, "server", map[string]any{"session_id": conv}); res.ViewErrors != "" || len(res.Receipts) != 0 {
-		t.Fatalf("flag off: %+v", res)
-	}
-	f.mu.Lock()
-	f.hello.PersonaView = true
-	f.mu.Unlock()
 
 	// Another machine, even naming this one in its params, sees nothing.
 	if res := nodeContext(t, s, "other-machine", map[string]any{"session_id": conv, "machine_id": "server"}); res.ViewErrors != "" {
@@ -110,7 +98,6 @@ func TestContextViewErrorsAreBounded(t *testing.T) {
 	database := viewErrorsDB(t)
 	ctx := context.Background()
 	f := newFakeHub().withMachine()
-	f.hello.PersonaView = true
 	s := newServiceOn(t, f, database)
 	conv := "view-errors-" + randomHex(8)
 	at := time.Now().UTC().Add(-time.Hour)
@@ -160,40 +147,12 @@ func TestContextViewErrorsAreBounded(t *testing.T) {
 	}
 }
 
-// Receipts read while rich views were on confirm nothing once they are off: nothing is read for a message then.
-func TestContextViewErrorsAckNeedsRichViews(t *testing.T) {
-	database := viewErrorsDB(t)
-	ctx := context.Background()
-	f := newFakeHub().withMachine()
-	f.hello.PersonaView = true
-	s := newServiceOn(t, f, database)
-	conv := "view-errors-" + randomHex(8)
-	if err := database.RecordAssistantViewErrors(ctx, conv, "server", "item-a", []string{"fallback: include a plain text summary of the card"}, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	res := nodeContext(t, s, "server", map[string]any{"session_id": conv})
-	if len(res.Receipts) != 1 {
-		t.Fatalf("%+v", res)
-	}
-	f.mu.Lock()
-	f.hello.PersonaView = false
-	f.mu.Unlock()
-	nodeContext(t, s, "server", map[string]any{"session_id": conv, "ack": res.Receipts})
-	f.mu.Lock()
-	f.hello.PersonaView = true
-	f.mu.Unlock()
-	if again := nodeContext(t, s, "server", map[string]any{"session_id": conv}); again.ViewErrors != res.ViewErrors {
-		t.Fatalf("acked while off: %+v", again)
-	}
-}
-
 // Only a reply with a complete, valid card redoes earlier ones: one that only mentions persona-view does not, nor
 // does one whose card failed.
 func TestOnlyAValidCardClearsEarlierViewErrors(t *testing.T) {
 	database := viewErrorsDB(t)
 	ctx := context.Background()
 	f := newFakeHub().withMachine()
-	f.hello.PersonaView = true
 	conv := "view-errors-" + randomHex(8)
 	f.setSessions("server", proto.Session{SessionID: conv, Assistant: true})
 	s := newServiceOn(t, f, database)
@@ -233,7 +192,6 @@ func TestViewErrorNamesAreScrubbedAndTheReasonKept(t *testing.T) {
 	database := viewErrorsDB(t)
 	ctx := context.Background()
 	f := newFakeHub().withMachine()
-	f.hello.PersonaView = true
 	conv := "view-errors-" + randomHex(8)
 	f.setSessions("server", proto.Session{SessionID: conv, Assistant: true})
 	s := newServiceOn(t, f, database)
@@ -265,7 +223,6 @@ func TestViewErrorLongQuotedNamesThroughTheStore(t *testing.T) {
 	database := viewErrorsDB(t)
 	ctx := context.Background()
 	f := newFakeHub().withMachine()
-	f.hello.PersonaView = true
 	conv := "view-errors-" + randomHex(8)
 	f.setSessions("server", proto.Session{SessionID: conv, Assistant: true})
 	s := newServiceOn(t, f, database)

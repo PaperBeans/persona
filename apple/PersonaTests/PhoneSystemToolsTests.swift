@@ -1,4 +1,5 @@
 import Foundation
+import MapKit
 import Testing
 @testable import Persona
 
@@ -96,7 +97,9 @@ struct PhoneSystemToolsTests {
         #expect(card.contains("Family"))
         #expect(card.contains(String(notes.prefix(200))))
         #expect(!card.contains(String(notes.prefix(201))))
-        #expect(card.contains(CardTime.text(start)) && card.contains(CardTime.text(end)))
+        let timeZone = try #require(TimeZone(secondsFromGMT: 8 * 3600))
+        #expect(card.contains(CardTime.text(start, timeZone: timeZone)))
+        #expect(card.contains(CardTime.text(end, timeZone: timeZone)))
         #expect(!card.contains("2027-01-15T15:00:00+08:00"))
     }
 
@@ -205,6 +208,42 @@ struct PhoneSystemToolsTests {
         #expect(try MapsTool.Destination.parse(json(#"{"latitude":1,"longitude":2}"#)).mode == .driving)
         #expect(throws: ToolFailure.self) { try MapsTool.Destination.parse(json(#"{"latitude":91,"longitude":2}"#)) }
         #expect(throws: ToolFailure.self) { try MapsTool.Destination.parse(json(#"{"latitude":1,"longitude":2,"mode":"flying"}"#)) }
+    }
+
+    /// A route starts at the phone unless both start coordinates are given (#5544); each mode asks Maps for its own kind
+    /// of route.
+    @Test func aRouteStartsAtThePhoneOrAtBothCoordinatesGiven() throws {
+        #expect(try MapsTool.routeStart(json(#"{"latitude":1,"longitude":2}"#)) == nil)
+        let given = try #require(try MapsTool.routeStart(json(#"{"from_latitude":31.2,"from_longitude":121.4}"#)))
+        #expect(given.latitude == 31.2 && given.longitude == 121.4)
+        #expect(throws: ToolFailure.self) { try MapsTool.routeStart(json(#"{"from_latitude":31.2}"#)) }
+        #expect(throws: ToolFailure.self) { try MapsTool.routeStart(json(#"{"from_latitude":31.2,"from_longitude":200}"#)) }
+        let modes = try ["driving", "walking", "transit"].map {
+            try MapsTool.Destination.parse(json(#"{"latitude":1,"longitude":2,"mode":"\#($0)"}"#)).transportType
+        }
+        #expect(modes == [.automobile, .walking, .transit])
+        let tool = PhoneToolRegistry.all.first { $0.spec.name == "phone_maps_route" }
+        #expect(tool != nil && tool?.confirmation == nil) // it opens nothing, so it asks nobody
+    }
+
+    /// A route's line is short enough for the model and the card: its ends stay, a straight stretch is two points, and a
+    /// winding one keeps at most `RouteLine.most`.
+    @Test func aRouteLineKeepsItsEndsAndStaysShort() {
+        func point(_ latitude: Double, _ longitude: Double) -> CLLocationCoordinate2D {
+            CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        }
+        let straight = (0..<500).map { point(31.2 + Double($0) * 0.00001, 121.4 + Double($0) * 0.00002) }
+        let line = RouteLine.simplified(straight)
+        #expect(line.count == 2 && line.first?.latitude == straight.first?.latitude && line.last?.latitude == straight.last?.latitude)
+        let winding = (0..<3000).map { i -> CLLocationCoordinate2D in
+            let t = Double(i) / 3000
+            return point(31.2 + t * 0.05, 121.4 + 0.01 * sin(t * 40))
+        }
+        let kept = RouteLine.simplified(winding)
+        #expect(kept.count > 2 && kept.count <= RouteLine.most)
+        #expect(kept.first?.longitude == winding.first?.longitude && kept.last?.latitude == winding.last?.latitude)
+        #expect(RouteLine.simplified(Array(winding.prefix(10))).count == 10)
+        #expect(RouteLine.rounded(31.2304449) == 31.23044)
     }
 
     // MARK: - Shortcuts (#2283)

@@ -2,7 +2,7 @@
 // Exercise the real side panel, chat header and menu: a task is an entry point, not the destination of its Agent chat.
 import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
@@ -32,6 +32,11 @@ let root: Root;
 let newWindow: MockInstance<typeof window.open>;
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
+// SidePanel loads the task and Agent panels on first use: loaded here once, so each test's lazy panel resolves at once
+beforeAll(async () => {
+  await import("./TaskPanel");
+}, 60_000);
+
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).includes("/todos") ? { todos: [servedTodo] } : String(url).includes("/items") ? { items: [], to_seq: 0 } : {}), { headers: { "Content-Type": "application/json" } })));
   newWindow = vi.spyOn(window, "open").mockReturnValue(null);
@@ -58,11 +63,13 @@ async function open(panel: Panel, todo = task(), sessions = [first]) {
     openPanel(panel);
     root.render(<StrictMode><SidePanel /></StrictMode>);
   });
+  // the task and Agent panels load with the first one opened (SidePanel's lazy chunk)
+  for (let i = 0; i < 50 && !host.querySelector("aside header"); i++) await settle();
   for (let i = 0; i < 6; i++) await settle();
   expect(host.querySelector("aside header")).not.toBeNull();
 }
 async function clickMore() {
-  const button = host.querySelector<HTMLButtonElement>(`aside header button[aria-label="${t("chat-chatview.more")}"]`)
+  const button = host.querySelector<HTMLButtonElement>(`aside header button[aria-label="${t("chat-chatview.more_actions")}"]`)
     ?? host.querySelector<HTMLButtonElement>(`aside button[aria-label="${t("assistant-taskpanel.more")}"]`);
   expect(button).not.toBeNull();
   act(() => button!.click());
@@ -76,7 +83,7 @@ async function clickMenu(label: string) {
 }
 async function expectSessionWindow(s = first) {
   await clickMore();
-  await clickMenu(t("common.open_in_new_window"));
+  await clickMenu(t("assistant-taskpanel.open_in_new_window"));
   expect(newWindow).toHaveBeenLastCalledWith(href({ name: "session", mid: s.machine_id, sid: s.session_id }), "_blank", "noopener");
   expect(newWindow.mock.calls.at(-1)?.[0]).not.toContain("/todos");
 }
@@ -97,7 +104,7 @@ describe("Agent panel new-window destination", () => {
   it("follows the Agent selected in a multi-Agent task, including its machine", async () => {
     await open({ kind: "task", todo: "example-task" }, task([first, second]), [first, second]);
     await expectSessionWindow();
-    act(() => host.querySelector<HTMLButtonElement>(`aside button[aria-label="${t("chat-chatview.switch_agent")}"]`)!.click());
+    act(() => host.querySelector<HTMLButtonElement>(`aside button[aria-label="${t("assistant-taskpanel.switch_agent")}"]`)!.click());
     await settle();
     await clickMenu(second.title);
     await expectSessionWindow(second);
@@ -111,7 +118,7 @@ describe("Agent panel new-window destination", () => {
   it("opens the task only while the panel has no unreleased Agent to show", async () => {
     await open({ kind: "task", todo: "example-task" }, task([]), []);
     await clickMore();
-    await clickMenu(t("common.open_in_new_window"));
+    await clickMenu(t("assistant-taskpanel.open_in_new_window"));
     expect(newWindow).toHaveBeenCalledExactlyOnceWith(href({ name: "todos", id: "example-task" }), "_blank", "noopener");
   });
 

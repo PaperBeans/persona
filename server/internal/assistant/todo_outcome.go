@@ -339,8 +339,12 @@ func outcomeLogLine(o taskOutcome) string {
 	return prefix + text + " " + strings.Join(links, " ")
 }
 
-// projectOutcomesMost is how many finished todos' outcomes a new agent for a project is handed.
-const projectOutcomesMost = 5
+// projectOutcomesMost is how many finished todos' outcomes a new agent for a project is handed; projectContextMost
+// how many projects' backgrounds.
+const (
+	projectOutcomesMost = 5
+	projectContextMost  = 2
+)
 
 // projectContext is the <persona-context> a new agent working in dir on machine gets before its first prompt: each of
 // its projects' one line and latest todo outcomes (todo/project); empty when the directory is no project's or the
@@ -353,16 +357,23 @@ func (s *Service) projectContext(ctx context.Context, machine, dir string) strin
 	if err != nil || e == nil {
 		return ""
 	}
+	projects := e.ProjectsForWork(machine, dir)
+	// What extensions wrote for these projects (extension_context.go): asked once for all of them.
+	var slugs []string
+	for _, p := range projects {
+		slugs = append(slugs, p.Slug)
+	}
+	fromExtensions := s.projectExtensionContext(ctx, slugs)
 	var blocks []string
-	for _, p := range e.ProjectsForWork(machine, dir) {
-		d := prompts.TodoProject{Name: contextText(oneLine(p.Name)), OneLine: contextText(oneLine(p.OneLine))}
+	for _, p := range projects {
+		d := prompts.TodoProject{Name: contextText(oneLine(p.Name)), OneLine: contextText(oneLine(p.OneLine)), Extensions: fromExtensions[p.Slug]}
 		for _, o := range e.Store.TodoOutcomes(p.Slug, projectOutcomesMost) {
 			d.Outcomes = append(d.Outcomes, prompts.TodoProjectOutcome{When: o.When, Title: contextText(o.Title), Text: contextText(o.Text)})
 		}
 		if b := prompts.RenderTodoProject(d); b != "" {
 			blocks = append(blocks, b)
 		}
-		if len(blocks) == 2 { // a directory in more projects than that: the first two (slug order) are enough
+		if len(blocks) == projectContextMost { // a directory in more projects than that: the first two (slug order) are enough
 			break
 		}
 	}

@@ -9,13 +9,17 @@ final class PhoneRecordingReceiver {
     func start() {
         guard !started else { return }
         started = true
+        // All-day recording's chunks, events and answers come through their own hooks, in place before the session
+        // activates like `onRecording` below (docs/assistant/day-recap.md「Watch to phone」).
+        RecordingDayReceiver.shared.start()
         _ = RecordingCapture.shared
         WatchSync.shared.onRecording = { transfer in
             do {
                 let first = RecordingLibrary.shared.entry(transfer.id) == nil
                 try RecordingLibrary.shared.receive(transfer)
                 #if os(iOS)
-                if first { MeetingRecorder.tagWatchRecording(transfer.id, at: transfer.createdAt) }
+                // A day recording is never a meeting, whatever the calendar says.
+                if first, transfer.kind != .day { MeetingRecorder.tagWatchRecording(transfer.id, at: transfer.createdAt) }
                 #endif
                 WatchSync.shared.confirmRecording(RecordingReceipt(id: transfer.id, index: transfer.segment?.index, total: transfer.total))
                 RecordingTranscription.shared.enqueue(transfer.id)

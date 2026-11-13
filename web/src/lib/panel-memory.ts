@@ -1,15 +1,17 @@
 // A session's side panel comes back with the session (#5150, docs/web/web.md "Side panels"). Moving to another page closes
-// a session's Files / Git / file panel (App); coming back to that session (the sidebar, the browser's Back) opens it
-// again where it was: the same kind, the Files panel's folder and the file open in it. What is kept is the panel open
+// a session's Files / Git / file / Background tasks panel (App); coming back to that session (the sidebar, the browser's
+// Back) opens it again where it was: the same kind, the Files panel's folder and the file open in it (the Background
+// tasks panel at its list). What is kept is the panel open
 // when the page left the session, so one the user closed (×, Esc, ⌘B, its button) before leaving is not brought back,
 // and one brought back is kept again only if it is still open when the page leaves. Kept per browser tab
 // (sessionStorage), for the last few sessions. A Persona chat keeps its panel the same way, and it is any panel but a
-// link (a task's or an agent's chat, the plan, a file): opened from that chat, it goes and comes back with it (#6199).
+// link (a task's or an agent's chat, a file): opened from that chat, it goes and comes back with it (#6199).
 import { useEffect, useRef } from "react";
+import { agentOpenMode } from "./agent-open";
 import { closePanel, directoryPanelKey, getPanel, openPanel, type Panel } from "./panel";
 
 /** The panels that belong to the session the page shows (the ones App closes when the page moves on). */
-export type SessionPanel = Extract<Panel, { kind: "files" | "git" | "review" | "file" | "preview" }>;
+export type SessionPanel = Extract<Panel, { kind: "files" | "git" | "review" | "file" | "preview" | "background" }>;
 
 /** Where a Files panel is: the folder it shows and the file open in it (FilesPanel tells, `notePlace`). */
 export interface Place {
@@ -37,14 +39,15 @@ export function chatKey(sid: string): string {
 export function belongsTo(p: Panel | null, pane: { mid: string; sid: string } | null | undefined): p is SessionPanel {
   if (!p || !pane) return false;
   if (p.kind === "file") return true; // a file opened from this conversation (its links, its tool rows)
-  return (p.kind === "files" || p.kind === "git" || p.kind === "review" || p.kind === "preview") && p.mid === pane.mid && p.sid === pane.sid;
+  return (p.kind === "files" || p.kind === "git" || p.kind === "review" || p.kind === "preview" || p.kind === "background") && p.mid === pane.mid && p.sid === pane.sid;
 }
 
 /** The memory after the page left `session` with `panel` open (null: none of its own): kept, or forgotten. */
 export function leaving(memory: PanelMemory, session: string, panel: Panel | null, place?: Place): PanelMemory {
   const { [session]: _, ...rest } = memory;
   if (!panel) return rest;
-  const kept: Panel = panel.kind === "files" && place ? { ...panel, path: place.path, file: place.file } : panel;
+  // the Background tasks panel comes back at its list, not at the run it showed (#5421)
+  const kept: Panel = panel.kind === "files" && place ? { ...panel, path: place.path, file: place.file } : panel.kind === "background" ? { kind: "background", mid: panel.mid, sid: panel.sid } : panel;
   const out = { ...rest, [session]: kept };
   const keys = Object.keys(out);
   return keys.length > KEPT ? Object.fromEntries(keys.slice(keys.length - KEPT).map((k) => [k, out[k]])) : out;
@@ -59,10 +62,17 @@ export function arriving(memory: PanelMemory, session: string, open: Panel | nul
   return { memory: rest, back };
 }
 
+// The kinds a panel can be now: one kept by an older version of the page (the plan's before #5156) is not brought back.
+// A task's and an Agent's are (#5424): opened in the side panel from a Persona chat, they go and come back with it; one
+// kept while Agents opened as pages (lib/agent-open.ts) is not reopened then.
+const KINDS = new Set<Panel["kind"]>(["files", "git", "review", "file", "link", "preview", "background", "task", "agent"]);
+
 function load(): PanelMemory {
   try {
     const v = JSON.parse(sessionStorage.getItem(STORE) ?? "{}");
-    return v && typeof v === "object" && !Array.isArray(v) ? (v as PanelMemory) : {};
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    const page = agentOpenMode() === "page";
+    return Object.fromEntries(Object.entries(v as Record<string, Panel>).filter(([, p]) => p && typeof p === "object" && KINDS.has(p.kind) && !(page && (p.kind === "task" || p.kind === "agent"))));
   } catch {
     return {};
   }

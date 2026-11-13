@@ -182,7 +182,7 @@ export function capabilityText(c: ChannelCapabilities): string[] {
   return out;
 }
 
-export function bindTitle(c: Channel): string {
+export function bindTitle(c: Pick<Channel, "bind">): string {
   switch (c.bind) {
     case "qr":
       return t("lib-channels.bind_qr");

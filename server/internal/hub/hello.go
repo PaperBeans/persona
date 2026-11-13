@@ -33,7 +33,10 @@ func (h *Hub) hello() map[string]any {
 	port, fp := h.tlsPin()
 	m := map[string]any{
 		"type": "hello", "server_version": h.version, "client_id": randomHex(6), "features": h.features(),
-		"channel": h.build.Channel, "build": h.build.Number, "protocol": proto.Protocol, "min_app_build": proto.MinAppBuild,
+		// A hub-authored trust marker, never merged from a manager's feature report.
+		// Legacy hubs reserve hello but can forward arbitrary extension feature strings.
+		proto.FeatureMessageSendState: proto.MessageSendStateVersion,
+		"channel":                     h.build.Channel, "build": h.build.Number, "protocol": proto.Protocol, "min_app_build": proto.MinAppBuild,
 		"hub_id": h.hubID(), "hub_name": h.hubName(), "endpoints": h.endpointList(), "tls_port": port, "fp": fp,
 		// The hubs of this hub's mesh group, itself included (docs/archive/operations/plan-hub-mesh.md 2.6): only after authentication.
 		"mesh": map[string]any{"hubs": h.meshHubs()},

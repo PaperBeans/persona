@@ -140,6 +140,8 @@ fun PersonaFace(
     val dark = PersonaTheme.darkTheme
     Box(modifier.size(size).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
+            // BlurMaskFilter rejects the zero blur radius produced by an empty pane-sized canvas.
+            if (this.size.minDimension <= 0f) return@Canvas
             val t = if (moving) time else 0f
             when (design) {
                 PersonaDesign.Mochi -> mochi(state, dark, t, moving, blink.value, size < Mochi.COMPACT_BELOW, paint)
@@ -346,9 +348,10 @@ private val RING_MIN = 1.5.dp
 @Composable
 fun JPersonaButton(state: PersonaState, contentDescription: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val stateText = stringResource(R.string.designsystem_persona_button_state, state.label)
+    val haptics = rememberHaptics()
     Box(
         modifier.size(48.dp).clip(CircleShape)
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(role = Role.Button, onClick = haptics.tapped(onClick))
             .semantics { this.contentDescription = contentDescription; stateDescription = stateText },
         contentAlignment = Alignment.Center,
     ) { PersonaFace(state, size = if (LocalHomeChrome.current != null && PersonaTheme.style == AppStyle.Glass) HomeTokens.homeFaceSize else 40.dp) }

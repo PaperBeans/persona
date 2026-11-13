@@ -25,7 +25,6 @@ func TestViewsPersistAcrossAssistantRestart(t *testing.T) {
 	}
 	t.Cleanup(database.Close)
 	f := newFakeHub().withMachine()
-	f.hello.PersonaView = true
 	f.setSessions("server", proto.Session{SessionID: "view-test-" + randomHex(8), Assistant: true})
 	f.mu.Lock()
 	conversation := f.sessions["server"][0].SessionID
@@ -71,7 +70,6 @@ func TestViewsSnapshotFollowsAnotherProcess(t *testing.T) {
 	}
 	ctx := context.Background()
 	f := newFakeHub().withMachine()
-	f.hello.PersonaView = true
 	conversation := "view-test-" + randomHex(8)
 	f.setSessions("server", proto.Session{SessionID: conversation, Assistant: true})
 	slot := func() *Service {

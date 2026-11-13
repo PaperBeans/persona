@@ -24,6 +24,7 @@ import persona.core.contracts.Session
 import persona.core.contracts.api.ChatActions
 import persona.core.contracts.api.hubCodedFailure
 import persona.core.designsystem.*
+import persona.core.designsystem.dense
 import persona.core.designsystem.icons.PersonaIcons
 
 // A refusal fallback (#2289, #2528; web lib/model-fallback.ts): the upstream refused a request and Claude Code answered
@@ -85,13 +86,13 @@ internal fun ModelFallbackCard(session: Session, actions: ChatActions?, modifier
     Column(
         modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs)
             .clip(PersonaTheme.shapes.controlShape).background(palette.statusSurface)
-            .padding(horizontal = 12.dp, vertical = 8.dp).testTag("model-fallback"),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = 12.dp.dense, vertical = 8.dp.dense).testTag("model-fallback"),
+        verticalArrangement = Arrangement.spacedBy(8.dp.dense),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-            JIcon(PersonaIcons.error, null, size = 16.dp, tint = palette.caution, modifier = Modifier.padding(top = 1.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp.dense), verticalAlignment = Alignment.Top) {
+            JIcon(PersonaIcons.error, null, size = 16.dp, tint = palette.caution, modifier = Modifier.padding(top = 1.dp.dense))
             Column(Modifier.weight(1f).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-                verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                verticalArrangement = Arrangement.spacedBy(2.dp.dense)) {
                 val line = PersonaTheme.type.caption
                 Text(stringResource(if (view.pending) R.string.chat_model_fallback_pending_title else R.string.chat_model_fallback_title),
                     style = line.copy(fontWeight = FontWeight.SemiBold), color = palette.ink)
@@ -106,8 +107,8 @@ internal fun ModelFallbackCard(session: Session, actions: ChatActions?, modifier
                 error?.let { Text(it, style = line, color = palette.danger.text) }
             }
         }
-        if (canRestore || newMain != null) FlowRow(Modifier.padding(start = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (canRestore || newMain != null) FlowRow(Modifier.padding(start = 24.dp.dense), horizontalArrangement = Arrangement.spacedBy(8.dp.dense),
+            verticalArrangement = Arrangement.spacedBy(8.dp.dense)) {
             if (canRestore) JButton(stringResource(R.string.chat_model_fallback_restore), {
                 if (busy) return@JButton
                 busy = true
@@ -136,12 +137,12 @@ internal fun RefusalNotice(refusal: ModelRefusal) {
     val line = PersonaTheme.type.caption
     val fallback = refusal.subtype == "model_refusal_fallback" && !refusal.fallbackModel.isNullOrEmpty()
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(PersonaTheme.shapes.controlShape).background(palette.statusSurface)
-            .padding(horizontal = 12.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}.testTag("refusal-notice"),
-        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top,
+        Modifier.fillMaxWidth().padding(vertical = 4.dp.dense).clip(PersonaTheme.shapes.controlShape).background(palette.statusSurface)
+            .padding(horizontal = 12.dp.dense, vertical = 8.dp.dense).semantics(mergeDescendants = true) {}.testTag("refusal-notice"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp.dense), verticalAlignment = Alignment.Top,
     ) {
-        JIcon(PersonaIcons.error, null, size = 16.dp, tint = palette.caution, modifier = Modifier.padding(top = 1.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        JIcon(PersonaIcons.error, null, size = 16.dp, tint = palette.caution, modifier = Modifier.padding(top = 1.dp.dense))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp.dense)) {
             Text(stringResource(R.string.chat_model_fallback_refusal_title), style = line.copy(fontWeight = FontWeight.SemiBold), color = palette.ink)
             Text(if (fallback) stringResource(R.string.chat_model_fallback_refusal_fallback, refusal.originalModel?.ifEmpty { null } ?: "?", refusal.fallbackModel!!)
                 else stringResource(R.string.chat_model_fallback_refusal_no_switch), style = line, color = palette.ink2)

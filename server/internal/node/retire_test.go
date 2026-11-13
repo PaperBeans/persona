@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/orcart/orcarttest"
+	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -21,12 +21,12 @@ import (
 // whatever is being driven; a test that lists the calls it expects should not depend on where it fell (#1940).
 func withoutAgentReports(trace []string) []string {
 	return slices.DeleteFunc(slices.Clone(trace), func(c string) bool {
-		return strings.HasPrefix(c, "pane.report_agent")
+		return strings.HasPrefix(c, "pane.report_agent") || strings.HasPrefix(c, "pane.clear_agent_authority")
 	})
 }
 
-// session.retire closes a stopped Claude that can be resumed (its pane, as session.close does), keeps what it was
-// started with, and refuses one that works, waits, or has no transcript to resume from; one not running is no error.
+// session.retire (what a hub before #4754 asks for a finished or idle agent) stops a still Claude and keeps its pane,
+// with what it was started with, and refuses one that works or waits; one not running is no error.
 func TestHerdrRetire(t *testing.T) {
 	n, f, home := herdrNode(t)
 	cwd := mkdir(t, filepath.Join(home, "proj"))
@@ -50,6 +50,17 @@ func TestHerdrRetire(t *testing.T) {
 	waitCalls(t, f, "pane.report_agent_session", 1)
 	f.reset()
 
+	for _, id := range []string{sidB, sidC} {
+		_, err := request(t, n, "session.retire", map[string]any{"session_id": id})
+		if code, _ := refusalOf(t, err); code != notRetirable {
+			t.Errorf("%s: code %q", id, code)
+		}
+	}
+	quitsOn(f, "w1:p1", sidA, []any{
+		claudeAgent(sidB, proto.StatusWorking, "w1:p2", "w1:t2", "w1", cwd, ""),
+		claudeAgent(sidC, proto.StatusBlocked, "w1:p3", "w1:t3", "w1", cwd, ""),
+		claudeAgent(sidD, proto.StatusIdle, "w1:p4", "w1:t4", "w1", cwd, ""),
+	}, shellPane("w1:p1", "w1:t1", "w1", cwd, sidA))
 	res, err := request(t, n, "session.retire", map[string]any{"session_id": sidA})
 	if err != nil || res["closed"] != true {
 		t.Fatalf("retire = %v, %v", res, err)
@@ -57,16 +68,8 @@ func TestHerdrRetire(t *testing.T) {
 	if st, _ := n.state.get(sidA); st.Launcher != "cc" || st.Cwd != cwd || st.Model != "opus" {
 		t.Errorf("state after retire = %+v", st)
 	}
-	for _, id := range []string{sidB, sidC, sidD} {
-		_, err := request(t, n, "session.retire", map[string]any{"session_id": id})
-		if code, _ := refusalOf(t, err); code != notRetirable {
-			t.Errorf("%s: code %q", id, code)
-		}
-	}
-	assertTrace(t, withoutAgentReports(f.trace()), []string{
+	assertTrace(t, withoutAgentReports(f.trace("pane.send_keys", "tab.close", "pane.close")), []string{
 		sendKeys("w1:p1", "ctrl+c"), sendKeys("w1:p1", "ctrl+c"),
-		call("pane.list", map[string]any{"workspace_id": "w1"}),
-		call("tab.close", map[string]any{"tab_id": "w1:t1"}),
 	})
 
 	f.reset()
@@ -78,10 +81,10 @@ func TestHerdrRetire(t *testing.T) {
 	}
 }
 
-// A message to a Codex Persona started that is no longer running resumes it in a new tab of its directory's
-// workspace, named after its title: its launcher's words with the model it ran with, `resume <id>`, and the message
-// as the prompt (nothing typed). One whose launcher is not known stays refused.
-func TestHerdrSendResumesARetiredCodex(t *testing.T) {
+// A message to a Codex Persona started that is no longer running is refused (#4754: a stopped agent takes no
+// messages). The user's Resume (session.start) brings it back in a new tab of its directory's workspace, named after
+// its title: its launcher's words with the model it ran with, `resume <id>`, and the start's prompt (nothing typed).
+func TestHerdrResumeBringsBackAStoppedCodex(t *testing.T) {
 	withCodexLaunchers(t, map[string][]string{"cx": {"codex", "-m", "gpt-6"}})
 	n, f, home := herdrNode(t)
 	cwd := mkdir(t, filepath.Join(home, "proj"))
@@ -93,9 +96,9 @@ func TestHerdrSendResumesARetiredCodex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "go on"}); err == nil ||
-		!strings.Contains(err.Error(), "重新打开") {
-		t.Fatalf("resumed a Codex whose launcher is not known: %v", err)
+	_, err := request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "go on"})
+	if code, _ := refusalOf(t, err); code != agentStopped {
+		t.Fatalf("a message to a stopped Codex: %v", err)
 	}
 
 	n.state.put(startThread, sessionState{Launcher: "cx", Cwd: cwd, Model: "gpt-7"})
@@ -117,7 +120,7 @@ func TestHerdrSendResumesARetiredCodex(t *testing.T) {
 			f.reply("session.snapshot", snapshot(nil, nil, []any{agentOf("codex", "", proto.StatusWorking, "w1:p2", "w1:t2", "w1", cwd, "")}, nil))
 		}
 	})
-	if _, err := request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "go on"}); err != nil {
+	if _, err := request(t, n, "session.start", map[string]any{"resume_session_id": startThread, "prompt": "go on"}); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
@@ -138,33 +141,120 @@ func TestHerdrSendResumesARetiredCodex(t *testing.T) {
 	}
 }
 
-// Orca continues only Claude sessions (#5548): retire closes there only what a message brings back. A stopped Codex
-// on Orca is not closed — the task closer would close an agent that could not be continued (send refuses it as not
-// running) — while a stopped Claude is.
-func TestOrcaRetiresOnlyWhatItCanContinue(t *testing.T) {
-	withCodexLaunchers(t, map[string][]string{"cx": {"codex"}})
-	n, _, o, procs, home := orcaNode(t)
-	const cx = "0a000000-0000-4000-8000-0000000000c1"
-	writeRollout(t, home, cx, orcaCwd, time.Now(), time.Now().Add(-time.Minute), event("task_started"), event("task_complete"))
-	n.state.put(cx, sessionState{Launcher: "cx", Cwd: orcaCwd})
-	o.SetTerminals(orcaTerm("term_1", "tab1", "leaf1", "codex"))
-	o.SetWorktrees(orcarttest.Worktree("repo::"+orcaCwd, orcaCwd, "refs/heads/main"))
-	procs.set("tab1:leaf1", orcaProc{pid: 4250, agent: "codex", start: time.Now().Add(-time.Hour)})
-	if m := byID(listSessions(t, n)); m[cx].PaneID != "orca:tab1:leaf1" {
-		t.Fatalf("codex not listed: %v", m)
-	}
-	o.Reset()
-	_, err := request(t, n, "session.retire", map[string]any{"session_id": cx})
-	if code, _ := refusalOf(t, err); code != notRetirable {
-		t.Fatalf("codex on Orca: %v", err)
-	}
-	if c := o.Trace("terminal.close"); len(c) != 0 {
-		t.Errorf("closed: %v", c)
-	}
-
-	cn, co, _ := orcaSession(t) // a stopped Claude (done): closed, the next message resumes it
+// On Orca too, retire stops a still agent with Ctrl+C and never closes its terminal, a Codex as well as a Claude: the
+// terminal stays, so whether Orca could continue the session does not matter any more (#4754).
+func TestOrcaRetireKeepsTheTerminal(t *testing.T) {
+	withStop(t, 1, orcaProcsMaxAge+time.Second) // the node reads Orca's processes at most this often
+	cn, co, procs := orcaSession(t)
+	go func() { // claude quits once Ctrl+C has been pressed twice: its process leaves the terminal
+		tick := time.NewTicker(10 * time.Millisecond) // the fake's trace signals nothing: looked at 200 times at most
+		defer tick.Stop()
+		for range 200 {
+			if len(co.Trace("terminal.send")) >= 2 {
+				procs.set("tab1:leaf1")
+				return
+			}
+			<-tick.C
+		}
+	}()
 	res, err := request(t, cn, "session.retire", map[string]any{"session_id": sidA})
 	if err != nil || res["closed"] != true {
 		t.Fatalf("claude on Orca: %v, %v (calls %v)", res, err, co.Trace())
+	}
+	if c := co.Trace("terminal.close"); len(c) != 0 {
+		t.Errorf("closed: %v", c)
+	}
+}
+
+func TestRetireUsesSessionHostWithRuntimeDefault(t *testing.T) {
+	for _, closeTerminal := range []bool{false, true} {
+		action := "stop"
+		if closeTerminal {
+			action = "close"
+		}
+		t.Run(action, func(t *testing.T) {
+			for _, def := range []string{proto.EnginePaseo, proto.EngineHerdr} {
+				t.Run(def, func(t *testing.T) {
+					withStop(t, 1, 50*time.Millisecond)
+					n, f, home := herdrNode(t)
+					choice := proto.EngineChoice{Hosts: []string{proto.EngineHerdr, proto.EnginePaseo}, Default: def}
+					n.eng.name, n.eng.set = proto.LegacyEngine(choice), &choice
+					cwd := mkdir(t, filepath.Join(home, "proj"))
+					writeTranscript(t, home, cwd, sidA, time.Now(), `{"type":"assistant","message":{"role":"assistant","content":"done"},"uuid":"a1"}`)
+					n.agents[sidA] = host.Agent{Agent: "claude", PaneID: "w1:p1", TabID: "w1:t1", WorkspaceID: "w1", AgentStatus: proto.StatusDone}
+					n.state.put(sidA, sessionState{Pane: "w1:p1", Launcher: "cc", Cwd: cwd})
+					n.runtimes = newRuntimeRegistry()
+					n.runtimes.known[sidB] = knownSession{runtime: proto.EnginePaseo, label: "Paseo", at: time.Now()}
+					n.agents[sidB] = host.Agent{Agent: "claude", PaneID: "w1:p9", AgentStatus: proto.StatusDone}
+					n.state.put(sidB, sessionState{Pane: "w1:p9"}) // stale terminal state cannot override runtime ownership
+					if !closeTerminal {
+						quitsOn(f, "w1:p1", sidA, nil, shellPane("w1:p1", "w1:t1", "w1", cwd, sidA))
+					}
+					res, err := request(t, n, "session.retire", map[string]any{"session_id": sidA, "close_terminal": closeTerminal})
+					if err != nil || res["closed"] != true {
+						t.Fatalf("herdr session: %v, %v", res, err)
+					}
+					if closeTerminal {
+						if got := f.trace("tab.close"); len(got) != 1 || !strings.Contains(got[0], `"tab_id":"w1:t1"`) {
+							t.Fatalf("herdr close calls: %v", got)
+						}
+					} else {
+						closesNothing(t, f)
+					}
+					f.reset()
+					_, err = request(t, n, "session.retire", map[string]any{"session_id": sidB, "close_terminal": closeTerminal})
+					if code, _ := refusalOf(t, err); code != notRetirable {
+						t.Fatalf("Paseo session: %v", err)
+					}
+					if got := f.trace("pane.send_keys", "tab.close"); len(got) != 0 {
+						t.Fatalf("Paseo retirement touched terminals: %v", got)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestRetireHerdrCoreWithRuntimeDefault(t *testing.T) {
+	for _, closeTerminal := range []bool{false, true} {
+		action := "stop"
+		if closeTerminal {
+			action = "close"
+		}
+		t.Run(action, func(t *testing.T) {
+			withStop(t, 1, 50*time.Millisecond)
+			n, hc := hcSession(t)
+			choice := proto.EngineChoice{Hosts: []string{proto.EngineHerdrCore, proto.EnginePaseo}, Default: proto.EnginePaseo}
+			n.eng.name, n.eng.set = proto.LegacyEngine(choice), &choice
+			hc.handle("terminal.keys", func(map[string]any) any {
+				hc.setTerminals(hcTerminal("t1", "", "", 4243, "zsh", hcCwd, "", "", ""))
+				return map[string]any{}
+			})
+			hc.handle("terminal.kill", func(map[string]any) any {
+				k := hcTerminal("t1", "", "", 0, "", hcCwd, "", "", "")
+				k["state"] = "finished"
+				return k
+			})
+			res, err := request(t, n, "session.retire", map[string]any{"session_id": sidA, "close_terminal": closeTerminal})
+			if err != nil || res["closed"] != true {
+				t.Fatalf("herdr-core retirement: %v, %v", res, err)
+			}
+			if got := hc.trace("terminal.keys"); len(got) != 2 {
+				t.Fatalf("interrupt calls: %v", got)
+			}
+			kills := hc.trace("terminal.kill")
+			if closeTerminal {
+				if len(kills) != 1 || !strings.Contains(kills[0], `"terminal":"t1"`) {
+					t.Fatalf("close calls: %v", kills)
+				}
+			} else {
+				if len(kills) != 0 {
+					t.Fatalf("stopping closed terminal: %v", kills)
+				}
+				if _, live := n.agent(sidA); live {
+					t.Fatal("agent still live after stop")
+				}
+			}
+		})
 	}
 }

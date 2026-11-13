@@ -1,0 +1,16 @@
+{
+  "more": "More",
+  "copy_link": "Copy import link",
+  "title": "Copy import link",
+  "intro": "Whoever opens this link gets Add provider filled in with {name}'s address and models, and saves it themselves.",
+  "fit_ids": "The model list is too long for a link, so it brings only the model IDs.",
+  "fit_none": "The model list is too long for a link, so whoever opens it fetches the models.",
+  "paste": "Someone with their own hub can paste the link into Add provider › Paste a configuration.",
+  "key_switch": "Put a key in the link",
+  "key_switch_hint": "Otherwise whoever opens it types their own key.",
+  "key_invalid": "A key has no spaces or line breaks.",
+  "key_warning": "Anyone who gets this link can use this key. Links pass through chat apps, browsers and their history, and can't be taken back. Use a key you can revoke, with a spending limit, and send it only to people you trust.",
+  "copy": "Copy link",
+  "copied": "Link copied",
+  "link_waits": "The import link opens when you close this."
+}

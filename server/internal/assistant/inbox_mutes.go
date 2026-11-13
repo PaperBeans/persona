@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -66,7 +67,7 @@ func mutesOf(it *InboxItem) []MuteOption {
 			}
 		}
 	case it.Lark != nil && it.Doc == nil && it.Moment == nil:
-		add(connector.TagChat, it.Lark.FeedID, it.Title)
+		add(connector.TagChat, it.Lark.FeedID, cmp.Or(it.Where, it.Title))
 		if it.Lark.IsGroup {
 			add(connector.TagSender, it.Lark.SenderID, it.Sender)
 		}
@@ -112,7 +113,7 @@ func (b *inboxBook) applyMutes(now time.Time) []*inboxWrite {
 // fileMuted keeps done_by=read for compatibility, but records the mute as the cause. Under b.mu.
 func (b *inboxBook) fileMuted(it *InboxItem, at time.Time, name string) {
 	it.done(at, "read")
-	b.chainAdd(it, InboxChainEntry{Kind: ChainDone, At: at.UTC(), Text: i18n.T(b.userLang(), "assistant-inbox_chain.done_muted")})
+	b.chainAdd(it, InboxChainEntry{Kind: ChainDone, At: at.UTC(), Text: i18n.T(b.userLang(), "assistant-inbox_chain.done_muted"), By: DoneByMuted})
 	it.Reason = b.mutedReason(name)
 }
 
@@ -275,6 +276,29 @@ func (s *Service) listedMutes() []InboxMute {
 		mutes[i].SourceName = b.sourceName(mutes[i].Source)
 	}
 	return mutes
+}
+
+// InboxSourceMutes is inbox.mutes: the mutes as GET /api/v1/inbox/mutes lists them, only source's when it is set.
+func (s *Service) InboxSourceMutes(ctx context.Context, source string) ([]assistantwire.InboxMute, error) {
+	if err := s.inboxReady(ctx); err != nil { // the mutes kept are not known
+		return nil, err
+	}
+	out := []assistantwire.InboxMute{}
+	for _, m := range s.listedMutes() {
+		if source == "" || m.Source == source {
+			out = append(out, assistantwire.InboxMute{ID: m.ID, Source: m.Source, SourceName: m.SourceName, Tag: m.Tag,
+				Value: m.Value, Name: m.Name, CreatedAt: m.CreatedAt})
+		}
+	}
+	return out, nil
+}
+
+// InboxUnmute is inbox.unmute: the mute goes, as DELETE /api/v1/inbox/mutes/{id}; what it filed stays done.
+func (s *Service) InboxUnmute(ctx context.Context, id string) error {
+	if err := s.inboxReady(ctx); err != nil {
+		return err
+	}
+	return s.removeMutes(ctx, func(m InboxMute) bool { return m.ID == id })
 }
 
 var errNoMuteOption = i18n.ErrEnglish("inbox-errors.cannot_mute")

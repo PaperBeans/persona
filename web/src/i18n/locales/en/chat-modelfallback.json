@@ -21,5 +21,8 @@
   "refusal_no_switch": "The record doesn't say another model was used",
   "refusal_category": "Category: {category}",
   "refusal_explanation": "Explanation: {text}",
-  "refusal_text": "Refusal text"
+  "refusal_text": "Refusal text",
+  "details": "Details",
+  "plain_refused_switched": "The upstream refused this request, so it switched to {model}.",
+  "plain_card": "After an upstream refusal, this conversation answers with {model}."
 }

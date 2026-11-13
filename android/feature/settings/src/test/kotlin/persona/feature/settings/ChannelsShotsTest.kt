@@ -197,13 +197,12 @@ class ChannelsShotsTest {
         // (Without a roster the first group's heading says Persona: a heading, not an entry.)
         rule.onAllNodes(hasText("Persona") and !hasTestTag("settings-hub-card") and !hasAnyAncestor(hasTestTag("settings-assistant-head"))).assertCountEquals(0)
         rule.onAllNodesWithText("认识 Persona").assertCountEquals(0)
-        // One row, in the current assistant's group (docs/assistant/managers.md "Clients"): after Connectors (and
-        // Extensions), before the computers' Claude Code settings; no section of its own.
+        // One row in the current assistant's group: after Connectors (and Extensions), before Agent.
         rule.onNode(hasText("渠道") and hasClickAction()).performScrollTo()
         rule.onAllNodesWithText("渠道").assertCountEquals(1)
         val connectors = rule.onNode(hasText("连接器") and hasClickAction()).fetchSemanticsNode().boundsInRoot
         val channelRow = rule.onNode(hasText("渠道") and hasClickAction()).fetchSemanticsNode().boundsInRoot
-        val computer = rule.onNode(hasText("Claude Code 设置") and hasClickAction()).fetchSemanticsNode().boundsInRoot
+        val computer = rule.onNode(hasText("Agent") and hasClickAction()).fetchSemanticsNode().boundsInRoot
         assertTrue(connectors.bottom <= channelRow.top)
         assertTrue(channelRow.bottom <= computer.top)
     }

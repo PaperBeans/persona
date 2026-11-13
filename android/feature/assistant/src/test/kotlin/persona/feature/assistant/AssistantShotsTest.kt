@@ -1,5 +1,6 @@
 package persona.feature.assistant
 
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
@@ -7,16 +8,20 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavKey
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -25,9 +30,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import persona.core.contracts.Interaction
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.designsystem.*
+import persona.core.domain.sort.AgentPreferences
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
@@ -60,6 +67,36 @@ class AssistantShotsTest {
     @Config(sdk = [35], qualifiers = "ja-w400dp-h1000dp-xhdpi")
     @Test fun japanese() = shots("ja", home = "オンラインのデバイス", drawer = "新規チャット", more = "受信トレイにあと2件")
 
+    @Config(sdk = [35], qualifiers = "zh-w400dp-h600dp-xhdpi")
+    @Test fun hubTitleNamesNeedsYouAtEveryStyleAndFontSize() {
+        val request = Interaction("r", machineId = "m", sessionId = "s", sessionTitle = "Release", kind = "permission",
+            toolName = "mcp__persona__report_to_supervisor", toolTitle = "Report to supervisor · Done")
+        val needs = needsYou(listOf(request), emptyList(), AgentPreferences(), emptyList())
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        var large by mutableStateOf(false)
+        rule.setContent {
+            val configuration = Configuration(LocalConfiguration.current).apply { fontScale = if (large) 1.6f else 1f }
+            val density = Density(LocalDensity.current.density, if (large) 1.6f else 1f)
+            CompositionLocalProvider(LocalConfiguration provides configuration, LocalDensity provides density) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                    Box(Modifier.testTag("title-shot").width(400.dp).height(300.dp).background(PersonaTheme.palette.background)) {
+                        NeedsYouSection(needs, {}, {})
+                    }
+                }
+            }
+        }
+        for (s in AppStyle.entries) for (d in listOf(false, true)) for (big in listOf(false, true)) {
+            style = s; dark = d; large = big
+            rule.waitForIdle()
+            rule.onNodeWithText("请求使用 Report to supervisor · Done").assertExists()
+            val bitmap = rule.onNodeWithTag("title-shot").captureToImage().asAndroidBitmap()
+            val font = if (big) "large" else "default"
+            File(out(), "needs-title-$font-${s.name.lowercase()}-${if (d) "dark" else "light"}.png").outputStream()
+                .use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+    }
+
     private fun minutesAgo(m: Long) = Instant.now().minusSeconds(m * 60).toString()
 
     private fun shots(language: String, home: String, drawer: String, more: String) {
@@ -84,12 +121,12 @@ class AssistantShotsTest {
                         "needs" -> NeedsYouSection(needs, {}, {})
                         "drawer" -> AssistantDrawer("", {}, ConversationGroups(main, listOf(pinned), recent),
                             active = null, hasMain = true, onEnd = null, onMain = {}, onOpen = {}, onInfo = {},
-                            onNew = {}, onHome = {}, onSettings = {}, onUnpinAll = {}, onTodos = {}, todoCount = 2)
+                            onNew = {}, onSettings = {}, onTodos = {}, todoCount = 2)
                         "empty" -> Column {
                             CompactionStatusLine(CompactionLine.Failed("Not enough messages"), onDismiss = {})
                             AssistantDrawer("zzz", {}, ConversationGroups(null, emptyList(), emptyList()),
                                 active = null, hasMain = false, onEnd = null, onMain = {}, onOpen = {}, onInfo = {},
-                                onNew = {}, onHome = {}, onSettings = {})
+                                onNew = {}, onSettings = {})
                         }
                     }
                 }

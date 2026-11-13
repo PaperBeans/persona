@@ -23,6 +23,7 @@ import (
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/managerconf"
+	"github.com/nwverse/persona/server/internal/memtrim"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -130,8 +131,11 @@ func NewBusHub(o BusOptions) *BusHub {
 		HelloParams: func() any {
 			return map[string]any{"id": id, "host": host, "os": runtime.GOOS, "arch": runtime.GOARCH,
 				"deploy": o.Deploy, "version": o.Version, "capabilities": []string{assistantwire.CapabilityConfigOwn, assistantwire.CapabilityAgentSessionArchives,
-					assistantwire.CapabilityAgentSessionArchiveClose, assistantwire.CapabilityMachinesOwn,
-					assistantwire.CapabilityMeetingAttendance, assistantwire.CapabilityMeetingConversation, devicewire.SharingCapability}}
+					assistantwire.CapabilityAgentSessionArchiveClose, assistantwire.CapabilityAgentNaming, assistantwire.CapabilityMachinesOwn,
+					assistantwire.CapabilityMeetingAttendance, assistantwire.CapabilityMeetingConversation, assistantwire.CapabilityMeetingPhotos, assistantwire.CapabilityMeetingLiveView,
+					assistantwire.CapabilityMeetingHighlights, assistantwire.CapabilityMeetingEcho, assistantwire.CapabilityMeetingTranscription,
+					assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityHTTPBodyStream,
+					devicewire.SharingCapability}}
 		},
 		OnHello: b.onHello,
 		// A node's tool call that its caller stopped waiting for ends at the hub too (fleet_tools.go).
@@ -173,12 +177,12 @@ func (b *BusHub) Run(ctx context.Context, svc *Service) error {
 	return b.Serve(ctx, svc)
 }
 
-// Serve is Run without svc's own work: the connection alone. It lets svc's knowledge base go when it ends.
+// Serve is Run without svc's own work: the connection alone. It lets svc's knowledge base go for good when it ends.
 func (b *BusHub) Serve(ctx context.Context, svc *Service) error {
 	b.mu.Lock()
 	b.svc, b.ctx = svc, ctx
 	b.mu.Unlock()
-	defer svc.kbClose()
+	defer svc.kbEnd()
 	go b.takeEvents(ctx)
 	go b.runOutbox(ctx) // what was made while the hub was away, once it is back (outbox.go)
 	return b.client.Run(ctx)
@@ -495,6 +499,19 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 		if err := decode(&p); err != nil {
 			return nil, err
 		}
+		defer memtrim.AfterLarge(len(p.Body)) // a large upload's buffers go back to the system after it
+		return serveHTTP(ctx, b.httpHandler(s), p, s.lang)
+	case assistantwire.MethodHTTPStreamed: // http.request with its body on a relay of its own (bus_body.go)
+		var p assistantwire.HTTPRequest
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		body, err := b.streamedBody(ctx, p.BodyStream)
+		if err != nil {
+			return nil, &rpc.Error{Code: assistantwire.CodeBodyIncomplete, Message: method + ": " + err.Error()}
+		}
+		p.Body, p.BodyStream = body, nil
+		defer memtrim.AfterLarge(len(p.Body))
 		return serveHTTP(ctx, b.httpHandler(s), p, s.lang)
 	case assistantwire.MethodTools:
 		return map[string]any{"tools": s.Tools(ctx)}, nil
@@ -543,9 +560,14 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 		if err := decode(&p); err != nil {
 			return nil, err
 		}
+		ctx, note := withLauncherNote(ctx)
 		params, err := s.SendParams(ctx, p)
 		if err != nil {
+			s.appSendRefused(p.MachineID, p.SessionID, err) // the hub sends nothing: no ConversationSent (north_star.go)
 			return nil, err
+		}
+		if *note != "" {
+			return map[string]any{"params": params, "launcher_note": *note}, nil
 		}
 		return map[string]any{"params": params}, nil
 	case assistantwire.MethodRename:
@@ -611,6 +633,9 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 	}
 	if d := b.opts.Devices; d != nil {
 		if out, ok, err := d.Request(ctx, method, params); ok { // devices.* (devices.go)
+			if err == nil && method == devicewire.MethodCall {
+				s.nodeCallDone(ctx, params) // an effort set on a conversation with a model pick (model_pick.go)
+			}
 			return out, err
 		}
 	}
@@ -630,6 +655,12 @@ func serveHTTP(ctx context.Context, s http.Handler, p assistantwire.HTTPRequest,
 	if p.ShareAuthority != nil {
 		ctx = devicewire.WithShareAuthority(ctx, *p.ShareAuthority)
 	}
+	if p.HandoffApprover != nil { // set by the hub only, never from a header (secret_handoff.go there)
+		ctx = assistantwire.WithHandoffApprover(ctx, *p.HandoffApprover)
+	}
+	if p.Human { // the same: a new conversation a person's own app opens (start.go's route)
+		ctx = assistantwire.WithHumanStart(ctx)
+	}
 	r, err := http.NewRequestWithContext(ctx, p.Method, target, bytes.NewReader(p.Body))
 	if err != nil {
 		return assistantwire.HTTPResponse{}, &rpc.Error{Code: bus.CodeInvalidParams, Message: err.Error()}
@@ -639,6 +670,9 @@ func serveHTTP(ctx context.Context, s http.Handler, p assistantwire.HTTPRequest,
 		r.Header = http.Header{}
 	}
 	r.ContentLength = int64(len(p.Body))
+	if len(p.Body) > 0 { // in memory already: the large routes decode it where it is (decodeLargeBody)
+		r.Body = newRelayedBody(p.Body)
+	}
 	r = withRequestLang(r) // what the routes write for people reads in it too (i18n.From)
 	w := &recorder{header: http.Header{}, lang: func() i18n.Lang {
 		if l := i18n.FromRequest(r); l != "" {
@@ -760,6 +794,12 @@ func (b *BusHub) event(ctx context.Context, ev busEvent) error {
 			return err
 		}
 		go s.StartEnded(context.WithoutCancel(ctx), p)
+	case assistantwire.EventConversationSent:
+		var p ConversationSent
+		if err := decode(&p); err != nil {
+			return err
+		}
+		go s.ConversationSent(context.WithoutCancel(ctx), p)
 	case assistantwire.EventInteractionResolved:
 		var p InteractionResolved
 		if err := decode(&p); err != nil {

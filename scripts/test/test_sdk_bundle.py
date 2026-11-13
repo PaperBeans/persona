@@ -51,6 +51,7 @@ class SDKBundle(unittest.TestCase):
                       "sdk/ts/src/index.ts", "sdk/ts/src/wire.ts", "sdk/VERSION",
                       "sdk/ts/package-lock.json", "sdk/ts/tsconfig.ui.json", "sdk/ts/tsconfig.negative.json",
                       "sdk/ts/scripts/check-portable.ts", "sdk/ts/scripts/portable-ui.mjs",
+                      "sdk/ts/.gitignore",
                       "sdk/ts/scripts/check-negative-types.ts", "sdk/ts/typechecks/native.tsx",
                       "sdk/ts/scripts/check-source-bundle.mjs", "sdk/ts/scripts/source-authoring-worker.mjs",
                       "sdk/ts/scripts/source-authoring-tests.mjs", "sdk/ts/README.md",

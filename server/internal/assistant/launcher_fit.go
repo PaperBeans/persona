@@ -44,18 +44,43 @@ func (s *Service) resolveStart(ctx context.Context, params map[string]any) (star
 // not have is refused, naming the ones it has. One a default gave (the agent.new binding, a profile, a tier) gives way
 // to one m has (launcherInstead), with that launcher's own default model and the caller's effort; note says so in the
 // user's language, for the task's why and the tool's answer. A list that can't be read (m offline, a timeout) counts
-// as having it, as mainChatFit does: nothing is refused or replaced on a guess.
-func (s *Service) fitLauncher(ctx context.Context, m Device, own startPick, params map[string]any) (note string, err error) {
+// as having it, as mainChatFit does: nothing is refused or replaced on a guess. The returned agent type comes from the
+// same list, so a caller changing permissions by agent does not have to ask for it again.
+func (s *Service) fitLauncher(ctx context.Context, m Device, own startPick, params map[string]any) (note, agent string, err error) {
 	name, _ := params["launcher"].(string)
 	if s.launcherEverywhere(ctx, name) {
-		return "", nil
+		if name == "" || name == "claude" {
+			return "", "claude", nil
+		}
+		for _, l := range s.storedLaunchers(ctx) {
+			if l.Name == name {
+				return "", l.AgentType(), nil
+			}
+		}
+		return "", "", nil
 	}
-	list, known := s.launchersHere(ctx, m.ID)
-	if !known || slices.ContainsFunc(list, func(l proto.Launcher) bool { return l.Name == name }) {
-		return "", nil
+	list, known := s.launchersHere(withUnhidden(ctx, name), m.ID) // a hidden default still runs (#4659)
+	if !known {
+		return "", "", nil
+	}
+	configured := make([]ConfiguredLauncher, 0, len(list))
+	for _, l := range list {
+		configured = append(configured, ConfiguredLauncher{Launcher: l})
+	}
+	configured = sessionLaunchers(configured, s.hello(ctx).Models.Launchers[m.ID])
+	agentOf := func(name string) string {
+		for _, l := range configured {
+			if l.Name == name {
+				return l.AgentType
+			}
+		}
+		return ""
+	}
+	if slices.ContainsFunc(list, func(l proto.Launcher) bool { return l.Name == name }) {
+		return "", agentOf(name), nil
 	}
 	if own.launcher != "" {
-		return "", i18n.Err("assistant-tasks.launcher_not_on_machine", i18n.Args{
+		return "", "", i18n.Err("assistant-tasks.launcher_not_on_machine", i18n.Args{
 			"machine": firstNonEmpty(m.Name, m.ID), "launcher": name, "launchers": strings.Join(launcherNamesOn(m, list), ", "),
 		})
 	}
@@ -68,23 +93,28 @@ func (s *Service) fitLauncher(ctx context.Context, m Device, own startPick, para
 		params["effort"] = own.effort
 	}
 	if err := s.applyModel(ctx, "agent.new", params); err != nil {
-		return "", err
+		return "", "", err
 	}
 	s.logf("start on %s: launcher %s is not there, using %s", m.ID, name, to)
-	return i18n.T(s.lang(ctx), "assistant-tasks.launcher_swapped", i18n.Args{
+	note = i18n.T(s.lang(ctx), "assistant-tasks.launcher_swapped", i18n.Args{
 		"launcher": name, "machine": firstNonEmpty(m.Name, m.ID), "to": to,
-	}), nil
+	})
+	current, _ := params["launcher"].(string)
+	return note, agentOf(current), nil
 }
 
 // launchersHere is what machine can start: machineLaunchers (its own launchers but the hidden ones, and the managed
 // ones) and those hub.json names for it (a wrapper the node may not list, configuredLauncher). known false when its
 // list can't be read, or the answer names none of its own: a node that read its shell lists plain claude at least
-// (node mergeLaunchers), so such an answer is no list.
+// (node mergeLaunchers), so such an answer is no list. The hub-added built-in is not evidence of a readable list.
 func (s *Service) launchersHere(ctx context.Context, machine string) (list []proto.Launcher, known bool) {
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	list, err := s.machineLaunchers(cctx, machine)
-	if err != nil || !slices.ContainsFunc(list, func(l proto.Launcher) bool { return compat.Source(l.Source) != "persona" }) {
+	if err != nil || !slices.ContainsFunc(list, func(l proto.Launcher) bool {
+		source := compat.Source(l.Source)
+		return source != "persona" && source != "builtin"
+	}) {
 		return nil, false
 	}
 	for _, c := range s.hello(ctx).Models.Launchers[machine] {

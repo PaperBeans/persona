@@ -119,6 +119,33 @@ func TestHerdrSetModelTypesTheCommandAndChecksTheScreen(t *testing.T) {
 	}
 }
 
+func TestHerdrSetModelWaitsForConfirmationAfterTheLatestCommand(t *testing.T) {
+	n, f, _ := herdrNode(t)
+	seedAgents(t, n, f, claudeAgent(sidA, proto.StatusIdle, "w1:p1", "w1:t1", "w1", "/tmp/m", ""))
+	empty, emptyANSI := screenFixture(t, "claude-2.1.312-empty-162.txt"), screenFixture(t, "claude-2.1.312-empty-162.ansi")
+	previous := "❯ /model sonnet\n  ⎿  Set model to Sonnet 4\n"
+	pending := empty + previous + "❯ /model opus\n"
+	f.setScreens("w1:p1", empty+previous, emptyANSI)
+	reads := 0
+	f.after(func(c herdrCall) {
+		if c.Method == "agent.prompt" {
+			f.setScreens("w1:p1", pending, emptyANSI)
+		}
+		if c.Method == "pane.read" && c.Params["format"] != "ansi" {
+			reads++
+			if reads == 1 {
+				f.setScreens("w1:p1", pending+"  ⎿  Set model to Opus 4.1 (claude-opus-4-1)\n", emptyANSI)
+			}
+		}
+	})
+	if err := setModel(t, n, sidA, "opus"); err != nil {
+		t.Fatalf("an older confirmation cut the read short: %v", err)
+	}
+	if reads != 2 {
+		t.Fatalf("visible reads = %d, want the pending read and the confirmed read", reads)
+	}
+}
+
 func TestHerdrSetModelRefusals(t *testing.T) {
 	n, f, _ := herdrNode(t)
 	seedAgents(t, n, f,

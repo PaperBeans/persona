@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appSocketReady, applyMachine, checkSocket, connect, disconnect, getState, onAppSocket, onPrivateUIStream, onHubEvent, reconnectNow, refresh, reset } from "./store";
 import { offlineNow } from "./feedback";
 import { liveEntry, resetLive } from "./live";
+import { messageFeedback } from "./message-send";
 
 class FakeSocket {
   static OPEN = 1;
@@ -60,16 +61,39 @@ afterEach(() => {
 });
 
 /** Connects and says hello on stream s1 at event 5 (with the hub's features, if given); returns the socket. */
-function online(features?: string[]) {
+function online(features?: string[], receiptVersion?: number) {
   connect();
   const s = last();
   s.open();
-  s.push({ type: "hello", server_version: "v1", event_stream: "s1", event_seq: 5, ...(features ? { features } : {}) });
+  s.push({ type: "hello", server_version: "v1", event_stream: "s1", event_seq: 5, ...(features ? { features } : {}), ...(receiptVersion === undefined ? {} : { message_send_state: receiptVersion }) });
   expect(getState().conn).toBe("online");
   return s;
 }
 
 describe("reconnecting", () => {
+  it("trusts send receipts only after this socket's authenticated capability hello", () => {
+    const receipt = (id: string) => ({ type: "message_send_state", machine_id: "m", session_id: "chat", client_msg_id: id, state: "processing", at: "2026-11-12T10:00:00Z" });
+    const old = online(["message_send_state"], 1);
+    old.push(receipt("first")); expect(messageFeedback("m", "chat", "first")).toBe("processing");
+    reconnectNow(); const next = last(); next.open();
+    expect(getState().features).toContain("message_send_state"); expect(appSocketReady()).toBe(false);
+    next.push(receipt("before-hello")); old.push(receipt("old-socket"));
+    expect(messageFeedback("m", "chat", "before-hello")).toBeUndefined();
+    expect(messageFeedback("m", "chat", "old-socket")).toBeUndefined();
+    next.push({ type: "hello", features: ["message_send_state"], resumed: true }); next.push(receipt("legacy-forgery"));
+    expect(messageFeedback("m", "chat", "legacy-forgery")).toBeUndefined();
+    next.push({ type: "hello", message_send_state: 1, features: ["message_send_state"], resumed: true }); next.push(receipt("trusted"));
+    expect(messageFeedback("m", "chat", "trusted")).toBe("processing");
+    vi.stubGlobal("localStorage", { getItem: () => "replacement-token" }); next.push(receipt("retired-credential"));
+    expect(messageFeedback("m", "chat", "retired-credential")).toBeUndefined();
+  });
+  it("retires send receipt trust when the same token gets a new credential epoch", () => {
+    const socket = online(["message_send_state"], 1);
+    vi.stubGlobal("localStorage", { getItem: (key: string) => key === "persona.credentialEpoch" ? "next-epoch" : "tok" });
+    expect(appSocketReady()).toBe(true);
+    socket.push({ type: "message_send_state", machine_id: "m", session_id: "chat", client_msg_id: "retired-epoch", state: "processing", at: "2026-11-12T10:00:00Z" });
+    expect(messageFeedback("m", "chat", "retired-epoch")).toBeUndefined();
+  });
   it("gates private native frames on the current authenticated hello, not cached features or socket open", () => {
     const connections: boolean[] = [], frames: string[] = [];
     const offConnection = onAppSocket((value) => connections.push(value));

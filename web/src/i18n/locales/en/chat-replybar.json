@@ -1,0 +1,22 @@
+{
+  "more_actions": "More message actions",
+  "worth": "Worth {cost}",
+  "tokens": "{tokens} tokens",
+  "approx": "≈ {cost}",
+  "details_title": "Request details",
+  "value_line": "Token value this turn: {cost}",
+  "by_model": "By model:",
+  "model_cost": "· {model} {cost}",
+  "token_line": "Tokens: {total} total · input {input} · output {output}",
+  "cache_line": "Cache breakdown: read {read} · write {write} · hit rate {rate}",
+  "cache_line_no_rate": "Cache breakdown: read {read} · write {write}",
+  "time_line": "Time {duration}",
+  "model_line": "Model: {model}",
+  "models_one": "{count} model",
+  "models_other": "{count} models",
+  "suggestion_line": "Suggestion: {suggestion}",
+  "low_cache": "Cache hit rate is low; more context was billed again this turn",
+  "no_cost": "Cost unavailable for this turn; showing usage only",
+  "persona_cost": "About {cost} for this reply, estimated at list prices",
+  "persona_title": "Estimated cost of this reply"
+}

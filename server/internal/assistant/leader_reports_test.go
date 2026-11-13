@@ -39,6 +39,16 @@ func (e *todoEventEnv) leaderTask(title, lead string) string {
 	return id
 }
 
+// worked gives todo id an agent that worked on it and was let go: it has started, so it can be stuck (taskStuck).
+func (e *todoEventEnv) worked(id string) {
+	e.t.Helper()
+	gone := time.Now().UTC().Add(-time.Hour)
+	e.s.todos.mu.Lock()
+	t := e.s.todos.todos[id]
+	t.Agents = append(t.Agents, TodoAgent{MachineID: "mac", SessionID: "s-worked", LinkedAt: gone.Add(-time.Hour), ReleasedAt: &gone})
+	e.s.todos.mu.Unlock()
+}
+
 func (e *todoEventEnv) review(id, verdict, note string) {
 	e.t.Helper()
 	_, _, err := e.s.updateSupervision(context.Background(), id, func(v *Supervision) bool {

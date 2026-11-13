@@ -39,6 +39,13 @@
   "disable_failed": "Couldn't turn off",
   "last_event": "Last received",
   "credentials": "App credentials",
+  "create_title": "Create the bot",
+  "create_start": "Scan to create with Lark",
+  "create_footer": "Scan the code with Lark on your phone and confirm: Persona creates the bot's app and pairs it with you. Nothing to fill in.",
+  "create_footer_shared": "Scan the code with Lark on your phone and confirm: Persona creates one Lark app for the bot and for reading your Lark, and pairs it with you.",
+  "advanced_have_app": "Already have a Lark app? Enter its credentials",
+  "advanced_other_app": "Advanced: use another Lark app",
+  "read_needs_app": "Create the app above by scanning first; then you can let Persona read your Lark here.",
   "credentials_from_config": "The credentials in manager.json are in use; saving here switches to these.",
   "credentials_secret_note": "The App Secret is stored encrypted on the hub and won't be shown again.",
   "required": "Required",
@@ -95,5 +102,7 @@
   "larkcli_profile_done": "Done",
   "larkcli_profile_auto_short": "the bot's app",
   "larkcli_profile_default": "lark-cli's default profile",
-  "larkcli_profile_fixed": "{name} (set in the config file)"
+  "larkcli_profile_fixed": "{name} (set in the config file)",
+  "feature_answer_new_card_title": "Answer as a new card",
+  "feature_answer_new_card_detail": "When a run finishes, its answer is sent as a new card at the bottom of the chat, so Lark notifies you, and the progress card folds up. Off: the answer is written into the progress card"
 }

@@ -36,11 +36,16 @@ func (s *Service) inboxRoutes() {
 	s.inboxSuggestionRoutes()
 	s.inboxHandoffRoutes()
 	s.inboxHistoryRoutes()
+	s.inboxTaskLinkRoutes()
 	s.translateRoutes()
 	// Items of connectors (GitHub…) only go to apps that draw them (?sources=all): an older app would show a PR as
 	// a mail and send a reply as one. triage says how many new items wait for the model, and why (inbox_admit.go).
 	s.handle("GET /api/v1/inbox", func(w http.ResponseWriter, r *http.Request) {
 		if !s.inboxUp(w, r) {
+			return
+		}
+		if q := r.URL.Query(); q.Has("since") { // only what changed since a list it had (inbox_delta.go)
+			s.writeInboxSince(w, inboxShape{all: q.Get("sources") == "all", lean: q.Get("chain") == "last"}, q.Get("since"))
 			return
 		}
 		s.writeInboxList(w, r.URL.Query().Get("sources") == "all") // from each item's kept bytes (inbox_list_memo.go)
@@ -110,6 +115,12 @@ func (s *Service) inboxRoutes() {
 		switch {
 		case errors.Is(err, errNoInboxItem):
 			apierr.Write(w, http.StatusNotFound, err)
+		case modelUnconfigured(err):
+			// Nothing the hub can call is set up for drafting: a coded answer the apps can explain, not a bare 502
+			// (an internal error's text never reaches the screen).
+			apierr.WriteCode(w, http.StatusServiceUnavailable, assistantwire.CodeModelUnavailable, i18n.Err("assistant-inbox.draft_no_model"))
+		case errors.Is(err, errDraftWithheld): // the drafts kept repeating what an extension marked never to quote
+			apierr.WriteCode(w, http.StatusUnprocessableEntity, "draft_withheld", err)
 		case err != nil:
 			apierr.Write(w, http.StatusBadGateway, err)
 		default:
@@ -227,8 +238,14 @@ func mailTarget(it InboxItem) *inboxMailTarget {
 
 // replyInboxChecked is replyInboxFrom with the mail the app saw (expected_uid / expected_version), if it gave one.
 func (s *Service) replyInboxChecked(ctx context.Context, id, text, clientID string, fromCard bool, uid *uint32, version *string, changes ...DocChange) (InboxItem, error) {
+	return s.replyInboxCheckedDo(ctx, id, text, clientID, fromCard, true, uid, version, changes...)
+}
+
+// replyInboxCheckedDo also serves a confirmed suggestion (file false): the target was bound when the suggestion was
+// created, so a read sync that changed the item's mail cannot redirect the user's confirmation to another message.
+func (s *Service) replyInboxCheckedDo(ctx context.Context, id, text, clientID string, fromCard, file bool, uid *uint32, version *string, changes ...DocChange) (InboxItem, error) {
 	if uid == nil && version == nil {
-		return s.replyInboxFrom(ctx, id, text, clientID, fromCard, changes...)
+		return s.replyInboxDo(ctx, id, text, clientID, fromCard, file, changes...)
 	}
 	// Collection and checked sends must not change the target between validation and sending.
 	b := &s.inbox
@@ -247,11 +264,11 @@ func (s *Service) replyInboxChecked(ctx context.Context, id, text, clientID stri
 	if target == nil || uid != nil && *uid != target.UID || version != nil && *version != target.Version {
 		return InboxItem{}, errMailReplyTargetChanged
 	}
-	return s.replyInboxFrom(ctx, id, text, clientID, fromCard, changes...)
+	return s.replyInboxDo(ctx, id, text, clientID, fromCard, file, changes...)
 }
 
-// inboxList is every open item and the recently done ones, newest first; connectors' only when all (rows stored
-// before Source was set have none, so it is the connector block that tells).
+// inboxList is every open item and the newest of the recently done ones (inbox_list_done.go), newest first;
+// connectors' only when all (rows stored before Source was set have none, so it is the connector block that tells).
 func (s *Service) inboxList(all bool) []InboxItem {
 	out, _ := s.inboxListAt(all)
 	return out
@@ -267,15 +284,18 @@ func (s *Service) inboxListAt(all bool) ([]InboxItem, time.Time) {
 	defer b.mu.Unlock()
 	now := time.Now()
 	cutoff := now.Add(-inboxKeepDone)
+	cut := b.listedDoneCut(cutoff, all)
 	out := make([]InboxItem, 0, len(b.items))
 	for _, it := range b.items {
-		if it.DoneAt != nil && it.DoneAt.Before(cutoff) || !all && it.Connector != nil {
+		if !inboxShows(it, cutoff, cut, all) {
 			continue
 		}
 		it.arrived(now)
 		out = append(out, it.listed())
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	sort.Slice(out, func(i, j int) bool {
+		return inboxListOrder(out[i].UpdatedAt, out[i].ID, out[j].UpdatedAt, out[j].ID) < 0
+	})
 	return out, now
 }
 

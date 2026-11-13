@@ -70,7 +70,7 @@ nonisolated enum RecordingPhase: Equatable, Sendable {
     }
 
     nonisolated struct Inputs: Equatable, Sendable {
-        /// The Meeting Recording / Start Recording tap is being worked on (a local flag): covers the calendar read.
+        /// The Record tap is being worked on (a local flag): covers the calendar read.
         var startRequested = false
         var capture: Capture = .idle
         var interrupted = false

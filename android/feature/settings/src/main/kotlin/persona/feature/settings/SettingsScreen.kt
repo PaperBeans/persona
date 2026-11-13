@@ -72,6 +72,8 @@ private fun SettingsContent(
     onClose: (() -> Unit)?,
 ) {
     var page by rememberSaveable(initialPage) { mutableStateOf(settingsPageFromInitialPage(initialPage)?.toInitialPage() ?: initialPage) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var parents by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var purposeManager by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
     var purpose by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
     var extension by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
@@ -81,6 +83,7 @@ private fun SettingsContent(
     var manager by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
     /** `ssh:<hub id>` or `proxy:<hub id>`: a hub's tunnel page under Settings › Hubs. */
     var tunnelPage by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
+    var pairingDiagnostics by rememberSaveable(initialPage) { mutableStateOf(false) }
     // Model providers's own steps when they open in place: one provider, adding one, importing from ~/.zshrc.
     var provider by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
     var providerStep by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
@@ -96,7 +99,7 @@ private fun SettingsContent(
         if (shownFor == assistant.id) return@LaunchedEffect
         shownFor = assistant.id
         if (initialPage == "settings" && isAssistantSettingsPage(page)) {
-            page = "settings"; purpose = null; purposeManager = null; extension = null; extensionManager = null
+            page = "settings"; parents = emptyList(); purpose = null; purposeManager = null; extension = null; extensionManager = null
             connectorManager = null; channel = null; provider = null; providerStep = null
         }
     }
@@ -119,6 +122,22 @@ private fun SettingsContent(
     val updateStatus by updateController.state.collectAsState()
     val update = updateStatus.latest
     val updateMessage = updateStatus.message
+    val updateNow by produceState(java.time.Instant.now(), page, updateStatus.lastChecked) {
+        if (page == "about") while (true) {
+            value = java.time.Instant.now()
+            delay(60_000)
+        }
+    }
+    val updateSubtitle = listOfNotNull(
+        updateStatus.lastChecked?.let { stringResource(R.string.settings_update_last_checked,
+            agoText(context.resources, java.time.Instant.ofEpochMilli(it), updateNow)) },
+        services.hubAddress?.let { stringResource(R.string.settings_update_source, it) },
+    ).joinToString("\n").ifEmpty { null }
+    val updateIncompatibility = when (updateStatus.result) {
+        AppUpdateState.Result.PackageMismatch -> R.string.settings_update_package_mismatch_detail
+        AppUpdateState.Result.SignatureMismatch -> R.string.settings_update_signature_mismatch_detail
+        else -> null
+    }
     val busy = updateStatus.checking
     val installing = updateStatus.installing
     fun checkUpdate() { scope.launch { updateController.check(manual = true) } }
@@ -191,7 +210,10 @@ private fun SettingsContent(
         } catch (_: Exception) {}
     }
     val back: () -> Unit = onBack ?: {
-        page = when {
+        if (parents.isNotEmpty()) {
+            page = parents.last()
+            parents = parents.dropLast(1)
+        } else page = when {
             page == "mail-add" -> "mail"
             page in setOf("sent", "connectors/sent", "phone", "mail", "feishu", "feishu-bot") || page.startsWith("connector/") -> "connectors"
             else -> "settings"
@@ -200,7 +222,10 @@ private fun SettingsContent(
     BackHandler(page != "settings" && onBack == null, onBack = back)
     val detailKey = LocalDetailKey.current
     fun open(destination: SettingsPage) {
-        if (onOpen != null) onOpen(destination) else page = destination.toInitialPage()
+        if (onOpen != null) onOpen(destination) else {
+            parents = parents + page
+            page = destination.toInitialPage()
+        }
     }
     val deviceFeedback: @Composable () -> Unit = {
         deviceState.message?.let { JNotice(it.text(), status = Status.NeedsYou) }
@@ -285,7 +310,7 @@ private fun SettingsContent(
     if (assistant.offline != null && isAssistantSettingsPage(page)) AssistantOfflinePage(page, assistant, back) else when (page) {
         "connectors" -> JListPage(title = stringResource(R.string.settings_section_connectors), onBack = back, content = connectorItems)
         "pair" -> PairingScreen(services.pairing, services.sessions, onReady = back,
-            onDiagnostics = { open(SettingsPage.Diagnostics) }, diagnostics = services.diagnostics, onBack = back,
+            onDiagnostics = { pairingDiagnostics = true }, diagnostics = services.diagnostics, onBack = back,
             footer = { onDemo?.let { Action(stringResource(R.string.settings_try_demo), onClick = it) }; deviceFeedback() },
             machines = services.machines.takeUnless { services.demo }, attempts = services.pairingAttempts,
             mainReadiness = services.readiness.takeUnless { services.demo }, skipWelcome = true)
@@ -295,10 +320,10 @@ private fun SettingsContent(
         "codex" -> ClaudeSettingsPage(services.sessions, services.machines.takeUnless { services.demo }, back, AgentSettingsKind.Codex,
             owns = { assistant.ownsOn(it.id, it.manager) })
         "models" -> purpose?.let { id -> ModelPurposePage(services.models.takeUnless { services.demo }, id, onBack = { purpose = null },
-                providers = services.providers.takeUnless { services.demo }, manager = purposeManager) }
+                providers = services.providers.takeUnless { services.demo }, manager = purposeManager, machines = machines) }
             ?: ModelConfigurationPage(services.models.takeUnless { services.demo }, back,
                 onPurpose = { id, owner -> onNavigate?.invoke(persona.core.navigation.ModelPurposeRoute(id, owner)) ?: run { purposeManager = owner; purpose = id } },
-                providers = services.providers.takeUnless { services.demo })
+                providers = services.providers.takeUnless { services.demo }, onProviders = { open(SettingsPage.Providers) }, machines = machines)
         "plugins" -> extension?.let { id -> ExtensionPage(services.extensions.takeUnless { services.demo }, id, onBack = { extension = null },
                 manager = extensionManager,
                 machines = services.sessions.machines,
@@ -312,18 +337,25 @@ private fun SettingsContent(
                 onChannel = { id -> onNavigate?.invoke(persona.core.navigation.ChannelRoute(id)) ?: run { channel = id } },
                 // Installed for the current assistant, whose channels these are.
                 onMarketExtension = onNavigate?.let { navigate -> { market, id -> navigate(persona.core.navigation.ExtensionCatalogRoute(market, id, manager = owner)) } })
-        "ready", "notify" -> {
-            val preferences: LazyListScope.() -> Unit =
-                if (page == "notify") NotificationPreferences(deviceController, paired && services.deviceSettings != null,
-                    desktops, onDesktops = { open(SettingsPage.Desktops) }) else ({})
+        "ready", "notify", "notification-background" -> {
+            val preferences = NotificationPreferences(deviceController, paired && services.deviceSettings != null,
+                desktops, onDesktops = { open(SettingsPage.Desktops) })
             ReadinessScreen(services.sessions, services.diagnostics,
-                notificationsOnly = page == "notify", showTitle = page == "notify",
-                readiness = services.readiness.takeUnless { services.demo }, onNavigate = onNavigate,
+                backgroundOnly = true, titleOverride = stringResource(R.string.settings_notification_background_title),
+                readiness = null, onNavigate = onNavigate,
                 onDiagnostics = { open(SettingsPage.Diagnostics) }, onDone = back, onBack = back,
-                header = preferences, footer = {
-                    if (page == "notify") SettingsCaption(stringResource(R.string.settings_notify_system_footer), Modifier.padding(vertical = Tokens.Space.s))
+                header = NotificationBackgroundHeader(services.capsule, { open(SettingsPage.Capsule) },
+                    stringResource(R.string.settings_notification_background_checks_header), preferences), footer = {
+                    SettingsCaption(stringResource(R.string.settings_notify_system_footer), Modifier.padding(vertical = Tokens.Space.s))
                     deviceFeedback()
                 })
+        }
+        "agent-settings" -> JListPage(title = stringResource(R.string.settings_home_agents), onBack = back) {
+            val entries = listOf(SettingsPage.ClaudeCode to R.string.settings_row_claude, SettingsPage.Codex to R.string.settings_row_codex,
+                SettingsPage.Triage to R.string.settings_triage_title)
+            itemsIndexed(entries) { index, (destination, title) -> JGroupItem(GroupPosition.of(index, entries.size)) {
+                JRow(stringResource(title), onClick = { open(destination) })
+            } }
         }
         "desktops" -> DesktopsPage(deviceController, services.desktops.takeUnless { services.demo }, paired && services.deviceSettings != null, back)
         "storage" -> StoragePage(back, services.clearCacheFiles, footer = deviceFeedback)
@@ -359,11 +391,11 @@ private fun SettingsContent(
             onAccess = { hubId -> tunnelPage = "access:$hubId" })
         // Adding a hub is the pairing page with an adding service; it returns to the hub list.
         "hubs-add" -> PairingScreen(services.addHub ?: services.pairing, services.sessions,
-            onReady = { page = "hubs" }, onDiagnostics = { open(SettingsPage.Diagnostics) }, diagnostics = services.diagnostics,
+            onReady = { page = "hubs" }, onDiagnostics = { pairingDiagnostics = true }, diagnostics = services.diagnostics,
             onBack = { page = "hubs" }, skipWelcome = true, attempts = services.pairingAttempts)
-        "diag" -> DiagnosticsScreen(services, onBack = back, footer = deviceFeedback)
+        "diag" -> DiagnosticsScreen(services, onBack = back, onPairing = { open(SettingsPage.Pairing) }, footer = deviceFeedback)
         "style" -> JListPage(title = stringResource(R.string.settings_style_title), onBack = back) {
-            item { AppearanceSettings() }
+            item { AppearanceSettings(agentsDisplay = services.agentsDisplay) }
             item { deviceFeedback() }
         }
         "language" -> LanguagePage(onBack = back, footer = deviceFeedback)
@@ -371,8 +403,36 @@ private fun SettingsContent(
             item { PersonaSettings(demo = services.demo) }
             item { deviceFeedback() }
         }
-        "about" -> JListPage(title = stringResource(R.string.settings_about_persona), onBack = back) {
+        "about" -> JListPage(title = stringResource(R.string.settings_home_about), onBack = back) {
             item { AboutSettingsPage() }
+            item { JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.m)) {
+                JRow(stringResource(R.string.settings_update_check), subtitle = updateSubtitle, subtitleLines = 6, value = when {
+                    busy -> stringResource(R.string.settings_update_checking)
+                    installing -> stringResource(R.string.settings_update_installing)
+                    updateStatus.result == AppUpdateState.Result.Failed -> stringResource(R.string.settings_update_check_failed)
+                    update != null -> stringResource(R.string.settings_update_found)
+                    services.demo -> stringResource(R.string.settings_demo_mode)
+                    updateStatus.result == AppUpdateState.Result.UpToDate -> stringResource(R.string.settings_update_up_to_date)
+                    updateStatus.result == AppUpdateState.Result.NoApk -> stringResource(R.string.settings_update_no_apk)
+                    updateStatus.result == AppUpdateState.Result.PackageMismatch -> stringResource(R.string.settings_update_package_mismatch)
+                    updateStatus.result == AppUpdateState.Result.SignatureMismatch -> stringResource(R.string.settings_update_signature_mismatch)
+                    else -> updateMessage?.let { stringResource(it) } ?: stringResource(R.string.settings_update_check_hint)
+                }, enabled = !services.demo && !busy && !installing, onClick = ::checkUpdate)
+            } }
+            if (!services.demo) item { AppUpdateRecovery(updateController) }
+            if (update != null || updateMessage != null || updateIncompatibility != null) item {
+                JCard(Modifier.padding(top = Tokens.Space.m)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
+                        update?.let { latest ->
+                            Text(stringResource(R.string.settings_update_new_version, latest.versionName), style = PersonaTheme.type.headline, color = PersonaTheme.palette.ink)
+                            if (latest.releaseNotes.isNotBlank()) Text(latest.releaseNotes, style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2)
+                            AppUpdateInstallButton(updateController)
+                        }
+                        if (updateMessage == null) updateIncompatibility?.let { SettingsCaption(stringResource(it)) }
+                        updateMessage?.let { SettingsCaption(stringResource(it)) }
+                    }
+                }
+            }
             item { deviceFeedback() }
         }
         "phone" -> JListPage(title = stringResource(R.string.settings_phone_data_title), onBack = back) {
@@ -399,212 +459,39 @@ private fun SettingsContent(
             MessagesConnectorPage(connectorsService, onBack = back)
         } else if (page.startsWith("connector/")) {
             HubConnectorPage(connectorsService, connectorId = page.removePrefix("connector/"), onBack = back, manager = connectorManager)
-        } else JListPage(title = stringResource(R.string.settings_title), actions = {
-            onClose?.let { close -> JIconButton(PhIcons.X, stringResource(persona.core.designsystem.R.string.designsystem_close), close, raised = true) }
-        }) {
-            if (services.demo) {
-                item { JNotice(stringResource(R.string.settings_demo_notice), title = stringResource(R.string.settings_demo_mode)) }
-                onExitDemo?.let { exit ->
-                    item { JButton(stringResource(R.string.settings_demo_connect), exit, Modifier.fillMaxWidth().padding(top = Tokens.Space.m)) }
-                }
-            }
-            // Three groups, in this order (docs/assistant/managers.md "Clients"): the current assistant's settings, this
-            // device's, the hub's. A row of a group is one position in it (its corners), whichever rows the hub has.
-            val sw = this
-            fun group(rows: List<@Composable (GroupPosition) -> Unit>) = rows.forEachIndexed { index, row ->
-                sw.item { row(GroupPosition.of(index, rows.size)) }
-            }
-            // A row drawn its own way (a switch, a count of its own): typed here so its content is composable.
-            fun custom(content: @Composable (GroupPosition) -> Unit) = content
-            fun row(destination: SettingsPage, title: Int, icon: persona.core.designsystem.icons.PhIcon, subtitle: Int? = null,
-                value: (@Composable () -> String?)? = null): @Composable (GroupPosition) -> Unit = { position ->
-                JGroupItem(position) {
-                    JRow(selected = detailKey == SettingsPageRoute(destination), title = stringResource(title), leadingIcon = icon,
-                        subtitle = subtitle?.let { stringResource(it) }, value = value?.invoke(), onClick = { open(destination) })
-                }
-            }
-            // 1. The current assistant's settings: its head (monogram, "{name}'s settings", Switch to the sidebar's roster).
-            item("assistant-head") {
-                val switchLabel = stringResource(R.string.settings_group_assistant_switch)
-                AssistantSwitcher(services.managers.takeUnless { services.demo }, LocalAssistantWaiting.current,
-                    hubOnline = connection == ConnectionState.Online || connection == ConnectionState.Updating,
-                    onManage = { open(SettingsPage.Managers) },
-                    // No roster (an older hub, demo mode): no assistants to name or switch, so a plain heading and no footer.
-                    fallback = { JAssistantSettingsHeader(stringResource(persona.core.designsystem.R.string.designsystem_brand_persona), null, false,
-                        switchLabel, onSwitch = null, modifier = Modifier.testTag("settings-assistant-head")) },
-                    head = { current, isDefault, _, toggle ->
-                        JAssistantSettingsHeader(stringResource(R.string.settings_group_assistant, current.shownName), current, isDefault,
-                            switchLabel, onSwitch = toggle)
-                    })
-            }
-            // The extensions' cards and nav pages are the default assistant's (they open by key, so only with a navigation host).
-            if (onNavigate != null && (assistant.roster == null || assistant.id == assistant.roster?.defaultManagerId)) extensionSlotItems(slotsState, slotCards,
-                selected = { place -> detailKey == persona.core.navigation.ExtensionUiRoute(place.extension, place.id, place.title.ifBlank { place.id }) },
-                onOpen = { place -> onNavigate(persona.core.navigation.ExtensionUiRoute(place.extension, place.id, place.title.ifBlank { place.id })) })
-            group(listOfNotNull(
-                row(SettingsPage.Providers, R.string.settings_providers_title, PhIcons.Cpu, R.string.settings_row_providers_subtitle),
-                row(SettingsPage.ModelConfig, R.string.settings_row_models, PhIcons.Brain, R.string.settings_row_models_subtitle),
-                // "Assistant profile" is a page of the Persona tab: only with a navigation host.
-                if (onNavigate == null) null else custom { position ->
-                    JGroupItem(position) {
-                        JRow(selected = detailKey == persona.core.navigation.AssistantSettingsRoute, title = stringResource(R.string.settings_row_assistant),
-                            leadingIcon = PhIcons.Sparkle, subtitle = stringResource(R.string.settings_row_assistant_subtitle),
-                            onClick = { onNavigate.invoke(persona.core.navigation.AssistantSettingsRoute) })
-                    }
-                },
-                row(SettingsPage.Triage, R.string.settings_triage_title, PhIcons.ListChecks, R.string.settings_row_triage_subtitle),
-                custom { position ->
-                    JGroupItem(position) {
-                        JRow(selected = detailKey == SettingsPageRoute(SettingsPage.Connectors) || detailKey == SettingsPageRoute(SettingsPage.Sent),
-                            title = stringResource(R.string.settings_section_connectors), leadingIcon = PhIcons.PlugsConnected,
-                            subtitle = stringResource(R.string.settings_connectors_caption), onClick = { open(SettingsPage.Connectors) })
-                    }
-                },
-                // Extension management and conversation channels are independent hub capabilities.
-                if (!extensionsAvailable) null else row(SettingsPage.Extensions, R.string.settings_section_extensions, PhIcons.PuzzlePiece,
-                    R.string.settings_row_extensions_subtitle) { extensionSummary },
-                if (!channelsAvailable) null else custom { position ->
-                    ChannelsSettingsRow(channelList, position, selected = detailKey == SettingsPageRoute(SettingsPage.Channels),
-                        onClick = { open(SettingsPage.Channels) })
-                },
-                row(SettingsPage.ClaudeCode, R.string.settings_row_claude, PhIcons.TerminalWindow, R.string.settings_row_claude_subtitle),
-                row(SettingsPage.Codex, R.string.settings_row_codex, PhIcons.Code, R.string.settings_row_codex_subtitle),
-            ))
-            // Its footer names the assistant its head does; without a roster there is none to name.
-            val named = assistant.manager?.takeIf { services.managers != null && !services.demo && assistant.roster?.installed?.isNotEmpty() == true }
-            if (named != null) item("assistant-footer") {
-                SettingsCaption(stringResource(R.string.settings_group_assistant_footer, named.shownName),
-                    Modifier.padding(horizontal = rowPadding, vertical = Tokens.Space.s))
-            }
-            // 2. This device's.
-            item("device-head") { JSectionHeader(stringResource(R.string.settings_group_device)) }
-            val desktopRow = desktops.isNotEmpty() && !services.demo
-            group(listOfNotNull(
-                row(SettingsPage.Appearance, R.string.settings_style_title, PhIcons.SquaresFour) { PersonaTheme.style.label },
-                custom { position ->
-                    JGroupItem(position) { LanguageRow(selected = detailKey == SettingsPageRoute(SettingsPage.Language), onClick = { open(SettingsPage.Language) }) }
-                },
-                // Inbox chats open natively (left / right bubbles, reply composer) unless switched to the extension's page.
-                appStyleStore?.let { store -> custom { position ->
-                    JGroupItem(position) {
-                        val nativeInboxChats by store.nativeInboxChats.collectAsState()
-                        JSwitchRow(stringResource(R.string.settings_update_v7_native_title), nativeInboxChats, store::setNativeInboxChats,
-                            subtitle = stringResource(R.string.settings_update_v7_native_subtitle))
-                    }
-                } },
-                row(SettingsPage.Notifications, R.string.settings_ready_notifications, PhIcons.BellSimple, R.string.settings_row_notifications_subtitle),
-                services.capsule?.let { capsule -> custom { position ->
-                    JGroupItem(position) {
-                        val mode by capsule.mode.collectAsState()
-                        JRow(title = stringResource(R.string.settings_capsule_title), leadingIcon = PhIcons.ChatCircle, value = CapsuleSettingsText.label(mode),
-                            subtitle = stringResource(R.string.settings_row_capsule_subtitle), selected = detailKey == SettingsPageRoute(SettingsPage.Capsule),
-                            onClick = { open(SettingsPage.Capsule) })
-                    }
-                } },
-                row(SettingsPage.Readiness, R.string.settings_row_background, PhIcons.BatteryCharging, R.string.settings_row_background_subtitle),
-                // "Persona on Mac is signed in" while a desktop app is connected (iOS shows it over the Agents list).
-                if (!desktopRow) null else custom { position ->
-                    DesktopPresenceRow(desktops, deviceState.preferences?.muteWhileDesktop == true,
-                        selected = detailKey == SettingsPageRoute(SettingsPage.Desktops), position, onClick = { open(SettingsPage.Desktops) })
-                },
-                row(SettingsPage.Translation, R.string.settings_translation_title, PhIcons.Translate, R.string.settings_row_translation_subtitle) { translationValue },
-                custom { position ->
-                    JGroupItem(position) { StorageRow(selected = detailKey == SettingsPageRoute(SettingsPage.Storage), onClick = { open(SettingsPage.Storage) }) }
-                },
-                row(SettingsPage.About, R.string.settings_section_about, PhIcons.Info, R.string.settings_row_about_subtitle),
-                custom { position ->
-                    JGroupItem(position) {
-                        JRow(stringResource(R.string.settings_update_check), leadingIcon = PhIcons.ArrowClockwise, value = when {
-                            busy -> stringResource(R.string.settings_update_checking)
-                            installing -> stringResource(R.string.settings_update_installing)
-                            update != null -> stringResource(R.string.settings_update_found)
-                            services.demo -> stringResource(R.string.settings_demo_mode)
-                            else -> updateMessage?.let { stringResource(it).trimEnd('。', '.') } ?: stringResource(R.string.settings_update_check_hint)
-                        },
-                            enabled = !services.demo && !busy && !installing, onClick = ::checkUpdate)
-                    }
-                },
-            ))
-            if (!services.demo) item { AppUpdateRecovery(updateController) }
-            if (update != null || updateMessage != null) item {
-                JCard(Modifier.padding(top = Tokens.Space.m)) {
-                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
-                        update?.let { latest ->
-                            Text(stringResource(R.string.settings_update_new_version, latest.versionName), style = PersonaTheme.type.headline, color = PersonaTheme.palette.ink)
-                            if (latest.releaseNotes.isNotBlank()) Text(latest.releaseNotes, style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2)
-                            AppUpdateInstallButton(updateController)
-                        }
-                        updateMessage?.let { SettingsCaption(stringResource(it)) }
-                    }
-                }
-            }
-            // 3. The hub's: how this device reaches it, then its rows.
-            item("hub-head") { JSectionHeader(stringResource(R.string.settings_group_hub)) }
-            item {
-                HubCard(name = stringResource(persona.core.designsystem.R.string.designsystem_brand_persona), connected = paired && connection == ConnectionState.Online,
-                    statusText = if (paired) connection.label() else stringResource(R.string.settings_not_paired),
-                    facts = if (paired) machines.count { it.online }.let { online ->
-                        listOf(stringResource(R.string.settings_hub_computers_online) to pluralStringResource(R.plurals.settings_hub_computers_count, online, online))
-                    } else emptyList(),
-                    busy = connection in setOf(ConnectionState.Connecting, ConnectionState.Updating),
-                    modifier = Modifier.testTag("settings-hub-card").padding(bottom = Tokens.Space.m), onClick = { open(SettingsPage.Diagnostics) })
-            }
-            if (paired) item {
-                JGroupItem(GroupPosition.Single, Modifier.padding(bottom = Tokens.Space.m)) {
-                    JRow {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
-                            Text(stringResource(R.string.settings_hub_address), style = PersonaTheme.type.body, color = PersonaTheme.palette.ink)
-                            SelectionContainer(Modifier.testTag("settings-hub-address-selection")) {
-                                Text(services.hubAddress ?: stringResource(R.string.settings_not_provided), Modifier.fillMaxWidth(),
-                                    style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2)
-                            }
-                        }
-                    }
-                }
-            }
-            // The hub list is the one row a single hub group adds to settings (docs/android/android.md "Multiple hubs").
-            // Hub version (docs/operations/hub-update.md "In the app") follows it while there is a real hub (not demo mode).
-            group(listOfNotNull(
-                if (services.hubs == null) null else row(SettingsPage.Hubs, R.string.settings_row_hubs, PhIcons.HardDrives, R.string.settings_row_hubs_subtitle),
-                if (hubUpdates == null) null else row(SettingsPage.HubUpdate, R.string.settings_row_hub_update, PhIcons.ArrowsClockwise,
-                    R.string.settings_row_hub_update_subtitle) { HubUpdateText.summary(hubUpdateStatus) },
-                // Assistants (docs/assistant/managers.md): the hub's roster, after its version.
-                if (services.managers == null || services.demo) null else custom { position ->
-                    JGroupItem(position) {
-                        JRow(selected = detailKey == SettingsPageRoute(SettingsPage.Managers) || detailKey is persona.core.navigation.ManagerRoute,
-                            title = stringResource(R.string.settings_managers_title), leadingIcon = PhIcons.UserCircle,
-                            subtitle = stringResource(R.string.settings_managers_hint), onClick = { open(SettingsPage.Managers) })
-                    }
-                },
-                row(SettingsPage.Pairing, R.string.settings_row_pairing, PhIcons.QrCode, R.string.settings_row_pairing_subtitle),
-                // The avatar is the hub's (`/api/v1/looks`: every device shows the one picked, whichever assistant is current).
-                row(SettingsPage.Persona, R.string.settings_avatar_title, PhIcons.Robot) {
-                    if (LocalPersonaPack.current != null) LocalPersonaName.current else LocalPersonaDesign.current.title
-                },
-                row(SettingsPage.Devices, R.string.settings_devices_title, PhIcons.DeviceMobile, R.string.settings_row_devices_subtitle),
-                row(SettingsPage.Diagnostics, R.string.settings_diag_title, PhIcons.Gauge, R.string.settings_row_diag_subtitle),
-            ))
-            item("hub-footer") {
-                SettingsCaption(stringResource(R.string.settings_group_hub_footer), Modifier.padding(horizontal = rowPadding, vertical = Tokens.Space.s))
-            }
-            if (paired) item {
-                JButton(stringResource(R.string.settings_disconnect_forget), { confirmDisconnect = true },
+        } else SettingsHomePage(
+            services, searchQuery, { searchQuery = it }, extensionsAvailable, extensionSummary, channelsAvailable, channelList,
+            connection, translationValue, hubUpdateStatus,
+            when {
+                busy -> stringResource(R.string.settings_update_checking)
+                installing -> stringResource(R.string.settings_update_installing)
+                update != null -> stringResource(R.string.settings_update_found)
+                else -> null
+            }, detailKey, ::open, onNavigate, onClose, onDemo, onExitDemo,
+            slots = {
+                if (onNavigate != null && (assistant.roster == null || assistant.id == assistant.roster?.defaultManagerId)) extensionSlotItems(slotsState, slotCards,
+                    selected = { place -> detailKey == persona.core.navigation.ExtensionUiRoute(place.extension, place.id, place.title.ifBlank { place.id }) },
+                    onOpen = { place -> onNavigate(persona.core.navigation.ExtensionUiRoute(place.extension, place.id, place.title.ifBlank { place.id })) })
+            }, footer = {
+                if (paired) JButton(stringResource(R.string.settings_disconnect_forget), { confirmDisconnect = true },
                     Modifier.fillMaxWidth().padding(top = Tokens.Space.section), kind = JButtonKind.Destructive, enabled = !deviceState.busy)
-            }
-            item { deviceFeedback() }
-        }
+                deviceFeedback()
+            },
+        )
     }
-    // Registered after the child pages, so routed back leaves a page in one step. Not on the pairing page: it steps back
-    // through its own pages first and calls onBack itself when none is left (PairingScreen's `back`).
-    if (onBack != null) BackHandler(page != "settings" && page != "pair", onBack = onBack)
+    // Routed Back leaves a page in one step. Pairing handles its own steps before returning to Settings or Hubs.
+    if (onBack != null) BackHandler(page != "settings" && page != "pair" && page != "hubs-add", onBack = onBack)
     // An AI use opened inside "Model configuration" (no navigation host) closes before the page does.
     BackHandler(page == "models" && purpose != null) { purpose = null }
     BackHandler(page == "plugins" && extension != null) { extension = null }
     BackHandler(page == "channels" && channel != null) { channel = null }
     BackHandler(page == "managers" && manager != null) { manager = null }
     BackHandler(page == "providers" && (provider != null || providerStep != null)) { if (providerStep != null) providerStep = null else provider = null }
-    BackHandler(page == "hubs-add") { page = "hubs" }
     BackHandler(page == "hubs" && tunnelPage != null) { tunnelPage = null }
+    if (pairingDiagnostics && (page == "pair" || page == "hubs-add")) {
+        val close = { pairingDiagnostics = false }
+        JFullScreen(onDismiss = close) { DiagnosticsScreen(services, onBack = close, footer = deviceFeedback) }
+    }
     if (confirmDisconnect) JDialog(
         onDismiss = { confirmDisconnect = false }, title = stringResource(R.string.settings_disconnect_title),
         text = stringResource(R.string.settings_disconnect_text),
@@ -628,10 +515,16 @@ fun ReadinessScreen(
     readiness: AssistantReadinessSource? = null,
     /** Opens a step's page ("Model providers", "Machines"); null during the first checklist, whose buttons then open help only. */
     onNavigate: ((androidx.navigation3.runtime.NavKey) -> Unit)? = null,
+    onLater: (() -> Unit)? = null,
+    /** Ordinary device settings reuse the checks, without finishing or dismissing first-run setup. */
+    backgroundOnly: Boolean = false,
+    titleOverride: String? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val preferences = remember { context.getSharedPreferences("settings-readiness", android.content.Context.MODE_PRIVATE) }
+    // The GitHub star prompts (#5761): finish() tells them setup is done.
+    val starPrompt = persona.core.designsystem.LocalStarPrompt.current
     val readinessOn by remember(readiness) { readiness?.available ?: kotlinx.coroutines.flow.flowOf(false) }.collectAsState(false)
     var main by remember(readiness) { mutableStateOf<AssistantReadiness?>(null) }
     var probing by remember { mutableStateOf(false) }
@@ -665,10 +558,10 @@ fun ReadinessScreen(
         if (detected.name == PhoneReadiness.HyperOS) { delay(1_000); items = PhoneReadiness.items(context, detected) }
     } }
     val machinesSeen = machines.joinToString(",") { "${it.id}:${it.online}" }
-    LaunchedEffect(readinessOn, machinesSeen) { if (readinessOn && !notificationsOnly) loadMain() }
+    LaunchedEffect(readinessOn, machinesSeen) { if (readinessOn && !notificationsOnly && !backgroundOnly) loadMain() }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { refresh() }
     val localNetwork = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { refresh() }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refresh(); if (readinessOn && !notificationsOnly) scope.launch { loadMain() } }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refresh(); if (readinessOn && !notificationsOnly && !backgroundOnly) scope.launch { loadMain() } }
     LaunchedEffect(Unit) {
         refresh()
         try { sessions.refresh() } catch (error: CancellationException) { throw error } catch (_: Exception) { }
@@ -694,12 +587,16 @@ fun ReadinessScreen(
                     withContext(kotlinx.coroutines.NonCancellable) { try { source.dismiss(true) } catch (_: Exception) { } }
                 }
             }
+            // Setup finished (Done, not Later): the GitHub star toast once per phone, which the app shell shows when it is
+            // up (StarPromptWelcome), past this page's leaving (#5761).
+            if (!later && !backgroundOnly) starPrompt?.onboarded()
         }
         onDone()
     }
-    JListPage(title = stringResource(if (notificationsOnly) R.string.settings_ready_notifications else R.string.settings_ready_title), onBack = onBack, largeTitle = showTitle && onBack == null) {
+    val title = titleOverride ?: stringResource(if (notificationsOnly) R.string.settings_ready_notifications else R.string.settings_ready_title)
+    val checklist: LazyListScope.() -> Unit = {
         header()
-        val mainSteps = main?.takeIf { readinessOn && !notificationsOnly }
+        val mainSteps = main?.takeIf { readinessOn && !notificationsOnly && !backgroundOnly }
         if (mainSteps != null) {
             item("main-header") { JSectionHeader(stringResource(R.string.settings_ready_main_header)) }
             item("main-steps") {
@@ -762,7 +659,7 @@ fun ReadinessScreen(
         }
         if (!notificationsOnly) {
             // The hub's computer step says it for the beginner; the per-machine versions stay for older hubs.
-            if (mainSteps == null) {
+            if (mainSteps == null && !backgroundOnly) {
                 item { JSectionHeader(stringResource(R.string.settings_section_computers), count = machines.size) }
                 if (machines.isEmpty()) item { JEmptyState(stringResource(R.string.settings_ready_no_machines), stringResource(R.string.settings_ready_no_machines_detail)) }
                 itemsIndexed(machines) { index, machine ->
@@ -791,7 +688,7 @@ fun ReadinessScreen(
                     }
                 }
             }
-            items(listOf("machines" to R.string.settings_ready_machines_check, "lock-test" to R.string.settings_lock_test_title, "cellular-test" to R.string.settings_ready_cellular_test)) { (id, title) ->
+            items(listOfNotNull(if (backgroundOnly) null else "machines" to R.string.settings_ready_machines_check, "lock-test" to R.string.settings_lock_test_title, "cellular-test" to R.string.settings_ready_cellular_test)) { (id, title) ->
                 val skipped = remember(id, revision) { records.skipped(id) }
                 if (skipped) SettingsCaption(stringResource(R.string.settings_ready_skipped_item, stringResource(title)))
             }
@@ -800,14 +697,23 @@ fun ReadinessScreen(
         item {
             Column(Modifier.padding(vertical = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
                 testMessage?.let { JNotice(stringResource(it)) }
-                SettingsCaption(stringResource(R.string.settings_ready_skip_note))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                if (!backgroundOnly) SettingsCaption(stringResource(R.string.settings_ready_skip_note))
+                if (!backgroundOnly) FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                     Action(stringResource(R.string.settings_ready_skip_rest), enabled = items.isNotEmpty(), onClick = { finish(later = true) })
                     JButton(stringResource(R.string.settings_done), { finish(later = false) }, size = JButtonSize.Small, enabled = items.isNotEmpty())
                 }
                 footer()
             }
         }
+    }
+    if (onLater == null) {
+        JListPage(title, onBack = onBack, largeTitle = showTitle && onBack == null,
+            scrollUnderBottom = notificationsOnly, content = checklist)
+    } else CompositionLocalProvider(
+        LocalRootBack provides null, LocalRootLeading provides pairingTitleInset, LocalHomeChrome provides null,
+    ) {
+        JListPage(title, largeTitle = false, actions = { JTextButton(stringResource(R.string.settings_ready_set_up_later), onLater) },
+            scrollUnderBottom = false, content = checklist)
     }
     mainHelp?.let { help ->
         ReadinessHelpDialog(help, main?.machine?.name, onDismiss = { mainHelp = null }, onAction = { action ->
@@ -836,11 +742,14 @@ private fun OnboardingContent(services: SettingsServices, onDone: () -> Unit) {
         return
     }
     var diagnostics by rememberSaveable { mutableStateOf(false) }
-    BackHandler { if (diagnostics) diagnostics = false else onDone() }
+    BackHandler(onBack = onDone)
+    ReadinessScreen(services.sessions, services.diagnostics, notificationsOnly = false, showTitle = false,
+        onDiagnostics = { diagnostics = true }, onDone = onDone, onBack = null, onLater = onDone,
+        readiness = services.readiness.takeUnless { services.demo })
     if (diagnostics) {
-        DiagnosticsScreen(services, onBack = { diagnostics = false })
-    } else ReadinessScreen(services.sessions, services.diagnostics, notificationsOnly = false, showTitle = false,
-        onDiagnostics = { diagnostics = true }, onDone = onDone, onBack = onDone, readiness = services.readiness.takeUnless { services.demo })
+        val close = { diagnostics = false }
+        JFullScreen(onDismiss = close) { DiagnosticsScreen(services, onBack = close) }
+    }
 }
 
 /** One of the first group's pages ([page]) while [assistant] is offline: its title and [JAssistantOffline]. */
@@ -848,7 +757,8 @@ private fun OnboardingContent(services: SettingsServices, onDone: () -> Unit) {
 private fun AssistantOfflinePage(page: String, assistant: persona.core.contracts.api.CurrentAssistant, onBack: () -> Unit) {
     val title = when (settingsPageFromInitialPage(page)) {
         SettingsPage.Providers -> R.string.settings_providers_title
-        SettingsPage.ModelConfig -> R.string.settings_row_models
+        SettingsPage.ModelConfig -> R.string.settings_home_models
+        SettingsPage.AgentSettings -> R.string.settings_home_agents
         SettingsPage.Triage -> R.string.settings_triage_title
         SettingsPage.Extensions -> R.string.settings_section_extensions
         SettingsPage.Channels -> R.string.settings_src_channels_title

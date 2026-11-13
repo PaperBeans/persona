@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import Persona
 
-/// The sidebar's Auto Chats (#3264, docs/protocol/protocol.md「Origin of assistant chats」): the conversations Persona opened by itself out of
-/// Recent, by source; a hub that never says who opened them lists them as before.
+/// The conversations Persona opened by itself (#3264, docs/protocol/protocol.md「Origin of assistant chats」): All Chats' filters by
+/// source, and the mark a row of one carries (#5195); a hub that never says who opened them lists them as before.
 struct AutoConversationsTests {
     private func session(_ id: String, origin: String? = nil, state: String = "idle", title: String = "") throws -> Session {
         var o: [String: Any] = ["machine_id": "server", "session_id": id, "status": "idle", "state": state, "title": title, "assistant": true]
@@ -68,5 +68,36 @@ struct AutoConversationsTests {
         #expect(AutoConversationSource.of("extension").name == "扩展")
         #expect(AutoConversationSource.of("whatever") == .other)
         #expect(AutoConversationSource.of("other") == .other)
+    }
+
+    /// External (#3758): only what an extension opened: Lark /agent with Lark's mark, any other extension with the
+    /// extensions symbol; the user's, a channel's, Persona's own and unknown origins are not.
+    @Test func externalIsWhatAnExtensionOpened() {
+        #expect(AutoConversationSource.external("lark_agent") == .larkAgent)
+        #expect(AutoConversationSource.external(" lark_agent ")?.brand == Theme.Brand.lark)
+        #expect(AutoConversationSource.external("extension") == .extensionSource)
+        #expect(AutoConversationSource.external("extension")?.brand == nil)
+        for origin in [nil, "", "user", "channel", "inbox", "task", "spawned", "something_new"] {
+            #expect(AutoConversationSource.external(origin) == nil, "\(origin ?? "nil")")
+        }
+        // The tests run in zh-Hans.
+        #expect(AutoConversationSource.larkAgent.from == "来自 飞书 /agent")
+        #expect(AutoConversationSource.extensionSource.from == "来自扩展")
+    }
+
+    /// A row's source mark (#5195) is named as its All Chats filter is, an external one by where it came from; the
+    /// source is the one the filters use, a scheduled task's the hub calls the user's included.
+    @Test func aRowsMarkIsNamedAsItsFilter() throws {
+        #expect(AutoConversationSource.inbox.markLabel == "收件箱")
+        #expect(AutoConversationSource.task.markLabel == "定时任务")
+        #expect(AutoConversationSource.spawned.markLabel == "对话派生")
+        #expect(AutoConversationSource.other.markLabel == "其他")
+        #expect(AutoConversationSource.larkAgent.markLabel == "来自 飞书 /agent")
+        #expect(AutoConversationSource.extensionSource.markLabel == "来自扩展")
+        #expect(AutoConversations.source(of: try session("task", origin: "user"), tasks: tasks) == .task)
+        #expect(AutoConversations.source(of: try session("in1", origin: "inbox"), tasks: tasks) == .inbox)
+        for origin in [nil, "", "user", "channel"] {
+            #expect(AutoConversations.source(of: try session("me", origin: origin), tasks: tasks) == nil, "\(origin ?? "nil")")
+        }
     }
 }

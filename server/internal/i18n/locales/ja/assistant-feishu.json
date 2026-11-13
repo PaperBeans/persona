@@ -7,6 +7,7 @@
   "chat_off": "Larkボットのチャット機能はオフです（Appの設定 › コネクタ › Larkボット）。",
   "agent_not_found": "このエージェント（{id}）が見つかりません。/agents で選び直してください",
   "agent_read_only": "このエージェントは閲覧のみです：{reason}",
+  "agent_stopped": "このエージェントは停止しています。会話とターミナルは残りますが、メッセージは受け付けません。Persona のターミナル画面で「再開」するか、新しいエージェントを開始してください。",
   "no_assistant_machine": "アシスタントのマシンが設定されていません",
   "new_chat": "新しいチャット",
   "main_chat": "メインチャット",
@@ -84,6 +85,7 @@
   "step_call": "電話をかける",
   "step_maps_nearby": "周辺を検索",
   "step_maps_navigate": "マップで経路を開く",
+  "step_maps_route": "経路を調べる",
   "step_shortcut_run": "ショートカットを実行",
   "step_media_play": "音楽を再生",
   "step_home_control": "アクセサリを操作",
@@ -147,5 +149,6 @@
   "source_noreply_choice": "依頼の場所には返信しない",
   "source_report_unreachable": "結果を依頼の場所に投稿できませんでした：{error}",
   "source_report_notice": "{minutes}分後に元のメッセージの下へ投稿します：{text}（取り消すには /noreply を送ってください）",
-  "source_report_notice_chat": "{minutes}分後に元のメッセージの下へ投稿します：{text}（取り消すにはこのメッセージに /noreply と返信してください）"
+  "source_report_notice_chat": "{minutes}分後に元のメッセージの下へ投稿します：{text}（取り消すにはこのメッセージに /noreply と返信してください）",
+  "answer_below": "回答は下にあります"
 }

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """End-to-end check of how the web shows a background workflow (#2935): the agent's row in the sidebar says which run
-it waits for and how far it got, the chat's "Background" chip opens a card per run (#3434: counts, a progress bar, one block
-per phase, the stopped one's error), the running phase's block lists its agents, another phase opens on a click, and an
-agent opens read-only in the side panel; the task card says the same in a line. These runs carry no phase_stats (an older
+it waits for and how far it got, the top bar's Background tasks button opens its side panel (#5421, cindy's tab): a row per run
+under Running / Completed, each opening the run's detail (#3434: counts, a progress bar, one block
+per phase, the stopped one's error), the running phase's block lists its agents, another phase opens on a click, and the
+agent rows only read (#5030: a workflow agent opens no conversation of its own); the task card says the same in a line. These runs carry no phase_stats (an older
 hub): the blocks come from the agents listed. With MOCK_WORKFLOWS=legacy (a hub without the workflows field) the row only
 says "Running in the background". The cards in the chat itself: scripts/test/web_workflow_cards_e2e.py.
 
@@ -71,26 +72,37 @@ def run(browser, base, token, size, theme, shots, legacy):
         row = page.locator("nav a[aria-current=page], aside a[aria-current=page]").first
         expect(row.locator("[data-workflow-line]")).to_contain_text("后台运行中" if legacy else "4/6+ · widget-audit")
         ok(f"{tag}: the sidebar row says it waits for the run")
-    chip = page.get_by_role("button", name="后台任务", exact=False).first
-    expect(chip).to_be_visible()
+    button = page.locator("main header").get_by_role("button", name="后台任务", exact=False).first
+    expect(button).to_be_visible()
     shot("chat")
-    chip.click()
-    dialog = page.get_by_role("dialog")
-    expect(dialog).to_be_visible()
+    button.click()
+    panel = page.locator('aside[aria-label="后台任务"]')
+    expect(panel).to_be_visible()
     if legacy:
-        expect(dialog).to_contain_text("widget-audit")  # a background task like the others
-        expect(dialog.locator("[data-workflow-card]")).to_have_count(0)
+        expect(panel).to_contain_text("widget-audit")  # a background task like the others
+        expect(panel.locator("[data-bg-run]")).to_have_count(0)
         ok(f"{tag}: an older hub's run is a background task")
-        shot("dialog")
+        shot("panel")
     else:
-        running = dialog.locator('[data-workflow-card="running"]')
+        # the loop first, then the running run and the shell task under Running; the stopped run under Completed
+        running_section = panel.locator('[data-background-section="running"]')
+        expect(running_section.locator("[data-bg-loop]")).to_have_count(1)
+        expect(running_section.locator('[data-bg-run="wdemo1"]')).to_contain_text("widget-audit")
+        expect(running_section.locator('[data-bg-run="wdemo1"] [data-bg-meta]')).to_contain_text("4/6")
+        expect(running_section).to_contain_text("跑小组件快照测试")  # the shell task still listed
+        expect(panel.locator('[data-background-section="completed"] [data-bg-run="wdemo0"]')).to_have_count(1)
+        ok(f"{tag}: the panel lists the loop, the running run and the task under Running, the stopped run under Completed")
+        shot("panel")
+        panel.locator('[data-bg-run="wdemo0"] [data-bg-row-button]').click()
+        expect(panel.locator('[data-workflow-card="killed"]')).to_contain_text("Error: Workflow aborted")
+        panel.get_by_role("button", name="返回").click()
+        panel.locator('[data-bg-run="wdemo1"] [data-bg-row-button]').click()
+        running = panel.locator('[data-workflow-card="running"]')
         expect(running).to_contain_text("widget-audit")
         expect(running.locator("[data-workflow-counts]")).to_have_text("4/6+")
         expect(running.locator('[data-tally="running"]')).to_have_text("2 在跑")
-        expect(dialog.locator('[data-workflow-card="killed"]')).to_contain_text("Error: Workflow aborted")
-        expect(dialog).to_contain_text("跑小组件快照测试")  # the shell task still listed
-        ok(f"{tag}: one card per run, the stopped one with its error")
-        shot("dialog")
+        ok(f"{tag}: a run's row opens its detail, the stopped one with its error")
+        shot("detail")
         # the phase it is in is open, in start order; the one before it folded until clicked
         verify = running.locator('[data-phase="Verify"]')
         expect(verify).to_have_attribute("data-phase-current", "true")
@@ -100,17 +112,16 @@ def run(browser, base, token, size, theme, shots, legacy):
         expect(audit.locator("[data-agent]")).to_have_count(0)
         audit.get_by_role("button").first.click()
         expect(audit.locator("[data-agent]")).to_have_count(3)
-        expect(audit.locator('[data-agent="wa2"] button')).to_have_attribute("title", "降雨概率在 0.5% 以下时显示成 0%，和 App 里不一致。")
+        expect(audit.locator('[data-agent="wa2"]')).to_have_attribute("title", "降雨概率在 0.5% 以下时显示成 0%，和 App 里不一致。")
         if page.evaluate(OVERFLOW) > 0:
             fail(f"{tag}: the page scrolls sideways (agents open)")
-        ok(f"{tag}: the card opens its agents with their last words")
+        ok(f"{tag}: the detail opens its agents with their last words")
         shot("agents")
-        running.get_by_role("button", name="看 audit:rain 的对话").click()
-        expect(dialog).to_have_count(0)
-        expect(page.get_by_text("降雨概率在 0.5% 以下时显示成 0%").last).to_be_visible()
-        expect(page.get_by_text("audit:rain").first).to_be_visible()
-        ok(f"{tag}: an agent opens read-only in the side panel")
-        shot("panel")
+        if running.locator("[data-agent] button, [data-agent] a, [data-agent][role=button]").count():
+            fail(f"{tag}: the agent rows should open nothing")
+        audit.locator('[data-agent="wa2"]').click()
+        expect(panel).to_have_count(1)  # nothing opened in its place
+        ok(f"{tag}: the agent rows only read")
     if errors:
         fail(f"{tag}: page errors: {errors[:3]}")
     ctx.close()

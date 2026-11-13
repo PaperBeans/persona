@@ -424,7 +424,7 @@ class ChatRepositoriesTest {
         assertNull(transport.resolved)
     }
 
-    @Test fun cardsThatEndedHereStayGoneFromLaterSnapshotsUntilAnEventBringsThemBack() = runTest {
+    @Test fun cardsThatEndedHereStayGoneFromLaterSnapshotsAndFrames() = runTest {
         val connection = FakeConnection()
         val transport = FakeChatTransport()
         val center = HubInteractionCenter(transport, connection, backgroundScope)
@@ -446,12 +446,13 @@ class ChatRepositoriesTest {
         center.refresh()
         assertEquals(listOf(other), center.pending.value)
 
-        // The hub asking again (a live event for the id) is authoritative.
+        // Nor does an `interaction` frame for one: the snapshot after a resumed hello, before the node ended it (#2767).
         connection.events.emit(InteractionEvent(answered))
+        connection.events.emit(InteractionEvent(gone))
         runCurrent()
-        assertEquals(setOf("other", "answered"), center.pending.value.map { it.id }.toSet())
+        assertEquals(listOf(other), center.pending.value)
         center.refresh()
-        assertEquals(setOf("other", "answered"), center.pending.value.map { it.id }.toSet())
+        assertEquals(listOf(other), center.pending.value)
     }
 
     @Test fun listUsesBroadcastRevsAndInteractionsReconcileWithoutResurrectingResolvedCards() = runTest {

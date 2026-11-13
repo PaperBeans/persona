@@ -71,8 +71,15 @@ import persona.core.designsystem.icons.PhIcons
  * Loads pictures the extension serves through the hub ([ExtensionHubPicture]) with [fetch] (the device's credentials go
  * to the hub's own signed path, nowhere else); https urls are left to the app's ordinary loader, without credentials.
  */
-internal fun extensionPictureLoader(context: android.content.Context, fetch: suspend (String) -> ByteArray): ImageLoader =
-    ImageLoader.Builder(context).components {
+internal fun extensionPictureLoader(context: android.content.Context, fetch: suspend (String) -> ByteArray, maxMemoryBytes: Long? = null): ImageLoader =
+    ImageLoader.Builder(context).apply {
+        if (maxMemoryBytes != null) {
+            memoryCache { coil3.memory.MemoryCache.Builder().maxSizeBytes(maxMemoryBytes).build() }
+            diskCache(null)
+        }
+    }.components {
+        // Catalog PNGs use the platform decoder (also available to Native JVM screenshot tests).
+        if (maxMemoryBytes != null) add(coil3.decode.BitmapFactoryDecoder.Factory())
         add(Keyer<ExtensionHubPicture> { data, _ -> data.path })
         add(object : Fetcher.Factory<ExtensionHubPicture> {
             override fun create(data: ExtensionHubPicture, options: Options, imageLoader: ImageLoader): Fetcher = object : Fetcher {

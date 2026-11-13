@@ -3,8 +3,8 @@ import { applyDraft, onDraftEvent, parseQuote, replaceNeedsConfirm, sendDraft, s
 import { browseTarget, byPrefix, chatFiles, displayTitle, mentionAt, nameMatches, otherSessions, relPath, replaceToken, sessionQuote, workspaceContext, workspaceMatches, workspaceTitle } from "./mentions";
 import { contextXML } from "./links";
 import type { Workspace } from "./workspace-board";
-import { keepAllBut, moved, sameMessage } from "./queue";
-import { boxRect, burnWidth, fitRect, keepMark, toImage, toScreen } from "./image-edit";
+import { keepAllBut, moved, movedTo, sameMessage } from "./queue";
+import { boxRect, fitRect, keepMark } from "./image-edit";
 import type { Item, Session } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -193,6 +193,15 @@ describe("queue", () => {
     expect(moved(3, 2, 1)).toBeNull();
   });
 
+  it("puts one message at any place, the others in their order (the drag handle, #5327)", () => {
+    expect(movedTo(4, 3, 0)).toEqual([3, 0, 1, 2]);
+    expect(movedTo(4, 0, 3)).toEqual([1, 2, 3, 0]);
+    expect(movedTo(4, 1, 2)).toEqual([0, 2, 1, 3]);
+    expect(movedTo(4, 2, 2)).toBeNull();
+    expect(movedTo(4, 0, 4)).toBeNull();
+    expect(movedTo(4, -1, 0)).toBeNull();
+  });
+
   it("matches a sent message to its queued copy, short ones only exactly", () => {
     expect(sameMessage("好", "好的，先这样")).toBe(false);
     expect(sameMessage(" 好 ", "好")).toBe(true);
@@ -203,22 +212,17 @@ describe("queue", () => {
 
 describe("image markup geometry", () => {
   const img = { width: 400, height: 200 };
-  it("fits the image in the box and maps points both ways", () => {
-    const fit = fitRect(img, { width: 200, height: 200 });
-    expect(fit).toEqual({ x: 0, y: 50, width: 200, height: 100 });
-    expect(toImage({ x: 100, y: 100 }, fit, img)).toEqual({ x: 200, y: 100 });
-    expect(toImage({ x: -10, y: 500 }, fit, img)).toEqual({ x: 0, y: 200 }); // held inside the image
-    expect(toScreen({ x: 200, y: 100 }, fit, img)).toEqual({ x: 100, y: 100 });
+  // the editor's turns, crops, widths and history: image-edit.test.ts
+  it("fits the image in the box", () => {
+    expect(fitRect(img, { width: 200, height: 200 })).toEqual({ x: 0, y: 50, width: 200, height: 100 });
     expect(fitRect({ width: 0, height: 10 }, { width: 10, height: 10 }).width).toBe(0);
   });
 
   it("keeps boxes dragged either way and drops taps", () => {
     expect(boxRect({ x: 10, y: 20 }, { x: 4, y: 2 })).toEqual({ x: 4, y: 2, width: 6, height: 18 });
-    expect(keepMark({ tool: "box", color: "red", points: [{ x: 1, y: 1 }] })).toBe(false);
-    expect(keepMark({ tool: "box", color: "red", points: [{ x: 1, y: 1 }, { x: 1.5, y: 1 }] })).toBe(false);
-    expect(keepMark({ tool: "pen", color: "red", points: [{ x: 1, y: 1 }, { x: 1, y: 2 }] })).toBe(true);
-    expect(burnWidth({ width: 2200, height: 1000 })).toBe(10);
-    expect(burnWidth({ width: 48, height: 32 })).toBe(2);
+    expect(keepMark({ tool: "box", ink: "red", width: 2, points: [{ x: 1, y: 1 }] })).toBe(false);
+    expect(keepMark({ tool: "box", ink: "red", width: 2, points: [{ x: 1, y: 1 }, { x: 1.5, y: 1 }] })).toBe(false);
+    expect(keepMark({ tool: "pen", ink: "red", width: 2, points: [{ x: 1, y: 1 }, { x: 1, y: 2 }] })).toBe(true);
   });
 });
 

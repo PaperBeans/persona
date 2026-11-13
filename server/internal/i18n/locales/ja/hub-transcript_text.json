@@ -1,5 +1,6 @@
 {
   "interrupted": "中断しました",
+  "stopped_from_phone": "スマホから停止しました",
   "loop_fired": "/loopの時間になり、新しいラウンドを開始しました",
   "loop_fired_prompt": "/loopの時間になり、新しいラウンドを開始しました：{prompt}",
   "codex_extension": "Codex拡張イベント：{kind}（完全な記録は元のセッションにあります）",
@@ -103,6 +104,7 @@
   "read_only_claude_no_inbox": "このClaudeにはメッセージ経路がありません（古いバージョンかオフ）：ここでは表示のみ。返信はコンピューターで",
   "read_only_claude_inbox": "このClaudeのメッセージ経路はPersonaで使えません（不明なバージョンかキーがない）：ここでは表示のみ。返信はコンピューターで",
   "attention_claude_computer": "コンピューターでしか答えられない質問または権限の確認を待っています",
+  "attention_claude_answer": "質問しています。返信するとそれが回答になります",
   "model_refusal": "Claude Code の拒否通知（{subtype}）。",
   "model_refusal_fallback": "上流サービスがリクエストを拒否したため、Claude Code は {original} から {fallback} に切り替えました。カテゴリ：{category}。範囲：{scope}。代替モデルが利用できない場合は、新しい会話を開始するか、Claude Code のターミナルで /model を使って設定済みのモデルを選択してください。リクエストが再び拒否される可能性があります。",
   "card_remaining": "残り",

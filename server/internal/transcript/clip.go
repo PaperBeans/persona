@@ -30,13 +30,17 @@ func clipTo(s string, n int) string {
 	return s[:cut] + note
 }
 
+// clipNoteFormat is the note clipParts ends a cut string with (%d: the original size in bytes). The apps know a tool input
+// was cut by it (clippedNote; web/src/lib/turn-changes.ts).
+const clipNoteFormat = "\n…（已截断，共 %d 字节）"
+
 // clipParts is where clipTo cuts s (len(s) > n) and the note it adds.
 func clipParts(s string, n int) (cut int, note string) {
 	cut = n
 	for cut > 0 && (s[cut]&0xC0) == 0x80 {
 		cut--
 	}
-	return cut, fmt.Sprintf("\n…（已截断，共 %d 字节）", len(s))
+	return cut, fmt.Sprintf(clipNoteFormat, len(s))
 }
 
 // light is the copy of an item that pages and pushes carry; cut says something was left out (fetch it with Full).

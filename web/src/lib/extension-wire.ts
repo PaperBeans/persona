@@ -13,6 +13,11 @@ export interface Manifest {
   publisher?: string;
   homepage?: string;
   /**
+   * Source-only square PNG artwork: 256–4096 pixels, at most 2 MiB. Catalog entry icon carries this path; strip it
+   * from packaged and runtime manifests for compatibility.
+   */
+  icon?: "assets/icon.png";
+  /**
    * What the market shows and searches (docs "Extension market"): at most 16, each 1 to 24 characters. Packages and
    * indexes carry the manifest without them (hubs before tags refuse an unknown field); the index entry carries them
    * instead.
@@ -54,6 +59,19 @@ export interface Manifest {
    */
   tools?: ToolSpec[];
   auth?: AuthSpec;
+  /**
+   * Configured host CLI integrations the program may use through a bounded, read-only typed RPC. IDs never name an
+   * executable; writes and arbitrary command lines are not part of this contract.
+   */
+  host_integrations?: HostIntegrationSpec[];
+}
+
+/**
+ * A configured CLI integration, selected by a closed ID rather than by an extension-provided executable.
+ */
+export interface HostIntegrationSpec {
+  id: string;
+  version: string;
 }
 
 /**
@@ -297,6 +315,7 @@ export interface StoragePermission {
 export interface Contributes {
   connectors?: ConnectorItem[];
   voice?: NamedItem[];
+  transcription?: NamedItem[];
   computer?: NamedItem[];
   browser?: NamedItem[];
   iphone?: NamedItem[];
@@ -327,26 +346,49 @@ export interface Contributes {
 
 /**
  * A skill (docs "Declarative contributions"): a directory of the package with SKILL.md, put in with the assistant's
- * skills.
+ * skills. With source data (docs "Assistant content from the data directory"): a directory of the extension's data
+ * directory whose subdirectories with a SKILL.md are skills its program writes (Markdown files only, 256 KB and 32
+ * skills per extension).
  */
 export interface SkillItem {
   id: string;
-  /** The directory, relative to the package. */
+  /** The directory, relative to the package (or to the data directory with source data). */
   dir: string;
+  source?: ContentSource;
 }
 
-export type PromptKind = "instructions" | "quick" | (string & {});
-export const PROMPT_KINDS = ["instructions", "quick"] as const;
+/**
+ * Where a skill's or a prompt's files are: package (the default) or data, the extension's data directory, which its
+ * program writes and upgrades keep.
+ */
+export type ContentSource = "package" | "data" | (string & {});
+export const CONTENT_SOURCES = ["package", "data"] as const;
+
+export type PromptKind = "instructions" | "quick" | "project_context" | "inbox_context" | (string & {});
+export const PROMPT_KINDS = ["instructions", "quick", "project_context", "inbox_context"] as const;
 
 /**
- * A prompt: instructions (a .md of the package added to the assistant's CLAUDE.md) or quick (a template the apps
- * offer in the message box).
+ * A prompt: instructions (a .md of the package, or with source data of the data directory, added to the assistant's
+ * CLAUDE.md), quick (a template the apps offer in the message box), project_context (a directory of the data
+ * directory whose <project slug>.md files go into a new Agent's project background) or inbox_context (a .md of the
+ * data directory added to the Inbox's triage and draft prompts).
  */
 export interface PromptItem {
   id: string;
   kind: PromptKind;
-  /** instructions: the .md file. */
+  source?: ContentSource;
+  /**
+   * instructions: the .md file (with source data: at most 6 KB, adopted at most once a day); inbox_context: the .md
+   * file (1 KB used).
+   */
   file?: string;
+  /** project_context: the directory of <project slug>.md files (1.5 KB of each used). */
+  dir?: string;
+  /**
+   * inbox_context: a text file of sentences, one a line, a draft must not repeat word for word (64 KB used); only
+   * checked, never in a prompt.
+   */
+  never_quote?: string;
   /** quick: what the apps show. */
   title?: string;
   /** quick: what goes into the message box. */
@@ -582,7 +624,7 @@ export interface ConnectorItem {
 }
 
 /**
- * A contribution with only an id and a name: voice, computer, browser.
+ * A contribution with only an id and a name: voice, transcription, computer, browser.
  */
 export interface NamedItem {
   id: string;

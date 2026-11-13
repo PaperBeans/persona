@@ -16,12 +16,19 @@ describe("startI18n", { timeout: 30_000 }, () => {
     const rest = i18nRest();
     expect(rest).toBeInstanceOf(Promise);
     expect(t("common.cancel")).toBe("Cancel");
+    for (const name of ["stopped", "busy", "load_failed", "no_progress", "page_cap", "not_found", "origin_changed", "return", "menu"]) {
+      const primary = `chat-chatview.search_${name}`;
+      expect(hasKey(primary)).toBe(true);
+      expect(t(primary)).not.toBe(primary);
+    }
+    expect(() => t("chat-chatsearch.title")).toThrow(/startup-namespaces\.json/);
     // In the build, a module reading it now would have run ahead of its lazy import's wait.
     expect(() => t(key)).toThrow(/startup-namespaces\.json/);
     expect(() => hasKey(key)).toThrow(/startup-namespaces\.json/);
     await rest;
     expect(i18nRest()).toBeUndefined();
     expect(t(key)).not.toBe(key);
+    expect(t("chat-chatsearch.title")).toBe(t("chat-chatview.search_menu"));
   });
 });
 

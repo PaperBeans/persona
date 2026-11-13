@@ -55,11 +55,12 @@ commit's build is VALID and in the Internal group. The Watch build is embedded
 in the iOS archive. The frozen native Mac app is not restarted by a generic
 release; desktop support is the web artifact plus Persona Link.
 
-For `android`, use the existing Android signing/publication pipeline. Never
-publish a debug or unsigned APK as a Release. Verify package, version code,
-source commit, and signing certificate; upload only a verified signed APK.
-Without the private signing and publication configuration, stop with an
-explicit prerequisite error.
+For `android`, use the existing Android signing/publication pipeline through
+`scripts/release/android_tag_release.py`. Never publish a debug or unsigned APK
+as a Release. Verify package, version code, source commit, and signing
+certificate; upload only a verified signed APK and the `android.json` that
+describes it. Without the private signing and publication configuration, stop
+with an explicit prerequisite error.
 
 For `hub`, use the existing publication script and its deployment lock. Publish
 its verified multi-platform binary, web, node, and connector downloads under

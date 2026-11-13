@@ -123,6 +123,12 @@ func (b *inboxBook) stored(it *InboxItem) {
 		it.Chain = synthesizedChain(b.userLang(), it)
 		it.ChainSeq = len(it.Chain)
 	}
+	// Loading a previously linked item is not a new message. Resume the process-local signal cursor at the
+	// stored snapshot; new batches collected after loading still change Last and reach the supervisor.
+	if a := it.Agent; a != nil && a.TodoID != "" {
+		_, a.signaled = receivedSince(it, 0, false)
+		a.signaledOf = it.Last
+	}
 }
 
 // purgeInboxHistory deletes the items done more than inboxKeepHistory ago: at load, then from the rounds at most every

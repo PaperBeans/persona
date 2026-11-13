@@ -251,6 +251,92 @@ func TestParseDangerousCommandPrompt(t *testing.T) {
 	}
 }
 
+// Claude Code 2.1.322's safety check on a command its parser cannot read (real captures in a private pty, the command
+// a placeholder), at 120, 100, 57 and 40 columns and a few seconds apart. 2.1.322 draws a │ before each of the
+// command's rows, as before the warning under it, so the command was read as part of the warning: no client showed
+// it, and it was not in Rev. On a narrow pane the countdown wraps ("… block this request in" / "1:53, to avoid …"),
+// and its seconds went into Rev: every answer was refused as a changed dialog (#5265).
+func TestParseShellSafetyCheck(t *testing.T) {
+	const cmd = `cd ./dist && F=(${(f)"$(grep -oE '(src|href)="\./assets/[^"]+\.js"' index.html | sed -E 's/.*="\.\///; s/"$//' | sort -u)"}); echo "${#F[@]} files"; for k in alpha_name beta_name gamma_name delta_name epsilon_name; do echo "$k: $(cat "${F[@]}" | grep -o "$k" | wc -l | xargs)"; done`
+	names := []string{"120", "later-120", "100", "57", "later-57", "40"}
+	var rev string
+	seconds := map[string]int{}
+	for _, name := range names {
+		screen := fixture(t, "claude-2.1.322-danger-shell-"+name+".txt")
+		d := ParseDialog(screen)
+		if d == nil {
+			t.Fatalf("%s: no dialog", name)
+		}
+		if d.Question != "Do you want to proceed?" || d.Command != cmd || d.Description != "Count the example names in first-screen chunks" ||
+			d.Warning != "Dangerous rm operation not ruled out — the shell may read this command differently than it was parsed" ||
+			d.Risk != RiskDelete || d.DeadlineAction != DeadlineDeny ||
+			!regexp.MustCompile(`^Claude Code will automatically block this request in 1:\d\d, to avoid holding up an unattended session$`).MatchString(d.Deadline) {
+			t.Fatalf("%s: question %q\ncommand %q\ndescription %q\nwarning %q\nrisk %q\ndeadline %q (%s)", name, d.Question, d.Command,
+				d.Description, d.Warning, d.Risk, d.Deadline, d.DeadlineAction)
+		}
+		// Older clients show Detail: the command is in it again, the countdown is not.
+		if !strings.HasPrefix(d.Detail, "Bash command\nCount the example names in") || !strings.Contains(squash(d.Detail), squash(cmd)) ||
+			strings.Contains(d.Detail, "unattended") {
+			t.Fatalf("%s: detail %q", name, d.Detail)
+		}
+		if len(d.Options) != 2 || d.Options[0].Label != "Yes" || d.Options[1].Label != "No" || !slices.Equal(d.Options[0].Keys, []string{"1"}) {
+			t.Fatalf("%s: options %+v", name, d.Options)
+		}
+		seconds[name] = d.DeadlineIn
+		// The same dialog as the clock runs and at every width.
+		if rev == "" {
+			rev = d.Rev
+		} else if d.Rev != rev {
+			t.Errorf("%s: rev %s, at 120 columns %s", name, d.Rev, rev)
+		}
+	}
+	if s := seconds["120"]; s < 100 || s > 120 || seconds["later-120"] >= s || seconds["later-57"] >= seconds["57"] {
+		t.Errorf("seconds left %v", seconds)
+	}
+	narrow := fixture(t, "claude-2.1.322-danger-shell-57.txt")
+	// Another command, or another question, is another dialog.
+	at := strings.LastIndex(narrow, "epsilon_name") // the box's, not the conversation's above it
+	if d := ParseDialog(narrow[:at] + "omega_name" + narrow[at+len("epsilon_name"):]); d == nil || d.Rev == rev || !strings.Contains(d.Command, "omega_name") {
+		t.Errorf("another command: %+v", d)
+	}
+	if d := ParseDialog(strings.Replace(narrow, "Do you want to proceed?", "Do you want to run it?", 1)); d == nil || d.Rev == rev {
+		t.Errorf("another question: %+v", d)
+	}
+	// The countdown gone (another mode), or the warning reworded: the same command asked about.
+	noClock := strings.Replace(narrow, " ⚠ Claude Code will automatically block this request in\n 1:53, to avoid holding up an unattended session\n", "", 1)
+	if d := ParseDialog(noClock); noClock == narrow || d == nil || d.Rev != rev || d.Deadline != "" || d.DeadlineAction != "" {
+		t.Errorf("without the countdown: %+v", d)
+	}
+	// The countdown over three rows (40 columns) reads the same, and a row after it is no part of it.
+	d := ParseDialog(fixture(t, "claude-2.1.322-danger-shell-40.txt"))
+	if d.DeadlineIn != 114 {
+		t.Errorf("40 columns: %d s left, want 114", d.DeadlineIn)
+	}
+}
+
+// The countdown's rows: one, or wrapped onto several, ending with its sentence; anything else is not one.
+func TestDeadlineRows(t *testing.T) {
+	for _, c := range []struct {
+		rows []string
+		n    int
+		in   int
+		act  string
+	}{
+		{[]string{"⚠ Claude Code will automatically block this request in 1:58, to avoid holding up an unattended session", "", "Do you want to proceed?"}, 1, 118, DeadlineDeny},
+		{[]string{"⚠ Claude Code will automatically block this request in 1:58, to avoid holding up an unattended", "session", "", ""}, 2, 118, DeadlineDeny},
+		{[]string{"⚠ Claude Code will automatically block", "this request in 1:54, to avoid", "holding up an unattended session", "Do you want to proceed?"}, 3, 114, DeadlineDeny},
+		{[]string{"⚠ Claude Code will automatically deny this request in 0:42, to avoid holding up an unattended session", "Another row"}, 1, 42, DeadlineDeny},
+		{[]string{"Claude Code will automatically approve this in 10:05"}, 1, 605, DeadlineAllow},
+		{[]string{"⚠ Something else entirely", "on two rows"}, 0, 0, ""},
+		{[]string{"⚠ Claude Code will automatically block this request in", "Do you want to proceed? 1:00"}, 0, 0, ""},
+	} {
+		text, n := deadlineRows(c.rows)
+		if n != c.n || n > 0 && (deadlineSeconds(text) != c.in || deadlineAction(text) != c.act || strings.HasPrefix(text, "⚠")) {
+			t.Errorf("%q: %d rows %q (%d s, %s), want %d rows, %d s, %s", c.rows, n, text, deadlineSeconds(text), deadlineAction(text), c.n, c.in, c.act)
+		}
+	}
+}
+
 // A question whose options have previews (AskUserQuestion's preview field, Claude Code 2.1.303): the options sit
 // beside a box showing the focused one's preview, and a number only moves the cursor — enter picks ("Enter to
 // select · ↑/↓ to navigate"). Pressing the number alone left the card answered and the question waiting

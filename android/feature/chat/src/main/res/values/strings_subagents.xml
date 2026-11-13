@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- A subagent's task card in an Agent's chat (#5045, the web's chat-subagentcard words). -->
+    <string name="chat_subagent_label">Subagent</string>
+    <string name="chat_subagent_untitled">Subagent task</string>
+    <string name="chat_subagent_expand_details">Show subagent details</string>
+    <string name="chat_subagent_collapse_details">Hide subagent details</string>
+    <string name="chat_subagent_show_full_result">Show full result</string>
+    <string name="chat_subagent_hide_full_result">Collapse result</string>
+    <string name="chat_subagent_status_running">Running</string>
+    <string name="chat_subagent_status_completed">Completed</string>
+    <string name="chat_subagent_status_failed">Failed</string>
+    <string name="chat_subagent_status_stopped">Stopped</string>
+    <string name="chat_subagent_harness_claude" translatable="false">Claude Code</string>
+    <string name="chat_subagent_tokens">%1$s tokens</string>
+    <plurals name="chat_subagent_tool_uses">
+        <item quantity="one">%1$d tool use</item>
+        <item quantity="other">%1$d tool uses</item>
+    </plurals>
+    <string name="chat_subagent_last_tool">Last tool: %1$s</string>
+    <string name="chat_subagent_output_file">Output: %1$s</string>
+    <string name="chat_subagent_running_for">Running for %1$s</string>
+</resources>

@@ -252,6 +252,69 @@ func TestInboxSuggestionWatch(t *testing.T) {
 	}
 }
 
+// Reading the latest of two unread mails can leave the older one as the item's only unread UID. The suggestion still
+// answers the mail it was written for: refuse its confirmation rather than silently replying to the older one (#5471).
+func TestInboxMailSuggestionTargetReadRace(t *testing.T) {
+	h, _, it := handledHub(t)
+	mail := &fakeMail{}
+	h.in.mail = mail
+	h.inbox.mu.Lock()
+	it.Source, it.Account, it.Lark, it.Last = "mail", "a1", nil, "89"
+	it.Mail = &InboxMail{AccountID: "a1", Mailbox: "INBOX", UIDs: []uint32{88, 89}, Thread: mailThread("合同续签")}
+	h.inbox.mu.Unlock()
+	if _, err := suggestTool(t, h, `{"kind":"reply","text":"可以续签"}`); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	h.inbox.applyMail(assistantwire.InboxMailAccount{ID: "a1", Email: "me@example.com"}, []assistantwire.InboxMailSummary{
+		{UID: 88, Subject: "合同续签", Date: now.Add(-2 * time.Hour).Format(time.RFC3339)},
+		{UID: 89, Subject: "合同续签", Seen: true, Date: now.Add(-time.Hour).Format(time.RFC3339)},
+	}, now)
+	if got := it.Mail.UIDs; len(got) != 1 || got[0] != 88 {
+		t.Fatalf("the read sync did not reduce the thread to the older unread mail: %v", got)
+	}
+	code, out := suggestionCall(t, h, it.ID, `{"version":1,"action":"confirm"}`)
+	if code != 409 || out["code"] != "mail_reply_target_changed" || len(mail.sent) != 0 {
+		t.Fatalf("a changed target: code %d, %v, sends %+v", code, out, mail.sent)
+	}
+}
+
+// A suggestion stored before reply targets were bound cannot be made safe by looking at the item after a read sync.
+// Both the processing conversation's and a handed-off conversation's confirmation refuse it without sending (#5471).
+func TestInboxMailPreUpgradeSuggestionTarget(t *testing.T) {
+	for _, handed := range []bool{false, true} {
+		name := "processing"
+		if handed {
+			name = "handed off"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, _, it := handledHub(t)
+			mail := &fakeMail{}
+			h.in.mail = mail
+			h.inbox.mu.Lock()
+			it.Source, it.Account, it.Lark, it.Last = "mail", "a1", nil, "89"
+			it.Mail = &InboxMail{AccountID: "a1", Mailbox: "INBOX", UIDs: []uint32{88, 89}, Thread: mailThread("合同续签")}
+			g := &InboxSuggestion{Version: 1, Kind: SuggestReply, Text: "可以续签", At: time.Now()} // no MailTarget: stored before the upgrade
+			if handed {
+				g.Conversation = &SessionRef{MachineID: "server", SessionID: "handoff"}
+			}
+			it.Suggestion = g
+			h.inbox.mu.Unlock()
+
+			now := time.Now()
+			h.inbox.applyMail(assistantwire.InboxMailAccount{ID: "a1", Email: "me@example.com"}, []assistantwire.InboxMailSummary{
+				{UID: 88, Subject: "合同续签", Date: now.Add(-2 * time.Hour).Format(time.RFC3339)},
+				{UID: 89, Subject: "合同续签", Seen: true, Date: now.Add(-time.Hour).Format(time.RFC3339)},
+			}, now)
+			code, out := suggestionCall(t, h, it.ID, `{"version":1,"action":"confirm"}`)
+			if code != 409 || out["code"] != "mail_reply_target_changed" || len(mail.sent) != 0 {
+				t.Fatalf("an unbound target: code %d, %v, sends %+v", code, out, mail.sent)
+			}
+		})
+	}
+}
+
 // Conclusions: FYI lists it there with the conclusion until Got it; Done files it at once.
 func TestInboxSuggestionConclusion(t *testing.T) {
 	h, _, it := handledHub(t)
@@ -316,6 +379,49 @@ func TestInboxSuggestionToolRules(t *testing.T) {
 	}
 	if out, err := suggestTool(t, h, `{"recap":"只更新总结"}`); err != nil || !strings.Contains(out, "recap") {
 		t.Fatalf("recap only: %s %v", out, err)
+	}
+}
+
+// A late suggestion on a filed item is refused without changing anything; a recap alone is still kept.
+func TestInboxSuggestionOnFiledItem(t *testing.T) {
+	h, _, it := handledHub(t)
+	done := time.Now().Add(-time.Minute).UTC()
+	h.inbox.mu.Lock()
+	h.inbox.file(it, done, "user")
+	it.Recap = "Before filing"
+	before := string(itemState(it))
+	h.inbox.mu.Unlock()
+
+	assertUnchanged := func(t *testing.T) {
+		t.Helper()
+		h.inbox.mu.Lock()
+		after := string(itemState(it))
+		h.inbox.mu.Unlock()
+		if after != before {
+			t.Fatalf("the filed item changed:\nbefore: %s\nafter:  %s", before, after)
+		}
+	}
+	for _, kind := range []string{SuggestReply, SuggestAgent, SuggestConclusion} {
+		t.Run(kind, func(t *testing.T) {
+			args := fmt.Sprintf(`{"kind":%q,"text":"A late suggestion","recap":"Must not replace the recap"}`, kind)
+			if _, err := suggestTool(t, h, args); !errors.Is(err, errSuggestFiled) {
+				t.Fatalf("filed item accepted %s: %v", kind, err)
+			}
+			assertUnchanged(t)
+		})
+	}
+	if _, err := h.runTool(context.Background(), "server", "s1", "inbox_draft", json.RawMessage(`{"text":"A late draft"}`)); !errors.Is(err, errSuggestFiled) {
+		t.Fatalf("inbox_draft on a filed item: %v", err)
+	}
+	assertUnchanged(t)
+
+	if out, err := suggestTool(t, h, `{"recap":"After filing"}`); err != nil || out != "The recap is updated." {
+		t.Fatalf("recap only on a filed item: %q %v", out, err)
+	}
+	h.inbox.mu.Lock()
+	defer h.inbox.mu.Unlock()
+	if it.Recap != "After filing" || it.DoneAt == nil || !it.DoneAt.Equal(done) {
+		t.Fatalf("recap only: recap %q, done at %v", it.Recap, it.DoneAt)
 	}
 }
 

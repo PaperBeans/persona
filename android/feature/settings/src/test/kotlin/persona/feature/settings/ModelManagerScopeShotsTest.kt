@@ -67,7 +67,8 @@ class ModelManagerScopeShotsTest {
         }
         rule.waitForIdle()
         rule.runOnIdle { AssistantManagerChoice.pick("work") } // the sidebar's switcher picks Work
-        rule.onNodeWithContentDescription("New model provider").performClick()
+        rule.onNodeWithText("Advanced").performClick()
+        rule.onNodeWithText("Add provider").performClick()
         rule.waitForIdle()
         assertEquals(listOf("work"), owners)
         rule.onNodeWithText("Work").assertExists()
@@ -102,7 +103,11 @@ class ModelManagerScopeShotsTest {
         val api = object : ModelConfiguration {
             private suspend fun record(operation: String) { calls += operation to currentCoroutineContext()[RequestManager]?.id }
             override suspend fun catalog(): ModelCatalog { record("catalog"); return ModelCatalog(listOf(purpose)) }
-            override suspend fun purpose(id: String): ModelPurposeDetail { record("purpose"); return ModelPurposeDetail(purpose) }
+            override suspend fun purpose(id: String): ModelPurposeDetail {
+                // The catalog page's own question (#5084), asked for whichever assistant it shows: this hub has no such use.
+                if (id == BackgroundSupervisor.PURPOSE) throw ModelPurposeNotFound(id)
+                record("purpose"); return ModelPurposeDetail(purpose)
+            }
             override suspend fun save(purpose: ModelPurpose, draft: ModelConfigurationDraft): ModelPurposeSave {
                 record("save"); return ModelPurposeSave.Saved(ModelPurposeDetail(purpose))
             }

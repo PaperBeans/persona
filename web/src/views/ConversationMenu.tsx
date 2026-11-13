@@ -1,8 +1,9 @@
-// A Persona conversation's menu in the sidebar (the iOS sidebar's long press, Android's drawer): "Pin" / "Unpin",
-// "Rename…", "Archive", "Copy session ID", then "End…" while it runs. The main conversation is never pinned, renamed or archived.
-// Pins are this browser's (lib/conversation-pins.ts); the rest is the hub's (the same calls as "All chats").
+// A Persona conversation's menu in the sidebar (the iOS sidebar's long press, Android's drawer): "设为常驻" / "取消常驻",
+// "Rename…", "Archive", "Copy session ID", then "End…" while it runs. The main conversation is never a lead, renamed or
+// archived; the background supervisor (#5082, lib/background-supervisor.ts) is built in and only has "Copy session ID".
+// All of it is the hub's (the same calls as "All chats"): 设为常驻 makes the chat a leader (#4331,
+// POST …/directions/{id}/make), 取消常驻 ends it (…/end; the tasks it handed out keep their supervisor).
 import { api, enc, errorText, sessionPath } from "../lib/api";
-import { togglePinnedConversation, unpinAllConversations } from "../lib/conversation-pins";
 import { sessionTitle } from "../lib/format";
 import { refreshAssistant } from "../lib/store";
 import type { Session } from "../lib/types";
@@ -17,6 +18,8 @@ export interface ConversationMenuDeps {
   unarchive: (s: Session) => Promise<unknown>;
   end: (s: Session) => Promise<unknown>;
   refresh: () => Promise<unknown>;
+  /** Makes the conversation a leader (常驻) or ends it, on the hub for every device. */
+  lead: (s: Session, on: boolean) => Promise<unknown>;
   copy: (text: string) => unknown;
   notify: (text: string, tone: "ok" | "error", action?: ToastAction) => void;
 }
@@ -27,6 +30,7 @@ export const conversationMenuDeps: ConversationMenuDeps = {
   unarchive: (s) => api(`/assistant/conversations/${enc(s.session_id)}/unarchive`, { method: "POST", json: {} }),
   end: (s) => api(`${sessionPath(s.machine_id, s.session_id)}/close`, { method: "POST" }),
   refresh: () => refreshAssistant(),
+  lead: (s, on) => api(`/assistant/directions/${enc(s.session_id)}/${on ? "make" : "end"}`, { method: "POST", json: {} }),
   copy: copyText,
   notify: (text, tone, action) => toast(text, tone, action),
 };
@@ -46,13 +50,63 @@ async function undoArchive(s: Session, title: string, deps: ConversationMenuDeps
   reread(deps);
 }
 
-/** `leader`: a leader conversation, pinned by the hub on every browser, so it has no Pin / Unpin of its own. */
-export function conversationMenuItems(s: Session, o: { main: boolean; pinned: boolean; leader?: boolean }, deps: ConversationMenuDeps = conversationMenuDeps): MenuItem[] {
+/** 设为常驻 / 取消常驻 for a conversation that is not the main one (`leader`: it is one now). Both ask a second time
+ * before the hub call (#6214): the first choice only arms the row, the second runs it, and the detail says what moves —
+ * unpinning sends the chat back to 最近 and returns its open tasks to the main chat's supervision, nothing deleted. */
+export function leaderItem(s: Session, leader: boolean, deps: ConversationMenuDeps = conversationMenuDeps): MenuItem {
   const title = sessionTitle(s);
+  return {
+    key: "leader",
+    label: leader ? t("conversation-menu.end_leader") : t("conversation-menu.make_leader"),
+    icon: "pin",
+    accel: "p",
+    confirm: leader ? t("conversation-menu.end_leader_confirm") : t("conversation-menu.make_leader_confirm"),
+    confirmDetail: leader
+      ? t("conversation-menu.end_leader_confirm_detail")
+      : t("conversation-menu.make_leader_confirm_detail"),
+    // The menu stays open while the hub call runs, shows a refusal in place, and closes only on success.
+    inline: true,
+    onSelect: async () => {
+      try {
+        await deps.lead(s, !leader);
+        deps.notify(leader ? t("conversation-menu.leader_ended", { title }) : t("conversation-menu.leader_made", { title }), "ok");
+      } catch (e) {
+        deps.notify(t("conversation-menu.leader_failed", { error: errorText(e) }), "error");
+      }
+      reread(deps);
+    },
+  };
+}
+
+/** Archive is the same reversible action in a sidebar row and the open conversation's title menu (#6565). */
+export function conversationArchiveItem(s: Session, deps: ConversationMenuDeps = conversationMenuDeps): MenuItem {
+  const title = sessionTitle(s);
+  return {
+    key: "archive",
+    label: t("conversation-menu.archive"),
+    icon: "archive",
+    onSelect: async () => {
+      try {
+        await deps.archive(s);
+        // Undo puts it back as it was (an open conversation stays open: its page reads the machine's sessions)
+        deps.notify(t("conversation-menu.archived", { title }), "ok", { label: t("conversation-menu.undo"), run: () => void undoArchive(s, title, deps) });
+      } catch (e) {
+        deps.notify(errorText(e), "error");
+      }
+      reread(deps);
+    },
+  };
+}
+
+/** `leader`: the conversation is a leader (常驻) now. `builtIn`: it is the background supervisor, which the hub keeps
+ *  listed and running: no 设为常驻, Rename, Archive or End. */
+export function conversationMenuItems(s: Session, o: { main: boolean; leader?: boolean; builtIn?: boolean }, deps: ConversationMenuDeps = conversationMenuDeps): MenuItem[] {
+  const copy: MenuItem = { key: "copy", label: t("conversation-menu.copy_id"), icon: "copy", accel: "c", onSelect: () => void deps.copy(s.session_id) };
+  if (o.builtIn) return [copy];
   const own: MenuItem[] = o.main
     ? []
     : [
-        ...(o.leader ? [] : [{ key: "pin", label: o.pinned ? t("conversation-menu.unpin") : t("conversation-menu.pin"), icon: "pin" as const, accel: "p", onSelect: () => togglePinnedConversation(s.session_id) }]),
+        leaderItem(s, !!o.leader, deps),
         {
           key: "rename",
           label: t("conversation-menu.rename"),
@@ -69,25 +123,11 @@ export function conversationMenuItems(s: Session, o: { main: boolean; pinned: bo
             },
           },
         },
-        {
-          key: "archive",
-          label: t("conversation-menu.archive"),
-          icon: "archive",
-          onSelect: async () => {
-            try {
-              await deps.archive(s);
-              // Undo puts it back as it was (an open conversation stays open: its page reads the machine's sessions)
-              deps.notify(t("conversation-menu.archived", { title }), "ok", { label: t("conversation-menu.undo"), run: () => void undoArchive(s, title, deps) });
-            } catch (e) {
-              deps.notify(errorText(e), "error");
-            }
-            reread(deps);
-          },
-        },
+        conversationArchiveItem(s, deps),
       ];
   return [
     ...own,
-    { key: "copy", label: t("conversation-menu.copy_id"), icon: "copy", accel: "c", onSelect: () => void deps.copy(s.session_id) },
+    copy,
     ...(conversationLive(s)
       ? [
           {
@@ -111,12 +151,8 @@ export function conversationMenuItems(s: Session, o: { main: boolean; pinned: bo
 }
 
 /** The menu of a row (`at`: where a right click opened it; without it, beside `anchor`). */
-export function ConversationRowMenu({ s, main, pinned, leader, anchor, at, onClose }: { s: Session; main: boolean; pinned: boolean; leader?: boolean; anchor: HTMLElement; at?: MenuAt; onClose: () => void }) {
+export function ConversationRowMenu({ s, main, leader, builtIn, anchor, at, onClose }: { s: Session; main: boolean; leader?: boolean; builtIn?: boolean; anchor: HTMLElement; at?: MenuAt; onClose: () => void }) {
   const p = at ?? { anchor };
-  return <Menu anchor={p.anchor ?? null} point={p.point} onClose={onClose} align="right" width={200} items={conversationMenuItems(s, { main, pinned, leader })} />;
+  return <Menu anchor={p.anchor ?? null} point={p.point} onClose={onClose} align="right" width={200} items={conversationMenuItems(s, { main, leader, builtIn })} />;
 }
 
-/** The section title's menu: "Unpin all" when something is pinned. */
-export function pinnedSectionItems(count: number): MenuItem[] {
-  return count ? [{ key: "unpin-all", label: t("conversation-menu.unpin_all"), icon: "pin", onSelect: () => unpinAllConversations() }] : [];
-}

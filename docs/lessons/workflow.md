@@ -11,6 +11,7 @@ Pitfalls, odd behavior and the trade-offs made at the time (formerly in `CLAUDE.
 - Privacy hooks must resolve the tracked default branch, not assume `origin/master` (#733). A new remote branch has an all-zero old SHA, so falling back to that SHA and skipping an unavailable range silently lets its first push through. Test real first pushes to an isolated bare repository, retain existing-ref and deletion controls, and refuse a new branch when no scan base is available.
 
 - PR merges and progress comments must be checked serially (#2024): `gh pr merge` can fail on a new conflict; if a compound shell command does not stop, the "merged" comment after it still goes out. Exit when the merge command fails, and read the PR's `state` again before posting a completion comment; mark it done only on `MERGED`. `mergeable: UNKNOWN` is not confirmation that it can merge, nor proof of a conflict; read back a definite state before acting. On a false report, edit the original comment first, keeping the verified results and the unfinished items; never leave two contradicting progress comments.
+- An unattended PR review service must bind every result to repository + PR + head SHA, and a pre-existing review must not bypass its own checks. Treat model failure, malformed findings, unavailable platform tests and GitHub read failures as not verified. Run manual and automated merges through the same shared-Git-directory lock and exact-head wrapper (`docs/operations/pr-review-automation.md`); an in-process lock alone cannot protect two service instances or a manual merge.
 
 - Migration inventories must distinguish actual extension packages from SDK templates, schema examples and duplicate application worktrees (#5956). Deduplicate real package IDs across repository copies before counting runtime kinds; a manifest with a command under `runtime` is executable even when `runtime.mode` is omitted. Finding and classifying authoring fixtures is not evidence of a third marketplace or additional migrated extensions.
 
@@ -252,3 +253,13 @@ forks with the same branch name cancelling each other. A reusable workflow's
 another lane from accidentally cancelling the caller, while allowing its direct
 and reusable invocations to deduplicate the same branch/lane. Keep every shard,
 set `max-parallel`, and measure normal-load PRs separately from peak queues.
+
+## Two fixes for the same breakage both merged (2026-11-12, #5609)
+
+- #5554 and #5608 fixed the same token drift (#5589) within the hour, each adding `Theme.Size.slimBar` in a different
+  place of `Theme.swift`. Git merged both without a conflict, and `main` declared it twice: no Apple target compiled.
+  A clean squash merge says nothing about whether the result builds.
+- Right before merging a fix for something on `main` that others hit too (a failing check, a broken build), fetch
+  `main`, look at what landed since your branch (`git log HEAD..origin/main -- <your files>`), and merge it into your
+  branch. If someone fixed it already, close yours. A lane that a pre-commit hook or a failing check sends to a fix
+  should look for an open PR with that fix before writing one.

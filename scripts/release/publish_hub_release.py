@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import time
@@ -24,7 +25,7 @@ def credential_fields(credentials):
     values = {}
     for field in credentials['fields']:
         for key in (field.get('id'), field.get('label')):
-            if key in {'host', 'port', 'username', 'password'}:
+            if key in {'host', 'port', 'username', 'password', 'key_filename'}:
                 value = field.get('value', '')
                 if key in values and values[key] != value:
                     raise ValueError(f'Ambiguous SSH credential field: {key}')
@@ -32,9 +33,20 @@ def credential_fields(credentials):
     return values
 
 
+def authentication(credentials):
+    """Exactly one login method: a password, or the path of a private key file on this machine."""
+    password, key = credentials.get('password'), credentials.get('key_filename')
+    if bool(password) == bool(key):
+        raise ValueError('SSH credentials need exactly one of password or key_filename')
+    if key:
+        return {'password': None, 'key_filename': str(Path(key).expanduser())}
+    return {'password': password}
+
+
 def connect_publisher(cfg):
     """Open the configured publisher connection with existing host-key validation."""
     credentials = credential_fields(json.loads(subprocess.check_output(cfg['credentials_command'])))
+    login = authentication(credentials)
     client = paramiko.SSHClient()
     client.load_system_host_keys()
     sock = None
@@ -60,7 +72,7 @@ def connect_publisher(cfg):
                         sock.close()
                         raise OSError('SSH proxy refused CONNECT')
                 client.connect(credentials['host'], port=int(credentials.get('port', 22)),
-                               username=credentials['username'], password=credentials['password'],
+                               username=credentials['username'], **login,
                                look_for_keys=False, allow_agent=False, timeout=20, sock=sock)
                 client.get_transport().set_keepalive(KEEPALIVE_SECONDS)
                 break
@@ -79,6 +91,16 @@ def connect_publisher(cfg):
         raise
 
 
+def remote_python(cfg):
+    """The remote command that reads the publication program: `remote_python` (default `python3`) followed by `-`.
+
+    The remote side needs Python 3.11 or later; hosts whose `python3` is older name another interpreter here."""
+    value = cfg.get('remote_python', 'python3')
+    if not isinstance(value, str) or not value or any(character.isspace() for character in value):
+        raise ValueError('remote_python must be one program name or path without whitespace')
+    return shlex.quote(value) + ' -'
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True, type=Path)
@@ -92,6 +114,7 @@ def main():
     remote_root = cfg['remote_root']
     release_root = release_directory(remote_root, cfg.get('release_namespace', 'hub'))
     staged = str(release_root / f'.upload-{manifest["build"]}-{uuid.uuid4().hex}')
+    interpreter = remote_python(cfg)
     client, sock = connect_publisher(cfg)
     try:
         with client.open_sftp() as sftp:
@@ -113,7 +136,7 @@ def main():
             script += f"module = types.ModuleType({name!r}); sys.modules[{name!r}] = module\n"
             script += f"exec({source!r}, module.__dict__)\n"
         script += 'module.promote(' + repr(payload) + ')\n'
-        stdin, stdout, stderr = client.exec_command('python3 -', timeout=1500)
+        stdin, stdout, stderr = client.exec_command(interpreter, timeout=1500)
         stdin.write(script)
         stdin.flush()
         stdin.channel.shutdown_write()

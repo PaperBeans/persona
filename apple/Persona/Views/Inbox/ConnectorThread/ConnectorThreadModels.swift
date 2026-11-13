@@ -126,6 +126,41 @@ nonisolated struct ThreadMessage: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// A message's words drawn rather than shown with their marks: Markdown (`format` "markdown"), and lark-cli's envelope
+/// for one interactive message, `<card title="…">…</card>` (the title optional, the body Markdown), decoded as the web
+/// decodes it (web/src/lib/lark-inbox-card.ts): only a message that is one whole card is a card. A picture a Lark post
+/// names by its image key, which the app cannot fetch, reads as [Image].
+nonisolated struct ThreadRichText: Equatable, Sendable {
+    /// The card's title, "" for an untitled card; nil when the words are not a card.
+    var cardTitle: String?
+    var body: String
+
+    private static let memo = TextMemo<ThreadRichText?>(limit: 256)
+
+    /// `parse`, kept per words: a row asks on every redraw (docs/apple/performance.md, P4).
+    static func of(_ text: String, markdown: Bool, larkCard: Bool, image: String) -> ThreadRichText? {
+        memo("\(markdown ? 1 : 0)\(larkCard ? 1 : 0)\u{0}\(image)\u{0}" + text) { _ in parse(text, markdown: markdown, larkCard: larkCard, image: image) }
+    }
+
+    /// The words as drawn, or nil when they are plain text: neither Markdown nor (larkCard: a Lark connector's
+    /// message) a card.
+    static func parse(_ text: String, markdown: Bool, larkCard: Bool, image: String) -> ThreadRichText? {
+        if larkCard, let card = text.wholeMatch(of: /\s*<card(?:\s+title="([^"<>]*)")?\s*>([\s\S]*)<\/card>\s*/),
+           !card.output.2.contains(/<\/?card[\s>]/) {
+            return ThreadRichText(cardTitle: String(card.output.1 ?? ""), body: pictures(String(card.output.2).trimmingCharacters(in: .whitespacesAndNewlines), image))
+        }
+        guard markdown else { return nil }
+        return ThreadRichText(cardTitle: nil, body: larkCard ? pictures(text, image) : text)
+    }
+
+    /// A Lark post's pictures: an image key (no web address) is nothing the app can fetch, so it reads as image.
+    private static func pictures(_ text: String, _ image: String) -> String {
+        text.replacing(/!\[[^\]\n]*\]\(([^)\s]*)\)/) { m in
+            m.output.1.hasPrefix("https://") || m.output.1.hasPrefix("http://") ? String(m.output.0) : image
+        }
+    }
+}
+
 /// What a media is, in a few words: Image, Sticker 👍, Voice 0:12, Video 1:05, File name.
 nonisolated enum ThreadMediaText {
     static func describe(_ m: ThreadMedia) -> String {
@@ -259,10 +294,18 @@ nonisolated enum ThreadLayout {
             (chat, messages, before, failure, unavailable) = (page.chat, page.messages, page.before, nil, false)
         } catch {
             if error.isCancellation { return }
-            failure = Self.said(error)
+            failure = Self.noConversation(error) ? nil : Self.said(error)
             unavailable = messages.isEmpty
         }
         loaded = true
+    }
+
+    /// An older hub's way of saying the item has no conversation of its own (#5537): no such connector (404: a
+    /// subscription's item, its source the subscription) or none to open (409 without `unavailable`: a connector
+    /// without threads). The page shows what the hub collected without an error, as a newer hub's `none` page does.
+    private static func noConversation(_ error: Error) -> Bool {
+        guard let e = error as? APIError else { return false }
+        return e.status == 404 || e.status == 409 && e.code != "unavailable"
     }
 
     /// The page before the oldest shown; false when there is none or it could not be read.

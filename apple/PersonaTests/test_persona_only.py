@@ -92,10 +92,10 @@ class PersonaOnlyTests(unittest.TestCase):
         self.assertEqual(settings["PRODUCT_NAME"], "PersonaWidgets")
         self.assertIn("WIDGET_EXTENSION", settings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"])
         self.assertNotIn("TARGETED_DEVICE_FAMILY", settings)
-        # The watch widgets' shared sources, less the watch face's own (the Milk Frog), which visionOS does not draw.
-        watch_face = {"Shared/WatchPetSnapshot.swift", "Shared/Design/WatchFaceTokens.swift"}
+        # The watch widgets' shared sources, less the watch face's own (the Milk Frog, All-Day Recording), which visionOS does not draw.
+        watch_face = {"Shared/WatchPetSnapshot.swift", "Shared/Recording/AllDaySnapshot.swift", "Shared/Design/WatchFaceTokens.swift"}
         shared = {item["path"] for item in targets["PersonaWatchWidgets"]["sources"] if item["path"].startswith("Shared/")}
-        watch_pet = {"Shared/WatchPetSnapshot.swift", "Shared/Design/WatchFaceTokens.swift"}
+        watch_pet = {"Shared/WatchPetSnapshot.swift", "Shared/Recording/AllDaySnapshot.swift", "Shared/Design/WatchFaceTokens.swift"}
         self.assertTrue(watch_pet.issubset(shared))
         vision_sources = {item["path"] for item in widget["sources"]}
         self.assertTrue(watch_pet.isdisjoint(vision_sources))

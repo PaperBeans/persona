@@ -10,7 +10,7 @@ vi.mock("./store", () => ({
 vi.mock("../ui/atoms", () => ({ toast: vi.fn() }));
 
 import {
-  badgeCount, bulkMessage, bulkScope, bulkScopeName, canDraft, cardText, connectorReference, connectorSources, contextXML, openTitle, openURL, sourceLine, conversationRoute, docChangeLine, emojiLabel, fromLine, getInbox, handOffMessage, interactionAsk,
+  badgeCount, bulkMessage, bulkScope, bulkScopeName, canDraft, cardText, connectorReference, connectorSources, contextXML, openTitle, openURL, sourceLine, conversationRoute, docChangeLine, emojiLabel, fromLine, repeatsSummary, getInbox, handOffMessage, interactionAsk,
   interactionMuted, interactionTitle, itemPath, kindLabel, labelIsUrgent, mailAccounts, mergeMessages, momentText, nextLarkPosition, partRuns, reloadInbox,
   replyLarkMessage, resetInboxForTests, sections, sendLarkMessage, sendReply, setAllDone, setDocStatus, setDone, shortTime, triage, triageBanner, TRIAGE_REASONS, TRIAGE_SETTINGS,
   listInboxMutes, muteCovers, muteItem, muteLine, muteShortName, muteTitle, unmuteInbox,
@@ -152,6 +152,11 @@ describe("等你的 Agent", () => {
     expect(interactionMuted(ix("s-free"), sessions, mutes)).toBe(false);
   });
 
+  it("a child session's card goes by its parent's switch alone (#5120), as the switcher counts it", () => {
+    expect(interactionMuted(ix("kid", { folded_under: "s-muted" }), sessions, mutes)).toBe(true);
+    expect(interactionMuted(ix("s-muted", { folded_under: "s-free" }), sessions, mutes)).toBe(false);
+  });
+
   it("只在没选来源时出现，Agent 筛选只看它们，老的在前，能搜", () => {
     const list = [ix("s-new", { created_at: at(1), session_title: "新的" }), ix("s-old", { created_at: at(9), summary: "要不要合并" }), ix("s-muted")];
     expect(ids(waitingAgents(list, sessions, mutes, all))).toEqual(["s-old", "s-new"]);
@@ -165,7 +170,7 @@ describe("等你的 Agent", () => {
     expect(interactionTitle(ix("a"))).toBe("Claude 在问你");
     expect(interactionTitle(ix("a", { kind: "plan" }))).toBe("计划等你审批");
     expect(interactionTitle(ix("a", { tool_name: "ask_user" }))).toBe("Persona 在问你");
-    expect(interactionTitle(ix("a", { agent: "codex", kind: "permission" }))).toBe("Codex 需要你授权");
+    expect(interactionTitle(ix("a", { agent: "codex", kind: "permission" }))).toBe("Codex 在等你批准");
     expect(interactionAsk(ix("a", { questions: [{ question: "用哪种格式？", options: [] }] }))).toBe("用哪种格式？");
     expect(interactionAsk(ix("a", { kind: "permission", tool_name: "Bash", tool_input: { command: "swift test" } }))).toBe("swift test");
   });
@@ -756,6 +761,22 @@ describe("列表状态", () => {
     expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ action: "reopen", items: [{ id: a.id, version: "v1" }] });
     expect(vi.mocked(toast).mock.lastCall).toEqual(["已移回 1 件", "ok", undefined]);
 
+    // Undo reopens what was filed even when the list no longer carries it (only the newest done items, #5549).
+    vi.mocked(toast).mockClear();
+    fetcher.mockReset().mockResolvedValueOnce(ok({ changed: [{ ...a, done_at: at(0), done_by: "user" }], unchanged: [], skipped: [] }));
+    await setAllDone([a], true);
+    const undo = vi.mocked(toast).mock.lastCall![2]!;
+    fetcher.mockReset().mockResolvedValueOnce(ok({ items: versioned.slice(1) }));
+    await reloadInbox();
+    expect(getInbox().items.some((x) => x.id === a.id)).toBe(false);
+    vi.mocked(toast).mockClear();
+    fetcher.mockReset().mockResolvedValueOnce(ok({ changed: [a], unchanged: [], skipped: [] }));
+    undo.run();
+    await vi.waitFor(() => expect(toast).toHaveBeenCalled());
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ action: "reopen", items: [{ id: a.id, version: "v1" }] });
+    fetcher.mockReset().mockResolvedValueOnce(ok({ items: versioned }));
+    await reloadInbox();
+
     // A failure puts every item back.
     fetcher.mockReset().mockResolvedValueOnce(fail(502, "boom"));
     await setAllDone(getInbox().items, true);
@@ -976,5 +997,17 @@ describe("静音的文字", () => {
     expect(muteCovers("lark", o, item("b", { mutes: [o], done_at: at(1) }))).toBe(false);
     expect(muteCovers("lark", o, item("c", { mutes: [{ ...o, value: "f2" }] }))).toBe(false);
     expect(muteCovers("github", o, item("d", { mutes: [o] }))).toBe(false);
+  });
+});
+
+describe("the assistant's own rows (#6430)", () => {
+  const row = (patch: Partial<InboxItem> = {}) => item("assistant:s1", { source: "assistant", sender: "Assistant", preview: "Three meetings today", summary: "Three meetings today", connector: { thread: "m/s" }, ...patch });
+  it("says the text without a sender prefix, and not twice under the summary", () => {
+    expect(fromLine(row())).toBe("Three meetings today");
+    expect(repeatsSummary(row())).toBe(true);
+    expect(repeatsSummary(row({ preview: "Three meetings today, the review moved to 15:00" }))).toBe(true); // starts with the summary
+    expect(repeatsSummary(row({ preview: "Something else" }))).toBe(false);
+    expect(repeatsSummary(row({ summary: undefined }))).toBe(false);
+    expect(repeatsSummary({ ...row(), source: "github" })).toBe(false); // other sources draw as before
   });
 });

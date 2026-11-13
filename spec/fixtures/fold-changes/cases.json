@@ -1,0 +1,861 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "edit_one_line",
+      "description": "An Edit that changes one line of three: one added, one removed.",
+      "source": [
+        "server/internal/transcript/fold_changes.go: foldChanges",
+        "web/src/views/chat/TurnChanges.tsx: turnChanges",
+        "docs/protocol/protocol.md: Folded work"
+      ],
+      "input": {
+        "items": [
+          {
+            "id": "use1#0",
+            "seq": 1,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_1",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/a.swift",
+              "old_string": "let a = 1\nlet b = 2\nlet c = 3",
+              "new_string": "let a = 1\nlet b = 20\nlet c = 3"
+            }
+          },
+          {
+            "id": "res1#0",
+            "seq": 1,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_1",
+            "text": "ok"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          {
+            "path": "/home/user/project/a.swift",
+            "add": 1,
+            "del": 1,
+            "exact": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "write_trailing_newline",
+      "description": "A Write of three lines ending in a newline: three added, as git counts, not four (the old side is empty).",
+      "source": [
+        "server/internal/transcript/fold_changes.go: foldChanges",
+        "web/src/views/chat/TurnChanges.tsx: turnChanges",
+        "docs/protocol/protocol.md: Folded work"
+      ],
+      "input": {
+        "items": [
+          {
+            "id": "use2#0",
+            "seq": 2,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_2",
+            "tool_name": "Write",
+            "tool_input": {
+              "file_path": "/home/user/project/new.md",
+              "content": "# Title\n\nBody\n"
+            }
+          },
+          {
+            "id": "res2#0",
+            "seq": 2,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_2",
+            "text": "ok"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          {
+            "path": "/home/user/project/new.md",
+            "add": 3,
+            "del": 0,
+            "exact": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "edit_adds_a_line_with_newline",
+      "description": "An Edit from \"x\" to \"x\\ny\\n\": the old side neither is empty nor ends in a newline, so the new side's last newline starts a line; two added, as each call's diff draws it.",
+      "source": [
+        "server/internal/transcript/fold_changes.go: foldChanges",
+        "web/src/views/chat/TurnChanges.tsx: turnChanges",
+        "docs/protocol/protocol.md: Folded work"
+      ],
+      "input": {
+        "items": [
+          {
+            "id": "use3#0",
+            "seq": 3,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_3",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/b.swift",
+              "old_string": "x",
+              "new_string": "x\ny\n"
+            }
+          },
+          {
+            "id": "res3#0",
+            "seq": 3,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_3",
+            "text": "ok"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          {
+            "path": "/home/user/project/b.swift",
+            "add": 2,
+            "del": 0,
+            "exact": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "edit_adds_only_a_final_newline",
+      "description": "\"foo\" becoming \"foo\\n\" is still a change: one line added, as each call's diff draws it.",
+      "source": [
+        "server/internal/transcript/fold_changes.go: foldChanges",
+        "web/src/views/chat/TurnChanges.tsx: turnChanges",
+        "docs/protocol/protocol.md: Folded work"
+      ],
+      "input": {
+        "items": [
+          {
+            "id": "use21#0",
+            "seq": 21,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_21",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/n.txt",
+              "old_string": "foo",
+              "new_string": "foo\n"
+            }
+          },
+          {
+            "id": "res21#0",
+            "seq": 21,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_21",
+            "text": "ok"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          {
+            "path": "/home/user/project/n.txt",
+            "add": 1,
+            "del": 0,
+            "exact": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "both_sides_end_in_newline",
+      "description": "Both texts end in a newline: it ends their last lines; one added.",
+      "source": [
+        "server/internal/transcript/fold_changes.go: foldChanges",
+        "web/src/views/chat/TurnChanges.tsx: turnChanges",
+        "docs/protocol/protocol.md: Folded work"
+      ],
+      "input": {
+        "items": [
+          {
+            "id": "use22#0",
+            "seq": 22,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_22",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/m.txt",
+              "old_string": "x\n",
+              "new_string": "x\ny\n"
+            }
+          },
+          {
+            "id": "res22#0",
+            "seq": 22,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_22",
+            "text": "ok"
+          },
+          {
+            "id": "use23#0",
+            "seq": 23,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_23",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/e.txt",
+              "old_string": "a\nb\n",
+              "new_string": ""
+            }
+          },
+          {
+            "id": "res23#0",
+            "seq": 23,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_23",
+            "text": "ok"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          {
+            "path": "/home/user/project/m.txt",
+            "add": 1,
+            "del": 0,
+            "exact": true
+          },
+          {
+            "path": "/home/user/project/e.txt",
+            "add": 0,
+            "del": 2,
+            "exact": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "multiedit_sums_its_pieces",
+      "description": "A MultiEdit of two pieces: the lines of both.",
+      "source": [
+        "server/internal/transcript/fold_changes.go: foldChanges",
+        "web/src/views/chat/TurnChanges.tsx: turnChanges",
+        "docs/protocol/protocol.md: Folded work"
+      ],
+      "input": {
+        "items": [
+          {
+            "id": "use4#0",
+            "seq": 4,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_4",
+            "tool_name": "MultiEdit",
+            "tool_input": {
+              "file_path": "/home/user/project/c.swift",
+              "edits": [
+                {
+                  "old_string": "var hourly: [Double]",
+                  "new_string": "var hourly: [Double]\nvar unit: String"
+                },
+                {
+                  "old_string": "func high() -> Double {\n    hourly.max() ?? 0\n}",
+                  "new_string": "func high() -> String {\n    \"\\(hourly.max() ?? 0) \\(unit)\"\n}"
+                }
+              ]
+            }
+          },
+          {
+            "id": "res4#0",
+            "seq": 4,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_4",
+            "text": "ok"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          {
+            "path": "/home/user/project/c.swift",
+            "add": 3,
+            "del": 2,
+            "exact": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "same_file_twice_in_first_order",
+      "description": "Two edits of one file sum, listed where it was first edited.",
+      "source": [
+        "server/internal/transcript/fold_changes.go: foldChanges",
+        "web/src/views/chat/TurnChanges.tsx: turnChanges",
+        "docs/protocol/protocol.md: Folded work"
+      ],
+      "input": {
+        "items": [
+          {
+            "id": "use5#0",
+            "seq": 5,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_5",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/p.swift",
+              "old_string": "a",
+              "new_string": "b"
+            }
+          },
+          {
+            "id": "res5#0",
+            "seq": 5,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_5",
+            "text": "ok"
+          },
+          {
+            "id": "use6#0",
+            "seq": 6,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_6",
+            "tool_name": "Write",
+            "tool_input": {
+              "file_path": "/home/user/project/q.swift",
+              "content": "one\ntwo"
+            }
+          },
+          {
+            "id": "res6#0",
+            "seq": 6,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_6",
+            "text": "ok"
+          },
+          {
+            "id": "use7#0",
+            "seq": 7,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_7",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/p.swift",
+              "old_string": "c\nd",
+              "new_string": "c"
+            }
+          },
+          {
+            "id": "res7#0",
+            "seq": 7,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_7",
+            "text": "ok"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          {
+            "path": "/home/user/project/p.swift",
+            "add": 1,
+            "del": 2,
+            "exact": true
+          },
+          {
+            "path": "/home/user/project/q.swift",
+            "add": 2,
+            "del": 0,
+            "exact": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "paths_are_normalized",
+      "description": "One file written as \"./\", \"../\" and doubled slashes is one entry, its path cleaned.",
+      "source": [
+        "server/internal/transcript/fold_changes.go: foldChanges",
+        "web/src/views/chat/TurnChanges.tsx: turnChanges",
+        "docs/protocol/protocol.md: Folded work"
+      ],
+      "input": {
+        "items": [
+          {
+            "id": "use24#0",
+            "seq": 24,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_24",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/src/../a.swift",
+              "old_string": "a",
+              "new_string": "b"
+            }
+          },
+          {
+            "id": "res24#0",
+            "seq": 24,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_24",
+            "text": "ok"
+          },
+          {
+            "id": "use25#0",
+            "seq": 25,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_25",
+            "tool_name": "Write",
+            "tool_input": {
+              "file_path": "/home/user/project//b.swift",
+              "content": "one\n"
+            }
+          },
+          {
+            "id": "res25#0",
+            "seq": 25,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_25",
+            "text": "ok"
+          },
+          {
+            "id": "use26#0",
+            "seq": 26,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_26",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/./a.swift",
+              "old_string": "c",
+              "new_string": "d"
+            }
+          },
+          {
+            "id": "res26#0",
+            "seq": 26,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_26",
+            "text": "ok"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          {
+            "path": "/home/user/project/a.swift",
+            "add": 2,
+            "del": 2,
+            "exact": true
+          },
+          {
+            "path": "/home/user/project/b.swift",
+            "add": 1,
+            "del": 0,
+            "exact": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "codex_unified_diff",
+      "description": "A Codex file change: an Edit with the patch as a unified diff, headers not counted.",
+      "source": [
+        "server/internal/transcript/fold_changes.go: foldChanges",
+        "web/src/views/chat/TurnChanges.tsx: turnChanges",
+        "docs/protocol/protocol.md: Folded work"
+      ],
+      "input": {
+        "items": [
+          {
+            "id": "use8#0",
+            "seq": 8,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_8",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/f.swift",
+              "change": "update",
+              "diff": "--- a/f.swift\n+++ b/f.swift\n@@ -3,3 +3,4 @@\n struct Forecast {\n-    var temperature: Double\n+    var feelsLike: Double\n+    var hourly: [Double]\n }\n"
+            }
+          },
+          {
+            "id": "res8#0",
+            "seq": 8,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_8",
+            "text": "update /home/user/project/f.swift"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          {
+            "path": "/home/user/project/f.swift",
+            "add": 2,
+            "del": 1,
+            "exact": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "codex_whole_file",
+      "description": "A Codex change without hunks is the whole file: added, or removed when it deletes it.",
+      "source": [
+        "server/internal/transcript/fold_changes.go: foldChanges",
+        "web/src/views/chat/TurnChanges.tsx: turnChanges",
+        "docs/protocol/protocol.md: Folded work"
+      ],
+      "input": {
+        "items": [
+          {
+            "id": "use9#0",
+            "seq": 9,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_9",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/added.txt",
+              "change": "add",
+              "diff": "one\ntwo\nthree\n"
+            }
+          },
+          {
+            "id": "res9#0",
+            "seq": 9,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_9",
+            "text": "ok"
+          },
+          {
+            "id": "use10#0",
+            "seq": 10,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_10",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/gone.txt",
+              "change": "delete",
+              "diff": "old\nlines"
+            }
+          },
+          {
+            "id": "res10#0",
+            "seq": 10,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_10",
+            "text": "ok"
+          },
+          {
+            "id": "use11#0",
+            "seq": 11,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_11",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/moved.txt",
+              "change": "update",
+              "diff": ""
+            }
+          },
+          {
+            "id": "res11#0",
+            "seq": 11,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_11",
+            "text": "ok"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          {
+            "path": "/home/user/project/added.txt",
+            "add": 3,
+            "del": 0,
+            "exact": true
+          },
+          {
+            "path": "/home/user/project/gone.txt",
+            "add": 0,
+            "del": 2,
+            "exact": true
+          },
+          {
+            "path": "/home/user/project/moved.txt",
+            "add": 0,
+            "del": 0,
+            "exact": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "only_successful_edits",
+      "description": "A failed edit, an edit without its result, a read and a command count for nothing.",
+      "source": [
+        "server/internal/transcript/fold_changes.go: foldChanges",
+        "web/src/views/chat/TurnChanges.tsx: turnChanges",
+        "docs/protocol/protocol.md: Folded work"
+      ],
+      "input": {
+        "items": [
+          {
+            "id": "use12#0",
+            "seq": 12,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_12",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/x.swift",
+              "old_string": "a",
+              "new_string": "b"
+            }
+          },
+          {
+            "id": "res12#0",
+            "seq": 12,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_12",
+            "text": "String to replace not found",
+            "is_error": true
+          },
+          {
+            "id": "use13#0",
+            "seq": 13,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_13",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/y.swift",
+              "old_string": "a",
+              "new_string": "b"
+            }
+          },
+          {
+            "id": "use14#0",
+            "seq": 14,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_14",
+            "tool_name": "Read",
+            "tool_input": {
+              "file_path": "/home/user/project/z.swift"
+            }
+          },
+          {
+            "id": "res14#0",
+            "seq": 14,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_14",
+            "text": "ok"
+          },
+          {
+            "id": "use15#0",
+            "seq": 15,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_15",
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "git apply fix.patch"
+            }
+          },
+          {
+            "id": "res15#0",
+            "seq": 15,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_15",
+            "text": "ok"
+          },
+          {
+            "id": "use16#0",
+            "seq": 16,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_16",
+            "tool_name": "Write",
+            "tool_input": {
+              "file_path": "/home/user/project/ok.swift",
+              "content": "done"
+            }
+          },
+          {
+            "id": "res16#0",
+            "seq": 16,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_16",
+            "text": "ok"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          {
+            "path": "/home/user/project/ok.swift",
+            "add": 1,
+            "del": 0,
+            "exact": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "clipped_input_is_not_exact",
+      "description": "An input the hub clipped for good keeps its file, marked not exact.",
+      "source": [
+        "server/internal/transcript/fold_changes.go: foldChanges",
+        "web/src/views/chat/TurnChanges.tsx: turnChanges",
+        "docs/protocol/protocol.md: Folded work"
+      ],
+      "input": {
+        "items": [
+          {
+            "id": "use17#0",
+            "seq": 17,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_17",
+            "tool_name": "Write",
+            "tool_input": {
+              "file_path": "/home/user/project/big.json",
+              "content": "line\nline\nline\nline\nline\n\n…（已截断，共 40210 字节）"
+            }
+          },
+          {
+            "id": "res17#0",
+            "seq": 17,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_17",
+            "text": "ok"
+          },
+          {
+            "id": "use18#0",
+            "seq": 18,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_18",
+            "tool_name": "Edit",
+            "tool_input": {
+              "file_path": "/home/user/project/big.json",
+              "old_string": "a",
+              "new_string": "b"
+            }
+          },
+          {
+            "id": "res18#0",
+            "seq": 18,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_18",
+            "text": "ok"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          {
+            "path": "/home/user/project/big.json",
+            "add": 8,
+            "del": 1,
+            "exact": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "no_edits",
+      "description": "A run of reads and commands: an empty list, which says nothing was edited.",
+      "source": [
+        "server/internal/transcript/fold_changes.go: foldChanges",
+        "web/src/views/chat/TurnChanges.tsx: turnChanges",
+        "docs/protocol/protocol.md: Folded work"
+      ],
+      "input": {
+        "items": [
+          {
+            "id": "use19#0",
+            "seq": 19,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_19",
+            "tool_name": "Read",
+            "tool_input": {
+              "file_path": "/home/user/project/a.swift"
+            }
+          },
+          {
+            "id": "res19#0",
+            "seq": 19,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_19",
+            "text": "ok"
+          },
+          {
+            "id": "use20#0",
+            "seq": 20,
+            "role": "assistant",
+            "kind": "tool_use",
+            "tool_use_id": "call_20",
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "swift test"
+            }
+          },
+          {
+            "id": "res20#0",
+            "seq": 20,
+            "role": "user",
+            "kind": "tool_result",
+            "tool_use_id": "call_20",
+            "text": "ok"
+          }
+        ]
+      },
+      "expected": {
+        "changes": []
+      }
+    }
+  ]
+}

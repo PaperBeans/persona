@@ -1,5 +1,10 @@
 import Foundation
 import Observation
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// The unified inbox as the app knows it (docs/assistant/inbox.md): the hub's items, kept on disk so the list paints at once
 /// (offline too), refreshed when the hub says `inbox` and on (re)connect. Marking done applies at once and is sent
@@ -24,59 +29,115 @@ final class InboxStore {
     /// Done marks the hub may not have yet, by `InboxItem.key`, laid over every list that comes in (#2201): a list from
     /// before the hub took a mark must not bring a swiped-away item back.
     @ObservationIgnored private var marks = InboxMarks()
-    @ObservationIgnored private let saver = Debouncer(.seconds(1))
+    /// The list on disk paints a cold start: written at most once a minute (3.3 MB on a busy hub, #4740), and when the
+    /// app leaves.
+    @ObservationIgnored private let saver = Throttle(gap: .seconds(60))
     private static let stateName = "inbox-items"
+    /// The hub's tag of the list `items` came from (`ETag`, #4739): sent with the next reload, which then costs a 304
+    /// while nothing changed. Good only for that hub and while nothing changed `items` here since (`itemsRevision`); not
+    /// kept on disk, where a done mark the hub never got could outlive it.
+    @ObservationIgnored private var listTag: (etag: String, hub: URL, revision: UInt64)?
+    /// The cursor of the list held, for that hub (docs/protocol/protocol.md "Inbox delta", #4740): a reload asks for only
+    /// what changed since, a few KB where the whole list was about 700 KB (3.4 MB decoded) on a busy hub. Not kept on disk:
+    /// the first list after a launch is whole.
+    @ObservationIgnored private var cursor: (value: String, hub: URL)?
+    /// Hubs that answered without a cursor (older ones): they are asked with the tag instead.
+    @ObservationIgnored private var withoutDeltas: Set<URL> = []
 
     private init() {
         items = StateCache.load(Self.stateName, as: [InboxItem].self) ?? []
         teachLarkSync()
+        #if os(iOS) || os(visionOS)
+        let leaving = [UIApplication.didEnterBackgroundNotification, UIApplication.willTerminateNotification]
+        #else
+        let leaving = [NSApplication.willTerminateNotification]
+        #endif
+        for name in leaving {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { @Sendable _ in
+                MainActor.assumeIsolated { InboxStore.shared.saver.flush() }
+            }
+        }
     }
 
     var open: [InboxItem] { items.filter { !$0.isDone } }
 
+    /// The items the pages list: the current assistant's, on a hub with several (`AppModel.assistantScope`,
+    /// docs/assistant/managers.md "Pages"). `items` stays whole, so another assistant's item still opens as itself from a
+    /// notification or a link.
+    var scopedItems: [InboxItem] {
+        guard let scope = AppModel.shared.assistantScope else { return items }
+        return items.filter { scope.has($0.manager) }
+    }
+
     // MARK: Done's history (#2200)
 
-    /// Done items older than the list's few days, from the hub's history (GET /api/v1/inbox/done), newest done first.
+    /// Done items older than the list's few days, from the hub's history (GET /api/v1/inbox/done), newest done first:
+    /// the current assistant's, as the history is one manager's (its cursor is, docs/protocol/protocol.md "Paged lists").
     private(set) var history: [InboxItem] = []
     /// The hub may have more history: true until a page comes back without a next one, or a hub without it (404).
     private(set) var historyMore = true
     private(set) var historyLoading = false
     @ObservationIgnored private var historyNext: InboxDonePage.Cursor?
+    /// Moves when the history starts over for another assistant (`scopeChanged`, `forget`): a page asked of the one
+    /// before doesn't land.
+    @ObservationIgnored private var historyEpoch = 0
+
+    /// Whom Done's history is asked of, and what its items are stamped with: the current assistant, named unless it
+    /// is the default (which a request without a manager reaches); no stamp with one manager.
+    private var historyOwner: (api: APIClient, manager: String?)? { AppModel.shared.inboxHistoryOwner }
 
     /// One more page of Done's history (the first when Done is shown). A failure (offline) is tried again next time.
     func loadOlderDone() {
-        guard historyMore, !historyLoading, let api = AppModel.shared.api else { return }
+        guard historyMore, !historyLoading, let asked = historyOwner else { return }
         historyLoading = true
+        let epoch = historyEpoch
         Task {
-            defer { historyLoading = false }
+            defer { if epoch == historyEpoch { historyLoading = false } }
             do {
-                let page = try await api.inboxDone(after: historyNext, connectors: Self.drawsConnectors)
-                let items = Self.stamped(page.items)
+                let page = try await asked.api.inboxDone(after: historyNext, connectors: Self.drawsConnectors)
+                guard epoch == historyEpoch else { return }
+                let items = Self.stamped(page.items, manager: asked.manager)
                 let known = Set(history.map(\.key))
                 history += items.filter { !known.contains($0.key) }
                 historyNext = page.next
                 historyMore = page.next != nil
             } catch let e as APIError where e.status == 404 || e.status == 405 {
-                historyMore = false // a hub from before the history: Done shows what the list has
+                if epoch == historyEpoch { historyMore = false } // a hub from before the history: Done shows what the list has
             } catch {}
         }
     }
 
-    /// The default manager's history items (no header), stamped as the merged list stamps them, so an item in both is one key.
-    private static func stamped(_ items: [InboxItem]) -> [InboxItem] {
-        guard let stamp = AppModel.shared.managerRoster.flatMap({ $0.isMulti ? $0.defaultID : nil }) else { return items }
+    /// History items of the manager asked, stamped as the merged list stamps them, so an item in both is one key.
+    nonisolated static func stamped(_ items: [InboxItem], manager: String?) -> [InboxItem] {
+        guard let manager else { return items }
         return items.map { it in
             guard it.manager == nil else { return it }
             var it = it
-            it.manager = stamp
+            it.manager = manager
             return it
         }
     }
 
+    /// Another assistant is current, or the hub's roster came or went (`AppModel.followScope`): Done's history and its
+    /// day counts were the one before's. They go, a page of them still on its way doesn't land, and the day counts are
+    /// read again for the one shown now, as when the list first came.
+    func scopeChanged() {
+        historyEpoch += 1
+        history = []
+        historyMore = true
+        historyNext = nil
+        historyLoading = false
+        doneDays = nil
+        groupLoading = []
+        groupComplete = []
+        groupNext = [:]
+        if listed { loadDoneDays() }
+    }
+
     // MARK: Done's day counts (#2969)
 
-    /// The default manager's done items per calendar day in this device's zone ("YYYY-MM-DD" → count; GET
-    /// /api/v1/inbox/done/days, #2967), as the history is the default manager's. nil: not known yet, or a hub without them.
+    /// The current assistant's done items per calendar day in this device's zone ("YYYY-MM-DD" → count; GET
+    /// /api/v1/inbox/done/days, #2967), as the history is. nil: not known yet, or a hub without them.
     private(set) var doneDays: [String: Int]?
     /// Done groups loading a page of their own, by group key.
     private(set) var groupLoading: Set<String> = []
@@ -88,11 +149,14 @@ final class InboxStore {
     /// (404 / 405, or 400 for a zone it doesn't know) gets the history's first page instead, as before; offline, nothing
     /// changes and the next time Done shows asks again.
     func loadDoneDays() {
-        guard let api = AppModel.shared.api else { return }
+        guard let asked = historyOwner else { return }
+        let epoch = historyEpoch
         Task {
             do {
-                doneDays = try await api.inboxDoneDays(zone: TimeZone.current.identifier, connectors: Self.drawsConnectors)
+                let days = try await asked.api.inboxDoneDays(zone: TimeZone.current.identifier, connectors: Self.drawsConnectors)
+                if epoch == historyEpoch { doneDays = days }
             } catch let e as APIError where e.status == 404 || e.status == 405 || e.status == 400 {
+                guard epoch == historyEpoch else { return }
                 doneDays = nil
                 if history.isEmpty { loadOlderDone() }
             } catch {}
@@ -103,13 +167,15 @@ final class InboxStore {
     /// its last page ended. The group is complete when a page reaches its start or the history ends; items of older
     /// groups a page also brings stay in `history` for theirs.
     func loadDoneGroup(_ key: String, range: (start: Date?, end: Date?)) {
-        guard !groupLoading.contains(key), !groupComplete.contains(key), let api = AppModel.shared.api else { return }
+        guard !groupLoading.contains(key), !groupComplete.contains(key), let asked = historyOwner else { return }
         groupLoading.insert(key)
+        let epoch = historyEpoch
         Task {
-            defer { groupLoading.remove(key) }
+            defer { if epoch == historyEpoch { groupLoading.remove(key) } }
             do {
-                let page = try await api.inboxDone(after: groupNext[key], before: range.end, connectors: Self.drawsConnectors)
-                let items = Self.stamped(page.items)
+                let page = try await asked.api.inboxDone(after: groupNext[key], before: range.end, connectors: Self.drawsConnectors)
+                guard epoch == historyEpoch else { return }
+                let items = Self.stamped(page.items, manager: asked.manager)
                 var complete = page.next == nil
                 if let last = items.last?.doneAt, let start = range.start, last < start { complete = true }
                 if items.last?.doneAt == nil { complete = true }
@@ -138,6 +204,8 @@ final class InboxStore {
 
     /// Entering or leaving Demo Mode: the other side's items must not show for a moment.
     func forget() {
+        historyEpoch += 1
+        cursor = nil
         items = []
         history = []
         historyMore = true
@@ -151,24 +219,84 @@ final class InboxStore {
         saver.run { StateCache.save(Self.stateName, [InboxItem]()) }
     }
 
-    /// Open items that still need the user, including ones already read.
-    var actionCount: Int { items.filter { !$0.isDone && $0.triage == .action }.count }
+    /// The current assistant's open items that still need the user, including ones already read: what the tab's badge
+    /// counts.
+    var actionCount: Int { scopedItems.filter { !$0.isDone && $0.triage == .action }.count }
 
     /// Unread open items in Needs you.
-    var unreadCount: Int { items.filter(\.isUnreadAction).count }
+    var unreadCount: Int { scopedItems.filter(\.isUnreadAction).count }
 
     /// Pulls the list (bursts of `inbox` events collapse into one request).
     func reload() {
         guard reloading == nil else { return }
         reloading = Task {
             defer { reloading = nil }
-            await fetch { try await $0.inboxListing(connectors: Self.drawsConnectors) }
+            await fetchListing()
         }
     }
 
-    /// Pull to refresh: the hub collects Feishu and mail now.
+    /// `reload`'s request: with the held list's tag, so a list the hub still has costs a 304, nothing decoded or written.
+    private func fetchListing() async {
+        guard let api = AppModel.shared.api else { return }
+        let hub = api.config.url
+        let held = listTag.flatMap { $0.hub == hub && $0.revision == itemsRevision ? $0.etag : nil }
+        loading = true
+        let seq = marks.beginList()
+        defer {
+            loading = false
+            marks.endList(seq)
+        }
+        do {
+            if withoutDeltas.contains(hub) {
+                let answer = try await api.inboxListing(connectors: Self.drawsConnectors, etag: held)
+                if let listing = answer.listing {
+                    apply(marks.lay(listing.items, seq: seq))
+                    if listing.triage != triage { triage = listing.triage }
+                }
+                listTag = answer.etag.map { (etag: $0, hub: hub, revision: itemsRevision) }
+            } else {
+                let since = cursor.flatMap { $0.hub == hub ? $0.value : nil } ?? InboxListing.noCursor
+                let listing = try await api.inboxListing(connectors: Self.drawsConnectors, since: since)
+                if listing.delta == true && since != InboxListing.noCursor {
+                    apply(marks.lay(listing.applied(to: items), seq: seq))
+                } else {
+                    apply(marks.lay(listing.items, seq: seq))
+                }
+                if listing.triage != triage { triage = listing.triage }
+                if let next = listing.cursor {
+                    cursor = (next, hub)
+                } else { // a hub without deltas: the tag from now on
+                    cursor = nil
+                    withoutDeltas.insert(hub)
+                }
+            }
+            listed = true
+            error = nil
+        } catch {
+            if let shown = error.shown { self.error = shown }
+        }
+    }
+
+    /// Pull to refresh: the hub collects Feishu and mail now. Its whole list is none a cursor names: the next reload asks
+    /// for a whole one again.
+    /// With another assistant than the default current it is that one that collects: named, it answers with its own
+    /// list alone, so the merged list is read after it.
     func refresh() async {
-        await fetch { try await $0.refreshInbox(connectors: Self.drawsConnectors) }
+        cursor = nil
+        if let api = AppModel.shared.api, let manager = AppModel.shared.assistantManagerID {
+            // A collection that failed must not look like one that worked (the hub answers 502 for it): its words show
+            // as a failed refresh's do. An offline assistant is said on the page itself.
+            var failed: String?
+            do {
+                _ = try await api.manager(manager).refreshInbox(connectors: Self.drawsConnectors)
+            } catch {
+                if (error as? APIError)?.code != "assistant_offline" { failed = error.shown }
+            }
+            await fetchListing()
+            if let failed { self.error = failed }
+        } else {
+            await fetch { try await $0.refreshInbox(connectors: Self.drawsConnectors) }
+        }
     }
 
     /// The connectors' items (GitHub…) are drawn on iOS and the Mac (#2611, #2736); the watch fetches its own (WatchModel, #2727).
@@ -203,7 +331,7 @@ final class InboxStore {
         teachLarkSync()
         let snapshot = list
         saver.run { StateCache.save(Self.stateName, snapshot) }
-        WatchSync.shared.push(summary: AppModel.shared.watchSummary())
+        AppModel.shared.summariesChanged()
     }
 
     /// Mark All Seen / Clear All (a section), Mac's multi-select, and every Undo: one request for them all on the Done request

@@ -1,7 +1,22 @@
 package prompts
 
+func RenderAgentSessionName() string { return render("agents/session_name", nil) }
+
+// AgentSessionNameInput contains only bounded dialogue, never machine paths or credentials.
+type AgentSessionNameInput struct {
+	First  string
+	Recent string
+}
+
+func RenderAgentSessionNameInput(v AgentSessionNameInput) string {
+	return render("agents/session_name_input", v)
+}
+
 // RenderReadonlyTaskPlanExit keeps a read-only task from requesting writable implementation approval.
 func RenderReadonlyTaskPlanExit() string { return render("agents/readonly_plan_exit", nil) }
+
+// RenderReadonlyTaskConstraint carries a read-only task's limit in its first prompt.
+func RenderReadonlyTaskConstraint() string { return render("agents/readonly_task", nil) }
 
 // AgentTriage is the system prompt that reads a stopped agent's last reply and says where its work stands
 // (agents/triage, docs/assistant/agent-work.md).
@@ -193,12 +208,25 @@ type DispatchTask struct {
 
 func RenderDispatchTask(t DispatchTask) string { return render("agents/dispatch_task", t) }
 
+// TaskSuccessor is the first message of an agent Persona starts for a task whose agents have all stopped (#4754): who
+// worked on it before and its last reply, then the user's message on the task (agents/task_successor).
+type TaskSuccessor struct {
+	Previous   string // the stopped agent's tab / title
+	PreviousID string // its session id
+	LastReply  string // its last reply, clipped; "" when there is none
+	Text       string
+}
+
+func RenderTaskSuccessor(t TaskSuccessor) string { return render("agents/task_successor", t) }
+
 // RenderTaskLeader is what follows the prompt of a task whose agent is a task leader (agents/task_leader, #3656): that it
 // can hand direct workers to task_plan and how their reports reach it.
 func RenderTaskLeader() string { return render("agents/task_leader", struct{}{}) }
 
 // RenderTaskWorker is what follows the prompt of a worker a task leader handed out (agents/task_worker).
 func RenderTaskWorker() string { return render("agents/task_worker", struct{}{}) }
+
+func RenderTaskHandoff() string { return render("agents/task_handoff", struct{}{}) }
 
 // RenderWorkerSupervise is the supervision message a task leader's agent gets about its workers (agents/worker_supervise,
 // assistant/task_leader.go): what each task of its own needs, from the same entries a conversation's message lists.

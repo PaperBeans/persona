@@ -32,12 +32,24 @@ struct NewChatView: View {
     /// A todo handed to a new Agent (TodoHandoffSheet): the todo's context block goes ahead of the first message, the
     /// session is named after the todo, and only the todo's hub's machines are offered.
     var contextBlock: String? = nil
+    /// A message forwarded to a new Agent (#3807), or several together (#3838): its card over the first message, which
+    /// carries it as `contextBlock`, and the pictures it had, attached.
+    var forwarded: [ContextRef] = []
+    /// One card's icon: a forward's, or an Inbox item's when Hand to AI starts the Agent with it (#5933).
+    var forwardedIcon = Theme.Icon.forwardMessage
+    var forwardedImages: [UIImage] = []
     var nameHint: String? = nil
     var onlyGroup: String? = nil
     var onStarted: (Session) -> Void
 
     @AppStorage("newChat.machine") private var machineID = ""
     @State private var cwd = ""
+    /// The folder was picked on this sheet (a row, the browser, a card, a workspace), not filled in from the last start: a
+    /// start in Claude's desktop app with none goes to the app's scratch folder (`desktopScratch`, #5480).
+    @State private var cwdPicked = false
+    /// Where browsing starts for a start in the desktop app: the folder holding the app's projects on this computer
+    /// (`DesktopStart.projectsFolder`), worked out when the computer or the launcher changes, not as the sheet draws.
+    @State private var desktopProjects = ""
     @State private var launcher = ""
     @State private var unifiedModels = false
     @State private var defaultLauncher = ""
@@ -79,6 +91,8 @@ struct NewChatView: View {
     @State private var worktreeBranch = ""
     /// Photos and files for the first message (#2321), and the pickers that add them.
     @State private var attachments = NewAgentAttachments()
+    /// The forwarded pictures are attached once, not again each time the form appears.
+    @State private var forwardedAttached = false
     @State private var photoPicks: [PhotosPickerItem] = []
     @State private var showPhotos = false
     @State private var showCamera = false
@@ -121,6 +135,14 @@ struct NewChatView: View {
     /// The launcher runs Codex: it starts with its first message (Codex makes the thread then) and the start waits for it.
     private var codex: Bool { launchers.first(where: { $0.name == runLauncher })?.isCodex == true }
 
+    /// A Codex this computer opens only with its first message (an older computer); a newer one opens it waiting for
+    /// one, sent later here or typed in its terminal (docs/integrations/codex.md「Starting without a first message」).
+    private var codexNeedsFirst: Bool { launchers.first(where: { $0.name == runLauncher })?.needsFirstMessage == true }
+    /// The launcher that will run starts the session in Claude's desktop app (#5480).
+    private var desktopStart: Bool { launchers.first(where: { $0.name == runLauncher })?.startsInDesktopApp == true }
+    /// That start goes to the app's scratch folder: no folder picked here (nor a space's).
+    private var desktopScratch: Bool { desktopStart && !cwdPicked && targetPreset == nil }
+
     /// The list for `runLauncher`; nil: none to pick (not loaded, an older hub).
     private var models: LauncherModels? { modelList.list }
     private var modelsLoading: Bool { modelList.loading }
@@ -161,17 +183,20 @@ struct NewChatView: View {
     /// Why this computer can't start with it (its Claude Code is known to be too old); nil when it can.
     private var ultracodeBlocked: String? { ultracodeShown ? Ultracode.startBlocked(claudeVersion: machine?.claudeVersion) : nil }
 
-    private var promptHint: String { codex ? String(localized: "What should Codex do? (Required: Codex starts a session only after the first message)")
-                                       : String(localized: "What should Claude do? (Optional)") }
+    private var promptHint: String {
+        if codexNeedsFirst { return String(localized: "What should Codex do? (Required: Codex starts a session only after the first message)") }
+        if codex { return String(localized: "What should Codex do? (Optional: you can also send it later, here or in its terminal)") }
+        return String(localized: "What should Claude do? (Optional)")
+    }
 
     /// Nothing missing for Start Chat, and the machine's own launchers and directories are in.
     private var ready: Bool {
-        machine?.online == true && defaultsFor == machineID && !cwd.isEmpty && (!launcher.isEmpty || unifiedModels)
+        machine?.online == true && defaultsFor == machineID && (!cwd.isEmpty || desktopScratch) && (!launcher.isEmpty || unifiedModels)
             && !codexNeedsMessage && attachmentsHold == nil
     }
 
     private var codexNeedsMessage: Bool {
-        codex && contextBlock == nil && prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        codexNeedsFirst && contextBlock == nil && prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// What the attachments hold the start back for (a Codex launcher, uploads still going); nil: nothing.
@@ -193,7 +218,7 @@ struct NewChatView: View {
         }
         // Until this machine's launchers and directories are in, cwd and launcher are not its own yet.
         guard defaultsFor == machineID else { return nil }
-        if cwd.isEmpty { return String(localized: "Choose a directory first") }
+        if cwd.isEmpty && !desktopScratch { return String(localized: "Choose a directory first") }
         if launcher.isEmpty && !unifiedModels { return launchers.isEmpty ? String(localized: "This computer has no launchers") : String(localized: "Choose a launcher first") }
         if codexNeedsMessage { return String(localized: "Codex needs a first message") }
         return attachmentsHold
@@ -255,7 +280,7 @@ struct NewChatView: View {
                         NavigationLink {
                             WorkspacePicker(workspaces: workspaceChoices, selectedID: pickedWorkspace?.sourceID, allowDirectory: true) { picked in
                                 pickedWorkspace = picked
-                                if let picked { cwd = picked.cwd }
+                                if let picked { cwd = picked.cwd; cwdPicked = true }
                             }
                         } label: {
                             LabeledContent(String(localized: "workspace.target", defaultValue: "Worktree"),
@@ -273,28 +298,45 @@ struct NewChatView: View {
                 if pickedWorkspace == nil {
                 Section {
                     NavigationLink {
-                        DirectoryBrowser(ref: ref, start: cwd.isEmpty ? "" : cwd) { picked in cwd = picked }
+                        DirectoryBrowser(ref: ref, start: desktopScratch ? desktopProjects : cwd, newFolder: desktopStart) { picked in
+                            cwd = picked
+                            cwdPicked = true
+                        }
                     } label: {
                         HStack {
                             ThemedIcon(Theme.Icon.folderFilled).foregroundStyle(Theme.accent)
                             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                                Text(cwd.isEmpty ? String(localized: "Choose Directory") : (cwd as NSString).lastPathComponent).font(Theme.Font.heading)
-                                if !cwd.isEmpty {
-                                    Text(Fmt.path(cwd, home: machine?.home)).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                                if desktopScratch {
+                                    Text("Temporary Session").font(Theme.Font.heading)
+                                    Text(codex ? String(localized: "Among the Codex App's chats in no project") : String(localized: "Grouped together in the Claude app's sidebar"))
+                                        .font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
+                                } else {
+                                    Text(cwd.isEmpty ? String(localized: "Choose Directory") : (cwd as NSString).lastPathComponent).font(Theme.Font.heading)
+                                    if !cwd.isEmpty {
+                                        Text(Fmt.path(cwd, home: machine?.home)).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                                    }
                                 }
                             }
                         }
                     }
                     .accessibilityIdentifier("newChat.directory")
+                    if desktopStart, !desktopScratch, targetPreset == nil {
+                        Button {
+                            cwdPicked = false
+                            Haptics.tap()
+                        } label: { Label("Use a Temporary Session", systemImage: Theme.Icon.temporarySession) }
+                        .accessibilityIdentifier("newChat.temporarySession")
+                    }
                     if !recent.isEmpty {
                         ForEach(recent.prefix(6)) { r in
                             Button {
                                 cwd = r.path
+                                cwdPicked = true
                                 Haptics.tap()
                             } label: {
                                 HStack {
-                                    ThemedIcon(cwd == r.path ? Theme.Icon.successFilled : Theme.Icon.recent)
-                                        .foregroundStyle(cwd == r.path ? Theme.accent : .secondary)
+                                    ThemedIcon(cwd == r.path && !desktopScratch ? Theme.Icon.successFilled : Theme.Icon.recent)
+                                        .foregroundStyle(cwd == r.path && !desktopScratch ? Theme.accent : .secondary)
                                     VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                                         Text(r.name).foregroundStyle(Color.primary)
                                         Text(Fmt.path((r.path as NSString).deletingLastPathComponent, home: machine?.home))
@@ -306,8 +348,14 @@ struct NewChatView: View {
                             }
                         }
                     }
-                } header: { Text("Folder [Task Views 52daa7]") }
-                if let repo, !repo.path.isEmpty {
+                } header: { Text("Folder [Task Views 52daa7]") } footer: {
+                    if desktopStart && codex {
+                        Text("Starts in the Codex App. With no folder it goes where the App keeps chats in no project; a new folder is made when it starts.")
+                    } else if desktopStart {
+                        Text("Starts in Claude's desktop app. With no folder it goes to one temporary folder beside the app's projects; a new folder is made when it starts.")
+                    }
+                }
+                if let repo, !repo.path.isEmpty, !desktopScratch {
                     NewAgentWorktreeSection(repo: repo, on: $inWorktree, branch: $worktreeBranch,
                                             suggested: AgentWorktree.branch(nameHint: worktreeNameHint), home: machine?.home)
                 }
@@ -369,6 +417,16 @@ struct NewChatView: View {
                 }
 
                 Section {
+                    if forwarded.count == 1, let one = forwarded.first {
+                        QuoteCard(heading: one.quoteHeading, icon: forwardedIcon, meta: ForwardMessage.meta(one),
+                                  summary: one.forwardSummary, lines: QuoteBlock.forwardLines, tint: Theme.accent, ink: .secondary) {}
+                            .accessibilityIdentifier("newChat.forward")
+                    } else if !forwarded.isEmpty {
+                        QuoteCard(heading: ForwardMessage.groupHeading(forwarded), icon: Theme.Icon.forwardMessage,
+                                  meta: forwarded[0].extra?["machine"], summary: forwarded.map(ForwardMessage.line).joined(separator: "\n"),
+                                  lines: QuoteBlock.forwardLines, tint: Theme.accent, ink: .secondary) {}
+                            .accessibilityIdentifier("newChat.forward")
+                    }
                     promptField
                         .focused($promptFocused)
                         .accessibilityIdentifier("newChat.prompt")
@@ -459,6 +517,9 @@ struct NewChatView: View {
                 .padding(.bottom, Theme.Space.s)
             }
             .task(id: machineID) { await loadMachine() }
+            .task(id: "\(machineID)|\(desktopStart)|\(codex)") {
+                desktopProjects = desktopStart ? DesktopStart.projectsFolder(model.sessionsByMachine[ref] ?? [], codex: codex) ?? "" : ""
+            }
             .task(id: machineID) { await workspaceCatalog.refresh([ref.group]) { model.api($0) } }
             // A provider added from a grayed-out launcher's help (Add Provider): this computer's list again.
             .onChange(of: model.launchersRevision) { _, _ in Task { await loadMachine() } }
@@ -484,6 +545,12 @@ struct NewChatView: View {
             }
             .onAppear {
                 if prompt.isEmpty { prompt = initialPrompt }
+                if !forwardedAttached {
+                    forwardedAttached = true
+                    for img in forwardedImages.prefix(MessagePhotos.limit) {
+                        if let p = MessagePhotos.payload(img) { attachments.images.append(p) }
+                    }
+                }
                 if let preset { machineID = preset.machineID; cwd = preset.cwd } else { pickDefaultMachine() }
             }
             .onChange(of: model.machines) { _, _ in if preset == nil { pickDefaultMachine() } }
@@ -520,6 +587,11 @@ struct NewChatView: View {
                     attachments.upload([url], to: ref, model: model)
                 }
             }
+            // `-showNewAgentPrompt YES`: once this computer's launchers are in, First Message scrolled into view and
+            // focused, for screenshots of its hint (#4961).
+            .onChange(of: defaultsFor) { _, now in
+                if !now.isEmpty, UserDefaults.standard.bool(forKey: "showNewAgentPrompt") { promptRequests += 1 }
+            }
             #endif
             .interactiveDismissDisabled(starting)
             // A list makes only the rows on screen: First Message is scrolled into view before it can take the focus.
@@ -538,6 +610,7 @@ struct NewChatView: View {
                 pickedWorkspace = HostWorkspace(machineID: source.machineID, source: source.source, sourceID: made.workspaceID,
                                                 title: made.branch, cwd: made.path, parentSourceID: made.parentWorkspaceID, group: source.group)
                 cwd = made.path
+                cwdPicked = true
                 childSource = nil
             }
         }
@@ -556,8 +629,9 @@ struct NewChatView: View {
                        addsProvider: ref.group == (model.hub?.group ?? ""))
     }
 
-    /// The machines offered: this hub's when a todo is handed over (`onlyGroup`), else all of them.
-    private var machinesShown: [Machine] { Self.offered(model.machines, onlyGroup: onlyGroup) }
+    /// The machines offered: the current assistant's (`AppModel.scopedMachines`), and of them this hub's when a todo is
+    /// handed over (`onlyGroup`).
+    private var machinesShown: [Machine] { Self.offered(model.scopedMachines(), onlyGroup: onlyGroup) }
 
     /// Not one waiting to be confirmed (the hub refuses it, 409 machine_pending): it is not the user's yet.
     static func offered(_ machines: [Machine], onlyGroup: String?) -> [Machine] {
@@ -566,6 +640,9 @@ struct NewChatView: View {
 
     /// The remembered machine belongs to another hub than the one the todo is on.
     private var machineOutsideGroup: Bool { onlyGroup.map { machine?.group != $0 } ?? false }
+
+    /// The remembered machine is another assistant's than the one whose computers are offered.
+    private var machineOutsideScope: Bool { machine.map { !model.assistantScope.has($0.manager, group: $0.group) } ?? false }
 
     /// The setups that started an Agent here before (#2134), one store for the app.
     private var recents: RecentSetupsStore { .shared }
@@ -599,6 +676,7 @@ struct NewChatView: View {
         pendingFill = nil
         pickedWorkspace = nil
         cwd = fill.cwd
+        cwdPicked = !fill.cwd.isEmpty
         launcher = fill.launcher
         if let m = fill.mode { mode = m }
         if let e = fill.effort { effort = e }
@@ -630,7 +708,7 @@ struct NewChatView: View {
     /// The setup a start records (#2134): the fields as they are, the model the start sends ("" for the default).
     private func recentSetup(agent: String) -> RecentSetup {
         let claude = agent == "claude"
-        return RecentSetup(machine: machineID, cwd: cwd, launcher: launcher, model: sentModel ?? "", agentType: agent,
+        return RecentSetup(machine: machineID, cwd: desktopScratch ? "" : cwd, launcher: launcher, model: sentModel ?? "", agentType: agent,
                            mode: claude ? mode : "", effort: claude ? effort : "", at: "")
     }
 
@@ -642,7 +720,7 @@ struct NewChatView: View {
 
     /// Remember the last machine, but fall back to the first online one (machines may arrive after the sheet opens).
     private func pickDefaultMachine() {
-        if machine == nil || machine?.online == false || machine?.isPending == true || machineOutsideGroup,
+        if machine == nil || machine?.online == false || machine?.isPending == true || machineOutsideGroup || machineOutsideScope,
            let m = machinesShown.first(where: \.online) ?? machinesShown.first {
             machineID = m.ref.path
         }
@@ -773,6 +851,7 @@ struct NewChatView: View {
         loading = false
         error = nil
         if preset == nil { cwd = "" }
+        cwdPicked = false
         if purposeGroup != ref.group {
             unifiedModels = false
             defaultLauncher = ""
@@ -898,8 +977,8 @@ struct NewChatView: View {
         defer { starting = false }
         let setup = recentSetup(agent: codex ? "codex" : startAgent)
         // In a worktree of its own (#6115): made first; a failure says why, and nothing starts.
-        var dir = cwd
-        if inWorktree, targetPreset == nil, repo?.path.isEmpty == false {
+        var dir = desktopScratch ? "" : cwd // the desktop app's scratch folder, which the computer picks (#5480)
+        if inWorktree, !desktopScratch, targetPreset == nil, repo?.path.isEmpty == false {
             do {
                 dir = try await api.addAgentWorktree(machine: ref.id, cwd: cwd, nameHint: worktreeNameHint, branch: worktreeBranch).path
             } catch {
@@ -915,7 +994,8 @@ struct NewChatView: View {
             let outgoing = contextBlock.map { p.isEmpty ? $0 : "\($0)\n\n\(p)" } ?? p
             if codex {
                 // Codex picks its thread's id once it has the first message: it goes with the start, which answers
-                // with that thread (one session, already working on it).
+                // with that thread (one session, already working on it). With none, the start answers with Codex
+                // waiting for it (Session.awaitingFirstMessage).
                 let s = try await api.start(.init(machineID: ref.id, cwd: dir, launcher: launcher, prompt: contextBlock == nil ? prompt : outgoing,
                                                   workspaceID: targetPreset?.workspaceID, host: targetPreset?.host, model: sentModel, tabName: name.isEmpty ? nil : name,
                                                   nameHint: nameHint ?? (p.isEmpty ? nil : p), todoID: todoID))
@@ -1120,7 +1200,11 @@ struct DirectoryBrowser: View {
     @Environment(\.dismiss) private var dismiss
     var ref: MachineRef
     var start: String
+    /// New Folder… names a folder the computer makes when the session starts (a start in Claude's desktop app, #5480).
+    var newFolder = false
     var onPick: (String) -> Void
+    @State private var naming = false
+    @State private var newName = ""
     @State private var list: DirList?
     @State private var path = ""
     @State private var draft = ""
@@ -1157,6 +1241,13 @@ struct DirectoryBrowser: View {
                         Label("Use “\((list.path as NSString).lastPathComponent)”", systemImage: Theme.Icon.successFilled)
                             .font(Theme.Font.heading)
                             .lineLimit(1)
+                    }
+                    if newFolder {
+                        Button {
+                            newName = ""
+                            naming = true
+                        } label: { Label("New Folder…", systemImage: Theme.Icon.newFolder) }
+                        .accessibilityIdentifier("dirBrowser.newFolder")
                     }
                 } footer: { Text("Edit the path above and press Return to go there; ~ is your home folder") }
 
@@ -1200,6 +1291,21 @@ struct DirectoryBrowser: View {
         .navigationTitle((path as NSString).lastPathComponent.isEmpty ? String(localized: "Folder [Task Views 52daa7]") : (path as NSString).lastPathComponent)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load(start) }
+        .alert("New Folder", isPresented: $naming) {
+            TextField("Folder Name", text: $newName)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Use") {
+                if let list, let made = DesktopStart.newFolder(newName, in: list.path) {
+                    onPick(made)
+                    dismiss()
+                }
+            }
+            .disabled(list.flatMap { DesktopStart.newFolder(newName, in: $0.path) } == nil)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Made in “\(((list?.path ?? "") as NSString).lastPathComponent)” when the session starts.")
+        }
     }
 
     private func go() {

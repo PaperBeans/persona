@@ -69,7 +69,7 @@ fun MessageContextGroup(
         val spoken = stringResource(R.string.designsystem_with_state, summary, stringResource(if (open) R.string.designsystem_expanded else R.string.designsystem_collapsed))
         Row(
             Modifier.fillMaxWidth(0.86f).wrapContentWidth(if (alignEnd) Alignment.End else Alignment.Start)
-                .heightIn(min = 36.dp).clip(PersonaTheme.shapes.controlShape)
+                .heightIn(min = 36.dp.row).clip(PersonaTheme.shapes.controlShape)
                 .clickable(role = Role.Button) { open = !open }
                 .semantics { contentDescription = spoken }
                 .padding(horizontal = Tokens.Space.s),
@@ -108,7 +108,7 @@ private fun ContextEntry(context: MessageContext, id: String, onOpen: (String) -
     val spoken = stringResource(R.string.designsystem_with_state, label, stringResource(if (open) R.string.designsystem_expanded else R.string.designsystem_collapsed))
     Column {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable(role = Role.Button) { open = !open }
+            Modifier.fillMaxWidth().heightIn(min = 40.dp.row).clickable(role = Role.Button) { open = !open }
                 .semantics { contentDescription = spoken }
                 .padding(horizontal = Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,

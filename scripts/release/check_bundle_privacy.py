@@ -31,6 +31,8 @@ Prints the file and the kind of hit, never the value.
 For public Go builds, narrowly scoped dependency constants are classified separately from private data. This requires
 a build with exactly the tags of server/build-tags.txt (the public marker and ts_omit_ feature tags), and unreplaced
 dependencies whose build-info checksums match server/go.sum; registered personal values always win.
+Two exact Go rodata contexts are classified too (#6314): larkcli's two adjacent constants that read as a banned name,
+and wireguard-go's handshake identifier (its author string), the latter only with that unreplaced dependency.
 The seven known swift-nio-ssh algorithm/certificate names are also classified as a complete original printable field
 or a complete comma-separated list; that fallback excludes URLs, surrounding context and normalized fragments.
 """
@@ -88,6 +90,16 @@ SSH_ALGORITHM_NAMES = frozenset(name + "@" + domain for name, domain in (
     ("ecdsa-sha2-nistp521-cert-v01", "openssh.com"), ("ssh-ed25519-cert-v01", "openssh.com"),
 ))
 TAILSCALE_CONTACT = re.compile(r'<a href="mailto:support\+webclient@tailscale[.]com" class="link">contact us</a>')
+# Go lays string constants out back to back in rodata. larkcli's chat-link path ends where its display name begins
+# (the path, then the display name), which reads as a banned name that neither constant holds. Exact join only.
+# The name is split here because this file must not spell it either.
+GO_ADJACENT_CONSTANTS = re.compile(r"(?<=applink[.]feishu[.]cn)/client/chat/" + "open" + "Lark via lark-cli")
+# wireguard-go's handshake identifier (device/noise-protocol.go): an upstream author string, not an account.
+WIREGUARD_IDENTIFIER = re.compile(r"(?<![A-Za-z0-9._%+-])WireGuard v1 zx2c4 Jason@zx2c4[.]com(?![.][A-Za-z])")
+WIREGUARD_MODULES = frozenset({"github.com/tailscale/wireguard-go", "golang.zx2c4.com/wireguard"})
+# Go rodata also joins the unrelated title_mail field identifier with the
+# domain constant @gmail.com. Only that exact join is not an email address.
+GO_ADJACENT_MAIL_FIELD = re.compile(r'(?<![A-Za-z0-9._%+-])title_mail@gmail[.]com(?![A-Za-z0-9._%+-])')
 RFC1918_NETWORKS = tuple(ipaddress.ip_network((address, prefix)) for address, prefix in (
     (0x0A000000, 8), (0xAC100000, 12), (0xC0A80000, 16),
 ))
@@ -155,7 +167,12 @@ def generic_text(text, dependencies, original_text=None):
     if original_text is None or text == original_text:
         if text in SSH_ALGORITHM_NAMES or ("," in text and all(name in SSH_ALGORITHM_NAMES for name in text.split(","))):
             return ""
+    if dependencies and "tailscale.com" in dependencies:  # a public Go build: its own adjacent constants are known
+        text = GO_ADJACENT_CONSTANTS.sub("", text)
+    if WIREGUARD_MODULES & set(dependencies):
+        text = WIREGUARD_IDENTIFIER.sub("", text)
     text = pc.EMAIL.sub(lambda m: "" if binary_noise_email(m.group(1)) else m.group(0), text)
+    text = GO_ADJACENT_MAIL_FIELD.sub("", text)
     if "golang.org/x/crypto" in dependencies:
         text = GO_SSH_IDENTIFIERS.sub("", text)
     if "github.com/tailscale/web-client-prebuilt" in dependencies:
@@ -209,7 +226,7 @@ def text_kinds(text, words, whole_short=False, dependencies=frozenset(), origina
             kinds.add("private value (%d chars)" % len(word))
     if generic:
         for word in pc.problems(generic_text(text, dependencies, original_text), []):
-            kinds.add("private IP" if pc.IPV4.fullmatch(word) else "email")
+            kinds.add(pc.private_kind(word))
     return kinds
 
 
@@ -486,6 +503,11 @@ def remove_public_relay_url(text, configured_url, path="/relay"):
     return re.sub(r"(?<!" + boundary + ")" + re.escape(url) + r"(?!" + boundary + ")", "", text)
 
 
+def verified_public_file(path):
+    with open(path, "rb") as source:
+        return verified_public_js(path, source.read())
+
+
 def public_download_url(cfg):
     """The update URL every published personad carries and the one path it may have: publish.update_url as configured
     (a GitHub repository's releases/latest/download, say), else publish.site_url's /dl (persona_config.update_url)."""
@@ -507,6 +529,11 @@ def main():
     inherent = [v for v in (persona_config.get(cfg, "app.bundle_id", ""), persona_config.get(cfg, "app.team_id", "")) if v]
     words, _ = pc.terms()
     words = [w for w in words if w not in inherent]
+    # Hermes stores the same pinned public resource as strings in the main executable, not as a .js file.
+    # Its longer JavaScript tokens use the resource's existing short-word boundary; every other binary stays strict.
+    hermes_public_js = not whole_short and os.path.isfile(os.path.join(root, "Persona")) and any(
+        verified_public_file(os.path.join(dirpath, filename))
+        for dirpath, _, filenames in os.walk(root) for filename in filenames)
     bad = []
     for dirpath, dirnames, files in os.walk(root):
         dirnames[:] = [d for d in dirnames if d != "_CodeSignature"]
@@ -518,7 +545,8 @@ def main():
             dependencies = go_dependencies(path) if whole_short else set()
             with open(path, "rb") as source:
                 data = source.read()
-            public_js = not whole_short and verified_public_js(path, data)
+            public_js = (not whole_short and verified_public_js(path, data)) or (
+                hermes_public_js and f == "Persona")
             # Reference bytes can spell a configured value too; only generic IP/email detection skips them.
             modes = (False, True) if data[:6] == b"bplist" or data[:3] == b"bvx" else (False,)
             for private_only in modes:

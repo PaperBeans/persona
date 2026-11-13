@@ -75,12 +75,17 @@ class HttpTasksApi internal constructor(
 
     // A new to-do is the current assistant's (the client names it on `POST todos`), or the one the caller named for it
     // (a RequestManager: an agent's own assistant when it is linked at once; "" the default's).
-    override suspend fun createTodo(title: String, notes: String): Todo {
+    override suspend fun createTodo(title: String, notes: String, due: TodoDue?): Todo {
         val named = kotlinx.coroutines.currentCoroutineContext()[persona.core.contracts.api.RequestManager]
         val owner = if (named != null) named.id.ifEmpty { null } else AssistantManagerChoice.current.value.manager
         val made: Todo = JsonCodec.decodeFromJsonElement(call(path("todos"), "POST", buildJsonObject {
             put("title", title)
             put("notes", notes)
+            when (due) {
+                is TodoDue.At -> put("due_at", due.at.toString())
+                is TodoDue.Day -> put("due_date", due.day.toString())
+                null -> Unit
+            }
         })["todo"] ?: error("no todo in the answer"))
         return (if (made.manager == null) made.copy(manager = owner) else made)
             .also { AssistantManagerChoice.noteItem(listOf("todos", it.id), it.manager) }
@@ -92,6 +97,10 @@ class HttpTasksApi internal constructor(
             notes?.let { put("notes", it) }
             done?.let { put("done", it) }
         })["todo"] ?: error("no todo in the answer")))
+
+    override suspend fun setTodoSeen(id: String, seen: Boolean): Todo =
+        stamped(JsonCodec.decodeFromJsonElement(call(path("todos", id, "seen"), if (seen) "PUT" else "DELETE",
+            if (seen) JsonObject(emptyMap()) else null)["todo"] ?: error("no todo in the answer")))
 
     override suspend fun setTodoPlan(id: String, plan: persona.core.contracts.TodoPlan): Todo =
         stamped(JsonCodec.decodeFromJsonElement(call(path("todos", id), "PATCH", todoPlanBody(plan))["todo"] ?: error("no todo in the answer")))
@@ -206,6 +215,13 @@ class HttpTasksApi internal constructor(
 
     override suspend fun markLaterHandled(questionId: String) {
         call(path("later", questionId, "handled"), "POST", JsonObject(emptyMap()))
+    }
+
+    override suspend fun ruleAlways(suggestionId: String): persona.core.contracts.RuleSuggestionMade =
+        JsonCodec.decodeFromJsonElement(call(path("assistant", "rule-suggestions", suggestionId, "always"), "POST", JsonObject(emptyMap())))
+
+    override suspend fun ruleNotNow(suggestionId: String) {
+        call(path("assistant", "rule-suggestions", suggestionId, "not-now"), "POST", JsonObject(emptyMap()))
     }
 
     override suspend fun removeTask(todoId: String) {

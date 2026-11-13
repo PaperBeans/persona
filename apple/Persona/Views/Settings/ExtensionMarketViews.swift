@@ -148,14 +148,29 @@ struct ExtensionMarketView: View {
 private struct MarketExtensionRow: View {
     var item: ExtensionCatalogItem
     var showsMarket: Bool
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        HStack(alignment: .top, spacing: Theme.Space.m) {
+            ExtensionLogo(url: item.iconURL)
+            content
+        }
+        .padding(.vertical, Theme.Space.xxs)
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            HStack(spacing: Theme.Space.s) {
-                Text(item.name).font(Theme.Font.bodyStrong).lineLimit(1)
-                Text(item.version).font(Theme.Font.label.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
-                Spacer(minLength: Theme.Space.s)
+            if typeSize.isAccessibilitySize {
+                Text(item.name).font(Theme.Font.bodyStrong).fixedSize(horizontal: false, vertical: true)
+                Text(item.version).font(Theme.Font.label.monospacedDigit()).foregroundStyle(.secondary)
                 MarketStateChip(item: item)
+            } else {
+                HStack(spacing: Theme.Space.s) {
+                    Text(item.name).font(Theme.Font.bodyStrong).lineLimit(1)
+                    Text(item.version).font(Theme.Font.label.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: Theme.Space.s)
+                    MarketStateChip(item: item)
+                }
             }
             if let d = item.description, !d.isEmpty {
                 Text(d).font(Theme.Font.secondary).foregroundStyle(.secondary).lineLimit(2)
@@ -168,20 +183,23 @@ private struct MarketExtensionRow: View {
                     }
                 }
             }
+            if let downloads = item.downloads, downloads >= 0 {
+                Text("Downloads: \(downloads)").font(Theme.Font.label).foregroundStyle(.secondary)
+            }
             if let p = item.problem, !p.isEmpty {
                 Text(p).font(Theme.Font.label).foregroundStyle(Theme.danger).lineLimit(2)
             }
         }
-        .padding(.vertical, Theme.Space.xxs)
     }
 }
 
 /// Available / Update / Installed / Can't Install, in its tone.
 private struct MarketStateChip: View {
+    @Environment(AppModel.self) private var app
     var item: ExtensionCatalogItem
 
     var body: some View {
-        if let op = ExtensionOperations.shared.operation(for: item.pluginID, market: item.market), let text = ExtensionOperationText.chip(op) {
+        if let op = ExtensionOperations.shared.operation(for: item.pluginID, market: item.market, manager: app.assistantManagerID), let text = ExtensionOperationText.chip(op) {
             Chip(text: text, look: .tint(op.state == .failed ? Theme.danger : Theme.accent))
         } else {
             stateChip
@@ -215,7 +233,7 @@ struct MarketExtensionDetailView: View {
             if let p = page.item {
                 header(p)
                 if let op = page.operation {
-                    ExtensionOperationSection(operation: op, name: p.name) {
+                    ExtensionOperationSection(operation: op, name: p.name, partial: page.partialLines(for: op)) {
                         Task { if await page.retry() { done(op.kind) } }
                     } review: {
                         Task {
@@ -269,7 +287,7 @@ struct MarketExtensionDetailView: View {
         #endif
         // Closed without Install: the operation waiting on this preview is canceled.
         .sheet(item: $page.preview, onDismiss: { page.declined() }) { pv in
-            ExtensionInstallSheet(preview: pv, name: page.item?.name ?? pv.manifest.name ?? pv.manifest.id) {
+            ExtensionInstallSheet(preview: pv, name: page.item?.name ?? pv.manifest.name ?? pv.manifest.id, installedNames: page.memberNames) {
                 // The sheet closes at once; the steps show on this page (and stay if it is left). The operation is
                 // taken before it closes, so its onDismiss does not cancel what was just agreed to.
                 let kind: ExtensionOperation.Kind = pv.upgrade == true ? .upgrade : .install
@@ -289,16 +307,16 @@ struct MarketExtensionDetailView: View {
             await ops
         }
         // One started earlier (the page left and opened again) ends while this page is up: read it again.
-        .onChange(of: ExtensionOperations.shared.operation(for: page.pluginID, market: page.market)?.state) { old, new in
+        .onChange(of: ExtensionOperations.shared.operation(for: page.pluginID, market: page.market, manager: page.manager)?.state) { old, new in
             guard old == .running, new == .succeeded else { return }
             Task { await page.load() }
             // Installed and waiting for a sign-in (#4507): its page, with the sign-in started.
-            if ExtensionOperations.shared.operation(for: page.pluginID, market: page.market)?.needsSignIn == true {
-                ExtensionAuthStore.shared.openSignIn = page.pluginID
+            if ExtensionOperations.shared.operation(for: page.pluginID, market: page.market, manager: page.manager)?.needsSignIn == true {
+                if page.manager == nil { ExtensionAuthStore.shared.openSignIn = page.pluginID }
                 openSignIn = true
             }
         }
-        .navigationDestination(isPresented: $openSignIn) { ExtensionDetailView(id: page.pluginID) }
+        .navigationDestination(isPresented: $openSignIn) { ExtensionDetailView(id: page.pluginID, manager: page.manager) }
     }
 
     private func done(_ kind: ExtensionOperation.Kind) {
@@ -315,12 +333,14 @@ struct MarketExtensionDetailView: View {
             // left "Ex…" (#4058).
             let large = typeSize.isAccessibilitySize
             HStack(spacing: Theme.Space.m) {
-                Image(systemName: Theme.Icon.plugins).resizable().scaledToFit().foregroundStyle(Theme.accent)
-                    .scaledFrame(width: Theme.Size.wellM, height: Theme.Size.wellM)
+                ExtensionLogo(url: p.iconURL)
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                     Text(p.name).font(Theme.Font.heading).lineLimit(large ? nil : 1)
                     Text([p.version, p.publisher, p.marketName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(large ? nil : 1)
+                    if let downloads = p.downloads, downloads >= 0 {
+                        Text("Downloads: \(downloads)").font(Theme.Font.label).foregroundStyle(.secondary)
+                    }
                     if large { MarketStateChip(item: p) }
                 }
                 Spacer(minLength: Theme.Space.s)
@@ -351,7 +371,7 @@ struct MarketExtensionDetailView: View {
                 .font(Theme.Font.label)
             }
             if p.installed != nil {
-                NavigationLink(value: SettingsPage.plugin(p.pluginID)) {
+                NavigationLink(value: SettingsPage.plugin(p.pluginID, manager: page.manager)) {
                     Label { Text("Open Extension Settings").lineLimit(1) } icon: { ThemedIcon(Theme.Icon.settings) }
                 }
                 .accessibilityIdentifier("market-open-plugin")
@@ -366,17 +386,17 @@ struct MarketExtensionDetailView: View {
                 .confirmationDialog("Uninstall “\(p.name)”?", isPresented: $confirmRemove, titleVisibility: .visible) {
                     Button(role: .destructive) {
                         Task { if await page.uninstall() { done(.uninstall) } }
-                    } label: { Text(page.isPack ? String(localized: "Uninstall Pack Only") : String(localized: "Uninstall")).lineLimit(1) }
+                    } label: { Text(page.isPack ? String(localized: "Pack Only") : String(localized: "Uninstall")).lineLimit(1) }
                     .accessibilityIdentifier("market-uninstall-confirm")
                     if page.isPack {
                         Button(role: .destructive) {
                             Task { if await page.uninstall(members: true) { done(.uninstall) } }
-                        } label: { Text("Uninstall with Members").lineLimit(1) }
+                        } label: { Text("Everything [Extension Market Views 8fc6ce]").lineLimit(1) }
                         .accessibilityIdentifier("market-uninstall-members")
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text(page.isPack ? String(localized: "Uninstalling only the pack keeps its members. Uninstalling with members deletes their settings and data.") : String(localized: "Its settings and data are deleted too. You can install it again from the market later."))
+                    Text(page.uninstallMessage)
                 }
             }
         } footer: {
@@ -458,9 +478,31 @@ private struct PermissionLine: View {
 
 /// The preview to agree to: the package downloaded and checked, what it may do (for an upgrade, what it asks for in
 /// addition first), then Install / Update.
+/// A pack member's row (#4122): its name, and under it its id beside the version and market (only the version and
+/// market under the id of one not installed). The lines wrap at the accessibility sizes.
+struct ExtensionPackMemberRow: View {
+    var line: ExtensionPackMemberLine
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let large = typeSize.isAccessibilitySize
+        VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+            Text(line.title).font(Theme.Font.body).lineLimit(large ? nil : 1)
+            if let detail = line.detail {
+                Text(detail).font(Theme.Font.label).foregroundStyle(.secondary)
+                    .lineLimit(large ? nil : 1).truncationMode(.middle)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 struct ExtensionInstallSheet: View {
     var preview: ExtensionPreview
     var name: String
+    /// The installed extensions' names by id, for a pack's members (#4122); the ones installed with it are named by
+    /// their own manifests.
+    var installedNames: [String: String] = [:]
     var confirm: () async -> Bool
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
@@ -488,9 +530,10 @@ struct ExtensionInstallSheet: View {
                     } header: { SettingsHeading(String(localized: "Dependencies")) }
                 }
                 if let members = preview.manifest.extensionPack, !members.isEmpty {
+                    let names = ExtensionPackMemberLine.names(installed: installedNames, preview: preview)
                     Section {
                         ForEach(members, id: \.id) { member in
-                            LabeledContent(member.id, value: member.version ?? "")
+                            ExtensionPackMemberRow(line: ExtensionPackMemberLine(member, name: names[member.id]))
                         }
                     } header: { SettingsHeading(String(localized: "Pack Members")) }
                 }

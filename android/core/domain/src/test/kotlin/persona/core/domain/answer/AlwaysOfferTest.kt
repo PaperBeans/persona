@@ -27,10 +27,25 @@ class AlwaysOfferTest {
             val edit = card.copy(toolName = tool, alwaysKeys = listOf("tool:Edit(//workspace/docs/**)"))
             assertEquals("这段对话中，这个目录里的所有文件编辑", edit.alwaysScopeDetail.zhAny())
         }
-        assertEquals("这段对话里对这个工具的所有调用", read.copy(alwaysKeys = null).alwaysScopeDetail.zhAny())
+        assertEquals("这段对话里的所有「Read」调用", read.copy(alwaysKeys = null).alwaysScopeDetail.zhAny())
         assertEquals("批准的范围在这段对话中持续有效", read.copy(alwaysKeys = listOf("lark:POST /conversations/*/messages")).alwaysScopeDetail.zhAny())
         assertEquals("Only this command", card.copy(agent = "codex", alwaysLabel = "Only this command").alwaysScopeDetail.zhAny())
         assertEquals(null, card.copy(agent = "codex").alwaysScopeDetail)
+    }
+
+    @Test fun genericToolScopeChoosesTheNameForEveryCall() {
+        val report = card.copy(
+            toolName = "mcp__persona__report_to_supervisor",
+            toolTitle = "Report to supervisor · Done", toolNameTitle = "Report to supervisor",
+        )
+        assertEquals("这段对话里的所有「Report to supervisor」调用", report.alwaysScopeDetail.zhAny())
+        assertEquals("这段对话里的所有「Report to supervisor · Done」调用",
+            report.copy(toolNameTitle = " ").alwaysScopeDetail.zhAny())
+        assertEquals("这段对话里的所有「Persona · report to supervisor」调用",
+            report.copy(toolTitle = " ", toolNameTitle = " ").alwaysScopeDetail.zhAny())
+        assertEquals("这段对话里的所有「工具」调用",
+            card.copy(toolName = null, toolTitle = " ", toolNameTitle = " ").alwaysScopeDetail.zhAny())
+        assertEquals("All Report to supervisor calls in this conversation", report.alwaysScopeDetail?.english())
     }
 
     @Test fun otherAgentsNeedTheirTuiToNameWhatItAllows() {

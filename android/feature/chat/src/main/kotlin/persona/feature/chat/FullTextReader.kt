@@ -144,13 +144,14 @@ internal fun ReaderEntry(text: String, title: String = stringResource(R.string.c
 }
 
 @Composable
-internal fun ToolReaderActions(input: String?, output: String?, onFullOutput: (() -> Unit)?) {
+internal fun ToolReaderActions(input: String?, output: String?, onFullOutput: (() -> Unit)?, rawInput: Boolean = true) {
     var opened by remember { mutableStateOf<Pair<String, String>?>(null) }
     val copy = rememberCopy()
     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-        val rawInput = stringResource(R.string.chat_reader_raw_input)
+        val rawInputLabel = stringResource(R.string.chat_reader_raw_input)
         val rawOutput = stringResource(R.string.chat_reader_raw_output)
-        JTextButton(rawInput, { opened = rawInput to input.orEmpty() }, enabled = input != null)
+        // The step draws iOS's inline Raw input toggle itself (`drawsRawInput`): no second button for it here.
+        if (rawInput) JTextButton(rawInputLabel, { opened = rawInputLabel to input.orEmpty() }, enabled = input != null)
         JTextButton(if (onFullOutput != null) stringResource(R.string.chat_reader_full_output) else rawOutput, { if (onFullOutput != null) onFullOutput() else opened = rawOutput to output.orEmpty() },
             enabled = output != null || onFullOutput != null)
         JTextButton(stringResource(R.string.chat_reader_copy_both), { copy(listOfNotNull(input, output).joinToString("\n\n"), null) },

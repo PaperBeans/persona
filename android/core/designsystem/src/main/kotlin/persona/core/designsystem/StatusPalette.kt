@@ -63,6 +63,12 @@ data class PersonaPalette(
         else StatusColors(Color(0xFF1D5FD6), Color(0xFF1C52BA), Color(0x1A1D5FD6)),
     val sourceTerminal: StatusColors = if (dark) StatusColors(Color(0xFFBEA3FF), Color(0xFFBEA3FF), Color(0x29BEA3FF))
         else StatusColors(Color(0xFF6A46C2), Color(0xFF6A46C2), Color(0x1A6A46C2)),
+    /**
+     * Waiting in the background (#4338 A5, A11; iOS `StatusPalette.backgroundWaiting`): an agent that works but only waits on
+     * background commands. Glass draws it lighter than Working (the generated `Tokens.Status.*.BackgroundWaiting`: Working's
+     * dot at 0.6, its words the secondary gray); Brief and Board keep Working's colors.
+     */
+    val backgroundWaiting: StatusColors = working,
     /** A fixed colour for [codeString] / [codeNumber] in place of the role (only the default look keeps its original ones). */
     val codeStringOverride: Color? = null,
     val codeNumberOverride: Color? = null,
@@ -86,6 +92,8 @@ data class PersonaPalette(
     /** Media overlays stay readable over a photograph/video, independent of the page's appearance. */
     val mediaBackdrop: Color get() = Color.Black
     val onMediaBackdrop: Color get() = Color.White
+    /** Transparent third-party logos keep their brand colors on a neutral light backing in either appearance. */
+    val catalogLogoBackground: Color get() = Tokens.System.Light.page
     /** Outside the circle an avatar crop keeps (New from photo, #2407): dimmed in every style and appearance, as iOS `Theme.Crop.outside`. */
     val cropOutside: Color get() = mediaBackdrop.copy(alpha = 0.5f)
     /** The crop circle's edge, as iOS `Theme.Crop.edge`. */
@@ -111,6 +119,10 @@ data class PersonaPalette(
         Status.Unknown, Status.Muted -> idle
         Status.Waiting -> working.copy(dot = working.dot.copy(alpha = 0.55f))
     }
+
+    /** An agent's colors (iOS `Session.stateTone`): [backgroundWaiting] for a working one that [waitsInBackground], else [status]'s. */
+    fun status(status: Status, waitsInBackground: Boolean): StatusColors =
+        if (waitsInBackground && status == Status.Working) backgroundWaiting else status(status)
 }
 
 internal object Palettes {
@@ -142,6 +154,7 @@ internal object Palettes {
         marker = Tokens.Semantic.Glass.Dark.accent.copy(alpha = 0.16f), onMarker = Tokens.Semantic.Glass.Dark.text,
         needsYou = StatusColors(Tokens.Status.Dark.NeedsYou.dot, Tokens.Status.Dark.NeedsYou.text, Tokens.Status.Dark.Offline.tint, Color.Black),
         working = StatusColors(Tokens.Status.Dark.Working.dot, Tokens.Status.Dark.Working.text, Tokens.Status.Dark.Offline.tint, Color.Black),
+        backgroundWaiting = StatusColors(Tokens.Status.Dark.BackgroundWaiting.dot, Tokens.Status.Dark.BackgroundWaiting.text, Tokens.Status.Dark.BackgroundWaiting.tint),
         done = StatusColors(Tokens.Status.Dark.Unread.dot, Tokens.Status.Dark.Unread.text, Tokens.Status.Dark.Offline.tint, Color.Black),
         idle = StatusColors(Tokens.Status.Dark.Idle.dot, Tokens.Status.Dark.Idle.text, Tokens.Status.Dark.Idle.tint),
         offline = StatusColors(Tokens.Status.Dark.Offline.dot, Tokens.Status.Dark.Offline.text, Tokens.Status.Dark.Offline.tint),
@@ -167,6 +180,7 @@ internal object Palettes {
         marker = Tokens.Semantic.Glass.Light.accent.copy(alpha = 0.12f), onMarker = Tokens.Semantic.Glass.Light.text,
         needsYou = StatusColors(Tokens.Status.Light.NeedsYou.dot, Tokens.Status.Light.NeedsYou.text, Tokens.Status.Light.Offline.tint, Color.Black),
         working = StatusColors(Tokens.Status.Light.Working.dot, Tokens.Status.Light.Working.text, Tokens.Status.Light.Offline.tint, Color.Black),
+        backgroundWaiting = StatusColors(Tokens.Status.Light.BackgroundWaiting.dot, Tokens.Status.Light.BackgroundWaiting.text, Tokens.Status.Light.BackgroundWaiting.tint),
         done = StatusColors(Tokens.Status.Light.Unread.dot, Tokens.Status.Light.Unread.text, Tokens.Status.Light.Offline.tint, Color.Black),
         idle = StatusColors(Tokens.Status.Light.Idle.dot, Tokens.Status.Light.Idle.text, Tokens.Status.Light.Idle.tint),
         offline = StatusColors(Tokens.Status.Light.Offline.dot, Tokens.Status.Light.Offline.text, Tokens.Status.Light.Offline.tint),

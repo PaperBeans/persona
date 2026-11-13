@@ -39,9 +39,14 @@
     <string name="chat_chrome_status_unconfirmed">要確認</string>
     <string name="chat_chrome_status_needs_you">対応待ち</string>
     <string name="chat_chrome_status_stopping">中断中</string>
+    <string name="chat_chrome_worked_minutes">%1$d分</string>
+    <string name="chat_chrome_worked_hours">%1$d時間%2$d分</string>
     <string name="chat_chrome_more">その他の操作</string>
     <string name="chat_chrome_actions_title">セッションの操作</string>
     <string name="chat_chrome_todo">ToDo · %1$s</string>
+    <string name="chat_chrome_terminal">ターミナル</string>
+    <string name="chat_chrome_resume_in_terminal">ターミナルで再開</string>
+    <string name="chat_chrome_resume_no_engine">%1$s ではターミナルエンジンが有効になっていません</string>
     <string name="chat_chrome_search">検索</string>
     <string name="chat_chrome_files">ファイル</string>
     <string name="chat_chrome_details">セッションの詳細</string>
@@ -137,11 +142,10 @@
     <string name="chat_full_text_failed">読み込めませんでした。タップして再試行</string>
     <string name="chat_full_text_open">全文を表示（%1$s）</string>
     <string name="chat_request_collapse_full">折りたたむ</string>
-    <string name="chat_request_list_title">対応待ちのリクエスト</string>
     <string name="chat_request_allow">許可</string>
     <string name="chat_request_deny">拒否</string>
     <string name="chat_request_always_allows">常に許可すると次を通します：%1$s</string>
-    <string name="chat_request_fields_elsewhere">このリクエストは許可する前に入力が必要です。Web または iPhone で許可してください。ここでは拒否のみできます。</string>
+    <string name="chat_request_fill_in_allow">入力して許可</string>
     <string name="chat_request_secret_run_commands">順に実行するコマンド</string>
     <string name="chat_request_secret_run_password">パスワード</string>
     <string name="chat_request_secret_run_note">1回だけ使い、保存しません。アシスタントにも見えません。</string>
@@ -179,6 +183,17 @@
     <string name="chat_screen_command_ids">リクエスト%1$s、ツール呼び出し%2$s</string>
     <string name="chat_screen_type_answer">回答を入力</string>
     <string name="chat_screen_unreadable">このダイアログはまだ読み取れません。コンピューターで確認して対応してください。</string>
+    <string name="chat_command_ask_title">%1$sがコマンドを実行しようとしています</string>
+    <string name="chat_command_ask_risk_delete">このコマンドでファイルが削除されないか確認できません</string>
+    <string name="chat_command_ask_risk_other">Claude Codeがこのコマンドについて警告しています</string>
+    <string name="chat_command_ask_countdown_deny">%1$s後に自動で拒否されます</string>
+    <string name="chat_command_ask_countdown_allow">%1$s後に自動で許可されます</string>
+    <string name="chat_command_ask_countdown_over_deny">時間切れのため、Claude Codeが自動で拒否します</string>
+    <string name="chat_command_ask_countdown_over_allow">時間切れのため、Claude Codeが自動で許可します</string>
+    <string name="chat_command_ask_show_original">原文を表示</string>
+    <string name="chat_command_ask_hide_original">原文を隠す</string>
+    <string name="chat_command_ask_show_all">すべて表示</string>
+    <string name="chat_command_ask_collapse">折りたたむ</string>
     <string name="chat_request_unsupported">このリクエストはまだスマートフォンで対応できません。コンピューターで確認して対応してください。</string>
     <string name="chat_request_terminal_help">ターミナルでの対応</string>
     <string name="chat_request_dismiss">コンピューターに任せる</string>
@@ -229,7 +244,6 @@
     <string name="chat_links_context_default">上の内容を参考にしてください。</string>
     <string name="chat_menu_copied">コピーしました</string>
     <string name="chat_menu_no_share">共有できるアプリがありません</string>
-    <string name="chat_menu_select_title">テキストを選択</string>
     <string name="chat_menu_copy">コピー</string>
     <string name="chat_menu_select">選択</string>
     <string name="chat_menu_quote">引用</string>
@@ -320,16 +334,30 @@
     <string name="chat_dialog_hand_title">Personaに任せる</string>
     <string name="chat_dialog_hand_hint">Personaに何をしてもらいますか？</string>
     <plurals name="chat_queue_title">
-        <item quantity="other">%1$d件待機中。%2$sの手が空くと順番に処理されます</item>
+        <item quantity="other">キュー%1$d件・%2$sが手すき次第順に処理します</item>
     </plurals>
     <string name="chat_queue_deleted">キューから削除しました</string>
-    <string name="chat_queue_restored">入力欄に戻しました。修正してから送信してください</string>
+    <string name="chat_queue_restored">入力欄に戻しました。編集してから送信してください。</string>
+    <plurals name="chat_queue_photos_lost">
+        <item quantity="other">入力欄に戻しました。画像%1$d枚は戻せませんでした。</item>
+    </plurals>
     <string name="chat_queue_not_found">このメッセージが見つかりません。キューが変わった可能性があります。確認してもう一度お試しください</string>
     <string name="chat_queue_failed">変更できませんでした：%1$s</string>
-    <string name="chat_queue_edit">戻して編集</string>
+    <string name="chat_queue_edit">取り消して編集</string>
     <string name="chat_queue_copy">コピー</string>
     <string name="chat_queue_copied">コピーしました</string>
     <string name="chat_queue_delete">削除</string>
+    <string name="chat_queue_move_up">上へ移動</string>
+    <string name="chat_queue_move_down">下へ移動</string>
+    <string name="chat_queue_send_now">今すぐ送信</string>
+    <string name="chat_queue_send_now_title">送信待ちのメッセージを今すぐ送りますか？</string>
+    <string name="chat_queue_send_now_message">送信待ちのメッセージを今すぐエージェントに送ります。実行中のコマンドはバックグラウンドで続き、書いている途中の返信はあなたのメッセージを含めてやり直します。</string>
+    <string name="chat_queue_send_now_message_persona">%1$s は次のステップを待たずにすぐ受け取ります。今の作業は止まるか、できるものはバックグラウンドで続き、あなたのメッセージを含めてやり直します。</string>
+    <string name="chat_queue_relayed_note">この会話が空いたら届きます</string>
+    <plurals name="chat_queue_relayed_summary">
+        <item quantity="other">別の会話からのメッセージが %1$d 件待機中</item>
+    </plurals>
+    <string name="chat_queue_sent_now">今すぐエージェントに送りました</string>
     <string name="chat_composer_photos_only">画像を見てください</string>
     <string name="chat_composer_photo_placeholder">[画像]</string>
     <string name="chat_reader_full_text">全文</string>
@@ -348,6 +376,7 @@
     <string name="chat_reader_empty">内容がありません</string>
     <string name="chat_reader_open">全文を表示</string>
     <string name="chat_reader_raw_input">元の入力</string>
+    <string name="chat_tool_hide_raw_input">元の入力を隠す</string>
     <string name="chat_reader_full_output">出力全体</string>
     <string name="chat_reader_raw_output">元の出力</string>
     <string name="chat_reader_copy_both">すべてコピー</string>
@@ -441,4 +470,11 @@
     <string name="chat_doc_rtf">RTF 書類</string>
     <string name="chat_doc_pdf">PDF 書類</string>
     <string name="chat_doc_other">書類</string>
+    <string name="chat_turn_fix_not_logged_in">モデル未接続：Claude Code にログインしていません</string>
+    <string name="chat_turn_fix_not_logged_in_detail">そのコンピュータで一度ログインするか、代わりに API キーを使ってください。</string>
+    <string name="chat_turn_fix_auth_failed">モデル未接続：キーが正しくありません</string>
+    <string name="chat_turn_fix_auth_failed_detail">キーが正しくないか期限切れです。使えるキーに変えてください。</string>
+    <string name="chat_turn_fix_model_route">モデル未接続：このモデルは使えません</string>
+    <string name="chat_turn_fix_model_route_detail">モデル名が正しくないか、このモデルは今使えません。別のモデルを試してください。</string>
+    <string name="chat_turn_fix_action">直す</string>
 </resources>

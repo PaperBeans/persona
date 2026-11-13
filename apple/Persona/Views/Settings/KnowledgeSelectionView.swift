@@ -1,12 +1,6 @@
 #if os(iOS)
 import SwiftUI
 
-/// Keep this page's dependency lookup off AppModel's full observable surface.
-private protocol KnowledgeSelectionAPIProvider: AnyObject {
-    var api: APIClient? { get }
-}
-extension AppModel: KnowledgeSelectionAPIProvider {}
-
 /// Settings › Knowledge Selection (`KnowledgeSelectionModel`): the chats and documents with a setting of their own
 /// first (they come before every rule), then the chat rules and the document rules, a section per priority level.
 /// A row opens its options in a sheet; a level's menu reorders it. Every change is saved at once.
@@ -82,7 +76,11 @@ struct KnowledgeSelectionView: View {
     }
 
     private var deps: KnowledgeSelectionModel.Deps {
-        let connected: () throws -> APIClient = { [app] in try Self.requireAPI(app) }
+        let api = app.api?.currentAssistantSettings()
+        let connected: () throws -> APIClient = {
+            guard let api else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
+            return api
+        }
         let load: () async throws -> KBSelection = { try await connected().kbSelection() }
         let save: (KBSelection) async throws -> KBSelection = { try await connected().setKBSelection($0) }
         let entries: (KBSelectionItem.Kind) async throws -> [KBEntry] = { kind in
@@ -92,13 +90,6 @@ struct KnowledgeSelectionView: View {
             try await connected().kbDetail(kind == .chat ? KBKind.chats.rawValue : KBKind.docs.rawValue, id: id).detail.meta
         }
         return .init(load: load, save: save, entries: entries, meta: meta)
-    }
-
-    private static func requireAPI(_ app: any KnowledgeSelectionAPIProvider) throws -> APIClient {
-        guard let api = app.api else {
-            throw APIError(status: 0, message: String(localized: "Not connected to the hub yet"))
-        }
-        return api
     }
 
     /// Removing a setting is undone from the toast: it goes back as it was.

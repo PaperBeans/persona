@@ -31,6 +31,9 @@ nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
     var description: String?
     var publisher: String?
     var homepage: String?
+    /// Source-only square PNG artwork: 256–4096 pixels, at most 2 MiB. Catalog entry icon carries this path; strip it
+    /// from packaged and runtime manifests for compatibility.
+    var icon: String?
     /// What the market shows and searches (docs "Extension market"): at most 16, each 1 to 24 characters. Packages
     /// and indexes carry the manifest without them (hubs before tags refuse an unknown field); the index entry
     /// carries them instead.
@@ -63,8 +66,11 @@ nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
     /// manifest.
     var tools: [ExtensionToolSpec]?
     var auth: ExtensionAuthSpec?
+    /// Configured host CLI integrations the program may use through a bounded, read-only typed RPC. IDs never name an
+    /// executable; writes and arbitrary command lines are not part of this contract.
+    var hostIntegrations: [ExtensionHostIntegrationSpec]?
 
-    init(manifestVersion: Int = 0, id: String = "", name: String = "", version: String = "", description: String? = nil, publisher: String? = nil, homepage: String? = nil, tags: [String]? = nil, engines: ExtensionEngines? = nil, runtime: ExtensionRuntime? = nil, node: ExtensionNodeRuntime? = nil, activationEvents: [String]? = nil, contributes: ExtensionContributes? = nil, offByDefault: [String]? = nil, depends: [ExtensionDependency]? = nil, exports: ExtensionExports? = nil, extensionPack: [ExtensionPackMember]? = nil, configuration: JSONValue? = nil, secrets: [ExtensionSecretSpec]? = nil, settingsCheck: Bool? = nil, permissions: ExtensionPermissions? = nil, tools: [ExtensionToolSpec]? = nil, auth: ExtensionAuthSpec? = nil) {
+    init(manifestVersion: Int = 0, id: String = "", name: String = "", version: String = "", description: String? = nil, publisher: String? = nil, homepage: String? = nil, icon: String? = nil, tags: [String]? = nil, engines: ExtensionEngines? = nil, runtime: ExtensionRuntime? = nil, node: ExtensionNodeRuntime? = nil, activationEvents: [String]? = nil, contributes: ExtensionContributes? = nil, offByDefault: [String]? = nil, depends: [ExtensionDependency]? = nil, exports: ExtensionExports? = nil, extensionPack: [ExtensionPackMember]? = nil, configuration: JSONValue? = nil, secrets: [ExtensionSecretSpec]? = nil, settingsCheck: Bool? = nil, permissions: ExtensionPermissions? = nil, tools: [ExtensionToolSpec]? = nil, auth: ExtensionAuthSpec? = nil, hostIntegrations: [ExtensionHostIntegrationSpec]? = nil) {
         self.manifestVersion = manifestVersion
         self.id = id
         self.name = name
@@ -72,6 +78,7 @@ nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
         self.description = description
         self.publisher = publisher
         self.homepage = homepage
+        self.icon = icon
         self.tags = tags
         self.engines = engines
         self.runtime = runtime
@@ -88,6 +95,7 @@ nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
         self.permissions = permissions
         self.tools = tools
         self.auth = auth
+        self.hostIntegrations = hostIntegrations
     }
 
     enum CodingKeys: String, CodingKey {
@@ -98,6 +106,7 @@ nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
         case description
         case publisher
         case homepage
+        case icon
         case tags
         case engines
         case runtime
@@ -114,6 +123,7 @@ nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
         case permissions
         case tools
         case auth
+        case hostIntegrations = "host_integrations"
     }
 
     init(from decoder: Decoder) throws {
@@ -125,6 +135,7 @@ nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
         self.description = try? c.decodeIfPresent(String.self, forKey: .description)
         self.publisher = try? c.decodeIfPresent(String.self, forKey: .publisher)
         self.homepage = try? c.decodeIfPresent(String.self, forKey: .homepage)
+        self.icon = try? c.decodeIfPresent(String.self, forKey: .icon)
         self.tags = try? c.decodeIfPresent([String].self, forKey: .tags)
         self.engines = try? c.decodeIfPresent(ExtensionEngines.self, forKey: .engines)
         self.runtime = try? c.decodeIfPresent(ExtensionRuntime.self, forKey: .runtime)
@@ -141,6 +152,29 @@ nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
         self.permissions = try? c.decodeIfPresent(ExtensionPermissions.self, forKey: .permissions)
         self.tools = try? c.decodeIfPresent([ExtensionToolSpec].self, forKey: .tools)
         self.auth = try? c.decodeIfPresent(ExtensionAuthSpec.self, forKey: .auth)
+        self.hostIntegrations = try? c.decodeIfPresent([ExtensionHostIntegrationSpec].self, forKey: .hostIntegrations)
+    }
+}
+
+/// A configured CLI integration, selected by a closed ID rather than by an extension-provided executable.
+nonisolated struct ExtensionHostIntegrationSpec: Codable, Hashable, Sendable {
+    var id: String
+    var version: String
+
+    init(id: String = "", version: String = "") {
+        self.id = id
+        self.version = version
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case version
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
+        self.version = (try? c.decodeIfPresent(String.self, forKey: .version)) ?? ""
     }
 }
 
@@ -751,6 +785,7 @@ nonisolated struct ExtensionStoragePermission: Codable, Hashable, Sendable {
 nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
     var connectors: [ExtensionConnectorItem]?
     var voice: [ExtensionNamedItem]?
+    var transcription: [ExtensionNamedItem]?
     var computer: [ExtensionNamedItem]?
     var browser: [ExtensionNamedItem]?
     var iphone: [ExtensionNamedItem]?
@@ -778,9 +813,10 @@ nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
     /// Extra keys stay at this object's level on the wire; declared fields always win.
     var additionalProperties: [String: JSONValue]
 
-    init(connectors: [ExtensionConnectorItem]? = nil, voice: [ExtensionNamedItem]? = nil, computer: [ExtensionNamedItem]? = nil, browser: [ExtensionNamedItem]? = nil, iphone: [ExtensionNamedItem]? = nil, quota: [ExtensionQuotaItem]? = nil, providers: [ExtensionProviderItem]? = nil, api: [ExtensionAPIItem]? = nil, assistant: [ExtensionAssistantItem]? = nil, mcpServers: [ExtensionMCPServerItem]? = nil, ui: [ExtensionUIItem]? = nil, agentSources: [ExtensionAgentSourceItem]? = nil, channel: [ExtensionChannelItem]? = nil, events: [ExtensionEventsItem]? = nil, shortcuts: [ExtensionShortcutItem]? = nil, skills: [ExtensionSkillItem]? = nil, prompts: [ExtensionPromptItem]? = nil, themes: [ExtensionThemeItem]? = nil, looks: [ExtensionLookItem]? = nil, triageTemplates: [ExtensionTriageTemplateItem]? = nil, agentFilters: [ExtensionAgentFilterItem]? = nil, tunnels: [ExtensionTunnelItem]? = nil, errorReports: [ExtensionErrorReportsItem]? = nil, authRelay: [ExtensionAuthRelayItem]? = nil, secretProviders: [ExtensionSecretProviderItem]? = nil, messaging: [ExtensionMessagingItem]? = nil, additionalProperties: [String: JSONValue] = [:]) {
+    init(connectors: [ExtensionConnectorItem]? = nil, voice: [ExtensionNamedItem]? = nil, transcription: [ExtensionNamedItem]? = nil, computer: [ExtensionNamedItem]? = nil, browser: [ExtensionNamedItem]? = nil, iphone: [ExtensionNamedItem]? = nil, quota: [ExtensionQuotaItem]? = nil, providers: [ExtensionProviderItem]? = nil, api: [ExtensionAPIItem]? = nil, assistant: [ExtensionAssistantItem]? = nil, mcpServers: [ExtensionMCPServerItem]? = nil, ui: [ExtensionUIItem]? = nil, agentSources: [ExtensionAgentSourceItem]? = nil, channel: [ExtensionChannelItem]? = nil, events: [ExtensionEventsItem]? = nil, shortcuts: [ExtensionShortcutItem]? = nil, skills: [ExtensionSkillItem]? = nil, prompts: [ExtensionPromptItem]? = nil, themes: [ExtensionThemeItem]? = nil, looks: [ExtensionLookItem]? = nil, triageTemplates: [ExtensionTriageTemplateItem]? = nil, agentFilters: [ExtensionAgentFilterItem]? = nil, tunnels: [ExtensionTunnelItem]? = nil, errorReports: [ExtensionErrorReportsItem]? = nil, authRelay: [ExtensionAuthRelayItem]? = nil, secretProviders: [ExtensionSecretProviderItem]? = nil, messaging: [ExtensionMessagingItem]? = nil, additionalProperties: [String: JSONValue] = [:]) {
         self.connectors = connectors
         self.voice = voice
+        self.transcription = transcription
         self.computer = computer
         self.browser = browser
         self.iphone = iphone
@@ -811,6 +847,7 @@ nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case connectors
         case voice
+        case transcription
         case computer
         case browser
         case iphone
@@ -841,6 +878,7 @@ nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
         let raw = try decoder.singleValueContainer().decode([String: JSONValue].self)
         self.connectors = ExtensionWireJSON.decode([ExtensionConnectorItem].self, from: raw["connectors"])
         self.voice = ExtensionWireJSON.decode([ExtensionNamedItem].self, from: raw["voice"])
+        self.transcription = ExtensionWireJSON.decode([ExtensionNamedItem].self, from: raw["transcription"])
         self.computer = ExtensionWireJSON.decode([ExtensionNamedItem].self, from: raw["computer"])
         self.browser = ExtensionWireJSON.decode([ExtensionNamedItem].self, from: raw["browser"])
         self.iphone = ExtensionWireJSON.decode([ExtensionNamedItem].self, from: raw["iphone"])
@@ -865,15 +903,16 @@ nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
         self.authRelay = ExtensionWireJSON.decode([ExtensionAuthRelayItem].self, from: raw["auth_relay"])
         self.secretProviders = ExtensionWireJSON.decode([ExtensionSecretProviderItem].self, from: raw["secret_providers"])
         self.messaging = ExtensionWireJSON.decode([ExtensionMessagingItem].self, from: raw["messaging"])
-        let known: Set<String> = ["connectors", "voice", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "messaging"]
+        let known: Set<String> = ["connectors", "voice", "transcription", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "messaging"]
         additionalProperties = raw.filter { !known.contains($0.key) }
     }
 
     func encode(to encoder: Encoder) throws {
-        let known: Set<String> = ["connectors", "voice", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "messaging"]
+        let known: Set<String> = ["connectors", "voice", "transcription", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "messaging"]
         var fields = additionalProperties.filter { !known.contains($0.key) }
         if let value = connectors { fields["connectors"] = try ExtensionWireJSON.encode(value) }
         if let value = voice { fields["voice"] = try ExtensionWireJSON.encode(value) }
+        if let value = transcription { fields["transcription"] = try ExtensionWireJSON.encode(value) }
         if let value = computer { fields["computer"] = try ExtensionWireJSON.encode(value) }
         if let value = browser { fields["browser"] = try ExtensionWireJSON.encode(value) }
         if let value = iphone { fields["iphone"] = try ExtensionWireJSON.encode(value) }
@@ -904,52 +943,80 @@ nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
 }
 
 /// A skill (docs "Declarative contributions"): a directory of the package with SKILL.md, put in with the assistant's
-/// skills.
+/// skills. With source data (docs "Assistant content from the data directory"): a directory of the extension's data
+/// directory whose subdirectories with a SKILL.md are skills its program writes (Markdown files only, 256 KB and 32
+/// skills per extension).
 nonisolated struct ExtensionSkillItem: Codable, Hashable, Sendable {
     var id: String
-    /// The directory, relative to the package.
+    /// The directory, relative to the package (or to the data directory with source data).
     var dir: String
+    var source: String?
 
-    init(id: String = "", dir: String = "") {
+    init(id: String = "", dir: String = "", source: String? = nil) {
         self.id = id
         self.dir = dir
+        self.source = source
     }
 
     enum CodingKeys: String, CodingKey {
         case id
         case dir
+        case source
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.dir = (try? c.decodeIfPresent(String.self, forKey: .dir)) ?? ""
+        self.source = try? c.decodeIfPresent(String.self, forKey: .source)
     }
+}
+
+/// Where a skill's or a prompt's files are: package (the default) or data, the extension's data directory, which its
+/// program writes and upgrades keep.
+nonisolated enum ExtensionContentSource {
+    static let package = "package"
+    static let data = "data"
+    static let all = ["package", "data"]
 }
 
 /// Values of PromptKind.
 nonisolated enum ExtensionPromptKind {
     static let instructions = "instructions"
     static let quick = "quick"
-    static let all = ["instructions", "quick"]
+    static let projectContext = "project_context"
+    static let inboxContext = "inbox_context"
+    static let all = ["instructions", "quick", "project_context", "inbox_context"]
 }
 
-/// A prompt: instructions (a .md of the package added to the assistant's CLAUDE.md) or quick (a template the apps
-/// offer in the message box).
+/// A prompt: instructions (a .md of the package, or with source data of the data directory, added to the assistant's
+/// CLAUDE.md), quick (a template the apps offer in the message box), project_context (a directory of the data
+/// directory whose <project slug>.md files go into a new Agent's project background) or inbox_context (a .md of the
+/// data directory added to the Inbox's triage and draft prompts).
 nonisolated struct ExtensionPromptItem: Codable, Hashable, Sendable {
     var id: String
     var kind: String
-    /// instructions: the .md file.
+    var source: String?
+    /// instructions: the .md file (with source data: at most 6 KB, adopted at most once a day); inbox_context: the
+    /// .md file (1 KB used).
     var file: String?
+    /// project_context: the directory of <project slug>.md files (1.5 KB of each used).
+    var dir: String?
+    /// inbox_context: a text file of sentences, one a line, a draft must not repeat word for word (64 KB used); only
+    /// checked, never in a prompt.
+    var neverQuote: String?
     /// quick: what the apps show.
     var title: String?
     /// quick: what goes into the message box.
     var text: String?
 
-    init(id: String = "", kind: String = "", file: String? = nil, title: String? = nil, text: String? = nil) {
+    init(id: String = "", kind: String = "", source: String? = nil, file: String? = nil, dir: String? = nil, neverQuote: String? = nil, title: String? = nil, text: String? = nil) {
         self.id = id
         self.kind = kind
+        self.source = source
         self.file = file
+        self.dir = dir
+        self.neverQuote = neverQuote
         self.title = title
         self.text = text
     }
@@ -957,7 +1024,10 @@ nonisolated struct ExtensionPromptItem: Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id
         case kind
+        case source
         case file
+        case dir
+        case neverQuote = "never_quote"
         case title
         case text
     }
@@ -966,7 +1036,10 @@ nonisolated struct ExtensionPromptItem: Codable, Hashable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? ""
+        self.source = try? c.decodeIfPresent(String.self, forKey: .source)
         self.file = try? c.decodeIfPresent(String.self, forKey: .file)
+        self.dir = try? c.decodeIfPresent(String.self, forKey: .dir)
+        self.neverQuote = try? c.decodeIfPresent(String.self, forKey: .neverQuote)
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
         self.text = try? c.decodeIfPresent(String.self, forKey: .text)
     }
@@ -1568,7 +1641,7 @@ nonisolated struct ExtensionConnectorItem: Codable, Hashable, Sendable {
     }
 }
 
-/// A contribution with only an id and a name: voice, computer, browser.
+/// A contribution with only an id and a name: voice, transcription, computer, browser.
 nonisolated struct ExtensionNamedItem: Codable, Hashable, Sendable {
     var id: String
     var name: String?

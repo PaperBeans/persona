@@ -25,7 +25,7 @@ import { BrandMark } from "../../ui/BrandMark";
 import { Icon } from "../../ui/icons";
 import { t } from "../../i18n";
 import { ChannelLink } from "./Channels";
-import { QRLinkStep, QRStep, UnsupportedStep, useStepPolling } from "./LoginSteps";
+import { QRCode, QRLinkStep, QRStep, UnsupportedStep, useStepPolling } from "./LoginSteps";
 import { Group, Row, Switch } from "./SettingsParts";
 import { scoped, useScope } from "../../lib/current-assistant";
 import { OfflineState, useShownOffline } from "../ManagerParts";
@@ -529,7 +529,7 @@ function SignInSections({ c, reload }: { c: HubConnector; reload: () => Promise<
   );
 }
 
-export function SignInSteps({ c, reload, footer, startLabel, startTone = "accent", bare }: {
+export function SignInSteps({ c, reload, footer, startLabel, startTone = "accent", bare, autoStart }: {
   c: HubConnector;
   reload: () => Promise<void>;
   footer?: string;
@@ -538,6 +538,8 @@ export function SignInSteps({ c, reload, footer, startLabel, startTone = "accent
   startTone?: "accent" | "quiet";
   /** Draw only the step content so a caller can place it inside its own section. */
   bare?: boolean;
+  /** Start signing in once, as soon as this is drawn: the step that follows another the user just finished (#5818). */
+  autoStart?: boolean;
 }) {
   const [prompt, setPrompt] = useState<ConnectorPrompt | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -575,6 +577,12 @@ export function SignInSteps({ c, reload, footer, startLabel, startTone = "accent
     }
     return false;
   }, [c.id, c.name, reload]);
+  const started = useRef(false);
+  useEffect(() => {
+    if (!autoStart || started.current) return;
+    started.current = true;
+    void send("", {});
+  }, [autoStart, send]);
 
   // A code on screen (GitHub's device flow) or a QR code to scan (WeChat): ask again every interval the hub gave
   // until the user has entered / scanned it.
@@ -630,6 +638,14 @@ export function SignInStep({ name, prompt, values, busy, isChannel, onChange, on
       )}
       {view === "device_code" ? (
         <div className="flex flex-col gap-3 px-4 py-3">
+          {prompt.qr?.rows.length ? (
+            // The link carries the code (Lark's, #5818): scanning it on the phone needs nothing typed; the code and
+            // the link stay below for doing it on this computer.
+            <div className="flex flex-col items-center gap-2 pb-1">
+              <QRCode rows={prompt.qr.rows} label={t("settings-hubconnector.qr_label")} />
+              <p className="text-center text-[12.5px] text-ink-2">{t("settings-hubconnector.scan_to_authorize")}</p>
+            </div>
+          ) : null}
           <div className="flex items-center gap-3">
             <span className="min-w-0 flex-1 truncate font-mono text-[26px] font-semibold tracking-[0.12em] text-ink select-all">{prompt.user_code}</span>
             <IconButton
@@ -641,7 +657,7 @@ export function SignInStep({ name, prompt, values, busy, isChannel, onChange, on
           <p className="flex items-center gap-2 text-[12.5px] text-ink-3"><Spinner size={11} />{t("settings-hubconnector.waiting_auth", { name })}</p>
           {prompt.url && (
             <div>
-              <Button tone="accent" icon="external" onClick={() => window.open(prompt.url, "_blank", "noopener,noreferrer")}>{t("settings-hubconnector.open_to_enter_code", { name })}</Button>
+              <Button tone={prompt.qr?.rows.length ? "secondary" : "accent"} icon="external" onClick={() => window.open(prompt.url, "_blank", "noopener,noreferrer")}>{t("settings-hubconnector.open_to_enter_code", { name })}</Button>
             </div>
           )}
         </div>

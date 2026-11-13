@@ -4,15 +4,19 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import android.content.res.Resources
+import persona.core.contracts.Machine
 import persona.core.contracts.api.ModelConfiguration
 import persona.core.contracts.api.ModelPurpose
 import persona.core.contracts.api.ProviderSetup
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.navigation.LocalDetailKey
 import persona.core.navigation.ModelPurposeRoute
@@ -24,20 +28,30 @@ import kotlinx.coroutines.launch
  * page reads that one's.
  */
 @Composable
-internal fun ModelConfigurationPage(models: ModelConfiguration?, onBack: () -> Unit, onPurpose: (String, String) -> Unit, providers: ProviderSetup? = null) {
+internal fun ModelConfigurationPage(
+    models: ModelConfiguration?, onBack: () -> Unit, onPurpose: (String, String) -> Unit,
+    providers: ProviderSetup? = null, onProviders: (() -> Unit)? = null,
+    machines: List<Machine> = emptyList(),
+) {
     val owner = currentAssistant().id
     val default = LocalManagerRoster.current?.defaultManagerId
     key(models, owner) {
         ModelConfigurationDetails(models, onBack, { onPurpose(it, owner) },
-            remember(providers, owner, default) { providers?.namingOwner(owner, default) }, owner)
+            remember(providers, owner, default) { providers?.namingOwner(owner, default) }, owner, onProviders, machines)
     }
 }
 
 @Composable
 private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () -> Unit, onPurpose: (String) -> Unit,
-    providers: ProviderSetup?, owner: String) {
+    providers: ProviderSetup?, owner: String, onProviders: (() -> Unit)?, machines: List<Machine>) {
     if (models == null) {
-        JListPage(title = stringResource(R.string.settings_src_model_title), onBack = onBack) { item { JNotice(stringResource(R.string.settings_src_model_demo)) } }
+        JListPage(title = stringResource(R.string.settings_home_models), onBack = onBack) {
+            item { JNotice(stringResource(R.string.settings_src_model_demo)) }
+            onProviders?.let { open ->
+                item { JSectionHeader(stringResource(R.string.settings_pedit_advanced)) }
+                item { JGroupItem(GroupPosition.Single) { JRow(stringResource(R.string.settings_providers_title), onClick = open) } }
+            }
+        }
         return
     }
     val default = LocalManagerRoster.current?.defaultManagerId
@@ -45,12 +59,13 @@ private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () ->
     val state by model.state.collectAsState()
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
+    var advanced by rememberSaveable { mutableStateOf(false) }
     // "New model provider" opens over this page (`debug.newProvider` opens it for captures).
     var adding by remember { mutableStateOf<String?>(if (providers != null) NewProviderPreview.take() else null) }
     LaunchedEffect(model) { model.load() }
     if (adding != null && providers != null) {
         NewProviderPage(providers, onBack = { adding = null }, onSaved = { adding = null; scope.launch { model.load() } },
-            preferPreset = adding == "preset", manager = owner)
+            preferPreset = adding == "preset", manager = owner, machines = machines)
         return
     }
     val catalog = state.catalog
@@ -59,16 +74,11 @@ private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () ->
     val detail = LocalDetailKey.current
     JListPage(title = stringResource(R.string.settings_src_model_title), onBack = onBack, refreshing = state.loading && catalog != null, onRefresh = { scope.launch { model.load() } },
         actions = {
-            if (providers != null) JIconButton(PhIcons.Plus, stringResource(R.string.settings_src_provider_new), { adding = "manual" })
-            JIconButton(PhIcons.ArrowClockwise, stringResource(R.string.settings_src_refresh), { scope.launch { model.load() } }, enabled = !state.loading)
+            JIconButton(PersonaIcons.retry, stringResource(R.string.settings_src_refresh), { scope.launch { model.load() } }, enabled = !state.loading)
         }) {
         item("manager") { ModelConfigurationOwner(owner) }
         item("search") {
-            Column(Modifier.padding(top = Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                JSearchField(query, { query = it }, stringResource(R.string.settings_src_model_search))
-                SettingsCaption(stringResource(R.string.settings_src_model_caption),
-                    Modifier.padding(horizontal = rowPadding))
-            }
+            JSearchField(query, { query = it }, stringResource(R.string.settings_src_model_search), Modifier.padding(top = Tokens.Space.s))
         }
         when {
             state.unsupported -> item("unsupported") {
@@ -81,15 +91,42 @@ private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () ->
         }
         if (catalog == null && state.loading) item("loading") { JLoading() }
         if (catalog != null && groups.isEmpty()) item("empty") {
-            JEmptyState(stringResource(if (query.isBlank()) R.string.settings_src_model_none else R.string.settings_src_model_no_match), stringResource(R.string.settings_src_model_no_match_hint), icon = PhIcons.MagnifyingGlass)
+            JEmptyState(stringResource(if (query.isBlank()) R.string.settings_src_model_none else R.string.settings_src_model_no_match), stringResource(R.string.settings_src_model_no_match_hint), icon = PersonaIcons.search)
         }
         groups.forEach { (group, purposes) ->
             item("group-$group") { JSectionHeader(group, count = purposes.size) }
             itemsIndexed(purposes, key = { _, it -> "purpose-${it.id}" }) { index, purpose ->
                 JGroupItem(GroupPosition.of(index, purposes.size)) {
-                    JRow(purpose.displayName, subtitle = purposeSubtitle(res, purpose, requireNotNull(catalog)), subtitleLines = 3,
+                    JRow(purpose.displayName, subtitle = purposeSubtitle(res, purpose, requireNotNull(catalog)), subtitleLines = purposeSubtitleLines(purpose),
                         selected = detail == ModelPurposeRoute(purpose.id, owner), onClick = { onPurpose(purpose.id) })
                 }
+            }
+        }
+        item("advanced") {
+            JSectionHeader(stringResource(R.string.settings_pedit_advanced), Modifier.heightIn(min = Tokens.MinTouch.android),
+                leading = { JIcon(if (advanced) PersonaIcons.collapse else PersonaIcons.expand, null, decorative = true) },
+                open = advanced, onClick = { advanced = !advanced })
+        }
+        if (advanced) {
+            val entries = listOfNotNull(
+                onProviders?.let { R.string.settings_providers_title to it },
+                providers?.let { R.string.settings_model_add_provider to { adding = "manual" } },
+            )
+            itemsIndexed(entries, key = { _, entry -> "advanced-${entry.first}" }) { index, (title, action) ->
+                JGroupItem(GroupPosition.of(index, entries.size)) {
+                    JRow(stringResource(title), onClick = action)
+                }
+            }
+            item("how-models-run") {
+                JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.m)) {
+                    JRow(stringResource(R.string.settings_model_how_runs),
+                        subtitle = stringResource(R.string.settings_model_how_runs_detail), subtitleLines = Int.MAX_VALUE,
+                        leadingIcon = PersonaIcons.run, chevron = false)
+                }
+            }
+            item("advanced-note") {
+                SettingsCaption(stringResource(R.string.settings_src_model_caption),
+                    Modifier.padding(horizontal = rowPadding, vertical = Tokens.Space.s))
             }
         }
     }
@@ -97,17 +134,19 @@ private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () ->
 
 /** One AI use: what is in effect, and its own provider, model and effort (blank: inherit). */
 @Composable
-fun ModelPurposePage(models: ModelConfiguration?, purposeId: String, onBack: () -> Unit, providers: ProviderSetup? = null, manager: String? = null) {
+fun ModelPurposePage(models: ModelConfiguration?, purposeId: String, onBack: () -> Unit, providers: ProviderSetup? = null, manager: String? = null,
+    machines: List<Machine> = emptyList()) {
     val owner = manager?.takeIf(String::isNotBlank) ?: LocalManagerRoster.current?.defaultManagerId
         ?: persona.core.contracts.api.ManagerRoster.ASSISTANT_MANAGER
     val default = LocalManagerRoster.current?.defaultManagerId
     key(models, purposeId, owner) {
-        ModelPurposeDetails(models, purposeId, onBack, remember(providers, owner, default) { providers?.namingOwner(owner, default) }, owner)
+        ModelPurposeDetails(models, purposeId, onBack, remember(providers, owner, default) { providers?.namingOwner(owner, default) }, owner, machines)
     }
 }
 
 @Composable
-private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, onBack: () -> Unit, providers: ProviderSetup?, owner: String) {
+private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, onBack: () -> Unit, providers: ProviderSetup?, owner: String,
+    machines: List<Machine>) {
     if (models == null) {
         JListPage(title = stringResource(R.string.settings_src_model_title), onBack = onBack) { item { JNotice(stringResource(R.string.settings_src_model_demo)) } }
         return
@@ -125,7 +164,8 @@ private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, 
     LaunchedEffect(model, state.listProvider) { model.loadModels() }
     if (adding && providers != null) {
         // A provider added from here is picked for this use (the edit is kept; saving is still the user's).
-        NewProviderPage(providers, onBack = { adding = false }, onSaved = { id -> adding = false; scope.launch { model.providerAdded(id) } }, manager = owner)
+        NewProviderPage(providers, onBack = { adding = false }, onSaved = { id -> adding = false; scope.launch { model.providerAdded(id) } }, manager = owner,
+            machines = machines)
         return
     }
     fun save(restore: Boolean) {
@@ -139,6 +179,10 @@ private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, 
     })) {
         item("manager") { ModelConfigurationOwner(owner) }
         if (purpose == null && state.busy) item("loading") { JLoading() }
+        // what the purpose is for, under its name (#5086); a task's, an extension's and an older hub's have none
+        purpose?.about?.let { about ->
+            item("about") { SettingsCaption(about, Modifier.padding(horizontal = rowPadding, vertical = Tokens.Space.s).testTag("model-purpose-about")) }
+        }
         if (purpose != null) {
             effective(res, purpose, state)
             form(res, purpose, state, onProvider = { choosingProvider = true }, onEdit = model::edit, onRestore = { save(true) },

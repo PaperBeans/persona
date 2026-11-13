@@ -42,9 +42,14 @@
     <string name="chat_chrome_status_unconfirmed">Needs checking</string>
     <string name="chat_chrome_status_needs_you">Waiting for you</string>
     <string name="chat_chrome_status_stopping">Interrupting</string>
+    <string name="chat_chrome_worked_minutes">%1$d min</string>
+    <string name="chat_chrome_worked_hours">%1$d hr %2$d min</string>
     <string name="chat_chrome_more">More actions</string>
     <string name="chat_chrome_actions_title">Session actions</string>
     <string name="chat_chrome_todo">To-do · %1$s</string>
+    <string name="chat_chrome_terminal">Terminal</string>
+    <string name="chat_chrome_resume_in_terminal">Resume in Terminal</string>
+    <string name="chat_chrome_resume_no_engine">No terminal engine on %1$s</string>
     <string name="chat_chrome_search">Search</string>
     <string name="chat_chrome_files">Files</string>
     <string name="chat_chrome_details">Session details</string>
@@ -144,11 +149,10 @@
     <string name="chat_full_text_failed">Couldn\'t load. Tap to retry</string>
     <string name="chat_full_text_open">View full text (%1$s)</string>
     <string name="chat_request_collapse_full">Collapse</string>
-    <string name="chat_request_list_title">Requests waiting for you</string>
     <string name="chat_request_allow">Allow</string>
     <string name="chat_request_deny">Deny</string>
     <string name="chat_request_always_allows">Always allowing lets through: %1$s</string>
-    <string name="chat_request_fields_elsewhere">This request needs details filled in before it can be allowed. Allow it on the web or on iPhone; you can still deny it here.</string>
+    <string name="chat_request_fill_in_allow">Fill In &amp; Allow</string>
     <string name="chat_request_secret_run_commands">Commands, run in order</string>
     <string name="chat_request_secret_run_password">Password</string>
     <string name="chat_request_secret_run_note">Used once, never saved. The assistant never sees it.</string>
@@ -186,6 +190,17 @@
     <string name="chat_screen_command_ids">Request %1$s, tool call %2$s</string>
     <string name="chat_screen_type_answer">Type an answer</string>
     <string name="chat_screen_unreadable">Can\'t read this dialog yet. Check and handle it on the computer.</string>
+    <string name="chat_command_ask_title">%1$s Wants to Run a Command</string>
+    <string name="chat_command_ask_risk_delete">Can\'t confirm this command won\'t delete files</string>
+    <string name="chat_command_ask_risk_other">Claude Code warns about this command</string>
+    <string name="chat_command_ask_countdown_deny">Denied automatically in %1$s</string>
+    <string name="chat_command_ask_countdown_allow">Allowed automatically in %1$s</string>
+    <string name="chat_command_ask_countdown_over_deny">Time\'s up: Claude Code denies it</string>
+    <string name="chat_command_ask_countdown_over_allow">Time\'s up: Claude Code allows it</string>
+    <string name="chat_command_ask_show_original">Show Original</string>
+    <string name="chat_command_ask_hide_original">Hide Original</string>
+    <string name="chat_command_ask_show_all">Show All</string>
+    <string name="chat_command_ask_collapse">Collapse</string>
     <string name="chat_request_unsupported">This request can\'t be handled on the phone yet. Check and handle it on the computer.</string>
     <string name="chat_request_terminal_help">Using the terminal</string>
     <string name="chat_request_dismiss">Leave to computer</string>
@@ -236,7 +251,6 @@
     <string name="chat_links_context_default">See the content above.</string>
     <string name="chat_menu_copied">Copied</string>
     <string name="chat_menu_no_share">No app can share this</string>
-    <string name="chat_menu_select_title">Select text</string>
     <string name="chat_menu_copy">Copy</string>
     <string name="chat_menu_select">Select</string>
     <string name="chat_menu_quote">Quote</string>
@@ -327,17 +341,33 @@
     <string name="chat_dialog_hand_title">Hand to Persona</string>
     <string name="chat_dialog_hand_hint">What should Persona do?</string>
     <plurals name="chat_queue_title">
-        <item quantity="one">%1$d queued; %2$s will handle it when free</item>
-        <item quantity="other">%1$d queued; %2$s will handle them in order when free</item>
+        <item quantity="one">%1$d queued · %2$s will handle it when free</item>
+        <item quantity="other">%1$d queued · %2$s will handle them in order</item>
     </plurals>
     <string name="chat_queue_deleted">Removed from the queue</string>
-    <string name="chat_queue_restored">Back in the composer; edit it and send again</string>
+    <string name="chat_queue_restored">Moved back to the input box. Edit it and send again.</string>
+    <plurals name="chat_queue_photos_lost">
+        <item quantity="one">Moved back to the input box. %1$d photo couldn\'t be put back.</item>
+        <item quantity="other">Moved back to the input box. %1$d photos couldn\'t be put back.</item>
+    </plurals>
     <string name="chat_queue_not_found">Couldn\'t find this one. The queue may have changed; check and try again</string>
     <string name="chat_queue_failed">Didn\'t change: %1$s</string>
-    <string name="chat_queue_edit">Pull back to edit</string>
+    <string name="chat_queue_edit">Take back to edit</string>
     <string name="chat_queue_copy">Copy</string>
     <string name="chat_queue_copied">Copied</string>
     <string name="chat_queue_delete">Delete</string>
+    <string name="chat_queue_move_up">Move up</string>
+    <string name="chat_queue_move_down">Move down</string>
+    <string name="chat_queue_send_now">Send now</string>
+    <string name="chat_queue_send_now_title">Send the queued messages now?</string>
+    <string name="chat_queue_send_now_message">Sends the queued messages to the agent now. A command it is running keeps running in the background; a reply it is writing starts again with your message.</string>
+    <string name="chat_queue_send_now_message_persona">%1$s gets them right away instead of at its next step. What it is doing now stops, or goes on in the background when it can, and it starts again with your messages.</string>
+    <string name="chat_queue_relayed_note">Arrives when this chat is free</string>
+    <plurals name="chat_queue_relayed_summary">
+        <item quantity="one">%1$d message from another conversation is waiting</item>
+        <item quantity="other">%1$d messages from other conversations are waiting</item>
+    </plurals>
+    <string name="chat_queue_sent_now">Sent to the agent now</string>
     <string name="chat_composer_photos_only">Please look at the photos</string>
     <string name="chat_composer_photo_placeholder">[Photo]</string>
     <string name="chat_reader_full_text">Full text</string>
@@ -356,6 +386,7 @@
     <string name="chat_reader_empty">No content</string>
     <string name="chat_reader_open">View full text</string>
     <string name="chat_reader_raw_input">Raw input</string>
+    <string name="chat_tool_hide_raw_input">Hide raw input</string>
     <string name="chat_reader_full_output">Full output</string>
     <string name="chat_reader_raw_output">Raw output</string>
     <string name="chat_reader_copy_both">Copy all</string>
@@ -454,4 +485,11 @@
     <string name="chat_doc_rtf">RTF document</string>
     <string name="chat_doc_pdf">PDF document</string>
     <string name="chat_doc_other">Document</string>
+    <string name="chat_turn_fix_not_logged_in">Model not connected: Claude Code isn\'t signed in</string>
+    <string name="chat_turn_fix_not_logged_in_detail">Sign in once on that computer, or use an API key instead.</string>
+    <string name="chat_turn_fix_auth_failed">Model not connected: the key is wrong</string>
+    <string name="chat_turn_fix_auth_failed_detail">The key is wrong or has expired; use one that works.</string>
+    <string name="chat_turn_fix_model_route">Model not connected: this model can\'t be used</string>
+    <string name="chat_turn_fix_model_route_detail">The model name is wrong, or the model isn\'t available right now; try another one.</string>
+    <string name="chat_turn_fix_action">Fix it</string>
 </resources>

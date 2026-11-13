@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_conversation_launcher_title">次のメッセージから使用</string>
+    <string name="chat_conversation_launcher_default">デフォルトを使用</string>
+    <string name="chat_conversation_launcher_default_named">デフォルト：%1$s</string>
+    <string name="chat_conversation_launcher_section">ランチャー</string>
+    <string name="chat_conversation_launchers_loading">ランチャーを読み込み中…</string>
+    <string name="chat_conversation_launchers_failed">ランチャーを読み込めません</string>
+    <string name="chat_conversation_launchers_none">このコンピューターにはPersonaを実行できるランチャーがありません</string>
+    <string name="chat_conversation_model_section">モデル</string>
+    <string name="chat_conversation_model_default">デフォルトモデル</string>
+    <string name="chat_conversation_model_selected">選択済みモデル</string>
+    <string name="chat_conversation_models_loading">モデルを読み込み中…</string>
+    <string name="chat_conversation_models_failed">モデルを読み込めません</string>
+    <string name="chat_conversation_models_unavailable">このHubにはモデルリストがありません</string>
+    <string name="chat_conversation_launcher_note">選択は次のメッセージから変更するまで適用されます。アシスタント設定は変更されません。</string>
+</resources>

@@ -344,10 +344,10 @@ private fun AddressSheet(sheet: EndpointSheet, pinned: Boolean, onChange: (Strin
 }
 
 /** The handle: the grip (with the row's turn over it) and the gap before the status dot; JRow pads the row itself. */
-private val HandleWidth = GripWidth + Tokens.Space.m
+private val HandleWidth = GripWidth + Tokens.Space.Standard.m
 
 /** A picked-up row casts a shadow and grows slightly, so it reads as lifted off the list. */
-private val LiftElevation = Tokens.Space.s
+private val LiftElevation = Tokens.Space.Standard.s
 private const val LiftScale = 0.02f
 
 /** Disabled candidates read as switched off, like a disabled row. */

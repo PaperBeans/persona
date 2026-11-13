@@ -174,7 +174,9 @@ struct TodayRow: View {
         case .open(let id): store.detailTask = id
         case .board: store.showBoard = true
         case .say(let text):
-            if let key = AppModel.shared.assistantMain { AppModel.shared.sendNow(key, text: text) }
+            // Written by the card from what the app read (a calendar event's title): marked, so it never counts as the
+            // user's own words for a secret hand-off's Always rule.
+            if let key = AppModel.shared.assistantMain { AppModel.shared.sendNow(key, text: text, via: .card) }
         case .routines: Self.showRoutines?()
         }
     }

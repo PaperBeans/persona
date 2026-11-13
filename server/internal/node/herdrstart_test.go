@@ -33,8 +33,8 @@ func init() {
 type fakeLaunch struct {
 	t      *testing.T
 	starts atomic.Int32
-	delay  time.Duration
-	fail   error // the server exits with it
+	gate   chan struct{} // a slow server opens only once the test lets it
+	fail   error         // the server exits with it
 	bins   []string
 	mu     sync.Mutex
 }
@@ -60,7 +60,9 @@ func (fl *fakeLaunch) launch(_ context.Context, bin, sock string) (<-chan error,
 		return exited, nil
 	}
 	go func() {
-		time.Sleep(fl.delay) // a server takes a moment to listen: concurrent callers find it down meanwhile
+		if fl.gate != nil {
+			<-fl.gate // a server takes a moment to listen: concurrent callers find it down meanwhile
+		}
 		serveSocket(fl.t, sock)
 	}()
 	return exited, nil
@@ -103,8 +105,15 @@ func downHerdrNode(t *testing.T) (*Node, string) {
 // its socket answers — eight requests at once (a burst from the phone) still start one server.
 func TestEnsureHerdrStartsOneServer(t *testing.T) {
 	n, sock := downHerdrNode(t)
-	fl := &fakeLaunch{delay: 150 * time.Millisecond}
+	fl := &fakeLaunch{gate: make(chan struct{})}
 	withLaunchHerdr(t, fl)
+	t.Cleanup(func() {
+		select {
+		case <-fl.gate:
+		default:
+			close(fl.gate)
+		}
+	})
 	var wg sync.WaitGroup
 	errs := make([]error, 8)
 	for i := range errs {
@@ -114,6 +123,10 @@ func TestEnsureHerdrStartsOneServer(t *testing.T) {
 			errs[i] = n.ensureHerdr(context.Background(), "test")
 		}()
 	}
+	waitWithin(t, 5*time.Second, "the one server start shared by concurrent callers", func() bool {
+		return fl.starts.Load() == 1
+	})
+	close(fl.gate)
 	wg.Wait()
 	for i, err := range errs {
 		if err != nil {
@@ -255,30 +268,39 @@ func refusalData(t *testing.T, err error) string {
 	return string(re.Data)
 }
 
-// A start finds herdr down: the node starts it, then goes on to make the workspace in it.
+// A start finds herdr down: the node starts it, then goes on to make the workspace in it — also a start into a
+// workspace it names (a task's worktree, #4754), which goes straight to the tab.
 func TestStartStartsHerdrFirst(t *testing.T) {
-	n, f, home := herdrNode(t)
-	real := f.sock
-	dir, err := os.MkdirTemp("/tmp", "hs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	down := filepath.Join(dir, "herdr.sock")
-	h := n.hosts.Get(host.Herdr).(*herdrHost)
-	h.c.Socket = down // herdr is not running…
-	fl := &fakeLaunch{}
-	withLaunchHerdr(t, fl)
-	launchHerdr = func(_ context.Context, _, sock string) (<-chan error, error) { // …until it is started: the fake
-		fl.starts.Add(1)
-		return make(chan error), os.Symlink(real, sock)
-	}
-	f.reply("workspace.list", map[string]any{"workspaces": []any{}})
-	f.reply("workspace.create", herdrFail{Code: "internal", Message: "stop here"})
-	began := time.Now()
-	_, _ = request(t, n, "session.start", map[string]any{"cwd": home})
-	if fl.starts.Load() != 1 || len(f.trace("workspace.list")) != 1 || time.Since(began) > 2*time.Second {
-		t.Fatalf("%d starts in %s; calls %v", fl.starts.Load(), time.Since(began), f.trace())
+	for _, ws := range []string{"", "w1"} {
+		n, f, home := herdrNode(t)
+		real := f.sock
+		dir, err := os.MkdirTemp("/tmp", "hs")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.RemoveAll(dir) })
+		down := filepath.Join(dir, "herdr.sock")
+		h := n.hosts.Get(host.Herdr).(*herdrHost)
+		h.c.Socket = down // herdr is not running…
+		fl := &fakeLaunch{}
+		withLaunchHerdr(t, fl)
+		launchHerdr = func(_ context.Context, _, sock string) (<-chan error, error) { // …until it is started: the fake
+			fl.starts.Add(1)
+			return make(chan error), os.Symlink(real, sock)
+		}
+		f.reply("workspace.list", map[string]any{"workspaces": []any{}})
+		f.reply("workspace.create", herdrFail{Code: "internal", Message: "stop here"})
+		f.reply("tab.create", herdrFail{Code: "internal", Message: "stop here"})
+		began := time.Now()
+		params := map[string]any{"cwd": home}
+		next := "workspace.list"
+		if ws != "" {
+			params["workspace_id"], next = ws, "tab.create"
+		}
+		_, _ = request(t, n, "session.start", params)
+		if fl.starts.Load() != 1 || len(f.trace(next)) != 1 || time.Since(began) > 2*time.Second {
+			t.Fatalf("workspace %q: %d starts in %s; calls %v", ws, fl.starts.Load(), time.Since(began), f.trace())
+		}
 	}
 }
 
@@ -406,7 +428,12 @@ func TestHerdrAtNodeStartWaitsForTheHub(t *testing.T) {
 	t.Cleanup(func() { herdrStartWait = prev })
 	done := make(chan struct{})
 	go func() { n.herdrAtStart(context.Background()); close(done) }()
-	time.Sleep(50 * time.Millisecond)
+	// A hub that never answers leaves the start blocked until its timeout; no fixed sleep is needed to check this.
+	select {
+	case <-done:
+		t.Fatal("herdrAtStart returned before the hub answered")
+	case <-time.After(time.Second):
+	}
 	if fl.starts.Load() != 0 {
 		t.Fatal("started before the hub said")
 	}
@@ -434,7 +461,7 @@ func TestClaudeResumeArgv(t *testing.T) {
 		Model: "opus[1m]", Hooks: "/Users/me/my hooks"}, startID)
 	want := inAgentEnv(n.dir, "HERDR_AGENT=claude /Users/me/.persona/bin/personad launch work_gw --resume "+startID+
 		" --settings /Users/me/.persona/launcher-settings/work_gw.json --mcp-config "+filepath.Join(n.dir, "mcp.json")+
-		` --model "opus[1m]" --plugin-dir "/Users/me/my hooks"`, dquote)
+		" --allowedTools "+ownToolsRule+` --model "opus[1m]" --plugin-dir "/Users/me/my hooks"`, dquote)
 	if !ok || len(argv) != 2 || argv[0] != "eval" || argv[1] != want {
 		t.Fatalf("argv %q\nwant eval %q", argv, want)
 	}
@@ -450,6 +477,20 @@ func TestClaudeResumeArgv(t *testing.T) {
 	// A path with an apostrophe cannot be said: no resume command (and the start is not failed for it).
 	if _, ok := n.claudeResumeArgv(claudeLaunch{Launcher: "claude", Settings: "/Users/me/it's/s.json"}, startID); ok {
 		t.Fatal("apostrophe accepted")
+	}
+	// Neither can a control character (herdr: invalid_resume_argv) nor a command over herdr's 8 KiB.
+	if _, ok := n.claudeResumeArgv(claudeLaunch{Launcher: "claude", Settings: "/Users/me/a\nb/s.json"}, startID); ok {
+		t.Fatal("control character accepted")
+	}
+	if _, ok := n.claudeResumeArgv(claudeLaunch{Launcher: "claude", Model: strings.Repeat("m", maxResumeArgv)}, startID); ok {
+		t.Fatal("over 8 KiB accepted")
+	}
+	// A shell-function launcher that passes its own --settings (a gateway's): the launcher, its flags and Persona's.
+	if argv, ok := n.claudeResumeArgv(claudeLaunch{Launcher: "super_relay", Settings: "/Users/me/.config/gw/super-relay.settings.json",
+		Model: "opus"}, startID); !ok || argv[1] != inAgentEnv(n.dir, "HERDR_AGENT=claude super_relay --resume "+startID+
+		" --settings /Users/me/.config/gw/super-relay.settings.json --mcp-config "+filepath.Join(n.dir, "mcp.json")+
+		" --allowedTools "+ownToolsRule+" --model opus", dquote) {
+		t.Fatalf("argv %q", argv)
 	}
 	// claude_start_dir (#1459) stays in the command: "$HOME" expands in the restored pane's shell.
 	d := "~/.claude-work"
@@ -479,7 +520,7 @@ func TestPersonaClaudeIsNotResumedBare(t *testing.T) {
 	launch := n.hosts.Get(host.Herdr).(*herdrHost)
 	spec := claudeLaunch{Launcher: "work_claude", Settings: filepath.Join(personaDir(home), "claude-settings.json")}
 	n.holdResume(context.Background(), launch, "w1:p2", startID, spec)
-	cmd := func(id string) string { return startCmd("work_claude", "--resume "+id, personaDir(home)) }
+	cmd := func(id string) string { return resumeCmd("work_claude", "--resume "+id, personaDir(home)) }
 	held := resumeHeld("w1:p2", startID, cmd(startID))
 	assertTrace(t, f.trace(), held[:])
 	for _, c := range f.calls() {
@@ -491,7 +532,11 @@ func TestPersonaClaudeIsNotResumedBare(t *testing.T) {
 	f.reset()
 	n.resumeOnSessionStart("w1:p2", startID) // the same session: already said
 	n.resumeOnSessionStart("w1:p9", sidB)    // a pane Persona did not start
-	time.Sleep(50 * time.Millisecond)
+	waitWithin(t, time.Second, "the unchanged resume state", func() bool {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		return n.launches["w1:p2"].ID == startID && n.launches["w1:p9"].ID == ""
+	})
 	assertTrace(t, f.trace(), nil)
 
 	n.resumeOnSessionStart("w1:p2", sidB) // /clear: a new session in the same pane
@@ -539,7 +584,7 @@ func TestRunningPersonaClaudeGetsItsResumeCommand(t *testing.T) {
 	}, nil))
 	listSessions(t, n)
 	waitCalls(t, f, "pane.report_agent_session", 1)
-	time.Sleep(100 * time.Millisecond)
+	waitReports(n, "w1:p2")
 	reports := f.trace("pane.report_agent_session")
 	if len(reports) != 1 || !strings.Contains(reports[0], `"pane_id":"w1:p2"`) ||
 		!strings.Contains(reports[0], `"eval",`+jsonPrefix(inAgentEnv(n.dir, "HERDR_AGENT=claude work_claude --resume "+startID, dquote))) {
@@ -547,7 +592,41 @@ func TestRunningPersonaClaudeGetsItsResumeCommand(t *testing.T) {
 	}
 	// Once: the next refresh reports nothing again.
 	listSessions(t, n)
-	time.Sleep(100 * time.Millisecond)
+	waitReports(n, "w1:p2")
+	if got := f.trace("pane.report_agent_session"); len(got) != 1 {
+		t.Fatalf("reported again: %v", got)
+	}
+}
+
+// herdr keeps a reported resume command only while the server that took it runs, and herdr before 0.9.2 took none at
+// all: on a user's machine an upgrade from 0.9.0 by live handoff left every Persona Agent with herdr's bare
+// `claude --resume`. A pane whose server is a new one (its socket bound anew) gets its full command again, once.
+func TestPersonaClaudeResumeFollowsANewHerdrServer(t *testing.T) {
+	n, f, home := herdrNode(t)
+	launch := n.hosts.Get(host.Herdr).(*herdrHost)
+	spec := claudeLaunch{Launcher: "work_claude", Settings: filepath.Join(personaDir(home), "claude-settings.json")}
+	n.holdResume(context.Background(), launch, "w1:p2", startID, spec)
+	f.reply("session.snapshot", snapshot(nil, nil, []any{claudeAgent(startID, proto.StatusIdle, "w1:p2", "w1:t2", "w1", home, "")}, nil))
+	f.reset()
+	listSessions(t, n) // the same server: nothing to say
+	waitReports(n, "w1:p2")
+	if got := f.trace("pane.report_agent_session"); len(got) != 0 {
+		t.Fatalf("reported to the same server: %v", got)
+	}
+
+	later := time.Now().Add(time.Minute) // a new server: the socket bound anew
+	if err := os.Chtimes(f.sock, later, later); err != nil {
+		t.Fatal(err)
+	}
+	listSessions(t, n)
+	waitCalls(t, f, "pane.report_agent_session", 1)
+	reports := f.trace("pane.report_agent_session")
+	if len(reports) != 1 || !strings.Contains(reports[0], `"pane_id":"w1:p2"`) ||
+		!strings.Contains(reports[0], `"eval",`+jsonPrefix(resumeCmd("work_claude", "--resume "+startID, personaDir(home)))) {
+		t.Fatalf("reports %v", reports)
+	}
+	listSessions(t, n) // reported to this server: once
+	waitReports(n, "w1:p2")
 	if got := f.trace("pane.report_agent_session"); len(got) != 1 {
 		t.Fatalf("reported again: %v", got)
 	}
@@ -574,7 +653,7 @@ func TestPersonaOtherAgentsResumeWithLauncher(t *testing.T) {
 	}, nil))
 	listSessions(t, n)
 	waitCalls(t, f, "pane.report_agent_session", 1)
-	time.Sleep(100 * time.Millisecond)
+	waitReports(n, "w1:p2")
 	reports := f.trace("pane.report_agent_session")
 	if len(reports) != 1 || !strings.Contains(reports[0], `"pane_id":"w1:p5"`) ||
 		!strings.Contains(reports[0], `"agent":"traex"`) ||

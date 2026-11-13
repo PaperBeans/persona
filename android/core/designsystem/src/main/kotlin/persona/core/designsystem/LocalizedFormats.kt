@@ -19,6 +19,8 @@ import java.util.Locale
 object LocalizedFormats {
     /** A month and day: Nov 5. */
     const val MONTH_DAY = "MMMd"
+    /** A weekday: Thursday. */
+    const val WEEKDAY = "EEEE"
     /** A month, day and weekday: Thursday, November 5. */
     const val MONTH_DAY_WEEKDAY = "MMMMdEEEE"
     /** A month, day and time: Nov 5, 2:30 PM. */

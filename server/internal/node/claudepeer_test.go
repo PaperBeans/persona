@@ -34,7 +34,8 @@ func TestOutsideClaudeListedLive(t *testing.T) {
 			s.LastText != "on it" || s.ReadOnlyReason != "" {
 			t.Errorf("%s: %+v", c.entrypoint, s)
 		}
-		if cp := s.Capabilities; cp == nil || !cp.Read || !cp.Send || cp.Interrupt || cp.Approve || cp.Terminal || cp.Attach ||
+		// Busy: the phone's Stop cuts its turn through the inbox (interruptOutside).
+		if cp := s.Capabilities; cp == nil || !cp.Read || !cp.Send || !cp.Interrupt || cp.Approve || cp.Terminal || cp.Attach ||
 			cp.Modes == nil || *cp.Modes {
 			t.Errorf("%s capabilities = %+v", c.entrypoint, cp)
 		}
@@ -182,6 +183,32 @@ func TestOutsideClaudeSendNotTaken(t *testing.T) {
 	}
 	if len(inbox.users()) != 1 {
 		t.Fatalf("the inbox read %d messages", len(inbox.users()))
+	}
+}
+
+// A session waiting on a permission prompt or another dialog takes the message into its queue, but reads it only once
+// that is answered at the computer: the send succeeds and says so (waits_on_computer); one that is working or idle
+// does not. (One waiting on its own question takes the message as the answer: claudepeer_stop_test.go.)
+func TestOutsideClaudeSendBehindDialog(t *testing.T) {
+	n, f, home := herdrNode(t)
+	noPaneEnv(t)
+	shortPeerWait(t, 3*time.Second)
+	p := bgTranscript(t, home, home, sidA, "plan")
+	inbox := newFakeInbox(t, p)
+	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
+	for i, c := range []struct {
+		status string
+		waits  bool
+	}{{"waiting", true}, {"busy", false}, {"idle", false}} {
+		writeOutsideClaude(t, home, sidA, "cli", c.status, inbox, nil)
+		res, err := request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "why nothing to tap? " + c.status,
+			"client_msg_id": "m-" + strconv.Itoa(i)})
+		if err != nil {
+			t.Fatalf("%s: %v", c.status, err)
+		}
+		if res["ok"] != true || (res["waits_on_computer"] == true) != c.waits {
+			t.Errorf("%s: answer %v", c.status, res)
+		}
 	}
 }
 

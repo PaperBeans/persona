@@ -370,19 +370,22 @@ func (ps *extensions) authChanged(id string, _ json.RawMessage) {
 // extensionAuthCommand is `personad extension auth <id> [login|logout]` (extension_cli.go).
 func extensionAuthCommand(ctx context.Context, c *extensionClient, args []string, stdin io.Reader, stdout io.Writer) error {
 	base := "/api/v1/extensions/" + url.PathEscape(args[0]) + "/-/auth"
+	l := c.l()
 	say := func(v ExtensionAuth) {
-		line := map[string]string{authUnknown: "不知道（扩展没在运行）", authSignedOut: "没登录", authPending: "登录中，等确认",
-			authSignedIn: "已登录", authExpired: "登录过期了", authError: "出错了"}[v.State]
-		if line == "" {
-			line = v.State
+		key := map[string]string{authUnknown: "extmgr-cli.auth_unknown", authSignedOut: "extmgr-cli.auth_signed_out",
+			authPending: "extmgr-cli.auth_pending", authSignedIn: "extmgr-cli.auth_signed_in",
+			authExpired: "extmgr-cli.auth_expired", authError: "extmgr-cli.auth_error"}[v.State]
+		line := v.State
+		if key != "" {
+			line = i18n.T(l, key)
 		}
 		if v.Account != "" {
-			line += "：" + v.Account
+			line = i18n.T(l, "extmgr-cli.auth_account", i18n.Args{"state": line, "account": v.Account})
 		}
 		if v.Message != "" {
-			line += "（" + v.Message + "）"
+			line += i18n.T(l, "extmgr-cli.paren", i18n.Args{"text": v.Message})
 		}
-		fmt.Fprintf(stdout, "%s：%s\n", v.Title, line)
+		fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.label_value", i18n.Args{"label": v.Title, "value": line}))
 	}
 	what := ""
 	if len(args) > 1 {
@@ -417,9 +420,9 @@ func extensionAuthCommand(ctx context.Context, c *extensionClient, args []string
 		}
 		if p.Done {
 			if p.Account != "" {
-				fmt.Fprintf(stdout, "登录好了：%s\n", p.Account)
+				fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.auth_done_account", i18n.Args{"account": p.Account}))
 			} else {
-				fmt.Fprintln(stdout, "登录好了")
+				fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.auth_done"))
 			}
 			return nil
 		}
@@ -434,11 +437,11 @@ func extensionAuthCommand(ctx context.Context, c *extensionClient, args []string
 				if p.QR != nil {
 					printQR(stdout, p.QR.Rows)
 				}
-				fmt.Fprintf(stdout, "打开 %s", p.URL)
 				if p.UserCode != "" {
-					fmt.Fprintf(stdout, "，输入 %s", p.UserCode)
+					fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.auth_open_code", i18n.Args{"url": p.URL, "code": p.UserCode}))
+				} else {
+					fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.auth_open", i18n.Args{"url": p.URL}))
 				}
-				fmt.Fprintln(stdout)
 				if p.Hint != "" {
 					fmt.Fprintln(stdout, p.Hint)
 				}
@@ -454,7 +457,7 @@ func extensionAuthCommand(ctx context.Context, c *extensionClient, args []string
 				fmt.Fprintln(stdout, p.Hint)
 			}
 			for _, f := range p.Fields {
-				fmt.Fprintf(stdout, "%s：", f.Label)
+				fmt.Fprint(stdout, i18n.T(l, "extmgr-cli.field_prompt", i18n.Args{"label": f.Label})+" ")
 				var line string
 				if f.Secret {
 					if file, ok := stdin.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
@@ -467,11 +470,11 @@ func extensionAuthCommand(ctx context.Context, c *extensionClient, args []string
 					}
 				}
 				if line == "" {
-					l, err := in.ReadString('\n')
-					if err != nil && l == "" {
+					read, err := in.ReadString('\n')
+					if err != nil && read == "" {
 						return err
 					}
-					line = l
+					line = read
 				}
 				values[f.Name] = strings.TrimSpace(line)
 			}

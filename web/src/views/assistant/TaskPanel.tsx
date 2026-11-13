@@ -1,5 +1,6 @@
 // A task's detail beside the assistant's conversation (docs/assistant/unified-entry.md "Task details"; iOS TaskDetailSheet): its
-// agent's own chat — everything the Agents page does works here — and, with several agents, a switch between them.
+// agent's own chat — everything the Agents page does works here — and, with several agents, a switch between them. Opened
+// while Agents open in the side panel (lib/agent-open.ts, #5424); loaded with the first one (SidePanel).
 import { useState } from "react";
 import { isRemovable, openAsk, TODO_STATUS_INFO } from "../../lib/todos";
 import { TodoAskLine } from "../TodoAsk";
@@ -19,7 +20,7 @@ import { TaskWorkspaceLine } from "./TaskWorkspace";
 
 /** ⋯'s "Open in new window": the page the panel shows, as its own tab (⌘-click on the link does the same). */
 function openInWindow(to: Route): MenuItem {
-  return { key: "open-window", label: t("common.open_in_new_window"), icon: "external", onSelect: () => void window.open(href(to), "_blank", "noopener") };
+  return { key: "open-window", label: t("assistant-taskpanel.open_in_new_window"), icon: "external", onSelect: () => void window.open(href(to), "_blank", "noopener") };
 }
 
 export function TaskPanel({ todoId, onClose }: { todoId: string; onClose: () => void }) {
@@ -63,7 +64,7 @@ export function TaskPanel({ todoId, onClose }: { todoId: string; onClose: () => 
           key={`${chosen.machine_id}/${chosen.session_id}`}
           mid={chosen.machine_id}
           sid={chosen.session_id}
-          panel={{ onClose, title: todo.title, sub: subtitle, items: taskItems, agents: switcher }}
+          panel={{ onClose, title: todo.title, sub: subtitle, items: taskItems, beside: switcher.length > 1 ? <AgentSwitch agents={switcher} /> : undefined }}
           // what the task's result waits on from the user (#2056), and what its agent last reported, as it wrote it (#3181),
           // over its agent's chat
           banner={openAsk(todo) || reportText(todo.supervision) || planned?.workspace ? (
@@ -101,6 +102,17 @@ export function TaskPanel({ todoId, onClose }: { todoId: string; onClose: () => 
           <div className="p-6 text-[13px] text-ink-2">{t("assistant-taskpanel.starting")}</div>
         )}
       </div>
+    </>
+  );
+}
+
+/** Beside the title of a task with several agents: ⌄ switches between them (iOS #3255). */
+function AgentSwitch({ agents }: { agents: MenuItem[] }) {
+  const pick = useMenu();
+  return (
+    <>
+      <IconButton icon="chevron" label={t("assistant-taskpanel.switch_agent")} onClick={pick.open} active={Boolean(pick.anchor)} className="-ml-1.5 shrink-0" />
+      {pick.anchor && <Menu anchor={pick.anchor} onClose={pick.close} items={agents} width={320} />}
     </>
   );
 }

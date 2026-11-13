@@ -50,13 +50,10 @@ class ComposerExpandShotsTest {
     private val short = "先跑一遍测试，然后把失败的用例列出来。"
     private val long = (1..9).joinToString("\n") { "第 $it 步：检查登录流程在弱网下的表现，记下每次重试的耗时" }
 
-    @Test fun growLinesFollowTheHeightAboveTheKeyboard() {
-        assertEquals(3, composerGrowLines(360.dp, 24.dp)) // a small phone with its keyboard up
-        assertEquals(6, composerGrowLines(760.dp, 24.dp)) // a tall phone without it
-        assertEquals(8, composerGrowLines(2000.dp, 24.dp))
-        assertEquals(3, composerGrowLines(0.dp, 24.dp))
-        assertFalse(composerOffersExpand(3, 3))
-        assertTrue(composerOffersExpand(4, 3))
+    @Test fun expandStartsOnlyAfterSixLines() {
+        assertEquals(6, ComposerGrowLines)
+        assertFalse(composerOffersExpand(6, ComposerGrowLines))
+        assertTrue(composerOffersExpand(7, ComposerGrowLines))
     }
 
     @Test fun fourStatesInEveryStyleAndAppearance() {

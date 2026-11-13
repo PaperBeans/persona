@@ -2,6 +2,7 @@
 
 Pitfalls hit while integrating DSH (`docs/integrations/dsh.md`) and node's runtime support (`server/internal/node/runtimes.go`, `integrations/runtime-sdk`, spec in `docs/integrations/runtimes.md`).
 
+- **A session's directory does not attach it to a DSH workspace** (#5485). `sessionController.create({cwd})` leaves it ungrouped even when a workspace has that path. Use the registry's existing `resolveByPath` (exact canonical path, including symlinks), then pass only `{workspaceId}` for a match: DSH rejects both fields together. Only `ENOENT` keeps the controller's supported new-directory creation path; other lookup failures must not create an ungrouped session as if nothing matched. Verify the actual registry/controller and persisted `sessionIds`, not just a fake controller accepting a directory.
 - **DSH approvals / questions are a responder chain, not a broadcast** (`approval/request` and `user-questions/request` are Cordis waterfalls: they run in registration order and stop at whoever doesn't call `next()`).
   The browser link in the chain only withdraws its card when the request's own `signal` ends; the plugin can't withdraw it on the browser's behalf. So the phone and the Web GUI can't "both pop up, first answer wins". The plugin can only go to the phone first,
   and call `next()` once the phone hands it back to the computer or it expires. The plugin needs `prepend: true` to get ahead of the browser (the browser only registers its listener when it connects).

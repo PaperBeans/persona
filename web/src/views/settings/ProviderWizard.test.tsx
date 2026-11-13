@@ -9,8 +9,11 @@ vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
 });
+import { forgetProviderNames, loadProviderNames } from "../../lib/provider-names";
+import type { ProviderView } from "../../lib/providers";
 import { resetReadiness, type Readiness } from "../../lib/readiness";
 import { getState } from "../../lib/store";
+import { Toasts } from "../../ui/atoms";
 import { ProviderWizard } from "./ProviderWizard";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -45,6 +48,9 @@ function hub(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   if (path.endsWith("/launchers/discover")) return Promise.resolve(json({ models: discovered }));
   if (path.endsWith("/launchers/test") && testAnswer) return Promise.resolve(json(testAnswer));
   if (path.endsWith("/launchers/test")) return Promise.resolve(json(testOK ? { ok: true, ms: 321, model: "glm-x" } : { ok: false, ms: 80, model: "glm-x", error: "Key 不对（401）" }));
+  // a gateway typed by hand: named as the hub would (#5029)
+  if (path.endsWith("/launchers") && method === "POST" && !body?.preset)
+    return Promise.resolve(json({ launcher: { name: body?.name || "relay-example-com", display_name: body?.display_name || "relay.example.com" } }));
   if (path.endsWith("/launchers") && method === "POST")
     return Promise.resolve(json({ launcher: { name: "glm", display_name: "智谱 GLM", has_key: true }, assigned: ["assistant"], kept: [{ purpose: "agent.new", reason: "customized" }] }));
   return Promise.resolve(json({}));
@@ -65,7 +71,7 @@ function type(input: HTMLInputElement, value: string) {
   });
 }
 const keyInput = () => document.body.querySelector<HTMLInputElement>('input[type="password"]')!;
-// The key auto-test debounce (AUTO_TEST_MS in ProviderWizard.tsx); timers are fake, so this costs no real time.
+// The key auto-test debounce (AUTO_TEST_MS in ProviderFields.tsx); timers are fake, so this costs no real time.
 const AUTO_TEST_MS = 700;
 const advance = async (ms: number) => {
   await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
@@ -625,5 +631,244 @@ describe("ProviderWizard device scope", () => {
     await flush();
     const post = calls.find((c) => c.method === "POST" && c.path.endsWith("/launchers"));
     expect(post?.body).toEqual({ api_key: "sk-test-123456", preset: "builtin/glm", assign: ["assistant", "agent.new"], share: "none" });
+  });
+});
+
+// #5029: a provider has a display name in any language; the startup ID launches and settings refer to is the hub's to
+// make up (launcher_auto_name), typed only under More options, and never changes once saved.
+describe("ProviderWizard names", () => {
+  /** The input a field's label names; null when it is not on screen. */
+  const field = (label: string) => {
+    const el = [...document.body.querySelectorAll("label")].find((l) => l.textContent === label);
+    return el ? (document.getElementById(el.htmlFor) as HTMLInputElement) : null;
+  };
+  const note = (input: HTMLInputElement) => document.getElementById(input.getAttribute("aria-describedby") ?? "")?.textContent;
+  const urlInput = () => document.body.querySelector<HTMLInputElement>('input[inputmode="url"]')!;
+  const addModelInput = () => document.body.querySelector<HTMLInputElement>('input[aria-label="手动添加模型 ID"]');
+  const alertText = () => document.body.querySelector('[role="alert"]')?.textContent;
+  const autoName = () => Object.assign(getState(), { features: ["builtin_presets", "launcher_auto_name"] });
+  /** The wizard, with the toasts it leaves. */
+  async function show(existing: ProviderView | "new") {
+    act(() => root.render(<><ProviderWizard existing={existing} onClose={() => {}} onSaved={() => {}} /><Toasts /></>));
+    await flush();
+  }
+  async function custom() {
+    await show("new");
+    act(() => button("自定义兼容网关")!.click());
+  }
+  function connect() {
+    type(urlInput(), "https://relay.example.com/v1");
+    type(keyInput(), "sk-test-123456");
+  }
+
+  it("names a new gateway in any language and leaves its startup ID to the hub", async () => {
+    autoName();
+    await custom();
+    expect(button("更多选项")!.getAttribute("aria-expanded")).toBe("false");
+    expect(field("启动 ID")).toBeNull();
+    const display = field("显示名")!;
+    expect(display.className).not.toContain("font-mono");
+    expect(note(display)).toBe("选供应商的地方都显示这个名字，用什么语言都行。");
+    expect(display.placeholder).toBe("比如 团队中转");
+    connect();
+    // left empty, the hub names it after the host
+    expect(display.placeholder).toBe("relay.example.com");
+    type(display, "我的中转 站");
+    act(() => button("下一步")!.click());
+    type(addModelInput()!, "m1");
+    act(() => button("添加")!.click());
+    await act(async () => button("保存")!.click());
+    await flush();
+    const post = calls.find((c) => c.method === "POST" && c.path.endsWith("/launchers"));
+    expect(post?.body).toMatchObject({ name: "", display_name: "我的中转 站", base_url: "https://relay.example.com/v1", model: "m1" });
+    expect(text()).toContain("已新增 我的中转 站");
+  });
+
+  it("still asks an older hub's gateway for the startup ID, right under the display name", async () => {
+    await custom();
+    expect(button("更多选项")).toBeUndefined();
+    const id = field("启动 ID")!;
+    expect(id.placeholder).toBe("比如 my_gateway");
+    type(field("显示名")!, "Team relay");
+    connect();
+    act(() => button("下一步")!.click());
+    expect(alertText()).toBe("要填启动 ID");
+    type(id, "team_relay");
+    act(() => button("下一步")!.click());
+    expect(addModelInput()).not.toBeNull();
+  });
+
+  it("says what is wrong with a startup ID only once one is typed, and opens More options to show it", async () => {
+    autoName();
+    await custom();
+    connect();
+    act(() => button("更多选项")!.click());
+    const id = field("启动 ID")!;
+    expect(id.placeholder).toBe("留空自动生成");
+    expect(id.getAttribute("aria-invalid")).toBeNull();
+    expect(note(id)).toBe("字母、数字、_ 和 -。启动命令、Agent 预设和模型配置都按它引用，添加后不能再改。");
+    type(id, "1 bad");
+    expect(id.getAttribute("aria-invalid")).toBe("true");
+    expect(note(id)).toBe("启动 ID 只能用字母、数字、_ 和 -，以字母或 _ 开头");
+    act(() => button("更多选项")!.click());
+    expect(button("更多选项")!.getAttribute("aria-expanded")).toBe("false");
+    act(() => button("下一步")!.click());
+    expect(alertText()).toBe("启动 ID 只能用字母、数字、_ 和 -，以字母或 _ 开头");
+    expect(button("更多选项")!.getAttribute("aria-expanded")).toBe("true");
+    expect(addModelInput()).toBeNull();
+  });
+
+  it("stops at a display name over 64 characters without keeping the connection from being checked", async () => {
+    autoName();
+    await custom();
+    connect();
+    const display = field("显示名")!;
+    type(display, "字".repeat(65));
+    expect(display.getAttribute("aria-invalid")).toBe("true");
+    expect(note(display)).toBe("显示名最多 64 个字，不能换行");
+    expect(button("测试连接")!.disabled).toBe(false);
+    expect(button("获取模型列表")!.disabled).toBe(false);
+    act(() => button("下一步")!.click());
+    expect(alertText()).toBe("显示名最多 64 个字，不能换行");
+    type(display, "字".repeat(64));
+    expect(display.getAttribute("aria-invalid")).toBeNull();
+    act(() => button("下一步")!.click());
+    expect(addModelInput()).not.toBeNull();
+  });
+
+  it("renames a saved provider in the PUT and shows its startup ID read-only, with why", async () => {
+    autoName();
+    forgetProviderNames();
+    await loadProviderNames();
+    await show({ name: "gw", display_name: "Team relay", base_url: "https://gw.example.com", model: "m1", has_key: true, auth: "bearer", models: [{ id: "m1" }] });
+    expect(text()).toContain("编辑 Team relay");
+    const display = field("显示名")!;
+    expect(display.value).toBe("Team relay");
+    act(() => button("更多选项")!.click());
+    const id = field("启动 ID")!;
+    expect(id.disabled).toBe(true);
+    expect(id.value).toBe("gw");
+    expect(note(id)).toBe("不能改：电脑上的启动命令、Agent 预设和模型配置都按它引用。");
+    // cleared, it shows the ID again
+    type(display, "");
+    expect(display.placeholder).toBe("gw");
+    type(display, "团队中转");
+    await act(async () => button("保存")!.click());
+    await flush();
+    const put = calls.find((c) => c.method === "PUT");
+    expect(put).toMatchObject({ path: "/api/v1/launchers/gw", body: { display_name: "团队中转" } });
+    expect(text()).toContain("已保存 团队中转");
+    // other pages read the names again
+    const reads = () => calls.filter((c) => c.path.endsWith("/model-config")).length;
+    expect(reads()).toBe(1);
+    await loadProviderNames();
+    expect(reads()).toBe(2);
+  });
+
+  it("adds a preset under a display name of one's own, and calls its name field the startup ID", async () => {
+    await open();
+    act(() => button("智谱 GLM")!.click());
+    act(() => button("更多选项")!.click());
+    const display = field("显示名")!;
+    expect(display.placeholder).toBe("智谱 GLM");
+    expect(field("启动 ID")!.placeholder).toBe("留空自动生成");
+    type(display, "团队的 GLM");
+    type(keyInput(), "sk-test-123456");
+    await waitAutoTest();
+    await act(async () => button("保存")!.click());
+    await flush();
+    const post = calls.find((c) => c.method === "POST" && c.path.endsWith("/launchers"));
+    expect(post?.body).toEqual({ display_name: "团队的 GLM", api_key: "sk-test-123456", preset: "builtin/glm", assign: ["assistant", "agent.new"] });
+  });
+
+  it("says why Save is off when More options folds a mistake away", async () => {
+    await open();
+    act(() => button("智谱 GLM")!.click());
+    act(() => button("更多选项")!.click());
+    type(field("显示名")!, "长".repeat(65));
+    type(keyInput(), "sk-test-123456");
+    await waitAutoTest();
+    const alert = () => [...document.body.querySelectorAll('[role="alert"]')].map((a) => a.textContent).join("");
+    expect(alert()).toBe("");
+    act(() => button("更多选项")!.click());
+    expect(alert()).toBe("显示名最多 64 个字，不能换行");
+    expect(button("保存")!.disabled).toBe(true);
+  });
+
+  it("says a Messages address's trailing /v1 goes by itself, and that other bases are used as typed", async () => {
+    await custom();
+    const hint = () => note(urlInput());
+    const dropped = "Anthropic Messages 兼容网关的基础地址；末尾的 /v1 会自动去掉。";
+    expect(hint()).toBe(dropped);
+    for (const [kind, want] of [
+      ["Codex", "Responses 兼容 API 的基础地址，按填写的原样使用（大多以 /v1 结尾）。"],
+      ["Antigravity", "Gemini 兼容 API 的基础地址，按填写的原样使用。"],
+      ["omp", dropped],
+      ["直接 API", dropped],
+      ["OpenAI Responses", "Responses 兼容 API 的基础地址。"],
+      ["Chat Completions", "Chat Completions 兼容 API 的基础地址。"],
+    ]) {
+      act(() => button(kind)!.click());
+      expect(hint(), kind).toBe(want);
+    }
+  });
+});
+
+// A gateway that lists more models than the wizard checks by itself (AUTO_CHECK): what was found is one click from where
+// it was fetched, a filter narrows a long list, and any row can be made the default, which checks it.
+describe("ProviderWizard with many models", () => {
+  const many = Array.from({ length: 20 }, (_, i) => ({ id: `gw-model-${String(i + 1).padStart(2, "0")}`, context_window: 200000 }));
+  const saved: ProviderView = { name: "gw", base_url: "https://gw.example.com", model: "m1", has_key: true, auth: "bearer", models: [{ id: "m1" }] };
+  async function fetchModels(list: Record<string, unknown>[]) {
+    discovered = list;
+    act(() => root.render(<><ProviderWizard existing={saved} onClose={() => {}} onSaved={() => {}} /><Toasts /></>));
+    await flush();
+    await act(async () => button("获取模型列表")!.click());
+    await flush();
+  }
+  const rows = () => [...document.body.querySelectorAll<HTMLElement>("li[data-model]")].map((r) => r.dataset.model);
+  const checked = () => [...document.body.querySelectorAll('[role="checkbox"][aria-checked="true"]')].map((b) => b.closest("li")?.getAttribute("data-model"));
+  const filter = () => document.body.querySelector<HTMLInputElement>('input[placeholder="筛选模型"]');
+
+  it("goes to Choose models from the line of the models found", async () => {
+    await fetchModels([{ id: "m1" }, ...many]);
+    const found = [...document.body.querySelectorAll('[role="status"]')].find((s) => s.textContent?.includes("找到 21 个模型。"))!;
+    expect(found.textContent).not.toContain("下一步");
+    act(() => [...found.querySelectorAll("button")].find((b) => b.textContent === "选择模型")!.click());
+    expect(rows()).toHaveLength(21);
+    expect(checked()).toEqual(["m1"]);
+  });
+
+  it("filters a long list by ID and name, and says when nothing matches", async () => {
+    await fetchModels([{ id: "m1" }, ...many, { id: "gw-x", name: "Example Long Name" }]);
+    act(() => button("下一步")!.click());
+    type(filter()!, "MODEL-1");
+    expect(rows()).toEqual(many.slice(9, 19).map((m) => m.id));
+    type(filter()!, "long name");
+    expect(rows()).toEqual(["gw-x"]);
+    type(filter()!, "no-such-model");
+    expect(rows()).toEqual([]);
+    expect(text()).toContain("没有匹配的模型。");
+  });
+
+  it("has no filter for a short list", async () => {
+    await fetchModels([{ id: "m1" }, { id: "m2" }]);
+    act(() => button("下一步")!.click());
+    expect(rows()).toEqual(["m1", "m2"]);
+    expect(filter()).toBeNull();
+  });
+
+  it("makes an unchecked model the default in one step, checking it, and saves both", async () => {
+    await fetchModels([{ id: "m1" }, ...many]);
+    act(() => button("下一步")!.click());
+    const row = document.body.querySelector<HTMLElement>('li[data-model="gw-model-05"]')!;
+    act(() => [...row.querySelectorAll("button")].find((b) => b.textContent === "设为默认")!.click());
+    expect(checked()).toEqual(["m1", "gw-model-05"]);
+    expect(row.textContent).toContain("默认");
+    await act(async () => button("保存")!.click());
+    await flush();
+    const put = calls.find((c) => c.method === "PUT")!;
+    expect(put.body).toMatchObject({ model: "gw-model-05" });
+    expect((put.body!.models as { id: string }[]).map((m) => m.id)).toEqual(["m1", "gw-model-05"]);
   });
 });

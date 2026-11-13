@@ -13,6 +13,8 @@ import type { FileContent, GitCommit } from "../../lib/files";
 import { splitLines } from "../../lib/files";
 import { shortPath } from "../../lib/format";
 import { whenComposer } from "../../lib/links";
+import { openPanel, type ReviewSpot } from "../../lib/panel";
+import { relativeTo } from "../../lib/comments";
 import {
   loadReview, loadReviewFile, orderedComments, pendingComment, pendingReview, reviewDiff, reviewItems, reviewMessage, reviewQuote, reviewTotals, setPendingReview, usePendingReview,
   type GitReview, type GitReviewFile, type ReviewScope, type ReviewTarget,
@@ -44,9 +46,17 @@ function storedTarget(session: string, scope?: ReviewScope): ReviewTarget {
 
 type Failure = { code?: string; message: string };
 
-export function ReviewPanel({ mid, sid, cwd, scope, at, onClose }: { mid: string; sid: string; cwd: string; scope?: ReviewScope; at?: { path: string; line: number; old?: boolean }; onClose: () => void }) {
+/** `opened`: the panel as last opened (lib/panel.ts): an opening while the panel is already up (a changed-files card's
+ *  Review or file) brings its `scope` and `at` with it. */
+export function ReviewPanel({ mid, sid, cwd, scope, at, opened, onClose }: { mid: string; sid: string; cwd: string; scope?: ReviewScope; at?: ReviewSpot; opened?: object; onClose: () => void }) {
   const session = `${mid}/${sid}`;
   const [target, setTargetState] = useState<ReviewTarget>(() => storedTarget(session, scope));
+  const lastOpened = useRef(opened);
+  useEffect(() => {
+    if (opened === lastOpened.current) return;
+    lastOpened.current = opened;
+    if (scope && scope !== "commit") setTargetState((t) => (t.scope === scope ? t : { scope }));
+  }, [opened, scope]);
   const setTarget = (t: ReviewTarget) => {
     setTargetState(t);
     try {
@@ -122,17 +132,30 @@ export function ReviewPanel({ mid, sid, cwd, scope, at, onClose }: { mid: string
     [items, key, res, count, pending.note],
   );
 
-  // a comment's card brought the review back: its file and line
-  const went = useRef(false);
+  // a comment's card brought the review back: its file and line; a changed-files card's file (#5157): the file, by its
+  // full path, once the review of the scope it asked for is in. Each opening goes there once, also when the panel was
+  // already open. A card's file the review does not list, or a review that cannot be read, opens the file instead.
+  const went = useRef<ReviewSpot | undefined>(undefined);
   useEffect(() => {
-    if (!at || went.current || !res) return;
-    went.current = true;
+    if (!at || went.current === at || loading) return;
+    const showFile = () => openPanel({ kind: "file", mid, path: at.path, cwd, sid });
+    if (failure) {
+      went.current = at;
+      if (at.file) showFile();
+      return;
+    }
+    // the scope this opening asked for, once the panel has taken it and its review is in
+    const wanted = scope && scope !== "commit" ? scope : target.scope;
+    if (!res || target.scope !== wanted || res.scope !== wanted) return;
+    went.current = at;
+    const path = relativeTo(res.root, at.path);
+    if (at.file && !res.files.some((f) => f.path === path)) return showFile();
     requestAnimationFrame(() => {
-      const d = document.querySelector(`[data-diff-path="${CSS.escape(at.path)}"]`);
-      const line = d?.querySelector(`[data-ln="${at.old ? "old" : "new"}"][data-n="${at.line}"]`);
+      const d = document.querySelector(`[data-diff-path="${CSS.escape(path)}"]`);
+      const line = at.line === undefined ? null : d?.querySelector(`[data-ln="${at.old ? "old" : "new"}"][data-n="${at.line}"]`);
       (line ?? d)?.scrollIntoView({ block: line ? "center" : "start" });
     });
-  }, [at, res]);
+  }, [at, scope, res, loading, failure, target.scope, mid, sid, cwd]);
 
   /** The lines of a file on disk (the new side), read once per review. */
   const fileLines = async (path: string): Promise<string[] | null> => {

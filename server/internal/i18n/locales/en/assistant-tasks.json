@@ -1,4 +1,6 @@
 {
+  "decision_review_changed": "This decision has changed or was already handled. Refresh before trying again.",
+  "decision_review_fields": "This request is missing a valid review time or Undo receipt.",
   "draft_changed": "This draft has changed or is no longer pending. Refresh before trying again.",
   "draft_dismissed": "You chose not to handle this draft. Undo that decision before sending it.",
   "draft_decision_question": "Reply drafted from the task’s progress",
@@ -30,6 +32,7 @@
   "done": "Done",
   "route_no_task": "This chat doesn’t have that task",
   "route_no_agent": "This task has no running agent",
+  "route_agents_stopped": "Every agent of this task has stopped, so nothing was sent. A message on the task starts a new agent for it.",
   "route_offline": "That computer is offline",
   "outcome_question": "Outcome",
   "outcome_pitfall": "Pitfall",
@@ -37,5 +40,17 @@
   "dispatch_notes": "Handed out by {from} on {from_machine} (dispatch_start): {machine} · {cwd}",
   "adopt_failed": "Could not take it under supervision: {reason}",
   "interrupt_summary": "Stop {agent} · {machine}",
-  "start_remedy_notice": "Didn’t start: “{title}”. {reason}"
+  "start_remedy_notice": "Didn’t start: “{title}”. {reason}",
+  "admission_no_metrics": "This computer has not reported resource metrics.",
+  "admission_stale": "This computer's resource metrics are stale.",
+  "admission_no_load": "This computer's load is not reported.",
+  "admission_no_cores": "This computer's core count is not reported.",
+  "admission_memory_ambiguous": "This computer's memory figures are missing or ambiguous.",
+  "admission_memory": "Only {available} of free memory left, below its limit of {limit}.",
+  "admission_procs": "{count} claude processes are already running, at its limit of {limit}.",
+  "admission_load": "Load {load} exceeds {cores} cores × {multiplier}.",
+  "admission_direction_full": "This direction already has {running} agents running, at its limit of {limit}.",
+  "admission_refused": "Computer {machine} cannot start this agent: {reason}.{recommend}",
+  "admission_recommend": " Recommended computer: {machine}.",
+  "admission_reroute": "Moved from {from} to {to}: {reason}"
 }

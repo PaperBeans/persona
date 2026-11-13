@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -800,7 +801,7 @@ func (f writerFunc) Write(b []byte) (int, error) { return f(b) }
 
 func TestPrintUpgrades(t *testing.T) {
 	var b strings.Builder
-	printUpgrades(&b, upgradesView{Auto: true, Upgrades: []ExtensionUpgrade{
+	printUpgrades(i18n.ZhHans, &b, upgradesView{Auto: true, Upgrades: []ExtensionUpgrade{
 		{ID: "example-a", From: "1.0.0", To: "1.1.0", State: upgradeWaitingIdle, Detail: "扩展正在用"},
 		{ID: "example-b", Market: "m1", From: "0.6.0", To: "0.7.0", State: upgradeNeedsConsent,
 			AddedPermissions: []extension.PermissionLine{{Title: "访问更多网络", Detail: "api.example.com"}}},
@@ -815,17 +816,41 @@ func TestPrintUpgrades(t *testing.T) {
 	}
 	// A rename: the command names the ID its market lists it under, and the line says the ID changes (#2511).
 	b.Reset()
-	printUpgrades(&b, upgradesView{Auto: true, Upgrades: []ExtensionUpgrade{{ID: "old-name", Market: "m1", From: "1.0.0", To: "1.1.0",
+	printUpgrades(i18n.ZhHans, &b, upgradesView{Auto: true, Upgrades: []ExtensionUpgrade{{ID: "old-name", Market: "m1", From: "1.0.0", To: "1.1.0",
 		State: upgradeNeedsConsent, RenameFrom: "old-name", RenameTo: "new-name"}}})
 	out = b.String()
 	if !strings.Contains(out, "market:m1/new-name") || strings.Contains(out, "market:m1/old-name") ||
-		!strings.Contains(out, i18n.T(i18n.Default, "extension-identity.confirmation", i18n.Args{"from": "old-name", "to": "new-name"})) {
+		!strings.Contains(out, i18n.T(i18n.ZhHans, "extension-identity.confirmation", i18n.Args{"from": "old-name", "to": "new-name"})) {
 		t.Fatalf("rename hint:\n%s", out)
 	}
 	b.Reset()
-	printUpgrades(&b, upgradesView{})
+	printUpgrades(i18n.ZhHans, &b, upgradesView{})
 	if !strings.Contains(b.String(), "都是最新的") {
 		t.Fatal(b.String())
+	}
+	// The same list in English, the terminal's language on most hubs (#5520): no Chinese left in it.
+	b.Reset()
+	printUpgrades(i18n.En, &b, upgradesView{Auto: true, Upgrades: []ExtensionUpgrade{
+		{ID: "example-a", From: "1.0.0", To: "1.1.0", State: upgradeWaitingIdle, Detail: "in use"},
+		{ID: "example-b", Market: "m1", From: "0.6.0", To: "0.7.0", State: upgradeNeedsConsent,
+			AddedPermissions: []extension.PermissionLine{{Title: "Access more network hosts", Detail: "api.example.com"}}},
+		{ID: "example-c", From: "2.0.0", To: "2.1.0", State: upgradeSkipped},
+	}})
+	out = b.String()
+	for _, want := range []string{"Extension auto-upgrade: on", "Upgradable:", "waiting until idle: in use",
+		"Waiting for your confirmation:", "Access more network hosts", "(Settings › Extensions in the app, or personad extension install market:m1/example-b)",
+		"Skipped:", "rolled back"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("no %q in:\n%s", want, out)
+		}
+	}
+	if han := regexp.MustCompile(`\p{Han}`); han.MatchString(out) {
+		t.Fatalf("Chinese in the English list:\n%s", out)
+	}
+	b.Reset()
+	printUpgrades(i18n.En, &b, upgradesView{})
+	if got := b.String(); got != "Extension auto-upgrade: off\nExtensions installed from marketplaces are all up to date\n" {
+		t.Fatalf("%q", got)
 	}
 }
 

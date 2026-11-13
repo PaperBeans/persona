@@ -70,14 +70,12 @@ describe("the preview", () => {
     expect(renderToStaticMarkup(<Preview name="decision" />)).toContain("B 队列去重");
   });
 
-  it("has no way to reach a conversation: the page calls only the switch's own admin route", () => {
+  it("has no way to reach a conversation: the page calls no hub API at all", () => {
     const dir = fileURLToPath(new URL(".", import.meta.url));
     for (const file of ["pages/Assistant.tsx", "assistant-examples.ts"]) {
       const src = readFileSync(dir + file, "utf8");
       expect(src, file).not.toMatch(/\bfetch\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|adminApi|\/api\/v1\/assistant|openLink|window\.open/);
     }
-    const page = readFileSync(dir + "pages/Assistant.tsx", "utf8");
-    expect(page.match(/from "\.\.\/api"/g)).toHaveLength(1);
-    expect(page).toMatch(/import \{ errorText, getAssistantCards, setPersonaView \} from "\.\.\/api"/);
+    expect(readFileSync(dir + "pages/Assistant.tsx", "utf8")).not.toMatch(/from "\.\.\/api"/);
   });
 });

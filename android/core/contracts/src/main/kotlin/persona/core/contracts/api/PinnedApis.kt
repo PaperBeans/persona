@@ -47,6 +47,8 @@ private class PinnedExtensionManagement(val source: ExtensionManagement, private
         values: Map<String, String>?) = withContext(pins) { source.uiAction(extension, ui, action, context, state, values) }
     override suspend fun uiImage(path: String) = withContext(pins) { source.uiImage(path) }
 
+    override fun iconPath(value: String) = source.iconPath(value)
+    override suspend fun icon(path: String) = withContext(pins) { source.icon(path) }
     override suspend fun markets() = withContext(pins) { source.markets() }
     override suspend fun addMarket(spec: String, token: String?) = withContext(pins) { source.addMarket(spec, token) }
     override suspend fun removeMarket(id: String) = withContext(pins) { source.removeMarket(id) }

@@ -38,7 +38,7 @@ nonisolated enum MeetingAttendance: String, Codable, CaseIterable, Sendable {
 /// the phone's live log of what it sent the hub, and the stretches Persona spoke in.
 nonisolated struct RecordingAttendance: Codable, Hashable, Sendable {
     var role: MeetingAttendance
-    /// The attending session's `SessionKey.path`; nil is the main chat (the upload then leaves `attending_session` out).
+    /// The attending session's `SessionKey.path`; nil is the main chat only when `mainPicked`, else nobody chosen yet.
     var session: String?
     /// Its name when it was chosen.
     var sessionTitle: String?
@@ -47,28 +47,62 @@ nonisolated struct RecordingAttendance: Codable, Hashable, Sendable {
     /// (`end` nil) while attending.
     var periods: [RecordingPeriod] = []
     /// The phone's append-only live log (`POST /api/v1/recordings/{id}/live`): a sentence's position is its index here,
-    /// never renumbered. A re-transcription or a dropped echo line changes nothing already in it.
+    /// never renumbered. A re-transcription or an echo line kept out of it (`echo`) changes nothing already in it.
     var live: [RecordingSentence] = []
     /// The segments whose sentences were already looked at for the log, so a segment transcribed again adds nothing.
     var liveSegments: [Int] = []
-    /// Where on the recording Persona said an answer out loud: the microphone may have heard it, so a sentence at least
-    /// half inside one is Persona's, not the meeting's (left out of the transcript, the upload and the live log).
+    /// Where on the recording Persona said an answer out loud, and what it said: the microphone may have heard it, so a
+    /// sentence that overlaps one and says its words is Persona's echo, not the meeting's (`echo`, #5905): hidden in the
+    /// transcript, kept out of the live log, uploaded marked (or left out, to a hub without `meeting_echo`).
     var spoken: [RecordingSpan] = []
     /// Why the phone stopped attending on its own, said on the recording: the hub can't follow meetings (an older
     /// manager), or it takes no more live lines for this one.
     var stopped: StopReason?
+    /// A room meeting (#3862): started while the hub listed `meeting_conversation`. Its uploads carry `room` and `private`
+    /// (never the top-level `attendance` / `attending_session`); it stays one for life.
+    var room: Bool = false
+    /// Started while the hub listed `meeting_photos` (phase 3): the page offers the camera and the library.
+    var photos: Bool = false
+    /// Started while the hub listed `meeting_live_view` (phase 2): the page shows the room's topics, the Live Activity the
+    /// current topic and the latest line, and while Persona attends the recording writes 15-second segments.
+    var liveView: Bool = false
+    /// Started while the hub listed `meeting_highlights` beside `meeting_live_view` (phase 2b): the page's top card shows
+    /// the room's highlights once it set any, and `GET …/live` reads them. Only ever with `liveView`.
+    var highlights: Bool = false
+    /// The start sheet's Private meeting choice, sent as the upload's `private` (the hub takes it only while it has no mark).
+    var privateMark: Bool? = nil
+    /// The owner picked the main chat to attend this meeting (#3862): the only way it ever attends one. A meeting's words
+    /// fill the chat they are fed to, so the main chat never gets them by default; no session named without this pick
+    /// means nobody was chosen, and the meeting goes as off (`sentRole`).
+    var mainPicked: Bool = false
 
     nonisolated enum StopReason: String, Codable, Sendable {
         case unsupported
         case liveFull = "live_full"
     }
 
-    init(role: MeetingAttendance, session: String? = nil, sessionTitle: String? = nil, at: Double = 0) {
-        self.role = .off; self.session = session; self.sessionTitle = sessionTitle
+    init(role: MeetingAttendance, session: String? = nil, sessionTitle: String? = nil, mainPicked: Bool = false, at: Double = 0) {
+        self.role = .off; self.session = session; self.sessionTitle = sessionTitle; self.mainPicked = mainPicked
         set(role, at: at)
     }
 
-    enum CodingKeys: String, CodingKey { case role, session, sessionTitle, periods, live, liveSegments, spoken, stopped }
+    /// A room meeting's attendance as it starts: no attending session (the meeting's own room attends), whatever the role.
+    /// `highlights` counts only beside `liveView`, as the hub lists it only beside `meeting_live_view`.
+    static func room(_ role: MeetingAttendance, private privateMark: Bool, photos: Bool, liveView: Bool = false,
+                     highlights: Bool = false, at: Double = 0) -> RecordingAttendance {
+        var a = RecordingAttendance(role: role, at: at)
+        a.room = true
+        a.photos = photos
+        a.liveView = liveView
+        a.highlights = liveView && highlights
+        a.privateMark = privateMark
+        return a
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case role, session, sessionTitle, periods, live, liveSegments, spoken, stopped, room, photos, liveView, highlights,
+             privateMark, mainPicked
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -81,10 +115,29 @@ nonisolated struct RecordingAttendance: Codable, Hashable, Sendable {
         liveSegments = try c.decodeIfPresent([Int].self, forKey: .liveSegments) ?? []
         spoken = try c.decodeIfPresent([RecordingSpan].self, forKey: .spoken) ?? []
         stopped = try? c.decodeIfPresent(StopReason.self, forKey: .stopped)
+        // Written by #3862 apps; an older file has none, and is no room meeting.
+        room = (try? c.decodeIfPresent(Bool.self, forKey: .room)) ?? false
+        photos = (try? c.decodeIfPresent(Bool.self, forKey: .photos)) ?? false
+        liveView = (try? c.decodeIfPresent(Bool.self, forKey: .liveView)) ?? false
+        // Written since phase 2b; a file from before has none, and its meeting shows no highlights.
+        highlights = (try? c.decodeIfPresent(Bool.self, forKey: .highlights)) ?? false
+        privateMark = try? c.decodeIfPresent(Bool.self, forKey: .privateMark)
+        // Written since #3862; a file from before has none: its main chat was never picked, so it goes as off.
+        mainPicked = (try? c.decodeIfPresent(Bool.self, forKey: .mainPicked)) ?? false
     }
 
-    /// The attending session, nil for the main chat.
+    /// The attending session, nil for the main chat (when `mainPicked`) or nobody.
     var key: SessionKey? { session.flatMap(SessionKey.init(path:)) }
+
+    /// Who attends is known: the meeting's own room, a session named (one the API can name: a malformed path such as ""
+    /// would go as no `attending_session`, which the hub reads as the main chat), or the main chat picked for this meeting.
+    var hasAttendee: Bool { room || key != nil || mainPicked }
+
+    /// The role the hub is told and the phone acts on (the upload, its stored mark, live lines, asks): `role`, except an
+    /// attending one with nobody chosen to attend, which goes as off. The structural half of "never the main chat by
+    /// default" (#3862): `attending_session` left out means the main chat to the hub, so an attending role without a
+    /// target is never sent, whatever built the attendance.
+    var sentRole: MeetingAttendance { role.attends && !hasAttendee ? .off : role }
 
     /// Sets the role at `at` (seconds on the recording's clock), opening or closing the attending period.
     mutating func set(_ next: MeetingAttendance, at: Double) {
@@ -95,23 +148,49 @@ nonisolated struct RecordingAttendance: Codable, Hashable, Sendable {
         if next.attends { stopped = nil }
     }
 
+    /// The recording writes its short segments (#3862 phase 2, docs/assistant/meeting-minutes.md「Phase 2: live view」), so
+    /// a line reaches the page and the room within about 15–30 seconds, in the foreground and the background
+    /// (`RecordingAudioSpec.meetingLiveSegmentSeconds`): a room meeting started with the live view that Persona attends as
+    /// the asks and the Live Activity see it (`MeetingAsk.canAsk`: its role attends, and the last upload's `200` named the
+    /// room, not `roomMissing`, `RecordingSync.roomMissing`: an older manager, which takes no line or ask), and whose lines
+    /// still go to the hub (`stopped` nil: after `live_full` questions still work, but no line reaches the room, so
+    /// shorter segments would only cost battery). A new recording has no answer yet: `roomMissing` false.
+    func shortSegments(roomMissing: Bool) -> Bool { room && liveView && sentRole.attends && stopped == nil && !roomMissing }
+
     /// The sentence ended while Persona attended.
     func attended(_ line: RecordingSentence) -> Bool {
         periods.contains { $0.holds(line.end) }
     }
 
-    /// Persona's own voice: at least half of the line is inside a stretch it spoke in (`open`: one still going).
-    func spokenBy(_ line: RecordingSentence, open: RecordingSpan? = nil) -> Bool {
-        spoken.contains { $0.holds(line) } || (open?.holds(line) ?? false)
+    /// Persona's echo (#5905): the line is what Persona said in a stretch it spoke in (`open`: one still going).
+    func echo(_ line: RecordingSentence, open: RecordingSpan? = nil) -> Bool {
+        spoken.contains { $0.echoes(line) } || (open?.echoes(line) ?? false)
     }
 }
 
-/// A stretch of a recording, in seconds on its clock (`RecordingSentence.start`).
+/// A stretch of a recording Persona spoke in, in seconds on its clock (`RecordingSentence.start`), with what it said.
 nonisolated struct RecordingSpan: Codable, Hashable, Sendable {
     var start: Double
     var end: Double
+    /// The answer said in it (#5905); nil (or empty) for a stretch saved before, which keeps the time rule (`holds`).
+    var text: String? = nil
 
-    /// At least half of the line was said inside this stretch (the contract's rule for Persona's own voice).
+    /// The line is Persona's echo by this stretch (`MeetingEcho`): it overlaps it, widened by `MeetingEcho.margin` on both
+    /// sides, and its words are the answer's. A stretch without text: at least half of the line is inside it (`holds`).
+    func echoes(_ line: RecordingSentence) -> Bool {
+        guard let text, !text.isEmpty else { return holds(line) }
+        return overlaps(line) && MeetingEcho.matches(line.text, spoken: text)
+    }
+
+    /// The line overlaps the stretch widened by `MeetingEcho.margin`; a line of no length, when it starts inside.
+    func overlaps(_ line: RecordingSentence) -> Bool {
+        let from = start - MeetingEcho.margin, to = end + MeetingEcho.margin
+        guard line.end > line.start else { return line.start >= from && line.start <= to }
+        return line.end >= from && line.start <= to
+    }
+
+    /// At least half of the line was said inside this stretch, with no margin (the rule before #5905, for a stretch with
+    /// no text); a line of no length, when it starts inside.
     func holds(_ line: RecordingSentence) -> Bool {
         let length = line.end - line.start
         guard length > 0 else { return line.start >= start && line.start <= end }
@@ -153,5 +232,182 @@ nonisolated enum MeetingAttendanceDefaults {
     static func remember(offered: Bool, role: MeetingAttendance?, _ store: UserDefaults = .standard) {
         if store.object(forKey: offeredKey) == nil || store.bool(forKey: offeredKey) != offered { store.set(offered, forKey: offeredKey) }
         if let role, store.string(forKey: roleKey) != role.rawValue { store.set(role.rawValue, forKey: roleKey) }
+    }
+
+    /// Listed by a hub whose manager has the meeting conversation (#3862, docs/assistant/meeting-minutes.md「Flags and
+    /// compatibility」): a meeting started then is a room meeting.
+    static let conversationFeature = "meeting_conversation"
+    /// …and photos in the meeting (phase 3); only ever with `meeting_conversation`.
+    static let photosFeature = "meeting_photos"
+    /// …and the live view (phase 2: topics, the latest line, 15-second segments); only ever with `meeting_conversation`.
+    static let liveViewFeature = "meeting_live_view"
+    /// …and the highlights (phase 2b: the page's top card); only ever with `meeting_live_view`.
+    static let highlightsFeature = "meeting_highlights"
+    /// Listed by a hub whose manager takes Persona's echo marked on an upload (#5905: `echo` on segments, `spoken`), with
+    /// `meeting_attendance`: only then the upload carries echo lines, else it leaves them out.
+    static let echoFeature = "meeting_echo"
+    /// Whether the last hub's `hello` listed it, for an upload while the socket is down.
+    static let echoKey = "recording.meeting.echo"
+
+    /// The last hub heard listed `meeting_echo`.
+    static func hubEcho(_ store: UserDefaults = .standard) -> Bool { store.bool(forKey: echoKey) }
+
+    /// Whether the hub listed them, for a start without the app in front, as `offeredKey`.
+    static let conversationKey = "recording.meeting.conversation"
+    static let photosKey = "recording.meeting.photos"
+    static let liveViewKey = "recording.meeting.liveView"
+    static let highlightsKey = "recording.meeting.highlights"
+
+    /// Keeps whether the hub lists them (a start without the app in front reads them).
+    static func remember(conversation: Bool, photos: Bool, liveView: Bool = false, highlights: Bool = false,
+                         _ store: UserDefaults = .standard) {
+        if store.object(forKey: conversationKey) == nil || store.bool(forKey: conversationKey) != conversation { store.set(conversation, forKey: conversationKey) }
+        if store.object(forKey: photosKey) == nil || store.bool(forKey: photosKey) != photos { store.set(photos, forKey: photosKey) }
+        if store.object(forKey: liveViewKey) == nil || store.bool(forKey: liveViewKey) != liveView { store.set(liveView, forKey: liveViewKey) }
+        if store.object(forKey: highlightsKey) == nil || store.bool(forKey: highlightsKey) != highlights { store.set(highlights, forKey: highlightsKey) }
+    }
+
+    /// Keeps every meeting flag of a hub's `hello` as it arrives (`features`, not empty: an empty list says nothing), so a
+    /// start without the app in front (Siri, a Control, the Action button) goes by the last hub it heard, not by the last
+    /// one whose Recordings page was open: a stale `meeting_conversation` would start a room meeting an older manager
+    /// takes as off. `role`: the hub's default role, when its settings are in.
+    static func remember(hello features: Set<String>, role: MeetingAttendance?, _ store: UserDefaults = .standard) {
+        let offered = features.contains(feature)
+        remember(offered: offered, role: role, store)
+        let conversation = offered && features.contains(conversationFeature)
+        let liveView = conversation && features.contains(liveViewFeature)
+        remember(conversation: conversation, photos: conversation && features.contains(photosFeature),
+                 liveView: liveView, highlights: liveView && features.contains(highlightsFeature), store)
+        let echo = offered && features.contains(echoFeature)
+        if store.object(forKey: echoKey) == nil || store.bool(forKey: echoKey) != echo { store.set(echo, forKey: echoKey) }
+    }
+}
+
+/// The room conversation's state as the hub reports it (`room` on the upload's 200, `GET/POST …/live`, `detail.meta`;
+/// docs/assistant/meeting-minutes.md「Fields on `GET …/live` and `detail.meta`」).
+nonisolated struct MeetingRoom: Codable, Hashable, Sendable {
+    nonisolated enum State: String, Sendable { case none, starting, ready, unavailable, ended, deleted }
+    var state: String
+    var machineID: String?
+    var sessionID: String?
+    /// Why it is `unavailable` (an open set: `runtime_unsupported`, `node_too_old`, `machine_offline`, `start_failed`).
+    var problem: String?
+
+    enum CodingKeys: String, CodingKey { case state, machineID = "machine_id", sessionID = "session_id", problem }
+
+    /// An open set: a value the app doesn't know reads as `starting`.
+    var known: State { State(rawValue: state) ?? .starting }
+
+    /// The room's conversation once it has ids (never with `none` / `deleted`).
+    func key(group: String) -> SessionKey? {
+        guard known != State.none, known != State.deleted, let machineID, !machineID.isEmpty, let sessionID, !sessionID.isEmpty else { return nil }
+        return SessionKey(group: group, machineID: machineID, sessionID: sessionID)
+    }
+}
+
+nonisolated extension MeetingRoom {
+    /// Leniently: a field of another shape is left out rather than losing the answer it came in (a missing state is one
+    /// the app doesn't know).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        state = (try? c.decodeIfPresent(String.self, forKey: .state)) ?? State.starting.rawValue
+        machineID = try? c.decodeIfPresent(String.self, forKey: .machineID)
+        sessionID = try? c.decodeIfPresent(String.self, forKey: .sessionID)
+        problem = try? c.decodeIfPresent(String.self, forKey: .problem)
+    }
+}
+
+/// One of the meeting's topics as the room set them (`topics` of `GET …/live`, #3862 phase 2;
+/// docs/assistant/meeting-minutes.md「Phase 2: live view」): `{"title", "state", "at"?, "note"?}`, in the room's order.
+nonisolated struct MeetingTopic: Codable, Hashable, Sendable {
+    nonisolated enum State: String, Sendable { case done, current, open }
+    var title: String
+    var state: String
+    /// Seconds from the start of the recording when the topic began.
+    var at: Double?
+    var note: String?
+
+    enum CodingKeys: String, CodingKey { case title, state, at, note }
+
+    /// `done`, `current` or `open`; a value the app doesn't know reads as `open` (neither done nor being discussed).
+    var known: State { State(rawValue: state) ?? .open }
+
+    /// The topic being discussed now: the first `current` (the hub keeps at most one).
+    static func current(_ topics: [MeetingTopic]) -> MeetingTopic? { topics.first { $0.known == .current } }
+
+    /// A topic with its identity in the list (`listed`).
+    nonisolated struct Listed: Identifiable, Hashable, Sendable {
+        var id: String
+        var topic: MeetingTopic
+    }
+
+    /// The topics with an identity each (pure, for the tests and the page's chips; docs/apple/performance.md P6): the room
+    /// replaces the whole list, inserting and reordering topics, so a place in it is no identity. A topic is its title,
+    /// which stays while it goes from open to now to done (`at` comes only once it begins); the hub doesn't promise
+    /// unique titles, so a title listed again gets its count ("Q&A", "Q&A #2", …), and one that is taken already the
+    /// next free count: the ids are unique whatever the room sends.
+    static func listed(_ topics: [MeetingTopic]) -> [Listed] {
+        var used = Set<String>()
+        return topics.map { topic in
+            var id = topic.title, n = 1
+            while used.contains(id) {
+                n += 1
+                id = "\(topic.title) #\(n)"
+            }
+            used.insert(id)
+            return Listed(id: id, topic: topic)
+        }
+    }
+}
+
+nonisolated extension MeetingTopic {
+    /// Leniently: a topic without a title is no topic (the list drops it), any other field of another shape is left out.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let title = (try? c.decodeIfPresent(String.self, forKey: .title))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !title.isEmpty else {
+            throw DecodingError.dataCorruptedError(forKey: .title, in: c, debugDescription: "a topic without a title")
+        }
+        self.title = title
+        state = (try? c.decodeIfPresent(String.self, forKey: .state)) ?? State.open.rawValue
+        at = (try? c.decodeIfPresent(Double.self, forKey: .at)).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        note = try? c.decodeIfPresent(String.self, forKey: .note)
+    }
+}
+
+/// One of the meeting's highlights as the room set them (`highlights` of `GET …/live`, #3862 phase 2b;
+/// docs/assistant/meeting-minutes.md「Phase 2b: highlights」): `{"text", "at", "end"}`, a point the meeting came to and
+/// the minute of the transcript it was made in, from the start of that minute's first line (`at`) to the end of its last
+/// (`end`), in seconds from the recording's start.
+nonisolated struct MeetingHighlight: Codable, Hashable, Sendable {
+    var text: String
+    var at: Double
+    var end: Double
+
+    enum CodingKeys: String, CodingKey { case text, at, end }
+
+    init(text: String, at: Double, end: Double? = nil) {
+        self.text = text
+        self.at = at
+        self.end = end ?? at
+    }
+}
+
+nonisolated extension MeetingHighlight {
+    /// Leniently: a highlight without words, or without a time it can go back to (`at` absent, of another shape, not
+    /// finite or below 0), is no highlight (the list drops it); an `end` that isn't a finite time from `at` on is `at`.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let text = (try? c.decodeIfPresent(String.self, forKey: .text))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !text.isEmpty else {
+            throw DecodingError.dataCorruptedError(forKey: .text, in: c, debugDescription: "a highlight without words")
+        }
+        guard let at = try? c.decodeIfPresent(Double.self, forKey: .at), at.isFinite, at >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .at, in: c, debugDescription: "a highlight without a time")
+        }
+        self.text = text
+        self.at = at
+        let end = try? c.decodeIfPresent(Double.self, forKey: .end)
+        self.end = end.flatMap { $0.isFinite && $0 >= at ? $0 : nil } ?? at
     }
 }

@@ -64,7 +64,9 @@ import persona.core.domain.tasks.TasksStore
  * What Persona sends to a task's agent in the main conversation (#1623, docs/assistant/unified-entry.md "Messages to
  * agents"): the hand-off right after its card is drawn only on the card ("2 instructions sent"), a later rework and a message
  * to a task with no card here are folded lines on the left, the user's own word keeps its bubble. Native JVM images in
- * every style, light and dark, folded and opened (build/sent-shots/); not emulator screenshots.
+ * every style, light and dark, folded and opened (build/sent-shots/); not emulator screenshots. The folded lines are Brief's
+ * and Board's: Glass draws Persona's messages as iOS's exchanges (`TaskRecordsShotsTest`), so the taps happen in Brief and
+ * Glass is drawn last.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -172,7 +174,7 @@ class SentToAgentsShotsTest {
     private fun shots(state: String, prepare: () -> Unit = {}) {
         val output = File("build/sent-shots").also { it.mkdirs() }
         val light = mutableMapOf<AppStyle, Bitmap>()
-        for (s in AppStyle.entries) for (d in listOf(false, true)) {
+        for (s in listOf(AppStyle.Brief, AppStyle.Board, AppStyle.Glass)) for (d in listOf(false, true)) {
             setLook(s, d)
             prepare()
             rule.waitForIdle()
@@ -182,10 +184,10 @@ class SentToAgentsShotsTest {
             File(output, "sent-$state-${s.name.lowercase()}-${if (d) "dark" else "light"}.png").outputStream()
                 .use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
-        setLook(AppStyle.Glass, false)
+        setLook(AppStyle.Brief, false)
     }
 
-    private var style by mutableStateOf(AppStyle.Glass)
+    private var style by mutableStateOf(AppStyle.Brief)
     private var dark by mutableStateOf(false)
     private fun setLook(style: AppStyle, dark: Boolean) {
         this.style = style; this.dark = dark

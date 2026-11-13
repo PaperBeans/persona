@@ -248,9 +248,10 @@ struct ManagerSwitchTests {
         model.managerRosters[""] = try Self.roster(Self.oneManager)
         model.selectAssistantManager("m-1")
         #expect(model.assistantManagerID == nil && model.assistantManager == nil, "one manager: nothing is named")
-        #expect(model.currentAssistant?.name == "助手" && model.managerRoster?.isMulti == false, "one manager: it is current, without a roster switcher")
+        #expect(model.currentAssistant?.name == "助手" && model.managerRoster?.isMulti == false && model.showsAssistantSwitcher,
+                "one manager: it is current, with the roster switcher")
         model.managerRosters[""] = nil
-        #expect(model.currentAssistant == nil, "a hub without a roster: no switcher")
+        #expect(model.currentAssistant == nil && !model.showsAssistantSwitcher, "a hub without a roster: no switcher")
     }
 
     @Test func thePickIsKeptOnThisDeviceAcrossLaunches() async throws {
@@ -260,10 +261,10 @@ struct ManagerSwitchTests {
         first.selectAssistantManager("m-1")
         #expect(AssistantPickStore.load(folder: folder) == ["": "m-1"])
 
-        // The next launch: the pick is there before the hub's roster is, and names its manager once it is read.
+        // The next launch routes to the saved pick before the roster arrives, not to another assistant's settings.
         hub.on("GET", "/api/v1/managers", json: Self.roster)
         let next = try model(hub, roster: nil, folder: folder)
-        #expect(next.assistantPicks == ["": "m-1"] && next.assistantManagerID == nil && next.api?.shownManager == nil)
+        #expect(next.assistantPicks == ["": "m-1"] && next.assistantManagerID == "m-1" && next.api?.shownManager == "m-1")
         await next.refreshManagerRoster("")
         #expect(next.assistantManagerID == "m-1" && next.currentAssistant?.name == "工作" && next.api?.shownManager == "m-1")
 
@@ -282,6 +283,17 @@ struct ManagerSwitchTests {
         #expect(model.currentAssistant?.id == "assistant")
         await model.refreshManagerRoster("")
         #expect(model.managerRoster == nil && model.currentAssistant == nil, "none from this hub: no switcher")
+    }
+
+    @Test func aLegacyHubDoesNotNameTheRememberedPickOnceAbsenceIsConfirmed() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "manager-startup-" + UUID().uuidString)
+        let first = try model(FakeHub(), roster: try Self.roster(), folder: folder)
+        first.selectAssistantManager("m-1")
+        let legacy = try model(FakeHub(), roster: nil, folder: folder)
+        #expect(legacy.assistantManagerID == "m-1")
+        await legacy.refreshManagerRoster("")
+        #expect(legacy.assistantManagerID == nil && legacy.api?.shownManager == nil)
+        #expect(legacy.assistantPicks == ["": "m-1"], "a compatibility read does not erase the user's pick")
     }
 
     @Test func thePickStaysOnItsManagerWhenTheDefaultMoves() async throws {

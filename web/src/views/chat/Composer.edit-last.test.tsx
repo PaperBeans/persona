@@ -146,9 +146,10 @@ describe("↑ in an empty box", () => {
     expect(box().value).toBe("");
   });
 
-  it("is not taken while the Ctrl+R search or a dialog is open", () => {
+  it("is not taken while the Ctrl+R search or a dialog is open", async () => {
     mount();
-    press("r", { ctrlKey: true });
+    // The search chunk loads on intent; keep the composer mounted while React resolves it.
+    await act(async () => { box().dispatchEvent(new KeyboardEvent("keydown", { key: "r", ctrlKey: true, bubbles: true, cancelable: true })); });
     expect(host.querySelector('[role="listbox"], [role="dialog"], input')).not.toBeNull();
     press("ArrowUp");
     expect(started).not.toHaveBeenCalled();

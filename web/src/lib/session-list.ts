@@ -16,9 +16,29 @@ export function compareListIds(a: string, b: string): number {
   return a.length - b.length;
 }
 const JOURNAL_LIMIT = 16_384;
-const FILTER_KEYS = ["state", "machine_id", "project", "group", "source", "provider", "q"] as const;
+const validCounts = (counts: ListCounts | undefined): counts is ListCounts => !!counts && typeof counts.total === "number" &&
+  typeof counts.revision === "string" && !!counts.machine && !!counts.project && !!counts.group && !!counts.state;
+const FILTER_KEYS = ["state", "machine_id", "project", "group", "source", "provider", "q", "parent_session_id"] as const;
+/** The filters that take several values, each a machine and value pair spelled as a JSON array (`sessions_catalog`,
+ * docs/protocol/protocol.md "Projects and spaces"): the rows at any of the places, in any of the spaces. */
+const PAIR_KEYS = ["place", "space"] as const;
 
-export type ListFilters = Partial<Record<typeof FILTER_KEYS[number], string>>;
+export type ListFilters = Partial<Record<typeof FILTER_KEYS[number], string>> & Partial<Record<typeof PAIR_KEYS[number], readonly string[]>>;
+/** A machine and value pair as `place` and `space` take it. */
+export const listPair = (machineId: string, value: string) => JSON.stringify([machineId, value]);
+/** How many pairs one of those filters takes; the hub refuses more. */
+export const LIST_PAIRS_MAX = 64;
+
+/** A read's query for `filters` in a stable order, so the same scope reached through different filters compares
+ * equal: `extra` first (`counts=1`), then each filter by key, a pair filter's values sorted. */
+export function filterQuery(filters: ListFilters, extra: Record<string, string> = { counts: "1" }): string {
+  const params = new URLSearchParams(extra);
+  for (const [key, value] of Object.entries(filters).sort(([a], [b]) => a.localeCompare(b))) {
+    if (typeof value === "string") { if (value) params.set(key, value); }
+    else for (const pair of [...new Set(value ?? [])].sort(compareListIds)) params.append(key, pair);
+  }
+  return params.toString();
+}
 export interface ListCounts {
   total: number;
   machine: Record<string, number>;
@@ -34,6 +54,8 @@ export interface ListPage<T> {
   next_cursor?: string;
   revision: string;
   total: number;
+  /** Only when the read asked `with_counts=1` (`sessions_page_counts`): what `counts=1` with the same filters returns. */
+  counts?: ListCounts;
 }
 export interface ListSnapshot<T> {
   rows: T[];
@@ -50,6 +72,15 @@ export interface SessionListOptions<T> {
   summary?: boolean;
   /** Receives only this completed delta's net changes, including unloaded identities. Must not throw. */
   onDelta?: (upsert: T[], remove: string[]) => void;
+  /** Whether the hub answers `with_counts=1` (`sessions_page_counts`, #4858): a refresh then reads its counts with the
+   * page, one request instead of two. A page that comes back without them still gets the separate counts read. */
+  pageCounts?: () => boolean;
+  /** Read the list without the child sessions folded under a listed one (`roots=1`, `sessions_hierarchy`, #5120): rows,
+   * totals and counts then hold each parent once, counted by its folded state. Only for a hub that advertises it. */
+  roots?: boolean;
+  /** false: the list's counts are never read (its snapshot's `counts` stays null). For a list that only shows rows,
+   * as one group's section does: its group's numbers come from the read that named the groups. */
+  counts?: boolean;
 }
 
 type PreparedDelta<T> = { overlay: Map<string, T | null>; changes: Map<string, T | null>; revision: string; total: number };
@@ -77,7 +108,10 @@ export class SessionList<T> {
   private invalidationQueued = false;
   private lastFailure: "load" | "more" = "load";
   private summary: boolean;
+  private roots: boolean;
   private onDelta?: (upsert: T[], remove: string[]) => void;
+  private pageCounts: () => boolean;
+  private counted: boolean;
 
   constructor(
     private path: string,
@@ -88,15 +122,29 @@ export class SessionList<T> {
     options: SessionListOptions<T> = {},
   ) {
     this.summary = options.summary ?? true;
+    this.roots = options.roots ?? false;
     this.onDelta = options.onDelta;
+    this.pageCounts = options.pageCounts ?? (() => false);
+    this.counted = options.counts ?? true;
   }
 
   isSummary(): boolean { return this.summary; }
+  /** Whether every read sends `roots=1`: a list or counts read over the same collection sends it too. */
+  isRoots(): boolean { return this.roots; }
+  /** For a list over the same collection, e.g. a filtered copy of this one. */
+  usesPageCounts(): boolean { return this.pageCounts(); }
 
   /** Changing projection invalidates its bound cursors, but preserves filters and does not start a read. */
   setSummary(value: boolean): void {
     if (this.summary === value) return;
     this.summary = value;
+    this.reset();
+  }
+
+  /** Leaving the folded children out (or taking them back) changes every row, total and cursor: like setSummary. */
+  setRoots(value: boolean): void {
+    if (this.roots === value) return;
+    this.roots = value;
     this.reset();
   }
 
@@ -109,6 +157,8 @@ export class SessionList<T> {
   setFilters(filters: ListFilters): Promise<void> {
     const next: ListFilters = {};
     for (const key of FILTER_KEYS) if (filters[key]) next[key] = filters[key];
+    // the same pairs in another order are the same filter: the hub binds a cursor to them as a set
+    for (const key of PAIR_KEYS) if (filters[key]?.length) next[key] = [...new Set(filters[key])].sort(compareListIds);
     if (!sameValue(next, this.filters)) {
       this.filters = next;
       this.reset();
@@ -129,7 +179,7 @@ export class SessionList<T> {
 
   retry(): Promise<void> {
     // A delta failure must not be mistaken for a next-page failure just because a frozen cursor still exists.
-    return this.lastFailure === "more" && this.snapshot.counts ? this.more() : this.load();
+    return this.lastFailure === "more" && (this.snapshot.counts || !this.counted) ? this.more() : this.load();
   }
 
   invalidate(): void {
@@ -213,8 +263,10 @@ export class SessionList<T> {
   private query(extra: Record<string, string>): string {
     const [path, existing = ""] = this.path.split("?");
     const params = new URLSearchParams(existing);
-    for (const key of [...FILTER_KEYS, "summary", "limit", "counts", "cursor", "since"]) params.delete(key);
+    for (const key of [...FILTER_KEYS, ...PAIR_KEYS, "summary", "limit", "counts", "with_counts", "cursor", "since", "roots"]) params.delete(key);
     for (const key of FILTER_KEYS) if (this.filters[key]) params.set(key, this.filters[key]!);
+    for (const key of PAIR_KEYS) for (const pair of this.filters[key] ?? []) params.append(key, pair);
+    if (this.roots) params.set("roots", "1");
     for (const [key, value] of Object.entries(extra)) params.set(key, value);
     return `${path}?${params}`;
   }
@@ -254,13 +306,12 @@ export class SessionList<T> {
   }
 
   private async readCounts(generation: number): Promise<void> {
+    if (!this.counted) return;
     try {
       const counts = await api<ListCounts>(this.query({ counts: "1" }));
       if (!this.current(generation)) return;
       // Legacy hubs may ignore counts and answer with sessions. Never use that as a row baseline.
-      if (typeof counts.total === "number" && typeof counts.revision === "string" && counts.machine && counts.project && counts.group && counts.state) {
-        this.publish({ counts });
-      }
+      if (validCounts(counts)) this.publish({ counts });
     } catch (error) {
       if (!this.current(generation)) return;
       if (!this.unsupported(error)) throw error;
@@ -268,10 +319,17 @@ export class SessionList<T> {
     }
   }
 
+  /** The counts that came with a page (`with_counts`), or the separate read when they did not. */
+  private async pageCountsOrRead(generation: number, page: ListPage<T>): Promise<void> {
+    if (validCounts(page.counts)) this.publish({ counts: page.counts });
+    else await this.readCounts(generation);
+  }
+
   private async refresh(generation: number, retry = true): Promise<void> {
+    const withCounts = this.counted && this.pageCounts();
     const results = await Promise.allSettled([
-      this.checkpoint && this.snapshot.supported !== false ? this.readDelta(generation) : this.readFirst(generation),
-      this.readCounts(generation),
+      this.checkpoint && this.snapshot.supported !== false ? this.readDelta(generation, withCounts) : this.readFirst(generation, withCounts),
+      withCounts ? undefined : this.readCounts(generation),
     ]);
     if (!this.current(generation)) return;
     const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
@@ -290,9 +348,11 @@ export class SessionList<T> {
     if (result.status === "fulfilled" && result.value) this.commitDelta(generation, result.value);
   }
 
-  private async readFirst(generation: number): Promise<void> {
-    const page = await this.page(generation);
+  private async readFirst(generation: number, withCounts = false): Promise<void> {
+    const page = await this.page(generation, withCounts ? { with_counts: "1" } : {});
     if (!page || !this.current(generation)) return;
+    if (withCounts) await this.pageCountsOrRead(generation, page);
+    if (!this.current(generation)) return;
     this.frozen = new Map(page.sessions.map((row) => [this.identity(row), row]));
     this.overlay = new Map();
     this.prefixSize = PAGE_SIZE;
@@ -302,7 +362,7 @@ export class SessionList<T> {
     this.publish({ rows: this.visible(), loaded: true, supported: this.snapshot.supported !== false, total: page.total, hasMore: !!this.cursor });
   }
 
-  private async readDelta(generation: number): Promise<PreparedDelta<T> | null> {
+  private async readDelta(generation: number, withCounts = false): Promise<PreparedDelta<T> | null> {
     const since = this.checkpoint!;
     const overlay = new Map(this.overlay);
     const changes = new Map<string, T | null>();
@@ -312,8 +372,12 @@ export class SessionList<T> {
     let total = this.snapshot.total;
     const cursors = new Set<string>();
     do {
-      const page = await this.page(generation, { since, ...(cursor ? { cursor } : {}) });
+      const page = await this.page(generation, { since, ...(cursor ? { cursor } : {}), ...(first && withCounts ? { with_counts: "1" } : {}) });
       if (!page || !this.current(generation)) return null;
+      if (first && withCounts) {
+        await this.pageCountsOrRead(generation, page);
+        if (!this.current(generation)) return null;
+      }
       if (!first && target !== page.revision) throw new Error(t("paged-agents.inconsistent_delta"));
       first = false;
       target = page.revision;

@@ -8,6 +8,7 @@ import persona.core.contracts.AgentState
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.AssistantRepository
 import persona.core.contracts.api.AssistantSnapshot
+import persona.core.contracts.api.LeaderCounts
 import persona.core.contracts.api.DeliveryState
 import persona.core.contracts.api.MessageSender
 import persona.core.contracts.api.OutboxMessage
@@ -25,73 +26,113 @@ import kotlinx.coroutines.flow.update
 import java.util.UUID
 
 /**
- * [auto]: the conversations the hub opened by itself (#3264), out of [recent] while nothing is searched. [directions]: the
- * leader conversations (`assistant.leaders`), first, in the hub's order, out of [pinned] and [recent]; [names] what each
- * direction is called, by session id, shown instead of its title.
+ * The drawer's Persona chats (#4331): [main] the main conversation (its own row, above the search), [directions] the
+ * leader conversations under their [names] ("常驻", in the hub's order), and [others] every other conversation, which
+ * "All chats" lists and a search narrows. [counts] each leader's open tasks, by session id. [recent] the newest eligible
+ * chats between 常驻 and All chats (#4922, #5196), none while searching. [background] the built-in background supervisor's
+ * conversation id (#4927): it is one of [others], under its own name, and its row has no pin, archive or end.
  */
 internal data class ConversationGroups(
-    val main: Session?, val pinned: List<Session>, val recent: List<Session>, val auto: List<Session> = emptyList(),
-    val directions: List<Session> = emptyList(), val names: Map<String, String> = emptyMap(),
-    /** Directions also pinned (before they became one): their menu keeps Unpin, so the pin can still go. */
-    val pinnedDirections: Set<SessionKey> = emptySet(),
+    val main: Session?, val directions: List<Session> = emptyList(), val others: List<Session> = emptyList(),
+    val names: Map<String, String> = emptyMap(), val counts: Map<String, LeaderCounts> = emptyMap(),
+    /**
+     * The hub's direction tree (#4352), the same one [counts] is read from: each 常驻 lead folds open to its to-dos. Null
+     * from an older hub: the rows stay as they are.
+     */
+    val tree: persona.core.contracts.DirectionTree? = null,
+    val recent: List<Session> = emptyList(),
+    val background: String? = null,
 )
 
-/** The drawer's groups of automatic conversations, in its order; [Other] is any origin this app doesn't know. */
-internal enum class AutoOrigin(val wire: String) { Inbox("inbox"), Task("task"), LarkAgent("lark_agent"), Spawned("spawned"), Extension("extension"), Other("other") }
+/** How many chats the drawer's Recent lists (#4922, the web's `RECENT_LIMIT`, iOS). */
+internal const val RECENT_LIMIT = 5
 
-/** The automatic group of a conversation; null for the user's own (none, user, channel). */
-internal fun Session.autoOrigin(): AutoOrigin? = when (val o = origin.orEmpty()) {
-    "", "user", "channel" -> null
-    else -> AutoOrigin.entries.firstOrNull { it.wire == o } ?: AutoOrigin.Other
+/** Origins of the user's own chats (docs/protocol/protocol.md "Origin of assistant chats"): the app, a channel's /new, or none from an older hub. */
+private val USER_ORIGINS = setOf("", "user", "channel")
+
+/** Where Persona opened a chat, shared by Recent, 常驻, search and All chats (#5196); unknown origins share [Other]. */
+internal enum class AssistantConversationOrigin(val id: String, @StringRes val labelRes: Int) {
+    Inbox("inbox", R.string.assistant_origin_inbox),
+    Task("task", R.string.assistant_origin_task),
+    LarkAgent("lark_agent", R.string.assistant_origin_lark_agent),
+    Spawned("spawned", R.string.assistant_origin_spawned),
+    Extension("extension", R.string.assistant_origin_extension),
+    Other("other", R.string.assistant_origin_other),
 }
 
-/** How a set of automatic conversations stands: how many, how many run, how many wait for the user. */
-internal data class OriginTally(val origin: AutoOrigin?, val count: Int, val working: Int, val needsYou: Int)
+/** Null for the user's own chat, otherwise the one source mapping used by every conversation row. */
+internal fun automaticConversationOrigin(origin: String?): AssistantConversationOrigin? {
+    val id = origin?.trim().orEmpty()
+    if (id in USER_ORIGINS) return null
+    return AssistantConversationOrigin.entries.firstOrNull { it.id == id && it != AssistantConversationOrigin.Other }
+        ?: AssistantConversationOrigin.Other
+}
 
-internal fun tally(origin: AutoOrigin?, list: List<Session>) = OriginTally(origin, list.size,
-    list.count { it.agentState == AgentState.Working }, list.count { it.agentState == AgentState.NeedsYou })
+/** The mark's TalkBack name: external conversations say where they came from, as on iOS and the web (#5195, #5196). */
+internal fun AssistantConversationOrigin.accessibilityLabel(resources: android.content.res.Resources): String {
+    val name = resources.getString(labelRes)
+    return when (this) {
+        AssistantConversationOrigin.LarkAgent -> resources.getString(R.string.assistant_origin_from, name)
+        AssistantConversationOrigin.Extension -> resources.getString(R.string.assistant_origin_from_extension)
+        else -> name
+    }
+}
 
-/** The automatic conversations by origin, only the origins that have any, in the drawer's order. */
-internal fun autoGroups(auto: List<Session>): List<OriginTally> =
-    AutoOrigin.entries.map { o -> tally(o, auto.filter { it.autoOrigin() == o }) }.filter { it.count > 0 }
+/**
+ * The drawer's Recent (#4922, #5196; web `recentConversations`, iOS `AssistantSidebarGroups.recent`): every conversation
+ * that is not the main one, not a leader, not archived, not the built-in background supervisor and not a scheduled
+ * task's own chat (#6228: the Scheduled Tasks entry and All chats keep those), newest first, equal times by session id,
+ * at most [limit]. The other automatic chats carry their source's mark; only the supervisor stays in All chats.
+ */
+internal fun recentConversations(snapshot: AssistantSnapshot, limit: Int = RECENT_LIMIT): List<Session> {
+    val leaders = snapshot.leaders.toSet()
+    return snapshot.conversations.distinctBy { it.key }
+        .filter { it.key != snapshot.mainSession && it.sessionId !in leaders && !it.archived &&
+            it.sessionId != snapshot.backgroundSupervisor &&
+            automaticConversationOrigin(it.origin) != AssistantConversationOrigin.Task }
+        .map { it to it.updated }
+        .sortedWith(compareByDescending<Pair<Session, java.time.Instant?>> { it.second }.thenBy { it.first.sessionId })
+        .take(limit).map { it.first }
+}
 
 internal fun conversationGroups(
     snapshot: AssistantSnapshot,
     query: String,
-    pinned: Set<SessionKey>,
     words: ConversationWords,
 ): ConversationGroups {
+    // The background supervisor (#4927) is built in: a conversation with the scheduled tasks' ones under All chats, found
+    // by its name too, and never a direction whatever the leaders say.
+    val background = snapshot.backgroundSupervisor?.takeIf(String::isNotBlank)
     val matches = snapshot.conversations.distinctBy { it.key }.filter {
         !it.archived && (query.isBlank() || it.conversationTitle(words).contains(query.trim(), ignoreCase = true) ||
-                it.lastText.orEmpty().contains(query.trim(), ignoreCase = true))
+                it.lastText.orEmpty().contains(query.trim(), ignoreCase = true) ||
+                (it.sessionId == background && words.background.contains(query.trim(), ignoreCase = true)))
     }.map { it to it.updated } // each time parsed once, not on every comparison
         .sortedWith(compareByDescending<Pair<Session, java.time.Instant?>> { it.second }.thenBy { it.first.key.path }).map { it.first }
-    // The leaders are the Directions group, under their names (a search matches the name too), in the hub's order.
+    // The leaders are the drawer's 常驻 group, under their names; a search matches the name too. Every other
+    // conversation waits under one "All chats" row (there is no all-conversations page on this app): main and the
+    // leaders are not listed twice.
     val names = snapshot.directionNames
-    val directions = snapshot.leaders.mapNotNull { id ->
+    val directions = snapshot.leaders.filter { it != background }.mapNotNull { id ->
         snapshot.conversations.firstOrNull { it.sessionId == id && it.key != snapshot.mainSession && !it.archived }
     }.filter { query.isBlank() || it in matches || names[it.sessionId].orEmpty().contains(query.trim(), ignoreCase = true) }
-    val isDirection = directions.map { it.key }.toSet()
-    val others = matches.filter { it.key != snapshot.mainSession && it.key !in pinned && it.key !in isDirection }
-    // A search finds every conversation, wherever it comes from; otherwise "Recent" is the user's own.
-    val searching = query.isNotBlank()
-    // The main conversation is the drawer's first row, above the search: a search does not take it away.
-    return ConversationGroups(snapshot.conversations.firstOrNull { it.key == snapshot.mainSession && !it.archived },
-        matches.filter { it.key != snapshot.mainSession && it.key in pinned && it.key !in isDirection },
-        if (searching) others else others.filter { it.autoOrigin() == null },
-        if (searching) emptyList() else others.filter { it.autoOrigin() != null },
-        directions, names, directions.map { it.key }.filter { it in pinned }.toSet())
+    val listed = directions.mapTo(HashSet()) { it.key }
+    val others = matches.filter { it.key != snapshot.mainSession && it.key !in listed }
+    return ConversationGroups(
+        snapshot.conversations.firstOrNull { it.key == snapshot.mainSession && !it.archived },
+        directions, others, names, snapshot.leaderCounts,
+        tree = snapshot.directionTree,
+        recent = if (query.isBlank()) recentConversations(snapshot) else emptyList(),
+        background = background,
+    )
 }
 
-/** How many recent conversations the history lists before folding the rest into "See all N". */
-internal const val RecentShown = 30
-
-internal data class RecentRows(val shown: List<Session>, val hidden: Int)
-
-/** The recent group as the history shows it: the first [limit], unless all were asked for or a search is on. */
-internal fun recentRows(recent: List<Session>, query: String, showAll: Boolean, limit: Int = RecentShown): RecentRows =
-    if (showAll || query.isNotBlank() || recent.size <= limit) RecentRows(recent, 0)
-    else RecentRows(recent.take(limit), recent.size - limit)
+/**
+ * What a leader's row says in words (#4331): its tasks waiting on you, 「等你 2」, null while none do. What runs under it
+ * is the row's spinner alone ([LeaderCounts.running]), never 「在做 N」 as well (#6626: one meaning, one expression).
+ */
+internal fun leaderCountsLabel(counts: LeaderCounts?, resources: android.content.res.Resources): String? =
+    counts?.needsYou?.takeIf { it > 0 }?.let { resources.getString(R.string.assistant_leader_needs_you, it) }
 
 @StringRes
 internal fun greeting(hour: Int): Int = when (hour) {
@@ -126,7 +167,6 @@ internal class DemoAssistantRepository(private val words: DemoWords) : Assistant
     override val assistant = snapshot.asStateFlow()
     private val messages = MutableStateFlow<List<OutboxMessage>>(emptyList())
     override val outbox = messages.asStateFlow()
-    val pinned = setOf(SessionKey("demo", "weekly"))
 
     override suspend fun refresh() = Unit
 
@@ -169,14 +209,18 @@ internal fun Session.conversationTitle(words: ConversationWords): String {
     return handoffTitle(line, words) ?: line.take(30)
 }
 
-/** The words a conversation's name falls back to: "Chat", "Hand to Persona" and "Hand to Persona: X" ([handoffNamed] has `%1$s`). */
-internal data class ConversationWords(val untitled: String, val handoff: String, val handoffNamed: String) {
+/**
+ * The words a conversation's name falls back to: "Chat", "Hand to Persona" and "Hand to Persona: X" ([handoffNamed] has `%1$s`);
+ * [background] is what the built-in background supervisor's conversation is called (#4927).
+ */
+internal data class ConversationWords(val untitled: String, val handoff: String, val handoffNamed: String, val background: String = "") {
     fun handoff(title: String): String = String.format(handoffNamed, title)
 }
 
 @Composable
 internal fun conversationWords() = ConversationWords(stringResource(R.string.assistant_untitled),
-    stringResource(R.string.assistant_handoff), stringResource(R.string.assistant_handoff_named))
+    stringResource(R.string.assistant_handoff), stringResource(R.string.assistant_handoff_named),
+    stringResource(R.string.assistant_background_supervisor))
 
 private val handoffTag = Regex("""<persona-context\b[^>]*?\btitle="([^"]*)"""")
 
@@ -227,10 +271,15 @@ internal fun DeliveryState.pendingStatus(): PendingStatus? = when (this) {
     DeliveryState.Sent -> null
 }
 
-internal fun assistantStatus(session: Session?, messages: List<OutboxMessage>) = StatusLineState(
+internal fun assistantStatus(session: Session?, messages: List<OutboxMessage>,
+    submittingId: String? = null, receipts: List<persona.core.contracts.api.MessageSendReceipt> = emptyList()) = StatusLineState(
     ended = session?.agentState == AgentState.Offline,
-    submitting = messages.any { it.state == DeliveryState.Sending },
-    unconfirmed = messages.any { it.state in setOf(DeliveryState.Unknown, DeliveryState.Verifying, DeliveryState.NeedsConfirmation) },
+    submitting = (submittingId != null && receipts.none { it.clientMessageId == submittingId && it.state != "sending" }) ||
+        receipts.any { it.state == "sending" } ||
+        messages.any { message -> message.state == DeliveryState.Sending && receipts.none { it.clientMessageId == message.clientMessageId && it.state != "sending" } },
+    processing = receipts.any { it.processing },
+    unconfirmed = messages.any { it.state in setOf(DeliveryState.Unknown, DeliveryState.Verifying, DeliveryState.NeedsConfirmation) } ||
+        receipts.any { it.state == "unknown" },
     blocked = session?.agentState == AgentState.NeedsYou,
     working = session?.agentState == AgentState.Working,
 )
@@ -238,6 +287,28 @@ internal fun assistantStatus(session: Session?, messages: List<OutboxMessage>) =
 internal fun conversationTime(at: java.time.Instant?, locale: java.util.Locale,
     zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String? =
     at?.let { LocalizedFormats.format(it, LocalizedFormats.MONTH_DAY_TIME, locale, zone) }
+
+/**
+ * When a conversation last moved, as the history writes it (iOS `Fmt.relative`): "Just now" under 45 seconds, "5 min ago"
+ * under an hour, today the time ("14:30"), "Yesterday", within six days the weekday ("Tuesday"), else the month and day
+ * ("Nov 5"). Null when there is no time.
+ */
+internal fun historyTime(at: java.time.Instant?, res: android.content.res.Resources, now: java.time.Instant = java.time.Instant.now(),
+    zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String? {
+    at ?: return null
+    val locale = res.configuration.locales[0]
+    val seconds = java.time.Duration.between(at, now).seconds
+    val day = at.atZone(zone).toLocalDate()
+    val today = now.atZone(zone).toLocalDate()
+    return when {
+        seconds < 45 -> res.getString(R.string.assistant_time_just_now)
+        seconds < 3600 -> maxOf(1, (seconds / 60).toInt()).let { res.getQuantityString(R.plurals.assistant_time_minutes_ago, it, it) }
+        day == today -> LocalizedFormats.format(at, LocalizedFormats.TIME, locale, zone)
+        day == today.minusDays(1) -> res.getString(R.string.assistant_time_yesterday)
+        seconds < 6 * 86_400 -> LocalizedFormats.format(at, LocalizedFormats.WEEKDAY, locale, zone)
+        else -> LocalizedFormats.format(at, LocalizedFormats.MONTH_DAY, locale, zone)
+    }
+}
 
 /** The composition root adapts these options to the shared chat lane's presentation parameters. */
 data class AssistantChatOptions(

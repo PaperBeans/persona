@@ -114,16 +114,16 @@ func TestMarketRefusalSaysWhy(t *testing.T) {
 		header      map[string]string
 		want, not   string
 	}{
-		{"primary limit", "", http.StatusForbidden, map[string]string{"X-RateLimit-Remaining": "0"}, "被限流了（HTTP 403）", "token 不对"},
-		{"secondary limit", "secret", http.StatusForbidden, map[string]string{"Retry-After": "120"}, "约 2 分钟后再试", "token 不对"},
-		{"429", "", http.StatusTooManyRequests, nil, "被限流了（HTTP 429）：过一会儿再试", "token 不对"},
+		{"primary limit", "", http.StatusForbidden, map[string]string{"X-RateLimit-Remaining": "0"}, "GitHub 在限制这台 hub 的请求（HTTP 403）", "token 不对"},
+		{"secondary limit", "secret", http.StatusForbidden, map[string]string{"Retry-After": "120"}, "约 2 分钟后再试。", "token 不对"},
+		{"429", "", http.StatusTooManyRequests, nil, "（HTTP 429）。过一会儿再试。", "token 不对"},
 		{"no token", "", http.StatusForbidden, map[string]string{"X-RateLimit-Remaining": "59"}, "要登录才能读（HTTP 403）", "token 不对"},
 		{"wrong token", "secret", http.StatusUnauthorized, nil, "token 不对", "限流"},
 		// A token's own hour used up: rate-limited, and no advice to add the token it has.
-		{"token limit", "secret", http.StatusForbidden, map[string]string{"X-RateLimit-Remaining": "0"}, "被限流了（HTTP 403）", "填一个 token"},
+		{"token limit", "secret", http.StatusForbidden, map[string]string{"X-RateLimit-Remaining": "0"}, "GitHub 在限制这台 hub 的请求（HTTP 403）", "填一个 GitHub token"},
 		// The secondary limit, at times with no header at all: only the body says it.
-		{"secondary limit body", "secret", http.StatusForbidden, map[string]string{"body": "You have exceeded a secondary rate limit."}, "被限流了（HTTP 403）：过一会儿再试", "token 不对"},
-		{"reset", "", http.StatusForbidden, map[string]string{"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": fmt.Sprint(time.Now().Add(30 * time.Minute).Unix())}, "约 30 分钟后再试；填一个 GitHub token 额度更高", "token 不对"},
+		{"secondary limit body", "secret", http.StatusForbidden, map[string]string{"body": "You have exceeded a secondary rate limit."}, "（HTTP 403）。过一会儿再试。", "token 不对"},
+		{"reset", "", http.StatusForbidden, map[string]string{"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": fmt.Sprint(time.Now().Add(30 * time.Minute).Unix())}, "约 30 分钟后再试。填一个 GitHub token 额度更高", "token 不对"},
 	}
 	for _, c := range cases {
 		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -154,18 +154,18 @@ func TestRetryIn(t *testing.T) {
 		header map[string]string
 		want   string
 	}{
-		{nil, "过一会儿"},
-		{map[string]string{"Retry-After": "30"}, "1 分钟后"},
-		{map[string]string{"Retry-After": "61"}, "约 2 分钟后"},
-		{map[string]string{"X-RateLimit-Reset": "1001800"}, "约 30 分钟后"},
-		{map[string]string{"X-RateLimit-Reset": "999000"}, "1 分钟后"}, // already past: the clocks differ
-		{map[string]string{"Retry-After": "soon"}, "过一会儿"},
+		{nil, "过一会儿再试。"},
+		{map[string]string{"Retry-After": "30"}, "1 分钟后再试。"},
+		{map[string]string{"Retry-After": "61"}, "约 2 分钟后再试。"},
+		{map[string]string{"X-RateLimit-Reset": "1001800"}, "约 30 分钟后再试。"},
+		{map[string]string{"X-RateLimit-Reset": "999000"}, "1 分钟后再试。"}, // already past: the clocks differ
+		{map[string]string{"Retry-After": "soon"}, "过一会儿再试。"},
 	} {
 		h := http.Header{}
 		for k, v := range c.header {
 			h.Set(k, v)
 		}
-		if got := retryIn(h, now); got != c.want {
+		if got := retryIn(h, now).Error(); got != c.want {
 			t.Errorf("%v: %q, want %q", c.header, got, c.want)
 		}
 	}

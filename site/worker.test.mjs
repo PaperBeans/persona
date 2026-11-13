@@ -1,7 +1,35 @@
 // node --test site/worker.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import worker from "./worker.mjs";
+import { FRESH_MS } from "./extensions.mjs";
+
+test("legal pages link to the existing product support footer without placeholder contacts", async () => {
+  const home = await readFile(new URL("./public/index.html", import.meta.url), "utf8");
+  assert.match(home, /<footer id="contact">/);
+  assert.match(home, /href="mailto:[^"@]+@[^"@]+"/);
+  assert.match(home, /href="https:\/\/github\.com\/nwverse\/persona\/issues\/new\/choose"/);
+  for (const page of ["privacy", "terms"]) {
+    const html = await readFile(new URL(`./public/${page}/index.html`, import.meta.url), "utf8");
+    assert.match(html, /<h2>联系<\/h2>\s*<p><a href="\/#contact">/);
+    assert.doesNotMatch(html, /mailto:|person@example\.com/);
+    assert.match(html, /自托管的个人 AI 助手/);
+    assert.match(html, /不提供托管账号/);
+    assert.match(html, /虚构数据演示/);
+  }
+});
+
+test("privacy policy discloses relay identifiers and technical diagnostics without claiming no collection", async () => {
+  const html = await readFile(new URL("./public/privacy/index.html", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /Persona 不收集、不出售、不与任何第三方共享用户数据/);
+  assert.match(html, /短哈希、推送类型、响应状态、耗时和大小/);
+  assert.match(html, /连接错误日志可能包含带推送标识的请求地址/);
+  assert.match(html, /日志不记录通知正文/);
+  assert.match(html, /不用于广告或跨 App 追踪/);
+  assert.match(html, /中继不保存设备列表/);
+  assert.match(html, /无法加密，所以经中继时中继能看到/);
+});
 
 const assets = { fetch: async (req) => new Response("asset " + new URL(req.url).pathname) };
 
@@ -186,4 +214,191 @@ test("/dl/<version>/ comes from the kept release, never a slot", async () => {
   assert.equal(r.status, 404);
   r = await worker.fetch(new Request("https://site.example/dl/v1-202611060000/manifest.json", { method: "POST", body: "x" }), env);
   assert.equal(r.status, 405);
+});
+
+// ---- /extensions: the catalog behind the page and its icons ----
+
+// A signed index like the official market's: the payload is a JSON string.
+function index(extensions, extra = {}) {
+  return { payload: JSON.stringify({ name: "Official", extensions, generation: { repository: "nwverse/persona-extensions", source_commit: "abc" }, ...extra }), signatures: [] };
+}
+const entry = (id, name, more = {}, manifest = {}) => ({ manifest: { id, name, version: "0.1.0", description: name + " does things", publisher: "nwverse", homepage: `https://github.com/nwverse/persona-extensions/tree/main/extensions/${id}`, ...manifest }, tags: ["阅读"], packages: [], ...more });
+
+// A fake edge cache (caches.default) and upstream; restored after each test.
+function edge() {
+  const store = new Map();
+  globalThis.caches = { default: {
+    async match(key) { const r = store.get(String(key)); return r ? r.clone() : undefined; },
+    async put(key, r) { store.set(String(key), r.clone()); },
+  } };
+  return store;
+}
+function upstream(handler) {
+  const calls = [];
+  globalThis.fetch = async (url, init) => { calls.push(String(url)); return handler(String(url), init); };
+  return calls;
+}
+const catalog = (env = {}) => worker.fetch(new Request("https://site.example/extensions/catalog.json"), { ASSETS: assets, ...env }, { waitUntil() {} });
+
+test("/extensions/catalog.json is the slim catalog, most downloaded first", async () => {
+  edge();
+  const calls = upstream(() => Response.json(index([
+    entry("weather", "天气", { downloads: 5 }),
+    entry("github", "GitHub", { downloads: 120, icon_url: "https://example.com/gh.png" }),
+    entry("markets", "行情", {}, { downloads: 40, icon_url: "http://insecure.example/x.png", category: "Finance" }),
+    entry("github", "duplicate"),
+    entry("../bad", "bad id"),
+  ], { downloads_updated_at: "2026-11-11T00:00:00Z" })));
+  const r = await catalog();
+  assert.equal(r.status, 200);
+  assert.deepEqual(calls, ["https://raw.githubusercontent.com/nwverse/persona-extensions/main/persona-extensions.json"]);
+  const d = await r.json();
+  assert.deepEqual(d.extensions.map((e) => e.id), ["github", "markets", "weather"]);
+  assert.equal(d.downloads_updated_at, "2026-11-11T00:00:00Z");
+  assert.equal(d.source_commit, "abc");
+  const [gh, mk] = d.extensions;
+  assert.equal(gh.downloads, 120);
+  assert.equal(gh.icon_url, "https://example.com/gh.png");
+  assert.equal(gh.icon, "/extensions/icons/github?v=0.1.0");
+  assert.equal(mk.downloads, 40, "a count on the manifest counts too");
+  assert.equal(mk.icon_url, "", "only https icons");
+  assert.equal(mk.icon, "");
+  assert.deepEqual(mk.categories, ["Finance"]);
+  assert.deepEqual(gh.tags, ["阅读"]);
+  assert.equal(d.extensions[0].packages, undefined, "package URLs are not part of the page's data");
+  assert.equal(gh.source, "https://github.com/nwverse/persona-extensions/tree/main/extensions/github", "the homepage, inside the market");
+});
+
+test("every extension links to its source in the market repository, and nowhere else", async () => {
+  edge();
+  upstream(() => Response.json(index([
+    entry("weather", "天气", {}, { homepage: undefined }),
+    entry("github", "GitHub", {}, { homepage: "https://github.com/nwverse/persona-extensions/blob/main/extensions/github/README.md" }),
+    entry("evil", "Elsewhere", {}, { homepage: "https://example.com/extensions/evil" }),
+  ])));
+  const d = await (await catalog()).json();
+  const source = Object.fromEntries(d.extensions.map((e) => [e.id, e.source]));
+  assert.deepEqual(source, {
+    weather: "https://github.com/nwverse/persona-extensions/tree/main/extensions/weather",
+    github: "https://github.com/nwverse/persona-extensions/blob/main/extensions/github/README.md",
+    evil: "https://github.com/nwverse/persona-extensions/tree/main/extensions/evil",
+  });
+});
+
+test("a catalog generated from another repository is not shown", async () => {
+  edge();
+  for (const generation of [{ repository: "someone/else" }, {}, undefined]) {
+    upstream(() => Response.json({ payload: JSON.stringify({ extensions: [entry("github", "GitHub")], generation }), signatures: [] }));
+    assert.equal((await catalog()).status, 503, JSON.stringify(generation));
+  }
+});
+
+test("without download counts the catalog is in name order", async () => {
+  edge();
+  upstream(() => Response.json(index([entry("zulip", "Zulip"), entry("anytype", "Anytype"), entry("miniflux", "Miniflux", { downloads: "12" })])));
+  const d = await (await catalog()).json();
+  assert.deepEqual(d.extensions.map((e) => e.id), ["anytype", "miniflux", "zulip"]);
+  assert.equal(d.extensions[1].downloads, null, "a count that is not an integer is no count");
+});
+
+test("the catalog is fetched once while fresh, and a stale copy outlives GitHub", async () => {
+  const store = edge();
+  let fail = false;
+  const calls = upstream(() => (fail ? new Response("down", { status: 502 }) : Response.json(index([entry("github", "GitHub")]))));
+  assert.equal((await catalog()).status, 200);
+  assert.equal((await catalog()).status, 200);
+  assert.equal(calls.length, 1, "served from the cache while fresh");
+  // Age the cached copy past FRESH_MS, then make GitHub fail.
+  const [key, r] = [...store.entries()][0];
+  const old = await r.json();
+  store.set(key, Response.json({ ...old, fetched_at: new Date(Date.now() - 3600_000).toISOString() }));
+  fail = true;
+  const s = await catalog();
+  assert.equal(s.status, 200);
+  const d = await s.json();
+  assert.equal(d.stale, true);
+  assert.deepEqual(d.extensions.map((e) => e.id), ["github"]);
+  assert.equal(calls.length, 2);
+});
+
+test("catalog replacements and icons refresh after expiry without a site deployment", async () => {
+  const store = edge();
+  let current = index([
+    entry("lark-bridge", "Lark Bridge", { icon_url: "https://icons.example/bridge.png" }),
+  ]);
+  const calls = upstream((url) => url.endsWith("persona-extensions.json")
+    ? Response.json(current)
+    : new Response("PNGDATA", { headers: { "content-type": "image/png" } }));
+  const ids = (data) => data.extensions.map((e) => e.id);
+  assert.deepEqual(ids(await (await catalog()).json()), ["lark-bridge"]);
+
+  current = index([
+    entry("larkx", "LarkAgentX", { icon_url: "https://icons.example/larkx.png" }, { version: "0.2.0" }),
+  ], { generation: { repository: "nwverse/persona-extensions", source_commit: "replacement" } });
+  assert.deepEqual(ids(await (await catalog()).json()), ["lark-bridge"], "still cached before expiry");
+  assert.equal(calls.length, 1);
+
+  // Expire the cached response without a real-time wait or a Worker restart.
+  const [key, response] = [...store.entries()][0];
+  const old = await response.json();
+  store.set(key, Response.json({ ...old, fetched_at: new Date(Date.now() - FRESH_MS - 1000).toISOString() }));
+  const refreshed = await (await catalog()).json();
+  assert.deepEqual(ids(refreshed), ["larkx"], "the removed entry is replaced, not appended to");
+  assert.equal(refreshed.source_commit, "replacement");
+  assert.equal(refreshed.stale, undefined);
+  assert.equal(refreshed.extensions[0].version, "0.2.0");
+  assert.equal(refreshed.extensions[0].icon, "/extensions/icons/larkx?v=0.2.0");
+  assert.ok(Date.now() - Date.parse(refreshed.fetched_at) < FRESH_MS, "the replacement has a fresh timestamp");
+  assert.equal(calls.length, 2, "the same Worker fetches the changed upstream catalog");
+  assert.deepEqual(ids(await (await catalog()).json()), ["larkx"]);
+  assert.equal(calls.length, 2, "the replacement is cached too");
+
+  const icon = (id) => worker.fetch(new Request(`https://site.example/extensions/icons/${id}?v=0.2.0`), { ASSETS: assets }, { waitUntil() {} });
+  assert.equal((await icon("lark-bridge")).status, 404);
+  const image = await icon("larkx");
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get("content-type"), "image/png");
+  assert.equal(calls.at(-1), "https://icons.example/larkx.png", "the new catalog's logo is served");
+});
+
+test("with no copy and GitHub down the catalog is 503; writes are refused", async () => {
+  edge();
+  upstream(() => { throw new Error("unreachable"); });
+  const r = await catalog();
+  assert.equal(r.status, 503);
+  assert.equal(r.headers.get("cache-control"), "no-store");
+  upstream(() => Response.json({ payload: "{}" }));
+  assert.equal((await catalog()).status, 503, "a catalog without extensions is no catalog");
+  const w = await worker.fetch(new Request("https://site.example/extensions/catalog.json", { method: "POST", body: "x" }), { ASSETS: assets }, {});
+  assert.equal(w.status, 405);
+});
+
+test("/extensions/icons/<id> proxies only the catalog's icon, and only images", async () => {
+  edge();
+  let iconType = "image/png";
+  const calls = upstream((url) => {
+    if (url.endsWith("persona-extensions.json")) {
+      return Response.json(index([entry("github", "GitHub", { icon_url: "https://icons.example/gh.png" }), entry("weather", "天气")]));
+    }
+    return new Response("PNGDATA", { headers: { "content-type": iconType } });
+  });
+  const icon = (id) => worker.fetch(new Request(`https://site.example/extensions/icons/${id}?v=1`), { ASSETS: assets }, { waitUntil() {} });
+  let r = await icon("github");
+  assert.equal(r.status, 200);
+  assert.equal(await r.text(), "PNGDATA");
+  assert.equal(r.headers.get("content-type"), "image/png");
+  assert.equal(r.headers.get("x-content-type-options"), "nosniff");
+  assert.match(r.headers.get("content-security-policy"), /sandbox/);
+  assert.ok(calls.includes("https://icons.example/gh.png"));
+  assert.equal((await icon("weather")).status, 404, "no icon in the catalog");
+  assert.equal((await icon("nope")).status, 404);
+  iconType = "text/html";
+  assert.equal((await icon("github")).status, 502, "not an image");
+});
+
+test("the page itself and other /extensions paths are static files", async () => {
+  for (const p of ["/extensions/", "/extensions", "/extensions/icons/a/b", "/extensions/catalog.json.bak"]) {
+    const r = await worker.fetch(new Request("https://site.example" + p), { ASSETS: assets }, {});
+    assert.equal(await r.text(), "asset " + p, p);
+  }
 });

@@ -14,8 +14,9 @@ sealed interface DraftKey {
     data class InboxReply(val itemId: String) : DraftKey
 }
 
+/** [Video]: a video from the photo picker, sent as a `<persona-file kind="video">` tag (docs/protocol/protocol.md "Sending videos"). */
 @Serializable
-enum class DraftAttachmentType { Image, File }
+enum class DraftAttachmentType { Image, File, Video }
 
 @Serializable
 enum class DraftUploadState { Pending, Uploading, Uploaded, Failed, Invalid }
@@ -30,6 +31,8 @@ data class DraftAttachment(
     val uploadState: DraftUploadState = DraftUploadState.Pending,
     val uploadedPath: String? = null,
     val error: String? = null,
+    /** A video's length in seconds, when the phone could read it. */
+    val duration: Double? = null,
 )
 
 /** History changes on transcript replacement; list rev changes on ordinary messages too. */

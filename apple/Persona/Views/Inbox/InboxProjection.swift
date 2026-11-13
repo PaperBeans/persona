@@ -7,6 +7,9 @@ final class InboxProjection {
         var source = ""
         var kind = ""
         var query = ""
+        /// The current assistant, on a hub with several (`AppModel.assistantScope`): only its items are in the snapshot,
+        /// its source chips included.
+        var scope: AssistantScope?
         // Searching and the Moments @Me alias use the current localization, not a cached language's result.
         var localeIdentifier = Locale.current.identifier
         var mentionLabel = String(localized: "@Me")
@@ -42,7 +45,7 @@ final class InboxProjection {
         var done: [InboxItem] = []
         var sources: [Source] = []
         var seen = Set<String>()
-        for item in items {
+        for item in items where filter.scope.has(item.manager) {
             // Source chips include archived and currently filtered-out items, first occurrence wins.
             if item.connector != nil && seen.insert(item.account).inserted {
                 sources.append(Source(id: item.account, name: item.accountName))
@@ -89,59 +92,29 @@ final class InboxProjectionMemo {
     }
 }
 
-/// One manager's part of the inbox on a hub with several (#1850; the web's inbox groups, docs/assistant/managers.md
-/// "Grouping"): under its name its own sections — Needs You with its waiting agents first, In Progress, FYI, Collapsed
-/// — and its own Done. With one manager, or a hub before managers, there is one share with no manager, and the page is
-/// as it was.
-nonisolated struct InboxShare: Identifiable {
-    var manager: HubManager?
+/// The inbox's sections as the list draws them (the current assistant's items, `InboxProjection.Filter.scope`): Needs
+/// You with its waiting agents first, In Progress, FYI, Collapsed, and Done.
+nonisolated struct InboxShare {
     var byTier: [InboxItem.Tier: [InboxItem]]
     var agents: [Interaction]
-    /// Its done items in the list's order (a page sorts them only while the section is open, `mine`).
+    /// Its done items in the list's order (a page sorts them only while the section is open).
     var done: [InboxItem]
-    var id: String { manager?.id ?? "" }
-    /// What waits in it: open items and waiting agents.
-    var openCount: Int { byTier.values.reduce(agents.count) { $0 + $1.count } }
-
-    /// The shares in the roster's order (the default first), empty ones left out.
-    static func make(byTier: [InboxItem.Tier: [InboxItem]], done: [InboxItem], agents: [Interaction], roster: ManagerRoster?) -> [InboxShare] {
-        guard let roster, roster.isMulti else { return [InboxShare(manager: nil, byTier: byTier, agents: agents, done: done)] }
-        var tiers: [String: [InboxItem.Tier: [InboxItem]]] = [:]
-        for tier in InboxItem.Tier.allCases {
-            for it in byTier[tier] ?? [] { tiers[roster.owner(it.manager), default: [:]][tier, default: []].append(it) }
-        }
-        let doneBy = Dictionary(grouping: done) { roster.owner($0.manager) }
-        let agentsBy = Dictionary(grouping: agents) { roster.owner($0.manager) }
-        return roster.installed.compactMap { m in
-            let share = InboxShare(manager: m, byTier: tiers[m.id] ?? [:], agents: agentsBy[m.id] ?? [], done: doneBy[m.id] ?? [])
-            return share.openCount == 0 && share.done.isEmpty ? nil : share
-        }
-    }
-
-    /// Those of `items` that are this share's.
-    func mine(_ items: [InboxItem], _ roster: ManagerRoster?) -> [InboxItem] {
-        guard let manager, let roster else { return items }
-        return items.filter { roster.owner($0.manager) == manager.id }
-    }
 }
 
-/// Which inbox sections are open: Needs You, In Progress and FYI start open, Collapsed and Done closed, in every
-/// manager's group alike (#1850). Only what the user flipped is kept, so a group that shows up later starts the same way.
+/// Which inbox sections are open: Needs You, In Progress and FYI start open, Collapsed and Done closed. Only what the
+/// user flipped is kept.
 nonisolated struct InboxFolds: Equatable {
     private static let startOpen: Set<String> = ["action", "working", "fyi"]
     private var flipped: Set<String> = []
 
-    /// `section`: a tier or "done"; `manager`: its group's, nil with one group.
-    func isOpen(_ section: String, manager: String? = nil) -> Bool {
+    /// `section`: a tier or "done".
+    func isOpen(_ section: String) -> Bool {
         guard InboxItem.Tier(rawValue: section)?.folds != false else { return true } // In Progress stays open
-        return Self.startOpen.contains(section) != flipped.contains(Self.key(section, manager))
+        return Self.startOpen.contains(section) != flipped.contains(section)
     }
 
-    mutating func toggle(_ section: String, manager: String? = nil) {
+    mutating func toggle(_ section: String) {
         guard InboxItem.Tier(rawValue: section)?.folds != false else { return }
-        let key = Self.key(section, manager)
-        if flipped.contains(key) { flipped.remove(key) } else { flipped.insert(key) }
+        if flipped.contains(section) { flipped.remove(section) } else { flipped.insert(section) }
     }
-
-    private static func key(_ section: String, _ manager: String?) -> String { manager.map { "\($0)\u{0}\(section)" } ?? section }
 }

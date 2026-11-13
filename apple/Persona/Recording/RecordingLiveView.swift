@@ -1,10 +1,10 @@
 #if os(iOS)
 import SwiftUI
 
-/// What the live sheet shows while a meeting records (docs/design/proposals/meeting-recording.md section 4C): the title and
-/// the state, the time, a level meter, Persona's part, and one timeline of what is heard, bookmarked and asked, with the bar
-/// that keeps Ask Persona, Pause, Stop and Bookmark under the thumb. At accessibility sizes everything above the bar scrolls
-/// as one view and the bar stays pinned.
+/// What the live sheet shows while a meeting records (docs/design/proposals/meeting-recording.md section 4C): the title, the
+/// page menu (Meeting / Note, #5243) and the state, the time, a level meter, Persona's part, and one timeline of what is
+/// heard, bookmarked and asked, with the bar that keeps Ask Persona, Pause, Stop and Bookmark under the thumb. At
+/// accessibility sizes everything above the bar scrolls as one view and the bar stays pinned.
 struct RecordingLiveView: View {
     var id: UUID
     var exchanges: [MeetingAsk.Exchange]
@@ -21,6 +21,9 @@ struct RecordingLiveView: View {
     @State private var following = true
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var showAttendee = false
+    /// The role Turn on Persona or the role menu asked for while nobody was chosen to attend (#3862): it goes on once the
+    /// picker names someone; closing the picker without a pick leaves Persona off.
+    @State private var pendingRole: MeetingAttendance?
 
     private var paused: Bool { capture.state == .paused }
 
@@ -31,10 +34,14 @@ struct RecordingLiveView: View {
                     RecordingLiveBar(entry: entry, paused: paused)
                 }
                 .navigationDestination(isPresented: $showAttendee) {
-                    MeetingAttendeePicker(selected: entry.attendance?.key ?? model.assistantMain) {
+                    // The main chat shows as chosen only when it was picked for this meeting, never by default (#3862).
+                    MeetingAttendeePicker(selected: entry.attendance.flatMap { $0.key ?? ($0.mainPicked ? model.assistantMain : nil) }) {
                         MeetingRecorder.shared.setSession($0, recordingID: id)
+                        if let role = pendingRole { MeetingRecorder.shared.setRole(role, recordingID: id.uuidString) }
+                        pendingRole = nil
                     }
                 }
+                .onChange(of: showAttendee) { _, shown in if !shown { pendingRole = nil } }
                 .onChange(of: exchanges.compactMap(\.answer)) { old, new in
                     // An answer arriving on screen: announced, with no haptic while the microphone is open.
                     if new.count > old.count, let latest = new.last { AccessibilityNotification.Announcement(latest).post() }
@@ -46,10 +53,10 @@ struct RecordingLiveView: View {
 
     @ViewBuilder private func layout(_ entry: RecordingEntry) -> some View {
         if size.isAccessibilitySize {
-            // A fixed one-line header (the mark, the time and Hide) stays above whatever scrolls, so the state and the
-            // time are on screen at any text size.
+            // A fixed one-line header (the mark, the time, the menu and Hide) stays above whatever scrolls, so the state
+            // and the time are on screen at any text size.
             VStack(spacing: Theme.Space.s) {
-                compactHeader
+                compactHeader(entry)
                 scroller {
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -72,8 +79,8 @@ struct RecordingLiveView: View {
         }
     }
 
-    /// The accessibility-size header: the mark, the time and Hide, on one line.
-    private var compactHeader: some View {
+    /// The accessibility-size header: the mark, the time, the menu and Hide, on one line.
+    private func compactHeader(_ entry: RecordingEntry) -> some View {
         HStack(spacing: Theme.Space.m) {
             RecordingStateDot(paused: paused)
             RecordingClock(running: capture.state == .recording, font: Theme.Font.title)
@@ -84,6 +91,7 @@ struct RecordingLiveView: View {
                 .accessibilityValue(RecordingClock.spoken(capture.timeline))
                 .accessibilityIdentifier("recording-live-timer")
             Spacer(minLength: Theme.Space.s)
+            pageMenu(entry)
             RecordingSheetCloseButton(title: String(localized: "Hide"), identifier: "recording-live-hide") { hide() }
         }
         .padding(.horizontal, Theme.Space.page)
@@ -125,9 +133,25 @@ struct RecordingLiveView: View {
         return HStack(alignment: .center, spacing: Theme.Space.m) {
             title.frame(maxWidth: .infinity, alignment: .leading)
             if !size.isAccessibilitySize {
+                pageMenu(entry)
                 RecordingSheetCloseButton(title: String(localized: "Hide"), identifier: "recording-live-hide") { hide() }
             }
         }
+    }
+
+    /// The page menu, where the meeting page has its own (#5243): Meeting or Note. Persona's part keeps its strip's menu.
+    private func pageMenu(_ entry: RecordingEntry) -> some View {
+        Menu {
+            RecordingKindPicker(entry: entry)
+        } label: {
+            ThemedIcon(Theme.Icon.moreMenu).font(Theme.Font.heading).foregroundStyle(Theme.accent)
+                .tapTargetFrame()
+                .contentShape(.rect)
+        }
+        .labelOnlyMenu()
+        // Its own name: the Persona strip's menu and the bar's More are other menus.
+        .accessibilityLabel(Text("Recording options"))
+        .accessibilityIdentifier("recording-page-menu")
     }
 
     /// The chip and the state: never the color alone, the dot becomes a pause glyph and the word changes.
@@ -174,7 +198,7 @@ struct RecordingLiveView: View {
 
     @ViewBuilder private func strip(_ entry: RecordingEntry) -> some View {
         if entry.isMeeting, entry.source == .phone, entry.attendance != nil || MeetingAttendees.offered(model) {
-            RecordingPersonaStrip(entry: entry, showAttendee: $showAttendee)
+            RecordingPersonaStrip(entry: entry, showAttendee: $showAttendee, pendingRole: $pendingRole)
                 .padding(.horizontal, Theme.Space.page)
         }
     }
@@ -211,15 +235,20 @@ struct RecordingLiveView: View {
 // MARK: Persona's part
 
 /// One row: whether Persona is listening, taking part or off, with a menu for the role and for who attends. A problem
-/// shows under it.
+/// shows under it. Turning Persona on with nobody chosen to attend opens the attendee picker first (#3862: the main chat
+/// is never the default).
 struct RecordingPersonaStrip: View {
     var entry: RecordingEntry
     @Binding var showAttendee: Bool
+    /// The role to turn on once the picker names who attends.
+    @Binding var pendingRole: MeetingAttendance?
     @Environment(\.dynamicTypeSize) private var size
     @State private var live = MeetingLive.shared
     @State private var sync = RecordingSync.shared
 
     private var attendance: RecordingAttendance { entry.attendance ?? RecordingAttendance(role: .off) }
+    /// The role as the hub has it: off while nobody is chosen to attend.
+    private var role: MeetingAttendance { attendance.sentRole }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -245,10 +274,10 @@ struct RecordingPersonaStrip: View {
         let content = Label {
             Text(word).font(Theme.Font.bodyStrong).lineLimit(size.isAccessibilitySize ? 3 : 2)
         } icon: {
-            ThemedIcon(attendance.role.attends ? Theme.Icon.voiceListening : Theme.Icon.attendanceOff).foregroundStyle(Theme.ai)
+            ThemedIcon(role.attends ? Theme.Icon.voiceListening : Theme.Icon.attendanceOff).foregroundStyle(Theme.ai)
         }
-        if attendance.role == .off {
-            Button { MeetingRecorder.shared.setRole(.listener, recordingID: entry.id.uuidString) } label: {
+        if role == .off {
+            Button { turn(.listener) } label: {
                 content.foregroundStyle(Theme.accent).frame(maxWidth: .infinity, alignment: .leading).contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -258,7 +287,7 @@ struct RecordingPersonaStrip: View {
     }
 
     private var word: String {
-        switch attendance.role {
+        switch role {
         case .off: String(localized: "Turn on Persona")
         case .listener: String(localized: "Persona is listening")
         case .participant: String(localized: "Persona is taking part")
@@ -267,11 +296,10 @@ struct RecordingPersonaStrip: View {
 
     private var menu: some View {
         Menu {
-            Picker(selection: Binding(get: { attendance.role },
-                                      set: { MeetingRecorder.shared.setRole($0, recordingID: entry.id.uuidString) })) {
+            Picker(selection: Binding(get: { role }, set: { turn($0) })) {
                 ForEach(MeetingAttendance.allCases, id: \.self) { Text($0.title).tag($0) }
             } label: { Text("Persona") }
-            if attendance.role.attends {
+            if role.attends {
                 Button { showAttendee = true } label: { Label("Who Attends…", systemImage: Theme.Icon.people) }
                     .accessibilityIdentifier("meeting-attendee")
             }
@@ -282,6 +310,13 @@ struct RecordingPersonaStrip: View {
         }
         .accessibilityLabel(Text("Persona"))
         .accessibilityIdentifier("meeting-attendance-now")
+    }
+
+    /// Sets the role; with nobody chosen to attend it stays off and the picker opens, the role going on once one is picked.
+    private func turn(_ next: MeetingAttendance) {
+        guard !MeetingRecorder.shared.setRole(next, recordingID: entry.id.uuidString) else { return }
+        pendingRole = next
+        showAttendee = true
     }
 }
 #endif

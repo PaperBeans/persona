@@ -100,7 +100,9 @@ class AgentMachineTreeTest {
         assertEquals(AgentGrouping.Repo, AgentGrouping.fromPreference("Repo"))
         assertEquals(AgentGrouping.State, AgentGrouping.fromPreference("State"))
         assertEquals(AgentGrouping.Todo, AgentGrouping.fromPreference("Todo"))
-        assertEquals(listOf(AgentGrouping.Repo, AgentGrouping.MachineSpace, AgentGrouping.State, AgentGrouping.Todo), AgentGrouping.selectable)
+        assertEquals(AgentGrouping.Direction, AgentGrouping.fromPreference("Direction"))
+        assertEquals(listOf(AgentGrouping.Repo, AgentGrouping.MachineSpace, AgentGrouping.State, AgentGrouping.Todo, AgentGrouping.Direction),
+            AgentGrouping.selectable)
         assertEquals(AgentGrouping.Repo, AgentListSettings().grouping)
     }
 

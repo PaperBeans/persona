@@ -34,13 +34,15 @@ private fun hubPreferences(raw: String): AgentPreferences {
 
 /** Display settings stay local; pins, mutes and read receipts belong to the paired hub. */
 @Singleton
-class AgentsPreferences @Inject constructor(private val store: DataStore<Preferences>, private val hub: HubPreferences) {
+class AgentsPreferences @Inject constructor(private val store: DataStore<Preferences>, private val hub: HubPreferences) :
+    AgentListDisplaySettings {
     val snapshots: Flow<AgentsPreferencesSnapshot> get() = snapshots("")
     fun snapshots(scope: String): Flow<AgentsPreferencesSnapshot> = combine(store.data, hub.preferences) { p, remote ->
         AgentsPreferencesSnapshot(
             range = AgentRange.entries.firstOrNull { it.name == p[agentRangeKey(scope)] } ?: AgentRange.Running,
             grouping = AgentGrouping.fromPreference(p[stringPreferencesKey("grouping")]),
-            compact = p[booleanPreferencesKey("compact")] ?: false,
+            compact = p[compactKey] ?: false,
+            rowStyle = AgentRowStyle.fromPreference(p[rowStyleKey]),
             sort = AgentSort.fromPreference(p[stringPreferencesKey("sort")]),
             hideBotmux = p[booleanPreferencesKey("hide-botmux")] ?: false,
             foldedTabs = p[foldedTabsKey].orEmpty(),
@@ -69,7 +71,20 @@ class AgentsPreferences @Inject constructor(private val store: DataStore<Prefere
     suspend fun sort(value: AgentSort) { store.edit { it[stringPreferencesKey("sort")] = value.name } }
     suspend fun hideBotmux(value: Boolean) { store.edit { it[booleanPreferencesKey("hide-botmux")] = value } }
     suspend fun range(scope: String, value: AgentRange) { store.edit { it[agentRangeKey(scope)] = value.name } }
-    suspend fun compact(value: Boolean) { store.edit { it[booleanPreferencesKey("compact")] = value } }
+    suspend fun compact(value: Boolean) { store.edit { it[compactKey] = value } }
+    /**
+     * The list's display, in the two values iOS keeps it in (`AgentListDisplayChoice`): Compact List is the `compact` the
+     * phone always kept (Brief and Board's Compact), so a phone that chose Compact before the styles came keeps it, and one
+     * that chose Detailed, with no style stored, reads as Avatar, the row Glass's Detailed list already drew. Compact List
+     * keeps the style chosen before it.
+     */
+    override val display: Flow<AgentListDisplay> get() = store.data.map { AgentListDisplay.of(AgentRowStyle.fromPreference(it[rowStyleKey]), it[compactKey] ?: false) }
+    override suspend fun setDisplay(value: AgentListDisplay) {
+        store.edit { p ->
+            value.style?.let { p[rowStyleKey] = it.name }
+            p[compactKey] = value == AgentListDisplay.CompactList
+        }
+    }
     /** Folds or opens a herdr tab's agents in the list (#2320), kept on this phone by [AgentTab.foldKey]. */
     suspend fun foldTab(key: String, folded: Boolean) {
         store.edit { it[foldedTabsKey] = it[foldedTabsKey].orEmpty().let { keys -> if (folded) keys + key else keys - key } }
@@ -86,11 +101,16 @@ class AgentsPreferences @Inject constructor(private val store: DataStore<Prefere
 }
 
 private val foldedTabsKey = stringSetPreferencesKey("folded-tabs")
+private val compactKey = booleanPreferencesKey("compact")
+private val rowStyleKey = stringPreferencesKey("row-style")
 private fun foldsKey(grouping: AgentGrouping) = stringSetPreferencesKey("folds-${grouping.name}")
 
 data class AgentsPreferencesSnapshot(
     val grouping: AgentGrouping = AgentGrouping.Repo,
+    /** Compact List (Brief and Board: Compact) over the [rowStyle]. */
     val compact: Boolean = false,
+    /** The row style Glass draws while the list is not compact ([AgentsPreferences.display]). */
+    val rowStyle: AgentRowStyle = AgentRowStyle.Default,
     val sort: AgentSort = AgentSort.State,
     /** botmux's sessions hidden from the list on this phone (web #2786). */
     val hideBotmux: Boolean = false,
@@ -102,7 +122,10 @@ data class AgentsPreferencesSnapshot(
     val mutes: AgentPreferences = AgentPreferences(),
     val seen: Map<String, String> = emptyMap(),
     val range: AgentRange = AgentRange.Running,
-)
+) {
+    /** What Glass draws the agents as (iOS `AgentListDisplay`); Brief and Board read [compact] alone. */
+    val display: AgentListDisplay get() = AgentListDisplay.of(rowStyle, compact)
+}
 
 /** Shared metadata supplied by the composition root for the active hub scope. */
 data class AgentsMetadata(

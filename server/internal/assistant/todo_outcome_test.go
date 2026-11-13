@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -238,11 +239,40 @@ func TestAgentStartCarriesProjectContext(t *testing.T) {
 	}
 	p, _ := f.starts[0]["prompt"].(string)
 	if !strings.HasPrefix(p, `<persona-context kind="context" title="项目 · 天气 App · 背景"`) || !strings.Contains(p, "结论：修好了") ||
-		!strings.HasSuffix(p, "\n\n加深色模式") {
+		!strings.Contains(p, "\n\n加深色模式\n\nPersona task handoffs:") {
 		t.Fatalf("prompt = %q", p)
 	}
 	if len(f.tabAsked) == 0 || strings.Contains(f.tabAsked[len(f.tabAsked)-1], "persona-context") {
 		t.Fatalf("tab named from %q", f.tabAsked)
+	}
+}
+
+// What an extension wrote for the project goes into the background a new agent gets, asked for the project's slug;
+// a project with nothing else to say still gets it; without an extension manager that knows the call, it is as before.
+func TestAgentStartCarriesExtensionProjectContext(t *testing.T) {
+	s, f, _ := outcomeEnv(t, nil, outcomeReply)
+	var asked []string
+	f.answerApp(AppPlugins, PluginsProjectContext, func(params json.RawMessage) (any, error) {
+		var a assistantwire.ProjectContextParams
+		_ = json.Unmarshal(params, &a)
+		asked = append(asked, a.Projects...)
+		return assistantwire.ExtensionContextResult{Blocks: []assistantwire.ExtensionContextBlock{
+			{Extension: "notes", Name: "Notes", Project: "天气-app", Text: "Builds run on the second machine.\nAsk before changing the release script."},
+			{Extension: "notes", Name: "Notes", Project: "other", Text: "not this project"},
+		}}, nil
+	})
+	got := s.projectContext(context.Background(), "box", "/code/weather")
+	if len(asked) == 0 || asked[0] != "天气-app" {
+		t.Fatalf("asked for %q", asked)
+	}
+	want := "扩展「Notes」为这个项目整理的背景：\nBuilds run on the second machine.\nAsk before changing the release script.\n</persona-context>"
+	if !strings.HasSuffix(got, want) || strings.Contains(got, "not this project") {
+		t.Fatalf("background = %q", got)
+	}
+
+	s2, _, _ := outcomeEnv(t, nil, outcomeReply) // no answer: the call fails, nothing from extensions
+	if got := s2.projectContext(context.Background(), "box", "/code/weather"); strings.Contains(got, "扩展") {
+		t.Fatalf("without extensions: %q", got)
 	}
 }
 

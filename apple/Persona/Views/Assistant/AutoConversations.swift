@@ -7,10 +7,13 @@ nonisolated struct AutoConversationSource: Hashable, Identifiable, Sendable {
     var id: String
     var name: String
     var symbol: String
+    /// Its brand's mark (`Theme.Brand`), drawn instead of `symbol` where there is one.
+    var brand: String? = nil
 
     static let inbox = AutoConversationSource(id: "inbox", name: String(localized: "Inbox"), symbol: Theme.Icon.inbox)
     static let task = AutoConversationSource(id: "task", name: String(localized: "Scheduled Tasks"), symbol: Theme.Icon.schedule)
-    static let larkAgent = AutoConversationSource(id: "lark_agent", name: String(localized: "Lark /agent"), symbol: Theme.Icon.feishuChats)
+    static let larkAgent = AutoConversationSource(id: "lark_agent", name: String(localized: "Lark /agent"), symbol: Theme.Icon.feishuChats,
+                                                  brand: Theme.Brand.lark)
     static let spawned = AutoConversationSource(id: "spawned", name: String(localized: "Spawned from Chats"), symbol: Theme.Icon.conversation)
     static let extensionSource = AutoConversationSource(id: "extension", name: String(localized: "Extensions"), symbol: Theme.Icon.plugins)
     static let other = AutoConversationSource(id: "other", name: String(localized: "Other"), symbol: Theme.Icon.ai)
@@ -26,21 +29,42 @@ nonisolated struct AutoConversationSource: Hashable, Identifiable, Sendable {
     /// The origins of the user's own conversations: made in the app or the web, or with /new in a channel.
     static let usersOwn: Set<String> = ["", "user", "channel"]
 
+    /// Where a conversation an extension opened came from (#3758): Lark /agent or another extension; nil for any other
+    /// (the user's, the inbox's, a task's, one another conversation started, an origin this app does not know).
+    static func external(_ origin: String?) -> AutoConversationSource? {
+        switch origin?.trimmingCharacters(in: .whitespaces) {
+        case larkAgent.id: larkAgent
+        case extensionSource.id: extensionSource
+        default: nil
+        }
+    }
+
+    /// 「来自 飞书 /agent」, 「来自扩展」: where an external conversation came from, under its first message and for
+    /// VoiceOver on its row.
+    var from: String {
+        id == Self.extensionSource.id ? String(localized: "From an extension") : String(localized: "From \(name)")
+    }
+
+    /// What a row's mark says to VoiceOver (#5195): where an external conversation came from (`from`), else the
+    /// source's name, as its All Chats filter says it.
+    var markLabel: String { Self.external(id) != nil ? from : name }
+
     /// The hub's feature for `origin` (docs/protocol/protocol.md「Origin of assistant chats」).
     static let feature = "conversation_origin"
 }
 
-/// The sidebar's conversations split into the user's own (Recent) and the ones Persona opened by itself (Auto Chats,
-/// #3264), counted by source and by state so a closed Auto Chats still says one waits or works.
+/// All Chats' conversations split into the user's own (its Mine filter) and the ones Persona opened by itself (#3264),
+/// by source (a filter for each) and counted by state. The sidebar's Recent lists both (#5195), each of the latter with
+/// its source's mark (`source(of:tasks:)`, the rule the filters use).
 ///
 /// With a hub that says who opened its conversations (`conversation_origin`, or an `origin` on any of them), the
-/// others are in Auto Chats; a scheduled task's conversation the hub calls the user's is still known the way the sidebar
-/// knew it before (`AssistantTaskChats`, #2838). A hub that never says lists them as before: Recent has all but the
-/// scheduled tasks' ones, and there is no Auto Chats.
+/// others are Persona's; a scheduled task's conversation the hub calls the user's is still known the way the sidebar
+/// knew it before (`AssistantTaskChats`, #2838). A hub that never says has no source filters: Mine has all but the
+/// scheduled tasks' ones.
 nonisolated struct AutoConversations: Equatable, Sendable {
-    /// Recent: the user's own, and the open one whatever opened it (it keeps its row).
+    /// Mine: the user's own, and the open one whatever opened it (it keeps its row).
     var mine: [Session] = []
-    /// Auto Chats, in the order they came.
+    /// The ones Persona opened, in the order they came.
     var auto: [Session] = []
     /// Whether the hub says who opened its conversations.
     var supported = false

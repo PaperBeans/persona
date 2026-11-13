@@ -59,12 +59,14 @@ func (f *fakeDevices) MachineResources(string) (*proto.Machine, *proto.MetricSam
 	return nil, nil, nil
 }
 func (f *fakeDevices) List() []devices.Summary                 { return nil }
+func (f *fakeDevices) Summary(string) (devices.Summary, bool)  { return devices.Summary{}, false }
 func (f *fakeDevices) Canonical(id string) string              { return id }
 func (f *fakeDevices) Sessions(string) ([]proto.Session, bool) { return nil, false }
 func (f *fakeDevices) SessionsWhere(string, func(*proto.Session) bool) ([]proto.Session, bool) {
 	return nil, false
 }
 func (f *fakeDevices) Session(string, string) (proto.Session, bool) { return proto.Session{}, false }
+func (f *fakeDevices) Watched(string, string) bool                  { return false }
 func (f *fakeDevices) ConnectedAt(string) time.Time                 { return time.Time{} }
 func (f *fakeDevices) Usage() assistantwire.UsageSummary            { return assistantwire.UsageSummary{} }
 func (f *fakeDevices) CapacitySnapshot(context.Context) proto.CapacitySnapshot {

@@ -1,5 +1,6 @@
 {
   "sending": "发送中…",
+  "processing": "处理中…",
   "queued": "工作中插入的消息",
   "collapse": "收起",
   "expand": "展开",

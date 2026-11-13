@@ -100,7 +100,18 @@ const (
 	MethodMachinesPut    = "devices.machines.put"
 	MethodMachinesRemove = "devices.machines.remove"
 	MethodMachinesGet    = "devices.machines.get"
+	// MethodEngineGet MachineRef → MachineEngine, MethodEnginePut MachineEngine → {}: a machine's engine choice as the
+	// manager keeps it in its own settings (Choice nil: never chosen). A move reads it from the manager the machine
+	// leaves and puts it in the one it goes to, so a change of owner does not change the engine (#3611).
+	MethodEngineGet = "devices.engine.get"
+	MethodEnginePut = "devices.engine.put"
 )
+
+// MachineEngine is one machine's engine choice (devices.engine.get's answer, devices.engine.put's params).
+type MachineEngine struct {
+	MachineID string              `json:"machine_id"`
+	Choice    *proto.EngineChoice `json:"choice,omitempty"`
+}
 
 // CodeNotOwnList: the manager does not keep its own list of computers (the hub did not hand it MachinesOwn, or its
 // list was not taken over as its own): the hub edits hub.json for it instead.
@@ -372,6 +383,9 @@ type PairConnector struct {
 // Routes are the apps' routes on machines the manager answers itself (the hub relays them as http.request, as the
 // assistant's): its own settings of each machine and what only it can do.
 var Routes = []string{
+	"GET /api/v1/sessions/{mid}/{sid}/skills",
+	"GET /api/v1/machines/{mid}/codex/{sid}/takeover",
+	"POST /api/v1/machines/{mid}/codex/{sid}/takeover",
 	"POST /api/v1/machines/{mid}/reconnect",
 	"PUT /api/v1/machines/{mid}/engine",
 	"GET /api/v1/machines/{mid}/herdr",

@@ -12,6 +12,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // Leader conversations (#3133, docs/assistant/unified-entry.md "Leader conversations"). By default only the main
@@ -38,11 +39,43 @@ func (s *Service) supervises(ctx context.Context, id string) bool {
 	return s.isMain(ctx, id) || s.isLeader(ctx, id)
 }
 
+// defaultPlanSupervisor is who supervises a task conversation hands out with task_plan when conversation does not supervise
+// (supervises): that conversation itself, so a side conversation follows up and reviews the work it dispatched. None for
+// a task leader's worker (parent set: its leader's agent supervises it), a reporting conversation's task (its notices
+// go back to it, #4101) or a plan with no conversation. A planning conversation that is not a live assistant
+// conversation cannot be told anything, so its task stays the main conversation's (#4669), and so does what the
+// background supervisor hands out: nothing is written on a task for it (supervise_background.go). digestTo sends the
+// main conversation's own to the background supervisor while there is one.
+func (s *Service) defaultPlanSupervisor(ctx context.Context, conversation, parent string) (string, bool) {
+	if parent != "" || conversation == "" {
+		return "", false
+	}
+	if _, reports := s.reporterOf(ctx, conversation); reports {
+		return "", false
+	}
+	if s.supervises(ctx, conversation) {
+		return "", false // the main conversation and leaders supervise their own (supervises)
+	}
+	if c, ok := s.session(ctx, s.settings(ctx).MachineID, conversation); ok && c.Assistant && !s.isBackground(ctx, conversation) {
+		return conversation, true
+	}
+	main := s.settings(ctx).Main
+	return main, main != "" && main != conversation
+}
+
 // digestTo is the conversation signal g goes to, with cfg the settings in effect: the one it names (To), else its task's
-// supervisor when that is a leader, unless the main conversation handles it (a leader's needs_user, a start to remedy, a task waiting for the
-// user); else the main conversation.
+// supervisor when that is a leader or another side conversation, unless the main conversation handles it (its needs_user,
+// a start to remedy, a task waiting for the user); else, for a task whose ledger names the main conversation, the
+// background supervisor, or the main conversation while there is none (ownSupervisor, supervise_background.go).
 func (s *Service) digestTo(cfg Settings, g superviseSignal) string {
+	own := s.ownSupervisor(cfg)
 	if g.To != "" {
+		switch {
+		case g.Kind == sigDecide && g.To == cfg.Main:
+			return own // a task leader's decision for the conversation above it, whose task is one no leader conversation supervises
+		case g.To == cfg.BackgroundSupervisor && g.To != own:
+			return cfg.Main // named the background supervisor, which was switched off or moved meanwhile
+		}
 		return g.To
 	}
 	switch g.Kind {
@@ -54,7 +87,14 @@ func (s *Service) digestTo(cfg Settings, g superviseSignal) string {
 		return cfg.Main
 	}
 	lead := t.Supervision.Supervisor
-	if lead == "" || lead == cfg.Main || !slices.Contains(cfg.Leaders, lead) || t.Supervision.state(t) == reviewNeedsUser {
+	// A supervisor is the conversation that handed the task out: the main conversation, a leader, or any other
+	// conversation (sendDigest falls back to the main one when that conversation is gone). The main conversation's own
+	// go to the background supervisor while there is one. A task leader's agent never reaches this: leaderRoute takes
+	// its workers' signals first.
+	if lead == "" || lead == cfg.Main {
+		return own
+	}
+	if t.Supervision.state(t) == reviewNeedsUser {
 		return cfg.Main
 	}
 	return lead
@@ -124,6 +164,9 @@ func (s *Service) setLeaders(ctx context.Context, v json.RawMessage) (*ownChange
 		if id == cfg.Main {
 			return nil, errors.New("the main conversation supervises already: a leader is a side conversation")
 		}
+		if id == cfg.BackgroundSupervisor {
+			return nil, errors.New("the background supervisor is built in and follows up the tasks no leader supervises: a leader is another side conversation")
+		}
 		if c, ok := s.session(ctx, cfg.MachineID, id); !ok || !c.Assistant {
 			return nil, fmt.Errorf("%s is not a Persona conversation on the assistant's machine (conversations_list has their ids)", id)
 		}
@@ -182,8 +225,10 @@ func (s *Service) stopTaskAgents(ctx context.Context, t Todo) {
 	}()
 }
 
-// stopCancelledAgent closes, ends the cards of and archives one agent of cancelled task id; one that works for another
+// stopCancelledAgent stops, ends the cards of and archives one agent of cancelled task id; one that works for another
 // open task now, an assistant conversation (the user's to stop) or a session its machine does not list is left alone.
+// The agent quits and its terminal stays (session.stop, #4754); a session with no terminal (another tool's, an engine
+// that runs agents itself) is closed as before.
 func (s *Service) stopCancelledAgent(ctx context.Context, id, machine, session string) {
 	s.todos.mu.RLock()
 	other, linked := s.todos.activeBySession[[2]string{machine, session}]
@@ -200,8 +245,12 @@ func (s *Service) stopCancelledAgent(ctx context.Context, id, machine, session s
 	machine = c.MachineID
 	if c.Status != proto.StatusOffline {
 		cctx, cancel := context.WithTimeout(ctx, agentArchiveCloseTimeout)
-		if err := s.call(cctx, machine, "session.close", map[string]any{"session_id": session}, nil); err != nil {
-			s.logf("task %s cancelled: close agent %s/%s: %v", id, machine, short(session), err)
+		err := s.call(cctx, machine, deviceSessionStop, map[string]any{"session_id": session}, nil)
+		if re := (*rpc.Error)(nil); errors.As(err, &re) && re.Code == "no_terminal" {
+			err = s.call(cctx, machine, "session.close", map[string]any{"session_id": session}, nil)
+		}
+		if err != nil {
+			s.logf("task %s cancelled: stop agent %s/%s: %v", id, machine, short(session), err)
 		}
 		cancel()
 	}

@@ -6,10 +6,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
@@ -24,6 +26,7 @@ import persona.core.contracts.*
 import persona.core.contracts.api.AssistantInboxDraft
 import persona.core.contracts.api.ScheduledTask
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.answer.*
 import persona.core.domain.tasks.BackgroundWork
@@ -186,7 +189,12 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
     backgroundRecords: Boolean = false, onBackground: (() -> Unit)? = null,
     onPlan: (TaskPlan) -> Unit = {},
     /** The main conversation folds background rounds (#4314): Needs you groups its rows by supervising conversation. */
-    groupByOrigin: Boolean = false) {
+    groupByOrigin: Boolean = false,
+    /**
+     * Under the entries: the pill while the conversation's model operates a Mac. iOS puts it after them in their row
+     * (`AssistantActionBar`); beside Android's two entries a phone leaves it too little room for its words.
+     */
+    under: (@Composable () -> Unit)? = null) {
     val todos by host.tasks.todos.collectAsStateWithLifecycle()
     val plans by host.tasks.plans.collectAsStateWithLifecycle()
     val feeds by host.tasks.feeds.collectAsStateWithLifecycle()
@@ -218,6 +226,8 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
     val shownRequests = own + asking.flatMap { (it as? NeedsYouEntry.Task)?.asks ?: (it as NeedsYouEntry.Agent).asks }
     val approvals = shownRequests.mapNotNull { r -> trayApproval(r, bySession[GroupKeys.rawKey(r.sessionKey)])?.let { r to it } }
     val standalone = persona.core.domain.tasks.dockAgents(host.conversation, main, host.sessions, todos)
+    // Glass folds the shelved tasks into one line under In progress, as iOS (#4339 C18); Brief and Board keep the tray as it was.
+    val shelvedLine = PersonaTheme.style == AppStyle.Glass
     // the tray closes once its last thing is handled; tapped while empty it still opens "All caught up"
     LaunchedEffect(needsCount) { if (needsCount == 0 && state.expanded == AssistantTray.NeedsYou) state.expanded = null }
     BackHandler(state.expanded != null) { state.expanded = null }
@@ -313,9 +323,11 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
                                         val detail = trayBackgroundLine(entry.activity) ?: stringResource(R.string.chat_tray_agent_detail, host.machineName(agent.machineId),
                                             agent.activity?.takeIf(String::isNotBlank) ?: agent.lastText.orEmpty())
                                         JRow(onClick = { host.onOpen(agent.key) }, modifier = Modifier.testTag("assistant-agent-${agent.sessionId}"), trailing = {
-                                            Text(stringResource(R.string.chat_tray_working), style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3, maxLines = 1)
+                                            Text(stringResource(if (entry.waiting) R.string.chat_tray_waiting else R.string.chat_tray_working),
+                                                style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3, maxLines = 1)
                                         }) {
-                                            JSpinner(Modifier.testTag("assistant-work-spinner"))
+                                            // iOS: a clock for an agent whose background work only waits, the working mark otherwise
+                                            if (entry.waiting) TrayWaitClock() else JSpinner(Modifier.testTag("assistant-work-spinner"))
                                             Spacer(Modifier.width(Tokens.Space.s))
                                             Column(Modifier.weight(1f)) {
                                                 Text(agent.displayTitle, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink,
@@ -326,11 +338,10 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
                                     }
                                 }
                             }
-                            item {
-                                val routes by host.tasks.routes.collectAsStateWithLifecycle()
-                                val routed = routes[host.conversation]?.let { id -> todos.firstOrNull { it.id == id } }
-                                if (routed != null) JRow(stringResource(R.string.chat_tasks_route_chip, routed.title),
-                                    onClick = { host.tasks.setRoute(host.conversation, null) }, leadingIcon = PhIcons.PaperPlaneTilt)
+                            // Open tasks with no progress for 48 hours: one quiet line under the rows, not counted; the board
+                            // lists them (iOS `shelvedLine`, Glass).
+                            if (shelvedLine && entries.shelved.isNotEmpty()) item(key = "shelved") {
+                                TrayShelvedLine(entries.shelved.size) { state.expanded = null; host.sheet.value = TaskSheet.Board }
                             }
                             if (schedules.isNotEmpty() || backgroundRecords) item { JSectionHeader(stringResource(R.string.chat_tray_quiet)) }
                             items(schedules, key = { "schedule:${it.id}" }) { schedule ->
@@ -348,7 +359,8 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
                             if (backgroundRecords && onBackground != null) item {
                                 JRow(stringResource(R.string.chat_tray_background), onClick = onBackground, leadingIcon = PhIcons.Clock)
                             }
-                            if (entries.running.isEmpty() && schedules.isEmpty() && !backgroundRecords) item {
+                            if (entries.running.isEmpty() && schedules.isEmpty() && !backgroundRecords &&
+                                !(shelvedLine && entries.shelved.isNotEmpty())) item {
                                 JEmptyState(stringResource(R.string.chat_tray_no_progress), "", icon = PhIcons.ListChecks)
                             }
                         }
@@ -370,6 +382,26 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
                 { state.toggle(tray) }, Modifier.testTag("assistant-entry-${tray.tag}"),
                 enabled = true)
         }
+        under?.invoke()
+    }
+}
+
+/**
+ * "Message “x”" above the composer while the next message goes straight to a task (iOS `RouteChip`, web `RouteChip`;
+ * docs/assistant/unified-entry.md "Routing"); its × hands the message back to Persona. The route is the store's one per
+ * conversation, set by a task's Message or by picking the task after @. Every style: where a message goes is behaviour,
+ * and each style draws its own chip.
+ */
+@Composable
+internal fun TaskRouteChip(host: AssistantTaskHost, modifier: Modifier = Modifier) {
+    val routes by host.tasks.routes.collectAsStateWithLifecycle()
+    val todos by host.tasks.todos.collectAsStateWithLifecycle()
+    val task = routedTask(routes, todos, host.conversation) ?: return
+    // At the tray bar's inset, so the chip lines up with its chips above it.
+    Row(modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m)) {
+        JChip(stringResource(R.string.chat_tasks_route_chip, task.title), Modifier.testTag("assistant-route-chip"),
+            icon = PhIcons.PaperPlaneTilt, accent = true, onRemove = { host.tasks.setRoute(host.conversation, null) },
+            removeLabel = stringResource(R.string.chat_tasks_route_clear))
     }
 }
 
@@ -427,6 +459,34 @@ private fun TrayBackgroundSubtitle(work: BackgroundWork?, fallback: String?) {
     } else fallback?.let { Text(it, style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis) }
 }
 
+/**
+ * The clock of a row that waits to be brought back (iOS draws it in `StatusPalette.backgroundWaiting`): Glass in that
+ * state's lighter tone ([trayWaitTint]); Brief and Board keep the row's content color.
+ */
+@Composable
+private fun TrayWaitClock() {
+    JIcon(PersonaIcons.backgroundWaiting, null, decorative = true, modifier = Modifier.testTag("assistant-wait-clock"),
+        tint = trayWaitTint(PersonaTheme.style == AppStyle.Glass, PersonaTheme.palette, LocalContentColor.current))
+}
+
+/** The tone of [TrayWaitClock]: the palette's background-waiting dot on Glass, else the [content] color. */
+internal fun trayWaitTint(glass: Boolean, palette: PersonaPalette, content: Color): Color =
+    if (glass) palette.backgroundWaiting.dot else content
+
+/** "Shelved" and how many, quiet, under In progress's rows (iOS `shelvedLine`): a tap opens the board, which lists them. */
+@Composable
+private fun TrayShelvedLine(count: Int, onClick: () -> Unit) {
+    val palette = PersonaTheme.palette
+    JRow(onClick = onClick, modifier = Modifier.testTag("assistant-tray-shelved"), chevron = false, trailing = {
+        Text("$count", style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1)
+    }) {
+        JIcon(persona.core.designsystem.icons.PersonaIcons.disclosure, null, decorative = true, tint = palette.ink3)
+        Spacer(Modifier.width(Tokens.Space.s))
+        Text(stringResource(R.string.chat_tray_shelved), style = PersonaTheme.type.body, color = palette.ink2, maxLines = 1,
+            overflow = TextOverflow.Ellipsis)
+    }
+}
+
 internal fun trayPullRequestNumber(reference: String): String? =
     Regex("/(?:pull|merge_requests)/(\\d+)(?:$|[/?#])").find(reference)?.groupValues?.get(1)
 
@@ -449,7 +509,7 @@ private fun TrayProgressRow(row: TrayProgress, activity: BackgroundWork? = null,
             JSpinner(Modifier.testTag("assistant-work-spinner"))
             Spacer(Modifier.width(Tokens.Space.s))
         } else if (live && waiting) {
-            JIcon(PhIcons.Clock, null, decorative = true, modifier = Modifier.testTag("assistant-wait-clock"))
+            TrayWaitClock()
             Spacer(Modifier.width(Tokens.Space.s))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {

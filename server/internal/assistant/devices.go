@@ -36,6 +36,9 @@ type Devices interface {
 	// another one absorbed: that one), its sessions as its node listed them, when its node's connection began, the
 	// token usage.
 	List() []devices.Summary
+	// Summary is List's entry for the machine id names (Canonical(id)'s), false when List has none: one machine,
+	// without building the others.
+	Summary(id string) (devices.Summary, bool)
 	// MachineResources returns the retained system and latest sample, including a stale sample's timestamp.
 	MachineResources(id string) (*proto.Machine, *proto.MetricSample, *bool)
 	Canonical(id string) string
@@ -45,6 +48,8 @@ type Devices interface {
 	// change or keep them, nor call the devices): a view that keeps a few rows of a busy machine copies only those.
 	SessionsWhere(id string, keep func(*proto.Session) bool) ([]proto.Session, bool)
 	Session(id, session string) (proto.Session, bool)
+	// Watched: the hub watches the session for its apps (session.watch), so one has it open.
+	Watched(id, session string) bool
 	ConnectedAt(id string) time.Time
 	Usage() assistantwire.UsageSummary
 	// CapacitySnapshot is the account-pool capacity view for scheduling (proto.CapacitySnapshot): how many

@@ -16,7 +16,7 @@ struct TodosView: View {
     @State private var creatingNotes = ""
     /// The New To-Do sheet's notes mic (#2188).
     @State private var dictation = Dictation()
-    /// Folded sections the user opened (Other open, Shelved, Done start folded), and merged rows opened to their members.
+    /// Folded sections the user opened (Shelved and Done start folded), and merged rows opened to their members.
     @State private var unfolded: Set<TodoSection> = []
     @State private var openedGroups: Set<String> = []
     /// Restores from Shelved kept on this device (`TodoRestores`), and the moment the sections are read at: a minute's
@@ -28,15 +28,23 @@ struct TodosView: View {
     /// List or calendar, and the calendar's day / week / month (#2029): each device keeps its own.
     @StoredValue("todos.view") private var viewMode = TodosViewMode.list
     @StoredValue("todos.calendar.mode") private var calendarMode = TodoCalendarMode.day
+    /// The list's filter by due date and its order inside each section (#3740): each device keeps its own, like the
+    /// view above. DEBUG screenshots set them with `-todos.filter week` / `-todos.sort due`.
+    @StoredValue("todos.filter") private var listFilter = TodoListFilter.all
+    @StoredValue("todos.sort") private var listSort = TodoListSort.recent
+    /// The list by status section (default) or by Pinned direction (#4352); a hub without the direction tree offers only
+    /// the first.
+    @StoredValue("todos.grouping") private var grouping = TodosGrouping.status
     @State private var calendarAnchor = Date.now
     @State private var quickAdd: TodoCalendarSlot?
     @Environment(\.tabIsActive) private var inFront
 
-    /// The list by status section (#3206, docs/assistant/todo-status-sop.md), related to-dos merged into one row. A
-    /// search narrows the to-dos first, then places what is left.
-    private var triaged: TodoTriageResult {
-        let lookup = TodosLogic.makeSessionLookup(AppModel.shared.allSessions(inFront: inFront))
-        return TodoTriageLogic.triageTodos(store.todos.filter(matchesQuery), lookup: lookup, now: clock, restored: restored)
+    /// What the list draws: the to-dos by status section (#3206, docs/assistant/todo-status-sop.md), related ones merged
+    /// into one row. A search and the filter (#3740) narrow the to-dos first, then the sections place what is left.
+    private func listState() -> TodoFilteredList {
+        TodoListLogic.list(store.scopedTodos, searched: store.scopedTodos.filter(matchesQuery), filter: listFilter,
+                           lookup: TodosLogic.makeSessionLookup(AppModel.shared.allSessions(inFront: inFront)),
+                           now: clock, restored: restored, calendar: TodoCalendar.userCalendar)
     }
 
     private func matchesQuery(_ todo: TodoItem) -> Bool {
@@ -49,9 +57,11 @@ struct TodosView: View {
 
     var body: some View {
         VStack(spacing: Theme.Space.flush) {
-            TodosModeBar(view: $viewMode, mode: $calendarMode)
+            TodosModeBar(view: $viewMode, mode: $calendarMode, grouping: model.directionTree == nil ? nil : $grouping) {
+                listControls
+            }
             if viewMode == .calendar {
-                TodoCalendarView(todos: store.todos, mode: $calendarMode, anchor: $calendarAnchor,
+                TodoCalendarView(todos: store.scopedTodos, mode: $calendarMode, anchor: $calendarAnchor,
                                  open: { pushed = TodoDetailRoute(id: $0) }, showList: { viewMode = .list })
             } else {
                 list
@@ -88,49 +98,67 @@ struct TodosView: View {
             // `-showDoneTodos YES`: the Done section starts open (screenshots of done todos).
             if UserDefaults.standard.bool(forKey: "showDoneTodos") { unfolded = [.other, .shelved, .done] }
             if let match = UserDefaults.standard.string(forKey: "openTodoTitled"),
-               let todo = store.todos.first(where: { $0.title.contains(match) }) {
+               let todo = store.scopedTodos.first(where: { $0.title.contains(match) }) {
                 pushed = TodoDetailRoute(id: todo.id)
             }
             #endif
+        }
+        // Another assistant is current: the list is its to-dos now, and one opened or being written is the one before's.
+        .onChange(of: model.assistantSwitches) {
+            pushed = nil
+            showCreate = false
+            quickAdd = nil
+            openedGroups = []
         }
         .navigationDestination(item: $pushed) { r in TodoDetailView(todoID: r.id) }
     }
 
     private var list: some View {
-        let result = triaged
-        let openEmpty = [TodoSection.waiting, .working, .justDone, .pr].allSatisfy { result.groups($0).isEmpty }
+        let state = listState()
+        let result = state.result
+        let calendar = TodoCalendar.userCalendar
         return List {
+            // The search field, and what the filter leaves out of Needs you, right under the bar: no band of section
+            // spacing between them and the first section (#3712).
             Section {
                 searchRow
+                if state.hiddenWaiting > 0 {
+                    NoticeBanner(text: String(localized: "\(state.hiddenWaiting) more waiting on you, not in \(listFilter.title)"),
+                                 tone: .caution, symbol: Theme.Icon.needsYou) {
+                        Button("Show All") { withAnimation(Theme.Motion.state) { listFilter = .all } }
+                            .accessibilityIdentifier("todos.filter.showAll")
+                    }
+                    .padding(.horizontal, Theme.Space.page)
+                    .padding(.vertical, Theme.Space.xs)
+                    .accessibilityIdentifier("todos.filter.hiddenWaiting")
+                }
             }
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
             .listRowSeparator(.hidden)
+            .listSectionSpacing(.custom(Theme.Space.s))
 
             if result.isEmpty {
                 emptySection
             } else {
-                Section {
-                    Text("\(result.open) open · \(result.shelved) shelved · \(result.finished) done")
-                        .font(Theme.Font.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .accessibilityIdentifier("todos.summary")
-                }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: Theme.Space.flush, leading: Theme.Space.page, bottom: Theme.Space.flush, trailing: Theme.Space.page))
-                .listRowSeparator(.hidden)
-
-                ForEach(TodoSection.allCases, id: \.self) { section in
-                    let groups = result.groups(section)
-                    if !groups.isEmpty {
-                        sectionView(section, groups: groups, count: result.todoCounts[section] ?? groups.count,
-                                    folded: section.startsFolded && !isUnfolded(section, openEmpty: openEmpty))
+                if TodosGrouping.resolved(grouping, hasTree: model.directionTree != nil) == .direction, let tree = model.directionTree {
+                    directionSections(tree, result: result)
+                } else {
+                    ForEach(TodoSection.allCases, id: \.self) { section in
+                        let groups = TodoListLogic.sorted(result.groups(section), by: listSort, calendar: calendar)
+                        if !groups.isEmpty {
+                            let folded = section.startsFolded && !isUnfolded(section)
+                            // The to-dos its rows list, a merged row's related ones too: the number says what is under it.
+                            sectionView(section, groups: groups, count: groups.reduce(0) { $0 + $1.members.count }, folded: folded)
+                                .listSectionSpacing(folded ? .custom(Theme.Space.flush) : .compact)
+                        }
                     }
                 }
             }
         }
         .themedPage()
+        // The first row close to the bar, as the Agents list keeps it: not the grouped list's first-section margin.
+        .contentMargins(.top, Theme.Space.xs, for: .scrollContent)
         .refreshable {
             await store.refresh()
         }
@@ -143,9 +171,90 @@ struct TodosView: View {
         }
     }
 
-    /// A folded section is open when the user opened it, while searching, or (Other open) when nothing above it shows.
-    private func isUnfolded(_ section: TodoSection, openEmpty: Bool) -> Bool {
-        unfolded.contains(section) || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (section == .other && openEmpty)
+    /// Beside List | Calendar in the list view (#3740): the filter shown as a chip that clears it, and one button whose
+    /// menu picks the filter and the order. Both start as All and Recent Activity, the list as it always was.
+    @ViewBuilder private var listControls: some View {
+        // To-dos the search leaves, per filter: what the menu says under each (no sections worked out for it)
+        let counts = TodoListLogic.counts(store.todos.filter(matchesQuery), now: clock, calendar: TodoCalendar.userCalendar)
+        if listFilter != .all {
+            FilterChip(title: listFilter.title, symbol: Theme.Icon.close, on: true) { listFilter = .all }
+                .accessibilityLabel(String(localized: "Clear the \(listFilter.title) filter"))
+                .accessibilityIdentifier("todos.filter.clear")
+        }
+        Menu {
+            Section("Show") {
+                // a toggle per choice: the menu's own checkmark and its "selected" for VoiceOver; the count as the subtitle
+                ForEach(TodoListFilter.allCases, id: \.self) { f in
+                    Toggle(isOn: choice(f == listFilter) { listFilter = f }) {
+                        Text(f.title)
+                        Text("\(counts[f] ?? 0) to-dos")
+                    }
+                    .accessibilityIdentifier("todos.filter.\(f.rawValue)")
+                }
+            }
+            Section("Sort By") {
+                ForEach(TodoListSort.allCases, id: \.self) { o in
+                    Toggle(o.title, isOn: choice(o == listSort) { listSort = o })
+                        .accessibilityIdentifier("todos.sort.\(o.rawValue)")
+                }
+            }
+        } label: {
+            ThemedIcon(listFilter == .all && listSort == .recent ? Theme.Icon.filter : Theme.Icon.filterActive)
+                .font(Theme.Font.title)
+                .tapTargetFrame()
+        }
+        .accessibilityLabel(String(localized: "Filter and sort"))
+        .accessibilityValue(Text(verbatim: [listFilter.title, listSort.title]
+            .joined(separator: String(localized: ", ", comment: "Separator between parts of an accessibility label"))))
+        .accessibilityIdentifier("todos.filter")
+    }
+
+    /// A menu toggle that picks one choice: on while chosen; a tap chooses it (tapping the chosen one keeps it).
+    private func choice(_ on: Bool, pick: @escaping () -> Void) -> Binding<Bool> {
+        Binding(get: { on }, set: { _ in withAnimation(Theme.Motion.state) { pick() } })
+    }
+
+    /// By Pinned direction (#4352): a section per direction of the hub's tree with a to-do, in its order (the secretary's
+    /// last), headed by its name and 「在做 N · 等你 N」, its to-dos in the tree's order; then Done, folded, as by status.
+    @ViewBuilder private func directionSections(_ tree: DirectionTree, result: TodoTriageResult) -> some View {
+        let triage = result.sections.values.joined().reduce(into: [String: TodoTriage]()) { all, g in
+            all.merge(g.triage) { first, _ in first }
+        }
+        // the search and the filter (#3740) narrow them as they narrow the sections; the tree's order is kept
+        let calendar = TodoCalendar.userCalendar
+        let filter = listFilter
+        let now = clock
+        let keep: (TodoItem) -> Bool = { todo in
+            matchesQuery(todo) && TodoListLogic.matches(todo, filter, now: now, calendar: calendar)
+        }
+        ForEach(DirectionTodoSections.build(tree, todos: store.byID, keep: keep)) { d in
+            Section {
+                ForEach(d.todos) { todo in todoRow(todo, triage: triage[todo.id]) }
+            } header: {
+                HStack(spacing: Theme.Space.s) {
+                    Text(model.directionTitle(d.direction))
+                        .font(Theme.Font.sectionHeader)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: Theme.Space.s)
+                    DirectionCountsLine(direction: d.direction)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("todos.direction")
+            }
+        }
+        let done = TodoListLogic.sorted(result.groups(.done), by: listSort, calendar: calendar)
+        if !done.isEmpty {
+            let folded = TodoSection.done.startsFolded && !isUnfolded(.done)
+            sectionView(.done, groups: done, count: done.reduce(0) { $0 + $1.members.count }, folded: folded)
+                .listSectionSpacing(folded ? .custom(Theme.Space.flush) : .compact)
+        }
+    }
+
+    /// A folded section (Shelved, Done) is open when the user opened it, or while searching.
+    private func isUnfolded(_ section: TodoSection) -> Bool {
+        unfolded.contains(section) || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     @ViewBuilder private func sectionView(_ section: TodoSection, groups: [TodoTriageGroup], count: Int, folded: Bool) -> some View {
@@ -161,74 +270,58 @@ struct TodosView: View {
                 }
             }
         } header: {
+            // The Agents list's state header (#3712): the name, and the count in the state's color. Folding ones are a
+            // FoldButton, spoken as "name, expanded / collapsed, N to-dos".
             if section.startsFolded {
-                Button {
+                FoldButton(title: section.title, folded: folded, detail: String(localized: "\(count) to-dos")) {
                     withAnimation(Theme.Motion.state) {
                         if unfolded.contains(section) { unfolded.remove(section) } else { unfolded.insert(section) }
                     }
                 } label: {
-                    HStack(spacing: Theme.Space.s) {
-                        sectionTitle(section, count: count)
-                        Spacer(minLength: Theme.Space.s)
-                        ThemedIcon(folded ? Theme.Icon.disclosure : Theme.Icon.expand)
-                            .font(Theme.Font.label)
-                            .foregroundStyle(.secondary)
-                    }
-                    .contentShape(.rect)
+                    SectionHeader(title: section.title, count: count, tone: section.tone)
                 }
-                .buttonStyle(.plain)
-                .accessibilityValue(folded ? Text("Collapsed") : Text("Expanded"))
+                .font(Theme.Font.sectionHeader)
+                .textCase(nil)
                 .accessibilityIdentifier("todos.section.\(section.rawValue)")
             } else {
-                sectionTitle(section, count: count)
+                SectionHeader(title: section.title, count: count, tone: section.tone)
+                    .font(Theme.Font.sectionHeader)
+                    .textCase(nil)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("todos.section.\(section.rawValue)")
             }
         }
     }
 
-    private func sectionTitle(_ section: TodoSection, count: Int) -> some View {
-        Text("\(section.title) · \(count)")
-            .font(Theme.Font.sectionHeader)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-    }
-
-    /// A row: the group's lead, then "N related" opening the others under it.
+    /// A row: the group's lead, its "N related" inside it (under its words, #3712), and the others under it when open,
+    /// a level in with a line down their side.
     @ViewBuilder private func groupRows(_ group: TodoTriageGroup) -> some View {
-        todoRow(group.lead, triage: group.triage[group.lead.id])
-        if !group.related.isEmpty {
-            let opened = openedGroups.contains(group.key)
-            Button {
-                withAnimation(Theme.Motion.state) {
-                    if opened { openedGroups.remove(group.key) } else { openedGroups.insert(group.key) }
-                }
-            } label: {
-                HStack(spacing: Theme.Space.xs) {
-                    ThemedIcon(opened ? Theme.Icon.expand : Theme.Icon.disclosure)
-                    Text("\(group.related.count) related")
-                        .lineLimit(1)
-                }
-                .font(Theme.Font.captionStrong)
-                .foregroundStyle(Theme.accent)
+        let opened = openedGroups.contains(group.key)
+        let related = group.related.isEmpty ? nil : TodoRelatedToggle(count: group.related.count, open: opened, key: group.key) {
+            withAnimation(Theme.Motion.state) {
+                if opened { openedGroups.remove(group.key) } else { openedGroups.insert(group.key) }
             }
-            .buttonStyle(.plain)
-            .accessibilityValue(opened ? Text("Expanded") : Text("Collapsed"))
-            .accessibilityIdentifier("todos.related.\(group.key)")
-            if opened {
-                ForEach(group.related) { member in
-                    todoRow(member, triage: group.triage[member.id])
-                        .padding(.leading, Theme.Space.l)
-                }
+        }
+        todoRow(group.lead, triage: group.triage[group.lead.id], related: related)
+        if opened {
+            ForEach(group.related) { member in
+                todoRow(member, triage: group.triage[member.id])
+                    .padding(.leading, Theme.Space.xl)
+                    .overlay(alignment: .leading) { Rectangle().fill(.separator).frame(width: Theme.Size.rule) }
             }
         }
     }
 
-    private func todoRow(_ todo: TodoItem, triage: TodoTriage?) -> some View {
+    private func todoRow(_ todo: TodoItem, triage: TodoTriage?, related: TodoRelatedToggle? = nil) -> some View {
         // a failed start waiting on the owner reads open: its checkbox and swipe close it (#3713)
         let open = TodoTriageLogic.checksAsOpen(todo, triage)
+        // Got It on a Just finished row (#5707), while the hub keeps seen marks
+        let seen: (() -> Void)? = triage?.section == .justDone && model.hubFeatures.contains(TodoSeen.feature)
+            ? { markSeen(todo, after: triage?.last ?? .distantPast) } : nil
         return NavigationLink(value: TodoDetailRoute(id: todo.id)) {
             TodoRow(todo: todo, triage: triage, onToggleDone: { store.toggleDone(todo, done: open) },
-                    onRestore: triage?.section == .shelved ? { restore(todo) } : nil)
+                    onRestore: triage?.section == .shelved ? { restore(todo) } : nil, onSeen: seen, related: related)
         }
         .swipeActions(edge: .leading) {
             if triage?.section == .shelved {
@@ -253,6 +346,13 @@ struct TodosView: View {
                 }
                 .tint(Theme.positive)
             }
+            // after the full swipe's action, which stays what it was
+            if let seen {
+                Button(action: seen) {
+                    Label("Got It [To-do Seen]", systemImage: Theme.Icon.seen)
+                }
+                .tint(Theme.accent)
+            }
         }
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
@@ -261,6 +361,30 @@ struct TodosView: View {
                 Label("Delete", systemImage: Theme.Icon.delete)
             }
         }
+        // VoiceOver: the row opens the to-do; its "N related" is an action of its own, not lost inside the row
+        .modifier(RelatedAction(related: related))
+        // The link merges its children and would otherwise take the "N related" button's identifier too
+        .accessibilityIdentifier("todos.row.\(todo.id)")
+    }
+
+    /// Got It (#5707, docs/assistant/todo-status-sop.md "Seen"): filed under Done at once, the hub keeps the mark for
+    /// every device, and the toast's Undo takes it off. `after`: the moment that put it in Just finished.
+    private func markSeen(_ todo: TodoItem, after: Date) {
+        let id = todo.id
+        Haptics.success()
+        Task {
+            do { try await store.setSeen(id: id, true, after: after) } catch {
+                AppModel.shared.toast = Toast(String(localized: "Couldn't move it to Done: \(error.localizedDescription)"), style: .error)
+            }
+        }
+        AppModel.shared.toast = Toast(String(localized: "Moved to Done"), style: .success,
+                                      action: Toast.Action(title: String(localized: "Undo")) {
+            Task {
+                do { try await TodoStore.shared.setSeen(id: id, false) } catch {
+                    AppModel.shared.toast = Toast(String(localized: "Couldn't put it back: \(error.localizedDescription)"), style: .error)
+                }
+            }
+        })
     }
 
     /// Restore from Shelved: counts as activity now, so it goes back to its section until another 48 hours pass.
@@ -294,12 +418,24 @@ struct TodosView: View {
 
     @ViewBuilder private var emptySection: some View {
         Section {
-            EmptyStateView(
-                symbol: Theme.Icon.todo,
-                title: query.isEmpty ? String(localized: "No to-dos yet") : String(localized: "No matching to-dos"),
-                message: query.isEmpty ? String(localized: "Write down something to do, hand it to an agent, and track its progress.") : String(localized: "Try a different search"),
-                action: query.isEmpty ? (String(localized: "New To-Do"), { showCreate = true }) : nil
-            )
+            // The hub's merged list has nothing of an assistant that is offline: said so, not offered as a first to-do.
+            if let offline = model.assistantManagerOffline {
+                AssistantOfflineNotice(manager: offline, surface: Theme.groupedPage)
+            } else if !query.isEmpty {
+                EmptyStateView(symbol: Theme.Icon.todo, title: String(localized: "No matching to-dos"),
+                               message: String(localized: "Try a different search"))
+            } else if listFilter != .all {
+                // the filter left nothing (#3740): say which, and the way back to every to-do
+                EmptyStateView(symbol: Theme.Icon.dueDate, title: listFilter.emptyTitle, message: String(localized: "Try another filter."),
+                               action: (String(localized: "Show All"), { withAnimation(Theme.Motion.state) { listFilter = .all } }))
+            } else {
+                EmptyStateView(
+                    symbol: Theme.Icon.todo,
+                    title: String(localized: "No to-dos yet"),
+                    message: String(localized: "Write down something to do, hand it to an agent, and track its progress."),
+                    action: (String(localized: "New To-Do"), { showCreate = true })
+                )
+            }
         }
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
@@ -356,9 +492,58 @@ struct TodosView: View {
         }
     }
 
+    /// Ends dictation, and a start still asking for permission with it (#3407).
     private func stopDictation() {
-        if dictation.isListening { dictation.stop() }
+        dictation.stop()
     }
+}
+
+private extension TodoSection {
+    /// The header's count color: the state the section is named after, as Android's section headers and the web's
+    /// tinted titles do; the rest plain.
+    var tone: StatusTone {
+        switch self {
+        case .waiting: StatusPalette.needsYou
+        case .working: StatusPalette.working
+        case .justDone: StatusPalette.unread
+        case .pr: StatusTone(dot: Theme.accent, text: Theme.accent)
+        case .other, .shelved, .done: StatusPalette.idle
+        }
+    }
+}
+
+private extension TodoListFilter {
+    /// The list's empty state when this filter leaves nothing.
+    var emptyTitle: String {
+        switch self {
+        case .all: String(localized: "No to-dos yet")
+        case .noDue: String(localized: "Every to-do has a due date")
+        case .today: String(localized: "Nothing due today")
+        case .week: String(localized: "Nothing due this week")
+        case .month: String(localized: "Nothing due this month")
+        }
+    }
+}
+
+/// A merged row's "N related" as a VoiceOver action on the row (the row's own activation opens the to-do).
+private struct RelatedAction: ViewModifier {
+    var related: TodoRelatedToggle?
+
+    func body(content: Content) -> some View {
+        if let related {
+            content.accessibilityAction(named: Text("\(related.count) related"), related.toggle)
+        } else {
+            content
+        }
+    }
+}
+
+/// A merged row's "N related" (#3712): drawn inside its lead's row, under its words, so it reads as that row's.
+struct TodoRelatedToggle {
+    var count: Int
+    var open: Bool
+    var key: String
+    var toggle: () -> Void
 }
 
 struct TodoRow: View {
@@ -371,6 +556,10 @@ struct TodoRow: View {
     var onToggleDone: () -> Void
     /// Set for a shelved row: one tap brings it back.
     var onRestore: (() -> Void)? = nil
+    /// Set for a Just finished row while the hub keeps seen marks: Got It files it under Done (#5707).
+    var onSeen: (() -> Void)? = nil
+    /// Set for a merged row's lead: its "N related", which opens the others under it.
+    var related: TodoRelatedToggle? = nil
 
     var body: some View {
         let lookup = TodosLogic.makeSessionLookup(AppModel.shared.allSessions(inFront: inFront))
@@ -422,6 +611,9 @@ struct TodoRow: View {
                     if !todo.isDone { ReviewChip(todo: todo, compact: true) }
                 }
 
+                // Nobody is working on it (#3618): under its state, where its supervision shows.
+                OrphanedLine(todo: todo, state: status)
+
                 TodoPlanLine(todo: todo)
 
                 if triage?.section == .pr, let pr = todo.prLink {
@@ -455,6 +647,20 @@ struct TodoRow: View {
                     .accessibilityIdentifier("todos.restore")
                 }
 
+                if let onSeen {
+                    Button(action: onSeen) {
+                        Label("Got It [To-do Seen]", systemImage: Theme.Icon.seen)
+                            .lineLimit(1)
+                            .scaledFrame(minHeight: Theme.Size.tapTarget, alignment: .leading)
+                            .contentShape(.rect)
+                    }
+                    .font(Theme.Font.captionStrong)
+                    .foregroundStyle(Theme.accent)
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(Text("Got It: move \(todo.title) to Done"))
+                    .accessibilityIdentifier("todos.seen.\(todo.id)")
+                }
+
                 if failedOpen, let error = todo.startError {
                     Text("Failed to start: \(error)")
                         .font(Theme.Font.caption)
@@ -480,6 +686,24 @@ struct TodoRow: View {
                         .font(Theme.Font.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                }
+
+                if let related {
+                    Button(action: related.toggle) {
+                        HStack(spacing: Theme.Space.xs) {
+                            ThemedIcon(related.open ? Theme.Icon.expand : Theme.Icon.disclosure)
+                                .font(Theme.Font.label)
+                            Text("\(related.count) related")
+                                .lineLimit(1)
+                        }
+                        .font(Theme.Font.captionStrong)
+                        .foregroundStyle(.secondary)
+                        .scaledFrame(minHeight: Theme.Size.tapTarget, alignment: .leading)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityValue(related.open ? Text("Expanded") : Text("Collapsed"))
+                    .accessibilityIdentifier("todos.related.\(related.key)")
                 }
             }
             .padding(.vertical, Theme.Space.xs)

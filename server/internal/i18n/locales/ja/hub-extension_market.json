@@ -9,6 +9,8 @@
   "address_taken": "別のマーケットがすでにこのアドレスを使っています",
   "bad_signature": "マーケットの署名が正しくありません：{err}",
   "no_package": "このハブ（{platform}）で使えるパッケージがありません",
+  "source_needs_linux": "このハブにはまだインストールできません：この種類の拡張機能（ソース拡張機能）はLinuxで動くハブでのみ実行できます。",
+  "source_needs_runtime": "このハブにはまだインストールできません：この種類の拡張機能（ソース拡張機能）には、先にハブで固定バージョンのソースランタイムを設定する必要があります（拡張機能マネージャーのmanager.jsonのextension_runtime）。",
   "bad_signature_install": "マーケットの署名が正しくないため、当面ここからはインストールもアップデートもしません：{err}",
   "not_in_market": "このマーケットに拡張機能 {id} はありません",
   "token_and_token_from": "token と token_from はどちらか一方だけ指定してください",

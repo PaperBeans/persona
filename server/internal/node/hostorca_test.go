@@ -48,6 +48,10 @@ func TestMain(m *testing.M) {
 		preflightChild(os.Args[1:], os.Stdout)
 		os.Exit(0)
 	}
+	// A plain run of the whole package: its tests in concurrent processes of this binary (partition_test.go, #5734).
+	if code, ran := runPartitioned(); ran {
+		os.Exit(code)
+	}
 	// Nor `node doctor` as the preflight's child: the test binary again, in that mode, given long enough to come up
 	// under the whole server suite's load (#1110); only a child that never starts waits that long.
 	preflightChildCmd = func(string) ([]string, []string) {
@@ -826,7 +830,8 @@ func TestOrcaPromptSubmitFails(t *testing.T) {
 
 // A session that is not running that Orca does not resume (no Claude transcript) is refused, nothing typed, with a
 // reason: its claude not in front when its pane is still there (suspended), else not running — not "unsupported".
-// Orca resumes a Claude session whose pane is gone (#5548); Herdr App resumes one as herdr does (#2532).
+// A message to a stopped agent is refused (#4754); the user's Resume (session.start) brings back a Claude session
+// whose pane is gone on Orca (#5548), and on Herdr App as herdr does (#2532).
 func TestNotRunningOnAnEngineWithoutResume(t *testing.T) {
 	n, o, procs := orcaSession(t)
 	n.claudeStart, n.claudeReady = 200*time.Millisecond, 200*time.Millisecond
@@ -843,14 +848,19 @@ func TestNotRunningOnAnEngineWithoutResume(t *testing.T) {
 	if w := o.Writes(); len(w) != 0 {
 		t.Errorf("wrote %+v", w)
 	}
-	o.SetTerminals() // the terminal closed: resumed in a new one, with the launcher that started it
+	o.SetTerminals() // the terminal closed: a message is refused, Resume brings it back in a new one with its launcher
 	n.state.mu.Lock()
 	st := n.state.Sessions[sidA]
 	st.Launcher = "claude-gpt"
 	n.state.Sessions[sidA] = st
 	n.state.mu.Unlock()
-	_, _ = request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "hello"})
-	if s := strings.Join(o.Trace("terminal.send"), "\n"); !strings.Contains(s, "--resume "+sidA) || !strings.Contains(s, "claude-gpt") {
+	_, err = request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "hello"})
+	if code, _ := refusalOf(t, err); code != agentStopped {
+		t.Fatalf("a message to a stopped agent: %v", err)
+	}
+	starts := orcaTypedStarts(o)
+	_, _ = request(t, n, "session.start", map[string]any{"resume_session_id": sidA})
+	if s := strings.Join(starts(), "\n"); !strings.Contains(s, "--resume "+sidA) || !strings.Contains(s, "claude-gpt") {
 		t.Fatalf("gone: not resumed with its launcher; calls %v", o.Trace())
 	}
 	const unknown = "0e000000-0000-4000-8000-0000000000ff" // no Claude transcript: not Orca's to resume
@@ -865,7 +875,7 @@ func TestNotRunningOnAnEngineWithoutResume(t *testing.T) {
 	n.state.mu.Unlock()
 	o.Reset()
 	_, err = request(t, n, "session.send", map[string]any{"session_id": cx, "text": "hello"})
-	if code, _ := refusalOf(t, err); code != "not_running" {
+	if code, _ := refusalOf(t, err); code != agentStopped {
 		t.Fatalf("codex: %v", err)
 	}
 	if c := o.Trace("terminal.create", "terminal.send"); len(c) != 0 {
@@ -884,7 +894,7 @@ func TestNotRunningOnAnEngineWithoutResume(t *testing.T) {
 	hc.setTerminals()
 	time.Sleep(time.Second) // past the failed-list cache
 	listSessions(t, hn)
-	_, err = request(t, hn, "session.send", map[string]any{"session_id": sidA, "text": "hello"})
+	_, err = request(t, hn, "session.start", map[string]any{"resume_session_id": sidA})
 	if isRefusal(err, "not_running") {
 		t.Fatalf("herdr-core: %v", err)
 	}

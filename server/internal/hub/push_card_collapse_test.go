@@ -1,8 +1,10 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -132,5 +134,75 @@ func TestAManagersCardIsWithdrawnByItsID(t *testing.T) {
 	w := f.wait(t, 2)[1]
 	if ids, _ := open(w)["resolved_interaction_ids"].([]any); w.PushType != "background" || len(ids) != 1 || ids[0] != id {
 		t.Fatalf("withdrawal %+v names %v", w, ids)
+	}
+}
+
+// A manager's push with a notification id goes under an apns-collapse-id of the manager and the id: the same push
+// asked for again after the hub forgot handing it over (a day recap's push after a restart) replaces the one the
+// phone shows. Another manager's push of the same id, and a push without one, get their own.
+func TestManagerPushCollapsesOnItsID(t *testing.T) {
+	h, f, attempts := localizedHub(t)
+	if err := h.push.setPrefs("phone", NotifyPrefs{Input: true}); err != nil {
+		t.Fatal(err)
+	}
+	sent := 0
+	push := func(from, id string) apnsCall {
+		t.Helper()
+		if err := h.deliverPushFrom(from, assistantwire.Notification{ID: id, Kind: assistantwire.NotifyPush, Title: "Your day recap is ready"}); err != nil {
+			t.Fatalf("%s's push %q: %v", from, id, err)
+		}
+		sent++
+		return sentPushes(t, f, attempts, sent)[sent-1]
+	}
+	const id = "ntf_dayrecap_2026-11-11"
+	first := push(assistantwire.AssistantID, id)
+	if first.Collapse != managerPushCollapseID(assistantwire.AssistantID, id) || !strings.HasPrefix(first.Collapse, "push:") || len(first.Collapse) > apnsCollapseMax {
+		t.Fatalf("apns-collapse-id %q", first.Collapse)
+	}
+	if again := push(assistantwire.AssistantID, id); again.Collapse != first.Collapse {
+		t.Fatalf("sent again under %q, first under %q", again.Collapse, first.Collapse)
+	}
+	if other := push("m-0b0b0b", id); other.Collapse == first.Collapse {
+		t.Fatal("another manager's push of the same id replaces the assistant's")
+	}
+	if none := push(assistantwire.AssistantID, ""); !strings.HasPrefix(none.Collapse, "p_") {
+		t.Fatalf("a push without an id: apns-collapse-id %q", none.Collapse)
+	}
+	if managerPushCollapseID("", id) != first.Collapse || managerPushCollapseID("ab", "c") == managerPushCollapseID("a", "bc") {
+		t.Fatal("the manager is not kept apart from the id")
+	}
+}
+
+// A meeting's minutes push names the recording (#3862 phase 6): the push and the notify carry `recording_id`, so an
+// app that knows it opens the meeting's thread; one that is not a recording id is left out, and other pushes have none.
+func TestManagerPushCarriesItsRecording(t *testing.T) {
+	h, f, attempts := localizedHub(t)
+	if err := h.push.setPrefs("phone", NotifyPrefs{Input: true}); err != nil {
+		t.Fatal(err)
+	}
+	app := &client{device: "tablet", out: make(chan []byte, 8)}
+	h.mu.Lock()
+	h.clients[app] = struct{}{}
+	h.mu.Unlock()
+	h.onClientMessage(context.Background(), app, []byte(`{"type":"client_hello","features":["ws_notify"]}`))
+	<-app.out // client_hello_ack
+	const rid = "22222222-2222-4222-8222-222222222222"
+	for i, c := range []struct{ sent, want string }{{strings.ToUpper(rid), rid}, {"../not-a-recording", ""}, {"", ""}} {
+		if err := h.deliverPushFrom(assistantwire.AssistantID, assistantwire.Notification{ID: "ntf_minutes_" + strconv.Itoa(i),
+			Kind: assistantwire.NotifyPush, Title: "Minutes ready", RecordingID: c.sent}); err != nil {
+			t.Fatal(err)
+		}
+		var push, notify map[string]any
+		if err := json.Unmarshal(sentPushes(t, f, attempts, i+1)[i].Body, &push); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(<-app.out, &notify); err != nil {
+			t.Fatal(err)
+		}
+		for what, p := range map[string]map[string]any{"push": push, "notify": notify} {
+			if got, ok := p["recording_id"]; c.want == "" && ok || c.want != "" && got != c.want {
+				t.Fatalf("%q: the %s carries recording_id %v, want %q", c.sent, what, got, c.want)
+			}
+		}
 	}
 }

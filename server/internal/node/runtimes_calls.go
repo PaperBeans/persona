@@ -35,7 +35,7 @@ func (n *Node) runtimeFor(ctx context.Context, method, id string) (*runtimeConn,
 		return h, nil
 	}
 	if known {
-		if claimMethods[method] || method == "session.rename" || method == "session.close" || method == "session.archive" || method == "session.unarchive" {
+		if claimMethods[method] || method == "session.rename" || method == "session.close" || method == "session.rewind" || method == "session.archive" || method == "session.unarchive" {
 			return nil, errRuntimeAway(label)
 		}
 		return nil, nil // unwatching and the like: nothing to refuse
@@ -247,6 +247,13 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 			return nil, err, true
 		}
 		return nativeArchiveResult{Native: nativeArchiveDone, Via: "runtime"}, nil, true
+	case "session.seen":
+		// Only a runtime with an unread mark of its own is told (caps.seen); for any other there is nothing to clear.
+		if !caps.Seen || strings.Contains(p.SessionID, subagentSep) {
+			return okResult(nil), nil, true
+		}
+		_, err := call("session.seen", map[string]any{"session_id": p.SessionID})
+		return okResult(err), err, true
 	case "session.rename":
 		if p.Title == nil || strings.TrimSpace(*p.Title) == "" {
 			return okResult(nil), nil, true // a tab name: these sessions have no tab

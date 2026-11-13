@@ -4,16 +4,78 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import persona.core.contracts.DirectionsEvent
+import persona.core.contracts.ServerEvent
+import persona.core.contracts.Session
+import persona.core.contracts.api.AssistantSnapshot
+import persona.core.contracts.api.LeaderCounts
 
-// The drawer's Directions (docs/assistant/unified-entry.md "Leader conversations"): `assistant.leaders` in the hub's order,
-// named by GET /api/v1/assistant/leaders.
+// The drawer's directions (docs/assistant/unified-entry.md "The direction tree"): `assistant.leaders` in the hub's order, with
+// names and open tasks from GET /api/v1/assistant/directions/tree (#4352).
 class DirectionNamesTest {
     private fun json(text: String): JsonObject = Json.parseToJsonElement(text).jsonObject
 
     @Test fun leadersKeepTheHubsOrderWithoutTheMainOne() {
         assertEquals(listOf("b", "a"), leadersOf(json("""{"main": "m", "leaders": ["b", "", "m", "a"]}""")))
         assertEquals(emptyList<String>(), leadersOf(json("""{"main": "m"}""")))
+    }
+
+    // #5084: the background supervisor's conversation, once the hub has made it; an older hub names none.
+    @Test fun theBackgroundSupervisorIsReadWhenTheHubNamesOne() {
+        assertEquals("bg", backgroundSupervisorOf(json("""{"main": "m", "background_supervisor": "bg"}""")))
+        assertEquals(null, backgroundSupervisorOf(json("""{"main": "m"}""")))
+        assertEquals(null, backgroundSupervisorOf(json("""{"main": "m", "background_supervisor": ""}""")))
+        assertEquals(null, backgroundSupervisorOf(json("""{"main": "m", "background_supervisor": "m"}""")))
+    }
+
+    // #5084: the hub makes the background supervisor on first use, so a conversation that may be it (opened by the hub
+    // with no task behind it) is asked about when it appears and when the hub titles it, not on its every update.
+    @Test fun aConversationThatMayBeTheBackgroundSupervisorIsAskedAboutOnceItAppearsOrIsRetitled() {
+        val main = Session(machineId = "m", sessionId = "main", assistant = true)
+        val fresh = Session(machineId = "m", sessionId = "bg", assistant = true, origin = "task")
+        val before = AssistantSnapshot(main.key, listOf(main))
+        assertTrue(mayBeNewBackgroundSupervisor(before, listOf(fresh)))
+        val listed = before.copy(conversations = listOf(main, fresh))
+        assertFalse(mayBeNewBackgroundSupervisor(listed, listOf(fresh.copy(status = "working"))))
+        assertTrue(mayBeNewBackgroundSupervisor(listed, listOf(fresh.copy(title = "Background supervisor"))))
+        // once the hub has named it, its updates ask nothing; one that replaces it is asked about
+        val named = listed.copy(backgroundSupervisor = "bg")
+        assertFalse(mayBeNewBackgroundSupervisor(named, listOf(fresh.copy(title = "Background supervisor"))))
+        assertTrue(mayBeNewBackgroundSupervisor(named, listOf(fresh.copy(sessionId = "bg2"))))
+        // a scheduled task's conversation, the user's own, and a session that is no assistant conversation are not it
+        assertFalse(mayBeNewBackgroundSupervisor(before, listOf(fresh.copy(originRef = "t1"))))
+        assertFalse(mayBeNewBackgroundSupervisor(before, listOf(fresh.copy(origin = "user"))))
+        assertFalse(mayBeNewBackgroundSupervisor(before, listOf(fresh.copy(origin = null))))
+        assertFalse(mayBeNewBackgroundSupervisor(before, listOf(fresh.copy(assistant = false))))
+    }
+
+    // #4352: the tree lists the current directions in order, then the secretary group (skipped), each with its counts.
+    @Test fun theTreeListsTheDirectionsWithTheirNamesAndCounts() {
+        val tree = directionTreeOf(json("""{"directions": [
+            {"id": "a", "name": " Growth ", "counts": {"working": 0, "needs_you": 1, "stuck": 0, "review": 3}, "running": true},
+            {"id": "b", "name": "", "counts": {"working": 2, "needs_you": 0, "stuck": 1, "review": 0}, "running": false},
+            {"id": "", "name": "Nobody"},
+            {"id": "m", "name": "", "secretary": true, "counts": {"working": 9, "needs_you": 9, "stuck": 9, "review": 9}}
+        ]}"""))!!
+        assertEquals(listOf("a", "b"), tree.ids)
+        assertEquals(mapOf("a" to "Growth"), tree.names)
+        // The lead rows read the same tree the snapshot holds (one parse, #4352): what runs is the hub's `running`, not
+        // the working count (b counts two working tasks with nothing at work, #6626).
+        assertEquals(mapOf("a" to LeaderCounts(running = true, needsYou = 1), "b" to LeaderCounts()),
+            AssistantSnapshot(directionTree = tree).leaderCounts)
+        assertNull("an answer without directions is no tree", directionTreeOf(json("{}")))
+    }
+
+    // The hub says only that the tree changed; the drawer reads it again (#4352).
+    @Test fun theHubSaysTheTreeChanged() {
+        assertEquals(DirectionsEvent, ServerEvent.decode("""{"type": "directions"}"""))
+        assertEquals("a payload changes nothing", DirectionsEvent,
+            ServerEvent.decode("""{"type": "directions", "manager": "second"}"""))
+        assertTrue(ServerEvent.decode("""{"type": "not_directions"}""") == null)
     }
 
     @Test fun namesSkipEndedAndBlankOnes() {

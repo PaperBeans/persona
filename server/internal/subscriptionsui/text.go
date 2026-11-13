@@ -167,6 +167,9 @@ func (p *pages) destinations(s subscriptions.Subscription) string {
 
 // schedule is every() for a subscription.
 func (p *pages) schedule(s subscriptions.Subscription) string {
+	if subscriptions.IsPush(s) {
+		return p.t("every.push")
+	}
 	if s.Recipe.Mode == wire.ConnectorSubscriptionModeSnapshot {
 		at := s.DailyAt
 		if at == "" && s.IntervalSeconds >= 86400 {
@@ -181,6 +184,9 @@ func (p *pages) schedule(s subscriptions.Subscription) string {
 
 // lastLine is what the last run did: 3 minutes ago, 2 new; or not run yet.
 func (p *pages) lastLine(s subscriptions.Subscription) string {
+	if s.LastOKAt == nil && subscriptions.IsPush(s) {
+		return p.t("last.push_never")
+	}
 	if s.LastOKAt == nil {
 		return p.t("last.never")
 	}
@@ -240,9 +246,12 @@ func toolTitle(src *subscriptions.CatalogSource, name string) string {
 func (p *pages) plain(s subscriptions.Subscription, src *subscriptions.CatalogSource) string {
 	args := i18n.Args{"source": s.Label, "tool": toolTitle(src, s.Recipe.Tool), "noun": p.noun(s.Recipe.Kind), "every": p.schedule(s)}
 	var out string
-	if s.Recipe.Mode == wire.ConnectorSubscriptionModeSnapshot {
+	switch s.Recipe.Mode {
+	case wire.ConnectorSubscriptionModeSnapshot:
 		out = p.t("plain.snapshot", args)
-	} else {
+	case wire.ConnectorSubscriptionModeThings: // the rows come ready-made (#6296)
+		out = p.t("plain.things", args)
+	default:
 		out = p.t("plain.items", args)
 	}
 	if s.WeakDedup {
@@ -254,7 +263,7 @@ func (p *pages) plain(s subscriptions.Subscription, src *subscriptions.CatalogSo
 // originShort is who made the recipe, in a word or two for its row.
 func (p *pages) originShort(origin string) string {
 	switch origin {
-	case subscriptions.OriginExtension, subscriptions.OriginModel:
+	case subscriptions.OriginExtension, subscriptions.OriginModel, subscriptions.OriginPersona:
 		return p.t("origin_short." + origin)
 	}
 	return p.t("origin_short.user")
@@ -265,6 +274,8 @@ func (p *pages) origin(s subscriptions.Subscription) string {
 	switch s.RecipeOrigin {
 	case subscriptions.OriginExtension:
 		return p.t("origin.extension")
+	case subscriptions.OriginPersona:
+		return p.t("origin.persona")
 	case subscriptions.OriginModel:
 		return p.t("origin.model", i18n.Args{"date": date})
 	}
@@ -293,6 +304,14 @@ func shortPath(path string) string {
 		return "$"
 	}
 	return s
+}
+
+// took is how long a run took, "" for a push (kept as it came).
+func (p *pages) took(ms int64, pushed bool) string {
+	if pushed {
+		return ""
+	}
+	return p.seconds(ms)
 }
 
 func (p *pages) seconds(ms int64) string {

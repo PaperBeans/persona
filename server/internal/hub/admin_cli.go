@@ -21,6 +21,7 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/clitext"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 // `personad hub admin …` on the hub's machine (docs/operations/admin.md): widen or set the admin UI's scope, reset its password.
@@ -35,12 +36,13 @@ const adminUsage = `usage:
   personad hub admin setup-code                    a one-time code for first-run setup from this machine (asks the
                                                    running hub; valid 10 minutes)`
 
-// accessChoices explains each scope; admin_access_help in scripts/deploy/install.sh prints the same.
+// accessChoices explains each scope (the catalog key of its meaning); admin_access_help in scripts/deploy/install.sh
+// prints the same.
 var accessChoices = []struct{ name, meaning string }{
-	{accessLoopback, "只有 hub 这台机器自己（Docker 里是容器自己）能打开；别的电脑要用 ssh 隧道"},
-	{accessLAN, "本机 + 和 hub 同一网段的私网地址（+ security.trusted_cidrs）。默认，适合家里 / 办公室的局域网"},
-	{accessCIDRs, "本机 + 你列出的网段（例如 VPN 的网段）；公网网段也只能经 TLS"},
-	{accessAny, "任何地方经 TLS 端口都能打开（局域网照旧）。暴露在公网上，只靠管理员密码和登录限流挡着"},
+	{accessLoopback, "hub-cli.access_loopback"},
+	{accessLAN, "hub-cli.access_lan"},
+	{accessCIDRs, "hub-cli.access_cidrs"},
+	{accessAny, "hub-cli.access_any"},
 }
 
 // AdminCommand runs `personad hub admin <args>`. Help asked for prints the usage on stdout (exit 0); a usage mistake
@@ -106,21 +108,22 @@ func adminAccessCommand(ctx context.Context, dir string, args []string, stdout, 
 		fmt.Fprintln(stdout, current.Access)
 		return nil
 	}
+	l := i18n.Terminal()
 	if len(positional) == 0 {
 		shown := current.Access
 		if shown == "" {
-			shown = accessLAN + "（hub.json 没写，用默认值）"
+			shown = i18n.T(l, "hub-cli.access_default", i18n.Args{"access": accessLAN})
 		}
-		fmt.Fprintf(stdout, "hub.json 的 admin.access：%s\n", shown)
+		fmt.Fprintln(stdout, i18n.T(l, "hub-cli.access_current", i18n.Args{"access": shown}))
 		if len(current.CIDRs) > 0 {
-			fmt.Fprintf(stdout, "admin.cidrs：%s\n", strings.Join(current.CIDRs, ", "))
+			fmt.Fprintln(stdout, i18n.T(l, "hub-cli.access_cidrs_current", i18n.Args{"list": strings.Join(current.CIDRs, ", ")}))
 		}
 		if env := adminEnv(); env != nil {
-			fmt.Fprintf(stdout, "环境变量 PERSONA_ADMIN_ACCESS=%s 优先于 hub.json\n", env.Access)
+			fmt.Fprintln(stdout, i18n.T(l, "hub-cli.access_env", i18n.Args{"access": env.Access}))
 		}
-		fmt.Fprintln(stdout, "\n可选：")
+		fmt.Fprintln(stdout, "\n"+i18n.T(l, "hub-cli.access_choices"))
 		for _, c := range accessChoices {
-			fmt.Fprintf(stdout, "  %-8s %s\n", c.name, c.meaning)
+			fmt.Fprintf(stdout, "  %-8s %s\n", c.name, i18n.T(l, c.meaning))
 		}
 		return nil
 	}
@@ -129,7 +132,7 @@ func adminAccessCommand(ctx context.Context, dir string, args []string, stdout, 
 	}
 	access := positional[0]
 	if !validAccess(access) || access == "" {
-		return fmt.Errorf("范围只能是 loopback、lan、cidrs、any，不是 %q", access)
+		return errors.New(i18n.T(l, "hub-cli.access_invalid", i18n.Args{"access": strconv.Quote(access)}))
 	}
 	cidrs := splitList(*cidrsFlag)
 	if access == accessCIDRs {
@@ -138,14 +141,14 @@ func adminAccessCommand(ctx context.Context, dir string, args []string, stdout, 
 			return err
 		}
 		if len(prefixes) == 0 {
-			return errors.New("cidrs 要用 --cidrs 给出至少一个网段，例如 --cidrs 192.0.2.0/24")
+			return errors.New(i18n.T(l, "hub-cli.access_cidrs_missing"))
 		}
 		cidrs = cidrs[:0]
 		for _, p := range prefixes {
 			cidrs = append(cidrs, p.String())
 		}
 	} else if len(cidrs) > 0 {
-		return errors.New("--cidrs 只和 cidrs 一起用")
+		return errors.New(i18n.T(l, "hub-cli.access_cidrs_only"))
 	}
 	err = editHubJSON(dir, func(o *jsonObject) error {
 		admin, err := o.Object("admin")
@@ -168,11 +171,11 @@ func adminAccessCommand(ctx context.Context, dir string, args []string, stdout, 
 	}
 	for _, c := range accessChoices {
 		if c.name == access {
-			fmt.Fprintf(stdout, "管理界面的访问范围已设为 %s：%s\n", access, c.meaning)
+			fmt.Fprintln(stdout, i18n.T(l, "hub-cli.access_set", i18n.Args{"access": access, "meaning": i18n.T(l, c.meaning)}))
 		}
 	}
 	if env := adminEnv(); env != nil {
-		fmt.Fprintf(stderr, "注意：环境变量 PERSONA_ADMIN_ACCESS=%s 优先于 hub.json，改它才会生效\n", env.Access)
+		fmt.Fprintln(stderr, i18n.T(l, "hub-cli.access_env_wins", i18n.Args{"access": env.Access}))
 	}
 	cfg := &Config{Listen: ":18660", dir: dir}
 	if b, err := os.ReadFile(dir + "/hub.json"); err == nil {
@@ -180,15 +183,15 @@ func adminAccessCommand(ctx context.Context, dir string, args []string, stdout, 
 	}
 	cfg.applyEnv()
 	if access == accessAny && cfg.Public.TLSListen == "" {
-		fmt.Fprintln(stderr, "注意：hub 没开 TLS（public.tls_listen），any 实际只放局域网进来；开了 TLS 重启 hub 后才对外")
+		fmt.Fprintln(stderr, i18n.T(l, "hub-cli.access_any_without_tls"))
 	}
 	switch err := notifyAdminReload(ctx, cfg); {
 	case err == nil:
-		fmt.Fprintln(stdout, "正在运行的 hub 已经按新范围生效。")
+		fmt.Fprintln(stdout, i18n.T(l, "hub-cli.access_applied"))
 	case errors.Is(err, errHubNotRunning):
-		fmt.Fprintln(stdout, "hub 没在运行：下次启动时生效。")
+		fmt.Fprintln(stdout, i18n.T(l, "hub-cli.access_next_start"))
 	default:
-		fmt.Fprintf(stderr, "没能通知正在运行的 hub（%v）：重启 hub 后生效。\n", err)
+		fmt.Fprintln(stderr, i18n.T(l, "hub-cli.access_notify_failed", i18n.Args{"error": err}))
 	}
 	return nil
 }
@@ -197,16 +200,17 @@ var errHubNotRunning = errors.New("hub not running")
 
 // adminSetupCode prints a fresh first-run setup code from the running hub.
 func adminSetupCode(ctx context.Context, dir string, stdout io.Writer) error {
+	l := i18n.Terminal()
 	cfg := &Config{Listen: ":18660", dir: dir}
 	b, err := os.ReadFile(dir + "/hub.json")
 	if err != nil {
-		return fmt.Errorf("这台机器上没有 hub 的配置（%s/hub.json）：%w", dir, err)
+		return &cliError{i18n.T(l, "hub-cli.no_hub_config", i18n.Args{"dir": dir, "error": err}), err}
 	}
 	_ = json.Unmarshal(b, cfg)
 	cfg.applyEnv()
 	resp, err := adminLoopbackPost(ctx, cfg, "/api/v1/admin/setup-code")
 	if errors.Is(err, errHubNotRunning) {
-		return errors.New("hub 没在运行：先启动 hub（设置码只在运行中的 hub 里有效）")
+		return errors.New(i18n.T(l, "hub-cli.setup_code_hub_down"))
 	}
 	if err != nil {
 		return err
@@ -220,12 +224,12 @@ func adminSetupCode(ctx context.Context, dir string, stdout io.Writer) error {
 	_ = json.Unmarshal(raw, &out)
 	switch {
 	case resp.StatusCode == http.StatusConflict:
-		return errors.New("管理员密码已经设过了：直接登录，忘了就 personad hub admin reset-password")
+		return errors.New(i18n.T(l, "hub-cli.setup_code_password_set", i18n.Args{"command": clitext.Named("personad hub admin reset-password")}))
 	case resp.StatusCode != http.StatusOK || out.Code == "":
-		return fmt.Errorf("hub 没给设置码（HTTP %d）：%s", resp.StatusCode, apierr.Describe(raw)) // with the cause in detail (#5728)
+		// with the cause in detail (#5728)
+		return errors.New(i18n.T(l, "hub-cli.setup_code_failed", i18n.Args{"status": resp.StatusCode, "error": apierr.Describe(raw)}))
 	}
-	fmt.Fprintf(stdout, "首次设置码：%s\n10 分钟内有效（到 %s），只能用一次；在 hub 机器上打开管理界面设置密码时填它。\n",
-		out.Code, out.ExpiresAt.UTC().Format(time.RFC3339))
+	fmt.Fprintln(stdout, i18n.T(l, "hub-cli.setup_code", i18n.Args{"code": out.Code, "expires": out.ExpiresAt.UTC().Format(time.RFC3339)}))
 	return nil
 }
 
@@ -283,9 +287,10 @@ func adminResetPassword(ctx context.Context, dir string, args []string, stdin io
 	if flags.NArg() != 0 {
 		return errors.New(adminUsage)
 	}
+	l := i18n.Terminal()
 	b, err := os.ReadFile(dir + "/hub.json")
 	if err != nil {
-		return fmt.Errorf("这台机器上没有 hub 的配置（%s/hub.json）：%w", dir, err)
+		return &cliError{i18n.T(l, "hub-cli.no_hub_config", i18n.Args{"dir": dir, "error": err}), err}
 	}
 	cfg := &Config{}
 	if err := json.Unmarshal(b, cfg); err != nil {
@@ -294,7 +299,7 @@ func adminResetPassword(ctx context.Context, dir string, args []string, stdin io
 	cfg.applyEnv()
 	var password string
 	if !*clear {
-		if password, err = readNewPassword(stdin, stderr); err != nil {
+		if password, err = readNewPassword(l, stdin, stderr); err != nil {
 			return err
 		}
 	}
@@ -309,7 +314,7 @@ func adminResetPassword(ctx context.Context, dir string, args []string, stdin io
 		if err := database.ClearAdminPassword(ctx); err != nil {
 			return err
 		}
-		fmt.Fprintln(stdout, "管理员密码已清除，所有已登录的浏览器都已退出；下次在访问范围内打开 /admin 时重新设置。")
+		fmt.Fprintln(stdout, i18n.T(l, "hub-cli.password_cleared"))
 		return nil
 	}
 	hash, err := hashAdminPassword(password)
@@ -319,30 +324,32 @@ func adminResetPassword(ctx context.Context, dir string, args []string, stdin io
 	if err := database.SetAdminPasswordSignOut(ctx, hash, ""); err != nil {
 		return err
 	}
-	fmt.Fprintln(stdout, "管理员密码已更新，所有已登录的浏览器都已退出。")
+	fmt.Fprintln(stdout, i18n.T(l, "hub-cli.password_updated"))
 	return nil
 }
 
-// readNewPassword asks twice without echo on a terminal; otherwise it reads one line from stdin (a script).
-func readNewPassword(stdin io.Reader, stderr io.Writer) (string, error) {
+// readNewPassword asks twice without echo on a terminal; otherwise it reads one line from stdin (a script). A refused
+// password says why in l.
+func readNewPassword(l i18n.Lang, stdin io.Reader, stderr io.Writer) (string, error) {
+	refused := func(problem error) error { return &cliError{i18n.Localize(problem, l), problem} }
 	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
-		fmt.Fprint(stderr, "新的管理员密码：")
+		fmt.Fprint(stderr, i18n.T(l, "hub-cli.password_prompt")+" ")
 		first, err := term.ReadPassword(int(f.Fd()))
 		fmt.Fprintln(stderr)
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprint(stderr, "再输一遍：")
+		fmt.Fprint(stderr, i18n.T(l, "hub-cli.password_again")+" ")
 		second, err := term.ReadPassword(int(f.Fd()))
 		fmt.Fprintln(stderr)
 		if err != nil {
 			return "", err
 		}
 		if string(first) != string(second) {
-			return "", errors.New("两次输入的不一样，没有改")
+			return "", errors.New(i18n.T(l, "hub-cli.password_mismatch"))
 		}
 		if problem := adminPasswordProblem(string(first)); problem != nil {
-			return "", problem
+			return "", refused(problem)
 		}
 		return string(first), nil
 	}
@@ -352,7 +359,7 @@ func readNewPassword(stdin io.Reader, stderr io.Writer) (string, error) {
 	}
 	password := strings.TrimRight(line, "\r\n")
 	if problem := adminPasswordProblem(password); problem != nil {
-		return "", problem
+		return "", refused(problem)
 	}
 	return password, nil
 }

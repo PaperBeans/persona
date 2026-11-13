@@ -84,5 +84,6 @@
   "save_client_id": "Save client ID",
   "client_id_saved": "Client ID saved. Sign in to Outlook on your phone.",
   "outlook_config_failed": "Couldn't read the Outlook sign-in settings: {error}",
-  "client_id_save_failed": "Not saved: {error}"
+  "client_id_save_failed": "Not saved: {error}",
+  "mail_inbox_failed": "Couldn't change it: {error}"
 }

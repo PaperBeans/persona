@@ -5,7 +5,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Session } from "../lib/types";
 import { agentRowMenuItems } from "./AgentMenus";
 import { AgentsPage } from "./AgentsPage";
-import { paneTabsFit, PaneTabs } from "./chat/PaneTabs";
 import { Palette } from "./Palette";
 import { ShellSwitchView } from "./ShellSwitch";
 import { NavGrid, navGridColumns, type NavPage } from "./Sidebar";
@@ -43,14 +42,28 @@ describe("「助手 | Agents」", () => {
     expect(html.match(/touch-hit/g)).toHaveLength(2);
     expect(html.match(/whitespace-nowrap/g)).toHaveLength(2);
   });
+  it("takes no more room than the bar gives it (#5036): on a phone the short Sessions label, truncating last", () => {
+    const html = renderToStaticMarkup(<ShellSwitchView page="assistant" waiting={2} />);
+    // the switch may shrink, so the side slots' buttons never go under it
+    expect(html).toMatch(/<nav aria-label="切换页面" class="flex h-8 max-w-full min-w-0 /);
+    expect(html.match(/min-w-0 [^"]*px-2 [^"]*sm:shrink-0 sm:px-3\.5/g)).toHaveLength(2);
+    expect(html.match(/<span class="min-w-0 truncate" data-switch-label="true">/g)).toHaveLength(2);
+    // Sessions: the short name on a phone, the full one wider, the full one always its name and tooltip
+    expect(html).toContain('<span class="sm:hidden">会话</span><span class="max-sm:hidden">会话与终端</span>');
+    expect(html).toMatch(/<a href="\/terminal" aria-label="会话与终端，2 个需要你" title="会话与终端"/);
+    // the assistant side has no short name and no tooltip
+    expect(html).toMatch(/<a href="\/" aria-current="page" aria-label="助手" class=/);
+    // the count: inline when wide, on the segment's corner on a phone
+    expect(html).toMatch(/max-sm:absolute max-sm:-top-1 max-sm:-right-1">2<\/span>/);
+  });
 });
 
 describe("the Agents page", () => {
   it("puts 侧边栏 and its button in ChatView's side slots, the switch narrow only, a title wide", () => {
     const html = renderToStaticMarkup(<AgentsPage route={{ name: "agent-list" }} onToggleSidebar={() => {}} onNewAgent={() => {}} />);
     const header = html.slice(0, html.indexOf("</header>"));
-    // left slot, centre, right slot in that order, both slots the same fixed width on a narrow screen
-    expect(header.match(/max-lg:w-20/g)).toHaveLength(2);
+    // left slot, centre, right slot in that order, both slots at least one width on a narrow screen, growing to fit (#5036)
+    expect(header.match(/max-lg:min-w-16/g)).toHaveLength(2);
     expect(header.indexOf('aria-label="侧边栏"')).toBeLessThan(header.indexOf('aria-label="切换页面"'));
     expect(header.indexOf('aria-label="切换页面"')).toBeLessThan(header.indexOf('aria-label="新建 Agent"'));
     expect(header).toMatch(/flex min-w-0 flex-1 justify-center lg:hidden"><nav aria-label="切换页面"/);
@@ -82,22 +95,6 @@ describe("the drawer's page grid", () => {
   });
 });
 
-describe("pane tabs on a phone", () => {
-  const two = [session({ session_id: "a" }), session({ session_id: "b", title: "改测试" })];
-  const five = ["a", "b", "c", "d", "e"].map((id) => session({ session_id: id }));
-  it("up to three share the width; more scroll with faded ends", () => {
-    expect(paneTabsFit(2)).toBe("fill");
-    expect(paneTabsFit(3)).toBe("fill");
-    expect(paneTabsFit(4)).toBe("scroll");
-    const fill = renderToStaticMarkup(<PaneTabs sessions={two} current="a" onSelect={() => {}} />);
-    expect(fill.match(/max-lg:flex-1 max-lg:basis-0/g)).toHaveLength(2);
-    expect(fill).not.toContain("mask-image");
-    const scroll = renderToStaticMarkup(<PaneTabs sessions={five} current="c" onSelect={() => {}} />);
-    expect(scroll).not.toContain("max-lg:flex-1");
-    expect(scroll).toContain("max-lg:[mask-image:linear-gradient(");
-  });
-});
-
 describe("a sidebar row's ⋯", () => {
   const items = (s: Session) => agentRowMenuItems(s, { pinned: false, muted: false, onRename: () => {}, onDelete: () => {}, onLinkTodo: () => {} }).map((i) => i.key);
   it("has what used to be only on right click: 关联到待办, 解除关联 and 删除对话", () => {
@@ -122,6 +119,19 @@ describe("a sidebar row's ⋯", () => {
     expect(keys(session(live))).not.toContain("close"); // no terminal capability
     expect(keys(session({ ...live, attached: true } as Partial<Session>))).not.toContain("attach");
     expect(keys(session())).not.toContain("attach");
+  });
+  it("offers 重命名 and 关闭 Agent on a runtime's session where its node says so (#6294)", () => {
+    const keys = (s: Session) => agentRowMenuItems(s, { pinned: false, muted: false, onRename: () => {}, onDelete: () => {}, onCloseAgent: () => {} }).map((i) => i.key);
+    const paseo = { source_kind: "runtime", agent: "claude", capabilities: { read: true, send: true, interrupt: true, approve: true, close: true, rename: true } } as Partial<Session>;
+    expect(keys(session(paseo))).toEqual(expect.arrayContaining(["rename", "close"]));
+    const refused = keys(session({ ...paseo, capabilities: { read: true, send: true, close: false, rename: false } } as Partial<Session>));
+    expect(refused).not.toContain("rename");
+    expect(refused).not.toContain("close");
+    // an older node says neither: a source keeps neither, as before
+    const older = keys(session({ ...paseo, capabilities: { read: true, send: true } } as Partial<Session>));
+    expect(older).not.toContain("rename");
+    expect(older).not.toContain("close");
+    expect(keys(session())).toEqual(expect.arrayContaining(["rename", "close"])); // the user's own Agent keeps both
   });
   it("offers 删除对话 on a finished or seen desktop thread, which has no terminal to close it from", () => {
     const thread = { source_kind: "codex_app_server", capabilities: { read: true, send: true } } as Partial<Session>;

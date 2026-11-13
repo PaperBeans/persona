@@ -1,7 +1,9 @@
 package hub
 
 import (
+	"cmp"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"maps"
@@ -33,10 +35,40 @@ func (w pushWants) fn() func(NotifyPrefs) bool {
 // devices: a member's computers are the center's machines. owner is the manager that asked for it: the devices that
 // turned its pushes off get none (NotifyPrefs.MutedManagers).
 func (h *Hub) notifyDone(owner, kind, machineID, machine, sessionID, title, text string, wants pushWants) {
-	build := func(l i18n.Lang) map[string]any { return donePayloadIn(l, machineID, machine, sessionID, title, text) }
+	h.notifyDoneUnder(owner, kind, machineID, machine, sessionID, title, text, wants, "", "")
+}
+
+// notifyDoneUnder is notifyDone with the push's apns-collapse-id ("": one of its own) and the recording it is about
+// ("": none; assistantwire.Notification.RecordingID), which the push and the notify carry as `recording_id`.
+func (h *Hub) notifyDoneUnder(owner, kind, machineID, machine, sessionID, title, text string, wants pushWants, collapseID, recordingID string) {
+	build := func(l i18n.Lang) map[string]any {
+		p := donePayloadIn(l, machineID, machine, sessionID, title, text)
+		if recordingID != "" {
+			p["recording_id"] = recordingID
+		}
+		return p
+	}
 	h.emitToExtensions(owner, "agent.finished", map[string]any{"machine_id": machineID, "machine": machine, "session_id": sessionID, "title": title})
-	h.push.sendFrom(owner, build, "", wants.fn(), wants.quiet(), nil)
+	h.push.sendFrom(owner, build, collapseID, wants.fn(), wants.quiet(), nil)
 	h.notifyWSFrom(owner, kind, build, wants.fn(), wants.quiet())
+}
+
+// managerPushCollapseID is the apns-collapse-id of manager's push with notification id (assistantwire.Notification.ID;
+// "" without one): the same push asked for again once the hub no longer remembers handing it over (handedOverFor)
+// takes the place of the one the phone shows instead of adding a second. A hash of the manager and the id, so it
+// replaces only that manager's push of that id: never a card's, a decision's (td_), a notify API alert, an extension's
+// push or the hub's own.
+func managerPushCollapseID(manager, id string) string {
+	if id == "" {
+		return ""
+	}
+	manager = cmp.Or(manager, assistantwire.AssistantID)
+	sum := sha256.New()
+	sum.Write([]byte("push\x00"))
+	sum.Write(binary.AppendUvarint(nil, uint64(len(manager))))
+	sum.Write([]byte(manager))
+	sum.Write([]byte(id))
+	return "push:" + hex.EncodeToString(sum.Sum(nil)[:16])
 }
 
 // notifyReply reminds the devices that take "needs you" pushes of an agent still waiting on the user's answer (#5096).
@@ -196,6 +228,9 @@ func notifyMessage(kind string, payload map[string]any) map[string]any {
 	}
 	if td, ok := payload["todo"]; ok { // a decision's push (decidePayloadIn)
 		msg["todo"] = td
+	}
+	if id, ok := payload["recording_id"]; ok { // a meeting's minutes (notifyDoneUnder)
+		msg["recording_id"] = id
 	}
 	return msg
 }

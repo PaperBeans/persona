@@ -93,7 +93,7 @@ struct MacMenuBarTests {
     }
 
     /// The icon's number counts waiting cards of the menu's Needs You sessions, not sessions (#4081): one agent on a
-    /// second card shows 2, matching the Dock badge and the iPhone's Agents tab.
+    /// second card shows 2.
     @Test func iconCountsCardsNotSessions() throws {
         func ix(_ id: String, _ session: String) throws -> Interaction {
             try JSON.decoder.decode(Interaction.self, from: Data(

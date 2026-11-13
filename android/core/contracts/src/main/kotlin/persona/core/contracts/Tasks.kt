@@ -46,6 +46,8 @@ data class TaskPlan(
     @WireEnum("open", "started", "dismissed", "unknown")
     val state: String = "unknown",
     @WireTime @SerialName("created_at") val createdAt: String? = null,
+    /** The rule an open plan suggests after three Starts of its kind (#4929): the hub fills it in on every read; null otherwise. */
+    val suggestion: RuleSuggestion? = null,
 )
 
 /** A message card's reply that went out: when, and what it said. */
@@ -61,7 +63,7 @@ data class FeedItem(
     val id: String,
     val conversation: String = "",
     @WireTime val at: String? = null,
-    @WireEnum("plan", "task", "answered", "receipt", "review", "report", "routed", "today", "brief", "message", "view", "unknown")
+    @WireEnum("plan", "task", "answered", "receipt", "review", "report", "routed", "today", "brief", "message", "view", "notice", "unknown")
     val kind: String = "unknown",
     val ref: String? = null,
     val body: JsonElement? = null,
@@ -152,6 +154,8 @@ data class Todo(
     @SerialName("done_by") val doneBy: String? = null,
     @SerialName("done_reason") val doneReason: String? = null,
     @WireTime @SerialName("reopened_at") val reopenedAt: String? = null,
+    /** When the owner last looked at it in Just finished: Got it, or opening it (#5707); one seen since it got there is Done. */
+    @WireTime @SerialName("seen_at") val seenAt: String? = null,
     /** Why the task's agent did not start (#1077): the hub ended the todo with it; "Retry" clears it (#1396). */
     @SerialName("start_error") val startError: String? = null,
     /** Opened from the main conversation while "Notify main-chat tasks only in the main chat" was on (#1731): not in the to-dos badge. */
@@ -240,7 +244,9 @@ data class TodoOrphaned(val reason: String? = null, @WireTime val since: String?
  * owner can answer") also carries what is to be decided ([question]), why only the owner can ([whyOwner]), its
  * [options] with the recommended one first, where the task came from and stands in one line ([background]), what waiting
  * costs, whether the recommendation is taken at [deadline] ([default] "taken") or never ("never"), the fixed answers the
- * hub takes ([responses]) and the one already given while it still waits ([response]). All absent from an older hub.
+ * hub takes ([responses]) and the one already given while it still waits ([response]). A decision that can wait is held
+ * for the next briefing, with nothing pushed for it, while [forBriefing] (#4930, "Decisions that can wait"); one the owner
+ * gave the same go-ahead for three times carries the rule it suggests ([suggestion], #4929). All absent from an older hub.
  */
 @Serializable
 data class TodoAsk(
@@ -257,6 +263,8 @@ data class TodoAsk(
     val default: String? = null,
     val responses: List<String>? = null,
     val response: String? = null,
+    @SerialName("for_briefing") val forBriefing: Boolean = false,
+    val suggestion: RuleSuggestion? = null,
 )
 
 /** One option of a decision: its [label], which is the answer, and what choosing it leads to. */

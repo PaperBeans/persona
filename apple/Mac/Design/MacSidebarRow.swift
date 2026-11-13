@@ -11,11 +11,19 @@ struct MacSidebarRow: View {
         case word(String)
     }
 
+    /// The column the row is in: the window's sections, or a page's side column (Inbox's filters). A style may select
+    /// them differently (Lark: a raised block in the sections, a wash of the accent beside a list).
+    enum Column {
+        case sections
+        case side
+    }
+
     var icon: String
     var title: String
     var selected: Bool
     var badge: Badge?
     var identifier: String
+    var column: Column = .side
     var action: () -> Void
     @State private var hovering = false
 
@@ -23,17 +31,18 @@ struct MacSidebarRow: View {
         Button(action: action) {
             HStack(spacing: Theme.Sidebar.gap) {
                 // The title says it (VoiceOver read the symbol's name too).
-                Image(systemName: icon).resizable().scaledToFit().foregroundStyle(Color.primary)
+                Image(systemName: icon).resizable().scaledToFit().foregroundStyle(selected ? Theme.macSelectedIcon : Color.primary)
                     .scaledFrame(width: Theme.Sidebar.glyph, height: Theme.Sidebar.glyph)
                     .scaledFrame(width: Theme.Sidebar.glyphColumn)
                     .accessibilityHidden(true)
                 // One small gap between the title and its count (the outer spacing on each side of the spacer was
                 // 32 pt): a mail account's address in the inbox's filters keeps more of itself.
                 HStack(spacing: 0) {
-                    Text(title).font(Theme.Font.body).foregroundStyle(Color.primary).lineLimit(1)
+                    Text(title).font(Theme.Font.body).fontWeight(selected ? Theme.macSelectedWeight : nil)
+                        .foregroundStyle(Color.primary).lineLimit(1)
                     Spacer(minLength: Theme.Space.s)
                     switch badge {
-                    case .count(let n): CountBadge(count: n, look: .tone(StatusPalette.needsYou))
+                    case .count(let n): CountBadge(count: n, look: .needs)
                     case .word(let w): Text(w).font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
                     case nil: EmptyView()
                     }
@@ -45,7 +54,7 @@ struct MacSidebarRow: View {
             .background {
                 if selected || hovering {
                     RoundedRectangle(cornerRadius: Theme.Sidebar.radius, style: .continuous)
-                        .fill(selected ? Theme.Fill.macSelected : Theme.Fill.macHover)
+                        .fill(selected ? (column == .sections ? Theme.Fill.macSidebarSelected : Theme.Fill.macSelected) : Theme.Fill.macHover)
                 }
             }
             .contentShape(.rect)

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_modelpill_spoken">モデルを選択。現在：%1$s</string>
+    <string name="chat_modelpill_spoken_effort">モデルを選択。現在：%1$s、思考の強さ：%2$s</string>
+    <string name="chat_modelpill_spoken_pending">モデルを選択。次のメッセージ：%1$s · %2$s</string>
+    <string name="chat_modelpill_spoken_pending_effort">モデルを選択。次のメッセージ：%1$s · %2$s、思考の強さ：%3$s</string>
+    <string name="chat_modelpill_loading">モデルを読み込み中…</string>
+    <string name="chat_modelpill_failed">モデルを読み込めませんでした</string>
+    <string name="chat_modelpill_default_model">デフォルトのモデル</string>
+    <string name="chat_modelpill_effort_xhigh_short">とても高い</string>
+    <string name="chat_modelpill_header_default">デフォルトに従っています · %1$s</string>
+    <string name="chat_modelpill_header_own">このチャットを始めたときのモデル · %1$s</string>
+    <string name="chat_modelpill_header_picked">このチャット用に選択 · %1$s</string>
+    <string name="chat_modelpill_header_picked_page">このチャット用に選択（チャットを離れると元に戻ります） · %1$s</string>
+    <string name="chat_modelpill_header_new">この新しいチャット用 · %1$s</string>
+    <string name="chat_modelpill_follow_default">デフォルトに戻す</string>
+    <string name="chat_modelpill_undo_pick">選択を取り消す</string>
+    <string name="chat_modelpill_provider_gone">このプロバイダーはもうこのコンピューターにありません</string>
+    <string name="chat_modelpanel_other_provider">実行中のエージェントでは、まだプロバイダーを切り替えられません</string>
+    <string name="chat_modelpanel_other_engine">%1$s から %2$s への切り替えには新しい会話が必要です</string>
+    <string name="chat_modelpanel_model_fixed">実行中の %1$s セッションではモデルを変更できません</string>
+    <string name="chat_modelpanel_locked">このランチャーは独自のモデルを固定しているため、ここで選んでも反映されません。</string>
+    <string name="chat_modelpanel_busy">エージェントが作業中です。このターンの終了後にモデルを切り替えてください</string>
+    <string name="chat_modelpanel_pending_note">次のメッセージで切り替わります：エージェントは %1$s で再起動し、この会話はそのまま続きます</string>
+    <string name="chat_modelpanel_engine_note">エンジンを切り替えるとコンテキストが再構築され、内容が失われる場合があります</string>
+    <string name="chat_modelpanel_switch_scheduled">切り替えを予約しました：次のメッセージでエージェントが %1$s に移ります</string>
+    <string name="chat_model_changed">モデルが %1$s から %2$s に変わりました</string>
+</resources>

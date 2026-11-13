@@ -88,7 +88,7 @@ extension MarkdownUI.Theme {
                 ReplyQuote(config: config)
                 #endif
             }
-            .table { config in FittedTable(config: config) } // fits the width it gets; scrolls only when it cannot
+            .table { config in FittedTable(config: config).oneBlockInLift() } // fits the width it gets; scrolls only when it cannot
             .tableCell { config in FittedTableCell(config: config).runFonts() }
     }
 }
@@ -132,7 +132,7 @@ extension MarkdownUI.Theme {
     /// below the third level (the secondary level's size), semibold in the quieter ink, more space above than below.
     /// Its label is built as heading1–3's are: a modifier theirs gains (the style's run fonts, say) belongs here too.
     @MainActor static func minorHeading(_ config: BlockConfiguration) -> some View {
-        config.label.markdownMargin(top: ReplyMetrics.heading4.top, bottom: ReplyMetrics.heading4.bottom)
+        config.label.runFonts().markdownMargin(top: ReplyMetrics.heading4.top, bottom: ReplyMetrics.heading4.bottom)
             .markdownTextStyle {
                 FontWeight(.semibold)
                 FontSize(.em(ReplyMetrics.heading4.size))
@@ -214,11 +214,15 @@ struct ImageViewing: Identifiable {
 struct UserBubble: View, Equatable {
     @Environment(\.rowMemoScope) private var memoScope
     var item: Item
+    /// The extension that opened the conversation with this message (#3758): 「来自 飞书 /agent」 under it. Set by the chat
+    /// page on the conversation's first message only.
+    var external: AutoConversationSource? = nil
     /// Only the message itself: the chat page re-evaluates its body on every hub push, and without this every row on
     /// screen (and in the lazy list's buffer) ran its body again too (about 45 a push on a long Persona conversation).
-    nonisolated static func == (a: Self, b: Self) -> Bool { a.item == b.item }
+    nonisolated static func == (a: Self, b: Self) -> Bool { a.item == b.item && a.external == b.external }
     @Environment(\.openFile) private var openFile
     @Environment(\.loadImage) private var loadImage
+    @Environment(\.chatPin) private var pin
 
     var body: some View {
         #if DEBUG || PERF_SIGNPOST
@@ -239,13 +243,21 @@ struct UserBubble: View, Equatable {
             if !shown.isEmpty || !quotes.isEmpty {
                 HStack {
                     Spacer(minLength: 48)
-                    UserBubbleBody(quotes: quotes, text: d.words, paths: d.pathRefs, comments: d.comments, lead: d.lead)
-                        .messageLongPress(id: item.id) { UserBubbleBody(quotes: quotes, text: d.words, paths: d.pathRefs, comments: d.comments, lead: d.lead) }
+                    let fold = BubbleFoldKey(id: item.id)
+                    UserBubbleBody(quotes: quotes, text: d.words, paths: d.pathRefs, comments: d.comments, lead: d.lead, fold: fold)
+                        .messageLongPress(id: item.id, opens: { fold.openOnPress(scope: memoScope, pin: pin) }) {
+                            UserBubbleBody(quotes: quotes, text: d.words, paths: d.pathRefs, comments: d.comments, lead: d.lead)
+                        }
                 }
             }
             if let openFile { FileChips(paths: d.chips, open: openFile) }
-            // Came in from a channel (WeChat, the Feishu bot…): 「来自 微信」 under it.
-            if ChannelSource.possible(item.clientMsgID) { ChannelSourceLine(clientMsgID: item.clientMsgID) }
+            // Came in from a channel (WeChat, the Feishu bot…): 「来自 微信」 under it; an extension opened the conversation
+            // with it: 「来自 飞书 /agent」.
+            if ChannelSource.possible(item.clientMsgID) {
+                ChannelSourceLine(clientMsgID: item.clientMsgID)
+            } else if let external {
+                ExternalSourceLine(source: external)
+            }
             if d.cardSource != nil {
                 Text("From a card").font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
                     .accessibilityIdentifier("assistant-card-source")
@@ -310,7 +322,7 @@ struct PeerMessage: View {
             .padding(.trailing, Theme.Space.xxl)
             .chatPinned(pinKey)
             .messageLongPress(id: item.id) { card }
-            .messageActionBar(id: item.id, text: item.text ?? "", isUser: false, date: item.ts)
+            .messageActionBar(id: item.id, text: item.text ?? "", isUser: false, date: item.ts, from: from)
     }
 
     /// The message in its card (also what a long press lifts).
@@ -340,6 +352,8 @@ struct PeerMessage: View {
         Markdown(d.markdown)
             .markdownSoftBreakMode(.lineBreak)
             .markdownTheme(.persona)
+            .readingContent()
+            .environment(\.replyKey, RowMemo.key(memoScope, item.id)) // its quotes' folds, the lifted copy's too
             .selectableInLift(item.text ?? "", as: .reply(quiet: false)) // #603
             .frame(maxWidth: .infinity, alignment: .leading)
             #if os(macOS)
@@ -351,13 +365,16 @@ struct PeerMessage: View {
 /// A message just sent from this phone, before the transcript has it: drawn like a sent bubble right away, with a
 /// quiet clock while the request runs, the clock and "Sends when connected" while it waits for the network (Outbox.swift),
 /// and a red "Resend" when it failed. A long press gives an action bar like a sent message's, with Copy, Select Text and
-/// Share (#6427): one that never went out can be copied rather than typed again.
+/// Share (#6427): one that never went out can be copied rather than typed again. One only on this phone (failed or
+/// waiting) ends the bar in Delete / Don't Send, as its mark's menu does (#4626).
 struct PendingBubble: View {
     var msg: PendingMessage
     var retry: () -> Void
     var discard: () -> Void
     @Environment(\.viewImages) private var viewImages
     @Environment(\.chatImages) private var chatImages
+    @Environment(\.rowMemoScope) private var memoScope
+    @Environment(\.chatPin) private var pin
 
     var body: some View {
         let parsed = ContextRef.parse(msg.text)
@@ -407,11 +424,17 @@ struct PendingBubble: View {
                         ThemedIcon(Theme.Icon.errorFilled).font(Theme.Font.body).foregroundStyle(Theme.danger)
                     }
                     .accessibilityLabel("Failed to send. Resend or delete.")
+                    // The menu's items as actions too: VoiceOver's Actions rotor, and the Runtime CLI (`activate`
+                    // `action:`), which cannot touch a menu's items.
+                    .accessibilityAction(named: Text("Resend"), retry)
+                    .accessibilityAction(named: Text("Delete"), discard)
                 }
                 let split = MessageComments.inBubble(shown)
-                UserBubbleBody(quotes: ContextRef.quotes(parsed.refs) ?? [], text: split?.rest ?? shown, comments: split?.comments ?? [], lead: split?.quote)
+                let fold = BubbleFoldKey(id: "pending-" + msg.id.uuidString) // folded as a sent bubble is (#5676)
+                UserBubbleBody(quotes: ContextRef.quotes(parsed.refs) ?? [], text: split?.rest ?? shown, comments: split?.comments ?? [], lead: split?.quote,
+                               fold: fold)
                     .opacity(msg.state == .failed || msg.state == .waiting ? 0.6 : 1)
-                    .messageLongPress(id: msg.id.uuidString) {
+                    .messageLongPress(id: msg.id.uuidString, opens: { fold.openOnPress(scope: memoScope, pin: pin) }) {
                         UserBubbleBody(quotes: ContextRef.quotes(parsed.refs) ?? [], text: split?.rest ?? shown, comments: split?.comments ?? [], lead: split?.quote)
                     }
             }
@@ -421,7 +444,9 @@ struct PendingBubble: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
-        .messageActionBar(id: msg.id.uuidString, text: shown, isUser: true, date: msg.createdAt, pending: true)
+        // The bar's last item on one only on this phone (#4626): what its mark's menu says, doing the same.
+        .messageActionBar(id: msg.id.uuidString, text: shown, isUser: true, date: msg.createdAt, pending: true,
+                          delete: .of(msg, run: discard))
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }
@@ -566,6 +591,8 @@ struct AssistantText: View, Equatable {
             // Inside the theme (applied first), or the theme's text style wins (docs/lessons/ios.md).
             .modifier(QuietMarkdown(on: quiet))
             .markdownTheme(.persona)
+            .readingContent()
+            .environment(\.replyKey, RowMemo.key(memoScope, item.id)) // its quotes' folds, the lifted copy's too
             .selectableInLift(item.text ?? "", as: .reply(quiet: quiet)) // #603
             .frame(maxWidth: .infinity, alignment: .leading)
             .chatBoxed(Theme.ChatBox.persona, on: boxed)
@@ -606,7 +633,7 @@ struct AssistantText: View, Equatable {
 
     /// Links in a fresh answer open instantly: their pages load in the background. Only for recent answers — every
     /// old one scrolling past used to create web views on the main thread, and those were the long freezes.
-    private static func preloadLinks(_ item: Item) async {
+    static func preloadLinks(_ item: Item) async {
         guard let ts = item.ts, Date.now.timeIntervalSince(ts) < 15 * 60, let text = item.text else { return }
         // Not a machine's localhost (it is opened through the hub, docs/operations/ports.md).
         let links = await Task.detached(priority: .utility) { WebLinks.find(in: text).filter { PortLinks.link($0) == nil } }.value
@@ -740,7 +767,7 @@ struct ThinkingRow: View {
             isWorking: false,
             doneTitle: open ? String(localized: "Thinking [Message Views a62acb]") : ToolPresentation.firstLine(text),
             rows: [BeautifulUI.ThinkingRow(id: item.id, text)],
-            isExpanded: Binding(get: { open }, set: { v in toggleInPlace(pin, pinKey, animation: Theme.Motion.standard) { open = v } }),
+            isExpanded: Binding(get: { open }, set: { v in toggleInPlace(pin, pinKey, animation: Theme.Motion.standard, closing: !v) { open = v } }),
             maxWidth: .infinity
         )
         .chatPinned(pinKey) // the trace's header is its top
@@ -780,7 +807,7 @@ struct CompactDivider: View {
         VStack(spacing: Theme.Space.s) {
             Button {
                 let opening = !open
-                toggleInPlace(pin, "compact-" + item.id, animation: Theme.Motion.state) { open.toggle() }
+                toggleInPlace(pin, "compact-" + item.id, animation: Theme.Motion.state, closing: open) { open.toggle() }
                 // The divider as the last row: the notes open under it, past the composer on a short screen.
                 guard opening, let pin else { return }
                 Task { @MainActor in
@@ -834,7 +861,8 @@ struct NoticeRow: View {
     @Environment(\.chatPin) private var pin
 
     var body: some View {
-        if item.compact != nil { CompactDivider(item: item) }
+        if let r = item.modelRefusal { RefusalNotice(refusal: r) } // an upstream refusal (#4489)
+        else if item.compact != nil { CompactDivider(item: item) }
         else if item.wake == true { wake } else if item.task != nil { TaskNoteRow(item: item) } else if Self.isShort(item.text ?? "") { plain } else { long }
     }
 
@@ -844,7 +872,7 @@ struct NoticeRow: View {
 
     private var long: some View {
         Button {
-            toggleInPlace(pin, "notice-" + item.id, animation: Theme.Motion.state) {
+            toggleInPlace(pin, "notice-" + item.id, animation: Theme.Motion.state, closing: expanded) {
                 if let openTools { openTools.set("notice-" + item.id, !expanded) } else { expandedHere.toggle() }
             }
         } label: {
@@ -1042,6 +1070,7 @@ struct RecapDrawer: View {
                             }
                             Markdown(Links.markdown(MathMarkdown.rewrite(CJKEmphasis.apply(ReplyBreaks.apply(item.text ?? "")))))
                                 .markdownTheme(.persona)
+                                .readingContent()
                                 .markdownSoftBreakMode(.lineBreak)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1063,13 +1092,34 @@ struct RecapDrawer: View {
 /// The assistant's answer while it is still being generated, with a caret after its words (`StreamTail`).
 struct StreamingText: View {
     var text: String
+    /// The stream is over (`ChatStore.liveDone`): the whole text at once.
+    var done = false
+    /// What of `text` is shown, a few characters a frame (`StreamReveal`, #6651): read only by this view, so the frames
+    /// redraw the reply and nothing around it.
+    @State private var reveal = StreamRevealClock()
 
-    /// A delta comes every 80 ms with the whole text so far. Parsing and laying out all of it each time cost a long
-    /// reply 10–20 ms a delta on the simulator: the blocks already finished are their own Markdown views that stay as
-    /// they are (`StreamChunks`), and only the block being written is parsed and laid out again.
     var body: some View {
         #if DEBUG || PERF_SIGNPOST
         let _ = PerfTrace.body("StreamingText")
+        #endif
+        StreamingMarkdown(text: done ? text : reveal.shown(of: text))
+            .onChange(of: text, initial: true) { _, new in reveal.receive(new) }
+            .onChange(of: done) { _, done in if done { reveal.finish() } }
+            .onAppear { reveal.resume() }
+            .onDisappear { reveal.stop() }
+    }
+}
+
+/// The reply as far as it is shown. A delta comes every 80 ms with the whole text so far, and the reveal adds a few
+/// characters a frame. Parsing and laying out all of it each time cost a long reply 10–20 ms on the simulator: the
+/// blocks already finished are their own Markdown views that stay as they are (`StreamChunks`), and only the block
+/// being written is parsed and laid out again.
+private struct StreamingMarkdown: View {
+    var text: String
+
+    var body: some View {
+        #if DEBUG
+        let _ = StreamCadence.shown = text.utf16.count
         #endif
         let parts = StreamChunks.split(AssistantCardText.replacingCards(text))
         VStack(alignment: .leading, spacing: 0) {
@@ -1083,8 +1133,94 @@ struct StreamingText: View {
         }
         .markdownSoftBreakMode(.lineBreak) // as the finished reply (`AssistantText`)
         .environment(\.replyStreaming, true) // its quotes fold once it is done
+        .readingContent()
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+/// Drives `StreamReveal` with the display's frames: a display link runs only while received text waits to be shown
+/// (P9), at most 60 times a second, and stops when the view goes. On the Mac (frozen, docs/apple/mac.md) the text shows
+/// as it comes.
+@MainActor @Observable
+final class StreamRevealClock {
+    /// Bumped when what is shown changed: the view's only dependency.
+    private var revision = 0
+    @ObservationIgnored private var reveal: StreamReveal?
+    #if os(iOS) || os(visionOS)
+    @ObservationIgnored private var link: CADisplayLink?
+    #endif
+
+    /// What of `text` to draw. `text` is the newest the view was given; `receive` takes it in right after this redraw,
+    /// so until then what was shown stays (or, first time, `StreamReveal`'s start; a text that does not continue it,
+    /// all of it).
+    func shown(of text: String) -> String {
+        _ = revision
+        guard let reveal else { return String(StreamReveal(text).shown) }
+        let shown = reveal.shown
+        return text.hasPrefix(shown) ? String(shown) : text
+    }
+
+    func receive(_ text: String) {
+        #if os(iOS) || os(visionOS)
+        let now = CACurrentMediaTime()
+        if reveal == nil { reveal = StreamReveal(text) } else { reveal?.receive(text, at: now) }
+        revision &+= 1
+        if reveal?.caughtUp == false { start() }
+        #else
+        reveal = StreamReveal(text)
+        reveal?.finish()
+        revision &+= 1
+        #endif
+    }
+
+    func finish() {
+        reveal?.finish()
+        revision &+= 1
+        stop()
+    }
+
+    func stop() {
+        #if os(iOS) || os(visionOS)
+        link?.invalidate()
+        link = nil
+        #endif
+    }
+
+    /// Back on screen: what still waits goes on (a stream that paused meanwhile sends nothing to restart it).
+    func resume() {
+        #if os(iOS) || os(visionOS)
+        if reveal?.caughtUp == false { start() }
+        #endif
+    }
+
+    #if os(iOS) || os(visionOS)
+    private func start() {
+        guard link == nil else { return }
+        // The link holds its target strongly: a weak hop, so a view gone without onDisappear frees this.
+        let link = CADisplayLink(target: Tick(self), selector: #selector(Tick.tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    fileprivate func tick(_ link: CADisplayLink) {
+        guard var r = reveal else { return stop() }
+        let moved = r.advance(to: link.timestamp)
+        reveal = r
+        if moved { revision &+= 1 }
+        if r.caughtUp { stop() }
+    }
+
+    private final class Tick: NSObject {
+        weak var clock: StreamRevealClock?
+        init(_ clock: StreamRevealClock) { self.clock = clock }
+        @objc func tick(_ link: CADisplayLink) {
+            MainActor.assumeIsolated {
+                if let clock { clock.tick(link) } else { link.invalidate() }
+            }
+        }
+    }
+    #endif
 }
 
 /// The block of a streaming reply still being written, as it is drawn (#2916): made whole for the moment
@@ -1153,7 +1289,20 @@ struct LinkedMarkdown: View {
 
     private static let memo = TextMemo<MarkdownContent>(limit: 512)
 
-    var body: some View { Markdown(content) }
+    /// The paths of a message that are there to open, which it links: none outside a chat. Only a message with paths
+    /// reads the presence (and is drawn again when an answer comes). Also how its words are laid out to select them
+    /// in place (`SelectableInLift`): a path written as code that is linked is drawn as words.
+    static func linkable(_ paths: PathMarkdown, model: AppModel?, scope: FileScope?) -> [String] {
+        guard !paths.paths.isEmpty, let model, let scope else { return [] }
+        return paths.paths.filter { model.filePresence.linkable($0, in: scope) }
+    }
+
+    var body: some View {
+        #if DEBUG || PERF_SIGNPOST
+        let _ = PerfTrace.body("LinkedMarkdown")
+        #endif
+        Markdown(content)
+    }
 
     private var content: MarkdownContent {
         // In a chat on the iPhone and iPad a tap on inline code copies it (#2984): its spans are links the chat's
@@ -1164,11 +1313,7 @@ struct LinkedMarkdown: View {
         let copies = false
         #endif
         let paths = paths
-        // Only a message with paths reads the presence (and is drawn again when an answer comes).
-        guard !paths.paths.isEmpty, let model, let scope else {
-            return copies ? Self.memo(key + "\u{1}") { _ in MarkdownContent(CodeCopyMarkdown.linked(paths.source)) } : plain
-        }
-        let there = paths.paths.filter { model.filePresence.linkable($0, in: scope) }
+        let there = Self.linkable(paths, model: model, scope: scope)
         guard !there.isEmpty else {
             return copies ? Self.memo(key + "\u{1}") { _ in MarkdownContent(CodeCopyMarkdown.linked(paths.source)) } : plain
         }
@@ -1204,7 +1349,13 @@ nonisolated enum RowMemo {
             if it.kind == .toolUse || it.kind == .toolResult { ToolTextMemo.prewarm(it, scope: scope) }
             guard it.kind == .text else { continue }
             guard let text = it.text, !text.isEmpty else { continue }
-            if it.role == "assistant" { _ = assistant(key(scope, it.id)) { _ in AssistantRowText(text) } }
+            if it.role == "assistant" {
+                _ = assistant(key(scope, it.id)) { _ in AssistantRowText(text) }
+                // A long answer's parts, as their rows draw them (`AssistantTextPart`).
+                for (n, part) in AnswerPartMemo.parts(text).enumerated() {
+                    _ = assistant(AnswerPartMemo.key(key(scope, it.id), n)) { _ in AssistantRowText(part.text) }
+                }
+            }
             if it.role == "user" { _ = user(key(scope, it.id)) { _ in UserRowText(text) } }
         }
     }

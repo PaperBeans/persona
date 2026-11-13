@@ -54,7 +54,7 @@ class HubUpdateStateTest {
         val api = FakeUpdates(current).apply { fail = HubFailure(HubError.Server, "数据库没连上", 500) }
         val model = HubUpdateModel(api)
         model.load()
-        assertEquals("读不到 hub 的版本：数据库没连上", model.state.value.error?.resolve(res))
+        assertEquals("读不到 Hub 的版本：数据库没连上", model.state.value.error?.resolve(res))
     }
 
     @Test fun startsAndShowsTheHubsRefusal() = runBlocking {
@@ -144,8 +144,8 @@ class HubUpdateStateTest {
 
     @Test fun whatTheUpdateGroupShows() {
         assertEquals(HubUpdateView.Docker, HubUpdateText.view(current.copy(channel = "docker", canUpdate = false), res))
-        assertEquals(HubUpdateView.Cannot("这个 hub 不会自己更新：开发版。"), HubUpdateText.view(current.copy(canUpdate = false, whyNot = "开发版"), res))
-        assertEquals(HubUpdateView.Cannot("这个 hub 不会自己更新。"), HubUpdateText.view(current.copy(canUpdate = false), res))
+        assertEquals(HubUpdateView.Cannot("这个 Hub 不会自己更新：开发版。"), HubUpdateText.view(current.copy(canUpdate = false, whyNot = "开发版"), res))
+        assertEquals(HubUpdateView.Cannot("这个 Hub 不会自己更新。"), HubUpdateText.view(current.copy(canUpdate = false), res))
         assertEquals(HubUpdateView.Newer(false), HubUpdateText.view(newer, res))
         assertEquals(HubUpdateView.Newer(true), HubUpdateText.view(newer.copy(state = "downloading"), res))
         assertEquals(HubUpdateView.Working, HubUpdateText.view(current.copy(state = "restarting"), res))

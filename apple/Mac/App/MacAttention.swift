@@ -3,9 +3,9 @@ import Foundation
 import UserNotifications
 
 /// What the Mac does outside its window when an agent needs you or finishes (docs/apple/mac.md「Mapping from iOS」):
-/// the Dock badge (how many cards wait on you) and a system notification for each agent that just turned Needs You /
-/// Done, plus one for every newly arrived card while it is already in Needs You (#4081, a sub-agent's authorization
-/// or a second confirmation for the same agent).
+/// a system notification for each agent that just turned Needs You / Done, plus one for every newly arrived card while
+/// it is already in Needs You (#4081, a sub-agent's authorization or a second confirmation for the same agent). The
+/// Dock badge is the tab badges added up, as on the iPhone's icon (`AppIconBadge`, #5824).
 /// While the app runs it watches its own session list (the WebSocket stays open) and follows the same Settings › Notifications
 /// choices (`NotifyPrefs`); the hub pushes these to the Mac only while it is not connected (docs/apple/mac.md「Remote push」).
 enum MacAttention {
@@ -76,7 +76,7 @@ enum MacAttention {
     }
 
     /// This device's push switch per manager (#1863, the prefs' `muted_managers`): a switched-off manager's agents ping
-    /// no banner here either. The Dock still counts their cards: the switch is about being told, not about what waits.
+    /// no banner here either. The Dock still counts them: the switch is about being told, not about what waits.
     /// The prefs are those of `group`'s hub (the hub-level one): another group's hub keeps its own, so its agents are
     /// left alone. A session or card without `manager` is the hub's own assistant's.
     static func managerMuted(_ prefs: NotifyPrefs, group: String, sessions: [Session], interactions: [Interaction]) -> (SessionKey) -> Bool {
@@ -96,14 +96,6 @@ enum MacAttention {
         var looking = Set<SessionKey>(), other = Set<SessionKey>()
         for ix in interactions { if ix.isDelegating { looking.insert(ix.sessionKey) } else { other.insert(ix.sessionKey) } }
         return looking.subtracting(other)
-    }
-
-    /// The Dock badge: waiting cards, not sessions — an agent already asking with a second card counts both (#4081),
-    /// the same unit as the iPhone's Agents tab and the menu bar icon. Muted agents and quiet tasks (#1731) stay out
-    /// like the sidebar's badges; the chat on screen still counts (a badge is not a banner).
-    static func badge(_ interactions: [Interaction], muted: (SessionKey) -> Bool) -> String? {
-        let n = interactions.filter { !muted($0.sessionKey) }.count
-        return n > 0 ? "\(n)" : nil
     }
 
     /// The banner of one agent and state: one per session and state, so a second Done for the same agent replaces
@@ -169,7 +161,7 @@ extension MacAttention {
     }
 }
 
-/// Keeps the Dock badge and the notifications in step with AppModel's session list, window open or not.
+/// Keeps the notifications in step with AppModel's session list, window open or not.
 @MainActor final class MacAttentionWatcher {
     static let shared = MacAttentionWatcher()
 
@@ -193,8 +185,6 @@ extension MacAttention {
             _ = model.pendingInteractions.count
             _ = model.config?.url
             _ = model.live.state
-            // Muting changes the badge too: read what isMuted reads, and what isQuiet does (a task found quiet, #1731).
-            _ = model.allSessions.map { model.isMuted($0) || model.isQuiet($0) }
             return model.allSessions
         } onChange: {
             // Called before the change lands; read the new values on the next turn of the main queue.
@@ -207,8 +197,6 @@ extension MacAttention {
         // A quiet task's agent (#1731) is the main conversation's to tell: no banner, no count, like a muted one.
         let mutedKey: (SessionKey) -> Bool = { model.isMuted($0) || model.isQuiet($0) }
         let interactions = model.pendingInteractions
-        // One tick per waiting card (the iPhone Agents tab's unit), not per session: a second card moves it (#4081).
-        NSApp.dockTile.badgeLabel = model.isPaired ? MacAttention.badge(interactions, muted: mutedKey) : nil
         defer {
             last = sessions
             lastInteractions = interactions

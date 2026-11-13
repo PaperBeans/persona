@@ -391,6 +391,17 @@ class CheckFastScriptsTests(unittest.TestCase):
         self.assertEqual(1, code, out)
         self.assertIn("FAIL     scripts/test/test_privacy_check.py", out)
 
+    def test_a_hook_or_adapter_generator_change_runs_the_adapter_hook_suite(self):
+        # test_check_deno_adapter_sh.py runs pre-push and scripts/gen/deno_adapter.sh in its temp repositories (#6001).
+        self.break_suite("test_check_deno_adapter_sh.py")
+        for changed in ("scripts/hooks/pre-push", "scripts/gen/deno_adapter.sh"):
+            with self.subTest(changed=changed):
+                self.git("checkout", "-q", "--", ".")
+                self.write(changed, "#!/bin/sh\n# changed\n")
+                code, out = self.check_fast()
+                self.assertEqual(1, code, out)
+                self.assertIn("FAIL     scripts/test/test_check_deno_adapter_sh.py", out)
+
     def test_a_privacy_check_change_also_runs_the_suites_that_load_it(self):
         # scripts/release/check_bundle_privacy.py imports privacy_check; test_merge_pr_sh.py copies it into its temp
         # repositories, where merge-pr.sh runs it.
@@ -847,7 +858,7 @@ class CheckFastWebInputsTests(unittest.TestCase):
                 finally:
                     (self.repo / sample).unlink()
                 self.assertIn("queued: web\n", out)
-                self.assertEqual(["web|run typecheck", "web|test"], npm_calls, out)
+                self.assertEqual(["web|run check:deps", "web|run typecheck", "web|test"], npm_calls, out)
                 self.assertNotIn("no fast check maps to", out)
 
     def test_web_inputs_keep_their_other_checks(self):

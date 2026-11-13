@@ -35,6 +35,7 @@ func listKeySized(list []proto.Session, size int) string {
 		w.b.WriteString("hierarchy:")
 		w.quote(s.ParentThreadID, '/')
 		w.quote(s.ParentSessionID, '/')
+		w.quote(s.ParentAgentID(), '/')
 		w.quote(s.RootSessionID, '/')
 		w.str(strconv.FormatBool(s.IsSubagent), '/')
 		w.quote(s.RepoRoot, '/')
@@ -42,6 +43,17 @@ func listKeySized(list []proto.Session, size int) string {
 		w.quote(s.Branch, '/')
 		w.quote(s.SpaceID, '/')
 		w.quote(s.SpaceKind, '\n')
+		if h := s.Hierarchy; h != nil { // the node's of it: when it began, the parent a blocked runtime child asks for
+			w.b.WriteString("lineage:")
+			w.quote(h.AskingParentSessionID, '/')
+			w.int(unixOf(&h.StartedAt), '\n')
+		}
+		if s.TitleSource != proto.TitleSourceUnknown || s.TitleManual || s.OutputTokens != 0 {
+			w.b.WriteString("naming:")
+			w.quote(s.TitleSource.String(), '/')
+			w.str(strconv.FormatBool(s.TitleManual), '/')
+			w.int(int64(s.OutputTokens), '\n')
+		}
 		writeUltracodeKey(&w, s)
 		if s.ServiceTier != "" || len(s.ServiceTiers) > 0 {
 			fmt.Fprintf(&w.b, "speed:%q/%v\n", s.ServiceTier, s.ServiceTiers)
@@ -95,6 +107,14 @@ func listKeySized(list []proto.Session, size int) string {
 		// A Codex thread's effort, which may change on the computer without a turn (codex_effort.go).
 		if len(s.Efforts) > 0 {
 			fmt.Fprintf(&w.b, "effort:%s/%v\n", s.Effort, s.Efforts)
+		}
+		// The model, mode and effort the phone just switched show at once (#6334): such a change alone comes with no new
+		// revision or status, and updated_at counts only in steps of 10 s.
+		if s.Model != "" || s.PermissionMode != "" || s.Effort != "" {
+			w.b.WriteString("modes:")
+			w.quote(s.Model, '/')
+			w.quote(s.PermissionMode, '/')
+			w.quote(s.Effort, '\n')
 		}
 		w.b.WriteString("source:")
 		w.str(s.SourceKind, '/')
@@ -156,7 +176,7 @@ func listKeySized(list []proto.Session, size int) string {
 			w.quote(p.Current, '\n')
 		}
 		// A subagent's new call shows at once (its card says what it does now, #5602); the list goes out at most once a
-		// second, with the poll.
+		// second, with the poll. Its model and tokens ride along (#5030).
 		for _, a := range s.Subagents {
 			w.str(a.ID, ':')
 			w.str(strconv.FormatBool(a.Running), ':')
@@ -220,6 +240,18 @@ func (w *keyWriter) caps(c *proto.SessionCapabilities) {
 	}
 	if c.Model != nil {
 		w.b.WriteString(" model=" + strconv.FormatBool(*c.Model))
+	}
+	if c.Close != nil {
+		w.b.WriteString(" close=" + strconv.FormatBool(*c.Close))
+	}
+	if c.Rename != nil {
+		w.b.WriteString(" rename=" + strconv.FormatBool(*c.Rename))
+	}
+	if c.Rewind != nil {
+		w.b.WriteString(" rewind=" + strconv.FormatBool(*c.Rewind))
+	}
+	if c.RewindCode != nil {
+		w.b.WriteString(" rewind_code=" + strconv.FormatBool(*c.RewindCode))
 	}
 	w.b.WriteByte('}')
 }

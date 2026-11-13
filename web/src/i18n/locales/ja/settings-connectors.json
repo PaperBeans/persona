@@ -84,5 +84,6 @@
   "save_client_id": "クライアント ID を保存",
   "client_id_saved": "クライアント ID を保存しました。スマートフォンで Outlook にログインしてください。",
   "outlook_config_failed": "Outlook ログインの設定を読み込めません：{error}",
-  "client_id_save_failed": "保存できませんでした：{error}"
+  "client_id_save_failed": "保存できませんでした：{error}",
+  "mail_inbox_failed": "変更できませんでした：{error}"
 }

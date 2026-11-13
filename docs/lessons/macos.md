@@ -282,6 +282,11 @@ Each page has its own `NSHostingView`, with `isHidden` set while inactive. Pitfa
   New pages need this too, or every push computes an extra page. To identify pages still updating, temporarily add `Self._printChanges()` to body;
   only a normal exit (`osascript … quit`) flushes stdout; `kill` loses it all.
 - Detaching a hidden hosting view from the window (`removeFromSuperview`) makes things worse: about 30 ms more per push.
+- A sheet presented by a page that goes behind another one no longer closes (2026-11-13, #5921). Hand to AI opened where
+  the item went (Persona or Agents, so the Inbox page was hidden) and then called `dismiss()`: the sheet stayed over the
+  other section, and Cancel did nothing until the app quit. Close the sheet first and move the window only once it is
+  gone (the sheet's `onDisappear`, or `.sheet(onDismiss:)`); never change `selectedTab`, `openChat` or the assistant's
+  conversation while a page's sheet is up.
 - “After the first frame” is not one `DispatchQueue.main.async`: it can run before that round's Core Animation commit, putting toolbar rearrangement back in the first frame.
   Schedule another `async` from a run-loop `beforeWaiting` observer ordered after Core Animation commit.
 - Without `sizeThatFits` on `NSViewRepresentable`, SwiftUI measures the embedded view with Auto Layout (`systemLayoutSizeFitting`) every time it renders the shell.
@@ -347,3 +352,33 @@ the same cause. Recheck scrolling, folding and layout separately with synthetic 
   light mode; only `NSColor`-backed colors (`secondaryLabelColor`) came out as written. The real window draws glass with vibrancy, which the
   offscreen copy does not have. A shot of a glass note (the resume line over the composer, `FailureNote`…) that looks unreadable is not evidence
   either way: check it in a style with solid surfaces (`-ui.style lark`, the same layout and text styles) or in a real window when the Mac is unlocked.
+
+## Screen Sharing leaves requests for part of the screen unanswered (2026-11-11, #3067)
+
+- RFB lets a client ask for updates of a rectangle only, which looks like a free saving when the view is zoomed in or
+  shows one display. macOS's Screen Sharing (26.6) doesn't honor it: while the bench page played a canvas video,
+  incremental requests for the page's part, the video's own box, a full-width band starting at y 300 or 340, or the
+  screen's left 1850 of 1920 columns got no updates for 5 s, and asked for the page's part the page's switch to its
+  typing scene never arrived either. Requests from the top that cover nearly all of it (1919 × 1080, 1920 × 884)
+  worked. An earlier check only asked for a strip where nothing seemed to change and read the silence as "nothing to send".
+- Asking for part of the screen would freeze a zoomed-in picture, so the app always asks for the whole framebuffer.
+  Before relying on a server behavior, trace the case that must work (the area containing the change):
+  `vncbench trace -trace-area page|stage|x,y,w,h` prints each request and each update's painted box.
+
+## Screen Sharing answers a request sent early later (2026-11-11, #3067)
+
+- Sending the next FramebufferUpdateRequest before the current update is read looks like it saves a round trip.
+  On macOS's Screen Sharing it doesn't: asked for as each update starts, it goes quiet for up to 2 s whenever the
+  request arrives while it is still writing a big update; asked for early only after a single rectangle of at most
+  64 KB, typed text still came back later (p50 374 ms against 215 for stop-and-wait over a 25 ms, 30 Mbit/s link,
+  slower in all 5 interleaved pairs, median +81 ms). The app asks for the next update once one is in (`RFBFrameTests.nextUpdateIsAskedOnceAnUpdateIsIn`).
+
+## The Dock draws a badge only for an app that asked for notifications (2026-11-12, #5824)
+
+- `NSApp.dockTile.badgeLabel` was set ("6", read back with `lsappinfo info -only StatusLabel -app <bundle id>`), yet
+  the Dock drew nothing: the build ran in Demo Mode, which never asks for notification permission. Once the same build
+  was paired (so `PushRegistrar` asked, with `.badge`), the Dock drew the number. Its switch is System Settings ›
+  Notifications › Badge application icon (not tried here).
+- To photograph the Dock, pair the build (the mock hub is enough) so it asks; check the label with `lsappinfo` before
+  blaming the code. Run such builds under a bundle id of their own (`PERSONA_BUNDLE_ID=…` on the `xcodebuild` line):
+  the installed app's container and preferences stay untouched.

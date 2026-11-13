@@ -2,10 +2,11 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, ApiError, enc, errorText } from "../../lib/api";
 import { extRoot } from "../../lib/extension-api";
 import {
-  agentsOverride, chooseProvider, draftFor, providerAgent, providerName, modelConfiguration, modelPurpose, modelSummary, providersFor, runtimeChoices, runtimeLabel, saveModelPurpose, supportsField,
+  providerAgent, providerName, modelPurpose, modelSummary, runtimeLabel,
   type ModelBinding, type ModelConfigurationBody, type ModelDraft, type ModelProvider, type ModelPurpose, type ModelPurposeBody,
 } from "../../lib/model-config";
-import { executionForm, purposeGroups, purposeLaunch } from "../../lib/model-config-execution";
+import { agentsOverride, catalogLists, chooseProvider, draftFor, executionForm, modelConfiguration, providersFor, purposeDescription, purposeGroups, purposeLaunch, runtimeChoices, saveModelPurpose, supportsField, withPurposeAfter } from "../../lib/model-config-execution";
+import { SUPERVISE_PURPOSE } from "../../lib/background-supervisor";
 import { effortChoices, providerModels, takesEffort } from "../../lib/launcher-models";
 import { useStore } from "../../lib/store";
 import { t } from "../../i18n";
@@ -34,7 +35,13 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
   const [query, setQuery] = useState("");
   const load = async () => {
     try {
-      setData(await modelConfiguration(manager));
+      // the background supervisor's purpose is listed right after Main chat (#5082). A hub since #5806 has it in the
+      // catalog; one before that answers it by its own id only, so only then is it asked for. There, only a hub that
+      // says it has none (404) lists none: any other failure is the page's error, with its retry, not a missing row
+      const absent = (e: unknown) => { if (e instanceof ApiError && e.status === 404) return undefined; throw e; };
+      const catalog = await modelConfiguration(manager);
+      const supervise = catalogLists(catalog, SUPERVISE_PURPOSE) ? undefined : await modelPurpose(SUPERVISE_PURPOSE, manager).catch(absent);
+      setData(withPurposeAfter(catalog, SUPERVISE_PURPOSE, "assistant", supervise?.purpose));
       setError("");
     } catch (e) {
       setError(e instanceof ApiError && e.status === 404 ? t("settings-modelconfiguration.unsupported") : errorText(e));
@@ -47,7 +54,7 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
   return (
     <>
       <h2 className="mb-3 px-1 text-[15px] font-semibold text-ink">{t("settings-nav.tab_model_config")}</h2>
-      <ModelProfiles manager={manager} onChanged={() => void load()} />
+      <ModelProfiles manager={manager} providers={data?.providers} onChanged={() => void load()} />
       <div className="mb-4 flex items-center gap-2">
         <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-control bg-surface px-3 shadow-btn focus-within:shadow-[inset_0_0_0_1px_var(--accent)]">
           <Icon name="search" size={13} stroke={2} className="text-ink-3" />
@@ -94,11 +101,14 @@ function PurposeRow({ purpose: p, providers, sourceName, onOpen }: { purpose: Mo
   const inheritance = agentsOverride(p) ? (p.override.provider || p.override.model || p.override.effort ? agentsOverrideStatus(p.override) : t("settings-modelconfiguration.lark_headless_inheritance"))
     : p.inherited_from ? t("settings-modelconfiguration.follows", { name: sourceName(p.inherited_from) ?? "" })
     : !p.status ? t("settings-modelconfiguration.custom") : "";
+  const description = purposeDescription(p);
   return <div ref={row} data-model-purpose={p.id} onMouseLeave={() => { if (!pinned) setHelp(false); }}
     onKeyDown={(event) => { if (event.key === "Escape") { setHelp(false); setPinned(false); event.stopPropagation(); } }}>
     <div className="flex items-center pr-1">
       <div className="min-w-0 flex-1">
         <Row label={p.id === "agent.new" ? t("newagent.title") : p.name} onClick={onOpen} wrapHint hint={<>
+          {/* what the purpose is for, right under its name (#5806); the model and how it runs follow */}
+          {description && <div data-testid="purpose-description" className="mb-1 whitespace-normal">{description}</div>}
           <div className="truncate">{modelSummary(p, providers)}</div>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <Pill wrap>{form.label} · {form.backend}</Pill>
@@ -244,7 +254,7 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
           <span className="mb-1 block text-[12px] font-medium text-ink-2">{t("settings-modelconfiguration.model_provider")}</span>
           <select className={inputClass} value={draft.provider} disabled={busy} onChange={(e) => setDraft((d) => chooseProvider(d, e.target.value))}>
             <option value="">{followsAgents ? t("settings-modelconfiguration.follow_agents") : t("settings-modelconfiguration.follow_default")}</option>
-            {draft.provider && !candidates.some((v) => v.id === draft.provider) && <option value={draft.provider}>{draft.provider.startsWith("legacy.") ? t("settings-modelconfiguration.not_configured") : t("settings-modelconfiguration.provider_unavailable", { id: draft.provider })}</option>}
+            {draft.provider && !candidates.some((v) => v.id === draft.provider) && <option value={draft.provider}>{draft.provider.startsWith("legacy.") ? t("settings-modelconfiguration.not_configured") : t("settings-modelconfiguration.provider_unavailable", { id: providerName(draft.provider, data?.providers) ?? draft.provider })}</option>}
             {candidates.map((v) => <option key={v.id} value={v.id}>{v.hidden ? t("settings-modelconfiguration.provider_hidden", { name: v.name }) : v.name}</option>)}
           </select>
         </label>}

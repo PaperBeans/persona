@@ -22,6 +22,7 @@ func TestNewTestPackTemplates(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds programs")
 	}
+	t.Setenv("PERSONA_LANG", "en") // what the commands print reads in the terminal's language (#5520)
 	for _, template := range []string{"go", "ts"} {
 		t.Run(template, func(t *testing.T) {
 			tool := map[string]string{"go": "go", "ts": "bun"}[template]
@@ -60,7 +61,7 @@ func TestNewTestPackTemplates(t *testing.T) {
 			} else if err != nil {
 				t.Fatalf("test: %v\n%s\n%s", err, out.String(), errs.String())
 			}
-			if !strings.Contains(out.String(), "✓ 协议") {
+			if !strings.Contains(out.String(), "✓ Manifest and package (demo-"+template) || !strings.Contains(out.String(), "✓ Protocol: handshake") {
 				t.Fatalf("test said: %s", out.String())
 			}
 			here := runtime.GOOS + "-" + runtime.GOARCH
@@ -168,6 +169,37 @@ func TestNewRefusesBadInput(t *testing.T) {
 		if err := newExtension(c[0], c[1], c[2], filepath.Join(t.TempDir(), "x"), &out); err == nil {
 			t.Errorf("new %v: no error", c)
 		}
+	}
+	// The refusals read in the terminal's language (#5520).
+	for _, tt := range []struct{ lang, template, want string }{
+		{"en", "rust", `The templates are go and ts; there is no "rust"`},
+		{"ja", "rust", `テンプレートは go と ts だけです（"rust" はありません）`},
+		{"zh-Hans", "rust", `模板只有 go 和 ts，没有 "rust"`},
+	} {
+		t.Setenv("PERSONA_LANG", tt.lang)
+		if err := newExtension("ok", tt.template, "x", filepath.Join(t.TempDir(), "x"), &out); err == nil || err.Error() != tt.want {
+			t.Errorf("%s: %v, want %q", tt.lang, err, tt.want)
+		}
+	}
+}
+
+// A new extension's next steps, in the terminal's language, with the commands as they are typed.
+func TestNewPrintsNextStepsInTheTerminalLanguage(t *testing.T) {
+	t.Setenv("PERSONA_LANG", "en")
+	dir := filepath.Join(t.TempDir(), "demo")
+	var out bytes.Buffer
+	if err := newExtension("demo-steps", "go", "Demo", dir, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Wrote the extension demo-steps in " + dir + " (go template). Next:",
+		"  go test ./...                 unit tests and conformance checks\n",
+		"personad extension dev", "try it on this machine’s hub", "personad extension pack"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("no %q in:\n%s", want, out.String())
+		}
+	}
+	if _, err := openProject(filepath.Join(t.TempDir(), "nothing")); err == nil || !strings.HasPrefix(err.Error(), "There is no persona-extension.json in ") {
+		t.Errorf("no manifest: %v", err)
 	}
 }
 

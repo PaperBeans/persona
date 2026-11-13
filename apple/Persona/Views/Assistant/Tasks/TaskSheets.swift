@@ -47,6 +47,20 @@ struct TaskDetailSheet: View {
         .presentationDetents([.fraction(0.6), .large], selection: $detent)
         .presentationDragIndicator(.visible)
         .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.6)))
+        #if os(iOS)
+        // A sheet has no edge-back of its own: a rightward swipe from the leading edge closes it like ✕ (#5603). The
+        // gesture runs beside the page's own, so taps, scrolling and selection inside it are not taken.
+        .simultaneousGesture(DragGesture(minimumDistance: Theme.Size.edgeBackZone / 2).onEnded { drag in
+            if !pushed && Self.edgeSwipeCloses(start: drag.startLocation, translation: drag.translation) { dismiss() }
+        })
+        #endif
+    }
+
+    /// Whether a drag is the edge swipe that closes the sheet: it starts at the leading edge, goes mostly right.
+    static func edgeSwipeCloses(start: CGPoint, translation: CGSize) -> Bool {
+        start.x <= Theme.Size.edgeBackZone
+            && translation.width >= Theme.Size.edgeBackDistance
+            && translation.width > abs(translation.height) * 2
     }
 
     @ViewBuilder private func content(_ todo: TodoItem) -> some View {
@@ -230,7 +244,7 @@ struct TaskBoardSheet: View {
             Section {
                 ForEach(rows, id: \.todo.id) { row in
                     if let ask = row.todo.openAsk {
-                        BriefAcceptRow(row: ask.row(for: row.todo), group: AppModel.shared.hub?.group ?? "", open: {
+                        TodoAskRow(todo: row.todo, ask: ask, group: AppModel.shared.hub?.group ?? "", open: {
                             store.openAfterBoard = row.todo.id
                             store.showBoard = false
                         })
@@ -309,6 +323,12 @@ struct TaskBoardSheet: View {
         if store.state(todo) == .needsYou, let asks = TaskAsk.line(store.interactions(todo)) {
             return place.isEmpty ? asks : place + " · " + asks
         }
+        #if !os(macOS)
+        // Nobody is working on it (#3618): the hub's finding first, where the line is not cut, then where it ran.
+        if store.state(todo) != .needsYou, let nobody = todo.orphanedLine {
+            return place.isEmpty ? nobody : nobody + " · " + place
+        }
+        #endif
         guard let now = TaskNow(lead: lead, working: store.state(todo) == .working) else { return place }
         return place + " · " + now.text
     }

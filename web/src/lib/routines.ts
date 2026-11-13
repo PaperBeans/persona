@@ -2,11 +2,18 @@
 // how a task is said in words (the iOS app's AssistantScheduleText), what the editor checks, and the body it saves.
 // Pure functions of their arguments (`now` passed in), so they are tested without a DOM.
 import { currentLanguage, formatDate, t } from "../i18n";
+import { launcherTitle, type Named } from "./provider-names";
 
 export type Repeat = "once" | "daily" | "interval" | "cron";
 
 /** "Push when done": "" every run's answer is pushed, "asked" only what a run sends itself. */
 export type Push = "" | "asked";
+
+/** "When done, put it in the Inbox": "" nothing, "worthy" a row only when a run finds something worth a look, "every" a row after every run. */
+export type InboxMode = "" | "worthy" | "every";
+
+/** The hub feature that says it takes Task.inbox; without it the editor leaves the setting out. */
+export const TASK_INBOX_FEATURE = "task_inbox";
 
 /** The hub feature that says it takes Task.push; without it the editor leaves the setting out. */
 export const TASK_PUSH_FEATURE = "task_push";
@@ -59,6 +66,8 @@ export interface Task {
   /** "Push when done" (hubs with the task_push feature): "" every run's answer, "asked" only what a run sends with notify_user.
    *  An "asked" task always runs in its own conversation (docs/assistant/assistant.md "Push after running"). */
   push?: Push;
+  /** "When done, put it in the Inbox" (hubs with the task_inbox feature); independent of push (docs/assistant/assistant.md "Put it in the Inbox when done"). */
+  inbox?: InboxMode;
   /** Optional end time (RFC 3339). After it, a daily or interval task turns itself off. Ignored for once; omitted when unset. */
   until?: string;
   created_by?: string;
@@ -261,9 +270,10 @@ export function effortLabel(id?: string): string {
   return EFFORTS.find((e) => e.id === id)?.title ?? id;
 }
 
-/** What it runs with when that isn't the default, in a few words: "claude-fast · Auto · Low thinking"; `danger` for "Allow all". */
-export function runsWith(task: Pick<Task, "launcher" | "permission_mode" | "effort">): { text: string; danger: boolean } | null {
-  const parts = [task.launcher, modeLabel(task.permission_mode), task.effort ? t("lib-routines.effort", { effort: effortLabel(task.effort) }) : ""].filter(Boolean);
+/** What it runs with when that isn't the default, in a few words: "claude-fast · Auto · Low thinking"; `danger` for "Allow all".
+ *  The launcher by its display name from `names` (#5029). */
+export function runsWith(task: Pick<Task, "launcher" | "permission_mode" | "effort">, names?: readonly Named[]): { text: string; danger: boolean } | null {
+  const parts = [task.launcher && launcherTitle(task.launcher, names), modeLabel(task.permission_mode), task.effort ? t("lib-routines.effort", { effort: effortLabel(task.effort) }) : ""].filter(Boolean);
   return parts.length ? { text: parts.join(" · "), danger: task.permission_mode === BYPASS } : null;
 }
 
@@ -313,6 +323,7 @@ export function sameTask(a: Task, b: Task): boolean {
   if ((a.session_id ?? "") !== (b.session_id ?? "")) return false;
   if ((a.permission_mode ?? "") !== (b.permission_mode ?? "")) return false;
   if ((a.push ?? "") !== (b.push ?? "")) return false;
+  if ((a.inbox ?? "") !== (b.inbox ?? "")) return false;
   if (a.repeat !== "once" && !sameInstant(a.until, b.until)) return false;
   switch (a.repeat) {
     case "once":
@@ -365,6 +376,7 @@ export function taskBody(d: Task, saved?: Task | null): Record<string, unknown> 
   if (until !== undefined) body.until = until;
   // Only when changed: a hub keeps it when left out, and one that does not know it never gets it.
   if ((d.push ?? "") !== (saved?.push ?? "")) body.push = d.push ?? "";
+  if ((d.inbox ?? "") !== (saved?.inbox ?? "")) body.inbox = d.inbox ?? "";
   return body;
 }
 

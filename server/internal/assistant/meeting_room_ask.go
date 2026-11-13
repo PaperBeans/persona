@@ -270,7 +270,7 @@ func (s *Service) roomAskMessage(ctx context.Context, e *kb.Engine, id string, r
 	if a.QuestionSource != askHeard {
 		return a.Question, nil, ""
 	}
-	l, err := awaitLive(ctx, e, id, a.LiveNext)
+	l, err := s.awaitHeard(ctx, e, id, *a)
 	if err != nil {
 		return "", nil, askModelError
 	}

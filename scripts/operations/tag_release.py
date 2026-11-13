@@ -186,7 +186,8 @@ def read_receipt(path, commit):
 
 # The release index files hubs and install.sh read: uploaded after the downloads they list, latest.json the very last,
 # so a hub never reads a manifest whose files are not there yet (GitHub serves an asset as soon as it is uploaded).
-INDEX_FILES = ("VERSION", "SHA256SUMS", "latest.json")
+# android.json is the Android platform's: the signed APK hubs offer their phones (android_tag_release.py).
+INDEX_FILES = ("VERSION", "SHA256SUMS", "android.json", "latest.json")
 
 
 def host_platform():
@@ -266,6 +267,80 @@ def check_release_manifest(assets):
         raise ConfigError("latest.json has no personad that runs on this machine (%s) to check it with" % here)
 
 
+def check_android_index(assets, version):
+    """A receipt with android.json (the Android platform's) must ship the APK it names, at its size and sha256, for
+    this version: hubs download that APK and offer it to every phone (docs/operations/release.md "Android on version tags")."""
+    by_name = {item["name"]: Path(item["path"]) for item in assets}
+    if "android.json" not in by_name:
+        return
+    try:
+        index = json.loads(by_name["android.json"].read_text())
+    except (OSError, ValueError) as error:
+        raise ConfigError("android.json does not read: " + str(error)) from error
+    if not isinstance(index, dict) or index.get("version") != version:
+        raise ConfigError("android.json is not version " + version)
+    code = index.get("version_code")
+    if type(code) is not int or not 0 < code <= 2100000000 or not isinstance(index.get("package_name"), str) \
+            or not index["package_name"] or not re.fullmatch(r"[0-9a-f]{64}", str(index.get("certificate_sha256"))):
+        raise ConfigError("android.json has no valid package, version code or certificate")
+    name = index.get("name")
+    path = by_name.get(name) if isinstance(name, str) and name.endswith(".apk") else None
+    if path is None:
+        raise ConfigError("android.json names %s, which is not an APK in the receipt" % name)
+    if path.stat().st_size != index.get("size") or hashlib.sha256(path.read_bytes()).hexdigest() != index.get("sha256"):
+        raise ConfigError("%s is not the APK android.json describes (size or sha256)" % name)
+
+
+def verify_remote_assets(repository, tag, assets, listed, gh="gh", missing=False):
+    """Verify exact remote bytes, also on gh versions whose release view has no digest field.
+
+    GitHub CLI 2.23.0 omits digest from --json assets. Its REST response has the
+    digest; if an older GitHub API omits that too, download the asset instead of
+    accepting its name or size as proof.
+    """
+    actual = {}
+    for remote in listed:
+        if not isinstance(remote, dict) or not isinstance(remote.get("name"), str):
+            raise ConfigError("GitHub returned an invalid Release asset")
+        actual[remote["name"]] = remote
+    if missing and not actual:
+        raise ConfigError("uploaded asset digest verification failed: " + assets[0]["name"])
+    fallback = None
+    for item in assets:
+        path = Path(item["path"])
+        digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        remote = actual.get(item["name"])
+        if remote is not None and remote.get("digest") is not None:
+            if remote["digest"] != digest:
+                raise ConfigError("another artifact already owns Release asset name: " + item["name"])
+            continue
+        if remote is None and not missing:
+            # Before uploading, an absent asset is what pending is for. The
+            # post-upload view must contain it, through this REST fallback.
+            continue
+        if fallback is None:
+            fallback = {}
+            data = json.loads(subprocess.check_output(
+                [gh, "api", "repos/" + repository + "/releases/tags/" + tag], text=True, timeout=60))
+            if not isinstance(data, dict) or not isinstance(data.get("assets"), list):
+                raise ConfigError("GitHub REST returned no Release asset list")
+            fallback = {remote.get("name"): remote for remote in data["assets"] if isinstance(remote, dict)}
+        remote = fallback.get(item["name"])
+        if not isinstance(remote, dict) or remote.get("size") != path.stat().st_size:
+            raise ConfigError("uploaded asset digest verification failed: " + item["name"])
+        if remote.get("digest") is not None:
+            if remote["digest"] != digest:
+                raise ConfigError("uploaded asset digest verification failed: " + item["name"])
+            continue
+        url = remote.get("url")
+        prefix = "https://api.github.com/repos/" + repository + "/releases/assets/"
+        if not isinstance(url, str) or not url.startswith(prefix) or not url[len(prefix):].isdigit():
+            raise ConfigError("GitHub returned an invalid asset download URL: " + item["name"])
+        body = subprocess.check_output([gh, "api", "-H", "Accept: application/octet-stream", url], timeout=1800)
+        if hashlib.sha256(body).hexdigest() != digest.removeprefix("sha256:"):
+            raise ConfigError("uploaded asset digest verification failed: " + item["name"])
+
+
 def upload(repository, tag, assets, gh="gh"):
     # The workflow owns Release creation; never create a tag from this machine.
     release = json.loads(subprocess.check_output(
@@ -278,15 +353,8 @@ def upload(repository, tag, assets, gh="gh"):
         return
     if len({item["name"] for item in assets}) != len(assets):
         raise ConfigError("duplicate Release asset name in receipt")
-    remote_assets = {item["name"]: item for item in release["assets"]}
-    pending = []
-    for item in assets:
-        digest = "sha256:" + hashlib.sha256(Path(item["path"]).read_bytes()).hexdigest()
-        existing = remote_assets.get(item["name"])
-        if existing and existing.get("digest") != digest:
-            raise ConfigError("another artifact already owns Release asset name: " + item["name"])
-        if not existing:
-            pending.append(item)
+    verify_remote_assets(repository, tag, assets, release["assets"], gh)
+    pending = [item for item in assets if item["name"] not in {remote["name"] for remote in release["assets"]}]
     if not pending:
         print("Release assets already have the verified digests", flush=True)
         return
@@ -309,12 +377,11 @@ def upload(repository, tag, assets, gh="gh"):
                             *(str(staging / name) for name in batch)], check=True, timeout=1800)
     remote = json.loads(subprocess.check_output(
         [gh, "release", "view", tag, "--repo", repository, "--json", "assets"], text=True, timeout=60))
-    actual = {item["name"]: item for item in remote}
-    for item in assets:
-        digest = hashlib.sha256(Path(item["path"]).read_bytes()).hexdigest()
-        remote_asset = actual.get(item["name"])
-        if not remote_asset or remote_asset.get("digest") != "sha256:" + digest:
-            raise ConfigError("uploaded asset digest verification failed: " + item["name"])
+    # gh returns {"assets": [...]}; older callers may return the bare list.
+    listed = remote if isinstance(remote, list) else remote.get("assets") if isinstance(remote, dict) else None
+    if not isinstance(listed, list) or not all(isinstance(item, dict) and isinstance(item.get("name"), str) for item in listed):
+        raise ConfigError("gh release view returned no asset list")
+    verify_remote_assets(repository, tag, assets, listed, gh, missing=True)
 
 
 def write_state(path, state):
@@ -344,6 +411,7 @@ def publish_once(config, tag, commit):
     subprocess.run(command, cwd=config["worktree"], env=env, check=True)
     assets = read_receipt(Path(config["receipt"]).expanduser(), commit)
     check_release_manifest(assets)
+    check_android_index(assets, tag[1:])
     upload(config["repository"], tag, assets)
     write_state(state, {"tag": tag, "commit": commit, "platform": platform, "phase": "complete", "assets": assets})
     print("Published " + platform + " " + tag, flush=True)

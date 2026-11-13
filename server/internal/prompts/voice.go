@@ -60,6 +60,29 @@ type VoiceCard struct {
 
 func RenderVoiceInstructions(d VoiceInstructions) string { return render("voice/instructions", d) }
 
+// VoiceMeeting is what the realtime model of a meeting call is told (voice/meeting, #3862 phase 4,
+// docs/assistant/meeting-minutes.md "Phase 4: realtime voice in the meeting"): it speaks in front of the room and hands every
+// question to the meeting's room conversation. Others hear it, so it takes only the owner's name and the language:
+// there is no Notes field (the owner's voice notes, which every other call's instructions carry), and History is only
+// what this call said.
+type VoiceMeeting struct {
+	Lang  string
+	Owner string // "" is the word for "user" in Lang
+	// Tool: the session declares delegate_task, its only tool; false: the model delegates (a dialect without tools).
+	Tool bool
+	// Title is the room conversation's title; Recent its last questions and answers, oldest first (user: the owner's
+	// question, assistant: the room's answer). Both inside <agent_output>.
+	Title  string
+	Recent []VoiceLine
+	// History: what this call said before its upstream dropped, or before the app picked the call up again (its own
+	// captions), oldest first.
+	History []VoiceLine
+	// Waiting are the questions handed to the room whose answer has not come back yet.
+	Waiting []string
+}
+
+func RenderVoiceMeeting(d VoiceMeeting) string { return render("voice/meeting", d) }
+
 // VoiceReport is what the voice model is told when a turn handed to the main conversation is over, or stops to wait for
 // the user (voice/report). Its first sentence and the <agent_output> block around the answer are the wording measured
 // to keep the model from doing what an agent wrote (docs/lessons/voice.md "Verbatim injection-test text").
@@ -128,6 +151,19 @@ type VoiceNudge struct {
 
 func RenderVoiceNudge(d VoiceNudge) string { return render("voice/nudge", d) }
 
+// VoiceReadAloud is what a realtime session that only reads texts aloud is told (voice/read_aloud, the extension's
+// POST /speak: the iPhone's spoken meeting answers outside a call, #5004). Others hear it, so it takes only the owner's
+// name, never their notes.
+type VoiceReadAloud struct {
+	Lang  string
+	Owner string // "" is the word for "user" in Lang
+	// TextLang is the language the texts are usually in (BCP 47, the hub's word for the answer's), "" when not known:
+	// the text's own language still wins.
+	TextLang string
+}
+
+func RenderVoiceReadAloud(d VoiceReadAloud) string { return render("voice/read_aloud", d) }
+
 // VoiceRefused is what the voice model is told when what it handed over was not sent (voice/refused).
 type VoiceRefused struct {
 	Lang string
@@ -145,6 +181,8 @@ type VoiceRefused struct {
 	// (a call bound to an agent: its name).
 	Agent bool
 	To    string
+	// Resend: the screen offers to send it anyway (protocol 2's run refused unprompted, #5904: the app's Send Anyway).
+	Resend bool
 }
 
 func RenderVoiceRefused(d VoiceRefused) string { return render("voice/refused", d) }

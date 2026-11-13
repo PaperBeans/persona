@@ -22,14 +22,17 @@ public struct BUIButtonStyle: ButtonStyle {
     var horizontalPadding: CGFloat?
     /// `aria-expanded:bg-hover` on the secondary style.
     var isActive: Bool
+    /// Let the whole pill grow with Dynamic Type instead of clipping a large label to the original 27 pt background.
+    var growsWithText: Bool
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.buiTheme) private var theme
 
-    public init(_ kind: Kind, fontSize: CGFloat = 13, horizontalPadding: CGFloat? = nil, isActive: Bool = false) {
+    public init(_ kind: Kind, fontSize: CGFloat = 13, horizontalPadding: CGFloat? = nil, isActive: Bool = false, growsWithText: Bool = false) {
         self.kind = kind
         self.fontSize = fontSize
         self.horizontalPadding = horizontalPadding
         self.isActive = isActive
+        self.growsWithText = growsWithText
     }
 
     public func makeBody(configuration: Configuration) -> some View {
@@ -39,7 +42,8 @@ public struct BUIButtonStyle: ButtonStyle {
             .lineLimit(1)
             .foregroundStyle(label)
             .padding(.horizontal, horizontalPadding ?? 12)
-            .frame(height: 27)
+            .frame(height: growsWithText ? nil : 27)
+            .frame(minHeight: growsWithText ? 27 : nil)
             .background(fill(pressed: pressed), in: Capsule())
             .overlay {
                 switch kind {
@@ -80,8 +84,8 @@ public struct BUIButtonStyle: ButtonStyle {
 }
 
 public extension ButtonStyle where Self == BUIButtonStyle {
-    static func bui(_ kind: BUIButtonStyle.Kind, fontSize: CGFloat = 13, horizontalPadding: CGFloat? = nil, isActive: Bool = false) -> BUIButtonStyle {
-        BUIButtonStyle(kind, fontSize: fontSize, horizontalPadding: horizontalPadding, isActive: isActive)
+    static func bui(_ kind: BUIButtonStyle.Kind, fontSize: CGFloat = 13, horizontalPadding: CGFloat? = nil, isActive: Bool = false, growsWithText: Bool = false) -> BUIButtonStyle {
+        BUIButtonStyle(kind, fontSize: fontSize, horizontalPadding: horizontalPadding, isActive: isActive, growsWithText: growsWithText)
     }
 }
 

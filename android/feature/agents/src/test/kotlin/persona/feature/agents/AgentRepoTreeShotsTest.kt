@@ -70,6 +70,8 @@ class AgentRepoTreeShotsTest {
                                 statusText = entry.row.state.takeIf { it != persona.core.contracts.AgentState.Idle }?.label)
                             is TreeChildrenEntry -> error("Fixture has no Codex subtasks")
                             is TreeIdleEntry -> AgentIdleRow(entry.hidden, {}, depth = entry.depth)
+                            is TreeIdleReposEntry -> error("Only Glass's By Repository on the page heads idle repositories")
+                            is TreeShowAllEntry -> AgentShowAllRow(entry.count, entry.expanded, {}, depth = entry.depth)
                             is TreeTabEntry -> error("按仓库 lists one agent a row")
                         }
                     }

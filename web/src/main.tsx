@@ -1,9 +1,14 @@
 // First: the live screen's token is read before App's module takes any token out of the address bar.
 import { screen } from "./screen/take";
+import { takeImportLinkOnStart } from "./lib/import-link";
 import { initI18n, startI18n } from "./i18n";
 import "./styles.css";
 import { applyLook } from "./ui/look";
 import { logCaughtError } from "./lib/caught-error";
+
+// A provider import link (#5420) may hold a key: out of the address bar before the page waits for anything, the
+// language's strings or App (lib/import-link.ts). Any other fragment stays, so a sign-in link's `#token=` still signs in.
+takeImportLinkOnStart();
 
 // Theme color and text size (docs/web/web.md "Theme color and text size") before anything draws.
 applyLook();
@@ -36,4 +41,7 @@ if (target) {
   // Error reports (docs/web/web.md "Error reports") start with the app: they go out only if the hub's hello has the feature.
   const [{ ExtensionThemeProvider }, { App }] = await Promise.all([import("./ui/ExtensionThemePicker"), import("./App"), import("./lib/error-reports-start")]);
   root.render(createElement(StrictMode, null, createElement(ExtensionThemeProvider, null, createElement(App))));
+  // An open page picks up a new build (lib/new-version.ts): by itself when idle, else a toast that stays.
+  const [{ startNewVersion }, { toast }, { t }] = await Promise.all([import("./lib/new-version"), import("./ui/atoms"), import("./i18n")]);
+  startNewVersion((reloadNow) => toast(t("app.new_version"), "info", { label: t("app.new_version_reload"), run: reloadNow, sticky: true }));
 }

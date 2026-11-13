@@ -8,5 +8,6 @@ struct PersonaWatchWidgetsBundle: WidgetBundle {
         ExtensionSystemWidget()
         PetComplication() // the Milk Frog on the watch face (docs/apple/persona.md)
         MeetingRecordingComplication() // one tap from the face / Smart Stack to a meeting recording (docs/apple/recording.md)
+        AllDayRecordingComplication() // all-day recording's state, one tap to continue it (docs/assistant/day-recap.md)
     }
 }

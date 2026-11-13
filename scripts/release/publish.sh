@@ -208,6 +208,24 @@ for t in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64; do
       -o "../$OUT/bin/$p-${t%/*}-${t#*/}" "./cmd/$p")
   done
 done
+# adhoc_identifiers <dir>: the darwin builds in dir, signed ad hoc again under their program's identifier
+# (com.nwverse.personad, com.nwverse.persona-node, ...) in place of the a.out Go's linker always writes. Only the name
+# changes: an ad-hoc signature's designated requirement stays the build's cdhash, so keeping macOS privacy permissions
+# across updates takes a certificate on the node's Mac (docs/operations/mac-node-signing.md). Only on a Mac, which has
+# codesign; builds made elsewhere keep a.out.
+adhoc_identifiers() {
+  local f prog
+  [ "$(uname -s)" = Darwin ] && command -v codesign >/dev/null 2>&1 || return 0
+  for f in "$1"/*-darwin-amd64 "$1"/*-darwin-arm64; do
+    [ -f "$f" ] || continue
+    prog=${f##*/}
+    prog=${prog%-darwin-*}
+    codesign --force --sign - --identifier "com.nwverse.$prog" "$f" 2>/dev/null ||
+      echo "note: $f keeps the Go linker's ad-hoc identifier a.out (codesign failed)" >&2
+  done
+}
+# Before anything hashes or packs them.
+adhoc_identifiers "$OUT/bin"
 cleanup
 python3 scripts/persona_identity.py --render-installer scripts/deploy/install.sh "$OUT/install.sh" "$PERSONA_PUBLISH_URL/dl"
 

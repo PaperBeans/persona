@@ -97,13 +97,17 @@ class CapsuleSurfaceTest {
         rule.mainClock.advanceTimeBy(1_000)
         rule.runOnIdle { assertEquals(listOf(latest.id), viewed) }
         // Agent replies render as Markdown, which joins soft line breaks: find the message by its tag.
-        rule.onNodeWithTag("capsule.message.${history[3].id}").performScrollTo()
+        // Under a full unit-test run the row is not composed yet when the scroll runs (#2771).
+        val historyTag = "capsule.message.${history[3].id}"
+        rule.waitUntil(5_000) { runCatching { rule.onNodeWithTag(historyTag).assertExists() }.isSuccess }
+        rule.onNodeWithTag(historyTag).performScrollTo()
         rule.onNodeWithText(latest.text).assertIsNotDisplayed()
         rule.runOnIdle { content = content.copy(messages = content.messages + next, readVersion = "v2") }
         rule.waitForIdle()
         rule.mainClock.advanceTimeBy(1_000)
         rule.onNodeWithText(next.text).assertIsNotDisplayed()
         rule.runOnIdle { assertEquals(listOf(latest.id), viewed) }
+        rule.waitUntil(5_000) { runCatching { rule.onNodeWithText(next.text).assertExists() }.isSuccess }
         rule.onNodeWithText(next.text).performScrollTo()
         rule.onNodeWithText(next.text).assertIsDisplayed()
         rule.runOnIdle { content = content.copy(messages = content.messages + final, readVersion = "v3") }

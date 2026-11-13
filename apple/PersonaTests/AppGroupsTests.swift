@@ -99,6 +99,33 @@ struct AppGroupsTests {
         #expect(!AppGroups.isCodexChatFolder("/Users/me/Documents/ChatGPT/botmux"))
     }
 
+    /// The Codex App's projects as its sidebar orders them (the node's `space_index`, from the App's project-order), then
+    /// any it does not number by their latest chat, Other last. Another app's agents keep the latest project first,
+    /// whatever their space's number (a herdr workspace's).
+    @Test func codexAppProjectsGoInTheAppsOrder() {
+        func chat(_ id: String, root: String?, place: Int?, updated: TimeInterval) -> Session {
+            var extra: [String: Any] = ["space_kind": "codex_app", "space_id": root.map { "codex-project:" + $0 } ?? "codex-chats:/Users/me/.codex",
+                                        "space_name": root.map { ($0 as NSString).lastPathComponent } ?? "Codex chats", "repo_root": root ?? ""]
+            if let place { extra["space_index"] = place }
+            return Self.placed(id, agent: "codex", cwd: root ?? "", updated: updated, extra: extra)
+        }
+        let codex = AppGroups.build([
+            chat("site-chat", root: "/Users/me/code/site", place: 2, updated: 50),
+            chat("tools-chat", root: "/Users/me/code/tools", place: 1, updated: 10),
+            chat("tools-sub", root: "/Users/me/code/tools", place: 1, updated: 5),
+            chat("unlisted-new", root: "/Users/me/.codex/.chatgpt-projects/g-p-1", place: nil, updated: 60),
+            chat("unlisted-old", root: "/Users/me/code/old", place: nil, updated: 20),
+            chat("loose", root: nil, place: nil, updated: 70),
+        ])[0]
+        #expect(codex.projects.map(\.title) == ["tools", "site", "g-p-1", "old", String(localized: "Other")])
+        #expect(codex.projects.first?.sessions.map(\.sessionID) == ["tools-chat", "tools-sub"])
+        let claude = AppGroups.build([
+            Self.placed("numbered-old", cwd: "/Users/me/code/a", updated: 10, extra: ["space_kind": "herdr", "space_id": "w1", "space_index": 1]),
+            Self.placed("latest", cwd: "/Users/me/code/b", updated: 30),
+        ])[0]
+        #expect(claude.projects.map(\.title) == ["b", "a"])
+    }
+
     /// A working tree's project is its repository's, from its path when an older node says nothing; when the home
     /// directory is a repository itself, a session's own folder is its project; one hub's folder is not another hub's.
     @Test func projectsFromRepositoriesAndHubs() {
@@ -110,6 +137,41 @@ struct AppGroupsTests {
         var otherHub = Self.placed("hub2", cwd: "/Users/me/code/app", updated: 1)
         otherHub.group = "second-hub"
         #expect(AppGroups.project(of: otherHub)?.key != AppGroups.project(of: Self.placed("hub1", cwd: "/Users/me/code/app", updated: 1))?.key)
+    }
+
+    /// The agents Persona and its assistant start in a terminal engine (#6567): a section per engine after the desktop
+    /// apps, in a fixed order, by project as a desktop app's is; an agent no engine placed (a claude in tmux or another
+    /// terminal, a runtime) stays in Other, which is not by project.
+    @Test func terminalEnginesHaveSectionsByProject() throws {
+        func cli(_ kind: String?, pane: String? = nil, repo: String? = nil) -> [String: Any] {
+            var f: [String: Any] = ["agent_surface": "cli"]
+            if let kind { f["space_kind"] = kind }
+            if let pane { f["pane_id"] = pane }
+            if let repo { f["repo_root"] = repo }
+            return f
+        }
+        let sessions = [
+            Self.placed("herdr-app", cwd: "/Users/me/code/app", updated: 50, extra: cli("herdr", pane: "w1:p1")),
+            Self.placed("herdr-gateway", agent: "codex", cwd: "/Users/me/code/gateway", updated: 40, extra: cli("herdr", pane: "w1:p2")),
+            Self.placed("herdr-app-sub", cwd: "/Users/me/code/app/web", updated: 30, extra: cli("herdr", pane: "w2:p1", repo: "/Users/me/code/app")),
+            Self.placed("herdr-home", cwd: "/Users/me", updated: 5, extra: cli("herdr", pane: "w3:p1")),
+            Self.placed("tern-x", cwd: "/srv/x", updated: 20, extra: cli("tern", pane: "tern:b1")),
+            Self.placed("orca-y", cwd: "/srv/y", updated: 25, extra: cli("orca", pane: "orca:p1")),
+            Self.placed("desk", cwd: "/Users/me/code/app", updated: 10),
+            Self.placed("tmux", cwd: "/Users/me/code/app", updated: 60, extra: cli(nil, pane: "tmux:%1")),
+            Self.placed("runtime", agent: "paseo", cwd: "/srv/z", updated: 15, extra: cli("paseo")),
+        ]
+        let groups = AppGroups.build(sessions)
+        #expect(groups.map(\.id) == ["app/desktop/claude code", "app/engine/herdr", "app/engine/orca", "app/engine/tern", AppGroups.otherID])
+        try #require(groups.count == 5)
+        let herdr = groups[1]
+        try #require(herdr.projects.count == 3)
+        #expect(herdr.engine == .herdr && herdr.kind == nil && herdr.title == "herdr" && herdr.showsProjects)
+        #expect(herdr.projects.map(\.name) == ["app", "gateway", ""]) // the latest project first; the home directory last
+        #expect(herdr.projects[0].sessions.map(\.sessionID) == ["herdr-app", "herdr-app-sub"])
+        #expect(herdr.projects[0].id.hasPrefix("app/engine/herdr/project/"))
+        #expect(groups[2].title == "Orca" && groups[3].title == "Tern" && groups[2].engine == .orca)
+        #expect(groups[4].sessions.map(\.sessionID) == ["tmux", "runtime"] && groups[4].engine == nil && !groups[4].showsProjects)
     }
 
     /// Other's section (terminals and the like) is not by project: its agents are listed as before.

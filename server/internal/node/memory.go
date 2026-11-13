@@ -26,6 +26,8 @@ type MemoryFile struct {
 	Name      string    `json:"name"` // file name, e.g. "lark-access.md"
 	Content   string    `json:"content"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// CreatedAt is when the file was made, where the file system keeps it (fileBirth); absent otherwise.
+	CreatedAt *time.Time `json:"created_at,omitempty"`
 }
 
 var (
@@ -67,7 +69,8 @@ func (n *Node) assistantMemory(a memoryOp) (any, error) {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 				continue
 			}
-			b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			path := filepath.Join(dir, e.Name())
+			b, err := os.ReadFile(path)
 			if err != nil {
 				continue
 			}
@@ -75,6 +78,9 @@ func (n *Node) assistantMemory(a memoryOp) (any, error) {
 			f := MemoryFile{Name: e.Name(), Content: string(b)}
 			if info != nil {
 				f.UpdatedAt = info.ModTime().UTC()
+				if born, ok := fileBirth(path, info); ok {
+					f.CreatedAt = &born
+				}
 			}
 			files = append(files, f)
 		}

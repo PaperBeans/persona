@@ -8,6 +8,8 @@
     <string name="designsystem_status_unknown">未知</string>
     <string name="designsystem_status_waiting">待唤醒</string>
     <string name="designsystem_status_muted">已屏蔽</string>
+    <string name="designsystem_density_standard">标准</string>
+    <string name="designsystem_density_compact">紧凑</string>
     <string name="designsystem_style_glass">玻璃</string>
     <string name="designsystem_style_glass_summary">磨砂玻璃浮在状态光上，有事等你时泛起琥珀色</string>
     <string name="designsystem_style_brief">晨报</string>
@@ -43,8 +45,8 @@
     <string name="designsystem_loading">加载中</string>
     <string name="designsystem_processing">正在处理…</string>
     <string name="designsystem_with_state">%1$s，%2$s</string>
-    <string name="designsystem_decision_command">需要你授权</string>
-    <string name="designsystem_decision_tool">需要你授权</string>
+    <string name="designsystem_decision_command">在等你批准</string>
+    <string name="designsystem_decision_tool">在等你批准</string>
     <string name="designsystem_decision_plan">计划等你审批</string>
     <string name="designsystem_decision_question">在问你</string>
     <string name="designsystem_decision_form">要你填几项</string>
@@ -52,12 +54,13 @@
     <string name="designsystem_decision_other">需要你</string>
     <string name="designsystem_decision_open_chat">打开对话</string>
     <string name="designsystem_decision_open_full">打开完整页</string>
-    <string name="designsystem_decision_previous">上一项</string>
-    <string name="designsystem_decision_next">下一项</string>
     <string name="designsystem_decision_advice">Persona：%1$s</string>
     <string name="designsystem_decision_recommended">建议</string>
-    <string name="designsystem_decision_position">第 %1$d 件，共 %2$d 件</string>
     <string name="designsystem_decision_option_position">第 %1$d 个，共 %2$d 个</string>
+    <!-- The pending requests above a chat's composer while they scroll (iOS PendingCards). -->
+    <plurals name="designsystem_decision_pending">
+        <item quantity="other">%1$d 个待处理</item>
+    </plurals>
     <string name="designsystem_pending_sending">发送中</string>
     <string name="designsystem_pending_waiting">连上后自动发送</string>
     <string name="designsystem_pending_unconfirmed">结果待确认</string>
@@ -73,6 +76,8 @@
         <item quantity="other">电脑离线，状态可能过时（%1$d 分钟前）</item>
     </plurals>
     <string name="designsystem_line_answering">正在回传你的选择…</string>
+    <string name="designsystem_message_sending">发送中</string>
+    <string name="designsystem_message_processing">处理中</string>
     <string name="designsystem_line_sending">正在发送…</string>
     <string name="designsystem_line_unconfirmed">上次操作结果待确认</string>
     <plurals name="designsystem_line_needs_you_count">
@@ -125,18 +130,55 @@
     </plurals>
     <!-- A herdr tab of several agents (#2320) -->
     <string name="designsystem_tab_launcher">发起者</string>
+    <!-- An Agents row's third line on Glass (#4338 A9): the to-do chip and the muted bell, for TalkBack -->
+    <string name="designsystem_row_todo">待办：%1$s</string>
+    <string name="designsystem_row_muted">已屏蔽通知</string>
+    <string name="designsystem_row_style_avatar">头像</string>
+    <string name="designsystem_row_style_two_lines">紧凑两行</string>
+    <string name="designsystem_row_style_cards">色条卡片</string>
+    <string name="designsystem_row_style_list">细列表</string>
+    <string name="designsystem_row_style_avatar_summary">头像、标题和时间，两行最新的话，再一行写它在哪儿跑。</string>
+    <string name="designsystem_row_style_two_lines_summary">每个 Agent 两行：标题和时间，再一行最新的话。</string>
+    <string name="designsystem_row_style_cards_summary">每个 Agent 一张卡片，左边一条状态色；等你处理的那张整张淡蓝底。</string>
+    <string name="designsystem_row_style_list_summary">每个 Agent 一行：状态、标题和时间。</string>
     <plurals name="designsystem_tab_agents">
         <item quantity="other">%1$d 个 Agent</item>
     </plurals>
+    <string name="designsystem_space_card_starter">%1$s · 发起者</string>
+    <plurals name="designsystem_space_card_pending">
+        <item quantity="other">%1$s · %2$d 件待处理</item>
+    </plurals>
     <string name="designsystem_group_expand">展开分组</string>
     <string name="designsystem_group_collapse">折叠分组</string>
+    <string name="designsystem_show_all">显示全部 %1$d 个</string>
+    <string name="designsystem_show_fewer">收起</string>
+    <string name="designsystem_count_waiting_background">%1$d 个后台等待中</string>
     <string name="designsystem_machine_monitor">机器监控</string>
+    <!-- 一台电脑的项目页（iOS MachineSpacesView，#4338 A11）：打开它的胶囊，以及项目的置顶标记 -->
+    <string name="designsystem_machine_projects">%1$s 上的所有项目</string>
+    <string name="designsystem_project_pinned">已置顶</string>
     <string name="designsystem_details">详情</string>
     <string name="designsystem_space">空间</string>
+    <string name="designsystem_repository">仓库</string>
+    <string name="designsystem_main_worktree">主工作树</string>
+    <string name="designsystem_worktree">工作树</string>
+    <string name="designsystem_worktree_primary">主要</string>
+    <string name="designsystem_worktree_detached">Detached HEAD</string>
+    <string name="designsystem_worktree_offline">这台电脑现在离线</string>
+    <string name="designsystem_worktree_idle">空闲</string>
     <string name="designsystem_expand_named">展开%1$s</string>
     <string name="designsystem_collapse_named">折叠%1$s</string>
     <plurals name="designsystem_idle_more">
         <item quantity="other">还有 %1$d 个空闲</item>
+    </plurals>
+    <plurals name="designsystem_idle_count">
+        <item quantity="other">%1$d 个空闲</item>
+    </plurals>
+    <plurals name="designsystem_idle_hide">
+        <item quantity="other">收起空闲的 %1$d 个</item>
+    </plurals>
+    <plurals name="designsystem_idle_show">
+        <item quantity="other">展开 %1$d 个空闲的 Agent</item>
     </plurals>
     <string name="designsystem_folded">已折叠</string>
     <string name="designsystem_attachment_uploading">正在上传</string>
@@ -192,6 +234,19 @@
     <string name="designsystem_editor_picture">要编辑的图片</string>
     <string name="designsystem_editor_undo">撤销</string>
     <string name="designsystem_editor_clear">清除</string>
+    <!-- The image editor's crop, turn, widths and redo (#4992, iOS ImageEditor) -->
+    <string name="designsystem_markup_crop">裁剪</string>
+    <string name="designsystem_editor_rotate">旋转</string>
+    <string name="designsystem_editor_reset">还原</string>
+    <string name="designsystem_editor_redo">重做</string>
+    <string name="designsystem_editor_shape">比例</string>
+    <string name="designsystem_editor_shape_free">自由</string>
+    <string name="designsystem_editor_shape_original">原始比例</string>
+    <string name="designsystem_editor_shape_square">正方形</string>
+    <string name="designsystem_editor_width">粗细</string>
+    <string name="designsystem_editor_width_thin">细</string>
+    <string name="designsystem_editor_width_medium">中</string>
+    <string name="designsystem_editor_width_thick">粗</string>
     <string name="designsystem_viewer_load_failed">图片加载失败</string>
     <string name="designsystem_viewer_action_failed">操作没有完成，请重试</string>
     <string name="designsystem_render_too_slow">画得太久</string>
@@ -232,6 +287,10 @@
     <string name="designsystem_qr_code">二维码</string>
     <string name="designsystem_queue_actions">排队消息的操作</string>
     <string name="designsystem_queue_item">第 %1$d 条：%2$s</string>
+    <string name="designsystem_queue_item_note">第 %1$d 条：%2$s。%3$s</string>
+    <plurals name="designsystem_queue_photos">
+        <item quantity="other">%1$d 张图片</item>
+    </plurals>
     <string name="designsystem_draft_ready">Persona 拟好了回复</string>
     <!-- Connection details (the title's sheet while the hub is out of reach) -->
     <string name="designsystem_connection_online">已连上 hub</string>

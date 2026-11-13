@@ -166,6 +166,18 @@ class KnowledgePresentationTest {
         assertEquals("b", KnowledgeDetail("projects", "b", "x").entry().name)
     }
 
+    @Test fun aProjectsAgentsLeaveOutTheSubtasksOfAnAgentListedThere() {
+        fun agent(id: String, state: String, parent: String? = null) = persona.core.contracts.Session(machineId = "mac", sessionId = id,
+            cwd = "/code/a", state = state, sourceKind = "runtime", agent = "claude", isSubagent = parent != null, parentSessionId = parent)
+        val agents = listOf(agent("lead", "working"), agent("review", "working", "lead"), agent("asks", "needs_you", "lead"),
+            agent("done", "unread", "lead"), agent("helper", "working", "gone"), agent("old", "offline").copy(status = "offline"))
+        // The agent that created them, the one that waits for you, and one whose creator is not listed here.
+        assertEquals(listOf("lead", "asks", "helper"), projectAgents(agents).map { it.sessionId })
+        // Without subtasks every live one is listed, as before.
+        assertEquals(listOf("lead", "review", "asks", "done", "helper"),
+            projectAgents(agents.map { it.copy(isSubagent = false, parentSessionId = null) }).map { it.sessionId })
+    }
+
     @Test fun taggingSendsOnlyWhatIsSet() {
         assertEquals("""{"importance":"P1","relevance":55,"tags":[]}""",
             JsonCodec.encodeToString(KnowledgeUpdate.serializer(), KnowledgeUpdate("P1", 55, emptyList())))
@@ -214,6 +226,21 @@ class KnowledgePresentationTest {
 
         assertEquals(listOf("大家好", "开始"), transcript(recording.segments).map { it.text })
         assertTrue(transcript(null).isEmpty())
+    }
+
+    /** Persona's echo (#5905): kept on the hub with `echo: true`, not what the meeting said, so hidden as on the web and iOS; the minutes' times land on the meeting's lines. */
+    @Test fun recordingTranscriptHidesPersonasEcho() {
+        val segments = JsonCodec.decodeFromString<KnowledgeDetailResponse>(
+            """{"detail":{"kind":"recordings","id":"r1","path":"data/recordings/r1","segments":[
+            {"start":2,"end":9,"text":"Who owns the regression test?"},
+            {"start":10.3,"end":17,"text":"You kept the cap for this release.","echo":true},
+            {"start":10,"end":17.8,"text":"Bo owns the regression test."},
+            {"start":20,"end":24,"text":"Thanks, next item.","echo":false}]}}""",
+        ).detail.segments
+        val lines = transcript(segments)
+        assertEquals(listOf("Who owns the regression test?", "Bo owns the regression test.", "Thanks, next item."), lines.map { it.text })
+        // An item at 10 s (the minutes cite Bo) opens Bo's line, not the echo that began just after it.
+        assertEquals("Bo owns the regression test.", lines[segmentAt(lines, 10.0)!!].text)
     }
 
     @Test fun recordingFactsFallBack() {

@@ -192,9 +192,19 @@ sealed interface ChatLine {
     data class Recaps(val items: List<LineItem>) : ChatLine {
         override val id get() = "rc-" + items.first().id
     }
+    /**
+     * What an exchange's work looked at, between its work line and its answer ([ViewedImages], iOS `ChatLine.viewed`). Its id
+     * stays as pictures come in and the answer changes, so the strip grows sideways in place.
+     */
+    data class Viewed(override val id: String, val images: List<ViewedImage>) : ChatLine
     /** What the assistant's conversation adds to the transcript (docs/assistant/unified-entry.md, `tasks.AssistantLines`): the
      *  hub's feed items, quick results, day lines; [payload] is drawn by the chat's host. */
     data class Extra(override val id: String, val payload: Any) : ChatLine
+    /**
+     * The replies' model changed here ([ModelChanges], the web's `ModelChangeDivider`, #5055): the exchange after this
+     * line was written by [to], the visible one before it by [from], as the transcript names them.
+     */
+    data class ModelChange(override val id: String, val from: String, val to: String) : ChatLine
 }
 
 data class WorkSummary(val full: List<CoreText>, val short: List<CoreText>) {

@@ -162,6 +162,9 @@ def readiness(sc, machine, lang, launcher="claude", dismissed=False, probe=None)
                            "model_route": ("connect_model", "test_assistant")}.get(
                 model_code, ("connect_model", ""))
             model = with_machine(step(lang, "model", "problem", model_code, name, launcher, action), mid)
+            if model_code == "rate_limited":
+                # The evidence occurrence stays stable across reads; checked_at still advances (iOS dismissal, #5658).
+                model["occurrence"] = sc.get("occurrence", "2026-11-06T09:00:00Z")
             if alt:
                 model["alt_actions"] = [{"id": alt}]
             if model_code == "not_logged_in" and sc.get("switch"):

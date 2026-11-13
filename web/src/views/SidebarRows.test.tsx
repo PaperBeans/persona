@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { AgentSession } from "../lib/agents";
 import type { Session } from "../lib/types";
 import { setAgentDetails, setContextAsUsed } from "../lib/context-usage";
-import { AgentRow, PersonaRow, PinnedHeading, SessionRow } from "./Sidebar";
+import { AgentRow, PersonaRow, SessionRow } from "./Sidebar";
 import { conversationMenuItems } from "./ConversationMenu";
 
 // the sidebar's modules read the colour scheme and this browser's settings when they load
@@ -164,14 +164,30 @@ describe("Persona's main row", () => {
     expect(renderToStaticMarkup(<PersonaRow {...props} main={undefined} active={false} />)).not.toContain("对话的操作");
   });
   it("whose menu has only 拷贝会话 ID and 结束…", () => {
-    expect(conversationMenuItems(main, { main: true, pinned: false }).map((i) => i.key)).toEqual(["copy", "end"]);
+    expect(conversationMenuItems(main, { main: true }).map((i) => i.key)).toEqual(["copy", "end"]);
   });
 });
 
-describe("the 置顶 heading over the pinned conversations", () => {
-  it("is drawn with a ⋯ a touch screen can reach for 全部取消置顶", () => {
-    const html = renderToStaticMarkup(<PinnedHeading onMenu={() => {}} />);
-    expect(html).toContain("置顶");
-    expect(html).toMatch(/<button [^>]*aria-label="全部取消置顶"[^>]*aria-haspopup="menu"/);
+describe("a 常驻 lead row (#6214 keepTrailing)", () => {
+  const lead: Session = { machine_id: "hub", session_id: "lead-a", title: "增长", cwd: "/", status: "idle", state: "idle", assistant: true };
+  const props = { s: lead, k: "j:lead-a", reg: () => () => {}, hover: () => {}, to: { name: "session", mid: "hub", sid: "lead-a" } as const, go: () => () => {}, onMenu: () => {}, hint: "在做 1 · 等你 1", hintFull: true, showState: false, keepTrailing: true };
+  it("keeps its counts visible on hover and gives the ⋯ an in-flow slot instead of an overlay", () => {
+    const html = renderToStaticMarkup(<SessionRow {...props} active={false} />);
+    // the direction's name stays in the row even with no second line; the menu never replaces it
+    expect(html).toContain("增长");
+    // the counts never carry the hover-hiding class
+    const counts = html.match(/<span[^>]*>在做 1 · 等你 1<\/span>/)![0];
+    expect(counts).not.toContain("group-hover/row:invisible");
+    // the ⋯ is an in-flow fader, not an absolute overlay covering the words
+    const button = html.match(/<button [^>]*aria-label="Agent 的操作"[^>]*>/)![0];
+    expect(button).toContain("opacity-0 group-hover/row:opacity-100");
+    expect(button).not.toContain("absolute");
+    // and the anchor reserves no overlay room of its own
+    expect(link(html)).toMatch(/pr-1\b/);
+  });
+  it("an ordinary row still overlays its ⋯ and hides its tail on hover", () => {
+    const html = renderToStaticMarkup(<SessionRow {...rowProps} active={false} />);
+    expect(more(html)).toMatch(/class="[^"]*\bhidden\b/);
+    expect(more(html)).toContain("absolute");
   });
 });

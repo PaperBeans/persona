@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 val PendingMainConversation = SessionKey("", "main")
 
 /** Shared entry point for sharing, asking Persona and handing context to Persona. */
-interface MainConversationSender {
+interface MainConversationSender : MessageSendReceiptSource {
     val outbox: StateFlow<List<OutboxMessage>>
     /** Commits locally before returning; a failed call must leave the editor intact. */
     suspend fun sendToMain(text: String, clientMessageId: String, draft: DraftSnapshot? = null)

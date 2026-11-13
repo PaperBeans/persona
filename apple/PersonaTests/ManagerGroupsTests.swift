@@ -100,23 +100,21 @@ struct ManagerGroupsTests {
 
     // MARK: Settings › Extensions
 
-    @Test func theListGroupsUnderEachManager() async throws {
+    @Test func theListShowsOnlyTheCurrentManagerWithoutGroups() async throws {
         let hub = FakeHub()
         hub.on("GET", "/api/v1/extensions", json: Self.extensions)
         hub.on("GET", "/api/v1/managers", json: Self.roster)
-        let page = ExtensionsModel(deps: .init(api: { self.client(hub) }, auth: ExtensionAuthStore()))
+        var manager: String?
+        let page = ExtensionsModel(deps: .init(api: { self.client(hub).showing(manager) }, auth: ExtensionAuthStore()))
         await page.load()
-        let groups = try #require(page.groups)
-        #expect(groups.map(\.manager.name) == ["助手", "工作", "家里"])
-        #expect(groups[0].items.map(\.id) == ["cua", "notes", "stray", "old"], "no stamp, or a manager the roster lacks: the default's")
-        #expect(groups[1].items.map(\.listKey) == ["m-1/cua"] && groups[2].items.map(\.listKey) == ["m-2/cua"])
-        // The offline one's heading says when it last synced.
-        #expect(!groups[2].manager.online && groups[2].manager.lastSeen != nil)
-        #expect(ManagersText.status(groups[2].manager, now: .now).text.hasPrefix("离线 · 最后同步于 "))
-        // Each row opens its own manager's copy; the default's names none.
-        #expect(groups.map { page.manager(of: $0.items[0]) } == [nil, "m-1", "m-2"])
-        #expect(Set(page.plugins!.map(\.listKey)).count == page.plugins!.count, "every row has its own identity")
-        #expect(named(hub.sent("GET", "/api/v1/extensions")) == [nil], "the list is the merged one")
+        #expect(page.groups == nil)
+        #expect(page.plugins?.map(\.id) == ["notes", "old", "stray", "cua"], "unknown and missing stamps belong to the default")
+        #expect(page.plugins!.allSatisfy { page.manager(of: $0) == nil })
+        manager = "m-1"
+        await page.load()
+        #expect(page.groups == nil && page.plugins?.map(\.listKey) == ["m-1/cua"])
+        #expect(page.manager(of: page.plugins![0]) == "m-1")
+        #expect(named(hub.sent("GET", "/api/v1/extensions")) == [nil, "m-1"])
     }
 
     @Test func oneManagerOrNoRosterLooksAsBefore() async throws {
@@ -144,7 +142,7 @@ struct ManagerGroupsTests {
         await page.load()
         hub.on("GET", "/api/v1/managers") { _ in throw APIError(status: 502, message: "bad gateway") }
         await page.load()
-        #expect(page.groups?.count == 3, "a failed read of the roster doesn't fold the groups")
+        #expect(page.roster?.installed.count == 3 && page.plugins?.count == 4, "a failed roster read keeps ownership and the selected list")
     }
 
     /// Every request of another manager's extension page names it; the default's page names none.
@@ -226,17 +224,16 @@ struct ManagerGroupsTests {
         hub.on("GET", "/api/v1/managers", json: Self.roster)
         let list = ConnectorsListModel(deps: .init(api: { hub.client }))
         await list.load(listed: true)
-        let groups = try #require(list.groups)
-        #expect(groups.map(\.id) == ["assistant", "m-2"], "工作 has none: its group is left out")
-        #expect(groups[0].items.map(\.id) == ["github", "imessage"] && groups[1].items.map(\.id) == ["imessage"])
-        #expect(list.rows(lark: true).map(\.id) == ["mail", "lark"], "mail and Lark keep their own rows; the rest go under the managers")
-        #expect(list.manager(of: groups[1].items[0]) == "m-2" && list.manager(of: groups[0].items[0]) == nil)
+        #expect(list.groups == nil)
+        #expect(list.connectors.map(\.id) == ["mail", "github", "imessage"])
+        #expect(list.rows(lark: true).map(\.id) == ["mail", "lark", "assistant/github", "assistant/imessage"])
+        #expect(list.connectors.allSatisfy { list.manager(of: $0) == nil })
         #expect(hub.sent("GET", "/api/v1/connectors").first?.query == ["all": "1"])
 
         // One manager: the section is as it was.
         hub.on("GET", "/api/v1/managers", json: Self.oneManager)
         await list.load(listed: true)
-        #expect(list.groups == nil && list.rows(lark: true).map(\.id) == ["mail", "lark", "assistant/github", "assistant/imessage", "m-2/imessage"])
+        #expect(list.groups == nil && list.rows(lark: true).map(\.id) == ["mail", "lark", "assistant/github", "assistant/imessage", "m-2/imessage"], "unknown stamps belong to the sole default assistant")
 
         // A hub without connectors (feature "connectors") isn't asked.
         let old = FakeHub()

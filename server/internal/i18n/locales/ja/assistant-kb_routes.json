@@ -1,5 +1,6 @@
 {
   "not_open": "ナレッジの準備ができていません。しばらくしてからもう一度お試しください。",
   "disabled": "このアシスタントのナレッジは無効です。",
-  "read_only": "ナレッジベースは読み取り専用です。変更できません。"
+  "read_only": "ナレッジベースは読み取り専用です。変更できません。",
+  "unknown_kind": "不明な種類です。projects、chats、people、docs、meetings、events、recordings、topics のいずれかで検索してください。"
 }

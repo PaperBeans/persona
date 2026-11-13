@@ -42,7 +42,7 @@ enum MacMenuBar {
     static func count(needsYou: Int) -> String? { needsYou > 0 ? "\(needsYou)" : nil }
 
     /// The number beside the icon: waiting cards of the menu's Needs You sessions, not sessions — one session waiting
-    /// on a second card shows 2 (#4081), the same unit as the Dock badge and the iPhone's Agents tab.
+    /// on a second card shows 2 (#4081). The Dock badge counts more: the tab badges added up (`AppIconBadge`, #5824).
     static func needsYouCount(_ sections: Sections, interactions: [Interaction]) -> Int {
         let keys = Set(sections.needsYou.map(\.key))
         return interactions.filter { keys.contains($0.sessionKey) }.count

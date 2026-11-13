@@ -29,7 +29,14 @@ export function query({ prompt, options }) {
       content: JSON.parse(readFileSync(options.settings, 'utf8')),
     }
   }
-  send({ type: 'fake_options', options: rest, settings_file: file, env_keys: Object.keys(env ?? {}).length, has_stderr: typeof stderr === 'function' })
+  // An in-process MCP server is a live object graph, not a stdio config. Record
+  // its boundary for the bridge tests instead of serializing the SDK instance.
+  const mcpServers = Object.fromEntries(Object.entries(rest.mcpServers ?? {}).map(([name, server]) => [name,
+    server?.type === 'sdk'
+      ? { type: 'sdk', name: server.name }
+      : server,
+  ]))
+  send({ type: 'fake_options', options: { ...rest, mcpServers }, settings_file: file, env_keys: Object.keys(env ?? {}).length, has_stderr: typeof stderr === 'function' })
   stderr?.(`cli says ${process.env.ANTHROPIC_AUTH_TOKEN} at ${process.env.ANTHROPIC_BASE_URL}\n`)
   if (options.resume) {
     send({ type: 'assistant', uuid: process.env.FAKE_OLD_UUID, session_id: options.resume, message: { content: [{ type: 'text', text: 'old' }] } })
@@ -39,6 +46,10 @@ export function query({ prompt, options }) {
   let inputEnded = false
   ;(async () => {
     for await (const m of prompt) {
+      // A message asking for it makes the CLI report a running background task, as background_tasks_changed does.
+      if (JSON.stringify(m).includes('start a background task')) {
+        send({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'b1', task_type: 'local_bash', description: 'sleep 600' }] })
+      }
       send({ type: 'stream_event', event: { type: 'message_start' } })
       if (process.env.FAKE_TURN_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_TURN_MS)))
       if (closed) return

@@ -247,7 +247,7 @@ internal fun TaskEditorPage(
                     else -> R.string.assistant_proactive_run_now_body
                 }),
                     leadingIcon = PhIcons.Play, onClick = ::runNow, enabled = !busy && canSave, chevron = false,
-                    trailing = if (running) ({ JSpinner(Modifier.size(Tokens.Space.xl)) }) else null)
+                    trailing = if (running) ({ JSpinner(Modifier.size(Tokens.Space.Standard.xl)) }) else null)
             }
         }
         if (lastLine != null) item("last") {
@@ -385,7 +385,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.conversationSection(
                         val freshening = task != null && state.freshening(task.id)
                         JRow(stringResource(R.string.assistant_proactive_fresh), leadingIcon = PhIcons.ChatCircleDots, chevron = false,
                             enabled = !busy && !freshening, onClick = { task?.let { t -> store.launch { fresh(t.id) } } },
-                            trailing = if (freshening) ({ JSpinner(Modifier.size(Tokens.Space.xl)) }) else null)
+                            trailing = if (freshening) ({ JSpinner(Modifier.size(Tokens.Space.Standard.xl)) }) else null)
                     }
                 }
             }

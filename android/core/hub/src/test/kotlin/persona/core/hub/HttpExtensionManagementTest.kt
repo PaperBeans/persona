@@ -73,6 +73,61 @@ class HttpExtensionManagementTest {
         }
     }
 
+    @Test fun catalogLogosAndPopularityRemainOptionalAndKeepTheHubOrder() = withHub(legacy = false) { server, api ->
+        val timestamp = "2026-11-11T08:00:00Z"
+        val fields = """"icon_url":"https://extensions.example.com/logo.png","downloads":4294967296,"downloads_updated_at":"$timestamp""""
+        server.enqueue(MockResponse().setBody("""{"extensions":[{"id":"popular","name":"Zeta",$fields},{"id":"zero","downloads":0},{"id":"old"}]}"""))
+        val installed = api.listing().extensions
+        server.takeRequest()
+        assertEquals(listOf("popular", "zero", "old"), installed.map { it.id })
+        assertEquals("https://extensions.example.com/logo.png", installed[0].iconUrl)
+        assertEquals(4294967296L, installed[0].downloads)
+        assertEquals(timestamp, installed[0].downloadsUpdatedAt)
+        assertEquals(0L, installed[1].downloads)
+        assertNull(installed[2].downloads)
+        assertNull(installed[2].iconUrl)
+        assertNull(installed[2].downloadsUpdatedAt)
+
+        server.enqueue(MockResponse().setBody("""{"id":"popular",$fields}"""))
+        val detail = api.extension("popular").extension
+        server.takeRequest()
+        assertEquals(installed[0].iconUrl, detail.iconUrl)
+        assertEquals(installed[0].downloads, detail.downloads)
+        assertEquals(timestamp, detail.downloadsUpdatedAt)
+
+        server.enqueue(MockResponse().setBody("""{"markets":[{"id":"m1","downloads_updated_at":"$timestamp"},{"id":"older-market"}],"extensions":[
+            {"id":"popular","name":"Zeta",$fields},{"id":"alpha","name":"Alpha","downloads":12},
+            {"id":"zero","downloads":0},{"id":"old"}]}"""))
+        val catalog = api.catalog()
+        server.takeRequest()
+        assertEquals(listOf("popular", "alpha", "zero", "old"), catalog.extensions.map { it.id })
+        assertEquals(timestamp, catalog.markets[0].downloadsUpdatedAt)
+        assertNull(catalog.markets[1].downloadsUpdatedAt)
+        assertEquals(installed[0].iconUrl, catalog.extensions[0].iconUrl)
+        assertEquals(installed[0].downloads, catalog.extensions[0].downloads)
+        assertEquals(timestamp, catalog.extensions[0].downloadsUpdatedAt)
+        assertEquals(0L, catalog.extensions[2].downloads)
+        assertNull(catalog.extensions[3].downloads)
+
+        server.enqueue(MockResponse().setBody("""{"extensions":[{"id":"old"}]}"""))
+        val old = api.catalog()
+        server.takeRequest()
+        assertTrue(old.markets.isEmpty())
+        assertNull(old.extensions.single().iconUrl)
+        assertNull(old.extensions.single().downloads)
+    }
+
+    @Test fun downloadCountsDecodeAsIntegersWithoutTruncation() = withHub(legacy = false) { server, api ->
+        server.enqueue(MockResponse().setBody("""{"extensions":[{"id":"maximum","downloads":9223372036854775807}]}"""))
+        assertEquals(Long.MAX_VALUE, api.catalog().extensions.single().downloads)
+        server.takeRequest()
+        for (value in listOf("1.5", "9223372036854775808")) {
+            server.enqueue(MockResponse().setBody("""{"extensions":[{"id":"invalid","downloads":$value}]}"""))
+            assertTrue(runCatching { api.catalog() }.exceptionOrNull() is HubFailure)
+            server.takeRequest()
+        }
+    }
+
     // What the phone says of itself in every view's context; a fixed one so the bodies are exact.
     private val device = ExtensionUiContext(tz = "Asia/Shanghai", locale = "zh-Hans-CN", platform = "android", uiVersion = 2)
     private val deviceJson = """"tz":"Asia/Shanghai","locale":"zh-Hans-CN","platform":"android","ui_version":2"""

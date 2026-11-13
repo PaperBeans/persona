@@ -1,6 +1,7 @@
 package persona.core.hub
 
 import persona.core.contracts.JsonCodec
+import persona.core.contracts.SessionKey
 
 import persona.core.contracts.api.InboxAssistantTransport
 import persona.core.contracts.api.InboxBulkAction
@@ -71,6 +72,7 @@ class HttpInboxAssistantTransport private constructor(
     // Connectors' items too (`sources=all`): each opens as its connector's thread (#2726); without it the hub lists
     // Feishu and mail only.
     override suspend fun inbox() = json(url("api", "v1", "inbox").newBuilder().addQueryParameter("sources", "all").build())
+    override suspend fun item(itemId: String) = json(url("api", "v1", "inbox", itemId))
     override suspend fun doneHistory(manager: String?, before: String?, beforeId: String?, limit: Int) =
         json(url("api", "v1", "inbox", "done").newBuilder().addQueryParameter("sources", "all").addQueryParameter("limit", limit.toString())
             .apply { if (before != null) { addQueryParameter("before", before); beforeId?.let { addQueryParameter("before_id", it) } } }
@@ -131,6 +133,18 @@ class HttpInboxAssistantTransport private constructor(
             put("text", text); put("client_id", clientId)
         })
     }
+    override suspend fun recordAgentHandOff(itemId: String, session: SessionKey, title: String, clientId: String): JsonObject {
+        require(itemId.isNotBlank() && session.machineId.isNotBlank() && session.sessionId.isNotBlank() && clientId.isNotBlank())
+        return json(url("api", "v1", "inbox", itemId, "handoff"), buildJsonObject {
+            put("session", buildJsonObject {
+                put("machine_id", session.machineId)
+                put("session_id", session.sessionId)
+            })
+            put("kind", "agent")
+            title.takeIf { it.isNotBlank() }?.let { put("title", it) }
+            put("client_id", clientId)
+        })
+    }
     override suspend fun suggestion(itemId: String, version: Long, action: String, text: String?, clientId: String): JsonObject {
         require(itemId.isNotBlank() && clientId.isNotBlank() && action in setOf("confirm", "reject", "instruct"))
         return try {
@@ -163,6 +177,12 @@ class HttpInboxAssistantTransport private constructor(
             after?.let { addQueryParameter("after", it) }
         }.build(),
     )
+    override suspend fun topics(feedId: String, before: String?) = json(
+        url("api", "v1", "lark", "conversations", feedId, "messages").newBuilder().apply {
+            addQueryParameter("topic", "1")
+            before?.let { addQueryParameter("before", it) }
+        }.build(),
+    )
     override suspend fun larkMessage(messageId: String): JsonObject {
         require(messageId.isNotBlank())
         return json(url("api", "v1", "lark", "messages", messageId))
@@ -183,9 +203,18 @@ class HttpInboxAssistantTransport private constructor(
     // the default, dropped before it goes).
     override suspend fun assistantOf(manager: String?) = json(url("api", "v1", "assistant").pinned(manager))
     override suspend fun assistantLeadersOf(manager: String?) = json(url("api", "v1", "assistant", "leaders").pinned(manager))
+    // The default manager's alone (docs/protocol/protocol.md): `?manager=` stays empty for it.
+    override suspend fun directionsTreeOf(manager: String?) =
+        json(url("api", "v1", "assistant", "directions", "tree").pinned(manager))
     override suspend fun createConversationOf(manager: String?, main: Boolean, launcher: String?) =
         json(url("api", "v1", "assistant", "conversations").pinned(manager), buildJsonObject {
             put("prompt", ""); put("main", main); launcher?.let { put("launcher", it) }
+        })
+    override suspend fun createConversationOf(manager: String?, main: Boolean, pick: persona.core.contracts.ModelPick) =
+        json(url("api", "v1", "assistant", "conversations").pinned(manager), buildJsonObject {
+            put("prompt", ""); put("main", main); put("launcher", pick.launcher)
+            pick.model?.takeIf(String::isNotBlank)?.let { put("model", it) }
+            pick.effort?.takeIf(String::isNotBlank)?.let { put("effort", it) }
         })
     private fun HttpUrl.pinned(manager: String?) = newBuilder().addQueryParameter(ManagerQuery, manager.orEmpty()).build()
     override suspend fun pins() = json(url("api", "v1", "pins"))
@@ -353,7 +382,7 @@ class HttpInboxAssistantTransport private constructor(
             val http = client.newBuilder().followRedirects(false).followSslRedirects(false)
                 .retryOnConnectionFailure(false).build()
             return { path, method, body, buffered ->
-                val target = base.hubUrl(path)
+                val target = base.hubUrl(path).withRequestManager()
                 http.newCall(Request.Builder().url(target).header("Authorization", "Bearer $token")
                     .method(method, body).build()).awaitResponse(buffered = buffered).also { response ->
                     if (!response.isSuccessful) throw response.use { HubFailure.from(it) }

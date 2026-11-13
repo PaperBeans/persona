@@ -82,8 +82,15 @@ describe("words", () => {
   it("says what it runs with when not the default", () => {
     expect(runsWith({})).toBeNull();
     expect(runsWith({ permission_mode: "default" })).toBeNull();
-    expect(runsWith({ launcher: "claude-fast", permission_mode: "auto", effort: "low" })).toEqual({ text: "claude-fast · 自动 · 思考低", danger: false });
-    expect(runsWith({ permission_mode: "bypassPermissions" })).toEqual({ text: "全部放行", danger: true });
+    expect(runsWith({ launcher: "claude-fast", permission_mode: "auto", effort: "low" })).toEqual({ text: "claude-fast · 自动审批 · 思考低", danger: false });
+    expect(runsWith({ permission_mode: "bypassPermissions" })).toEqual({ text: "完全访问", danger: true });
+  });
+
+  it("names its launcher by the provider's display name; an rc alias by its ID (#5029)", () => {
+    const names = [{ name: "relay-example-com", display_name: "我的中转 站" }, { name: "cc_glm" }];
+    expect(runsWith({ launcher: "relay-example-com", effort: "low" }, names)).toEqual({ text: "我的中转 站 · 思考低", danger: false });
+    expect(runsWith({ launcher: "cc_glm" }, names)).toEqual({ text: "cc_glm", danger: false });
+    expect(runsWith({ launcher: "gone" }, names)).toEqual({ text: "gone", danger: false });
   });
 });
 
@@ -175,6 +182,17 @@ describe("the editor", () => {
     expect(back.push).toBe("");
     expect(back.session_id).toBeUndefined(); // switched back, it stays in its own conversation
     expect(taskBody(back, { ...saved, push: "asked" })).toMatchObject({ push: "" });
+  });
+
+  it("跑完放进收件箱: compared, saved only when changed, independent of the push setting", () => {
+    const saved = task({ repeat: "interval", every_minutes: 30, push: "asked" });
+    expect(sameTask(saved, { ...saved, inbox: "" })).toBe(true); // a hub that does not send it: nothing goes into the Inbox
+    expect(sameTask(saved, { ...saved, inbox: "worthy" })).toBe(false);
+    expect("inbox" in taskBody(saved, saved)).toBe(false); // unchanged: a hub keeps it, and one that does not know it never gets it
+    expect("inbox" in taskBody(task({ repeat: "interval", every_minutes: 5 }))).toBe(false); // a new task that puts nothing there
+    expect(taskBody({ ...saved, inbox: "every" }, saved)).toMatchObject({ inbox: "every" });
+    expect("push" in taskBody({ ...saved, inbox: "every" }, saved)).toBe(false); // push is not touched
+    expect(taskBody({ ...saved, inbox: "" }, { ...saved, inbox: "worthy" })).toMatchObject({ inbox: "" });
   });
 
   it("edits a cron task: says its rule, checks, compares and saves its expression", () => {
