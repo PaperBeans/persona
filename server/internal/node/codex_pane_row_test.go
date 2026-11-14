@@ -141,3 +141,98 @@ func TestCodexPaneReportingASubagentKeepsItsConversationsRowUnderAnotherTitle(t 
 		t.Fatalf("the conversation is listed as %+v, want its pane's row", rows)
 	}
 }
+
+// The thread was renamed a minute after it started (Persona's rename goes to the app-server's thread/name/set), so
+// session_index.jsonl holds two lines for it and the node keeps the latest name. herdr names the thread; the pane's
+// title shows the earlier name, or the latest one with full-width bars in it. Either way the pane is the thread's row.
+func TestCodexPaneOfARenamedThreadKeepsItsRow(t *testing.T) {
+	for _, title := range []string{
+		"调研 合成浏览器操控能力 | repo",    // the name the thread was given first, which the title kept
+		"1114｜调研｜合成浏览器适配 | repo", // the latest name, with full-width bars
+		"[ . ] Action Required | 调研 合成浏览器操控能力 | repo",
+		"调研 合成浏览器... | repo", // the earlier name cut short
+	} {
+		t.Run(title, func(t *testing.T) {
+			n, home := testNode(t)
+			n.metas, n.bgScans, n.panes, n.panePIDs = map[string]quickMeta{}, map[string]*bgScan{}, map[string]string{}, map[string]panePID{}
+			const (
+				thread = "0a000000-0000-4000-8000-000000000031"
+				cwd    = "/work/repo"
+			)
+			now := time.Now()
+			writeRollout(t, home, thread, cwd, now, now, event("task_started"), event("task_complete"))
+			index := `{"id":"` + thread + `","thread_name":"调研 合成浏览器操控能力","updated_at":"2026-11-14T07:07:54Z"}` + "\n" +
+				`{"id":"` + thread + `","thread_name":"1114｜调研｜合成浏览器适配","updated_at":"2026-11-14T07:08:56Z"}` + "\n"
+			if err := os.WriteFile(filepath.Join(home, ".codex", "session_index.jsonl"), []byte(index), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			pane := host.Agent{Agent: "codex", PaneID: "w4:p1", TabID: "w4:t1", Cwd: cwd, ForegroundCwd: cwd, AgentStatus: proto.StatusIdle,
+				Title: title, AgentSession: &host.AgentSession{Kind: "id", Value: thread}}
+			n.setAgents([]host.Agent{pane})
+			if a, ok := n.agents[thread]; !ok || a.PaneID != "w4:p1" || len(n.agents) != 1 {
+				t.Fatalf("the pane shows %v, want %s", n.agents, thread)
+			}
+			rows := rowsOf(n, thread)
+			if len(rows) != 1 || rows[0].PaneID != "w4:p1" || rows[0].TabID != "w4:t1" {
+				t.Fatalf("the thread is listed as %+v, want its pane's row", rows)
+			}
+		})
+	}
+}
+
+// A name the reported thread never had is still no name of it: the /resume rule holds for a renamed thread too.
+func TestCodexPaneOfARenamedThreadUnderANameItNeverHadIsLeftOut(t *testing.T) {
+	n, home := testNode(t)
+	n.metas, n.bgScans, n.panes, n.panePIDs = map[string]quickMeta{}, map[string]*bgScan{}, map[string]string{}, map[string]panePID{}
+	const (
+		thread = "0a000000-0000-4000-8000-000000000041"
+		cwd    = "/work/repo"
+	)
+	now := time.Now()
+	writeRollout(t, home, thread, cwd, now, now, event("task_started"), event("task_complete"))
+	index := `{"id":"` + thread + `","thread_name":"先前的名字"}` + "\n" + `{"id":"` + thread + `","thread_name":"后来的名字"}` + "\n"
+	if err := os.WriteFile(filepath.Join(home, ".codex", "session_index.jsonl"), []byte(index), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pane := host.Agent{Agent: "codex", PaneID: "w4:p1", Cwd: cwd, ForegroundCwd: cwd, AgentStatus: proto.StatusIdle,
+		Title: "别的线程 | repo", AgentSession: &host.AgentSession{Kind: "id", Value: thread}}
+	n.setAgents([]host.Agent{pane})
+	if len(n.agents) != 0 {
+		t.Fatalf("the pane shows %v", n.agents)
+	}
+}
+
+// The reporter's setup: the renamed thread is joined on the app-server that runs it, and the title kept the first
+// name. The pane is the thread's one row, on the app-server route, with its terminal.
+func TestCodexPaneOfARenamedJoinedThreadKeepsItsRow(t *testing.T) {
+	n := remoteTestNode(t)
+	n.panes, n.panePIDs = map[string]string{}, map[string]panePID{}
+	home := canonicalCodexHome(filepath.Join(n.home, ".codex"), n.home)
+	const cwd = "/work/repo"
+	now := time.Now()
+	writeRollout(t, n.home, remoteRaw, cwd, now, now, event("task_started"), event("task_complete"))
+	connectRemoteFixture(t, n, home, "discovered-09b03a5e", remoteRaw)
+	codex := host.Agent{Agent: "codex", PaneID: "w4:p1", TabID: "w4:t1", WorkspaceID: "w4", Cwd: cwd, ForegroundCwd: cwd,
+		Title: "repo", AgentStatus: proto.StatusIdle, AgentSession: &host.AgentSession{Kind: "id", Value: remoteRaw}}
+	n.setAgents([]host.Agent{codex})
+	n.joinCodexPanes(context.Background())
+	waitFor(t, "joined", func() bool { return n.codexJoined(remoteRaw) })
+
+	index := `{"id":"` + remoteRaw + `","thread_name":"调研 合成浏览器操控能力"}` + "\n" +
+		`{"id":"` + remoteRaw + `","thread_name":"1114｜调研｜合成浏览器适配"}` + "\n"
+	if err := os.WriteFile(filepath.Join(home, "session_index.jsonl"), []byte(index), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	codex.Title = "调研 合成浏览器操控能力 | repo"
+	n.setAgents([]host.Agent{codex})
+
+	rows := rowsOf(n, remoteRaw)
+	if len(rows) != 1 {
+		t.Fatalf("%d rows for the pane's thread, want 1: %+v", len(rows), rows)
+	}
+	if s := rows[0]; s.PaneID != "w4:p1" || s.SourceKind != "" || s.CodexRoute != codexRouteAppServer ||
+		s.Capabilities == nil || !s.Capabilities.Terminal {
+		t.Errorf("the pane's thread: pane %q, source %q, route %q, capabilities %+v; want its pane's row with a terminal",
+			s.PaneID, s.SourceKind, s.CodexRoute, s.Capabilities)
+	}
+}
