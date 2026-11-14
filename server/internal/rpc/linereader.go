@@ -34,6 +34,7 @@ type lineReader struct {
 	seen       int      // how much of the unread part has no newline: a line read in several reads is searched once
 	parts      [][]byte // the full pieces of the line being read that came before buf
 	held       int      // their bytes
+	spent      bool     // buf was the last piece of a line of many: it goes to the GC, not back to grownBufs
 	err        error
 	token      []byte
 	owned      bool
@@ -42,7 +43,8 @@ type lineReader struct {
 // linePiece is the buffer from which a line is read in pieces, and the size of a piece: the largest buffer grownBufs
 // keeps. Up to it a line grows as before, by doubling through those pooled buffers (lines that long come often, and a
 // copy of a few hundred KiB costs less than putting pieces together); past it each doubling would copy megabytes into
-// a buffer the GC has to take back.
+// a buffer the GC has to take back. A line of two pieces (a file's 1 MiB chunk in base64 is 1.4 MiB) takes both from
+// grownBufs and gives both back, so the next one allocates only its line.
 const linePiece = lineStart << 6
 
 func newLineReader(r io.Reader, maximum int) *lineReader {
@@ -131,7 +133,7 @@ func (s *lineReader) Scan() bool {
 				// limit. Nothing is copied until the line is whole (line).
 				s.parts = append(s.parts, s.buf)
 				s.held += len(s.buf)
-				s.buf = make([]byte, min(s.piece, s.max-s.held))
+				s.buf, s.spent = takeGrown(min(s.piece, s.max-s.held)), false
 				s.start, s.end, s.seen = 0, 0, 0
 			} else {
 				// Out of the first buffer straight to four times it (64 KiB: a session list of a few dozen rows fits),
@@ -144,7 +146,7 @@ func (s *lineReader) Scan() bool {
 				grown := takeGrown(min(size, s.max))
 				copy(grown, s.buf[s.start:s.end])
 				if s.grown {
-					giveGrown(s.buf)
+					s.release()
 				}
 				s.buf, s.grown = grown, true
 				s.end -= s.start
@@ -187,14 +189,28 @@ func (s *lineReader) line(tail []byte) []byte {
 	return dropCR(whole)
 }
 
-// dropParts lets the pieces before buf go. The first is the buffer the line grew to before it went on in pieces, one
-// of grownBufs'; the others are left to the GC, as every buffer over linePiece was before: pooled, a 30 MB line's
-// would stay with the process until the second GC after it.
+// dropParts lets the pieces before buf go. A line of two pieces gives its first back to grownBufs here and its second
+// when the reader is through with it (release), for the next such line. A longer line's pieces all go to the GC, the
+// last one too (spent), as every buffer over linePiece did before: a pool keeps what it is given until the second
+// collection, so megabytes of a line that is over would stay through the one collection that follows a large body
+// (memtrim).
 func (s *lineReader) dropParts() {
-	if len(s.parts) > 0 {
+	switch len(s.parts) {
+	case 0:
+	case 1:
 		giveGrown(s.parts[0])
+	default:
+		s.spent = true
 	}
 	s.parts, s.held = nil, 0
+}
+
+// release lets a grown buf go, before another takes its place: back to grownBufs, unless it is spent.
+func (s *lineReader) release() {
+	if !s.spent {
+		giveGrown(s.buf)
+	}
+	s.spent = false
 }
 
 // shrink moves the unread part back into the first buffer and lets the grown one go.
@@ -203,7 +219,7 @@ func (s *lineReader) shrink() {
 		return
 	}
 	n := copy(s.first, s.buf[s.start:s.end])
-	giveGrown(s.buf)
+	s.release()
 	s.buf, s.grown, s.start, s.end = s.first, false, 0, n
 }
 
@@ -216,8 +232,8 @@ func dropCR(b []byte) []byte {
 
 // grownBufs keeps the buffers long lines grew to, 64 KiB to 1 MiB (a pool per size), for the next long line on any
 // connection: lines that long come often (a computer's session list), and only a few are being read at once. A buffer
-// of any other size, and the pieces of a longer line between its first and its last (dropParts), are left to the GC,
-// as a pool's are at every other GC.
+// of any other size, and the pieces of a line of more than two (dropParts), are left to the GC, as a pool's are at
+// every other GC.
 var grownBufs [5]sync.Pool
 
 func grownPool(size int) *sync.Pool {

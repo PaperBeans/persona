@@ -174,3 +174,79 @@ func TestLineReaderLongLineCutShort(t *testing.T) {
 			len(sc.Bytes()), sc.held, sc.grown)
 	}
 }
+
+// A line of many pieces leaves none of them in grownBufs: the one collection that follows a large body (memtrim)
+// gives all of it back, where a pool would keep what it was given until the second.
+func TestLineReaderLeavesNoPiecePooled(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the race detector's sync.Pool drops buffers at random")
+	}
+	const length = 21 << 20
+	data := append(append(bytes.Repeat([]byte("x"), length), '\n'), "next"...)
+	read := func() {
+		sc := newLineReader(&socketReads{data: data}, 64<<20)
+		if !sc.Scan() || len(sc.Bytes()) != length || !sc.Scan() || string(sc.Bytes()) != "next" || sc.Scan() || sc.Err() != nil {
+			t.Fatalf("a %d-byte line and a short one were not read: %v", length, sc.Err())
+		}
+	}
+	read()
+	before := liveHeap()
+	read()
+	var after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	// At most the small buffers the line grew through on its way to the first piece, if no collection came since.
+	if kept := int64(after.HeapAlloc) - int64(before); kept > linePiece {
+		t.Errorf("one collection after a %d-byte line left %d bytes, want under %d", length, kept, linePiece)
+	}
+	// And not one piece: the pool of that size is as empty after the line as before it.
+	pooled := func() (n int) {
+		for grownPool(linePiece).Get() != nil {
+			n++
+		}
+		return n
+	}
+	defer debug.SetGCPercent(debug.SetGCPercent(-1)) // a GC would empty the pool by itself
+	pooled()
+	read()
+	if n := pooled(); n != 0 {
+		t.Errorf("a %d-byte line left %d of its pieces in the pool", length, n)
+	}
+}
+
+// Lines of two pieces, one after another (a file's chunks), take their two buffers from grownBufs and give them back:
+// each costs its own buffer and no more.
+func TestLineReaderReusesTwoPieces(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the race detector's sync.Pool drops buffers at random")
+	}
+	const length, lines = linePiece + 400<<10, 8
+	data := bytes.Repeat(append(bytes.Repeat([]byte("x"), length), '\n'), lines)
+	read := func() {
+		sc := newLineReader(&socketReads{data: data}, 64<<20)
+		n := 0
+		for sc.Scan() {
+			if n++; len(sc.Bytes()) != length || !sc.Owned() {
+				t.Fatalf("line %d: %d bytes (owned: %v), want %d", n, len(sc.Bytes()), sc.Owned(), length)
+			}
+		}
+		if n != lines || sc.Err() != nil {
+			t.Fatalf("%d lines, %v; want %d", n, sc.Err(), lines)
+		}
+	}
+	var before, after runtime.MemStats
+	least := ^uint64(0)
+	func() {
+		defer debug.SetGCPercent(debug.SetGCPercent(-1)) // no GC empties grownBufs in the middle of a run
+		read()
+		for range 3 {
+			runtime.ReadMemStats(&before)
+			read()
+			runtime.ReadMemStats(&after)
+			least = min(least, after.TotalAlloc-before.TotalAlloc)
+		}
+	}()
+	if limit := uint64(lines*length + linePiece); least > limit {
+		t.Errorf("reading %d lines of %d bytes allocated %d bytes, over %d (the lines)", lines, length, least, limit)
+	}
+}
