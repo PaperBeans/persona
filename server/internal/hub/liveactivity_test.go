@@ -626,6 +626,8 @@ func TestPrefsChangeResends(t *testing.T) {
 type fleetPushSink struct {
 	mu  sync.Mutex
 	got []fleetPushCall
+	// answer, when set, answers a call instead of 200: a status (and body) the relay returns, or an error for no answer.
+	answer func(fleetPushCall) (status int, body string, err error)
 }
 
 type fleetPushCall struct {
@@ -646,8 +648,16 @@ func (s *fleetPushSink) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	s.mu.Lock()
 	s.got = append(s.got, call)
+	answer := s.answer
 	s.mu.Unlock()
-	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"ok":true}`)), Request: r}, nil
+	status, body := http.StatusOK, `{"ok":true}`
+	if answer != nil {
+		var err error
+		if status, body, err = answer(call); err != nil {
+			return nil, err
+		}
+	}
+	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 }
 
 func (s *fleetPushSink) count(device, kind, event string) int {

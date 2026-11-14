@@ -2,6 +2,9 @@ package hub
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net/http"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -196,4 +199,93 @@ func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
 			}
 		})
 	})
+}
+
+// What came of a start decides its hold (#7641 review). Accepted, or no answer at all (APNs may have taken it): the
+// next start waits for the phone or fleetMaxAge. Refused by APNs or the relay (any status but 200, 410 included): there
+// is no card to hold for, so the next round starts again once the rolling cooldown is over, as before #7641.
+func TestFleetStartOutcomeDecidesTheHold(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		status   int
+		body     string
+		err      error
+		wantHold time.Duration
+	}{
+		{"accepted", http.StatusOK, `{"ok":true}`, nil, fleetMaxAge},
+		{"no answer", 0, "", errors.New("connection reset after the request was written"), fleetMaxAge},
+		{"relay refused", http.StatusUnprocessableEntity, `{"error":"apns 400","reason":"BadDeviceToken"}`, nil, fleetRefresh},
+		{"APNs unavailable", http.StatusBadGateway, `{"error":"apns 503","reason":"ServiceUnavailable"}`, nil, fleetRefresh},
+		{"relay rejects the payload", http.StatusBadRequest, `{"error":"bad aps key"}`, nil, fleetRefresh},
+		{"token gone", http.StatusGone, `{"reason":"ExpiredToken"}`, nil, fleetRefresh},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				h, sink, stop := localFleetLoopWith(t, func(h *Hub) { h.push.retryWaits = nil })
+				defer stop()
+				store := h.store.(*fleetStartStore)
+				sink.mu.Lock()
+				sink.answer = func(call fleetPushCall) (int, string, error) {
+					if call.event != "start" {
+						return http.StatusOK, `{"ok":true}`, nil
+					}
+					return tc.status, tc.body, tc.err
+				}
+				sink.mu.Unlock()
+				h.live.update("phone", func(v *db.LiveActivity) { v.ActivityID, v.PushToken = "", "" })
+				reportLive(t, h, fleetWorking, FleetStats{})
+				elapse(fleetCoalesce)
+				if got := fleetStarts(sink); got != 1 {
+					t.Fatalf("starts: %d, want 1", got)
+				}
+				store.mu.Lock()
+				hold := store.due["phone"].Sub(store.claimed["phone"])
+				store.mu.Unlock()
+				if hold != tc.wantHold {
+					t.Fatalf("next start held for %v after the start, want %v", hold, tc.wantHold)
+				}
+				// The round is the same past the cooldown: one start per round either way.
+				elapse(fleetRefresh + time.Minute)
+				if got := fleetStarts(sink); got != 1 {
+					t.Fatalf("same round past the cooldown: %d starts, want 1", got)
+				}
+				// The agent ends; a request arrives: the next round, 10 minutes after the start's cooldown ran out.
+				if tc.status == http.StatusGone { // the phone hands the hub its new push-to-start token
+					h.live.update("phone", func(v *db.LiveActivity) { v.PushToStartToken = "phone-start-2" })
+				}
+				reportLive(t, h, FleetState{}, FleetStats{})
+				elapse(fleetEndAfter + 30*time.Second)
+				reportLive(t, h, fleetAsking, FleetStats{})
+				elapse(fleetCoalesce)
+				want := 1
+				if tc.wantHold == fleetRefresh {
+					want = 2
+				}
+				if got := fleetStarts(sink); got != want {
+					t.Fatalf("next round: %d starts, want %d", got, want)
+				}
+			})
+		})
+	}
+}
+
+// sendFailure tells a start that never reached APNs (never sent, or refused with a status) from one nobody answered.
+func TestSendFailureOutcome(t *testing.T) {
+	refused := &relayRefusal{status: http.StatusUnprocessableEntity, msg: "apns 400", reason: "BadDeviceToken"}
+	for _, tc := range []struct {
+		name string
+		err  error
+		want pushOutcome
+	}{
+		{"registration changed", errRegistrationChanged, pushRefused},
+		{"request not made", fmt.Errorf("%w: %v", errNotSent, errors.New("bad URL")), pushRefused},
+		{"relay status", refused, pushRefused},
+		{"relay status after retries", fmt.Errorf("%w (%d tries)", refused, 3), pushRefused},
+		{"grant renewal failed", fmt.Errorf("%w; renewing the grant: %v", &relayRefusal{status: http.StatusUnauthorized}, errors.New("register: 500")), pushRefused},
+		{"no answer", fmt.Errorf("%w (%d tries)", errors.New("i/o timeout"), 3), pushUnknown},
+	} {
+		if got := sendFailure(tc.err); got != tc.want {
+			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		}
+	}
 }

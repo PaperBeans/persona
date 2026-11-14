@@ -490,8 +490,12 @@ update token never comes back, and the hub can neither update nor end it: it goe
 update or end). Hold the next start until the phone answers (a reported update token, its app connecting) or for as
 long as an activity can run, and keep the hold with the start budget so a restart or the other slot sees it. Put the
 hold on before sending, so an answer that follows at once is what lifts it; a claimed start that was not sent keeps
-only the cooldown. A test that never reports a token models this case, not the usual one: have the phone answer where
-the test is about the cooldown. The hub's update and end paths were fine all along; check them with a token before
+only the cooldown. Hold only what may be on screen: a start APNs or the relay refused (any status but 200) put up
+nothing, so lift the hold when that answer comes, or the phone that cannot reach the hub goes 8 hours without an
+activity; only a start with no answer at all is in doubt and keeps it. Keep the send's outcome typed (refused, not
+sent, no answer) rather than a log line, since the transport's retries already blur "failed" into one error. A test
+that never reports a token models this case, not the usual one: have the phone answer where the test is about the
+cooldown. The hub's update and end paths were fine all along; check them with a token before
 looking for a lost push.
 
 ## A custom HTTPS dial must opt into HTTP/2 (#1620)

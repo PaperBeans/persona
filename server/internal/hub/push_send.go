@@ -2,6 +2,7 @@ package hub
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"time"
@@ -122,8 +123,33 @@ func (p *Pusher) sendFromTo(manager string, build localized, collapseID string, 
 // not sealed: iOS reads a Live Activity's content-state itself (docs/operations/push-relay.md "Live Activities are plaintext").
 // The returned channel closes after the attempt and its retries, so revocation can wait before forgetting the device.
 func (p *Pusher) sendLiveActivity(d Device, token string, payload map[string]any, priority string, gone func()) <-chan struct{} {
+	return p.sendLiveActivityThen(d, token, payload, priority, gone, nil)
+}
+
+// pushOutcome is what came of one push once its retries are over.
+type pushOutcome int
+
+const (
+	pushAccepted pushOutcome = iota // APNs took it (directly, or the relay said it did)
+	// pushRefused: it was never sent, or APNs or the relay answered with a status other than 200 (410 included): it
+	// is not on the phone.
+	pushRefused
+	// pushUnknown: no answer at all (a network error or timeout on the last try), so it may have reached APNs all the
+	// same and be on the phone.
+	pushUnknown
+)
+
+// sendLiveActivityThen is sendLiveActivity that tells outcome (nil: nobody) what came of the push, before the returned
+// channel closes. It runs on the push's own goroutine, or on the caller's when nothing is sent.
+func (p *Pusher) sendLiveActivityThen(d Device, token string, payload map[string]any, priority string, gone func(), outcome func(pushOutcome)) <-chan struct{} {
 	done := make(chan struct{})
+	tell := func(o pushOutcome) {
+		if outcome != nil {
+			outcome(o)
+		}
+	}
 	if p == nil || token == "" || !p.reachable(d) {
+		tell(pushRefused)
 		close(done)
 		return done
 	}
@@ -137,10 +163,15 @@ func (p *Pusher) sendLiveActivity(d Device, token string, payload map[string]any
 			started := time.Now()
 			res, err := p.postRelay(d, relayproto.PushRequest{Type: "liveactivity", Priority: priority, Token: token, APS: aps})
 			p.noteRelayResult(d, nil, event, err, res.gone, int64(len(body)), time.Since(started))
-			if err != nil {
+			switch {
+			case err != nil:
 				p.logf("relay live activity %s: %v", d.Name, err)
-			} else if res.gone {
+				tell(sendFailure(err))
+			case res.gone:
 				gone()
+				tell(pushRefused)
+			default:
+				tell(pushAccepted)
 			}
 		}()
 		return done
@@ -153,6 +184,7 @@ func (p *Pusher) sendLiveActivity(d Device, token string, payload map[string]any
 		p.noteDirectResult(d, nil, event, err, res.Status, int64(len(body)), time.Since(started))
 		if err != nil {
 			p.logf("apns live activity %s: %v", d.Name, err)
+			tell(sendFailure(err))
 			return
 		}
 		if res.Status != 200 {
@@ -160,9 +192,22 @@ func (p *Pusher) sendLiveActivity(d Device, token string, payload map[string]any
 			if res.Gone() {
 				gone()
 			}
+			tell(pushRefused)
+			return
 		}
+		tell(pushAccepted)
 	}()
 	return done
+}
+
+// sendFailure is the outcome of a send that returned err: refused when it was never sent or the relay answered with a
+// status (relayRefusal), unknown when nothing answered.
+func sendFailure(err error) pushOutcome {
+	var refusal *relayRefusal
+	if errors.Is(err, errNotSent) || errors.As(err, &refusal) {
+		return pushRefused
+	}
+	return pushUnknown
 }
 
 // wakeDevices sends a silent background push to the devices in ids: iOS gives the app ~30 s to connect and run a
