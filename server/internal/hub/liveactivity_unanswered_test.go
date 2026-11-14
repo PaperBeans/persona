@@ -1,0 +1,191 @@
+package hub
+
+import (
+	"context"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/nwverse/persona/server/internal/db"
+)
+
+var (
+	fleetWorking = FleetState{Phase: "working", Working: 1, Items: []FleetItem{{ID: "m/a", Title: "upgrade", Kind: "working"}}}
+	fleetAsking  = FleetState{Phase: "needsYou", NeedsYou: 1, Items: []FleetItem{{ID: "m/b", Title: "todo", Kind: "permission", Interaction: "ix1"}}}
+)
+
+// restartFleetLoop replaces the hub's Live Activity manager with a new one over the same store, as a hub restart or a
+// blue-green switch does: what each device shows, the round and who was started in it are gone.
+func restartFleetLoop(t *testing.T, h *Hub, stop func()) func() {
+	t.Helper()
+	stop()
+	h.live = newLiveActivities(h)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); h.live.run(ctx) }()
+	synctest.Wait()
+	return func() { cancel(); <-done }
+}
+
+func fleetStarts(sink *fleetPushSink) int { return sink.count("phone", "liveactivity", "start") }
+
+// A push-started activity whose update token the phone reported follows the fleet as before: the agent it lists
+// ending and the card it shows being answered end it, across a hub restart too, and start nothing more.
+func TestFleetPushStartedActivityFollowsFleet(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		shown   FleetState
+		restart bool
+	}{
+		{"agent ends", fleetWorking, false},
+		{"card answered", fleetAsking, false},
+		{"agent ends across a restart", fleetWorking, true},
+		{"card answered across a restart", fleetAsking, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				h, sink, stop := localFleetLoop(t)
+				defer func() { stop() }()
+				h.live.update("phone", func(v *db.LiveActivity) { v.ActivityID, v.PushToken = "", "" })
+				reportLive(t, h, tc.shown, FleetStats{})
+				time.Sleep(fleetCoalesce)
+				synctest.Wait()
+				if got := fleetStarts(sink); got != 1 {
+					t.Fatalf("starts: %d, want 1", got)
+				}
+				// The app, woken by the start, reports the new activity's token.
+				h.live.update("phone", func(v *db.LiveActivity) {
+					v.ActivityID, v.PushToken, v.StartedAt = "started", "phone-started", time.Now()
+				})
+				synctest.Wait()
+				if tc.restart {
+					stop = restartFleetLoop(t, h, stop)
+				}
+				reportLive(t, h, FleetState{}, FleetStats{})
+				time.Sleep(fleetEndAfter + 30*time.Second)
+				synctest.Wait()
+				if got := sink.count("phone", "liveactivity", "end"); got != 1 {
+					t.Fatalf("the activity was not ended: %d end pushes", got)
+				}
+				if got := fleetStarts(sink); got != 1 {
+					t.Fatalf("starts after the end: %d, want 1", got)
+				}
+			})
+		})
+	}
+}
+
+// A push-start the phone never answered (#7641: no update token came back, so the hub can neither update nor end
+// that activity) holds the next one: none in the same round after a restart, none in the next round. A token report,
+// the app connecting, or fleetMaxAge lifts it, and the store keeps both the hold and the lift across restarts.
+func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
+	// unanswered leaves a start nobody answered and, a restart and a round later, a request waiting.
+	unanswered := func(t *testing.T) (h *Hub, sink *fleetPushSink, stop func(), started time.Time) {
+		h, sink, stop = localFleetLoop(t)
+		h.live.update("phone", func(v *db.LiveActivity) { v.ActivityID, v.PushToken = "", "" })
+		reportLive(t, h, fleetWorking, FleetStats{})
+		time.Sleep(fleetCoalesce)
+		synctest.Wait()
+		started = time.Now()
+		if got := fleetStarts(sink); got != 1 {
+			t.Fatalf("starts: %d, want 1", got)
+		}
+		// Same round, past the rolling cooldown, on a hub that restarted (or the other slot).
+		time.Sleep(fleetRefresh + time.Minute)
+		stop = restartFleetLoop(t, h, stop)
+		time.Sleep(fleetCoalesce)
+		synctest.Wait()
+		if got := fleetStarts(sink); got != 1 {
+			t.Fatalf("restart in the same round: %d starts, want 1", got)
+		}
+		// The agent ends; later a request arrives: a new round.
+		reportLive(t, h, FleetState{}, FleetStats{})
+		time.Sleep(fleetRefresh)
+		synctest.Wait()
+		reportLive(t, h, fleetAsking, FleetStats{})
+		time.Sleep(fleetCoalesce)
+		synctest.Wait()
+		if got := fleetStarts(sink); got != 1 {
+			t.Fatalf("next round: %d starts, want 1", got)
+		}
+		if n := sink.count("phone", "liveactivity", "update") + sink.count("phone", "liveactivity", "end"); n != 0 {
+			t.Fatalf("pushes to an activity without a token: %d", n)
+		}
+		return h, sink, stop, started
+	}
+
+	t.Run("token report", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			h, sink, stop, _ := unanswered(t)
+			defer func() { stop() }()
+			h.live.update("phone", func(v *db.LiveActivity) {
+				v.ActivityID, v.PushToken, v.StartedAt = "started", "phone-started", time.Now()
+			})
+			time.Sleep(20 * time.Second) // the next tick refreshes an activity the hub has pushed nothing to
+			synctest.Wait()
+			if got := sink.count("phone", "liveactivity", "update"); got != 1 {
+				t.Fatalf("the reported activity got %d updates, want 1", got)
+			}
+			reportLive(t, h, FleetState{}, FleetStats{}) // answered: the activity ends
+			time.Sleep(fleetEndAfter + 30*time.Second)
+			synctest.Wait()
+			if got := sink.count("phone", "liveactivity", "end"); got != 1 {
+				t.Fatalf("ends: %d, want 1", got)
+			}
+			stop = restartFleetLoop(t, h, stop)
+			reportLive(t, h, fleetWorking, FleetStats{})
+			time.Sleep(fleetCoalesce)
+			synctest.Wait()
+			if got := fleetStarts(sink); got != 2 {
+				t.Fatalf("after the phone reported a token: %d starts, want 2", got)
+			}
+		})
+	})
+
+	t.Run("app connects", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			h, sink, stop, _ := unanswered(t)
+			defer func() { stop() }()
+			reportLive(t, h, FleetState{}, FleetStats{})
+			time.Sleep(fleetCoalesce)
+			synctest.Wait()
+			app := &client{hub: h, device: "credential-ios", role: roleFull, out: make(chan []byte, 64), clean: true}
+			addTestClient(h, app)
+			h.onClientMessage(context.Background(), app, []byte(`{"type":"register_phone","device_id":"phone","tools":[]}`))
+			synctest.Wait()
+			h.dropClient(app)
+			synctest.Wait()
+			stop = restartFleetLoop(t, h, stop)
+			reportLive(t, h, fleetWorking, FleetStats{})
+			time.Sleep(fleetCoalesce)
+			synctest.Wait()
+			if got := fleetStarts(sink); got != 2 {
+				t.Fatalf("after the app connected: %d starts, want 2", got)
+			}
+		})
+	})
+
+	t.Run("fleetMaxAge", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			h, sink, stop, started := unanswered(t)
+			defer func() { stop() }()
+			time.Sleep(time.Until(started.Add(fleetMaxAge - time.Minute)))
+			synctest.Wait()
+			if got := fleetStarts(sink); got != 1 {
+				t.Fatalf("before fleetMaxAge: %d starts, want 1", got)
+			}
+			stop = restartFleetLoop(t, h, stop)
+			time.Sleep(2 * time.Minute)
+			synctest.Wait()
+			if got := fleetStarts(sink); got != 2 {
+				t.Fatalf("after fleetMaxAge: %d starts, want 2", got)
+			}
+			sink.mu.Lock()
+			last := sink.got[len(sink.got)-1]
+			sink.mu.Unlock()
+			if last.event != "start" || last.state.NeedsYou != 1 {
+				t.Fatalf("the start after the hold: %+v, want the request still waiting", last)
+			}
+		})
+	})
+}

@@ -197,6 +197,7 @@ type Store interface {
 	LiveActivities(ctx context.Context) ([]db.LiveActivity, error)
 	SaveLiveActivity(ctx context.Context, v db.LiveActivity) error
 	ClaimLiveActivityStart(ctx context.Context, device, startToken string, at time.Time, cooldown, maxAge time.Duration) (time.Time, bool, error)
+	HoldLiveActivityStart(ctx context.Context, device string, hold time.Duration) error
 	Setting(ctx context.Context, key string, out any) (bool, error)
 	PutSetting(ctx context.Context, key string, v any) error
 	TakeSetting(ctx context.Context, key string, out any) (bool, error)

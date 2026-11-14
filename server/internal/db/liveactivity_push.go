@@ -59,3 +59,13 @@ func (d *DB) ClaimLiveActivityStart(ctx context.Context, device, startToken stri
 	}
 	return due, true, nil
 }
+
+// HoldLiveActivityStart sets how long after the last claimed start the next one may be claimed. The hub holds it for
+// as long as an activity can run once it has sent a start, since that activity may be up where no update reaches it,
+// and puts the cooldown back when the phone answers. A device without a claim has nothing to hold.
+func (d *DB) HoldLiveActivityStart(ctx context.Context, device string, hold time.Duration) error {
+	_, err := d.pool.Exec(ctx, `UPDATE live_activity_start_budget
+		SET next_start_at = claimed_at + $2 * interval '1 microsecond'
+		WHERE device_id = $1 AND next_start_at <> claimed_at + $2 * interval '1 microsecond'`, device, hold.Microseconds())
+	return err
+}

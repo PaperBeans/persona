@@ -31,6 +31,11 @@ func (s *registrationErrorStore) SaveLiveActivity(ctx context.Context, v db.Live
 	return s.activity(ctx, v)
 }
 
+// A reported token also lifts the hold on the next push-start (#7641): not what these tests fail.
+func (s *registrationErrorStore) HoldLiveActivityStart(context.Context, string, time.Duration) error {
+	return nil
+}
+
 func TestDeviceRegistrationSaveFailure(t *testing.T) {
 	h := newTestHub(t)
 	mux := h.routes()

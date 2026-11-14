@@ -166,14 +166,32 @@ func (f *fakeAPNs) calls(t *testing.T, n int) []apnsCall {
 // Real transaction/row-lock behavior is covered by db.TestLiveActivityStartBudget.
 type fleetStartStore struct {
 	Store
-	mu   sync.Mutex
-	rows map[string]db.LiveActivity
-	due  map[string]time.Time
-	fail bool
+	mu      sync.Mutex
+	rows    map[string]db.LiveActivity
+	due     map[string]time.Time
+	claimed map[string]time.Time
+	fail    bool
 }
 
 func newFleetStartStore() *fleetStartStore {
-	return &fleetStartStore{rows: map[string]db.LiveActivity{}, due: map[string]time.Time{}}
+	return &fleetStartStore{rows: map[string]db.LiveActivity{}, due: map[string]time.Time{}, claimed: map[string]time.Time{}}
+}
+
+func (s *fleetStartStore) HoldLiveActivityStart(_ context.Context, device string, hold time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fail {
+		return fmt.Errorf("injected hold persistence failure")
+	}
+	if at, ok := s.claimed[device]; ok {
+		s.due[device] = at.Add(hold)
+	}
+	return nil
+}
+
+// A phone registering over its socket saves its tools: nothing these tests read.
+func (s *fleetStartStore) ReplacePhoneTools(context.Context, db.PhoneToolRegistration) error {
+	return nil
 }
 
 func (s *fleetStartStore) SaveLiveActivity(_ context.Context, v db.LiveActivity) error {
@@ -206,7 +224,7 @@ func (s *fleetStartStore) ClaimLiveActivityStart(_ context.Context, device, toke
 	if due := s.due[device]; at.Before(due) {
 		return due, false, nil
 	}
-	s.due[device] = at.Add(cooldown)
+	s.claimed[device], s.due[device] = at, at.Add(cooldown)
 	return s.due[device], true, nil
 }
 
@@ -288,6 +306,9 @@ func TestFleetStartAcrossFiveEpisodes(t *testing.T) {
 		if got := sink.count("phone", "liveactivity", "start"); got != 1 {
 			t.Fatalf("after: five episodes produced %d starts, want 1", got)
 		}
+		// The phone answers that start (its app connected): the next waits for the rolling cooldown alone. Unanswered,
+		// it would wait for fleetMaxAge (#7641, TestFleetUnansweredStartHoldsTheNext).
+		h.live.phoneAnswered(context.Background(), "phone")
 		// The timer reads the newest active state, not any of the five old ones.
 		h.live = newLiveActivities(h)
 		reportLive(t, h, FleetState{Phase: "working", Working: 9}, FleetStats{})
@@ -330,6 +351,8 @@ func TestFleetDeferredStartCancellation(t *testing.T) {
 				reportLive(t, h, FleetState{Phase: "working", Working: 1}, FleetStats{})
 				time.Sleep(fleetCoalesce)
 				synctest.Wait()
+				// Answered: the next round's start is the one the cooldown defers, not one held for fleetMaxAge (#7641).
+				h.live.phoneAnswered(context.Background(), "phone")
 				reportLive(t, h, FleetState{Phase: "done"}, FleetStats{})
 				time.Sleep(fleetCoalesce)
 				synctest.Wait()
@@ -379,6 +402,9 @@ func TestFleetStartRestartAndConcurrentInstances(t *testing.T) {
 		if got := sink.count("phone", "liveactivity", "start"); got != 1 {
 			t.Fatalf("concurrent instances started %d times", got)
 		}
+		// Answered, so that what follows is the rolling cooldown: unanswered, a start holds the next for fleetMaxAge
+		// across a restart too (#7641, TestFleetUnansweredStartHoldsTheNext).
+		h.live.phoneAnswered(context.Background(), "phone")
 		// Reconstruct all ephemeral state and run with no further fleet changes:
 		// startup must recover the due time from Postgres and eventually flush.
 		h.live = newLiveActivities(h)
