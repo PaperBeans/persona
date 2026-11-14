@@ -1,5 +1,12 @@
 # Lessons: hub / node and networking
 
+## An empty list sent as null means "no change" to an optional field (2026-11-14)
+
+The node reads node.configure's `claude_dirs_blocked` as `*[]string`: absent or `null` leaves its patterns as they are.
+Go marshals a nil slice as `null`, so lifting the last blocked pattern stored none on the hub but left the node blocking
+the directory, and its sessions stayed hidden. A field where null means "leave it" must be sent as `[]` when it is
+empty, and a fake peer in a test must read null the way the real one does, or it hides exactly this.
+
 ## Nothing on a handshake path may wait on system_profiler (2026-11-13, #6028)
 
 `sysmon.ReadSystem` ran `system_profiler SPHardwareDataType` for the Mac's model name, under a 10 s timeout, on the

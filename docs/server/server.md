@@ -50,6 +50,7 @@ The hub and the managers apart:
 | `internal/nodeclient` | The client side of `node.sock` for hook / mcp / ask / notify / tool |
 | `internal/apns` | APNs client (.p 8 key, provider token, single push), shared by direct hub and relay |
 | `internal/pushcrypto` | Push-body encryption with phone public key (HPKE), `docs/operations/push-relay.md` |
+| `internal/webpush` | The hub's Web Push to browsers: VAPID signing and RFC 8291 message encryption, `docs/web/web.md` "Web Push" |
 | `internal/relay` | Publisher-run personad relay, `docs/operations/push-relay.md` |
 | `internal/tunnel` | Tailcat node key / endpoint, hub dialing, new-binary transfer over tailcat (“Tailcat hole punching” below) |
 
@@ -105,6 +106,23 @@ Foreground suppression applies to both activity updates and push-to-start; a sta
 suppressed in the foreground remains eligible after the last matching phone socket
 leaves. Important interaction alerts and the existing urgent activity fast path
 remain unchanged.
+
+## Calls to computers in the log (#7509)
+
+The hub's calls to a node (`devices.Machine.call`, `devices/calllog.go`) leave one line each in the hub's journal
+when they fail (a quick cancel excepted), and when they work but are slow (2 s and more), are a session start, or are
+the sampled one in 200 per computer. `result` is `ok`, `deadline` (the wait ran out), `canceled`, `closed` (the
+connection closed; `sent=true` means the request was out and the node may have done it), `offline` (no connection to
+send it on) or `error` (the node answered with an error; `code` when it has one).
+
+```text
+[m1] rpc call method=session.start result=closed took=1m2.31s via=ssh sent=true err="rpc: connection closed"
+[m1] connection over ssh closed with 2 call(s) out: ping, session.start (reason: "node exited")
+[m1] connection ended: via=ssh lasted=3h2m1s planned=false restarting=false reason="node exited"
+[m1] connected over ssh: … (trigger: reconnect after 1m58s down; the ssh connection ended: node exited)
+```
+
+`journalctl -u jarvisd | grep "rpc call"` lists them; filter on `result=` and `method=`.
 
 ## Connecting to herdr
 

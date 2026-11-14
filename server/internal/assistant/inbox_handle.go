@@ -135,10 +135,11 @@ func (b *inboxBook) closeHandling(it *InboxItem, why string, now time.Time) bool
 }
 
 // ownSend: the source says the newest message of the item is the user's, and it is a reply Persona sent (nothing came
-// in since): not a separate reply the user made in the source. Under b.mu.
+// in since): not a separate reply the user made in the source. SentOf still proves this after a due check or another
+// wake has temporarily moved handling out of waiting. Under b.mu.
 func ownSend(it *InboxItem, last string) bool {
-	a, h := it.Agent, it.Handling
-	return a != nil && h != nil && h.State == HandlingWaiting && a.SentOf != "" && a.SentOf == it.Last && (last == "" || last == it.Last)
+	a := it.Agent
+	return a != nil && it.Handling != nil && a.SentOf != "" && a.SentOf == it.Last && (last == "" || last == it.Last)
 }
 
 // escalate hands the manager its work, under b.mu: a newly triaged Needs you event (recent) gets a processing
@@ -282,8 +283,11 @@ func (s *Service) deliverNotes(ctx context.Context, it *InboxItem) {
 		case err == nil:
 			a.keepToldSince(told) // the notes told while it was sent go next time
 			if wake {
-				t := now.UTC()
-				a.Wake, a.StartedAt = false, &t
+				a.Wake = false
+				if it.Handling == nil || it.Handling.State != HandlingAgent {
+					t := now.UTC()
+					a.StartedAt = &t
+				}
 			}
 		case gone:
 			a.Lost = append(a.Lost, sid)
