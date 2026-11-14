@@ -535,19 +535,33 @@ advertises `screen_video`, which a node does once it has the helper (the picture
 otherwise). The web, the Mac app and Android don't decode video yet: they keep RFB and show no switcher (the web's is
 behind `webVideo.plays` in `web/src/screen/video.ts`).
 
-- **Persona Screen** (`apple/PersonaLink/Sources/PersonaScreen`, `apple/Packages/PersonaScreenKit`): a Swift helper app inside
+- **Persona Screen** (`apple/PersonaLink/Sources/PersonaScreen`, `apple/Packages/PersonaScreenCore`): a Swift helper app inside
   Persona Link.app (`Contents/Helpers/Persona Screen.app`, bundle id `<link id>.screen`) that captures one display
   with ScreenCaptureKit and encodes it with VideoToolbox (HEVC Main, else H.264 High). It is an app bundle so its
   Screen Recording grant is its own, not the node's: the node starts it through LaunchServices
   (`open -g -n <helper> --args --socket <path> --token <t>`), and it connects back over a 0600 Unix socket, one
-  per stream, whose first line is the token. `mac-link.sh` builds it the same way every time (no timestamp), so an
-  unchanged helper keeps its ad-hoc signature, and its grant, across Persona Link updates. `--request-permission` calls `CGRequestScreenCaptureAccess()` and exits;
+  per stream, whose first line is the token.
+  - **Keeping its grant** (#7927): signed ad hoc, macOS holds the grant to the helper's exact bytes. So the helper is
+    built only from `PersonaScreenCore` (the wire, `CapturePlan`, `CaptureTick`, `HelperArguments`, `ScreenSource`,
+    `RateController`, `Refinement`, `Timing` and `CaptureConfigGate`), never from the rest of `PersonaScreenKit` (the
+    route session, the quality tiers), which changes far more often. `mac-link.sh` builds it with `swift build -c
+    release`, linked with `-S` (no debug symbols, so no checkout paths), and keeps the executable by a hash of its
+    sources, `PersonaScreenCore`'s, its Info.plist template and the architectures
+    (`~/.persona/cache/persona-screen`). Every later Persona Link build reuses it byte for byte until those change,
+    as it does for Persona Input. `mac-link.sh verify-screen` checks that two clean copies at different paths build
+    the same executable and cdhash. With a certificate set (`mac.link_signing_identity`,
+    `docs/operations/persona-link-install.md`) both helpers are signed with it, and their grants follow the certificate
+    across any change.
+  - `--request-permission` calls `CGRequestScreenCaptureAccess()` and exits;
   `--preflight` prints whether Screen Recording is granted without asking (`CGPreflightScreenCaptureAccess()`), which
   the node reports as `screen_video.permission`.
   - **Capture** (`ScreenCaptureSource`): the encoder settings gate ① measured (`RealTime`, low-latency rate control,
     no frame reordering, `MaxFrameDelayCount` 0, capture queue depth 3, NV12 straight into the encoder; ≈5 ms p50 and
     ≈10 ms p95 from a screen change to an encoded frame at 1080p60). The picture's long edge is at most `start.max_size`
     (never upscaled, even sides), the frame rate 1–60, and a keyframe comes at least every 10 s and whenever asked.
+    A configuration change (an `update`'s frame rate or size) made before `startCapture` has completed waits and is
+    applied from its completion (`CaptureConfigGate`, #7856): ScreenCaptureKit would keep the stream's first
+    configuration, so a client's first tier, which comes right after `hello`, never took effect.
   - **Messages**: `start` gets `hello` (codec, display, size, and `features` from a helper that has more, `tiers` for #6396's
     quality tiers), then `format` and a keyframe; `format` again whenever the
     parameter sets change. A still screen gives no frames, so a `heartbeat` goes out each second nothing did. Each
@@ -589,12 +603,14 @@ behind `webVideo.plays` in `web/src/screen/video.ts`).
   stream can bind video to it by guessing. Hubs and nodes from before the video channel ignore the parameter.
 - **Wire** (length-prefixed messages: u32 big-endian length, u8 type, body). Helper → phone: `hello`, `format`,
   `frame`, `heartbeat`, `paused`, `resumed`, `timing`, `encoding`. Phone → helper: `start`, `report`, `keyframe`, `update`. Unknown types
-  are skipped by length, so either side may add more. `PersonaScreenKit` (`apple/Packages/PersonaScreenKit`, its own
-  package for macOS and iOS) is the codec, shared by the helper and the app's client. `update.path`
+  are skipped by length, so either side may add more. `PersonaScreenCore` (`apple/Packages/PersonaScreenCore`, its own
+  package for macOS and iOS) is the codec, shared by the helper and the app's client through `PersonaScreenKit`
+  (`apple/Packages/PersonaScreenKit`), which re-exports it. `update.path`
   `{kind, via, min_rtt_ms}` (#6398) says the stream moved to another network route, so the helper can start its delay
   baseline again (#6396); helpers that don't know the field skip it. `kind` (`lan`, `tailscale`, `ipv6`, `relay`) and
   `via` (the phone's `wifi`, `cellular`, `wired` or `other` interface) name the cases of `LinkStats`, the route
-  measurement the route choice and the quality tiers share (`LinkStats.swift`, with `PathChange`).
+  measurement the route choice and the quality tiers share (`LinkStats.swift`, with `PathChange` and the
+  `UpdateMessage.Path` conversions, in `PersonaScreenKit`: the helper only carries the strings).
 - **Adaptation** (`RateController`): the phone reports when each frame arrived; the helper turns that into a queueing
   delay and cuts the bitrate 30% over 150 ms, skips frames over 500 ms, and raises it 10% under 50 ms for 2 s. The
   delay is measured above the lowest one-way delay of the last 10 s, so the phone's and the Mac's clocks needn't agree.
@@ -826,7 +842,8 @@ iPhone's side comes next.
   transports per session. Its pongs carry the TCP packets retransmitted and sent on it since the last pong (macOS
   `TCP_CONNECTION_INFO`, Linux `TCP_INFO`), the phone's measure of loss. When macOS's application firewall is on and the
   node isn't explicitly allowed through it (read with `socketfilterfw`, at most once a minute, never changed), the node
-  doesn't listen and `paths` says `unavailable: "firewall"`, so no prompt appears on the Mac.
+  doesn't listen and `paths` says `unavailable: "firewall"`, so no prompt appears on the Mac. Beside the TCP listener the
+  node opens a UDP socket on each candidate address for the video over UDP ("Video over UDP (#7873)" below).
 - **The phone's side** (`PersonaScreenKit`, pure and tested with `swift test`): `ScreenLinkMessage` frames the wire
   exactly as the node does (both check `spec/fixtures/screen-link`); `LinkReceiver` / `LinkSender` keep each channel's
   offsets (bytes once and in order, what the node hasn't acknowledged kept within a window); `VideoMessageAssembler`
@@ -873,6 +890,52 @@ iPhone's side comes next.
 - **Rejoining**: a relay that dropped while the session went on (a hub restart, the phone changing networks) is opened
   again with the same `pair` and `attach=1`; the node attaches it to the live session instead of dialing Screen Sharing
   or starting Persona Screen again (`session_gone`, 410 at the hub, when there is none). The phone then sends `use`.
+
+### Video over UDP (#7873)
+
+On a direct route (same network or Tailscale), the live screen's video can ride a UDP flow instead of the route's TLS
+connection, so a lost packet delays only the frame it belongs to, usually by no round trip, and never slows the stream
+by itself ([#7873](https://github.com/nwverse/persona/issues/7873) has the design and the shaped-link numbers it rests
+on). The node's end is `internal/screenlink` (`udp.go`, `udp_wire.go`, `rs.go`); the shared cases are
+`spec/fixtures/screen-udp`. In place: the node's side, offered in `paths` as `"udp": 1`. The iPhone's side comes
+next; until then no phone opens a flow, and nothing changes for anyone.
+
+- **What rides it**: only the video channel's bytes from the node to the phone, plus the phone's acknowledgements,
+  requests to send again, give-ups and pings for it. RFB, the phone's video messages (`start`, `report`, `keyframe`,
+  `update`) and every link message stay on the TLS connection or the relays, so input never moves. Persona Screen is
+  unchanged: the node re-frames the video messages it already reads from it.
+- **Opening**: on a direct route's TLS connection (never a relay) the phone sends `udp_open` (link type 12); the node
+  answers `udp_ready` (type 13: `{port, flow}`, the flow's 8-byte id in base64url, or `{unavailable}`). The node listens
+  on one UDP port per candidate address beside the TCP listener (the TCP port number when free there), only while a
+  session is live, and never on the wildcard. One flow per TLS connection and eight per session; a flow ends with its
+  connection, its session, or after `Limits.FlowSilence` (5 s) without a packet from the phone.
+- **Keys and sealing**: both ends take 88 bytes from the TLS 1.3 exporter of that connection (label
+  `EXPORTER-persona-screen-udp-1`, the flow id as context): a key and IV for each direction. Every packet is a clear
+  header (version, flow id, packet number) and its body sealed with AES-256-GCM, the header as additional data and the
+  IV XOR the packet number as the nonce. Only an end of the connection that proved the session's token and pinned the
+  node's certificate can derive the keys, so the flow is exactly as authenticated as that connection.
+- **Threat model** (each with a test in `udp_security_test.go`): a replayed packet is dropped (a 4,096-packet window); a
+  changed one doesn't open; one sealed with any other key doesn't open, the node's own packets reflected back and keys
+  exported from another connection included; nothing that doesn't open is ever answered; nothing goes to an address
+  the phone hasn't proved (a hello, the node's challenge sent to that address, a hello answering it), and the one
+  answer before the proof is smaller than the hello, so a forged source address gains nothing; each direction numbers
+  its packets from 0 without repeating, and a flow that would run out of numbers is closed instead.
+- **Sending**: the node sends each video message whole from the phone's offset, cut into 1,146-byte shards, at most 128
+  to a Reed-Solomon block (systematic, Cauchy, GF(2⁸)) with ⌈ratio × shards⌉ + 1 parity shards: the phone asks for the
+  ratio in its pings (none by default, at most 40 %), and any `shards` of a block rebuild it. Packets are paced at the
+  rate the phone asks for, kept between 4 × the video's own rate (8 Mbit/s at least) and 150 Mbit/s, 40 Mbit/s until it
+  asks. The pong reports the bytes sent as data, parity and again, so the phone can count them against mobile data.
+- **Recovering**: the phone asks again for the data shards a block still lacks (`nack`) and for messages it learned of
+  only from a later one (`want`); the node sends them from the 512 KB window. Video left unacknowledged with nothing
+  newer to send gets its newest message's last shard again after 50 ms (doubling to 800 ms), so a message lost whole
+  at the end of a burst is found; the phone answers a shard it already has with its acknowledgement.
+- **Giving a frame up**: frames (and only frames) may be given up. On `skip`, the node drops the backlog's frames,
+  sends `reset` with where the stream goes on, asks Persona Screen for a keyframe and drops frames until it comes,
+  as a move with an old backlog does; the backlog's other messages (`format`, `encoding`, …) still go out after the
+  reset, so the keyframe decodes.
+- **Falling back**: when a flow is lost (silent, or its route gone), the video goes on over the flow's own TLS
+  connection from what the phone acknowledged, or over its relay when the route went too. The node never moves RFB or
+  link messages onto a flow, and moving the video onto one takes the phone's `use` on it.
 
 ### Pixel scrolling (#7775)
 
@@ -930,7 +993,26 @@ scrolling stays on RFB's notches.
     so the phone never sends a record to a node that would pass it to Screen Sharing.
   - With the node signing setting the node runs its own signed copy (`~/.persona/bin/Persona Input.app`), as for Persona
     Screen. None of Persona Screen's node code changes for it.
-- Still to come on #7775: the phone saying hello and sending records.
+- **The phone** (`VNCPixelScroll`, `RFBSession`, `VNCScreenView`; the iOS app, which links `PersonaInputKit`; Vision
+  scrolls by notches):
+  - A two-finger touch scrolls by pixels when the Mac's status says its node reads records and Persona Input may post
+    them (`screen_input.permission` granted, read as the touch begins). As the page goes live on such a Mac it says
+    hello once a connection, so the helper is started before the first scroll.
+  - While scrolling by pixels: the Mac's pointer goes where the scroll began and stays there (as a trackpad's). One
+    record a display frame carries that frame's distance, by the same curve as the notches (slow fingers one to one,
+    quick ones up to 4×) but with no ceiling. The phases are `began`, `changed`, then `ended` at the lift. After a flick
+    comes the coast as momentum (`begin`, `continue`, `end`), with UIScrollView's normal deceleration, at most 6000
+    Mac points. A touch during the coast ends it, and its end goes too.
+  - Where the helper may not post yet and macOS was never asked (`permission` missing, `asked` false), the first
+    two-finger scroll of a connection says hello, so the node asks macOS once. A line under the page's bar, as the
+    video's fallback line, says what the window now on the Mac's screen is for ("To scroll more smoothly, allow Persona
+    Input on this Mac."). A tap on it gives the way through it in an alert (Open System Settings, then Persona Input
+    under Privacy & Security › Accessibility; scrolling still works meanwhile). The line goes once the Mac allows it or
+    the connection ends, and doesn't come back on later connections (macOS asks only once). Scrolling goes on by wheel
+    notches meanwhile, and for anyone who never allows it.
+  - Measuring: `VNCTests/testPixelScrolling` (mock `MOCK_SCREEN_INPUT=granted`) and `testPersonaInputNotice`
+    (`=missing`, with the notice's screenshots). The mock's relay takes records out as the node does and lists them as
+    `input`.
 
 ## Locking, preventing sleep and per-App approval (plan, #1507, decided)
 
