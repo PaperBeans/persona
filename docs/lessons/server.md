@@ -157,8 +157,21 @@ messages (terminal keys) is a one-way `notify` written in place, never a call.
 Test it by keeping the node's answer back, waiting until the call is at the node, and then checking that a message
 sent behind it is taken: the fix is told apart by whether the hub reads, not by how long something took. Run the
 scenario through the manager as well, where the wait is the manager's own
-(`server/internal/hub/subscribe_readloop_test.go`). As of this change `fs_watch` still calls the node from the read
-loop (`fsWatchSet`, up to 10 s).
+(`server/internal/hub/subscribe_readloop_test.go`).
+
+`fs_watch` needed the same treatment (#6786), with one addition: replacing a set is not the same as counting joins
+and leaves. Record the browser's set in its read loop, then use one worker per machine with one coalesced trailing
+request. The worker reads the union when its turn comes, so a burst makes at most the call in flight and one latest
+call. Disconnect cleanup and reconnect resends use that queue too. A reconnect sets a forced-resend flag rather than
+only `fswSent`: an earlier empty call can clear `fswSent` before the trailing reconnect runs, and the new node still
+needs that empty set. A failed forced resend leaves `fswSent` set, so the next empty set retries it as before
+(`server/internal/hub/fswatch_report_readloop_test.go`).
+
+A manager bus read loop has the same rule for its store. `extensions.report` keeps its in-memory report and broadcasts
+in bus order, but one worker persists only the latest pending report, with a bounded context for each write. A failed
+write is logged and left for the next report, never retried in a tight loop. Both kinds of worker join the hub's
+`nodeWorkers`, whose shutdown wait is bounded. Tests hold the node or `PutSetting`, prove a later message or bus event
+is still handled, then release the dependency and join the workers before checking the final value and call count.
 
 ## A Go file named after a platform builds only there (#5563)
 
@@ -1352,6 +1365,7 @@ back) and only keeps the entry. Tell them apart by git's `CONFLICT` lines plus `
 
 - **JPEG pixels are stored before EXIF orientation** (#1303): apply all eight primary-image orientations, including mirrors, before sizing a thumbnail; re-encoding alone drops the orientation metadata. Keep metadata scans bounded and separate from nested/thumbnail IFDs. A derived thumbnail's ETag also needs a processing version, but clients must reach that validator: revalidate persisted disk thumbnails once per launch even when a listing's size/time match, and give browser thumbnail URLs a new page-load identity. Test both upgrade orders with a seeded old image; a new client may see an old node first. Unupdated clients can retain their private caches until they refresh or upgrade.
 - **Go `mime.TypeByExtension` varies by machine**: it reads `/etc/mime.types` and other system files; docx / xlsx / ipynb / heic may be known on one machine and empty on another, making MIME-selected viewers differ for the same file. Keep a fixed preview-type table in node (`node/filemime.go`); outside it, consult the system, then sniff initial bytes.
+- **An extension can name two formats** (#7974): `.ts` is TypeScript and MPEG transport stream, `.mts` TypeScript and AVCHD video. The system tables pick one (a Mac's `/etc/apache2/mime.types` says `video/mp2t`, Linux shared-mime-info lists `text/vnd.qt.linguist` first), so a fixed table entry would be wrong half the time too: such names are typed by their first bytes (`proto.ScriptOrStream`: sync byte `0x47` every 188 bytes, binary; else text). Older nodes keep answering by the name until their computer updates, so the hub's `file.read` relay re-checks a streamed `video/mp2t` through `file.chunk`; a type fix that lives only in the node reaches nobody whose files are on another computer.
 - **`qlmanage -t` hangs on locked Macs** (still running after 30 seconds measured), without errors. System thumbnail tools need timeouts, cooldown after a timeout, and one concurrent execution: a file list may request dozens, otherwise node fills with stuck processes waiting on every thumbnail.
 - **Hub and web share an origin; isolate inline files**: standalone `Content-Disposition: inline` SVG / HTML scripts run as the web app and can read localStorage tokens. Inline only images, audio/video, PDF, with `Content-Security-Policy: sandbox`; PDF is exempt because Chrome won't display sandboxed PDFs.
 
