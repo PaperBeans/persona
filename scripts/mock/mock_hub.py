@@ -10749,6 +10749,7 @@ MOCK_PAIR_DROP = float(os.environ.get("MOCK_PAIR_DROP", "0"))
 PAIR_DROPPED = [False]
 PAIR_TRADED = [None]  # when the pairing token was traded (MOCK_PAIR_TOKEN)
 PAIR_DEVICE_TOKENS = set()
+PAIR_DEVICE_ROLES = {}  # exchanged device token -> the role the exchange returned
 
 TOKENS = [  # Settings › Devices (GET/POST/DELETE /api/v1/auth/tokens)
     {"id": "dev_phone", "name": "我的 iPhone", "kind": "phone", "role": "full", "created_at": ago(days=12), "last_seen": ago()},
@@ -20494,8 +20495,9 @@ def zrle_rect(px, W, x, y, w, h, z):
     return struct.pack(">I", len(comp)) + comp
 
 
-# MOCK_SCREEN_VIDEO=1|missing (#3954): MacBook's node offers the live screen's video channel (`screen_video`; =missing:
-# Screen Recording isn't granted for Persona Screen), and …/screen/video/connect?pair=… plays
+# MOCK_SCREEN_VIDEO=1|missing|denied (#3954): MacBook's node offers the live screen's video channel (`screen_video`;
+# =missing: Screen Recording isn't granted for Persona Screen and macOS hasn't asked yet; =denied: not granted, asked
+# once already, so Persona Screen is in System Settings' list), and …/screen/video/connect?pair=… plays
 # scripts/mock/screen_video/fixture.bin (HEVC) or fixture-h264.bin (a made-up desktop; make_fixture.sh makes them again),
 # picked as the helper picks its codec: the first of the `start`'s codecs there is a fixture for, else H.264 (#6558: a
 # browser without HEVC offers only H.264), round and round at 30 fps:
@@ -20505,9 +20507,10 @@ def zrle_rect(px, W, x, y, w, h, z):
 # sends `paused` with that reason (no frames and no heartbeats, as the helper), ?resume=1 sends `resumed` and starts over
 # with `hello`, `format` and the keyframe. Once a second while frames go out it sends `timing` as the helper does: capture
 # 0 and encode 4.8 ms (made up: nothing is encoded here), the network as half the real round trip from a frame going out
-# to the phone's report on it.
+# to the phone's report on it. MOCK_SCREEN_VIDEO_TIERS=1: the hello says the helper has quality tiers (`features`,
+# #6396); GET /mock/screen-video also lists the `update`s the client sent (#6558: a new data budget).
 SCREEN_VIDEO = {"mode": os.environ.get("MOCK_SCREEN_VIDEO", ""), "pairs": set(), "streams": [], "starts": [], "reports": 0,
-                "refuse": False}
+                "updates": [], "refuse": False, "tiers": os.environ.get("MOCK_SCREEN_VIDEO_TIERS") == "1"}
 _SCREEN_VIDEO_FIXTURE = {}
 _SCREEN_VIDEO_FILES = {"hevc": "fixture.bin", "h264": "fixture-h264.bin"}
 
@@ -20540,7 +20543,7 @@ def screen_video_control(h, q):
     if q.get("resume", ["0"])[0] == "1":
         for st in SCREEN_VIDEO["streams"]: st["resume"] = True
     h.send_json({"open": sum(1 for st in SCREEN_VIDEO["streams"] if st["open"]), "starts": SCREEN_VIDEO["starts"],
-                 "reports": SCREEN_VIDEO["reports"], "refuse": SCREEN_VIDEO["refuse"]})
+                 "reports": SCREEN_VIDEO["reports"], "updates": SCREEN_VIDEO["updates"], "refuse": SCREEN_VIDEO["refuse"]})
 
 
 def screen_video_connect(h, mid):
@@ -20549,7 +20552,7 @@ def screen_video_connect(h, mid):
     if not pair: return h.send_json({"error": "a pair is required"}, 400)
     if pair not in SCREEN_VIDEO["pairs"]:
         return h.send_json({"error": "the paired screen-sharing stream has not signed in"}, 403)
-    if SCREEN_VIDEO["refuse"] or SCREEN_VIDEO["mode"] == "missing":
+    if SCREEN_VIDEO["refuse"] or SCREEN_VIDEO["mode"] in ("missing", "denied"):
         return h.send_json({"error": "no live-screen video helper on this node"}, 503)
     key = h.headers.get("Sec-WebSocket-Key", "")
     accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
@@ -20573,6 +20576,7 @@ def screen_video_connect(h, mid):
         if not st["started"].wait(10): st["open"] = False; return
         msgs = screen_video_fixture(screen_video_codec(st.get("codecs")))
         hello, fmt, frames = msgs[0], msgs[1], msgs[2:]
+        if SCREEN_VIDEO["tiers"]: hello = (hello[0], json.dumps({**json.loads(hello[1]), "features": ["tiers"]}).encode())
         number, i, restart = 0, 0, True
         second, count, size = time.monotonic(), 0, 0
         try:
@@ -20629,6 +20633,8 @@ def screen_video_connect(h, mid):
                     SCREEN_VIDEO["starts"].append(start)
                     st["codecs"] = start.get("codecs")
                     st["started"].set()
+                elif t == 19:
+                    SCREEN_VIDEO["updates"].append(json.loads(body or b"{}"))
                 elif t == 17:
                     SCREEN_VIDEO["reports"] += 1
                     sent = st["sent"].pop(struct.unpack(">I", body[:4])[0], None) if len(body) >= 4 else None
@@ -21725,7 +21731,8 @@ def computer_of(machine_id, enabled):
         c["displays"] = FAKE_NODE_DISPLAYS  # MOCK_SCREEN_DISPLAYS=2:node
     if machine_id == "macbook" and c.get("screen_sharing") and SCREEN_VIDEO["mode"]:  # MOCK_SCREEN_VIDEO (#3954)
         c["screen_video"] = {"version": 1, "codecs": ["hevc", "h264"],
-                             "permission": "missing" if SCREEN_VIDEO["mode"] == "missing" else "granted"}
+                             "permission": "missing" if SCREEN_VIDEO["mode"] in ("missing", "denied") else "granted"}
+        if SCREEN_VIDEO["mode"] == "denied": c["screen_video"]["asked"] = True
     return c
 
 
@@ -25372,7 +25379,9 @@ class H(BaseHTTPRequestHandler):
                 PAIR_DEVICE_TOKENS.add(device)
                 print("mock: traded for %s" % device, flush=True)
                 kind = req.get("kind") if req.get("kind") in ("phone", "watch") else "other"
-                return self.send_json({"id": "dev_" + device, "token": device, "role": "answer" if kind == "watch" else "full",
+                role = "answer" if kind == "watch" else "full"
+                PAIR_DEVICE_ROLES[device] = role
+                return self.send_json({"id": "dev_" + device, "token": device, "role": role,
                                        "name": req.get("name") or "设备"})
             kind = req.get("kind") if req.get("kind") in ("phone", "watch") else "other"
             t = {"id": "dev_mock_%d" % (len(TOKENS) + 1), "name": req.get("name") or "设备", "kind": kind,
@@ -27052,6 +27061,10 @@ class H(BaseHTTPRequestHandler):
         # ?features=managers: the roster event (hub/managers.go); the rest of ?features= keeps its old meaning here
         client = {"send": send, "features": {"managers"} if "managers" in asked else set(), "close": close_going_away}
         ws_token = self.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if not ws_token:
+            ws_token = (parse_qs(urlparse(self.path).query).get("token") or [""])[0]
+        # A legacy fixture socket has no credential and keeps the mock's full-role default.
+        client["role"] = PAIR_DEVICE_ROLES.get(ws_token, "full")
         if MOCK_PAIR_TOKEN: print("mock: ws open host=%s token=%s" % (self.headers.get("Host"), ws_token[:9]), flush=True)
         if MOCK_PAIR_TOKEN and ws_token == MOCK_PAIR_TOKEN:
             def cut_after_grace():  # the hub cancels the pairing token's sockets once its grace is over
@@ -29632,6 +29645,8 @@ DESKTOP_LOCK = threading.Lock()
 
 def desktop_registration(connection, msg):
     """A socket's register_desktop / unregister_desktop message, or its close (msg None)."""
+    if msg is not None and CLIENTS.get(connection, {}).get("role") != "full":
+        return  # hub/desktops.go: an answer-only watch never becomes desktop presence.
     with DESKTOP_LOCK:
         if msg is not None and msg.get("type") == "register_desktop":
             name = msg.get("device_name") if isinstance(msg.get("device_name"), str) else ""

@@ -539,6 +539,7 @@ notify               POST /api/v1/notify
 agents.control       POST /api/v1/sessions
 -                    POST /api/v1/sessions/{mid}/{sid}/archive
 -                    POST /api/v1/sessions/{mid}/{sid}/attach
+-                    POST /api/v1/sessions/{mid}/{sid}/autoname
 -                    POST /api/v1/sessions/{mid}/{sid}/close
 -                    POST /api/v1/sessions/{mid}/{sid}/fork
 agents.control       POST /api/v1/sessions/{mid}/{sid}/interrupt

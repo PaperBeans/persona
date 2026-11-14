@@ -190,7 +190,7 @@ fn payload(kind: &str, body: String) -> Payload {
         "newer" => Payload::Newer { body },
         "reloaded" => Payload::Reloaded { body },
         "older" => Payload::Older { body },
-        "range" => Payload::Range { body },
+        "range" => Payload::Range { fold_id: None, body },
         "frame" => Payload::Frame { body },
         other => panic!("unknown payload kind {other}"),
     }
@@ -542,6 +542,177 @@ fn a_frame_is_routed_by_a_hub_group_path() {
 }
 
 #[test]
+fn a_backlog_marks_the_chat_verified_and_a_gap_clears_it() {
+    // Android's `verified` rule, owned by the core now: a complete backlog verifies, a batch with a gap clears it,
+    // and a catch-up only preserves an already-verified chat.
+    let host = Arc::new(Recorder::default());
+    let runtime = open(&host);
+    let latest = r#"{"items":[{"id":"a#0","seq":1,"role":"user","kind":"text"}],"has_more":false,"to_seq":1}"#;
+    assert!(runtime.dispatch(&wire::encode(&Action::WirePayload {
+        chat: CHAT.into(),
+        payload: Payload::Latest { body: latest.into() },
+    })));
+    let (patch, _) = drain(&runtime, &host);
+    assert!(patch.verified, "a complete latest page verifies the chat");
+    let pushed =
+        r#"{"type":"items","machine_id":"m1","session_id":"s1","items":[],"from_seq":5,"to_seq":6,"backlog":false}"#;
+    assert!(runtime.dispatch(&wire::encode(&Action::WirePayload {
+        chat: CHAT.into(),
+        payload: Payload::Frame { body: pushed.into() },
+    })));
+    let (patch, _) = drain(&runtime, &host);
+    assert!(!patch.verified, "a batch with a gap clears verification");
+}
+
+#[test]
+fn a_successful_catch_up_restores_verified() {
+    // Android's `catchUp`: a gap clears verification, and the complete after page that closes it restores it,
+    // provided no live push overtook the covered point.
+    let host = Arc::new(Recorder::default());
+    let runtime = open(&host);
+    let latest = r#"{"items":[{"id":"a#0","seq":1,"role":"user","kind":"text"}],"has_more":false,"to_seq":1}"#;
+    assert!(runtime.dispatch(&wire::encode(&Action::WirePayload {
+        chat: CHAT.into(),
+        payload: Payload::Latest { body: latest.into() },
+    })));
+    drain(&runtime, &host);
+    // A push with a gap clears verification.
+    let pushed =
+        r#"{"type":"items","machine_id":"m1","session_id":"s1","items":[],"from_seq":4,"to_seq":5,"backlog":false}"#;
+    assert!(runtime.dispatch(&wire::encode(&Action::WirePayload {
+        chat: CHAT.into(),
+        payload: Payload::Frame { body: pushed.into() },
+    })));
+    let (patch, _) = drain(&runtime, &host);
+    assert!(!patch.verified, "a gap clears verification");
+    // The catch-up page that closes the gap restores it.
+    let after = r#"{"items":[{"id":"b#0","seq":2,"role":"user","kind":"text"},{"id":"c#0","seq":3,"role":"user","kind":"text"}],"from_seq":1,"to_seq":5}"#;
+    assert!(runtime.dispatch(&wire::encode(&Action::WirePayload {
+        chat: CHAT.into(),
+        payload: Payload::Newer { body: after.into() },
+    })));
+    let (patch, _) = drain(&runtime, &host);
+    assert!(patch.verified, "the completed catch-up restores verification");
+}
+
+#[test]
+fn a_hub_changed_input_starts_a_fill() {
+    // iOS's `settle(.fill)`: a hub signalled change fetches after the covered point, without an extra re-read.
+    let host = Arc::new(Recorder::default());
+    let runtime = open(&host);
+    let latest = r#"{"items":[{"id":"a#0","seq":4,"role":"user","kind":"text"}],"has_more":false,"to_seq":4}"#;
+    assert!(runtime.dispatch(&wire::encode(&Action::WirePayload {
+        chat: CHAT.into(),
+        payload: Payload::Latest { body: latest.into() },
+    })));
+    drain(&runtime, &host);
+    assert!(runtime.dispatch(&wire::encode(&Action::HubChanged { chat: CHAT.into() })));
+    let (_, effects) = drain(&runtime, &host);
+    assert!(
+        matches!(
+            &effects[..],
+            [Effect::Fetch {
+                request: persona_core::continuity::Request::FetchAfter { after_seq: 4 },
+                ..
+            }]
+        ),
+        "the hub-changed input asks for what comes after: {effects:?}"
+    );
+}
+
+#[test]
+fn an_ack_is_echoed_even_when_nothing_changed() {
+    // A no-op input must still be acknowledged, or an asynchronous host cannot tell it was applied.
+    let host = Arc::new(Recorder::default());
+    let runtime = open(&host);
+    let (patch, _) = drain(&runtime, &host);
+    assert_eq!(patch.acked, None);
+    assert!(runtime.dispatch(&wire::encode(&Action::Ack {
+        chat: CHAT.into(),
+        seq: 7
+    })));
+    let (patch, _) = drain(&runtime, &host);
+    assert_eq!(patch.acked, Some(7), "the acknowledgement reaches the patch");
+    assert!(runtime.dispatch(&wire::encode(&Action::Ack {
+        chat: CHAT.into(),
+        seq: 3
+    })));
+    let (patch, _) = drain(&runtime, &host);
+    assert_eq!(patch.acked, Some(7), "an older ack never moves the watermark back");
+}
+
+#[test]
+fn two_folds_open_independently_and_complete_in_either_order() {
+    // iOS opens different folds independently; the second opening must not cancel the first, and each completes
+    // against its own id.
+    let host = Arc::new(Recorder::default());
+    let runtime = open(&host);
+    let fold = |id: &str, seq: u32, through: u32| {
+        format!(
+            r#"{{"id":"{id}","seq":{seq},"role":"assistant","kind":"fold","fold":{{"items":1,"tools":0,"thoughts":0,"through_seq":{through},"through_id":"x#0"}}}}"#
+        )
+    };
+    let first = format!(
+        r#"{{"items":[{},{}],"has_more":false,"to_seq":6}}"#,
+        fold("fold:a#0", 2, 4),
+        fold("fold:b#0", 5, 6)
+    );
+    assert!(runtime.dispatch(&wire::encode(&Action::WirePayload {
+        chat: CHAT.into(),
+        payload: Payload::Latest { body: first },
+    })));
+    drain(&runtime, &host);
+    assert!(runtime.dispatch(&wire::encode(&Action::Chat {
+        chat: CHAT.into(),
+        event: ChatEvent::OpenFold {
+            fold_id: "fold:a#0".into()
+        },
+    })));
+    assert!(runtime.dispatch(&wire::encode(&Action::Chat {
+        chat: CHAT.into(),
+        event: ChatEvent::OpenFold {
+            fold_id: "fold:b#0".into()
+        },
+    })));
+    let (_, effects) = drain(&runtime, &host);
+    assert_eq!(effects.len(), 2, "both folds are fetched independently: {effects:?}");
+    // Answer the second fold first; the first must still complete afterwards.
+    let page_b = r#"{"items":[{"id":"b1#0","seq":6,"role":"assistant","kind":"text","text":"work b"}],"more":false}"#;
+    assert!(runtime.dispatch(&wire::encode(&Action::WirePayload {
+        chat: CHAT.into(),
+        payload: Payload::Range {
+            fold_id: Some("fold:b#0".into()),
+            body: page_b.into()
+        },
+    })));
+    let page_a = r#"{"items":[{"id":"a1#0","seq":3,"role":"assistant","kind":"text","text":"work a"}],"more":false}"#;
+    assert!(runtime.dispatch(&wire::encode(&Action::WirePayload {
+        chat: CHAT.into(),
+        payload: Payload::Range {
+            fold_id: Some("fold:a#0".into()),
+            body: page_a.into()
+        },
+    })));
+    let (patch, _) = drain(&runtime, &host);
+    let jsons: Vec<&str> = patch
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            ListOp::Insert { json, .. } | ListOp::Update { json, .. } => Some(json.as_str()),
+            ListOp::Remove { .. } => None,
+        })
+        .collect();
+    assert!(
+        jsons.iter().any(|json| json.contains("work a")),
+        "fold a completes: {jsons:?}"
+    );
+    assert!(
+        jsons.iter().any(|json| json.contains("work b")),
+        "fold b completes: {jsons:?}"
+    );
+}
+
+#[test]
 fn a_frame_for_another_chat_is_rejected() {
     let host = Arc::new(Recorder::default());
     let runtime = open(&host);
@@ -580,7 +751,8 @@ fn a_range_page_reaches_an_open_fold() {
             [Effect::Fetch {
                 request: persona_core::continuity::Request::FetchRange {
                     from_seq: 2,
-                    through_seq: 4
+                    through_seq: 4,
+                    ..
                 },
                 ..
             }]
@@ -590,7 +762,10 @@ fn a_range_page_reaches_an_open_fold() {
     let page = r#"{"items":[{"id":"entry_text#0","seq":3,"role":"user","kind":"text","text":"inside the fold"}],"more":false}"#;
     assert!(runtime.dispatch(&wire::encode(&Action::WirePayload {
         chat: CHAT.into(),
-        payload: Payload::Range { body: page.into() },
+        payload: Payload::Range {
+            fold_id: None,
+            body: page.into()
+        },
     })));
     let (patch, effects) = drain(&runtime, &host);
     assert!(!patch.ops.is_empty(), "the opened fold publishes its items: {patch:?}");

@@ -73,7 +73,7 @@ function eventAction(event: FixtureEvent, chat: string): Action {
   else if (event.kind === 'http_reload') eventValue = {kind: 'reloaded', items_json: JSON.stringify(event.items || []),
     history: text(event, 'history'), to_seq: number(event, 'to_seq'), has_more: event.has_more === true};
   else if (event.kind === 'http_older') eventValue = {kind: 'older', items_json: JSON.stringify(event.items || []), has_more: event.has_more === true};
-  else if (event.kind === 'http_range') eventValue = {kind: 'range', items_json: JSON.stringify(event.items || []), more: event.more === true};
+  else if (event.kind === 'http_range') eventValue = {kind: 'range', fold_id: null, items_json: JSON.stringify(event.items || []), more: event.more === true};
   else if (event.kind === 'reconnect') eventValue = {kind: 'reconnected'};
   else if (event.kind === 'load_older') eventValue = {kind: 'load_older'};
   else if (event.kind === 'open_fold') eventValue = {kind: 'open_fold', fold_id: event.fold_id || ''};

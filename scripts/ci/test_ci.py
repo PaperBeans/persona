@@ -7,12 +7,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import paths
 import required
+import run
 
 
 class PathTests(unittest.TestCase):
@@ -31,6 +33,13 @@ class PathTests(unittest.TestCase):
             self.assertTrue(paths.select([filename])[platform])
         self.assertTrue(paths.select(["scripts/mock/inbox_events.json"])["web"])
         self.assertTrue(paths.select(["schema/extension/example.json"])["apple"])
+
+    def test_desktop_inputs_select_the_desktop_lane(self):
+        for filename in ["desktop/src/main.ts", "web/src/main.tsx", "scripts/mock/mock_hub.py",
+                         "scripts/mock/test_desktops_mock.py", "scripts/mock/stream_trace.py", "spec/desktop-bridge.d.ts",
+                         "server/cmd/password-wasm/main.go", "server/internal/passwordpake/pake.go", "server/go.mod", "server/go.sum"]:
+            self.assertTrue(paths.select([filename])["desktop"], filename)
+        self.assertFalse(paths.select(["server/internal/hub/hub.go"])["desktop"])
 
     def test_sdk_ts_sources_also_select_the_server_lane(self):
         # The trusted Deno adapter and the extension page tests bundle sdk/ts/src (#4221); the rest of sdk/ts is not.
@@ -372,6 +381,40 @@ class RunnerTests(unittest.TestCase):
         result = self.invoke("import time; time.sleep(3)", 0.1)
         self.assertEqual(result.returncode, 124)
         self.assertIn("TIMEOUT fixture", result.stdout)
+
+    def test_windows_termination_preserves_process_tree_cleanup_and_bounded_wait(self):
+        for taskkill_code in (0, 1):
+            with self.subTest(taskkill_code=taskkill_code):
+                process = mock.Mock(pid=321)
+                process.wait.return_value = 0
+                with mock.patch.object(run, "WINDOWS", True), mock.patch.object(run.subprocess, "run", return_value=mock.Mock(returncode=taskkill_code)) as taskkill:
+                    run.terminate(process)
+                self.assertEqual(process.wait.call_args, mock.call(timeout=5))
+                taskkill.assert_called_once_with(["taskkill", "/T", "/F", "/PID", "321"], capture_output=True, check=False)
+
+    def test_failed_windows_termination_still_prints_timeout_verdict(self):
+        process = mock.Mock(pid=321)
+        process.wait.side_effect = [run.subprocess.TimeoutExpired("fixture", 0.1), run.subprocess.TimeoutExpired("fixture", 5)]
+        process.kill.side_effect = OSError("already gone")
+        with mock.patch.object(run, "WINDOWS", True), \
+                mock.patch.object(run.subprocess, "Popen", return_value=process), \
+                mock.patch.object(run.subprocess, "run", return_value=mock.Mock(returncode=1)) as taskkill, \
+                mock.patch.object(run.signal, "signal"), \
+                mock.patch("builtins.print") as output:
+            result = run.run("fixture", 0.1, ["fixture"])
+        self.assertEqual(result, 124)
+        self.assertEqual(process.wait.call_args_list, [mock.call(timeout=0.1), mock.call(timeout=5)])
+        process.kill.assert_called_once_with()
+        taskkill.assert_called_once_with(["taskkill", "/T", "/F", "/PID", "321"], capture_output=True, check=False)
+        self.assertEqual(output.call_args_list[-1], mock.call("::endgroup::\nTIMEOUT fixture (0.0s, exit 124)", flush=True))
+
+    def test_posix_termination_uses_process_group_and_grace(self):
+        process = mock.Mock(pid=321)
+        process.wait.return_value = 0
+        with mock.patch.object(run, "WINDOWS", False), mock.patch.object(run.os, "killpg") as killpg:
+            run.terminate(process)
+        killpg.assert_called_once_with(321, run.signal.SIGTERM)
+        self.assertEqual(process.wait.call_args, mock.call(timeout=5))
 
 
 if __name__ == "__main__":

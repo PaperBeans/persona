@@ -50,6 +50,7 @@ The hub and the managers apart:
 | `internal/nodeclient` | The client side of `node.sock` for hook / mcp / ask / notify / tool |
 | `internal/apns` | APNs client (.p 8 key, provider token, single push), shared by direct hub and relay |
 | `internal/pushcrypto` | Push-body encryption with phone public key (HPKE), `docs/operations/push-relay.md` |
+| `internal/webpush` | The hub's Web Push to browsers: VAPID signing and RFC 8291 message encryption, `docs/web/web.md` "Web Push" |
 | `internal/relay` | Publisher-run personad relay, `docs/operations/push-relay.md` |
 | `internal/tunnel` | Tailcat node key / endpoint, hub dialing, new-binary transfer over tailcat (“Tailcat hole punching” below) |
 

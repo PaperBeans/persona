@@ -150,6 +150,8 @@ nonisolated final class ScreenVideoStream: @unchecked Sendable {
         case timing(TimingMessage)
         /// The quality tier changed (#6396): already sent to the helper; for the stats overlay and the link's memory.
         case tier(TierPolicy.Change)
+        /// What the helper's encoder runs at now (#6396, `encoding`): the overlay's resolution after an in-place change.
+        case encoding(EncodingMessage)
         /// The stream is over; nothing more comes.
         case ended(Ending)
     }
@@ -325,6 +327,8 @@ nonisolated final class ScreenVideoStream: @unchecked Sendable {
                 case let .timing(t):
                     tiers?.helper(t)
                     onEvent(.timing(t))
+                case let .encoding(e):
+                    onEvent(.encoding(e))
                 default:
                     break // phone → helper types, or ones newer than this app: skipped
                 }

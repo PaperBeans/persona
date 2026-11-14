@@ -1019,6 +1019,24 @@ final class VNCTests: XCTestCase {
         shot(app, "vnc-video-lost")
     }
 
+    /// #6398: the stats overlay's Route row (the demo's numbers: a direct LAN route, its round trip and loss, and why the
+    /// live screen moved, on its own line), for review in light and dark, at the default size and at xxxLarge.
+    @MainActor func testTheOverlayShowsTheRoute() throws {
+        for (scheme, size) in [("light", "L"), ("dark", "L"), ("light", "XXXL"), ("dark", "XXXL")] {
+            let (app, _) = try signedInMachinePage(["-showScreenStatsDemo", "YES", "-ui.scheme", scheme,
+                                                    "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategory\(size)"])
+            let overlay = app.descendants(matching: .any)["screen-stats"].firstMatch
+            XCTAssertTrue(overlay.waitForExistence(timeout: 10), "the overlay:\n\(app.debugDescription)")
+            XCTAssertTrue(overlay.label.contains("6 ms"), "the route's round trip: \(overlay.label)")
+            for source in [app, XCUIApplication(bundleIdentifier: "com.apple.springboard")] { // the icon follows the look
+                let alert = source.alerts.containing(NSPredicate(format: "label CONTAINS[c] 'icon' OR label CONTAINS '图标'")).firstMatch
+                if alert.exists, alert.buttons.firstMatch.exists { alert.buttons.firstMatch.tap() }
+            }
+            shot(app, "vnc-overlay-route-\(scheme)-\(size == "L" ? "default" : "xxxl")")
+            app.terminate()
+        }
+    }
+
     /// #6398: a phone that asks the hub for a screen session (direct routes on, `-showScreenRoutes`) and a hub that
     /// doesn't offer one (the mock, like an older hub or node) keep today's live screen through the same raw streams:
     /// RFB signs in and, with the mock's video channel, video takes the picture and reports frames.
@@ -1068,6 +1086,27 @@ final class VNCTests: XCTestCase {
         shot(app, "vnc-video-stats")
         app.buttons["screen-stats-close"].firstMatch.tap() // kept per Mac: off again for the other tests
         XCTAssertTrue(stats.waitForNonExistence(timeout: 5))
+    }
+
+    /// #3954: a Mac whose helper macOS hasn't asked about yet (a second mock with MOCK_SCREEN_VIDEO=missing, its address
+    /// in TEST_RUNNER_PERSONA_SCREEN_VIDEO_MISSING): VNC with the not-allowed line, and "How to turn it on" says the Mac
+    /// is about to show a window, not where in System Settings (Persona Screen isn't in that list until it asked).
+    @MainActor func testNotAskedYetSaysAWindowWillShow() throws {
+        guard let missingHub = ProcessInfo.processInfo.environment["PERSONA_SCREEN_VIDEO_MISSING"], missingHub.hasPrefix("http") else {
+            throw XCTSkip("needs a mock with MOCK_SCREEN_VIDEO=missing, its address in TEST_RUNNER_PERSONA_SCREEN_VIDEO_MISSING")
+        }
+        hubOverride = missingHub
+        let (app, _) = try signedInMachinePage()
+        let how = app.buttons["screen-fallback-help"].firstMatch
+        XCTAssertTrue(how.waitForExistence(timeout: 10), "the not-allowed line:\n\(app.debugDescription)")
+        XCTAssertTrue((app.descendants(matching: .any)["vnc-screen"].firstMatch.value as? String ?? "").contains("picture=vnc"))
+        how.tap()
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "会弹一个窗口")).firstMatch.exists,
+                      "a window will show: \(alert.debugDescription)")
+        shot(app, "vnc-video-not-asked")
+        alert.buttons.firstMatch.tap()
     }
 
     /// #6558: Connection Stats over VNC shows the round trip to the hub on a line of its own, timed on the app's own

@@ -1,7 +1,7 @@
 # screen-tiers
 
 The live screen's quality tiers (#6396, `docs/extensions/computer-use.md` "Live screen video (#3954)"): what the
-iPhone's `PersonaScreenKit` (`TierLadder`, `ReceiverSignals`) and the browser's port (`web/src/screen/tiers/`, #6558)
+iPhone's `PersonaScreenKit` (`TierLadder`, `ReceiverSignals`, `TierPolicy`) and the browser's port (`web/src/screen/tiers/`, #6558)
 must both give. One scenario per file: its input and the expected output, never internal state. The format was agreed
 between the two lanes that keep the two sides.
 
@@ -23,10 +23,16 @@ the whole ladder, best first: `scale`, `fps`, `width`, `height`, `minKbps`, `max
 
 ## `policy/`
 
-`TierPolicy` (with live-tier's save-data cap, `maxScale`): a timeline of `init`, then helper `timing`, `tick(signals)`,
-`path`, `setBias` and `setBudget` in order (`init` and `setBudget` carry `maxScale`, which may be null), each with the
-Change it returned (`index`, `scale`, `fps`, `width`, `height`, `minKbps`, `maxKbps`, `targetKbps`, `reason`) or null.
-Seconds, as the API takes them. Not written yet.
+`TierPolicy`: `init` (`display` with `points`, `pixels` and `maxSize`; `bias`, `capKbps`, `maxFps`, `maxScale` (null: no
+limit; Data Saver: 1), `link` (`kind`, `via`, `minRttMs`, `srttMs`; null before a route is measured), `remembered`
+(null), `now`), then `start`, the Change `init` begins on, then `steps` in order, each one of
+- `helper`: the helper's `timing` as the policy reads it (`targetKbps`, `kbps`, `skipped`), with no answer;
+- `tick`: `signals` (every `TierSignals` field, as in `signals/`) and `now`;
+- `path`: `to` (a link as above) and `now`;
+- `setBias`: `bias` and `now`; `setBudget`: `capKbps`, `maxFps`, `maxScale` and `now`;
+
+each with `expected`, the Change it returned (`index`, `scale`, `fps`, `width`, `height`, `minKbps`, `maxKbps`,
+`targetKbps`, `reason`) or null. Times are seconds, as the API takes them.
 
 ## Numbers
 

@@ -64,6 +64,10 @@ func (h *Hub) assistantRoutesRelayed(api *http.ServeMux) {
 			api.HandleFunc(pattern, h.forwardAgentArchives)
 			continue
 		}
+		if pattern == "POST /api/v1/sessions/{mid}/{sid}/autoname" { // a full device, a capable owner (agent_autoname.go)
+			api.HandleFunc(pattern, h.forwardAgentAutoname)
+			continue
+		}
 		if key, ok := mergedLists[pattern]; ok { // the todos: every manager's
 			api.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) { h.mergeList(w, r, key, h.forwardHTTP) })
 			continue

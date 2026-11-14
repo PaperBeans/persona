@@ -6,7 +6,7 @@ import XCTest
 /// (web/src/screen/tiers/) must give exactly what these Swift types give. One scenario per file, its input and the
 /// expected output, no internal state. `PERSONA_WRITE_TIER_FIXTURES=1 swift test --filter TierFixtureTests` writes them;
 /// otherwise every committed file must be exactly what the scenarios write now, so a change in behaviour on either side
-/// fails until the files and the other side follow. `policy/` comes with `TierPolicy`'s save-data cap (live-tier ②b).
+/// fails until the files and the other side follow.
 final class TierFixtureTests: XCTestCase {
     // MARK: Ladder
 
@@ -171,6 +171,167 @@ final class TierFixtureTests: XCTestCase {
         return ["name": c.name, "description": c.description, "steps": steps]
     }
 
+    // MARK: Policy
+
+    private enum Op {
+        case helper(target: Int?, sent: Int, skipped: Int?)
+        case tick(TierSignals, now: Double)
+        case path(LinkStats, now: Double)
+        case setBias(TierLadder.Bias, now: Double)
+        case setBudget(cap: Int, fps: Int, maxScale: Double?, now: Double)
+    }
+
+    private struct PolicyCase {
+        let name: String
+        let description: String
+        var display = TierPolicy.Display(points: [1512, 982], pixels: [3024, 1964], maxSize: 2868)
+        var bias: TierLadder.Bias = .auto
+        var capKbps = 12_000
+        var maxFps = 60
+        var maxScale: Double?
+        let link: LinkStats?
+        var remembered: Int?
+        var ops: [Op] = []
+    }
+
+    private static func sig(queue: Double, p95: Double? = nil, delivered: Double? = nil, rising: Bool = false,
+                            falling: Bool = false, frames: Int = 30, bursts: [Double] = [], decode: Double? = 4) -> TierSignals {
+        var s = TierSignals()
+        s.frames = frames
+        s.queueP50Ms = queue
+        s.queueP95Ms = p95 ?? queue
+        s.deliveredKbps = delivered
+        s.queueRising = rising
+        s.queueFalling = falling
+        s.burstKbps = bursts
+        s.decodeP95Ms = decode
+        s.replacedShare = 0
+        return s
+    }
+
+    /// Ticks every 250 ms from `from` while `now < to`, with the same signals.
+    private static func ticks(from: Double, to: Double, _ s: TierSignals) -> [Op] {
+        stride(from: from, to: to, by: 0.25).map { .tick(s, now: $0) }
+    }
+
+    private static let lan = LinkStats(kind: .lan, via: .wifi)
+    private static let relay = LinkStats(kind: .relay, via: .wifi)
+    private static let cellular = LinkStats(kind: .relay, via: .cellular)
+
+    private static let policies: [PolicyCase] = [
+        PolicyCase(name: "start_lan", description: "The same network: the best tier.", link: lan),
+        PolicyCase(name: "start_tailscale_fast", description: "Tailscale under 30 ms: the best tier.",
+                   link: LinkStats(kind: .tailscale, via: .wifi, minRttMs: 18)),
+        PolicyCase(name: "start_tailscale_slow", description: "Tailscale over 30 ms: the second.",
+                   link: LinkStats(kind: .tailscale, via: .cellular, minRttMs: 60)),
+        PolicyCase(name: "start_relay_wifi", description: "The relay over Wi-Fi: the second.", link: relay),
+        PolicyCase(name: "start_relay_cellular", description: "The relay over cellular, under the cellular cap: the third rung.",
+                   capKbps: 4_000, link: cellular),
+        PolicyCase(name: "start_unmeasured", description: "No route measured yet: as the relay over Wi-Fi.", link: nil),
+        PolicyCase(name: "start_remembered", description: "Where this computer last settled over this route.", link: relay,
+                   remembered: 3),
+        PolicyCase(name: "start_data_saver", description: "Data Saver on mobile data: 1.5 Mbit/s and one pixel per point.",
+                   capKbps: 1_500, maxScale: 1, link: cellular),
+        PolicyCase(name: "long_queue_jumps", description: "A queue over 400 ms for a quarter second jumps to what arrived.",
+                   link: lan, ops: [.tick(sig(queue: 500, delivered: 3_000), now: 1), .tick(sig(queue: 500, delivered: 3_000), now: 1.25)]),
+        PolicyCase(name: "skipped_frames", description: "Frames the helper skipped count as a long queue; no rate: one down.",
+                   link: lan, ops: [.helper(target: 7_000, sent: 7_000, skipped: 4), .tick(sig(queue: 100), now: 1),
+                                    .tick(sig(queue: 100), now: 1.25)]),
+        PolicyCase(name: "exhausted_band", description: "The bitrate at the band's floor and the queue not draining: down, spaced, and at once for a runaway queue.",
+                   link: lan, ops: [.helper(target: 10_000, sent: 10_000, skipped: 0), .tick(sig(queue: 200), now: 1),
+                                    .helper(target: 6_500, sent: 6_500, skipped: 0), .tick(sig(queue: 200, delivered: 5_500), now: 1.25),
+                                    .helper(target: 4_100, sent: 4_100, skipped: 0), .tick(sig(queue: 200), now: 1.75),
+                                    .tick(sig(queue: 200, falling: true), now: 2.5), .tick(sig(queue: 200), now: 2.75),
+                                    .helper(target: 2_100, sent: 2_100, skipped: 0), .tick(sig(queue: 280, rising: true), now: 3),
+                                    .tick(sig(queue: 520, rising: true), now: 3.25)]),
+        PolicyCase(name: "backlog_rides_out", description: "A tier whose floor fits what arrives rides out a backlog.",
+                   link: relay, ops: [.helper(target: 4_100, sent: 4_100, skipped: 3)]
+                       + ticks(from: 0.25, to: 3.25, sig(queue: 700, delivered: 5_500))
+                       + [.helper(target: 4_100, sent: 4_100, skipped: 0), .tick(sig(queue: 700, delivered: 4_000), now: 3.25)]),
+        PolicyCase(name: "phone_behind", description: "Decoding behind for 2 s: the next tier with a lower frame rate.",
+                   link: lan, ops: [.tick(sig(queue: 5, decode: 30), now: 1), .tick(sig(queue: 5, decode: 30), now: 2.75),
+                                    .tick(sig(queue: 5, decode: 30), now: 3)]),
+        PolicyCase(name: "up_needs_proof", description: "A calm window isn't enough: up only once the link carried more.",
+                   link: relay, ops: [.helper(target: 12_000, sent: 300, skipped: 0)] + ticks(from: 0.25, to: 12, sig(queue: 5))
+                       + [.helper(target: 12_000, sent: 11_000, skipped: 0)] + ticks(from: 12, to: 22, sig(queue: 5))),
+        PolicyCase(name: "first_seconds", description: "In the first 10 s a step up waits 3 s, not 8.",
+                   link: relay, ops: [.helper(target: 12_000, sent: 11_500, skipped: 0)] + ticks(from: 0.25, to: 4, sig(queue: 5))),
+        PolicyCase(name: "bursts_prove_headroom", description: "Three large frames at 1.5× the next floor prove headroom.",
+                   link: relay, ops: [.helper(target: 12_000, sent: 200, skipped: 0), .tick(sig(queue: 5, bursts: [20_000]), now: 0.25),
+                                      .tick(sig(queue: 5, bursts: [8_000]), now: 0.5), .tick(sig(queue: 5, bursts: [16_000, 18_000]), now: 0.75)]
+                       + ticks(from: 1, to: 4, sig(queue: 5))),
+        PolicyCase(name: "undone_step_up", description: "A step up undone within 15 s doubles that tier's window.",
+                   link: relay, ops: [.helper(target: 12_000, sent: 11_500, skipped: 0)] + ticks(from: 0.25, to: 3.5, sig(queue: 5))
+                       + [.tick(sig(queue: 600, delivered: 7_000), now: 13.25), .tick(sig(queue: 600, delivered: 7_000), now: 13.5)]
+                       + ticks(from: 13.75, to: 30, sig(queue: 5))),
+        PolicyCase(name: "still_screen", description: "A still screen (no frames) neither proves nor breaks the window.",
+                   link: relay, ops: [.helper(target: 12_000, sent: 11_500, skipped: 0), .tick(sig(queue: 5), now: 0.25)]
+                       + ticks(from: 0.5, to: 3, sig(queue: 0, frames: 0)) + [.tick(sig(queue: 5), now: 3.25)]),
+        PolicyCase(name: "slower_route", description: "A slower route steps down at once; a faster one keeps the tier.",
+                   link: lan, ops: [.path(cellular, now: 5), .path(lan, now: 30)]),
+        PolicyCase(name: "new_bias", description: "A new bias takes the tier the rate fits, never richer in pixels a second.",
+                   link: lan, ops: [.helper(target: 3_000, sent: 3_000, skipped: 0), .setBias(.sharper, now: 1), .setBias(.sharper, now: 2),
+                                    .setBias(.smoother, now: 3)]),
+        PolicyCase(name: "data_saver_budget", description: "Choosing Data Saver moves the stream at once; Clearer back.",
+                   capKbps: 4_000, link: cellular, ops: [.helper(target: 2_500, sent: 2_500, skipped: 0),
+                                                         .setBudget(cap: 1_500, fps: 60, maxScale: 1, now: 1),
+                                                         .setBudget(cap: 4_000, fps: 60, maxScale: nil, now: 2)]),
+        PolicyCase(name: "warm_phone", description: "A frame-rate cap is the phone being warm; a lower bitrate cap the network.",
+                   link: lan, ops: [.helper(target: 9_000, sent: 9_000, skipped: 0), .setBudget(cap: 12_000, fps: 15, maxScale: nil, now: 1),
+                                    .setBudget(cap: 1_500, fps: 15, maxScale: nil, now: 2)]),
+    ]
+
+    private static func linkObject(_ l: LinkStats?) -> Any {
+        guard let l else { return NSNull() }
+        return ["kind": l.kind.rawValue, "via": l.via.rawValue, "minRttMs": l.minRttMs.map { $0 as Any } ?? NSNull(),
+                "srttMs": l.srttMs.map { $0 as Any } ?? NSNull()]
+    }
+
+    private static func changeObject(_ c: TierPolicy.Change?) -> Any {
+        guard let c else { return NSNull() }
+        return ["index": c.index, "scale": c.tier.scale, "fps": c.tier.fps, "width": c.tier.width, "height": c.tier.height,
+                "minKbps": c.tier.minKbps, "maxKbps": c.tier.maxKbps, "targetKbps": c.targetKbps, "reason": c.reason.rawValue]
+    }
+
+    private static func signalsObject(_ s: TierSignals) -> [String: Any] {
+        func v(_ d: Double?) -> Any { d.map { $0 as Any } ?? NSNull() }
+        return ["frames": s.frames, "queueP50Ms": v(s.queueP50Ms), "queueP95Ms": v(s.queueP95Ms), "queueRising": s.queueRising,
+                "queueFalling": s.queueFalling, "deliveredKbps": v(s.deliveredKbps), "burstKbps": s.burstKbps,
+                "lateShare": v(s.lateShare), "decodeP95Ms": v(s.decodeP95Ms), "replacedShare": v(s.replacedShare)]
+    }
+
+    private static func policyFile(_ c: PolicyCase) -> [String: Any] {
+        var p = TierPolicy(display: c.display, bias: c.bias, capKbps: c.capKbps, maxFps: c.maxFps, maxScale: c.maxScale,
+                           link: c.link, remembered: c.remembered, now: 0)
+        let start = changeObject(p.last) // init's answer: the stream's first tier
+        var steps: [[String: Any]] = []
+        for op in c.ops {
+            switch op {
+            case let .helper(target, sent, skipped):
+                p.helper(TimingMessage(captureMs: nil, encodeMs: nil, networkMs: nil, kbps: sent, fps: 60, targetKbps: target,
+                                       skipped: skipped))
+                steps.append(["helper": ["targetKbps": target.map { $0 as Any } ?? NSNull(), "kbps": sent,
+                                         "skipped": skipped.map { $0 as Any } ?? NSNull()]])
+            case let .tick(s, now):
+                steps.append(["tick": ["signals": signalsObject(s), "now": now], "expected": changeObject(p.tick(s, now: now))])
+            case let .path(to, now):
+                let change = PathChange(from: nil, to: to, reason: .networkChanged)
+                steps.append(["path": ["to": linkObject(to), "now": now], "expected": changeObject(p.path(change, now: now))])
+            case let .setBias(b, now):
+                steps.append(["setBias": ["bias": b.rawValue, "now": now], "expected": changeObject(p.setBias(b, now: now))])
+            case let .setBudget(cap, fps, scale, now):
+                steps.append(["setBudget": ["capKbps": cap, "maxFps": fps, "maxScale": scale.map { $0 as Any } ?? NSNull(), "now": now],
+                              "expected": changeObject(p.setBudget(capKbps: cap, maxFps: fps, maxScale: scale, now: now))])
+            }
+        }
+        return ["name": c.name, "description": c.description,
+                "init": ["display": ["points": c.display.points, "pixels": c.display.pixels, "maxSize": c.display.maxSize],
+                         "bias": c.bias.rawValue, "capKbps": c.capKbps, "maxFps": c.maxFps,
+                         "maxScale": c.maxScale.map { $0 as Any } ?? NSNull(), "link": linkObject(c.link),
+                         "remembered": c.remembered.map { $0 as Any } ?? NSNull(), "now": 0],
+                "start": start, "steps": steps]
+    }
+
     // MARK: Files
 
     private static var root: URL {
@@ -211,5 +372,9 @@ final class TierFixtureTests: XCTestCase {
 
     func testTheSignalsCases() throws {
         try check("signals", Self.signals.map { ($0.name, Self.signalsFile($0)) })
+    }
+
+    func testThePolicyCases() throws {
+        try check("policy", Self.policies.map { ($0.name, Self.policyFile($0)) })
     }
 }

@@ -123,14 +123,89 @@ What each tool does: Codex threads are archived with the app-server's `thread/ar
 | Manager capability | Contract |
 | --- | --- |
 | `agent_naming.v1` | Full-user ordinary Agent renames persist manual intent in the manager before node dispatch. Older/offline managers retain the native node path; ordinary extension calls retain the existing node authorization boundary. |
+| `agent_autoname` | The manager answers `POST /api/v1/sessions/{mid}/{sid}/autoname` (see "Naming an Agent on request" below). The hub relays the request only to an owner that names it and answers 501 `agent_autoname_unsupported` for an older one. |
 
 Session rows may carry `title_source` (`manual`, `auto`, `prompt` or `runtime`), `title_manual` and cumulative
 `output_tokens` (#4812). These are additive node facts, not instructions to rename a session. Absent or unknown
 provenance never proves that a title was not manually chosen. The manager uses them for guarded naming,
 then publishes the resulting name in the existing `title` field; no client-side renaming algorithm is needed.
+
+### Naming an Agent on request
+
+`POST /api/v1/sessions/{mid}/{sid}/autoname` (#7432; hello / health feature `agent_autoname`, manager capability
+`agent_autoname`) names one Agent session with the model now, for an **Auto Rename** action in the Agent's menu.
+The user does not type a name. It is the background naming's own call ("Automatic session names" in
+[agent-work.md](../assistant/agent-work.md)): the **Sorting** model (`inbox.triage`), the same prompt, input and
+validity check. Because the user asked, the background's guards do not apply: not the per-session change limit, not
+"placeholder names only", not the `agent_auto_naming` switch, and a hand-written or native custom title is replaced
+too. The result is an automatic name in the manager's ledger, so nothing is typed into the Agent and its tab keeps
+its name; a later native rename or `POST …/rename` wins again.
+
+- **Request**: no body (`{}` is accepted). `mid` is the computer's id and `sid` the session id of the row
+  (`machine_id`, `session_id`). Full devices only. The manager waits for the model, up to 45 seconds; give the request
+  a 60-second timeout.
+- **Answer** `200 {"ok": true, "title": "<new title>", "title_source": "auto", "changed": true|false}`: `title` is
+  what every list shows from now on; `changed` is false when the model gave the name the lists already showed. The
+  manager publishes the session list before it answers, so the existing `sessions` / `sessions_delta` /
+  `sessions_list` pushes carry the new `title` to every client: none reloads or renames locally (the client that
+  asked may show `title` from the answer at once). A row named this way over a custom title carries
+  `title_source: "auto"` and no `title_manual`.
+- **One call per session**: requests for the same session that arrive while its call is out share that call and
+  get the same answer. A client still disables the action while its own request is pending.
+- **Errors** use the common error body (`error` in the request's language, `code`, `retryable`):
+
+| Status | `code` | When | `retryable` |
+| --- | --- | --- | --- |
+| 400 | `assistant_session` | The session is one of Persona's own conversations (the main chat included); clients hide the action on rows with `assistant: true` | false |
+| 403 | `forbidden` | The device is not a full device (an answer-only device, an extension's token) | false |
+| 404 | `not_found` | No such computer, or its node lists no such session | false |
+| 409 | `model_not_configured` | No model is set up for **Sorting** | false |
+| 409 | `no_dialogue` | The session has no user or assistant text to name it from yet | false |
+| 409 | `renamed_meanwhile` | A rename in the app or the Agent finished while the model was working; the later hand-written name is kept | false |
+| 501 | `agent_autoname_unsupported` | The computer's manager is older than the feature (the hub answers; nothing was asked) | false |
+| 502 | `invalid_name` | The model's answer was not a usable name (empty, too long, markup, cut off) | true |
+| 502 | `model_failed` | The model call failed | true |
+| 502 | `dialogue_unavailable` | The session's conversation could not be read (its computer is offline or did not answer) | true |
+| 503 | `assistant_offline` | The computer's manager is not connected (the hub answers) | true |
+| 503 | `names_unavailable` | The saved names could not be read; nothing was changed | true |
+| 503 | `canceled` | The manager stopped during the call | true |
+| 504 | `timeout` | The model did not answer in time | true |
+| 500 | `save_failed` | The new name could not be saved; nothing was changed | true |
+
+Failures are logged by the manager with a static reason code and the session's ids only (`agent naming: requested
+session="<mid>"/"<sid>" reason=<code>`), never the model's or the provider's words. A failed request does not count
+as a background naming failure and starts no cooldown.
+
+Clients show the action only when the feature is listed, on rows that are not `assistant` (archived rows included:
+the name is kept by computer and session). The hub lists the feature only while every manager that carries Agents
+is connected and names the capability.
 Claude custom-title records remain protected even outside the quick metadata tail. Other runtimes without
 reliable title provenance remain ineligible. Settings and the naming ledger belong to the manager; see
 `docs/assistant/agent-work.md` ("Automatic session names (#4812)").
+
+The assistant-only `agent_autoname` MCP tool is a separate, narrow caller of the same manager operation, for a
+Persona conversation acting on the user's explicit request. It takes exactly `{"machine":"<machine id or name>",
+"session_id":"<full session id>"}` and rejects other fields, prefixes, ordinary coding-Agent callers and Persona's
+own conversations. A phone permission card confirms the write on every invocation; declining or not answering makes
+no model call and changes no title. The text result is a JSON object with the same success fields, or
+`{"ok":false,"code":"<the applicable code above>","retryable":true|false,"error":"<localized sentence>"}`. It has
+no URL, header or token parameters and grants no standing permission. iOS uses the HTTP endpoint, not this tool.
+
+`agent_autoname_receipt` is an assistant-only, read-only evidence lookup (`agent_naming_receipt.go`), not a new
+client dependency or an execution receipt for a particular model call. Its input is only an exact machine and full
+session id, plus an optional bounded `since`/`before` window `[since,before)` (both required together, at most 24 hours). It reads
+only the real calling conversation's permission history through the owning manager, never another caller's cards
+or arbitrary transcript text. `confirmation: found` requires one exact target match in the original two-field
+`{"machine","session_id"}` card input, independent of JSON field order or layout, with complete bounded-page
+coverage; the four-field evidence query is not matched against the card. The first history read and every later
+page use the exclusive upper bound and the `(created_at,id)` cursor, so equal timestamps at `since` are not
+mistaken for the window's end. It returns `{id,status,allow?,resolved_at?}` only; multiple matches are `ambiguous`, and no match, a
+read error or partial coverage stays `unknown`. `naming` separately reports the exact target's current
+`{status,requested,title?,named_at?,observed_at}` (`status` `current`, `not_found` or `unknown`). That snapshot is
+not proof this request started or finished a model call and is not associated with its call id. `last_failure` is
+not returned because it can belong to background naming. No `model_started`, execution-ended or `retryable` claim
+is synthesized. The tool invokes no model, writes no settings, resolves no card, renames nothing and publishes no
+session list. Ordinary coding Agents, extensions and work machines cannot call it.
 
 ### Health check and feature flags
 
@@ -173,6 +248,7 @@ The authenticated WS `hello.features` always lists server capabilities; trusted 
   - `assistant_search` only while the default manager names it in its `manager.hello` capabilities, the same way (an extension's report cannot add it): `GET /api/v1/assistant/search`, the assistant's chats found by what was said in them (see "Assistant chat search (#6282)"). Without it the apps filter titles and last messages as before; a non-default manager from before it answers the route 404, which the apps take the same way.
   - `assistant_start_service_tier` only while the default manager names it in its `manager.hello` capabilities, the same way (an extension's report cannot add it): `POST /api/v1/assistant/conversations` takes a native Codex `service_tier` with its first message, acknowledged before the first turn (#6240). The web offers pre-start Fast only while using that default manager and a model whose advertised tiers include `priority`; it neither offers nor sends the field for another manager or an older hub, which would ignore it. An explicit nonempty tier sent to a manager without the capability gets 501 `assistant_service_tier_manager_outdated` before relaying, never a silent Standard start.
   - `agent_session_archives` only while every manager (the default one, each connected one and each computer's owner) is connected and names it in its `manager.hello` capabilities, and `agent_session_archive_close` only while every manager names that one too (see "Agent session archives" above).
+  - `agent_autoname` only while every manager (the same set) is connected and names it in its `manager.hello` capabilities: `POST /api/v1/sessions/{mid}/{sid}/autoname`, an Agent session named by the model when the user asks (see "Naming an Agent on request" above). Without it clients do not show **Auto Rename**.
   - The assistant's cards, always listed since #5509 (an older hub lists them only with its `assistant.persona_view` / `assistant.html_views` switches on): `assistant_views` (declarative actions carry `expected_version`, live cards, and the APIs registered by in-body cards are available), `assistant_html_bridge` (`…/html-actions` is available; whether a client runs HTML still depends on its own security sign-off, and it does not run JS based on this flag). See the card APIs in the REST table and [assistant-views.md](../assistant/assistant-views.md).
 - Reported by the manager for the extensions (its `extensions.report`, [extensions.md](../extensions/extensions.md) "Who owns what"): `extension_ui_stream_v1` (whenever the manager runs extensions: extension pages streamed on the app WebSocket once a client negotiates `context.stream`, [extensions.md](../extensions/extensions.md) "Source runtime"), `messaging` (while an extension has a message source, [extension-messaging.md](../extensions/extension-messaging.md)), `error_reports` (while an extension takes error reports, see "Error reports"), `source_subscriptions` (source subscriptions deliver to the Inbox and the knowledge base, #2039: the apps show their entry rows only with it; a manager from before that answers `/api/v1/subscriptions…` and sends `subscription` events without it, [subscriptions.md](../extensions/subscriptions.md) "API"), `subscription_push` (beside it: a device can hand in its own items with `POST /api/v1/subscriptions/-/push`, #3848; the iOS Shortcuts action tells an older hub apart by it, [subscriptions.md](../extensions/subscriptions.md) "Push sources"), `inbox_sources` (beside them: the pages are Inbox Sources, with the built-in sources, recommended subscriptions, Set Up with the assistant and the preview, #5278; the apps show Settings' Inbox Sources row only with it, [subscriptions.md](../extensions/subscriptions.md) "Pages"), `inbox_sources_graph` (beside them: `GET /api/v1/subscriptions/-/graph` answers with Inbox Sources as relations, #5741; the apps offer the relationship view only with it, the same "Pages"), and the `features` that the `api` contributions of enabled, running extensions declare ([extensions.md](../extensions/extensions.md) "App endpoints"). The report cannot add `agent_session_archives`, `agent_session_archive_close`, `meeting_attendance`, `meeting_conversation`, `meeting_photos`, `meeting_live_view`, `meeting_highlights`, `meeting_echo` or `meeting_transcription` or add `assistant_start_service_tier`: only the managers' hellos decide those.
 
@@ -1582,6 +1658,7 @@ Clients report their errors and crashes only while `features` has `error_reports
 | (node RPC) | `session.start` `session_id` | A manager-started Claude session may carry the id it wants the new session to use (a v4 UUID). The node starts Claude with `--session-id <id>` and answers that session, so when the start's answer never comes back the manager reconciles it by this exact id instead of guessing from launcher and directory (#6908). Optional and backward compatible: a node that does not honor it generates its own id, and the manager falls back to the pre-start snapshot heuristic. |
 | POST | `/api/v1/sessions/{mid}/{sid}/modes` | `{"permission_mode"?, "effort"?, "model"?, "launcher"?, "ultracode"?, "ultracode_dismiss_lost"?}` or a separate `{"service_tier":"<advertised id>"}` request: change a running session's permission mode / reasoning effort (`effort` is `auto` / `low` / `medium` / `high` / `xhigh` / `max`, `auto` being the model's own default, see `docs/apple/ios.md` ("Reasoning effort and permission mode")); `model` (#2434) is only for Claude Code terminal sessions: the node types `/model <id>` into its input box (with the same checks as sending a message: `dialog_open` / `input_draft` reject, Agent working rejects, and the screen is read afterwards to confirm), the id comes from `GET /machines/{mid}/launchers/{name}/models` or is one the user typed (the same rule as a start's `model`, `proto.ValidModelID`; the node refuses anything else), and within one request the model is switched first, then the rest; the session list's `model` shows this choice until a new model appears in the transcript; `permission_mode` and `effort` in the session list are the current values. A Claude Code agent's `bypass_available: true` says it can switch to `bypassPermissions` while it runs (its claude was started with `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions` or `--permission-mode bypassPermissions`, read off the process by the node, #1379); without it, a terminal Claude Code the node can restart (one in a pane of a terminal host that can start an agent there, on a launcher and in a folder Persona can tell) takes the pick anyway: the node restarts it in that mode once its turn is over, resuming the same conversation (`bypass_pending: true` on its row until then, #6476, `docs/integrations/claude-integration.md` "Full access by a restart"); any other mode picked meanwhile drops the restart. Elsewhere (or from an older node) only a new start or the assistant can pick that mode. Sessions with `efforts` (Codex via app-server or the Codex App) accept `effort` from `efforts` and separate speed requests when `service_tiers` are advertised ("Codex sources and capabilities"). `POST /api/v1/sessions` and `POST /api/v1/assistant/conversations` also accept these two fields, as the starting values. `ultracode` calls the separate `session.ultracode` method after model and effort changes; `ultracode_dismiss_lost:true` only dismisses the resume notice. See "Claude Code ultracode". `launcher` (feature `launcher_switch`, #5035) other than the session's own records a switch to that launcher that the user's next message (`apply_switch`) carries out, with `model` and `effort` for it; its own launcher drops one; `from` is the launcher the client saw. See "Switching a running Agent to another provider" |
 | POST | `/api/v1/sessions/{mid}/{sid}/rename` | `{"tab_name"?, "title"?}`: the tab uses `herdr tab rename`; the session name sends `/rename <name>` to the running claude (it writes `custom-title`), and if it isn't running, appends the same `custom-title` line to the transcript directly. For assistant chats, `title` is also recorded as the user-given title (the hub's `assistant.titles`, no longer overwritten by automatic titles, `docs/assistant/assistant.md` ("Chat titles")); Codex assistant chats are only recorded on the hub. With an extension's token the title is only a hint: the hub still names a chat it started after its first turn (#3758) |
+| POST | `/api/v1/sessions/{mid}/{sid}/autoname` | #7432, hub feature `agent_autoname`, full devices only: the model names this Agent session now → `{"ok", "title", "title_source": "auto", "changed"}`, the list update sent before the answer. Asked by the user, so the automatic naming's limits and a hand-written name do not hold it back; Persona's own conversations are refused (400 `assistant_session`). Request, answer and error codes: "Naming an Agent on request". Answered by the manager (relayed by the hub to the computer's owner) |
 | GET / PUT | `/api/v1/mutes` | Mutes, same structure as pins, plus `allowed` (Agents with notifications turned on individually while their space is muted). Rule: the Agent itself in sessions → muted; in allowed → not muted; otherwise go by its space. Muted Agents / spaces get no notifications at all (done, needs you) and are shown dimmed on the phone; cached in hub memory, updated on PUT. GET returns the cached list when available; a failed initial read returns 500 (`code: internal`) without a mute list and is retried on the next read. Clients keep their previous copy on failure; only a successful read may replace it |
 | GET | `/api/v1/hub/update` | The hub's version and update state (`docs/operations/hub-update.md`): `{version, build, channel, can_update, why_not?, latest?{version, build, released, notes, newer, bad, held?}, state, progress?, busy:[{machine_id, machine, session_id?, title}], error?, auto, auto_notice, last_check?, confirmed}`; `state`: `idle` / `checking` / `available` / `downloading` / `waiting_idle` / `restarting` / `confirming` / `updated` / `rolled_back` / `failed`; `busy` lists what a restart would interrupt (chats working or waiting for an answer, machines being redeployed); `auto_notice`: the user hasn't been told "automatic updates are on" yet; `latest.held`: why automatic update won't install this newer version (its code may not include the commit this hub is running, `docs/operations/hub-update.md` ("No going backwards")), though a manual update still can; a Docker hub also has `image{name, tag, pinned}` (the image it runs; `pinned`: the tag is a version number, so `.env` must be changed first), `latest` is the newest release on the registry (`build` is 0, no `released`), and `POST …/check` asks the registry; all `/api/v1/hub/update` endpoints return 503 `internal` with a localized unavailable message when persisted update settings cannot be read. Failed reads are retried, and no settings/history write or automatic update proceeds from unread settings |
 | POST | `/api/v1/hub/update/check` | Check now, returns the same as above |
@@ -1699,7 +1776,7 @@ Clients report their errors and crashes only while `features` has `error_reports
 | PUT | `/api/v1/looks/current` | `{"id", "if_unset?"}` choose an avatar (stored on the hub, synced across clients), returns the new `current`; not in the list 404; with `if_unset`, if the hub already has a choice it's returned unchanged (clients use this to migrate their old local choice up). A change broadcasts `look`; with `if_unset`, a database read failure returns 500 `internal` without saving or broadcasting a choice |
 | POST | `/api/v1/looks/uploads` | `{"name", "subtitle?", "image", "choose?"}` makes an avatar from an image (#2404, `docs/apple/persona.md` "Uploading an image"): `image` is base64 (or a `data:` URL) of a PNG, JPEG, WebP or GIF, at most 8 MB and 40 million pixels, at least 64 px a side; the apps send it cropped square and upright, and the hub crops a non-square one to its centered square. The hub writes a format-1 package `personas/u-<hex>/` (avatar at 64 / 128 / 256 / 512 px, a still dot frame per state, `source.kind: "upload"`) and returns `{"look": <as GET /looks lists it, "uploaded": true>, "current?"}`; with `choose` it is chosen too (`current`, broadcast `look`). Broadcasts `personas`. Refusals carry `code`: 400 `no_name` / `bad_name` (1–40 characters, no control or bidi formatting characters) / `bad_subtitle` (≤ 80) / `no_image` / `not_image` / `too_small`, 413 `too_large` / `too_many_pixels`, 409 `too_many` (50 uploaded avatars). Full credentials only |
 | DELETE | `/api/v1/looks/uploads/{id}` | Deletes an avatar made from an upload and returns `{"current"}`; when it was the chosen one, the default is chosen (broadcast `look`). Broadcasts `personas`. 404 `not_found`; 409 `not_uploaded` for any other package (placed by hand, built in, an extension's). Full credentials only |
-| GET | `/api/v1/plugins` | The hub's plugins: `{"plugins":[{"id","name","kind","status","error"?, "version", "source", "enabled", "contributes", "needs_setup"?, …}], "can_install"}`; `status` is `disabled / needs_setup / incompatible / stopped / starting / running / error` (`docs/extensions/extensions.md` ("The hub's API")); only present when `features` has `plugins` |
+| GET | `/api/v1/plugins` | The hub's plugins: `{"plugins":[{"id","name","kind","status","error"?, "version", "source", "enabled", "contributes", "needs_setup"?, "nodes"?, "node_status"? …}], "can_install"}`; `status` is `disabled / needs_setup / incompatible / stopped / starting / running / error` — for an extension whose program runs on computers, while the hub runs no process of its own, `status` is aggregated from its machines and `node_status` carries the counts (see `docs/extensions/extensions.md` ("Programs running on computers")); only present when `features` has `plugins` |
 | GET / PUT / DELETE | `/api/v1/plugins/{id}/-/…`, `/api/v1/plugins/-/…` | Plugin details, switch, config and secrets (full-access devices), preview / install / upgrade / rollback / uninstall (main token over loopback only); only present when `features` has `plugin_manager`, see `docs/extensions/extensions.md` ("The hub's API") |
 | GET | `/api/v1/machines/{mid}/ports/{port}` | Port probe (`docs/operations/ports.md`): `{"port","listening","http","title"?}`, only looks, doesn't allow |
 | POST | `/api/v1/machines/{mid}/ports/{port}/open` | The user taps a port in the App that doesn't belong to any Agent: if something is listening it's allowed for 24 hours and returns the same as above; nothing there 404; read-only device 403 |

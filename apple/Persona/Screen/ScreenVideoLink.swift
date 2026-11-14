@@ -75,8 +75,13 @@ nonisolated enum ScreenVideoFallback: Equatable, Sendable {
     }
 
     /// The one thing the user can do about `notAllowed` themselves, in one sentence (the page's "How to turn it on").
-    static var howToAllow: String {
-        String(localized: "On that Mac, turn on Persona Screen in System Settings › Privacy & Security › Screen & System Audio Recording.")
+    /// Before the node has asked macOS (`permission` missing, not `asked`), macOS's alert is about to show on the Mac;
+    /// once asked, Persona Screen is in System Settings' list (an alert macOS shows only once).
+    static func howToAllow(permission: String?, asked: Bool) -> String {
+        if permission == "missing", !asked {
+            return String(localized: "That Mac will show a window: choose Open System Settings, then turn on Persona Screen.")
+        }
+        return String(localized: "On that Mac, turn on Persona Screen in System Settings › Privacy & Security › Screen & System Audio Recording.")
     }
 }
 
@@ -144,6 +149,10 @@ import UIKit
     @ObservationIgnored var onPathChange: @MainActor (PathChange) -> Void = { _ in }
     /// The route the live screen takes and why it last changed (#6398); nil without a screen session.
     private(set) var route: PathChange?
+    /// The route in use as last measured, about once a second (#6398; the tiers', #6396, too); only the overlay draws it.
+    private(set) var link: LinkStats?
+    /// The node said why it has no direct routes (`firewall`).
+    private(set) var directUnavailable: String?
 
     @ObservationIgnored private var want: Want?
     @ObservationIgnored private var ready: Ready?
@@ -187,8 +196,14 @@ import UIKit
     /// What the page wants shown as video; nil: VNC (chosen, or several displays shown at once).
     /// The live screen's route changed (#6398): the helper starts its delay baseline again (`update.path`), since the
     /// one-way delay changed with the route.
+    func measured(_ stats: LinkStats?, unavailable: String?) {
+        if stats != link { link = stats }
+        if unavailable != directUnavailable { directUnavailable = unavailable }
+    }
+
     func routeChanged(_ change: PathChange) {
         route = change
+        link = change.to
         if change.reason != .start { stream?.send(UpdateMessage(path: .init(change.to))) }
         stream?.tierPath(change) // the tiers look again (#6396)
         onPathChange(change)
@@ -292,6 +307,8 @@ import UIKit
                 Task { @MainActor in self?.helperTiming(t) }
             case let .tier(c):
                 Task { @MainActor in self?.tierChanged(c) }
+            case let .encoding(e):
+                Task { @MainActor in self?.encodingChanged(e) }
             case let .ended(why):
                 Task { @MainActor in self?.ended(why) }
             }
@@ -342,6 +359,13 @@ import UIKit
         tier = c
         tierAt = .now
         if let ready { Self.settled[settledKey(ready)] = c.index }
+    }
+
+    /// The encoder's size after a change in place (#6396): the overlay shows what runs, not what `hello` said.
+    private func encodingChanged(_ e: EncodingMessage) {
+        guard stream != nil else { return }
+        let s = CGSize(width: e.width, height: e.height)
+        if s != size { size = s }
     }
 
     private func settledKey(_ r: Ready) -> String { "\(r.group)/\(r.machine)/\(route?.to.kind.rawValue ?? "relay")" }
@@ -525,6 +549,33 @@ nonisolated struct ScreenVideoTally {
         let s = values.sorted(), mid = s.count / 2
         let m = s.count % 2 == 1 ? s[mid] : (s[mid - 1] + s[mid]) / 2
         return (m * 10).rounded() / 10
+    }
+}
+
+/// The tier as Connection Stats shows it (#6396): the Quality choice, the scale and frame rate, and why it last changed
+/// in plain words with how long ago.
+enum ScreenTierText {
+    static func value(_ quality: ScreenQuality, _ tier: TierLadder.Tier) -> String {
+        let scale = tier.scale == tier.scale.rounded() ? String(Int(tier.scale)) : String(format: "%.1f", tier.scale)
+        return "\(quality.label) · \(scale)× · \(tier.fps) fps"
+    }
+
+    static func reason(_ r: TierReason, at: Date, now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(at)))
+        let ago = seconds < 60 ? String(localized: "\(seconds) s ago") : String(localized: "\(seconds / 60) min ago")
+        return "\(words(r)) · \(ago)"
+    }
+
+    static func words(_ r: TierReason) -> String {
+        switch r {
+        case .start: String(localized: "Picked for this connection")
+        case .linkSlowed: String(localized: "Connection slowed down")
+        case .linkSteady: String(localized: "Connection is steady")
+        case .networkChanged: String(localized: "Network changed")
+        case .phoneWarm: String(localized: "iPhone is warm or saving power")
+        case .phoneBehind: String(localized: "iPhone couldn’t keep up")
+        case .choice: String(localized: "You changed Quality")
+        }
     }
 }
 

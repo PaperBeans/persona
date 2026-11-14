@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS) && canImport(PersonaScreenKit)
+import PersonaScreenKit
+#endif
 
 /// A Mac's VNC on the whole screen (#1343), where it can be operated: its picture, the touches as the mode says (Mouse /
 /// Trackpad), the clipboard both ways, the keyboard with a row of the Mac's shortcuts, Help, and Picture in Picture back to picture in
@@ -569,7 +572,7 @@ struct VNCPage: View {
         .alert("Turn On Video for This Mac", isPresented: $fallbackHelp) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(ScreenVideoFallback.howToAllow)
+            Text(ScreenVideoFallback.howToAllow(permission: model.screenVideo(ref)?.permission, asked: model.screenVideo(ref)?.asked ?? false))
         }
     }
 
@@ -592,19 +595,50 @@ struct VNCPage: View {
         #endif
         guard let s = session else { return nil }
         #if os(iOS) && canImport(PersonaScreenKit)
+        let route = Self.route(s.video)
         if s.video.showing {
             let v = s.video, r = v.reading
-            return ScreenStats(mode: .video, path: .relay, bitrateMbps: r.mbps, fps: r.fps, codec: v.codec,
+            let tier = v.tier.map { ScreenTierText.value(quality, $0.tier) }
+            let why = v.tier.flatMap { c in v.tierAt.map { ScreenTierText.reason(c.reason, at: $0, now: .now) } }
+            return ScreenStats(mode: .video, path: route.path, routeRttMs: route.rtt, routeLoss: route.loss, routeReason: route.reason,
+                               tier: tier, tierReason: why, bitrateMbps: r.mbps, fps: r.fps, codec: v.codec,
                                resolution: v.size.map { "\(Int($0.width))×\(Int($0.height))" }, captureMs: r.captureMs,
                                encodeMs: r.encodeMs, networkMs: r.networkMs, decodeMs: r.decodeMs, totalMs: r.totalMs)
         }
-        #endif
+        return ScreenStats(mode: .vnc, path: route.path, routeRttMs: route.rtt, routeLoss: route.loss, routeReason: route.reason,
+                           bitrateMbps: s.mbps > 0 ? s.mbps : nil,
+                           fps: s.fps > 0 ? s.fps : nil,
+                           roundTripMs: s.latency,
+                           hubRoundTripMs: hubTrips.median(at: .now))
+        #else
         return ScreenStats(mode: .vnc, path: .relay,
                            bitrateMbps: s.mbps > 0 ? s.mbps : nil,
                            fps: s.fps > 0 ? s.fps : nil,
                            roundTripMs: s.latency,
                            hubRoundTripMs: hubTrips.median(at: .now))
+        #endif
     }
+
+    #if os(iOS) && canImport(PersonaScreenKit)
+    /// The overlay's route (#6398): which one, its numbers, and why it last changed. Without a screen session: the hub.
+    private static func route(_ v: ScreenVideoLink) -> (path: ScreenStats.Path, rtt: Double?, loss: Double?, reason: String?) {
+        let kind = v.link?.kind ?? v.route?.to.kind ?? .relay
+        let path: ScreenStats.Path = switch kind {
+        case .lan: .directLAN
+        case .tailscale: .directTailscale
+        case .ipv6, .relay: .relay
+        }
+        let reason: String? = switch v.route?.reason {
+        case .faster?: ScreenRouteReason.text(.faster)
+        case .lost?: ScreenRouteReason.text(.lost)
+        case .degraded?: ScreenRouteReason.text(.degraded)
+        case .networkChanged?: ScreenRouteReason.text(.networkChanged)
+        case .directOff?: ScreenRouteReason.text(.turnedOff)
+        case .start?, nil: v.directUnavailable == "firewall" ? ScreenRouteReason.text(.firewall) : nil
+        }
+        return (path, v.link?.srttMs, v.link?.packetLoss, reason)
+    }
+    #endif
 
     #if os(iOS)
     /// Whether the round trip to the hub is timed (#6558): the stats overlay shown on a live screen, with the app in

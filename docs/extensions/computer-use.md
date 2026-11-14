@@ -105,12 +105,30 @@ In these cases tools still attempt the call, returning Cua Driver's original err
 
 The assistant's two tools (descriptions in `server/internal/prompts/mcp/computer/`):
 
-- **`computer_state {machine, app?, query?, screenshot?}`**
-  - With `app`: first use `cua.getApp(app)` in `run_script` to find its frontmost window (Cua Driver's own lookup), then `get_window_state`: accessibility tree (markdown) plus screenshot.
-  - Without: `get_accessibility_tree` (on-screen Apps and windows) plus `get_desktop_state` (full-screen screenshot).
-- **`computer_run {machine, steps | script, app?, observe?, timeout_ms?}`**
-  - `steps` → `run_steps`: a sequence of actions, finding targets by role and name or `element_token`; stops on the first failure.
-  - `script` → `run_script`: JS with loops and conditions, up to 120 seconds.
+- **`computer_state {machine, app?, pid?, window_id?, query?, screenshot?}`**
+  - With `app`: `list_windows` for the app's windows. With one process, `cua.getApp(app)` in `run_script` finds its frontmost window (Cua Driver's own lookup); with several, the manager chooses (below). Then `get_window_state`: accessibility tree (markdown) plus screenshot.
+  - With `pid` or `window_id`: that process's best window, or that window.
+  - Without any: `get_accessibility_tree` (on-screen Apps and windows) plus `get_desktop_state` (full-screen screenshot).
+- **`computer_run {machine, steps | script, app?, pid?, window_id?, observe?, timeout_ms?}`**
+  - `steps` → `run_steps`: a sequence of actions, finding targets by role and name or `element_token`; stops on the first failure. `pid` / `window_id` (or the process chosen of an app with several) go to `run_steps` as the default window of steps that name none.
+  - `script` → `run_script`: JS with loops and conditions, up to 120 seconds. Not with `pid` / `window_id`.
+- **An app with several processes (#7591)** (`extmgr/computer_window.go`): two processes can share an app's name and
+  bundle id (the user's browser and another copy of it with its own profile). Cua Driver's own lookup takes whichever it
+  finds first, so it once read another copy's small untitled window and the user's own could not be chosen.
+  - Each process's best window: a titled ordinary (layer 0) window, then on the current Space, on screen, in front of
+    the process's others.
+  - Between processes: the one with a titled window, then on the current Space, then the app active now (`list_apps`).
+    Window stacking does not decide between processes: the other copy's windows were stacked over the user's.
+  - Still more than one: nothing runs, and the result lists the candidates (pid, window_id, title, size, on the
+    current Space) for the model to call again with `pid` or `window_id`, asking the user by the titles when unsure.
+  - `computer_run`: the call's `app` with several processes is pinned to the chosen pid (not its window, so a dialog
+    over it in that process is still found). A step that names such an app itself, or a script that does
+    (`cua.getApp` takes no process), is refused with the candidates: a step's own app has Cua Driver choose again.
+  - `pid` / `window_id` are checked against the Mac (`list_windows`, `list_apps`) and stand for their app in per-app
+    approval and the protected-app checks. A pid of another app than the one named is an error, never a way around
+    them. LCU takes neither.
+  - The cost: one `list_windows` (about 75 ms on the Mac) per `computer_state` with an app, and per app a run's steps
+    or script name.
 
 **Session**: each chat's calls carry the same Cua Driver session name, `persona-<first 8 characters of chat id>`.
 - Tested locally (Cua Driver 0.38.0):
@@ -118,11 +136,29 @@ The assistant's two tools (descriptions in `server/internal/prompts/mcp/computer
   - With the **same** session name, tokens work across calls: read the Clear token once, click it in the next `call`, and Calculator resets.
   - Named sessions expire after 5 minutes idle.
   - So line numbers from `computer_state` can be used in later `computer_run` calls.
+- **A session that ended (#7590)**: once Cua Driver ends a session, it refuses every later call under that label
+  ("session has ended; … Call start_session …") until `start_session` starts it again. It ends one after 5 minutes idle,
+  and when the user presses Stop on the bar it shows on the Mac's screen ("You're in control / Return to agent / Stop").
+  The error is the same for both, `get_session` on it is refused too, and Cua Driver keeps no reason (0.38.0, measured).
+  The manager tells them apart by its own record of the label (`extmgr/computer_session.go`, in memory):
+  | Found ended | Taken for | What happens |
+  | --- | --- | --- |
+  | Used under 5 minutes ago | The user's Stop (it cannot have idled out) | Nothing runs. The model is told the user stopped it on that Mac, not to call again in this turn, and to ask the user with a sentence in their language (`hub-computer.session_stopped`). Retries keep getting that answer |
+  | After that, the owner spoke in the conversation (a message, or an answer to its question; the assistant's `ownerHeard`) | Their go-ahead | `start_session` under the same label, then the call once more |
+  | Used 5 minutes ago or more, or never used by a manager that has run that long | Idled out | `start_session`, then the call once more, silently |
+  | Never used, by a manager that started under 5 minutes ago and has not heard the owner since | Cannot tell | Treated as the user's Stop |
+  - The manager's own label (`persona-apps`, its look at the apps and windows for the protected-app checks) and the
+    node's (`persona-gate`, `cua_gate.go`) only read: no cursor, no bar, nothing for the user to stop. They always start
+    again (the node does its own), or every check would fail as unreadable and every run would be refused.
+  - What it can miss: a Stop after the label's last use, when the manager restarted in between and its next call
+    comes 5 minutes or more after that restart with no word from the owner since. That call is taken for an
+    idled-out session.
+  - The node takes `start_session` only for the call's own label and with no other arguments.
 - **Why not keep a `cua-driver mcp` child resident on the node**: a session name already preserves tokens. One `call` per invocation is stateless: node restarts, hub redeployments and two concurrent chats don't affect it. It costs one extra process per call (tens of milliseconds), negligible next to Cua Driver operations (about 0.3 seconds per click, 1.3 seconds to find a window).
 
 **Arguments and tools**:
 - Arguments go to `cua-driver call` through stdin: no length limit, and absent from process listings.
-- The node accepts only 7 tools: `get_desktop_state`, `get_accessibility_tree`, `get_window_state`, `list_apps`, `list_windows`, `run_script`, `run_steps`. Cua Driver settings, updates, extensions and clipboard don't go through this path.
+- The node accepts only 8 tools: `get_desktop_state`, `get_accessibility_tree`, `get_window_state`, `list_apps`, `list_windows`, `run_script`, `run_steps`, and `start_session` for the call's own label (a session that ended, above). Cua Driver settings, updates, extensions and clipboard don't go through this path.
 
 **If the daemon isn't running**: the node first runs `open -g -b com.trycua.driver`, opening CuaDriver.app in the background through LaunchServices with no window. Measured: starts within 1 second, retaining permissions, then the call proceeds.
 
@@ -474,9 +510,10 @@ displays to offer; on a narrow screen the button keeps only its icon). The rules
 
 A hardware video channel next to RFB, so the phone shows a Mac's screen at a fraction of today's bitrate for the same
 picture (from #3067's frames: 0.27–0.31 Mbit/s as HEVC at SSIM ≥ 0.98, against 2.1–2.6 as ZRLE). RFB stays open for
-input, the clipboard and as the fallback; only the picture moves to video. The phone and the web offer it only for a
-Mac whose node advertises `screen_video`, which a node does once it has the helper (the picture switcher in ⋯ stays
-hidden otherwise); until then every client shows RFB. The web, the Mac app and Android don't decode video yet.
+input, the clipboard and as the fallback; only the picture moves to video. The iPhone offers it for a Mac whose node
+advertises `screen_video`, which a node does once it has the helper (the picture switcher in ⋯ stays hidden
+otherwise). The web, the Mac app and Android don't decode video yet: they keep RFB and show no switcher (the web's is
+behind `webVideo.plays` in `web/src/screen/video.ts`).
 
 - **Persona Screen** (`apple/PersonaLink/Sources/PersonaScreen`, `apple/Packages/PersonaScreenKit`): a Swift helper app inside
   Persona Link.app (`Contents/Helpers/Persona Screen.app`, bundle id `<link id>.screen`) that captures one display
@@ -517,9 +554,14 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
     is connected; the token is 16 random bytes, compared in constant time, and the line is read unbuffered so no
     stream bytes go with it. The helper has 10 s to connect and say it.
   - **Permission**: the helper's `--preflight`, run through LaunchServices (so it is about the helper's grant), at most
-    once a minute. `screen_video {version, codecs, permission}` carries it; the node leaves `screen_video` out of the
-    statuses (`advertiseScreenVideo`) until the iPhone's decoder is in the official TestFlight build, since apps
-    before it would show a picture switcher they can't use. `screen.dial` works either way.
+    once a minute. `screen_video {version, codecs, permission, asked}` carries it (`advertiseScreenVideo`, on since the
+    official TestFlight build decodes the video; apps before it show no picture switcher). `screen.dial` works either
+    way.
+  - **Asking once**: macOS lists Persona Screen under Screen & System Audio Recording only after the helper has asked.
+    The first time an app that plays the video (its 5900 stream carries a `pair`) signs in while the helper has no
+    grant, the node starts the helper with `--request-permission`, once per helper version (its stamp, kept in
+    `~/.persona/bin/Persona Screen.asked`). macOS shows its alert on the Mac's own screen, which that app is showing over
+    VNC at that moment; `asked` then tells the app that Persona Screen is in the list.
 - **Hub** (`GET …/screen/video/connect?pair=…`): a binary WebSocket with the same checks as `…/ports/5900/connect`
   (full device, `cua` or `ego` on), counted against the same 64 streams per machine. It calls `screen.dial` and relays
   the bytes without parsing them. The iOS app's screen-sharing stream carries the pair it will bind to
@@ -575,7 +617,7 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
   - **Shared with the browser** (#6558): `spec/fixtures/screen-tiers` holds the ladder's and the signals' scenarios
     (input and expected output, one per file), which `TierFixtureTests` writes from these Swift types
     (`PERSONA_WRITE_TIER_FIXTURES=1`) and otherwise checks unchanged. The browser's port (`web/src/screen/tiers/`)
-    replays them, so a change on either side fails both until they agree. The policy's scenarios follow.
+    replays them, so a change on either side fails both until they agree; so do the policy's timelines (route starts, every way down and up, a route change, a new bias, Data Saver and a warm device).
   - **Signals** (the phone's, from the frames): queueing above the 10 s floor of the one-way delay (p50 / p95 over
     0.5 s, rising or falling over 1 s), the rate the link carried while busy (frames queued behind one another: their
     bytes over their arrival gaps, so quiet stretches don't read as a slow link), bursts of large frames, late frames,
@@ -628,24 +670,65 @@ hidden otherwise); until then every client shows RFB. The web, the Mac app and A
   Mac hasn't allowed video yet (`permission` missing, so no stream is opened).
   Connection Stats (⋯, off by default) reads the video once a second: frames shown and megabits that arrived, the
   helper's capture, encode and network from `timing`, the phone's decode, and their total first when encode, network
-  and decode are all known (a helper before `timing` gives the phone's numbers only). Over VNC it shows RFB's bitrate
+  and decode are all known (a helper before `timing` gives the phone's numbers only). With quality tiers (#6396) a Tier
+  line shows the Quality choice, the scale and frame rate ("Auto · 1.5× · 60 fps", `ScreenTierText`) and why it last
+  changed in plain words with how long ago (picked for this connection, the connection slowed down or is steady, the
+  network changed, the iPhone is warm or saving power or couldn't keep up, you changed Quality); the resolution is the
+  encoder's after an in-place change (`encoding`), not `hello`'s. Over VNC it shows RFB's bitrate
   and frame rate and, on a line of its own, **Round trip to the hub** (#6558): while the overlay is shown and the app is
   in front, the page pings the app's own connection to that Mac's hub every 2 s (`LiveConnection.roundTrip`, the
   heartbeat's kind of ping) and shows the median of the last 5 from the last 20 s (`HubRoundTrips`). It is the same leg
   the web overlay times ("Connection stats on the web"), and like it never sits on the first line. Bitrates have two
   decimals under 1 Mbps, one above, as on the web.
-- **Browser** (#6558, in progress; nothing on the page uses it yet): `web/src/screen/video-wire.ts` frames the wire as
-  `PersonaScreenKit` does, both replaying `spec/fixtures/screen-video` (written from Swift's own messages by
-  `ScreenVideoFixtureTests`), and `video-bitstream.ts` turns `format` into what WebCodecs' `VideoDecoder` takes: the
-  codec string (`hvc1.1.6.L93.B0`, `avc1.64001F`) and the HEVC or AVC decoder configuration record, for the 4-byte NAL
-  lengths every `frame` carries. `node web/e2e/screen-video-decode.mjs <web URL>` decodes the mock's HEVC and H.264
-  fixtures, every frame, in a real browser. The mock plays `fixture.bin` (HEVC) or `fixture-h264.bin` as the helper picks
-  its codec: the first of `start.codecs` it has, else H.264, which is what a browser without HEVC gets.
+- **Browser** (#6558; off for users until it has been checked on a real Mac in each browser: `video.ts` `webVideo.plays`,
+  on only in a development server started with `VITE_SCREEN_VIDEO=1`):
+  - **Wire and decoding**: `web/src/screen/video-wire.ts` frames the wire as `PersonaScreenKit` does (both replay
+    `spec/fixtures/screen-video`, written from Swift's own messages by `ScreenVideoFixtureTests`); `video-bitstream.ts`
+    turns `format` into WebCodecs' codec string (`hvc1.1.6.L93.B0`, `avc1.64001F`) and decoder configuration record.
+  - **What the browser offers** (`video-probe.ts`, once a page): WebCodecs exists only on a secure address (https or
+    localhost); HEVC counts only with a hardware decoder, H.264 either way (`isConfigSupported`, never the user agent).
+    `start.codecs` is what passed, HEVC first; nothing passed means no Picture switcher and VNC.
+  - **The channel** (`video-stream.ts`, `video-link.ts`, `VideoPicture.tsx`, a chunk loaded only for a Mac that offers
+    video): the RFB connection carries a `pair`, and once it signs in the page opens `…/screen/video/connect` with it
+    over the hub's relay (a transport function, where #6398's browser route will plug in). Each picture is decoded as
+    it comes, the newest of a burst drawn on a canvas over noVNC's at `hello.rect` (noVNC's canvas stays underneath,
+    clear, and keeps the pointer and keyboard), and a `report` goes back for every frame. While video shows, noVNC's
+    update requests are held (`rfb-hold.ts`, a guarded hook on `RFB.messages.fbUpdateRequest`; the last one goes out
+    when video stops). The iPhone's rules: video by default where it plays, one display at a time, back to VNC with the
+    same three lines (the Mac locked, video stopped, not allowed with "How to turn it on"), 3 s of silence, 30 s doubling
+    to 5 min, reset after a minute of video, and nothing while the tab is in the background. A decoder that fails on the
+    stream before any picture means this browser can't play it: no switcher, no retry on that page.
+  - **Connection stats**: video mode shows the iPhone's lines (Video · Via hub · total; bitrate · fps · codec · size;
+    capture · encode · network · decode); over VNC, when the Mac offers video but this page can't play it, one line
+    says why: not a secure address, a browser that can't play it, or a decoder that couldn't start.
+  - **Data use** (`data-use.ts`, the iPhone's `ScreenVideoBudget` and `ScreenMobileData`): the cap goes in
+    `start.max_kbps` and, when `navigator.connection` changes, in an `update`. Without tiers the caps are the iPhone's:
+    1.5 Mbit/s with the browser's Data Saver on (`saveData`, its Low Data Mode), 4 on mobile data, 12 otherwise. Chrome
+    and Edge say `type: "cellular"`; Safari and Firefox say nothing, so a phone's browser (a coarse pointer and a screen
+    no wider than 600 CSS pixels on its short side) gets 4 and nothing is asked, any other 12. With tiers on both sides
+    (`webTiers.supported`, PR 4) mobile data follows the user's choice as on the iPhone: Data Saver (1.5 Mbit/s and at
+    most one pixel per point, `maxScale` for the tier policy) until they choose, Clearer 4. The stream starts on the
+    cap without tiers, which aren't known before `hello`. The card (`MobileDataCard`: On mobile data, The screen is
+    saving data. Make it clearer?, Clearer about 0.6 GB an hour, Data Saver about 0.2–0.3 GB an hour) sits under the bar
+    while video shows, is asked at most twice while nothing is chosen (once a page), and the choice is kept in this
+    browser for every computer (`persona.screen.mobileData`). The web has no Settings row for it: it sits in ⋯ as
+    "Quality on mobile data" while it applies. The browser's Data Saver is always Data Saver and asks nothing. Until
+    the page drives tiers the card and the choice never show; a development server started with
+    `VITE_SCREEN_TIERS=1` shows them.
+  - **Tests**: `video-wire.test.ts`, `video-bitstream.test.ts`, `video-probe.test.ts`, `video-stream.test.ts`,
+    `video-link.test.ts`, `rfb-hold.test.ts` (on the real noVNC), `data-use.test.ts`, `VideoPicture.test.tsx`,
+    `ScreenView.video.test.tsx`; `node web/e2e/screen-video-decode.mjs <web URL>` decodes both fixtures in a real
+    browser, `node web/e2e/screen-video.mjs <web URL> <mock hub URL>` runs the page against the mock's helper side
+    (`MOCK_SCREEN_VIDEO=1`, which plays `fixture.bin` (HEVC) or `fixture-h264.bin` as the helper picks from
+    `start.codecs`), and `node web/e2e/screen-data-use.mjs <web URL> <mock hub URL>` the card and the choice with
+    tiers on both sides (`MOCK_SCREEN_VIDEO_TIERS=1`, `VITE_SCREEN_TIERS=1`).
 - **Permission and login**: only input on that Mac answers macOS's Screen Recording question — someone at the Mac, or
   the user's own taps through Screen Sharing. Nothing in Persona answers it, and Agents' computer-use calls can't target
   System Settings' Privacy & Security or the system alert. Video needs the same login as Screen Sharing (the `pair`
   binding); no password travels anywhere new. `computer.status` / `browser.status` gain `screen_video {version, codecs,
-  permission}` (absent from an old node or one without the helper, so an old app keeps RFB).
+  permission, asked}` (absent from an old node or one without the helper, so an old app keeps RFB). The phone's "How to
+  turn it on" follows `asked`: before it, the Mac is about to show a window (choose Open System Settings, then turn on
+  Persona Screen); after it, where in System Settings to turn it on.
 
 ### Live screen routes (#6398)
 
@@ -706,8 +789,16 @@ iPhone's side comes next.
   another VPN or a proxy); `PathPolicy` picks the route: by minimum round trip, a direct route winning a tie with the
   relay; at the stream's start at once, later only after 10 s healthy, a clear gain and 20 s since the last move; a lost
   route left at once and a degraded one (loss ≥ 5 %, or 50 ms over its own floor for 5 s) when another is healthy.
-- **The iPhone** (`apple/Persona/Screen/ScreenLinkRoutes.swift`, for now only in a DEBUG build launched with
-  `-showScreenRoutes`): the RFB and video relays offer the subprotocol beside `binary`; `ScreenLinkRFBStream` /
+- **The iPhone** (`apple/Persona/Screen/ScreenLinkRoutes.swift`): off in release builds until the real-device
+  acceptance has passed (`ScreenRoutes.releaseEnabled`, one line to turn on); a DEBUG build launched with
+  `-showScreenRoutes` has it meanwhile. While offered, **Settings › This Device › Live Screen**
+  (`LiveScreenSettingsView`) has one switch, "Choose the Fastest Route Automatically", on by default; turned off, the
+  phone asks for no session (everything through the hub, as before) and live sessions move back to their relays at
+  once. The quality tiers (#6396) add their own section to the same page. The stats overlay's Route row shows the route's
+  round trip and packet loss and why it last changed ("Faster route", "Previous route dropped", "Network changed", …, or
+  that the computer's firewall blocks direct connections). The first try of a same-network route shows iOS's local
+  network question with `NSLocalNetworkUsageDescription`; refused, those routes fail quietly and the relay stays.
+  How it works: the RFB and video relays offer the subprotocol beside `binary`; `ScreenLinkRFBStream` /
   `ScreenLinkVideoStream` (`PersonaScreenKit`) read the first message, and when the hub selected the subprotocol the
   stream is the session's channel (`ScreenLinkSession`, an actor holding the channels, the transports, the pings and
   `PathPolicy`), else the same raw stream as before, so the RFB client and the video stream don't change. A session
@@ -844,16 +935,23 @@ Flags used:
   - Any step without an app, a `launch_app` step naming no app, computed app names in a script (`getApp` or `launch`), or a script naming no app makes identification incomplete: ask every time for the whole call, without Always Allow.
     A `getApp` / `launch` occurrence the literal reader cannot parse counts the same way: space or a comment before the call's parentheses (`getApp ("Terminal")`), a computed callee (`cua["getApp"]`, a saved function), or an argument that is not a plain string. The completeness check compares every occurrence of the callee's name with the parsed literal calls, so an unreadable one cannot be missed.
 - **Always ask, never offer Always Allow**: terminals (Terminal, iTerm2, Warp, Ghostty, etc.), System Settings, Keychain Access, password managers (Passwords, 1Password, Bitwarden, etc.), Persona, identified by bundle id or name (Chinese/English).
-- **Never operated** (#4336, `computer_protected.go`): System Settings and the system's permission and authorization prompts (`com.apple.UserNotificationCenter`, `com.apple.SecurityAgent`, `com.apple.LocalAuthentication.UIAgent`, and older systems' Accessibility alert). macOS's privacy permissions are meant to be answered by a person; one Allow on a card that said "operate System Settings" would otherwise let an Agent turn any of them on. Reading them (`computer_state`) is still asked about every time; acting is refused before any card, whatever App approval or Confirm on Phone say:
-  - a `computer_run` that names one (a step's or the call's `app`, a `launch_app`, a literal `cua.getApp` / `cua.launch`), by bundle id or by name in English, Chinese or Japanese, names resolved through Cua `list_apps` first;
-  - a script whose apps can't all be read (they were asked about every time before): it could open one under a computed name. The model is told to name them literally;
-  - on Cua Driver, any `computer_run` while one has a window on the screen (`list_windows`, each window's pid matched to its bundle id through `list_apps`, so System Settings counts in any language; the prompts by their process names): an element token, a pid or a step naming no app could still reach it. When the windows can't be read, nothing is done;
-  - steps naming no app (they act on whatever has the focus) run one `run_steps` call at a time, the screen checked before each, so a prompt that an earlier step brought up stops the rest. The answer lists each step's own answer (`one_by_one`);
+- **Never operated** (#4336, #7560, `computer_protected.go`): System Settings and the system's permission and authorization prompts (`com.apple.UserNotificationCenter`, `com.apple.SecurityAgent`, `com.apple.LocalAuthentication.UIAgent`, and older systems' Accessibility alert). macOS's privacy permissions are meant to be answered by a person; one Allow on a card that said "operate System Settings" would otherwise let an Agent turn any of them on. Reading them (`computer_state`) is still asked about every time. Acting is decided by one check, `protectedapps.Look.Check` (`server/internal/protectedapps/check.go`), before any card and again after one, whatever App approval or Confirm on Phone say. It refuses only what could reach one of them; having System Settings open does not stop other apps:
+  - **Named or aimed at, always**: a `computer_run` that names one (a step's or the call's `app`, a `launch_app`, a literal `cua.getApp` / `cua.launch`), by bundle id or by name in English, Chinese or Japanese (names resolved through Cua `list_apps` first), or aims at one's pid, window id or window title.
+  - **A prompt on the screen stops everything**: while a permission or password prompt has a window on the screen, every acting call is refused. Prompts are modal and float on top, and #4349 found the Screen Recording prompt takes synthetic clicks.
+  - **While System Settings has a window** (each window of `list_windows` matched to its bundle id through `list_apps`, so it counts in any language), a call is refused only when it could reach it:
+    - **element tokens**: a token carries its own pid, so it is traced to its window by reading each of System Settings' windows with `since: <the token's snapshot id>`. `other_window` means another window's token, which goes. Its own token, or one that can't be traced, is refused, minimized windows included. Only System Settings' windows are read, never the one the call is for, because a read replaces a window's current snapshot and would make the caller's tokens stale;
+    - **points** (a click, drag, scroll or pointer move at `x, y`): refused where System Settings' window can be the topmost one, by `z_index`, or by its bounds when the order isn't known. The pixels map back by a screenshot scale the call doesn't carry (up to 2 on a Retina display at full size, below 1 for a capped image). So every place they can land is checked: from the window's origin plus half the point, out along the same line to the window's edge;
+    - **keys**: keys aimed at an app (a pid, a window, an element token, a named app, or a step's inherited window) are judged by that app. Keys with no target are refused only while System Settings is the frontmost app (`list_apps` `active`);
+    - **scripts** don't run while System Settings is on the screen, because what a script will click can't be checked beforehand. Steps can be used instead;
+    - **anything that can't be placed** (a pixel point in no known window, a tool whose target isn't known) is refused. Browser page tools, the clipboard and the agent cursor go.
+  - **Not checked**: windows that can't be read stop the call ("could not be read", nothing done). A script whose apps can't all be read is refused (they were asked about every time before): it could open one under a computed name. The model is told to name them literally.
+  - Steps naming no app (they act on whatever has the focus) run one `run_steps` call at a time, each checked just before it runs, so a prompt that an earlier step brought up stops the rest. The answer lists each step's own answer (`one_by_one`).
   - LCU: a native-app question about one of them is declined without a card (`lcuconfirm.NativeApp`). App-less steps already fail there.
-  The model is told the user does it themselves, on the Mac or through the live screen, and not to retry; the hub log says `refused: protected app <id>` and nothing else of the call.
-  - **The Agents' own Cua Driver** (#4349, `server/internal/node/cua_gate.go`): in the sessions Persona starts on a Mac, a PreToolUse hook on Cua Driver's MCP tools (`mcp__<server>__<tool>`, any server name with "cua" in it) and on Bash commands that run `cua-driver call` applies the same rules on the computer, at once, with no card. The rules and their wording live in `server/internal/protectedapps`, shared with the manager. Reads pass without a look. A call is denied when it names a protected app, aims at one's pid, or acts while one has a window on the screen. A script whose apps can't be read is denied, and so is a `cua-driver call` whose arguments aren't in the command, or one the gate can't follow (a heredoc, a subshell). `cua-driver` counts only where it is the program run (after variable assignments, `env` / `sudo` and the like, or inside `sh -c`), so a `grep` or a commit message that mentions it is no call.
+  Each refusal tells the model which case applies and what can still be done: only the protected app is off limits, for example "System Settings is on top where this would click; act by `element_token`, or ask the user to move it out of the way or close it". When an app is named or aimed at, the model is told the user does that themselves, on the Mac or through the live screen, and not to retry. The hub log says which rule refused it and the app's name, and nothing else of the call.
+  - **The Agents' own Cua Driver** (#4349, `server/internal/node/cua_gate.go`): in the sessions Persona starts on a Mac, a PreToolUse hook on Cua Driver's MCP tools (`mcp__<server>__<tool>`, any server name with "cua" in it) and on Bash commands that run `cua-driver call` applies the same check on the computer, at once, with no card. Reads pass without a look. A script whose apps can't be read is denied, and so is a `cua-driver call` whose arguments aren't in the command, or one the gate can't follow (a heredoc, a subshell). `cua-driver` counts only where it is the program run (after variable assignments, `env` / `sudo` and the like, or inside `sh -c`), so a `grep` or a commit message that mentions it is no call.
   - **Not covered**:
     - what a script does with a window it finds once it is running;
+    - a window that comes up partway through steps that each name their app: those run as one batch, checked before it starts (steps naming no app are checked one by one);
     - the sessions the user starts themselves (Persona's global hooks only report, `docs/integrations/claude-integration.md` "Global report-only hooks");
     - Codex Agents' own MCP tools;
     - any other program a shell can use to drive the screen.
@@ -912,6 +1010,8 @@ Follow the order above, one PR per area. Item 6 can go with b, or a separate sma
   - `ComputerSectionTests.testTheLiveScreenAsksForTheMacsSignIn` taps VNC through to login required (ARD).
   - `ScreenDrawerTests` (mock with `MOCK_COMPUTER_OPERATING=1 MOCK_SCREEN=fake`; without `MOCK_SCREEN=fake`, it uses this Mac's real Screen Sharing, showing "hub doesn't allow this machine's screen" and failing if off; assistant and Agent chats each have a running operation): open the full page from the operating bar and ··· menu in assistant and Agent chats, close with ×.
   - `ScreenPasswordTests`: remember, automatic login next time (PiP on real device, full page in simulator), reenter changed password, forget; one-tap unlock.
+  - `VNCTests.testNotAskedYetSaysAWindowWillShow` (#3954, a second mock with `MOCK_SCREEN_VIDEO=missing` at
+    `TEST_RUNNER_PERSONA_SCREEN_VIDEO_MISSING`): before macOS asked, "How to turn it on" says a window will show.
   - `VNCTests.testVideoTakesThePictureAndFallsBack` (#3954, mock `MOCK_SCREEN_VIDEO=1`, runner
     `TEST_RUNNER_PERSONA_SCREEN_VIDEO=1`): video takes the picture after the sign-in, with Wi-Fi's cap in `start` and
     reports coming back; the Mac locking and the stream dropping each put VNC back with their line, unlocking brings
