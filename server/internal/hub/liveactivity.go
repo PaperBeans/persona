@@ -192,7 +192,8 @@ type liveActivities struct {
 	// startDue: device -> when the store said its next push-start may be claimed (the rolling cooldown, or the hold
 	// after a start the phone has not answered). Not asked again before then, unless the phone answers (phoneAnswered).
 	startDue map[string]time.Time
-	// lifts counts the holds lifted (liftHold): a claim whose answer may predate one is not kept in startDue.
+	// lifts counts the times the store moved a device's next start earlier (liftHold): a claim whose answer may
+	// predate one is not kept in startDue.
 	lifts int
 	// The last fleet broadcast to the open apps, and when: what an app that closed its connection cleanly (gone to
 	// the background) left its activity showing (phoneLeft).
@@ -515,7 +516,8 @@ func (la *liveActivities) markSent(device string, dst FleetState, now time.Time,
 // and at most once per fleetRefresh rolling window, atomically persisted across hub restarts and overlapping slots).
 // A start the phone has not answered holds the next one for fleetMaxAge (holdStart): the hub has no token to update
 // or end that activity with, so another start would only put a second card beside it (#7641). A start APNs or the
-// relay refused holds nothing (startRefused); one with no answer holds like an accepted one.
+// relay refused holds nothing (startRefused); one with no answer holds like an accepted one. A hold and what lifts
+// it are about one start, named by the time it was claimed at: they leave a start claimed later alone (holdStart).
 // A device whose own version did not change (the change was something it does not show) is skipped unless forced; one
 // whose app is open is not pushed (it draws the activity itself); one pushed less than fleetMinGap ago gets an ordinary
 // change later: next is when the first of those is due (zero: none). A settings refresh
@@ -651,13 +653,13 @@ func (la *liveActivities) flush(st FleetState, urgent, force bool, settingsDevic
 			// Held before it is sent, so the phone's answer, which may follow at once, is what lifts it. So does a
 			// start APNs or the relay refused, or that never left the hub (startRefused); one nobody answered at all
 			// may be on the phone, and stays held.
-			la.holdStart(context.Background(), r.DeviceID, fleetMaxAge)
+			la.holdStart(context.Background(), r.DeviceID, now, fleetMaxAge)
 			// "Phone Muted" while a desktop is online, the device's quiet hours (quiethours.go), or the device turned off
 			// the pushes of the manager whose agents it counts (NotifyPrefs.MutedManagers): the activity still starts,
 			// without its alert (desktops.go).
 			quiet := prefs.MuteWhileDesktop && la.h.push.desktopOnline != nil && la.h.push.desktopOnline() ||
 				la.h.push.inQuiet(prefs) || prefs.mutes(from)
-			la.sendStart(d, r, startPayloadIn(la.h.userLang(), dst, now, quiet))
+			la.sendStart(d, r, now, startPayloadIn(la.h.userLang(), dst, now, quiet))
 		}
 	}
 	return next
@@ -697,40 +699,56 @@ func (la *liveActivities) claimStart(r db.LiveActivity, now time.Time) (time.Tim
 // answers its activity may be up where the hub can neither update nor end it; fleetRefresh again when the phone
 // answers or the start is refused (liftHold). Best effort: when the write fails the rolling cooldown alone paces the
 // starts, as before #7641.
-func (la *liveActivities) holdStart(ctx context.Context, device string, hold time.Duration) {
+//
+// asOf is the start the write is about: the time it was claimed at (the now its flush claimed with), or the time the
+// phone answered. The store leaves a start claimed after asOf alone, so a write that comes late (a refusal after the
+// send's retries, a slow store, the slot that is leaving) cannot hold or lift a newer start.
+//
+// moved reports whether the store's deadline may differ from what the hub last read: the write changed it, or failed
+// without saying (it may have been applied). False when it changed nothing: no store, no claim, the deadline was
+// already that, or the device's last start was claimed after asOf.
+func (la *liveActivities) holdStart(ctx context.Context, device string, asOf time.Time, hold time.Duration) (moved bool) {
 	if la.h.store == nil {
-		return
+		return false
 	}
 	ctx, cancel := context.WithTimeout(ctx, la.storeTimeout)
 	defer cancel()
-	if err := la.h.store.HoldLiveActivityStart(ctx, device, hold); err != nil {
+	changed, err := la.h.store.HoldLiveActivityStart(ctx, device, asOf, hold)
+	if err != nil {
 		la.h.logf("live activity start hold: device=%s hold=%s error=%v", trafficIdentity(device), hold, err)
+		return true
 	}
+	return changed
 }
 
 // phoneAnswered: the phone reached the hub (it reported an activity's update token, or its app connected), so the
-// hub hears of what it starts there again: the next start waits only for the rolling cooldown.
+// hub hears of what it starts there again: the next start waits only for the rolling cooldown. The answer is stamped
+// now: it lifts the hold of a start claimed up to now, never of one claimed while its write was on its way.
 func (la *liveActivities) phoneAnswered(ctx context.Context, device string) {
 	if la == nil || device == "" {
 		return
 	}
-	la.liftHold(ctx, device)
+	la.liftHold(ctx, device, la.now())
 }
 
-// startRefused: the start just sent did not reach the phone for certain (pushRefused: never sent, or APNs or the relay
-// answered with a status other than 200), so there is no card to hold for: the next start waits only for the rolling
-// cooldown, as before #7641. A start with no answer at all (pushUnknown) is not lifted: APNs may have taken it, and
-// another start would put a second card beside it, so it waits for the phone or fleetMaxAge like an accepted one. The
-// answer comes within the send's retries, well inside fleetRefresh, so it cannot lift the hold of a later start.
-func (la *liveActivities) startRefused(device string) {
+// startRefused: the start claimed at claimed did not reach the phone for certain (pushRefused: never sent, or APNs or
+// the relay answered with a status other than 200), so there is no card to hold for: the next start waits only for the
+// rolling cooldown, as before #7641. A start with no answer at all (pushUnknown) is not lifted: APNs may have taken it,
+// and another start would put a second card beside it, so it waits for the phone or fleetMaxAge like an accepted one.
+// The refusal lifts its own start's hold only: if another start was claimed before it came, that one's hold stays.
+func (la *liveActivities) startRefused(device string, claimed time.Time) {
 	la.h.logf("live activity start refused: device=%s, next start after the rolling cooldown", trafficIdentity(device))
-	la.liftHold(context.Background(), device)
+	la.liftHold(context.Background(), device, claimed)
 }
 
-// liftHold puts the device's next start back on the rolling cooldown. The store first, then the cache: a claim that
-// read the hold before the write sees lifts change and does not cache it (flush).
-func (la *liveActivities) liftHold(ctx context.Context, device string) {
-	la.holdStart(ctx, device, fleetRefresh)
+// liftHold puts the device's next start back on the rolling cooldown, unless its last start was claimed after asOf
+// (holdStart). startDue is dropped only when the store's deadline moved (or may have): a lift that changed nothing
+// leaves what the hub read from the store in place. The store first, then the cache: a claim that read the hold
+// before the write sees lifts change and does not cache it (flush).
+func (la *liveActivities) liftHold(ctx context.Context, device string, asOf time.Time) {
+	if !la.holdStart(ctx, device, asOf, fleetRefresh) {
+		return
+	}
 	la.mu.Lock()
 	delete(la.startDue, device)
 	la.lifts++
@@ -867,7 +885,8 @@ func (la *liveActivities) send(d Device, r db.LiveActivity, payload map[string]a
 	})
 }
 
-func (la *liveActivities) sendStart(d Device, r db.LiveActivity, payload map[string]any) {
+// sendStart sends the start claimed at claimed; a refusal lifts that start's hold (startRefused).
+func (la *liveActivities) sendStart(d Device, r db.LiveActivity, claimed time.Time, payload map[string]any) {
 	la.h.logf("live activity: push-start on %s", d.Name)
 	la.h.push.sendLiveActivityThen(d, r.PushToStartToken, compatibleStartPayload(d, payload), "10", func() {
 		la.update(r.DeviceID, func(v *db.LiveActivity) {
@@ -877,7 +896,7 @@ func (la *liveActivities) sendStart(d Device, r db.LiveActivity, payload map[str
 		})
 	}, func(o pushOutcome) {
 		if o == pushRefused {
-			la.startRefused(r.DeviceID)
+			la.startRefused(r.DeviceID, claimed)
 		}
 	})
 }

@@ -498,6 +498,16 @@ that never reports a token models this case, not the usual one: have the phone a
 cooldown. The hub's update and end paths were fine all along; check them with a token before
 looking for a lost push.
 
+The hold and its lift were first written against "the device's current start", on the reasoning that a refusal comes
+within the send's retries, well inside the cooldown. That is a guess about timing, not a guarantee: a slow send, a
+slow store or the slot that is leaving can deliver the write after the next start was claimed, where a late lift
+drops that start's hold and a late hold keeps a refused one back for 8 hours. A write that follows from an event
+says which event: the time the start was claimed at, or the time the phone answered, and the store applies it only
+to a start claimed up to then (`claimed_at <= asOf`, one statement under the row lock). That needs the claim time to
+name one claim, so a claim is refused unless it is later than the last one, whatever the deadline says. Have the
+write report whether it changed anything, and drop what the caller remembers only then (or when it failed without
+saying).
+
 ## A custom HTTPS dial must opt into HTTP/2 (#1620)
 
 A custom `http.Transport.DialContext` conservatively disables Go's automatic HTTP/2 negotiation. Keep the checked-address dial callback and explicitly enable `ForceAttemptHTTP2`; do not replace it with a default dialer or let an upstream proxy resolve the name again. Verify real local TLS HTTP/2 negotiation, HTTP/1.1 fallback and request cancellation. A successful transport test is not evidence that a particular upstream challenge disappeared: verify the installed source separately, without raising budgets or substituting host-downloaded content.

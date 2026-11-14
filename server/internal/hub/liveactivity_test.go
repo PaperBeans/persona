@@ -177,16 +177,19 @@ func newFleetStartStore() *fleetStartStore {
 	return &fleetStartStore{rows: map[string]db.LiveActivity{}, due: map[string]time.Time{}, claimed: map[string]time.Time{}}
 }
 
-func (s *fleetStartStore) HoldLiveActivityStart(_ context.Context, device string, hold time.Duration) error {
+// HoldLiveActivityStart is the store's: only a start claimed up to asOf, and changed only when the deadline moved.
+func (s *fleetStartStore) HoldLiveActivityStart(_ context.Context, device string, asOf time.Time, hold time.Duration) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fail {
-		return fmt.Errorf("injected hold persistence failure")
+		return false, fmt.Errorf("injected hold persistence failure")
 	}
-	if at, ok := s.claimed[device]; ok {
-		s.due[device] = at.Add(hold)
+	at, ok := s.claimed[device]
+	if !ok || at.After(asOf) || s.due[device].Equal(at.Add(hold)) {
+		return false, nil
 	}
-	return nil
+	s.due[device] = at.Add(hold)
+	return true, nil
 }
 
 // A phone registering over its socket saves its tools: nothing these tests read.
