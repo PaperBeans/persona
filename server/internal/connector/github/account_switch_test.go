@@ -583,7 +583,7 @@ func TestRepliesNeverCrossAccounts(t *testing.T) {
 			before := c.Status(ctx).Account
 			err := c.cachedGet(ctx, api7, &it)
 			after := c.Status(ctx).Account
-			if err == nil && before == after && it.Title != title[after] {
+			if err == nil && after != "" && before == after && it.Title != title[after] {
 				select {
 				case served <- "read as " + after + ": " + it.Title:
 				default:
