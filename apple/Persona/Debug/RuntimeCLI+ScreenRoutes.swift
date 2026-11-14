@@ -9,23 +9,43 @@ extension RuntimeCLI {
     static let screenRouteCommands: [String: Command] = [
         "screenRoutes": { _ in screenRoutes() },
         "screenRoute": { a in await screenRoute(a) },
+        "screenFlow": { a in await screenFlow(a) },
     ]
 
     /// Each live screen's routes: kind, smoothed and minimum round trip, jitter, packet loss, samples, healthy; the
     /// one in use; the last change and why. Kinds and numbers only, never addresses.
     private static func screenRoutes() -> Reply {
         var screens: [[String: Any]] = []
-        for (_, l) in ScreenRoutes.latest {
+        for (pair, l) in ScreenRoutes.latest {
             let routes: [[String: Any]] = l.routes.map { id, s in
                 ["route": id == ScreenLinkSession.relayRoute ? "relay" : s.kind.rawValue, "inUse": id == l.current,
                  "srttMs": s.srttMs as Any, "minRttMs": s.minRttMs as Any, "jitterMs": s.jitterMs as Any,
                  "packetLoss": s.packetLoss as Any, "samples": s.samples, "healthy": s.healthy, "via": s.via.rawValue]
             }
             var screen: [String: Any] = ["routes": routes]
-            if let c = l.change { screen["lastChange"] = ["to": c.to.kind.rawValue, "reason": c.reason.rawValue] }
+            if let c = l.change {
+                screen["lastChange"] = ["to": c.to.kind.rawValue, "transport": c.to.transport.rawValue, "reason": c.reason.rawValue]
+            }
+            if let f = ScreenRoutes.latestFlow[pair] {
+                screen["flow"] = ["route": f.route.split(separator: ":").first.map(String.init) ?? "", "loss": f.loss as Any,
+                                  "parity": f.parity, "overhead": f.overhead, "rttMs": f.rttMs as Any, "scale": f.scale]
+            }
             screens.append(screen)
         }
         return ["screens": screens]
+    }
+
+    /// `action`: mute (UDP flows go silent: nothing arrives on them, so the video falls back to the route's TLS
+    /// connection) or unmute (#7873).
+    private static func screenFlow(_ a: Args) async -> Reply {
+        guard let action = a["action"] as? String, action == "mute" || action == "unmute" else {
+            return ["error": "action (mute | unmute)"]
+        }
+        let pairs = Array(ScreenRoutes.latest.keys)
+        for pair in pairs {
+            await ScreenLinkRegistry.shared.session(for: pair)?.muteFlows(action == "mute")
+        }
+        return ["screens": pairs.count, "action": action]
     }
 
     /// `action`: drop (the direct route's connection breaks), mute (it goes silent: nothing it carries arrives) or

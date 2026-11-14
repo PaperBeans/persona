@@ -1168,6 +1168,25 @@ final class VNCTests: XCTestCase {
         }
     }
 
+    /// #7873: the Route row says "· UDP" while the video rides a UDP flow (the demo with `-showScreenUDP`), for review
+    /// beside `testTheOverlayShowsTheRoute`'s, in light and dark, at the default size and at xxxLarge.
+    @MainActor func testTheOverlayShowsTheUDPRoute() throws {
+        for (scheme, size) in [("light", "L"), ("dark", "L"), ("light", "XXXL"), ("dark", "XXXL")] {
+            let (app, _) = try signedInMachinePage(["-showScreenStatsDemo", "YES", "-showScreenUDP", "YES", "-ui.scheme", scheme,
+                                                    "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategory\(size)"])
+            let overlay = app.descendants(matching: .any)["screen-stats"].firstMatch
+            XCTAssertTrue(overlay.waitForExistence(timeout: 10), "the overlay:\n\(app.debugDescription)")
+            XCTAssertTrue(overlay.label.contains("UDP"), "the Route row names UDP: \(overlay.label)")
+            XCTAssertTrue(overlay.label.contains("4 ms"), "the flow's round trip: \(overlay.label)")
+            for source in [app, XCUIApplication(bundleIdentifier: "com.apple.springboard")] { // the icon follows the look
+                let alert = source.alerts.containing(NSPredicate(format: "label CONTAINS[c] 'icon' OR label CONTAINS '图标'")).firstMatch
+                if alert.exists, alert.buttons.firstMatch.exists { alert.buttons.firstMatch.tap() }
+            }
+            shot(app, "vnc-overlay-udp-\(scheme)-\(size == "L" ? "default" : "xxxl")")
+            app.terminate()
+        }
+    }
+
     /// #6398: a phone that asks the hub for a screen session (direct routes on, `-showScreenRoutes`) and a hub that
     /// doesn't offer one (the mock, like an older hub or node) keep today's live screen through the same raw streams:
     /// RFB signs in and, with the mock's video channel, video takes the picture and reports frames.

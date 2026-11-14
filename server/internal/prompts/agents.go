@@ -18,6 +18,13 @@ func RenderReadonlyTaskPlanExit() string { return render("agents/readonly_plan_e
 // RenderReadonlyTaskConstraint carries a read-only task's limit in its first prompt.
 func RenderReadonlyTaskConstraint() string { return render("agents/readonly_task", nil) }
 
+type TaskContinuation struct {
+	TodoID   string
+	Readonly bool
+}
+
+func RenderTaskContinuation(t TaskContinuation) string { return render("agents/task_continuation", t) }
+
 // AgentTriage is the system prompt that reads a stopped agent's last reply and says where its work stands
 // (agents/triage, docs/assistant/agent-work.md).
 type AgentTriage struct {

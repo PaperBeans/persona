@@ -175,6 +175,8 @@ public actor ScreenLinkSession {
     private var flowAsked: [Int: Double] = [:]
     private var flowTicker: Task<Void, Never>?
     private var lastFlowStatus = -Double.infinity
+    /// For tests on real networks: everything that arrives on UDP flows is ignored (`muteFlows`).
+    private var flowsMuted = false
 
     /// A session over the RFB relay the hub selected the subprotocol on. `first` is what the relay already said (the
     /// app read it to see the subprotocol); `now` is a monotonic clock in seconds.
@@ -651,6 +653,10 @@ extension ScreenLinkSession {
         }
     }
 
+    /// For tests on real networks (the DEBUG command channel): UDP flows go silent (everything that arrives on them is
+    /// ignored, as when a network drops UDP), so the video falls back to the route's TLS connection; or speak again.
+    public func muteFlows(_ on: Bool) { flowsMuted = on }
+
     /// The socket the app opened for a route's flow (`openFlow`).
     public func addFlow(_ socket: ScreenUDPSocket, route: String) {
         guard var f = flows[route], f.socket == nil, !ended else { socket.close(); return }
@@ -727,7 +733,7 @@ extension ScreenLinkSession {
 
     /// One datagram from a flow's socket: dropped unless it opens under the node's key with a number not seen before.
     private func flowPacket(_ route: String, _ id: Data, _ p: Data) {
-        guard var f = flows[route], f.id == id, let head = ScreenUDPPacket.read(p), head.flow == f.id,
+        guard !flowsMuted, var f = flows[route], f.id == id, let head = ScreenUDPPacket.read(p), head.flow == f.id,
               let body = ScreenUDPPacket.open(p, cipher: f.opener, iv: f.openIV, number: head.number),
               f.window.accept(head.number), let m = try? ScreenUDPMessage.decode(body, fromNode: true) else { return }
         let t = now()
