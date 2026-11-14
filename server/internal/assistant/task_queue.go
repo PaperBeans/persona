@@ -179,7 +179,7 @@ func (s *Service) failQueuedStart(ctx context.Context, p *TaskPlan, i int, pt Pl
 		s.logf("task %s: admission queue: receipt: %v", pt.TodoID, err)
 	}
 	if todo, ok := s.todoNow(pt.TodoID); ok {
-		s.taskNotice(ctx, todo, pt.Machine, "failed", "", reason)
+		s.taskStartFailed(ctx, todo, pt.Machine, pt.Start, reason) // a retry's timeout is news even with the same reason (#6027)
 		s.taskReport(todo, reportFailed, pt.Machine, [2]string{}, reason, nil)
 	}
 	s.logf("task %s: admission queue: gave up after %d attempt(s)", pt.TodoID, q.Attempt)

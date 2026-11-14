@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -176,6 +177,56 @@ func TestAdmissionQueueTimeoutFailsWithReceipt(t *testing.T) {
 	if !strings.Contains(feedKinds(s, "conv1"), "receipt") {
 		t.Fatalf("the timed-out task must get a failure receipt: %s", feedKinds(s, "conv1"))
 	}
+}
+
+// timeOutQueue makes task 0's queue record overdue and past the queue bounds, then sweeps it.
+func timeOutQueue(t *testing.T, s *Service, planID string) {
+	t.Helper()
+	if err := s.patchPlanTask(context.Background(), planID, 0, func(pt *PlanTask) {
+		pt.Queue.Attempt = admissionQueueMaxAttempts
+		pt.Queue.QueuedAt = time.Now().Add(-admissionQueueMaxWait - time.Minute)
+		pt.Queue.NextAt = time.Now().Add(-time.Second)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.sweepAdmissionQueue(context.Background())
+}
+
+// A task_retry whose start waits in the queue and times out again, for the same gate reason, is still news to the
+// supervisor: task_retry promised it how the retry ends (#6027).
+func TestAdmissionQueueRetryThatTimesOutTheSameWayIsTold(t *testing.T) {
+	s, f, d := admissionHub(t)
+	shortSupervise(t, s)
+	setSettings(t, s, func(v *Settings) { v.Main = "conv1" })
+	f.known["conv1"] = true
+	// The main conversation lives on the hub machine, whose sessions the manager's own device layer answers for.
+	d.add("server", "Server")
+	d.setSessions("server", []proto.Session{{SessionID: "conv1", Assistant: true, Status: proto.StatusIdle}})
+	busyOverloaded(d)
+	p, todo := queuedStart(t, s, "busy")
+	if p.Tasks[0].Queue == nil {
+		t.Fatal("precondition: the task is queued")
+	}
+
+	timeOutQueue(t, s, p.ID)
+	waitFor(t, "the first timeout", func() bool { return todoNow(s, todo.ID).DoneAt != nil })
+	first := todoNow(s, todo.ID).StartError
+	waitFor(t, "the first timeout told", func() bool { return len(f.notices()) == 1 })
+
+	raw, _ := json.Marshal(map[string]any{"todo_id": todo.ID, "reason": "再试一次"})
+	if _, err := s.runTool(context.Background(), "server", "conv1", "task_retry", raw); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the retry to queue again", func() bool {
+		loaded, err := s.loadPlan(context.Background(), p.ID)
+		return err == nil && loaded.Tasks[0].Queue != nil && todoNow(s, todo.ID).DoneAt == nil
+	})
+	timeOutQueue(t, s, p.ID)
+	waitFor(t, "the retry's timeout", func() bool { return todoNow(s, todo.ID).DoneAt != nil })
+	if again := todoNow(s, todo.ID).StartError; again != first {
+		t.Fatalf("precondition: the retry must time out for the same reason: %q, then %q", first, again)
+	}
+	waitFor(t, "the retry's timeout told", func() bool { return len(f.notices()) == 2 })
 }
 
 // A task whose todo ended while queued simply drops the queue on the next sweep.
