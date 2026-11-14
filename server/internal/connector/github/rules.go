@@ -443,26 +443,36 @@ func (c *Connector) over(thread string, o InboxOptions) string {
 // asks, and whatever has none was read as the account before: answered through Persona, older than things are
 // kept, or from before a restart. A thread both accounts have is held, so its item stays: the hub gives it the
 // new account's thing as a new move (markLast).
+//
+// That it is done is saved before the hub is told (keepSettled), and it is done once. So whatever goes wrong
+// around it (the save fails, the manager stops, the answer is lost) leaves items of the account before open,
+// which cannot be answered, and never closes one of the account in use.
 func (c *Connector) Settle(ctx context.Context, threads []string) map[string]string {
-	_ = c.restore(ctx) // what a restart left unsettled; unreadable, nothing is closed for the account's sake
+	c.restore(ctx) // what a restart left unsettled
 	o := c.options()
 	out := map[string]string{}
 	st := &c.inbox
 	st.mu.Lock()
-	settled := st.unsettled && st.polled && len(threads) > 0
+	epoch, closing := st.epoch, st.unsettled && st.polled && len(threads) > 0
+	st.mu.Unlock()
+	if closing {
+		closing = c.keepSettled(ctx, epoch)
+	}
+	st.mu.Lock()
+	closing = closing && st.unsettled && st.epoch == epoch
 	for _, t := range threads {
 		if why := c.over(t, o); why != "" {
 			out[t] = why
-		} else if settled && st.things[t] == nil {
+		} else if closing && st.things[t] == nil {
 			out[t] = "GitHub：换了账号，这条是之前那个账号的"
 		}
 	}
-	if settled {
+	if closing {
 		st.unsettled = false
 	}
 	st.mu.Unlock()
-	if settled {
-		c.keepAccount(ctx)
+	if closing {
+		c.keepAccount(ctx) // a save that ran in between wrote it as unsettled again: what holds now
 	}
 	return out
 }

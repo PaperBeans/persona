@@ -47,19 +47,18 @@ type inboxState struct {
 // inbox, the notifications cursor and everything the polls kept start again, and the hub's items of them are
 // closed when it next asks (Settle). c.mu is held (adopt).
 func (st *inboxState) retire(epoch uint64) {
+	st.reset(epoch, true)
+}
+
+// reset empties the state for the account of epoch; unsettled says whether the hub may still hold items of the
+// account before (retire: yes; Connector.restore: what was kept). c.mu is held.
+func (st *inboxState) reset(epoch uint64, unsettled bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	st.epoch, st.unsettled, st.polled, st.left = epoch, true, false, true
+	st.epoch, st.unsettled, st.polled, st.left = epoch, unsettled, false, st.left || len(st.things) > 0 || unsettled
 	st.things, st.seen = map[string]*connector.InboxThing{}, map[string]string{}
 	st.ci, st.repos, st.marks = nil, nil, nil
 	st.lastModified, st.fullAt = "", time.Time{}
-}
-
-// restore starts the state at what was kept before a restart (Connector.restore): nothing was read yet. c.mu is held.
-func (st *inboxState) restore(epoch uint64, unsettled bool) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	st.epoch, st.unsettled = epoch, unsettled
 }
 
 // isUnsettled says whether the hub may still hold items of the account before.
@@ -634,9 +633,7 @@ func (c *Connector) Reply(ctx context.Context, r connector.InboxReply) error {
 	// (markLast), with or without the thing still held here, so the thread alone is never taken for it: both
 	// accounts may have it. Then the request is bound to the epoch (asEpoch): an account that changes before it
 	// is sent refuses it.
-	if err := c.restore(ctx); err != nil {
-		return err
-	}
+	c.restore(ctx)
 	st := &c.inbox
 	st.mu.Lock()
 	epoch := st.epoch

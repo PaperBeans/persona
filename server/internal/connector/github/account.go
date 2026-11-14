@@ -31,10 +31,6 @@ import (
 // errAccountChanged: the connector reads as another account than the one a read or a reply began under.
 var errAccountChanged = errors.New("the GitHub account changed: read it again")
 
-// errNoRecord: the store that keeps the account across restarts cannot be read, so whose the hub's items are is
-// not known: nothing is read or answered as an account until it can.
-var errNoRecord = errors.New("the GitHub sign-in store cannot be read")
-
 // account is whose the token in memory is. c.mu guards it.
 type account struct {
 	// login is the account GitHub last named for a token ("" until it has, here or before a restart); known says
@@ -59,32 +55,44 @@ type accountRecord struct {
 	Unsettled bool `json:"unsettled,omitempty"`
 }
 
-// restore reads the account kept before this process started, once, before anything is read or answered as an
-// account: the first login GitHub names is compared with it, so a login that changed while the manager was down
-// is a change like any other. Without a store (a test) there is nothing to read.
-func (c *Connector) restore(ctx context.Context) error {
+// restore reads the account kept before this process started, before anything is read or answered as an account:
+// the first login GitHub names is compared with it, so a login that changed while the manager was down is a change
+// like any other. It reads again after Reload, and after a read that failed: until the store can be read the
+// connector goes on with what it has in memory, as it does without a store (a computer's gh login must not stop
+// working because the hub's secret no longer opens). A record ahead of what this process has (read late, or saved
+// by whoever held the id meanwhile) replaces it, and GitHub is asked again whose the token is.
+func (c *Connector) restore(ctx context.Context) {
 	c.mu.Lock()
 	done := c.acct.restored
 	c.mu.Unlock()
 	if done {
-		return nil
+		return
 	}
 	c.deviceState(ctx)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.acct.restored {
-		return nil
-	}
-	if c.secrets != nil && !c.devLoaded {
-		return errNoRecord
-	}
-	if r := c.dev.Account; r != nil && r.Login != "" {
-		c.acct.login, c.acct.epoch, c.acct.kept = r.Login, r.Epoch, *r
-		c.inbox.restore(r.Epoch, r.Unsettled)
-		c.etags.reset(r.Epoch)
+	if c.acct.restored || c.secrets != nil && !c.devLoaded {
+		return
 	}
 	c.acct.restored = true
-	return nil
+	r := c.dev.Account
+	if r == nil || r.Login == "" {
+		return // nothing kept: keepAccount writes what is in use
+	}
+	c.acct.kept = *r
+	switch {
+	case c.acct.login == "": // nothing named in this process yet
+		c.acct.login, c.acct.epoch = r.Login, r.Epoch
+		c.inbox.reset(r.Epoch, r.Unsettled)
+		c.etags.reset(r.Epoch)
+	case r.Epoch > c.acct.epoch:
+		c.acct.login, c.acct.epoch, c.acct.known = r.Login, r.Epoch, false
+		c.inbox.reset(r.Epoch, r.Unsettled)
+		c.etags.reset(r.Epoch)
+	case r.Epoch == c.acct.epoch && !strings.EqualFold(r.Login, c.acct.login):
+		// This process named an account without knowing the one kept: asked again, GitHub's answer is a change.
+		c.acct.login, c.acct.known = r.Login, false
+	}
 }
 
 // keepAccount saves the account for the next start when it is not what the store holds. A save that fails is
@@ -109,6 +117,37 @@ func (c *Connector) keepAccount(ctx context.Context) {
 	c.mu.Lock()
 	c.acct.kept = saved
 	c.mu.Unlock()
+}
+
+// keepSettled saves, before the hub is told to close the items of the account before (Settle), that this is done
+// for epoch, and says whether it is saved: a restart that still found them unsettled would close, by the same
+// exclusion, items of the account in use that the new process holds no thing of yet. Without a store there is
+// nothing a restart could find. A store that cannot be written keeps the old items open (and unanswerable).
+func (c *Connector) keepSettled(ctx context.Context, epoch uint64) bool {
+	c.mu.Lock()
+	none, restored := c.secrets == nil, c.acct.restored
+	c.mu.Unlock()
+	if none {
+		return true
+	}
+	if !restored {
+		return false
+	}
+	var saved accountRecord
+	err := c.saveDevice(ctx, func(d *deviceLogin) {
+		if c.acct.epoch != epoch {
+			return // the account changed again meanwhile: that change's own save says what holds
+		}
+		saved = accountRecord{Login: c.acct.login, Epoch: epoch}
+		d.Account = &saved
+	})
+	if err != nil || saved.Login == "" {
+		return false
+	}
+	c.mu.Lock()
+	c.acct.kept = saved
+	c.mu.Unlock()
+	return true
 }
 
 // newCredential puts tok in memory ("" drops the one there): nobody knows whose it is until GitHub says. c.mu is
@@ -182,11 +221,7 @@ const (
 // the answer or the error belongs to.
 func (c *Connector) credential(ctx context.Context, refused string, need int) (tok string, epoch, cred uint64, err error) {
 	if need != tokenAsIs {
-		if err := c.restore(ctx); err != nil {
-			c.mu.Lock()
-			defer c.mu.Unlock()
-			return "", 0, c.acct.cred, err
-		}
+		c.restore(ctx)
 	}
 	again := refused != ""
 	for range credentialTries {
@@ -256,7 +291,7 @@ func (c *Connector) adopt(cred uint64, login string, h http.Header) bool {
 // accountKnown says whether GitHub has named the account of the token in memory. Until it has, nothing kept for
 // the account before is served: the read is sent, which asks first (tokenKnown).
 func (c *Connector) accountKnown(ctx context.Context) bool {
-	_ = c.restore(ctx) // a read that binds itself to an epoch does so to the one kept: what fails here fails the request
+	c.restore(ctx) // a read that binds itself to an epoch does so to the one kept
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.acct.known
@@ -264,7 +299,7 @@ func (c *Connector) accountKnown(ctx context.Context) bool {
 
 // epochNow is the epoch of the account the connector reads as.
 func (c *Connector) epochNow(ctx context.Context) uint64 {
-	_ = c.restore(ctx)
+	c.restore(ctx)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.acct.epoch

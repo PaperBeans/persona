@@ -55,6 +55,9 @@ func (c *Connector) UseSecrets(s connector.Secrets) {
 func (c *Connector) Reload() {
 	c.mu.Lock()
 	c.dev, c.devLoaded = deviceLogin{}, false
+	// The account kept there too (restore): whoever held the id may have saved over it, and the check below
+	// writes it back when it is gone.
+	c.acct.restored, c.acct.kept = false, accountRecord{}
 	c.mu.Unlock()
 	c.kickCheck()
 }
@@ -69,11 +72,14 @@ func (c *Connector) deviceState(ctx context.Context) deviceLogin {
 	}
 	raw, err := s.Load(ctx)
 	if err != nil {
+		c.mu.Lock()
+		c.devUnreadable = true
+		c.mu.Unlock()
 		return d
 	}
 	_ = json.Unmarshal(raw, &d)
 	c.mu.Lock()
-	c.dev, c.devLoaded = d, true
+	c.dev, c.devLoaded, c.devUnreadable = d, true, false
 	c.mu.Unlock()
 	return d
 }
@@ -87,12 +93,14 @@ func (c *Connector) saveDevice(ctx context.Context, change func(*deviceLogin)) e
 	for try := 0; ; try++ {
 		c.deviceState(ctx) // what is kept already, so that the save does not drop it
 		c.mu.Lock()
-		if s = c.secrets; s == nil || c.devLoaded {
+		// A store that cannot be read has nothing this save could drop: a new sign-in writes over it, the way out
+		// of a secret that no longer opens.
+		if s = c.secrets; s == nil || c.devLoaded || c.devUnreadable {
 			break
 		}
-		c.mu.Unlock() // not read: the store failed, or Reload forgot it meanwhile (then it is read again)
+		c.mu.Unlock() // Reload forgot it meanwhile: read again, or the save would drop what is kept there
 		if try == 8 {
-			return errNoRecord // saving now would drop what is kept (the sign-in, the account)
+			return errors.New("the GitHub sign-in store keeps changing")
 		}
 	}
 	change(&c.dev)

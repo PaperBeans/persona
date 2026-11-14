@@ -132,6 +132,8 @@ type Connector struct {
 	secrets   connector.Secrets
 	dev       deviceLogin
 	devLoaded bool
+	// devUnreadable: the last read of the secrets failed (the store is down, or the secret no longer opens).
+	devUnreadable bool
 	saving    sync.Mutex // one save of dev at a time (saveDevice)
 	pending   *devicePending
 }
