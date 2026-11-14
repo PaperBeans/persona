@@ -437,6 +437,7 @@ To call the hub's HTTP API, an extension lists the scopes it uses in `permission
 | `assistant.ask` | Start chats with Persona and read chat activity | `GET /api/v1/assistant`, `POST /api/v1/assistant/conversations`, `GET …/conversations/{id}/feed` |
 | `todos.read` | See to-dos | `GET /api/v1/todos`, `GET /api/v1/todos/{id}/decisions` |
 | `leaders.read` | See leader conversations (directions) and what they report | `GET /api/v1/assistant/leaders`; the events `leader.changed` and `leader.report` (see "Leader events") |
+| `assistant.dispatch_policy` | Read and change the assistant dispatch policy | `GET` / `PUT /api/v1/assistant/dispatch-policy`; a policy written by an extension must expire within one hour (see "Dispatch policy") |
 | `todos.write` | Create and edit to-dos, attach chats to to-dos | `POST /api/v1/todos`, `PATCH /api/v1/todos/{id}`, a to-do's `agents/{mid}/{sid}` and `spaces/{mid}/{space…}` (`PUT` / `DELETE`), `POST /api/v1/todos/{id}/decisions` (outcome decisions only, see [todos.md](../assistant/todos.md) "API overview"); creating and editing to-dos and adding decisions not with terminal control characters (see below); deleting to-dos, superseding decisions, completion checks and retries still require full access |
 | `assistant.read` | Read your Persona chats (your messages and its replies) | No HTTP route: the `assistant.conversations` / `assistant.messages` RPC (see "Assistant conversations"). `assistant.ask` does not include it |
 | `assistant.memory.read` | Read what Persona remembers about you (read-only, never the health space) | No HTTP route: the `assistant.memory` RPC (see "Assistant memory"). Writing and deleting memory stay with full credentials; `assistant.read` does not include it |
@@ -2673,8 +2674,9 @@ Used to connect directly to a personal Agent service (e.g. one with real-time pu
 - **Extension event to the hub** `agentsrc.updated {contribution?, session_keys?}`: these sessions changed (new messages, unread state, title); omitting `session_keys` means the list changed.
   The hub clears caches and pushes `{"type":"agents","session_ids":[…]}`, and the app refetches immediately. Only this extension's own sources are accepted. The hub also pushes after its own sends, then again at 4 / 15 / 45 seconds;
   every 60 seconds it relists all sources as a fallback.
+  The hub keeps each source's list for 20 seconds; reads that miss it at the same time (the Agents page's sections, groups and counts after a change, other open apps) share one `sessions` call, and one that comes after a change does not share a call made before it (#7204).
 - Implementation: `server/internal/extmgr/extension_agents.go`; tests `TestExtensionAgentSource` (`extension_agents_test.go`, fake extension exercises the protocol),
-  `agents.TestAddAndRemoveSources`.
+  `agents.TestAddAndRemoveSources`, `agents.TestListsMissingTheCacheTogetherAskTheSourceOnce` (`inflight_test.go`).
 
 ## Events
 
@@ -2728,7 +2730,8 @@ side conversation in `assistant.leaders`; one leader is one direction. Schema: `
   out while none; the hub files a new direction under the project most of its tasks are filed under); `ended: true`
   once it left `assistant.leaders` (nothing is deleted; made a leader again, it is sent without `ended`). Sent once per
   change: what was last told is kept in the hub's store, so a restart or a replay of the same state sends nothing.
-- **`leader.report {id, leader, kind, todo, plan?, text, link?, at, reached?, doing?, needs_you?, links?}`**: written by the hub from the task's ledger, never by a
+- **`level?`** on `leader.report`: present only while the hub's push tiering (the low-distraction switch, `docs/server/server.md`) is on: `P1` for `progress`, `reached` and `stuck`, which an extension keeps in its log and briefing without alerting anyone (no message that rings, no mention); `P0` for a `decision`. Left out with the switch off, when an extension does as before.
+- **`leader.report {id, leader, kind, todo, plan?, text, link?, at, reached?, doing?, needs_you?, links?, level?}`**: written by the hub from the task's ledger, never by a
   model; `kind` is `reached` (its review accepted it), `decision` (its review needs the owner, or a plan of the
   leader's waits for the owner's Start: then `plan` is the plan's id and `todo` is `""`, as a plan has no to-do until
   it starts; #3608) or `stuck` (in Waiting
@@ -2765,6 +2768,7 @@ Extensions with an `auth_relay` contribution (and the permission `auth_relay`) c
 When an extension decides "this needs a person", it sends a phone alert through the hub: `POST /api/v1/notify` (scope `notify`, or full access; use `PERSONA_HUB_URL` / `PERSONA_HUB_TOKEN`); parameters in `docs/protocol/protocol.md`.
 
 - **The extension chooses the level**: `active` (default, normal notification) or `time-sensitive` (breaks through Focus, vibrates the watch when the phone is locked; users can turn it off in system settings). iOS needs the app's `com.apple.developer.usernotifications.time-sensitive` entitlement to truly show it as time-sensitive; without it the system treats it as `active` (the hub's own "Needs you" pushes are affected too, see #1572). No `critical` (requires separate Apple approval) or `passive`.
+- **Urgency for push grading**: the optional `push_level` says how urgent the alert is — `P0` (must interrupt), `P1`, the default (worth knowing) or `P2` (background news). It is independent of `level` (the APNs interruption level). When the hub's push grading switch is off every level alerts as usual; when it is on, only `P0` alerts, `P1` is held for briefings and `P2` stays silent, and the same `id` (the related key) alerts at most once in 12 hours. A held alert is recorded with its reason and readable at `GET /api/v1/push/intercepts`, so the extension can avoid repeating what was held back. Reading it needs both the `notify` scope and the extension's ID in the hub's `intercept_readers` allow-list (`hub.json`); an extension not listed gets 403, and a listed one still sees its own manager's entries only (filtered before the 200-entry limit). The answer's `body` is a stored summary (title plus at most 140 runes), never the full held-push text, which can contain the owner's decision questions, agent replies or `notify_user` content; the extension gets `title`, the summary `body`, `level`, `reason`, `at`, `related_key` and the merged `also` titles — enough for an extension panel — while full credentials read through the same shape. The switch itself is readable at `GET /api/v1/push/ln-mode` (scope `notify`; only full credentials may PUT it), and `GET /api/v1/push/stats/daily` (`?days=1..14` or `?since=<RFC3339>`, scope `notify`) reports per UTC day how many of the extension's pushes were delivered (`sent`) and held (`intercepted`, with `by_reason`), counted from the hub's full records so the numbers stay exact past 200 entries. There is no "opened / handled" count: the hub has no data source for push taps.
 - **Responsibilities**: when to notify, how often per session and how to detect a stall are the extension's business; the hub only delivers and honors user settings: no notification when the device has **Needs you** (`input`) off, the session is blocked, or the phone is muted. The hub's own pushes (questions, permissions, completion) stay as before; extensions cannot intercept them and do not cause them to be sent twice.
 - **Opening**: alerts with `machine_id` + `session_id` are grouped by session and open that session on tap; without them it is just a message. Buttons are covered in "System-level placements", "Notification buttons".
 - Example: subscribe to `agent.needs_you` / `agent.finished`, then poll `GET /api/v1/sessions`; if a session is stuck waiting for confirmation (no screen reading, no interaction card created by the hub) or has been spinning for 30 minutes, send one `time-sensitive` alert, at most once per session in 30 minutes.
@@ -2910,7 +2914,7 @@ all paths through `APIClient.extensionPath`); otherwise (old hub) `/api/v1/plugi
 UI placements `extension` / `extension_name` and `plugin` / `plugin_name`, marketplace counts `extensions` / `plugins`; marketplace-preview request bodies use `extension` on new hubs and `plugin` on old ones.
 Features accept new and old names (`hasExtensionFeature("ui_slots")` means `extension_ui_slots` or `plugin_ui_slots`, likewise `"manager"`); both `extension_ui` and `plugin_ui` events
 are accepted (new hubs send both; badges are set values, so receiving twice is harmless); channel `settings_url` accepts `settings/extensions/<id>` and `settings/plugins/<id>`.
-Views, components, actions, responses, placements and context all use schema-generated types (`apple/Shared/Generated/ExtensionWire.swift`, #1860); the app only adds decoding helpers alongside them
+Views, components, actions, responses, placements and context all use schema-generated types (`apple/Packages/PersonaWire/Sources/PersonaWire/ExtensionWire.swift`, #1860); the app only adds decoding helpers alongside them
 (`ExtensionUIModel.swift`: `ExtensionUIPlace.owner` accepts both key forms, `ExtensionUIContext.here(…)` includes time zone, language, platform and `ui_version: 3`, the Shared version widgets and the watch send; every page or card the app draws sends 6, #827).
 
 - List: each extension's name and status (**On** / **Starting** / **Needs Setup** / **Off** / **Not available on this hub** / **Something Went Wrong**; both `running` and `stopped` are **On**), opening details on tap; footer explains installation via the hub's admin UI (`/admin`) or on the hub machine (`personad extension`).
@@ -3172,7 +3176,7 @@ and the node follows (`node/plugins.go`). Reconciliation runs on computer connec
   manager.json values migrate once at hub startup: name becomes machine id, extension enabled, marker recorded (`imessage.migrated_to_extension`); later user disable/switch choices are not overwritten.
   Unknown machine names or failed writes produce one log line and retry next startup, reading manager.json meanwhile. The manager.json field remains unchanged for one version.
   **iphone** (#3450) is a built-in node program as well: only `plugin.node.call {id: "iphone", method: status | call | pair | forget | cancel}`,
-  with no old names (`node/iphone.go`, `docs/extensions/iphone-pairing.md`).
+  with no old names (`node/iphone/iphone.go`, `docs/extensions/iphone-pairing.md`).
   All three built-in manifests specify `node: {command: "builtin", machines: "machines"}` (`NodeBuiltin`). Installed packages with `builtin` are rejected; only hub built-ins may use it.
   Their `Manifest.NodeProgram()` is nil: no packages, no `plugin.node.sync`, no `nodes` / `node_machines`, no added "Runs on this computer…" confirmation,
   no node permission rows, and the consent digest is the same as without a node section. UI is therefore unchanged. Anything related to packages, status, confirmation or consent uses `NodeProgram()`, not `Node` directly.
@@ -3183,7 +3187,7 @@ and the node follows (`node/plugins.go`). Reconciliation runs on computer connec
 
 Manifests, process protocol, Views and components have one definition: JSON Schema in `schema/extension/` (#1849). Generate types from it, never hand-write them:
 Go `sdk/go/wire` (used directly by the hub, `server/go.mod` uses `replace` to `../sdk/go`), TypeScript `sdk/ts/src/wire.ts` and web `web/src/lib/extension-wire.ts`,
-Swift `apple/Shared/Generated/ExtensionWire.swift`, Kotlin `android/core/contracts/.../generated/ExtensionWire.kt`.
+Swift `apple/Packages/PersonaWire/Sources/PersonaWire/ExtensionWire.swift`, Kotlin `android/core/contracts/.../generated/ExtensionWire.kt`.
 
 - After schema changes, regenerate with `python3 scripts/gen/extension_schema.py`; `--check` compares only (`scripts/test/test_extension_schema.py` runs it and checks examples/counterexamples under `examples/`).
 - Hub validation of extension Views and conformance checks of `initialize` responses first use the schema (`wire.Validate`), then checks the schema cannot express (`extension.CheckView`).

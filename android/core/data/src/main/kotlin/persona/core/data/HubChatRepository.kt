@@ -232,6 +232,8 @@ class HubChatRepository(
         override suspend fun sendQueuedNow(session: Session) = delegate.sendQueuedNow(session)
         override suspend fun info(session: Session) = delegate.info(session)
         override suspend fun completeRow(session: Session) = delegate.completeRow(session)
+        override suspend fun childRows(session: Session) = delegate.childRows(session)
+        override suspend fun childPage(session: Session, since: String?) = delegate.childPage(session, since)
         override suspend fun interactionHistory(session: Session) = delegate.interactionHistory(session)
         override suspend fun restoreModel(session: Session) = delegate.restoreModel(session)
         override suspend fun fork(session: Session, atItemId: String): String {
@@ -356,6 +358,22 @@ class HubChatRepository(
                 entry.state.update { it.copy(loadingOlder = false) }
             } } }
         }
+    }
+
+    override suspend fun loadRange(session: SessionKey, fromSeq: Int, throughSeq: Int): List<Item> {
+        require(fromSeq >= 0 && throughSeq >= fromSeq)
+        val out = mutableListOf<Item>()
+        var from = fromSeq
+        repeat(20) {
+            val page = transport.items(session, ItemsQuery(fromSeq = from, throughSeq = throughSeq))
+            out += page.items
+            val last = page.items.lastOrNull()?.seq
+            if (!page.more || last == null || last >= throughSeq) return out.distinctBy { it.id }
+            val next = last + 1
+            if (next <= from) return out.distinctBy { it.id }
+            from = next
+        }
+        return out.distinctBy { it.id }
     }
 
     override suspend fun expandFold(session: SessionKey, fromSeq: Int, toSeq: Int): List<Item> {

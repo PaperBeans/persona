@@ -503,6 +503,8 @@ class Watcher:
             if old.get("outcome") == "passed_with_base_failures" and old.get("semantic") == "passed" and not old.get("review_posted"):
                 old = dict(old, outcome="passed", review_posted=False)
             if old.get("outcome") == "failed":
+                if old.get("failure_posted"):
+                    return
                 self.comment(repo, number, "Automated review at `%s` did not pass. Not merged.\n\n```text\n%s\n```" %
                              (head[:9], bounded(old.get("failure", "verification failed"), 14000)))
                 self.state.put(repo, number, head, evidence_key=evidence_key, failure_posted=True)
@@ -696,11 +698,10 @@ class Watcher:
 
     def worker(self):
         while True:
-            key = self.tasks.get()
-            if key is None:
+            priority, _, key = self.tasks.get()
+            if priority == 2:
                 self.tasks.task_done()
                 return
-            _, _, key = key
             repo, number = key
             try:
                 self.process(repo, number)
@@ -763,7 +764,7 @@ class Watcher:
         finally:
             self.stopping.set()
             for _ in self.workers:
-                self.tasks.put(None)
+                self.tasks.put((2, -1, ("", 0)))
             for worker in self.workers:
                 worker.join(timeout=30)
             if self.events:

@@ -6,6 +6,7 @@ import SwiftUI
 import UIKit
 #endif
 import UserNotifications
+import PersonaWire
 
 /// App-wide state: server pairing, live connection, machines, sessions, interactions and per-session chats.
 @Observable
@@ -485,6 +486,10 @@ final class AppModel {
         }
         #if os(iOS)
         HomeWidgetWriter.shared.source = { [weak self] in self?.homeSnapshotSource() }
+        // A tool call asked iOS for a source's permission (#7659): a refused source's tools leave the hub's list.
+        NotificationCenter.default.addObserver(forName: .phoneAccessAnswered, object: nil, queue: .main) { @Sendable [weak self] _ in
+            MainActor.assumeIsolated { self?.registerPhone() }
+        }
         #endif
         #if os(iOS) || os(visionOS)
         if registryUnreadable {

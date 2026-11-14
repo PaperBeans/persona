@@ -198,6 +198,10 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 - Runtime CLI element filtering uses `id`, not `identifier` (2026-11-06, #2024). The latter is an XCUITest property; passing it to the runtime omits ID filtering and is not card-readiness evidence. Validate real card IDs plus visibility/on-screen bounds; still use XCUITest for nested WebView body buttons. Never fall back to fixed-sleep screenshots when a button cannot be found.
 
 - Do not nest `#require` in Swift Testing macros (2026-11-05, #2024). `#require(JSONSerialization.jsonObject(with: try #require(body)) …)` fails real compilation with recursive expansion. Unwrap body in a separate `#require`, then parse/assert. `#expect(array.allSatisfy(keyPath))` can also be mistaken for a throwing closure during macro expansion; use an explicit nonthrowing closure. Preserve assertions rather than skip tests.
+
+- Never `return Issue.record(...)` in a void `@Test` (2026-11-14, #7677). `Issue.record` is `@discardableResult` and returns an `Issue`, so returning it from a void test fails compilation with "unexpected non-void return value in void function"; the error only surfaces when the test target compiles, so an app-target-only build stays green. Write two statements — `Issue.record("..."); return` — inside a guard's `else`, matching the repo's existing plain-statement usage.
+
+- The iOS simulator does not implement data protection (2026-11-14, #7677). `FileManager.attributesOfItem` always returns nil for `.protectionKey` there, so a test asserting `FileProtectionType` on a written file fails on every simulator run and can only pass on a physical device. Gate the protection-level assertions with `#if !targetEnvironment(simulator)` and keep the write/read round-trip assertion unconditional; do not "fix" the production `completeFileProtection…` write option to make the simulator assertion pass.
 - Another session can claim a build slot between inspection and launch (2026-11-05, #2024). `pgrep` observes, not locks. All `xcodebuild` must use `~/.local/bin/xcode-slot xcodebuild …` for the machine-wide slot, max two concurrent, queue when full. Never bypass the lock or increase `XCODE_SLOTS`. Outer waits have an overall timeout; distinguish not started, build failure, and success. A queue-exit code is neither test failure nor pass; serialize your own builds.
 
 - After resolving rebase conflicts, `git diff --check` covers only uncommitted edits; a clean worktree does not prove commits lack conflict markers (#2195). Before push/merge also run `git diff origin/main...HEAD --check` over the full PR diff.
@@ -614,6 +618,10 @@ Ordinary `go test` and CI do not include `//go:build herdrlive`, so a node helpe
 - Tests selecting rows by "where one swipe stops" change results after row-height/font changes (#245 changed new-shell text sizes) (2026-11-02, #339).
   `testScrolledListHoldsStillThroughUpdates` previously happened to stop on a space whose rank did not change, missing replacement of the reader's screen. Bisect landed on a font-only commit, but the real issue was failure to preserve the reader's row.
   A bisected commit shows where the issue became visible, not necessarily its cause; check whether its edits explain the symptom. Find rows by title, not whole accessibility labels containing "3 minutes ago", which change across minutes.
+- **A row on the first screen today can be below it tomorrow** (2026-11-13, #6782). A SwiftUI `List` makes a row only as it comes near the
+  screen, so `waitForExistence` on a row below the first screen never succeeds. `TodoPlanTests` waited for the NAS to-do, and a new section above
+  it in the mock pushed it down: the test failed at its first check. Wait for the list's first row, then drag the list up slowly until the row is
+  wholly inside the list's frame (`TodoPlanTests.scrollIntoView`), rather than counting on where the mock's rows land.
 - Body-count tests (`RenderBudgetTests`) wait for the page to settle before measurement (2026-11-03, #475). Launch still loads/layouts history, and the first measured `rev` push
   gets blamed for those bubbles, looking like "unchanged-screen push redraws 6 bubbles"; order changes or a second measurement remove it. Now wait for unchanged counts for 1 second (`settled()`).
 
@@ -797,6 +805,19 @@ Pin the visual style, not an alternate navigation tree. A shared launch helper t
   row's label doesn't flip the switch: the value stays, and a test that expects a sheet or a command after it fails, or passes for
   the wrong reason. Tap the switch itself: `(row.switches.firstMatch.exists ? row.switches.firstMatch : row).tap()`, as
   `ExtensionControlsUITests` and `AgentWorktreeUITests` do, and assert the value it reports (`"1"` / `"0"`) afterwards.
+
+## A hidden view that stays built is still in XCUITest's tree (2026-11-14, #7684)
+
+- Since #7586 the composer's dictation bar is built with the composer and only hidden while off, so a tap only animates
+  it. XCUITest (iOS 27.2) still listed its ✕ ■ ↑ at the mic's spot under their labels, so `app.buttons["发送"]` found the
+  off ↑: a tap fell through to the composer's send where the two lined up, a lookup with two matches failed to tap
+  (`PersonaQueueUITests`), and `ExtensionAssistantCardTests`' "no send" check failed in the main conversation.
+- Not enough, measured: `accessibilityHidden`, opacity 0, the whole bar as `.accessibilityElement(children: .ignore)` +
+  hidden, the identifier switched off (`accessibilityIdentifier(_:isEnabled: false)`: the button then shows its SF
+  Symbol's name, `arrow.up`, as identifier), an empty identifier (the label stays).
+- Out of the tree means not built. A view that must stay built drops its accessibility label and identifier while
+  hidden (`DictationBar`'s `named`): still listed, but no lookup by label or identifier finds it. `DictationBarTests`
+  checks that none of the bar's names is in the tree while it is off.
 
 ## XCUITest cannot tap while a list glides (2026-11-10, #3027)
 

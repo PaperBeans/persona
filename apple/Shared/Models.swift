@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 // Wire types mirroring docs/protocol/protocol.md. Explicit CodingKeys everywhere: key strategies would also rewrite
 // arbitrary JSON keys inside tool inputs and answer dictionaries.
@@ -1251,6 +1252,8 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         bypassAvailable = (try? c.decodeIfPresent(Bool.self, forKey: .bypassAvailable)).flatMap { $0 } ?? false
         effort = try c.decodeIfPresent(String.self, forKey: .effort)
         efforts = try c.decodeIfPresent([String].self, forKey: .efforts)
+        // The conversation's own pick (#5033): an odd one never drops the session, which then follows its default.
+        modelPick = (try? c.decodeIfPresent(ModelPick.self, forKey: .modelPick)).flatMap { $0 }
         contextTokens = try? c.decodeIfPresent(Int.self, forKey: .contextTokens) // an odd one never drops the session
         contextWindow = try? c.decodeIfPresent(Int.self, forKey: .contextWindow)
         // An odd ultracode field never drops the session; omitted is unknown (an older hub or node), not off.

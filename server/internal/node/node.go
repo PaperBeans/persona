@@ -26,6 +26,7 @@ import (
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/node/clipshare"
 	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/nodeupdate"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -172,6 +173,7 @@ type Node struct {
 	events    *herdrEvents               // herdr's event stream (herdrevents.go)
 	hostSig   map[string]*watcherSignals // change signals of the registered watcher hosts, by host kind (herdrevents.go)
 	cdirs     *claudeDirs                // Claude Code config directories in use (claudedirs.go)
+	cfiles    claudeFiles                // every claude's sessions/<pid>.json as last parsed (claudefiles.go)
 	hooks     *hookTurns                 // per-session turn counters from Persona's hooks (hookturn.go)
 	live      liveReplies                // the replies Claude is showing, from its MessageDisplay hook (livereply.go)
 	bgWait    bgWatch                    // whether background commands only wait (bgwait.go)
@@ -302,6 +304,8 @@ type Node struct {
 	restores      restoreMarks // "back to the configured model" asked, until newer model evidence (model_restore.go)
 	hookFlights   hookFlights  // hook calls in progress by session: their process waits on them (model_restore.go)
 
+	// dialogWait: first messages waiting for the dialog that kept them out to be answered (firstprompt.go).
+	dialogWait sync.WaitGroup
 	// screens: live-screen hardware video channel (#3954). Login binding per `pair` and the busy count (screen.go).
 	// screenStart starts the capture/encode helper (Persona Screen.app) for a stream: startScreenHelper on a Mac
 	// (screenhelper.go), nil elsewhere, where screen.dial returns video_unavailable and the screen stays RFB only.
@@ -310,6 +314,9 @@ type Node struct {
 	screens     *screenLogins
 	screenStart func(ctx context.Context, id, pair string, keepAwake, link bool, done func()) (linked bool, err error)
 	links       *screenlink.Registry
+	// inputs: pixel scrolling (#7775, inputhelper.go): on a Mac, each paired 5900 stream is read for the phone's scroll
+	// records, which go to Persona Input. nil elsewhere: the streams pass as they come.
+	inputs *screenInputs
 }
 
 func New(version string) (*Node, error) {
@@ -366,7 +373,8 @@ func New(version string) (*Node, error) {
 		n.logger.Printf("machine uid: %v", err) // the hubs then treat this computer as theirs alone
 	}
 	if runtime.GOOS == "darwin" {
-		n.screenStart = n.startScreenHelper // Persona Screen, the live screen's video helper (#3954)
+		n.screenStart = n.startScreenHelper                                         // Persona Screen, the live screen's video helper (#3954)
+		n.inputs = &screenInputs{logf: n.logger.Printf, signed: n.screens.signedIn} // Persona Input (#7775)
 	}
 	n.links = screenlink.NewRegistry(screenlink.DefaultLimits, n.logger.Printf)
 	// Direct routes (#6398): a listener on this computer's LAN and Tailscale addresses, only while a screen session is
@@ -647,11 +655,11 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 	if strings.HasPrefix(method, "plugin.node.") { // plugins' programs on this computer (plugins.go)
 		return n.handlePlugins(ctx, method, params)
 	}
-	switch method { // sharing the clipboard with the phone (clipshare.go)
+	switch method { // sharing the clipboard with the phone (clipshare/)
 	case "clipboard.get":
-		return clipboardGet(ctx)
+		return clipshare.Get(ctx)
 	case "clipboard.set":
-		return clipboardSet(ctx, params)
+		return clipshare.Set(ctx, params)
 	}
 	if method == codexTakeoverPrepare || method == codexTakeoverCommit {
 		return n.codexTakeoverCall(ctx, method, params)
@@ -2102,7 +2110,7 @@ func (n *Node) info(ctx context.Context) proto.NodeInfo {
 		EngineHosts:        &choice, // this node takes sets in engine.use (the hub then sends it hosts and default)
 		MachineUID:         n.uid,
 		BuiltinPrograms:    builtinProgramIDs,
-		Clipboard:          clipboardSupport(),
+		Clipboard:          clipshare.Support(),
 	}
 }
 
