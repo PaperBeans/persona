@@ -138,8 +138,8 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(host.querySelector("[data-task-slot] .status-mark")!.getAttribute("data-state")).toBe("working");
   });
 
-  /** The In progress row of to-do id (its own slot, with no plan card), and the dock's pill titles. */
-  const trayRow = (id: string) => host.querySelector<HTMLElement>(`[data-task-slot="task:${id}"]`);
+  /** The In progress row titled title, and the dock's pill titles. */
+  const trayRow = (title: string) => [...host.querySelectorAll<HTMLElement>("[data-task-slot]")].find((row) => row.querySelector(".font-semibold")?.textContent === title);
   const dockTitles = () => {
     const dockHost = document.createElement("div");
     document.body.append(dockHost);
@@ -158,7 +158,7 @@ describe("Assistant Needs you / In progress trays", () => {
       await refreshTodos();
     });
     act(() => entry("running").click());
-    const row = trayRow("own-todo")!;
+    const row = trayRow("Decide the release")!;
     expect(row.querySelector("[data-task-status]")!.textContent).toBe(stateName("not_started"));
     expect(row.querySelector(".status-mark")!.getAttribute("data-state")).toBe("offline");
     // still a row of In progress, counted open as the To-dos page counts it (#3331)
@@ -175,15 +175,15 @@ describe("Assistant Needs you / In progress trays", () => {
       await refreshTodos();
     });
     act(() => entry("running").click());
-    expect(trayRow("reused-todo")!.querySelector("[data-task-status]")!.textContent).toBe(t("assistant-tasks.status_starting"));
-    expect(trayRow("reused-todo")!.querySelector(".status-mark")!.getAttribute("data-state")).toBe("working");
+    expect(trayRow("Carry on the work")!.querySelector("[data-task-status]")!.textContent).toBe(t("assistant-tasks.status_starting"));
+    expect(trayRow("Carry on the work")!.querySelector(".status-mark")!.getAttribute("data-state")).toBe("working");
     expect(dockTitles()).toContain("Carry on the work");
     // the hub ends a failed start with done_at and start_error (#1077): the owner's to retry, in Needs you
     moreTodos = [{ ...moreTodos[0], done_at: at, start_error: "the computer is offline" }];
     await act(async () => {
       await refreshTodos();
     });
-    expect(trayRow("reused-todo")).toBeNull();
+    expect(trayRow("Carry on the work")).toBeUndefined();
     act(() => entry("needs").click());
     expect(host.querySelector('[data-needs-row="task:reused-todo"]')?.textContent).toContain("Carry on the work");
     delete getFeedState().plans[reuse.id];
@@ -197,7 +197,7 @@ describe("Assistant Needs you / In progress trays", () => {
       await refreshTodos();
     });
     act(() => entry("running").click());
-    const row = trayRow("owner-todo")!;
+    const row = trayRow("Book the dentist")!;
     expect(row.querySelector("[data-task-status]")!.textContent).toBe(stateName("not_started"));
     expect(row.querySelector(".status-mark")!.getAttribute("data-state")).not.toBe("working");
   });

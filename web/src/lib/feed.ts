@@ -709,6 +709,17 @@ export function startFailure(todo: Todo, plans: Record<string, TaskPlan>): strin
 }
 
 /**
+ * Whether an Agent is being started for a to-do with none up yet (#7552): a plan made it (`plan_id`), or a plan that is
+ * not dismissed holds it as a task (a to-do a plan takes over keeps no `plan_id`), and that start has not failed.
+ * A to-do nobody dispatched (`todo_create`, a leader's piece, one made by hand) is not starting: it is "Not started".
+ */
+export function startInFlight(todo: Todo, plans: Record<string, TaskPlan>): boolean {
+  if (todo.done_at || startFailure(todo, plans)) return false;
+  if (todo.plan_id) return true;
+  return Object.values(plans).some((p) => p.state !== "dismissed" && p.tasks.some((t) => t.todo_id === todo.id && !t.error));
+}
+
+/**
  * Removes a task that does not run: its todo goes (its agents and their chats stay on the Agents page), and with it
  * its card, pill and panel. One whose agents ran asks first; one whose agent never started goes at once. Answers
  * whether it went.

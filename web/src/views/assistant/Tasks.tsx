@@ -27,6 +27,7 @@ import {
   retryTask,
   routeTodoId,
   startFailure,
+  startInFlight,
   setRoute,
   startPlan,
   todayFailedRow,
@@ -167,18 +168,19 @@ export function removeTaskNow(todo: Todo) {
   );
 }
 
-/** The task's state as an agent state, for its dot and tone. */
-function dotState(st: TodoStatus): AgentState {
-  return st === "needs_you" || st === "interrupted" ? "needs_you" : st === "usage_limit" ? "idle" : st === "working" || st === "waiting" || st === "not_started" ? "working" : st === "unread" ? "unread" : st === "follow_up" ? "idle" : "offline"; // done, failed
+/** The task's state as an agent state, for its dot and tone. `starting`: a not-started task's Agent is being started
+ *  (startInFlight); one nobody dispatched is still, as on the To-dos page (#7552). */
+function dotState(st: TodoStatus, starting = true): AgentState {
+  return st === "needs_you" || st === "interrupted" ? "needs_you" : st === "usage_limit" ? "idle" : st === "working" || st === "waiting" || (st === "not_started" && starting) ? "working" : st === "unread" ? "unread" : st === "follow_up" ? "idle" : "offline"; // done, failed, not started
 }
 
-function TaskMark({ status, size = 9 }: { status: TodoStatus; size?: number }) {
+function TaskMark({ status, size = 9, starting }: { status: TodoStatus; size?: number; starting?: boolean }) {
   if (status === "usage_limit") return <Icon name="clock" size={size + 4} stroke={2.4} className="text-orange" />;
   if (status === "waiting") return <Icon name="clock" size={size + 4} stroke={2.4} className="text-ink-2" />;
   if (status === "failed" || status === "interrupted") return <Icon name="info" size={size + 4} stroke={2.4} className="text-red" />;
   if (status === "done" || status === "unread")
     return <Icon name="check" size={size + 4} stroke={2.4} className={status === "done" ? "text-ink-3" : "text-green"} />;
-  return <StatusMark state={dotState(status)} />;
+  return <StatusMark state={dotState(status, starting)} />;
 }
 
 /** Where a task runs: machine · folder · agent. `machines` and `plans` default to the stores' own; a selector passes
@@ -969,7 +971,8 @@ function dockTasksIn(s: State, conversation: string, plans: Record<string, TaskP
   return s.todos
     .filter((t) => t.origin === conversation)
     .map((t) => ({ t, st: statusOf(t, lookup, plans) }))
-    .filter((x) => DOCK_RANK[x.st] !== undefined)
+    // a to-do nobody dispatched is not going on (#7552)
+    .filter((x) => DOCK_RANK[x.st] !== undefined && (x.st !== "not_started" || startInFlight(x.t, plans)))
     .sort((a, b) => DOCK_RANK[a.st]! - DOCK_RANK[b.st]! || byTime(b.t.created_at, a.t.created_at))
     .map(({ t: todo, st }) => {
       const lead = mostUrgentAgent(todo, lookup)?.session;
@@ -1051,11 +1054,13 @@ function ProgressTaskRow({ card, conversation, activity, countsOpen }: { card: T
   const pr = todo?.pr_url ?? (receipt && field(receipt, "pr"));
   const prNumber = pr ? /\/(\d+)\/?$/.exec(pr)?.[1] : undefined;
   const toStart = !todo && !!card.plan_id && plans[card.plan_id]?.state === "open";
+  // Starting only while an Agent is being started for it; a to-do nobody dispatched says Not started (#7552)
+  const starting = !todo || startInFlight(todo, plans);
   const liveWork = !finished && state !== "cancelled" ? activity : undefined;
   const liveLine = backgroundWorkLine(liveWork);
   // parked by its supervisor (#3804): the row says so, until when and why, ahead of what its agent last did
   const parked = liveWork || finished || state === "cancelled" ? undefined : parkedLine(todo);
-  const statusLabel = liveWork ? stateName("working") : parked ? t("assistant-tasks.review_parked") : accepted || (!todo && state === "accepted") ? t("assistant-tasks.review_accepted") : state === "cancelled" ? t("assistant-tasks.review_cancelled") : toStart ? t("assistant-tasks.plan_waiting") : state === "not_started" ? t("assistant-tasks.status_starting") : TODO_STATUS_INFO[state as TodoStatus]?.label ?? t("assistant-tasks.no_activity");
+  const statusLabel = liveWork ? stateName("working") : parked ? t("assistant-tasks.review_parked") : accepted || (!todo && state === "accepted") ? t("assistant-tasks.review_accepted") : state === "cancelled" ? t("assistant-tasks.review_cancelled") : toStart ? t("assistant-tasks.plan_waiting") : state === "not_started" && starting ? t("assistant-tasks.status_starting") : TODO_STATUS_INFO[state as TodoStatus]?.label ?? t("assistant-tasks.no_activity");
   // the mark tells the state at a glance, in the colors the dock and the board use (TaskMark)
   const mark: TodoStatus = liveWork ? "working" : accepted || state === "accepted" ? "done" : state === "cancelled" ? "done" : toStart ? "needs_you" : (TODO_STATUS_INFO[state as TodoStatus] ? state as TodoStatus : "not_started");
   const ask = useStore((s) => taskAsk(todo ? taskInteraction(todo, s.interactions, task?.lead) : undefined));
@@ -1074,7 +1079,7 @@ function ProgressTaskRow({ card, conversation, activity, countsOpen }: { card: T
     : limit ?? liveLine ?? parked ?? waits ?? nobody ?? stopped ?? progressLine(todo?.supervision) ?? ask ?? task?.lead?.plan?.current ?? progressOf(task?.lead)?.text ?? (report && field(report, "text"));
   return (
     <button type="button" data-task-slot={card.id} data-counts-open={countsOpen ? "true" : "false"} disabled={!todo && !card.plan_id} onClick={() => card.todo_id ? openTask(card.todo_id) : window.dispatchEvent(new CustomEvent("persona:task-start", { detail: conversation }))} className="flex w-full min-w-0 items-center gap-3 px-3 py-2.5 text-left hover:bg-hover disabled:cursor-default">
-      <span data-task-mark={mark} className="flex w-4 shrink-0 justify-center"><TaskMark status={mark} size={8} /></span>
+      <span data-task-mark={mark} className="flex w-4 shrink-0 justify-center"><TaskMark status={mark} size={8} starting={starting} /></span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-semibold" title={title}>{title}</div>
         <BackgroundWorkDetail activity={liveWork} detail={detail} pr={prNumber ? t("assistant-tasks.progress_pr", { number: prNumber }) : undefined} />
