@@ -81,11 +81,20 @@ func (c *Connector) deviceState(ctx context.Context) deviceLogin {
 // saveDevice changes what the secrets keep (change runs under c.mu) and saves it, one save at a time so that the
 // last change is the one kept.
 func (c *Connector) saveDevice(ctx context.Context, change func(*deviceLogin)) error {
-	c.deviceState(ctx) // what is kept already, so that the save does not drop it
 	c.saving.Lock()
 	defer c.saving.Unlock()
-	c.mu.Lock()
-	s := c.secrets
+	var s connector.Secrets
+	for try := 0; ; try++ {
+		c.deviceState(ctx) // what is kept already, so that the save does not drop it
+		c.mu.Lock()
+		if s = c.secrets; s == nil || c.devLoaded {
+			break
+		}
+		c.mu.Unlock() // not read: the store failed, or Reload forgot it meanwhile (then it is read again)
+		if try == 8 {
+			return errNoRecord // saving now would drop what is kept (the sign-in, the account)
+		}
+	}
 	change(&c.dev)
 	c.devLoaded = true
 	raw, _ := json.Marshal(c.dev)
