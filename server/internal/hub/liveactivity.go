@@ -189,12 +189,10 @@ type liveActivities struct {
 	sent       map[string][]byte    // device -> the content-state it last got
 	sentAt     map[string]time.Time // device -> when
 	stats      []byte               // last numbers broadcast to the open apps
-	// startDue: device -> when the store said its next push-start may be claimed (the rolling cooldown, or the hold
-	// after a start the phone has not answered). Not asked again before then, unless the phone answers (phoneAnswered).
-	startDue map[string]time.Time
-	// lifts counts the times the store moved a device's next start earlier (liftHold): a claim whose answer may
-	// predate one is not kept in startDue.
-	lifts int
+	// deferred: device -> the due time of the deferred start it last logged (claimStart), so a start held for hours is
+	// one line, not one a round. Only that: when a start may be claimed is the store's to say, every round, since the
+	// other slot of a blue-green switch moves it too (TestFleetHoldLiftedOnTheOtherSlot).
+	deferred map[string]time.Time
 	// The last fleet broadcast to the open apps, and when: what an app that closed its connection cleanly (gone to
 	// the background) left its activity showing (phoneLeft).
 	shownState FleetState
@@ -211,7 +209,7 @@ type liveActivities struct {
 
 func newLiveActivities(h *Hub) *liveActivities {
 	return &liveActivities{h: h, signal: make(chan struct{}, 1), rows: map[string]db.LiveActivity{}, started: map[string]int{},
-		startDue: map[string]time.Time{}, sent: map[string][]byte{}, sentAt: map[string]time.Time{}, now: time.Now, minGap: fleetMinGap, storeTimeout: deviceStoreTimeout}
+		deferred: map[string]time.Time{}, sent: map[string][]byte{}, sentAt: map[string]time.Time{}, now: time.Now, minGap: fleetMinGap, storeTimeout: deviceStoreTimeout}
 }
 
 func (la *liveActivities) load(ctx context.Context) {
@@ -518,6 +516,8 @@ func (la *liveActivities) markSent(device string, dst FleetState, now time.Time,
 // or end that activity with, so another start would only put a second card beside it (#7641). A start APNs or the
 // relay refused holds nothing (startRefused); one with no answer holds like an accepted one. A hold and what lifts
 // it are about one start, named by the time it was claimed at: they leave a start claimed later alone (holdStart).
+// Whether a start is held is asked of the store each round: this hub keeps no deadline of its own, since the phone
+// may answer the other slot of a blue-green switch, or a start that slot sent may be refused.
 // A device whose own version did not change (the change was something it does not show) is skipped unless forced; one
 // whose app is open is not pushed (it draws the activity itself); one pushed less than fleetMinGap ago gets an ordinary
 // change later: next is when the first of those is due (zero: none). A settings refresh
@@ -601,32 +601,15 @@ func (la *liveActivities) flush(st FleetState, urgent, force bool, settingsDevic
 		case r.PushToStartToken != "" && !fleetEmpty(st) && st.Phase != "done":
 			la.mu.Lock()
 			already := la.started[r.DeviceID] == episode
-			held := la.startDue[r.DeviceID]
 			la.mu.Unlock()
 			if already {
 				continue
 			}
-			if now.Before(held) {
-				if next.IsZero() || held.Before(next) {
-					next = held
-				}
-				continue
-			}
 			observed, _ := json.Marshal(la.snapshot())
-			la.mu.Lock()
-			lifts := la.lifts
-			la.mu.Unlock()
 			due, claimed := la.claimStart(r, now)
 			if !claimed {
-				if !due.IsZero() {
-					la.mu.Lock()
-					if la.lifts == lifts {
-						la.startDue[r.DeviceID] = due
-					}
-					la.mu.Unlock()
-					if next.IsZero() || due.Before(next) {
-						next = due
-					}
+				if !due.IsZero() && (next.IsZero() || due.Before(next)) {
+					next = due
 				}
 				continue
 			}
@@ -681,7 +664,16 @@ func (la *liveActivities) claimStart(r db.LiveActivity, now time.Time) (time.Tim
 		la.h.logf("live activity start deferred: reason=claim_failed device=%s due=%s error=%v", trafficIdentity(r.DeviceID), retry.UTC().Format(time.RFC3339), err)
 		return retry, false
 	}
-	if !claimed {
+	la.mu.Lock()
+	logged, repeat := la.deferred[r.DeviceID]
+	repeat = repeat && !claimed && logged.Equal(due)
+	if claimed {
+		delete(la.deferred, r.DeviceID)
+	} else {
+		la.deferred[r.DeviceID] = due
+	}
+	la.mu.Unlock()
+	if !claimed && !repeat { // the same answer as last round is not said again: a hold lasts hours of rounds
 		reason := "token_changed"
 		switch {
 		case due.Sub(now) > fleetRefresh:
@@ -704,31 +696,58 @@ func (la *liveActivities) claimStart(r db.LiveActivity, now time.Time) (time.Tim
 // phone answered. The store leaves a start claimed after asOf alone, so a write that comes late (a refusal after the
 // send's retries, a slow store, the slot that is leaving) cannot hold or lift a newer start.
 //
-// moved reports whether the store's deadline may differ from what the hub last read: the write changed it, or failed
-// without saying (it may have been applied). False when it changed nothing: no store, no claim, the deadline was
-// already that, or the device's last start was claimed after asOf.
-func (la *liveActivities) holdStart(ctx context.Context, device string, asOf time.Time, hold time.Duration) (moved bool) {
+// The deadline lives in the store alone. A hub that remembered it would hold on after the other slot of a blue-green
+// switch lifted it (the phone's app connected there, a start sent from there was refused), for up to fleetMaxAge:
+// flush asks the store each round instead (claimStart).
+func (la *liveActivities) holdStart(ctx context.Context, device string, asOf time.Time, hold time.Duration) {
 	if la.h.store == nil {
-		return false
+		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, la.storeTimeout)
 	defer cancel()
-	changed, err := la.h.store.HoldLiveActivityStart(ctx, device, asOf, hold)
-	if err != nil {
+	if _, err := la.h.store.HoldLiveActivityStart(ctx, device, asOf, hold); err != nil {
 		la.h.logf("live activity start hold: device=%s hold=%s error=%v", trafficIdentity(device), hold, err)
-		return true
 	}
-	return changed
 }
 
 // phoneAnswered: the phone reached the hub (it reported an activity's update token, or its app connected), so the
 // hub hears of what it starts there again: the next start waits only for the rolling cooldown. The answer is stamped
 // now: it lifts the hold of a start claimed up to now, never of one claimed while its write was on its way.
+// device is the phone's push id, which the start was claimed under (the activity's row, the start budget).
 func (la *liveActivities) phoneAnswered(ctx context.Context, device string) {
 	if la == nil || device == "" {
 		return
 	}
 	la.liftHold(ctx, device, la.now())
+}
+
+// phoneConnected: a phone's app registered over its connection (register_phone), which answers the starts claimed
+// for that phone. They are claimed under its push id, so that is what names it: pushID when the app gave one. An
+// older app gives none, and what its registration is kept under instead (the connection's credential, or "legacy")
+// is no push id: lifting that would lift nothing. Such a phone is the devices its credential registered (or took
+// since, Device.Credential) or, on a connection without a credential, the devices that have none, as wakeDevices
+// finds the phone of such a registration. Never a Mac or a watch: they register as devices too and run no activity
+// of the phone's.
+func (la *liveActivities) phoneConnected(ctx context.Context, pushID, credential string) {
+	if la == nil {
+		return
+	}
+	if pushID != "" {
+		la.phoneAnswered(ctx, pushID)
+		return
+	}
+	if la.h.push == nil {
+		return
+	}
+	for _, d := range la.h.push.list() {
+		its := d.CredentialID == credential || d.Credential == credential
+		if credential == "" {
+			its = d.CredentialID == "" && d.Credential == ""
+		}
+		if its && d.Kind != kindMac && d.Kind != "watch" {
+			la.phoneAnswered(ctx, d.DeviceID)
+		}
+	}
 }
 
 // startRefused: the start claimed at claimed did not reach the phone for certain (pushRefused: never sent, or APNs or
@@ -742,17 +761,9 @@ func (la *liveActivities) startRefused(device string, claimed time.Time) {
 }
 
 // liftHold puts the device's next start back on the rolling cooldown, unless its last start was claimed after asOf
-// (holdStart). startDue is dropped only when the store's deadline moved (or may have): a lift that changed nothing
-// leaves what the hub read from the store in place. The store first, then the cache: a claim that read the hold
-// before the write sees lifts change and does not cache it (flush).
+// (holdStart). In the store only, where every hub's next round reads it.
 func (la *liveActivities) liftHold(ctx context.Context, device string, asOf time.Time) {
-	if !la.holdStart(ctx, device, asOf, fleetRefresh) {
-		return
-	}
-	la.mu.Lock()
-	delete(la.startDue, device)
-	la.lifts++
-	la.mu.Unlock()
+	la.holdStart(ctx, device, asOf, fleetRefresh)
 }
 
 func (la *liveActivities) endAll() { la.end(nil) }
@@ -774,7 +785,7 @@ func (la *liveActivities) endCredential(credential string) {
 		delete(la.sent, d.DeviceID)
 		delete(la.sentAt, d.DeviceID)
 		delete(la.started, d.DeviceID)
-		delete(la.startDue, d.DeviceID)
+		delete(la.deferred, d.DeviceID)
 		delete(la.resend, d.DeviceID)
 		la.mu.Unlock()
 		if r.PushToken != "" {

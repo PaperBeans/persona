@@ -517,9 +517,21 @@ slow store or the slot that is leaving can deliver the write after the next star
 drops that start's hold and a late hold keeps a refused one back for 8 hours. A write that follows from an event
 says which event: the time the start was claimed at, or the time the phone answered, and the store applies it only
 to a start claimed up to then (`claimed_at <= asOf`, one statement under the row lock). That needs the claim time to
-name one claim, so a claim is refused unless it is later than the last one, whatever the deadline says. Have the
-write report whether it changed anything, and drop what the caller remembers only then (or when it failed without
-saying).
+name one claim, so a claim is refused unless it is later than the last one, whatever the deadline says.
+
+The hub then kept the deadline the store last told it, so as not to ask each round, and dropped it when its own lift
+moved the store's. Two slots share the store through a blue-green switch, and a lift is whichever slot's the phone
+reaches or the refusal comes back to: the other one held on for up to 8 hours on a deadline nobody had any more.
+State another process can move is read where it is kept, each time it decides something; a copy needs a way to hear
+of every writer, and "this process's own writes" is not that. Test it with two hubs over one store, not with a
+restart, which starts from nothing remembered. What the hub still keeps per device is only the last deferral it
+logged, so hours of rounds are one line.
+
+The app connecting lifted the hold by the `device_id` in `register_phone`, and an older app sends none. The id that
+registration falls back to (the connection's credential, then `legacy`) names the phone's tools, not its pushes:
+starts are claimed under the push id, so a lift by the fallback id changes no row and looks done. An id has a
+namespace; resolve the fallback into the ids of the table being written (the devices that credential registered, as
+`wakeDevices` does for the same registrations) and assert on the store's row for a registration without the id.
 
 ## A custom HTTPS dial must opt into HTTP/2 (#1620)
 

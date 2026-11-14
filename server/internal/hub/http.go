@@ -1518,7 +1518,8 @@ func (h *Hub) onClientMessage(ctx context.Context, c *client, data []byte) {
 			return
 		}
 		// Its app reaches the hub: what the hub push-starts there is answered again (#7641). Outside h.mu, as the tools' write.
-		h.live.phoneAnswered(context.Background(), msg.DeviceID)
+		// By its push id, which starts are claimed under; not deviceID above, which falls back to the credential.
+		h.live.phoneConnected(context.Background(), msg.DeviceID, c.device)
 		h.setPhoneTools(db.PhoneToolRegistration{DeviceID: deviceID, Platform: msg.Platform, CredentialID: c.device, Tools: tools})
 	case "register_desktop":
 		h.registerDesktop(c, msg.DeviceName, msg.DeviceID)

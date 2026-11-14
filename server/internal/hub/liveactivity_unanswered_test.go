@@ -271,9 +271,9 @@ func TestFleetStartOutcomeDecidesTheHold(t *testing.T) {
 }
 
 // A refusal lifts the hold of the start it answers, not of the next one (#7641 review). Start A's refusal comes only
-// after the phone answered and start B was claimed, sent and accepted: B's hold stays, the deadline the hub read from
-// the store for B stays cached, and the round after starts nothing. Before the fix A's refusal put B back on the
-// cooldown and the next round put a second card beside B's.
+// after the phone answered and start B was claimed, sent and accepted: B's hold stays in the store and the round
+// after starts nothing. Before the fix A's refusal put B back on the cooldown and the next round put a second card
+// beside B's.
 func TestFleetLateRefusalLeavesTheNextStartHeld(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const slow = 30 * time.Minute // how long start A's answer takes: past the phone's answer and start B
@@ -301,11 +301,6 @@ func TestFleetLateRefusalLeavesTheNextStartHeld(t *testing.T) {
 			store.mu.Lock()
 			defer store.mu.Unlock()
 			return store.claimed["phone"], store.due["phone"].Sub(store.claimed["phone"])
-		}
-		cached := func() (due time.Time, lifts int) {
-			h.live.mu.Lock()
-			defer h.live.mu.Unlock()
-			return h.live.startDue["phone"], h.live.lifts
 		}
 
 		// Start A goes out; its answer is on its way for half an hour.
@@ -336,12 +331,11 @@ func TestFleetLateRefusalLeavesTheNextStartHeld(t *testing.T) {
 		if got := fleetStarts(sink); got != 2 || !claimedB.After(claimedA) || hold != fleetMaxAge {
 			t.Fatalf("start B: %d starts, claimed %v after A, held for %v; want 2, later, %v", got, claimedB.Sub(claimedA), hold, fleetMaxAge)
 		}
-		// Past B's cooldown the next round asks the store, is told of B's hold and keeps that.
+		// Past B's cooldown the next round asks the store and is told of B's hold.
 		elapse(fleetRefresh)
 		round(fleetWorking)
-		due, lifts := cached()
-		if got := fleetStarts(sink); got != 2 || !due.Equal(claimedB.Add(fleetMaxAge)) {
-			t.Fatalf("round after B: %d starts, next start cached at %v after B; want 2 and %v", got, due.Sub(claimedB), fleetMaxAge)
+		if got := fleetStarts(sink); got != 2 {
+			t.Fatalf("round after B: %d starts, want 2", got)
 		}
 		if waited := time.Since(sent); waited >= slow {
 			t.Fatalf("A's answer was due %v ago: the test must reach here before it", waited-slow)
@@ -354,21 +348,15 @@ func TestFleetLateRefusalLeavesTheNextStartHeld(t *testing.T) {
 		if at, hold := held(); !at.Equal(claimedB) || hold != fleetMaxAge {
 			t.Fatalf("A's late refusal left B's next start %v after it, want %v", hold, fleetMaxAge)
 		}
-		if nowDue, nowLifts := cached(); !nowDue.Equal(due) || nowLifts != lifts {
-			t.Fatalf("A's late refusal changed what the hub keeps: due %v -> %v, lifts %d -> %d", due, nowDue, lifts, nowLifts)
-		}
 		// The round after still starts nothing: B's card may be on the phone.
 		round(fleetAsking)
 		if got := fleetStarts(sink); got != 2 {
 			t.Fatalf("round after A's late refusal: %d starts, want 2", got)
 		}
-		// B's own answer still lifts it, and drops what the hub kept.
+		// B's own answer still lifts it.
 		h.live.phoneAnswered(context.Background(), "phone")
 		if _, hold = held(); hold != fleetRefresh {
 			t.Fatalf("after the phone answered B: next start %v after it, want %v", hold, fleetRefresh)
-		}
-		if nowDue, nowLifts := cached(); !nowDue.IsZero() || nowLifts != lifts+1 {
-			t.Fatalf("after the phone answered B: the hub keeps due=%v lifts=%d, want none and %d", nowDue, nowLifts, lifts+1)
 		}
 		round(fleetWorking)
 		if got := fleetStarts(sink); got != 3 {
@@ -396,4 +384,182 @@ func TestSendFailureOutcome(t *testing.T) {
 			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
 		}
 	}
+}
+
+// startHold is how long after the device's last claimed start the store lets the next one be claimed.
+func startHold(store *fleetStartStore, device string) time.Duration {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return store.due[device].Sub(store.claimed[device])
+}
+
+// The app connecting lifts the hold of the device the start was claimed for (#7641 review). The start budget is kept
+// by the device's push id; register_phone names it, and an older app that leaves it out is the devices its
+// connection's credential registered, or, on a connection without one, the devices registered without one (the
+// phones wakeDevices picks for such a registration). Before the fix only a named push id lifted anything, and the id
+// the registration falls back to (the credential, "legacy") is no push id: the hold stayed for the 8 hours.
+func TestRegisterPhoneLiftsTheHoldOfItsDevice(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		credential string            // of the connection
+		message    string            // its register_phone
+		registered map[string]string // push id -> the credential that registered it
+		lifted     map[string]bool
+	}{
+		{"push id", "credential-ios", `{"type":"register_phone","device_id":"phone","tools":[]}`,
+			map[string]string{"phone": "credential-ios", "pad": "credential-ios"}, map[string]bool{"phone": true}},
+		{"no device id: the credential's device", "credential-ios", `{"type":"register_phone","tools":[]}`,
+			map[string]string{"phone": "credential-ios", "pad": "credential-pad"}, map[string]bool{"phone": true}},
+		{"no device id, no credential: the device registered without one", "", `{"type":"register_phone","tools":[]}`,
+			map[string]string{"phone": "", "pad": "credential-pad"}, map[string]bool{"phone": true}},
+		{"no device id: a credential that registered neither", "credential-other", `{"type":"register_phone","tools":[]}`,
+			map[string]string{"phone": "credential-ios", "pad": ""}, map[string]bool{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				h, sink, stop := localFleetLoopWith(t, func(h *Hub) {
+					h.push.mu.Lock()
+					defer h.push.mu.Unlock()
+					for id, credential := range tc.registered {
+						d := h.push.devices[id]
+						d.CredentialID, d.Credential = credential, credential
+						h.push.devices[id] = d
+					}
+				})
+				defer stop()
+				store := h.store.(*fleetStartStore)
+				devices := []string{"phone", "pad"}
+				for _, id := range devices {
+					h.live.update(id, func(v *db.LiveActivity) { v.ActivityID, v.PushToken = "", "" })
+				}
+				reportLive(t, h, fleetWorking, FleetStats{})
+				elapse(fleetCoalesce)
+				for _, id := range devices {
+					if got, hold := sink.count(id, "liveactivity", "start"), startHold(store, id); got != 1 || hold != fleetMaxAge {
+						t.Fatalf("%s: %d starts held for %v, want 1 held for %v", id, got, hold, fleetMaxAge)
+					}
+				}
+				reportLive(t, h, FleetState{}, FleetStats{})
+				elapse(fleetCoalesce)
+				app := &client{hub: h, device: tc.credential, role: roleFull, out: make(chan []byte, 64), clean: true}
+				addTestClient(h, app)
+				h.onClientMessage(context.Background(), app, []byte(tc.message))
+				synctest.Wait()
+				h.dropClient(app)
+				synctest.Wait()
+				for _, id := range devices {
+					want := fleetMaxAge
+					if tc.lifted[id] {
+						want = fleetRefresh
+					}
+					if hold := startHold(store, id); hold != want {
+						t.Errorf("%s after the app connected: next start %v after its last, want %v", id, hold, want)
+					}
+				}
+			})
+		})
+	}
+}
+
+// Two hubs over one store, as the two slots of a blue-green switch are: what lifts a hold on one (the phone's app
+// connecting there, a start it sent being refused) lets the other start in its next round (#7641 review). Before the
+// fix each kept the deadline the store last told it and did not ask again before then, so a hub that had been told
+// of the hold held for the 8 hours whatever the other one lifted.
+func TestFleetHoldLiftedOnTheOtherSlot(t *testing.T) {
+	// slots are hub a and, over a's store, hub b; neither has an update token for the phone.
+	slots := func(t *testing.T, prepareB func(h *Hub)) (a, b *Hub, sinkA, sinkB *fleetPushSink, store *fleetStartStore) {
+		t.Helper()
+		a, sinkA, stopA := localFleetLoop(t)
+		t.Cleanup(stopA)
+		store = a.store.(*fleetStartStore)
+		b, sinkB, stopB := localFleetLoopWith(t, func(h *Hub) {
+			h.store = store
+			if prepareB != nil {
+				prepareB(h)
+			}
+		})
+		t.Cleanup(stopB)
+		for _, h := range []*Hub{a, b} {
+			h.live.update("phone", func(v *db.LiveActivity) { v.ActivityID, v.PushToken = "", "" })
+		}
+		synctest.Wait()
+		return a, b, sinkA, sinkB, store
+	}
+	round := func(t *testing.T, h *Hub, st FleetState) {
+		t.Helper()
+		reportLive(t, h, FleetState{}, FleetStats{})
+		elapse(fleetEndAfter + 30*time.Second)
+		reportLive(t, h, st, FleetStats{})
+		elapse(fleetCoalesce)
+	}
+
+	t.Run("the phone's app connects there", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			a, b, sinkA, sinkB, store := slots(t, nil)
+			// A's start goes unanswered; past the cooldown its next round asks the store and is told of the hold.
+			reportLive(t, a, fleetWorking, FleetStats{})
+			elapse(fleetCoalesce)
+			elapse(fleetRefresh)
+			round(t, a, fleetAsking)
+			if got, hold := fleetStarts(sinkA), startHold(store, "phone"); got != 1 || hold != fleetMaxAge {
+				t.Fatalf("A, a round after its unanswered start: %d starts held for %v, want 1 held for %v", got, hold, fleetMaxAge)
+			}
+			// The phone's app connects to B and leaves.
+			app := &client{hub: b, device: "credential-ios", role: roleFull, out: make(chan []byte, 64), clean: true}
+			addTestClient(b, app)
+			b.onClientMessage(context.Background(), app, []byte(`{"type":"register_phone","device_id":"phone","tools":[]}`))
+			synctest.Wait()
+			b.dropClient(app)
+			synctest.Wait()
+			if hold := startHold(store, "phone"); hold != fleetRefresh {
+				t.Fatalf("after the app connected to B: next start %v after the last, want %v", hold, fleetRefresh)
+			}
+			// A's next round starts again.
+			round(t, a, fleetWorking)
+			if got := fleetStarts(sinkA); got != 2 {
+				t.Fatalf("A's round after B heard the phone: %d starts, want 2", got)
+			}
+			if got := fleetStarts(sinkB); got != 0 {
+				t.Fatalf("B, whose fleet is empty, started %d", got)
+			}
+		})
+	})
+
+	t.Run("its start is refused there", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			const slow = 20 * time.Minute // how long the answer to B's start takes: past A's round and the cooldown
+			a, b, sinkA, sinkB, store := slots(t, func(h *Hub) { h.push.retryWaits = nil })
+			sinkB.mu.Lock()
+			sinkB.answer = func(call fleetPushCall) (int, string, error) {
+				if call.event != "start" || call.device != "phone" {
+					return http.StatusOK, `{"ok":true}`, nil
+				}
+				time.Sleep(slow) // sleep-ok: the fake clock of a synctest bubble, no wall time
+				return http.StatusUnprocessableEntity, `{"error":"apns 400","reason":"BadDeviceToken"}`, nil
+			}
+			sinkB.mu.Unlock()
+			// B sends a start; while its answer is on its way A's round asks the store and is told of the hold.
+			reportLive(t, b, fleetWorking, FleetStats{})
+			elapse(fleetCoalesce)
+			sent := time.Now()
+			reportLive(t, a, fleetAsking, FleetStats{})
+			elapse(fleetCoalesce)
+			if gotA, gotB, hold := fleetStarts(sinkA), fleetStarts(sinkB), startHold(store, "phone"); gotA != 0 || gotB != 1 || hold != fleetMaxAge {
+				t.Fatalf("while B's start is out: A started %d, B %d, held for %v; want 0, 1, %v", gotA, gotB, hold, fleetMaxAge)
+			}
+			// The refusal reaches B.
+			elapse(time.Until(sent.Add(slow)) + time.Second)
+			if hold := startHold(store, "phone"); hold != fleetRefresh {
+				t.Fatalf("after B's start was refused: next start %v after it, want %v", hold, fleetRefresh)
+			}
+			// A's next round starts.
+			round(t, a, fleetWorking)
+			if got := fleetStarts(sinkA); got != 1 {
+				t.Fatalf("A's round after B's start was refused: %d starts, want 1", got)
+			}
+			if got := fleetStarts(sinkB); got != 1 {
+				t.Fatalf("B started %d, want its 1", got)
+			}
+		})
+	})
 }
