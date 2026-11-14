@@ -117,6 +117,13 @@ nonisolated enum AssistantEntries {
         return .followUp
     }
 
+    /// A task's status when some of its Agents ask under another task (`own`: its status from its own Agents alone): it
+    /// does not wait on the user for them, so a Needs You that only those bring is the task at work instead (the web's
+    /// `withNeeds`).
+    static func withNeeds(_ all: Status, own: Status) -> Status {
+        all == .needsYou && own != .needsYou ? (own == .notStarted ? .working : own) : all
+    }
+
     /// The open ask, as the web reads it (`openAsk`): one with a verdict and a time.
     static func openAsk(_ todo: TodoItem) -> TodoAsk? {
         guard let a = todo.ask, !(a.verdict ?? "").isEmpty, !a.askedAt.isEmpty else { return nil }
@@ -176,6 +183,17 @@ nonisolated enum AssistantEntries {
             at[todo.id] = todo.createdAt ?? .distantPast
         }
 
+        // One home per request (docs/design/DESIGN_SYSTEM.md 4.8, the web's #7490): an Agent several of these tasks list
+        // asks under one of them, the task the hub ties its session to (`Session.todo`) when it lists it, else the first
+        // that lists it. The others neither repeat its cards nor wait on the user for them.
+        var home: [String: String] = [:]
+        for todo in todos where at[todo.id] != nil && todo.doneAt == nil {
+            for a in todo.activeAgents {
+                let k = pair(a.machineID, a.sessionID)
+                if home[k] == nil || lookup(a.machineID, a.sessionID)?.todo?.id == todo.id { home[k] = todo.id }
+            }
+        }
+
         typealias Ranked = (row: Row, rank: Double, at: Date)
         /// The agents of the tasks listed as rows: folded into them, never rows of their own, whoever made the to-do.
         var folded = Set<String>()
@@ -185,9 +203,14 @@ nonisolated enum AssistantEntries {
         let superseded = TodoTriageLogic.supersededFailedStarts(todos)
         for todo in todos {
             guard let when = at[todo.id] else { continue }
-            let status = status(todo, lookup: lookup, plans: plans)
             let active = todo.doneAt != nil ? [] : todo.activeAgents
-            let asks = active.flatMap { asksOf[pair($0.machineID, $0.sessionID)] ?? [] }
+            let own = active.filter { home[pair($0.machineID, $0.sessionID)] == todo.id }
+            let all = Self.status(todo, lookup: lookup, plans: plans)
+            // what the task waits on the user for is its own Agents' (an Agent another task holds asks there)
+            var mine = todo
+            mine.agents = own
+            let status = own.count < active.count ? withNeeds(all, own: todoStatus(mine, lookup: lookup)) : all
+            let asks = own.flatMap { asksOf[pair($0.machineID, $0.sessionID)] ?? [] }
             let row = Row.task(id: todo.id, status: status, agents: active.count)
             let listed = { folded.formUnion(active.map { pair($0.machineID, $0.sessionID) }) }
             let bucket = TodoTriageLogic.bucket(todo, lookup: lookup, now: now, restoredAt: restored[todo.id],

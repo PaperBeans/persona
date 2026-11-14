@@ -130,12 +130,12 @@ each count is its rows:
   back to In progress. An entry with nothing counted (no number on it), Needs you or In progress, is grey and still opens:
   to the rows it lists uncounted, or to its line ("All caught up", "Nothing in progress"); the web drew such an In
   progress in its working blue and ink until 2026-11-14.
-- **One home for an Agent several tasks list** (web, 2026-11-14): an Agent that more than one of the conversation's tasks
+- **One home for an Agent several tasks list** (web and the Apple clients, 2026-11-14): an Agent that more than one of the conversation's tasks
   lists asks under one of them, the task the hub ties its session to (`Session.todo`), else the first that lists it. Its
   cards are that task's row alone and are counted once; the other tasks do not wait on the user for them and are In
   progress, unless a decision of their own keeps them in Needs you (without the Agent's cards). Before, each task listing
-  the Agent showed and counted the same approval. Android (#7531) and the Apple clients (#7532) split the old way until
-  they adopt it, and the shared cases (`spec/fixtures/entries`) get one for it once every client does; the whole-client
+  the Agent showed and counted the same approval. Android (#7531) splits the old way until it adopts it (the Apple
+  clients did with #7532), and the shared cases (`spec/fixtures/entries`) get one for it once every client does; the whole-client
   Needs you rule is #5974's.
 
 The split is one pure function per client: web `assistantEntries` (`web/src/lib/assistant-entries.ts`), Android
