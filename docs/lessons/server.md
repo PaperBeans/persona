@@ -475,6 +475,18 @@ fleet, preferences, foreground state and tokens, and recheck after a slow claim.
 Empty/done, an open phone or a fresh update token suppresses a queued start. Restart
 reconstructs its deadline from the durable budget and the current manager snapshot.
 
+## A push-start the phone has not answered is an activity the hub cannot reach (#7641)
+
+A push-to-start reaches the phone through APNs even while the phone cannot reach the hub. The activity starts, its
+update token never comes back, and the hub can neither update nor end it: it goes stale and stays. "No token" is not
+"no activity": starting again each round, and after each restart, only added cards (15 starts in 22 hours, not one
+update or end). Hold the next start until the phone answers (a reported update token, its app connecting) or for as
+long as an activity can run, and keep the hold with the start budget so a restart or the other slot sees it. Put the
+hold on before sending, so an answer that follows at once is what lifts it; a claimed start that was not sent keeps
+only the cooldown. A test that never reports a token models this case, not the usual one: have the phone answer where
+the test is about the cooldown. The hub's update and end paths were fine all along; check them with a token before
+looking for a lost push.
+
 ## A custom HTTPS dial must opt into HTTP/2 (#1620)
 
 A custom `http.Transport.DialContext` conservatively disables Go's automatic HTTP/2 negotiation. Keep the checked-address dial callback and explicitly enable `ForceAttemptHTTP2`; do not replace it with a default dialer or let an upstream proxy resolve the name again. Verify real local TLS HTTP/2 negotiation, HTTP/1.1 fallback and request cancellation. A successful transport test is not evidence that a particular upstream challenge disappeared: verify the installed source separately, without raising budgets or substituting host-downloaded content.

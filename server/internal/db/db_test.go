@@ -254,6 +254,61 @@ func TestLiveActivityStartBudget(t *testing.T) {
 	t.Log("two independent pools: 20 concurrent attempts, one claim; renewal retained budget; failed save rolled back")
 }
 
+// The hold on the next push-start after one the phone has not answered (#7641): counted from the claim, seen by the
+// other blue-green process, and back to the cooldown when lifted.
+func TestLiveActivityStartHold(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	at := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	const cooldown, maxAge = 10 * time.Minute, 8 * time.Hour
+	if err := d.UpsertDevice(ctx, Device{DeviceID: "phone"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SaveLiveActivity(ctx, LiveActivity{DeviceID: "phone", PushToStartToken: "start"}); err != nil {
+		t.Fatal(err)
+	}
+	other, err := Open(ctx, os.Getenv("PERSONA_TEST_DATABASE_URL"), AllSets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	// Nothing claimed yet: nothing to hold, and no row appears.
+	if err := d.HoldLiveActivityStart(ctx, "phone", maxAge); err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err := d.ClaimLiveActivityStart(ctx, "phone", "start", at, cooldown, maxAge); err != nil || !claimed {
+		t.Fatalf("first claim: %v %v", claimed, err)
+	}
+	if err := d.HoldLiveActivityStart(ctx, "phone", maxAge); err != nil {
+		t.Fatal(err)
+	}
+	due, claimed, err := other.ClaimLiveActivityStart(ctx, "phone", "start", at.Add(cooldown), cooldown, maxAge)
+	if err != nil || claimed || !due.Equal(at.Add(maxAge)) {
+		t.Fatalf("held start claimed by the other pool: due=%s claimed=%v err=%v", due, claimed, err)
+	}
+	due, claimed, err = other.ClaimLiveActivityStart(ctx, "phone", "start", at.Add(maxAge-time.Microsecond), cooldown, maxAge)
+	if err != nil || claimed || !due.Equal(at.Add(maxAge)) {
+		t.Fatalf("held start claimed before the hold ended: due=%s claimed=%v err=%v", due, claimed, err)
+	}
+	// The phone answered: the cooldown from that claim again, which has passed.
+	if err := other.HoldLiveActivityStart(ctx, "phone", cooldown); err != nil {
+		t.Fatal(err)
+	}
+	second := at.Add(cooldown)
+	if _, claimed, err = d.ClaimLiveActivityStart(ctx, "phone", "start", second, cooldown, maxAge); err != nil || !claimed {
+		t.Fatalf("claim after the hold was lifted: %v %v", claimed, err)
+	}
+	// Held again and never answered: the hold ends by itself, counted from the second claim.
+	if err := d.HoldLiveActivityStart(ctx, "phone", maxAge); err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err = d.ClaimLiveActivityStart(ctx, "phone", "start", second.Add(maxAge), cooldown, maxAge); err != nil || !claimed {
+		t.Fatalf("claim when the hold ended: %v %v", claimed, err)
+	}
+	if err := d.HoldLiveActivityStart(ctx, "missing", maxAge); err != nil {
+		t.Fatalf("hold for an unknown device: %v", err)
+	}
+}
+
 func TestLiveActivityStartParentLockOrder(t *testing.T) {
 	d, ctx := open(t), context.Background()
 	if err := d.UpsertDevice(ctx, Device{DeviceID: "phone"}); err != nil {

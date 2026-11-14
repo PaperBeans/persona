@@ -1511,12 +1511,13 @@ func (h *Hub) onClientMessage(ctx context.Context, c *client, data []byte) {
 		}
 		h.mu.Unlock()
 		h.noteClientAppSimulator(c, msg.Simulator)
-		go h.live.phoneAnswered(context.Background(), msg.DeviceID) // its app reaches the hub: a push-start is answered again (#7641)
 		if strings.HasPrefix(c.device, "pair_") {
 			// A pairing token is traded for a device token within seconds and the phone registers again under it:
 			// calls still reach this connection, but nothing is saved under a credential about to disappear.
 			return
 		}
+		// Its app reaches the hub: what the hub push-starts there is answered again (#7641). Outside h.mu, as the tools' write.
+		h.live.phoneAnswered(context.Background(), msg.DeviceID)
 		h.setPhoneTools(db.PhoneToolRegistration{DeviceID: deviceID, Platform: msg.Platform, CredentialID: c.device, Tools: tools})
 	case "register_desktop":
 		h.registerDesktop(c, msg.DeviceName, msg.DeviceID)

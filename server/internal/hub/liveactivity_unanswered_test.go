@@ -14,17 +14,31 @@ var (
 	fleetAsking  = FleetState{Phase: "needsYou", NeedsYou: 1, Items: []FleetItem{{ID: "m/b", Title: "todo", Kind: "permission", Interaction: "ix1"}}}
 )
 
-// restartFleetLoop replaces the hub's Live Activity manager with a new one over the same store, as a hub restart or a
-// blue-green switch does: what each device shows, the round and who was started in it are gone.
-func restartFleetLoop(t *testing.T, h *Hub, stop func()) func() {
+// fleetRun is localFleetLoop's hub with a loop that can be restarted, stopped when the test ends (a failed one too).
+type fleetRun struct {
+	h    *Hub
+	sink *fleetPushSink
+	stop func()
+}
+
+func newFleetRun(t *testing.T) *fleetRun {
 	t.Helper()
-	stop()
-	h.live = newLiveActivities(h)
+	r := &fleetRun{}
+	r.h, r.sink, r.stop = localFleetLoop(t)
+	t.Cleanup(func() { r.stop() })
+	return r
+}
+
+// restart replaces the hub's Live Activity manager with a new one over the same store, as a hub restart or a
+// blue-green switch does: what each device shows, the round and who was started in it are gone.
+func (r *fleetRun) restart() {
+	r.stop()
+	r.h.live = newLiveActivities(r.h)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { defer close(done); h.live.run(ctx) }()
+	go func() { defer close(done); r.h.live.run(ctx) }()
 	synctest.Wait()
-	return func() { cancel(); <-done }
+	r.stop = func() { cancel(); <-done }
 }
 
 func fleetStarts(sink *fleetPushSink) int { return sink.count("phone", "liveactivity", "start") }
@@ -44,8 +58,8 @@ func TestFleetPushStartedActivityFollowsFleet(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				h, sink, stop := localFleetLoop(t)
-				defer func() { stop() }()
+				r := newFleetRun(t)
+				h, sink := r.h, r.sink
 				h.live.update("phone", func(v *db.LiveActivity) { v.ActivityID, v.PushToken = "", "" })
 				reportLive(t, h, tc.shown, FleetStats{})
 				time.Sleep(fleetCoalesce)
@@ -59,7 +73,7 @@ func TestFleetPushStartedActivityFollowsFleet(t *testing.T) {
 				})
 				synctest.Wait()
 				if tc.restart {
-					stop = restartFleetLoop(t, h, stop)
+					r.restart()
 				}
 				reportLive(t, h, FleetState{}, FleetStats{})
 				time.Sleep(fleetEndAfter + 30*time.Second)
@@ -80,8 +94,9 @@ func TestFleetPushStartedActivityFollowsFleet(t *testing.T) {
 // the app connecting, or fleetMaxAge lifts it, and the store keeps both the hold and the lift across restarts.
 func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
 	// unanswered leaves a start nobody answered and, a restart and a round later, a request waiting.
-	unanswered := func(t *testing.T) (h *Hub, sink *fleetPushSink, stop func(), started time.Time) {
-		h, sink, stop = localFleetLoop(t)
+	unanswered := func(t *testing.T) (r *fleetRun, started time.Time) {
+		r = newFleetRun(t)
+		h, sink := r.h, r.sink
 		h.live.update("phone", func(v *db.LiveActivity) { v.ActivityID, v.PushToken = "", "" })
 		reportLive(t, h, fleetWorking, FleetStats{})
 		time.Sleep(fleetCoalesce)
@@ -92,7 +107,7 @@ func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
 		}
 		// Same round, past the rolling cooldown, on a hub that restarted (or the other slot).
 		time.Sleep(fleetRefresh + time.Minute)
-		stop = restartFleetLoop(t, h, stop)
+		r.restart()
 		time.Sleep(fleetCoalesce)
 		synctest.Wait()
 		if got := fleetStarts(sink); got != 1 {
@@ -111,13 +126,13 @@ func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
 		if n := sink.count("phone", "liveactivity", "update") + sink.count("phone", "liveactivity", "end"); n != 0 {
 			t.Fatalf("pushes to an activity without a token: %d", n)
 		}
-		return h, sink, stop, started
+		return r, started
 	}
 
 	t.Run("token report", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			h, sink, stop, _ := unanswered(t)
-			defer func() { stop() }()
+			r, _ := unanswered(t)
+			h, sink := r.h, r.sink
 			h.live.update("phone", func(v *db.LiveActivity) {
 				v.ActivityID, v.PushToken, v.StartedAt = "started", "phone-started", time.Now()
 			})
@@ -132,7 +147,7 @@ func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
 			if got := sink.count("phone", "liveactivity", "end"); got != 1 {
 				t.Fatalf("ends: %d, want 1", got)
 			}
-			stop = restartFleetLoop(t, h, stop)
+			r.restart()
 			reportLive(t, h, fleetWorking, FleetStats{})
 			time.Sleep(fleetCoalesce)
 			synctest.Wait()
@@ -144,8 +159,8 @@ func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
 
 	t.Run("app connects", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			h, sink, stop, _ := unanswered(t)
-			defer func() { stop() }()
+			r, _ := unanswered(t)
+			h, sink := r.h, r.sink
 			reportLive(t, h, FleetState{}, FleetStats{})
 			time.Sleep(fleetCoalesce)
 			synctest.Wait()
@@ -155,7 +170,7 @@ func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
 			synctest.Wait()
 			h.dropClient(app)
 			synctest.Wait()
-			stop = restartFleetLoop(t, h, stop)
+			r.restart()
 			reportLive(t, h, fleetWorking, FleetStats{})
 			time.Sleep(fleetCoalesce)
 			synctest.Wait()
@@ -167,14 +182,14 @@ func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
 
 	t.Run("fleetMaxAge", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			h, sink, stop, started := unanswered(t)
-			defer func() { stop() }()
+			r, started := unanswered(t)
+			sink := r.sink
 			time.Sleep(time.Until(started.Add(fleetMaxAge - time.Minute)))
 			synctest.Wait()
 			if got := fleetStarts(sink); got != 1 {
 				t.Fatalf("before fleetMaxAge: %d starts, want 1", got)
 			}
-			stop = restartFleetLoop(t, h, stop)
+			r.restart()
 			time.Sleep(2 * time.Minute)
 			synctest.Wait()
 			if got := fleetStarts(sink); got != 2 {
