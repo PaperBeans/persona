@@ -176,7 +176,8 @@ func (c *Connector) pollDevice(ctx context.Context) (connector.Prompt, error) {
 		return connector.Prompt{}, err
 	}
 	c.mu.Lock()
-	c.token, c.pending = d.Token, nil
+	c.newCredential(d.Token)
+	c.pending = nil
 	c.mu.Unlock()
 	c.check(ctx)
 	st := c.Status(ctx)
@@ -207,7 +208,7 @@ func (c *Connector) Logout(ctx context.Context) error {
 func (c *Connector) forgetDevice(ctx context.Context) error {
 	c.mu.Lock()
 	if c.source == SourceDevice {
-		c.token = ""
+		c.newCredential("")
 	}
 	c.pending = nil
 	c.mu.Unlock()

@@ -208,10 +208,13 @@ func (c *Connector) defaultBranch(ctx context.Context, repo string) (string, err
 	var r struct {
 		DefaultBranch string `json:"default_branch"`
 	}
+	_, epoch := st.bind(ctx)
 	if _, err := c.Get(ctx, "/repos/"+repo, &r); err != nil {
 		return "", err
 	}
-	st.mu.Lock()
+	if !st.enter(epoch) {
+		return "", errAccountChanged
+	}
 	if st.repos == nil {
 		st.repos = map[string]repoMeta{}
 	}
@@ -269,7 +272,10 @@ func (c *Connector) describeCI(ctx context.Context, n notification, run ciRun, m
 	}
 	t.Context = ciContext(repo, run.branch, pr, n.Subject.Title)
 	st := &c.inbox
-	st.mu.Lock()
+	_, epoch := st.bind(ctx)
+	if !st.enter(epoch) {
+		return t, false, errAccountChanged
+	}
 	if st.ci == nil {
 		st.ci = map[string]*ciMeta{}
 	}
@@ -283,7 +289,10 @@ func (c *Connector) describeCI(ctx context.Context, n notification, run ciRun, m
 // GitHub notifies only the account that started a run.
 func (c *Connector) followUpCI(ctx context.Context) bool {
 	st := &c.inbox
-	st.mu.Lock()
+	ctx, epoch := st.bind(ctx)
+	if !st.enter(epoch) {
+		return false
+	}
 	var due []string
 	for thread, m := range st.ci {
 		if t := st.things[thread]; t != nil && t.Done == "" && time.Since(m.checked) >= ciRecheck {
@@ -297,7 +306,9 @@ func (c *Connector) followUpCI(ctx context.Context) bool {
 		if i >= ciChecks || c.ratesLow() {
 			break
 		}
-		st.mu.Lock()
+		if !st.enter(epoch) {
+			return moved
+		}
 		m := *st.ci[thread]
 		st.ci[thread].checked = time.Now()
 		st.mu.Unlock()
@@ -305,7 +316,9 @@ func (c *Connector) followUpCI(ctx context.Context) bool {
 		if err != nil {
 			continue
 		}
-		st.mu.Lock()
+		if !st.enter(epoch) {
+			return moved
+		}
 		if t := st.things[thread]; t != nil && t.Done == "" {
 			switch {
 			case check.over != "":
@@ -423,12 +436,19 @@ func (c *Connector) over(thread string, o InboxOptions) string {
 
 // Settle closes the hub's open GitHub items the current rules leave out: CI items made one per notification
 // (before CI failures were merged per branch), muted repositories, branches and CI the user does not want.
+// So are the items of an account the connector no longer reads as (retire), unless the account in use has taken
+// the thread over.
 func (c *Connector) Settle(_ context.Context, threads []string) map[string]string {
 	o := c.options()
 	out := map[string]string{}
+	st := &c.inbox
+	st.mu.Lock()
+	defer st.mu.Unlock()
 	for _, t := range threads {
 		if why := c.over(t, o); why != "" {
 			out[t] = why
+		} else if r := st.retired[t]; r != nil && !r.taken {
+			out[t] = "GitHub：换了账号，这条是之前那个账号的"
 		}
 	}
 	return out

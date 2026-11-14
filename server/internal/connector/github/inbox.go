@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -28,6 +29,77 @@ type inboxState struct {
 	ci           map[string]*ciMeta               // CI items, by thread (rules.go)
 	repos        map[string]repoMeta              // repositories' default branches (rules.go)
 	marks        map[string]*readMark             // by thread: whether its thing was read on GitHub
+	// epoch is the account epoch (account.go) everything above was read under: what a poll that began under
+	// another one read is dropped (enter).
+	epoch uint64
+	// retired are the things of the accounts before, by thread, kept for the hub to close their items (Settle);
+	// left says some were retired since Watch last looked.
+	retired map[string]*retiredThing
+	left    bool
+}
+
+// retiredThing is what is kept of a thing read as an account the connector no longer reads as.
+type retiredThing struct {
+	last string    // the move it held (InboxThing.Last)
+	at   time.Time // when that move happened (InboxThing.At)
+	when time.Time // when it was retired: kept for forgetAfter from then, however old the thing was
+	// taken: the account in use has a thing of the same thread at that move or a later one, which the hub's open
+	// item takes over (its Last differs), so the item is no longer one to close.
+	taken bool
+}
+
+// retire ends what was read as the account before, in one step, for the account of epoch: its things leave the
+// inbox, remembered only for the hub to close their items (Settle), and the notifications cursor and everything
+// the polls kept start again. c.mu is held (adopt).
+func (st *inboxState) retire(epoch uint64, now time.Time) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	for thread, t := range st.things {
+		if t.Done != "" {
+			continue // over already: the hub has no open item of it
+		}
+		if st.retired == nil {
+			st.retired = map[string]*retiredThing{}
+		}
+		st.retired[thread] = &retiredThing{last: t.Last, at: t.At, when: now}
+		st.left = true
+	}
+	st.epoch = epoch
+	st.things, st.seen = map[string]*connector.InboxThing{}, map[string]string{}
+	st.ci, st.repos, st.marks = nil, nil, nil
+	st.lastModified, st.fullAt = "", time.Time{}
+}
+
+// enter locks the state for what was read under epoch; false, with the state not locked, when the connector reads
+// as another account by now: what was read is not this account's and is dropped.
+func (st *inboxState) enter(epoch uint64) bool {
+	st.mu.Lock()
+	if st.epoch != epoch {
+		st.mu.Unlock()
+		return false
+	}
+	return true
+}
+
+// bind is ctx bound to the epoch the state is read under (asEpoch), and that epoch: one poll's reads and what
+// they write back are all one account's. A context bound already (a poll's) keeps its epoch.
+func (st *inboxState) bind(ctx context.Context) (context.Context, uint64) {
+	if epoch, ok := boundEpoch(ctx); ok {
+		return ctx, epoch
+	}
+	st.mu.Lock()
+	epoch := st.epoch
+	st.mu.Unlock()
+	return asEpoch(ctx, epoch), epoch
+}
+
+// takeLeft says whether things were retired since it was last asked.
+func (st *inboxState) takeLeft() bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	left := st.left
+	st.left = false
+	return left
 }
 
 // readMark is what says whether a thread's thing was read on GitHub (applyNotifications). It lives in memory only,
@@ -71,16 +143,17 @@ type notification struct {
 // Watch polls the notifications until ctx ends, saying ScopeInbox when a thing changed.
 func (c *Connector) Watch(ctx context.Context, changed func(connector.Scope)) error {
 	for {
-		wait := pollDefault
+		wait, moved := pollDefault, false
 		if c.signedIn() {
-			w, moved, err := c.poll(ctx)
+			w, m, err := c.poll(ctx)
 			if err != nil {
 				return err
 			}
-			if moved {
-				changed(connector.ScopeInbox)
-			}
-			wait = max(w, pollDefault)
+			wait, moved = max(w, pollDefault), m
+		}
+		// Another account's things left since the last look (retire): the hub closes their items.
+		if c.inbox.takeLeft() || moved {
+			changed(connector.ScopeInbox)
 		}
 		select {
 		case <-ctx.Done():
@@ -109,10 +182,16 @@ func (c *Connector) poll(ctx context.Context) (time.Duration, bool, error) {
 	if !full && st.lastModified != "" {
 		hdr.Set("If-Modified-Since", st.lastModified)
 	}
+	// The poll is one account's: the cursor above, every read below and what they write back (asEpoch, enter).
+	epoch := st.epoch
 	st.mu.Unlock()
+	ctx = asEpoch(ctx, epoch)
 
 	var ns []notification
 	code, h, err := c.request(ctx, http.MethodGet, notificationsPath(1), hdr, nil, &ns)
+	if errors.Is(err, errAccountChanged) {
+		return 0, false, nil // the next poll reads as the account in use
+	}
 	if err != nil {
 		if left := c.pauseLeft(); left > 0 { // a rate limit (request records it: notePause)
 			return max(left, pollDefault), false, nil
@@ -126,7 +205,9 @@ func (c *Connector) poll(ctx context.Context) (time.Duration, bool, error) {
 	if code == http.StatusNotModified {
 		return wait, false, nil
 	}
-	st.mu.Lock()
+	if !st.enter(epoch) {
+		return 0, false, nil
+	}
 	st.lastModified = h.Get("Last-Modified")
 	if full {
 		st.fullAt = time.Now()
@@ -167,6 +248,7 @@ func (c *Connector) laterNotifications(ctx context.Context, ns []notification) (
 // for a pause) and marks those no longer in ns, the unread list newest first, as read elsewhere (missedAgain).
 func (c *Connector) applyNotifications(ctx context.Context, ns []notification, complete bool, now time.Time) bool {
 	st := &c.inbox
+	ctx, epoch := st.bind(ctx)
 	me := c.Status(ctx).Account
 	budget := maxDetails
 	var oldest time.Time
@@ -192,7 +274,9 @@ func (c *Connector) applyNotifications(ctx context.Context, ns []notification, c
 			continue
 		}
 		stamp := n.UpdatedAt.UTC().Format(time.RFC3339)
-		st.mu.Lock()
+		if !st.enter(epoch) {
+			return moved
+		}
 		known := st.seen[n.ID] == stamp
 		// Notifications come newest first and a CI thread gathers many: one older than the thread's thing is an
 		// earlier move, and the thing keeps the newest (InboxThing.At).
@@ -215,7 +299,9 @@ func (c *Connector) applyNotifications(ctx context.Context, ns []notification, c
 		case kind == "ci_failed" && !run.failed():
 			// A run of the branch that did not fail (succeeded, cancelled): after a success the follow-up checks in
 			// this poll whether the branch's item is over (followUpCI: every workflow's newest run).
-			st.mu.Lock()
+			if !st.enter(epoch) {
+				return moved
+			}
 			st.seen[n.ID] = stamp
 			if m := st.ci[thread]; m != nil && run.status == "succeeded" {
 				m.checked = time.Time{}
@@ -226,7 +312,9 @@ func (c *Connector) applyNotifications(ctx context.Context, ns []notification, c
 			var ok bool
 			thing, ok, err = c.describeCI(ctx, n, run, me, o)
 			if err == nil && !ok {
-				st.mu.Lock()
+				if !st.enter(epoch) {
+					return moved
+				}
 				st.seen[n.ID] = stamp
 				st.mu.Unlock()
 				continue
@@ -239,7 +327,18 @@ func (c *Connector) applyNotifications(ctx context.Context, ns []notification, c
 		}
 		thing.Thread, thing.Kind, thing.Label, thing.Last = thread, kind, label, stamp
 		thing.Tags = tagsOf(n, run, kind, thing.Sender)
-		st.mu.Lock()
+		if !st.enter(epoch) {
+			return moved
+		}
+		if r := st.retired[thread]; r != nil {
+			// The same thread was in the inbox as another account. A notification of the same move carries the
+			// same time for both: marked with the epoch, this account's is another move to the hub, whose item
+			// takes it over, and a reply to the item as it was does not pass for one to this (answerable).
+			if r.last == stamp || strings.HasPrefix(r.last, stamp+"#") {
+				thing.Last = stamp + "#" + strconv.FormatUint(epoch, 10)
+			}
+			r.taken = r.taken || !thing.At.Before(r.at)
+		}
 		st.seen[n.ID] = stamp
 		st.things[thread] = &thing
 		if st.marks == nil {
@@ -249,8 +348,15 @@ func (c *Connector) applyNotifications(ctx context.Context, ns []notification, c
 		st.mu.Unlock()
 		moved = true
 	}
-	st.mu.Lock()
+	if !st.enter(epoch) {
+		return moved
+	}
 	defer st.mu.Unlock()
+	for thread, r := range st.retired {
+		if now.Sub(r.when) > forgetAfter {
+			delete(st.retired, thread)
+		}
+	}
 	for thread, t := range st.things {
 		if now.Sub(t.At) > forgetAfter {
 			delete(st.things, thread)
@@ -532,18 +638,48 @@ func (c *Connector) Reply(ctx context.Context, r connector.InboxReply) error {
 	if m == nil || !validRepo(m[1]) {
 		return fmt.Errorf("%s cannot be replied to", thread)
 	}
+	// The reply goes out as the account the item was read as or not at all: admitted against the state's epoch,
+	// and sent under it (asEpoch), so an account that changes in between refuses it before the request.
+	st := &c.inbox
+	st.mu.Lock()
+	epoch, err := st.epoch, st.answerable(thread, r.Last)
+	st.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	ctx = asEpoch(ctx, epoch)
 	body, _ := json.Marshal(map[string]string{"body": text})
 	if _, _, err := c.request(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/issues/%s/comments", m[1], m[2]), nil, body, nil); err != nil {
 		return err
 	}
 	n, _ := strconv.Atoi(m[2])
 	c.forget(m[1], n)
-	st := &c.inbox
-	st.mu.Lock()
-	if t := st.things[thread]; t != nil {
-		t.Done = connector.DoneReplied
+	if st.enter(epoch) {
+		if t := st.things[thread]; t != nil {
+			t.Done = connector.DoneReplied
+		}
+		st.mu.Unlock()
 	}
-	st.mu.Unlock()
+	return nil
+}
+
+// answerable says whether a reply to thread, answering the move last (the hub item's InboxThing.Last), is one to
+// something read as the account in use. While the connector has read as one account only, every item is that
+// account's, as before. Once the account has changed, items of the account before may still be open or on their
+// way (a reply sent late, an item the hub has not closed yet), and the thread alone does not tell them apart: both
+// accounts may have it. So the connector answers only for what it holds, a thing read as this account at the very
+// move the item holds. st.mu is held.
+func (st *inboxState) answerable(thread, last string) error {
+	if st.epoch == 0 {
+		return nil
+	}
+	t := st.things[thread]
+	switch {
+	case t == nil:
+		return fmt.Errorf("%s is not in the inbox of the GitHub account in use (it was read as another account, or long ago): open it on GitHub", thread)
+	case t.Last != last:
+		return fmt.Errorf("%s has moved, or was read as another GitHub account: read it again", thread)
+	}
 	return nil
 }
 

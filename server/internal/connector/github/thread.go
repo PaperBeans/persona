@@ -41,6 +41,19 @@ type etagCache struct {
 	logs  map[int64]string // failed checks' log tails, by job id (a finished job's log does not change)
 	// avatars: a login's avatar URL, as the lists gave it, for Media.
 	avatars map[string]string
+	// epoch is the account epoch (account.go) the answers were read under: one account's are never kept for,
+	// or served to, another (reset).
+	epoch uint64
+}
+
+// reset drops everything kept, for the account of epoch: what one account may read says nothing of what another
+// may, and GitHub's 304 only says the answer has not changed, not that this token may see it. A read still in
+// flight belongs to the epoch before: it finds the epoch moved and neither serves nor keeps its answer
+// (cachedPageSince, checkLog). c.mu is held (adopt).
+func (e *etagCache) reset(epoch uint64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.m, e.logs, e.avatars, e.epoch = nil, nil, nil, epoch
 }
 
 type etagEntry struct {
@@ -74,8 +87,14 @@ func (c *Connector) cachedPageSince(ctx context.Context, path string, out any, d
 	}
 	e := &c.etags
 	e.mu.Lock()
-	if e.m == nil {
-		e.m = map[string]*etagEntry{}
+	// The read is one account's from here on: what it finds kept, the request (asEpoch) and what it keeps.
+	epoch, bound := boundEpoch(ctx)
+	if !bound {
+		epoch = e.epoch
+		ctx = asEpoch(ctx, epoch)
+	} else if epoch != e.epoch {
+		e.mu.Unlock()
+		return "", 0, errAccountChanged
 	}
 	old := e.m[path]
 	var hdr http.Header
@@ -99,6 +118,10 @@ func (c *Connector) cachedPageSince(ctx context.Context, path string, out any, d
 	if discover && code == http.StatusNotModified && h.Values("Link") == nil {
 		// One unconditional discovery read is bounded independently of thread size.
 		e.mu.Lock()
+		if e.epoch != epoch {
+			e.mu.Unlock()
+			return "", 0, errAccountChanged
+		}
 		e.reads++
 		read = e.reads
 		e.mu.Unlock()
@@ -122,6 +145,14 @@ func (c *Connector) cachedPageSince(ctx context.Context, path string, out any, d
 	}
 	at := time.Now()
 	e.mu.Lock()
+	if e.epoch != epoch {
+		// The account changed while GitHub answered: the answer is the account before's.
+		e.mu.Unlock()
+		return "", 0, errAccountChanged
+	}
+	if e.m == nil {
+		e.m = map[string]*etagEntry{}
+	}
 	// Never let an older in-flight response overwrite a newer representation.
 	if current := e.m[path]; current == nil || current.read <= read {
 		if tag != "" {
@@ -351,6 +382,8 @@ func (c *Connector) Thread(ctx context.Context, thread, before string, limit int
 		return connector.ThreadPage{}, fmt.Errorf("%s is not a pull request or an issue", thread)
 	}
 	repo, number := m[1], m[2]
+	// The page is one account's: every list below is read under the epoch it began in, or the page fails.
+	ctx = asEpoch(ctx, c.epochNow())
 	base := fmt.Sprintf("/repos/%s/issues/%s", repo, number)
 	var it threadIssue
 	if err := c.cachedGet(ctx, base, &it); err != nil {
@@ -519,16 +552,21 @@ func (c *Connector) checkLog(ctx context.Context, repo string, job int64) string
 	e := &c.etags
 	e.mu.Lock()
 	log, ok := e.logs[job]
+	epoch := e.epoch
 	e.mu.Unlock()
 	if ok {
 		return log
 	}
-	raw, err := c.raw(ctx, fmt.Sprintf("/repos/%s/actions/jobs/%d/logs", repo, job))
+	raw, err := c.raw(asEpoch(ctx, epoch), fmt.Sprintf("/repos/%s/actions/jobs/%d/logs", repo, job))
 	if err != nil {
 		return ""
 	}
 	log = tail(raw, checkLogTail)
 	e.mu.Lock()
+	if e.epoch != epoch {
+		e.mu.Unlock()
+		return "" // the account changed meanwhile: not a log to show or keep
+	}
 	if e.logs == nil || len(e.logs) > etagKeep {
 		e.logs = map[int64]string{}
 	}
