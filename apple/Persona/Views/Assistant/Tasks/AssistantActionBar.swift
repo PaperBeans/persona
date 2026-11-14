@@ -185,9 +185,11 @@ nonisolated enum AssistantEntries {
 
         // One home per request (docs/design/DESIGN_SYSTEM.md 4.8, the web's #7490): an Agent several of these tasks list
         // asks under one of them, the task the hub ties its session to (`Session.todo`) when it lists it, else the first
-        // that lists it. The others neither repeat its cards nor wait on the user for them.
+        // that lists it in the web's slot order (oldest card first, then id). The others neither repeat its cards nor wait
+        // on the user for them.
         var home: [String: String] = [:]
-        for todo in todos where at[todo.id] != nil && todo.doneAt == nil {
+        let slotOrder = todos.compactMap { t in at[t.id].map { (todo: t, at: $0) } }.sorted { ($0.at, $0.todo.id) < ($1.at, $1.todo.id) }
+        for (todo, _) in slotOrder where todo.doneAt == nil {
             for a in todo.activeAgents {
                 let k = pair(a.machineID, a.sessionID)
                 if home[k] == nil || lookup(a.machineID, a.sessionID)?.todo?.id == todo.id { home[k] = todo.id }

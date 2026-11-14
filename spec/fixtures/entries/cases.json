@@ -1886,6 +1886,185 @@
           }
         }
       }
+    },
+    {
+      "name": "shared_agent_asks_under_its_tied_task",
+      "description": "An Agent three tasks list asks for one approval; the hub ties its session to the middle task. That task is its one home: one Needs you row, counted once. The other two do not wait on the user for it and are In progress (newest first).",
+      "source": [
+        "web/src/lib/assistant-entries.ts assistantEntries",
+        "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
+        "apple/Persona/Views/Assistant/Tasks/AssistantActionBar.swift AssistantEntries.split",
+        "docs/design/DESIGN_SYSTEM.md 4.8",
+        "issues #7490, #7531, #7532"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-10T09:00:00Z",
+        "plans": {},
+        "feed": [],
+        "todos": [
+          {
+            "id": "t-cache",
+            "title": "Warm the cache",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T08:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "agents": [
+              {
+                "machine_id": "mac",
+                "session_id": "w-shared",
+                "linked_at": "2026-11-10T08:00:00Z"
+              }
+            ]
+          },
+          {
+            "id": "t-release",
+            "title": "Cut the release",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T08:10:00Z",
+            "updated_at": "2026-11-10T08:10:00Z",
+            "agents": [
+              {
+                "machine_id": "mac",
+                "session_id": "w-shared",
+                "linked_at": "2026-11-10T08:10:00Z"
+              }
+            ]
+          },
+          {
+            "id": "t-tests",
+            "title": "Fix the flaky tests",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T08:20:00Z",
+            "updated_at": "2026-11-10T08:20:00Z",
+            "agents": [
+              {
+                "machine_id": "mac",
+                "session_id": "w-shared",
+                "linked_at": "2026-11-10T08:20:00Z"
+              }
+            ]
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "mac",
+            "session_id": "w-shared",
+            "title": "w-shared",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "status": "blocked",
+            "updated_at": "2026-11-10T08:50:00Z",
+            "state_since": "2026-11-10T08:50:00Z",
+            "todo": {
+              "id": "t-release",
+              "title": "t-release"
+            }
+          }
+        ],
+        "interactions": [
+          {
+            "id": "perm-shared",
+            "machine_id": "mac",
+            "session_id": "w-shared",
+            "kind": "permission",
+            "tool_name": "Bash",
+            "created_at": "2026-11-10T08:55:00Z"
+          }
+        ]
+      },
+      "expected": {
+        "needs_you": [
+          "task:t-release"
+        ],
+        "running": [
+          "task:t-tests",
+          "task:t-cache"
+        ],
+        "shelved": []
+      }
+    },
+    {
+      "name": "shared_agent_untied_asks_under_its_first_task",
+      "description": "An Agent two tasks list asks for one approval and the hub ties its session to neither: the first task that lists it (the oldest card) is its home; the other is In progress.",
+      "source": [
+        "web/src/lib/assistant-entries.ts assistantEntries",
+        "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
+        "apple/Persona/Views/Assistant/Tasks/AssistantActionBar.swift AssistantEntries.split",
+        "docs/design/DESIGN_SYSTEM.md 4.8",
+        "issues #7490, #7531, #7532"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-10T09:00:00Z",
+        "plans": {},
+        "feed": [],
+        "todos": [
+          {
+            "id": "t-cache",
+            "title": "Warm the cache",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T08:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "agents": [
+              {
+                "machine_id": "mac",
+                "session_id": "w-shared",
+                "linked_at": "2026-11-10T08:00:00Z"
+              }
+            ]
+          },
+          {
+            "id": "t-tests",
+            "title": "Fix the flaky tests",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T08:20:00Z",
+            "updated_at": "2026-11-10T08:20:00Z",
+            "agents": [
+              {
+                "machine_id": "mac",
+                "session_id": "w-shared",
+                "linked_at": "2026-11-10T08:20:00Z"
+              }
+            ]
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "mac",
+            "session_id": "w-shared",
+            "title": "w-shared",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "status": "blocked",
+            "updated_at": "2026-11-10T08:50:00Z",
+            "state_since": "2026-11-10T08:50:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "perm-shared",
+            "machine_id": "mac",
+            "session_id": "w-shared",
+            "kind": "permission",
+            "tool_name": "Bash",
+            "created_at": "2026-11-10T08:55:00Z"
+          }
+        ]
+      },
+      "expected": {
+        "needs_you": [
+          "task:t-cache"
+        ],
+        "running": [
+          "task:t-tests"
+        ],
+        "shelved": []
+      }
     }
   ]
 }

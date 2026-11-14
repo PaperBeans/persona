@@ -88,9 +88,10 @@ struct AssistantActionBarTests {
         #expect(ActionTrayContent(r).count(.needsYou) == 1)
     }
 
-    /// With no to-do tied, the first that lists the Agent is its home.
+    /// With no to-do tied, the first that lists the Agent in the web's slot order (oldest card first) is its home, though
+    /// the bar passes the to-dos newest first.
     @Test func agentSeveralTodosListAsksUnderTheFirstWhenNoneIsTied() {
-        let r = split([todo("cache", agent: "w"), todo("tests", agent: "w")], [session("w", "needs_you")],
+        let r = split([todo("tests", agent: "w", at: 10), todo("cache", agent: "w", at: 40)], [session("w", "needs_you")],
                       asks: [ask("ix", session: "w")])
         #expect(ids(r.needsYou) == ["task:cache"])
         #expect(ids(r.running) == ["task:tests"])
