@@ -175,8 +175,22 @@ func TestCancelledFailedStartWithParkedContinuation(t *testing.T) {
 			s, f, _ := failedStartReviewService(t, withStore)
 			title := "cancelled failed start with a parked continuation"
 			first := reviewTestTask(t, s, f, map[string]any{"title": title}, errors.New("synthetic start failure"))
-			second := reviewTestTask(t, s, f, map[string]any{"title": title, "continues": first.ID,
-				"continues_why": "the first Agent did not start"}, nil)
+			// Reconstruct a historical successor chain. New continues calls now reopen first in place.
+			second, err := s.createTaskTodo(context.Background(), title, "Continue the original fix", "conv1", "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			brief, err := s.ensureTaskBrief(context.Background(), first)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.linkTaskBrief(context.Background(), brief.ID, second.ID, first.ID, "the first Agent did not start"); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.linkTodoAgent(context.Background(), second.ID, "box", "legacy-agent", title, "/code/app", "claude"); err != nil {
+				t.Fatal(err)
+			}
+			s.superviseTodo(context.Background(), second.ID, "conv1", brief.Criteria, brief.ExpectNow)
 
 			raw, err := s.todoView(context.Background(), second.ID)
 			if err != nil {

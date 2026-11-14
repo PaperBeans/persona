@@ -185,12 +185,23 @@ func (d *Devices) withOwn(ctx context.Context, machine string, hub *devicewire.C
 func (d *Devices) rehook(ctx context.Context) {
 	for _, m := range d.machinesNow() {
 		m.mu.Lock()
-		peer, at := m.peer, m.connectedAt
+		peer, at, ready := m.peer, m.connectedAt, m.sessionsReady
 		m.mu.Unlock()
 		if peer == nil {
 			continue
 		}
 		go func() {
+			if ready != nil {
+				// A first list that is still out has no replay in BusUp. Its normal initial forward closes ready;
+				// configuring only afterwards keeps the hub's rehook behind that real snapshot.
+				select {
+				case <-ready:
+				case <-peer.Done():
+					return
+				case <-ctx.Done():
+					return
+				}
+			}
 			if reply, _ := d.hubConnected(ctx, m, at); reply != nil {
 				m.configureNode(ctx, peer, d.withOwn(ctx, m.cfg.ID, reply), true)
 			}

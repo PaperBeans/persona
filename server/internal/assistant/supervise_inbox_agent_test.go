@@ -158,3 +158,48 @@ func TestInboxGitHubCommentToAClosedAgent(t *testing.T) {
 		}
 	}
 }
+
+func TestInboxGroupedCopyDoesNotHideFailedAgentDelivery(t *testing.T) {
+	s, f := newQuietService(t)
+	turnInboxSignalsOn(t, s)
+	s.superviseTimes.gather = time.Hour
+	todo := agentTask(t, s, f)
+	f.mu.Lock()
+	f.failSend = errors.New("send failed")
+	f.mu.Unlock()
+	first := linkedPRItem(s, todo.ID, "c1", "the first comment was not delivered")
+	s.superviseInbox(context.Background(), []*InboxItem{first}, map[*InboxItem]bool{first: true})
+	waitFor(t, "the failed comment to remain unmarked", func() bool {
+		s.supervise.mu.Lock()
+		defer s.supervise.mu.Unlock()
+		g, ok := s.supervise.pending[todo.ID+"|inbox"]
+		return ok && g.Inbox.ToAgent == "" && g.Inbox.Item == "github:pr12"
+	})
+	f.mu.Lock()
+	f.failSend = nil
+	f.mu.Unlock()
+	second := linkedPRItem(s, todo.ID, "c2", "the second comment was delivered")
+	second.ID = "github:pr12:comment2"
+	before := len(sentToAgent(f))
+	s.superviseInbox(context.Background(), []*InboxItem{second}, map[*InboxItem]bool{second: true})
+	waitFor(t, "the successful copy to be marked", func() bool {
+		s.supervise.mu.Lock()
+		defer s.supervise.mu.Unlock()
+		g, ok := s.supervise.pending[todo.ID+"|inbox:agent_copy"]
+		return ok && g.Inbox.ToAgent == "sent" && g.Inbox.Item == "github:pr12:comment2"
+	})
+
+	s.supervise.mu.Lock()
+	failed := s.supervise.pending[todo.ID+"|inbox"]
+	sent := s.supervise.pending[todo.ID+"|inbox:agent_copy"]
+	s.supervise.mu.Unlock()
+	if failed.Inbox == nil || failed.Inbox.ToAgent != "" || failed.Inbox.Item != "github:pr12" {
+		t.Fatalf("the failed comment lost its unmarked supervisor entry: %+v", failed.Inbox)
+	}
+	if sent.Inbox == nil || sent.Inbox.ToAgent != "sent" || sent.Inbox.Count != 1 || sent.Inbox.Item != "github:pr12:comment2" {
+		t.Fatalf("the successful copy is wrong: %+v", sent.Inbox)
+	}
+	if got := sentToAgent(f)[before:]; len(got) != 1 || !strings.Contains(got[0], "the second comment was delivered") || strings.Contains(got[0], "the first comment was not delivered") {
+		t.Fatalf("only the second comment should reach the agent: %q", got)
+	}
+}
