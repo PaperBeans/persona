@@ -184,14 +184,14 @@ type liveActivities struct {
 	// answeredAt: when the assistant stopped answering last (zero: not since the fleet started over). An activity that
 	// shows it stays fleetEndAfter after that, as one does after the fleet empties (#4398).
 	answeredAt time.Time
-	episode    int            // bumps each time the fleet becomes active after being over
-	started    map[string]int // device -> episode it was push-started in (once per episode)
+	episode    int                  // bumps each time the fleet becomes active after being over
+	started    map[string]int       // device -> episode it was push-started in (once per episode)
+	sent       map[string][]byte    // device -> the content-state it last got
+	sentAt     map[string]time.Time // device -> when
+	stats      []byte               // last numbers broadcast to the open apps
 	// startDue: device -> when the store said its next push-start may be claimed (the rolling cooldown, or the hold
 	// after a start the phone has not answered). Not asked again before then, unless the phone answers (phoneAnswered).
 	startDue map[string]time.Time
-	sent     map[string][]byte    // device -> the content-state it last got
-	sentAt   map[string]time.Time // device -> when
-	stats    []byte               // last numbers broadcast to the open apps
 	// The last fleet broadcast to the open apps, and when: what an app that closed its connection cleanly (gone to
 	// the background) left its activity showing (phoneLeft).
 	shownState FleetState
@@ -207,8 +207,8 @@ type liveActivities struct {
 }
 
 func newLiveActivities(h *Hub) *liveActivities {
-	return &liveActivities{h: h, signal: make(chan struct{}, 1), rows: map[string]db.LiveActivity{}, started: map[string]int{}, startDue: map[string]time.Time{},
-		sent: map[string][]byte{}, sentAt: map[string]time.Time{}, now: time.Now, minGap: fleetMinGap, storeTimeout: deviceStoreTimeout}
+	return &liveActivities{h: h, signal: make(chan struct{}, 1), rows: map[string]db.LiveActivity{}, started: map[string]int{},
+		startDue: map[string]time.Time{}, sent: map[string][]byte{}, sentAt: map[string]time.Time{}, now: time.Now, minGap: fleetMinGap, storeTimeout: deviceStoreTimeout}
 }
 
 func (la *liveActivities) load(ctx context.Context) {
