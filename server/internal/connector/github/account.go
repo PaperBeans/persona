@@ -79,10 +79,16 @@ func (c *Connector) tokenNow(ctx context.Context, refused string) (string, uint6
 			c.mu.Unlock()
 			continue
 		}
+		replaced := tok != "" && fresh != tok
 		if fresh != tok {
 			cred = c.newCredential(fresh)
 		}
 		c.mu.Unlock()
+		if replaced {
+			// Another token than the one GitHub refused may be another account's: Run asks now, without waiting
+			// for the next read that belongs to an account to.
+			c.kickCheck()
+		}
 		return fresh, cred, nil
 	}
 	return "", 0, errAccountChanged
@@ -158,6 +164,14 @@ func (c *Connector) adopt(cred uint64, login string, h http.Header) bool {
 	c.scopes, c.scopesKnown = scopesOf(h)
 	c.status = connector.Status{State: connector.StateOK, Account: login, LastSync: now.UTC(), LastEvent: c.status.LastEvent}
 	return true
+}
+
+// accountKnown says whether GitHub has named the account of the token in memory. Until it has, nothing kept for
+// the account before is served: the read is sent, which asks first (tokenKnown).
+func (c *Connector) accountKnown() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.acct.known
 }
 
 // epochNow is the epoch of the account the connector reads as.

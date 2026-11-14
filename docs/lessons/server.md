@@ -1,5 +1,26 @@
 # Lessons: hub / node and networking
 
+## A token does not say whose it is, and a thread does not say whose item (2026-11-15, #7832)
+
+The GitHub connector kept its inbox things, its notifications cursor and its thread cache by thread and path, and swapped only the token when the
+account changed. So account A's review request stayed in the inbox, and a reply to it posted a comment with B's token. Fixing it at the place
+the user switches was not enough, because the login changes in ways nobody chooses:
+
+- A poll that gets a 401 asks the computer for its token again and retries. If `gh` was switched there, the retry is another account's request
+  carrying the first one's `If-Modified-Since`, and its answer is merged into the first one's inbox.
+- `/user` answers arrive in any order. A check of the old token that GitHub answers late wrote the old login back over the new one.
+- A read in flight when the account changes writes its answer into whatever is there afterwards: a cache that was just emptied (or a nil map).
+- A thing can be older than its keep time when the account changes (things are forgotten only when a poll reads the list), so a marker kept
+  by the thing's age is dropped by the next poll, before the hub closed the item.
+- Both accounts can have the same thread unread at the same time: the thread, and even the move's timestamp, do not tell their items apart.
+
+What holds: one owner of the identity (`account.go`). A new token reads or answers nothing that belongs to an account until GitHub named its
+account; every credential has a number and an answer to an older one is dropped; a different login moves an epoch, and the same step that
+adopts it retires and resets everything read under the old one. State and requests carry the epoch they began under (in the context), a
+request for an older epoch is refused before it is sent, and write-backs check the epoch under the state's own lock. Lock order is the
+connector's lock, then the state's; a state lock never takes the connector's. The tests hold a request at the fake GitHub on a channel and
+change the account while it waits (`account_switch_test.go`).
+
 ## An empty list sent as null means "no change" to an optional field (2026-11-14)
 
 The node reads node.configure's `claude_dirs_blocked` as `*[]string`: absent or `null` leaves its patterns as they are.

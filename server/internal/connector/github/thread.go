@@ -85,6 +85,7 @@ func (c *Connector) cachedPageSince(ctx context.Context, path string, out any, d
 	if err := ctx.Err(); err != nil {
 		return "", 0, err
 	}
+	known := c.accountKnown() // before e.mu: c.mu is never taken under it (adopt)
 	e := &c.etags
 	e.mu.Lock()
 	// The read is one account's from here on: what it finds kept, the request (asEpoch) and what it keeps.
@@ -100,7 +101,7 @@ func (c *Connector) cachedPageSince(ctx context.Context, path string, out any, d
 	var hdr http.Header
 	if old != nil {
 		old.used = time.Now()
-		if time.Since(old.at) < threadFresh && old.read >= freshSince {
+		if known && time.Since(old.at) < threadFresh && old.read >= freshSince {
 			body, link, read := old.body, old.link, old.read
 			e.mu.Unlock()
 			return link, read, decodeBody(path, body, out)
@@ -549,12 +550,13 @@ func (c *Connector) checkMessages(ctx context.Context, repo, sha string, opened 
 
 // checkLog is the end of a failed job's log, read once per job; "" when it cannot be read.
 func (c *Connector) checkLog(ctx context.Context, repo string, job int64) string {
+	known := c.accountKnown()
 	e := &c.etags
 	e.mu.Lock()
 	log, ok := e.logs[job]
 	epoch := e.epoch
 	e.mu.Unlock()
-	if ok {
+	if ok && known {
 		return log
 	}
 	raw, err := c.raw(asEpoch(ctx, epoch), fmt.Sprintf("/repos/%s/actions/jobs/%d/logs", repo, job))
