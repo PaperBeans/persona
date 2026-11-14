@@ -1591,9 +1591,16 @@ What a large request body costs the hub's slot and the manager it is relayed to,
   script also prints the physical footprint: when the Mac is short of memory it compresses the pages of an idle
   process, RSS falls though the process gave nothing back, and only the footprint still counts them. Compare builds
   by the footprint there.
+- Since #6574 the hub sends a body of 1 MiB or more to a manager that names `http_body_stream` on a relay stream
+  of its own, so this post does not go through the bus's line any more. To measure the line (what a manager that
+  takes no body stream gets, and every other line of megabytes: a large answer, a file's 1 MiB chunks to and from a
+  computer), build both trees once more with `assistantwire.CapabilityHTTPBodyStream` left out of the hello in
+  `server/internal/assistant/bus.go`, and compare those builds: the hub then sends the body inline, as
+  `http.request`.
 - The micro benchmarks behind it: `go test -run '^$' -bench 'Relay|ReadRelayed' -benchmem ./internal/hub`,
-  `-bench 'Decode(22MB|1K)' ./internal/assistant`, `-bench CallLarge ./internal/rpc`; compare two builds' test
-  binaries in alternating rounds with `benchstat`.
+  `-bench 'Decode(22MB|1K)' ./internal/assistant`, `-bench 'CallLarge|Serve(Large|Lines)' ./internal/rpc`
+  (`ServeLarge`: the reading side of a 30 MB line; `ServeLines`: streams of lines from 200 bytes to 4 MiB); compare
+  two builds' test binaries in alternating rounds with `benchstat`.
 
 ## Hub transcription live check
 

@@ -157,8 +157,12 @@ func (p *Peer) Serve(ctx context.Context, r io.Reader) error {
 	sc := newLineReader(r, maximum) // a bufio.Scanner that gives back what a long line grew (linereader.go)
 	for sc.Scan() {
 		var m message
-		if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
-			continue
+		// A line in a buffer of its own keeps its params or result where they are (ownedline.go); any other is in the
+		// reader's buffer, which the next line overwrites, so they are copied out of it.
+		if !sc.Owned() || !unmarshalOwned(sc.Bytes(), &m) {
+			if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
+				continue
+			}
 		}
 		switch {
 		case m.Method != "":
