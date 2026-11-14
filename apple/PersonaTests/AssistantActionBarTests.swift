@@ -77,6 +77,36 @@ struct AssistantActionBarTests {
         #expect(r.running.isEmpty)
     }
 
+    /// One home per request (docs/design/DESIGN_SYSTEM.md 4.8, #7532, the web's #7490): an Agent several to-dos list asks
+    /// under the to-do the hub ties its session to; the others are In Progress, so one approval is one row, counted once.
+    @Test func agentSeveralTodosListAsksUnderItsTiedTodo() {
+        let r = split([todo("cache", agent: "w"), todo("release", agent: "w"), todo("tests", agent: "w")],
+                      [session("w", "needs_you", todo: "release")], asks: [ask("ix", session: "w")])
+        #expect(ids(r.needsYou) == ["task:release"])
+        #expect(Set(ids(r.running)) == ["task:cache", "task:tests"])
+        #expect(r.running.allSatisfy { if case .task(_, let status, _) = $0 { status == .working } else { false } })
+        #expect(ActionTrayContent(r).count(.needsYou) == 1)
+    }
+
+    /// With no to-do tied, the first that lists the Agent is its home.
+    @Test func agentSeveralTodosListAsksUnderTheFirstWhenNoneIsTied() {
+        let r = split([todo("cache", agent: "w"), todo("tests", agent: "w")], [session("w", "needs_you")],
+                      asks: [ask("ix", session: "w")])
+        #expect(ids(r.needsYou) == ["task:cache"])
+        #expect(ids(r.running) == ["task:tests"])
+    }
+
+    /// Another to-do that lists the Agent stays in Needs You for a decision of its own, without the Agent's card.
+    @Test func otherListerKeepsItsOwnDecision() {
+        let decide = todo("tests", agent: "w", ask: ["verdict": "Which framework?", "asked_at": iso(2), "outcome": "decide"])
+        let r = split([todo("release", agent: "w"), decide], [session("w", "needs_you", todo: "release")],
+                      asks: [ask("ix", session: "w")])
+        // the Agent asks under its home; the other row is the to-do's decision, not waiting on the Agent
+        #expect(r.needsYou == [.task(id: "release", status: .needsYou, agents: 1), .task(id: "tests", status: .working, agents: 1)])
+        #expect(r.running.isEmpty)
+        #expect(ActionTrayContent(r).count(.needsYou) == 2)
+    }
+
     /// A manual Agent (no task) asking is only in Needs You; one at work only in In Progress; elsewhere than the main
     /// conversation neither is a row.
     @Test func manualAgentsAreRowsOfTheMainConversation() {
