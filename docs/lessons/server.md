@@ -21,6 +21,19 @@ request for an older epoch is refused before it is sent, and write-backs check t
 connector's lock, then the state's; a state lock never takes the connector's. The tests hold a request at the fake GitHub on a channel and
 change the account while it waits (`account_switch_test.go`).
 
+The first version of the fix still failed an independent review, on what the hub keeps rather than on what the connector does:
+
+- The hub holds items longer than the connector's process lives and hands back only a thread and the move the item holds. Anything the
+  connector decides from what it has in memory (a marker per retired thing, "is this thread held") is wrong after a restart, for items it
+  has forgotten (older than its keep time), and for items it considers done while the hub keeps them open (answered through Persona).
+  So the account and its epoch are kept across restarts, every move read after a change carries the epoch (the reply check needs no
+  memory), and the hub's leftovers are closed by exclusion: whatever the account in use holds no thing of.
+- A mark put only where a collision was noticed (the retired thing's last move) misses the collisions nobody remembered: the hub's item
+  one move behind, or a third account meeting the first one's move. Mark every move, or none.
+- Closing by thread meets the hub's own rule, which starts an item only for a move later than the thread's closed one: a round trip to
+  another account and back does not bring the first inbox back. That is a limit, written down in `docs/assistant/inbox.md`, not a bug to
+  work around by moving a thing's time.
+
 ## An empty list sent as null means "no change" to an optional field (2026-11-14)
 
 The node reads node.configure's `claude_dirs_blocked` as `*[]string`: absent or `null` leaves its patterns as they are.
