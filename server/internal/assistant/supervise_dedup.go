@@ -45,12 +45,13 @@ func digestFingerprint(e prompts.SuperviseEntry, g superviseSignal) (string, str
 }
 
 // keyIsNews: a signal of kind whose key names one event that is not in its agent's words, so a new key is news
-// whatever the agent said last: each park's time, each new Inbox message, each answer the owner gives a decision's
-// round, each recheck or undecidable review of a decision, each start attempt's failure or start (#6027). The other
-// kinds' keys move with every turn or sweep, which is not news while the agent's words stay the same.
+// whatever the agent said last: each park's time, each decision that ended a park, each new Inbox message, each
+// answer the owner gives a decision's round, each recheck or undecidable review of a decision, each start attempt's
+// failure or start (#6027). The other kinds' keys move with every turn or sweep, which is not news while the agent's
+// words stay the same.
 func keyIsNews(kind string) bool {
 	switch kind {
-	case sigParkedDue, sigInbox, sigOwnerCannot, sigRecheck, sigUndecidable, sigFailed, sigStarted:
+	case sigParkedDue, sigParkDecided, sigInbox, sigOwnerCannot, sigRecheck, sigUndecidable, sigFailed, sigStarted:
 		return true
 	}
 	return false

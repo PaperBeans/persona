@@ -107,6 +107,10 @@ type TaskReview struct {
 	WaitingOn string    `json:"waiting_on,omitempty"`
 	Parks     int       `json:"parks,omitempty"`
 	DueAt     time.Time `json:"due_at,omitzero"`
+	// Decided: the owner's decision (its id) that ended this park before its time (parkDecided, parked.go), and
+	// DecidedTold: when a supervision message carried that to the supervisor.
+	Decided     string    `json:"decided,omitempty"`
+	DecidedTold time.Time `json:"decided_told,omitzero"`
 	// RestateAt: when the hub handed this needs_user back to its supervisor because the owner could not answer it
 	// (undecidable, or owner_cannot_answer): told once.
 	RestateAt time.Time `json:"restate_at,omitzero"`

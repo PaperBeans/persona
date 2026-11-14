@@ -698,6 +698,8 @@ type Supervise struct {
 	Overdue bool
 	// ParkedDue: an entry is a parked task whose time came (#3804).
 	ParkedDue bool
+	// ParkDecided: an entry is a task whose parking a decision of the owner's ended (#8044).
+	ParkDecided bool
 	// Asked: an entry is an agent's cards that came to this conversation before the user (ask); AskMinutes how long
 	// they wait here before going up a rung.
 	Asked      bool
@@ -742,8 +744,8 @@ type SuperviseEntry struct {
 	// lines, and how many retries are left; KeptUntil "" when the start failed for good.
 	KeptUntil, Question, Screen string
 	RetriesLeft                 int
-	// ask: the cards waiting, and the task's decisions in effect (prompts/todo/decisions.md, rendered); escalated: the
-	// cards a leader gave the user.
+	// ask: the cards waiting, and the task's decisions in effect (prompts/todo/decisions.md, rendered), which
+	// parked_due and park_decided carry too; escalated: the cards a leader gave the user.
 	Asks      []SuperviseAsk
 	Decisions string
 	// recheck and owner_cannot_answer: the decision as it was asked; owner_cannot_answer: the owner's answer
