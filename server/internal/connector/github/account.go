@@ -159,6 +159,10 @@ func (c *Connector) adopt(cred uint64, login string, h http.Header) bool {
 		c.acct.epoch++
 		c.inbox.retire(c.acct.epoch, now)
 		c.etags.reset(c.acct.epoch)
+		select {
+		case c.repoll <- struct{}{}: // Watch tells the hub now, and reads the new account's inbox
+		default:
+		}
 	}
 	c.acct.login, c.acct.known = login, true
 	c.scopes, c.scopesKnown = scopesOf(h)

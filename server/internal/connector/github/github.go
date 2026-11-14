@@ -95,6 +95,8 @@ type Connector struct {
 	acct   account // account.go: whose the token is, and the epoch everything account-scoped is read under
 	status connector.Status
 	poke   chan struct{}
+	// repoll wakes Watch: the account changed (adopt), so the inbox is read as the new one now, not a poll later.
+	repoll chan struct{}
 	// rateLow: under a tenth of the hour's core requests are left (X-RateLimit-Remaining); only notifications are
 	// polled until rateReset.
 	rateLow   bool
@@ -254,7 +256,8 @@ func New(cfg Config, machine string, fetch TokenSource) *Connector {
 	}
 	return &Connector{cfg: cfg, machine: machine, machineID: cfg.Auth.FromMachine, fetch: fetch, source: source, api: api,
 		web: "https://" + cfg.host(), client: httpClient(cfg), opts: cfg.Inbox,
-		status: connector.Status{State: connector.StateNotSignedIn, Error: waiting}, poke: make(chan struct{}, 1)}
+		status: connector.Status{State: connector.StateNotSignedIn, Error: waiting}, poke: make(chan struct{}, 1),
+		repoll: make(chan struct{}, 1)}
 }
 
 func (c *Connector) ID() string   { return "github" }

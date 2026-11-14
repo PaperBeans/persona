@@ -42,6 +42,7 @@ type twoAccounts struct {
 	reads   map[string]int               // "login path" -> GETs answered
 	posted  []string                     // "token path body" of every POST
 	held    map[string]*heldAnswer       // "token path" -> the next answer to it waits
+	wrote   chan struct{}                // a POST arrived (never blocks: one is kept)
 }
 
 // heldAnswer is one answer kept back: entered closes when the request has arrived, let lets it go on.
@@ -61,6 +62,7 @@ func newTwoAccounts(t *testing.T) *twoAccounts {
 		since:   map[string][]string{},
 		reads:   map[string]int{},
 		held:    map[string]*heldAnswer{},
+		wrote:   make(chan struct{}, 1),
 	}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
@@ -109,6 +111,10 @@ func (f *twoAccounts) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost:
 		b, _ := io.ReadAll(r.Body)
 		f.posted = append(f.posted, tok+" "+r.URL.Path+" "+string(b))
+		select {
+		case f.wrote <- struct{}{}:
+		default:
+		}
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{}`))
 	case f.visible[login][r.URL.Path] != "":
@@ -422,14 +428,12 @@ func TestLateUserAnswerDoesNotRestoreTheAccount(t *testing.T) {
 	refused(t, f, c, a)
 }
 
-// Watch tells the hub when an account's things have left, so it settles their items without waiting for the new
-// account's inbox to move.
+// Watch tells the hub when an account's things have left, at once (the change wakes it), so the hub settles their
+// items without waiting a poll, or for the new account's inbox to move.
 func TestWatchTellsTheHubWhenAnAccountsThingsLeave(t *testing.T) {
 	f := newTwoAccounts(t)
 	f.reviewRequest(loginA, "1", "review_requested", t1)
 	c := f.connector(t, tokenA)
-	was := pollDefault
-	pollDefault = 5 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	changes, stopped := make(chan connector.Scope, 64), make(chan error, 1)
 	go func() {
@@ -443,7 +447,6 @@ func TestWatchTellsTheHubWhenAnAccountsThingsLeave(t *testing.T) {
 	t.Cleanup(func() {
 		cancel()
 		<-stopped
-		pollDefault = was
 	})
 	await(t, changes, "A's review request to come in")
 	a := collected(t, c)
@@ -451,6 +454,40 @@ func TestWatchTellsTheHubWhenAnAccountsThingsLeave(t *testing.T) {
 	switchTo(c, tokenB)
 	await(t, changes, "Watch to say the inbox changed after the account did")
 	retired(t, c, a)
+}
+
+// A refresh outside the inbox: a tool's read meets the 401 and the computer hands over B's token. Nothing asked
+// GitHub whose it is yet, so what was kept and collected is still A's: none of it is served or answered with B's
+// token, and the first thing that belongs to an account finds out and retires it.
+func TestRefreshOutsideTheInboxDoesNotServeTheOldAccount(t *testing.T) {
+	f := newTwoAccounts(t)
+	f.reviewRequest(loginA, "1", "review_requested", t1)
+	f.visible[loginA][api7] = `{"title":"as A reads it"}`
+	f.visible[loginB][api7] = `{"title":"as B reads it"}`
+	c := f.connector(t, tokenA, tokenB)
+	pollOnce(t, c)
+	a := collected(t, c)
+	ctx := context.Background()
+	var it struct {
+		Title string `json:"title"`
+	}
+	if err := c.cachedGet(ctx, api7, &it); err != nil || it.Title != "as A reads it" {
+		t.Fatalf("as %s: %q %v", loginA, it.Title, err)
+	}
+
+	f.revoke(tokenA)
+	if _, err := c.Get(ctx, api7, &it); err != nil || it.Title != "as B reads it" { // a tool's read: the token in use, whoever's
+		t.Fatalf("a read after the refresh: %q %v", it.Title, err)
+	}
+	it.Title = ""
+	if err := c.cachedGet(ctx, api7, &it); err == nil && it.Title != "as B reads it" {
+		t.Errorf("served %q, kept for %s, with %s's token in use", it.Title, loginA, loginB)
+	}
+	refused(t, f, c, a)
+	retired(t, c, a)
+	if err := c.cachedGet(ctx, api7, &it); err != nil || it.Title != "as B reads it" {
+		t.Errorf("as %s: %q %v", loginB, it.Title, err)
+	}
 }
 
 // A same-account refresh keeps everything: GitHub refuses the token, the computer hands over the same account's
@@ -486,4 +523,104 @@ func TestSameAccountRefreshKeepsTheInbox(t *testing.T) {
 	if posted := f.posts(); len(posted) != 1 || !strings.HasPrefix(posted[0], tokenA2+" "+issue12+"/comments ") {
 		t.Errorf("posted %v", posted)
 	}
+}
+
+// Many changes of account while replies, polls and thread reads run: whatever the order, a reply never reaches
+// GitHub with the token of an account other than the one its item was read as. Both accounts have the same PR
+// unread, notified at the same time: the worst case, in which neither the thread nor the time tells the items
+// apart. The reply's text names the account its item was collected as; the fake GitHub compares it with the token.
+func TestRepliesNeverCrossAccounts(t *testing.T) {
+	f := newTwoAccounts(t)
+	f.reviewRequest(loginA, "1", "review_requested", t1)
+	f.reviewRequest(loginB, "9", "mention", t1)
+	f.visible[loginA][api7] = `{"title":"as A reads it"}`
+	f.visible[loginB][api7] = `{"title":"as B reads it"}`
+	c := f.connector(t, tokenA)
+	ctx := context.Background()
+	owner := map[string]string{"review_requested": loginA, "mention": loginB} // whose inbox a thing of this kind is in
+	title := map[string]string{loginA: "as A reads it", loginB: "as B reads it"}
+
+	const rounds = 60
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() { // the user, answering whatever item the hub shows
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if th, ok := things(t, c)[thread12]; ok {
+				_ = c.Reply(ctx, connector.InboxReply{Thread: thread12, Last: th.Last, Text: owner[th.Kind]})
+			}
+		}
+	}()
+	go func() { // Watch's polls
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_, _, _ = c.poll(ctx)
+			}
+		}
+	}()
+	served := make(chan string, 1)
+	go func() { // the thread page: what it serves is what the account the read ran as may read
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			var it struct {
+				Title string `json:"title"`
+			}
+			before := c.Status(ctx).Account
+			err := c.cachedGet(ctx, api7, &it)
+			after := c.Status(ctx).Account
+			if err == nil && before == after && it.Title != title[after] {
+				select {
+				case served <- "read as " + after + ": " + it.Title:
+				default:
+				}
+			}
+		}
+	}()
+	// Each account gets to answer before the next change, so every change has replies, polls and reads around it.
+	for i := range rounds {
+		switchTo(c, []string{tokenB, tokenA}[i%2])
+		select {
+		case <-f.wrote:
+		default:
+		}
+		await(t, f.wrote, "a reply as the account in use")
+	}
+	close(stop)
+	wg.Wait()
+
+	select {
+	case wrong := <-served:
+		t.Errorf("the thread cache served another account's answer: %s", wrong)
+	default:
+	}
+	posted := f.posts()
+	for _, p := range posted {
+		tok, rest, _ := strings.Cut(p, " ")
+		var body struct {
+			Body string `json:"body"`
+		}
+		_, raw, _ := strings.Cut(rest, " ")
+		if err := json.Unmarshal([]byte(raw), &body); err != nil {
+			t.Fatalf("post %q: %v", p, err)
+		}
+		if f.logins[tok] != body.Body {
+			t.Errorf("a reply to %s's item went out with %s's token", body.Body, f.logins[tok])
+		}
+	}
+	t.Logf("%d replies posted over %d account changes", len(posted), rounds)
 }

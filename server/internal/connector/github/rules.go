@@ -447,7 +447,7 @@ func (c *Connector) Settle(_ context.Context, threads []string) map[string]strin
 	for _, t := range threads {
 		if why := c.over(t, o); why != "" {
 			out[t] = why
-		} else if r := st.retired[t]; r != nil && !r.taken {
+		} else if r := st.retired[t]; r != nil && r.open && !r.taken {
 			out[t] = "GitHub：换了账号，这条是之前那个账号的"
 		}
 	}

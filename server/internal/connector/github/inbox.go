@@ -43,6 +43,7 @@ type retiredThing struct {
 	last string    // the move it held (InboxThing.Last)
 	at   time.Time // when that move happened (InboxThing.At)
 	when time.Time // when it was retired: kept for forgetAfter from then, however old the thing was
+	open bool      // it was not over: the hub may hold an open item of it, to close
 	// taken: the account in use has a thing of the same thread at that move or a later one, which the hub's open
 	// item takes over (its Last differs), so the item is no longer one to close.
 	taken bool
@@ -55,14 +56,13 @@ func (st *inboxState) retire(epoch uint64, now time.Time) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	for thread, t := range st.things {
-		if t.Done != "" {
-			continue // over already: the hub has no open item of it
-		}
 		if st.retired == nil {
 			st.retired = map[string]*retiredThing{}
 		}
-		st.retired[thread] = &retiredThing{last: t.Last, at: t.At, when: now}
-		st.left = true
+		// One that was over is kept too, for its move (a late reply to its item must not pass for one to the next
+		// account's thing), but not as one to close: the hub's open item of the thread, if any, is not its.
+		st.retired[thread] = &retiredThing{last: t.Last, at: t.At, when: now, open: t.Done == ""}
+		st.left = st.left || t.Done == ""
 	}
 	st.epoch = epoch
 	st.things, st.seen = map[string]*connector.InboxThing{}, map[string]string{}
@@ -158,6 +158,7 @@ func (c *Connector) Watch(ctx context.Context, changed func(connector.Scope)) er
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-c.repoll:
 		case <-time.After(wait):
 		}
 	}
