@@ -498,6 +498,7 @@ func (n *Node) setAgentsAt(agents []host.Agent, epoch uint64, heard map[string]b
 		if id != "" {
 			id = mainThread(home, id) // a subagent's id stands for its conversation
 		}
+		reported := id // what the host says the pane runs now, not what the node remembers of the pane
 		if id == "" {
 			n.mu.Lock()
 			id = n.panes[a.PaneID]
@@ -505,8 +506,12 @@ func (n *Node) setAgentsAt(agents []host.Agent, epoch uint64, heard map[string]b
 		}
 		if named := n.codexByTitle(a, id, m); named != "" {
 			id = named
-		} else if strings.LastIndex(a.Title, " | ") > 0 {
-			id = "" // an unrecognised current title must not reuse a stale pane binding either
+		} else if strings.LastIndex(a.Title, " | ") > 0 && (id != reported || threadTitle(home, id) != "") {
+			// An unrecognised current title must not reuse a stale pane binding either, nor a thread the host named
+			// that the index knows under another name (a /resume in Codex since). A reported thread the index has no
+			// name for is not contradicted by a name the index lacks, so the host's word stands: left out, the pane
+			// was listed nowhere and its thread only as its app-server's row, with no terminal (#7538).
+			id = ""
 		}
 		if id != "" {
 			id = n.codexPublicID(home, id)

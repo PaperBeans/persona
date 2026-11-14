@@ -152,6 +152,9 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
 - Don't map Codex panes from "newest rollout in the same directory" (same pitfall as Claude): terminal titles are "thread name | directory"; map by thread name in `session_index.jsonl`.
   Rollouts keep writing in the directory of the thread's start date; scanning only the last two weeks' date directories misses old threads (2026-10-31: a running Codex appeared as another session with a gray dot).
   Comparing content by id won't catch this; compare against actual pane truth (`scripts/diag/live_panes_check.py`).
+- A Codex pane title that names no thread in `session_index.jsonl` is not evidence that the pane runs another thread: the index may simply lack the name.
+  Discarding herdr's reported session id for it left the pane mapped to nothing, so a Persona-started Codex joined on its app-server was listed only as the `codex_app_server` row, with no pane or terminal (#7538).
+  Drop the reported id only when the index knows that thread under a different name; a remembered pane binding is still dropped.
   Claude panes likewise: pane bindings for Persona-started sessions live in hub's database and reload after node restart, but can be stale; `sessions/<pid>.json` takes priority.
   After changing pane identification logic, rerun verification after deployment (restart); pre- and post-restart results may differ.
 - herdr `agent.prompt` pastes, then waits about 300 ms before Enter: serialize sends to the same session, or the second screen read mistakes the first message for an input draft. Sending deduplication lives in hub Postgres (`sent_messages`):

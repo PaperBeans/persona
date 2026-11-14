@@ -420,6 +420,9 @@ Before answering, the node restores the TUI to an answerable state. If it cannot
 Codex 0.166's model/path/warning footer is not draft text, even without a blank separator or shortcuts row.
 The blinking `[ . ]` / `[ ! ] Action Required | ` title prefix is also status, not part of the thread name. A named
 pane that cannot be identified uses neither a stale pane binding nor directory-based rollout guessing.
+The session id herdr reports for the pane stands under such a title while `session_index.jsonl` has no name for that
+thread: nothing says the title names another one, and dropping it left the pane unlisted and its thread only as its
+app-server's row, without a terminal (#7538). A reported thread the index knows under another name is still dropped.
 
 | On the computer | Behavior |
 | --- | --- |
