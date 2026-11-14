@@ -1049,7 +1049,7 @@ use it only on the intranet / VPN, and put an HTTPS reverse proxy in front befor
   availability test, function source (collapsed), edit, delete / hide. Adding first lists the hub's provider presets (built-in and extension-provided; select, paste only a Key, test automatically, `assign` on save); Custom compatible gateway comes last (launcher or direct API, Messages / Responses): its Connect step starts with a **Display name** in any language (at most 64 characters; left empty, a hub with `launcher_auto_name` names it after the address's host) and keeps the **Startup ID** under More options, where the hub makes one up when it is left empty and its format is checked only once something is typed (an older hub still needs the ID, shown under the display name). **Next** with something missing or wrong says it under each field it is about (`aria-invalid`, a red edge; `connectProblems` in `lib/providers.ts`), opens More options when the startup ID is among them, and focuses the first such field and scrolls it into view inside the dialog (audit item 19); a problem no field holds still shows above the buttons. The gateway's sign-in method (Bearer or x-api-key) is found by the step's own check and named in one line of its check box; the choice sits under More options too, and editing names and tests the stored one (#5329, `docs/integrations/launchers.md` "Authentication method"). Editing renames a provider; its startup ID is read-only with the reason (#5029, `docs/integrations/launchers.md` "Display names"). Every place that names a provider leads with its display name and shows the ID as secondary text (`lib/provider-names.ts`, `docs/design/DESIGN_SYSTEM.md` "Provider display names (#5029)"). **Import** sits in the header between the search field and **Add provider** (icon only at phone width) and opens **Import from your computer's aliases** (#5024, `settings/ProviderImport.tsx`, logic in `lib/providers.ts`): pick a computer, then each provider its claude aliases in `~/.zshrc`, `~/.bashrc` and `~/.bash_aliases` add up to, under the name it will be saved as (`create_as`: an alias Persona already lists becomes `<alias>-2`), with the file each alias came from, the environment variables it carries over and the ones it leaves out by reason; a group whose aliases set more than the model differently says what differs and offers **A provider for each alias** (the default, listing what each becomes) or **One provider**. Below the list, **Hide the imported aliases in Persona** (on by default; shell files are not changed) names the aliases it hides and why each other one stays; the note that merging only adds models shows only when the picked groups, as chosen, merge into a provider that is there. With no computer the dialog explains instead of showing the picker (`docs/integrations/launchers.md` ("Adding from extensions")).
   Import links (#5420, [launchers.md](../integrations/launchers.md) "Import links"): opening `<web address>/settings?tab=models#import=<data>` takes the fragment out of the address bar and the Back list at load, first thing in `main.tsx`, before the language catalog loads (`takeImportLink` in `lib/import-link.ts`, kept apart from the link builder `lib/provider-link.ts` so only it is on the first screen; a link on another path or tab lands on `?tab=models`, and other fragment parameters such as a sign-in `token` stay for `takeToken`). A link pasted into the address bar of a page already open fires only `hashchange`: it is taken then, through the router when the address changes. It is kept in memory only, and opens Add provider on the paste view in its link mode (`ProviderPaste.tsx`): no text box, a line that it was opened from a link and that nothing is saved until Save, **Paste something else**, and the link read at once by the parse route; its drafts, matches and notes show as a paste's do. Signing in first keeps it in memory until Settings opens; `reloadForSignIn` (a sign-in layer in front of the hub) puts a held link back in the address bar before it reloads; any other reload before Settings takes it drops it. A link arriving while the wizard, the copy dialog or the alias import is open waits until that closes (a toast says so) rather than throw away what is in it. Without the hub's `launcher_import_link` the view says the hub can't open links yet. A Persona-managed Claude Code gateway's or direct Responses / Chat Completions API's dialog has **⋯ › Copy import link** (`ProviderLinkCopy.tsx`): the link carries the name, address and models, no key unless **Put a key in the link** is on and a key is pasted there, under a warning; the hub never returns a stored key. Its strings and the ⋯ menu's are in the lazy `settings-providerlink` catalog, the link view's in `settings-providerpaste`.
   Gateway discovery and connection tests belong to the current wizard opening and connection inputs. Closing, switching providers or changing the URL, type, authentication, key or headers retires pending results and releases their busy state for retry. A late success, error or cleanup cannot alter the current form or its active request. Valid discovery merges into the latest model edits, preserving checked choices and an intentional default; changing only the test model retires its connection test without canceling discovery (#1314).
-  Model configuration groups / searches the hub's real purpose catalog, edits provider, specific model, and supported thinking effort, and shows inheritance and currently effective values. Save failures preserve the draft; revision conflicts require reload (`docs/assistant/model-config.md`).
+  Model configuration groups / searches the hub's real purpose catalog, edits provider, specific model, and supported thinking effort, and shows inheritance and currently effective values. Save failures preserve the draft; revision conflicts require reload (`docs/assistant/model-config.md`). A use the hub sets apart from its category (the two meeting uses, #7980) sits right after it ("Meeting uses in Model settings (#7980)" below).
   Translation (`settings/TranslationSettings.tsx`, within Settings › General; old `?tab=translate` redirects to `?tab=general#settings-translation`): auto-translate, translation model (the default assistant's; opens the `translate` purpose in Model configuration only while the default is the current assistant, else the row says it is the default assistant's and goes nowhere), target language, translation scope (mail, selected Lark chats),
   stored in this browser (same key names as iOS AppStorage). Not synced to the hub: hub translation preferences are tied to the phone's push device id (`/devices/{id}/prefs`, sent by iOS and Android; the hub pre-translates incoming messages accordingly), which the web does not have.
   The web translates on demand when opened, and directly uses any hub-pretranslated content.
@@ -1099,6 +1099,52 @@ use it only on the intranet / VPN, and put an HTTPS reverse proxy in front befor
   it explains where to enable it, whatever Cua Driver's state, and while macOS's permission dialogs are up with it on, it points to the top bar's View screen to click Allow from here.
   Both read Screen Sharing from the machine list, as the top bar does. On page open, query `GET …/computer` once, and every 2 seconds during installation / authorization. The hub has no actions such as reboot (`…/computer/reboot` is 404), and neither does this section.
   Screenshots use the `MOCK_COMPUTER=permissions|missing|ready` mock hub.
+
+### Meeting uses in Model settings (#7980)
+
+Settings › Models lists the two meeting uses the hub sets apart from their categories
+([model-config.md](../assistant/model-config.md) "Meeting minutes and the in-meeting conversation (#7980)"):
+**In-meeting conversation** in Persona chats · Background process, right after Main chat and the background supervisor,
+and **Meeting minutes** in Background processing · Direct API, right after Information processing.
+
+- **Found by data** (`setApartFrom`, `withUsesAfterCategories` in `lib/model-config-execution.ts`): a purpose with fields
+  of its own, no `uses`, a `category_id` other than its id and a `parent` that is a category listed in the same group.
+  The hub lists them last among its own purposes, so the installed apps keep their order; the page moves each up to its
+  category, behind the uses already there.
+- **Its row**: the hub's description, the model in effect, and **Follows Main chat** / **Follows Information processing**
+  (the background supervisor's words, `follows`, with the category's name as the catalog sends it; an English hub calls
+  Information processing **Processing**) while its record is empty,
+  **Separately configured** once it has a provider, model or effort of its own (`followedCategory`). The editor says the
+  same at its top.
+- **Its editor**: the provider list's empty choice and the reset are **Follow Main chat** / **Follow Information
+  processing**, and a stale revision keeps the draft and blocks Save and the reset until reloaded, as for every purpose.
+  It offers the hub's `provider_ids` only, no Runtime, and effort only for a provider that takes one. For the In-meeting
+  conversation a line under the provider list says it runs on Claude Code only. The page knows that by the purpose's id
+  (`claudeCodeOnly`, `meeting.room`): it is a fact about that purpose, and the hub sends no field that says it.
+  Its reset is longer than **Inherit**, so where the three actions do not fit on one line (日本語's メインチャットに従う at
+  320 px, also with Large text; in English, a category name as long as "Information processing" at 320 px, or 360 px with
+  Large text) it takes a line of its own above Cancel and Save, its words whole (button labels never wrap); where they
+  fit, all three stay where every other editor has them.
+- **What every editor of a use with a record of its own does** (the two meeting uses, the AI twin, Lark /agent, the
+  background supervisor, an extension's purpose; `ownRecord`, told by the purpose's own `fields` and `category_id`, not
+  by the group it is listed in): its reset sends explicit `null` for provider, model and effort with the purpose's
+  revision (`resetPatch`), also when the page's catalog did not load, so an effort saved on an earlier provider goes too.
+  With its provider cleared, the draft previews what it will follow: the category's provider from the catalog
+  (`parentCategory`), with that launcher's model list, the category's model as its **Default**, the backend chip and
+  whether it takes an effort. Effort goes by the provider the draft runs on (`effortOffered`): the hub lists `effort` in
+  an API purpose's `fields` only while the provider in effect takes one, so Meeting minutes on a Chat Completions
+  connection offer it again once a Messages or Responses one is picked, and Save sends it. The launcher's model list is
+  inert while a save is on its way, and the page shows only its latest catalog request's answer, so an older one still
+  on its way never puts back what a save's reload replaced.
+- **Unchanged in look**: the background supervisor (its **Follows Main chat** comes from the hub's `inherited_from`, its
+  reset is **Inherit**), the AI twin, Lark /agent and the extensions' purposes. Against a hub before #7980 there are no
+  such rows and nothing is asked by their ids.
+
+Tests: `lib/model-config.test.ts`, `views/settings/ModelConfiguration.meeting.test.tsx`. Screenshots: the mock hub with
+`MOCK_MEETING_MODELS=1 MOCK_SUPERVISE_LISTED=1`. The editors' footers on a phone, measured in a browser (320 px, 320 and
+360 px with Large text, wide; English, 简体中文 and 日本語; the background supervisor's as the unchanged reference): against
+that mock and `npx vite`, run `node web/e2e/meeting-models.mjs <web URL> [--shots <dir>] [--executable <chromium>]`
+(the mock names its categories in Chinese in every language; the script gives the page their names as a hub sends them).
 
 ### Standing authorizations
 

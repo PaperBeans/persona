@@ -619,7 +619,8 @@ struct VNCPage: View {
     /// `-showScreenStatsDemo` build shows sample video-mode numbers.
     private var currentStats: ScreenStats? {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-showScreenStatsDemo") { return .demoVideo }
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("-showScreenStatsDemo") { return args.contains("-showScreenUDP") ? .demoVideoUDP : .demoVideo }
         #endif
         guard let s = session else { return nil }
         #if os(iOS) && canImport(PersonaScreenKit)
@@ -649,11 +650,13 @@ struct VNCPage: View {
 
     #if os(iOS) && canImport(PersonaScreenKit)
     /// The overlay's route (#6398): which one, its numbers, and why it last changed. Without a screen session: the hub.
+    /// While the video rides a UDP flow (#7873) the row says so, with the flow's own round trip and loss.
     private static func route(_ v: ScreenVideoLink) -> (path: ScreenStats.Path, rtt: Double?, loss: Double?, reason: String?) {
         let kind = v.link?.kind ?? v.route?.to.kind ?? .relay
+        let udp = v.route?.to.transport == .udp
         let path: ScreenStats.Path = switch kind {
-        case .lan: .directLAN
-        case .tailscale: .directTailscale
+        case .lan: udp ? .directLANUDP : .directLAN
+        case .tailscale: udp ? .directTailscaleUDP : .directTailscale
         case .ipv6, .relay: .relay
         }
         let reason: String? = switch v.route?.reason {
@@ -664,6 +667,7 @@ struct VNCPage: View {
         case .directOff?: ScreenRouteReason.text(.turnedOff)
         case .start?, nil: v.directUnavailable == "firewall" ? ScreenRouteReason.text(.firewall) : nil
         }
+        if udp, kind != .relay { return (path, v.udp?.rttMs ?? v.link?.srttMs, v.udp?.loss, reason) }
         return (path, v.link?.srttMs, v.link?.packetLoss, reason)
     }
     #endif

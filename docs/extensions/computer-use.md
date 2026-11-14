@@ -952,6 +952,9 @@ release builds until the check on real devices (`ScreenRoutes.udpReleaseEnabled`
   what the phone has, when the flow is silent for 1 s, gives more than 2 frames up in 10 s, or the phone's networks
   change; a route asks again after 30 s, doubling to 5 min, and at once after a network change. Each move onto or off
   the flow is a `PathChange` whose `LinkStats.transport` says `udp` or `tcp`, so the quality tiers look again.
+- **What people see**: no setting of its own. Connection Stats' Route row (off by default) says "Direct · LAN · UDP" or
+  "Direct · Tailscale · UDP" while the video rides a flow, with the flow's round trip and its loss before recovery;
+  otherwise as before. A DEBUG build shows it in the stats demo with `-showScreenStatsDemo` and `-showScreenUDP`.
 - **Not on cellular**: the phone opens no flow while its route, or its path under Tailscale, is cellular. On #7873's
   shaped cellular-like link (40 ms, a 3 Mbit/s bottleneck with a short queue) a flow kept the picture going but brought
   nothing over TCP: about the same bitrate, as many stalls or more, a worse tail. There the loss is a queue

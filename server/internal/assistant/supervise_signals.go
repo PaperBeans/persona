@@ -105,6 +105,9 @@ func (g superviseSignal) id() string {
 	if g.Kind == sigEscalated && len(g.Cards) > 0 { // a leader's escalated cards, apart from its needs_user
 		return g.Todo + "|" + g.Kind + ":cards"
 	}
+	if g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "sent" {
+		return g.Todo + "|" + g.Kind + ":agent_copy" // delivered copies never absorb an earlier failed delivery
+	}
 	return g.Todo + "|" + g.Kind
 }
 

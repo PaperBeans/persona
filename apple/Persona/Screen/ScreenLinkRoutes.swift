@@ -55,6 +55,8 @@ enum ScreenRoutes {
     /// And of the UDP flow carrying the video, about once a second (#7873): the mobile data budget leaves room for its
     /// parity and resends.
     @MainActor static var flows: [String: @MainActor (ScreenUDPStatus?) -> Void] = [:]
+    /// The UDP flow carrying each live screen's video, as last reported, by pair (the DEBUG command channel reads it).
+    @MainActor static var latestFlow: [String: ScreenUDPStatus] = [:]
     /// Each live screen's routes as last measured and the one in use, by pair (the DEBUG command channel reads them).
     @MainActor static var latest: [String: (routes: [String: LinkStats], current: String, change: PathChange?)] = [:]
 
@@ -70,6 +72,7 @@ enum ScreenRoutes {
             listeners[pair] = nil
             meters[pair] = nil
             flows[pair] = nil
+            latestFlow[pair] = nil
             latest[pair] = nil
             ScreenLinkRegistry.shared.remove(pair)
         }
@@ -361,7 +364,10 @@ actor ScreenLinkProber {
                 openFlow(route, port: port)
             case let .flow(status):
                 let pair = pair
-                await MainActor.run { ScreenRoutes.flows[pair]?(status) }
+                await MainActor.run {
+                    ScreenRoutes.flows[pair]?(status)
+                    ScreenRoutes.latestFlow[pair] = status
+                }
             case let .reopen(video):
                 let group = group, machine = machine, pair = pair
                 if let relay = await MainActor.run(body: { ScreenRoutes.reopenRelay(group: group, machine: machine, pair: pair, video: video) }) {

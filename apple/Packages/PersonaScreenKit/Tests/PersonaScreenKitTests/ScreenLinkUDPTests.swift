@@ -284,6 +284,16 @@ final class ScreenLinkUDPTests: XCTestCase {
         XCTAssertEqual(after, next)
     }
 
+    /// Muting flows (the DEBUG command channel's `screenFlow mute`, as a network dropping UDP) sends the video back to
+    /// the route's TLS connection.
+    func testMutedFlowsFallBackToTheRoute() async throws {
+        let r = try await rig()
+        await until("the video on the flow") { r.route.usedOnUDP() }
+        await r.s.muteFlows(true)
+        await until("back on the route's TLS connection", timeout: 5) { r.route.usedOnTLS(2) != nil }
+        await until("the move says so") { r.events.moves().contains { $0.from?.transport == .udp && $0.to.transport == .tcp } }
+    }
+
     /// Packets lost on the flow are rebuilt from parity or asked for again; the video still comes whole and in order.
     func testLossOnTheFlowIsRebuiltOrAskedFor() async throws {
         let r = try await rig()
