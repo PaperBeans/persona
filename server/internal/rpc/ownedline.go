@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"bytes"
 	"encoding/json"
 	"encoding/json/jsontext"
 )
@@ -27,7 +28,8 @@ func (k *kept) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 }
 
 // in is k's value as the part of line it is, nil for a field the line does not have. False when the decoder did not
-// hand on the line's own bytes: the value may be in a buffer of the decoder's, gone by now.
+// hand on the line's own bytes: the value may be in a buffer of the decoder's, gone by now. A value that is less than
+// half the line is copied after all: whoever keeps it then keeps it alone, not megabytes of a line around it.
 func (k kept) in(line []byte) (json.RawMessage, bool) {
 	if k.value == nil {
 		return nil, true
@@ -36,6 +38,9 @@ func (k kept) in(line []byte) (json.RawMessage, bool) {
 	from := k.end - n
 	if n == 0 || from < 0 || k.end > int64(len(line)) || &k.value[0] != &line[from] {
 		return nil, false
+	}
+	if 2*n < int64(len(line)) {
+		return bytes.Clone(line[from:k.end]), true
 	}
 	return line[from:k.end:k.end], true // capped: appending to it never writes into the line
 }
@@ -50,9 +55,10 @@ type ownedMessage struct {
 	Error  *Error `json:"error,omitempty"`
 }
 
-// unmarshalOwned is json.Unmarshal(line, m) for a line the caller owns and m at its zero value, with m.Params and
-// m.Result parts of line instead of copies. False: it did not read the line that way (not valid JSON, not a message,
-// or a decoder that hands on other bytes than the line's), m is untouched and json.Unmarshal says what the line is.
+// unmarshalOwned is json.Unmarshal(line, m) for a line the caller owns and m at its zero value, with m.Params or
+// m.Result a part of line instead of a copy when it is most of the line. False: it did not read the line that way (not
+// valid JSON, not a message, or a decoder that hands on other bytes than the line's), m is untouched and json.Unmarshal
+// says what the line is.
 // TestUnmarshalOwnedIsUnmarshal and FuzzUnmarshalOwnedIsUnmarshal compare the two.
 func unmarshalOwned(line []byte, m *message) bool {
 	var o ownedMessage

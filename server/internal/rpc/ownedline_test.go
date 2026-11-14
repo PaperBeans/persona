@@ -16,8 +16,8 @@ import (
 )
 
 // ownedIsUnmarshal checks unmarshalOwned against json.Unmarshal for one line: when it reads the line, json.Unmarshal
-// reads it too, into the same message, and the params and the result are the line's own bytes; when it does not, it
-// leaves the message alone. It says whether it read the line.
+// reads it too, into the same message, and a value that is half the line or more is the line's own bytes, a smaller
+// one a copy; when it does not, it leaves the message alone. It says whether it read the line.
 func ownedIsUnmarshal(t *testing.T, line []byte) bool {
 	t.Helper()
 	kept := bytes.Clone(line)
@@ -43,30 +43,49 @@ func ownedIsUnmarshal(t *testing.T, line []byte) bool {
 		if value == nil {
 			continue
 		}
-		at := bytes.Index(line, value)
-		for at >= 0 && &line[at] != &value[0] {
-			next := bytes.Index(line[at+1:], value)
-			if next < 0 {
-				at = -1
-				break
-			}
-			at += 1 + next
+		at := partOf(line, value)
+		if most := 2*len(value) >= len(line); most != (at >= 0) {
+			t.Fatalf("%q: the value %q (most of the line: %v) is a part of the line: %v", line, value, most, at >= 0)
 		}
-		if at < 0 || cap(value) != len(value) {
-			t.Fatalf("%q: the value %q is not a part of the line with nothing behind it (cap %d)", line, value, cap(value))
+		if at >= 0 && cap(value) != len(value) {
+			t.Fatalf("%q: the value %q has %d bytes of the line behind it", line, value, cap(value)-len(value))
 		}
 	}
 	return true
+}
+
+// partOf is where in line value's own bytes are (the same memory, not equal bytes), -1 when they are not line's.
+func partOf(line, value []byte) int {
+	for at := range line {
+		if &line[at] == &value[0] {
+			return at
+		}
+	}
+	return -1
 }
 
 // Lines of every kind Serve takes read the same either way, and the ones the peers write are read without a copy:
 // requests, replies, errors and events, null and missing values, a key twice or in other letters (json takes those
 // for the same field), whitespace, escapes, bytes that are not UTF-8, and lines that are not a message at all.
 func TestUnmarshalOwnedIsUnmarshal(t *testing.T) {
+	long := `{"method":"POST","body":"` + strings.Repeat("QUJD", 100) + `","more":[1,{"a":null}]}` // most of its line
 	for _, c := range []struct {
 		line string
 		read bool
 	}{
+		{`{"id":"h1","method":"http.request","params":` + long + `}`, true},
+		{`{"id":"h1","result":` + long + `}`, true},
+		{`{"event":"pushed","params":` + long + `}`, true},
+		{`{"id":"h1","error":{"message":"no"},"result":` + long + `}`, true},
+		{" {	\"id\":\"h1\" , \"method\" : \"m\" ,\r \"params\" :  " + long + "  }  ", true},
+		{`{"id":"h1","method":"m","params":{"a":1},"params":` + long + `}`, true},
+		{`{"id":"h1","method":"m","params":` + long + `,"params":null}`, true},
+		{`{"id":"h1","method":"m","PARAMS":` + long + `}`, true},
+		{`{"id":"h1","method":"m","params":"` + strings.Repeat(`a string \" \u00e9 `, 30) + `"}`, true},
+		{`{"id":"h1","method":"m","params":[` + strings.Repeat(`12.5e3,`, 80) + `0]}`, true},
+		{`{"id":"h1","method":"m","params":` + long + `} trailing`, false},
+		{`{"id":"h1","method":"m","params":` + long[:len(long)-1] + `}`, false},
+		{`{"id":5,"method":"m","params":` + long + `}`, false},
 		{`{"id":"h1","method":"http.request","params":{"method":"POST","body":"aGVsbG8="}}`, true},
 		{`{"id":"h1","result":{"status":200,"body":"aGVsbG8="}}`, true},
 		{`{"id":"h1","error":{"message":"no","code":"refused","data":{"why":[1,2,3]}}}`, true},
@@ -130,8 +149,13 @@ func TestUnmarshalOwnedIsUnmarshal(t *testing.T) {
 func TestKeptValueMustBeTheLines(t *testing.T) {
 	line := []byte(`{"params":{"a":1}}`)
 	const from, end = 10, 17
-	if value, ok := (kept{value: line[from:end], end: end}).in(line); !ok || string(value) != `{"a":1}` || cap(value) != len(value) {
-		t.Fatalf("the line's own value: %q, %v", value, ok)
+	if value, ok := (kept{value: line[from:end], end: end}).in(line); !ok || string(value) != `{"a":1}` || partOf(line, value) >= 0 {
+		t.Fatalf("a small part of the line: %q, %v, want a copy of it", value, ok)
+	}
+	short := []byte(`{"p":{"a":1}}`) // here the value is most of the line
+	if value, ok := (kept{value: short[5:12], end: 12}).in(short); !ok || string(value) != `{"a":1}` || partOf(short, value) != 5 ||
+		cap(value) != len(value) {
+		t.Fatalf("most of the line: %q, %v, want the line's own bytes and nothing behind them", value, ok)
 	}
 	if value, ok := (kept{}).in(line); !ok || value != nil {
 		t.Fatalf("a field the line does not have: %q, %v", value, ok)
@@ -151,6 +175,9 @@ func TestKeptValueMustBeTheLines(t *testing.T) {
 
 func FuzzUnmarshalOwnedIsUnmarshal(f *testing.F) {
 	for _, seed := range []string{
+		`{"id":"h1","method":"http.request","params":{"method":"POST","body":"aGVsbG8=","path":"/api/v1/assistant/conversations"}}`,
+		`{"id":"h1","result":{"status":200,"header":{"Content-Type":["application/json"]},"body":"aGVsbG8="}}`,
+		`{"params":[1,2,3,4,5,6,7,8,9]}`,
 		`{"id":"h1","method":"http.request","params":{"method":"POST","body":"aGVsbG8="}}`,
 		`{"id":"h1","result":{"status":200},"error":{"message":"no","data":[1]}}`,
 		`{"event":"e","params":null,"PARAMS":[1,{"a":"\u00e9"}],"result":"r"}`,
@@ -178,13 +205,16 @@ func uploadParams(t *testing.T, n int, salt byte) []byte {
 
 // Serve hands a long line's params to the handler, its result to the call and an event's params to OnEvent as they
 // were sent, whatever the reads split, with short lines before, between and behind them; and what a handler keeps of
-// a long line is still that after everything behind it was read.
+// any line, long (the line's own bytes) or not (a copy out of the reader's buffer, also when the params are nearly
+// all of the line), is still that after everything behind it was read.
 func TestServeHandsOnLongLines(t *testing.T) {
 	first := uploadParams(t, 3<<20, 1)
 	second := uploadParams(t, linePiece, 2)
 	third := uploadParams(t, 2<<20+12345, 3)
 	answer := uploadParams(t, 2<<20, 4)
 	small := []byte(`{"a":"short"}`)
+	brief := []byte(`{"a":"` + strings.Repeat("most of a short line ", 20) + `"}`)
+	medium := uploadParams(t, 300<<10, 5) // grows the reader's buffer, not past a piece
 	var stream bytes.Buffer
 	add := func(m message) {
 		line, err := encodeLine(m)
@@ -194,6 +224,8 @@ func TestServeHandsOnLongLines(t *testing.T) {
 		stream.Write(line)
 	}
 	add(message{ID: "n1", Method: "n1", Params: small})
+	add(message{ID: "n6", Method: "n6", Params: brief})
+	add(message{ID: "n7", Method: "n7", Params: medium})
 	add(message{ID: "n2", Method: "n2", Params: first})
 	add(message{Event: "note", Params: small})
 	add(message{ID: "n3", Method: "n3", Params: second})
@@ -204,7 +236,7 @@ func TestServeHandsOnLongLines(t *testing.T) {
 	}
 	add(message{ID: "n4", Method: "n4", Params: small})
 	stream.WriteString(`{"id":"n5","method":"n5","params":{"a":"the last line, without a newline"}}`)
-	want := map[string][]byte{"n1": small, "n2": first, "n3": second, "n4": small, "pushed": third,
+	want := map[string][]byte{"n1": small, "n2": first, "n3": second, "n4": small, "n6": brief, "n7": medium, "pushed": third,
 		"n5": []byte(`{"a":"the last line, without a newline"}`)}
 
 	for _, reads := range [][]byte{nil, {32}, {1, 0, 250, 3}} {
@@ -236,12 +268,12 @@ func TestServeHandsOnLongLines(t *testing.T) {
 			if err := p.Serve(context.Background(), r); err != io.EOF {
 				t.Fatal(err)
 			}
-			for i := range 5 { // their handlers run on goroutines of their own
+			for i := range 7 { // their handlers run on goroutines of their own
 				select {
 				case h := <-requests:
 					got[h.method] = h.params
 				case <-time.After(10 * time.Second):
-					t.Fatalf("%d of 5 requests reached the handler", i)
+					t.Fatalf("%d of 7 requests reached the handler", i)
 				}
 			}
 			if notes != 201 {
