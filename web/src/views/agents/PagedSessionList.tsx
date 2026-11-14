@@ -59,8 +59,9 @@ export interface PagedSessionListProps<T> {
    *  server's; only the order of the loaded rows changes. */
   parentOf?: (row: T) => string | undefined;
   /** The sidebar's groupings (#6662): the caller chooses the dimension with its own bar, the complete list's, so both
-   *  lists show the same control; this list draws that bar first, then the state chips and the search, as the complete
-   *  list does, with no value pill of its own. A search lists its matches flat. `label` names the dimension. */
+   *  lists show the same control; this list draws that bar first, then the state chips and what ⌘K put on it, as the
+   *  complete list does, with no value pill or search field of its own. A search lists its matches flat. `label` names
+   *  the dimension. */
   grouping?: PagedGrouping;
 }
 
@@ -68,6 +69,9 @@ export interface PagedGrouping {
   dimension: GroupDimension; bar: ReactNode; label: string; todos?: TodoNames; quick?: PagedQuickFilters;
   /** The sections follow this scope's fold-all (useFolded). */ foldScope?: string;
   /** "Recently updated" (the title row's ⋯): the computers' and projects' sections by their newest session. */ byUpdate?: boolean;
+  /** The words ⌘K's "Filter Agents list" put on the list (#6589), sent as the search: the sidebar's list has no field of
+   *  its own, `chips` says what narrows it where the field was. */
+  query?: string; chips?: ReactNode;
 }
 
 /** The complete list's quick filters on the paged list (`sessions_quick_filters`, #6662), in place of its state chips:
@@ -101,7 +105,9 @@ export function scrollParent(el: HTMLElement | null): HTMLElement | null {
 
 export function PagedSessionList<T>({ root, path, identity, compare, removeIdentity, event, renderRow, personal = false, label, catalog = false, placeOf, activeAt, needsYou, isOpen, parentOf, grouping }: PagedSessionListProps<T>) {
   const [query, setQuery] = useState("");
-  const [q, setQ] = useState("");
+  const [typed, setTyped] = useState("");
+  // the sidebar's groupings take ⌘K's words (#6589); every other list its own field's, once typing pauses
+  const q = grouping ? grouping.query?.trim() ?? "" : typed;
   const [state, setState] = useState("");
   // Browse by: "" is the one list, newest first; a dimension is that list in groups, or one of them once picked
   const [ownDimension, setDimension] = useState<GroupDimension | "">(() => browseBy(storedValue(browseKey(personal)), personal));
@@ -114,7 +120,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   const [provider, setProvider] = useState("");
   const [providerQuery, setProviderQuery] = useState("");
   useEffect(() => {
-    const timer = setTimeout(() => { setQ(query.trim()); setProvider(providerQuery.trim()); }, SESSION_LIST_METRICS.searchDelay);
+    const timer = setTimeout(() => { setTyped(query.trim()); setProvider(providerQuery.trim()); }, SESSION_LIST_METRICS.searchDelay);
     return () => clearTimeout(timer);
   }, [query, providerQuery]);
   // the hub's catalog names projects and spaces; computers, and every group of a hub without it, come from the counts
@@ -397,7 +403,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
       {/* under the caller's title row its bar sits where the complete list's does: no padding of this list's above it */}
       <div className={cx("space-y-2 px-1 pb-2", !grouping && "pt-2")}>
         {/* the caller's bar and chips where the complete list has them: its padding, not this list's as well */}
-        {grouping ? <><div className="-mx-1">{grouping.bar}{quick ? quick.bar(quickCounts) : stateChips}</div>{searchField}</> : <>{searchField}
+        {grouping ? <><div className="-mx-1">{grouping.bar}{quick ? quick.bar(quickCounts) : stateChips}</div>{grouping.chips}</> : <>{searchField}
         <SegmentedTrack role="radiogroup" label={t("paged-agents.group_by")} className="flex gap-0.5 rounded-full p-0.5" thumbClassName="rounded-full bg-surface shadow-btn">
           {dimensions.map((d) => {
             const on = d.key === dimension;

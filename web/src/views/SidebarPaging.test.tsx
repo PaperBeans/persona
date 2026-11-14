@@ -8,6 +8,7 @@ vi.hoisted(() => {
 });
 import { connect, reset, savePins } from "../lib/store";
 import { cycleGrouping } from "../lib/sidebar-api";
+import { filterAgentList, getAgentListFilters, resetAgentListFilters } from "../lib/agent-list-filters";
 import type { AgentPins } from "../lib/pins";
 import type { Session } from "../lib/types";
 import { Sidebar } from "./Sidebar";
@@ -79,7 +80,7 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(() => {
-  act(() => root.unmount()); host.remove(); reset(); vi.unstubAllGlobals();
+  act(() => root.unmount()); host.remove(); reset(); resetAgentListFilters(); vi.unstubAllGlobals();
 });
 
 for (const paged of [false, true]) {
@@ -137,4 +138,20 @@ it("honors the grouping shortcut while the paged list is mounted", async () => {
   expect(localStorage.getItem("persona.agentGrouping")).toBe("machine");
   expect(chosen()).toBe("机器");
   expect(pagedList()).not.toBeNull();
+});
+
+it("has no search field of its own: ⌘K's words are the paged list's search, a chip whose × takes them off (#6589)", async () => {
+  const fetch = await render(true);
+  expect(pagedList()).not.toBeNull();
+  expect(host.querySelector("[data-sidebar-agents] input")).toBeNull();
+  act(() => filterAgentList("review"));
+  await flush();
+  // the hub reads them as its text search, the matches listed flat
+  expect(fetch.mock.calls.some(([url]) => new URL(url as string, "http://hub.example.com").searchParams.get("q") === "review")).toBe(true);
+  const chip = host.querySelector('[data-sidebar-agents] [data-chip="query"]')!;
+  expect(chip.textContent).toContain("review");
+  await act(async () => chip.querySelector<HTMLButtonElement>("button[aria-label]")!.click());
+  await flush();
+  expect(getAgentListFilters().query).toBe("");
+  expect(host.querySelector('[data-chip="query"]')).toBeNull();
 });

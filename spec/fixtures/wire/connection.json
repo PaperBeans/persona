@@ -124,6 +124,7 @@
         "sessions_todo",
         "sessions_quick_filters",
         "machine_rename",
+        "desktop_unregister",
         "assistant_views",
         "assistant_html_bridge"
       ],
@@ -263,6 +264,7 @@
           "sessions_todo",
           "sessions_quick_filters",
           "machine_rename",
+          "desktop_unregister",
           "assistant_views",
           "assistant_html_bridge"
         ],
@@ -393,6 +395,7 @@
         "sessions_todo",
         "sessions_quick_filters",
         "machine_rename",
+        "desktop_unregister",
         "assistant_views",
         "assistant_html_bridge"
       ],
@@ -521,6 +524,7 @@
           "sessions_todo",
           "sessions_quick_filters",
           "machine_rename",
+          "desktop_unregister",
           "assistant_views",
           "assistant_html_bridge"
         ],

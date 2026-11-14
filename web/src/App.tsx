@@ -550,7 +550,7 @@ function Shell() {
       {paletteOpened && (
         <OverlayBoundary open={palette.open} onClose={closePalette}>
           <Suspense fallback={null}>
-            <Palette open={palette.open} onClose={closePalette} onNewAgent={openNewAgent} pane={pane} route={route} />
+            <Palette open={palette.open} onClose={closePalette} onNewAgent={openNewAgent} pane={pane} route={route} listShown={!narrow && !rail && sidebarShown(layout)} />
           </Suspense>
         </OverlayBoundary>
       )}

@@ -165,11 +165,12 @@ nonisolated final class MeetingAudioUplink: @unchecked Sendable {
     /// Sends what the ring has for the socket, in order, until nothing is left.
     private func pump() {
         while true {
-            let (out, socket) = lock.withLock { () -> (MeetingAudioRing.Out?, VoiceSocket?) in
-                guard let socket else { return (nil, nil) }
+            // The closure reads the property; a local of the same name would be captured before it is declared.
+            let (out, current) = lock.withLock { () -> (MeetingAudioRing.Out?, VoiceSocket?) in
+                guard let socket = self.socket else { return (nil, nil) }
                 return (ring.next(), socket)
             }
-            guard let out, let socket else { return }
+            guard let out, let socket = current else { return }
             switch out {
             case .seek(let sample): socket.send(text: MeetingAudioOut.seek(at: MeetingAudioClock.seconds(sample)))
             case .audio(let data, _): socket.send(data: data)
