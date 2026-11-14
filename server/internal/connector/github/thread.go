@@ -85,7 +85,7 @@ func (c *Connector) cachedPageSince(ctx context.Context, path string, out any, d
 	if err := ctx.Err(); err != nil {
 		return "", 0, err
 	}
-	known := c.accountKnown() // before e.mu: c.mu is never taken under it (adopt)
+	known := c.accountKnown(ctx) // before e.mu: c.mu is never taken under it (adopt)
 	e := &c.etags
 	e.mu.Lock()
 	// The read is one account's from here on: what it finds kept, the request (asEpoch) and what it keeps.
@@ -384,7 +384,8 @@ func (c *Connector) Thread(ctx context.Context, thread, before string, limit int
 	}
 	repo, number := m[1], m[2]
 	// The page is one account's: every list below is read under the epoch it began in, or the page fails.
-	ctx = asEpoch(ctx, c.epochNow())
+	epoch := c.epochNow(ctx)
+	ctx = asEpoch(ctx, epoch)
 	base := fmt.Sprintf("/repos/%s/issues/%s", repo, number)
 	var it threadIssue
 	if err := c.cachedGet(ctx, base, &it); err != nil {
@@ -453,12 +454,15 @@ func (c *Connector) Thread(ctx context.Context, thread, before string, limit int
 			// The checks of the head commit; a list that cannot be read leaves the rest of the thread as it is.
 			if ms, err := c.checkMessages(ctx, repo, pr.Head.SHA, it.CreatedAt); err == nil {
 				add(ms...)
-			} else if errors.Is(err, context.Canceled) {
+			} else if errors.Is(err, context.Canceled) || errors.Is(err, errAccountChanged) {
 				return connector.ThreadPage{}, err
 			}
 		}
 	}
 	slices.SortStableFunc(all, func(a, b connector.ThreadMessage) int { return a.At.Compare(b.At) })
+	if c.epochNow(ctx) != epoch {
+		return connector.ThreadPage{}, errAccountChanged // the last read answered as the account before: not a page to show
+	}
 
 	end := len(all)
 	if before != "" {
@@ -550,12 +554,15 @@ func (c *Connector) checkMessages(ctx context.Context, repo, sha string, opened 
 
 // checkLog is the end of a failed job's log, read once per job; "" when it cannot be read.
 func (c *Connector) checkLog(ctx context.Context, repo string, job int64) string {
-	known := c.accountKnown()
+	known := c.accountKnown(ctx)
 	e := &c.etags
 	e.mu.Lock()
 	log, ok := e.logs[job]
 	epoch := e.epoch
 	e.mu.Unlock()
+	if bound, scoped := boundEpoch(ctx); scoped && bound != epoch {
+		return "" // the page began as another account (Thread fails it)
+	}
 	if ok && known {
 		return log
 	}

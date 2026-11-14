@@ -32,42 +32,41 @@ type inboxState struct {
 	// epoch is the account epoch (account.go) everything above was read under: what a poll that began under
 	// another one read is dropped (enter).
 	epoch uint64
-	// retired are the things of the accounts before, by thread, kept for the hub to close their items (Settle);
-	// left says some were retired since Watch last looked.
-	retired map[string]*retiredThing
-	left    bool
-}
-
-// retiredThing is what is kept of a thing read as an account the connector no longer reads as.
-type retiredThing struct {
-	last string    // the move it held (InboxThing.Last)
-	at   time.Time // when that move happened (InboxThing.At)
-	when time.Time // when it was retired: kept for forgetAfter from then, however old the thing was
-	open bool      // it was not over: the hub may hold an open item of it, to close
-	// taken: the account in use has a thing of the same thread at that move or a later one, which the hub's open
-	// item takes over (its Last differs), so the item is no longer one to close.
-	taken bool
+	// unsettled: the account changed and the hub has not asked since which of its open items are over (Settle).
+	// Until it has, every open item the connector holds no thing of is the account before's. Kept across restarts
+	// (accountRecord). polled: the account in use has tried to read its inbox since (poll): only then does Settle
+	// close, so a thread both accounts have is held by the time the hub asks, and its item goes on as the new
+	// account's instead of being closed with the new account's thing left out. left says things were retired
+	// since Watch last looked.
+	unsettled bool
+	polled    bool
+	left      bool
 }
 
 // retire ends what was read as the account before, in one step, for the account of epoch: its things leave the
-// inbox, remembered only for the hub to close their items (Settle), and the notifications cursor and everything
-// the polls kept start again. c.mu is held (adopt).
-func (st *inboxState) retire(epoch uint64, now time.Time) {
+// inbox, the notifications cursor and everything the polls kept start again, and the hub's items of them are
+// closed when it next asks (Settle). c.mu is held (adopt).
+func (st *inboxState) retire(epoch uint64) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	for thread, t := range st.things {
-		if st.retired == nil {
-			st.retired = map[string]*retiredThing{}
-		}
-		// One that was over is kept too, for its move (a late reply to its item must not pass for one to the next
-		// account's thing), but not as one to close: the hub's open item of the thread, if any, is not its.
-		st.retired[thread] = &retiredThing{last: t.Last, at: t.At, when: now, open: t.Done == ""}
-		st.left = st.left || t.Done == ""
-	}
-	st.epoch = epoch
+	st.epoch, st.unsettled, st.polled, st.left = epoch, true, false, true
 	st.things, st.seen = map[string]*connector.InboxThing{}, map[string]string{}
 	st.ci, st.repos, st.marks = nil, nil, nil
 	st.lastModified, st.fullAt = "", time.Time{}
+}
+
+// restore starts the state at what was kept before a restart (Connector.restore): nothing was read yet. c.mu is held.
+func (st *inboxState) restore(epoch uint64, unsettled bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.epoch, st.unsettled = epoch, unsettled
+}
+
+// isUnsettled says whether the hub may still hold items of the account before.
+func (st *inboxState) isUnsettled() bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.unsettled
 }
 
 // enter locks the state for what was read under epoch; false, with the state not locked, when the connector reads
@@ -187,6 +186,12 @@ func (c *Connector) poll(ctx context.Context) (time.Duration, bool, error) {
 	epoch := st.epoch
 	st.mu.Unlock()
 	ctx = asEpoch(ctx, epoch)
+	defer func() { // however it ends: an account that cannot read its inbox still has the old one's items closed
+		if st.enter(epoch) {
+			st.polled = true
+			st.mu.Unlock()
+		}
+	}()
 
 	var ns []notification
 	code, h, err := c.request(ctx, http.MethodGet, notificationsPath(1), hdr, nil, &ns)
@@ -326,19 +331,10 @@ func (c *Connector) applyNotifications(ctx context.Context, ns []notification, c
 		if err != nil {
 			continue // read again next time
 		}
-		thing.Thread, thing.Kind, thing.Label, thing.Last = thread, kind, label, stamp
+		thing.Thread, thing.Kind, thing.Label, thing.Last = thread, kind, label, markLast(stamp, epoch)
 		thing.Tags = tagsOf(n, run, kind, thing.Sender)
 		if !st.enter(epoch) {
 			return moved
-		}
-		if r := st.retired[thread]; r != nil {
-			// The same thread was in the inbox as another account. A notification of the same move carries the
-			// same time for both: marked with the epoch, this account's is another move to the hub, whose item
-			// takes it over, and a reply to the item as it was does not pass for one to this (answerable).
-			if r.last == stamp || strings.HasPrefix(r.last, stamp+"#") {
-				thing.Last = stamp + "#" + strconv.FormatUint(epoch, 10)
-			}
-			r.taken = r.taken || !thing.At.Before(r.at)
 		}
 		st.seen[n.ID] = stamp
 		st.things[thread] = &thing
@@ -353,11 +349,6 @@ func (c *Connector) applyNotifications(ctx context.Context, ns []notification, c
 		return moved
 	}
 	defer st.mu.Unlock()
-	for thread, r := range st.retired {
-		if now.Sub(r.when) > forgetAfter {
-			delete(st.retired, thread)
-		}
-	}
 	for thread, t := range st.things {
 		if now.Sub(t.At) > forgetAfter {
 			delete(st.things, thread)
@@ -639,14 +630,19 @@ func (c *Connector) Reply(ctx context.Context, r connector.InboxReply) error {
 	if m == nil || !validRepo(m[1]) {
 		return fmt.Errorf("%s cannot be replied to", thread)
 	}
-	// The reply goes out as the account the item was read as or not at all: admitted against the state's epoch,
-	// and sent under it (asEpoch), so an account that changes in between refuses it before the request.
+	// The reply goes out as the account its item was read as, or not at all. The item's move says which that was
+	// (markLast), with or without the thing still held here, so the thread alone is never taken for it: both
+	// accounts may have it. Then the request is bound to the epoch (asEpoch): an account that changes before it
+	// is sent refuses it.
+	if err := c.restore(ctx); err != nil {
+		return err
+	}
 	st := &c.inbox
 	st.mu.Lock()
-	epoch, err := st.epoch, st.answerable(thread, r.Last)
+	epoch := st.epoch
 	st.mu.Unlock()
-	if err != nil {
-		return err
+	if lastEpoch(r.Last) != epoch {
+		return fmt.Errorf("%s was read as another GitHub account than the one in use: open it on GitHub", thread)
 	}
 	ctx = asEpoch(ctx, epoch)
 	body, _ := json.Marshal(map[string]string{"body": text})
@@ -660,26 +656,6 @@ func (c *Connector) Reply(ctx context.Context, r connector.InboxReply) error {
 			t.Done = connector.DoneReplied
 		}
 		st.mu.Unlock()
-	}
-	return nil
-}
-
-// answerable says whether a reply to thread, answering the move last (the hub item's InboxThing.Last), is one to
-// something read as the account in use. While the connector has read as one account only, every item is that
-// account's, as before. Once the account has changed, items of the account before may still be open or on their
-// way (a reply sent late, an item the hub has not closed yet), and the thread alone does not tell them apart: both
-// accounts may have it. So the connector answers only for what it holds, a thing read as this account at the very
-// move the item holds. st.mu is held.
-func (st *inboxState) answerable(thread, last string) error {
-	if st.epoch == 0 {
-		return nil
-	}
-	t := st.things[thread]
-	switch {
-	case t == nil:
-		return fmt.Errorf("%s is not in the inbox of the GitHub account in use (it was read as another account, or long ago): open it on GitHub", thread)
-	case t.Last != last:
-		return fmt.Errorf("%s has moved, or was read as another GitHub account: read it again", thread)
 	}
 	return nil
 }

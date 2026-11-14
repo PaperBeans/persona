@@ -31,6 +31,9 @@ const deviceScopes = "repo"
 // App's client_id: it is no longer read and is dropped at the next save; a token granted to it still works.
 type deviceLogin struct {
 	Token string `json:"token,omitempty"`
+	// Account is the account the inbox was last read as (account.go), kept with the sign-in so that a restart does
+	// not forget it. It is not a secret; this is the one store the connector has.
+	Account *accountRecord `json:"account,omitempty"`
 }
 
 // devicePending is a device code waiting for the user.
@@ -75,15 +78,21 @@ func (c *Connector) deviceState(ctx context.Context) deviceLogin {
 	return d
 }
 
-func (c *Connector) saveDevice(ctx context.Context, d deviceLogin) error {
+// saveDevice changes what the secrets keep (change runs under c.mu) and saves it, one save at a time so that the
+// last change is the one kept.
+func (c *Connector) saveDevice(ctx context.Context, change func(*deviceLogin)) error {
+	c.deviceState(ctx) // what is kept already, so that the save does not drop it
+	c.saving.Lock()
+	defer c.saving.Unlock()
 	c.mu.Lock()
 	s := c.secrets
-	c.dev, c.devLoaded = d, true
+	change(&c.dev)
+	c.devLoaded = true
+	raw, _ := json.Marshal(c.dev)
 	c.mu.Unlock()
 	if s == nil {
 		return errors.New("no secrets store")
 	}
-	raw, _ := json.Marshal(d)
 	return s.Save(ctx, raw)
 }
 
@@ -171,12 +180,11 @@ func (c *Connector) pollDevice(ctx context.Context) (connector.Prompt, error) {
 	default:
 		return c.restartDevice(ctx, "GitHub 没有授权（"+r.Error+"）")
 	}
-	d := deviceLogin{Token: r.AccessToken}
-	if err := c.saveDevice(ctx, d); err != nil {
+	if err := c.saveDevice(ctx, func(d *deviceLogin) { d.Token = r.AccessToken }); err != nil {
 		return connector.Prompt{}, err
 	}
 	c.mu.Lock()
-	c.newCredential(d.Token)
+	c.newCredential(r.AccessToken)
 	c.pending = nil
 	c.mu.Unlock()
 	c.check(ctx)
@@ -206,18 +214,20 @@ func (c *Connector) Logout(ctx context.Context) error {
 }
 
 func (c *Connector) forgetDevice(ctx context.Context) error {
+	had := c.deviceState(ctx).Token != ""
 	c.mu.Lock()
 	if c.source == SourceDevice {
 		c.newCredential("")
 	}
 	c.pending = nil
+	// With the token in memory, in one step: a read between the two would take the kept one for a new sign-in and
+	// put it back (tokenNow).
+	c.dev.Token = ""
 	c.mu.Unlock()
-	d := c.deviceState(ctx)
-	if d.Token == "" {
+	if !had {
 		return nil
 	}
-	d.Token = ""
-	return c.saveDevice(ctx, d)
+	return c.saveDevice(ctx, func(d *deviceLogin) { d.Token = "" })
 }
 
 // postForm posts to GitHub's web host (the device flow is not the API's), answers as JSON.

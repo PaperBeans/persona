@@ -169,8 +169,17 @@ func (f *twoAccounts) reviewRequest(login, id, reason, at string) {
 
 // connector is a connector reading a computer's gh login, which hands out tokens in turn, signed in with the first.
 func (f *twoAccounts) connector(t *testing.T, tokens ...string) *Connector {
+	return f.connectorWith(t, nil, tokens...)
+}
+
+// connectorWith is connector with the hub's store for its sign-in: what a manager keeps across a restart. A second
+// connector with the same store is the manager started again.
+func (f *twoAccounts) connectorWith(t *testing.T, kept *memSecrets, tokens ...string) *Connector {
 	c := New(Config{Auth: AuthConfig{FromMachine: "mac"}}, "Mac", (&machine{tokens: tokens}).fetch)
 	c.api = f.srv.URL
+	if kept != nil {
+		c.UseSecrets(kept)
+	}
 	c.check(context.Background())
 	if st := c.Status(context.Background()); st.State != connector.StateOK || st.Account != f.logins[tokens[0]] {
 		t.Fatalf("not signed in as %s: %+v", f.logins[tokens[0]], st)
@@ -219,7 +228,8 @@ func refused(t *testing.T, f *twoAccounts, c *Connector, th connector.InboxThing
 	}
 }
 
-// retired checks that th left the inbox and that the hub is told to close its item.
+// retired checks that th left the inbox and that the hub is told to close its item (it asks once the account in
+// use has read its inbox: the tests poll first).
 func retired(t *testing.T, c *Connector, th connector.InboxThing) {
 	t.Helper()
 	if still, ok := things(t, c)[th.Thread]; ok {
@@ -269,7 +279,9 @@ func TestTokenRefreshToAnotherAccountRetiresTheInbox(t *testing.T) {
 	if st := c.Status(context.Background()); st.Account != loginB {
 		t.Errorf("the status still names %s after the computer's token became %s's: %+v", loginA, loginB, st)
 	}
-	retired(t, c, a)
+	if still, ok := things(t, c)[thread12]; ok {
+		t.Errorf("%s's thing is still in the inbox after the poll that met the 401: %+v", loginA, still)
+	}
 	refused(t, f, c, a)
 	for _, since := range f.sinceOf(loginB) {
 		if since != "" {
@@ -277,8 +289,9 @@ func TestTokenRefreshToAnotherAccountRetiresTheInbox(t *testing.T) {
 		}
 	}
 
-	// From here on the inbox is B's.
+	// From here on the inbox is B's (Watch polls again at once: the change wakes it).
 	pollOnce(t, c)
+	retired(t, c, a)
 	got := things(t, c)
 	if _, ok := got["example-org/example-repo#7"]; !ok || len(got) != 1 {
 		t.Errorf("%s's inbox: %+v", loginB, got)
@@ -315,35 +328,6 @@ func TestDelayedReplyToAnotherAccountsItemIsRefused(t *testing.T) {
 	}
 	if posted := f.posts(); len(posted) != 1 || !strings.HasPrefix(posted[0], tokenB+" "+issue12+"/comments ") {
 		t.Errorf("posted %v", posted)
-	}
-}
-
-// An expired tombstone: a thing can be older than things are kept (forgetAfter) when the account changes, since
-// they are only forgotten when a poll reads the list. What is kept of it for the hub is kept from the change, not
-// from the thing's age, or the first poll as the new account drops it before the hub has closed the item.
-func TestRetiredThingOutlivesItsAge(t *testing.T) {
-	f := newTwoAccounts(t)
-	c := f.connector(t, tokenA)
-	pollOnce(t, c)
-	now := time.Now()
-	f.reviewRequest(loginA, "1", "review_requested", now.Add(-forgetAfter+time.Hour).UTC().Format(time.RFC3339))
-	var ns []notification
-	if err := json.Unmarshal([]byte(f.feeds[loginA]), &ns); err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	c.applyNotifications(ctx, ns, true, now)
-	a := collected(t, c)
-
-	switchTo(c, tokenB)
-	// Two hours on the thing is past forgetAfter: B's list read forgets things that old.
-	c.applyNotifications(ctx, nil, true, now.Add(2*time.Hour))
-	retired(t, c, a)
-
-	// It is not kept for ever: forgetAfter from the change.
-	c.applyNotifications(ctx, nil, true, now.Add(forgetAfter+2*time.Hour))
-	if why := c.Settle(ctx, []string{thread12})[thread12]; why != "" {
-		t.Errorf("still retiring %s after forgetAfter: %s", thread12, why)
 	}
 }
 
@@ -484,6 +468,7 @@ func TestRefreshOutsideTheInboxDoesNotServeTheOldAccount(t *testing.T) {
 		t.Errorf("served %q, kept for %s, with %s's token in use", it.Title, loginA, loginB)
 	}
 	refused(t, f, c, a)
+	pollOnce(t, c)
 	retired(t, c, a)
 	if err := c.cachedGet(ctx, api7, &it); err != nil || it.Title != "as B reads it" {
 		t.Errorf("as %s: %q %v", loginB, it.Title, err)

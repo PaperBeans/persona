@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,20 +21,94 @@ import (
 // in one step (adopt); a read or a reply that began under the epoch before is refused before it is sent (asEpoch)
 // and writes nothing back. What belongs to no account (a tool's read, a write the user allowed) goes out with
 // the token in use as before.
+//
+// The hub keeps the inbox's items longer than this process lives, and gives back only an item's thread and the
+// move it holds (InboxThing.Last). So the login and the epoch are kept across restarts (accountRecord), and every
+// move read after the first change of account carries its epoch (markLast): a reply is admitted by the epoch of
+// the move it answers, whether or not the connector still holds the thing, and the items of the account before
+// are closed through Settle (inboxState.unsettled).
 
 // errAccountChanged: the connector reads as another account than the one a read or a reply began under.
 var errAccountChanged = errors.New("the GitHub account changed: read it again")
 
+// errNoRecord: the store that keeps the account across restarts cannot be read, so whose the hub's items are is
+// not known: nothing is read or answered as an account until it can.
+var errNoRecord = errors.New("the GitHub sign-in store cannot be read")
+
 // account is whose the token in memory is. c.mu guards it.
 type account struct {
-	// login is the account GitHub last named for a token ("" until it has); known says it is the token in memory's.
+	// login is the account GitHub last named for a token ("" until it has, here or before a restart); known says
+	// it is the token in memory's.
 	login string
 	known bool
-	// epoch counts the changes of login: what account-scoped state is read under.
+	// epoch counts the changes of login, across restarts: what account-scoped state is read under.
 	epoch uint64
 	// cred counts the credentials: every token put in memory or dropped, every source chosen. Answers come back in
 	// any order: one to a credential since replaced says nothing of the account now.
 	cred uint64
+	// restored: what was kept before this process started has been read (restore); kept is what the store holds.
+	restored bool
+	kept     accountRecord
+}
+
+// accountRecord is what is kept of the account across restarts, with the sign-in (deviceLogin).
+type accountRecord struct {
+	Login string `json:"login"`
+	Epoch uint64 `json:"epoch,omitempty"`
+	// Unsettled: the hub may still hold open items of the account before (inboxState.unsettled).
+	Unsettled bool `json:"unsettled,omitempty"`
+}
+
+// restore reads the account kept before this process started, once, before anything is read or answered as an
+// account: the first login GitHub names is compared with it, so a login that changed while the manager was down
+// is a change like any other. Without a store (a test) there is nothing to read.
+func (c *Connector) restore(ctx context.Context) error {
+	c.mu.Lock()
+	done := c.acct.restored
+	c.mu.Unlock()
+	if done {
+		return nil
+	}
+	c.deviceState(ctx)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.acct.restored {
+		return nil
+	}
+	if c.secrets != nil && !c.devLoaded {
+		return errNoRecord
+	}
+	if r := c.dev.Account; r != nil && r.Login != "" {
+		c.acct.login, c.acct.epoch, c.acct.kept = r.Login, r.Epoch, *r
+		c.inbox.restore(r.Epoch, r.Unsettled)
+		c.etags.reset(r.Epoch)
+	}
+	c.acct.restored = true
+	return nil
+}
+
+// keepAccount saves the account for the next start when it is not what the store holds. A save that fails is
+// tried again the next time (every check).
+func (c *Connector) keepAccount(ctx context.Context) {
+	now := func() accountRecord { // c.mu is held
+		return accountRecord{Login: c.acct.login, Epoch: c.acct.epoch, Unsettled: c.inbox.isUnsettled()}
+	}
+	c.mu.Lock()
+	same := c.secrets == nil || !c.acct.restored || c.acct.login == "" || c.acct.kept == now()
+	c.mu.Unlock()
+	if same {
+		return
+	}
+	var saved accountRecord
+	if err := c.saveDevice(ctx, func(d *deviceLogin) {
+		saved = now()
+		d.Account = &saved
+	}); err != nil {
+		return
+	}
+	c.mu.Lock()
+	c.acct.kept = saved
+	c.mu.Unlock()
 }
 
 // newCredential puts tok in memory ("" drops the one there): nobody knows whose it is until GitHub says. c.mu is
@@ -106,6 +181,13 @@ const (
 // 401 to: the machine may have signed in again since, so it is asked once more. The last result is the credential
 // the answer or the error belongs to.
 func (c *Connector) credential(ctx context.Context, refused string, need int) (tok string, epoch, cred uint64, err error) {
+	if need != tokenAsIs {
+		if err := c.restore(ctx); err != nil {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			return "", 0, c.acct.cred, err
+		}
+	}
 	again := refused != ""
 	for range credentialTries {
 		if tok, cred, err = c.tokenNow(ctx, refused); err != nil {
@@ -137,6 +219,7 @@ func (c *Connector) credential(ctx context.Context, refused string, need int) (t
 		epoch = c.acct.epoch
 		c.mu.Unlock()
 		if taken {
+			c.keepAccount(ctx)
 			return tok, epoch, cred, nil
 		}
 		refused = "" // the credential was replaced while GitHub answered: look at the one there now
@@ -157,7 +240,7 @@ func (c *Connector) adopt(cred uint64, login string, h http.Header) bool {
 	now := time.Now()
 	if c.acct.login != "" && !strings.EqualFold(c.acct.login, login) {
 		c.acct.epoch++
-		c.inbox.retire(c.acct.epoch, now)
+		c.inbox.retire(c.acct.epoch)
 		c.etags.reset(c.acct.epoch)
 		select {
 		case c.repoll <- struct{}{}: // Watch tells the hub now, and reads the new account's inbox
@@ -172,17 +255,39 @@ func (c *Connector) adopt(cred uint64, login string, h http.Header) bool {
 
 // accountKnown says whether GitHub has named the account of the token in memory. Until it has, nothing kept for
 // the account before is served: the read is sent, which asks first (tokenKnown).
-func (c *Connector) accountKnown() bool {
+func (c *Connector) accountKnown(ctx context.Context) bool {
+	_ = c.restore(ctx) // a read that binds itself to an epoch does so to the one kept: what fails here fails the request
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.acct.known
 }
 
 // epochNow is the epoch of the account the connector reads as.
-func (c *Connector) epochNow() uint64 {
+func (c *Connector) epochNow(ctx context.Context) uint64 {
+	_ = c.restore(ctx)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.acct.epoch
+}
+
+// markLast is the move stamp as the hub keeps it (InboxThing.Last), read under epoch: as it is while the connector
+// has only ever read as one account (nothing changes for a hub that never changes account), and with the epoch
+// after it from the first change on. The hub hands a reply the move its item holds: lastEpoch reads whose it is.
+func markLast(stamp string, epoch uint64) string {
+	if epoch == 0 {
+		return stamp
+	}
+	return stamp + "#" + strconv.FormatUint(epoch, 10)
+}
+
+// lastEpoch is the epoch a move was read under (markLast); a move with no mark is the first account's.
+func lastEpoch(last string) uint64 {
+	if i := strings.LastIndexByte(last, '#'); i >= 0 {
+		if epoch, err := strconv.ParseUint(last[i+1:], 10, 64); err == nil {
+			return epoch
+		}
+	}
+	return 0
 }
 
 type epochKey struct{}

@@ -325,7 +325,7 @@ func (c *Connector) followUpCI(ctx context.Context) bool {
 				t.Done, t.Why, moved = connector.DoneRead, check.over, true
 			case check.failed.at.After(t.At):
 				// News the user has not seen, even if they read the item's notification: GitHub sent none of this run.
-				t.At, t.Last, t.Read = check.failed.at, check.failed.at.UTC().Format(time.RFC3339), false
+				t.At, t.Last, t.Read = check.failed.at, markLast(check.failed.at.UTC().Format(time.RFC3339), epoch), false
 				t.Preview = check.failed.workflow + " workflow run failed for " + m.branch + " branch" // as GitHub titles its notification
 				t.Context = ciContext(m.repo, m.branch, m.pr, t.Preview)
 				moved = true
@@ -436,20 +436,33 @@ func (c *Connector) over(thread string, o InboxOptions) string {
 
 // Settle closes the hub's open GitHub items the current rules leave out: CI items made one per notification
 // (before CI failures were merged per branch), muted repositories, branches and CI the user does not want.
-// So are the items of an account the connector no longer reads as (retire), unless the account in use has taken
-// the thread over.
-func (c *Connector) Settle(_ context.Context, threads []string) map[string]string {
+//
+// After a change of account it also closes the items of the account before (#7832): once the account in use has
+// tried to read its inbox, and until the hub has asked once, every open item the connector holds no thing of. The hub's items come only from the things it was handed, and
+// it asks in the same round it takes them, so an item of the account in use has its thing here when the hub first
+// asks, and whatever has none was read as the account before: answered through Persona, older than things are
+// kept, or from before a restart. A thread both accounts have is held, so its item stays: the hub gives it the
+// new account's thing as a new move (markLast).
+func (c *Connector) Settle(ctx context.Context, threads []string) map[string]string {
+	_ = c.restore(ctx) // what a restart left unsettled; unreadable, nothing is closed for the account's sake
 	o := c.options()
 	out := map[string]string{}
 	st := &c.inbox
 	st.mu.Lock()
-	defer st.mu.Unlock()
+	settled := st.unsettled && st.polled && len(threads) > 0
 	for _, t := range threads {
 		if why := c.over(t, o); why != "" {
 			out[t] = why
-		} else if r := st.retired[t]; r != nil && r.open && !r.taken {
+		} else if settled && st.things[t] == nil {
 			out[t] = "GitHub：换了账号，这条是之前那个账号的"
 		}
+	}
+	if settled {
+		st.unsettled = false
+	}
+	st.mu.Unlock()
+	if settled {
+		c.keepAccount(ctx)
 	}
 	return out
 }

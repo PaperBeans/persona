@@ -132,6 +132,7 @@ type Connector struct {
 	secrets   connector.Secrets
 	dev       deviceLogin
 	devLoaded bool
+	saving    sync.Mutex // one save of dev at a time (saveDevice)
 	pending   *devicePending
 }
 
