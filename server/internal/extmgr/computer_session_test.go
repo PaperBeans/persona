@@ -126,7 +126,9 @@ func TestComputerToolsAfterTheSessionEnded(t *testing.T) {
 	if res := h.callComputerTool(ctx, conv, "computer_state", state); res.IsError || !strings.Contains(res.Content[0].Text, "AXButton") {
 		t.Fatalf("an idled-out session is started again and read: %+v", res)
 	}
-	if got := strings.Join(toolsSince(0), " "); got != "run_script@"+label+" start_session@"+label+" run_script@"+label+" get_window_state@"+label {
+	// (computer_state looks at the app's processes first: computer_window.go.)
+	if got := strings.Join(toolsSince(0), " "); got != "list_windows@"+label+" start_session@"+label+" list_windows@"+label+" run_script@"+label+
+		" get_window_state@"+label {
 		t.Fatalf("start_session under the same label, then the call again: %s", got)
 	}
 
@@ -163,8 +165,10 @@ func TestComputerToolsAfterTheSessionEnded(t *testing.T) {
 	if res := h.callComputerTool(ctx, conv, "computer_run", steps); res.IsError {
 		t.Fatalf("after the owner's word: %+v", res)
 	}
-	if got := strings.Join(toolsSince(len(before)), " "); !strings.Contains(got, "start_session@"+label+" run_steps@"+label) {
-		t.Fatalf("started again, then run: %s", got)
+	// Started again on the run's first call (its look at the app's processes, computer_window.go), then run.
+	if got := toolsSince(len(before)); len(got) < 3 || got[1] != "start_session@"+label || got[len(got)-1] != "run_steps@"+label ||
+		strings.Count(strings.Join(got, " "), "start_session") != 1 {
+		t.Fatalf("started again, then run: %v", got)
 	}
 
 	// The manager's own label (its look at the apps for the protected-app check) ended a second after its last use:

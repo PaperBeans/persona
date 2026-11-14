@@ -30,6 +30,7 @@ from pr_watch_review import review as semantic_review
 from pr_watch_verify import verify
 
 FORMAT_VERSION = 1
+VERIFICATION_POLICY_VERSION = 2
 
 
 def load_config(path):
@@ -130,7 +131,8 @@ class Watcher:
         self.dry_run = dry_run
         self.verbose = verbose
         self.state = State(config["state"])
-        self.tasks = queue.Queue()
+        self.tasks = queue.PriorityQueue()
+        self.queue_sequence = 0
         self.pending = {}
         self.active = {}
         self.wake = threading.Event()
@@ -192,6 +194,21 @@ class Watcher:
             self.wake.set()
             raise
 
+    def queue_priority(self, repo, number, sha):
+        """Prioritize only a migration that process() will actually attempt."""
+        old = self.state.get(repo, number)
+        evidence_key = repo + "#" + str(number) + "@" + str(old.get("base", "")) + ".." + sha
+        if (old.get("head") == sha and old.get("evidence_key") == evidence_key
+                and old.get("retry_after", 0) <= time.time()
+                and old.get("outcome") != "merge_failed"
+                and old.get("format") == FORMAT_VERSION
+                and old.get("verification_policy") != VERIFICATION_POLICY_VERSION
+                and old.get("verification") not in ("passed", "base_failure")
+                and not old.get("repair_exhausted")
+                and old.get("outcome") not in ("merged", "continuation", "findings")):
+            return 0
+        return 1
+
     def enqueue(self, repo, number, sha, source):
         if repo not in self.repositories or not isinstance(number, int) or number < 1:
             return
@@ -204,7 +221,10 @@ class Watcher:
                     self.log("%s#%s: newer head noticed while busy" % (repo, number))
                 return
             self.active[key] = {"started": time.monotonic(), "phase": "queued", "source": source}
-        self.tasks.put(key)
+            priority = self.queue_priority(repo, number, sha)
+            sequence = self.queue_sequence
+            self.queue_sequence += 1
+            self.tasks.put((priority, sequence, key))
         self.log("%s#%s queued (%s)" % (repo, number, source))
 
     def phase(self, key, phase):
@@ -440,6 +460,23 @@ class Watcher:
         if old.get("evidence_key") != evidence_key:
             previous = old
             old = {"repair_rounds": int(previous.get("repair_rounds", 0))}
+        if (old.get("head") == head and old.get("format") == FORMAT_VERSION
+                and old.get("verification_policy") != VERIFICATION_POLICY_VERSION
+                and old.get("verification") not in ("passed", "base_failure")
+                and not old.get("repair_exhausted")
+                and old.get("outcome") not in ("merged", "continuation", "findings")):
+            # A prerequisite failure is not evidence against this exact head.
+            # Retry only its verification under the new policy. Completed gates,
+            # published findings and exhausted repair budgets keep their meaning.
+            old = self.state.put(repo, number, head, evidence_key=evidence_key,
+                                 verification_policy=VERIFICATION_POLICY_VERSION,
+                                 outcome="retry", retry_after=0,
+                                 repair_rounds=int(old.get("repair_rounds", 0)),
+                                 repair_attempts=0, review_attempts=0,
+                                 semantic=old.get("semantic"), findings=old.get("findings", []),
+                                 review_fingerprint=old.get("review_fingerprint"),
+                                 review_posted=old.get("review_posted", False),
+                                 base=pr["baseRefOid"], format=FORMAT_VERSION)
         if old.get("head") == head and old.get("retry_after", 0) > time.time():
             return
         if old.get("outcome") == "continuation":
@@ -466,6 +503,8 @@ class Watcher:
             if old.get("outcome") == "passed_with_base_failures" and old.get("semantic") == "passed" and not old.get("review_posted"):
                 old = dict(old, outcome="passed", review_posted=False)
             if old.get("outcome") == "failed":
+                if old.get("failure_posted"):
+                    return
                 self.comment(repo, number, "Automated review at `%s` did not pass. Not merged.\n\n```text\n%s\n```" %
                              (head[:9], bounded(old.get("failure", "verification failed"), 14000)))
                 self.state.put(repo, number, head, evidence_key=evidence_key, failure_posted=True)
@@ -539,6 +578,7 @@ class Watcher:
                 rounds = int(self.state.get(repo, number).get("repair_rounds", 0))
                 current = self.state.put(repo, number, head, evidence_key=evidence_key,
                                          base=pr["baseRefOid"], format=FORMAT_VERSION, outcome="reviewing",
+                                         verification_policy=VERIFICATION_POLICY_VERSION,
                                          repair_rounds=rounds)
             if current.get("semantic") != "passed" and current.get("semantic") != "findings":
                 self.phase(key, "independent semantic review")
@@ -577,10 +617,12 @@ class Watcher:
                     base_evidence = current.get("base_failures")
                     current = self.state.put(repo, number, head, evidence_key=evidence_key,
                                              verification="base_failure", checks=error.checks,
+                                             verification_policy=VERIFICATION_POLICY_VERSION,
                                              base_failures=base_evidence)
                 else:
                     current = self.state.put(repo, number, head, evidence_key=evidence_key,
-                                             verification="passed", checks=results)
+                                             verification="passed", checks=results,
+                                             verification_policy=VERIFICATION_POLICY_VERSION)
             if current.get("verification") == "base_failure":
                 self.phase(key, "continuing after a clean-main failure")
             with self.merging(repo):
@@ -656,8 +698,8 @@ class Watcher:
 
     def worker(self):
         while True:
-            key = self.tasks.get()
-            if key is None:
+            priority, _, key = self.tasks.get()
+            if priority == 2:
                 self.tasks.task_done()
                 return
             repo, number = key
@@ -722,7 +764,7 @@ class Watcher:
         finally:
             self.stopping.set()
             for _ in self.workers:
-                self.tasks.put(None)
+                self.tasks.put((2, -1, ("", 0)))
             for worker in self.workers:
                 worker.join(timeout=30)
             if self.events:

@@ -273,10 +273,12 @@ func TestComputerToolsCallTheNode(t *testing.T) {
 		t.Fatalf("a window's tree and screenshot: %+v", res)
 	}
 	_, calls := seen()
-	if len(calls) != 2 || calls[0].Tool != "run_script" || !strings.Contains(calls[0].Args["script"].(string), `cua.getApp("Calculator")`) {
+	// One process of the app (none listed here): the window is Cua Driver's own lookup's (computer_window.go).
+	if len(calls) != 3 || calls[0].Tool != "list_windows" || calls[0].Args["app"] != "Calculator" || calls[1].Tool != "run_script" ||
+		!strings.Contains(calls[1].Args["script"].(string), `cua.getApp("Calculator")`) {
 		t.Fatalf("the window is found by Cua Driver's own lookup: %+v", calls)
 	}
-	if w := calls[1]; w.Tool != "get_window_state" || w.Args["window_id"] != float64(2318) || w.Args["query"] != "7" || w.Session != "persona-conv1234" {
+	if w := calls[2]; w.Tool != "get_window_state" || w.Args["window_id"] != float64(2318) || w.Args["query"] != "7" || w.Session != "persona-conv1234" {
 		t.Fatalf("then read under the conversation's session: %+v", w)
 	}
 

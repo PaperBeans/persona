@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 // What the page says about the video channel (#6558): the fallback line (with "How to turn it on" for a Mac that hasn't
 // allowed video, one sentence that depends on whether macOS has asked yet), and the stats panel in video mode (the
-// iPhone's lines) or, when the Mac offers video but this page can't play it, why.
+// iPhone's lines) or, when the Mac offers video but this page can't play it, why; and the mobile-data card.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../i18n";
 
 vi.mock("./probes", () => ({ countFrames: () => null, countBytes: () => () => {}, probeHub: () => () => {} }));
-import { FallbackLine } from "./VideoPicture";
-import { StatsOverlay } from "./StatsOverlay";
+import { FallbackLine, MobileDataCard } from "./VideoPicture";
+import { StatsOverlay, tierParts, tierReasonParts } from "./StatsOverlay";
+import type { Change } from "./tiers/policy";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
@@ -68,6 +69,22 @@ describe("the stats panel", () => {
     expect(host.querySelector('[data-testid="screen-stats-segments"]')?.textContent).toBe(t("screen-video.stats_decode", { ms: 2 }));
   });
 
+  it("shows the tier as the iPhone does: Quality, scale and frame rate, then why it last changed and how long ago", () => {
+    const change: Change = { tier: { scale: 1.5, fps: 60, width: 2268, height: 1472, minKbps: 4_006, maxKbps: 12_000, pixelsPerPoint: 1.5 }, index: 1, reason: "link_steady", targetKbps: 5_000 };
+    vi.spyOn(performance, "now").mockReturnValue(73_000);
+    act(() => root.render(<StatsOverlay {...props} video={{ reading: {}, codec: "HEVC", size: null, tier: { change, at: 61_000, quality: "auto" } }} />));
+    const value = [t("screen-video.quality_auto"), "1.5×", t("screen-video.stats_fps", { fps: 60 })].join("·");
+    expect(host.querySelector('[data-testid="screen-stats-tier"]')?.textContent).toBe(t("screen-video.stats_tier") + value);
+    expect(host.querySelector('[data-testid="screen-stats-tier-reason"]')?.textContent).toBe(`${t("screen-video.tier_link_steady")}·${t("screen-video.tier_seconds_ago", { n: 12 })}`);
+    expect(tierParts("sharper", { ...change, tier: { ...change.tier, scale: 2, fps: 30, pixelsPerPoint: 2 } })).toEqual([t("screen-video.quality_sharper"), "2×", t("screen-video.stats_fps", { fps: 30 })]);
+    // the scale the picture has, not the step asked for: a Retina 2× under the long-edge cap, and any step on a 1× display
+    expect(tierParts("auto", { ...change, tier: { ...change.tier, scale: 2, pixelsPerPoint: 2868 / 1512 } })[1]).toBe("1.9×");
+    expect(tierParts("auto", { ...change, tier: { ...change.tier, scale: 1.5, pixelsPerPoint: 1 } })[1]).toBe("1×");
+    expect(tierReasonParts("choice", 0, 125_000)).toEqual([t("screen-video.tier_choice"), t("screen-video.tier_minutes_ago", { n: 2 })]);
+    act(() => root.render(<StatsOverlay {...props} video={{ reading: {}, codec: "HEVC", size: null }} />));
+    expect(host.querySelector('[data-testid="screen-stats-tier"]'), "no tier line without tiers").toBeNull();
+  });
+
   it("says why the Mac's video isn't playing here, over VNC only", () => {
     for (const [reason, words] of [["insecure", "screen-video.stats_no_video_insecure"], ["unsupported", "screen-video.stats_no_video_unsupported"], ["failed", "screen-video.stats_no_video_failed"]] as const) {
       act(() => root.render(<StatsOverlay {...props} noVideo={reason} />));
@@ -75,5 +92,25 @@ describe("the stats panel", () => {
     }
     act(() => root.render(<StatsOverlay {...props} noVideo="insecure" video={{ reading: {}, codec: "HEVC", size: null }} />));
     expect(host.querySelector('[data-testid="screen-stats-no-video"]')).toBeNull();
+  });
+});
+
+describe("the mobile-data card", () => {
+  it("asks in the iPhone's words, each choice with its data an hour on one line, and closes", () => {
+    const chose: string[] = [];
+    let closed = 0;
+    act(() => root.render(<MobileDataCard onChoose={(m) => chose.push(m)} onClose={() => closed++} />));
+    const card = host.querySelector('[data-testid="screen-mobile-data"]')!;
+    expect(card.getAttribute("aria-label")).toBe(t("screen-video.mobile_data_title"));
+    expect(card.textContent).toContain(t("screen-video.mobile_data_line"));
+    const clearer = host.querySelector<HTMLButtonElement>('[data-testid="screen-mobile-data-clearer"]')!;
+    const saver = host.querySelector<HTMLButtonElement>('[data-testid="screen-mobile-data-saver"]')!;
+    expect(clearer.textContent).toBe(t("screen-video.mobile_data_clearer") + t("screen-video.mobile_data_clearer_usage"));
+    expect(saver.textContent).toBe(t("screen-video.mobile_data_saver") + t("screen-video.mobile_data_saver_usage"));
+    expect(clearer.className).toContain("whitespace-nowrap");
+    act(() => clearer.click());
+    act(() => saver.click());
+    act(() => host.querySelector<HTMLButtonElement>('[data-testid="screen-mobile-data-close"]')!.click());
+    expect([chose, closed]).toEqual([["clearer", "saver"], 1]);
   });
 });
