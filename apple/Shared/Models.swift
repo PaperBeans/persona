@@ -301,6 +301,39 @@ nonisolated struct MachineScreenVideo: Codable, Hashable, Sendable {
     var advertised: Bool { version > 0 }
 }
 
+/// What a Mac can do for pixel scrolling (#7775, docs/extensions/computer-use.md "Pixel scrolling"): its node takes the
+/// live screen's scroll records out of the RFB stream for Persona Input (`version`: the record's version it reads), and
+/// whether that helper may post events (Accessibility). Absent from a Mac without the helper or from an older node: the
+/// phone then scrolls by wheel notches only and never sends a record.
+nonisolated struct MachineScreenInput: Codable, Hashable, Sendable {
+    /// The record's version the node reads; 0 or absent: none.
+    var version = 0
+    /// Accessibility (posting events) for Persona Input: granted | missing | unknown.
+    var permission: String? = nil
+    /// The node has asked macOS for this helper version's permission (once), so Persona Input is in System Settings' list.
+    var asked = false
+
+    enum CodingKeys: String, CodingKey { case version, permission, asked }
+
+    init(version: Int = 0, permission: String? = nil, asked: Bool = false) {
+        self.version = version
+        self.permission = permission
+        self.asked = asked
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 0
+        permission = try c.decodeIfPresent(String.self, forKey: .permission)
+        asked = (try? c.decodeIfPresent(Bool.self, forKey: .asked)) ?? false
+    }
+
+    /// The node reads this phone's records (version 1).
+    var reads: Bool { version >= 1 }
+    /// Scroll records may go: the node reads them and the helper may post them.
+    var granted: Bool { reads && permission == "granted" }
+}
+
 /// A Mac the assistant may operate through Cua Driver (the hub's plugin cua, docs/extensions/computer-use.md). `enabled`: the user
 /// turned it on for this machine; the rest is what its node found when last asked, and only for an enabled one.
 nonisolated struct MachineComputer: Codable, Hashable, Sendable {
@@ -330,10 +363,13 @@ nonisolated struct MachineComputer: Codable, Hashable, Sendable {
     var displays: [MachineDisplay] = []
     /// The live-screen hardware video channel this Mac can carry (#3954); nil from a Mac without the helper or an older node.
     var screenVideo: MachineScreenVideo? = nil
+    /// Pixel scrolling (#7775); nil from a Mac without Persona Input or an older node.
+    var screenInput: MachineScreenInput? = nil
 
     enum CodingKeys: String, CodingKey {
         case enabled, installed, version, daemon, accessibility, desktop, ready, note, job, backend, chatgpt, displays
         case screenRecording = "screen_recording", screenSharing = "screen_sharing", noAutoLock = "no_auto_lock", screenVideo = "screen_video"
+        case screenInput = "screen_input"
     }
 
     init(enabled: Bool = false, installed: Bool = false, version: String? = nil, daemon: Bool = false, accessibility: String? = nil,
@@ -373,6 +409,8 @@ nonisolated struct MachineComputer: Codable, Hashable, Sendable {
         displays = (try? c.decodeIfPresent([MachineDisplay].self, forKey: .displays)) ?? []
         // An unreadable channel only costs the video switcher, not the machine (the page stays on RFB).
         screenVideo = (try? c.decodeIfPresent(MachineScreenVideo.self, forKey: .screenVideo)) ?? nil
+        // An unreadable one only costs pixel scrolling (wheel notches instead).
+        screenInput = (try? c.decodeIfPresent(MachineScreenInput.self, forKey: .screenInput)) ?? nil
     }
 
     /// The node has said how it is (a never-asked one has neither a verdict nor a note).
@@ -403,10 +441,12 @@ nonisolated struct MachineBrowser: Codable, Hashable, Sendable {
     var displays: [MachineDisplay] = []
     /// As `MachineComputer.screenVideo` (#3954): a Mac the plugin ego is on for shares the same live screen and helper.
     var screenVideo: MachineScreenVideo? = nil
+    /// As `MachineComputer.screenInput` (#7775).
+    var screenInput: MachineScreenInput? = nil
 
     enum CodingKeys: String, CodingKey {
         case enabled, installed, version, imported, analytics, ready, note, job, displays
-        case setUp = "set_up", screenSharing = "screen_sharing", screenVideo = "screen_video"
+        case setUp = "set_up", screenSharing = "screen_sharing", screenVideo = "screen_video", screenInput = "screen_input"
     }
 
     init(enabled: Bool = false, installed: Bool = false, version: String? = nil, setUp: Bool = false, imported: Bool = false,
@@ -437,6 +477,7 @@ nonisolated struct MachineBrowser: Codable, Hashable, Sendable {
         job = try? c.decodeIfPresent(ComputerJob.self, forKey: .job)
         displays = (try? c.decodeIfPresent([MachineDisplay].self, forKey: .displays)) ?? []
         screenVideo = (try? c.decodeIfPresent(MachineScreenVideo.self, forKey: .screenVideo)) ?? nil
+        screenInput = (try? c.decodeIfPresent(MachineScreenInput.self, forKey: .screenInput)) ?? nil
     }
 
     /// The node has said how it is.
@@ -1925,11 +1966,83 @@ nonisolated struct ImagePayload: Codable, Hashable, Sendable {
 }
 
 nonisolated enum ItemKind: String, Codable, Sendable {
-    case text, thinking, toolUse = "tool_use", toolResult = "tool_result", notice, image, recap, fold, unknown
+    case text, thinking, toolUse = "tool_use", toolResult = "tool_result", notice, image, recap, fold
+    /// Codex's duration row. Counted in the turn's usage, never drawn (#5426).
+    case turnDuration = "turn_duration"
+    case unknown
 
     init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = ItemKind(rawValue: raw) ?? .unknown
+    }
+}
+
+/// One model's request on an item (`usage` / `fold.usage`, docs/protocol/protocol.md "Token usage on items").
+/// An entry with an `id` is a subagent or workflow report and is counted once. Counts are tokens; prices are elsewhere.
+nonisolated struct TokenUsage: Codable, Hashable, Sendable {
+    var id: String?
+    var model: String?
+    var input: Int64
+    var output: Int64
+    var cacheRead: Int64
+    var cacheWrite: Int64
+    var cacheWrite1h: Int64
+    var fast: Bool
+
+    /// A report (a subagent or a workflow), counted once per model and speed.
+    var report: Bool { !(id ?? "").isEmpty }
+
+    enum CodingKeys: String, CodingKey {
+        case id, model, fast
+        case input = "in", output = "out"
+        case cacheRead = "cache_read", cacheWrite = "cache_write", cacheWrite1h = "cache_write_1h"
+    }
+
+    init(id: String? = nil, model: String? = nil, input: Int64 = 0, output: Int64 = 0, cacheRead: Int64 = 0,
+         cacheWrite: Int64 = 0, cacheWrite1h: Int64 = 0, fast: Bool = false) {
+        self.id = id
+        self.model = model
+        self.input = input
+        self.output = output
+        self.cacheRead = cacheRead
+        self.cacheWrite = cacheWrite
+        self.cacheWrite1h = cacheWrite1h
+        self.fast = fast
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id)
+        model = try c.decodeIfPresent(String.self, forKey: .model)
+        input = try c.decodeIfPresent(Int64.self, forKey: .input) ?? 0
+        output = try c.decodeIfPresent(Int64.self, forKey: .output) ?? 0
+        cacheRead = try c.decodeIfPresent(Int64.self, forKey: .cacheRead) ?? 0
+        cacheWrite = try c.decodeIfPresent(Int64.self, forKey: .cacheWrite) ?? 0
+        cacheWrite1h = try c.decodeIfPresent(Int64.self, forKey: .cacheWrite1h) ?? 0
+        fast = try c.decodeIfPresent(Bool.self, forKey: .fast) ?? false
+    }
+}
+
+/// A built-in catalog price, USD per million tokens (`POST /api/v1/launchers/catalog`). A missing kind has no price.
+nonisolated struct ModelPrice: Codable, Hashable, Sendable {
+    var input: Double?
+    var output: Double?
+    var cacheRead: Double?
+    var cacheWrite: Double?
+    var cacheWrite1h: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case input, output
+        case cacheRead = "cache_read", cacheWrite = "cache_write", cacheWrite1h = "cache_write_1h"
+    }
+
+    init(input: Double? = nil, output: Double? = nil, cacheRead: Double? = nil, cacheWrite: Double? = nil,
+         cacheWrite1h: Double? = nil) {
+        self.input = input
+        self.output = output
+        self.cacheRead = cacheRead
+        self.cacheWrite = cacheWrite
+        self.cacheWrite1h = cacheWrite1h
     }
 }
 
@@ -1950,9 +2063,11 @@ nonisolated struct Fold: Codable, Hashable, Sendable {
     var tasks: [FoldTasks]? = nil
     /// The hub proved this supervision round is user-visible, even while its visibility tools are folded away.
     var supervisionUser: Bool? = nil
+    /// What the folded items used (#5426). Omitted when none of them carried usage, and from older nodes.
+    var usage: [TokenUsage]? = nil
 
     enum CodingKeys: String, CodingKey {
-        case items, tools, thoughts, until, images, tasks
+        case items, tools, thoughts, until, images, tasks, usage
         case supervisionUser = "supervision_user"
         case throughSeq = "through_seq", throughID = "through_id"
     }
@@ -2153,9 +2268,11 @@ nonisolated struct Item: Codable, Identifiable, Hashable, Sendable {
     var outcome: ToolOutcome? = nil
     /// kind == .notice: an upstream refusal, drawn as a line of its own after the exchange (#4489, `RefusalNotice`).
     var modelRefusal: ModelRefusal? = nil
+    /// What the model requests this item stands for used (#5426). Older hubs omit it.
+    var usage: [TokenUsage]? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, seq, ts, role, kind, text, image, queued, from, wake, fold, task, compact, injected, source, outcome
+        case id, seq, ts, role, kind, text, image, queued, from, wake, fold, task, compact, injected, source, outcome, usage
         case modelRefusal = "model_refusal"
         case toolUseID = "tool_use_id", toolName = "tool_name", toolInput = "tool_input", isError = "is_error", fullSize = "full_size",
              clientMsgID = "client_msg_id", supervisionUser = "supervision_user"
