@@ -253,7 +253,7 @@ struct TurnUsageTests {
     @Test func aModelIsPricedPerMillionAndOnlyWhenEveryKindHasAPrice() {
         let price = ModelPrice(input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5, cacheWrite1h: 8)
         let row = tokens(input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 3_000_000, cacheWrite1h: 1_000_000)
-        let full = 4.0 + 20 + 0.2 + 2 * 5 + 8
+        let full: Double = 4.0 + 20 + 0.2 + 2 * 5 + 8
         #expect(modelCost(row, price) == full)
         var without = price
         without.cacheWrite1h = nil
