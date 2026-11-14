@@ -535,19 +535,33 @@ advertises `screen_video`, which a node does once it has the helper (the picture
 otherwise). The web, the Mac app and Android don't decode video yet: they keep RFB and show no switcher (the web's is
 behind `webVideo.plays` in `web/src/screen/video.ts`).
 
-- **Persona Screen** (`apple/PersonaLink/Sources/PersonaScreen`, `apple/Packages/PersonaScreenKit`): a Swift helper app inside
+- **Persona Screen** (`apple/PersonaLink/Sources/PersonaScreen`, `apple/Packages/PersonaScreenCore`): a Swift helper app inside
   Persona Link.app (`Contents/Helpers/Persona Screen.app`, bundle id `<link id>.screen`) that captures one display
   with ScreenCaptureKit and encodes it with VideoToolbox (HEVC Main, else H.264 High). It is an app bundle so its
   Screen Recording grant is its own, not the node's: the node starts it through LaunchServices
   (`open -g -n <helper> --args --socket <path> --token <t>`), and it connects back over a 0600 Unix socket, one
-  per stream, whose first line is the token. `mac-link.sh` builds it the same way every time (no timestamp), so an
-  unchanged helper keeps its ad-hoc signature, and its grant, across Persona Link updates. `--request-permission` calls `CGRequestScreenCaptureAccess()` and exits;
+  per stream, whose first line is the token.
+  - **Keeping its grant** (#7927): signed ad hoc, macOS holds the grant to the helper's exact bytes. So the helper is
+    built only from `PersonaScreenCore` (the wire, `CapturePlan`, `CaptureTick`, `HelperArguments`, `ScreenSource`,
+    `RateController`, `Refinement`, `Timing` and `CaptureConfigGate`), never from the rest of `PersonaScreenKit` (the
+    route session, the quality tiers), which changes far more often. `mac-link.sh` builds it with `swift build -c
+    release`, linked with `-S` (no debug symbols, so no checkout paths), and keeps the executable by a hash of its
+    sources, `PersonaScreenCore`'s, its Info.plist template and the architectures
+    (`~/.persona/cache/persona-screen`). Every later Persona Link build reuses it byte for byte until those change,
+    as it does for Persona Input. `mac-link.sh verify-screen` checks that two clean copies at different paths build
+    the same executable and cdhash. With a certificate set (`mac.link_signing_identity`,
+    `docs/operations/persona-link-install.md`) both helpers are signed with it, and their grants follow the certificate
+    across any change.
+  - `--request-permission` calls `CGRequestScreenCaptureAccess()` and exits;
   `--preflight` prints whether Screen Recording is granted without asking (`CGPreflightScreenCaptureAccess()`), which
   the node reports as `screen_video.permission`.
   - **Capture** (`ScreenCaptureSource`): the encoder settings gate ① measured (`RealTime`, low-latency rate control,
     no frame reordering, `MaxFrameDelayCount` 0, capture queue depth 3, NV12 straight into the encoder; ≈5 ms p50 and
     ≈10 ms p95 from a screen change to an encoded frame at 1080p60). The picture's long edge is at most `start.max_size`
     (never upscaled, even sides), the frame rate 1–60, and a keyframe comes at least every 10 s and whenever asked.
+    A configuration change (an `update`'s frame rate or size) made before `startCapture` has completed waits and is
+    applied from its completion (`CaptureConfigGate`, #7856): ScreenCaptureKit would keep the stream's first
+    configuration, so a client's first tier, which comes right after `hello`, never took effect.
   - **Messages**: `start` gets `hello` (codec, display, size, and `features` from a helper that has more, `tiers` for #6396's
     quality tiers), then `format` and a keyframe; `format` again whenever the
     parameter sets change. A still screen gives no frames, so a `heartbeat` goes out each second nothing did. Each
@@ -589,12 +603,14 @@ behind `webVideo.plays` in `web/src/screen/video.ts`).
   stream can bind video to it by guessing. Hubs and nodes from before the video channel ignore the parameter.
 - **Wire** (length-prefixed messages: u32 big-endian length, u8 type, body). Helper → phone: `hello`, `format`,
   `frame`, `heartbeat`, `paused`, `resumed`, `timing`, `encoding`. Phone → helper: `start`, `report`, `keyframe`, `update`. Unknown types
-  are skipped by length, so either side may add more. `PersonaScreenKit` (`apple/Packages/PersonaScreenKit`, its own
-  package for macOS and iOS) is the codec, shared by the helper and the app's client. `update.path`
+  are skipped by length, so either side may add more. `PersonaScreenCore` (`apple/Packages/PersonaScreenCore`, its own
+  package for macOS and iOS) is the codec, shared by the helper and the app's client through `PersonaScreenKit`
+  (`apple/Packages/PersonaScreenKit`), which re-exports it. `update.path`
   `{kind, via, min_rtt_ms}` (#6398) says the stream moved to another network route, so the helper can start its delay
   baseline again (#6396); helpers that don't know the field skip it. `kind` (`lan`, `tailscale`, `ipv6`, `relay`) and
   `via` (the phone's `wifi`, `cellular`, `wired` or `other` interface) name the cases of `LinkStats`, the route
-  measurement the route choice and the quality tiers share (`LinkStats.swift`, with `PathChange`).
+  measurement the route choice and the quality tiers share (`LinkStats.swift`, with `PathChange` and the
+  `UpdateMessage.Path` conversions, in `PersonaScreenKit`: the helper only carries the strings).
 - **Adaptation** (`RateController`): the phone reports when each frame arrived; the helper turns that into a queueing
   delay and cuts the bitrate 30% over 150 ms, skips frames over 500 ms, and raises it 10% under 50 ms for 2 s. The
   delay is measured above the lowest one-way delay of the last 10 s, so the phone's and the Mac's clocks needn't agree.
@@ -631,7 +647,9 @@ behind `webVideo.plays` in `web/src/screen/video.ts`).
     1×15; Sharper gives up frame rate first (2×60, 2×30, 2×15, 1.5×15, 1×15), Smoother pixels (2×60, 1.5×60, 1×60, 1×30,
     1×15). Every tier keeps at least a pixel per point, so text stays readable. Each band is 0.02–0.08 bits per pixel per
     frame, the ceiling at the phone's cap; a tier whose floor is above the cap is left out, and ones that come out the
-    same on a display merge. On `screenbench` the floor keeps scrolling text at SSIM ≥ 0.98 against what was encoded.
+    same on a display merge. Each tier also carries the scale its picture really has (`pixelsPerPoint`, #7842): on a
+    display at one pixel per point every tier is 1×, and 2× under the phone's long-edge cap is less; the tier line shows
+    it and Data Saver's one pixel per point holds to it. On `screenbench` the floor keeps scrolling text at SSIM ≥ 0.98 against what was encoded.
     The band is per codec (`TierLadder.bitsFactor`; #6558: a browser without HEVC gets H.264). H.264's factor is 1, the
     same as HEVC's, as `screenbench` measured it (2026-11-14, every Auto tier, scene and band end at the same targets):
     text (typing, scrolling) within 0.002 SSIM of HEVC, the video scene 0.003–0.007 lower, and 0–11% more data an hour
@@ -642,8 +660,10 @@ behind `webVideo.plays` in `web/src/screen/video.ts`).
     replays them, so a change on either side fails both until they agree; so do the policy's timelines (route starts, every way down and up, a route change, a new bias, Data Saver and a warm device).
   - **Signals** (the phone's, from the frames): queueing above the 10 s floor of the one-way delay (p50 / p95 over
     0.5 s, rising or falling over 1 s), the rate the link carried while busy (frames queued behind one another: their
-    bytes over their arrival gaps, so quiet stretches don't read as a slow link), bursts of large frames, late frames,
-    decode time and pictures replaced before they showed. The route's round trip, jitter and loss are `LinkStats`'.
+    bytes over their arrival gaps, so quiet stretches don't read as a slow link; frames read together all count, #7842),
+    bursts of large frames, late frames, decode time and pictures replaced before they showed. A keyframe (one every
+    10 s) and the frames queued behind it are left out of the p95 that says whether the link is calm: that queue is the
+    keyframe's size, not a slower link, and its burst is the proof of headroom (#7842). The route's round trip, jitter and loss are `LinkStats`'.
   - **Policy**, every 250 ms. A tier fits the link when its floor is at most 80% of what the link carries. Down, fast:
     a long queue (over 400 ms for a quarter second, or skipped frames) or one the bitrate can't fix (the helper's
     bitrate within 15% of the band's floor and over 150 ms), with a tier that no longer fits, goes straight to the best
@@ -652,13 +672,22 @@ behind `webVideo.plays` in `web/src/screen/video.ts`).
     first 10 s or after a route change) with proof the link carried 1.25× the next floor, or three large frames at 1.5×
     it; a step up undone within 15 s doubles that tier's window, to 60 s. The start comes from the route: the same
     network the best tier, Tailscale (direct IPv6 too) under 30 ms the best else the second, the relay the second over
-    Wi-Fi, the third over cellular. A slower route steps down at once; a new bias or cap takes the tier the rate fits.
+    Wi-Fi, the third over cellular. A slower route steps down at once; a new bias or cap takes the tier the rate fits,
+    the rate at least the current tier's floor, which the link carries. The helper's `timing` comes once a second only
+    while frames flow, so its skipped frames count until the next is due (1.25 s) and its bitrate proves headroom once:
+    a still screen never steps down or up on an old second's numbers (#7842).
   - **Simulated links** (`TierPolicySimulationTests`, the real types over a shaped link): a steady link never moves in
     10 minutes; the relay settles on 2×60 in 5 s; 25 → 3 Mbit/s steps down in 1 s to 1.5×30 and holds (queueing p50 32
-    / p95 179 ms, against 543 / 1,033 with 2×60 fixed); a link jittering 5–9 Mbit/s for 10 minutes never moves.
+    / p95 179 ms, against 543 / 1,033 with 2×60 fixed); a link jittering 5–9 Mbit/s for 10 minutes never moves. On a
+    display at one pixel per point with light content (scrolling text) and a keyframe every 10 s, as on a real Mac
+    (#7842), a 3 Mbit/s cap steps down once, to 1.5×30, frames read one at a time or several together, and back to 2×60
+    20.5 s after the cap lifts.
   - **The app** (`ScreenVideoTiers`, `ScreenVideoStream`, `ScreenVideoLink`): when the helper's `hello` lists `tiers`
     with the display's points and pixels and this app has them (`ScreenTiers.appSupported`), the stream starts a policy
-    and sends its first tier as an `update` (`scale`, `fps`, `min_kbps`, `max_kbps`, `target_kbps`). The stream feeds it
+    and sends its first tier as an `update` (`scale`, `fps`, `min_kbps`, `max_kbps`, `target_kbps`) once the first frame
+    arrives: on `hello` the helper's capture hasn't really started, and ScreenCaptureKit drops a configuration change
+    made then, so capture stayed at 60 fps (#7842). Every tier change waits the same way after `hello` and after
+    `paused`, the latest one kept. The stream feeds it
     every frame from its own task (arrival, the time a frame spread over several reads began, decode time, pictures
     replaced before they showed) and ticks it every 250 ms; a new tier goes out as an `update` and to the link (the
     overlay's tier and reason). ⋯ › Quality changes the bias on the running stream; a route change (#6398) restarts the
@@ -693,7 +722,8 @@ behind `webVideo.plays` in `web/src/screen/video.ts`).
   Connection Stats (⋯, off by default) reads the video once a second: frames shown and megabits that arrived, the
   helper's capture, encode and network from `timing`, the phone's decode, and their total first when encode, network
   and decode are all known (a helper before `timing` gives the phone's numbers only). With quality tiers (#6396) a Tier
-  line shows the Quality choice, the scale and frame rate ("Auto · 1.5× · 60 fps", `ScreenTierText`) and why it last
+  line shows the Quality choice, the picture's own scale and frame rate ("Auto · 1.5× · 60 fps", `ScreenTierText`;
+"1×" on a display at one pixel per point, #7842) and why it last
   changed in plain words with how long ago (picked for this connection, the connection slowed down or is steady, the
   network changed, the iPhone is warm or saving power or couldn't keep up, you changed Quality); the resolution is the
   encoder's after an in-place change (`encoding`), not `hello`'s. Over VNC it shows RFB's bitrate
@@ -812,7 +842,8 @@ iPhone's side comes next.
   transports per session. Its pongs carry the TCP packets retransmitted and sent on it since the last pong (macOS
   `TCP_CONNECTION_INFO`, Linux `TCP_INFO`), the phone's measure of loss. When macOS's application firewall is on and the
   node isn't explicitly allowed through it (read with `socketfilterfw`, at most once a minute, never changed), the node
-  doesn't listen and `paths` says `unavailable: "firewall"`, so no prompt appears on the Mac.
+  doesn't listen and `paths` says `unavailable: "firewall"`, so no prompt appears on the Mac. Beside the TCP listener the
+  node opens a UDP socket on each candidate address for the video over UDP ("Video over UDP (#7873)" below).
 - **The phone's side** (`PersonaScreenKit`, pure and tested with `swift test`): `ScreenLinkMessage` frames the wire
   exactly as the node does (both check `spec/fixtures/screen-link`); `LinkReceiver` / `LinkSender` keep each channel's
   offsets (bytes once and in order, what the node hasn't acknowledged kept within a window); `VideoMessageAssembler`
@@ -859,6 +890,160 @@ iPhone's side comes next.
 - **Rejoining**: a relay that dropped while the session went on (a hub restart, the phone changing networks) is opened
   again with the same `pair` and `attach=1`; the node attaches it to the live session instead of dialing Screen Sharing
   or starting Persona Screen again (`session_gone`, 410 at the hub, when there is none). The phone then sends `use`.
+
+### Video over UDP (#7873)
+
+On a direct route (same network or Tailscale), the live screen's video can ride a UDP flow instead of the route's TLS
+connection, so a lost packet delays only the frame it belongs to, usually by no round trip, and never slows the stream
+by itself ([#7873](https://github.com/nwverse/persona/issues/7873) has the design and the shaped-link numbers it rests
+on). The node's end is `internal/screenlink` (`udp.go`, `udp_wire.go`, `rs.go`); the shared cases are
+`spec/fixtures/screen-udp`. In place: the node's side, offered in `paths` as `"udp": 1`, and the iPhone's, off in
+release builds until the check on real devices (`ScreenRoutes.udpReleaseEnabled`; a DEBUG build launched with
+-showScreenUDP has it). No setting of its own: the Settings switch for direct routes covers it.
+
+- **What rides it**: only the video channel's bytes from the node to the phone, plus the phone's acknowledgements,
+  requests to send again, give-ups and pings for it. RFB, the phone's video messages (`start`, `report`, `keyframe`,
+  `update`) and every link message stay on the TLS connection or the relays, so input never moves. Persona Screen is
+  unchanged: the node re-frames the video messages it already reads from it.
+- **Opening**: on a direct route's TLS connection (never a relay) the phone sends `udp_open` (link type 12); the node
+  answers `udp_ready` (type 13: `{port, flow}`, the flow's 8-byte id in base64url, or `{unavailable}`). The node listens
+  on one UDP port per candidate address beside the TCP listener (the TCP port number when free there), only while a
+  session is live, and never on the wildcard. One flow per TLS connection and eight per session; a flow ends with its
+  connection, its session, or after `Limits.FlowSilence` (5 s) without a packet from the phone.
+- **Keys and sealing**: both ends take 88 bytes from the TLS 1.3 exporter of that connection (label
+  `EXPORTER-persona-screen-udp-1`, the flow id as context): a key and IV for each direction. Every packet is a clear
+  header (version, flow id, packet number) and its body sealed with AES-256-GCM, the header as additional data and the
+  IV XOR the packet number as the nonce. Only an end of the connection that proved the session's token and pinned the
+  node's certificate can derive the keys, so the flow is exactly as authenticated as that connection.
+- **Threat model** (each with a test in `udp_security_test.go`): a replayed packet is dropped (a 4,096-packet window); a
+  changed one doesn't open; one sealed with any other key doesn't open, the node's own packets reflected back and keys
+  exported from another connection included; nothing that doesn't open is ever answered; nothing goes to an address
+  the phone hasn't proved (a hello, the node's challenge sent to that address, a hello answering it), and the one
+  answer before the proof is smaller than the hello, so a forged source address gains nothing; each direction numbers
+  its packets from 0 without repeating, and a flow that would run out of numbers is closed instead.
+- **Sending**: the node sends each video message whole from the phone's offset, cut into 1,146-byte shards, at most 128
+  to a Reed-Solomon block (systematic, Cauchy, GF(2⁸)) with ⌈ratio × shards⌉ + 1 parity shards: the phone asks for the
+  ratio in its pings (none by default, at most 40 %), and any `shards` of a block rebuild it. Packets are paced at the
+  rate the phone asks for (from the rate its packets arrive at), kept between 1.25 × the video's own rate (1 Mbit/s
+  at least) and 150 Mbit/s, 40 Mbit/s until it asks. The pong reports the bytes sent as data, parity and again, so the phone can count them against mobile data.
+- **Recovering**: the phone asks again for the data shards a block still lacks (`nack`) and for messages it learned of
+  only from a later one (`want`); the node sends them from the 512 KB window. Video left unacknowledged with nothing
+  newer to send gets its newest message's last shard again after 50 ms (doubling to 800 ms), so a message lost whole
+  at the end of a burst is found; the phone answers a shard it already has with its acknowledgement.
+- **Giving a frame up**: frames other than keyframes (and only those) may be given up; giving a keyframe up would ask
+  for another as large, and on a slow link the stream would fill with keyframes that never come whole. On `skip`, the node drops the backlog's frames,
+  sends `reset` with where the stream goes on, asks Persona Screen for a keyframe and drops frames until it comes,
+  as a move with an old backlog does; the backlog's other messages (`format`, `encoding`, …) still go out after the
+  reset, so the keyframe decodes.
+- **Falling back**: when a flow is lost (silent, or its route gone), the video goes on over the flow's own TLS
+  connection from what the phone acknowledged, or over its relay when the route went too. The node never moves RFB or
+  link messages onto a flow, and moving the video onto one takes the phone's `use` on it.
+- **The phone's side** (`PersonaScreenKit`, tested with `swift test` against the shared cases): `ScreenUDPWire` (packets,
+  sealed with CryptoKit's AES-256-GCM, `ScreenUDPAESGCM`), `ReedSolomon`, `ScreenUDPReceiver` (blocks rebuilt from parity; a block still short asked for again
+  once all of it was sent, a message gone quiet for max(6 ms, 2 × jitter) counting as sent; again after max(10 ms,
+  1.5 round trips); a message known only from a later one asked for by its place; a frame that held the picture back
+  100 ms plus a round trip given up), `ScreenUDPParity` and `ScreenUDPLoss` (below). `ScreenLinkSession` asks for a
+  flow once a direct route attaches, takes its keys from the route's TLS exporter, has the app open the socket on the
+  route's interface (`openFlow`, `ScreenLinkUDPSocket`), proves its address, and moves the
+  video onto the flow once the route carries the session, from the start of the message it was in the middle of; the
+  video's bytes on other transports are ignored meanwhile. It pings the flow every second with the parity and pacing
+  it asks for (1.25 × the rate a message's packets arrive at, `ScreenUDPPace`; 150 Mbit/s on a LAN route, 40 on
+  Tailscale and 8 on cellular before it knows), and leaves the flow for the route's TLS connection, from
+  what the phone has, when the flow is silent for 1 s, gives more than 2 frames up in 10 s, or the phone's networks
+  change; a route asks again after 30 s, doubling to 5 min, and at once after a network change. Each move onto or off
+  the flow is a `PathChange` whose `LinkStats.transport` says `udp` or `tcp`, so the quality tiers look again.
+- **Not on cellular**: the phone opens no flow while its route, or its path under Tailscale, is cellular. On #7873's
+  shaped cellular-like link (40 ms, a 3 Mbit/s bottleneck with a short queue) a flow kept the picture going but brought
+  nothing over TCP: about the same bitrate, as many stalls or more, a worse tail. There the loss is a queue
+  overflowing, which parity and resends only add to. Before the fixes found there, it showed nothing at all: a
+  keyframe given up asked for another, and the node paced far above the bottleneck. A keyframe is now never given up
+  (the node never marks one droppable, and the phone reads its first shard), and 10 % loss or more over 2 s cuts the
+  cap given to the helper by half the loss, at most every 2 s, recovering 5 % a second below 2 %
+  (`ScreenUDPCongestion`); parity stays at 15 % or less meanwhile.
+- **Parity and mobile data**: the phone asks for three times the loss the packet numbers show (before recovery), from
+  5 % up to the cap: 40 % on Wi-Fi, 15 % on cellular (kept for when cellular gets flows); none under 0.2 %. Each block
+  gets one parity shard more than the ratio, a lot for the few-shard frames of a low bitrate, so the ratio is the
+  largest whose parity on the recent blocks stays within the cap's share, and none when even one shard per block would
+  not. On mobile data the cap the phone gives the helper is divided by one plus the flow's overhead (parity and resent
+  bytes per byte of video, from the node's pong counters, at least the parity asked for), so the bytes on the wire stay
+  within Data Saver's 1.5 Mbit/s or Clearer's 4, and the card's figures per hour hold.
+
+### Pixel scrolling (#7775)
+
+Two-finger scrolling over RFB sends wheel notches, and macOS's Screen Sharing scrolls a notch one point: a page follows
+the fingers, but Screen Sharing falls behind past about 2000 notches a second, a terminal moves a whole line per event
+(notches that come together merge), and a page stops dead at its ends. Continuous scroll events posted on the Mac
+itself, as a trackpad's are, scroll by the point with no such ceiling, with the app's own momentum and rubber-banding.
+Approved on #7775: a helper of its own posts them, with the Accessibility permission asked for once; without it,
+scrolling stays on RFB's notches.
+
+- **Persona Input** (`apple/PersonaLink/Input`, a package of its own; bundle `Persona Link.app/Contents/Helpers/Persona
+  Input.app`, bundle id `<link id>.input`): started by the node through LaunchServices as Persona Screen is, on a 0600
+  Unix socket whose first line is a token. It then says `granted` or `missing` (`CGPreflightPostEventAccess()`; missing
+  ends it) and posts every scroll record that comes as `CGEvent(scrollWheelEvent2Source:units: .pixel, …)` with
+  `scrollWheelEventIsContinuous`, the scroll phase and the momentum phase, at the pointer (RFB has just put it there),
+  carrying fractions of a point to the next event. Scroll events only: no clicks, no keys. `--preflight` prints
+  `post_event: granted|missing`, asking nothing; `--request-permission` asks macOS once (`CGRequestPostEventAccess()`),
+  whose window only the user answers. Persona Screen is not touched: its package, binary and Screen Recording grant stay
+  as they were, and the two share no code.
+- **Same bits from build to build**: macOS ties the permission to the helper's code. The package builds in Swift 6 mode
+  (`#file` is the module and file name) and links no debug map, so a build does not depend on its path:
+  `scripts/app/mac-link.sh verify-input` builds it twice from clean copies at two paths and compares the executable and
+  the signed bundle's cdhash (the same on 2026-11-15: executable `659dc1e66ff90a6f`, cdhash `da868531…`). On top of that,
+  `mac-link.sh` keeps the built executable in `~/.persona/cache/persona-input/<key>` (`PERSONA_INPUT_CACHE`), the key a
+  hash of the helper's and `PersonaInputKit`'s sources and the architectures, and reuses it byte for byte: a Persona Link
+  update that leaves those sources alone never changes the helper, whatever checkout or Xcode builds it.
+- **The record** (`PersonaInputKit`'s `ScrollRecord`, the helper and the iOS app; the node's codec in Go, both checked
+  against `spec/fixtures/screen-input`): 16 bytes, big-endian. Byte 0 is **200**, an RFB client message type that IANA's
+  registry leaves unassigned (151–244 are, checked 2026-11-15); the phone sends it inside the RFB stream and the node
+  takes it out, so Screen Sharing never sees it. Then the version (1), the kind (0 hello: the phone can scroll by pixels;
+  1 scroll), the scroll phase (CGScrollPhase: 0 none, 1 began, 2 changed, 4 ended, 8 cancelled), the momentum phase
+  (CGMomentumScrollPhase: 0 none, 1 begin, 2 continue, 3 end), three reserved bytes, then dy and dx as `f32` Mac points
+  (> 0 shows what is above or to the left, as the RFB wheel's up and CGEvent's axes). Another version is refused, never
+  guessed at. The node hands the helper the same 16 bytes.
+- **The node** (`node/rfbinput.go`, `node/inputhelper.go`): on a Mac every paired 5900 stream (after the login observer)
+  is read on the phone's side.
+  - **The handshake** is followed as the bytes go by. With types 1, 2 and 30, macOS's Screen Sharing speaks plain RFB
+    after the login (type 30's key length comes from Screen Sharing's own bytes). With Apple's other types (33, 35, 36)
+    or anything else, nothing is read and the stream passes as it came.
+  - **Messages**: then the six client messages (fixed lengths; SetEncodings' and ClientCutText's from their headers),
+    each passed on at once, byte for byte, however the stream is cut. A message type it doesn't know ends the reading
+    for good.
+  - **Records** (type 200) are taken out:
+    - A hello starts Persona Input for the stream if it may post events: at most 2 at once, only for a stream that
+      signed in, and it ends with the stream. If it may not, the node asks macOS once for this helper version
+      (`--request-permission`, recorded in `~/.persona/bin/Persona Input.asked`; macOS's window shows on the Mac's
+      screen, which the phone is showing).
+    - A scroll goes to the helper through a short queue, so the relay never waits.
+    - One the helper can't take (not started yet, the permission gone, the helper stuck) goes to Screen Sharing as
+      wheel notches instead: a notch a Mac point, at the pointer the phone last placed, at most 200 a record, fractions
+      carried.
+    - A record that doesn't decode is dropped, never passed on.
+  - **Status**: `computer.status` / `browser.status` gain `screen_input {version, permission, asked}`, from the helper's
+    `--preflight`, at most once a minute (`asked` while missing). It is absent without the helper or from an older node,
+    so the phone never sends a record to a node that would pass it to Screen Sharing.
+  - With the node signing setting the node runs its own signed copy (`~/.persona/bin/Persona Input.app`), as for Persona
+    Screen. None of Persona Screen's node code changes for it.
+- **The phone** (`VNCPixelScroll`, `RFBSession`, `VNCScreenView`; the iOS app, which links `PersonaInputKit`; Vision
+  scrolls by notches):
+  - A two-finger touch scrolls by pixels when the Mac's status says its node reads records and Persona Input may post
+    them (`screen_input.permission` granted, read as the touch begins). As the page goes live on such a Mac it says
+    hello once a connection, so the helper is started before the first scroll.
+  - While scrolling by pixels: the Mac's pointer goes where the scroll began and stays there (as a trackpad's). One
+    record a display frame carries that frame's distance, by the same curve as the notches (slow fingers one to one,
+    quick ones up to 4×) but with no ceiling. The phases are `began`, `changed`, then `ended` at the lift. After a flick
+    comes the coast as momentum (`begin`, `continue`, `end`), with UIScrollView's normal deceleration, at most 6000
+    Mac points. A touch during the coast ends it, and its end goes too.
+  - Where the helper may not post yet and macOS was never asked (`permission` missing, `asked` false), the first
+    two-finger scroll of a connection says hello, so the node asks macOS once. A line under the page's bar, as the
+    video's fallback line, says what the window now on the Mac's screen is for ("To scroll more smoothly, allow Persona
+    Input on this Mac."). A tap on it gives the way through it in an alert (Open System Settings, then Persona Input
+    under Privacy & Security › Accessibility; scrolling still works meanwhile). The line goes once the Mac allows it or
+    the connection ends, and doesn't come back on later connections (macOS asks only once). Scrolling goes on by wheel
+    notches meanwhile, and for anyone who never allows it.
+  - Measuring: `VNCTests/testPixelScrolling` (mock `MOCK_SCREEN_INPUT=granted`) and `testPersonaInputNotice`
+    (`=missing`, with the notice's screenshots). The mock's relay takes records out as the node does and lists them as
+    `input`.
 
 ## Locking, preventing sleep and per-App approval (plan, #1507, decided)
 

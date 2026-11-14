@@ -160,6 +160,7 @@ func TestBriefSurvivesTakeOvers(t *testing.T) {
 			Text: prompts.RenderSupervise(prompts.Supervise{Entries: []prompts.SuperviseEntry{{ID: first.ID, Title: first.Title, Kind: sigOrphaned}}})})
 	takeOver := func(title, prompt, from, why string) Todo {
 		t.Helper()
+		before := len(todoNow(s, first.ID).Agents)
 		got, isErr := tool(t, s, "task_plan", briefTask(map[string]any{"title": title, "prompt": prompt, "continues": from, "continues_why": why,
 			"done_when": []string{"something else entirely"}, "expect_minutes": 5, "goal": nil}))
 		if isErr {
@@ -167,14 +168,17 @@ func TestBriefSurvivesTakeOvers(t *testing.T) {
 		}
 		var todo Todo
 		waitFor(t, "the take-over "+title+": "+got, func() bool {
-			todo, ok = todoByTitle(s, title)
-			return ok && len(todo.Agents) == 1
+			todo, ok = s.todoNow(first.ID)
+			return ok && len(todo.Agents) == before+1
 		})
 		return todo
 	}
 	second := takeOver("take over login", "you are taking over a session that stopped: carry on from its branch", first.ID, "its computer went offline")
 	third := takeOver("retry login fix", "second hand-over: the branch is pushed, finish the test", second.ID, "the model service kept failing")
 	for _, todo := range []Todo{second, third} {
+		if todo.ID != first.ID || todoCount(s) != 1 {
+			t.Fatalf("take-over split the original task: %+v", todo)
+		}
 		got, ok := s.briefOfTodo(todo.ID)
 		if !ok || got.ID != brief.ID || got.Request.Text != brief.Request.Text || !got.Request.At.Equal(asked) {
 			t.Fatalf("%s: brief = %+v", todo.Title, got)
@@ -183,10 +187,13 @@ func TestBriefSurvivesTakeOvers(t *testing.T) {
 			t.Fatalf("%s: the take-over's own criteria replaced the brief's: %+v", todo.Title, todo.Supervision)
 		}
 	}
-	if third.Notes != "second hand-over: the branch is pushed, finish the test" {
-		t.Fatalf("the take-over's prompt is not its own: %q", third.Notes)
+	f.mu.Lock()
+	lastPrompt, _ := f.starts[len(f.starts)-1]["prompt"].(string)
+	f.mu.Unlock()
+	if third.Notes != first.Notes || !strings.Contains(lastPrompt, "second hand-over: the branch is pushed, finish the test") {
+		t.Fatalf("the original notes or the take-over's own prompt were lost: notes=%q, prompt=%q", third.Notes, lastPrompt)
 	}
-	// The to-do as the apps get it: the brief and the chain.
+	// The to-do as the apps get it: one brief and lineage entry, with all Agents kept in its history.
 	raw, err := s.todoView(context.Background(), third.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -198,14 +205,9 @@ func TestBriefSurvivesTakeOvers(t *testing.T) {
 	if err := json.Unmarshal(raw, &view); err != nil || view.Brief == nil || view.Brief.Request.Text != brief.Request.Text {
 		t.Fatalf("view = %s (%v)", raw, err)
 	}
-	if len(view.Lineage) != 3 || view.Lineage[0].TodoID != first.ID || view.Lineage[0].Why != "its computer went offline" ||
-		view.Lineage[0].SupersededBy != second.ID || view.Lineage[1].Why != "the model service kept failing" ||
-		view.Lineage[2].Continues != second.ID || !view.Lineage[2].Current || view.Lineage[2].Why != "" || view.Lineage[2].Session == "" {
+	if len(view.Lineage) != 1 || view.Lineage[0].TodoID != first.ID || !view.Lineage[0].Current ||
+		view.Lineage[0].SupersededBy != "" || view.Lineage[0].Session == "" || len(third.Agents) != 3 {
 		t.Fatalf("lineage = %+v", view.Lineage)
-	}
-	// Closing the superseded first task ends nothing: the brief has no result while the take-over carries it.
-	if got, isErr := tool(t, s, "task_review", map[string]any{"todo_id": first.ID, "verdict": "cancelled", "note": "superseded"}); isErr {
-		t.Fatal(got)
 	}
 	if b, _ := s.briefOfTodo(third.ID); b.Result != nil {
 		t.Fatalf("cancelling a superseded task ended the brief: %+v", b.Result)
@@ -238,6 +240,40 @@ func TestBriefSurvivesTakeOvers(t *testing.T) {
 	later := now.Add(time.Minute)
 	if _, ended := s.briefDigest(context.Background(), later, s.briefDigestSince(context.Background(), later), time.UTC); len(ended) != 0 {
 		t.Fatalf("listed a second time: %+v", ended)
+	}
+}
+
+// Historical multi-to-do briefs remain readable even though new continuations no longer create successor to-dos.
+func TestLegacyBriefLineageSurvivesSupersededTaskCancellation(t *testing.T) {
+	s, _, _ := briefService(t, "fix the login crash")
+	ctx := context.Background()
+	first, err := s.createTaskTodo(ctx, "Original fix", "Fix login", "conv1", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	brief, err := s.ensureTaskBrief(ctx, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.createTaskTodo(ctx, "Legacy successor", "Finish login", "conv1", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.linkTaskBrief(ctx, brief.ID, second.ID, first.ID, "The old Agent stopped"); err != nil {
+		t.Fatal(err)
+	}
+	if got, isErr := tool(t, s, "task_review", map[string]any{
+		"todo_id": first.ID, "verdict": "cancelled", "note": "superseded",
+	}); isErr {
+		t.Fatal(got)
+	}
+	if got, _ := s.briefOfTodo(second.ID); got.Result != nil {
+		t.Fatalf("cancelling a historical predecessor ended its open successor's brief: %+v", got.Result)
+	}
+	lineage := s.taskLineage(second.ID)
+	if len(lineage) != 2 || lineage[0].SupersededBy != second.ID ||
+		lineage[0].Why != "The old Agent stopped" || lineage[1].Continues != first.ID || !lineage[1].Current {
+		t.Fatalf("legacy lineage was lost: %+v", lineage)
 	}
 }
 

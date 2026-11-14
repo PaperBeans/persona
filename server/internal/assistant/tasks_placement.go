@@ -206,6 +206,9 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		return "", "", err
 	}
 	prompt := t.Prompt
+	if t.Continues != "" {
+		prompt += "\n\n" + prompts.RenderTaskContinuation(prompts.TaskContinuation{TodoID: t.Continues, Readonly: t.Readonly})
+	}
 	if t.Readonly {
 		prompt += "\n\n" + prompts.RenderReadonlyTaskConstraint()
 	}
