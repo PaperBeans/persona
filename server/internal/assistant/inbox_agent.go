@@ -533,7 +533,9 @@ func (s *Service) sweepInboxAgents(ctx context.Context, cfg InboxAgentConfig, no
 			continue
 		}
 		b.mu.Lock()
-		if it.Agent != nil && it.Agent.SessionID == a.SessionID && (it.Handling == nil || it.Handling.State == state) {
+		// A wake queued during the session read can keep the same session and handling state; only settle the turn we read.
+		if it.Agent != nil && it.Agent.SessionID == a.SessionID && (it.Handling == nil || it.Handling.State == state) &&
+			a.Back == it.Agent.Back && sameTime(a.StartedAt, it.Agent.StartedAt) {
 			w := beginWrite(it)
 			if it.Suggestion != nil { // new messages left its suggestion standing: it still holds
 				b.setHandling(it, HandlingDone, "", now)

@@ -319,7 +319,15 @@ function liveAgents(td: Todo, lookup: SessionLookup): Session[] {
 /** Open to-dos by project (#2526, #2581): the knowledge-base project a to-do was put in first (named by projectName),
  *  else the repository its agents work in; those with neither last ("Unsorted"). Groups that need the user come
  *  first within each of the three; the to-dos keep their order. */
-export function groupTodosByProject(todos: Todo[], lookup: SessionLookup, now = Date.now(), projectName: (slug: string) => string = (slug) => slug): TodoProjectGroup[] {
+export function groupTodosByProject(
+  todos: Todo[],
+  lookup: SessionLookup,
+  now = Date.now(),
+  projectName: (slug: string) => string = (slug) => slug,
+  /** A to-do the To-dos page has in Needs you (its status section): its folder says Needs you whatever its agents do,
+   *  so a failed start waiting on the owner (which the hub closed) does not read Done or fold away. */
+  waiting: (td: Todo) => boolean = () => false,
+): TodoProjectGroup[] {
   const map = new Map<string, { name: string; tier: number; list: Todo[] }>();
   for (const td of todos) {
     const repo = td.project ? "" : projectOfTodo(td, lookup);
@@ -333,7 +341,7 @@ export function groupTodosByProject(todos: Todo[], lookup: SessionLookup, now = 
     map.set(key, g);
   }
   const groups = [...map.entries()].map(([key, { name, tier, list }]) => {
-    const states = list.map((td) => todoTreeState(todoStatus(td, lookup), liveAgents(td, lookup)));
+    const states = list.map((td): TreeState => (waiting(td) ? "needs_you" : todoTreeState(todoStatus(td, lookup), liveAgents(td, lookup))));
     const state = worst(states);
     const sessions = list.flatMap((td) => (td.agents ?? []).filter((a) => !a.released_at).map((a) => lookup(a.machine_id, a.session_id)).filter((s): s is Session => Boolean(s)));
     const touched = Math.max(latest(sessions), ...list.map((td) => Date.parse(td.updated_at) || 0));

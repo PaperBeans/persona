@@ -66,13 +66,36 @@ func (s *Service) applyGroupStates(ctx context.Context, src assistantwire.InboxS
 			entry.Link.Type = LinkSource
 			entry.Link.Position = t.Last
 			if hasConversation {
+				follow := defaultInboxFollow(now)
+				if it.Follow != nil {
+					follow.Who, follow.Next = it.Follow.Who, it.Follow.Next
+				}
+				it.Follow = follow
+				resetInboxFollowChecks(it)
+				it.Suggestion = nil // the owner's source reply supersedes a suggestion still waiting for confirmation
+				clearDraft(it)
+				wasAgent := it.Handling != nil && it.Handling.State == HandlingAgent
+				restoreWaiting := wasAgent && it.Agent != nil && it.Agent.Back == HandlingWaiting
+				interrupted := HandlingWaiting
+				if wasAgent {
+					interrupted = HandlingAgent
+				}
+				b.setHandling(it, interrupted, "", now)
 				if twinEnabled {
 					at := t.At
 					if at.IsZero() {
 						at = now
 					}
+					agentStartedAt := it.Agent.StartedAt
 					b.tell(it, inboxNote{Name: prompts.NoteSelfReplied, Text: at.In(loc).Format("2006-01-02 15:04")}, true, now)
-					b.setHandling(it, HandlingLooking, "", now)
+					if restoreWaiting {
+						it.Agent.Back = HandlingWaiting
+					}
+					if wasAgent {
+						it.Agent.StartedAt = agentStartedAt
+					} else {
+						b.setHandling(it, HandlingLooking, "", now)
+					}
 				}
 			} else {
 				it.done(now, connector.DoneReplied)
@@ -87,6 +110,8 @@ func (s *Service) applyGroupStates(ctx context.Context, src assistantwire.InboxS
 			switch {
 			case own || groupStateHasSelfReply(it, t.Last):
 				// Persona's own send, or a reply already recorded at this position, is not a new read by the owner.
+			case hasConversation && it.Handling != nil && (it.Handling.State == HandlingWaiting || it.Handling.State == HandlingAgent):
+				// Waiting for the other side or an Agent needs no new look merely because the owner read the source.
 			case hasConversation:
 				if twinEnabled {
 					b.tell(it, inboxNote{Name: prompts.NoteSelfRead}, true, now)

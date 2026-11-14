@@ -1,5 +1,39 @@
 # Lessons: web UI and interactions
 
+## A date field's change fires per typed segment; a list hidden under a narrow detail drops the focus (web audit, 2026-11-14)
+
+- `<input type="date">`, `time` and `datetime-local` fire `input` (React's `onChange`) whenever the typed segments make
+  a valid value: the "1" of a day "15" is already the 1st. A field that saves on `onChange` and disables itself while
+  saving stores the half-typed day and takes the focus away before the next digit. Save typed changes on blur or Enter
+  and a change with no key before it (the browser's picker) at once, and never disable a field mid-edit
+  (`PlanField` in `web/src/views/Todos.tsx`). A half-typed field reads `""` with `validity.badInput`: go back to the
+  saved value, do not clear it. Chrome's first Tab out of the last segment stops on the picker button. Playwright's
+  `fill` sends no keys, so a test needs real `keyboard.type` (`web/e2e/todos-keyboard-layout.mjs`).
+- A list hidden with `display: none` under a phone-width detail takes the focused row with it: the focus falls to
+  `<body>`. Move it to the detail's Back when a row opens it, and back to that row on the way back (Back, Esc, the
+  browser's Back). Chrome keeps a hidden scroller's offset but reads `scrollTop` as 0 while hidden and fires a scroll
+  event, so a scroll memory that saves on every event can store 0.
+- A count shown under one name ("Done") must come from the rule that fills the section of that name, in every
+  grouping: the header counting closed to-dos by `done_at` disagreed with the Done section (seen or 24 hours old) and
+  with a failed start the sections show open. Count a merged row's to-dos under the row's section, as the section titles
+  do, not each under its own.
+- A grouping drawn from a hub list that holds only some to-dos (the pinned directions' tree lists only open ones,
+  `server/internal/assistant/direction_tree.go`) must still place the ones it leaves out: a to-do moved out of the
+  page's Done fold vanished from 常驻 and was counted as "open, under no direction". Check every grouping for each
+  to-do state a rule change moves.
+
+## A read that only handles the expected failure loads forever (2026-11-14, workflow board)
+
+The board's switch started as "not answered yet" (`enabled: null`) and its read handled only 404; a 500 left it null,
+so `/workspace-board` and Settings showed their loaders until the next reconnect. Any state that a page draws as
+"loading" needs an exit on every failure: keep the reason next to it and draw it with Retry. The same page also read
+every 503 as "this hub has no board, update it", while the manager answers 503 `assistant_offline` while it restarts:
+tell an unsupported hub from a passing failure by the error's `code` (`not_supported`), not by its status, and offer
+Retry only for what a retry can fix. A message about the hub's version belongs on its own, without the controls of a
+page that cannot work there. The switch's module is on the first screen and its pages are lazy: exporting its read for
+their Retry renamed the first screen's imports (ja +120 B), while handing `retry` out through the hook they already
+import, and keeping the 404 as the stored failure rather than a flag of its own, kept it within a few dozen bytes of main.
+
 ## Removing a client-only prompt includes its hooks and fixture documentation (#6570)
 
 The star toast was browser-local, but readiness refresh and successful Agent creation loaded its rule lazily.
@@ -524,6 +558,7 @@ Adding Bcc to the request alone leaves Bcc-only edits lost on dismissal and Bcc-
 - **Rendering categories before counts still shifts the first screen**: on a narrow screen, one extra digit in the selected category can wrap the final pill onto another line. Do not guess digit width or fix the width of loaded pills. Without a cached list, show only the existing `Loading` below search, then mount filters and content together when the list arrives. Keep the loading notice in that branch too, so newly inserted filters cannot push it down (following #4029's one-time display approach).
 - **Loading gates distinguish empty lists from failures**: an empty list object is loaded and cached data can display immediately; a first-load failure must still allow category switching or retry. Search is independent of category lists and must not be blocked by this gate.
 - **Validate real layout**: jsdom checks timing only. Measure wrapping with Playwright + mock hub at width 390, using `layout-shift` over 4 seconds after navigation, excluding `hadRecentInput`, with 3 repetitions per group. Also delay list responses and capture light / dark loading and loaded states. Pin time and animation frames for before / after comparisons, checking loaded pixels rather than mistaking timers or animation for layout changes.
+- **Later (2026-11-14): the count left the pills**. Holding the pills back until the count arrived kept the first paint still, but picking another kind still changed the selected pill's width, so the row re-wrapped and every pill after it moved, and an uncached kind took the whole row away while it loaded. The pills now carry no count (each section under them says how many it holds), so they paint at once and never move; `web/e2e/knowledge-kind-chips.mjs` measures every pill's box while each picked kind's list read is held (a mock answers in milliseconds, so without the hold the loading state is never measured) and once the list is drawn. The iOS app still shows the count on its selected pill. A width that depends on the selection is the bug: remove what varies before reaching for reserved widths.
 
 ### Confirmed facts belong to the requested entry (#1341)
 

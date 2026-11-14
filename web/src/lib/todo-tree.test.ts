@@ -117,6 +117,15 @@ describe("By to-do: to-dos at the top level, no repository rows (#2526, #6458)",
     expect(groups.map((g) => [g.name, g.state, g.todos.map((t) => t.id)])).toEqual([["persona", "working", ["t1"]], ["未归类", "done", ["t2"]]]);
   });
 
+  it("a folder holding a to-do the page has in Needs you says so, a failed start the hub closed too (audit item 13)", () => {
+    const old = new Date(NOW - 3 * STALE_MS).toISOString();
+    const failedStart = todo("f1", [], { done_at: old, updated_at: old, start_error: "machine offline", origin: "conv" });
+    // by its agents alone it reads Done, and a quiet folder of it folds away
+    expect(groupTodosByProject([failedStart], makeSessionLookup([]), NOW).map((g) => [g.state, g.folded])).toEqual([["done", true]]);
+    const waiting = groupTodosByProject([failedStart, todo("t2", [])], makeSessionLookup([]), NOW, undefined, (td) => td.id === "f1");
+    expect(waiting.map((g) => [g.state, g.folded, g.todos.map((t) => t.id)])).toEqual([["needs_you", false, ["f1", "t2"]]]);
+  });
+
   it("待办页先按待办所属的知识库项目分段，再按仓库，都没有的最后 (#2581)", () => {
     const all = [s("a", "working", "/code/persona"), s("b", "needs_you", "/code/persona")];
     const inArea = (id: string, project: string, links: ReturnType<typeof link>[] = []) => ({ ...todo(id, links), project });

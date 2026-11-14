@@ -57,7 +57,7 @@ class TransportBindingFixtureTest {
     private class Harness : CoreHost {
         val effects = CopyOnWriteArrayList<Effect>()
         val items = mutableListOf<String>()
-        var patch = ChatPatch(0u, 0, null, null, false, emptyList())
+        var patch = ChatPatch(0u, 0, null, null, false, false, null, emptyList())
         override fun changed(version: Long) = Unit
         override fun run(effect: Effect) {
             effects.add(effect)
@@ -267,7 +267,7 @@ class TransportBindingFixtureTest {
             // NewerResponse.more_after is an optional Bool.
             Payload.Newer("""{"items":[],"more_after":"$marker"}""") to "wrong_type: more_after",
             // foldedWork.Range.more is an optional Bool.
-            Payload.Range("""{"items":[],"more":1}""") to "wrong_type: more",
+            Payload.Range(null, """{"items":[],"more":1}""") to "wrong_type: more",
             // A fold's through_seq is a required Int (Models.swift, Fold).
             Payload.Latest(
                 """{"items":[{"id":"fold#0","seq":1,"role":"assistant","kind":"fold",""" +
@@ -317,7 +317,7 @@ class TransportBindingFixtureTest {
         // The two paths really took different decoders: the fold was opened, its page published its work, and the
         // page's `more: true` asks for the range's next page from the item that just arrived.
         assertEquals(
-            listOf<Request>(Request.FetchRange(2, 4), Request.FetchRange(2, 4)),
+            listOf<Request>(Request.FetchRange("fold:entry_thinking#0", 2, 4), Request.FetchRange("fold:entry_thinking#0", 2, 4)),
             bytes.effects.map { (it as Effect.Fetch).request },
         )
         // The opened work is published next to the fold that stands for it: the fold itself is retained opened, and
@@ -352,7 +352,7 @@ class TransportBindingFixtureTest {
     private fun Case.payload(): Payload = when (raw.decoder) {
         "items" -> Payload.Latest(raw.input)
         "items_after" -> Payload.Newer(raw.input)
-        "items_range" -> Payload.Range(raw.input)
+        "items_range" -> Payload.Range(null, raw.input)
         else -> Payload.Frame(raw.input)
     }
 
@@ -374,7 +374,7 @@ class TransportBindingFixtureTest {
         return when (raw.decoder) {
             "items" -> ChatEvent.Latest(batch)
             "items_after" -> ChatEvent.After(batch)
-            "items_range" -> ChatEvent.Range(items, field("more")?.jsonPrimitive?.booleanOrNull == true)
+            "items_range" -> ChatEvent.Range(null, items, field("more")?.jsonPrimitive?.booleanOrNull == true)
             // A live frame is a push; the fixture's backlog flag rides in the batch, as with ws_items.
             else -> ChatEvent.Pushed(batch)
         }

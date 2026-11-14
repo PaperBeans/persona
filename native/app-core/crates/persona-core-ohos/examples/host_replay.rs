@@ -391,6 +391,7 @@ fn samples() -> Vec<(&'static str, Vec<u8>)> {
         json: r#"{"id":"7#2","text":"new"}"#.into(),
     };
     let range = Request::FetchRange {
+        fold_id: Some("fold:3#0".into()),
         from_seq: 2,
         through_seq: 8_589_934_600,
     };
@@ -423,6 +424,19 @@ fn samples() -> Vec<(&'static str, Vec<u8>)> {
             "Action.continue_fill",
             wire::encode(&Action::ContinueFill {
                 chat: "chat/fill".into(),
+            }),
+        ),
+        (
+            "Action.hub_changed",
+            wire::encode(&Action::HubChanged {
+                chat: "chat/hub".into(),
+            }),
+        ),
+        (
+            "Action.ack",
+            wire::encode(&Action::Ack {
+                chat: "chat/ack".into(),
+                seq: 4_294_967_301,
             }),
         ),
         (
@@ -470,6 +484,7 @@ fn samples() -> Vec<(&'static str, Vec<u8>)> {
         (
             "ChatEvent.range",
             event(ChatEvent::Range {
+                fold_id: None,
                 items_json: r#"[{"id":"g#0"}]"#.into(),
                 more: false,
             }),
@@ -484,7 +499,10 @@ fn samples() -> Vec<(&'static str, Vec<u8>)> {
         ),
         ("ChatEvent.fill_failed", event(ChatEvent::FillFailed)),
         ("ChatEvent.older_failed", event(ChatEvent::OlderFailed)),
-        ("ChatEvent.range_failed", event(ChatEvent::RangeFailed)),
+        (
+            "ChatEvent.range_failed",
+            event(ChatEvent::RangeFailed { fold_id: None }),
+        ),
         (
             "ChatPatch.full",
             wire::encode(&ChatPatch {
@@ -493,6 +511,8 @@ fn samples() -> Vec<(&'static str, Vec<u8>)> {
                 history: Some("patch-history".into()),
                 has_more: Some(true),
                 loaded_once: false,
+                verified: true,
+                acked: Some(11),
                 ops: vec![ListOp::Remove { index: 3 }, insert.clone(), update.clone()],
             }),
         ),
@@ -504,6 +524,8 @@ fn samples() -> Vec<(&'static str, Vec<u8>)> {
                 history: None,
                 has_more: None,
                 loaded_once: true,
+                verified: false,
+                acked: None,
                 ops: Vec::new(),
             }),
         ),
@@ -557,6 +579,7 @@ fn samples() -> Vec<(&'static str, Vec<u8>)> {
         (
             "Payload.range",
             wire::encode(&Payload::Range {
+                fold_id: None,
                 body: r#"{"items":[],"more":true}"#.into(),
             }),
         ),

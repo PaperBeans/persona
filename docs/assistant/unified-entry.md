@@ -313,7 +313,11 @@ lines, and in the user's own color and alignment they read as something the user
   hand-off stays a folded line under it (#1668).
 - **Any other message of Persona's** (a rework, a later instruction, one whose task has no card in this chat) is one folded
   line on the left, styled like the answered and review lines: a send icon (a stop when Persona cut the turn short first),
-  "Sent to ‘xx’" (tap to open the task) and the first line; tapping the line opens the whole text with Copy.
+  "Sent to ‘xx’" (tap to open the task) and the first line; tapping the line opens the whole text with Copy. Persona
+  writes these in Markdown: the web's folded line is the first line with words, without its marks (`**`, `` ` ``, list
+  and heading marks), and the opened text is drawn as Markdown (bold, code, lists), never with raw marks showing, and
+  line by line as Persona's replies are: a single line break stays one (web usability audit 2026-11-14, item 7); Copy
+  copies the text as written.
 - What the user sends to a task (its card's Message, or the composer's routing label) has no `from` and keeps the bubble.
 - Older entries: migration `0441_feed_routed_from.sql` marks those Persona wrote before the field existed (see "Chat activity").
   Older apps ignore `from` and keep drawing the bubble.

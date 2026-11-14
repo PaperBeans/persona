@@ -83,6 +83,11 @@ struct ScreenStats: Equatable {
 
     var mode: Mode
     var path: Path? = nil
+    /// The route's own numbers (#6398): its smoothed round trip and the share of packets lost, when measured.
+    var routeRttMs: Double? = nil
+    var routeLoss: Double? = nil
+    /// Why the route last changed, in plain words (`ScreenRouteReason`); nil at the start.
+    var routeReason: String? = nil
     var tier: String? = nil            // #6396, e.g. "1080p · 60"
     var tierReason: String? = nil      // #6396, a short reason shown on a tier change
     var bitrateMbps: Double? = nil
@@ -147,6 +152,22 @@ nonisolated struct HubRoundTrips: Equatable, Sendable {
     }
 }
 
+/// Why the live screen's route last changed (#6398), in words anyone reads.
+enum ScreenRouteReason {
+    enum Kind { case faster, lost, degraded, networkChanged, turnedOff, firewall }
+
+    static func text(_ k: Kind) -> String {
+        switch k {
+        case .faster: String(localized: "Faster route")
+        case .lost: String(localized: "Previous route dropped")
+        case .degraded: String(localized: "Previous route got worse")
+        case .networkChanged: String(localized: "Network changed")
+        case .turnedOff: String(localized: "Turned off in Settings")
+        case .firewall: String(localized: "The computer's firewall blocks direct connections")
+        }
+    }
+}
+
 // MARK: - Overlay
 
 /// A small, semi-transparent, draggable panel showing the live-screen connection numbers (#3954): mode, path, tier,
@@ -161,6 +182,7 @@ struct ScreenStatsOverlay: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             header
+            if let route = routeText { kv(String(localized: "Route [Screen Stats]"), route, note: stats.routeReason) }
             if let tier = stats.tier { kv(String(localized: "Tier"), tier, note: stats.tierReason) }
             rateLine
             latencyLine
@@ -245,6 +267,15 @@ struct ScreenStatsOverlay: View {
     }
 
     private func ms(_ v: Double) -> String { String(format: "%.0f ms", v) }
+
+    /// The route's round trip and loss (#6398), "6 ms round trip · 0% lost"; nil with nothing measured.
+    private var routeText: String? {
+        var parts: [String] = []
+        if let rtt = stats.routeRttMs { parts.append(String(localized: "\(Int(rtt.rounded())) ms round trip")) }
+        if let loss = stats.routeLoss { parts.append(String(localized: "\(Int((loss * 100).rounded()))% lost")) }
+        if parts.isEmpty, stats.routeReason == nil { return nil }
+        return parts.isEmpty ? (stats.path?.label ?? "") : parts.joined(separator: " · ")
+    }
 }
 
 #if DEBUG
@@ -252,7 +283,8 @@ extension ScreenStats {
     /// Sample numbers for previews and `-showScreenStatsDemo` screenshots (video mode shows the per-segment latency).
     /// Capture ≈ 0 ms on the Mac (gate ①: the frame reaches us before its display time), so it's folded into the total.
     static let demoVideo = ScreenStats(
-        mode: .video, path: .directLAN, tier: "1080p · 60", tierReason: nil,
+        mode: .video, path: .directLAN, routeRttMs: 6, routeLoss: 0, routeReason: ScreenRouteReason.text(.faster),
+        tier: "1080p · 60", tierReason: nil,
         bitrateMbps: 1.8, fps: 60, codec: "HEVC", resolution: "1920×1080",
         captureMs: nil, encodeMs: 9, networkMs: 6, decodeMs: 8, totalMs: 23, roundTripMs: nil)
     static let demoVNC = ScreenStats(

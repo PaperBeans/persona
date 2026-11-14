@@ -407,6 +407,19 @@ Phase 2 lands in several PRs.
   - Still not done: no production client sends bytes; the Swift XCTest replay needs macOS and follows #7401; the
     on-device cells stay blocked: no physical device.
 
+- **The core boundary's missing contracts (#7554).**
+  - `ChatPatch.verified` carries whether the chat's items are known complete, the rule Android used to derive per
+    client (`gap == None && (backlog || already verified)`), so no client re-implements the reducer's gap logic.
+  - `Action::Ack` echoes a host's sequence number in the patch, so an applied no-op is distinguishable from a
+    pending action. `Action::HubChanged` settles as if a gap were found, iOS's `settle(.fill)`.
+  - Folds are keyed by id and independent: different folds open and complete in either order, as on iOS, and
+    `Request::FetchRange`, `ChatEvent::Range` / `RangeFailed` and `Payload::Range` carry an optional `fold_id`.
+    Callers that send no id keep the older single-opening behaviour.
+  - The three codecs are regenerated; the existing 38-case / 94-step corpus still passes, with new tests for the
+    verified rule, hub-changed input, acknowledgement and two folds completing in either order. The Android host
+    JNI and ArkTS host replays cover the new fields.
+  - Not done: no production client uses these contracts yet; the adapters (#7366, #7448) consume them next.
+
 ### Migration rules (each domain)
 
 1. **Fixtures first.** The domain's fixtures cover the rules the current iOS implementation follows today. Compare

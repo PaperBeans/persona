@@ -8,24 +8,41 @@ import PersonaScreenKit
 // The live screen's routes on the iPhone (#6398, docs/extensions/computer-use.md "Live screen routes (#6398)"): the
 // hub's relays opened as a screen session when the hub and the node offer one, the node's direct candidates probed
 // and measured, and the route policy run. This stage measures and decides only: the picture and input stay on the
-// relay. Off unless a DEBUG build is launched with -showScreenRoutes.
+// relay.
 
 enum ScreenRoutes {
     nonisolated static let log = Logger(subsystem: "persona", category: "screen-link")
 
-    /// Whether this phone asks the hub for a screen session.
-    nonisolated static var enabled: Bool {
+    /// Direct routes ship off until their real-device acceptance has passed (#6398); one line turns them on. A DEBUG
+    /// build launched with -showScreenRoutes has them meanwhile.
+    nonisolated static let releaseEnabled = false
+
+    /// Whether this app offers direct routes at all (Settings shows the switch only then).
+    nonisolated static var offered: Bool {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-showScreenRoutes")
-        #else
-        false
+        if ProcessInfo.processInfo.arguments.contains("-showScreenRoutes") { return true }
         #endif
+        return releaseEnabled
+    }
+
+    /// Whether this phone asks the hub for a screen session: offered, and the Settings switch on (it is by default).
+    nonisolated static var enabled: Bool { offered && ScreenRoutePrefs.automatic }
+
+    /// The Settings switch went off: live sessions go back to their relays and close their direct connections now.
+    @MainActor static func turnedOff() {
+        for pair in probers.keys {
+            if let s = ScreenLinkRegistry.shared.session(for: pair) { Task { await s.directOff() } }
+        }
     }
 
     /// The probers of the sessions open now, by pair.
     @MainActor static var probers: [String: ScreenLinkProber] = [:]
     /// Who hears of each live screen's route changes, by pair (its RFBSession's video link).
     @MainActor static var listeners: [String: @MainActor (PathChange) -> Void] = [:]
+    /// And of the route in use as measured each second, with why the node has no direct routes when it says.
+    @MainActor static var meters: [String: @MainActor (LinkStats?, String?) -> Void] = [:]
+    /// Each live screen's routes as last measured and the one in use, by pair (the DEBUG command channel reads them).
+    @MainActor static var latest: [String: (routes: [String: LinkStats], current: String, change: PathChange?)] = [:]
 
     /// A session opened for pair: register it for the video stream and start probing its direct routes.
     nonisolated static func opened(_ s: ScreenLinkSession, pair: String, group: String, machine: String) {
@@ -36,6 +53,8 @@ enum ScreenRoutes {
             await p.run()
             probers[pair] = nil
             listeners[pair] = nil
+            meters[pair] = nil
+            latest[pair] = nil
             ScreenLinkRegistry.shared.remove(pair)
         }
     }
@@ -253,6 +272,11 @@ actor ScreenLinkProber {
                 if let why = p.unavailable { ScreenRoutes.log.info("no direct routes: \(why, privacy: .public)") }
                 probe()
             case let .routes(routes, current, decision):
+                let stats = routes[current], why = paths?.unavailable, pair = pair
+                await MainActor.run {
+                    ScreenRoutes.meters[pair]?(stats, why)
+                    ScreenRoutes.latest[pair] = (routes, current, ScreenRoutes.latest[pair]?.change)
+                }
                 if case let .move(to, reason) = decision {
                     let kind = routes[to]?.kind.rawValue ?? "?"
                     ScreenRoutes.log.info("route: \(kind, privacy: .public) (\(reason.rawValue, privacy: .public)); \(routes.count) measured; in use \(current == to ? "yes" : "no", privacy: .public)")
@@ -262,7 +286,10 @@ actor ScreenLinkProber {
             case let .moved(change):
                 let kind = change.to.kind.rawValue, why = change.reason.rawValue, pair = pair
                 ScreenRoutes.log.info("moved to \(kind, privacy: .public) (\(why, privacy: .public))")
-                await MainActor.run { ScreenRoutes.listeners[pair]?(change) }
+                await MainActor.run {
+                    ScreenRoutes.listeners[pair]?(change)
+                    if let l = ScreenRoutes.latest[pair] { ScreenRoutes.latest[pair] = (l.routes, l.current, change) }
+                }
             case let .reopen(video):
                 let group = group, machine = machine, pair = pair
                 if let relay = await MainActor.run(body: { ScreenRoutes.reopenRelay(group: group, machine: machine, pair: pair, video: video) }) {

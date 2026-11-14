@@ -9,6 +9,7 @@ import { settingsHref } from "./nav";
 import { SUPERVISE_PURPOSE } from "../../lib/background-supervisor";
 import { api, credentialOwner, enc, errorText, subscribeCredentialOwner } from "../../lib/api";
 import { MANAGER_HEADER } from "../../lib/manager-choice";
+import { mainRuntimeDetails, type MainExecution } from "../../lib/main-runtime";
 import { PERMISSION_MODES } from "../../lib/session-actions";
 import { ConfigurationManager } from "./ConfigurationManager";
 import { AgentAutoNaming, supportsAgentAutoNaming, type AgentAutoNamingState } from "./AgentAutoNaming";
@@ -36,6 +37,9 @@ interface AssistantState extends AgentAutoNamingState {
   manager?: string;
   default_permission_mode?: string;
   machine_id?: string;
+  /** The main chat and the node it is routed through (not where it runs: `MainExecution`'s location). */
+  main?: string;
+  main_machine_id?: string;
   launcher?: string;
   cwd?: string;
   timezone?: string;
@@ -100,6 +104,9 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
   const persona = usePersona();
   const machines = useStore((s) => s.machines);
   const [info, setInfo] = useState<AssistantState | null>(null);
+  // where and with what the main chat runs (docs/assistant/assistant.md "Main conversation execution on the web"): kept
+  // here, out of the Assistant screen's line (audit item 80); nothing when the hub does not report it
+  const [execution, setExecution] = useState<MainExecution | null>(null);
   const [error, setError] = useState("");
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [files, setFiles] = useState<MemoryFile[] | null>(null);
@@ -248,6 +255,7 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
   const load = () => {
     setError("");
     scopedApi<AssistantState>("/assistant").then(setInfo, (e) => setError(errorText(e)));
+    scopedApi<MainExecution>("/assistant?view=main-runtime").then(setExecution, () => setExecution(null));
     scopedApi<{ tasks: Task[] }>("/assistant/tasks").then((r) => setTasks(r.tasks ?? []), () => setTasks([]));
     void loadMemory();
   };
@@ -255,6 +263,9 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
 
   const machine = machines.find((m) => m.id === info?.machine_id);
   const machineName = machine?.name || info?.machine_id || "";
+  // a report routed through another node than the main chat's is not this main chat's (MainRuntimeBadge's rule)
+  const routed = info?.main_machine_id && execution?.machine_id && execution.machine_id !== info.main_machine_id;
+  const runtime = routed ? {} : mainRuntimeDetails(info?.main, execution ?? undefined);
   const entries = useMemo(() => memoryEntries(files ?? []), [files]);
   const index = files?.find((f) => f.name === MEMORY_INDEX);
   const on = tasks?.filter((task) => task.enabled).length ?? 0;
@@ -466,6 +477,16 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         <Row label={t("settings-assistantsettings.machine")}>
           <span className="max-w-[220px] truncate">{machineName || t("settings-assistantsettings.machine_none")}</span>
         </Row>
+        {runtime.place && (
+          <Row label={t("settings-assistantsettings.main_place")}>
+            <span data-main-runtime-place className="max-w-[220px] truncate" title={runtime.place}>{runtime.place}</span>
+          </Row>
+        )}
+        {runtime.runtime && (
+          <Row label={t("settings-assistantsettings.main_runtime")}>
+            <span data-main-runtime-tool className="max-w-[220px] truncate">{runtime.runtime}</span>
+          </Row>
+        )}
         <Row label={t("settings-assistantsettings.cwd")} mono>
           <span className="max-w-[300px] truncate" title={info?.cwd}>{info?.cwd || "~/.persona/assistant"}</span>
         </Row>

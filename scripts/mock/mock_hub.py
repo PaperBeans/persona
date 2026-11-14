@@ -10749,6 +10749,7 @@ MOCK_PAIR_DROP = float(os.environ.get("MOCK_PAIR_DROP", "0"))
 PAIR_DROPPED = [False]
 PAIR_TRADED = [None]  # when the pairing token was traded (MOCK_PAIR_TOKEN)
 PAIR_DEVICE_TOKENS = set()
+PAIR_DEVICE_ROLES = {}  # exchanged device token -> the role the exchange returned
 
 TOKENS = [  # Settings › Devices (GET/POST/DELETE /api/v1/auth/tokens)
     {"id": "dev_phone", "name": "我的 iPhone", "kind": "phone", "role": "full", "created_at": ago(days=12), "last_seen": ago()},
@@ -25374,7 +25375,9 @@ class H(BaseHTTPRequestHandler):
                 PAIR_DEVICE_TOKENS.add(device)
                 print("mock: traded for %s" % device, flush=True)
                 kind = req.get("kind") if req.get("kind") in ("phone", "watch") else "other"
-                return self.send_json({"id": "dev_" + device, "token": device, "role": "answer" if kind == "watch" else "full",
+                role = "answer" if kind == "watch" else "full"
+                PAIR_DEVICE_ROLES[device] = role
+                return self.send_json({"id": "dev_" + device, "token": device, "role": role,
                                        "name": req.get("name") or "设备"})
             kind = req.get("kind") if req.get("kind") in ("phone", "watch") else "other"
             t = {"id": "dev_mock_%d" % (len(TOKENS) + 1), "name": req.get("name") or "设备", "kind": kind,
@@ -27054,6 +27057,10 @@ class H(BaseHTTPRequestHandler):
         # ?features=managers: the roster event (hub/managers.go); the rest of ?features= keeps its old meaning here
         client = {"send": send, "features": {"managers"} if "managers" in asked else set(), "close": close_going_away}
         ws_token = self.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if not ws_token:
+            ws_token = (parse_qs(urlparse(self.path).query).get("token") or [""])[0]
+        # A legacy fixture socket has no credential and keeps the mock's full-role default.
+        client["role"] = PAIR_DEVICE_ROLES.get(ws_token, "full")
         if MOCK_PAIR_TOKEN: print("mock: ws open host=%s token=%s" % (self.headers.get("Host"), ws_token[:9]), flush=True)
         if MOCK_PAIR_TOKEN and ws_token == MOCK_PAIR_TOKEN:
             def cut_after_grace():  # the hub cancels the pairing token's sockets once its grace is over
@@ -29634,6 +29641,8 @@ DESKTOP_LOCK = threading.Lock()
 
 def desktop_registration(connection, msg):
     """A socket's register_desktop / unregister_desktop message, or its close (msg None)."""
+    if msg is not None and CLIENTS.get(connection, {}).get("role") != "full":
+        return  # hub/desktops.go: an answer-only watch never becomes desktop presence.
     with DESKTOP_LOCK:
         if msg is not None and msg.get("type") == "register_desktop":
             name = msg.get("device_name") if isinstance(msg.get("device_name"), str) else ""

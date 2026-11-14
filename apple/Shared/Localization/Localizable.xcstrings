@@ -5918,6 +5918,28 @@
       },
       "extractionState" : "manual"
     },
+    "%lld ms round trip" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld ms round trip"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "往復 %lld ms"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "往返 %lld ms"
+          }
+        }
+      }
+    },
     "%lld Picked" : {
       "localizations" : {
         "en" : {
@@ -11853,6 +11875,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "%lld%% lost" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld%% lost"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "損失 %lld%%"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "丢包 %lld%%"
+          }
+        }
+      }
     },
     "%lld%% similar" : {
       "localizations" : {
@@ -29803,6 +29847,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Choose the Fastest Route Automatically" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose the Fastest Route Automatically"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最速の経路を自動で選ぶ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动选择最快的线路"
+          }
+        }
+      }
     },
     "CI" : {
       "extractionState" : "manual",
@@ -62494,6 +62560,28 @@
       },
       "extractionState" : "manual"
     },
+    "Faster route" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Faster route"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "より速い経路"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找到更快的线路"
+          }
+        }
+      }
+    },
     "FYI" : {
       "localizations" : {
         "en" : {
@@ -90263,6 +90351,28 @@
       },
       "extractionState" : "manual"
     },
+    "Network changed" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network changed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ネットワークが変わった"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网络变了"
+          }
+        }
+      }
+    },
     "Network on, scripts still off" : {
       "localizations" : {
         "en" : {
@@ -103115,6 +103225,28 @@
       },
       "extractionState" : "manual"
     },
+    "On the same Wi-Fi or Tailscale as your computer, the screen comes straight from it, faster and steadier. Turned off, it always goes through your hub." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On the same Wi-Fi or Tailscale as your computer, the screen comes straight from it, faster and steadier. Turned off, it always goes through your hub."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コンピュータと同じ Wi-Fi や Tailscale にいるときは、画面がコンピュータから直接届き、速く安定します。オフにすると、常にハブを経由します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和电脑在同一 Wi-Fi 或 Tailscale 上时，画面直接从电脑传过来，更快更稳。关掉后始终经 hub 中转。"
+          }
+        }
+      }
+    },
     "On This iPhone [Meeting Transcription]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -115422,6 +115554,50 @@
       },
       "extractionState" : "manual"
     },
+    "Previous route dropped" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Previous route dropped"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前の経路が切れた"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一条线路断了"
+          }
+        }
+      }
+    },
+    "Previous route got worse" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Previous route got worse"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前の経路が不安定になった"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一条线路变差了"
+          }
+        }
+      }
+    },
     "Previous Version" : {
       "localizations" : {
         "en" : {
@@ -117720,6 +117896,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Route [Screen Stats]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Route"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "経路"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "线路"
+          }
+        }
+      }
     },
     "RTF document" : {
       "localizations" : {
@@ -149651,6 +149850,28 @@
       },
       "extractionState" : "manual"
     },
+    "The computer's firewall blocks direct connections" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The computer's firewall blocks direct connections"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コンピュータのファイアウォールが直接接続を止めています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑的防火墙挡住了直连"
+          }
+        }
+      }
+    },
     "The Fullest [Home Widgets]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -168584,6 +168805,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "调大音量"
+          }
+        }
+      }
+    },
+    "Turned off in Settings" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turned off in Settings"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定でオフ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在设置中关闭"
           }
         }
       }

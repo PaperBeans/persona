@@ -149,6 +149,10 @@ import UIKit
     @ObservationIgnored var onPathChange: @MainActor (PathChange) -> Void = { _ in }
     /// The route the live screen takes and why it last changed (#6398); nil without a screen session.
     private(set) var route: PathChange?
+    /// The route in use as last measured, about once a second (#6398; the tiers', #6396, too); only the overlay draws it.
+    private(set) var link: LinkStats?
+    /// The node said why it has no direct routes (`firewall`).
+    private(set) var directUnavailable: String?
 
     @ObservationIgnored private var want: Want?
     @ObservationIgnored private var ready: Ready?
@@ -192,8 +196,14 @@ import UIKit
     /// What the page wants shown as video; nil: VNC (chosen, or several displays shown at once).
     /// The live screen's route changed (#6398): the helper starts its delay baseline again (`update.path`), since the
     /// one-way delay changed with the route.
+    func measured(_ stats: LinkStats?, unavailable: String?) {
+        if stats != link { link = stats }
+        if unavailable != directUnavailable { directUnavailable = unavailable }
+    }
+
     func routeChanged(_ change: PathChange) {
         route = change
+        link = change.to
         if change.reason != .start { stream?.send(UpdateMessage(path: .init(change.to))) }
         stream?.tierPath(change) // the tiers look again (#6396)
         onPathChange(change)

@@ -358,6 +358,7 @@ For every component: use the design-system one, not a lookalike. Counts are appr
 - States: expanded when focused, non-empty or holding attachments; send hidden when empty and replaced by voice or stop; send gate button when the main conversation is not ready.
 - Send and stop swap (iOS `ShellComposerBar` and `ComposerButtons.swift`, `Theme.Motion.composerSwap`; Android Glass, #4210 T3): the round button changes with the state, and the change moves. Send grows from a scale of 0.001 at the trailing edge while a 4 pt blur clears, and fades in over 0.2 s; stop (and voice) shrink to 0.2 from their middle as they fade, and grow from that coming back; send leaving does the same as coming, the other way. Scale and blur follow the curve (0.38, 0.7, 0.125, 1) over 0.4 s, the fade eases in and out over 0.2 s, and what stands beside the slot glides with the `state` spring. A button on its way out takes no tap and is not read out. Send shrinks to 0.75 under a finger, 0.4 s easing out, and comes back over 0.25 s on the swap's curve; stop and the other composers' send buttons keep the plain press, as on iOS. With Reduce Motion (Android: the system's animations off) nothing moves: the swap is instant and send does not shrink. iOS still keeps the scale and blur under Reduce Motion (HIG-044); Android does not copy that. Android skips the blur on Android 11 (no render effects before 12) and keeps Brief's and Board's instant swap (decision 8 of #4194). Android has no Voice Chat button in the slot yet, so only send and stop swap. The values are `composerSwap` and `composerPress` in `spec/tokens/motion.json`.
 - Model menu (`[model/effort]`, #4322): titled sections, "Model" and "Thinking Effort", their choices as switches with the current one checked (`MenuChoice` in `apple/Persona/Views/Chat/SessionModes.swift`; a running agent's `SessionModesMenu`, a new conversation's `StarterModesMenu`). Never an inline `Picker` in a titled section: an iOS menu draws no title over its options (`docs/lessons/ios.md`). The Agents header's mode menu (#3719) uses the same switches.
+- Dictation bar (iOS, `apple/Persona/DesignSystem/DictationBar.swift`): the tapped mic turns the capsule into `[✕] wave [■] [↑]` laid over the one-line composer. ✕ and ■ are muted round buttons (`ComposerRoundButton(muted:)`, `Theme.Shell.roundMuted` or BeautifulUI `inset`), ↑ the ink one; a spinner replaces the symbol while the last words are transcribed (`busy`). Wave and motion tokens: `Theme.DictationBar`, `Theme.Motion.dictation…`. While listening only the wave changes: a `Canvas` redrawn per sample (`TimelineView(.periodic)`) and slid by Core Animation between samples; Reduce Motion stops the slide.
 - Accessibility: every control labelled; hold-to-talk has a hint and a tap action (`apple/Persona/DesignSystem/ComposerHoldMic.swift:105-110`). Reduce Motion read in the bar.
 - Source: `apple/Persona/DesignSystem/ShellComposerBar.swift:11`, `apple/Persona/DesignSystem/ComposerButtons.swift`.
 - Platforms: web composer (14 px radius, 28 px buttons, `web/src/views/chat/Composer.tsx:648`); Android `ComposerFrame` (radius 32 in Glass) with its round button in `ComposerActionSlot`.
@@ -523,6 +524,17 @@ For every component: use the design-system one, not a lookalike. Counts are appr
   and one plain line, and nothing without a cost (super rules 0 and 4). On touch screens the text ends the copy + ⋯
   row: a tap holds the card or the tooltip, and a second tap on the text or a press elsewhere closes it.
   Details: `docs/web/web.md` ("Reply bar").
+- Web hover bar beside your own bubble (pointer only: the time, Copy message, Quote, Edit, ⋯): left of the bubble, 6 px
+  away, where it fits inside what shows the chat. Where a narrow window leaves a wide bubble no room there, the same
+  buttons sit under the bubble, right-aligned, as a small floating bar (`rounded-control`, `bg-surface`,
+  `shadow-hairline`) over what comes next; a transparent bridge over the 4 px gap keeps the hover, and hidden it takes
+  no clicks. Where it goes is measured when the pointer or the focus comes into the bubble's row, and only its classes
+  change, so the button Tab reached keeps the focus (`docs/web/web.md`, "The hover bar beside your bubbles").
+- Web Markdown tables in replies: a column is as narrow as its words. Headers never wrap and have no minimum width; a
+  cell whose words fit one line in about 5.5em stays on one line with no minimum; only longer cells keep 7em, so a
+  squeezed table never stacks a sentence a word per line. The copy button (hover or keyboard focus; always on a screen
+  without hover) sits on a cap as tall as the header row in its `--inset` color, with a short fade on its left, and the
+  last header cell keeps room for it, so it never covers header words (`docs/web/web.md`, "User bubbles").
 - Model change divider (web, #5034, `ModelChangeDivider`): where an exchange's reply came from another model than the
   previous visible reply, between that exchange's message and its reply: two `--line-strong` hairlines and a centered
   pill chip (`⇄` 12 px, "Opus 5.5 → Sonnet 4.5", 11 px `--ink-3`, `--line-strong` border, `bg-page/50`, padding 10 × 4),
@@ -929,7 +941,9 @@ chat (#5033), where the panel only offers models and says plainly which one the 
   name), the model name (truncates), the engine's `AgentMark` at 12 px (the separator: no "·"), the effort label without a
   tier colour (English "Extra" for "Very high"; the full name on hover), a filled bolt for Fast and the workflow
   `UltraMark` (`ink-2`), a 14 px chevron (`ink-2`). Widths by the composer card (`@container/composer`): ≥ 600 px 72–320 px;
-  < 600 px 148 px (name ≤ 108 px and truncating first, the effort only once the name has no room); < 520 px 12 px text, marks a step smaller; < 420 px 64 px, the
+  < 600 px the width its words need (name ≤ 108 px without a trailing bracketed qualifier, a context size kept as a short
+  mark, "Opus 5.5 1M"; the whole name in the tooltip;
+  shrinking only when the row is short, the name truncating first, the effort only once the name has no room); < 520 px 12 px text, marks a step smaller; < 420 px 64 px, the
   tile and chevron only. States: loading (a 13 px `Spinner` and "Loading model…"), failed (the `warning` icon in `--red`),
   pending (#5035, a switch to another launcher that the next message carries out: a 12 px clock in `ink-3` first, then
   the target launcher's tile and its name in `ink-3` up to 96 px, hidden under 600 px, before the target's model and
@@ -1279,7 +1293,12 @@ Tool execution is one summary line, never opens by itself, shows the latest text
 order, and each run of work between two pieces of it an inner summary of its own, "Worked for 12s" from the words
 before it to the words after it, the live one "Working…" with its clock. Without intermediate narration it holds its
 rows directly. Inner summaries open together with the outer one and then keep their own open / closed state, so
-opening a summary shows every tool call. A thought with words is one row in the tool rows' chrome (16 px status slot
+opening a summary shows every tool call. On the web a long finished summary fills in as it opens: the first 60 steps
+(its inner summaries' included) come with the tap and the rest follow in batches of 60 while the page is idle, so the
+tap is answered at once and every call is still drawn a moment later, none left out or behind a "Show more"; rows
+already drawn stay put. A live summary, a search hit inside one and a jump to a call in one ("Jump to the step that
+started it", a subagent's or a child session's link) draw all of it at once, so the row asked for is there to land on
+(`docs/web/web.md`, "A long summary opens a screenful at a time"). A thought with words is one row in the tool rows' chrome (16 px status slot
 with the sparkle, italic `thinking-ink` words on one line, the 18 px chevron slot), opening in place only when it does
 not fit or has a line break, its opened words selectable; a thought without words is no step, so it neither makes a
 summary of its own nor splits a run of rows. The live "Thinking" line with dots and a clock ends
@@ -1544,6 +1563,25 @@ Claude Code's AskUserQuestion, the assistant's ask_user and Codex's questions.
 - **BeautifulUI's hook card** keeps its own ↑ n / N ↓ counter instead of capsules; a question skipped with ↓ shows in the
   review as not answered, and its main button opens the card at that question with every answer kept.
 - **The plan pill folds** while a card asks something, so it never sits over the card's buttons.
+
+### 4.12 Keyboard in web lists and forms
+
+For people who work from the keyboard on the web (web audit, 2026-11-14). Every list-and-detail page and every form
+follows these; the To-dos page is the reference (`web/src/views/Todos.tsx`, checked by `Todos.narrow-keyboard.test.tsx`,
+`Todos.plan-fields.test.tsx` and `web/e2e/todos-keyboard-layout.mjs`).
+
+- **A list and its detail at a phone's width** take turns (the list is hidden under the detail). A row opened with Enter
+  or a click moves the focus to the detail's Back, as a page pushed on iOS does. Esc goes back as Back does, except from a
+  field being edited or under a dialog or a menu, which own Esc. Back on the list, by Back, Esc or the browser's Back,
+  the list is scrolled where it was and the focus is on the row that was open, a detail opened by a link too. Side by
+  side, nothing moves: the focus stays on the row and Esc does nothing. Why: hiding the list with `display: none` drops
+  the focused row's focus to `<body>`, and the next Tab starts from the top of the page.
+- **Date and time fields** (`<input type="date">`, `time`, `datetime-local`) save once the value is entered: on leaving
+  the field or on Enter, once however soon the field is left after Enter, and at once for a pick from the browser's
+  picker. Never per typed segment (the "1" of a day "15" is already a valid date), and never disable a field while it
+  saves, which takes the focus away mid-edit (`PlanField`). A half-typed field goes back to the saved value.
+- **⌘↩ / Ctrl+↩ submits** a dialog or a box from its multi-line field, as the composer and New Agent do; Enter alone is
+  a new line, and the Enter that ends an IME composition does neither.
 
 ## 5. Content
 

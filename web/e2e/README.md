@@ -16,6 +16,28 @@ node web/e2e/ask-card-dock.mjs <loopback-web-origin> <artifact-directory> [--chr
 
 Opens the real app against a loopback web server (Vite or a preview build) with every hub request and the socket answered in the browser by invented data. The main conversation shows an ask_user card with four described options in the Pending tray at 1280 × 600, 1024 × 520, 390 × 664 and 360 × 560 (touch), light and dark. It checks the card's send button and the three tray entries are not under the composer before any scrolling, and that "Or write your own" is fully visible (not under the sticky answer row or the tray's title) once tapped and typed into. Writes `results.json` and before/after-typing screenshots; exits nonzero on failure or the four-minute timeout.
 
+## Chat content: sent lines, tables, bubble actions, model pill, runtime line, long folds
+
+```sh
+MOCK_TASKS=1 MOCK_MARKDOWN=1 MOCK_EXCHANGES=1 MOCK_MANAGERS=1 MOCK_RICH=1 MOCK_TASKS_SENT=1 PORT=<port> python3 scripts/mock/mock_hub.py &
+(cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port> --strictPort &)
+node web/e2e/chat-content.mjs <loopback-web-origin> <artifact-directory> [--big] [Chromium executable]
+```
+
+Against an exclusively owned mock-backed web server (Vite or `vite preview`), in Simplified Chinese, light and dark. It
+checks what jsdom cannot show from the web usability audit of 2026-11-14: Persona's message to a task folds to its first
+line without Markdown marks and opens drawn as Markdown, and the supervisor's rework note keeps its lines apart (item 7);
+the main chat's runtime line is absent when nothing is known and reads just "主对话 · 运行中" for a report intercepted in
+the browser, whose place and harness Settings › Assistant shows instead (item 80); the model pill's name is not cut under
+a 600 px composer and a phone keeps the 64 px tile and chevron (item 50); in a 390 px window with a pointer, Tab reaches
+your bubble's first action inside the window, the bar under the bubble stays while the pointer goes down to it and takes
+no clicks once hidden, and in a 1440 px window the bar stays beside the bubble (item 73); on a 390 px phone a "#" column is at most 40 px and the table copy button
+covers no header words of a table that fits (item 77). `--big` runs against the mock started with `MOCK_BIG=1` instead
+(item 90): opening the "worked 1 h 10 min" fold, no animation frame draws more than 60 rows at once, all 650 rows are
+drawn after it with the header where it was tapped, and a search for `make step-600` lands on that row inside the closed
+fold. Only the mock's own reads leave the browser; other origins are blocked. Screenshots and `results.json`
+(`results-big.json`) go to the artifact directory; a 240-second watchdog ends the run, and the last line is the verdict.
+
 ## User-input navigation acceptance
 
 With web dependencies and Chrome already available, point the runner at an **already-running, exclusively owned loopback web server** backed by `scripts/mock/mock_hub.py`. Start the mock on an unused loopback port and configure the web server's `PERSONA_HUB_URL` for that mock; a Vite server proxying a real hub is not acceptable. The runner does not install dependencies, start services, create conversations, or stop the caller's services.
@@ -61,6 +83,26 @@ node web/e2e/agents-paged-groupings.mjs <loopback-web-origin> <artifact-director
 Run against an exclusively owned mock-backed web server. It checks the one grouping bar (待办 / 机器 / 仓库 / 项目 / 状态) over the paged and the complete list, By to-do paged as a section per open to-do (open) and 没挂待办的 (folded) against the mock's `todo` counts, By machine and By state paged, and By repository and a pin taking the complete list; it saves light and dark screenshots. `MOCK_MANAGERS=1` keeps one assistant, since with several the sidebar reads the complete list. The runner clears the mock's default pins for the run (they also keep the complete list), sets one for the pinned case, and puts them back. `--before` takes the same screenshots of a build from before #6662 with no checks. (It replaces `agents-browse-by.mjs`, whose sidebar view by catalog project the sidebar no longer offers; `PagedSessionList.groups.test.tsx` still covers that view.)
 
 It reads the mock's own catalog and holds the page to it, in English at 1280 x 900 (light and dark), a 240 px sidebar and a 390 px touch phone: Browse by Computer draws one section per computer, the busiest first, the first three open on their newest six sessions and the counts adding up to the list's total; Project lists the catalog's projects in its order, the repository on two computers as one section with its remote and both directories and the sessions of both; the value pill's menu is as wide as its pill and names each computer under the project; a picked project is the one flat list of its sessions; Space names each computer's spaces, tells two of one name apart and ends with the sessions in no space; the chosen Browse by survives a reload; Recently updated is the flat list. With `--hub` it also drives 20 s of the mock's churn while the list is drawn by project and prints the mock's read counters by kind, failing when the groups were read more than once per 1.5 s or a complete list was read. Screenshots of each step go to the artifact directory. A three-minute watchdog ends the run with a timeout verdict. Browser and mock checks only: no real hub, node or Git repository is involved.
+
+## To-dos with a keyboard, narrow and wide (web audit items 2, 74, 75, 88)
+
+```sh
+MOCK_TASKS=1 MOCK_TODO_ASKS=1 MOCK_LEADERS=1 PORT=<port> python3 scripts/mock/mock_hub.py &
+(cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port> --strictPort &)
+node web/e2e/todos-keyboard-layout.mjs <loopback-web-origin> [--shots <artifact-directory>] [--executable <chromium>]
+```
+
+Run against an exclusively owned mock-backed web server; the date checks save to the mock, so use a disposable one. In Chinese, light and dark, it types a due day and a reminder hour segment by segment in the to-do's page (1280 × 820) and checks the field keeps the focus and nothing is saved until the field is left or Enter is pressed, then the typed value is saved once, also when the field is left right after Enter; at 390 × 844 it opens a to-do from a focused row with Enter (the focus lands on Back), checks Esc in the title field stays there, and goes back by Esc, Back and the browser's Back, each time with the list scrolled where it was and the focus on that row, and Esc on a to-do opened by a link puts the focus on its row; at 1920 × 1080 it checks the detail is at most 760 px wide and centered; at 1440 × 700 it leaves the page for Machines and comes back with the browser's Back, the list scrolled where it was and the open row in view. A part that throws counts as a failed check and the run goes on; one line per check, a final verdict, exit 1 on a failure or after four minutes. `--shots` saves the typed date field, the narrow detail and list, the wide detail and the list after Back. Browser and mock checks only.
+
+## Knowledge kind chips stay put
+
+```sh
+PORT=<port> python3 scripts/mock/mock_hub.py &
+(cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port> --strictPort &)
+node web/e2e/knowledge-kind-chips.mjs <loopback-web-origin> <artifact-directory> [--channel chrome]
+```
+
+Run against an exclusively owned mock-backed web server; the runner only reads. On `/kb/projects` it checks that every kind chip reads its kind's name alone, then picks each other kind by clicking its chip and holds that kind's list read (`page.route`), so the kind is still loading: **Loading** must show under the chips, and every chip's box is measured. It then lets the read through and measures again once the list is drawn: no chip may move, change or go. It runs at 1280 x 820 and on a 390 x 844 touch phone, light and dark in Chinese and light in English, and saves the chip row with the first and the last kind picked, and with the last kind while it loads. A three-minute watchdog ends the run with a timeout verdict; it exits 1 on a failed check. Browser and mock checks only.
 
 ## Bounded list verification
 

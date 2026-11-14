@@ -24,12 +24,14 @@ const sampleBatch = {items_json: '[{"id":"b#0"}]', history: 'batch-history', fro
 const sampleBareBatch = {items_json: '[]', history: null, from_seq: null, to_seq: null, backlog: false, has_more: null, more_after: true};
 const sampleInsert = {kind: 'insert', index: 258, id: '7#1', json: '{"id":"7#1","kind":"text"}'};
 const sampleUpdate = {kind: 'update', index: 65537, id: '7#2', json: '{"id":"7#2","text":"new"}'};
-const sampleRange = {kind: 'fetch_range', from_seq: 2, through_seq: 8589934600};
+const sampleRange = {kind: 'fetch_range', fold_id: 'fold:3#0', from_seq: 2, through_seq: 8589934600};
 const expectedSamples = {
   'Action.open_chat': {kind: 'open_chat', chat: 'chat/open', snapshot: sampleSnapshot},
   'Action.close_chat': {kind: 'close_chat', chat: 'chat/close'},
   'Action.chat': {kind: 'chat', chat: 'chat/event', event: {kind: 'open_fold', fold_id: 'fold:3#0'}},
   'Action.continue_fill': {kind: 'continue_fill', chat: 'chat/fill'},
+  'Action.hub_changed': {kind: 'hub_changed', chat: 'chat/hub'},
+  'Action.ack': {kind: 'ack', chat: 'chat/ack', seq: 4294967301},
   'Action.wire_payload': {kind: 'wire_payload', chat: 'chat/payload', payload: {kind: 'newer', body: '{"items":[],"more_after":true}'}},
   'ChatEvent.latest': {kind: 'latest', batch: sampleBatch},
   'ChatEvent.pushed': {kind: 'pushed', batch: sampleBareBatch},
@@ -37,16 +39,16 @@ const expectedSamples = {
   'ChatEvent.reloaded': {kind: 'reloaded', items_json: '[{"id":"r#0"}]', history: 'reloaded-history', to_seq: 77, has_more: true},
   'ChatEvent.reloaded_bare': {kind: 'reloaded', items_json: '[]', history: null, to_seq: null, has_more: false},
   'ChatEvent.older': {kind: 'older', items_json: '[{"id":"o#0"}]', has_more: true},
-  'ChatEvent.range': {kind: 'range', items_json: '[{"id":"g#0"}]', more: false},
+  'ChatEvent.range': {kind: 'range', fold_id: null, items_json: '[{"id":"g#0"}]', more: false},
   'ChatEvent.reconnected': {kind: 'reconnected'},
   'ChatEvent.load_older': {kind: 'load_older'},
   'ChatEvent.open_fold': {kind: 'open_fold', fold_id: 'fold:12#0'},
   'ChatEvent.fill_failed': {kind: 'fill_failed'},
   'ChatEvent.older_failed': {kind: 'older_failed'},
-  'ChatEvent.range_failed': {kind: 'range_failed'},
-  'ChatPatch.full': {version: 4294967298, covered: -9, history: 'patch-history', has_more: true, loaded_once: false,
+  'ChatEvent.range_failed': {kind: 'range_failed', fold_id: null},
+  'ChatPatch.full': {version: 4294967298, covered: -9, history: 'patch-history', has_more: true, loaded_once: false, verified: true, acked: 11,
     ops: [{kind: 'remove', index: 3}, sampleInsert, sampleUpdate]},
-  'ChatPatch.bare': {version: 0, covered: 0, history: null, has_more: null, loaded_once: true, ops: []},
+  'ChatPatch.bare': {version: 0, covered: 0, history: null, has_more: null, loaded_once: true, verified: false, acked: null, ops: []},
   'ChatSnapshot.full': sampleSnapshot,
   'ChatSnapshot.bare': {items_json: '', history: null, covered: -2, has_more: null, loaded_once: true},
   'Config.default': {},
@@ -59,7 +61,7 @@ const expectedSamples = {
   'Payload.newer': {kind: 'newer', body: '{"items":[],"more_after":true}'},
   'Payload.reloaded': {kind: 'reloaded', body: '{"items":[],"has_more":false}'},
   'Payload.older': {kind: 'older', body: '{"items":[],"has_more":true}'},
-  'Payload.range': {kind: 'range', body: '{"items":[],"more":true}'},
+  'Payload.range': {kind: 'range', fold_id: null, body: '{"items":[],"more":true}'},
   'Payload.frame': {kind: 'frame', body: '{"type":"items","machine_id":"m1","session_id":"s1"}'},
   'Request.fetch_after': {kind: 'fetch_after', after_seq: 4294967301},
   'Request.fetch_latest': {kind: 'fetch_latest', fold_work: true},
@@ -139,7 +141,7 @@ function eventAction(event, chat) {
     case 'http_reload': return {kind: 'chat', chat, event: {kind: 'reloaded', items_json, history: event.history ?? null,
       to_seq: event.to_seq ?? null, has_more: event.has_more === true}};
     case 'http_older': return {kind: 'chat', chat, event: {kind: 'older', items_json, has_more: event.has_more === true}};
-    case 'http_range': return {kind: 'chat', chat, event: {kind: 'range', items_json, more: event.more === true}};
+    case 'http_range': return {kind: 'chat', chat, event: {kind: 'range', fold_id: null, items_json, more: event.more === true}};
     case 'reconnect': return {kind: 'chat', chat, event: {kind: 'reconnected'}};
     case 'load_older': return {kind: 'chat', chat, event: {kind: 'load_older'}};
     case 'open_fold': return {kind: 'chat', chat, event: {kind: 'open_fold', fold_id: event.fold_id ?? ''}};

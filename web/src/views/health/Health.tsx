@@ -283,6 +283,8 @@ function HealthMemory() {
   }, []);
   useEffect(() => {
     void load();
+    // read again on every hello, as the space's conversations and reports are: one that failed while the hub was away
+    return onHubEvent("hello", () => void load());
   }, [load]);
   const entries = useMemo(() => memoryEntries(files ?? []), [files]);
 

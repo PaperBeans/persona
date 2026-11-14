@@ -623,6 +623,29 @@ Use an invalidation revision as the task key and handle the flag after completio
 - UIKit providers for dynamic `Color(light:dark:)` have different identities each time; equal numeric colors do not imply SwiftUI `Color ==`. When changing static role colors into computed properties, keep default colors statically cached and create extension role colors only once per `StyleSpec` composition. Do not hide repeated color-object creation by changing existing tests to RGB comparisons.
 - A collection's main preview being unexpired does not guarantee valid members: check every member's expiry, unresolved dependencies and permission digest. When uninstall returns `removed_members`, report only members actually removed successfully, not all members inferred from main-package success.
 
+## The dictation bar's wave and measuring it (#5843)
+
+- **A frame-by-frame `Canvas` costs app CPU off the main thread**: `Canvas(rendersAsynchronously: true)` in `TimelineView(.animation)` kept the main thread
+  below the composer it replaced, but RenderBox drew a new texture every frame on its own threads (through the simulator's
+  emulated Metal) and the app's total CPU went up. Redrawing only per sample and sliding with a SwiftUI `.offset` animation
+  was worse still: SwiftUI steps that animation on the main thread every frame. What fit: the canvas drawn once per sample
+  (`TimelineView(.periodic)`), in a view whose layer Core Animation slides (`WaveStripView`), each tick restarting the slide
+  from the layer's presentation value. Listening: app CPU 8.3 % against 11.0 % before (iPhone 17 Pro simulator).
+- **Switching a view between `if timeline { … } else { … }` builds it again**: the strip's hosting controller was rebuilt on
+  every open and close, a long frame each time. Keep one `TimelineView` and slow its schedule while idle.
+- **Measure a container the content cannot size**: a strip one pitch wider than the wave, measured through
+  `onGeometryChange` on a container that fit it, widened on every pass, a layout loop that left the window blank.
+- **Two blocking calls hide in "simple" taps**: `AVAudioSession.setActive(false)` blocks the main thread for about 50 ms
+  (`Dictation.stop(settling:)` lets it go later, off the main thread); a cold `UIImpactFeedbackGenerator`'s first impact
+  blocked 100–600 ms on a simulator (keep one generator and `prepare()` it ahead).
+- **Measuring taps with XCUITest measures XCUITest**: every `tap()`, coordinate taps too, takes an accessibility
+  snapshot of the app on its main thread (about 80 ms over a long conversation), inside the measured window. Drive the
+  touches from the host with `idb ui tap`, start and stop `FrameStats` with `simctl spawn … notifyutil -p
+  com.persona.perf.frames.start|stop`, and wait for the app's report to reach the mock before switching its label.
+- **Simulator CPU numbers have modes**: for several minutes after installing a freshly built binary, the app's listening
+  CPU sat near 18 % instead of 8–11 %, with no view bodies or pushes, then dropped. Alternate old and new builds, let the
+  machine settle after a build, count the first round after an install as warm-up, and compare like runs.
+
 ## Video export
 
 - 2026-11-04, #1045: generated gray video triggered `EXC_BREAKPOINT / SIGTRAP` in a real compression test, with the stack in Swift AVFoundation's `AVAssetExportSession.ProgressStates.Iterator.StateInternal.init`.

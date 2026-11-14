@@ -444,7 +444,7 @@ enum ExtensionText {
     /// (`runNote`). hub's `status` values are unchanged.
     static func state(_ p: HubExtension) -> String {
         if let note = nodeStatusNote(p) { return note }
-        switch p.status {
+        return switch p.status {
         case "running", "stopped": String(localized: "On [Herdr Notice 56410f]", comment: "Extension state: on")
         case "starting": String(localized: "Starting [Session Modes 087739]")
         case "needs_setup": String(localized: "Needs Setup")
@@ -501,7 +501,7 @@ enum ExtensionText {
     /// Whether an enabled plugin's program runs right now, under its description; nil for any other state.
     static func runNote(_ p: HubExtension) -> String? {
         if p.nodeStatus != nil { return nil } // the node status line already says where it runs
-        switch p.status {
+        return switch p.status {
         case "running": String(localized: "Running [Extensions Model 9273b8]")
         case "stopped": String(localized: "Not running; starts when needed")
         default: nil
