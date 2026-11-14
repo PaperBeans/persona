@@ -41,6 +41,12 @@ func (r *fleetRun) restart() {
 	r.stop = func() { cancel(); <-done }
 }
 
+// elapse moves the bubble's clock on by d and lets the loop settle.
+func elapse(d time.Duration) {
+	time.Sleep(d) // sleep-ok: the fake clock of a synctest bubble, no wall time
+	synctest.Wait()
+}
+
 func fleetStarts(sink *fleetPushSink) int { return sink.count("phone", "liveactivity", "start") }
 
 // A push-started activity whose update token the phone reported follows the fleet as before: the agent it lists
@@ -62,8 +68,7 @@ func TestFleetPushStartedActivityFollowsFleet(t *testing.T) {
 				h, sink := r.h, r.sink
 				h.live.update("phone", func(v *db.LiveActivity) { v.ActivityID, v.PushToken = "", "" })
 				reportLive(t, h, tc.shown, FleetStats{})
-				time.Sleep(fleetCoalesce)
-				synctest.Wait()
+				elapse(fleetCoalesce)
 				if got := fleetStarts(sink); got != 1 {
 					t.Fatalf("starts: %d, want 1", got)
 				}
@@ -76,8 +81,7 @@ func TestFleetPushStartedActivityFollowsFleet(t *testing.T) {
 					r.restart()
 				}
 				reportLive(t, h, FleetState{}, FleetStats{})
-				time.Sleep(fleetEndAfter + 30*time.Second)
-				synctest.Wait()
+				elapse(fleetEndAfter + 30*time.Second)
 				if got := sink.count("phone", "liveactivity", "end"); got != 1 {
 					t.Fatalf("the activity was not ended: %d end pushes", got)
 				}
@@ -99,27 +103,23 @@ func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
 		h, sink := r.h, r.sink
 		h.live.update("phone", func(v *db.LiveActivity) { v.ActivityID, v.PushToken = "", "" })
 		reportLive(t, h, fleetWorking, FleetStats{})
-		time.Sleep(fleetCoalesce)
-		synctest.Wait()
+		elapse(fleetCoalesce)
 		started = time.Now()
 		if got := fleetStarts(sink); got != 1 {
 			t.Fatalf("starts: %d, want 1", got)
 		}
 		// Same round, past the rolling cooldown, on a hub that restarted (or the other slot).
-		time.Sleep(fleetRefresh + time.Minute)
+		elapse(fleetRefresh + time.Minute)
 		r.restart()
-		time.Sleep(fleetCoalesce)
-		synctest.Wait()
+		elapse(fleetCoalesce)
 		if got := fleetStarts(sink); got != 1 {
 			t.Fatalf("restart in the same round: %d starts, want 1", got)
 		}
 		// The agent ends; later a request arrives: a new round.
 		reportLive(t, h, FleetState{}, FleetStats{})
-		time.Sleep(fleetRefresh)
-		synctest.Wait()
+		elapse(fleetRefresh)
 		reportLive(t, h, fleetAsking, FleetStats{})
-		time.Sleep(fleetCoalesce)
-		synctest.Wait()
+		elapse(fleetCoalesce)
 		if got := fleetStarts(sink); got != 1 {
 			t.Fatalf("next round: %d starts, want 1", got)
 		}
@@ -136,21 +136,18 @@ func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
 			h.live.update("phone", func(v *db.LiveActivity) {
 				v.ActivityID, v.PushToken, v.StartedAt = "started", "phone-started", time.Now()
 			})
-			time.Sleep(20 * time.Second) // the next tick refreshes an activity the hub has pushed nothing to
-			synctest.Wait()
+			elapse(20 * time.Second) // the next tick refreshes an activity the hub has pushed nothing to
 			if got := sink.count("phone", "liveactivity", "update"); got != 1 {
 				t.Fatalf("the reported activity got %d updates, want 1", got)
 			}
 			reportLive(t, h, FleetState{}, FleetStats{}) // answered: the activity ends
-			time.Sleep(fleetEndAfter + 30*time.Second)
-			synctest.Wait()
+			elapse(fleetEndAfter + 30*time.Second)
 			if got := sink.count("phone", "liveactivity", "end"); got != 1 {
 				t.Fatalf("ends: %d, want 1", got)
 			}
 			r.restart()
 			reportLive(t, h, fleetWorking, FleetStats{})
-			time.Sleep(fleetCoalesce)
-			synctest.Wait()
+			elapse(fleetCoalesce)
 			if got := fleetStarts(sink); got != 2 {
 				t.Fatalf("after the phone reported a token: %d starts, want 2", got)
 			}
@@ -162,8 +159,7 @@ func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
 			r, _ := unanswered(t)
 			h, sink := r.h, r.sink
 			reportLive(t, h, FleetState{}, FleetStats{})
-			time.Sleep(fleetCoalesce)
-			synctest.Wait()
+			elapse(fleetCoalesce)
 			app := &client{hub: h, device: "credential-ios", role: roleFull, out: make(chan []byte, 64), clean: true}
 			addTestClient(h, app)
 			h.onClientMessage(context.Background(), app, []byte(`{"type":"register_phone","device_id":"phone","tools":[]}`))
@@ -172,8 +168,7 @@ func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
 			synctest.Wait()
 			r.restart()
 			reportLive(t, h, fleetWorking, FleetStats{})
-			time.Sleep(fleetCoalesce)
-			synctest.Wait()
+			elapse(fleetCoalesce)
 			if got := fleetStarts(sink); got != 2 {
 				t.Fatalf("after the app connected: %d starts, want 2", got)
 			}
@@ -184,14 +179,12 @@ func TestFleetUnansweredStartHoldsTheNext(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			r, started := unanswered(t)
 			sink := r.sink
-			time.Sleep(time.Until(started.Add(fleetMaxAge - time.Minute)))
-			synctest.Wait()
+			elapse(time.Until(started.Add(fleetMaxAge - time.Minute)))
 			if got := fleetStarts(sink); got != 1 {
 				t.Fatalf("before fleetMaxAge: %d starts, want 1", got)
 			}
 			r.restart()
-			time.Sleep(2 * time.Minute)
-			synctest.Wait()
+			elapse(2 * time.Minute)
 			if got := fleetStarts(sink); got != 2 {
 				t.Fatalf("after fleetMaxAge: %d starts, want 2", got)
 			}
