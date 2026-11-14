@@ -73,6 +73,10 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 	modes := map[string]string{} // each computer's Claude Code default mode, read once for this plan
 	for i := range a.Tasks {
 		t := &a.Tasks[i]
+		asked := strings.TrimSpace(t.Permission) // the caller's own, before read-only replaces it
+		if t.Readonly {
+			asked = ""
+		}
 		t.normalizeReadonlyPermission()
 		t.TodoID, t.Error, t.ErrorCode, t.ErrorArgs = "", "", "", nil
 		t.WorkspaceResolved, t.ReservedTodoID, t.WorkspaceInferred = nil, "", false
@@ -136,22 +140,33 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		t.Reroute = preview.Reroute
 		// What it runs on the computer it lands on (#2640): a default that computer lacks is swapped now, so the card
 		// names the launcher that will run and its why says so; a launcher this plan names that it lacks is refused.
+		takesModes := true
 		if m, ok := s.machineByName(ctx, t.Machine); ok {
 			params := map[string]any{"launcher": t.Launcher, "model": t.Model, "effort": t.Effort, "tier": t.Tier}
 			own, err := s.resolveStart(ctx, params)
 			if err != nil {
 				return "", fmt.Errorf("task %d: %w", i+1, err)
 			}
-			claude, err := s.fitTaskLauncher(ctx, t, m, own, params)
+			agent, err := s.fitTaskLauncher(ctx, t, m, own, params)
 			if err != nil {
 				return "", fmt.Errorf("task %d: %w", i+1, err)
 			}
-			if claude {
+			if agent == "claude" {
 				t.Permission = "bypassPermissions"
 			}
+			// traex, omp…: no mode, no effort (launcher_modes.go). One the call names is refused now, rather than by
+			// the computer once the task starts; one a tier filled in is dropped.
+			if takesModes = startTakesModes(agent); !takesModes {
+				launcher, _ := params["launcher"].(string)
+				if err := startModesRefused(launcher, agent, asked, own.effort); err != nil {
+					return "", fmt.Errorf("task %d: %w", i+1, err)
+				}
+				t.Effort = ""
+			}
 		}
-		// Unset: settled on the computer it lands on, so the card shows what will run (tasks_permission.go).
-		if t.Permission == "" {
+		// Unset: settled on the computer it lands on, so the card shows what will run (tasks_permission.go). An agent
+		// that takes no mode gets none: a read-only task keeps its plan, which only says it is read-only.
+		if t.Permission == "" && takesModes {
 			t.Permission = s.taskPermission(ctx, t.Machine, modes)
 		}
 		if err := s.resolveTaskWorkspace(ctx, t); err != nil {
