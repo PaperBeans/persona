@@ -1,4 +1,4 @@
-package assistant
+package kbhistory
 
 import (
 	"context"
@@ -88,12 +88,12 @@ func (c *historyAnchorsCache) reach(now, cut time.Time, zone *time.Location) {
 }
 
 func historyAnchorsPath(data, source string) string {
-	return filepath.Join(historyDir(data), "anchors-"+kb.SafeID(source)+".json")
+	return filepath.Join(Dir(data), "anchors-"+kb.SafeID(source)+".json")
 }
 
 func loadHistoryAnchors(data, source string) (*historyAnchorsCache, error) {
 	c := &historyAnchorsCache{Source: source}
-	if _, err := readJSONFile(historyAnchorsPath(data, source), c); err != nil {
+	if _, err := ReadJSONFile(historyAnchorsPath(data, source), c); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -140,7 +140,7 @@ func historyYears(now, cut time.Time, zone *time.Location) []historyAnchorYear {
 // goes further), when the selection reads a chat of the plan personally that is not finished yet, or would read a
 // chat the search finds outside the list; then adds the chats the plan does not list.
 func (d *historyDriver) gatherAnchors(ctx context.Context) error {
-	p, ok, err := loadHistoryPlan(d.data, d.source)
+	p, ok, err := LoadPlan(d.data, d.source)
 	if err != nil || !ok {
 		return halt(false, "plan_gone")
 	}
@@ -152,9 +152,9 @@ func (d *historyDriver) gatherAnchors(ctx context.Context) error {
 	if err != nil {
 		return halt(false, "kb_unavailable")
 	}
-	sel, ret := historySelection(e)
+	sel, ret := Selection(e)
 	days, need := 0, false
-	if u := historyNeed(sel, ret, d.source, historyPlanChat{Kind: historyUnlisted}); u.Read {
+	if u := Need(sel, ret, d.source, PlanChat{Kind: Unlisted}); u.Read {
 		days, need = u.Days, !cache.Done
 	}
 	for _, r := range p.reading(sel, ret) {
@@ -162,7 +162,7 @@ func (d *historyDriver) gatherAnchors(ctx context.Context) error {
 			continue
 		}
 		days = max(days, r.need.Days)
-		if !historyChatDone(d.data, kb.ChatID(r.chat.filing(d.source), r.chat.ID), r.need) {
+		if !historyChatDone(d.data, kb.ChatID(r.chat.Filing(d.source), r.chat.ID), r.need) {
 			need = true
 		}
 	}
@@ -203,7 +203,7 @@ func (d *historyDriver) gatherYear(ctx context.Context, cache *historyAnchorsCac
 		}
 		switch {
 		case c.err != nil:
-			o, code := c.classify()
+			o, code := c.Classify()
 			switch o {
 			case historyPauseIt:
 				if c.stop != nil {
@@ -213,8 +213,8 @@ func (d *historyDriver) gatherYear(ctx context.Context, cache *historyAnchorsCac
 					return err
 				}
 				continue
-			case historyStopIt:
-				return haltWhy(true, c.stopWhy(code))
+			case StopIt:
+				return HaltWhy(true, c.stopWhy(code))
 			}
 			y.Done, y.Partial = true, true // the search refused this window: the year is not covered, its chats are read backwards
 		case ans.Pace != nil && ans.Pace.Stop:
@@ -261,7 +261,7 @@ func (d *historyDriver) gatherYear(ctx context.Context, cache *historyAnchorsCac
 // plan's approval back, as new chats in a refreshed list do (the approval's fingerprint does not have them): the run
 // ends at the next call, the owner is told, and nothing of them is read until the owner approves the plan again.
 func (d *historyDriver) addUnlisted(ctx context.Context, cache *historyAnchorsCache) error {
-	p, ok, err := loadHistoryPlan(d.data, d.source)
+	p, ok, err := LoadPlan(d.data, d.source)
 	if err != nil || !ok {
 		return halt(false, "plan_gone")
 	}
@@ -276,7 +276,7 @@ func (d *historyDriver) addUnlisted(ctx context.Context, cache *historyAnchorsCa
 	if !changed {
 		return nil
 	}
-	if err := saveHistoryPlan(d.data, p); err != nil {
+	if err := SavePlan(d.data, p); err != nil {
 		return halt(true, "plan_save_failed", "class", errClass(err))
 	}
 	return d.gate(ctx)
@@ -416,7 +416,7 @@ func (d *historyDriver) stepPositional(ctx context.Context, e *kb.Engine, w hist
 	if ps.WindowsDone {
 		return d.stepFallback(ctx, e, w, st)
 	}
-	sel, _ := historySelection(e)
+	sel, _ := Selection(e)
 	span := sel.MineContext()
 	windows := historyWindows(ps.Anchors, span)
 	var a, b int64
@@ -730,7 +730,7 @@ func (d *historyDriver) stepFallback(ctx context.Context, e *kb.Engine, w histor
 		_, done, err := d.outcome(ctx, e, w, st, c, historyChatError, "cursor_stuck", nil)
 		return done, err
 	}
-	sel, _ := historySelection(e)
+	sel, _ := Selection(e)
 	yearDone := older || atStart
 	out, near := d.pick(w, sel.MineContext(), st, in, yearDone)
 	switch {

@@ -1,4 +1,4 @@
-package assistant
+package kbhistory
 
 import (
 	"maps"
@@ -20,7 +20,7 @@ type historyReason struct {
 }
 
 // reason is a historyReason of code with args given as key, value pairs.
-func reason(code string, kv ...string) historyReason {
+func NewReason(code string, kv ...string) historyReason {
 	r := historyReason{Code: code}
 	for i := 0; i+1 < len(kv); i += 2 {
 		if r.Args == nil {

@@ -1,4 +1,4 @@
-package assistant
+package saved
 
 import (
 	"context"
@@ -23,19 +23,25 @@ import (
 // They are this assistant's settings, as saved places and repository bindings are, so every device shows the same list.
 // The assistant itself has no tools for them: its fixed payload stays as it was.
 
-// savedPromptsKey is where the prompts are kept, in the order the "/" list shows them.
-const savedPromptsKey = "assistant.saved_prompts"
+// promptStore is the part of the assistant's store the prompts use.
+type promptStore interface {
+	Setting(ctx context.Context, key string, out any) (bool, error)
+	PutSetting(ctx context.Context, key string, value any) error
+}
+
+// PromptsKey is where the prompts are kept, in the order the "/" list shows them.
+const PromptsKey = "assistant.saved_prompts"
 
 // The limits of a prompt: its name is the word after "/" (one word, so the composer's "/word" finds it), its text what
 // it types.
 const (
-	savedPromptNameMax = 32
-	savedPromptTextMax = 8000
-	savedPromptsMax    = 100
+	PromptNameMax = 32
+	PromptTextMax = 8000
+	PromptsMax    = 100
 )
 
-// SavedPrompt is one of the user's saved prompts.
-type SavedPrompt struct {
+// Prompt is one of the user's saved prompts.
+type Prompt struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Text      string    `json:"text"`
@@ -49,8 +55,9 @@ type savedPromptInput struct {
 	Text string `json:"text"`
 }
 
-// savedPromptBook serializes the changes: each reads the list, changes it and writes it back.
-type savedPromptBook struct {
+// promptBook serializes the changes: each reads the list, changes it and writes it back.
+type promptBook struct {
+	h  Host
 	mu sync.Mutex
 }
 
@@ -58,9 +65,9 @@ var (
 	errSavedPromptsStore = i18n.Err("assistant-saved-prompts.err_store")
 	errSavedPromptRead   = i18n.Err("assistant-saved-prompts.err_read_only")
 	errSavedPromptGone   = i18n.Err("assistant-saved-prompts.err_not_found")
-	errSavedPromptName   = i18n.Err("assistant-saved-prompts.err_name", i18n.Args{"max": savedPromptNameMax})
-	errSavedPromptText   = i18n.Err("assistant-saved-prompts.err_text", i18n.Args{"max": savedPromptTextMax})
-	errSavedPromptsFull  = i18n.Err("assistant-saved-prompts.err_too_many", i18n.Args{"max": savedPromptsMax})
+	errSavedPromptName   = i18n.Err("assistant-saved-prompts.err_name", i18n.Args{"max": PromptNameMax})
+	errSavedPromptText   = i18n.Err("assistant-saved-prompts.err_text", i18n.Args{"max": PromptTextMax})
+	errSavedPromptsFull  = i18n.Err("assistant-saved-prompts.err_too_many", i18n.Args{"max": PromptsMax})
 	errSavedPromptOrder  = i18n.Err("assistant-saved-prompts.err_order")
 )
 
@@ -82,30 +89,30 @@ func savedPromptTextRune(r rune) bool {
 
 // prompt checks in and makes it a prompt (no id or times yet): the name trimmed and without a "/" typed before it, the
 // text's line ends made "\n" and its surrounding blank space dropped.
-func (in savedPromptInput) prompt() (SavedPrompt, error) {
+func (in savedPromptInput) prompt() (Prompt, error) {
 	name := strings.TrimPrefix(strings.TrimSpace(in.Name), "/")
-	if name == "" || utf8.RuneCountInString(name) > savedPromptNameMax || strings.ContainsFunc(name, func(r rune) bool { return !savedPromptNameRune(r) }) {
-		return SavedPrompt{}, errSavedPromptName
+	if name == "" || utf8.RuneCountInString(name) > PromptNameMax || strings.ContainsFunc(name, func(r rune) bool { return !savedPromptNameRune(r) }) {
+		return Prompt{}, errSavedPromptName
 	}
 	text := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(in.Text, "\r\n", "\n"), "\r", "\n"))
-	if text == "" || !utf8.ValidString(text) || utf8.RuneCountInString(text) > savedPromptTextMax ||
+	if text == "" || !utf8.ValidString(text) || utf8.RuneCountInString(text) > PromptTextMax ||
 		strings.ContainsFunc(text, func(r rune) bool { return !savedPromptTextRune(r) }) {
-		return SavedPrompt{}, errSavedPromptText
+		return Prompt{}, errSavedPromptText
 	}
-	return SavedPrompt{Name: name, Text: text}, nil
+	return Prompt{Name: name, Text: text}, nil
 }
 
 // sameSavedPromptName: two names are the same prompt's, case aside (the "/" list matches without it).
 func sameSavedPromptName(a, b string) bool { return strings.EqualFold(a, b) }
 
 // savedPrompts are the saved prompts, in the "/" list's order.
-func (s *Service) savedPrompts(ctx context.Context) ([]SavedPrompt, error) {
-	st := s.store()
-	if st == nil {
+func (b *promptBook) prompts(ctx context.Context) ([]Prompt, error) {
+	st, ok := b.h.Store().(promptStore)
+	if !ok {
 		return nil, errSavedPromptsStore
 	}
-	var prompts []SavedPrompt
-	if _, err := st.Setting(ctx, savedPromptsKey, &prompts); err != nil {
+	var prompts []Prompt
+	if _, err := st.Setting(ctx, PromptsKey, &prompts); err != nil {
 		return nil, err
 	}
 	return prompts, nil
@@ -113,10 +120,10 @@ func (s *Service) savedPrompts(ctx context.Context) ([]SavedPrompt, error) {
 
 // changeSavedPrompts runs change on the saved prompts and keeps what it returns, one change at a time; the apps are told
 // (event assistant_saved_prompts), so another open page reads the list again.
-func (s *Service) changeSavedPrompts(ctx context.Context, change func([]SavedPrompt) ([]SavedPrompt, error)) ([]SavedPrompt, error) {
-	s.savedPromptBook.mu.Lock()
-	defer s.savedPromptBook.mu.Unlock()
-	prompts, err := s.savedPrompts(ctx)
+func (b *promptBook) change(ctx context.Context, change func([]Prompt) ([]Prompt, error)) ([]Prompt, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	prompts, err := b.prompts(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -124,20 +131,24 @@ func (s *Service) changeSavedPrompts(ctx context.Context, change func([]SavedPro
 	if err != nil {
 		return nil, err
 	}
-	if err := s.store().PutSetting(ctx, savedPromptsKey, next); err != nil {
+	st, ok := b.h.Store().(promptStore)
+	if !ok {
+		return nil, errSavedPromptsStore
+	}
+	if err := st.PutSetting(ctx, PromptsKey, next); err != nil {
 		return nil, err
 	}
-	s.event(ctx, map[string]any{"type": "assistant_saved_prompts"})
+	b.h.Event(ctx, map[string]any{"type": "assistant_saved_prompts"})
 	return next, nil
 }
 
 // addSavedPrompt adds p at the end of the list; a prompt of the same name is an error.
-func (s *Service) addSavedPrompt(ctx context.Context, p SavedPrompt) (SavedPrompt, error) {
-	_, err := s.changeSavedPrompts(ctx, func(prompts []SavedPrompt) ([]SavedPrompt, error) {
-		if slices.ContainsFunc(prompts, func(x SavedPrompt) bool { return sameSavedPromptName(x.Name, p.Name) }) {
+func (b *promptBook) add(ctx context.Context, p Prompt) (Prompt, error) {
+	_, err := b.change(ctx, func(prompts []Prompt) ([]Prompt, error) {
+		if slices.ContainsFunc(prompts, func(x Prompt) bool { return sameSavedPromptName(x.Name, p.Name) }) {
 			return nil, savedPromptNameTaken(p.Name)
 		}
-		if len(prompts) >= savedPromptsMax {
+		if len(prompts) >= PromptsMax {
 			return nil, errSavedPromptsFull
 		}
 		now := time.Now().UTC()
@@ -149,10 +160,10 @@ func (s *Service) addSavedPrompt(ctx context.Context, p SavedPrompt) (SavedPromp
 
 // newSavedPromptID is an id no prompt in prompts has: the time, moved on past one taken (a clock as coarse as a
 // microsecond gives two prompts added in a row the same time).
-func newSavedPromptID(prompts []SavedPrompt, now time.Time) string {
+func newSavedPromptID(prompts []Prompt, now time.Time) string {
 	for n := now.UnixNano(); ; n++ {
 		id := fmt.Sprintf("sp%d", n)
-		if !slices.ContainsFunc(prompts, func(x SavedPrompt) bool { return x.ID == id }) {
+		if !slices.ContainsFunc(prompts, func(x Prompt) bool { return x.ID == id }) {
 			return id
 		}
 	}
@@ -160,13 +171,13 @@ func newSavedPromptID(prompts []SavedPrompt, now time.Time) string {
 
 // updateSavedPrompt changes prompt id's name and text, keeping its place in the list; a name another prompt has is an
 // error.
-func (s *Service) updateSavedPrompt(ctx context.Context, id string, p SavedPrompt) (SavedPrompt, error) {
-	_, err := s.changeSavedPrompts(ctx, func(prompts []SavedPrompt) ([]SavedPrompt, error) {
-		i := slices.IndexFunc(prompts, func(x SavedPrompt) bool { return x.ID == id })
+func (b *promptBook) update(ctx context.Context, id string, p Prompt) (Prompt, error) {
+	_, err := b.change(ctx, func(prompts []Prompt) ([]Prompt, error) {
+		i := slices.IndexFunc(prompts, func(x Prompt) bool { return x.ID == id })
 		if i < 0 {
 			return nil, errSavedPromptGone
 		}
-		if slices.ContainsFunc(prompts, func(x SavedPrompt) bool { return x.ID != id && sameSavedPromptName(x.Name, p.Name) }) {
+		if slices.ContainsFunc(prompts, func(x Prompt) bool { return x.ID != id && sameSavedPromptName(x.Name, p.Name) }) {
 			return nil, savedPromptNameTaken(p.Name)
 		}
 		p.ID, p.CreatedAt, p.UpdatedAt = id, prompts[i].CreatedAt, time.Now().UTC()
@@ -177,17 +188,17 @@ func (s *Service) updateSavedPrompt(ctx context.Context, id string, p SavedPromp
 }
 
 // deleteSavedPrompt removes prompt id; one that is not there is not an error (deleting twice is fine).
-func (s *Service) deleteSavedPrompt(ctx context.Context, id string) error {
-	_, err := s.changeSavedPrompts(ctx, func(prompts []SavedPrompt) ([]SavedPrompt, error) {
-		return slices.DeleteFunc(prompts, func(x SavedPrompt) bool { return x.ID == id }), nil
+func (b *promptBook) delete(ctx context.Context, id string) error {
+	_, err := b.change(ctx, func(prompts []Prompt) ([]Prompt, error) {
+		return slices.DeleteFunc(prompts, func(x Prompt) bool { return x.ID == id }), nil
 	})
 	return err
 }
 
 // orderSavedPrompts puts the prompts in the order of ids, which must name each saved prompt once: a list that changed
 // since the page read it (one added, deleted, or named twice) is refused, and the page reads it again.
-func (s *Service) orderSavedPrompts(ctx context.Context, ids []string) ([]SavedPrompt, error) {
-	return s.changeSavedPrompts(ctx, func(prompts []SavedPrompt) ([]SavedPrompt, error) {
+func (b *promptBook) order(ctx context.Context, ids []string) ([]Prompt, error) {
+	return b.change(ctx, func(prompts []Prompt) ([]Prompt, error) {
 		if len(ids) != len(prompts) {
 			return nil, errSavedPromptOrder
 		}
@@ -195,7 +206,7 @@ func (s *Service) orderSavedPrompts(ctx context.Context, ids []string) ([]SavedP
 		for i, p := range prompts {
 			at[p.ID] = i
 		}
-		out := make([]SavedPrompt, 0, len(prompts))
+		out := make([]Prompt, 0, len(prompts))
 		for _, id := range ids {
 			i, ok := at[id]
 			if !ok {
@@ -226,16 +237,16 @@ func writeSavedPromptError(w http.ResponseWriter, err error) {
 }
 
 // listedSavedPrompts is the list as the routes answer it: never null.
-func listedSavedPrompts(prompts []SavedPrompt) map[string]any {
+func listedSavedPrompts(prompts []Prompt) map[string]any {
 	if prompts == nil {
-		prompts = []SavedPrompt{}
+		prompts = []Prompt{}
 	}
 	return map[string]any{"prompts": prompts}
 }
 
-func (s *Service) savedPromptRoutes() {
-	s.handle("GET /api/v1/assistant/saved-prompts", func(w http.ResponseWriter, r *http.Request) {
-		prompts, err := s.savedPrompts(r.Context())
+func (b *promptBook) routes() {
+	b.h.Handle("GET /api/v1/assistant/saved-prompts", func(w http.ResponseWriter, r *http.Request) {
+		prompts, err := b.prompts(r.Context())
 		if err != nil {
 			writeSavedPromptError(w, err)
 			return
@@ -244,42 +255,42 @@ func (s *Service) savedPromptRoutes() {
 	})
 	// writable: a device that may change the prompts; false when it answered 403.
 	writable := func(w http.ResponseWriter, r *http.Request) bool {
-		if !fullRole(r) {
+		if !b.h.Full(r) {
 			apierr.Write(w, http.StatusForbidden, errSavedPromptRead)
 			return false
 		}
 		return true
 	}
 	// readPrompt is the prompt in the request's body; false when it answered an error.
-	readPrompt := func(w http.ResponseWriter, r *http.Request) (SavedPrompt, bool) {
+	readPrompt := func(w http.ResponseWriter, r *http.Request) (Prompt, bool) {
 		if !writable(w, r) {
-			return SavedPrompt{}, false
+			return Prompt{}, false
 		}
 		var in savedPromptInput
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
 			apierr.Write(w, http.StatusBadRequest, err)
-			return SavedPrompt{}, false
+			return Prompt{}, false
 		}
 		p, err := in.prompt()
 		if err != nil {
 			writeSavedPromptError(w, err)
-			return SavedPrompt{}, false
+			return Prompt{}, false
 		}
 		return p, true
 	}
-	s.handle("POST /api/v1/assistant/saved-prompts", func(w http.ResponseWriter, r *http.Request) {
+	b.h.Handle("POST /api/v1/assistant/saved-prompts", func(w http.ResponseWriter, r *http.Request) {
 		p, ok := readPrompt(w, r)
 		if !ok {
 			return
 		}
-		p, err := s.addSavedPrompt(r.Context(), p)
+		p, err := b.add(r.Context(), p)
 		if err != nil {
 			writeSavedPromptError(w, err)
 			return
 		}
 		apierr.WriteJSON(w, map[string]any{"prompt": p})
 	})
-	s.handle("PUT /api/v1/assistant/saved-prompts/order", func(w http.ResponseWriter, r *http.Request) {
+	b.h.Handle("PUT /api/v1/assistant/saved-prompts/order", func(w http.ResponseWriter, r *http.Request) {
 		if !writable(w, r) {
 			return
 		}
@@ -290,30 +301,30 @@ func (s *Service) savedPromptRoutes() {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
-		prompts, err := s.orderSavedPrompts(r.Context(), in.IDs)
+		prompts, err := b.order(r.Context(), in.IDs)
 		if err != nil {
 			writeSavedPromptError(w, err)
 			return
 		}
 		apierr.WriteJSON(w, listedSavedPrompts(prompts))
 	})
-	s.handle("PUT /api/v1/assistant/saved-prompts/{id}", func(w http.ResponseWriter, r *http.Request) {
+	b.h.Handle("PUT /api/v1/assistant/saved-prompts/{id}", func(w http.ResponseWriter, r *http.Request) {
 		p, ok := readPrompt(w, r)
 		if !ok {
 			return
 		}
-		p, err := s.updateSavedPrompt(r.Context(), r.PathValue("id"), p)
+		p, err := b.update(r.Context(), r.PathValue("id"), p)
 		if err != nil {
 			writeSavedPromptError(w, err)
 			return
 		}
 		apierr.WriteJSON(w, map[string]any{"prompt": p})
 	})
-	s.handle("DELETE /api/v1/assistant/saved-prompts/{id}", func(w http.ResponseWriter, r *http.Request) {
+	b.h.Handle("DELETE /api/v1/assistant/saved-prompts/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !writable(w, r) {
 			return
 		}
-		if err := s.deleteSavedPrompt(r.Context(), r.PathValue("id")); err != nil {
+		if err := b.delete(r.Context(), r.PathValue("id")); err != nil {
 			writeSavedPromptError(w, err)
 			return
 		}

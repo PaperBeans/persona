@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/assistant/saved"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/prompts"
@@ -156,20 +157,19 @@ type Service struct {
 	noBackground bool
 	// briefsOptional: task_plan takes a task without done_when / expect_minutes (briefRequired). Only the tests of
 	// what a plan does once it exists set it; the hub never does.
-	briefsOptional  bool
-	background      backgroundBook  // supervise_background.go
-	autoRuns        autoReviewBook  // supervise_autoreview.go
-	reports         reportBook      // reports.go
-	upReports       reportRate      // agent_control.go: report_to_supervisor
-	noteRate        reportRate      // todo_decisions.go: todo_decision_add
-	dispatch        dispatchBook    // dispatch.go: dispatch_start, dispatch_read
-	admission       admissionBook   // admission.go: execution-agent resource and direction gate
-	adoptMu         sync.Mutex      // agent_control.go: one agent_supervise at a time
-	placeBook       placeBook       // places.go
-	savedPromptBook savedPromptBook // saved_prompts.go
-	accept          acceptBook      // acceptance.go
-	pushQuiet       quietSwitch     // push_quiet.go: the hub's low-distraction switch as last read
-	deploy          deployProbe     // deploy_check.go: is the work in the running hub
+	briefsOptional bool
+	background     backgroundBook // supervise_background.go
+	autoRuns       autoReviewBook // supervise_autoreview.go
+	reports        reportBook     // reports.go
+	upReports      reportRate     // agent_control.go: report_to_supervisor
+	noteRate       reportRate     // todo_decisions.go: todo_decision_add
+	dispatch       dispatchBook   // dispatch.go: dispatch_start, dispatch_read
+	admission      admissionBook  // admission.go: execution-agent resource and direction gate
+	adoptMu        sync.Mutex     // agent_control.go: one agent_supervise at a time
+	placeBook      placeBook      // places.go
+	accept         acceptBook     // acceptance.go
+	pushQuiet      quietSwitch    // push_quiet.go: the hub's low-distraction switch as last read
+	deploy         deployProbe    // deploy_check.go: is the work in the running hub
 
 	reviewDismissals taskReviewDismissalBook // task_review_dismissals.go
 	// ownerVerifiesAll: every deployed task asks the owner to verify, not only the big ones (ownerVerifies; tests).
@@ -290,8 +290,7 @@ func New(o Options) *Service {
 	s.workoutRoutes()
 	s.scheduleRoutes()
 	s.placeRoutes()
-	s.savedPromptRoutes()
-	s.savedAgentSearchRoutes()
+	saved.Register(saved.Host{Store: func() any { return s.store() }, Event: s.event, Handle: s.handle, Full: fullRole, BodyErr: writeBodyErr})
 	s.repositoryRoutes()
 	s.taskRoutes()
 	s.viewActionRoutes()

@@ -324,8 +324,11 @@ func (m *Machine) establishViaOnce(ctx context.Context, p *nodePath, via string,
 func (m *Machine) serve(ctx context.Context, c *nodeConn) error {
 	p := c.path
 	m.d.pathConnected(p)
+	listed := make(chan struct{})
 	m.mu.Lock()
 	m.peer, m.info, m.online, m.err, m.lastSeen = c.peer, c.info, true, "", time.Now().UTC()
+	m.sessionsListed = false
+	m.sessionsReady = listed
 	m.reloadUntil = time.Time{}
 	m.connectedAt = m.lastSeen
 	m.forgetOpenedLocked()     // a new connection has nothing of the hub's open yet
@@ -402,16 +405,16 @@ func (m *Machine) serve(ctx context.Context, c *nodeConn) error {
 		var list struct {
 			Sessions []proto.Session `json:"sessions"`
 		}
-		revision := m.sessionsRevision()
+		snapshot := &sessionSnapshot{peer: c.peer, revision: m.sessionsRevision()}
 		if err := c.peer.Call(ctx, "sessions.list", map[string]any{}, &list); err == nil {
-			m.setInitialSessions(c.peer, revision, list.Sessions)
-			m.d.forward(m.cfg.ID, "sessions.changed", map[string]any{"sessions": m.sessionList()})
+			m.acceptSessionsList(snapshot, list.Sessions, true)
 			updates = true
 		}
 	} else {
 		rewatch = nil
 		updates = true // node.update.* stays available so this node can become compatible again
 	}
+	close(listed)
 	m.firstTried() // configured and listed: the calls that waited for it go now
 	if updates {
 		// A queued update goes on, and a node back on another build is given the one it should run (deploy_rpc.go,

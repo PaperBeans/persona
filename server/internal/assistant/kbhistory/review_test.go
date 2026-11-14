@@ -1,4 +1,4 @@
-package assistant
+package kbhistory
 
 import (
 	"context"
@@ -152,7 +152,7 @@ func TestHistorySlowStartFromTheFirstCall(t *testing.T) {
 	src := &fakeHistory{chats: []connectorwire.HistoryChat{{ID: "a", Kind: "dm"}}, convs: map[string][]kb.SourceMessage{"a": historyConv("a", 30, recentStart(30, time.Hour), time.Hour)}}
 	ht := newHistoryTest(t, src)
 	ht.plan(true, nil)
-	updateHistoryStatus(ht.data, testSource, func(st *historySourceStatus) { st.SlowPending = true })
+	UpdateStatus(ht.data, testSource, func(st *SourceStatus) { st.SlowPending = true })
 	ht.clock.Advance(3 * time.Hour) // a quiet period, a rest, another process: the import starts later
 	first := ht.clock.Now()
 	ht.run()
@@ -176,7 +176,7 @@ func TestHistoryNotReadyAfterACallStops(t *testing.T) {
 	ht := newHistoryTest(t, src)
 	ht.plan(true, nil)
 	ht.run()
-	stop, stopped := readHistoryStop(ht.data)
+	stop, stopped := ReadStop(ht.data)
 	if !stopped || stop.Code != "not_ready_after_call" || src.count("page") != 3 {
 		t.Fatalf("STOP %+v %v after %d pages", stop, stopped, src.count("page"))
 	}
@@ -209,7 +209,7 @@ func TestHistoryImageCutShortIsNotLost(t *testing.T) {
 	ht.d.notify = func(context.Context, string, historyReason) {}
 	ht.plan(true, nil)
 	ht.run()
-	if stop, stopped := readHistoryStop(ht.data); !stopped || stop.Code != "call_timeout" {
+	if stop, stopped := ReadStop(ht.data); !stopped || stop.Code != "call_timeout" {
 		t.Fatalf("STOP %+v", stop)
 	}
 	if got := ht.kept("a"); len(got) != 0 {
@@ -218,7 +218,7 @@ func TestHistoryImageCutShortIsNotLost(t *testing.T) {
 	if st := ht.state("a"); st.Cursor != "" || st.Read != 0 {
 		t.Fatalf("moved past the cut page: %+v", st)
 	}
-	if err := removeHistoryStop(ht.data); err != nil {
+	if err := RemoveStop(ht.data); err != nil {
 		t.Fatal(err)
 	}
 	ht.run()
@@ -299,7 +299,7 @@ func TestHistoryReasonsHaveWords(t *testing.T) {
 		"call_no_code", "call_unknown_code", "not_ready_after_call", "stop_file", "asked", "source_pace", "transient", "slow",
 		"very_slow", "very_slow_list", "slow_repeated", "plan_changed"} {
 		for _, l := range []string{"en", "zh-Hans", "ja"} {
-			r := reason(code, "method", "history", "code", "x", "ms", "1", "limit", "1", "minutes", "1", "hours", "2", "class", "error",
+			r := NewReason(code, "method", "history", "code", "x", "ms", "1", "limit", "1", "minutes", "1", "hours", "2", "class", "error",
 				"chat", "abc", "count", "3", "of", "20", "mult", "2.0", "seconds", "60")
 			if got := historyReasonText(i18n.Lang(l), r); got == r.String() || strings.Contains(got, "{") {
 				t.Fatalf("%s in %s: %q", code, l, got)

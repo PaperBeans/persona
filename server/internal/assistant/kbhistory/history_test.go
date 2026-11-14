@@ -1,4 +1,4 @@
-package assistant
+package kbhistory
 
 import (
 	"archive/tar"
@@ -288,13 +288,13 @@ func newHistoryTest(t *testing.T, src *fakeHistory) *historyTest {
 
 // plan lists the chats, gives the ones in modes their per-item setting (ht.item) and approves the plan (what
 // kb_history_plan and kb_history_resume do).
-func (ht *historyTest) plan(approve bool, modes map[string]string) *historyPlan {
+func (ht *historyTest) plan(approve bool, modes map[string]string) *Plan {
 	ht.t.Helper()
-	p, ok, err := loadHistoryPlan(ht.data, testSource)
+	p, ok, err := LoadPlan(ht.data, testSource)
 	if err != nil || !ok {
-		p = &historyPlan{Source: testSource}
+		p = &Plan{Source: testSource}
 	}
-	p.regenerate(ht.src.chats, ht.clock.Now())
+	p.Regenerate(ht.src.chats, ht.clock.Now())
 	for id, m := range modes {
 		ht.item(id, m)
 	}
@@ -303,16 +303,16 @@ func (ht *historyTest) plan(approve bool, modes map[string]string) *historyPlan 
 	} else {
 		p.revoke()
 	}
-	if err := saveHistoryPlan(ht.data, p); err != nil {
+	if err := SavePlan(ht.data, p); err != nil {
 		ht.t.Fatal(err)
 	}
 	return p
 }
 
 // approve approves p as the selection reads it now.
-func (ht *historyTest) approve(p *historyPlan) {
+func (ht *historyTest) approve(p *Plan) {
 	ht.t.Helper()
-	sel, ret := historySelection(ht.e)
+	sel, ret := Selection(ht.e)
 	p.approve(sel, ret, ht.clock.Now())
 }
 
@@ -384,8 +384,8 @@ func recentStart(n int, step time.Duration) time.Time {
 // longer has.
 func TestHistoryPlanByTheSelection(t *testing.T) {
 	now := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
-	p := &historyPlan{Source: "x"}
-	p.regenerate([]connectorwire.HistoryChat{
+	p := &Plan{Source: "x"}
+	p.Regenerate([]connectorwire.HistoryChat{
 		{ID: "d", Name: "D", Kind: "dm", Estimate: 120},
 		{ID: "g", Name: "G", Kind: "group", Estimate: 9000},
 		{ID: "m", Name: "M", Kind: "group", Muted: true},
@@ -396,7 +396,7 @@ func TestHistoryPlanByTheSelection(t *testing.T) {
 	}, now)
 	sel, ret := kb.Defaults(), kb.Retention{TextDays: 365}
 	read := func(id string) string {
-		switch need := historyNeed(&sel, ret, "x", *p.chat(id)); {
+		switch need := Need(&sel, ret, "x", *p.chat(id)); {
 		case need.Whole:
 			return "whole"
 		case need.Read:
@@ -412,7 +412,7 @@ func TestHistoryPlanByTheSelection(t *testing.T) {
 	}
 	sel.SetItem(kb.SelectionItem{Source: "x", Kind: kb.ItemChat, ID: "m", Read: true, Store: true})
 	sel.SetItem(kb.SelectionItem{Source: "x", Kind: kb.ItemChat, ID: "d", Read: false})
-	p.regenerate([]connectorwire.HistoryChat{
+	p.Regenerate([]connectorwire.HistoryChat{
 		{ID: "m", Name: "M renamed", Kind: "group", Muted: true, Collapsed: true, Estimate: 5},
 		{ID: "g", Name: "G", Kind: "group", Estimate: 9100},
 		{ID: "n", Name: "N", Kind: "dm"},
@@ -430,7 +430,7 @@ func TestHistoryPlanByTheSelection(t *testing.T) {
 	// back_days bounds how far back the import goes, whatever the rule's days.
 	sel.History = map[string]kb.HistorySelection{"x": {BackDays: new(int)}}
 	*sel.History["x"].BackDays = 30
-	if need := historyNeed(&sel, ret, "x", *p.chat("g")); need.Days != 30 {
+	if need := Need(&sel, ret, "x", *p.chat("g")); need.Days != 30 {
 		t.Fatalf("back days: %+v", need)
 	}
 }
@@ -697,16 +697,16 @@ func TestHistoryUnreadableChatKeepsTheHits(t *testing.T) {
 	ht.run()
 	// The search found a chat the plan does not list: it is added, the approval taken back and the owner told;
 	// nothing of it is read before the owner approves the plan with it.
-	p, _, _ := loadHistoryPlan(ht.data, testSource)
-	sel, ret := historySelection(ht.e)
-	if c := p.chat("gone"); c == nil || c.Kind != historyUnlisted || !historyNeed(sel, ret, testSource, *c).Personal || p.ApprovedAt != nil {
+	p, _, _ := LoadPlan(ht.data, testSource)
+	sel, ret := Selection(ht.e)
+	if c := p.chat("gone"); c == nil || c.Kind != Unlisted || !Need(sel, ret, testSource, *c).Personal || p.ApprovedAt != nil {
 		t.Fatalf("plan %+v", p)
 	}
 	if src.count("page") != 0 || len(ht.notices) != 1 || !strings.Contains(ht.notices[0], "plan_changed") {
 		t.Fatalf("read before approval: %v, notices %v", src.calls, ht.notices)
 	}
 	ht.approve(p)
-	if err := saveHistoryPlan(ht.data, p); err != nil {
+	if err := SavePlan(ht.data, p); err != nil {
 		t.Fatal(err)
 	}
 	ht.notices = nil
@@ -717,7 +717,7 @@ func TestHistoryUnreadableChatKeepsTheHits(t *testing.T) {
 	if st := ht.state("gone"); st.State != kb.HistoryUnreadable {
 		t.Fatalf("state %+v", st)
 	}
-	if _, stopped := readHistoryStop(ht.data); stopped || len(ht.notices) > 0 {
+	if _, stopped := ReadStop(ht.data); stopped || len(ht.notices) > 0 {
 		t.Fatal("an unreadable chat stopped the import")
 	}
 }
@@ -756,7 +756,7 @@ func TestHistoryRetryAfterPauses(t *testing.T) {
 	if st.LastPause == nil || st.LastPause.Code != "transient" || st.LastPause.Args["code"] != "rate_limited" {
 		t.Fatalf("status %+v", st)
 	}
-	if _, stopped := readHistoryStop(ht.data); stopped {
+	if _, stopped := ReadStop(ht.data); stopped {
 		t.Fatal("a pause stopped the import")
 	}
 }
@@ -804,7 +804,7 @@ func TestHistoryStopsWithoutRetrying(t *testing.T) {
 			if got := src.count("page"); got != 2 {
 				t.Fatalf("%d pages: %v", got, src.calls)
 			}
-			stop, stopped := readHistoryStop(ht.data)
+			stop, stopped := ReadStop(ht.data)
 			if !stopped || stop.By != "driver" || stop.Code == "" || len(ht.notices) != 1 {
 				t.Fatalf("STOP %+v %v, notices %v", stop, stopped, ht.notices)
 			}
@@ -970,7 +970,7 @@ func TestHistoryRestartResumes(t *testing.T) {
 	var early []byte
 	ht.d.notify = func(context.Context, string, historyReason) {}
 	ht.run()
-	early, _ = os.ReadFile(historyStatePathFor(ht.data, kb.ChatID(testSource, "a")))
+	early, _ = os.ReadFile(StatePathFor(ht.data, kb.ChatID(testSource, "a")))
 	if st := ht.state("a"); st.Read != 60 || st.State != kb.HistoryPaused {
 		t.Fatalf("after the stop %+v", st)
 	}
@@ -983,7 +983,7 @@ func TestHistoryRestartResumes(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The owner resumes; a new process takes over.
-	if err := removeHistoryStop(ht.data); err != nil {
+	if err := RemoveStop(ht.data); err != nil {
 		t.Fatal(err)
 	}
 	ht.d.instance = "test-2"
@@ -1014,14 +1014,14 @@ func TestHistoryLock(t *testing.T) {
 	if _, _, err := lockHistory(data, "two", now); !errors.Is(err, errHistoryLocked) {
 		t.Fatalf("second lock: %v", err)
 	}
-	if lease, ok := readHistoryLease(data); !ok || lease.Instance != "one" || lease.PID != os.Getpid() {
+	if lease, ok := ReadLease(data); !ok || lease.Instance != "one" || lease.PID != os.Getpid() {
 		t.Fatalf("lease %+v", lease)
 	}
 	l1.release()
-	if _, ok := readHistoryLease(data); ok {
+	if _, ok := ReadLease(data); ok {
 		t.Fatal("the lease outlived the lock")
 	}
-	path := filepath.Join(historyDir(data), historyLockName)
+	path := filepath.Join(Dir(data), historyLockName)
 	write := func(beat time.Time) {
 		raw := fmt.Sprintf(`{"pid":1,"instance":"gone","started_at":%q,"heartbeat":%q}`, beat.Format(time.RFC3339), beat.Format(time.RFC3339))
 		if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
@@ -1043,7 +1043,7 @@ func TestHistoryLock(t *testing.T) {
 	src := &fakeHistory{chats: []connectorwire.HistoryChat{{ID: "a", Kind: "dm"}}, convs: map[string][]kb.SourceMessage{"a": historyConv("a", 10, recentStart(10, time.Hour), time.Hour)}}
 	ht := newHistoryTest(t, src)
 	ht.plan(true, nil)
-	path = filepath.Join(historyDir(ht.data), historyLockName)
+	path = filepath.Join(Dir(ht.data), historyLockName)
 	write(ht.clock.Now().Add(-20 * time.Minute))
 	ht.run()
 	if !strings.Contains(readAllLogs(t, ht.data), `"event":"takeover"`) || len(ht.kept("a")) != 10 {
@@ -1272,7 +1272,7 @@ func TestHistoryModeChangeMidway(t *testing.T) {
 
 func readAllLogs(t *testing.T, data string) string {
 	t.Helper()
-	files, _ := filepath.Glob(filepath.Join(historyDir(data), "log-*.jsonl"))
+	files, _ := filepath.Glob(filepath.Join(Dir(data), "log-*.jsonl"))
 	var b strings.Builder
 	for _, f := range files {
 		raw, _ := os.ReadFile(f)
@@ -1323,7 +1323,7 @@ func TestHistoryVerySlowCallsStop(t *testing.T) {
 	if ht.clock.Now().Sub(start) < 30*time.Minute {
 		t.Fatalf("no rest after the first very slow call: %v", ht.clock.Now().Sub(start))
 	}
-	stop, stopped := readHistoryStop(ht.data)
+	stop, stopped := ReadStop(ht.data)
 	if !stopped || stop.Code != "very_slow_twice" || len(ht.notices) != 1 {
 		t.Fatalf("STOP %+v", stop)
 	}

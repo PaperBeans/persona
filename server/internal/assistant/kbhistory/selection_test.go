@@ -1,4 +1,4 @@
-package assistant
+package kbhistory
 
 import (
 	"encoding/json"
@@ -105,7 +105,7 @@ func TestHistoryWidenedSelectionRevokesTheApproval(t *testing.T) {
 	if got := src.count("page"); got != 2 {
 		t.Fatalf("%d pages: a call was made after the selection widened", got)
 	}
-	p, _, _ := loadHistoryPlan(ht.data, testSource)
+	p, _, _ := LoadPlan(ht.data, testSource)
 	if p.ApprovedAt != nil || p.Approved != nil {
 		t.Fatalf("approval kept: %+v", p)
 	}
@@ -147,7 +147,7 @@ func TestHistoryBackDaysHonoured(t *testing.T) {
 	}
 	setBack(100)
 	ht.run()
-	if p, _, _ := loadHistoryPlan(ht.data, testSource); p.ApprovedAt != nil {
+	if p, _, _ := LoadPlan(ht.data, testSource); p.ApprovedAt != nil {
 		t.Fatal("going further back kept the approval")
 	}
 	ht.plan(true, nil)
@@ -266,7 +266,7 @@ func TestHistoryStopgapKeepsTheApproval(t *testing.T) {
 	if got := src.count("page"); got != 0 {
 		t.Fatalf("%d pages under the stopgap", got)
 	}
-	if p, _, _ := loadHistoryPlan(ht.data, testSource); p.ApprovedAt == nil || len(ht.notices) != 0 {
+	if p, _, _ := LoadPlan(ht.data, testSource); p.ApprovedAt == nil || len(ht.notices) != 0 {
 		t.Fatalf("approval %+v, notices %v", p, ht.notices)
 	}
 	ht.sel.Store(def)
@@ -293,7 +293,7 @@ func TestHistoryLargerContextRevokesTheApproval(t *testing.T) {
 	if got := src.count("page"); got != 0 {
 		t.Fatalf("%d pages after the context grew", got)
 	}
-	if p, _, _ := loadHistoryPlan(ht.data, testSource); p.ApprovedAt != nil || len(ht.notices) != 1 {
+	if p, _, _ := LoadPlan(ht.data, testSource); p.ApprovedAt != nil || len(ht.notices) != 1 {
 		t.Fatalf("approval %+v, notices %v", p, ht.notices)
 	}
 	ht.plan(true, nil)

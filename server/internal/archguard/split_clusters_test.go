@@ -24,6 +24,7 @@ var movedClusters = []struct {
 	{"node", "node/iphone", []string{"iphone"}},
 	{"node", "node/nodekit", nil}, // helpers shared by the clusters: no file prefix, names only
 	{"assistant", "assistant/chatsearch", []string{"search_text"}},
+	{"assistant", "assistant/saved", []string{"saved_"}},
 }
 
 const clusterHint = "put the code in the subpackage instead (docs/server/architecture.md, tracking issue #7891)"

@@ -153,6 +153,8 @@ import UIKit
     private(set) var link: LinkStats?
     /// The node said why it has no direct routes (`firewall`).
     private(set) var directUnavailable: String?
+    /// The UDP flow carrying the video, about once a second (#7873); nil when none does. The overlay shows its numbers.
+    private(set) var udp: ScreenUDPStatus?
 
     @ObservationIgnored private var want: Want?
     @ObservationIgnored private var ready: Ready?
@@ -208,6 +210,7 @@ import UIKit
 
     /// The UDP flow carrying the video (#7873), about once a second; nil when none does.
     func flowChanged(_ status: ScreenUDPStatus?) {
+        if status != udp { udp = status }
         let o = ((status?.overhead ?? 0) * 20).rounded(.up) / 20
         let sc = ((status?.scale ?? 1) * 20).rounded(.down) / 20
         guard o != udpOverhead || sc != udpScale else { return }

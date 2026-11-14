@@ -163,9 +163,9 @@ class MeetingModelMockTests(MockHubTests):
                 self.assertNotIn("launch", rows["meeting.minutes"])
                 self.assertEqual(rows["meeting.minutes"]["provider_ids"], rows["kb"]["provider_ids"])
                 providers = rows["meeting.room"]["provider_ids"]
-                for provider in ("launcher.claude", "launcher.cc_bash", "launcher.gw_full", "legacy.ai"):
+                for provider in ("launcher.claude", "launcher.cc_bash", "launcher.gw_full"):
                     self.assertIn(provider, providers)
-                for provider in ("launcher.codex", "launcher.cc_main"):
+                for provider in ("launcher.codex", "launcher.cc_main", "legacy.ai"):
                     self.assertNotIn(provider, providers)
                 # Each launcher's agent as the hub's viewAgent sends it: none for a Claude Code alias.
                 agents = {p["id"]: p.get("agent") for p in catalog["providers"] if p["kind"] == "launcher"}
@@ -173,8 +173,8 @@ class MeetingModelMockTests(MockHubTests):
 
     def test_own_revisions_sparse_updates_conflicts_and_reset(self):
         api = self.add_api("messages")
-        for pid, category, second_provider in (("meeting.room", "assistant", "launcher.claude"),
-                                               ("meeting.minutes", "kb", api)):
+        for pid, category, first_provider, second_provider in (("meeting.room", "assistant", api, "launcher.claude"),
+                                                               ("meeting.minutes", "kb", "legacy.ai", api)):
             with self.subTest(purpose=pid):
                 path, parent_path = "/api/v1/model-config/purposes/" + pid, "/api/v1/model-config/purposes/" + category
                 parent = self.request(parent_path)["purpose"]
@@ -182,9 +182,9 @@ class MeetingModelMockTests(MockHubTests):
                 own = self.request(path)["purpose"]
                 self.assertEqual((own["revision"], own["override"]), (0, {}))
                 self.assertEqual(own["effective"], parent["effective"])
-                saved = self.request(path, {"revision": 0, "provider": "legacy.ai", "model": "meeting-model", "effort": "high"}, "PUT")["purpose"]
+                saved = self.request(path, {"revision": 0, "provider": first_provider, "model": "meeting-model", "effort": "high"}, "PUT")["purpose"]
                 self.assertEqual(saved["revision"], 1)
-                self.assertEqual(saved["override"], {"provider": "legacy.ai", "model": "meeting-model", "effort": "high"})
+                self.assertEqual(saved["override"], {"provider": first_provider, "model": "meeting-model", "effort": "high"})
                 sparse = self.request(path, {"revision": 1, "effort": "low"})["purpose"]
                 self.assertEqual(sparse["revision"], 2)
                 self.assertEqual(sparse["override"], dict(saved["override"], effort="low"))
@@ -192,14 +192,19 @@ class MeetingModelMockTests(MockHubTests):
                     self.assert_status(409, path, {"revision": 1, "model": "stale"}, method)
                     self.assertEqual(self.request(path)["purpose"], sparse)
                 cleared = self.request(path, {"revision": 2, "model": None}, "PUT")["purpose"]
-                self.assertEqual(cleared["override"], {"provider": "legacy.ai", "effort": "low"})
-                self.assertEqual(cleared["effective"]["model"], "model-fast")
+                self.assertEqual(cleared["override"], {"provider": first_provider, "effort": "low"})
+                first_default = "meeting-default" if first_provider == api else "model-fast"
+                expected_model = parent["effective"]["model"] if first_provider == parent["effective"]["provider"] else first_default
+                self.assertEqual(cleared["effective"]["model"], expected_model)
                 changed = self.request(path, {"revision": 3, "model": "provider-specific", "effort": "high"})["purpose"]
                 self.assertEqual(changed["override"]["model"], "provider-specific")
                 self.assertNotIn("inherited_from", changed, "set apart, it follows nothing")
                 changed = self.request(path, {"revision": 4, "provider": second_provider})["purpose"]
                 self.assertEqual(changed["override"], {"provider": second_provider})
-                self.assertNotIn("effort", changed["effective"])
+                if second_provider == parent["effective"]["provider"]:
+                    self.assertEqual(changed["effective"], parent["effective"])
+                else:
+                    self.assertNotIn("effort", changed["effective"])
                 restored = self.request(path, {"revision": 5, "provider": None, "model": None, "effort": None}, "PUT")["purpose"]
                 self.assertEqual((restored["revision"], restored["override"]), (6, {}))
                 self.assertEqual(restored["effective"], parent["effective"])
@@ -210,12 +215,30 @@ class MeetingModelMockTests(MockHubTests):
                 self.assertEqual(following["effective"], parent["effective"])
                 self.assertEqual(following["revision"], 6, "category edits do not advance the own revision")
 
+    def test_same_provider_keeps_inherited_model_and_effort(self):
+        for pid, category, provider in (("meeting.room", "assistant", "launcher.claude"),
+                                        ("meeting.minutes", "kb", "legacy.ai")):
+            with self.subTest(purpose=pid):
+                parent_path = "/api/v1/model-config/purposes/" + category
+                parent = self.request(parent_path, {"revision": 0, "provider": provider,
+                                                    "model": "parent-model", "effort": "high"})["purpose"]
+                path = "/api/v1/model-config/purposes/" + pid
+                saved = self.request(path, {"revision": 0, "provider": parent["effective"]["provider"],
+                                            "model": None, "effort": None})["purpose"]
+                self.assertEqual(saved["override"], {"provider": provider})
+                self.assertEqual(saved["effective"]["model"], parent["effective"]["model"])
+                if "effort" in parent["effective"]:
+                    self.assertEqual(saved["effective"]["effort"], parent["effective"]["effort"])
+                else:
+                    self.assertNotIn("effort", saved["effective"])
+                self.assertEqual(saved["revision"], 1)
+
     def test_room_refuses_other_runtimes_and_protocols_without_storing(self):
         messages, responses, chat = (self.add_api(protocol) for protocol in ("messages", "responses", "chat"))
         path = "/api/v1/model-config/purposes/meeting.room"
         own = self.request(path, language="en")["purpose"]
         self.assertIn(messages, own["provider_ids"])
-        for provider in ("launcher.codex", responses, chat):
+        for provider in ("launcher.codex", responses, chat, "legacy.ai"):
             self.assertNotIn(provider, own["provider_ids"])
             for method in ("PATCH", "PUT"):
                 error = self.assert_status(400, path, {"revision": 0, "provider": provider, "model": "not-saved"}, method, "en")
@@ -259,11 +282,12 @@ class MeetingModelMockTests(MockHubTests):
         self.assertEqual(reset["status"], own["status"])
 
     def test_a_model_alone_still_follows_the_category(self):
-        for pid, parent in (("meeting.room", "Main chat"), ("meeting.minutes", "Processing")):
+        for pid, parent, provider in (("meeting.room", "Main chat", "launcher.claude"),
+                                      ("meeting.minutes", "Processing", "legacy.ai")):
             path = "/api/v1/model-config/purposes/" + pid
             own = self.request(path, {"revision": 0, "model": "only-model"}, "PUT", "en")["purpose"]
             self.assertEqual((own["override"], own["inherited_from"]), ({"model": "only-model"}, parent))
-            own = self.request(path, {"revision": 1, "provider": "legacy.ai"}, "PATCH", "en")["purpose"]
+            own = self.request(path, {"revision": 1, "provider": provider}, "PATCH", "en")["purpose"]
             self.assertNotIn("inherited_from", own)
 
     def test_minutes_fields_follow_the_api_protocol(self):
@@ -296,10 +320,12 @@ class MeetingModelsLimitMockTests(MockHubTests):
         self.assertEqual(minutes["limit"], kb["limit"])
         self.assertEqual(minutes["status"], kb["status"])
         path = "/api/v1/model-config/purposes/meeting.room"
-        room = self.request(path, {"revision": 0, "provider": "legacy.ai"})["purpose"]
-        self.assertEqual(room["limit"], kb["limit"])
-        self.assertEqual(room["status"], kb["status"])
-        room = self.request(path, {"revision": 1, "provider": "launcher.claude"})["purpose"]
+        room = self.request(path)["purpose"]
+        self.assertNotIn("limit", room)
+        for method in ("PATCH", "PUT"):
+            self.assert_status(400, path, {"revision": 0, "provider": "legacy.ai"}, method)
+            self.assertEqual(self.request(path)["purpose"], room, "a refused provider cannot import the API limit or change state")
+        room = self.request(path, {"revision": 0, "provider": "launcher.claude"})["purpose"]
         self.assertNotIn("limit", room)
         self.assertNotEqual(room["status"], kb["status"])
 

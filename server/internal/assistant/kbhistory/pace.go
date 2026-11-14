@@ -1,4 +1,4 @@
-package assistant
+package kbhistory
 
 import (
 	"math"
@@ -26,10 +26,10 @@ const (
 	historyProfileCareful  = "careful"
 
 	historySlowFloor = 2 * time.Second // a call is slow above max(3 × its baseline, this)
-	// historyVerySlow: a call is very slow above this, whatever its baseline (kept well under the 8 s a
+	// VerySlow: a call is very slow above this, whatever its baseline (kept well under the 8 s a
 	// source's own main-queue timeout trips at); an image download above max(3 × its baseline, this), since an image's
 	// baseline is higher by nature.
-	historyVerySlow      = 5 * time.Second
+	VerySlow             = 5 * time.Second
 	historyIntervalCap   = time.Minute      // slowing down never waits longer than this between calls
 	historyBaselineCalls = 20               // the baseline is the median of a day's first 20 calls of a method
 	historySlowWindow    = 20               // three slow calls among the last 20: a rest, then the slowest pace
@@ -74,8 +74,8 @@ func historyProfile(name string) historyPace {
 
 func historyRange(a, b float64) assistantwire.KBRange { return assistantwire.KBRange{a, b} }
 
-// historyPaceFor is src's profile with its overrides.
-func historyPaceFor(src assistantwire.KBHistorySource) historyPace {
+// PaceFor is src's profile with its overrides.
+func PaceFor(src assistantwire.KBHistorySource) historyPace {
 	p := historyProfile(src.Profile)
 	set := func(dst *assistantwire.KBRange, v *assistantwire.KBRange) {
 		if v != nil {
@@ -271,9 +271,9 @@ func (pc *historyPacer) observe(method string, d time.Duration, now time.Time) h
 	}
 	base := pc.baseline[method]
 	slowAt := max(3*base, historySlowFloor)
-	verySlowAt := historyVerySlow
+	verySlowAt := VerySlow
 	if method == historyImageMethod {
-		verySlowAt = max(3*base, historyVerySlow)
+		verySlowAt = max(3*base, VerySlow)
 	}
 	ms := func(d time.Duration) string { return strconv.FormatInt(d.Milliseconds(), 10) }
 	var v historyVerdict
@@ -288,25 +288,25 @@ func (pc *historyPacer) observe(method string, d time.Duration, now time.Time) h
 	case v.verySlow:
 		pc.normal = 0
 		if now.Before(pc.watchUntil) {
-			v.stop = reason("very_slow_twice", "minutes", strconv.Itoa(int(historyVerySlowWatch.Minutes())), "method", method, "ms", ms(d))
+			v.stop = NewReason("very_slow_twice", "minutes", strconv.Itoa(int(historyVerySlowWatch.Minutes())), "method", method, "ms", ms(d))
 			return v
 		}
 		v.rest = historyVerySlowRest
 		pc.watchUntil = now.Add(historyVerySlowRest + historyVerySlowWatch)
 		pc.mult = max(pc.mult*2, floor)
 		pc.mult = min(pc.mult, pc.maxMult())
-		v.note = reason("very_slow", "method", method, "ms", ms(d), "limit", ms(verySlowAt), "minutes", strconv.Itoa(int(v.rest.Minutes())))
+		v.note = NewReason("very_slow", "method", method, "ms", ms(d), "limit", ms(verySlowAt), "minutes", strconv.Itoa(int(v.rest.Minutes())))
 	case v.slow:
 		pc.normal = 0
 		if countTrue(pc.recent) >= historySlowRest {
 			v.rest = time.Duration((10 + 10*pc.rng.Float64()) * float64(time.Minute))
 			pc.mult = pc.maxMult()
 			pc.recent = nil
-			v.note = reason("slow_repeated", "count", strconv.Itoa(historySlowRest), "of", strconv.Itoa(historySlowWindow), "method", method,
+			v.note = NewReason("slow_repeated", "count", strconv.Itoa(historySlowRest), "of", strconv.Itoa(historySlowWindow), "method", method,
 				"ms", ms(d), "minutes", strconv.Itoa(int(v.rest.Minutes())))
 		} else {
 			pc.mult = min(max(pc.mult*2, floor), pc.maxMult())
-			v.note = reason("slow", "method", method, "ms", ms(d), "limit", ms(slowAt), "mult", strconv.FormatFloat(pc.mult, 'f', 1, 64))
+			v.note = NewReason("slow", "method", method, "ms", ms(d), "limit", ms(slowAt), "mult", strconv.FormatFloat(pc.mult, 'f', 1, 64))
 		}
 	default:
 		pc.normal++

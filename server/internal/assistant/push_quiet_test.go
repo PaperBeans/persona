@@ -329,6 +329,8 @@ func TestHeldEscalationIsNotReEscalatable(t *testing.T) {
 	if err != nil || !strings.Contains(res, "without a push") {
 		t.Fatalf("first escalation: %s %v", res, err)
 	}
+	// notifyInteractionAt sends the held card's push on a goroutine of its own: count from there.
+	waitFor(t, "the held card's push", func() bool { return len(e.cardPushes("ix1")) == 1 })
 	for _, args := range []map[string]any{
 		{"todo_id": e.todo.ID, "reason": "now urgent", "p0": true},
 		{"todo_id": e.todo.ID, "reason": "now urgent", "why_owner": "irreversible"},
@@ -338,8 +340,10 @@ func TestHeldEscalationIsNotReEscalatable(t *testing.T) {
 			t.Fatalf("re-escalation %v: %v", args, err)
 		}
 	}
+	// The rejected re-escalations above add no second push; settle the service before the final count.
+	e.settle()
 	// The held escalation's P1 push is handed to the hub on deliver()'s own goroutine, so wait for it to land
-	// before reading the pushes; the two rejected re-escalations above add none.
+	// before reading the pushes.
 	waitFor(t, "the held escalation's P1 push", func() bool { return len(e.cardPushes("ix1")) == 1 })
 	if got := e.cardPushes("ix1"); len(got) != 1 || got[0] != assistantwire.LevelP1 {
 		t.Fatalf("the rejected re-escalation pushed: %v", got)

@@ -1,9 +1,10 @@
-package assistant
+package kbhistory
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/textfmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -25,7 +26,7 @@ import (
 //     through kb.AnchorFilter around the owner's messages (the mine rule's context on each side), and the messages
 //     that mention the owner on their own.
 //   - personal, from a source that can: windows by position around the anchors its search found
-//     (kb_history_anchor.go).
+//     (kbhistory/anchor.go).
 //
 // Either way WriteHistory judges every message again by the selection: the read only bounds what it is handed.
 
@@ -37,7 +38,7 @@ func (d *historyDriver) step(ctx context.Context, w historyWork) (bool, error) {
 	}
 	st, err := d.loadState(e, w)
 	if err != nil {
-		return false, halt(true, "state_unreadable", "chat", historyHash(d.key, w.chat.filing(d.source), w.chat.ID))
+		return false, halt(true, "state_unreadable", "chat", historyHash(d.key, w.chat.Filing(d.source), w.chat.ID))
 	}
 	if st.Finished() {
 		return true, nil
@@ -71,8 +72,8 @@ func (d *historyDriver) loadState(e *kb.Engine, w historyWork) (kb.HistoryState,
 		return kb.HistoryState{}, err
 	}
 	mode := historyMode(w.need)
-	if !ok || !historyCovers(st.Plan, w.need) {
-		st = kb.HistoryState{Source: w.chat.filing(d.source), Mode: mode, State: kb.HistoryRunning, Read: st.Read, Written: st.Written}
+	if !ok || !Covers(st.Plan, w.need) {
+		st = kb.HistoryState{Source: w.chat.Filing(d.source), Mode: mode, State: kb.HistoryRunning, Read: st.Read, Written: st.Written}
 	}
 	if !st.Finished() {
 		need := w.need
@@ -95,10 +96,10 @@ func (d *historyDriver) saveState(e *kb.Engine, w historyWork, st *kb.HistorySta
 // kbChat names the chat for WriteHistory.
 func (d *historyDriver) kbChat(w historyWork) *kb.Chat {
 	kind := w.chat.Kind
-	if kind == historyUnlisted {
+	if kind == Unlisted {
 		kind = connectorwire.HistoryKindGroup
 	}
-	return &kb.Chat{Source: w.chat.filing(d.source), SourceID: w.chat.ID, Kind: kind, Name: w.chat.Name}
+	return &kb.Chat{Source: w.chat.Filing(d.source), SourceID: w.chat.ID, Kind: kind, Name: w.chat.Name}
 }
 
 // historyMine picks the owner's own messages: the anchors the mine rule's context is read around.
@@ -182,13 +183,13 @@ func (d *historyDriver) pick(w historyWork, span int, st *kb.HistoryState, msgs 
 }
 
 // page reads one page of the chat (one call).
-func (d *historyDriver) page(ctx context.Context, w historyWork, q connectorwire.HistoryQuery) (connectorwire.HistoryPage, historyCall, error) {
+func (d *historyDriver) page(ctx context.Context, w historyWork, q connectorwire.HistoryQuery) (connectorwire.HistoryPage, Call, error) {
 	q.Chat = w.chat.ID
 	if q.Limit == 0 {
 		q.Limit = d.pacer.pace.PageLimit
 	}
 	var page connectorwire.HistoryPage
-	c, err := d.call(ctx, "history", w.chat.filing(d.source), w.chat.ID, false, func(cctx context.Context) (int, string, string, error) {
+	c, err := d.call(ctx, "history", w.chat.Filing(d.source), w.chat.ID, false, func(cctx context.Context) (int, string, string, error) {
 		p, err := d.src.Page(cctx, d.source, q)
 		page = p
 		return len(p.Messages), pageResult(p), paceText(p.Pace), err
@@ -220,7 +221,7 @@ func paceText(p *connectorwire.Pace) string {
 // paused), the call failed, the source paced or the chat is unreadable. handled false: the page is to be written.
 // unreadable writes what can be kept of an unreadable chat (nil: nothing).
 func (d *historyDriver) answered(ctx context.Context, e *kb.Engine, w historyWork, st *kb.HistoryState, page connectorwire.HistoryPage,
-	c historyCall, callErr error, unreadable func() error) (handled, done bool, err error) {
+	c Call, callErr error, unreadable func() error) (handled, done bool, err error) {
 	if callErr != nil {
 		st.State, st.LastError = kb.HistoryPaused, "stopped"
 		if serr := d.saveState(e, w, st); serr != nil {
@@ -229,7 +230,7 @@ func (d *historyDriver) answered(ctx context.Context, e *kb.Engine, w historyWor
 		return true, false, callErr
 	}
 	if c.err != nil {
-		outcome, code := c.classify()
+		outcome, code := c.Classify()
 		return d.outcome(ctx, e, w, st, c, outcome, code, unreadable)
 	}
 	if p := page.Pace; p != nil {
@@ -249,15 +250,15 @@ func (d *historyDriver) answered(ctx context.Context, e *kb.Engine, w historyWor
 }
 
 // historySourceStop is the stop a source asked for (Pace.Stop), with its own words.
-func historySourceStop(p *connectorwire.Pace) *historyHalt {
+func historySourceStop(p *connectorwire.Pace) *Halt {
 	h := halt(true, "source_stop")
-	h.why.Text = clip(strings.TrimSpace(p.Reason), 200)
+	h.why.Text = textfmt.Clip(strings.TrimSpace(p.Reason), 200)
 	return h
 }
 
 // outcome acts on what a call came to for the chat: pause and read the same again, stop everything, or end the
 // chat (error, unreadable).
-func (d *historyDriver) outcome(ctx context.Context, e *kb.Engine, w historyWork, st *kb.HistoryState, c historyCall,
+func (d *historyDriver) outcome(ctx context.Context, e *kb.Engine, w historyWork, st *kb.HistoryState, c Call,
 	o historyOutcome, code string, unreadable func() error) (handled, done bool, err error) {
 	switch o {
 	case historyPauseIt:
@@ -272,12 +273,12 @@ func (d *historyDriver) outcome(ctx context.Context, e *kb.Engine, w historyWork
 			return true, false, err
 		}
 		return true, false, d.after(ctx, c)
-	case historyStopIt:
+	case StopIt:
 		st.State, st.LastError = kb.HistoryPaused, code
 		if err := d.saveState(e, w, st); err != nil {
 			return true, false, err
 		}
-		return true, false, haltWhy(true, c.stopWhy(code))
+		return true, false, HaltWhy(true, c.stopWhy(code))
 	case historyUnreadable:
 		if unreadable != nil {
 			if err := unreadable(); err != nil {
@@ -354,7 +355,7 @@ func (d *historyDriver) stepBackwards(ctx context.Context, e *kb.Engine, w histo
 		_, done, err := d.outcome(ctx, e, w, st, c, historyChatError, "cursor_stuck", nil)
 		return done, err
 	}
-	sel, _ := historySelection(e)
+	sel, _ := Selection(e)
 	out, near := d.pick(w, sel.MineContext(), st, historyFrom(msgs, cut), reached)
 	added, err := d.write(ctx, e, w, out, near)
 	if err != nil {
@@ -414,7 +415,7 @@ func historyFrom(msgs []kb.SourceMessage, cut time.Time) []kb.SourceMessage {
 // image again. A stop (a timeout, an unknown error, the gate during the wait, a pause that ran out) aborts the page's
 // write (kb.ErrDownloadAborted): the halt is acted on once WriteHistory returns, and the page is read again later.
 func (d *historyDriver) download(ctx context.Context, w historyWork) kb.DownloadFunc {
-	filing := w.chat.filing(d.source)
+	filing := w.chat.Filing(d.source)
 	abort := func(err error) error {
 		d.halted = err
 		return kb.ErrDownloadAborted
@@ -437,12 +438,12 @@ func (d *historyDriver) download(ctx context.Context, w historyWork) kb.Download
 				return abort(err)
 			}
 			if c.err != nil {
-				o, code := c.classify()
+				o, code := c.Classify()
 				switch {
 				case c.stop != nil:
 					return abort(c.stop)
-				case o == historyStopIt:
-					return abort(haltWhy(true, c.stopWhy(code)))
+				case o == StopIt:
+					return abort(HaltWhy(true, c.stopWhy(code)))
 				case o == historyPauseIt:
 					if err := d.pause(ctx, d.pauseWait(code), pauseFor(code)); err != nil {
 						return abort(err)

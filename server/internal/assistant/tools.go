@@ -164,7 +164,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 	case "kb_search", "kb_list", "kb_get", "kb_update":
 		return s.toolKB(ctx, name, args)
 	case "kb_history_plan", "kb_history_status", "kb_history_stop", "kb_history_resume":
-		return s.toolKBHistory(ctx, name, args) // kb_history_tools.go
+		return s.historyTools().Call(ctx, name, args) // kbhistory/tools.go
 	case "interaction_answer":
 		return s.toolInteractionAnswer(ctx, self, args)
 	case "ask_escalate":

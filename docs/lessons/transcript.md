@@ -301,3 +301,21 @@ A view that fetches once per id cannot recover when the store puts the same id b
   `rolloutAgent`). Claude rows still look again every half minute; a shared read per list pass would bound them, but it
   must not hide a newer copy that appears in another config directory meanwhile
   (`TestAssistantResumeKeepsARunningProcessProfile`).
+
+## Structural tool-input clipping must count its own marker (#2907)
+
+- A size-indexed clip pass must include the appended marker, its root comma and every change in the omission counts before
+  deciding to stop. Excluding the marker makes an exactly full result cross the budget only when the final JSON is encoded.
+  Keep the marker as a fixed root suffix: ordinary tail removal would otherwise delete it when the root is the widest object.
+- Dropping an ancestor detaches its whole subtree. Mark those descendants inactive instead of resizing their ancestors again;
+  lazy heap removal then skips them. Compare the optimized size index with a deliberately naive reference that re-encodes after
+  every removal, including nested arrays, root-wide objects and marker-key collisions.
+- Walking every ancestor to update its size after each drop is quadratic on deep nesting. Keep one running total, sum a subtree
+  only when detaching it, and pin the work with a node-visit counter rather than a clock. Each indexed node is then visited at
+  most once after the initial tree walk, plus its deactivation.
+- A top-level string metadata field becomes the title in clients that name a call by its first string argument, including
+  already-installed versions. Use an object holding the note instead. Go and the web find that note recursively; Apple and
+  Android's `cutText` handling applies to item text, not recursive tool-input detection.
+- JavaScript's `Object.keys` order (integer-like keys first) and default UTF-16 sort do not match Go's UTF-8/code-point key
+  order. Sort only the SDK's removal and preorder keys with UTF-8 bytes; delete from the original object so surviving fields
+  retain their own output order. Compare shared cases as parsed values and keep known encoder differences platform-specific.

@@ -9,9 +9,11 @@ import (
 // Generate writes from integrations/. Measured 424,588 B on 2026-11-10 (the same files raw were 1,627,267 B); the
 // budget was that +3%. Raised by 4,500 B on 2026-11-13 for the Paseo bridge's workspaces (#6295, #6297: 5,693 B over
 // main's 434,235 B), and by 4,000 B more for the bridge reading the lines of forked Claude sessions (#6709). Raise it
-// only for code a runtime needs, never to embed the packages raw again.
+// only for code a runtime needs, never to embed the packages raw again. The required whole-input clip pass (#2907) measured
+// 445,466 B on untouched main and 447,388 B after its ordering, marker and linear-accounting fixes; the budget is the latter
+// plus the same 334 B of headroom main had.
 func TestDistBudget(t *testing.T) {
-	const budget = 445_800
+	const budget = 447_722
 	_, out := generateIntegrations(t)
 	entries, err := os.ReadDir(out)
 	if err != nil {

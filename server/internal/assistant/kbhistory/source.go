@@ -1,4 +1,4 @@
-package assistant
+package kbhistory
 
 import (
 	"context"
@@ -17,11 +17,11 @@ import (
 // historyBlock is why a configured source does not run now ("" it can), as the selection sel reads now: "widened"
 // when it reads more than the owner approved (the caller takes the approval back). info is what the hub says the
 // connector offers (nil: not asked yet, so whether its anchors are still to gather is not known).
-func (d *historyDriver) historyBlock(src assistantwire.KBHistorySource, info *assistantwire.ArchiveSource, sel *kb.Selection, ret kb.Retention) (string, *historyPlan) {
+func (d *historyDriver) historyBlock(src assistantwire.KBHistorySource, info *assistantwire.ArchiveSource, sel *kb.Selection, ret kb.Retention) (string, *Plan) {
 	if src.SearchIndexNeeded() && !d.indexed() {
 		return "needs_search_index", nil
 	}
-	p, ok, err := loadHistoryPlan(d.data, src.Name)
+	p, ok, err := LoadPlan(d.data, src.Name)
 	switch {
 	case err != nil:
 		return "plan_unreadable", nil
@@ -43,10 +43,10 @@ func (d *historyDriver) historyBlock(src assistantwire.KBHistorySource, info *as
 
 // finished: every chat the selection reads is done, in error or unreadable, for what it reads now; and for a source
 // that can search, its anchors are gathered (they may add chats) unless no chat is read by them.
-func (d *historyDriver) finished(source string, p *historyPlan, info *assistantwire.ArchiveSource, sel *kb.Selection, ret kb.Retention) bool {
+func (d *historyDriver) finished(source string, p *Plan, info *assistantwire.ArchiveSource, sel *kb.Selection, ret kb.Retention) bool {
 	personal := false
 	for _, r := range p.reading(sel, ret) {
-		if !historyChatDone(d.data, kb.ChatID(r.chat.filing(source), r.chat.ID), r.need) {
+		if !historyChatDone(d.data, kb.ChatID(r.chat.Filing(source), r.chat.ID), r.need) {
 			return false
 		}
 		personal = personal || !r.need.Whole
@@ -63,19 +63,19 @@ func (d *historyDriver) finished(source string, p *historyPlan, info *assistantw
 // base): finished under a plan that covers it.
 func historyChatDone(data, chatID string, need kb.ReadPlan) bool {
 	var hs kb.HistoryState
-	ok, err := readJSONFile(historyStatePathFor(data, chatID), &hs)
-	return err == nil && ok && hs.Finished() && historyCovers(hs.Plan, need)
+	ok, err := ReadJSONFile(StatePathFor(data, chatID), &hs)
+	return err == nil && ok && hs.Finished() && Covers(hs.Plan, need)
 }
 
-// historyCovers: a read under plan covers need (nil plan: a state from before plans were kept, covering nothing).
-func historyCovers(plan *kb.ReadPlan, need kb.ReadPlan) bool {
+// Covers: a read under plan covers need (nil plan: a state from before plans were kept, covering nothing).
+func Covers(plan *kb.ReadPlan, need kb.ReadPlan) bool {
 	return plan != nil && !need.Wider(*plan)
 }
 
 // revokeWidened takes the approval of the source's plan back when the selection now reads more than was approved,
 // saying how many chats that is (0: nothing taken back).
 func (d *historyDriver) revokeWidened(source string, sel *kb.Selection, ret kb.Retention) (int, error) {
-	p, ok, err := loadHistoryPlan(d.data, source)
+	p, ok, err := LoadPlan(d.data, source)
 	if err != nil || !ok {
 		return 0, err
 	}
@@ -84,7 +84,7 @@ func (d *historyDriver) revokeWidened(source string, sel *kb.Selection, ret kb.R
 		return 0, nil
 	}
 	p.revoke()
-	if err := saveHistoryPlan(d.data, p); err != nil {
+	if err := SavePlan(d.data, p); err != nil {
 		return 0, err
 	}
 	return max(n, 1), nil
@@ -96,7 +96,7 @@ func (d *historyDriver) runOnce(ctx context.Context) error {
 	if !cfg.On() {
 		return nil
 	}
-	if _, stopped := readHistoryStop(d.data); stopped {
+	if _, stopped := ReadStop(d.data); stopped {
 		return nil
 	}
 	e, err := d.eng(ctx)
@@ -104,7 +104,7 @@ func (d *historyDriver) runOnce(ctx context.Context) error {
 		return err
 	}
 	d.zone = e.Store.Zone()
-	sel, ret := historySelection(e)
+	sel, ret := Selection(e)
 	// Approved plans first (no call at all otherwise), then what the connectors offer, then what is left to do. A plan
 	// the selection now reads more of than was approved loses its approval, and the owner is told.
 	var approved []assistantwire.KBHistorySource
@@ -114,7 +114,7 @@ func (d *historyDriver) runOnce(ctx context.Context) error {
 			d.source = src.Name
 			if n, err := d.revokeWidened(src.Name, sel, ret); err == nil && n > 0 {
 				h := halt(false, "plan_changed", "count", strconv.Itoa(n))
-				d.log(historyLogLine{Event: "end", historyReason: h.why})
+				d.log(LogLine{Event: "end", historyReason: h.why})
 				if d.notify != nil {
 					d.notify(ctx, src.Name, h.why)
 				}
@@ -143,7 +143,7 @@ func (d *historyDriver) runOnce(ctx context.Context) error {
 	for _, src := range approved {
 		info, ok := infos[src.Name]
 		if !ok {
-			d.setStatus(src.Name, func(st *historySourceStatus) { st.State = "unavailable" })
+			d.setStatus(src.Name, func(st *SourceStatus) { st.State = "unavailable" })
 			continue
 		}
 		if why, _ := d.historyBlock(src, &info, sel, ret); why == "" {
@@ -154,7 +154,7 @@ func (d *historyDriver) runOnce(ctx context.Context) error {
 		return nil
 	}
 	d.zone = e.Store.Zone()
-	if d.key, err = historyLogKey(d.data); err != nil {
+	if d.key, err = LogKey(d.data); err != nil {
 		return err
 	}
 	now := d.now()
@@ -172,23 +172,23 @@ func (d *historyDriver) runOnce(ctx context.Context) error {
 		d.running.Store(nil)
 	}()
 	if took != nil {
-		d.log(historyLogLine{Event: "takeover", historyReason: reason("stale_lease", "pid", strconv.Itoa(took.PID), "heartbeat", took.Heartbeat.UTC().Format(time.RFC3339))})
+		d.log(LogLine{Event: "takeover", historyReason: NewReason("stale_lease", "pid", strconv.Itoa(took.PID), "heartbeat", took.Heartbeat.UTC().Format(time.RFC3339))})
 	}
 	// The import rewrites day files: the data directory is backed up first, and nothing runs without a backup.
 	path, err := backupKB(d.data, now)
 	if err != nil {
-		d.log(historyLogLine{Event: "backup", Result: "failed", historyReason: reason("backup_failed", "class", errClass(err))})
+		d.log(LogLine{Event: "backup", Result: "failed", historyReason: NewReason("backup_failed", "class", errClass(err))})
 		return fmt.Errorf("backup before the import: %w", err)
 	}
-	d.log(historyLogLine{Event: "backup", Result: "ok", historyReason: reason("backup", "file", filepath.Base(path))})
+	d.log(LogLine{Event: "backup", Result: "ok", historyReason: NewReason("backup", "file", filepath.Base(path))})
 	for _, src := range runnable {
 		info := infos[src.Name]
-		sel, ret := historySelection(e)
+		sel, ret := Selection(e)
 		if why, _ := d.historyBlock(src, &info, sel, ret); why != "" { // the plan or the selection changed while another source ran
 			continue
 		}
 		err := d.runSource(ctx, src, info)
-		var h *historyHalt
+		var h *Halt
 		switch {
 		case err == nil:
 		case errors.As(err, &h):
@@ -196,19 +196,19 @@ func (d *historyDriver) runOnce(ctx context.Context) error {
 			case h.stop:
 				d.stopAll(ctx, h.why)
 			default:
-				d.log(historyLogLine{Event: "end", historyReason: h.why})
+				d.log(LogLine{Event: "end", historyReason: h.why})
 				if h.why.Code == "plan_changed" && d.notify != nil {
 					d.notify(ctx, d.source, h.why)
 				}
-				stop, stopped := readHistoryStop(d.data)
-				d.setStatus(src.Name, func(st *historySourceStatus) {
+				stop, stopped := ReadStop(d.data)
+				d.setStatus(src.Name, func(st *SourceStatus) {
 					st.State, st.Until = "idle", time.Time{}
 					if stopped { // a STOP made by hand or by kb_history_stop
 						at := stop.At
 						if at.IsZero() {
 							at = d.now().UTC()
 						}
-						st.State, st.LastStop = "stopped", &historyEvent{At: at, historyReason: stop.historyReason}
+						st.State, st.LastStop = "stopped", &Event{At: at, historyReason: stop.historyReason}
 					}
 				})
 			}
@@ -223,13 +223,13 @@ func (d *historyDriver) runOnce(ctx context.Context) error {
 // stopAll stops the whole import for a person to look: STOP, a log line, the status and a push.
 func (d *historyDriver) stopAll(ctx context.Context, why historyReason) {
 	now := d.now()
-	if err := writeHistoryStop(d.data, historyStop{At: now.UTC(), historyReason: why, By: "driver", Source: d.source}); err != nil {
+	if err := WriteStop(d.data, Stop{At: now.UTC(), historyReason: why, By: "driver", Source: d.source}); err != nil {
 		d.logf("kb history: write STOP: %v", err)
 	}
-	d.log(historyLogLine{Event: "stop", historyReason: why})
-	d.setStatus(d.source, func(st *historySourceStatus) {
+	d.log(LogLine{Event: "stop", historyReason: why})
+	d.setStatus(d.source, func(st *SourceStatus) {
 		st.State = "stopped"
-		st.LastStop = &historyEvent{At: now.UTC(), historyReason: why}
+		st.LastStop = &Event{At: now.UTC(), historyReason: why}
 		if d.pacer != nil {
 			st.Pace = d.paceState()
 		}
@@ -243,7 +243,7 @@ func (d *historyDriver) stopAll(ctx context.Context, why historyReason) {
 
 // historyWork is a chat the run imports, with what the selection reads of it (as of the step).
 type historyWork struct {
-	chat historyPlanChat
+	chat PlanChat
 	id   string // the knowledge-base chat id
 	need kb.ReadPlan
 }
@@ -256,14 +256,14 @@ func (d *historyDriver) runSource(ctx context.Context, src assistantwire.KBHisto
 	// The pace goes on where it was: a rest or pause that is not over yet is waited out first, whatever stopped the
 	// process meanwhile, and how slowly it reads, what it watches for and today's quiet periods carry over.
 	now := d.now()
-	d.pacer = newHistoryPacer(historyPaceFor(src), d.rng, d.zone, now, status.SlowUntil)
+	d.pacer = newHistoryPacer(PaceFor(src), d.rng, d.zone, now, status.SlowUntil)
 	d.pacer.slowPending = status.SlowPending
 	if ps := status.Pace; ps != nil {
 		d.pacer.restore(*ps, now)
 		d.pausedSince = ps.PausedSince
 	}
-	d.log(historyLogLine{Event: "start", historyReason: reason("start", "profile", d.pacer.pace.Profile)})
-	d.setStatus(src.Name, func(st *historySourceStatus) { st.State = "running"; st.Since = now.UTC() })
+	d.log(LogLine{Event: "start", historyReason: NewReason("start", "profile", d.pacer.pace.Profile)})
+	d.setStatus(src.Name, func(st *SourceStatus) { st.State = "running"; st.Since = now.UTC() })
 	if err := d.beat(true); err != nil {
 		return err
 	}
@@ -272,7 +272,7 @@ func (d *historyDriver) runSource(ctx context.Context, src assistantwire.KBHisto
 		if state == "" {
 			state = "resting"
 		}
-		d.log(historyLogLine{Event: "rest", historyReason: reason("carried_over", "state", state)})
+		d.log(LogLine{Event: "rest", historyReason: NewReason("carried_over", "state", state)})
 		if err := d.wait(ctx, ps.NotBefore.Sub(now), state, historyReason{}); err != nil {
 			return err
 		}
@@ -282,7 +282,7 @@ func (d *historyDriver) runSource(ctx context.Context, src assistantwire.KBHisto
 			return err
 		}
 	}
-	p, _, err := loadHistoryPlan(d.data, src.Name)
+	p, _, err := LoadPlan(d.data, src.Name)
 	if err != nil || p == nil {
 		return halt(false, "plan_gone")
 	}
@@ -290,10 +290,10 @@ func (d *historyDriver) runSource(ctx context.Context, src assistantwire.KBHisto
 	if err != nil {
 		return halt(false, "kb_unavailable")
 	}
-	sel, ret := historySelection(e)
+	sel, ret := Selection(e)
 	var work []historyWork
 	for _, r := range p.reading(sel, ret) {
-		w := historyWork{chat: r.chat, id: kb.ChatID(r.chat.filing(src.Name), r.chat.ID), need: r.need}
+		w := historyWork{chat: r.chat, id: kb.ChatID(r.chat.Filing(src.Name), r.chat.ID), need: r.need}
 		if historyChatDone(d.data, w.id, w.need) {
 			continue
 		}
@@ -325,22 +325,22 @@ func (d *historyDriver) runSource(ctx context.Context, src assistantwire.KBHisto
 		}
 		i++
 	}
-	d.log(historyLogLine{Event: "done"})
-	d.setStatus(src.Name, func(st *historySourceStatus) { st.State = "done" })
+	d.log(LogLine{Event: "done"})
+	d.setStatus(src.Name, func(st *SourceStatus) { st.State = "done" })
 	return nil
 }
 
 // chatNeed is the plan's chat and what the selection reads of it now; false when the plan no longer has it.
-func (d *historyDriver) chatNeed(ctx context.Context, id string) (historyPlanChat, kb.ReadPlan, bool) {
-	p, ok, err := loadHistoryPlan(d.data, d.source)
+func (d *historyDriver) chatNeed(ctx context.Context, id string) (PlanChat, kb.ReadPlan, bool) {
+	p, ok, err := LoadPlan(d.data, d.source)
 	if err != nil || !ok {
-		return historyPlanChat{}, kb.ReadPlan{}, false
+		return PlanChat{}, kb.ReadPlan{}, false
 	}
 	c := p.chat(id)
 	e, err := d.eng(ctx)
 	if c == nil || err != nil {
-		return historyPlanChat{}, kb.ReadPlan{}, false
+		return PlanChat{}, kb.ReadPlan{}, false
 	}
-	sel, ret := historySelection(e)
-	return *c, historyNeed(sel, ret, d.source, *c), true
+	sel, ret := Selection(e)
+	return *c, Need(sel, ret, d.source, *c), true
 }

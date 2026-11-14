@@ -1,4 +1,4 @@
-package assistant
+package kbhistory
 
 import (
 	"context"
@@ -21,7 +21,7 @@ func (d *historyDriver) gate(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if _, stopped := readHistoryStop(d.data); stopped {
+	if _, stopped := ReadStop(d.data); stopped {
 		return halt(false, "stop_file")
 	}
 	cfg := d.cfg(ctx)
@@ -35,10 +35,10 @@ func (d *historyDriver) gate(ctx context.Context) error {
 	if err != nil {
 		return halt(false, "kb_unavailable")
 	}
-	if p, ok, err := loadHistoryPlan(d.data, d.source); err != nil || !ok || p.ApprovedAt == nil {
+	if p, ok, err := LoadPlan(d.data, d.source); err != nil || !ok || p.ApprovedAt == nil {
 		return halt(false, "not_approved")
 	}
-	sel, ret := historySelection(e)
+	sel, ret := Selection(e)
 	if sel.Stopgap() { // the document does not read now: the approval is kept, and the next round tries again
 		return halt(false, "selection_unavailable")
 	}
@@ -73,11 +73,11 @@ func (d *historyDriver) wait(ctx context.Context, dur time.Duration, state strin
 	if state != "" {
 		d.lastOK = false
 		d.pacer.notBefore, d.pacer.waiting = end, state
-		d.setStatus(d.source, func(st *historySourceStatus) {
+		d.setStatus(d.source, func(st *SourceStatus) {
 			st.State = state
 			st.Until = end.UTC()
 			if state == "paused" && why.Code != "" {
-				st.LastPause = &historyEvent{At: d.now().UTC(), historyReason: why}
+				st.LastPause = &Event{At: d.now().UTC(), historyReason: why}
 			}
 			st.Pace = d.paceState()
 		})
@@ -96,7 +96,7 @@ func (d *historyDriver) wait(ctx context.Context, dur time.Duration, state strin
 	}
 	if state != "" {
 		d.pacer.notBefore, d.pacer.waiting = time.Time{}, ""
-		d.setStatus(d.source, func(st *historySourceStatus) { st.State = "running"; st.Until = time.Time{}; st.Pace = d.paceState() })
+		d.setStatus(d.source, func(st *SourceStatus) { st.State = "running"; st.Until = time.Time{}; st.Pace = d.paceState() })
 	}
 	return nil
 }
@@ -104,13 +104,13 @@ func (d *historyDriver) wait(ctx context.Context, dur time.Duration, state strin
 // paced waits what the pace says before the next call: a quiet period, a rest that is due, then the interval.
 func (d *historyDriver) paced(ctx context.Context, image bool) error {
 	if end := d.pacer.quietUntil(d.now()); !end.IsZero() {
-		d.log(historyLogLine{Event: "rest", historyReason: reason("quiet")})
+		d.log(LogLine{Event: "rest", historyReason: NewReason("quiet")})
 		if err := d.wait(ctx, end.Sub(d.now()), "quiet", historyReason{}); err != nil {
 			return err
 		}
 	}
 	if rest, why := d.pacer.rest(d.now()); rest > 0 {
-		d.log(historyLogLine{Event: "rest", historyReason: reason(why, "minutes", strconv.Itoa(int(rest.Minutes())))})
+		d.log(LogLine{Event: "rest", historyReason: NewReason(why, "minutes", strconv.Itoa(int(rest.Minutes())))})
 		if err := d.wait(ctx, rest, "resting", historyReason{}); err != nil {
 			return err
 		}
@@ -118,31 +118,31 @@ func (d *historyDriver) paced(ctx context.Context, image bool) error {
 	return d.wait(ctx, d.pacer.interval(image, d.now()), "", historyReason{})
 }
 
-// historyCall is what a call came to: the call's own error (nil: an answer), and what its duration asks for after
+// Call is what a call came to: the call's own error (nil: an answer), and what its duration asks for after
 // the answer is handled (a rest before the next call, or a stop).
-type historyCall struct {
+type Call struct {
 	err    error
 	rest   time.Duration
-	stop   *historyHalt
+	stop   *Halt
 	method string
 	chat   string // its hash
 	prevOK bool   // the call before it went through, with only the interval between (lastOK)
 }
 
-// classify is what the call's error means. A source that answers not ready right after a call of ours went through
+// Classify is what the call's error means. A source that answers not ready right after a call of ours went through
 // is taken as made unready by it (docs/assistant/knowledge.md "Errors and stops"): that stops, where not ready otherwise
 // pauses.
-func (c historyCall) classify() (historyOutcome, string) {
-	o, code := classify(c.err)
+func (c Call) Classify() (historyOutcome, string) {
+	o, code := Classify(c.err)
 	if code == "not_ready" && c.prevOK {
-		return historyStopIt, code
+		return StopIt, code
 	}
 	return o, code
 }
 
 // stopWhy is the reason a call's stop-class error stops the import for.
-func (c historyCall) stopWhy(code string) historyReason {
-	r := reason("call_unknown_code", "code", code, "method", c.method, "chat", c.chat)
+func (c Call) stopWhy(code string) historyReason {
+	r := NewReason("call_unknown_code", "code", code, "method", c.method, "chat", c.chat)
 	switch {
 	case code == "not_ready":
 		r.Code = "not_ready_after_call"
@@ -160,21 +160,21 @@ func (c historyCall) stopWhy(code string) historyReason {
 // cancelled by a stop (its context only ends on its own timeout), logged, timed and judged. f returns how many items
 // the answer had, its result and its pace for the log. An error from call itself means no call was made: the gate or
 // the pace's wait ended the run.
-func (d *historyDriver) call(ctx context.Context, method, filing, chat string, image bool, f func(context.Context) (n int, result, pace string, err error)) (historyCall, error) {
+func (d *historyDriver) call(ctx context.Context, method, filing, chat string, image bool, f func(context.Context) (n int, result, pace string, err error)) (Call, error) {
 	if err := d.paced(ctx, image); err != nil {
-		return historyCall{}, err
+		return Call{}, err
 	}
 	d.calls.Lock()
 	if !d.connected() {
 		d.calls.Unlock()
-		return historyCall{}, halt(false, "not_connected")
+		return Call{}, halt(false, "not_connected")
 	}
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.timeout)
 	start := d.now()
 	if d.pacer.slowPending { // kb_history_resume with slow: the two slow hours start with the first call
 		d.pacer.slowPending, d.pacer.slowUntil = false, start.Add(historySlowStart)
 		d.pacer.mult = max(d.pacer.mult, d.pacer.maxMult())
-		d.setStatus(d.source, func(st *historySourceStatus) { st.SlowPending, st.SlowUntil = false, d.pacer.slowUntil.UTC() })
+		d.setStatus(d.source, func(st *SourceStatus) { st.SlowPending, st.SlowUntil = false, d.pacer.slowUntil.UTC() })
 	}
 	n, result, pace, err := f(cctx)
 	took := d.now().Sub(start)
@@ -184,13 +184,13 @@ func (d *historyDriver) call(ctx context.Context, method, filing, chat string, i
 	cancel()
 	d.calls.Unlock()
 	if err != nil {
-		result = historyErrCode(err)
+		result = ErrCode(err)
 	}
 	hash := historyHash(d.key, filing, chat)
-	line := historyLogLine{Method: method, Chat: hash, MS: took.Milliseconds(), Result: result, N: n, Pace: pace}
+	line := LogLine{Method: method, Chat: hash, MS: took.Milliseconds(), Result: result, N: n, Pace: pace}
 	d.log(line)
 	line.At, line.Source = d.now().UTC(), d.source
-	out := historyCall{err: err, method: method, chat: hash, prevOK: d.lastOK}
+	out := Call{err: err, method: method, chat: hash, prevOK: d.lastOK}
 	d.lastOK = err == nil && pace == ""
 	if d.lastOK {
 		d.pausedSince = time.Time{}
@@ -198,29 +198,29 @@ func (d *historyDriver) call(ctx context.Context, method, filing, chat string, i
 	v := d.pacer.observe(method, took, d.now())
 	out.rest = v.rest
 	if v.stop.Code != "" {
-		out.stop = haltWhy(true, v.stop)
+		out.stop = HaltWhy(true, v.stop)
 	}
-	d.setStatus(d.source, func(st *historySourceStatus) {
+	d.setStatus(d.source, func(st *SourceStatus) {
 		st.LastCall = &line
 		st.Calls++
 		if v.note.Code != "" {
-			st.LastSlow = &historyEvent{At: d.now().UTC(), historyReason: v.note}
+			st.LastSlow = &Event{At: d.now().UTC(), historyReason: v.note}
 		}
 		st.Pace = d.paceState()
 	})
 	if v.note.Code != "" {
-		d.log(historyLogLine{Event: "slow", historyReason: v.note})
+		d.log(LogLine{Event: "slow", historyReason: v.note})
 	}
 	return out, nil
 }
 
 // after does what a call's duration asked for, once its answer is handled: stop, or rest.
-func (d *historyDriver) after(ctx context.Context, c historyCall) error {
+func (d *historyDriver) after(ctx context.Context, c Call) error {
 	if c.stop != nil {
 		return c.stop
 	}
 	if c.rest > 0 {
-		d.log(historyLogLine{Event: "rest", historyReason: reason("slow_rest", "minutes", strconv.Itoa(int(c.rest.Minutes())))})
+		d.log(LogLine{Event: "rest", historyReason: NewReason("slow_rest", "minutes", strconv.Itoa(int(c.rest.Minutes())))})
 		return d.wait(ctx, c.rest, "resting", historyReason{})
 	}
 	return nil
@@ -236,7 +236,7 @@ func (d *historyDriver) pause(ctx context.Context, dur time.Duration, why histor
 	if now.Add(dur).Sub(d.pausedSince) > historyPauseMost {
 		return halt(true, "pause_too_long", "hours", strconv.Itoa(int(historyPauseMost.Hours())), "code", why.Args["code"])
 	}
-	d.log(historyLogLine{Event: "pause", historyReason: why})
+	d.log(LogLine{Event: "pause", historyReason: why})
 	return d.wait(ctx, dur, "paused", why)
 }
 
@@ -244,9 +244,9 @@ func (d *historyDriver) pause(ctx context.Context, dur time.Duration, why histor
 func pauseFor(code string) historyReason {
 	if ms, ok := strings.CutPrefix(code, "retry_after="); ok {
 		n, _ := strconv.ParseInt(ms, 10, 64)
-		return reason("source_pace", "code", "retry_after", "seconds", strconv.FormatInt(n/1000, 10))
+		return NewReason("source_pace", "code", "retry_after", "seconds", strconv.FormatInt(n/1000, 10))
 	}
-	return reason("transient", "code", code)
+	return NewReason("transient", "code", code)
 }
 
 // ---- errors ----
@@ -257,7 +257,7 @@ type historyOutcome int
 const (
 	historyNone       historyOutcome = iota // (the zero value: nothing to act on)
 	historyPauseIt                          // wait, then read the same again
-	historyStopIt                           // stop the whole import for a person
+	StopIt                                  // stop the whole import for a person
 	historyChatError                        // this chat cannot be read as asked: error, permanent
 	historyUnreadable                       // this chat cannot be read any more: skipped, not a failure
 )
@@ -270,8 +270,8 @@ var historyGone = map[string]bool{"not_found": true, "gone": true, "conversation
 var historyRefused = map[string]bool{"forbidden": true, "permission_denied": true, "no_permission": true, "not_member": true,
 	"conversation_not_member": true}
 
-// historyErrCode is an error's code for the log and the status: never its message, which may name a chat.
-func historyErrCode(err error) string {
+// ErrCode is an error's code for the log and the status: never its message, which may name a chat.
+func ErrCode(err error) string {
 	var re *rpc.Error
 	switch {
 	case err == nil:
@@ -307,15 +307,15 @@ func isHistoryQueryErr(err error) bool {
 	return errors.Is(err, connectorwire.ErrQuery) || strings.HasPrefix(err.Error(), connectorwire.ErrQuery.Error()+":")
 }
 
-// classify says what err means, with its code. A timeout, a closed connection (the result is unknown, as for a
+// Classify says what err means, with its code. A timeout, a closed connection (the result is unknown, as for a
 // timeout) and any code it does not know stop the import: a person looks, nothing is retried by itself.
-func classify(err error) (historyOutcome, string) {
-	code := historyErrCode(err)
+func Classify(err error) (historyOutcome, string) {
+	code := ErrCode(err)
 	switch {
 	case code == "query":
 		return historyChatError, code
 	case historyTimeoutCode(code) || code == "connection_closed":
-		return historyStopIt, code
+		return StopIt, code
 	case historyTransient[code]:
 		return historyPauseIt, code
 	case historyGone[code]:
@@ -323,7 +323,7 @@ func classify(err error) (historyOutcome, string) {
 	case historyRefused[code]:
 		return historyChatError, code
 	}
-	return historyStopIt, code
+	return StopIt, code
 }
 
 func historyTimeoutCode(code string) bool {

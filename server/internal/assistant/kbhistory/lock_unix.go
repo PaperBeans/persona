@@ -1,6 +1,6 @@
 //go:build !windows
 
-package assistant
+package kbhistory
 
 import (
 	"errors"

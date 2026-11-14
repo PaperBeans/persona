@@ -1,4 +1,4 @@
-package assistant
+package kbhistory
 
 import (
 	"archive/tar"
@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/textfmt"
 	"io"
 	"io/fs"
 	"os"
@@ -26,9 +27,9 @@ import (
 // The history import's files, all under the knowledge base's history/ directory (search, lists and cleanup never look
 // there; docs/assistant/knowledge.md "History import"):
 //
-//	history/plan-<source>.json     the chats a source lists and the approval (kb_history_plan; kb_history_plan.go)
+//	history/plan-<source>.json     the chats a source lists and the approval (kb_history_plan; kbhistory/plan.go)
 //	history/state/<chat id>.json   how far each chat got (kb.Store.HistoryState)
-//	history/anchors-<source>.json  the owner's messages a searchable source found, by year (kb_history_anchor.go)
+//	history/anchors-<source>.json  the owner's messages a searchable source found, by year (kbhistory/anchor.go)
 //	history/status.json            each source's state, last call, slowdown, pause and stop, for kb_history_status
 //	history/run.lock               one import at a time: a file lock and a lease with a heartbeat
 //	history/STOP                   there: nothing is read until a person resumes (kb_history_resume, or deleting it)
@@ -41,14 +42,14 @@ const (
 	historyDirName  = "history"
 	historyLockName = "run.lock"
 	historyStopName = "STOP"
-	// historyLeaseStale is how old a lease's heartbeat may be before another process takes the import over: a page
+	// LeaseStale is how old a lease's heartbeat may be before another process takes the import over: a page
 	// takes seconds, a rest is waited in steps that renew it, so ten minutes without one means its process is gone.
-	historyLeaseStale = 10 * time.Minute
+	LeaseStale = 10 * time.Minute
 	// historyBackupsKept is how many backups of the data directory are kept.
 	historyBackupsKept = 3
 )
 
-func historyDir(data string) string { return filepath.Join(data, historyDirName) }
+func Dir(data string) string { return filepath.Join(data, historyDirName) }
 
 // writeJSONFile writes v as JSON to path atomically (a temporary file renamed over it), 0600, its directory 0700.
 func writeJSONFile(path string, v any) error {
@@ -87,8 +88,8 @@ func writeFileAtomic(path string, data []byte) error {
 	return err
 }
 
-// readJSONFile reads path into v; false when there is no such file.
-func readJSONFile(path string, v any) (bool, error) {
+// ReadJSONFile reads path into v; false when there is no such file.
+func ReadJSONFile(path string, v any) (bool, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -128,7 +129,7 @@ type historyLock struct {
 // instance's lease is fresh (a file system without working locks); a stale one is taken over, and tookOver says so
 // (with the lease it replaced) for the log.
 func lockHistory(data, instance string, now time.Time) (l *historyLock, tookOver *historyLease, err error) {
-	path := filepath.Join(historyDir(data), historyLockName)
+	path := filepath.Join(Dir(data), historyLockName)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, nil, err
 	}
@@ -147,7 +148,7 @@ func lockHistory(data, instance string, now time.Time) (l *historyLock, tookOver
 	var old historyLease
 	if raw, _ := io.ReadAll(f); len(strings.TrimSpace(string(raw))) > 0 && json.Unmarshal(raw, &old) == nil &&
 		old.Instance != "" && old.Instance != instance {
-		if now.Sub(old.Heartbeat) < historyLeaseStale {
+		if now.Sub(old.Heartbeat) < LeaseStale {
 			unlockFile(f)
 			f.Close()
 			return nil, nil, errHistoryLeased
@@ -186,10 +187,10 @@ func (l *historyLock) release() {
 	l.f.Close()
 }
 
-// readHistoryLease is the lease in run.lock, for the status (false: none).
-func readHistoryLease(data string) (historyLease, bool) {
+// ReadLease is the lease in run.lock, for the status (false: none).
+func ReadLease(data string) (historyLease, bool) {
 	var l historyLease
-	raw, err := os.ReadFile(filepath.Join(historyDir(data), historyLockName))
+	raw, err := os.ReadFile(filepath.Join(Dir(data), historyLockName))
 	if err != nil || json.Unmarshal(raw, &l) != nil || l.Instance == "" {
 		return historyLease{}, false
 	}
@@ -198,29 +199,29 @@ func readHistoryLease(data string) (historyLease, bool) {
 
 // ---- STOP ----
 
-// historyStop is what STOP says: when, why and by whom. A STOP a person made by hand (empty, or a few words) stops as
+// Stop is what STOP says: when, why and by whom. A STOP a person made by hand (empty, or a few words) stops as
 // well (reason stop_file, with the words as its text).
-type historyStop struct {
+type Stop struct {
 	At time.Time `json:"at,omitzero"`
 	historyReason
 	By     string `json:"by,omitempty"` // "tool" (kb_history_stop), "driver" (the import stopped itself)
 	Source string `json:"source,omitempty"`
 }
 
-func historyStopPath(data string) string { return filepath.Join(historyDir(data), historyStopName) }
+func historyStopPath(data string) string { return filepath.Join(Dir(data), historyStopName) }
 
-// readHistoryStop: STOP is there (and what it says, as far as it reads).
-func readHistoryStop(data string) (historyStop, bool) {
+// ReadStop: STOP is there (and what it says, as far as it reads).
+func ReadStop(data string) (Stop, bool) {
 	raw, err := os.ReadFile(historyStopPath(data))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return historyStop{}, false
+			return Stop{}, false
 		}
-		return historyStop{historyReason: reason("stop_file")}, true // there but unreadable: stopped all the same
+		return Stop{historyReason: NewReason("stop_file")}, true // there but unreadable: stopped all the same
 	}
-	var st historyStop
+	var st Stop
 	if json.Unmarshal(raw, &st) != nil {
-		st = historyStop{historyReason: historyReason{Code: "stop_file", Text: clip(strings.TrimSpace(string(raw)), 200)}}
+		st = Stop{historyReason: historyReason{Code: "stop_file", Text: textfmt.Clip(strings.TrimSpace(string(raw)), 200)}}
 	}
 	if st.Code == "" {
 		st.Code = "stop_file"
@@ -228,11 +229,11 @@ func readHistoryStop(data string) (historyStop, bool) {
 	return st, true
 }
 
-func writeHistoryStop(data string, st historyStop) error {
+func WriteStop(data string, st Stop) error {
 	return writeJSONFile(historyStopPath(data), st)
 }
 
-func removeHistoryStop(data string) error {
+func RemoveStop(data string) error {
 	if err := os.Remove(historyStopPath(data)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
@@ -241,9 +242,9 @@ func removeHistoryStop(data string) error {
 
 // ---- the log ----
 
-// historyLogLine is one line of log-YYYY-MM-DD.jsonl: a call (Method) or an event (Event). Never a message's text,
+// LogLine is one line of log-YYYY-MM-DD.jsonl: a call (Method) or an event (Event). Never a message's text,
 // a chat's name or its id: Chat is a keyed hash of the id.
-type historyLogLine struct {
+type LogLine struct {
 	At     time.Time `json:"at"`
 	Source string    `json:"source,omitempty"`
 	Method string    `json:"method,omitempty"`
@@ -257,8 +258,8 @@ type historyLogLine struct {
 	historyReason
 }
 
-// appendHistoryLog appends l to the log of its day (in zone).
-func appendHistoryLog(data string, zone *time.Location, l historyLogLine) error {
+// AppendLog appends l to the log of its day (in zone).
+func AppendLog(data string, zone *time.Location, l LogLine) error {
 	if zone == nil {
 		zone = time.UTC
 	}
@@ -268,7 +269,7 @@ func appendHistoryLog(data string, zone *time.Location, l historyLogLine) error 
 	if err != nil {
 		return err
 	}
-	dir := historyDir(data)
+	dir := Dir(data)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -283,9 +284,9 @@ func appendHistoryLog(data string, zone *time.Location, l historyLogLine) error 
 	return err
 }
 
-// historyLogKey is the key the log hashes chat ids with, made once (32 random bytes, 0600).
-func historyLogKey(data string) ([]byte, error) {
-	path := filepath.Join(historyDir(data), "log.key")
+// LogKey is the key the log hashes chat ids with, made once (32 random bytes, 0600).
+func LogKey(data string) ([]byte, error) {
+	path := filepath.Join(Dir(data), "log.key")
 	if raw, err := os.ReadFile(path); err == nil && len(raw) >= 32 {
 		return raw, nil
 	}
@@ -481,7 +482,7 @@ func pruneKBBackups(dir string, keep int) ([]string, error) {
 	return deleted, nil
 }
 
-// historyStatePathFor is a chat's state file, for tests that look at it.
-func historyStatePathFor(data, chatID string) string {
-	return filepath.Join(historyDir(data), "state", kb.SafeID(chatID)+".json")
+// StatePathFor is a chat's state file, for tests that look at it.
+func StatePathFor(data, chatID string) string {
+	return filepath.Join(Dir(data), "state", kb.SafeID(chatID)+".json")
 }

@@ -179,7 +179,7 @@ func TestUsageLimitScheduledRunThatWentOnAfterMissingSessionIsNotRetried(t *test
 		return 50 * time.Millisecond
 	}
 	limitRun(t, n, h, func(c *proto.Session) { c.UpdatedAt = time.Now().Add(-time.Minute) })
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond) // sleep-ok: a negative check, the 50 ms wait must pass with no retry and no event marks it
 	if n.sent() != 1 || retried(h) {
 		t.Fatalf("retried: %d sends", n.sent())
 	}

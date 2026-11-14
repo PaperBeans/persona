@@ -1,4 +1,4 @@
-package assistant
+package saved
 
 import (
 	"bytes"
@@ -20,29 +20,29 @@ import (
 )
 
 const (
-	savedAgentSearchesKey    = "agents.saved_searches"
+	SearchesKey              = "agents.saved_searches"
 	savedAgentSearchesMax    = 50
 	savedAgentSearchNameMax  = 64
 	savedAgentSearchQueryMax = 1024
 )
 
-// SavedAgentSearch is a named query, not an instruction or a subscription. Applying
+// AgentSearch is a named query, not an instruction or a subscription. Applying
 // it is a client action and never starts an Agent or changes a session.
-type SavedAgentSearch struct {
+type AgentSearch struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Query     string    `json:"query"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
-type savedAgentSearchDocument struct {
-	Revision int64              `json:"revision"`
-	Searches []SavedAgentSearch `json:"searches"`
+type SearchDocument struct {
+	Revision int64         `json:"revision"`
+	Searches []AgentSearch `json:"searches"`
 }
-type savedAgentSearchResponse struct {
-	Revision string             `json:"revision"`
-	Searches []SavedAgentSearch `json:"searches"`
-	CanWrite bool               `json:"can_write"`
+type SearchResponse struct {
+	Revision string        `json:"revision"`
+	Searches []AgentSearch `json:"searches"`
+	CanWrite bool          `json:"can_write"`
 }
 
 // Both reads and writes require durable revision support. A test/older store with
@@ -54,8 +54,10 @@ type savedAgentSearchStore interface {
 type savedAgentSearchMutation struct {
 	revision                        int64
 	action, id, name, query, before string
-	item                            *SavedAgentSearch
+	item                            *AgentSearch
 }
+type searchBook struct{ h Host }
+
 type savedAgentSearchProblem string
 
 func (e savedAgentSearchProblem) Error() string { return string(e) }
@@ -70,7 +72,7 @@ const (
 	savedSearchUnsupported      savedAgentSearchProblem = "unsupported"
 )
 
-func validSavedSearchID(id string) bool {
+func ValidSearchID(id string) bool {
 	if len(id) != len("search_")+24 || !strings.HasPrefix(id, "search_") {
 		return false
 	}
@@ -92,9 +94,9 @@ func normalizeSavedSearch(name, query string) (string, string, error) {
 	}
 	return name, query, nil
 }
-func validSavedSearchItem(item SavedAgentSearch) bool {
+func validSavedSearchItem(item AgentSearch) bool {
 	name, query, err := normalizeSavedSearch(item.Name, item.Query)
-	return err == nil && name == item.Name && query == item.Query && validSavedSearchID(item.ID) && !item.CreatedAt.IsZero() && !item.UpdatedAt.IsZero() && !item.UpdatedAt.Before(item.CreatedAt)
+	return err == nil && name == item.Name && query == item.Query && ValidSearchID(item.ID) && !item.CreatedAt.IsZero() && !item.UpdatedAt.IsZero() && !item.UpdatedAt.Before(item.CreatedAt)
 }
 
 // savedSearchObject rejects duplicate, differently cased, unknown and trailing
@@ -184,7 +186,7 @@ func parseSavedSearchMutation(raw []byte) (savedAgentSearchMutation, error) {
 	m := savedAgentSearchMutation{revision: n, action: action}
 	if action == "update" || action == "delete" || action == "move" {
 		m.id, err = savedSearchString(fields, "id", true)
-		if err != nil || !validSavedSearchID(m.id) {
+		if err != nil || !ValidSearchID(m.id) {
 			return m, savedSearchInvalid
 		}
 	}
@@ -204,7 +206,7 @@ func parseSavedSearchMutation(raw []byte) (savedAgentSearchMutation, error) {
 	}
 	if action == "move" || action == "restore" {
 		m.before, err = savedSearchString(fields, "before_id", false)
-		if err != nil || m.before != "" && !validSavedSearchID(m.before) {
+		if err != nil || m.before != "" && !ValidSearchID(m.before) {
 			return m, savedSearchInvalid
 		}
 	}
@@ -216,7 +218,7 @@ func parseSavedSearchMutation(raw []byte) (savedAgentSearchMutation, error) {
 		if _, err := savedSearchObject(raw, "id", "name", "query", "created_at", "updated_at"); err != nil {
 			return m, err
 		}
-		var item SavedAgentSearch
+		var item AgentSearch
 		if json.Unmarshal(raw, &item) != nil || !validSavedSearchItem(item) {
 			return m, savedSearchInvalid
 		}
@@ -225,22 +227,22 @@ func parseSavedSearchMutation(raw []byte) (savedAgentSearchMutation, error) {
 	return m, nil
 }
 
-func (s *Service) savedSearchStore() (savedAgentSearchStore, error) {
-	st, ok := s.store().(savedAgentSearchStore)
+func (b *searchBook) store() (savedAgentSearchStore, error) {
+	st, ok := b.h.Store().(savedAgentSearchStore)
 	if !ok || st == nil {
 		return nil, savedSearchUnsupported
 	}
 	return st, nil
 }
-func readSavedSearches(ctx context.Context, st savedAgentSearchStore) (savedAgentSearchDocument, error) {
-	doc := savedAgentSearchDocument{Searches: []SavedAgentSearch{}}
+func readSavedSearches(ctx context.Context, st savedAgentSearchStore) (SearchDocument, error) {
+	doc := SearchDocument{Searches: []AgentSearch{}}
 	var raw json.RawMessage
-	exists, err := st.Setting(ctx, savedAgentSearchesKey, &raw)
+	exists, err := st.Setting(ctx, SearchesKey, &raw)
 	if err != nil {
 		return doc, savedSearchStoreUnavailable
 	}
 	if !exists {
-		return savedAgentSearchDocument{Searches: []SavedAgentSearch{}}, nil
+		return SearchDocument{Searches: []AgentSearch{}}, nil
 	}
 	fields, err := savedSearchObject(raw, "revision", "searches")
 	if err != nil || fields["revision"] == nil || fields["searches"] == nil || string(fields["revision"]) == "null" || string(fields["searches"]) == "null" || json.Unmarshal(raw, &doc) != nil {
@@ -262,26 +264,26 @@ func readSavedSearches(ctx context.Context, st savedAgentSearchStore) (savedAgen
 		}
 	}
 	if doc.Searches == nil {
-		doc.Searches = []SavedAgentSearch{}
+		doc.Searches = []AgentSearch{}
 	}
 	return doc, nil
 }
-func listedSavedSearches(doc savedAgentSearchDocument, write bool) savedAgentSearchResponse {
-	return savedAgentSearchResponse{Revision: strconv.FormatInt(doc.Revision, 10), Searches: doc.Searches, CanWrite: write}
+func listedSavedSearches(doc SearchDocument, write bool) SearchResponse {
+	return SearchResponse{Revision: strconv.FormatInt(doc.Revision, 10), Searches: doc.Searches, CanWrite: write}
 }
-func applySavedSearch(before savedAgentSearchDocument, m savedAgentSearchMutation, now time.Time) (savedAgentSearchDocument, error) {
+func applySavedSearch(before SearchDocument, m savedAgentSearchMutation, now time.Time) (SearchDocument, error) {
 	if before.Revision != m.revision {
-		return savedAgentSearchDocument{}, savedSearchConflict
+		return SearchDocument{}, savedSearchConflict
 	}
 	if before.Revision == math.MaxInt64 {
-		return savedAgentSearchDocument{}, savedSearchInvalid
+		return SearchDocument{}, savedSearchInvalid
 	}
-	next := savedAgentSearchDocument{Revision: before.Revision + 1, Searches: append([]SavedAgentSearch{}, before.Searches...)}
+	next := SearchDocument{Revision: before.Revision + 1, Searches: append([]AgentSearch{}, before.Searches...)}
 	index := func(id string) int {
-		return slices.IndexFunc(next.Searches, func(item SavedAgentSearch) bool { return item.ID == id })
+		return slices.IndexFunc(next.Searches, func(item AgentSearch) bool { return item.ID == id })
 	}
 	duplicate := func(id, name string) bool {
-		return slices.ContainsFunc(next.Searches, func(item SavedAgentSearch) bool { return item.ID != id && strings.EqualFold(item.Name, name) })
+		return slices.ContainsFunc(next.Searches, func(item AgentSearch) bool { return item.ID != id && strings.EqualFold(item.Name, name) })
 	}
 	switch m.action {
 	case "add":
@@ -295,7 +297,7 @@ func applySavedSearch(before savedAgentSearchDocument, m savedAgentSearchMutatio
 		for index(id) >= 0 {
 			id = "search_" + randomHex(12)
 		}
-		next.Searches = append(next.Searches, SavedAgentSearch{ID: id, Name: m.name, Query: m.query, CreatedAt: now.UTC(), UpdatedAt: now.UTC()})
+		next.Searches = append(next.Searches, AgentSearch{ID: id, Name: m.name, Query: m.query, CreatedAt: now.UTC(), UpdatedAt: now.UTC()})
 	case "update":
 		i := index(m.id)
 		if i < 0 {
@@ -316,7 +318,7 @@ func applySavedSearch(before savedAgentSearchDocument, m savedAgentSearchMutatio
 		}
 		next.Searches = slices.Delete(next.Searches, i, i+1)
 	case "move", "restore":
-		var item SavedAgentSearch
+		var item AgentSearch
 		if m.action == "move" {
 			i := index(m.id)
 			if i < 0 {
@@ -352,7 +354,7 @@ func applySavedSearch(before savedAgentSearchDocument, m savedAgentSearchMutatio
 	}
 	return next, nil
 }
-func (s *Service) changeSavedSearch(ctx context.Context, st savedAgentSearchStore, m savedAgentSearchMutation) (savedAgentSearchDocument, error) {
+func (b *searchBook) change(ctx context.Context, st savedAgentSearchStore, m savedAgentSearchMutation) (SearchDocument, error) {
 	before, err := readSavedSearches(ctx, st)
 	if err != nil {
 		return before, err
@@ -361,14 +363,14 @@ func (s *Service) changeSavedSearch(ctx context.Context, st savedAgentSearchStor
 	if err != nil {
 		return before, err
 	}
-	saved, err := st.CompareSetting(ctx, savedAgentSearchesKey, before.Revision, next)
+	saved, err := st.CompareSetting(ctx, SearchesKey, before.Revision, next)
 	if err != nil {
 		return before, savedSearchStoreUnavailable
 	}
 	if !saved {
 		return before, savedSearchConflict
 	}
-	s.event(ctx, map[string]any{"type": "saved_agent_searches", "revision": strconv.FormatInt(next.Revision, 10)})
+	b.h.Event(ctx, map[string]any{"type": "saved_agent_searches", "revision": strconv.FormatInt(next.Revision, 10)})
 	return next, nil
 }
 func writeSavedSearchError(w http.ResponseWriter, err error) {
@@ -389,9 +391,9 @@ func writeSavedSearchError(w http.ResponseWriter, err error) {
 	}
 	apierr.WriteCode(w, status, code, i18n.Err("assistant-saved-agent-searches."+key))
 }
-func (s *Service) savedAgentSearchRoutes() {
-	s.handle("GET /api/v1/saved-agent-searches", func(w http.ResponseWriter, r *http.Request) {
-		st, err := s.savedSearchStore()
+func (b *searchBook) routes() {
+	b.h.Handle("GET /api/v1/saved-agent-searches", func(w http.ResponseWriter, r *http.Request) {
+		st, err := b.store()
 		if err != nil {
 			writeSavedSearchError(w, err)
 			return
@@ -401,21 +403,21 @@ func (s *Service) savedAgentSearchRoutes() {
 			writeSavedSearchError(w, err)
 			return
 		}
-		apierr.WriteJSON(w, listedSavedSearches(doc, fullRole(r)))
+		apierr.WriteJSON(w, listedSavedSearches(doc, b.h.Full(r)))
 	})
-	s.handle("POST /api/v1/saved-agent-searches", func(w http.ResponseWriter, r *http.Request) {
-		if !fullRole(r) {
+	b.h.Handle("POST /api/v1/saved-agent-searches", func(w http.ResponseWriter, r *http.Request) {
+		if !b.h.Full(r) {
 			apierr.WriteCode(w, http.StatusForbidden, "forbidden", i18n.Err("assistant-saved-agent-searches.read_only"))
 			return
 		}
-		st, err := s.savedSearchStore()
+		st, err := b.store()
 		if err != nil {
 			writeSavedSearchError(w, err)
 			return
 		}
 		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<10))
 		if err != nil {
-			writeBodyErr(w, err, i18n.Err("assistant-saved-agent-searches.invalid"))
+			b.h.BodyErr(w, err, i18n.Err("assistant-saved-agent-searches.invalid"))
 			return
 		}
 		mutation, err := parseSavedSearchMutation(raw)
@@ -423,7 +425,7 @@ func (s *Service) savedAgentSearchRoutes() {
 			writeSavedSearchError(w, err)
 			return
 		}
-		doc, err := s.changeSavedSearch(r.Context(), st, mutation)
+		doc, err := b.change(r.Context(), st, mutation)
 		if err != nil {
 			writeSavedSearchError(w, err)
 			return

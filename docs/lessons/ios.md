@@ -2641,3 +2641,28 @@ could not read the actor's own `static let`s. The fix is per declaration, and on
   nonisolated. A plain actor can still conform to a `nonisolated ... : Sendable` protocol.
 - A `@Sendable` closure that must touch a main-actor API (`UIApplication.shared.isProtectedDataAvailable`) wraps the
   read in `MainActor.assumeIsolated { ... }`; give tests an injectable closure so they never hit the real API.
+
+## A UI test's scroll drags whatever is under the finger (2026-11-13, #6783)
+
+`TodoStageBarUITests` scrolled the to-do's page by dragging from the middle of the window. Before the interface stopped
+growing at xxxLarge (#6813), `FormDatePicker` was a wheel across its row at AX5 (#6108), and the page could stop with
+the Due date's wheel under the middle: every later drag turned the wheel (moving the mock's due date by weeks) instead of
+scrolling, and the stage bar never came into view. Where the page stops depends on the language and the iOS version: on
+iOS 27.0 only Japanese failed, on 27.2 zh-Hans already did.
+
+- Scroll a form or list in a UI test by dragging its margin at the screen's leading edge
+  (`coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: …))`), where no row draws a control. The middle of the
+  screen holds a different row in each language and text size.
+- Not the trailing edge: the chat list's edge navigator lives there (#2615). A quick vertical drag from the leading edge
+  starts neither the back swipe nor the drawer.
+- A test that must not change what it reads (the mock's to-dos are shared by the whole run) checks that itself:
+  `TodoStageBarUITests` reads the to-do's `due_at` (`GET /api/v1/todos/todo_weather`) in `setUpWithError` and compares
+  it in `tearDownWithError`, which runs after a failure too.
+- A launch at `UICTContentSizeCategoryAccessibilityXXXL` no longer reaches the accessibility layouts of interface views
+  (`dynamicTypeSize.isAccessibilitySize` is false under the cap); a UI test that expects one fails on `main`. A view that
+  still needs another form at the largest size picks it by measured width (`ViewThatFits`, as `TodoStageBar` since
+  #7268), so its test accepts either form there.
+- A fixed band (the window less 15% at each end) is not the part of a page nothing covers: the to-do page's bottom
+  buttons stack at the largest size (#6151) and covered the stage bar in Japanese while the test, checking only the
+  window, passed with a screenshot that didn't show it. Take the bottom from the frames of each page's own bottom
+  controls (on the chat, the action bar's entries, which also reach above the band at the largest size).

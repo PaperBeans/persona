@@ -1,4 +1,4 @@
-package assistant
+package kbhistory
 
 import (
 	"path/filepath"
@@ -20,22 +20,22 @@ import (
 // personal message not looked for, further back), new chats in the list among them, takes the approval back: nothing
 // runs until the owner approves again (kb_history_resume). A change that reads less needs no approval.
 
-// historyUnlisted is the kind of a chat the plan did not list but the source's search found the owner's messages in
+// Unlisted is the kind of a chat the plan did not list but the source's search found the owner's messages in
 // (often one the account left): the selection judges it as a group.
-const historyUnlisted = "unlisted"
+const Unlisted = "unlisted"
 
-type historyPlan struct {
-	Source      string            `json:"source"`
-	GeneratedAt time.Time         `json:"generated_at"`
-	ApprovedAt  *time.Time        `json:"approved_at,omitempty"`
-	Chats       []historyPlanChat `json:"chats"`
+type Plan struct {
+	Source      string     `json:"source"`
+	GeneratedAt time.Time  `json:"generated_at"`
+	ApprovedAt  *time.Time `json:"approved_at,omitempty"`
+	Chats       []PlanChat `json:"chats"`
 	// Approved is what each chat would be read as when the owner approved (by chat id; a chat left out was not read),
 	// and ApprovedUnlisted what a chat the search finds outside the list would be.
 	Approved         map[string]kb.ReadPlan `json:"approved,omitempty"`
 	ApprovedUnlisted *kb.ReadPlan           `json:"approved_unlisted,omitempty"`
 }
 
-type historyPlanChat struct {
+type PlanChat struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
@@ -49,7 +49,7 @@ type historyPlanChat struct {
 }
 
 // filing is the source the chat's knowledge-base chat is under: the source its per-item setting names too.
-func (c historyPlanChat) filing(connector string) string {
+func (c PlanChat) Filing(connector string) string {
 	if c.FiledAs != "" {
 		return c.FiledAs
 	}
@@ -58,12 +58,12 @@ func (c historyPlanChat) filing(connector string) string {
 
 // facts are what the selection judges the chat by. A chat the search found outside the list, and a kind the source
 // made up, are judged as a group: never read whole by default, and never outside the selection.
-func (c historyPlanChat) facts(connector string) kb.ChatFacts {
+func (c PlanChat) facts(connector string) kb.ChatFacts {
 	kind := c.Kind
 	if !isHistoryKind(kind) {
 		kind = connectorwire.HistoryKindGroup
 	}
-	return kb.ChatFacts{Source: c.filing(connector), ID: c.ID, Kind: kind, Bot: c.Bot, Muted: c.Muted, Collapsed: c.Collapsed, Done: c.Done}
+	return kb.ChatFacts{Source: c.Filing(connector), ID: c.ID, Kind: kind, Bot: c.Bot, Muted: c.Muted, Collapsed: c.Collapsed, Done: c.Done}
 }
 
 func isHistoryKind(kind string) bool {
@@ -75,9 +75,9 @@ func isHistoryKind(kind string) bool {
 	return false
 }
 
-// historyNeed is what the import reads of a chat now: the selection's read plan, its days bounded by the source's
+// Need is what the import reads of a chat now: the selection's read plan, its days bounded by the source's
 // history back_days. Not Read: the chat is not read at all.
-func historyNeed(sel *kb.Selection, ret kb.Retention, connector string, c historyPlanChat) kb.ReadPlan {
+func Need(sel *kb.Selection, ret kb.Retention, connector string, c PlanChat) kb.ReadPlan {
 	rp := sel.ReadChat(ret, c.facts(connector))
 	if !rp.Read {
 		return kb.ReadPlan{}
@@ -98,26 +98,26 @@ func historyMode(need kb.ReadPlan) string {
 }
 
 func historyPlanPath(data, source string) string {
-	return filepath.Join(historyDir(data), "plan-"+kb.SafeID(source)+".json")
+	return filepath.Join(Dir(data), "plan-"+kb.SafeID(source)+".json")
 }
 
-// loadHistoryPlan reads a source's plan; false when there is none.
-func loadHistoryPlan(data, source string) (*historyPlan, bool, error) {
-	var p historyPlan
-	ok, err := readJSONFile(historyPlanPath(data, source), &p)
+// LoadPlan reads a source's plan; false when there is none.
+func LoadPlan(data, source string) (*Plan, bool, error) {
+	var p Plan
+	ok, err := ReadJSONFile(historyPlanPath(data, source), &p)
 	if err != nil || !ok {
 		return nil, ok, err
 	}
 	return &p, true, nil
 }
 
-func saveHistoryPlan(data string, p *historyPlan) error {
+func SavePlan(data string, p *Plan) error {
 	return writeJSONFile(historyPlanPath(data, p.Source), p)
 }
 
 // regenerate lays the source's list over the plan: names, kinds, flags and estimates from the list; chats the list
 // no longer has stay as they were (the search may still find them).
-func (p *historyPlan) regenerate(chats []connectorwire.HistoryChat, now time.Time) {
+func (p *Plan) Regenerate(chats []connectorwire.HistoryChat, now time.Time) {
 	at := map[string]int{}
 	for i, c := range p.Chats {
 		at[c.ID] = i
@@ -126,7 +126,7 @@ func (p *historyPlan) regenerate(chats []connectorwire.HistoryChat, now time.Tim
 		if hc.ID == "" {
 			continue
 		}
-		c := historyPlanChat{ID: hc.ID, Name: hc.Name, Kind: hc.Kind, Muted: hc.Muted, Collapsed: hc.Collapsed, Done: hc.Done, Bot: hc.Bot,
+		c := PlanChat{ID: hc.ID, Name: hc.Name, Kind: hc.Kind, Muted: hc.Muted, Collapsed: hc.Collapsed, Done: hc.Done, Bot: hc.Bot,
 			Estimate: max(hc.Estimate, 0), FiledAs: hc.Source}
 		if i, ok := at[hc.ID]; ok {
 			p.Chats[i] = c
@@ -139,15 +139,15 @@ func (p *historyPlan) regenerate(chats []connectorwire.HistoryChat, now time.Tim
 }
 
 // addUnlisted adds a chat the plan does not list (a search found the owner's messages in it).
-func (p *historyPlan) addUnlisted(id, filedAs string) bool {
+func (p *Plan) addUnlisted(id, filedAs string) bool {
 	if id == "" || p.chat(id) != nil {
 		return false
 	}
-	p.Chats = append(p.Chats, historyPlanChat{ID: id, Kind: historyUnlisted, FiledAs: filedAs})
+	p.Chats = append(p.Chats, PlanChat{ID: id, Kind: Unlisted, FiledAs: filedAs})
 	return true
 }
 
-func (p *historyPlan) chat(id string) *historyPlanChat {
+func (p *Plan) chat(id string) *PlanChat {
 	for i := range p.Chats {
 		if p.Chats[i].ID == id {
 			return &p.Chats[i]
@@ -157,34 +157,34 @@ func (p *historyPlan) chat(id string) *historyPlanChat {
 }
 
 // approve records the approval with what the selection reads now.
-func (p *historyPlan) approve(sel *kb.Selection, ret kb.Retention, now time.Time) {
+func (p *Plan) approve(sel *kb.Selection, ret kb.Retention, now time.Time) {
 	at := now.UTC()
 	p.ApprovedAt = &at
 	p.Approved = map[string]kb.ReadPlan{}
 	for _, c := range p.Chats {
-		if need := historyNeed(sel, ret, p.Source, c); need.Read {
+		if need := Need(sel, ret, p.Source, c); need.Read {
 			p.Approved[c.ID] = need
 		}
 	}
-	u := historyNeed(sel, ret, p.Source, historyPlanChat{Kind: historyUnlisted})
+	u := Need(sel, ret, p.Source, PlanChat{Kind: Unlisted})
 	p.ApprovedUnlisted = &u
 }
 
 // revoke takes the approval back.
-func (p *historyPlan) revoke() {
+func (p *Plan) revoke() {
 	p.ApprovedAt, p.Approved, p.ApprovedUnlisted = nil, nil, nil
 }
 
 // widened counts the chats the selection now reads more of than the approval saw (a chat new to the plan that is
 // read among them), and whether a chat the search finds outside the list would be read more. 0 and false for a plan
 // not approved.
-func (p *historyPlan) widened(sel *kb.Selection, ret kb.Retention) (int, bool) {
+func (p *Plan) widened(sel *kb.Selection, ret kb.Retention) (int, bool) {
 	if p.ApprovedAt == nil {
 		return 0, false
 	}
 	n := 0
 	for _, c := range p.Chats {
-		need := historyNeed(sel, ret, p.Source, c)
+		need := Need(sel, ret, p.Source, c)
 		if !need.Read {
 			continue
 		}
@@ -192,20 +192,20 @@ func (p *historyPlan) widened(sel *kb.Selection, ret kb.Retention) (int, bool) {
 			n++
 		}
 	}
-	u := historyNeed(sel, ret, p.Source, historyPlanChat{Kind: historyUnlisted})
+	u := Need(sel, ret, p.Source, PlanChat{Kind: Unlisted})
 	unlisted := u.Read && (p.ApprovedUnlisted == nil || u.Wider(*p.ApprovedUnlisted))
 	return n, unlisted
 }
 
 // historyPlanGroups are the plan's chats by what the selection reads of them, the largest estimate first.
 type historyPlanGroups struct {
-	whole, personal, none []historyPlanChat
+	whole, personal, none []PlanChat
 }
 
-func (p *historyPlan) grouped(sel *kb.Selection, ret kb.Retention) historyPlanGroups {
+func (p *Plan) grouped(sel *kb.Selection, ret kb.Retention) historyPlanGroups {
 	var g historyPlanGroups
 	for _, c := range p.Chats {
-		switch need := historyNeed(sel, ret, p.Source, c); {
+		switch need := Need(sel, ret, p.Source, c); {
 		case !need.Read:
 			g.none = append(g.none, c)
 		case need.Whole:
@@ -214,7 +214,7 @@ func (p *historyPlan) grouped(sel *kb.Selection, ret kb.Retention) historyPlanGr
 			g.personal = append(g.personal, c)
 		}
 	}
-	for _, list := range [][]historyPlanChat{g.whole, g.personal, g.none} {
+	for _, list := range [][]PlanChat{g.whole, g.personal, g.none} {
 		sort.SliceStable(list, func(i, j int) bool {
 			if list[i].Estimate != list[j].Estimate {
 				return list[i].Estimate > list[j].Estimate
@@ -227,15 +227,15 @@ func (p *historyPlan) grouped(sel *kb.Selection, ret kb.Retention) historyPlanGr
 
 // historyRead is a chat the import reads, with what it reads of it.
 type historyRead struct {
-	chat historyPlanChat
+	chat PlanChat
 	need kb.ReadPlan
 }
 
 // reading are the chats the selection reads anything of.
-func (p *historyPlan) reading(sel *kb.Selection, ret kb.Retention) []historyRead {
+func (p *Plan) reading(sel *kb.Selection, ret kb.Retention) []historyRead {
 	var out []historyRead
 	for _, c := range p.Chats {
-		if need := historyNeed(sel, ret, p.Source, c); need.Read {
+		if need := Need(sel, ret, p.Source, c); need.Read {
 			out = append(out, historyRead{chat: c, need: need})
 		}
 	}
@@ -245,11 +245,11 @@ func (p *historyPlan) reading(sel *kb.Selection, ret kb.Retention) []historyRead
 // historyWantsUnlisted: a chat the source's search finds that the plan does not list would be read (as a group), so the
 // anchors are worth gathering even without a personal chat in the plan.
 func historyWantsUnlisted(sel *kb.Selection, ret kb.Retention, connector string) bool {
-	return historyNeed(sel, ret, connector, historyPlanChat{Kind: historyUnlisted}).Read
+	return Need(sel, ret, connector, PlanChat{Kind: Unlisted}).Read
 }
 
-// historySelection is the selection the engine goes by (its defaults when it has none).
-func historySelection(e *kb.Engine) (*kb.Selection, kb.Retention) {
+// Selection is the selection the engine goes by (its defaults when it has none).
+func Selection(e *kb.Engine) (*kb.Selection, kb.Retention) {
 	if e.Selection != nil {
 		if s := e.Selection(); s != nil {
 			return s, e.Retention()
