@@ -44,6 +44,21 @@ type Computer struct {
 	// docs/extensions/computer-use.md "Live screen video"). Absent from a node without Persona Screen, or an old node,
 	// so an old app simply keeps showing RFB.
 	ScreenVideo *ScreenVideo `json:"screen_video,omitempty"`
+	// ScreenInput: this Mac's node takes the live screen's pixel scroll records out of the RFB stream for Persona Input
+	// (#7775, docs/extensions/computer-use.md "Pixel scrolling"). Absent from an old node or one without the helper: the
+	// phone then scrolls by wheel notches only, and never sends a record.
+	ScreenInput *ScreenInput `json:"screen_input,omitempty"`
+}
+
+// ScreenInput is what a Mac can do for pixel scrolling (#7775): Persona Input is installed and the node reads scroll
+// records (Version, the record's version it reads). The phone sends records only while Permission is granted; before
+// that it says hello on its first two-finger scroll, and the node asks macOS once for this helper version (Asked).
+type ScreenInput struct {
+	Version int `json:"version"`
+	// Permission: Accessibility (posting events) for Persona Input, granted | missing | unknown.
+	Permission string `json:"permission,omitempty"`
+	// Asked: macOS was asked for this helper version's permission, so Persona Input is in System Settings' list.
+	Asked bool `json:"asked,omitempty"`
 }
 
 // ScreenVideo is what a Mac can do for the iOS live-screen hardware video channel (#3954): the capture-and-encode
@@ -58,6 +73,10 @@ type ScreenVideo struct {
 	// Permission: Screen Recording for Persona Screen, granted | missing | unknown. "missing" keeps the phone on RFB
 	// and offers to allow again; only input on that Mac answers macOS's question.
 	Permission string `json:"permission,omitempty"`
+	// Asked: the node has asked macOS for this helper version's grant (once, when an app that plays the video first
+	// signed in to the live screen without it), so Persona Screen is in System Settings' Screen & System Audio
+	// Recording list. While Permission is missing and Asked is false, macOS's alert is about to show on the Mac.
+	Asked bool `json:"asked,omitempty"`
 }
 
 // Browser is a Mac's ego lite, the agent browser the assistant may drive (the built-in plugin ego,
@@ -83,6 +102,8 @@ type Browser struct {
 	Checked       time.Time    `json:"checked,omitempty"`
 	// ScreenVideo: as in Computer (#3954). A Mac the plugin ego is on for shares the same live screen and helper.
 	ScreenVideo *ScreenVideo `json:"screen_video,omitempty"`
+	// ScreenInput: as in Computer (#7775).
+	ScreenInput *ScreenInput `json:"screen_input,omitempty"`
 }
 
 // Display is one of a Mac's displays: its frame in points in the global display space (origin at the top-left corner

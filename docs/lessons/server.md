@@ -1,5 +1,12 @@
 # Lessons: hub / node and networking
 
+## An empty list sent as null means "no change" to an optional field (2026-11-14)
+
+The node reads node.configure's `claude_dirs_blocked` as `*[]string`: absent or `null` leaves its patterns as they are.
+Go marshals a nil slice as `null`, so lifting the last blocked pattern stored none on the hub but left the node blocking
+the directory, and its sessions stayed hidden. A field where null means "leave it" must be sent as `[]` when it is
+empty, and a fake peer in a test must read null the way the real one does, or it hides exactly this.
+
 ## An update waits only for what its restart interrupts (2026-11-13, #6364)
 
 A node update counted every session on the computer as busy: working, background tasks, running subagents, questions on the phone. On a computer whose terminal Agents always run a background workflow it never went through, and the queued update survived hub restarts. The resident node restarts by exec in place and stops only its own headless conversations (`ResidentReload.Prepare`); terminal Agents are other processes and keep running. Before adding a wait in front of a restart, list what that restart actually stops and wait for that, as the hub self-update's `updateBusy` does. When the rule lives on both sides of a connection, gate the new rule on a capability: the hub's lighter wait in front of an old node's strict commit check would re-send the whole build on every refusal. And let the side that enforces the rule report its verdict rather than have the other side rebuild it from rows: the hub first rebuilt the node's check from `sessions.list` rows, but a node never marks its headless rows `Assistant` (the hub's assistant manager adds that later), so the hub saw a busy main chat as idle and re-sent the build until it settled. The node now answers `update_busy`.
@@ -112,8 +119,21 @@ messages (terminal keys) is a one-way `notify` written in place, never a call.
 Test it by keeping the node's answer back, waiting until the call is at the node, and then checking that a message
 sent behind it is taken: the fix is told apart by whether the hub reads, not by how long something took. Run the
 scenario through the manager as well, where the wait is the manager's own
-(`server/internal/hub/subscribe_readloop_test.go`). As of this change `fs_watch` still calls the node from the read
-loop (`fsWatchSet`, up to 10 s).
+(`server/internal/hub/subscribe_readloop_test.go`).
+
+`fs_watch` needed the same treatment (#6786), with one addition: replacing a set is not the same as counting joins
+and leaves. Record the browser's set in its read loop, then use one worker per machine with one coalesced trailing
+request. The worker reads the union when its turn comes, so a burst makes at most the call in flight and one latest
+call. Disconnect cleanup and reconnect resends use that queue too. A reconnect sets a forced-resend flag rather than
+only `fswSent`: an earlier empty call can clear `fswSent` before the trailing reconnect runs, and the new node still
+needs that empty set. A failed forced resend leaves `fswSent` set, so the next empty set retries it as before
+(`server/internal/hub/fswatch_report_readloop_test.go`).
+
+A manager bus read loop has the same rule for its store. `extensions.report` keeps its in-memory report and broadcasts
+in bus order, but one worker persists only the latest pending report, with a bounded context for each write. A failed
+write is logged and left for the next report, never retried in a tight loop. Both kinds of worker join the hub's
+`nodeWorkers`, whose shutdown wait is bounded. Tests hold the node or `PutSetting`, prove a later message or bus event
+is still handled, then release the dependency and join the workers before checking the final value and call count.
 
 ## A Go file named after a platform builds only there (#5563)
 
@@ -596,6 +616,10 @@ Sockets passed by socket activation (`LISTEN_FDS`, descriptors 3 and up) are not
 
 `syscall.Exec` keeps the pid, so every child of the old image (the update watchdog, the herdr server, bridges, the hub's manager) is the new image's child, and no `exec.Cmd` there knows it. Once one exits it stays a zombie until the process ends; `init: true` in Docker does not help, since the zombie's parent is personad, not init. The resident node, the hub and a manager all replace themselves this way, so each calls `osproc.ReapInherited` next to `osproc.SealInherited`, before it starts any child: it waits for each pid listed as its child then, never for -1, which could take a child an `exec.Cmd` waits for.
 
+## macOS's resolver opens a control socket after the startup seal (2026-11-15, #7813)
+
+On macOS the first lookup through libSystem opens `com.apple.netsrc`, an `AF_SYSTEM` kernel control socket without close-on-exec, and keeps reusing it; the separate Unix socket to mDNSResponder is close-on-exec. A startup seal before any lookup therefore misses the one socket that every later child inherits. `osproc.SealInherited` makes one `localhost` lookup through `net.DefaultResolver` with a 50 ms deadline immediately before its descriptor scan on Darwin. This leaves `GODEBUG=netdns` untouched (`netdns=go` opens no control socket), ignores resolver errors and costs each caller only one local lookup, including the short-lived stdio commands. If the deadline passes, the system lookup may finish and open the socket after the scan, retaining the old inheritance behavior rather than delaying startup further. Keep the warm-up inside `osproc` so no present or future caller can forget it. A test can identify the socket without `lsof` through `CTLIOCGINFO`: Darwin has no `SO_DOMAIN` option, and `getsockname` is unsupported on this control socket.
+
 ## A fixed name in the temp folder is shared on Linux (2026-11-07, #66)
 
 `os.TempDir()` is the per-user `$TMPDIR` on macOS but the shared `/tmp` on Linux, so a fixed name there (`persona-herdr-server.log`, `persona-orca-images`) looks private on a Mac and is not on a Linux node. Another local user can create the name first: a symlink makes the next `O_CREATE|O_TRUNC` open empty and write into a file of the node's user, and a world-writable folder receives every file written into it, since `MkdirAll` succeeds on an existing folder whatever its owner or mode. Keep such files under `privateCacheDir` (`internal/node/cachedir.go`: the user's cache folder, checked to be a private folder of this user; a per-process `os.MkdirTemp` folder when there is none).
@@ -816,6 +840,8 @@ Splitting a registry at its first colon reads `[::1]:5000` as `[`, selecting HTT
 - An ownership rule between managers has to hold on every path into the hub, not just the obvious one (2026-11-06, #5923). After #5556 made `device.call` and the cards check the caller's machine, a review still found a manager reaching another's things through `ws.broadcast` (relabelling its own card as another session's question), `notify.request`, extension pushes, `app.call`, relayed Persona Links that outlived a move or a revoke, and extension events sent to every manager. When adding a bus method, event, relay or push, take the caller (`handleBus`, `c.managerID()`), check what it names with `ownsRef` / `machineOwner`, and recheck after anything a move can change in between (`withCaller`, cards and relays checked again once kept). For what a manager sends on, allowlist its types (`TestBroadcastTypes` reads them and the hub's from the code with `go/ast`) rather than denylisting the hub's, and read it with exact keys: Go's `encoding/json` matches keys regardless of case and takes the last of a repeated key, so `{"type":"interaction","Type":"x"}` read into a struct passed a denylist while the apps read `interaction`; refuse repeated and case-variant keys and pass on what was checked, re-marshalled (#5960 review).
 
 - Merging managers' to-do links must resolve each machine/session pair by `sessionOwner` before falling back to the built-in assistant (2026-11-06, #5829). A session belongs to its machine's owner (#5556), which may not be the built-in assistant. Go map iteration has no guaranteed order, so looking up the owner's and built-in assistant's entries directly prevents a later-visited fallback from overwriting the owner. Test both report arrival orders and nil versus empty reports: a failed read retains links, while a successful empty report withdraws them.
+
+- The hub half of `TestBroadcastTypes` scans every non-test `.go` file in the `hub` package for message types: any `Type: "text"` struct literal, `"type": "x"` map key, `x.Type = "x"` assignment, or in-string `"type":"x"` is treated as an app message type and must be listed in `hubMessageTypes` (2026-11-14, #7677). Code that merely builds `proto.Content` (e.g. prepending a note to a phone tool result) trips it. Build such content with the `proto.TextResult(...)` helper instead of a `proto.Content{Type: ...}` literal, so the literal lives in the `proto` package, which the scanner does not parse.
 
 - To-do Agent linking and removal must lock rows in the same order (2026-11-05, #2660): acquire a session transaction lock, then lock the target and other active to-do parent rows by id, then update Agent rows, preventing concurrent link/removal deadlocks and duplicate active links. Auto-link first confirms the target isn't an existing row or dismissed marker, releases old active links, then inserts; `todo_agents_active` is an immediate unique index, so inserting before release raises 23505. Preserve soft unlink and roll back the whole transaction on unexpected conflicts. Regressions observe real lock waits and use `FOR UPDATE NOWAIT` to check order, not added sleeps or retries.
 
@@ -1301,6 +1327,7 @@ back) and only keeps the entry. Tell them apart by git's `CONFLICT` lines plus `
 
 - **JPEG pixels are stored before EXIF orientation** (#1303): apply all eight primary-image orientations, including mirrors, before sizing a thumbnail; re-encoding alone drops the orientation metadata. Keep metadata scans bounded and separate from nested/thumbnail IFDs. A derived thumbnail's ETag also needs a processing version, but clients must reach that validator: revalidate persisted disk thumbnails once per launch even when a listing's size/time match, and give browser thumbnail URLs a new page-load identity. Test both upgrade orders with a seeded old image; a new client may see an old node first. Unupdated clients can retain their private caches until they refresh or upgrade.
 - **Go `mime.TypeByExtension` varies by machine**: it reads `/etc/mime.types` and other system files; docx / xlsx / ipynb / heic may be known on one machine and empty on another, making MIME-selected viewers differ for the same file. Keep a fixed preview-type table in node (`node/filemime.go`); outside it, consult the system, then sniff initial bytes.
+- **An extension can name two formats** (#7974): `.ts` is TypeScript and MPEG transport stream, `.mts` TypeScript and AVCHD video. The system tables pick one (a Mac's `/etc/apache2/mime.types` says `video/mp2t`, Linux shared-mime-info lists `text/vnd.qt.linguist` first), so a fixed table entry would be wrong half the time too: such names are typed by their first bytes (`proto.ScriptOrStream`: sync byte `0x47` every 188 bytes, binary; else text). Older nodes keep answering by the name until their computer updates, so the hub's `file.read` relay re-checks a streamed `video/mp2t` through `file.chunk`; a type fix that lives only in the node reaches nobody whose files are on another computer.
 - **`qlmanage -t` hangs on locked Macs** (still running after 30 seconds measured), without errors. System thumbnail tools need timeouts, cooldown after a timeout, and one concurrent execution: a file list may request dozens, otherwise node fills with stuck processes waiting on every thumbnail.
 - **Hub and web share an origin; isolate inline files**: standalone `Content-Disposition: inline` SVG / HTML scripts run as the web app and can read localStorage tokens. Inline only images, audio/video, PDF, with `Content-Security-Policy: sandbox`; PDF is exempt because Chrome won't display sandboxed PDFs.
 

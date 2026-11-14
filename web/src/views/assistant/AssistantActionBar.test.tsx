@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
 import { getFeedState, loadFeed, type FeedItem, type TaskPlan } from "../../lib/feed";
 import { setAgentOpenMode } from "../../lib/agent-open";
 import { closePanel, getPanel } from "../../lib/panel";
+import { loadPages } from "../../lib/lazy-page";
 import { putTodo, refresh, refreshTodos, reset, upsertSession } from "../../lib/store";
 import type { Todo } from "../../lib/todos";
 import { usageLimitLabel } from "../../lib/usage-limit";
@@ -13,6 +14,7 @@ import type { Interaction, Session } from "../../lib/types";
 import { AssistantActionBar, DOCK_CAPSULE, FeedLineView, TaskDock } from "./Tasks";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+beforeAll(() => loadPages(), 60_000);
 const at = "2026-11-10T08:00:00Z";
 // "Now" for every case: an hour after the fixtures, not the real clock, by which they would be long shelved
 // (SHELVE_AFTER_MS, lib/todo-triage.ts) and the trays would leave them out (#5531). Only Date is faked: timers stay real.
@@ -47,7 +49,7 @@ beforeEach(async () => {
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     const path = String(url);
     if (init?.method && init.method !== "GET") writes.push(path);
-    const body = path.includes("/feed") ? { items: feed, plans: { [plan.id]: plan }, task_cards: [{ id: `plan:${plan.id}:0`, plan_id: plan.id, index: 0, todo_id: todo.id, at, updated_at: at, state: "accepted" }] } : path.includes("/todos") ? { todos: [todo, ...moreTodos] } : path.includes("/sessions") ? { sessions: [{ machine_id: "demo", session_id: "worker", title: "Demo agent", state: "working", status: "working", updated_at: at }, ...moreSessions] } : path.includes("/interactions") ? { interactions: moreInteractions } : /\/assistant(\?|$)/.test(path) && mainChat ? { machine_id: "demo", main: mainChat, conversations: [] } : {};
+    const body = path.includes("/push/ln-mode") ? { enabled: false } : path.includes("/feed") ? { items: feed, plans: { [plan.id]: plan }, task_cards: [{ id: `plan:${plan.id}:0`, plan_id: plan.id, index: 0, todo_id: todo.id, at, updated_at: at, state: "accepted" }] } : path.includes("/todos") ? { todos: [todo, ...moreTodos] } : path.includes("/sessions") ? { sessions: [{ machine_id: "demo", session_id: "worker", title: "Demo agent", state: "working", status: "working", updated_at: at }, ...moreSessions] } : path.includes("/interactions") ? { interactions: moreInteractions } : /\/assistant(\?|$)/.test(path) && mainChat ? { machine_id: "demo", main: mainChat, conversations: [] } : {};
     return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
   }));
   await act(async () => {
@@ -73,6 +75,16 @@ afterEach(() => {
   delete getFeedState().taskCards[conversation];
   vi.unstubAllGlobals();
 });
+const settleHeldPushRead = async () => {
+  await act(async () => {
+    vi.advanceTimersByTime(0);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  const fetchMock = vi.mocked(fetch);
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/push/ln-mode"))).toBe(true);
+};
+
 const entries = () => [...host.querySelectorAll<HTMLButtonElement>("[data-assistant-actionbar] [data-tray-entry]")];
 const entry = (key: string) => host.querySelector<HTMLButtonElement>(`[data-assistant-actionbar] [data-tray-entry="${key}"]`)!;
 
@@ -383,6 +395,24 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(entries().map((button) => button.textContent)).toEqual([label.needs, `${label.running}1`]);
   });
 
+  it("counts and lists an Agent's question once when two to-dos list that Agent, under the one the hub ties it to", async () => {
+    moreTodos = [{ id: "also-lists", title: "Also lists the agent", origin: conversation, created_at: at, updated_at: at, agents: [{ machine_id: "demo", session_id: "worker", linked_at: at }] }];
+    moreSessions = [{ machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", state: "needs_you", status: "blocked", updated_at: at, pending_interactions: 1, todo: { id: "tray-task", title: "Demo task" } } as Session];
+    moreInteractions = [{ id: "ix-1", machine_id: "demo", session_id: "worker", kind: "question", created_at: at, questions: [{ question: "Which port?", options: [{ label: "8080" }, { label: "9090" }] }] } as Interaction];
+    await act(async () => {
+      await refresh();
+      await refreshTodos();
+      upsertSession(moreSessions[0]);
+    });
+    expect(entries().map((button) => button.textContent)).toEqual([`${label.needs}1`, `${label.running}1`]);
+    act(() => entry("needs").click());
+    const rows = [...host.querySelectorAll("[data-needs-row]")];
+    expect(rows.map((row) => row.getAttribute("data-needs-row"))).toEqual(["task:tray-task"]);
+    expect(trays().split("Which port?")).toHaveLength(2);
+    act(() => entry("running").click());
+    expect(trays()).toContain("Also lists the agent");
+  });
+
   it("lists Agents that belong to no task in the main conversation only, by what they need", async () => {
     mainChat = conversation;
     moreSessions = [
@@ -394,6 +424,7 @@ describe("Assistant Needs you / In progress trays", () => {
       await refresh();
       for (const s of moreSessions) upsertSession(s);
     });
+    await settleHeldPushRead();
     expect(entries().map((button) => button.textContent)).toEqual([`${label.needs}1`, `${label.running}2`]);
     act(() => entry("needs").click());
     expect(host.querySelector('[data-needs-row="agent:demo/by-hand-asks"]')?.textContent).toContain("Keep the old file?");
@@ -417,6 +448,7 @@ describe("Assistant Needs you / In progress trays", () => {
       await refresh();
       upsertSession(moreSessions[0]);
     });
+    await settleHeldPushRead();
     act(() => entry("needs").click());
     await openRows();
     const row = host.querySelector<HTMLElement>(`[data-needs-row="${kind === "task" ? "task:tray-task" : "agent:demo/by-hand-asks"}"]`)!;
@@ -485,6 +517,100 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(entry("running").querySelector("[aria-hidden]")?.classList).toContain("bg-accent");
     act(() => needs.click());
     expect(host.textContent).toContain(t("assistant-tasks.tray_empty_pending"));
+  });
+
+  it("draws an empty In progress quiet (grey) as well, like an empty Needs you, and still opens it", () => {
+    const emptyHost = document.createElement("div");
+    document.body.append(emptyHost);
+    const emptyRoot = createRoot(emptyHost);
+    act(() => emptyRoot.render(<AssistantActionBar conversation="nothing-here" />));
+    for (const key of ["needs", "running"]) {
+      const button = emptyHost.querySelector<HTMLButtonElement>(`[data-tray-entry="${key}"]`)!;
+      expect(button.classList).toContain("text-ink-3");
+      expect(button.classList).not.toContain("text-ink");
+      expect(button.querySelector("[aria-hidden]")?.classList).toContain("bg-ink-3");
+    }
+    act(() => emptyHost.querySelector<HTMLButtonElement>('[data-tray-entry="running"]')!.click());
+    expect(emptyHost.textContent).toContain(t("assistant-tasks.tray_empty_progress"));
+    act(() => emptyRoot.unmount());
+    emptyHost.remove();
+    // one with work going on is drawn as before
+    expect(entry("running").classList).toContain("text-ink");
+    expect(entry("running").querySelector("[aria-hidden]")?.classList).toContain("bg-accent");
+  });
+
+  it("closes an open tray on Esc, from its entry or from inside it, with the focus back on the entry and the chat's Esc untouched", () => {
+    const windowEsc = vi.fn();
+    window.addEventListener("keydown", windowEsc);
+    const esc = (el: Element) => act(() => void el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+    try {
+      entry("needs").focus();
+      act(() => entry("needs").click());
+      expect(host.querySelector("section")).not.toBeNull();
+      esc(entry("needs"));
+      expect(host.querySelector("section")).toBeNull();
+      expect(document.activeElement).toBe(entry("needs"));
+
+      act(() => entry("running").click());
+      const inside = host.querySelector<HTMLButtonElement>(`section button[aria-label="${t("ui-atoms.close")}"]`)!;
+      inside.focus();
+      esc(inside);
+      expect(host.querySelector("section")).toBeNull();
+      expect(document.activeElement).toBe(entry("running"));
+      expect(windowEsc).not.toHaveBeenCalled();
+
+      // with no tray open, Esc is not the bar's
+      esc(entry("running"));
+      expect(windowEsc).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("keydown", windowEsc);
+    }
+  });
+
+  it("leaves Esc in a tray card to the card: the tray stays open and an answer being typed is kept", async () => {
+    moreSessions = [{ machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", state: "needs_you", status: "blocked", updated_at: at, pending_interactions: 1 } as Session];
+    moreInteractions = [{ id: "ix-1", machine_id: "demo", session_id: "worker", kind: "question", created_at: at, questions: [{ question: "Which port?", options: [{ label: "8080" }, { label: "9090" }] }] } as Interaction];
+    await act(async () => {
+      await refresh();
+      await refreshTodos();
+      upsertSession(moreSessions[0]);
+    });
+    const windowEsc = vi.fn();
+    window.addEventListener("keydown", windowEsc);
+    const esc = (el: Element) => act(() => void el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+    const field = () => host.querySelector<HTMLInputElement>(`section input[aria-label="${t("chat-interactions.custom_answer")}"]`);
+    try {
+      act(() => entry("needs").click());
+      await openRows();
+      const typed = field()!;
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(typed, "8081");
+        typed.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      act(() => typed.focus());
+      esc(typed);
+      expect(host.querySelector("section")).not.toBeNull();
+      expect(field()?.value).toBe("8081");
+      // the card's own Esc took it: on to neither the tray nor the window (the chat's interrupt)
+      expect(windowEsc).not.toHaveBeenCalled();
+
+      // from a waiting card's own buttons as well: the card's Esc, not the tray's
+      const pick = host.querySelector<HTMLElement>("section [data-card-keys] button")!;
+      act(() => pick.focus());
+      esc(pick);
+      expect(host.querySelector("section")).not.toBeNull();
+      expect(field()?.value).toBe("8081");
+
+      // the tray's own controls still close it
+      const close = host.querySelector<HTMLButtonElement>(`section button[aria-label="${t("ui-atoms.close")}"]`)!;
+      close.focus();
+      esc(close);
+      expect(host.querySelector("section")).toBeNull();
+      expect(document.activeElement).toBe(entry("needs"));
+      expect(windowEsc).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", windowEsc);
+    }
   });
 
   it("lists every open task that does not wait on the user in In progress, and the one that does in Needs you", async () => {

@@ -26,14 +26,17 @@ as an encoded pair. It decorates `session.title` on session lists and lookups, s
 Android, watch, Mac and Vision selectors all see the same name. Automatic naming never writes into the
 Agent's input or transcript, and never renames herdr/Orca tabs. `todo.title` and plan titles name separate work
 objects and are unchanged. Native-title comparisons ignore leading terminal spinner frames and whitespace;
-animation does not hide a saved name or discard an in-flight result (#5254). Explicit Claude sessions with
-proven `prompt` source also keep a saved name when switching between recognizable bad tool and first-message
-fallbacks (#5269). This exception does not treat another runtime/tool, a meaningful native title or unknown
-provenance as the same fallback, and it never resets the successful-change count.
+animation does not hide a saved name or discard an in-flight result (#5254). Explicit Claude sessions with proven `prompt` source also keep a saved name when switching between a tool
+label and a copied or truncated first-message title, including openings absent from the instruction-prefix
+list (#7337). The node's provenance proves the copy; it is not inferred from text alone. This exception does
+not treat another runtime/tool, a meaningful `auto`/`runtime` title or unknown provenance as the same fallback,
+and it never resets the successful-change count or pays for a replacement name.
 
 Candidates are empty names, tool-only names (including terminal spinners), plain directory names,
-new-chat placeholders, and instruction/template openings in Chinese, English or Japanese. A meaningful but
-out-of-date name is refreshed only with periodic naming enabled. Native custom titles are protected even
+new-chat placeholders, titles over 40 characters, common instruction/template openings in Chinese,
+English or Japanese, and titles whose `prompt` provenance proves they are copied from the first user message
+(including a short exact copy or a truncated one). Meaningful `auto`/`runtime` titles are refreshed only with
+periodic naming enabled. Native custom titles are protected even
 when they look like placeholders. Old nodes and runtimes that cannot establish title provenance are skipped
 rather than guessing that a title was not chosen by the user. Claude nodes provide `title_source`,
 `title_manual` and cached cumulative `output_tokens`; unknown sources do not establish eligibility.
@@ -45,6 +48,40 @@ name. A meaningful original title starts with an observation baseline when perio
 Changing the maximum does not erase the ledger. A native or app rename stops automatic naming permanently
 for that session; app/API rename intent is persisted before contacting the node, even when its reply is uncertain.
 
+**Named on request (#7432).** `POST /api/v1/sessions/{mid}/{sid}/autoname` is the same model call asked for by the
+user from an Agent's menu (**Auto Rename**), for one session, answered with the new title
+(`docs/protocol/protocol.md`, "Naming an Agent on request"). It shares the dialogue, prompt and validity check with
+the background pass (`agentNameFromModel`) and skips the background's guards, because the request is the user's own
+wish: the change limit, the placeholder test, the automatic-naming switch, and the protection of custom titles.
+The ledger record is marked `requested` and is no longer `manual`. Such a name also stands over a native custom
+title or a title of unknown provenance, and its row is published with `title_source: "auto"`; it holds until the
+native title changes, or until the user renames the session by hand, exactly as an automatic name does. The
+background's change count is left as it is (a request neither spends nor resets it), its failure count and
+cooldown are cleared by a successful request, and a failed request records nothing. Requests for one session
+share one model call. Persona's own conversations are refused.
+
+The assistant-only `agent_autoname` tool is a narrow second entry to that same request, for an explicitly requested
+name in a Persona conversation. It accepts only an exact machine and full session id, never a URL, credential or
+arbitrary request. The usual assistant-source check applies, so a task Agent cannot call it. Every invocation asks
+for phone confirmation before the model call, including when the title was hand-written; declining or leaving the
+card unanswered changes nothing. The result is the same title or coded refusal in a text JSON object. The assistant
+tool is not a client dependency: iOS and other clients use the HTTP endpoint above (`agent_naming_tool.go`).
+
+The assistant-only read tool `agent_autoname_receipt` reads the calling conversation's existing `agent_autoname`
+permission records and one exact target's current naming snapshot, through the owning manager's existing stores
+(`agent_naming_receipt.go`). It takes an exact machine and full session id, with an optional bounded RFC3339 window
+`[since,before)` (at most 24 hours, 50 records per page, at most two pages). It never decorates the target's list, invokes a model,
+writes settings, answers a card, renames or publishes. A single card plus complete coverage returns only its id,
+status, `allow` and `resolved_at`; multiple cards return `ambiguous`; missing records, read errors or partial
+coverage return `unknown`. Its own four-field query is not confused with the original two-field autoname input:
+only the card's exact target is compared, independent of JSON field order or layout. The first history read and all
+subsequent pages use the exclusive upper bound and the `(created_at,id)` cursor, including equal timestamps at the
+window's lower bound. The snapshot separately reports `requested`, `title`, `named_at` and `observed_at`.
+Neither is the original model call's outcome: call ids are not propagated, an existing requested name may predate
+the request or belong to another caller, and `last_failure` can belong to background naming. Nothing in the result
+says it is safe to retry. Ordinary coding Agents, extensions, work machines and other assistant callers cannot read
+this conversation's cards. The tool is for evidence only and is not part of the iOS HTTP contract.
+
 Cost controls: list events coalesce into one worker, dispatching at most one candidate per 30-second pass.
 Queue-local one-shot wakes drain existing matches even without another list event, then stop; they do not
 install a timer on any node. A successful check that keeps the name advances its interval baseline without
@@ -53,6 +90,12 @@ Input keeps at most 2000 characters of the first user message and 4000 of recent
 payloads are excluded. Calls time out after 45 seconds and request at most 256 output tokens on every protocol.
 Responses relays that refuse the output bound fail closed, without retrying unbounded. A persisted ten-minute
 lease precedes dispatch; failures back off from ten minutes and stop after three consecutive failures.
+Each failed attempt logs its computer/session and a static reason code (for example `no_dialogue`,
+`model_call_failed`, `invalid_name`, `model_output_truncated` or `naming_timeout`), even if a subsequent title
+or settings recheck discards the result. Provider error bodies, prompts and model replies never enter these
+logs. The ledger retains `last_failure` until a successful naming clears it; old silent failures have no
+recoverable reason. A deployed hub does not add missing provenance to old nodes: those nodes remain excluded
+until an explicitly authorized compatible node update reports it.
 Before committing, the worker checks settings, counters, current provenance, native title and eligibility again.
 
 Only web settings controls are added here. iOS and Android can read effective fields from
@@ -165,6 +208,13 @@ Apply in order; on a match, do not call the model:
 
    Stopping with Esc (`turn_aborted`, `status: interrupted`) is not an error. The node rereads a changing rollout at most every 3 seconds. If the file is written again during throttling,
    omit the cached `turn_error` (the continued turn may already have completed normally; an old error would continue it again). Better to be a few seconds late.
+
+   **A newer confirmed success retires an obsolete model failure and its retry attention (#6221).** Confirmed success is a newer turn's `turn_duration` after at least one visible,
+   non-synthetic model reply, with no newer model error in the settled transcript. Starting a turn, receiving an unclosed reply, or finding that the process exited is not enough. On that
+   closing evidence the node drops an older error-only `last_text` preview (a silent BotMux turn, or one with only tools and thinking, may have no newer words), so the manager's legacy
+   preview fallback cannot recreate `turn_error`. A pending retry with no such success stays answerable, and a newer failure replaces the old one. The historical reply and error items stay
+   in the transcript unchanged. A later stopped row whose direct or preview-derived error is gone retires the transient retry state without waiting for model triage, including inside the timestamp tolerance
+   and when a manager restart restores a card the hub kept up. The old card and wake go; a silent turn may remain work-state `unsure` rather than inventing a textual conclusion.
 3. Background commands / sub-Agents still running (`background`, `subagents` contain running entries) → `external`, "N background tasks running"; do not register a wakeup (results wake it themselves).
 4. `/loop` running (`loop`) → `external`, "Scheduled loop, next at HH:MM"; do not register a wakeup.
 5. Otherwise: model.
@@ -225,7 +275,7 @@ waiting: <for status="blocked": who or what it waits for>
 - **Checked by the hub** (`checkCloseout`): when the closeout names a GitHub pull request by its link, triage looks at it with the deploy check that deliveries use (`deploy_check.go`: the pull request's merge, and whether the running hub contains the merge commit) and keeps the result beside the claim as `closeout.checked {merged, deployed}`, each `yes`, `no` or absent when it could not tell. `deployed` is about the running hub, so it is known only for the hub's own repository; for another repository only `merged` is. A closeout that says merged or deployed when the check says it is not is never `done`: the turn is "Not finished" (above), Unread with the closeout and the finding kept and a line naming the claim. Supervision messages show the finding under the closeout.
 - **Snapshot**: in the main chat's live snapshot an Agent's line ends with what its closeout claims of merging and deploying, marked as its own account, and with the hub's finding where that differs from the claim (`prompts/assistant/snapshot_closeout.md`, `snapshotCloseout`); nothing is added when the closeout says neither. A turn that is not finished is under "Unread" with its line.
 - **Delivery**: a reply with a closeout and no delivery line of its own (`docs/assistant/todos.md` "Delivery") states its delivery through the closeout: deployed `yes` is live, merged `yes` is merged and not live, merged `no` with a pull request is held at the PR, and a done closeout that says neither is "nothing to ship". A delivery line in the same reply wins.
-- **Not done yet** (follow-ups of #3612): the web (`docs/web/web.md`, "Pages": **Closeout**; the web also has `closeout_ask`, #3616), Android (`docs/android/android.md`, "Closeout, decisions and tasks nobody works on") and the iOS app ("Clients" below) draw the closeout and have the switch, the Mac app and the watch do not; only Android gives a turn that is not finished a mark of its own (on the web and iOS it shows as the plain line of an Unread row, with a claim the hub found untrue marked in the suffix); Codex has no held stop and no starting context, so a Codex session started without a task prompt writes a closeout only if it is asked to (one it writes is read all the same); a session already running when the switch is turned on learns the form at its next start or held stop; the form reaches a task's Agent on Claude Code twice (prompt and starting context).
+- **Not done yet** (follow-ups of #3612): the web (`docs/web/web.md`, "Pages": **Closeout**; the web and Android also have `closeout_ask`, #3616), Android (`docs/android/android.md`, "Closeout, decisions and tasks nobody works on") and the iOS app ("Clients" below) draw the closeout and have the switch, the Mac app and the watch do not; only Android gives a turn that is not finished a mark of its own (on the web and iOS it shows as the plain line of an Unread row, with a claim the hub found untrue marked in the suffix); Codex has no held stop and no starting context, so a Codex session started without a task prompt writes a closeout only if it is asked to (one it writes is read all the same); a session already running when the switch is turned on learns the form at its next start or held stop; the form reaches a task's Agent on Claude Code twice (prompt and starting context).
 
 ## Automatic actions
 
@@ -552,11 +602,11 @@ Pre-launch baseline (evening of 2026-11-04, non-assistant sessions on the hub): 
   A subscription usage limit (`turn_error_kind` `usage_limit`) is not shown as Interrupted: task cards, agent rows and the chat say "Usage limit · resumes <time>" when the CLI or the hub will continue it, and "Usage limit · resets <time>" when nothing will (the user's time zone; the date as well when that is another day). An older hub that does not send the fields keeps the interrupted text. Screenshots use `MOCK_USAGE_LIMIT=1`.
 - Android (#1837): the Agents list and knowledge-base "Agents working on this project" rows use the same preview (`Session.workLine`, `WorkLine.kt` in `core:domain`). Sessions the hub waits for go into "Waiting";
   **Settings › AI › Session triage** has the main switch, triage model (link to model settings), and three action switches.
-  Closeout (#3612, `docs/android/android.md` "Closeout, decisions and tasks nobody works on"): a stopped Agent's page has the closeout card above its transcript, with the hub's finding beside merged and deployed, and the reply is drawn without the block the card shows; a list row keeps its line and says "merged ✓", "not deployed" as facts under it, with a mark beside the title for a claim the hub found untrue and for a turn that is not finished; **Session triage** has the **Ask for a closeout** switch on a hub that sends it (nothing for `closeout_ask`).
+  Closeout (#3612, `docs/android/android.md` "Closeout, decisions and tasks nobody works on"): a stopped Agent's page has the closeout card above its transcript, with the hub's finding beside merged and deployed, and the reply is drawn without the block the card shows; a list row keeps its line and says "merged ✓", "not deployed" as facts under it, with a mark beside the title for a claim the hub found untrue and for a turn that is not finished; **Session triage** has the **Ask for a closeout** switch on a hub that sends it and **Ask for the status afterwards** (`closeout_ask`) beside it when the hub sends that field, both disabled while triage is off or a save is in flight.
 - iOS / Mac (#2895): Agents-list and space-page card previews (`Session.listPreview`) switch to the same line when the session is stopped and the hub has triaged it (`Session.workLine`, `apple/Shared/Models.swift`).
   Host-provided reasons for needing the user (botmux) and failure notices still take precedence. Sessions the hub waits for go into "Waiting", not collapsed into idle (`WorkState.hubWaits`, `Session.isWaiting`). Unit tests: `SessionWorkTests`.
   **Settings › Session Triage** (below the assistant, `TriageSettingsView` / `TriageSettingsModel`) has the main switch, triage model (opens `agent.triage` in Model Settings), and three action switches (disabled when the main switch is off). Failed changes revert to the old value with an explanation; old hubs (404) report unsupported. Unit tests: `TriageSettingsTests`; DEBUG `-tab settings -openTriageSettings YES`.
-- iOS (#3612; iPad and Vision through the same views, not the frozen Mac app): a stopped Agent session's closeout is a card in its chat's header, above the transcript (`CloseoutCard`): the status, "The agent's own report", what changed, artifacts, merged and deployed each with the hub's finding (confirmed, contradicted in the caution color with the warning mark, or not checked), verified and still needs. While it shows, the last reply is drawn without its raw `<closeout>` block (`ChatLines.hidingCloseout`). List rows keep their line and add where the closeout stands ("merged ✓ · not deployed", "✗ says merged, isn't"; `Session.closeoutPreview`); a turn with an empty phase and a line shows that line. **Settings › Session Triage** has **Ask for a Closeout** (`closeout`; no row on a hub that does not name the switch, and nothing for `closeout_ask`). Details, tests and the DEBUG samples: `docs/apple/ios.md` ("Closeout, orphaned tasks and answerable decisions (#3612, #3618, #3804)").
+- iOS (#3612; iPad and Vision through the same views, not the frozen Mac app): a stopped Agent session's closeout is a card in its chat's header, above the transcript (`CloseoutCard`): the status, "The agent's own report", what changed, artifacts, merged and deployed each with the hub's finding (confirmed, contradicted in the caution color with the warning mark, or not checked), verified and still needs. While it shows, the last reply is drawn without its raw `<closeout>` block (`ChatLines.hidingCloseout`). List rows keep their line and add where the closeout stands ("merged ✓ · not deployed", "✗ says merged, isn't"; `Session.closeoutPreview`); a turn with an empty phase and a line shows that line. **Settings › Session Triage** has **Ask for a Closeout** (`closeout`; no row on a hub that does not name the switch), followed by **Ask for the Status Afterwards** (`closeout_ask`, #3616): a stopped → one question → report example, disabled only by the main switch rather than by `closeout`, and likewise hidden and unencoded when its field is absent. Details, tests and the DEBUG samples: `docs/apple/ios.md` ("Closeout, orphaned tasks and answerable decisions (#3612, #3618, #3804)").
 - Watch: list rows do not show last words; work previews are not displayed yet.
 
 ## Steps

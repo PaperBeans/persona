@@ -129,6 +129,16 @@ The same window also lost the last words of online sessions (#1583): after the A
 `last_text` became empty, leaving task cards and main-chat snapshots showing "No activity yet" for 7 minutes. `readQuickMetaSince` now reuses the previously read text when the window contains none;
 if there is no previous value (the node has just started), it searches backward in segments (`lookBack`, up to 8 MB). For any "last X" value found only in the tail, consider that it may already be outside the window.
 
+That retained preview belongs to the last visible words, not necessarily the latest turn (#6221). A later silent BotMux reply, or a turn with only tools and thinking, can leave an older API error there even after the structured `TurnError` cleared. Retire that error-only preview only when a newer `turn_duration` closes a turn with a visible non-synthetic model reply and no newer error; a prompt, an unclosed reply or process exit is not recovery. The reply and its close can straddle the quick-tail boundary, so backward recovery must reread an expanding window through the current end, not treat a close without the reply as success. Do not rewrite the historical error item.
+- **A Claude Code transcript is a tree** (`uuid` / `parentUuid`): rewinding (`/rewind`) or editing and resending with ↑ writes the next message as a sibling of an earlier one. Rewound turns remain in the file. See
+  `transcript/branch.go` (two messages from the user under the same parent, with an assistant reply to the earlier one → the earlier message's entire subtree produces no items) and `docs/protocol/protocol.md` ("Rewinding to a message");
+  **pressing Esc to cancel a message before any reply, then sending again, also writes the same pair of siblings** (#3036; observed: two identical messages under the same "[Request interrupted by user]" line, with no reply to the first).
+  This is not a rewind. Older versions treated any "two siblings" as a rewind, added `.r1` to `history`, made all clients discard and refetch local content, and removed the interrupted turn from the chat too.
+  To detect a rewind, check whether the earlier message received a reply. Persona's own rewind does not rely on this inference (`File.Rewound` is marked by the node).
+  Do not walk backward from the end along parentUuid (parallel tool results are normal branches, and `compact_boundary` has a null parent). Abandoning a branch changes only the `history` token (`.r<n>`),
+  not the item structure, so there is no need to bump the App's `ChatCache` directory version. Clients already discard and refetch local content when the token changes. Validate against a real corpus:
+  build one old and one new binary with `go test -c ./internal/transcript`, compare item counts file by file with `-test.run 'TestCorpus$' -corpus <directory> -out <file>`, then run `TestCorpusWindowed`.
+
 ### The head speaks for the start, never for the end (2026-11-13, #5896)
 
 `readQuickMetaSince` also reads the transcript's head, up to its first prompt, for the title and the starting directory. It used to parse the head and the tail into one `transcript.Meta`,
@@ -144,14 +154,6 @@ On one machine's real transcripts: 1 of 124 was in that state when scanned, and 
 - The leak also hid a gap: a long turn's prompt leaves the tail after 384 KB, and the turn only read as open because the first prompt's did. Removing a wrong source of a value means supplying the right one
   (the turn seen starting stays open until the tail ends it), and testing the case the wrong one happened to cover.
 - Check such a change against real transcripts, not only fixtures: compare the quick read with a read of the whole file, per field, and print ids and counts only.
-- **A Claude Code transcript is a tree** (`uuid` / `parentUuid`): rewinding (`/rewind`) or editing and resending with ↑ writes the next message as a sibling of an earlier one. Rewound turns remain in the file. See
-  `transcript/branch.go` (two messages from the user under the same parent, with an assistant reply to the earlier one → the earlier message's entire subtree produces no items) and `docs/protocol/protocol.md` ("Rewinding to a message");
-  **pressing Esc to cancel a message before any reply, then sending again, also writes the same pair of siblings** (#3036; observed: two identical messages under the same "[Request interrupted by user]" line, with no reply to the first).
-  This is not a rewind. Older versions treated any "two siblings" as a rewind, added `.r1` to `history`, made all clients discard and refetch local content, and removed the interrupted turn from the chat too.
-  To detect a rewind, check whether the earlier message received a reply. Persona's own rewind does not rely on this inference (`File.Rewound` is marked by the node).
-  Do not walk backward from the end along parentUuid (parallel tool results are normal branches, and `compact_boundary` has a null parent). Abandoning a branch changes only the `history` token (`.r<n>`),
-  not the item structure, so there is no need to bump the App's `ChatCache` directory version. Clients already discard and refetch local content when the token changes. Validate against a real corpus:
-  build one old and one new binary with `go test -c ./internal/transcript`, compare item counts file by file with `-test.run 'TestCorpus$' -corpus <directory> -out <file>`, then run `TestCorpusWindowed`.
 
 ## A subagent's report is a tool call now (2026-11-06, #5886)
 

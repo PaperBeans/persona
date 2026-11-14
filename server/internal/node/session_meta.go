@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/identity"
+	"github.com/nwverse/persona/server/internal/node/transcripttail"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
@@ -131,7 +133,7 @@ func reported(text, kind string, rollout turnFailure) turnFailure {
 
 // quickTail: how much of a transcript's end readQuickMeta reads for its title and last words. One line can fill it:
 // Claude Code writes its api-request-blob lines whole (300–500 KB each, 2026-11).
-const quickTail = 384 * 1024
+const quickTail = transcripttail.Window
 
 // metaMinInterval: how stale a growing transcript's title / last text / background tasks may get in the list.
 const metaMinInterval = 3 * time.Second
@@ -268,9 +270,10 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 	if covered {
 		before = prev
 	}
+	// words: the tail has no words of the agent's, and the last read's do not stand (none covers what was written since,
+	// or a turn in the tail was gone back over: they may be that turn's), so they are read from before the tail.
+	words := off > 0 && tm.LastText == "" && (!covered || rewound)
 	if off > 0 {
-		// Not the last read's words after a turn in the tail was gone back over: they may be that turn's.
-		words := tm.LastText == "" && (!covered || rewound)
 		exchange := !covered && tm.LastActivity.IsZero()
 		turn := !covered && !tm.Codex && !tm.TurnOpen && !tm.TurnClosed
 		// Claude Code names the mode on every prompt, so it is at most a turn back. A rollout names it once a turn and
@@ -331,6 +334,25 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 		if m.lastPromptAt = before.lastPromptAt; m.lastPromptAt.IsZero() {
 			m.lastPromptAt = head.LastPromptAt
 		}
+	}
+	// succeeded: the newest closed turn succeeded (transcript.Meta.TurnSucceeded, #6221). The tail can hold the closing
+	// record but not the reply that proves it, so for an error-looking preview both are read together, from the end
+	// (from the tail's start when a turn in it was gone back over: the hidden turn's words and outcome are no evidence).
+	// Words read from before the tail are checked whatever error the tail holds; the tail's own words or the last read's
+	// only when the tail holds none and no turn in it was gone back over.
+	succeeded := tm.TurnSucceeded()
+	if !succeeded && off > 0 && assistantwire.CutOff(m.lastText) && (words || !rewound && tm.TurnError == "") {
+		end := st.Size()
+		if rewound {
+			end = off
+		}
+		_, succeeded = transcripttail.LastWordsBefore(f, end)
+	}
+	if succeeded && assistantwire.CutOff(m.lastText) {
+		// The newest closed turn succeeded, but its visible reply was only botmux's sentinel (or tools and thinking):
+		// LastText still names an older failure. Do not let the manager's legacy preview fallback revive that failure.
+		// The old reply and its error remain untouched in the transcript.
+		m.lastText, m.answer = "", ""
 	}
 	if !m.lastPromptAt.After(m.lastTextAt) { // a message after the question answered it (#5096)
 		m.asks = closeout.AskOf(m.lastText)

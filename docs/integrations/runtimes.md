@@ -418,11 +418,21 @@ on success, failure or timeout. Completed probe workspaces stay out of the user 
 The runtime bounds native calls to a 75-second budget, followed by bounded session cleanup. Older runtimes keep the
 node's shell check. Shell and managed launchers keep their own execution context.
 
+A chat gets Persona's MCP server once, named `persona`, through ACP `mcpServers`. `agy` defers the tools over its
+declaration budget, largest first, and has no `call_mcp_tool` for servers passed through ACP, so an assistant chat's
+server runs behind `integrations/antigravity/mcp-proxy.mjs`, which adds a small `persona_call` tool that calls any
+Persona tool by name (#7333).
+
 Implementation: `integrations/antigravity/lib/runtime.js` and `integrations/antigravity/lib/acp.js`.
 
 Live text belongs to the ACP prompt currently executing. Queued prompts acquire the stream when they start, with an
 empty boundary. A tool call ends the current text message, so the next message replaces its words in the live slot.
 Each prompt clears its live text on completion, including when another prompt is queued.
+
+While a conversation is watched, the companion polls its native export every 400 ms. Persona-owned ACP turns reuse
+their existing poll. Unwatch, disconnection and shutdown release the watched poll. Native records that update an
+existing step carry a stable content revision in the history token, so a response completed at the same sequence
+replaces retained content. Ordinary appends preserve that revision and continue through incremental item batches.
 
 Session inventory, watch cursors, item pages and live item pushes read `transcript_full.jsonl` when available.
 Antigravity declares `caps.rewind` for idle Agent conversations. The selected message, duplicate occurrence from the

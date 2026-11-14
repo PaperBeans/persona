@@ -1,6 +1,7 @@
 import BeautifulUI
 import OSLog
 import SwiftUI
+import PersonaWire
 
 /// Rendered rows omit pinned Agents; worktree navigation and actions still address the complete direct inventory.
 @MainActor enum WorkspaceNavigation {
@@ -872,15 +873,17 @@ private struct AgentsList: View {
         let settings = projectionSettings()
         let partitions = AgentListProjectionCache.partitions(model)
         let follows = feed.following && feed.hasPartitions(partitions)
+        let asks = ChildSessions.asks(model.pendingInteractions)
         let key = AgentListProjectionCache.Key(revision: feed.revision, partitions: partitions, settings: settings,
-                                               workspaceRevision: workspaceCatalog.revision)
+                                               workspaceRevision: workspaceCatalog.revision, asks: asks)
         return feed.projection.resolve(key, immediate: !follows || feed.immediateRevision == key.revision,
             input: { .init(sessions: follows ? feed.sessions : model.sessionLists.sessions,
                            machines: follows ? feed.machines : model.scopedMachines(), settings: settings,
-                           workspaces: workspaceCatalog.workspaces) },
+                           workspaces: workspaceCatalog.workspaces, asks: asks) },
             valid: { key in
                 key.revision >= feed.immediateRevision && AgentListProjectionCache.partitions(model) == key.partitions &&
-                    projectionSettings() == key.settings && workspaceCatalog.revision == key.workspaceRevision
+                    projectionSettings() == key.settings && workspaceCatalog.revision == key.workspaceRevision &&
+                    key.asks == asks
             },
             canPublish: { key in feed.mayPublish(key.revision) },
             willPublish: { feed.reader.willChange() })
@@ -965,7 +968,7 @@ private struct AgentsList: View {
         let waiting = AgentsNeedsYou.rows(
             cards: AgentsNeedsYou.cards(feed.following ? feed.interactions : model.scopedInteractions, session: session,
                                         machine: machineFilter, hub: model.isMultiHub ? hubFilter : nil),
-            waiting: AgentsNeedsYou.waiting(base)) // a subtask waiting for you is a row of its own (`CodexTasks`)
+            waiting: AgentsNeedsYou.waiting(base)) // a folded child's card sits under its parent; a subtask the hub did not fold stays its own row
         let _ = (lookup.needsYou = waiting.count)
         let needsYou = quick == .all || quick == .needsYou ? waiting : []
         let interactions = needsYou.flatMap(\.cards)
@@ -3494,7 +3497,12 @@ nonisolated struct AgentsListShown: Encodable, Equatable {
             revision &+= 1
         }
         show(s)
-        if i != interactions { reader.willChange(); interactions = i }
+        if i != interactions {
+            reader.willChange()
+            interactions = i
+            // A waiting child's words land on the parent row. The session list itself did not change.
+            applyFoldedRows(s)
+        }
         if !Self.sameListing(m, machines) { reader.willChange(); machines = m; revision &+= 1 }
         if immediate { immediateRevision = revision }
     }
@@ -3515,19 +3523,28 @@ nonisolated struct AgentsListShown: Encodable, Equatable {
         guard s != shown else { return }
         shown = s
         reader.willChange() // a row above the one being read may grow or shrink (its last line), not only the structure
+        applyFoldedRows(s)
+        restructure(force: false)
+    }
+
+    /// The row shows the folded copy: a waiting child makes the parent Needs You, and says what that child asks.
+    /// The stored list stays the hub's own rows, so the chat page and the structure's equality are unchanged.
+    private func applyFoldedRows(_ s: [Session]) {
+        let folded = Dictionary(ChildSessions.fold(s, asks: ChildSessions.asks(interactions)).map { ($0.id, $0) },
+                                uniquingKeysWith: { a, _ in a })
         for x in s {
+            let display = folded[x.id] ?? x
             if let r = rows[x.id] {
-                if !Session.sameApartFromTicks(r.session, x) { r.session = x }
+                if !Session.sameApartFromTicks(r.session, display) { r.session = display }
                 if r.time.updatedAt != x.updatedAt { r.time.updatedAt = x.updatedAt }
             } else {
-                rows[x.id] = Row(x)
+                rows[x.id] = Row(display)
             }
         }
         if rows.count > s.count {
             let ids = Set(s.map(\.id))
             rows = rows.filter { ids.contains($0.key) }
         }
-        restructure(force: false)
     }
 
     private func restructure(force: Bool) {
@@ -3992,33 +4009,21 @@ struct StateCounts: View {
     }
 }
 
-/// A heading's name and its agents' state counts: side by side; at the accessibility text sizes the counts on a line of
-/// their own under the name. `StateCounts` never gives up width, and beside them a narrow phone left the name none at all
-/// (#1658). `trailing` (the fold chevron) stays on the name's line.
+/// A heading's name and its agents' state counts: side by side; the counts on a line of their own under the name when
+/// the name would be left under half the width (`BesideOrUnder`). `StateCounts` never gives up width, and beside them a
+/// narrow phone left the name none at all (#1658). `trailing` (the fold chevron) stays on the name's line.
 struct CountsHeading<Name: View, Counts: View, Trailing: View>: View {
     var spacing: CGFloat = Theme.Space.s
     @ViewBuilder var name: Name
     @ViewBuilder var counts: Counts
     @ViewBuilder var trailing: Trailing
-    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        if typeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                HStack(spacing: spacing) {
-                    name
-                    Spacer(minLength: Theme.Space.xs)
-                    trailing
-                }
-                counts
-            }
-        } else {
-            HStack(spacing: spacing) {
-                name
-                Spacer(minLength: Theme.Space.xs)
-                counts
-                trailing
-            }
+        BesideOrUnder(gap: spacing * 2 + Theme.Space.xs, tailGap: spacing) {
+            // Each part is one view for the layout, its own pieces side by side as in a row.
+            HStack(spacing: spacing) { name }
+            HStack(spacing: spacing) { counts }
+            HStack(spacing: spacing) { trailing }
         }
     }
 }
@@ -4029,25 +4034,17 @@ extension CountsHeading where Trailing == EmptyView {
     }
 }
 
-/// An agent row's words and its time (with the source under it): the time at the row's end; at the accessibility text
-/// sizes under the words, where beside them it left the title a character or two (#1658). Outside `SlotRow`, whose
+/// An agent row's words and its time (with the source under it): the time at the row's end; under the words when
+/// beside them it would leave the title under 70% of the width (its words stay on one line, so they get the whole row when stacked) (`BesideOrUnder`, #1658). Outside `SlotRow`, whose
 /// equality is its stored values.
 struct TimeBesideOrUnder<Words: View, Time: View>: View {
     @ViewBuilder var words: Words
     @ViewBuilder var time: Time
-    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        if typeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                words
-                time
-            }
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.sm) {
-                words
-                time
-            }
+        BesideOrUnder(alignment: .firstTextBaseline, minShare: 0.7) {
+            words
+            time
         }
     }
 }
@@ -4171,6 +4168,7 @@ nonisolated struct SlotRow: View, Equatable {
                     }
                 } detail: {
                     if !session.runningWorkflows.isEmpty { WorkflowLine(runs: session.runningWorkflows) }
+                    RunningChildrenCaption(session: session)
                 }
                 // The badge's column holds the state alone (#3004): the agent's mark leads the title (#6390), with
                 // ultracode's mark after it while that is on (#1307; the library's row has no slot after the title).
@@ -4212,6 +4210,7 @@ nonisolated struct SlotRow: View, Equatable {
                             }
                             // A workflow running in the background (#2935): its name, phase and progress.
                             if !session.runningWorkflows.isEmpty { WorkflowLine(runs: session.runningWorkflows) }
+                            RunningChildrenCaption(session: session)
                             HStack(spacing: Theme.Space.xs) {
                                 metaText.lineLimit(1)
                                 if let todo = session.todo {

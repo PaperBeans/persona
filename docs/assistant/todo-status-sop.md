@@ -55,6 +55,21 @@ The first rule that holds wins.
 | 10 | `stale` | Shelvable (see "Shelving") and no activity for 48 hours | Shelved |
 | 11 | `rest` | Anything else | Other open |
 
+**Open concerns** (`kind = "concern"`, `done_at` unset, #3582) follow that table with these exceptions:
+
+- Rules 1 to 4 apply unchanged: a failed start in its first 48 hours and anything waiting on the owner is Waiting on you;
+  an agent working or starting is Working.
+- A failed start older than 48 hours is Other open by rule `rest`, never Done.
+- Rules 6 (`accepted`) and 7 (`deployed`) never apply.
+- Rules 8 (`finished_unseen`) and 9 (`pr_open`) apply unchanged.
+- Rule 9a (`seen`) never applies: a finished turn the owner has seen leaves the concern in Other open, not Done.
+- Rule 10 (`stale`) never applies: an open concern is never Shelved, however long nothing happens.
+- Otherwise it is Other open by rule `rest`.
+
+A closed concern (`done_at` set by its report) follows rule 5 like any closed to-do. Every concern row, open or closed,
+carries one neutral **Concern** tag next to its title, using the client's existing tag component; other rows do not change.
+A client whose older hub does not send `kind` keeps its previous behavior.
+
 On the web, the header's Parked count is the number of to-dos in the Parked section (included in open).
 Inactive counts only automatic 48-hour shelving. The Parked section and review badge use the same localized name.
 Apple (`apple/Shared/TodoTriage.swift`) and Android (`TodoTriage.kt` in `android/core/domain`) still need this
@@ -170,19 +185,35 @@ top of the list (#5707). Now the owner files it:
 
 ## Header count
 
-The web's header reads "N open · N shelved · N done" beside the title on wider screens (a phone leaves it out); it counts what the list's filter shows, whatever is searched (#3740). The iOS and
+The web's header reads "N open · N parked · N inactive · N done" beside the title on wider screens (a phone leaves it out); it counts what the list's filter shows, whatever is searched (#3740). The iOS and
 Android lists have no such line (#3712): it said again what the sections say, so each section's title carries the number of
 to-dos its rows list (a merged row's related ones too), in the section's state color, and the counts follow a search and the
 list's filter (#3740). **Open** counts to-dos that are not closed, not accepted or deployed,
 and not shelved: Waiting on you, Working, PR to merge, Other open, and Just finished rows still open (a finished turn
 is not a closed to-do; only a review or the user closes it; once the owner has seen it, rule 9a, it is in Done and not
-counted). **Done** counts closed, accepted and deployed ones. The
+counted). **Parked**, **inactive** and **done** count the to-dos in the Parked, Shelved and Done sections as their titles
+do (a merged row's related to-dos under the row's section), so the header and each section's title say the same number;
+what closed in the last 24 hours and was not seen yet is under Just finished and counted there, not as done. The
 sidebar's To-dos badge shows the same open count without quiet tasks (#1731), as before; the page lists and counts them. A task whose agent never started (rule 1) counts as open while it waits on the owner.
+
+The counts are the same whatever the list is grouped by (web audit item 12), and so is where each to-do is:
+
+- **By folder**: the folders hold every to-do the status sections place outside Done (a merged row's to-dos where the
+  row is), each in its own reading: a failed start waiting on the owner open, with why it did not start, and its folder
+  says Needs you; a to-do closed in the last 24 hours struck through, with **Got it**, until it is seen. The folded
+  **Done** at the bottom holds the Done section's.
+- **By pinned direction**: the directions hold the open to-dos the hub's tree lists (it lists only what counts as open);
+  a line says how many open ones no direction lists; the rest outside Done (closed in the last 24 hours, accepted,
+  deployed, shelved) keep their status sections below the directions, as Android's list does, so a to-do ticked there
+  moves to Just finished instead of leaving the list; the folded **Done** holds the Done section's.
+
+Before the first read of the to-dos lands the header shows no counts, not zeros (audit item 83).
 
 ## Shelving
 
 A to-do is shelvable when it is a task (an agent was ever linked, or a conversation handed it out) and has no due date
-ahead. The user's own to-dos without agents (reminders, errands) and ones due later never shelve themselves.
+ahead. The user's own to-dos without agents (reminders, errands) and ones due later never shelve themselves. An open
+concern never shelves either: it waits for its report, however long.
 
 - Shelved to-dos are folded under **Shelved**, not counted as open, and not changed on the hub: nothing is deleted, closed
   or released. Any new activity (an agent working, a report, a review, an edit) takes it out again at once.
@@ -201,6 +232,8 @@ activity); "N related" under the row opens the others. Two to-dos are related wh
 - the same plan (`plan_id`: tasks one request was split into).
 
 Relations chain (A shares a PR with B, B an issue with C: one row). A closed to-do never joins an open one's row.
+An open concern always has a row of its own: it never merges into a related to-do's row, and no related to-do merges
+into its row. A closed concern groups like any closed to-do.
 
 ## Accepted tasks
 
@@ -235,9 +268,12 @@ Every client follows this document with its own copy of the rules, each with the
 | Hub | `server/internal/assistant/todo_triage.go` | `server/internal/assistant/todo_triage_test.go` | none: it tells when a leader's task is stuck (#3483) |
 
 The shared cases in `spec/fixtures/triage` are read by the web app (`web/src/lib/todo-triage-fixture.test.ts`) and the
-hub; a rule change adds or changes a case there first.
+hub; a rule change adds or changes a case there first. The concern exceptions, standalone open-concern rows and neutral
+Concern row tag are a staged new capability under #3582, implemented on the hub and web here. iOS and Android follow in
+their own PRs; until then they keep the documented compatibility behavior and show a concern as an ordinary to-do, so no
+existing native triage rule changes in this step.
 
-A change to the rules changes all of them in the same PR. Native differences: iOS / Mac keep restores in the device's
+A change to an existing rule changes all of them in the same PR. Native differences: iOS / Mac keep restores in the device's
 `UserDefaults` (`todos.restored`) and Android in its local preferences, as the web keeps them per browser; the iOS list
 has no Status | Folder switch (it had no folder view), and the Mac shows a merged row's members as a disclosure under the
 lead. The iOS list draws a row's "N related" inside the lead's row, under its words (Android's card already had it). iOS and

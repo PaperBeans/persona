@@ -1,5 +1,6 @@
-#if os(iOS)
+#if os(iOS) || os(visionOS)
 import SwiftUI
+import PersonaWire
 
 /// Settings › Knowledge Selection (`KnowledgeSelectionModel`): the chats and documents with a setting of their own
 /// first (they come before every rule), then the chat rules and the document rules, a section per priority level.
@@ -7,12 +8,15 @@ import SwiftUI
 struct KnowledgeSelectionView: View {
     @Environment(AppModel.self) private var app
     @State private var model: KnowledgeSelectionModel?
+    /// Organize knowledge points by topic (#7251), the page's first group.
+    @State private var topics: KnowledgeTopicsModel?
     @State private var editingRule: RuleRef?
     @State private var editingItem: ItemRef?
     @State private var picking: PickRef?
 
     var body: some View {
         SettingsForm {
+            if let topics { KnowledgeTopicsSection(model: topics) }
             if let error = model?.error {
                 Section { LoadProblem(text: error) }
             }
@@ -58,6 +62,12 @@ struct KnowledgeSelectionView: View {
         }
         .task {
             if model == nil { model = KnowledgeSelectionModel(deps: deps) }
+            if topics == nil {
+                let api = app.api?.currentAssistantSettings()
+                topics = KnowledgeTopicsModel(deps: AssistantDeps(api: { api }, report: { app.show($0) }, toast: { app.toast = $0 },
+                                                                  open: { app.openAssistantConversation($0) }))
+            }
+            await topics?.load()
             await model?.load()
             #if DEBUG
             // `-openKnowledgeSelection rule | chat | doc` opens the page with that sheet up (screenshots).

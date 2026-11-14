@@ -90,6 +90,7 @@ internal fun ChatMarkdown(text: String, id: String = text,
 private fun ChatMarkdownCards(text: String, id: String, fences: List<persona.core.domain.views.AssistantFence>,
     bodyStyle: TextStyle, color: Color, viewKeys: ((Int) -> String)?, streaming: Boolean?) {
     val blocks = LocalViewBlocks.current
+    val inPicture = LocalInPicture.current
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
         var at = 0
         fences.forEachIndexed { n, fence ->
@@ -97,6 +98,8 @@ private fun ChatMarkdownCards(text: String, id: String, fences: List<persona.cor
             at = fence.end
             when {
                 blocks == null -> CodeText(fence.raw.trimEnd('\n', '\r'), fence.language, syntax = true)
+                // Share's picture: the card as it looks, with nothing that answers, never its JSON (#7261).
+                inPicture -> key(fence.start) { blocks.picture(fence.language, fence.raw, fence.complete, fence.index) }
                 // A card is not words: a selection of the message goes round it.
                 fence.isView -> key(fence.index) { DisableSelection { blocks.block(viewKeys?.invoke(fence.index) ?: "$id/local/${fence.index}", fence.raw, fence.complete) } }
                 else -> {
@@ -340,6 +343,9 @@ internal fun ChatLineContent(
                 // only the block goes; a reply that said nothing else is not drawn at all
                 if (!hideCloseout || !onlyCloseout(textUpdates[it.id]?.text ?: it.text, cut = it.fullSize != null)) {
                     MessageContent(it, false, textUpdates[it.id], boxed = true, hideCloseout = hideCloseout)
+                    val usage = LocalReplyUsage.current[it.id]
+                    // A reply still streaming has no total yet (the web hides the bar while the turn is live).
+                    if (usage != null && textUpdates[it.id]?.streaming != true) ReplyUsageFooter(it, usage)
                 }
             }
             "thinking" -> if (!style.hidesThoughts()) ThoughtContent(line.row.item?.text.orEmpty(), line.id, style.collapseThoughts)
@@ -435,6 +441,10 @@ private fun WorkStep(step: WorkItem, session: SessionKey, loader: ImageLoader, o
         }
         is WorkItem.Tool -> {
             val call = step.call
+            persona.core.domain.lines.ChildSessionCards.session(call)?.let {
+                ChildSessionCard(it, assistant = style == ChatRenderStyle.Assistant)
+                return
+            }
             // A Workflow call whose run the session lists draws the run's card (#3435); otherwise the row it always was.
             if (call.name == "Workflow") LocalChatWorkflows.current?.let { workflows ->
                 call.use.item.toolUseId?.let(workflows.runs::get)?.let { run ->

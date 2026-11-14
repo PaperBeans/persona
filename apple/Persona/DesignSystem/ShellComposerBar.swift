@@ -6,7 +6,8 @@ import SwiftUI
 /// (`voice`, docs/assistant/voice.md 6.1) the line is [+] … [mic] [voice], or [+] … [voice] [stop] while the agent works (dictation
 /// is then in the card's row), and the card's row has voice in send's place while nothing is typed. The assistant's
 /// conversation and an agent's (in the shell) both type here (#1091). The field is one view in both
-/// shapes (only the buttons around it come and go), so focus and the IME's marked text survive the change.
+/// shapes, so focus and the IME's marked text survive the change; so are + and the mic (voice and stop too), which move
+/// with the box between the shapes (`ComposerBoxLayout`, #7278). Only what the card alone has comes and goes.
 /// The callers keep their own state (drafts, uploads, SendSafety in `Composer`; the starter's text in StarterComposer).
 struct ShellComposerBar<Attach: View, Modes: View>: View {
     var placeholder: String
@@ -48,6 +49,10 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
     #if os(iOS)
     /// The mic held down (`ComposerHoldMic`): the box draws the strip, the circle and the lock over itself.
     @State private var hold = ComposerHold()
+    /// The mic tapped: the capsule is the dictation bar (`DictationBar`).
+    @State private var dictationBar = DictationBarModel()
+    /// The composer's row under the bar has left the accessibility tree (`Theme.DictationBar.treeAfter` after it opened).
+    @State private var rowOutOfTree = false
     /// Where 「+」 is in the window, for the panel it opens. Read when tapped, never drawn, so it is kept outside the
     /// view's state: as a `@State` rectangle it was written on every frame the shell's pages slid (the window frame of
     /// everything on a page changes with the strip) and the whole bar, its menus included, was drawn again 30 times a
@@ -132,106 +137,68 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
         return Theme.Shell.composerRadius - well / 2 - (Theme.Size.tapTarget - well) / 2
     }
 
-    private var expanded: Bool { alwaysOpen || focused.wrappedValue || !text.isEmpty || hasAttachments }
+    private var expanded: Bool { !barOn && (alwaysOpen || focused.wrappedValue || !text.isEmpty || hasAttachments) }
+
+    /// The dictation bar is up: the composer keeps its one-line shape under it.
+    private var barOn: Bool {
+        #if os(iOS)
+        dictationBar.on
+        #else
+        false
+        #endif
+    }
 
     var body: some View {
         #if DEBUG || PERF_SIGNPOST
         let _ = PerfTrace.body("ShellComposerBar")
         #endif
-        let box = VStack(alignment: .leading, spacing: 0) {
-            VStack(spacing: 0) {
-                if expanded, let quotes, !quotes.wrappedValue.isEmpty {
-                    QuoteBar(refs: quotes)
-                        .padding(.leading, Theme.Space.l)
-                        .padding(.trailing, Theme.Space.s)
-                        .padding(.top, Theme.Space.m)
-                        .transition(quoteTransition)
+        // One layout for both shapes (`ComposerBoxLayout`, #7278): the field, then the box's leading and trailing corners.
+        // Each control is one view in both shapes and moves with the box; what only the card has fades in and out in place.
+        let box = ComposerBoxLayout(open: expanded, spacing: Theme.Space.xs, rowGap: Theme.Space.xs + Theme.Space.s + Theme.Space.xs,
+                                    rowLeading: Theme.Space.s, rowTrailing: sendInset, rowBottom: sendInset) {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(spacing: 0) {
+                    if expanded, let quotes, !quotes.wrappedValue.isEmpty {
+                        QuoteBar(refs: quotes)
+                            .padding(.leading, Theme.Space.l)
+                            .padding(.trailing, Theme.Space.s)
+                            .padding(.top, Theme.Space.m)
+                            .transition(quoteTransition)
+                    }
                 }
-            }
-            #if os(iOS)
-            .clipped() // the quotes slide in from under the box's top edge (Telegram's reply bar)
-            #endif
-            HStack(alignment: .bottom, spacing: Theme.Space.xs) {
-                if !expanded { plus }
-                TextField("", text: $text, selection: fieldSelection, axis: .vertical)
-                    .readingContent() // what is typed grows past the interface's cap, as in Messages
-                    .font(Theme.Font.body)
-                    .overlay(alignment: .leading) {
-                        // The placeholder is interface text: capped with it, one line, shrunk before it is cut ("Ask Per…").
-                        if text.isEmpty {
-                            Text(placeholder).font(Theme.Font.body).foregroundStyle(.tertiary)
-                                .lineLimit(1).minimumScaleFactor(0.5).allowsHitTesting(false).accessibilityHidden(true)
-                        }
-                    }
-                    .accessibilityLabel(placeholder)
-                    .lineLimit(expanded ? 1...maximumLines : 1...1)
-                    #if os(iOS) || os(visionOS)
-                    // Grown taller, the field must not stay scrolled down a line (#909, TextViewScroll).
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in
-                        #if os(iOS)
-                        if focused.wrappedValue, !enlarged { TextViewScroll.settleFocused() }
-                        #else
-                        if focused.wrappedValue { TextViewScroll.settleFocused() }
-                        #endif
-                    }
-                    #endif
-                    .focused(focused)
-                    #if os(macOS)
-                    .textFieldStyle(.plain) // the card is the field's box; the Mac's own bezel drew a second one inside
-                    .macComposerKeys(focused: focused.wrappedValue, canSend: canSend, // ⏎ sends, ⇧⏎ a new line
-                                     history: history.map { MacComposerHistory(key: $0, text: $text, focus: { focused.wrappedValue = true }) }, send: send)
-                    #endif
-                    .padding(.leading, expanded ? Theme.Space.l : Theme.Space.xs)
-                    .padding(.trailing, fieldRightInset)
-                    .padding(.top, expanded ? Theme.Space.l : 0)
-                    .scaledFrame(minHeight: fieldMinimumHeight)
-                    .accessibilityIdentifier("shell-composer-field")
+                #if os(iOS)
+                .clipped() // the quotes slide in from under the box's top edge (Telegram's reply bar)
+                #endif
+                field
                     #if os(iOS)
-                    // Measure at full width, before the button's reserved inset, not the field's capped height.
-                    // Not while the page is up: it has its own lines, and the box measures again as it comes back.
-                    .background(alignment: .topLeading) {
-                        if !enlarged { measuring }
-                    }
-                    .overlay(alignment: .topTrailing) {
-                        if offersEnlarge {
-                            enlargeButton
-                                .padding(.trailing, Theme.Space.s)
-                                .padding(.top, Theme.Space.xs)
-                        }
-                    }
+                    // Prefer the native, line-limited text region over surrounding content without forcing UIKit's size.
+                    .layoutPriority(1)
                     #endif
-                if !expanded {
-                    // While the agent works, voice and stop share the line and dictation waits in the card's row.
-                    if voice == nil || stop == nil { mic }
-                    if let voice { voiceButton(voice) }
-                    if let stop { stopButton(stop) }
+            }
+            HStack(spacing: Theme.Space.xs) {
+                plus
+                #if os(iOS)
+                if focused.wrappedValue { dismissKeyboardButton }
+                #endif
+            }
+            HStack(spacing: Theme.Space.xs) {
+                if expanded, let modesTitle {
+                    Menu { modes() } label: { modesLabel(modesTitle) }
+                        .menuStyle(.button)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Model and thinking effort")
+                        .accessibilityValue(modesTitle.spoken)
+                        .accessibilityIdentifier("shell-composer-modes")
                 }
-            }
-            #if os(iOS)
-            // Prefer the native, line-limited text region over surrounding content without forcing UIKit's size.
-            .layoutPriority(1)
-            #endif
-            if expanded {
-                HStack(spacing: Theme.Space.xs) {
-                    plus
-                    #if os(iOS)
-                    if focused.wrappedValue { dismissKeyboardButton }
-                    #endif
-                    Spacer(minLength: Theme.Space.s)
-                    if let modesTitle {
-                        Menu { modes() } label: { modesLabel(modesTitle) }
-                            .menuStyle(.button)
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Model and thinking effort")
-                            .accessibilityValue(modesTitle.spoken)
-                            .accessibilityIdentifier("shell-composer-modes")
-                    }
-                    mic
-                    // One place for send and what it replaces, so they swap over each other rather than side by side.
+                // While the agent works, voice and stop share the line and dictation waits in the card's row.
+                if expanded || voice == nil || stop == nil { mic }
+                // One place for send and what it replaces, so they swap over each other rather than side by side. The line
+                // has it only for voice and stop: empty, it would still take the row's spacing.
+                if expanded || voice != nil || stop != nil {
                     ZStack(alignment: .trailing) {
-                        if let gate {
+                        if expanded, let gate {
                             SendGateButton(gate: gate)
-                        } else if canSend {
+                        } else if expanded, canSend {
                             HStack(spacing: Theme.Space.flush) {
                                 ComposerRoundButton(symbol: Theme.Icon.send, label: String(localized: "Send"), id: "shell-composer-send",
                                                     pressScales: telegramMotion) { endDictation(then: sendTyped) }
@@ -248,14 +215,29 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                     }
                     .animation(swapMotion, value: canSend)
                 }
-                .padding(.leading, Theme.Space.s)
-                .padding(.trailing, sendInset)
-                .padding(.bottom, sendInset)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+        #if os(iOS)
+        // Under the bar the one-line composer stays in place, so the capsule keeps its size and the field its text. Out
+        // of the accessibility tree, children and all (hiding the row alone left the text view UIKit draws in it), once
+        // the bar's spring has run: rebuilding the tree on the tap's frame made it the longest one of the bar opening.
+        let layered = ZStack {
+            box
+                .opacity(barOn ? 0 : 1)
+                .allowsHitTesting(!barOn)
+                .accessibilityElement(children: rowOutOfTree ? .ignore : .contain)
+                .accessibilityHidden(rowOutOfTree)
+            DictationBar(model: dictationBar, meter: dictation.meter,
+                         cancel: { dictationBar.cancel(dictation, reduceMotion: reduceMotion) },
+                         stop: { dictationBar.end(.stop, dictation, text: $text, reduceMotion: reduceMotion, send: { false }) },
+                         send: { dictationBar.end(.send, dictation, text: $text, reduceMotion: reduceMotion, send: sendDictated) })
+        }
+        let erased = AnyView(layered)
+        #else
+        let erased = AnyView(box)
+        #endif
         // Erased (#6735): generic, so every intermediate of the chain below took a run-time-sized stack slot holding the box.
-        AnyView(box)
+        erased
         .padding(.horizontal, expanded ? 0 : Theme.Space.xs)
         .padding(.vertical, expanded ? 0 : Theme.Space.xxs)
         .modifier(ComposerSurface())
@@ -265,7 +247,7 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
         #endif
         .composerGlow(glows)
         .contentShape(.rect(cornerRadius: Theme.Shell.composerRadius))
-        .onTapGesture { focused.wrappedValue = true }
+        .onTapGesture { if !barOn { focused.wrappedValue = true } }
         .shellScaled()
         .animation(openMotion, value: expanded)
         .animation(Theme.Motion.state, value: canSend)
@@ -306,8 +288,105 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                 .presentationSizing(.page) // the iPad's too: a page's height, not the small form
         }
         #endif
-        .onDisappear { dictation.stop() } // a start still asking for permission too (#3407)
+        .onDisappear {
+            dictation.stop() // a start still asking for permission too (#3407)
+            #if os(iOS)
+            dictationBar.reset()
+            #endif
+        }
+        #if os(iOS)
+        .task { dictationBar.warm() }
+        .task(id: barOn) {
+            guard barOn else {
+                rowOutOfTree = false
+                return
+            }
+            try? await Task.sleep(for: Theme.DictationBar.treeAfter)
+            if !Task.isCancelled, barOn { rowOutOfTree = true }
+        }
+        .onChange(of: dictation.isListening) { _, on in
+            if !on { dictationBar.listeningEnded(dictation, text: $text, reduceMotion: reduceMotion) }
+        }
+        #endif
     }
+
+    /// The draft's field: one view in both shapes, so focus and the IME's marked text survive the change.
+    private var field: some View {
+        TextField("", text: $text, selection: fieldSelection, axis: .vertical)
+            // The field's name and identifier on the field itself, before the placeholder drawn over it: applied after the
+            // overlay, they also went to the placeholder, a second `shell-composer-field` element in the tree, listed
+            // first (#8002).
+            .accessibilityLabel(placeholder)
+            .accessibilityIdentifier("shell-composer-field")
+            .readingContent() // what is typed grows past the interface's cap, as in Messages
+            .font(Theme.Font.body)
+            .overlay(alignment: .leading) {
+                // The placeholder is interface text: capped with it, one line, shrunk before it is cut ("Ask Per…").
+                if text.isEmpty {
+                    Text(placeholder).font(Theme.Font.body).foregroundStyle(.tertiary)
+                        .lineLimit(1).minimumScaleFactor(0.5).allowsHitTesting(false).accessibilityHidden(true)
+                }
+            }
+            .lineLimit(expanded ? 1...maximumLines : 1...1)
+            #if os(iOS) || os(visionOS)
+            // Grown taller, the field must not stay scrolled down a line (#909, TextViewScroll).
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in
+                #if os(iOS)
+                if focused.wrappedValue, !enlarged { TextViewScroll.settleFocused() }
+                #else
+                if focused.wrappedValue { TextViewScroll.settleFocused() }
+                #endif
+            }
+            #endif
+            .focused(focused)
+            #if os(macOS)
+            .textFieldStyle(.plain) // the card is the field's box; the Mac's own bezel drew a second one inside
+            .macComposerKeys(focused: focused.wrappedValue, canSend: canSend, // ⏎ sends, ⇧⏎ a new line
+                             history: history.map { MacComposerHistory(key: $0, text: $text, focus: { focused.wrappedValue = true }) }, send: send)
+            #endif
+            .padding(.leading, expanded ? Theme.Space.l : Theme.Space.xs)
+            .padding(.trailing, fieldRightInset)
+            .padding(.top, expanded ? Theme.Space.l : 0)
+            .scaledFrame(minHeight: fieldMinimumHeight)
+            #if os(iOS)
+            // Measure at full width, before the button's reserved inset, not the field's capped height.
+            // Not while the page is up: it has its own lines, and the box measures again as it comes back.
+            .background(alignment: .topLeading) {
+                if !enlarged { measuring }
+            }
+            .overlay(alignment: .topTrailing) {
+                if offersEnlarge {
+                    enlargeButton
+                        .padding(.trailing, Theme.Space.s)
+                        .padding(.top, Theme.Space.xs)
+                }
+            }
+            #endif
+    }
+
+    #if os(iOS)
+    /// The mic tapped: the bar, with the keyboard down (what it was composing goes into the draft first). A hold
+    /// locked on keeps dictating into the draft; a tap then ends it, as before.
+    private func startDictationBar() {
+        if dictation.isListening {
+            dictation.stop()
+            return
+        }
+        if focused.wrappedValue {
+            TypedText.commitFocused(into: $text)
+            focused.wrappedValue = false
+        }
+        dictationBar.start(dictation, hints: [text] + dictationHints(), reduceMotion: reduceMotion)
+    }
+
+    /// ↑ on the bar, once the words are in the draft: sent as the card's send would, unless there is nothing to send
+    /// or the main conversation cannot take it yet (the draft waits, `gate`).
+    private func sendDictated() -> Bool {
+        guard gate == nil, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasAttachments else { return false }
+        send()
+        return true
+    }
+    #endif
 
     #if os(iOS)
     /// An icon in the text area's corner, never competing with the model and send controls below it.
@@ -489,7 +568,8 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
     /// be held down (`ComposerHoldMic`).
     @ViewBuilder private var mic: some View {
         #if os(iOS)
-        ComposerHoldMic(dictation: dictation, text: $text, hold: hold, id: "shell-composer-mic", hints: dictationHints)
+        ComposerHoldMic(dictation: dictation, text: $text, hold: hold, id: "shell-composer-mic", hints: dictationHints,
+                        tap: startDictationBar, quiet: barOn)
         #else
         ComposerMicButton(dictation: dictation, text: $text, id: "shell-composer-mic", hints: dictationHints)
         #endif
@@ -522,6 +602,64 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
     private func endDictation(then action: () -> Void) {
         dictation.stop()
         action()
+    }
+}
+
+/// The box's two shapes in one layout (#7278), so + and the mic (voice and stop too) are each one view that moves with
+/// the box as it opens and closes, in the box's own motion, rather than one leaving and another arriving. Subviews: the
+/// field (with the quotes over it), what sits at the box's leading corner, what sits at its trailing corner. The line: the
+/// corners either side of the field, bottom-aligned (an HStack's). The card: the field on top, the corners in a row
+/// under it, apart as far as the row allows (an HStack with a spacer between them).
+private struct ComposerBoxLayout: Layout {
+    /// The card; else the line.
+    var open: Bool
+    /// Between the field and each corner in the line.
+    var spacing: CGFloat
+    /// The least room between the corners in the card's row.
+    var rowGap: CGFloat
+    /// The card's row from the box's leading, trailing and bottom edges.
+    var rowLeading: CGFloat
+    var rowTrailing: CGFloat
+    var rowBottom: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(proposal, subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (subview, frame) in zip(subviews, arrange(ProposedViewSize(bounds.size), subviews).frames) {
+            subview.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), proposal: ProposedViewSize(frame.size))
+        }
+    }
+
+    /// The box's size and the frames of the field, the leading corner and the trailing corner, from the box's top left.
+    private func arrange(_ proposal: ProposedViewSize, _ subviews: Subviews) -> (size: CGSize, frames: [CGRect]) {
+        guard subviews.count == 3 else { return (.zero, []) }
+        let field = subviews[0], leading = subviews[1], trailing = subviews[2]
+        let lead = leading.sizeThatFits(.unspecified)
+        if open {
+            let width = proposal.width ?? rowLeading + lead.width + rowGap + trailing.sizeThatFits(.unspecified).width + rowTrailing
+            let trail = trailing.sizeThatFits(ProposedViewSize(width: max(0, width - rowLeading - lead.width - rowGap - rowTrailing), height: nil))
+            let row = max(lead.height, trail.height)
+            let top = field.sizeThatFits(ProposedViewSize(width: width, height: proposal.height.map { max(0, $0 - row - rowBottom) }))
+            let middle = top.height + row / 2
+            return (CGSize(width: width, height: top.height + row + rowBottom), [
+                CGRect(x: 0, y: 0, width: width, height: top.height),
+                CGRect(x: rowLeading, y: middle - lead.height / 2, width: lead.width, height: lead.height),
+                CGRect(x: width - rowTrailing - trail.width, y: middle - trail.height / 2, width: trail.width, height: trail.height),
+            ])
+        }
+        let trail = trailing.sizeThatFits(.unspecified)
+        let sides = lead.width + spacing + spacing + trail.width
+        let room = proposal.width.map { max(0, $0 - sides) }
+        let line = field.sizeThatFits(ProposedViewSize(width: room, height: proposal.height))
+        let width = proposal.width ?? sides + line.width
+        let height = max(lead.height, line.height, trail.height)
+        return (CGSize(width: width, height: height), [
+            CGRect(x: lead.width + spacing, y: height - line.height, width: room ?? line.width, height: line.height),
+            CGRect(x: 0, y: height - lead.height, width: lead.width, height: lead.height),
+            CGRect(x: width - trail.width, y: height - trail.height, width: trail.width, height: trail.height),
+        ])
     }
 }
 
