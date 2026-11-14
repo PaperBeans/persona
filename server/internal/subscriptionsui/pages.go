@@ -65,6 +65,8 @@ type Env struct {
 	UIVersion int
 	// Platform is the asking app's (the UI context's): only "ios" offers to add its own Shortcuts source (#3848).
 	Platform string
+	// Graph: the app has its own relationship view (#5741), which the list's Source Relationships row opens (GraphURL).
+	Graph bool
 }
 
 // Request is the page's state and, when something was pressed, the action and its values.
@@ -77,11 +79,15 @@ type Request struct {
 // ErrReadOnly answers an action from a device that may only look.
 var ErrReadOnly = errors.New("read_only_device")
 
+// looks are the actions that only show something, which a device that may only look may press too: the relationship
+// view's row (#5741).
+var looks = map[string]bool{"graph": true}
+
 // Handle draws the page the state names, or does the action and answers what the app shows next.
 func Handle(ctx context.Context, svc Service, env Env, req Request) (wire.ActionResult, error) {
 	p := &pages{ctx: ctx, svc: svc, env: prepared(env), st: parseState(req.State)}
 	if req.Action != "" {
-		if !env.CanEdit {
+		if !env.CanEdit && !looks[req.Action] {
 			return wire.ActionResult{}, ErrReadOnly
 		}
 		return p.act(req.Action, req.Values)
@@ -235,7 +241,7 @@ func (p *pages) readOnly(v *wire.View) {
 				c.Control.Disabled = true
 			case c.Type == "button" && (c.Action == nil || c.Action.Push == nil):
 				continue
-			case c.Type == "row" && c.Action != nil && c.Action.Push == nil:
+			case c.Type == "row" && c.Action != nil && c.Action.Push == nil && !looks[c.Action.ID]:
 				c.Action = nil
 			case c.Type == "field":
 				val := c.Value

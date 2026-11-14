@@ -2,8 +2,6 @@ package assistant
 
 import (
 	"context"
-	"strconv"
-	"strings"
 
 	"github.com/nwverse/persona/server/internal/prompts"
 )
@@ -34,25 +32,141 @@ func (s *Service) inboxSignalsOn(ctx context.Context) bool {
 // superviseInbox raises the inbox signal for those of items (the twin's pass just took new content into them) that are
 // linked to a supervised task, while assistant.inbox_signals is on. linked are the items the judge linked in this pass:
 // all they hold is new to the supervisor.
+//
+// An item linked to a task that was closed and carried on by another (continues) follows it there first
+// (followContinuations), whatever the switch says: the link and the signal belong to the task doing the work now. A
+// message is counted as told only once a signal took it, so one that came while its task could not hear it (closed,
+// unsupervised, waiting for the owner) is not lost to the task that can.
 func (s *Service) superviseInbox(ctx context.Context, items []*InboxItem, linked map[*InboxItem]bool) {
-	if len(items) == 0 || !s.inboxSignalsOn(ctx) {
+	if len(items) == 0 {
+		return
+	}
+	s.followContinuations(ctx, items)
+	if !s.inboxSignalsOn(ctx) {
 		return
 	}
 	b := &s.inbox
+	b.mu.Lock()
+	todos := make([]string, len(items))
+	for i, it := range items {
+		if it.Agent != nil {
+			todos[i] = it.Agent.TodoID
+		}
+	}
+	b.mu.Unlock()
+	hears := map[string]bool{}
+	for _, id := range todos {
+		if _, seen := hears[id]; !seen && id != "" {
+			t, ok := s.todoNow(id)
+			hears[id] = ok && s.inboxSignalHolds(t)
+		}
+	}
 	var out []superviseSignal
 	b.mu.Lock()
-	for _, it := range items {
+	for i, it := range items {
+		if it.Agent == nil || it.Agent.TodoID != todos[i] || !hears[todos[i]] {
+			continue // relinked meanwhile, or its task cannot hear it: the messages wait, uncounted
+		}
 		if g, ok := inboxSignalOf(it, linked[it]); ok {
 			out = append(out, g)
 		}
 	}
 	b.mu.Unlock()
 	for _, g := range out {
-		if t, ok := s.todoNow(g.Todo); ok && s.inboxSignalHolds(t) {
-			s.signal(g)
-		}
+		s.signal(g)
 	}
 }
+
+// continuesHops bounds how far a closed task's link follows the tasks that continue it.
+const continuesHops = 8
+
+// followContinuations moves the items of items linked to a closed task to the one open task that carries it on
+// (currentTaskOf), and saves them: open items from superviseInbox, handled ones from linkInboxTaskURLs (#6546). The
+// move is no news: it raises nothing by itself.
+func (s *Service) followContinuations(ctx context.Context, items []*InboxItem) {
+	b := &s.inbox
+	b.mu.Lock()
+	linkedTo := map[*InboxItem]string{}
+	for _, it := range items {
+		if it.Agent != nil && it.Agent.TodoID != "" {
+			linkedTo[it] = it.Agent.TodoID
+		}
+	}
+	b.mu.Unlock()
+	moves := map[*InboxItem]string{}
+	now := map[string]string{}
+	for it, id := range linkedTo {
+		cur, seen := now[id]
+		if !seen {
+			cur, _ = s.currentTaskOf(id)
+			now[id] = cur
+		}
+		if cur != "" && cur != id {
+			moves[it] = cur
+		}
+	}
+	if len(moves) == 0 {
+		return
+	}
+	var writes []*inboxWrite
+	b.mu.Lock()
+	for it, to := range moves {
+		if b.items[it.ID] != it || it.Agent == nil || it.Agent.TodoID != linkedTo[it] {
+			continue // moved or relinked meanwhile
+		}
+		w := beginWrite(it)
+		it.Agent.TodoID = to
+		b.settle(w)
+		writes = append(writes, w)
+		s.logf("inbox: %s: its task %s was closed and %s carries it on: linked there", it.ID, linkedTo[it], to)
+	}
+	b.mu.Unlock()
+	s.saveWrites(ctx, writes, "its link to the task that carries on its closed one")
+}
+
+// currentTaskOf is the task todo id stands for now: itself while it is open; once it is closed (done or cancelled),
+// the one open task that continues it, down any line of tasks that continued each other (task_brief_todos.continues).
+// "" when there is no such task, or more than one.
+func (s *Service) currentTaskOf(id string) (string, bool) {
+	if t, ok := s.todoNow(id); !ok {
+		return "", false
+	} else if taskOpen(t) {
+		return id, true
+	}
+	next := map[string][]string{}
+	b := &s.tbriefs
+	b.mu.Lock()
+	for todo, l := range b.links {
+		if l.Continues != "" {
+			next[l.Continues] = append(next[l.Continues], todo)
+		}
+	}
+	b.mu.Unlock()
+	seen := map[string]bool{id: true}
+	var open []string
+	for hop, line := 0, next[id]; hop < continuesHops && len(line) > 0; hop++ {
+		var deeper []string
+		for _, c := range line {
+			if seen[c] {
+				continue
+			}
+			seen[c] = true
+			if t, ok := s.todoNow(c); ok && taskOpen(t) {
+				open = append(open, c) // the one doing the work: what continues it is not looked at
+			} else if ok {
+				deeper = append(deeper, next[c]...)
+			}
+		}
+		line = deeper
+	}
+	if len(open) != 1 {
+		return "", false
+	}
+	return open[0], true
+}
+
+// taskOpen: t is neither done nor cancelled.
+func taskOpen(t Todo) bool { return t.DoneAt == nil && !t.Cancelled() }
 
 // inboxSignalHolds: an inbox signal about task t is told its supervisor: t is open and supervised by a conversation, and
 // does not wait for the owner's decision.
@@ -62,38 +176,41 @@ func (s *Service) inboxSignalHolds(t Todo) bool {
 }
 
 // inboxSignalOf is the inbox signal of item it, whose new content the twin's pass just took; false when it is linked to
-// no task or its newest message is not someone else's. It counts the messages received since the last signal it gave
-// (receivedSince), and remembers how far it counted. Under b.mu.
+// no task or its newest message is not someone else's. It counts the messages received since the item count at the last
+// signal it gave (receivedSince), and remembers that count. Under b.mu.
 func inboxSignalOf(it *InboxItem, linked bool) (superviseSignal, bool) {
 	a := it.Agent
-	if a == nil || a.TodoID == "" || !it.open() || it.Kind == KindBot || a.SentOf != "" && a.SentOf == it.Last {
+	if a == nil || a.TodoID == "" || !it.open() || it.Kind == KindBot || a.SentOf != "" && a.SentOf == it.Last ||
+		a.signaledOf != "" && a.signaledOf == it.Last {
 		return superviseSignal{}, false
 	}
 	n, seq := receivedSince(it, a.signaled, linked)
 	a.signaled = seq
+	a.signaledOf = it.Last
 	return superviseSignal{Todo: a.TodoID, Kind: sigInbox, Key: it.ID + "@" + it.Last, Inbox: &prompts.SuperviseInbox{
 		Item: it.ID, Title: clip(oneLine(it.Title), 80), Sender: clip(oneLine(it.Sender), 40), Preview: clip(oneLine(it.Preview), 140),
 		Count: n}}, true
 }
 
-// receivedSince counts the messages of the item's received batches after chain entry since (the handling chain numbers
-// its entries c1, c2…), at least one, and answers the newest batch's number. since 0 (nothing counted yet in this run of
-// the manager): an item linked just now counts every batch its chain holds, any other only the newest, the one surely
-// new.
+// receivedSince counts the messages received since the item's count was last signaled, and returns the current count
+// as the next watermark. since 0 (nothing counted yet in this run of the manager): an item linked just now counts every
+// message its item count holds, any other only the newest received entry, the one surely new. A mail item's count is
+// its unread count, which can fall below the watermark when mail is read elsewhere; its next batch then counts as one
+// and still signals.
 func receivedSince(it *InboxItem, since int, linked bool) (n, seq int) {
-	seq, last := since, 0
-	for _, e := range it.Chain {
-		k, err := strconv.Atoi(strings.TrimPrefix(e.ID, "c"))
-		if e.Kind != ChainReceived || err != nil || k <= since {
-			continue
+	seq = it.Count
+	if since > 0 {
+		return max(it.Count-since, 1), seq
+	}
+	if linked {
+		return max(it.Count, 1), seq
+	}
+	for i := len(it.Chain) - 1; i >= 0; i-- {
+		if it.Chain[i].Kind == ChainReceived {
+			return max(it.Chain[i].Count, 1), seq
 		}
-		seq, last = max(seq, k), max(e.Count, 1)
-		n += last
 	}
-	if since == 0 && !linked {
-		n = last
-	}
-	return max(n, 1), seq
+	return 1, seq
 }
 
 // joinInbox is inbox signal g in the place of cur, which still waits to be told: the newest item, with the messages of

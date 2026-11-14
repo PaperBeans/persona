@@ -81,6 +81,9 @@ type Todo struct {
 	StageKind     string `json:"stage_kind,omitempty"` // code or general; absent on older hubs
 	stageVerified bool   // explicit acceptance, kept with the stage setting
 	planPending   bool   // a live plan-approval card; never persisted as progress
+	// PRs are the earlier PRs its agents named before PRURL, newest last (reports.go todoStage.PRs): the Inbox links
+	// a comment on any of them to the task (inbox_task_links.go, #6507). Not sent to the apps.
+	PRs []string `json:"-"`
 	// Delivery: how far its finished work went out, and while short of live where it is held and who can unhold it
 	// (delivery.go, #3306); nil until judged.
 	Delivery *TodoDelivery `json:"delivery,omitempty"`
@@ -110,6 +113,8 @@ type Todo struct {
 	// SeenAt: when the owner last looked at it in Just finished, by Got it or by opening it (#5707, todo_seen.go); a to-do
 	// seen since it got there is filed under Done (todo_triage.go). Absent when never seen.
 	SeenAt *time.Time `json:"seen_at,omitempty"`
+	// InboxItem is the Inbox row it was made from (#6480); the to-do's page opens that row. Empty for any other to-do.
+	InboxItem string `json:"inbox_item,omitempty"`
 	// Brief: what was asked when the work was handed out, with its log, and Lineage: the to-dos that carried the work
 	// (#3822, task_brief.go). Filled in where the apps read the to-dos (withBrief); absent for a to-do with no brief.
 	Brief   *TaskBrief    `json:"brief,omitempty"`
@@ -194,6 +199,11 @@ type todoBook struct {
 	reportMu  sync.Mutex
 	reporting map[string]bool
 	runMu     sync.Mutex // one report step at a time (sourceReportNow)
+
+	// importing is held across a batch of imported reminders, and imports are their links when there is no store
+	// (todo_imports.go).
+	importing sync.Mutex
+	imports   map[[2]string]db.TodoImport
 
 	// remindWake wakes remindLoop when the todos change (todo_plan.go).
 	remindOnce sync.Once
@@ -367,7 +377,7 @@ func (s *Service) loadTodosLocked(ctx context.Context) error {
 	}
 	for id, st := range s.todoStages(ctx) {
 		if t, ok := tmap[id]; ok {
-			t.Stage, t.PRURL, t.StageKind, t.Delivery, t.stageVerified, t.Check = st.Stage, st.PR, st.Kind, st.Delivery, st.Verified, st.Check
+			t.Stage, t.PRURL, t.PRs, t.StageKind, t.Delivery, t.stageVerified, t.Check = st.Stage, st.PR, st.PRs, st.Kind, st.Delivery, st.Verified, st.Check
 		}
 	}
 
@@ -749,6 +759,7 @@ func (s *Service) todoRoutes() {
 	s.todoThreadRoutes()
 	s.todoSeenRoutes()
 	s.todoRetitleRoute()
+	s.todoImportRoutes()
 	// GET /api/v1/todos: list all todos (newest created_at first), agents sorted (active first, then released); a todo
 	// waiting for the owner carries its ask (todo_ask.go), an open one nobody works on why (tasks_orphan.go)
 	s.handle("GET /api/v1/todos", func(w http.ResponseWriter, r *http.Request) {

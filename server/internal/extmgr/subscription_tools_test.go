@@ -70,6 +70,7 @@ type toolEnv struct {
 	t     *testing.T
 	h     *Manager
 	conn  *toolConn
+	store *subscriptions.MemStore
 	mu    sync.Mutex
 	cards []proto.Interaction
 	reply func(proto.Interaction) proto.Resolution
@@ -78,9 +79,9 @@ type toolEnv struct {
 func allowCard(proto.Interaction) proto.Resolution { yes := true; return proto.Resolution{Allow: &yes} }
 
 func newToolEnv(t *testing.T) *toolEnv {
-	e := &toolEnv{t: t, h: newTestManager(t), conn: &toolConn{answer: toolNotices(2)}, reply: allowCard}
+	e := &toolEnv{t: t, h: newTestManager(t), conn: &toolConn{answer: toolNotices(2)}, store: subscriptions.NewMemStore(), reply: allowCard}
 	e.h.opts.Lang = func() i18n.Lang { return i18n.En } // the card is in the user's language
-	e.h.subs = subscriptions.New(subscriptions.Options{Store: subscriptions.NewMemStore(), Connectors: toolConns{e.conn},
+	e.h.subs = subscriptions.New(subscriptions.Options{Store: e.store, Connectors: toolConns{e.conn},
 		Lang: func() i18n.Lang { return i18n.En }})
 	e.h.opts.Ask = func(_ context.Context, ix proto.Interaction) (proto.Resolution, error) {
 		e.mu.Lock()
@@ -183,9 +184,15 @@ func TestSubscriptionListGetAndSources(t *testing.T) {
 		t.Fatalf("sources of a connector: %s", b)
 	}
 	format := out["recipe_format"].(map[string]any)
-	if fmt.Sprint(format["fields"]) != "[id thread title sender time body link due_date]" || format["template_vars"].(map[string]any)["{{since_date}}"] == nil ||
+	if fmt.Sprint(format["fields"]) != "[id thread title sender time body link due_date sender_id chat chat_name seen reply_to]" || format["template_vars"].(map[string]any)["{{since_date}}"] == nil ||
 		fmt.Sprint(format["modes"].(map[string]any)["snapshot"]) == "" || len(format["group_by"].(map[string]any)) != 2 {
 		t.Fatalf("the recipe format: %v", format)
+	}
+	meanings, _ := format["field_meaning"].(map[string]any)
+	for _, k := range format["fields"].([]any) {
+		if s, _ := meanings[k.(string)].(string); s == "" {
+			t.Errorf("field %v has no meaning in the recipe format", k)
+		}
 	}
 	out, _ = e.call("subscription_sources", `{}`)
 	b, _ = json.Marshal(out["connectors"])
@@ -344,20 +351,21 @@ func TestSubscriptionRunWaitsForTheRun(t *testing.T) {
 	t.Cleanup(func() { subscriptionRunPoll = poll })
 	e := newToolEnv(t)
 	s := e.made()
+	runNow := make(chan struct{})
+	var recorded sync.Once
+	e.h.subs = toolRunService(e, e.store, func(action string) {
+		if action == "subscription_run_now" {
+			recorded.Do(func() { close(runNow) })
+		}
+	})
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	ticks := time.NewTicker(5 * time.Millisecond)
-	defer ticks.Stop()
 	done := make(chan struct{})
-	go func() { // bounded polling, as the runner's own ticker provides in production
+	go func() {
 		defer close(done)
-		for {
+		select {
+		case <-runNow:
 			e.h.subs.RunDue(ctx)
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticks.C:
-			}
+		case <-ctx.Done():
 		}
 	}()
 	t.Cleanup(func() {

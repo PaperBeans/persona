@@ -73,6 +73,7 @@ func TestResidentListenerHandoverRetainsBacklogAndLock(t *testing.T) {
 }
 
 func TestResidentReloadReapsIdleProcessesBeforeTransportEnds(t *testing.T) {
+	shortHome(t) // the attach socket and its lock under a home of its own: not those of a node running on this computer
 	shortenKeeperStop(t, 200*time.Millisecond, time.Second)
 	n := assistantNode(t)
 	stubborn, polite, spare := connectionEndProcs(t, n)

@@ -513,7 +513,13 @@ func (c *Connector) Collect(context.Context) ([]connector.InboxThing, error) {
 	for _, t := range st.things {
 		out = append(out, *t)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
+	// Oldest first; rows at the same time by thread, so reading again gives the same list (the map has no order).
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].At.Equal(out[j].At) {
+			return out[i].At.Before(out[j].At)
+		}
+		return out[i].Thread < out[j].Thread
+	})
 	return out, nil
 }
 

@@ -60,7 +60,6 @@
   "wt_removed": "Worktree removed",
   "wt_removed_branch": "Worktree and branch removed",
   "wt_remove_failed": "Couldn’t remove the worktree: {error}",
-  "archive_close_title": "Archive and close agent",
   "archive_close_detail": "Persona archives “{title}” and closes its tab and process on {machine}. Its conversation stays: restore it from Archived agents, then resume it from its terminal page.",
   "archive_close": "Archive and close",
   "bypass_confirm": "Switch to Full access",
@@ -68,5 +67,8 @@
   "speed_fast": "Fast",
   "header_mode": "Permission mode: {mode}",
   "leave_bypass_confirm": "Switch to {mode}",
-  "leave_bypass_detail": "This agent wasn't started with Full access, so it can't be switched back to it from here."
+  "leave_bypass_detail": "This agent wasn't started with Full access, so it can't be switched back to it from here.",
+  "bypass_restart_detail": "Restarts the session to apply it once this turn ends; the conversation carries on",
+  "bypass_pending": "The session restarts in Full access once this turn ends",
+  "bypass_next_message": "Takes effect from the next message"
 }

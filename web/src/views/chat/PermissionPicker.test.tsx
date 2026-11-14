@@ -19,6 +19,7 @@ vi.mock("../../lib/api", async (importOriginal) => ({ ...(await importOriginal<t
 vi.mock("../../lib/store", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../lib/store")>()), upsertSession: vi.fn() }));
 
 import { PermissionPicker, usePlanMode, type PlanMode } from "./PermissionPicker";
+import { requestPermissionPicker } from "../../lib/permissions-command";
 import { PERMISSION_MODES, switchableModes } from "../../lib/session-actions";
 import type { Session } from "../../lib/types";
 import { t } from "../../i18n";
@@ -102,6 +103,11 @@ describe("its menu (#5584, #5324)", () => {
     const modes = switchableModes(true, "claude").filter((m) => m.id !== "plan");
     expect(rows()).toHaveLength(modes.length);
     rows().forEach((row, i) => {
+      // a Persona conversation takes Full access with its next message, which its row says under its name (#6476)
+      if (modes[i].id === "bypassPermissions") {
+        expect(row.textContent).toBe(modes[i].title + t("chat-sessiondialogs.bypass_next_message"));
+        return;
+      }
       expect(row.textContent).toBe(modes[i].title);
       expect(row.title).toBe(modes[i].detail);
       expect(row.getAttribute("aria-describedby")).toBeNull();
@@ -221,6 +227,75 @@ describe("Full access on a running agent (#1379)", () => {
   });
 });
 
+// `/permissions` in the composer (#6476): the picker's menu with every mode, Plan mode included, the current one checked;
+// a pick switches the running session. Full access for a terminal Claude Code started without a bypass flag restarts
+// the session once its turn is over, which its row says, asking first.
+describe("/permissions (#6476)", () => {
+  const agent = (over: Partial<Session>) =>
+    ({ machine_id: "mac", session_id: "c1", agent: "claude", status: "idle", state: "idle", pane_id: "w1:p1", permission_mode: "default", ...over }) as unknown as Session;
+  const show = (s: Session) => {
+    act(() => root.unmount());
+    root = createRoot(host);
+    act(() => root.render(<PermissionPicker session={s} />));
+  };
+  // Full access's row turns into its question once clicked ("Switch to Full access"), which still names it
+  const row = (id: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="menu"] [role^="menuitem"]')].find((r) => (id === "bypassPermissions" ? r.textContent?.includes(label(id)) : r.textContent?.startsWith(label(id))));
+
+  it("opens the menu with all five modes, Plan mode and Auto included, the current one checked", () => {
+    show(agent({ permission_mode: "acceptEdits" }));
+    let opened = false;
+    act(() => void (opened = requestPermissionPicker("mac/c1")));
+    expect(opened).toBe(true);
+    expect(rows()).toHaveLength(5);
+    for (const id of ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]) expect(row(id)).toBeTruthy();
+    expect(rows().filter((r) => r.getAttribute("aria-checked") === "true").map((r) => r.textContent)).toEqual([label("acceptEdits")]);
+    // the chip's own click keeps Plan mode for the + panel
+    show(agent({ permission_mode: "acceptEdits" }));
+    open();
+    expect(row("plan")).toBeUndefined();
+  });
+
+  it("switches at once to Plan mode and Auto", async () => {
+    show(agent({}));
+    act(() => void requestPermissionPicker("mac/c1"));
+    await act(async () => row("plan")!.click());
+    expect(api).toHaveBeenLastCalledWith(expect.stringContaining("/sessions/mac/c1/modes"), { method: "POST", timeout: 95_000, json: { permission_mode: "plan" } });
+    act(() => void requestPermissionPicker("mac/c1"));
+    await act(async () => row("auto")!.click());
+    expect(api).toHaveBeenLastCalledWith(expect.stringContaining("/modes"), { method: "POST", timeout: 95_000, json: { permission_mode: "auto" } });
+  });
+
+  it("offers Full access to an agent started without a bypass flag, saying the session restarts, and asks first", async () => {
+    show(agent({}));
+    act(() => void requestPermissionPicker("mac/c1"));
+    const bypass = row("bypassPermissions")!;
+    expect(bypass.disabled).toBe(false);
+    expect(bypass.textContent).toContain(t("chat-sessiondialogs.bypass_restart_detail"));
+    await act(async () => bypass.click());
+    expect(api).not.toHaveBeenCalled();
+    expect(panel().textContent).toContain(t("chat-sessiondialogs.bypass_confirm"));
+    expect(panel().textContent).toContain(t("chat-sessiondialogs.bypass_restart_detail"));
+    await act(async () => row("bypassPermissions")!.click());
+    expect(api).toHaveBeenCalledWith(expect.stringContaining("/modes"), { method: "POST", timeout: 95_000, json: { permission_mode: "bypassPermissions" } });
+  });
+
+  it("says the restart waits once picked, on the chip's hover and on the row", () => {
+    show(agent({ permission_mode: "acceptEdits", bypass_pending: true }));
+    expect(chip().title).toBe(t("chat-sessiondialogs.bypass_pending"));
+    expect(chip().dataset.pending).toBe("bypassPermissions");
+    expect(chip().textContent).toBe(label("acceptEdits")); // the mode it still runs in
+    act(() => void requestPermissionPicker("mac/c1"));
+    expect(row("bypassPermissions")!.textContent).toContain(t("chat-sessiondialogs.bypass_pending"));
+  });
+
+  it("has no menu to open once the picker is gone: the composer sends the words", () => {
+    show(agent({}));
+    act(() => root.unmount());
+    expect(requestPermissionPicker("mac/c1")).toBe(false);
+    root = createRoot(host);
+  });
+});
+
 describe("Plan mode, the + panel's check row (#5324)", () => {
   let plan: PlanMode | undefined;
   function Probe({ s, assistant }: { s: Session | undefined; assistant?: boolean }) {
@@ -266,5 +341,24 @@ describe("Plan mode, the + panel's check row (#5324)", () => {
     expect(ask).toHaveBeenCalledOnce();
     expect(String((ask.mock.calls[0] as unknown[])[0])).toContain(t("chat-sessiondialogs.leave_bypass_detail"));
     expect(api).not.toHaveBeenCalled();
+  });
+});
+
+// #6476: a pick that restarts the session is drawn as waiting for it, never as the mode it does not run in yet
+describe("the pick drawn before the hub answers (#6476)", () => {
+  it("draws Full access by a restart as waiting, and another mode as dropping the wait", async () => {
+    const { upsertSession } = await import("../../lib/store");
+    const { applyModes } = await import("./SessionDialogs");
+    const up = vi.mocked(upsertSession);
+    up.mockClear();
+    const s = { machine_id: "mac", session_id: "r1", agent: "claude", status: "idle", state: "idle", pane_id: "w1:p1", permission_mode: "default" } as unknown as Session;
+    await applyModes(() => s, { permission_mode: "bypassPermissions" });
+    expect(up).toHaveBeenLastCalledWith(expect.objectContaining({ permission_mode: "default", bypass_pending: true }));
+    expect(api).toHaveBeenLastCalledWith(expect.stringContaining("/modes"), expect.objectContaining({ json: { permission_mode: "bypassPermissions" } }));
+    await applyModes(() => ({ ...s, bypass_pending: true }), { permission_mode: "auto" });
+    expect(up).toHaveBeenLastCalledWith(expect.objectContaining({ permission_mode: "auto", bypass_pending: undefined }));
+    // where shift+tab reaches it, it is drawn at once
+    await applyModes(() => ({ ...s, bypass_available: true }), { permission_mode: "bypassPermissions" });
+    expect(up).toHaveBeenLastCalledWith(expect.objectContaining({ permission_mode: "bypassPermissions" }));
   });
 });

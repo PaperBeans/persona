@@ -4,7 +4,7 @@
     <string name="inbox_title">Inbox</string>
     <string name="inbox_retry">Retry</string>
     <string name="inbox_done">Done</string>
-    <string name="inbox_move_back">Move to Inbox</string>
+    <string name="inbox_move_back">Move Back</string>
     <string name="inbox_hand_to_ai">Hand to AI</string>
     <string name="inbox_ai_draft">AI draft</string>
     <string name="inbox_ai_summary">AI summary</string>
@@ -280,7 +280,7 @@
     <string name="inbox_suggestion_say_send">Tell AI</string>
     <string name="inbox_suggestion_stale">The suggestion was updated</string>
     <string name="inbox_event_recap">Recap</string>
-    <string name="inbox_event_chain">What happened</string>
+    <string name="inbox_event_chain">Timeline</string>
     <string name="inbox_event_chain_all">Show all (%1$d)</string>
     <string name="inbox_event_view_source">View original</string>
     <string name="inbox_done_by_manager">Handled by the assistant</string>

@@ -11,6 +11,7 @@ import (
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
 // Credentials the hub reads from this machine for a connector (docs/plans/plan-connectors.md "Credentials"). Only the hub
@@ -52,8 +53,5 @@ func ghToken(ctx context.Context, host string) (map[string]any, error) {
 
 func firstLine(s string) string {
 	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
-	if len(s) > 200 {
-		s = s[:200]
-	}
-	return s
+	return textfmt.Cut(s, 200)
 }

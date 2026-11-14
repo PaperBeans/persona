@@ -18,12 +18,14 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/devicewire"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/link"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -626,6 +628,9 @@ func (d *Devices) forward(machine, event string, params any) {
 // Call is devices.call: a call to a machine's node, coded for the hub (no_device, machine_offline, node_closed;
 // the node's own coded errors as they are).
 func (d *Devices) Call(ctx context.Context, p devicewire.NodeCall) (json.RawMessage, error) {
+	if strings.HasPrefix(p.Method, "session.codex.takeover.") {
+		return nil, &rpc.Error{Code: "user_confirmation_required", Message: i18n.Err("codex-takeover.user_only").Error()}
+	}
 	m := d.machineByID(p.MachineID)
 	if m == nil {
 		return nil, &rpc.Error{Code: devicewire.CodeNoDevice, Message: fmt.Sprintf("no machine %q", p.MachineID)}
@@ -638,6 +643,13 @@ func (d *Devices) Call(ctx context.Context, p devicewire.NodeCall) (json.RawMess
 	params := p.Params
 	if len(params) == 0 {
 		params = json.RawMessage(`{}`)
+	}
+	if p.Method == "session.send" {
+		var err error
+		params, err = d.prepareSessionSkills(params)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if refusesHandoff(p.Method, params) {
 		return nil, errHandoffRefused
@@ -703,6 +715,9 @@ func wireError(err error) error {
 // Notify is devices.notify: a one-way event to a machine's node, queued for it (notes.go): the bus's read loop goes
 // on at once.
 func (d *Devices) Notify(p devicewire.NodeEvent) {
+	if strings.HasPrefix(p.Event, "session.codex.takeover.") {
+		return
+	}
 	m := d.machineByID(p.MachineID)
 	if m == nil {
 		return
@@ -776,26 +791,46 @@ func (d *Devices) listed(id string) *Machine {
 	return nil
 }
 
-// View is one machine with what its node said of itself (node.info), and its sessions as the node listed them.
+// View is one machine with what its node said of itself (node.info). Its sessions are not in it: the extensions'
+// code looks one up on every node event it takes (each port stream's data, ack and close), and copying every
+// machine's list for that was 6.3 MB a lookup at 20 machines of 200 sessions (#3197); FindSession reads them.
 type View struct {
 	Summary
-	Info     proto.NodeInfo
-	Sessions []proto.Session
+	Info proto.NodeInfo
 }
 
 // Views are the machines with their node.info (the extensions' code reads the computers' OS, programs, capabilities).
 func (d *Devices) Views() []View {
-	out := []View{}
-	for _, m := range d.machinesNow() {
+	machines := d.machinesNow()
+	out := make([]View, 0, len(machines))
+	for _, m := range machines {
 		m.mu.Lock()
 		v := View{Summary: Summary{ID: m.cfg.ID, Name: m.name(), Kind: m.cfg.Kind, SSHHost: m.cfg.SSHHost, Home: m.info.Home,
-			DataDir: m.info.DataDir, Online: m.online || m.warmLocked(time.Now())}, Info: m.info, Sessions: slices.Clone(m.sessions)}
+			DataDir: m.info.DataDir, Online: m.online || m.warmLocked(time.Now())}, Info: m.info}
 		m.mu.Unlock()
 		v.Trust = d.machineTrust(m)
 		v.Reachable = m.reachable()
 		out = append(out, v)
 	}
 	return out
+}
+
+// FindSession reports whether match accepts one of the sessions of the machine Views lists as id, as its node listed
+// them, stopping at the first it accepts; false when Views lists none. match reads each session in place, under the
+// machine's lock: it must not change or keep it, nor call the devices.
+func (d *Devices) FindSession(id string, match func(*proto.Session) bool) bool {
+	m := d.listed(id)
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.sessions { // by index: a range value copies every (large) session it passes
+		if match(&m.sessions[i]) {
+			return true
+		}
+	}
+	return false
 }
 
 // Relist asks a machine's node for its sessions again and passes the list on (what it leaves out changed: the

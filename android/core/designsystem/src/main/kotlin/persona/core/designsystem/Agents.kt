@@ -204,7 +204,7 @@ internal fun StateCounts(counts: List<Pair<Status, Int>>, waiting: Int = 0, ligh
         }
         // Idle is spoken as iOS says it ("3 idle"), not by the state's own name (Seen).
         count(n, if (status == Status.Idle) pluralStringResource(R.plurals.designsystem_idle_count, n, n) else "$n ${stringResource(status.labelRes)}") {
-            JStatusDot(status, size = Dot, waiting = lighter)
+            JStatusDot(status, size = Dot, waiting = lighter, breathes = false) // still, as iOS's `StateCounts`
         }
     }
     if (waiting > 0 && !clockDrawn) count(waiting, waitingWords) {
@@ -292,9 +292,10 @@ fun AgentTreeHeader(
  * computer and drops its heading) and smaller than the computer. A [quiet] space (all finished and seen) is lighter
  * and says how many [sessions] it holds instead of [counts]. [counts] take a clock for the agents that only [waiting] in the
  * background, as iOS's `StateCounts` does. [menu] is the space's ⋯ (a [HeadingAction] and its sheet).
- * Under "By repository" the same heading is a repository or one of its working trees, told apart by [icon] (folder, ⌂ for the
- * main checkout, a branch for another tree) and one more [depth] step for a tree. [kind] names the level for TalkBack
- * (space, repository, main worktree, worktree): the caret says "Expand" / "Collapse" it, the icon says what it is, the heading whether it is open.
+ * Under "By repository" the same heading is a repository or one of its working trees, told apart by [icon] (folder for a
+ * repository, ⌂ for the main checkout, no icon for another tree) and one more [depth] step for a tree. [kind] names the
+ * level for TalkBack (space, repository, main worktree, worktree): the caret says "Expand" / "Collapse" it, the icon
+ * (when present) says what it is, the heading whether it is open.
  */
 @Composable
 fun AgentSpaceHeader(
@@ -1089,7 +1090,7 @@ data class Bay(
 
 /**
  * The quick filters of a list. Glass shows glass chips; brief underlined tabs; the board a counter board with
- * one big number per bay — tapping a cell filters to it.
+ * one big number per bay — tapping a cell filters to it. A Needs You dot is still, as on iOS's `QuickFilterBar`.
  */
 @Composable
 fun QuickFilterBar(bays: List<Bay>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
@@ -1097,7 +1098,7 @@ fun QuickFilterBar(bays: List<Bay>, selected: Int, onSelect: (Int) -> Unit, modi
     val type = PersonaTheme.type
     when (PersonaTheme.style) {
         AppStyle.Glass -> Row(modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp.dense)) {
-            bays.forEachIndexed { index, bay -> JChip(bay.label, selected = index == selected, onClick = { onSelect(index) }, status = bay.status, count = bay.count) }
+            bays.forEachIndexed { index, bay -> JChip(bay.label, selected = index == selected, onClick = { onSelect(index) }, status = bay.status, count = bay.count, breathes = false) }
         }
         // Tabs that do not fit scroll sideways rather than being cut off at the edge.
         AppStyle.Brief -> JSegmented(bays.map { JSegment(it.label, it.count) }, selected, onSelect, modifier.horizontalScroll(rememberScrollState()))

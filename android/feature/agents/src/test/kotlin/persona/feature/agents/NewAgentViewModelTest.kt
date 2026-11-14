@@ -67,6 +67,7 @@ class NewAgentViewModelTest {
         try {
             advanceUntilIdle()
             model.selection(model.state.value.selection.copy(mode = "plan", effort = "high"))
+            model.prompt("Review the changes")
             model.submit()
             advanceUntilIdle()
             assertEquals("codex", store.operation?.request?.agentType)
@@ -93,6 +94,7 @@ class NewAgentViewModelTest {
         try {
             advanceUntilIdle()
             model.selection(model.state.value.selection.copy(cwd = "/code/new", launcher = "codex"))
+            model.prompt("Review the changes")
             model.submit() // the answer is lost
             advanceUntilIdle()
             model.submit() // asking again finds it created

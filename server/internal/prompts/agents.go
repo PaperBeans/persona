@@ -226,6 +226,8 @@ func RenderTaskLeader() string { return render("agents/task_leader", struct{}{})
 // RenderTaskWorker is what follows the prompt of a worker a task leader handed out (agents/task_worker).
 func RenderTaskWorker() string { return render("agents/task_worker", struct{}{}) }
 
+func RenderTaskHandoff() string { return render("agents/task_handoff", struct{}{}) }
+
 // RenderWorkerSupervise is the supervision message a task leader's agent gets about its workers (agents/worker_supervise,
 // assistant/task_leader.go): what each task of its own needs, from the same entries a conversation's message lists.
 func RenderWorkerSupervise(entries []SuperviseEntry) string {

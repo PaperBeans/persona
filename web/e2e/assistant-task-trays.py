@@ -208,6 +208,10 @@ def run(args):
                     needs_entry.click()
                     expect(needs_entry).to_have_attribute("aria-expanded", "true")
                     section = bar.locator("section")
+                    # the rows with something to answer are folded to a line until opened (#5569)
+                    folded = section.locator('button[data-needs-row][aria-expanded="false"]')
+                    while folded.count():
+                        folded.first.click()
                     # one row per thing: the release task with its agent's card under its name, the hand-opened Agent's
                     # question, the plan with its Start, the draft
                     expect(section.locator('[data-needs-row="task:demo-task-2"]')).to_have_count(1)
@@ -240,15 +244,21 @@ def run(args):
                     running_tasks = bar.locator('[data-tray-entry="running"]')
                     running_tasks.click()
                     task_rows = bar.locator("[data-task-slot]").count() - bar.locator('[data-task-slot="task:demo-stale"]').count()
+                    # #3331: the badge counts a to-do row only while the To-dos page counts it open (data-counts-open);
+                    # rows that the page shelves or closes stay visible but add no number.
+                    chip_open_running = bar.locator('section [data-counts-open="true"]').count()
                     needs_entry.click()
                     needs_tasks = bar.locator('section [data-needs-row^="task:"], section [data-brief-row="accept"]').count()
+                    chip_open_needs = bar.locator('section [data-counts-open="true"]').count()
+                    chip_open = chip_open_running + chip_open_needs
                     page.goto(args.url.rstrip("/") + "/todos")
                     header = page.get_by_text(re.compile(r"^\d+ open · ")).first
                     # a phone-wide page hides the line (max-sm:hidden); it is there all the same
                     expect(header).to_be_attached()
                     open_count = int(re.match(r"(\d+) open", header.text_content()).group(1))
+                    assert open_count == chip_open, (open_count, chip_open, header.text_content())
                     assert open_count == task_rows + needs_tasks == 4, (open_count, task_rows, needs_tasks, header.text_content())
-                    print(f"  In progress {task_rows} tasks + Needs you {needs_tasks} = To-dos page \"{header.text_content()}\"", flush=True)
+                    print(f"  chip open markers {chip_open} ({chip_open_running} in progress + {chip_open_needs} needs you) = To-dos page \"{header.text_content()}\"", flush=True)
                     page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
                     page.screenshot(path=str(shots / f"{width}-{theme}-todos.png"))
                     print(f"PASS {width} {theme}: real app; two entries, each thing once; In progress by the To-dos page's rule; real count meter; draft not sent", flush=True)

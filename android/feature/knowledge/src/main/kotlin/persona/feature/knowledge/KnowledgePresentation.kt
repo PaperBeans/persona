@@ -328,9 +328,9 @@ internal data class RecordingFacts(
     }
 }
 
-/** The transcript's lines that say something, in time order. */
+/** The transcript's lines that say something, in time order; Persona's echo (#5905) is not the meeting's, hidden as on the web and iOS. */
 internal fun transcript(segments: List<KnowledgeSegment>?): List<KnowledgeSegment> =
-    segments.orEmpty().filter { it.text.isNotBlank() }.sortedBy { it.start }
+    segments.orEmpty().filter { !it.echo && it.text.isNotBlank() }.sortedBy { it.start }
 
 internal fun JsonObject?.string(key: String): String = (this?.get(key) as? JsonPrimitive)?.contentOrNull.orEmpty()
 internal fun JsonObject?.strings(key: String): List<String> = (this?.get(key) as? JsonArray)

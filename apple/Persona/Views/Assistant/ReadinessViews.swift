@@ -112,6 +112,7 @@ struct ReadinessSheets: ViewModifier {
             NavigationStack {
                 MachinesView()
                     .navigationDestination(for: MachineDetailRoute.self) { MachineDetailView(ref: $0.ref) }
+                    .navigationDestination(for: TerminalsRoute.self) { TerminalsView(only: $0.machine) }
                     .toolbar { ToolbarItem(placement: .cancellationAction) { DoneButton { route = nil } } }
             }
         case .providerWizard:
@@ -145,14 +146,23 @@ extension View {
 /// the readiness says is missing, else Try a Message's result. Nothing on a hub without readiness and nothing when all is well.
 struct ReadinessHomeCard: View {
     @Environment(AppModel.self) private var model
+    var key: SessionKey? = nil
     @Binding var route: ReadinessRoute?
 
     private var store: AssistantReadinessModel { model.readiness }
 
+    nonisolated static func scopedDetail(_ step: AssistantReadiness.Step, activeLauncher: String?) -> String? {
+        guard step.code == "rate_limited", let affected = step.launcher, let activeLauncher,
+              !affected.isEmpty, !activeLauncher.isEmpty, affected != activeLauncher else { return step.detail }
+        let scope = String(localized: "This warning is for the default model connection. This conversation uses another model connection.")
+        if let detail = step.detail, !detail.isEmpty { return detail + "\n" + scope }
+        return scope
+    }
+
     var body: some View {
         if let f = store.failure {
             CodedFailureCard(failure: f, route: $route)
-        } else if let step = store.current?.cardStep {
+        } else if let step = store.homeCardStep {
             stepCard(step)
         } else if let probeError = store.probeError {
             ReadinessCard(title: String(localized: "Tried a message, it didn't work"), detail: probeError, tone: .danger)
@@ -167,14 +177,16 @@ struct ReadinessHomeCard: View {
         let alt = step.altActions?.first?.id
         let trying = primary == "test_assistant" || alt == "test_assistant"
         let failed = trying ? store.probeError : nil
+        let activeLauncher = key.map { AssistantCopyText.launcher($0, in: model) }
         return ReadinessCard(title: failed == nil ? step.title ?? String(localized: "One more step") : String(localized: "Tried a message, it didn't work"),
-                             detail: failed ?? step.detail,
+                             detail: failed ?? Self.scopedDetail(step, activeLauncher: activeLauncher),
                              tone: failed != nil || step.state == "problem" ? .danger : .caution,
                              actionTitle: primary.flatMap(ReadinessRoute.title),
                              action: primary.flatMap { a in ReadinessRoute.title(a).map { _ in { run(a, launcher: step.launcher, machine: machineName(step)) } } },
                              altTitle: alt.flatMap(ReadinessRoute.title),
                              alt: alt.flatMap { a in ReadinessRoute.title(a).map { _ in { run(a, launcher: step.launcher, machine: machineName(step)) } } },
-                             busy: store.probing)
+                             busy: store.probing,
+                             dismiss: step.code == "rate_limited" ? { withAnimation(Theme.Motion.state) { store.dismissHomeCard() } } : nil)
     }
 
     private func machineName(_ step: AssistantReadiness.Step) -> String? {

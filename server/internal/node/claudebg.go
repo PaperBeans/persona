@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -18,7 +19,7 @@ import (
 // Claude sessions that run where Persona has no terminal pane: a background session Claude's own daemon runs (/fork,
 // /background: kind "bg"), a session open in Claude's desktop app (entrypoint claude-desktop…), claude in a terminal
 // that herdr, Orca, Tern or botmux do not run (entrypoint cli). Each writes sessions/<pid>.json in its config directory with
-// the session it has open, its status (busy / idle / waiting) and, since Claude Code 2.1.29x, its peer inbox
+// the session it has open, its status (busy / idle / shell / waiting) and, since Claude Code 2.1.29x, its peer inbox
 // (claudepeer.go). They listed as offline while they worked, and a message from the phone was refused (a second
 // claude --resume would write the same transcript, openelsewhere.go). The node lists every live one as running, with
 // its status from the file and its transcript as for any session; a message goes through its inbox when the node can
@@ -55,8 +56,12 @@ const claudeBgReadOnly = proto.ReadOnlyClaudeBg
 const claudeAgentsList = "这个标签停在 Claude Code 的 agents 列表上：打开终端，用方向键选中一个会话、回车进去后再发消息"
 
 // claudeBgStatus maps a claude's sessions/<pid>.json status to the node's: waiting is a question or dialog of its
-// own, answered on the computer. Anything else is unknown.
-var claudeBgStatus = map[string]string{"busy": proto.StatusWorking, "idle": proto.StatusIdle, "waiting": proto.StatusBlocked}
+// own, answered on the computer. shell (Claude Code 2.1.31x and later) is a turn that ended while a background command
+// or Monitor still runs, which older builds wrote as idle; the commands come from the transcript (#6363). Anything else
+// is unknown.
+var claudeBgStatus = map[string]string{
+	"busy": proto.StatusWorking, "idle": proto.StatusIdle, "shell": proto.StatusIdle, "waiting": proto.StatusBlocked,
+}
 
 // parkedClaudeSessions are the sessions only parked claudes have open, each with the background job it went to.
 func parkedClaudeSessions(procs []claudeProc) map[string]parkedJob {
@@ -133,6 +138,7 @@ func (n *Node) outsideSource(c claudeProc) string {
 func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool) []proto.Session {
 	var out []proto.Session
 	listed := map[string]bool{}
+	var desktop *claudeDesktopIndex // read once, when a desktop session rests
 	for _, c := range procs {
 		id := c.SessionID
 		if seen[id] || listed[id] {
@@ -155,6 +161,16 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool) []proto.
 		status, ok := claudeBgStatus[c.Status]
 		if !ok {
 			status = proto.StatusUnknown
+		}
+		if status == proto.StatusIdle && source == proto.SourceClaudeDesktop {
+			// Its last turn ended while nobody looked: Unread until it is seen (claudedesktop_unread.go).
+			if desktop == nil {
+				d := readClaudeDesktopIndex(n.home)
+				desktop = &d
+			}
+			if n.desktopTurnUnread(id, *desktop) {
+				status = proto.StatusDone
+			}
 		}
 		s := proto.Session{
 			SessionID: id, Cwd: c.Cwd, Status: status, Agent: "claude", Title: m.title, SourceKind: source,
@@ -179,6 +195,9 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool) []proto.
 		}
 		if status == proto.StatusBlocked {
 			s.AttentionReason = proto.AttentionClaudeComputer
+			if s.Capabilities != nil && s.Capabilities.Send && s.PaneID == "" && asking(c, m) {
+				s.AttentionReason = proto.AttentionClaudeAnswer // a message answers it (sendOutside)
+			}
 		}
 		if s.Cwd == "" {
 			s.Cwd = m.cwd
@@ -218,7 +237,9 @@ func outsideCapabilities(c claudeProc) (*proto.SessionCapabilities, string) {
 	p, has := peerOf(c)
 	switch {
 	case has && peerReachable(p):
-		return &proto.SessionCapabilities{Read: true, Send: true, Modes: proto.CanModes(false)}, ""
+		// A turn it runs, or a question it waits on, stops at a message of priority now (interruptOutside).
+		stoppable := c.Status == "busy" || c.Status == "waiting"
+		return &proto.SessionCapabilities{Read: true, Send: true, Interrupt: stoppable, Modes: proto.CanModes(false)}, ""
 	case c.Kind == "bg":
 		return &proto.SessionCapabilities{Read: true, Modes: proto.CanModes(false)}, claudeBgReadOnly
 	case !has:
@@ -288,18 +309,38 @@ func (n *Node) sendOutside(ctx context.Context, id, text string, images []proto.
 		}
 		text = attachImages(text, paths)
 	}
+	// A session waiting on a question it asked takes the message as its answer: at priority now it ends that wait (the
+	// question's call ends unanswered) and runs the message; queued, it would wait behind the question until someone
+	// answered it on the computer. One waiting on a permission prompt or another dialog gets it queued as before: at
+	// now it would decline the prompt, which is the computer's to approve.
 	var offset int64
-	if st, err := os.Stat(n.transcriptPath(id)); err == nil {
-		offset = st.Size()
+	priority := peerNext
+	if path := n.transcriptPath(id); path != "" {
+		if st, err := os.Stat(path); err == nil {
+			offset = st.Size()
+			if asking(c, n.metaNow(path, st)) {
+				priority = peerNow
+			}
+		}
 	}
-	err = peerSend(ctx, p, id, text)
+	err = peerSendAt(ctx, p, id, text, priority)
 	var pe *errPeer
 	if asPeer(err, &pe) {
 		log.Printf("send %s: claude %d's inbox refused: %v", id, c.pid, err)
 		return true, refusal(pe.code, pe.msg, map[string]any{"pid": c.pid})
 	}
 	if peerTaken(ctx, func() string { return n.transcriptPath(id) }, offset, text, peerConfirmWait) {
-		log.Printf("send %s: claude %d (%s) took it through its inbox", id, c.pid, c.Entrypoint)
+		log.Printf("send %s: claude %d (%s) took it through its inbox (%s)", id, c.pid, c.Entrypoint, priority)
+		// Taken into its queue while a permission prompt or another dialog holds it: Claude reads the message only once
+		// that is answered at the computer, which the answer says (waits_on_computer). The status is read once, after
+		// the take: a prompt that opened just after a busy session queued the message marks it too, and rightly, since
+		// it still waits on the computer. A message at priority now waits on nothing: it ended the question it answers
+		// (the status file may say waiting a moment longer).
+		if now, ok := n.outsideClaude(id); ok && priority == peerNext && claudeBgStatus[now.Status] == proto.StatusBlocked {
+			if w, ok := ctx.Value(computerWaitKey{}).(*bool); ok {
+				*w = true
+			}
+		}
 		return true, nil
 	}
 	if err != nil {
@@ -307,6 +348,60 @@ func (n *Node) sendOutside(ctx context.Context, id, text string, images []proto.
 		return true, uncertain(err)
 	}
 	log.Printf("send %s: written to claude %d's inbox, not taken within %s (held or dropped there)", id, c.pid, peerConfirmWait)
+	return true, unconfirmed()
+}
+
+// computerWaitKey is where sendOutside leaves, for session.send's answer, that the session took the message while
+// waiting on a dialog only the computer can answer (withComputerWait).
+type computerWaitKey struct{}
+
+// withComputerWait gives sendOutside somewhere to say the message waits behind a dialog on the computer.
+func withComputerWait(ctx context.Context) (context.Context, *bool) {
+	w := new(bool)
+	return context.WithValue(ctx, computerWaitKey{}, w), w
+}
+
+// askTool is Claude Code's question tool.
+const askTool = "AskUserQuestion"
+
+// asking: claude c waits on a question it asked (its status file says waiting, and its transcript's latest call, m,
+// is the question), not on a permission prompt, a plan to approve or another dialog only the computer answers.
+func asking(c claudeProc, m quickMeta) bool {
+	return c.Status == "waiting" && m.tool == askTool
+}
+
+// interruptOutside stops the turn a claude outside Persona's panes runs, through its inbox: a message at priority now
+// cuts the turn (or ends a question or permission prompt it waits on) and asks it to stop (prompts.PeerStop). handled false for any other
+// session, and one a tmux pane runs (its Esc goes to the pane). A session at rest has nothing to stop: done, nothing sent.
+func (n *Node) interruptOutside(ctx context.Context, id string) (handled bool, err error) {
+	c, ok := n.outsideClaude(id)
+	if !ok || outsidePane(c) != "" {
+		return false, nil
+	}
+	p, has := peerOf(c)
+	if !has {
+		return true, refusal(peerUnsupported, peerNoInboxMsg, nil)
+	}
+	if c.Status != "busy" && c.Status != "waiting" {
+		return true, nil // at rest already (a Stop from a list a moment old): nothing to stop, nothing sent
+	}
+	var offset int64
+	if st, err := os.Stat(n.transcriptPath(id)); err == nil {
+		offset = st.Size()
+	}
+	stop := prompts.PeerStop()
+	err = peerSendAt(ctx, p, id, stop, peerNow)
+	var pe *errPeer
+	if asPeer(err, &pe) {
+		return true, refusal(pe.code, pe.msg, map[string]any{"pid": c.pid})
+	}
+	if peerTaken(ctx, func() string { return n.transcriptPath(id) }, offset, stop, peerConfirmWait) {
+		log.Printf("interrupt %s: claude %d took the stop through its inbox", id, c.pid)
+		return true, nil
+	}
+	if err != nil {
+		return true, uncertain(err)
+	}
 	return true, unconfirmed()
 }
 

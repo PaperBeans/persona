@@ -57,7 +57,6 @@
   "wt_removed": "worktree を削除しました",
   "wt_removed_branch": "worktree とブランチを削除しました",
   "wt_remove_failed": "worktree を削除できませんでした：{error}",
-  "archive_close_title": "エージェントをアーカイブして閉じる",
   "archive_close_detail": "Persona は「{title}」をアーカイブし、{machine} 上のタブとプロセスを閉じます。会話は残ります。「アーカイブしたエージェント」から復元し、ターミナルページから再開できます。",
   "archive_close": "アーカイブして閉じる",
   "bypass_confirm": "フルアクセスに切り替える",
@@ -65,5 +64,8 @@
   "speed_fast": "Fast",
   "header_mode": "権限モード：{mode}",
   "leave_bypass_confirm": "{mode}に切り替え",
-  "leave_bypass_detail": "このエージェントはフルアクセスで起動していないため、切り替えるとここからは戻せません。"
+  "leave_bypass_detail": "このエージェントはフルアクセスで起動していないため、切り替えるとここからは戻せません。",
+  "bypass_restart_detail": "このターンが終わるとセッションを再起動して適用します。会話はそのまま続きます",
+  "bypass_pending": "このターンが終わるとセッションを再起動してフルアクセスに切り替えます",
+  "bypass_next_message": "次のメッセージから適用されます"
 }

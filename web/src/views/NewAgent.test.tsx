@@ -98,3 +98,16 @@ describe("NewAgent with no computer", () => {
     expect(document.body.textContent).not.toContain("选一个目录");
   });
 });
+
+describe("NewAgent with an Inbox item (#5933)", () => {
+  it("shows the item's card, forwarded from where it came, over the first message, and the ask in the box", async () => {
+    const forward = { id: "inbox:lark:f1:1", kind: "context" as const, title: "Lark · Example", url: "", text: "Example: is it merged?" };
+    act(() => root.render(<NewAgent open onClose={() => {}} preset={{ forwards: [forward], prompt: "Look into it" }} key="inbox" />));
+    await flush();
+    const card = document.body.querySelector("[data-new-agent-forward]");
+    expect(card?.textContent).toContain("Lark · Example");
+    expect(card?.textContent).toContain("Example: is it merged?");
+    expect(card?.textContent).toContain("转发自 Lark · Example");
+    expect([...document.body.querySelectorAll("textarea")].some((t) => t.value.startsWith("Look into it"))).toBe(true);
+  });
+});

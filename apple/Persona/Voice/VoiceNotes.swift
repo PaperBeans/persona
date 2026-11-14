@@ -45,6 +45,10 @@ nonisolated struct VoiceUnavailableNote: Equatable, Sendable {
         case .readOnly:
             return VoiceUnavailableNote(title: String(localized: "Voice isn’t available in this chat"),
                                         message: String(localized: "It’s view-only and can’t take messages."), settings: nil)
+        case .meetingRoom:
+            return VoiceUnavailableNote(title: String(localized: "Voice isn’t available in this chat"),
+                                        message: String(localized: "To talk to Persona in this meeting, hold Talk on the meeting’s page while it records."),
+                                        settings: nil)
         case .unknown:
             return VoiceUnavailableNote(title: String(localized: "Not sure yet whether the hub supports voice"),
                                         message: String(localized: "Try again once connected to the hub."), settings: nil)
@@ -117,7 +121,7 @@ nonisolated struct VoiceEndNote: Equatable, Sendable {
                 return note(String(localized: "The realtime voice service disconnected"), .retry, details: message)
             case .noUpstream?:
                 return note(String(localized: "Realtime voice service isn’t set up"), .retry, settings: .voiceExtension(extensionID), details: message)
-            case .targetGone?, .targetReadOnly?:
+            case .targetGone?, .targetReadOnly?, .meetingRoom?, .notMeetingRoom?:
                 return note(String(localized: "Voice isn’t available in this chat"), nil, details: message)
             case .targetForbidden?:
                 return note(String(localized: "This device can’t use voice in this chat"), nil, details: message)

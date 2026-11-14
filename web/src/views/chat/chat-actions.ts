@@ -2,6 +2,7 @@
 // composer's draft key), whether it takes them now, and the conversation's images for the viewer to page through.
 import { createContext, useContext } from "react";
 import type { ForwardPick } from "../../lib/forward";
+import type { MessagePick } from "../../lib/message-pick";
 import type { RewindRestore } from "../../lib/rewind";
 import type { Item } from "../../lib/types";
 
@@ -17,6 +18,9 @@ export interface ChatActions {
   images: () => Item[];
   /** "Forward" (#3899): opens Forward to for a message of this chat, including when this chat is read-only. */
   forward?: (pick: ForwardPick) => void;
+  /** Picking messages to forward at once (#3838), set with `forward`: while it is on, each message with a Forward is a
+   *  checkbox instead of its actions. */
+  pick?: MessagePick;
   /** "Start a new session" from a reply (its item id): set only when the session can be forked. */
   fork?: (itemId: string) => void;
   /** A Persona conversation, for everyday words (docs/protocol/i18n.md "Glossary"): "Start a new chat", not "session". */

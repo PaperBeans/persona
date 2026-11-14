@@ -227,7 +227,8 @@ class BriefCardShotsTest {
                 }
             }
         }
-        val output = File("build/brief-card-shots").also { it.mkdirs() }
+        // under the reports folder, which CI uploads: the only pictures of this section from a machine without an emulator
+        val output = File("build/reports/tests/brief-setup-shots").also { it.mkdirs() }
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
             Snapshot.sendApplyNotifications()
@@ -281,7 +282,8 @@ class BriefCardShotsTest {
                 }
             }
         }
-        val output = File("build/brief-card-shots").also { it.mkdirs() }
+        // under the reports folder, which CI uploads: the only pictures of this section from a machine without an emulator
+        val output = File("build/reports/tests/brief-setup-shots").also { it.mkdirs() }
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
             Snapshot.sendApplyNotifications()

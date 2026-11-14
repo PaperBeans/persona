@@ -3,6 +3,10 @@ package persona.feature.chat
 import android.content.Context
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
@@ -90,9 +94,14 @@ class ModelPillTest {
     /** Records what the pill asks the hub. */
     private class Hub : AssistantManagement {
         val asked = mutableListOf<String>()
+        var launcherListReads = 0
+            private set
         override suspend fun config() = AssistantConfig(machineId = "box", launcher = "claude", main = "main")
-        override suspend fun assistantLauncherList(machineId: String) = AssistantLaunchers(
-            listOf(AgentLauncher("claude"), AgentLauncher("team", displayName = "Team API")), LauncherDefault("claude", "opus", "high"))
+        override suspend fun assistantLauncherList(machineId: String): AssistantLaunchers {
+            launcherListReads++
+            return AssistantLaunchers(
+                listOf(AgentLauncher("claude"), AgentLauncher("team", displayName = "Team API")), LauncherDefault("claude", "opus", "high"))
+        }
         override suspend fun launcherModels(machineId: String, launcher: String) = when (launcher) {
             "claude" -> LauncherModels("claude", listOf(AgentModel("default", "Default", resolved = "claude-opus-5-5", isDefault = true),
                 AgentModel("opus", "Opus 5.5", resolved = "claude-opus-5-5")))
@@ -119,7 +128,7 @@ class ModelPillTest {
 
     @Test fun aPersonaChatsPickIsKeptOnTheHubAndUndone() {
         val hub = Hub()
-        val chat = JsonCodec.decodeFromString<Session>("""{"machine_id":"box","session_id":"c2","assistant":true,"agent":"claude","status":"idle",
+        val chat = JsonCodec.decodeFromString<Session>("""{"machine_id":"box","session_id":"main","assistant":true,"agent":"claude","status":"idle",
             "launcher":"claude","model":"claude-opus-5-5","effort":"high","rev":3}""")
         rule.setContent {
             CompositionLocalProvider(LocalHubFeatures provides setOf("assistant_model_pick")) {
@@ -135,7 +144,7 @@ class ModelPillTest {
         assertTrue(rule.onAllNodes(hasText("Same as when this chat started", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
         rule.onNode(hasDialogText("Sonnet 4.5"), useUnmergedTree = true).performClick()
         rule.waitUntil(5_000) { hub.asked.isNotEmpty() }
-        assertEquals(listOf("PUT c2 ModelPick(launcher=team, model=sonnet, effort=null)"), hub.asked)
+        assertEquals(listOf("PUT main ModelPick(launcher=team, model=sonnet, effort=null)"), hub.asked)
         // drawn at once: the pill says the pick before the hub's push
         rule.waitUntil(5_000) { rule.onAllNodes(hasText("Sonnet 4.5", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithTag("model-pill").performClick()
@@ -143,6 +152,48 @@ class ModelPillTest {
         assertTrue(rule.onAllNodes(hasText("Picked for this chat · Team API · Sonnet 4.5"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
         rule.onNode(hasDialogText("Undo pick"), useUnmergedTree = true).performClick()
         rule.waitUntil(5_000) { hub.asked.size == 2 }
-        assertEquals("DELETE c2", hub.asked.last())
+        assertEquals("DELETE main", hub.asked.last())
+    }
+
+    @Test fun aNonMainAssistantConversationDrawsNoPill() {
+        val hub = Hub()
+        val side = JsonCodec.decodeFromString<Session>("""{"machine_id":"box","session_id":"side","assistant":true,"agent":"claude","status":"idle",
+            "launcher":"claude","model":"claude-opus-5-5","effort":"high","rev":3}""")
+        rule.setContent {
+            CompositionLocalProvider(LocalHubFeatures provides setOf("assistant_model_pick")) {
+                PersonaTheme(reduceMotion = true, style = AppStyle.Glass) {
+                    Box { PersonaModelPill(side, "box", hub, ModelPillWidth.Wide, pagePick = null, onPagePick = { }, onNotice = {}) }
+                }
+            }
+        }
+        rule.waitUntil(5_000) { hub.launcherListReads >= 1 } // the config is read, but the picker is never drawn
+        rule.onNodeWithTag("model-pill").assertDoesNotExist()
+        assertTrue("nothing is written for a conversation without a pick", hub.asked.isEmpty())
+    }
+
+    @Test fun aHubPushThatBumpsTheRevisionReReadsTheEffectiveMainChatModel() {
+        val hub = Hub()
+        val first = JsonCodec.decodeFromString<Session>("""{"machine_id":"box","session_id":"main","assistant":true,"agent":"claude","status":"idle",
+            "launcher":"claude","model":"claude-haiku-5-5","effort":"high","rev":3}""")
+        var shown by mutableStateOf(first)
+        rule.setContent {
+            CompositionLocalProvider(LocalHubFeatures provides setOf("assistant_model_pick")) {
+                PersonaTheme(reduceMotion = true, style = AppStyle.Glass) {
+                    key(shown.key, shown.rev) {
+                        Box { PersonaModelPill(shown, "box", hub, ModelPillWidth.Wide, pagePick = null, onPagePick = {}, onNotice = {}) }
+                    }
+                }
+            }
+        }
+        rule.waitUntil(5_000) { hub.launcherListReads >= 1 }
+        val afterMount = hub.launcherListReads
+        // the same revision re-renders nothing again (the page-life cache stands)
+        rule.runOnUiThread { shown = first.copy() }
+        rule.waitForIdle()
+        assertEquals(afterMount, hub.launcherListReads)
+        // a hub push with a new revision forces a fresh read so the pill matches the effective model (#6542)
+        rule.runOnUiThread { shown = first.copy(rev = 4) }
+        rule.waitForIdle()
+        rule.waitUntil(5_000) { hub.launcherListReads > afterMount }
     }
 }

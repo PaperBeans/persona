@@ -7,9 +7,13 @@ import (
 )
 
 // KBOwner is the knowledge base models' system prompts: compressing a chat (kb/compress), rewriting a project
-// (kb/project), tagging documents, meetings and events (kb/items).
+// (kb/project), tagging documents, meetings and events (kb/items). Language is what text written from a recording for
+// the user to read is written in, by the language's own name ("English", "日本語"; "" is Chinese), whatever languages
+// the transcript mixes (kb/write_language): only a recording's summary (kb/recording), minutes (kb/minutes,
+// kb/minutes_merge) and day recap (kb/day_recap, kb/day_recap_merge) read it.
 type KBOwner struct {
-	Owner string
+	Owner    string
+	Language string
 }
 
 func RenderKBCompress(o KBOwner) string { return render("kb/compress", o) }
@@ -160,10 +164,10 @@ type KBMinutesInput struct {
 func RenderKBMinutesInput(in KBMinutesInput) string { return render("kb/minutes_input", in) }
 
 // KBMinutesNote is an item of a part's notes: Line the transcript line it cites, or Photo the photo (Line 0 then); Who,
-// By and DueDate as the part said.
+// By and DueDate as the part said; Topic the title of the part's topic a point or decision is in ("" none, #6563).
 type KBMinutesNote struct {
-	Line, Photo            int
-	Text, Who, By, DueDate string
+	Line, Photo                   int
+	Text, Who, By, DueDate, Topic string
 }
 
 // KBMinutesPart is a part's notes, From and To its first and last lines' clock times.

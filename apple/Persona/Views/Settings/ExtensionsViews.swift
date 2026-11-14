@@ -172,7 +172,6 @@ struct ExtensionDetailView: View {
     @State private var page: ExtensionModel
     @State private var editingSecret: ExtensionSecret?
     /// An Always rule the user asked to remove: confirmed first.
-    @State private var removingRule: HandoffRule?
     @State private var declarations = ExtensionTextContributions()
     @State private var connectorInbox: ExtensionConnectorsModel
     /// Its connectors' source subscriptions (#2041): the entry row's counts, nil while it is hidden.
@@ -247,18 +246,11 @@ struct ExtensionDetailView: View {
                               saveReference: { await page.setSecretReference(secret.name, reference: $0) },
                               clear: { await page.clearSecret(secret.name) }, close: { editingSecret = nil })
         }
-        .confirmationDialog(String(localized: "Remove this rule?"), isPresented: Binding(get: { removingRule != nil }, set: { if !$0 { removingRule = nil } }),
-                            titleVisibility: .visible, presenting: removingRule) { rule in
-            Button(role: .destructive) { Task { await page.removeHandoffRule(rule.id) } } label: { Text("Remove [Handoff Rule]").lineLimit(1) }
-                .accessibilityIdentifier("handoff-rule-remove-confirm")
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            Text("The next time an Agent asks for it, you approve it again.")
-        }
         .task { await page.load() }
         // A launcher field's choices (format launcher): the hub asks every machine for them, so apart from the page.
         .task(id: page.detail?.plugin.id) { await page.loadLaunchersIfNeeded() }
-        .subscriptionCounts($subscriptions, enabled: page.manager == nil) { [id = page.id] in $0.extensionID == id }
+        // Its own manager's subscriptions (the current assistant's in Settings), as everything else on the page.
+        .subscriptionCounts($subscriptions, manager: page.manager) { [id = page.id] in $0.extensionID == id }
         // Again when the connector's page closes (its switch may have changed there) or the extension is switched.
         // Also once paired (opened at launch, before the hub's address is known) or paired to another hub.
         .task(id: ConnectorSectionsKey(ids: connectorIDs, depth: AppModel.shared.settingsPath.count,
@@ -349,12 +341,12 @@ struct ExtensionDetailView: View {
         }
         pages(d)
         if d.plugin.enabled ?? true {
-            SubscriptionsEntrySection(counts: subscriptions, state: SubscriptionsUI.state(extension: d.plugin.id))
+            SubscriptionsEntrySection(counts: subscriptions, state: SubscriptionsUI.state(extension: d.plugin.id), manager: page.manager)
         }
         connectorSections(d)
         if !d.readOnly && !d.form.isEmpty { form(d) }
         if !d.readOnly && !d.secrets.isEmpty { secrets(d) }
-        SecretProviderSections(users: d.secretUsers, rules: d.handoffRules, editable: !d.readOnly) { removingRule = $0 }
+        SecretProviderSections(users: d.secretUsers, rules: d.handoffRules, editable: !d.readOnly) { await page.removeHandoffRule($0.id) }
         if !d.readOnly && !d.form.isEmpty {
             Section {
                 FormAction {
@@ -1059,14 +1051,16 @@ private struct ExtensionSecretSheet: View {
 }
 
 /// A secret provider's page (docs/extensions/secret-providers.md): the settings that hold its references, each the
-/// user's standing approval, and its Always rules for hand-offs to Agents, each removable after a confirm (the page's
-/// `removingRule`). Nothing shows for an extension that is no provider.
+/// user's standing approval, and its Always rules for hand-offs to Agents, each removable after a confirm that comes
+/// from its own row (on iOS 26 a popover pointing at the rule swiped). Nothing shows for an extension that is no provider.
 private struct SecretProviderSections: View {
     @Environment(AppModel.self) private var model
     var users: [ExtensionSecretUser]
     var rules: [HandoffRule]
     var editable: Bool
-    var remove: (HandoffRule) -> Void
+    var remove: (HandoffRule) async -> Void
+    /// The rule whose removal is being confirmed.
+    @State private var confirming: HandoffRule.ID?
 
     var body: some View {
         if !users.isEmpty {
@@ -1095,18 +1089,29 @@ private struct SecretProviderSections: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("handoff-rule")
                     // Row actions as everywhere (DESIGN_SYSTEM 3.4): a swipe and the same in the context menu, and a
-                    // named action for VoiceOver; the page confirms before anything goes.
+                    // named action for VoiceOver; the row confirms before anything goes.
                     .swipeActions(edge: .trailing) {
                         if editable {
-                            Button(role: .destructive) { remove(r) } label: { Text("Remove [Handoff Rule]") }
+                            // Tinted, not `.destructive`: that role folds the row away at once, and the dialog it anchors
+                            // went with it, closing Settings' cover instead.
+                            Button { confirming = r.id } label: { Text("Remove [Handoff Rule]") }.tint(Theme.danger)
                         }
                     }
                     .contextMenu {
                         if editable {
-                            Button(role: .destructive) { remove(r) } label: { Text("Remove [Handoff Rule]") }
+                            Button(role: .destructive) { confirming = r.id } label: { Text("Remove [Handoff Rule]") }
                         }
                     }
-                    .accessibilityAction(named: Text("Remove [Handoff Rule]")) { if editable { remove(r) } }
+                    .accessibilityAction(named: Text("Remove [Handoff Rule]")) { if editable { confirming = r.id } }
+                    .confirmationDialog(String(localized: "Remove this rule?"),
+                                        isPresented: Binding(get: { confirming == r.id }, set: { if !$0 { confirming = nil } }),
+                                        titleVisibility: .visible) {
+                        Button(role: .destructive) { Task { await remove(r) } } label: { Text("Remove [Handoff Rule]").lineLimit(1) }
+                            .accessibilityIdentifier("handoff-rule-remove-confirm")
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("The next time an Agent asks for it, you approve it again.")
+                    }
                 }
             } header: {
                 SettingsHeading(String(localized: "Always for Agents"))

@@ -132,7 +132,7 @@ func (c *conversation) sendNow(s *sentWords) {
 		c.unacked[id] = s
 	}
 	if s.agent {
-		c.gate.told(now)
+		c.gate.told(now, agentSent)
 	}
 	c.sus.said = now
 	c.told(s.card)

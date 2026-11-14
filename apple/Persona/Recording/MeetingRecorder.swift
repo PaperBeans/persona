@@ -31,8 +31,14 @@ import UserNotifications
         RecordingActivity.shared.start()
         MinutesRelay.shared.start()
         capture.onInterruptionNotResumed = { MeetingRecorder.notifyPaused() }
-        // However a meeting stops: nothing more is said in it, and its questions go (#2981).
-        capture.onStopping = { MeetingAsk.shared.ended($0) }
+        // However a meeting stops: nothing more is said in it, and its questions go (#2981); its call and Talk end
+        // (#3862 phase 4).
+        capture.onStopping = { id in
+            MeetingAsk.shared.ended(id)
+            MeetingCall.shared.ended(id)
+            // The audio socket says `end` after the last audio, and hub-mode time ends here (#3862 phase 5).
+            MeetingTranscription.shared.ended(id, at: RecordingCapture.shared.timeline)
+        }
         MeetingLive.shared.start()
         // The segment length follows what the meeting being recorded may send (#3862 phase 2).
         RecordingSync.shared.onSegments = { MeetingRecorder.shared.followSegments($0) }
@@ -40,6 +46,10 @@ import UserNotifications
         MeetingConversation.shared.start()
         // Meeting photos a relaunch left on their way (#3862 phase 3): they go on uploading.
         MeetingPhotos.shared.start()
+        // The meeting call and Talk follow the room meeting being recorded (#3862 phase 4).
+        MeetingCall.shared.start()
+        // Hub transcription (#3862 phase 5): the mode of every upload's 200, the uplink, the gaps after a meeting.
+        MeetingTranscription.shared.start()
         // A call that ended while the app was away (or never said so): coming back carries on, unless another app's audio
         // (a VoIP call without CallKit, still going) holds the route: taking the session would cut into that call.
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { @Sendable _ in
@@ -71,8 +81,11 @@ import UserNotifications
         let meeting = await MeetingCalendar.meetingOffMain() ?? RecordingMeeting()
         let picked = attendance != nil
         let attendance = attendance ?? MeetingAttendees.startAttendance(AppModel.shared)
+        // A room meeting's engine carries a meeting call's player (#3862 phase 4); one that starts taking part asks for the
+        // system's echo cancellation now, for the whole recording (never on the simulator, where it doesn't run).
         await capture.start(locale: Self.locale, input: RecordingInput.chosen, title: meeting.title ?? "", meeting: meeting,
-                            playsAloud: attendance.sentRole.speaks, shortSegments: attendance.shortSegments(roomMissing: false))
+                            playsAloud: attendance.sentRole.speaks, shortSegments: attendance.shortSegments(roomMissing: false),
+                            meetingCall: attendance.room, echoCancellation: Self.echoCancellation(attendance))
         guard capture.state == .recording, let id = capture.recordingID else {
             return .failed(capture.error ?? String(localized: "Can't open the microphone. Try again later."))
         }
@@ -102,6 +115,22 @@ import UserNotifications
             }
         }
         return .started
+    }
+
+    /// Whether a meeting asks for the system's echo-cancelled input as it starts (#3862 phase 4, decision 8): a room
+    /// meeting that starts taking part; never switched while it records, so a later change of role keeps what it began
+    /// with. Not on the simulator: voice processing doesn't run there (docs/assistant/voice.md 6.4).
+    static func echoCancellation(_ attendance: RecordingAttendance) -> Bool {
+        attendance.room && attendance.sentRole == .participant && !VoiceCapture.simulator
+    }
+
+    /// The activity's Talk and Done (#3862 phase 4): `open` is what the button showed (Talk: true, Done: false; nil from an
+    /// activity drawn before it said). Talk opens a talk window, Done ends the open span; a tap that no longer matches
+    /// what is open does nothing (`MeetingCallRule.activityTap`).
+    func talk(recordingID: String?, open: Bool?) {
+        guard let id = capture.recordingID, recordingID == nil || recordingID == id.uuidString else { return }
+        MeetingCall.shared.activityTap(id, open: open)
+        Haptics.tap()
     }
 
     /// Stops the recording (the activity's Stop: `id` is the one it shows; a stale one stops nothing).
@@ -178,6 +207,9 @@ import UserNotifications
         guard capture.recordingID == recordingID, library.entry(recordingID)?.isMeeting == !on else { return }
         let start = on ? MeetingAttendees.startAttendance(AppModel.shared) : RecordingAttendance(role: .off)
         let at = capture.timeline
+        // Hub mode (phase 5): the uplink stops at `at` now, in the same step hub-mode time ends there, so no tap buffer of
+        // the Note reaches the hub while the switch's observers catch up.
+        if !on { MeetingTranscription.shared.becameNote(recordingID, at: at) }
         library.change(recordingID) { $0 = Self.switched($0, meeting: on, at: at, named: named, start: start) }
         let speaks = library.entry(recordingID).map { $0.isMeeting && $0.attendance?.sentRole.speaks == true } ?? false
         capture.setPlaysAloud(speaks)
@@ -209,6 +241,8 @@ import UserNotifications
             // in (kept out of the transcript), and a room meeting's room, which it never leaves.
             e.meeting = nil
             e.attendance?.set(.off, at: at)
+            // Hub mode (phase 5): the Note's audio stays on the phone, so hub-mode time ends here.
+            e.attendance?.closeHubTime(at: at)
         }
         return e
     }

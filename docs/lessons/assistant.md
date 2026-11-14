@@ -1,10 +1,32 @@
 # Lessons: assistant (headless Claude / Codex)
 
+- A presence window is not an owner-turn guarantee (#6394). The two-minute `ownerPresentFor` hold and the
+  five-minute `relayDecisionMax` cap let queued relayed/decision messages start new rounds behind the owner's back
+  once the window expires, even while the owner is still waiting on their own round. Keep the ranked queue and the
+  presence window, but add an in-memory per-conversation gate armed when the owner speaks (`relayBook.ownerTurns`)
+  that holds every rank until a session list shows the round stopped. Give it two safety releases — a short
+  `ownerTurnStartWait` when the round is never seen working (refused send, dropped conversation) and a hard
+  `ownerTurnMax` once seen working but never stopped — and make an expired gate return immediately rather than fall
+  back onto the presence window, or the cap is not authoritative. The gate is memory-only on purpose: a restart
+  degrades to the persisted presence window. Update the time-window tests by shortening the new limits in lockstep
+  with the presence timers instead of waiting real minutes.
+
+- Inbox handling chats are implementation details, not user-created conversations (#5723). `Untitled` suppresses
+  automatic naming but does not hide a chat, and `titleFixed` still gives it the item's subject. Apply default
+  archiving in the common session snapshot, not only after starting or finishing: restored chats and follow-up
+  instructions must stay hidden too. Preserve item-chain links and the main conversation.
+
 - Count repeated conditional instructions at the runtime-send boundary, not just in a prompt golden (#5665).
   Two adjacent decision blocks repeated the same handling rules, but the newer one also required recording the choice.
   Remove the older copy, retain the newer obligations, and check both decision gating and the actual synthetic
   `DeviceAssistantSend` text. This proves literal deduplication, not a stable-policy refactor or provider-context savings.
 
+
+- Rechecking an Inbox task link must not replay event handling (#5680). Existing processing conversations and saved
+  drafts skip the initial task judge; resetting their processing fields to force another pass can duplicate work.
+  Use the task-link maintenance action instead: validate the message and candidate after judgment, persist through
+  Inbox rollback-aware writes, then publish the draft's task card and supervisor signal. A model failure is distinct
+  from a successful no-match result.
 
 - Proven `prompt` source can describe either a terminal tool label or a first-message fallback (#5269).
   Ordinary Claude inventory falls back to the first message for a bare tool label but not its spinner-prefixed
@@ -12,6 +34,8 @@
   changes only with explicit Claude runtime and prompt provenance; reject other tool/runtime names, meaningful
   titles, manual/custom titles and unknown sources. Apply this comparison at display and late-result boundaries,
   and test both directions plus service reconstruction without a new model call or counter reset.
+
+- A to-do's PR reference may exist only in `PRURL`, without appearing in its title or notes (#5458). Duplicate hints must read that link too; an open to-do still represents ongoing work when its linked Agent is idle.
 
 - Terminal spinner frames are presentation, not native-title changes (#5254). Comparing a saved `raw_title`
   byte for byte with a later inventory hid a successful automatic name while leaving its one-shot count spent.
@@ -154,6 +178,7 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
 - Session `last_text` is node preview, whitespace collapsed /200 characters (`node/sessions.go` snippet), not renderable Markdown (2026-11-04,#1508). Completion-card summaries became one-line lists / headings with truncated ** / backticks and web plaintext symbols. Full completion cards read `lastTurn` via `session.items`, `clipMarkdown` by lines without splitting markup. One/two-line progress / pushes strip Markdown (`textfmt.PlainMarkdown` / `textfmt.PushText` in `server/internal/textfmt`, web `lib/plain-markdown.ts`).
 - Hub feed append-only does not mean later Sent status can stay client-memory (2026-11-04,#1519). GitHub comment sent, refresh reverted card to Draft / Send, nearly duplicate. Persist body.sent_at, rebroadcast same ID, replace body by ID; incremental fetch includes later updates. Same investigation found prompt `查不到的用【】标出来` (“mark unknowns in brackets”), sending literal `【预计今晚 / 几点前】` (“[expected tonight / by what time]”). One-tap drafts must not leave blanks for user completion.
 - MCP `tools/list` failure must not return empty list (2026-11-04,#504). Personad mcp declares `listChanged: false`; Claude lists once per chat. Temporary node failure / startup order returned empty, permanently removing Persona tools without connectivity indication. Retry 15 seconds then JSON-RPC error, visible `/mcp` / logs. Node `{"tools":[],"error":…}` is failure too; only valid empty means no tools.
+- Nor may one part of the list failing drop that part (2026-11-13, #6422). The manager's `mcpTools` asked the hub for the phone's tools, logged a failure and listed the rest, so a conversation that started while the hub restarted had no `phone_*` for its whole life and the model told the user the phone couldn't set a reminder. Ask again briefly, then list what the hub last gave (`phoneTools`, `server/internal/assistant/fleet_tools.go`); each call is still the phone's to refuse.
 - Separate assistant process (2026-11-04,#1446, `docs/assistant/assistant.md` “Process”) can be unavailable to every hub inquiry. Startup connector registration asked each assistant tool name before connection,10 seconds each,60-second test. Startup / registration read last `assistantToolsNow`; wait only when node requests tools for assistant chat. Assistant schedule loop waits first handshake machine / timezone reply before running due tasks, or starts with empty config and fails all.
 - Bus events synchronously invoke read-loop callbacks (`internal/rpc`); slow handler stalls connection. Assistant queues in order, handles `session.turn_ended` separately (model query / waiting task Agent stop). To wait in tests, call assistant after event on same connection, then await empty queue (`BusHub.Settle`).
 - Hub default `os.Executable() assistant` launches test binary in tests, rerunning entire suite. Tests replace `assistantCommand` in init; subprocess tests detect env in `TestMain` and act as assistant.
@@ -224,6 +249,8 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
   modification time of `~/.persona/plugin-skills/<name>/.persona-plugin` on the assistant's machine with the upgrade's.
 
 - Inbox fixtures must wait for the first asynchronous roster count before writing directly to their items (#3459). `inboxReady` returns after scheduling `tellInboxNeedsYou`, whose goroutine holds the Inbox mutex while reading the map and status fields. Legacy fixture seeding bypassed that mutex and could crash the whole test process, even without the race detector. Use `waitNeedsYouIdle` at the fixture readiness boundary; later concurrent mutations must still use the Inbox mutex. Keep the real teller enabled and verify the complete Inbox test group under `-race`.
+  Observing a fake send is not the end of `tellSoon` (#7035). Before restoring a swapped `Service.store`, hold the fixture's handling pass and call `deliverNotes` synchronously for the item: its per-item lock waits through the background save, while `toldConv` returns as soon as the send is recorded.
+  Scheduling is not completion for transcription readiness either (#7232): after a fixture calls `transcriptionReadinessChanged`, `hubTr.wg.Wait` must precede a direct `Service.store` replacement because `transcriptionJobsCheck` reads settings through that store.
 - **An optional object in a tool's schema can come filled with zero values** (#3386): runtimes that fill in every field
   of a tool's schema send `agent_send`'s `task` as `{"title":"","done_when":[],"expect_minutes":0}` instead of leaving it
   out, and the server took any `task` as a hand-off: a reply to another conversation's agent was refused, and one to an
@@ -367,6 +394,8 @@ the only line between tool calls was English to a Chinese owner. The node now al
 (`midTurn`), asking for one sentence in the user's language before the next tool call, and the CLAUDE.md asks for the
 user's language in process text too.
 
+- Match Inbox PR/issue comments by full task URLs before the AI twin gate (#5578). A to-do may record its link only in `pr_url`, its title or its notes. Keep host, repository and PR/issue kind in the identity, leave ambiguous matches to the judge, and use a separate per-message signal cursor: the twin's `Of` cursor tracks handling, which does not run while it is off. Persist associations before forwarding them, and retain the existing supervision opt-in and exclusions. A URL-only Agent must still obey the age limit before its first automatic handling; creating its task association is not permission to process old backlog. On load, seed previously linked items' signal cursors from the stored snapshot so a restart is not paid-for news; count only batches observed after that snapshot.
+
 ## Disable ToolSearch per server, not for the whole assistant process (#5838)
 
 Setting `ENABLE_TOOL_SEARCH=false` for Persona's assistant also forced every claude.ai connector's tools into each request (one connector alone was hundreds of tools and most of the context), causing repeated compaction. `personad mcp` now marks only Persona tools with `_meta: {"anthropic/alwaysLoad": true}` when `PERSONA_ASSISTANT=1`, and the assistant no longer disables ToolSearch globally. Keep other servers on Claude Code's normal deferred loading. A regression test checks both the metadata and the process environment.
@@ -398,3 +427,117 @@ leader and read an answer full of its own labels. A leader's `todo_create` now o
 tree shows pieces no Agent has worked on as `planned`. Two traps found on the way: such a piece has an `origin`, so the
 To-dos SOP shelves it after 48 h untouched like any agent-made to-do (it leaves the tree; the leader touching it keeps it),
 and the stuck rule must not count a piece that never started, or every planned piece older than a day reported stuck.
+
+- Match Inbox PR/issue comments by full task URLs before the AI twin gate (#5578). A to-do may record its link only in `pr_url`, its title or its notes. Keep host, repository and PR/issue kind in the identity, leave ambiguous matches to the judge, and use a separate per-message signal cursor: the twin's `Of` cursor tracks handling, which does not run while it is off. Persist associations before forwarding them, and retain the existing supervision opt-in and exclusions.
+## A source read by pages must settle what left the page (#5993)
+
+The Inbox's mail rounds read each account's newest 40 INBOX messages, and every rule that files a mail item (read
+elsewhere, the 7-day window) ran only for threads on that page. Mail archived or deleted in the mail client, or pushed off
+by newer mail, left its item open for good: nothing else files an open item, so the open side grew with the mailbox
+(600 open items after 30 days of 60 mails a day, all read the same evening). A rule that only fires on what a bounded read
+returns needs a second path for what it no longer returns: here past-window items are filed without asking, and the rest are
+looked up by UID once a round (`inbox.mail_flags`), bounded, with a failed lookup changing nothing. Tests of such a round
+must wait for the background triage pass (`waitTriage`) before setting a tier by hand, or the fallback tier overwrites it.
+
+- Literal `for` lists need per-value classification (#6266). Straight-line assignment tracking cannot resolve a loop's route segments or executable, and accepting GET alone misses action routes such as `/documents/delete`. Bind only literal lists in a completely inspected shell tree, retain quoting and reject unquoted values that could split or glob. A later assignment, state-changing builtin, executable-environment change or nonliteral nested list invalidates the entire attempt; never keep a partially expanded prefix. Resolve command positions before unwrapping so a variable cannot become a gate, CLI, shell or wrapper. Bound nested expansion and classify every resulting call through the existing read and hard-boundary rules. Both Claude and Codex adapter tests must count actual fake-hub approval cards; classification fixtures must never execute the supplied commands.
+
+## Clear a "tell it later" record only after the tell went (#6306)
+
+After a node restart, `recoverAssistantTasks` cleared the record of a conversation's lost background tasks (written to
+the hub) before sending the message about them. When that one send failed (the launcher not up yet, the 1-minute
+deadline), the record was gone and no later connection told the conversation: an assistant that promised to report on CI
+waited forever. A record that exists only so something is said later is cleared after the saying succeeded, and only if it
+still holds what was said (the woken conversation may already have re-armed new tasks). Being told twice after a send
+that timed out but was delivered is the cheaper failure.
+
+## A "which of these is it" model picks one even when none is (#6424)
+
+The Inbox judge was asked which open task an item belonged to and answered with an id the code only checked was among
+the candidates. Given seven unrelated tasks, it linked a GitHub bug report to a broad task whose notes shared a few
+words with it, and the link stuck. A selection model needs two guards: narrow the candidates by something exact first
+(the repository, the thread), skipping the call when none is left, and accept an answer only with evidence the code can
+check, such as a verbatim quote from the chosen candidate.
+
+- A legacy `bot` Inbox kind is not enough to reject a human Lark conversation (#5680). Check its explicit sender
+  identity, keep forwarded notification text as content, and apply one eligibility predicate before both URL routing
+  and the model judge. Correct old excluded links through the bounded maintenance write, with rollback on save failure.
+
+- A streamed reply is only as smooth as its slowest stage, and the model's output is bursty (#6651): Claude's
+  `text_delta`s come a few dozen characters at a time about every 350 ms, up to 2 s apart. A leading-edge throttle
+  ("send if 80 ms passed since the last send") holds back the rest of every burst until the next one, and a client that
+  draws whatever arrived shows one jump per burst however fast it renders. Throttles that drop in-between values need a
+  trailing send; a typewriter effect has to pace by the stream's average rate, not the last burst, or it finishes each
+  burst early and waits. Measure on recorded streams (`scripts/mock/stream_traces/`, `/mock/say?trace=…`) and report the
+  gaps between visible text changes and the added lag, not only frames: an evenly timed mock stream hides all of this.
+
+## "Busy" must mean a request is out, and one probe must not strand the rest (#6698)
+
+A report said Inbox triage stayed "the model is at its concurrency limit" forever after a short upstream outage,
+with nothing in flight, and suspected a slot released only on success. The gate (`server/internal/ai/limit.go`)
+pairs every `admit` with a `done` and no error path skips it (`TestEveryExitGivesItsSlotBack`); what kept the
+status wrong was how a pause ended. One request went out to find out and every other was put off at once, until
+that request's whole streamed answer had been read: a round right after a pause sorted one item and reported the
+rest as busy until a later round, and a 404 or 5xx during the outage showed as busy too, because only the probe
+reached the upstream. When one request finds something out for many, let the others wait for the finding (bounded
+by their own deadlines) and act on the first signal that settles it (the 200), not on the end of the work. Before
+fixing a suspected leak, count: a stress test over every exit path with the counter read afterwards settles it
+faster than reading the code again.
+
+## A send whose answer came too late may have gone in (2026-11-12)
+
+The manager waits 90 s for a relayed message (`drainRelays`) and kept it queued when no answer came. The node had
+written it after the first of two session-list rebuilds inside the send and was still building the second when the
+time ran out, so every later drain wrote it again: one conversation read the same message 32 times in an hour, and the
+messages queued behind it waited. A send in doubt is not a failure. Relays now carry one `once_id` per message
+(`relayMsgID`), which the node sends once (`sentLog`); a try in doubt first looks for the message's line in the
+conversation's latest turns (`relayArrived`: context blocks left out, no line older than the try, the sending
+conversation as its source), and one not found then is looked for again before the next try (`relayLanded`), which
+covers a line that lands late and a node restarted in between; and the send pushes the session list in the background, waiting for it only briefly
+(`notifySessionsSoon`, `listPushWait`). The id is deliberately not a `client_msg_id`: a line tied to one reads as the
+owner's own message everywhere (its source label, task briefs, user-input counts, extensions). The web had the same
+blind spot for the owner's own sends: a send answered 502 `delivered: "unknown"` stayed a failed bubble unless the hub
+tied a transcript line to its id, so the owner sent it again; a send in doubt now also settles by its words written
+after it (`inDoubt` in `web/src/lib/outbox.ts`; `isEcho` in `web/src/lib/echo.ts` allows 5 s for the clocks, not
+`CLOCK_SLACK_MS`); one whose copy arrived before the answer did was already settled while it went (`flight.echoed()`
+in ChatView). A refusal never settles by words.
+
+## Name the thing an event is about, and keep what was done for it (#5718)
+
+Completion handling started only on a session list going from `working` to `done` / `idle`, and remembered "this stretch
+had its receipt" in memory. A node whose inventory never said `working` for Codex left finished turns with no receipt, no
+judgment and no supervision message; a manager restart forgot the receipt and wrote a second one when the same end was told
+again; a stale `working` row arriving after the end judged the same reply twice. Three faults, one cause: the work was
+keyed to the event that told of the turn, not to the turn.
+
+- Key the side effect to what it is about (here to-do, machine, session and the runtime's own turn end), give its row an
+  id derived from that key, and let the database refuse the second write.
+- Keep each later step on that key too (judged, told), so a process that stops between two steps resumes at the next one
+  instead of starting over or stopping for good.
+- Do not make a status transition the only trigger for something that must happen. Statuses are another component's
+  guess; reconcile from the record of what happened (the transcript) in a sweep that already runs, and bound what the
+  sweep reads per tick.
+- A reservation taken before a check must be given back on every path that leaves without doing the work, or one failed
+  check consumes the work for good (the second look at the task's agents failing on a dropped link).
+- When such a ledger is new, decide what it does with everything that happened before it existed. Here a turn that ended
+  before the ledger was first kept is recorded as seen and nothing is made of it; otherwise the first sweep after an
+  upgrade would have judged every stopped task again.
+- A recovery path changes state last. The first version took the start nobody heard (stage back, check cleared, review
+  wait cleared) and then ran the end's handler, which could still refuse: a cancelled task or a usage-limit wait lost its
+  state for an end that was never handled. Run every refusal of the path being recovered first, and only then the
+  missing step.
+- Every way a recovery look can end without doing the work needs an answer to "will looking again help?". Never (the
+  task refuses this end): record it and stop. Not until something changes (a usage-limit wait, a computer that is away):
+  do not look. Perhaps (the node did not answer): back off, and start over when the row moves. A boolean "not done"
+  that retries every tick reads the same transcript for hours.
+- Compare rows by what says the thing changed. The transcript's size says it was written to; the row's time can move
+  on a later list with nothing written, and a row compared on both was never the same row twice.
+- A mutex that is held across database calls must not be reachable from under a hot lock. The ledger's mutex is
+  held across its reads and writes; a counter that happened to live under it was read and set with the task lock
+  held, so one stuck write would have parked every user of the task lock behind it. Before putting a field under a
+  lock, ask who reads it and what they hold: in-memory state that a hot path needs gets a lock that is held across
+  nothing, and the order is written on the struct in one sentence a reader can check. Test it by stalling the store,
+  not by reading the code.
+
+## Reconciling a lost start needs an exact id, not a shape match (2026-11-13, #6908)
+
+When `session.start` never answers, the hub lists the machine and adopts the session its start probably created. The first version guessed from shape: not in the pre-start snapshot, `StartedByPersona`, same launcher and cwd, a fresh sign of life, newest wins. Three rows are indistinguishable by shape: a session the owner started by hand also carries `StartedByPersona` (the app's start path stamps it), and two workspace-none tasks run in the same directory with no workspace claim between them, so each could adopt the other's session — and nothing excluded a session already linked to another open todo. A heuristic over mutable, shared signals (`UpdatedAt`, cwd) cannot identify one specific start. The fix carries the identity instead: the hub generates a v4 UUID and sends it on the existing `session.start` `session_id`, the node starts Claude with `--session-id <id>` on every Claude path (the sync terminal path had been passing an empty id), and adoption matches that exact id first with no other condition. The heuristic is only the fallback for a node too old to honor the field, and even then it skips every session in `todos.activeBySession` and fails closed when the todo book cannot load. Lesson: when an action's result can be lost, make the request carry a unique correlation token and match on that; keep a heuristic only as a version-compatibility fallback, and have it exclude resources already claimed elsewhere rather than merely rank candidates.

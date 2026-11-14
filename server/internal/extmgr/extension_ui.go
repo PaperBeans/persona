@@ -177,6 +177,9 @@ type uiRequest struct {
 		// pages (subscriptions_ui.go), which name it; never handed to an extension (uiParams). Sent at all (even ""),
 		// it says the app opens their Set Up with … (#5661).
 		Assistant *string `json:"assistant,omitempty"`
+		// Graph: the app pushes its own view of Inbox Sources as relations (#5741, the iPhone), so the subscription pages
+		// draw its row; never handed to an extension either.
+		Graph bool `json:"graph,omitempty"`
 	} `json:"context"`
 	State  string            `json:"state,omitempty"`
 	Action string            `json:"action,omitempty"`
@@ -290,7 +293,7 @@ func (h *Manager) withUI(ctx context.Context, id, uiID string, in uiRequest, cal
 			return res, errNoMachine
 		}
 		m.mu.Lock()
-		params.Machine = &extension.UIMachine{ID: m.cfg.ID, Name: m.cfg.Name, OS: m.info.OS, Online: m.online}
+		params.Machine = &extension.UIMachine{ID: m.cfg.ID, Name: m.name(), OS: m.info.OS, Online: m.online}
 		m.mu.Unlock()
 	case "inbox_item":
 		if in.Context.Item == "" {

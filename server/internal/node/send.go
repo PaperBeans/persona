@@ -47,11 +47,25 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 		return err
 	}
 	defer unlock()
+	selectionText := text
+	if opts.SwitchNow {
+		// The assistant's agent_switch (#5973): the switch it picked goes with this message now, or nothing does
+		// (launcher_switch.go switchNowRefusal). Anything but a running Claude Code agent with that switch waiting is
+		// refused here, before a path below could type the message on the launcher the agent runs on.
+		if err := n.switchNowReady(ctx, id); err != nil {
+			return err
+		}
+		opts.ApplySwitch = true
+	}
 	if n.externalCodex(id) {
 		if n.codexResumable(ctx, id) { // nothing runs it: a stopped agent takes no messages (stopped.go, #4754)
 			return n.stoppedRefusal(id)
 		}
 		return n.sendCodex(ctx, id, text, images)
+	}
+	selected, err := n.sessionSelectedSkills(ctx, id, text)
+	if err != nil {
+		return err
 	}
 	if r := n.agentsListRefusal(id); r != nil { // claudebg.go
 		return r
@@ -99,16 +113,22 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 			// On its app-server (codex_daemon.go): a turn or a steer, nothing typed — a draft in its box stays as it is.
 			return n.sendCodex(ctx, id, text, images)
 		}
+		if kind == "claude" && ps != nil && ps.Agent == "" {
+			n.leaveLimitQuestion(ctx, id, pane) // the switch moves it off its usage limit: Claude Code's question about it goes
+		}
 		if err := n.checkPaneFor(ctx, pane, kind, opts); err != nil { // sendsafe.go
+			if opts.SwitchNow {
+				n.dropSwitchNow(id, err) // a draft or a dialog: nothing typed, and no switch left waiting for the user
+			}
 			return err
 		}
 		if kind == "claude" && ps != nil && ps.Agent == "" { // one to the other engine waits, above
 			// The user's own message carries out the switch to another launcher they picked (launcher_switch.go): the
 			// agent is quit and resumed there, in the same terminal, and the message goes to it. While the agent is busy
 			// the message goes on the launcher it runs on and the switch waits; a failed switch is dropped with nothing
-			// typed.
+			// typed. The assistant's (switch_now) is refused then instead, and dropped.
 			switched := false
-			if pane, switched, err = n.applySwitch(ctx, id, pane, *ps); err != nil {
+			if pane, switched, err = n.applySwitch(ctx, id, pane, *ps, opts.SwitchNow); err != nil {
 				return err
 			}
 			// The new claude came up behind a dialog of its own (start returns early then): the text would answer it.
@@ -119,6 +139,9 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 			}
 		}
 	} else {
+		if opts.SwitchNow { // gone since switchNowReady: nothing below would carry the switch out
+			return n.switchNowDropped(id, refusal(proto.CodeSwitchUnsupported, fmt.Sprintf("session %s is not running in one of Persona's terminals: there is no agent to switch (%v)", id, err), nil))
+		}
 		// A session of the desktop app's sidebar that nothing runs: the app opens it, and the message goes to its inbox,
 		// not to a claude --resume of ours (claudedesktop_open.go).
 		if handled, err := n.sendThroughDesktopApp(ctx, id, text, images); handled {
@@ -181,6 +204,13 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 				text = handoff.message(text)
 			}
 		}
+	}
+	if len(selected) > 0 {
+		// Recheck after pane readiness work; do not carry a selection across a changed environment.
+		if _, err := n.sessionSelectedSkills(ctx, id, selectionText); err != nil {
+			return err
+		}
+		text = selectedSkillInstructions(selected) + "\n\n" + text
 	}
 	paths, err := n.saveImages(images)
 	if err != nil {

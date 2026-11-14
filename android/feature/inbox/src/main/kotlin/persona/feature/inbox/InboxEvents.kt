@@ -7,10 +7,13 @@ import kotlinx.serialization.Serializable
 import persona.core.contracts.InboxChainEntry
 import persona.core.contracts.InboxHandling
 import persona.core.contracts.InboxSuggestion
+import persona.core.contracts.SessionKey
 import persona.core.designsystem.LocalizedFormats
+import persona.core.designsystem.Status
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
 import persona.core.navigation.ChatRoute
+import persona.core.navigation.RouteSource
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
@@ -46,6 +49,21 @@ internal sealed interface EventMark {
     data class Suggests(@StringRes val kind: Int, val line: String) : EventMark
     /** The manager failed or timed out: back in Needs you without a suggestion. */
     data class Failed(val reason: String?) : EventMark
+    /** The shared `now` words; an unknown key never reaches this variant and keeps the old mark. */
+    data class Now(val text: String, val status: Status, val problem: Boolean = false, val key: String? = null) : EventMark
+}
+
+/** The processing conversation, from the handling record or its handling-chain entry, when the hub gave both ids. */
+internal fun inboxProcessingSession(record: InboxRecord): SessionKey? {
+    record.event.handling?.let {
+        if (!it.machineId.isNullOrBlank() && !it.sessionId.isNullOrBlank()) return SessionKey(it.machineId!!, it.sessionId!!)
+    }
+    val entry = record.event.chain.lastOrNull {
+        it.kind == "handling" && it.link?.let { link ->
+            link.type == "session" && !link.machineId.isNullOrBlank() && !link.sessionId.isNullOrBlank()
+        } == true
+    } ?: return null
+    return SessionKey(entry.link!!.machineId!!, entry.link!!.sessionId!!)
 }
 
 internal fun eventMark(record: InboxRecord): EventMark? {
@@ -93,9 +111,9 @@ internal fun suggestionButtons(suggestion: InboxSuggestion): SuggestionButtons =
 internal fun confirmText(suggestion: InboxSuggestion, edited: String?): String? =
     edited?.trim()?.takeIf { it.isNotEmpty() && it != suggestion.text.trim() }
 
-/** The chain as shown: only the newest entry while collapsed, else all of it, oldest first. */
+/** The chain as shown: the three newest entries while collapsed, else all of it, oldest of the shown entries first. */
 internal fun shownChain(chain: List<InboxChainEntry>, expanded: Boolean): List<InboxChainEntry> =
-    if (expanded || chain.size <= 1) chain else chain.takeLast(1)
+    if (expanded || chain.size <= 3) chain else chain.takeLast(3)
 
 /** What tapping a chain entry does. */
 internal sealed interface ChainTarget {
@@ -112,6 +130,10 @@ internal sealed interface ChainTarget {
     data object None : ChainTarget
 }
 
+/** A conversation opened from this item; its source lets the shell keep Back pointed at the item. */
+internal fun inboxConversationRoute(machineId: String, sessionId: String, itemId: String) =
+    ChatRoute(machineId, sessionId, source = RouteSource.InboxItem(itemId))
+
 internal fun chainTarget(entry: InboxChainEntry, record: InboxRecord): ChainTarget {
     val inline = if (!entry.detail.isNullOrBlank() || entry.messages.isNotEmpty()) ChainTarget.Inline else ChainTarget.None
     val link = entry.link ?: return inline
@@ -126,7 +148,7 @@ internal fun chainTarget(entry: InboxChainEntry, record: InboxRecord): ChainTarg
             }
         }
         "session" -> if (!link.machineId.isNullOrBlank() && !link.sessionId.isNullOrBlank())
-            ChainTarget.Page(ChatRoute(link.machineId!!, link.sessionId!!)) else inline
+            ChainTarget.Page(inboxConversationRoute(link.machineId!!, link.sessionId!!, record.item.id)) else inline
         "item" -> link.id?.takeIf { it.isNotBlank() }?.let { ChainTarget.Item(it) } ?: inline
         else -> inline
     }
@@ -150,9 +172,9 @@ internal fun chainIcon(kind: String, record: InboxRecord): PhIcon = when (kind) 
     else -> PhIcons.Info
 }
 
-/** A chain entry's time: the clock today, the date and the clock before. */
+/** A chain entry's time: the 24-hour clock today, the localized short date and 24-hour clock before. */
 internal fun chainTime(value: String?, locale: Locale, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): String {
     val at = value?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return ""
     val today = at.atZone(zone).toLocalDate() == now.atZone(zone).toLocalDate()
-    return LocalizedFormats.format(at, if (today) LocalizedFormats.TIME else LocalizedFormats.MONTH_DAY_TIME, locale, zone)
+    return LocalizedFormats.format24(at, if (today) LocalizedFormats.TIME_24 else LocalizedFormats.MONTH_DAY_TIME_24, locale, zone)
 }

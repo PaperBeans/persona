@@ -41,6 +41,23 @@ struct BrowserLoginsModelTests {
         #expect(!page.folded && page.sites?.count == 3)
     }
 
+    /// The section is rebuilt with its page's content (#6050): coming back does not read again, so an open list stays;
+    /// Try Again and a change of connection do.
+    @Test func comingBackKeepsWhatWasReadUntilTryAgainOrOffline() async {
+        let hub = FakeHub()
+        hub.on("GET", Self.path, json: #"{"sites":\#(Self.sites(["a", "b", "c", "d"]))}"#)
+        let page = make(hub, toasts: Box())
+        await page.appear(online: true)
+        await page.appear(online: true)
+        #expect(hub.sent("GET", Self.path).count == 1 && page.shown.count == 4)
+        await page.load(online: true)
+        #expect(hub.sent("GET", Self.path).count == 2)
+        await page.appear(online: false)
+        #expect(page.sites == nil && hub.sent("GET", Self.path).count == 2)
+        await page.appear(online: true)
+        #expect(hub.sent("GET", Self.path).count == 3 && page.sites?.count == 4)
+    }
+
     @Test func clearsSeveralSitesInOneCallNamingEach() async {
         let hub = FakeHub()
         hub.on("GET", Self.path, json: #"{"sites":\#(Self.sites(["a", "b", "c", "d"]))}"#)

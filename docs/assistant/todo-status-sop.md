@@ -28,9 +28,10 @@ then the folded ones, Done last. The same order decides which member leads a mer
 | Waiting on you | open | Something only the owner can move: an answer, an approval, a decision, a retry |
 | Working | open | An agent is running on it now |
 | PR to merge | open | Its work stopped at a pull request that is still open and nothing runs: however old, it stays here, with the PR link and how long since it moved |
+| Parked (web) | open | An explicitly parked task whose wait has not expired; it is unfinished, even if its last agent turn was seen |
 | Other open | open | Open, recently active, none of the above (an agent stopped and seen, a reminder of the user's own) |
 | Just finished | open | Worth a look: closed, accepted or deployed in the last 24 hours, or a turn nobody has seen / a review not done yet (those stay until seen or reviewed); the owner has not seen it since (see "Seen") |
-| Shelved | folded | No activity for 48 hours and nothing running (see "Shelving") |
+| Inactive (web; Shelved on native clients) | folded | No activity for 48 hours and nothing running (see "Shelving"); not an explicit parked verdict |
 | Done | folded | Closed, accepted or deployed more than 24 hours ago or seen since; a finished turn the owner has seen since it last moved |
 
 ## Decision table
@@ -45,6 +46,7 @@ The first rule that holds wins.
 | 3 | `owner_decides` | Open, and the review says `needs_user`, or its ask is a decision or "cannot be done" | Waiting on you |
 | 4 | `agent_running` | An agent is working or starting | Working |
 | 5 | `closed` | `done_at` is set | Just finished for 24 hours or until seen, then Done |
+| 5a | `parked` (web) | Open and the current review is parked | Parked until its `until`; after that, Other open while awaiting review, never Done just because its agent stopped |
 | 6 | `accepted` | The latest review accepted it and no review came since, even when the hub reopened it (see "Accepted tasks") | Just finished for 24 hours after the review or until seen, then Done |
 | 7 | `deployed` | `delivery.state` is `live` | Just finished for 24 hours or until seen, then Done |
 | 8 | `finished_unseen` | An agent finished a turn nobody has seen, the review is pending, or its ask says done / please verify; not seen since it last moved | Just finished |
@@ -52,6 +54,11 @@ The first rule that holds wins.
 | 9a | `seen` | Rule 8's signals, seen by the owner since it last moved (see "Seen"); not an open concern | Done |
 | 10 | `stale` | Shelvable (see "Shelving") and no activity for 48 hours | Shelved |
 | 11 | `rest` | Anything else | Other open |
+
+On the web, the header's Parked count is the number of to-dos in the Parked section (included in open).
+Inactive counts only automatic 48-hour shelving. The Parked section and review badge use the same localized name.
+Apple (`apple/Shared/TodoTriage.swift`) and Android (`TodoTriage.kt` in `android/core/domain`) still need this
+parked rule and naming alignment; #5929 records the parity gap. This web fix does not claim native-client delivery.
 
 **A failed start whose work got done another way is not the owner's**: the hub closes a to-do whose agent never started
 (`done_at` with its `start_error`), and rule 1 keeps it in Waiting on you so the owner can retry or remove it. When the
@@ -140,7 +147,8 @@ to-do with priority `high`, still asks the owner with the card, as before.
 Just finished used to empty itself only by time: a to-do the owner had already looked at stayed there for 24 hours, on
 top of the list (#5707). Now the owner files it:
 
-- **Got it** on a Just finished row (a button under its words, and on iOS a leading swipe action) marks it seen. The row
+- **Got it** on a Just finished row (on the web a small button at the end of its status line, under the time, #6578; on
+  iOS a button under its words, moving to the web's place in #7148, and a leading swipe action) marks it seen. The row
   goes to Done at once, before the hub answers; a toast says so with **Undo**, which takes the mark off. A failed write
   puts the row back and says why.
 - **Opening it** counts too: the iPhone marks it seen when its page opens (the list behind has it in Done on the way
@@ -197,7 +205,10 @@ Relations chain (A shares a PR with B, B an issue with C: one row). A closed to-
 ## Accepted tasks
 
 When `task_review` accepts a task, the hub closes it. If its agent is then sent more work, the hub reopens it
-(`taskWorking` → `reopenTodo`, `docs/assistant/todos.md`) while the supervision still says `accepted`. Earlier the
+(`taskWorking` → `closedTurnReopens` → `reopenTodo`, `docs/assistant/todos.md`) while the supervision still says
+`accepted`. For a task with no plan (an adopted agent, often kept on for other work), only the task's conversation
+sending more (`agent_send`, or the owner's message on its card) reopens it; that agent's other turns leave it closed
+(#6726). Earlier the
 page treated every reopened task as not reviewed: it showed "Follow up", its badge "Supervising", and criteria added
 with the extra work (`agent_supervise` / `agent_send` replace `done_when`, so the list grew from 5 to 8) as open
 with a clock and counted them ("5/8").
@@ -219,7 +230,7 @@ Every client follows this document with its own copy of the rules, each with the
 | Client | Rules | Tests | Page |
 | :--- | :--- | :--- | :--- |
 | Web | `web/src/lib/todo-triage.ts` | `web/src/lib/todo-triage.test.ts` | `web/src/views/Todos.tsx` |
-| iOS / Mac | `apple/Shared/TodoTriage.swift` (`TodoTriageLogic`) | `apple/PersonaTests/TodoTriageTests.swift` | `apple/Persona/Views/Todos/TodosView.swift`, `apple/Mac/Todos/MacTodosPage.swift` |
+| iOS / Mac | `apple/Shared/TodoTriage.swift` (`TodoTriageLogic`) | `apple/PersonaTests/TodoTriageTests.swift` | `apple/Persona/Views/Todos/TodosView.swift` |
 | Android | `android/core/domain/src/main/kotlin/persona/core/domain/tasks/TodoTriage.kt` | `android/core/domain/src/test/kotlin/persona/core/domain/tasks/TodoTriageTest.kt` | `android/feature/agents/src/main/kotlin/persona/feature/agents/TodosScreen.kt` |
 | Hub | `server/internal/assistant/todo_triage.go` | `server/internal/assistant/todo_triage_test.go` | none: it tells when a leader's task is stuck (#3483) |
 

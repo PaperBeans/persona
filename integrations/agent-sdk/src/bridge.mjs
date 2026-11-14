@@ -94,8 +94,18 @@ const closeWhenIdle = () => {
   }
 }
 
+// The CLI's background tasks as the SDK passes them on (system/background_tasks_changed, each a full list): the node
+// asks for them before a model switch, which restarts the process (persona_background_tasks, #5234). The CLI sends
+// none at start and only on a change, so once a turn has ended with none sent the set is empty; null before that.
+let backgroundTasks = null
+q.persona_background_tasks = () => ({ tasks: backgroundTasks })
+
 const output = (async () => {
   for await (const msg of q) {
+    if (msg.type === 'system' && msg.subtype === 'background_tasks_changed' && Array.isArray(msg.tasks)) {
+      backgroundTasks = msg.tasks
+    }
+    if (msg.type === 'result') backgroundTasks ??= []
     if (!guard.keep(msg, turns > 0)) {
       log(`dropped a replayed ${msg.type}${msg.subtype ? `/${msg.subtype}` : ''}`)
       continue

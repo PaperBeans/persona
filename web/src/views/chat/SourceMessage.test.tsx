@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { segments } from "../../lib/turns";
 import type { Item } from "../../lib/types";
 import { SegmentView } from "./SegmentView";
@@ -43,14 +43,17 @@ describe("source messages in the actual transcript renderer", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("keeps selected excerpts inspectable while hiding transport metadata", () => {
+  it("keeps selected excerpts inspectable while hiding transport metadata", async () => {
     const value = input(1, `<persona-context kind="message-source" title="">{"kind":"conversation"}</persona-context>\n<persona-context kind="doc" title="Selected excerpt" url="">Quoted acceptance requirement</persona-context>\nPlease check this excerpt`);
     const host = render([value]);
     expect(host.textContent).toContain("Selected excerpt");
     expect(host.textContent).not.toContain('{"kind":"conversation"}');
     const toggle = host.querySelector("button[aria-expanded]") as HTMLButtonElement;
-    act(() => toggle.click());
-    expect(host.textContent).toContain("Quoted acceptance requirement");
+    await act(async () => toggle.click());
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(host.textContent).toContain("Quoted acceptance requirement");
+    });
   });
 
   it("never exposes injected model instructions in the source block", () => {

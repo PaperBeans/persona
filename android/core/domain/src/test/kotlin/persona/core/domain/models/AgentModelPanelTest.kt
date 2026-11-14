@@ -7,6 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import persona.core.contracts.PendingSwitch
 import persona.core.contracts.Session
+import persona.core.contracts.SessionCapabilities
 import persona.core.contracts.api.AgentLauncher
 import persona.core.contracts.api.AgentModel
 import persona.core.contracts.api.LauncherModels
@@ -100,6 +101,36 @@ class AgentModelPanelTest {
         val working = agent.copy(status = "working", state = "working")
         assertEquals(PanelReason.Busy, AgentModelPanel.panel(working, launchers, ::read, switching).state.busy)
         assertNull(AgentModelPanel.panel(agent, launchers, ::read, switching).state.busy)
+    }
+
+    // #6294 (the web's canSwitchModel): a runtime's session switches its model where its node says so, on its own launcher
+    // only (POST …/modes {model}, then {effort}); the node moves no runtime's session to another launcher.
+    @Test fun aRuntimesSessionSwitchesItsModelWhereItsNodeSays() {
+        val paseo = agent.copy(sourceKind = "runtime", paneId = null,
+            capabilities = SessionCapabilities(read = true, send = true, interrupt = true, approve = true, model = true))
+        assertTrue(AgentModelPanel.canSwitchModel(paseo))
+        assertTrue(AgentModelPanel.switches(paseo).first)
+        assertFalse(AgentModelPanel.switchesLauncher(paseo, switching))
+        assertEquals(listOf(ModeStep.Model("sonnet"), ModeStep.Effort("low")),
+            AgentModelPanel.pickPlan(paseo, PanelConfig("example", "sonnet", "low"), { lists[it] }, switching))
+        assertNull(AgentModelPanel.pickPlan(paseo, PanelConfig("work", "glm-5.3"), { lists[it] }, switching))
+        val panel = AgentModelPanel.panel(paseo, launchers, ::read, switching)
+        assertNull(panel.providers.first { it.id == "example" }.unavailable)
+        assertEquals(PanelReason.OtherProvider, panel.providers.first { it.id == "work" }.unavailable)
+        assertEquals(listOf("example"), panel.state.recommended)
+        // The node's no, no sending, not running, or a Persona chat: its model stays.
+        assertFalse(AgentModelPanel.canSwitchModel(paseo.copy(capabilities = paseo.capabilities!!.copy(model = false))))
+        assertFalse(AgentModelPanel.canSwitchModel(paseo.copy(capabilities = paseo.capabilities!!.copy(send = false))))
+        assertFalse(AgentModelPanel.canSwitchModel(paseo.copy(status = "offline", state = "offline")))
+        assertFalse(AgentModelPanel.canSwitchModel(paseo.copy(assistant = true)))
+        assertEquals(PanelReason.ModelFixed("claude"),
+            AgentModelPanel.panel(paseo.copy(capabilities = paseo.capabilities!!.copy(model = false)), launchers, ::read, switching)
+                .providers.first { it.id == "example" }.unavailable)
+        // An older node says nothing: a session with a source keeps its model, as before; any agent the node says yes for switches.
+        assertFalse(AgentModelPanel.canSwitchModel(paseo.copy(capabilities = SessionCapabilities(read = true, send = true))))
+        assertTrue(AgentModelPanel.canSwitchModel(paseo.copy(agent = "agy")))
+        // Claude Code in a terminal, nothing said: as before.
+        assertTrue(AgentModelPanel.canSwitchModel(agent) && AgentModelPanel.switchesLauncher(agent, switching))
     }
 
     @Test fun aCodexThreadKeepsItsModel() {

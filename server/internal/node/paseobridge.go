@@ -172,7 +172,8 @@ func commonNodePaths() []string {
 	for _, dir := range agentSystemDirs { // Homebrew, /usr/local
 		out = append(out, filepath.Join(dir, "node"))
 	}
-	out = append(out, "/usr/bin/node", filepath.Join(home, ".volta", "bin", "node"), filepath.Join(home, ".local", "bin", "node"))
+	out = append(out, filepath.Join(distroNodeDir, "node"), filepath.Join(home, ".volta", "bin", "node"),
+		filepath.Join(home, ".local", "bin", "node"))
 	nvm, _ := filepath.Glob(filepath.Join(home, ".nvm", "versions", "node", "*", "bin", "node"))
 	sort.Sort(sort.Reverse(sort.StringSlice(nvm)))
 	return append(out, nvm...)

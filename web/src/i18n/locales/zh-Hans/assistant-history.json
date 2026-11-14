@@ -12,6 +12,7 @@
   "empty_title": "还没有对话",
   "empty_body": "在 Persona 里说句话，对话就会出现在这里。",
   "no_results": "没有和「{query}」相关的对话",
+  "search_partial": "较早的对话还在整理，可能有些暂时搜不到。",
   "archived_count_other": "已归档（{count}）",
   "archived_footer": "归档只是不在列表里显示，对话还在。在归档的对话里再发消息，它会自动回到列表。",
   "via": "来自{name}",

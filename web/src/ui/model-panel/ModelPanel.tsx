@@ -554,6 +554,18 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
                           />
                         );
                       })}
+                      {s.total && s.provider && (
+                        <button
+                          type="button"
+                          disabled={picking}
+                          data-panel-more={s.provider.id}
+                          onClick={() => s.provider && chooseView({ kind: "provider", provider: s.provider.id })}
+                          className="mt-1 flex w-full items-center gap-1.5 rounded-control px-3 py-1.5 text-left text-label text-ink-2 transition-colors duration-150 outline-none enabled:hover:bg-hover-2 enabled:hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed"
+                        >
+                          <span className="min-w-0 truncate">{t("ui-modelpanel.show_all", { count: s.total })}</span>
+                          <Icon name="chevronRight" size={12} className="shrink-0" />
+                        </button>
+                      )}
                     </div>
                   ))
                 )}

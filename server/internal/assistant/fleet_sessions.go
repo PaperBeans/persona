@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"math"
@@ -89,8 +90,10 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 	}
 	s.availSweep(machine, list, now) // the waits of conversations no longer listed (availability.go)
 	s.fleetKeepPrevious(machine, list)
-	s.roundsSeen(list) // whose round each conversation is on (owner_preempt.go)
+	s.roundsSeen(list)      // whose round each conversation is on (owner_preempt.go)
+	s.ownerRoundsSeen(list) // the owner-turn gates end with their rounds (relay_presence.go, #6394)
 	s.sessionsChanged(machine)
+	s.searchWake() // the chat search index reads what changed (search_index.go)
 	// Messages from other conversations, for those no longer running; the todos' links and herdr marks.
 	var connected time.Time
 	if s.devs != nil {
@@ -184,22 +187,25 @@ func (s *Service) publishList(machine string) []proto.Session {
 		list = kept
 	}
 	msg := assistantwire.FleetSessions{MachineID: machine, Sessions: list, Muted: s.mutedSessions(machine, list)}
-	// json.Marshal's bytes, compared with the list told last as they are written: a list that is the same (most of them)
-	// is not kept, and one that differs is copied once.
-	w := changedWriter{old: f.sent[machine]}
+	// json.Marshal's bytes, encoded into the one buffer and compared with the list told last by length and SHA-256: a
+	// list that is the same (most of them) is not told again, and none of them is kept (#3197: 3.6 MB at 20 computers
+	// of 200 sessions, when each computer's last bytes were).
+	f.enc.Reset()
 	var b []byte // nil when the list does not encode, as json.Marshal gives
-	if jsonv2.MarshalWrite(&w, msg, json.DefaultOptionsV1()) == nil {
-		if w.same() {
+	var told sentList
+	if jsonv2.MarshalWrite(&f.enc, msg, json.DefaultOptionsV1()) == nil {
+		told = sentList{n: f.enc.Len(), sum: sha256.Sum256(f.enc.Bytes())}
+		if told == f.sent[machine] {
 			return list
 		}
-		b = w.written()
-	} else if len(w.old) == 0 {
+		b = bytes.Clone(f.enc.Bytes()) // enc is the next list's: what is told is never written again
+	} else if f.sent[machine].n == 0 {
 		return list
 	}
 	if f.sent == nil {
-		f.sent = map[string][]byte{}
+		f.sent = map[string]sentList{}
 	}
-	f.sent[machine] = b // kept and told: never written again
+	f.sent[machine] = told
 	f.shownMu.Lock()
 	if f.shown == nil {
 		f.shown = map[string][]proto.Session{}
@@ -227,34 +233,11 @@ func awaitingReply(list []proto.Session) []proto.Session {
 	return out
 }
 
-// changedWriter takes an encoding and compares it with old as it comes, copying it out only once it differs.
-type changedWriter struct {
-	old []byte
-	n   int    // how many bytes came, while they are old's
-	out []byte // all of them, once they differ from old
-}
-
-func (w *changedWriter) Write(p []byte) (int, error) {
-	if w.out == nil {
-		if len(p) <= len(w.old)-w.n && bytes.Equal(p, w.old[w.n:w.n+len(p)]) {
-			w.n += len(p)
-			return len(p), nil
-		}
-		w.out = append(make([]byte, 0, max(len(w.old), w.n+len(p))), w.old[:w.n]...)
-	}
-	w.out = append(w.out, p...)
-	return len(p), nil
-}
-
-// same: what came is old.
-func (w *changedWriter) same() bool { return w.out == nil && w.n == len(w.old) }
-
-// written is everything that came, when it was not old.
-func (w *changedWriter) written() []byte {
-	if w.out == nil {
-		return slices.Clone(w.old[:w.n]) // a prefix of old: never handed on as old's own bytes
-	}
-	return w.out
+// sentList is what is kept of the list last told the hub for a machine: the length and SHA-256 of its JSON. Zero: none,
+// or one that did not encode (told as null), so the next list that encodes is told.
+type sentList struct {
+	n   int
+	sum [sha256.Size]byte
 }
 
 // decorated returns a machine's sessions as the apps get them: the unified states, the pending interaction counts,
@@ -360,34 +343,73 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 }
 
 // decoratedSession is one of the machine's sessions as the apps get it. Each row is decorated on its own, so the one
-// the node lists is decorated alone (as readinessMain does), not the machine's whole list for each finished turn; one
-// the node does not list may still be an archived row (archivedSessions), found in the whole list.
+// the node lists is decorated alone (listedSession, as readinessMain does), not the machine's whole list for each
+// finished turn; one the node does not list may still be an archived row (archivedSessions), read from its record
+// alone (archivedRow): the records only grow, and the whole list carries every one of them.
 func (s *Service) decoratedSession(machine, sid string) (proto.Session, bool) {
-	mark := s.archiveMark()
-	if row, ok := s.nodeSession(machine, sid); ok {
-		list, _, err := s.archivedSessions(context.Background(), machine, s.decorateInventory(machine, []proto.Session{row}, false), mark)
-		if err != nil {
-			s.logf("load agent archives: %v", err)
-		}
-		return list[0], true // the row itself: the archive appends only the rows it was not given
+	if row, ok := s.listedSession(machine, sid); ok {
+		return row, true
 	}
-	for _, sess := range s.decorated(machine) {
-		if sess.SessionID == sid {
-			return sess, true
-		}
+	row, ok, err := s.archivedRow(context.Background(), machine, sid)
+	if err != nil {
+		s.logf("load agent archives: %v", err)
 	}
-	return proto.Session{}, false
+	if !ok {
+		return proto.Session{}, false
+	}
+	one := []proto.Session{row}
+	s.foldSubset(machine, one) // what the last complete list folded it as, as for a row the node lists
+	return one[0], true
 }
 
-// decorateTodos puts on machine mid's sessions the todo each works for and whether it is quiet.
+// listedSession is decoratedSession for a row machine's node lists: false for one only the archive keeps.
+func (s *Service) listedSession(machine, sid string) (proto.Session, bool) {
+	mark := s.archiveMark()
+	row, ok := s.nodeSession(machine, sid)
+	if !ok {
+		return proto.Session{}, false
+	}
+	list, err := s.archivedListed(context.Background(), machine, s.decorateInventory(machine, []proto.Session{row}, false), mark)
+	if err != nil {
+		s.logf("load agent archives: %v", err)
+	}
+	return list[0], true
+}
+
+// listedSessions are the sessions machine's node lists, each as the apps get it (listedSession, for the whole list,
+// folded as the last complete list was): sessions without the rows only the archive keeps, for a reader of what runs
+// on a machine. Those rows are offline, and every record of the machine is one (they only grow). Without the fleet
+// in this process it is sessions, archive rows and all.
+func (s *Service) listedSessions(ctx context.Context, machine string) ([]proto.Session, error) {
+	if !s.fleetOn() || machine == DeviceAll {
+		return s.sessions(ctx, machine)
+	}
+	m, ok := s.fleetMachine(machine)
+	if !ok {
+		return nil, ErrNoDevice // as sessions.list says
+	}
+	mark := s.archiveMark()
+	list, err := s.archivedListed(context.Background(), m.ID, s.decorateInventory(m.ID, s.nodeSessions(m.ID), true), mark)
+	if err != nil {
+		s.logf("load agent archives: %v", err)
+	}
+	s.foldSubset(m.ID, list) // never stored: the fold is the complete list's, archive rows and all (foldInventory)
+	return list, nil
+}
+
+// decorateTodos keeps active work and completed ownership separate, with quiet still decided by its own report.
 func (s *Service) decorateTodos(mid string, list []proto.Session) {
 	r := &s.fleet.rep
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for i := range list {
 		key := [2]string{mid, list[i].SessionID}
+		list[i].Todo = nil
+		list[i].SetCompletedTodo(nil)
 		if l, ok := r.links[key]; ok {
 			list[i].Todo = &proto.TodoRef{ID: l.TodoID, Title: l.Title}
+		} else if l, ok := r.completed[key]; ok {
+			list[i].SetCompletedTodo(&proto.TodoRef{ID: l.TodoID, Title: l.Title})
 		}
 		list[i].Quiet = r.quiet[key]
 	}

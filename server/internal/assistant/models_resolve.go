@@ -105,9 +105,23 @@ func inheritedLabel(l i18n.Lang, p ModelPurpose, base ModelBinding, from string,
 	return from
 }
 
-// modelNoAPIStatus explains an API use with nothing to call: launchers like "Claude Code default" only start a CLI on a
-// computer, so they never show up for these uses. A catalog name.
+// modelNoAPIStatus explains an API use with nothing to call without assuming which launchers are installed.
+// modelCodexNoAPIStatus adds Codex's limitation only when a visible Codex launcher actually exists.
 const modelNoAPIStatus = "status_no_api"
+const modelCodexNoAPIStatus = "status_codex_no_api"
+
+// noAPIStatus is the catalog key for an unconfigured API use, on the settings row and on a done judge's task alike.
+// It reads the last-seen node list: explaining a failed call must not start another round of node requests.
+func (s *Service) noAPIStatus(ctx context.Context) string {
+	seen, _ := s.zshrcLaunchersLastSeen(ctx)
+	views := s.launcherViewsFrom(ctx, seen, s.storedLaunchers(ctx))
+	if slices.ContainsFunc(views, func(v LauncherView) bool {
+		return !v.Hidden && v.Kind != "api" && viewAgent(v) == "codex"
+	}) {
+		return modelCodexNoAPIStatus
+	}
+	return modelNoAPIStatus
+}
 
 // modelUnverified is the status of a use nothing is known to be wrong with. Not translated: the apps compare it to
 // this text (iOS ModelConfigurationView, Android HttpVoiceExtensions) to leave it out.
@@ -210,7 +224,7 @@ func (s *Service) apiConfig(ctx context.Context, b ModelBinding) (ai.Config, err
 		for _, l := range s.storedLaunchers(ctx) {
 			if l.Name == name {
 				if l.Kind != "api" && !messagesAPI(l.API) {
-					return c, i18n.Err("assistant-models.err_launcher_not_responses")
+					break // no gateway the manager can call: its CLI answers on a computer (models_run.go)
 				}
 				if err := checkAPITransport(l.Kind, l.API, l.Proxy, l.NoProxy, l.HeadersSealed != ""); err != nil {
 					return c, err
@@ -225,8 +239,15 @@ func (s *Service) apiConfig(ctx context.Context, b ModelBinding) (ai.Config, err
 				break
 			}
 		}
-		if !found {
-			return c, i18n.Err("assistant-models.err_not_callable")
+		if !found { // plain claude, a computer's own launcher, a managed one without a Messages gateway
+			// Claude Code only (an empty agent is Claude Code) and one the manager knows: a deleted launcher is an error.
+			if name != "claude" && !slices.ContainsFunc(s.launcherViews(ctx), func(v LauncherView) bool { return v.Name == name && (viewAgent(v) == "" || viewAgent(v) == "claude") }) {
+				return c, i18n.Err("assistant-models.err_not_callable")
+			}
+			c = ai.Config{RunLauncher: name, ViaMachine: s.settings(ctx).MachineID}
+			if c.ViaMachine == "" {
+				return c, i18n.Err("assistant-models.err_run_no_machine")
+			}
 		}
 	} else {
 		return c, i18n.Err("assistant-models.err_not_api")

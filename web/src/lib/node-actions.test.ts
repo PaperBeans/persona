@@ -94,6 +94,36 @@ describe("splitting and running an agent", () => {
     expect(d.openSession).toHaveBeenCalledWith("m1", "s9");
   });
 
+  it("offers Codex launchers where the computer starts them in the user's pane (run_here, #5504), and only those", async () => {
+    const d = deps({
+      post: vi.fn(async () => ({ session_id: "c0de0000-0000-4000-8000-000000000009" })),
+      launchers: vi.fn(async () => [
+        { name: "claude" },
+        { name: "codex", agent: "codex", agent_type: "codex", prompt_optional: true, run_here: true, model: "gpt-6" },
+        { name: "cx_old", agent: "codex", prompt_optional: true }, // a computer that keeps no pane when a start fails
+        { name: "cx_cfg", agent_type: "codex", run_here: false },
+      ]),
+    });
+    const list = await (by(nodeActions(tab, d), "node-agent").children as () => Promise<MenuItem[]>)();
+    expect(list.map((i) => i.label)).toEqual(["claude", "codex"]);
+    await list[1].onSelect();
+    expect(d.post).toHaveBeenCalledWith("m1", "panes/agent", { pane: "w1:p2", launcher: "codex" });
+    // its waiting row opens, where the first message goes (docs/integrations/codex.md "Starting without a first message")
+    expect(d.openSession).toHaveBeenCalledWith("m1", "c0de0000-0000-4000-8000-000000000009");
+  });
+
+  it("never offers a launcher that starts the session in a desktop app (#5480): a shell would run nothing", async () => {
+    const d = deps({
+      launchers: vi.fn(async () => [
+        { name: "claude" },
+        { name: "claude-desktop", agent: "claude", source: "claude_desktop" },
+        { name: "codex-app", agent: "codex", source: "codex_app", run_here: true },
+      ]),
+    });
+    const list = await (by(nodeActions(tab, d), "node-agent").children as () => Promise<MenuItem[]>)();
+    expect(list.map((i) => i.label)).toEqual(["claude"]);
+  });
+
   it("names a provider by its display name, its ID before the model at the row's end; an rc alias by its ID (#5029)", async () => {
     const d = deps({ launchers: vi.fn(async () => [{ name: "relay-example-com", display_name: "我的中转 站", model: "glm-5" }, { name: "cc_glm" }]) });
     const list = await (by(nodeActions(tab, d), "node-agent").children as () => Promise<MenuItem[]>)();
@@ -225,6 +255,43 @@ describe("read-only items", () => {
     await by(nodeActions(pane, d), "node-close-pane").onSelect();
     expect(d.post).toHaveBeenCalledWith("m1", "panes/close", { pane: "w1:p3" });
     expect(keys(nodeActions(pane, d))).not.toContain("node-close-tab");
+  });
+});
+
+describe("closing a pane (#7125)", () => {
+  const shell: MenuNode = { kind: "pane", mid: "m1", host: "herdr", workspaceId: "w1", tabId: "w1:t2", paneId: "w1:p4", agent: "", cwd: "/home/me/proj", branch: "main" };
+  const agent: MenuNode = { ...shell, paneId: "w1:p3", sessionId: "sid-1", agent: "claude" };
+  it("sits with the pane's own actions, right after New pane, not in a danger group at the bottom", () => {
+    const items = nodeActions(shell, deps());
+    expect(keys(items)).toEqual(["node-split", "node-close-pane", "node-agent", "node-git", "node-copy-path", "node-copy-id"]);
+    expect(by(items, "node-close-pane")).toMatchObject({ danger: true, closes: true, confirm: "确认关闭", inline: true });
+    expect(by(items, "node-close-pane").divider).toBeFalsy();
+  });
+  it("a shell's pane closes after the menu's second click, as before", async () => {
+    const d = deps({ closeAgent: vi.fn(() => undefined) });
+    await by(nodeActions(shell, d), "node-close-pane").onSelect();
+    expect(d.post).toHaveBeenCalledWith("m1", "panes/close", { pane: "w1:p4" });
+    expect(d.closeAgent).not.toHaveBeenCalled();
+  });
+  it("an agent's pane asks with the agent's Close… instead, so a busy agent is never closed by the second click alone", () => {
+    const open = vi.fn();
+    const d = deps({ closeAgent: vi.fn(() => ({ onSelect: open })) });
+    const close = by(nodeActions(agent, d), "node-close-pane");
+    expect(d.closeAgent).toHaveBeenCalledWith("m1", "sid-1");
+    expect(close.confirm).toBeUndefined();
+    expect(close.inline).toBeUndefined();
+    close.onSelect();
+    expect(open).toHaveBeenCalledOnce();
+    expect(d.post).not.toHaveBeenCalled();
+  });
+  it("stays disabled, saying why, where the agent's Close… is", () => {
+    const d = deps({ closeAgent: () => ({ onSelect: () => {}, disabled: true, detail: "正忙" }) });
+    expect(by(nodeActions(agent, d), "node-close-pane")).toMatchObject({ disabled: true, detail: "正忙" });
+  });
+  it("closes the pane as a shell's when the page doesn't list the agent's session", async () => {
+    const d = deps({ closeAgent: () => undefined });
+    await by(nodeActions(agent, d), "node-close-pane").onSelect();
+    expect(d.post).toHaveBeenCalledWith("m1", "panes/close", { pane: "w1:p3" });
   });
 });
 

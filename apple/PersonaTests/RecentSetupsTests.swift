@@ -190,6 +190,7 @@ import Testing
         #expect(RecentSetupCard.folder("/Users/me/code/persona", home: "/Users/me") == "persona")
         #expect(RecentSetupCard.folder("/Users/me/code/persona/", home: nil) == "persona")
         #expect(RecentSetupCard.folder("/Users/me", home: "/Users/me") == "~")
+        #expect(RecentSetupCard.folder("", home: "/Users/me") == String(localized: "Temporary Session")) // a start in the desktop app with no folder
         #expect(RecentSetupCard.folder("~", home: nil) == "~")
         #expect(RecentSetupCard.folder("/", home: "/Users/me") == "/")
     }

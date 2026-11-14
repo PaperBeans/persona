@@ -22,10 +22,13 @@ import {
   addTodoDecision,
   createTodo,
   decisionSourceLabel,
+  DECISIONS_FIRST,
+  type DecisionsView,
   deleteTodo,
   fetchTodoDecisions,
   setDecisionSupersedes,
   supersedeCandidates,
+  shownDecisions,
   formatAgentSource,
   formatTodoContext,
   isLegacySpacesRouteError,
@@ -61,6 +64,8 @@ import type { MenuAt } from "../ui/menu-model";
 import { SearchField } from "../ui/SearchField";
 import { StatusMark } from "../ui/StatusMark";
 import { Icon } from "../ui/icons";
+import { FoldAllButton } from "../ui/FoldAllButton";
+import { SESSION_LIST_STYLE } from "../ui/list-metrics";
 import { formatDate, t } from "../i18n";
 import { groupTodosByProject, treeStateLabel, type TodoProjectGroup, type TreeState } from "../lib/todo-tree";
 import { directionTitle, groupsByDirection, useDirectionTree, type Direction } from "../lib/direction-tree";
@@ -540,8 +545,8 @@ export function TodosView({
               <span className="text-[12px] whitespace-nowrap text-ink-3 max-sm:hidden">
                 {byStatus
                   ? listFilter === "all"
-                    ? t("todos.summary_triage", { open: triageAll.open, shelved: triageAll.shelved, done: triageAll.finished })
-                    : t("todos.summary_filtered", { filter: filterLabel(listFilter), open: triageAll.open, shelved: triageAll.shelved, done: triageAll.finished })
+                    ? t("todos.summary_triage", { open: triageAll.open, parked: triageAll.todoCounts.parked, shelved: triageAll.shelved, done: triageAll.finished })
+                    : t("todos.summary_filtered", { filter: filterLabel(listFilter), open: triageAll.open, parked: triageAll.todoCounts.parked, shelved: triageAll.shelved, done: triageAll.finished })
                   : t("todos.summary", { open: uncompleted.length, done: completed.length })}
               </span>
             )}
@@ -1105,7 +1110,7 @@ const TodoDirectionSection = memo(function TodoDirectionSection({
         <Icon name="chevron" size={10} stroke={2.4} className="shrink-0 opacity-60 transition-transform" style={{ transform: folded ? "rotate(-90deg)" : "none" }} />
         <Icon name={direction.secretary ? "person" : "target"} size={12} stroke={2} className="shrink-0 text-ink-3" />
         <span className="min-w-0 flex-1 truncate font-semibold">{title}</span>
-        <DirectionCountsText counts={direction.counts} />
+        <DirectionCountsText direction={direction} />
       </button>
       {!folded && (
         <div className="flex flex-col gap-1 pl-2 pt-0.5">
@@ -1123,6 +1128,7 @@ const TodoDirectionSection = memo(function TodoDirectionSection({
 const SECTION_TONE: Record<TriageSection, string> = {
   waiting: "text-attention",
   working: "text-orange",
+  parked: "text-ink-2",
   just_done: "text-green",
   pr: "text-accent-ink",
   other: "text-ink-2",
@@ -1426,15 +1432,15 @@ const TodoListItem = memo(function TodoListItem({
         <div className="flex items-baseline justify-between gap-2">
           {view.ultracode ? (
             <span className="flex min-w-0 items-center gap-1">
-              <span className="truncate text-[13.5px] font-semibold text-ink">{todo.title}</span>
+              <span className="truncate text-[13.5px] font-semibold text-ink" data-testid="todo-title">{todo.title}</span>
               <UltraMark size={11} />
             </span>
           ) : (
-            <span className={cx("truncate text-[13.5px] font-semibold text-ink", !open && "line-through text-ink-3 font-normal")}>
+            <span className={cx("truncate text-[13.5px] font-semibold text-ink", !open && "line-through text-ink-3 font-normal")} data-testid="todo-title">
               {todo.title}
             </span>
           )}
-          <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-ink-3">
+          <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-ink-3" data-testid="todo-age">
             {thread && (
               <span data-testid="todo-thread-mark" role="img" aria-label={t("todos.thread_mark")} title={threadLine(thread)} className="inline-flex">
                 <Icon name="chat" size={12} stroke={2} />
@@ -1445,7 +1451,7 @@ const TodoListItem = memo(function TodoListItem({
         </div>
 
         {/* Status Line */}
-        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px]">
+        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px]" data-testid="todo-status-line">
           {open && <StatusMark state={dotState} size="sm" />}
           <span className={cx("shrink-0 whitespace-nowrap font-medium", toneClass)}>{todoStatusLabel(todo, status)}</span>
           {!todo.done_at && activeCount > 0 && (
@@ -1457,7 +1463,14 @@ const TodoListItem = memo(function TodoListItem({
           {!todo.done_at && activeCount === 0 && (
             <span className="truncate text-ink-3">· {t("todos.not_handed")}</span>
           )}
-          {!todo.done_at && <ReviewBadge todo={todo} className="ml-auto" />}
+          {section === "just_done" && onSeen ? (
+            <span className="ml-auto flex shrink-0 items-center gap-1.5">
+              {!todo.done_at && <ReviewBadge todo={todo} />}
+              <SeenButton onClick={() => onSeen(todo.id)} />
+            </span>
+          ) : (
+            !todo.done_at && <ReviewBadge todo={todo} className="ml-auto" />
+          )}
         </div>
 
         {/* What it waits on from the user, with the one tap that answers it (#2056) */}
@@ -1517,25 +1530,31 @@ const TodoListItem = memo(function TodoListItem({
             </Button>
           </div>
         )}
-
-        {/* Just finished: Got it files it under Done at once (#5707); nothing else about it changes */}
-        {section === "just_done" && onSeen && (
-          <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
-            <Button
-              tone="secondary"
-              icon="check"
-              testId="todo-seen"
-              onClick={() => onSeen(todo.id)}
-              className="h-7 text-[12px] whitespace-nowrap"
-            >
-              {t("todos.seen")}
-            </Button>
-          </div>
-        )}
       </div>
     </div>
   );
 });
+
+/** Got it on a Just finished row (#5707): files it under Done at once. A small capsule at the end of the status line,
+ *  under the time (#6578), so the row is as tall as any other: its 20 px hang over the 18 px line (the negative margin
+ *  keeps them out of the line's height), and `touch-hit` gives a finger 44 px. Its press stays its own and never opens
+ *  the row. */
+function SeenButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="todo-seen"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="touch-hit -my-1 inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-surface px-2 text-[11.5px] font-medium whitespace-nowrap text-ink-2 shadow-btn transition-colors hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+    >
+      <Icon name="check" size={11} stroke={2.2} />
+      {t("todos.seen")}
+    </button>
+  );
+}
 
 const PLAN_FIELD = "rounded-control border border-line bg-canvas px-2 py-1 text-[12.5px] text-ink outline-none focus:border-accent";
 
@@ -1644,6 +1663,25 @@ function TodoPlanEditor({ todo }: { todo: Todo }) {
         </select>
       </span>
     </div>
+  );
+}
+
+/** A to-do whose decision is held for the briefing (#4930, #5803, docs/assistant/todos.md "Decisions that can wait"):
+ *  nothing was pushed for it, and it comes with the next briefing. The to-do's page writes out what that means under
+ *  its ask; a row's ask line carries the quiet mark itself (views/TodoAsk AskLine), as the decision's card does
+ *  (views/assistant/BriefingMark). Nothing for any other to-do, and for a hub that does not say. */
+export function HeldForBriefing({ todo }: { todo: Pick<Todo, "ask"> }) {
+  const ask = todo.ask;
+  if (!ask?.verdict || !ask.asked_at || ask.for_briefing !== true) return null;
+  return (
+    <p data-for-briefing="caption" className="mt-2 flex min-w-0 items-start gap-1.5 px-1 text-xs text-ink-2 [overflow-wrap:anywhere]">
+      <Icon name="clock" size={13} className="mt-0.5 shrink-0" />
+      <span>
+        <span className="font-medium">{t("todos.ask_held")}</span>
+        {t("assistant-decisionrow.separator")}
+        {t("todos.ask_held_hint")}
+      </span>
+    </p>
   );
 }
 
@@ -1937,6 +1975,7 @@ function TodoDetail({
 
       {/* What it waits on from the user and how to answer it (#2056) */}
       <TodoAskPanel todo={todo} />
+      <HeldForBriefing todo={todo} />
 
       {/* Due date, reminder, priority (#1683) */}
       <TodoPlanEditor todo={todo} />
@@ -2278,12 +2317,16 @@ function ThreadSection({ todo }: { todo: Todo }) {
  * Decisions: the calls made on this todo, in effect first-to-last; "Revise" writes a new one that replaces it, "full history" shows
  * the replaced ones struck through. Refetched whenever the todo changes (the hub bumps it when a decision is written,
  * also from an answered card). Hidden on a hub without decisions (404 on the route).
+ * Only the first five show at first, with Show all under them; the header's fold-all button folds the list away and
+ * opens it whole (#6447, `shownDecisions`). Nothing is stored: each to-do opens with the first five, and one just
+ * recorded or revised shows the whole list so it is in view.
  */
 function DecisionsSection({ todo, lookup }: { todo: Todo; lookup: ReturnType<typeof makeSessionLookup> }) {
   const [all, setAll] = useState<TodoDecision[] | null>(null);
   const [failed, setFailed] = useState("");
   const [unsupported, setUnsupported] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [view, setView] = useState<DecisionsView>("first");
   const [form, setForm] = useState<{ supersedes?: TodoDecision } | null>(null);
   const [linking, setLinking] = useState<TodoDecision | null>(null);
   const menu = useMenu();
@@ -2313,13 +2356,16 @@ function DecisionsSection({ todo, lookup }: { todo: Todo; lookup: ReturnType<typ
     setAll(null);
     setFailed("");
     setShowAll(false);
+    setView("first");
     setForm(null);
   }, [todo.id]);
 
   if (unsupported) return null;
   const effective = (all ?? []).filter((d) => !d.superseded_by);
   const replaced = (all ?? []).length - effective.length;
-  const shown = showAll ? (all ?? []) : effective;
+  const listed = showAll ? (all ?? []) : effective;
+  const shown = shownDecisions(listed, view);
+  const folded = view === "folded" && listed.length > 0;
   const byId = new Map((all ?? []).map((d) => [d.id, d]));
 
   const markSupersedes = async (d: TodoDecision, old: string) => {
@@ -2333,11 +2379,11 @@ function DecisionsSection({ todo, lookup }: { todo: Todo; lookup: ReturnType<typ
   };
 
   return (
-    <div className="mt-6">
-      <div className="mb-2 flex items-center justify-between gap-3">
+    <div className="mt-6" data-testid="todo-decisions">
+      <div className="relative mb-2 flex items-center justify-between gap-3">
         <span className="text-[11.5px] font-medium tracking-[0.04em] text-ink-3 uppercase">{t("todos.decisions_section", { count: effective.length })}</span>
         <div className="flex shrink-0 items-center gap-1">
-          {replaced > 0 && (
+          {replaced > 0 && !folded && (
             <Button tone="quiet" className="whitespace-nowrap px-2 py-1 text-[12px]" onClick={() => setShowAll((v) => !v)}>
               {showAll ? t("todos.show_effective") : t("todos.show_history", { count: replaced })}
             </Button>
@@ -2345,6 +2391,16 @@ function DecisionsSection({ todo, lookup }: { todo: Todo; lookup: ReturnType<typ
           <Button tone="quiet" icon="plus" className="whitespace-nowrap px-2 py-1 text-[12px]" onClick={() => setForm({})}>
             {t("todos.add_decision")}
           </Button>
+          {/* the Agents title row's fold-all button and meaning: Collapse all while any is shown, Expand all once folded */}
+          {all !== null && listed.length > 0 && (
+            <FoldAllButton
+              label={folded ? t("todos.decisions_expand") : t("todos.decisions_fold")}
+              expand={folded}
+              onClick={() => setView(folded ? "all" : "folded")}
+              className={SESSION_LIST_STYLE.foldButton}
+              testId="todo-decisions-fold"
+            />
+          )}
         </div>
       </div>
 
@@ -2355,7 +2411,7 @@ function DecisionsSection({ todo, lookup }: { todo: Todo; lookup: ReturnType<typ
             {t("todos.retry")}
           </Button>
         </div>
-      ) : all === null ? null : shown.length === 0 ? (
+      ) : all === null || folded ? null : shown.length === 0 ? (
         <div className="rounded-control border border-dashed border-line p-4 text-[12.5px] leading-[1.6] text-ink-3">
           {t("todos.decisions_empty")}
         </div>
@@ -2426,6 +2482,11 @@ function DecisionsSection({ todo, lookup }: { todo: Todo; lookup: ReturnType<typ
           })}
         </ol>
       )}
+      {!folded && listed.length > DECISIONS_FIRST && (
+        <Button tone="quiet" testId="todo-decisions-more" expanded={view === "all"} className="mt-1.5 whitespace-nowrap px-2 py-1 text-xs" onClick={() => setView(view === "first" ? "all" : "first")}>
+          {view === "first" ? t("todos.decisions_show_all", { count: listed.length }) : t("todos.decisions_show_first", { count: DECISIONS_FIRST })}
+        </Button>
+      )}
 
       {menu.anchor && linking && (
         <Menu
@@ -2451,7 +2512,11 @@ function DecisionsSection({ todo, lookup }: { todo: Todo; lookup: ReturnType<typ
         todoId={todo.id}
         supersedes={form?.supersedes}
         onClose={() => setForm(null)}
-        onSaved={load}
+        onSaved={async () => {
+          // the one just recorded or revised is last: show them all so it is in view
+          setView("all");
+          await load();
+        }}
       />
     </div>
   );

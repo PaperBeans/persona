@@ -12,6 +12,7 @@ import {
   phaseRows,
   phaseTitle,
   recentWorkflows,
+  runningWorkflows,
   tallyParts,
   workflowAgentFor,
   workflowCalls,
@@ -83,8 +84,11 @@ describe("workflows (#2935)", () => {
     expect(workflowShortLine(s)).toBe("169/185+ · parity-audit · Verify");
     expect(workflowLine(s, start + 14 * 60_000)).toBe("后台 workflow「parity-audit」 · Verify 2/2 · 169/185+ · 14 分");
     expect(backgroundCount(s)).toBe(1); // the summary's own count, not the run again
-    // a row that carries workflows reads only those
-    expect(workflowLine({ ...s, workflows: [] }, start)).toBe("后台运行中");
+    // merged over an older complete row (the store keeps its workflows), the summary's own counts still win
+    expect(workflowShortLine({ ...s, workflows: [] })).toBe("169/185+ · parity-audit · Verify");
+    const ended = session({ waiting: false, workflows: [run], background: [{ id: "b", kind: "workflow" } as never] });
+    expect(runningWorkflows(ended)).toEqual([]);
+    expect(workflowLine(ended, start)).toBe("");
   });
 
   it("says nothing for ended runs, and reads their status", () => {

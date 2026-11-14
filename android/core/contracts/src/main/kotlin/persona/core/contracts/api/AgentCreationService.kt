@@ -4,6 +4,8 @@ import persona.core.contracts.CoreText
 import persona.core.contracts.Session
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.KeepGeneratedSerializer
+import kotlinx.serialization.json.*
 
 /** Bound to one hub and pairing generation; never reuse it after pairing changes. */
 interface AgentCreationService {
@@ -31,18 +33,58 @@ interface AgentCreationService {
 
     /**
      * What [cwd] is in Git terms (`POST …/worktree/status`, docs/protocol/protocol.md): null when the computer can't say
-     * (an older node or hub, offline, an error), and then New Agent offers no worktree.
+     * (an older node or hub, offline, an error), and then New Agent offers no worktree. [kind]: the engine the agent
+     * opens in or ran in, which makes its worktree (`Session.worktreeKind`); null, the computer's default.
      */
-    suspend fun worktreeStatus(machineId: String, cwd: String): WorktreeStatus? = null
+    suspend fun worktreeStatus(machineId: String, cwd: String, kind: String? = null): WorktreeStatus? = null
 
-    /** A worktree for a new agent from the repository [cwd] is in (`…/worktree/add`); an empty [branch] is the node's pick. */
-    suspend fun addWorktree(machineId: String, cwd: String, nameHint: String, branch: String): WorktreeAdded =
+    /**
+     * A worktree for a new agent from the repository [cwd] is in (`…/worktree/add`); an empty [branch] is the node's pick,
+     * [kind] the engine the agent opens in, which makes it (null: the computer's default).
+     */
+    suspend fun addWorktree(machineId: String, cwd: String, nameHint: String, branch: String, kind: String? = null): WorktreeAdded =
         throw UnsupportedOperationException("Worktrees unavailable")
 
-    /** Removes a worktree Persona made (`…/worktree/remove`); [force] only after the user confirmed what it loses. */
-    suspend fun removeWorktree(machineId: String, path: String, deleteBranch: Boolean, force: Boolean): WorktreeRemoved =
+    /**
+     * Removes a worktree Persona made (`…/worktree/remove`); [force] only after the user confirmed what it loses, by the
+     * engine the agent ran in ([kind]).
+     */
+    suspend fun removeWorktree(machineId: String, path: String, deleteBranch: Boolean, force: Boolean, kind: String? = null): WorktreeRemoved =
         throw UnsupportedOperationException("Worktrees unavailable")
+
+    /**
+     * [machineId]'s rows of the hub's workspace catalog (`GET /api/v1/workspaces`, #7259), for New Agent's workspace
+     * choice: empty from an older hub (404) and on any failure, which then shows no choice.
+     */
+    suspend fun workspaces(machineId: String): List<AgentWorkspace> = emptyList()
 }
+
+/**
+ * One workspace of the hub's catalog (`GET /api/v1/workspaces`, docs/protocol/protocol.md): a start with
+ * `workspace_id` = [sourceId] and `host` = [source] runs inside it, in [cwd]. [projectId] is scoped to the machine and
+ * [source]; [workspaceKind] `git` or `folder`; [available] / [online] false when it can't take an agent now.
+ */
+@Serializable
+data class AgentWorkspace(
+    val id: String = "",
+    @SerialName("machine_id") val machineId: String = "",
+    val source: String = "",
+    @SerialName("source_id") val sourceId: String = "",
+    val title: String = "",
+    val cwd: String = "",
+    val branch: String? = null,
+    val head: String? = null,
+    @SerialName("parent_source_id") val parentSourceId: String? = null,
+    val index: Int? = null,
+    @SerialName("project_id") val projectId: String? = null,
+    @SerialName("project_name") val projectName: String? = null,
+    @SerialName("project_path") val projectPath: String? = null,
+    @SerialName("is_main") val isMain: Boolean? = null,
+    @SerialName("workspace_kind") val workspaceKind: String? = null,
+    val online: Boolean? = null,
+    val available: Boolean? = null,
+    val owned: Boolean? = null,
+)
 
 /**
  * What `worktree/status` says of a folder (server proto.WorktreeStatus, #4532): [path] is set for any folder in a
@@ -113,21 +155,36 @@ fun modelName(id: String?, name: String? = null): String {
     }.joinToString(" ")
 }
 
-@Serializable
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+@KeepGeneratedSerializer
+@Serializable(with = AgentLauncherSerializer::class)
 data class AgentLauncher(
     val name: String,
     @SerialName("base_url") val baseUrl: String? = null,
     val model: String? = null,
-    @SerialName("agent_type") val agentType: String = "claude",
+    @SerialName("agent") val agentType: String = "claude",
     /** A runtime's own declaration that it can run the assistant; false or absent on other launchers. */
     val assistant: Boolean = false,
     /** Its health on this computer (docs/server/launcher-health.md); null when never checked or from an older hub. */
     val health: LauncherHealth? = null,
     /** A Persona-managed provider's own name (feature `launcher_auto_name`), shown over [name]; null for the others. */
     @SerialName("display_name") val displayName: String? = null,
+    /** This computer can open Codex before its first message; absent on older nodes. */
+    @SerialName("prompt_optional") val promptOptional: Boolean = false,
 ) {
     /** What people read for it: its display name, else its startup name (the web's `providerTitle`). */
     val title: String get() = displayName?.trim()?.takeIf(String::isNotEmpty) ?: name
+}
+
+/** Prefer the configured agent type, falling back to the hub's `agent` field, as on the web. */
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+object AgentLauncherSerializer : JsonTransformingSerializer<AgentLauncher>(AgentLauncher.generatedSerializer()) {
+    override fun transformDeserialize(element: JsonElement): JsonElement {
+        val fields = element as? JsonObject ?: return element
+        val agent = sequenceOf("agent_type", "agent").mapNotNull { fields[it] as? JsonPrimitive }
+            .firstOrNull { it != JsonNull && it.content.isNotEmpty() } ?: JsonPrimitive("claude")
+        return JsonObject((fields - "agent_type") + ("agent" to agent))
+    }
 }
 
 /**
@@ -206,7 +263,7 @@ data class AgentStartRequest(
     val prompt: String? = null,
     @SerialName("permission_mode") val permissionMode: String? = null,
     val effort: String? = null,
-    /** Opens a new tab in this herdr workspace instead of a new space. */
+    /** Opens a new tab in this herdr workspace instead of a new space, or starts in a catalog workspace of [host] (#7259). */
     @SerialName("workspace_id") val workspaceId: String? = null,
     @SerialName("agent_type") val agentType: String? = null,
     @SerialName("resume_session_id") val resumeSessionId: String? = null,
@@ -219,6 +276,8 @@ data class AgentStartRequest(
     /** The model picked for this start (an id of [AgentCreationService.launcherModels]); null: the default one. */
     val model: String? = null,
     @SerialName("todo_id") val todoId: String? = null,
+    /** The engine whose workspace [workspaceId] is (a catalog row's `source`, #7259); null: the computer's default. */
+    val host: String? = null,
 )
 
 sealed interface AgentStartResult {

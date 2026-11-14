@@ -9,6 +9,13 @@ import { ago, sessionTitle, shortPath, stateOf, tabLabel } from "../lib/format";
 import { appCommands, commandKeys, contextCommands, filterCommands, inboxHits, orderGroups, parseQuery, placeHits, setPaletteQuery, terminalHits, usePalette, type InboxHit, type MachinePanes, type PaletteCommand, type PlaceHit, type PlaceInput, type TerminalHit } from "../lib/palette";
 import { isDone, itemRoute, useInbox, type InboxItem } from "../lib/inbox";
 import { useNavPages } from "./Sidebar";
+import type { EvidenceSnippet } from "../lib/agent-chatlist-filter";
+import { storedValue } from "../lib/compatibility";
+import { useScope } from "../lib/current-assistant";
+import { SESSIONS_LIST_FEATURE } from "../lib/session-list";
+import { SESSIONS_TODO_FEATURE } from "../lib/session-groups";
+import { GROUPING_KEY, pagedAgentList } from "../lib/sidebar-api";
+import { filterAgentList } from "../lib/agent-list-filters";
 import { conversationPage } from "../lib/conversation-page";
 import { href, navigate, type Route } from "../lib/router";
 import { composing } from "../lib/send-history";
@@ -24,9 +31,12 @@ import { StatusMark } from "../ui/StatusMark";
 import { Icon } from "../ui/icons";
 import { useModalFocus } from "../ui/overlay";
 import { copyFileMention, FilesHeading, FilesNotice, FileResultRow, openFileHit, usePaletteFiles, type FileRow } from "./palette/FilesSection";
+import { AgentConditions } from "./palette/AgentConditions";
 import { t } from "../i18n";
 import { byTime } from "../lib/times";
 import { STATE_LABEL } from "../lib/state-labels";
+import { PHONE, useMedia } from "../lib/viewport";
+import type { AssistantSearchAnswer, AssistantSearchHit } from "../lib/assistant-search";
 
 interface Hit {
   key: string;
@@ -34,6 +44,10 @@ interface Hit {
   to: Route;
   assistant?: boolean;
   score: number;
+  /** A Persona chat found by what was said in it (lib/assistant-search.ts): the message, shown as the row's second line. */
+  said?: AssistantSearchHit;
+  /** An Agent found by what is inside it, not its name, project or computer (#6589): the line that matched, likewise. */
+  evidence?: EvidenceSnippet;
 }
 
 /** One selectable row of the list: a conversation, a terminal pane, an inbox item, a page ("Go to"), a file
@@ -86,9 +100,16 @@ export function placeWords(key: string): string {
   return [PLACE_WORDS[key], own[key]].filter(Boolean).join(" ");
 }
 
+// A result row's title, the line under it, and what its end says (a time, "Terminal"), as the Inbox, pane and
+// conversation rows write them.
+const ROW_TITLE = "block truncate text-[13px] font-medium text-ink";
+const ROW_DETAIL = "block truncate text-[11.5px] text-ink-3";
+const ROW_END = "shrink-0 text-[11px] text-ink-3";
+
 /** A group's heading above its first row ("Inbox", "Go to"). */
+const groupHeadingClass = "px-2.5 pt-2 pb-1 text-[10.5px] font-medium tracking-[0.06em] text-ink-3 uppercase";
 function GroupHeading({ children }: { children: React.ReactNode }) {
-  return <div className="px-2.5 pt-2 pb-1 text-[10.5px] font-medium tracking-[0.06em] text-ink-3 uppercase">{children}</div>;
+  return <div className={groupHeadingClass}>{children}</div>;
 }
 
 /** One row of the list as drawn: the option, and the heading above it when a group starts there. */
@@ -119,6 +140,8 @@ function sections(items: Section[], listId: string): ReactNode[] {
   });
 }
 
+/** A chat's match by its title (starting with what was typed 100, containing it 80), then every word in its folder,
+ *  computer or last line (40): a Persona chat's, and an Agent's until lib/agent-search.ts has loaded. */
 function score(s: Session, q: string, machine: string): number {
   if (!q) return 1;
   const title = sessionTitle(s).toLowerCase();
@@ -144,11 +167,23 @@ function previousChat(recent: { entries: string[]; current: string }, sessions: 
   return key ? find(key) : null;
 }
 
-export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { open: boolean; onClose: () => void; onNewAgent: () => void; pane?: { mid: string; sid: string }; route?: Route }) {
+/** `listShown`: the sidebar's column, with its Agents list, is on screen (not a narrow screen's drawer or the rail). */
+export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listShown = true }: { open: boolean; onClose: () => void; onNewAgent: () => void; pane?: { mid: string; sid: string }; route?: Route; listShown?: boolean }) {
   // what is typed lives in the store (lib/palette.ts): the shortcuts open it in a mode (`>` for commands) and read it
   const q = usePalette().query;
   const setQ = setPaletteQuery;
   const { mode, text } = parseQuery(q);
+  // the Agents list's matcher (#6589), loaded with the first query typed as the manager's chat search is: the palette is
+  // idle-tier (src/startup-preload.ts IDLE_TIER_BUDGET); until then an Agent matches as a Persona chat does
+  const [agentSearch, setAgentSearch] = useState<typeof import("../lib/agent-search") | null>(null);
+  // the Filter beside the field asks for it too, its first click before anything is typed
+  const [conditions, wantConditions] = useState(false);
+  const wantsAgentSearch = open && mode === "jump" && (text !== "" || conditions) && !agentSearch;
+  useEffect(() => {
+    if (wantsAgentSearch) void import("../lib/agent-search").then(setAgentSearch, () => {}); // a failed load keeps the titles
+  }, [wantsAgentSearch]);
+  // `machine:`, `project:`, `is:pinned`, `since:`… speak of Agent sessions: with one, only they are listed (#6589)
+  const operators = mode === "jump" && Boolean(agentSearch?.hasSearchOperators(text));
   const [active, setActive] = useState(0);
   const [box, setBox] = useState<{ top: number; height: number } | null>(null);
   const sessions = useAgentSessions();
@@ -156,8 +191,19 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
   const recentChats = useRecentChats();
   const assistant = useStore((s) => s.assistant);
   const machines = useStore((s) => s.machines);
+  const pins = useStore((s) => s.pins);
+  const interactions = useStore((s) => s.interactions);
   const bySession = useStore((s) => s.sessions);
+  // "Filter Agents list" narrows the complete list with what was typed, the hub's paged list with its words alone (the
+  // hub matches the query as text; its operators are the complete list's)
+  const bounded = useStore((s) => s.features.includes(SESSIONS_LIST_FEATURE));
+  const byTodo = useStore((s) => s.features.includes(SESSIONS_TODO_FEATURE));
+  const todosSupported = useStore((s) => s.todosSupported);
+  const several = useScope().several;
+  const completeList = !pagedAgentList({ bounded, byTodo, todosSupported, pins, stored: storedValue(GROUPING_KEY), several });
   const panesOn = useStore((s) => s.features.includes("terminal_panes"));
+  // Persona chats found by what was said in them too (#6283): the manager's search, merged into the local matches
+  const searchOn = useStore((s) => s.features.includes("assistant_search"));
   const bindings = useBindings();
   // "Inbox" and "Go to" (the Mac's quick open): the open inbox items, and the sidebar's pages with Persona and "All chats"
   const inboxItems = useInbox((s) => s.items);
@@ -210,18 +256,55 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
     [machines, trees, bySession],
   );
 
+  // loaded on intent (the palette is idle-tier, src/startup-preload.ts IDLE_TIER_BUDGET): the first query typed loads
+  // lib/assistant-search.ts; asked 200 ms after the last key, each query cancelling the one before
+  const [found, setFound] = useState<{ q: string; answer?: AssistantSearchAnswer; marks?: typeof import("../lib/assistant-search").markParts }>({ q: "" });
+  // a found chat's line starts just before its match, as much of a lead-in as the row's width holds (#7045)
+  const phone = useMedia(PHONE);
+  const asked = open && mode === "jump" && !operators && searchOn && Boolean(assistant) ? text.trim() : "";
+  useEffect(() => {
+    if (!asked) return;
+    const ctrl = new AbortController();
+    const id = window.setTimeout(() => {
+      void import("../lib/assistant-search")
+        .then((m) => m.searchAssistantChats(asked, ctrl.signal).then((answer) => setFound({ q: asked, answer: answer ?? undefined, marks: m.markParts })))
+        .catch(() => {}); // a failed search leaves the local matches
+    }, 200);
+    return () => {
+      clearTimeout(id);
+      ctrl.abort();
+    };
+  }, [asked]);
+  const said = { answer: asked && found.q === asked ? found.answer : undefined };
   const hits = useMemo((): Row[] => {
     if (mode !== "jump") return [];
     const query = text.toLowerCase();
-    const name = (m: string) => machineWithHub(m, machines);
     const out: Hit[] = [];
+    // an Agent as the list's search found it: its operators, then its name, its project or computer, what is inside it
+    const ctx = { machines, pins, interactions, now: Date.now() };
     for (const s of sessions) {
-      const sc = score(s, query, name(s.machine_id));
-      if (sc) out.push({ key: `s:${s.machine_id}/${s.session_id}`, s, to: { name: "session", mid: s.machine_id, sid: s.session_id }, score: sc + (stateOf(s) === "offline" ? 0 : 5) });
+      const found = agentSearch ? agentSearch.agentSearchHit(s, text, ctx) : { score: score(s, query, machineWithHub(s.machine_id, machines)), snippet: undefined };
+      if (found.score) out.push({ key: `s:${s.machine_id}/${s.session_id}`, s, to: { name: "session", mid: s.machine_id, sid: s.session_id }, score: found.score + (stateOf(s) === "offline" ? 0 : 5), evidence: found.snippet });
     }
-    for (const s of assistant?.conversations ?? []) {
+    for (const s of operators ? [] : assistant?.conversations ?? []) {
       const sc = score(s, query, "persona");
       if (sc) out.push({ key: `j:${s.session_id}`, s, to: conversationPage(s.session_id, s.machine_id, s.manager), assistant: true, score: sc });
+    }
+    // what the manager found: a chat found by a message opens at it (not one found by its title); one not listed here
+    // (archived) is the result's own row
+    for (const r of said.answer?.results ?? []) {
+      const key = `j:${r.session_id}`;
+      const hit = r.hits[0];
+      const at = r.title_match ? undefined : hit?.item_id;
+      const known = out.find((h) => h.key === key);
+      if (known) {
+        known.said = hit;
+        known.to = conversationPage(r.session_id, known.s.machine_id, known.s.manager, at);
+        continue;
+      }
+      const s = (assistant?.conversations ?? []).find((c) => c.session_id === r.session_id)
+        ?? ({ machine_id: r.machine_id, session_id: r.session_id, title: r.title, cwd: "", status: "idle", assistant: true, archived: r.archived, updated_at: r.updated_at } as Session);
+      out.push({ key, s, to: conversationPage(r.session_id, s.machine_id, s.manager, at), assistant: true, score: r.title_match ? 80 : 40, said: hit });
     }
     // nothing typed: the conversations opened here come first, newest first, without the one on the page (#2191); the
     // first is the one before it, picked already, so ⌘K ⏎ goes back to it
@@ -230,13 +313,13 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
     const recentRows: Row[] = recent.map((k, i) => ({ kind: "session" as const, key: k, hit: byKey.get(k)!, recent: true, previous: i === 0 }));
     const all: (Row & { score: number; at: string })[] = [
       ...out.filter((h) => !recent.includes(h.key)).map((h) => ({ kind: "session" as const, key: h.key, hit: h, score: h.score, at: h.s.updated_at ?? "" })),
-      ...terminalHits(machinePanes, text).map((h) => ({ kind: "pane" as const, key: h.key, hit: h, score: h.score, at: "" })),
+      ...(operators ? [] : terminalHits(machinePanes, text)).map((h) => ({ kind: "pane" as const, key: h.key, hit: h, score: h.score, at: "" })),
     ];
     all.sort((a, b) => b.score - a.score || byTime(b.at, a.at));
-    const mail = inboxHits(inboxItems.filter((it) => !isDone(it)), text).map((h) => ({ kind: "inbox" as const, key: h.key, hit: h, score: h.score }));
-    const go = placeHits(places, text).map((h) => ({ kind: "place" as const, key: h.key, hit: h, score: h.score }));
+    const mail = (operators ? [] : inboxHits(inboxItems.filter((it) => !isDone(it)), text)).map((h) => ({ kind: "inbox" as const, key: h.key, hit: h, score: h.score }));
+    const go = (operators ? [] : placeHits(places, text)).map((h) => ({ kind: "place" as const, key: h.key, hit: h, score: h.score }));
     return [...recentRows, ...orderGroups<Row & { score: number }>([all.slice(0, 40), mail, go]).flat()];
-  }, [mode, text, sessions, assistant, machines, machinePanes, inboxItems, places, recentChats]);
+  }, [mode, text, operators, agentSearch, sessions, assistant, machines, pins, interactions, machinePanes, inboxItems, places, recentChats, said.answer]);
 
   // command mode: what other modules offer for here, then the registered commands with their shortcuts
   const commands = useMemo((): Row[] => {
@@ -256,7 +339,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `route` is parsed anew each render; its path says it all
   }, [open, mode, text, bindings, machines, pane?.mid, pane?.sid, href(route), onNewAgent, recentChats, sessions, assistant]);
   // the files under the directory of the page (#2438): listed after the conversations and panes
-  const files = usePaletteFiles({ open, jump: mode === "jump", text, route, pane, machinePanes });
+  const files = usePaletteFiles({ open, jump: mode === "jump" && !operators, text, route, pane, machinePanes });
   const shown = useMemo(() => (mode === "command" ? commands : [...hits, ...files.rows]), [mode, commands, hits, files.rows]);
 
   useEffect(() => setActive(0), [q]);
@@ -294,6 +377,14 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
   };
   const command = mode === "command";
   const label = command ? t("palette.command_palette") : t("palette.search_sessions");
+  // "Filter Agents list" (#6589): what was typed narrows the Agents list in place, as its own field did, while it finds an
+  // Agent; on a narrow screen or beside the rail the list is the Agents page
+  const listable = !command && text !== "" && (completeList || (Boolean(agentSearch) && !operators)) && hits.some((r) => r.kind === "session" && !r.hit.assistant);
+  const filterList = () => {
+    onClose();
+    filterAgentList(text);
+    if (!listShown) navigate({ name: "agent-list" });
+  };
 
   return createPortal(
     <div ref={backdrop} data-closing={exit.leaving || undefined} inert={exit.leaving || undefined} className="fixed inset-0 z-40 flex items-start justify-center bg-black/20 px-4 pt-[14vh] backdrop-blur-[2px] dark:bg-black/45" style={{ animation: "fade-in 120ms ease-out both" }} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -317,6 +408,9 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
                 if (shown.length) setActive((a) => (a + (e.key === "ArrowDown" ? 1 : shown.length - 1)) % shown.length);
+              } else if (e.key === "Enter" && e.shiftKey && listable) {
+                e.preventDefault();
+                filterList();
               } else if (e.key === "Enter") {
                 e.preventDefault();
                 const row = shown[active];
@@ -329,6 +423,8 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
             placeholder={command ? t("palette.command_placeholder") : files.ctx ? t("files-find.searching_placeholder") : t("palette.search_placeholder")}
             className="min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-3"
           />
+          {/* the Agents list's filter choices, written into the query as its operators (#6589) */}
+          {!command && <AgentConditions query={text} onQuery={(next) => setQ(next && `${next} `)} search={agentSearch} want={() => wantConditions(true)} sessions={sessions} onDone={() => input.current?.focus({ preventScroll: true })} />}
           {/* the key hints are for a keyboard: a touch screen has none (#1996) */}
           <span className="contents [@media(pointer:coarse)]:hidden">
             <Kbd>Esc</Kbd>
@@ -349,7 +445,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
               const heading = c.section && c.section !== (shown[i - 1] as Extract<Row, { kind: "command" }> | undefined)?.cmd.section;
               return {
                 key: r.key,
-                heading: heading ? <div className="px-2.5 pt-2 pb-1 text-[10.5px] font-medium tracking-[0.06em] text-ink-3 uppercase">{c.section}</div> : null,
+                heading: heading ? <GroupHeading>{c.section}</GroupHeading> : null,
                 row: (
                   <button ref={ref} type="button" {...option} onMouseMove={() => setActive(i)} onClick={() => pick(r)} className={rowClass}>
                     <span className="flex size-5 shrink-0 items-center justify-center">{c.icon && <Icon name={c.icon} size={13} className={c.danger ? "text-red" : "text-ink-3"} />}</span>
@@ -379,10 +475,10 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
                   <>
                     <span className="flex size-5 shrink-0 items-center justify-center"><Icon name="inbox" size={13} className="text-ink-3" /></span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] font-medium text-ink">{r.hit.item.title}</span>
-                      <span className="block truncate text-[11.5px] text-ink-3">{[r.hit.item.sender, r.hit.item.preview].filter(Boolean).join(t("palette.sender_separator"))}</span>
+                      <span className={ROW_TITLE}>{r.hit.item.title}</span>
+                      <span className={ROW_DETAIL}>{[r.hit.item.sender, r.hit.item.preview].filter(Boolean).join(t("palette.sender_separator"))}</span>
                     </span>
-                    <span className="shrink-0 text-[11px] text-ink-3">{ago(r.hit.item.updated_at)}</span>
+                    <span className={ROW_END}>{ago(r.hit.item.updated_at)}</span>
                   </>
                 ) : (
                   <>
@@ -419,10 +515,10 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
                   {h.state !== "shell" && h.agent && <AgentMark agent={h.agent} surface={h.surface} size={14} />}
                   <span className="flex size-5 shrink-0 items-center justify-center">{h.state === "shell" ? <Icon name="terminal" size={13} className="text-ink-3" /> : <StatusMark state={h.state} />}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-medium text-ink">{h.title}</span>
-                    <span className="block truncate text-[11.5px] text-ink-3">{[h.trail, h.detail].filter(Boolean).join(" · ")}</span>
+                    <span className={ROW_TITLE}>{h.title}</span>
+                    <span className={ROW_DETAIL}>{[h.trail, h.detail].filter(Boolean).join(" · ")}</span>
                   </span>
-                  <span className="shrink-0 text-[11px] text-ink-3">{t("palette.terminal")}</span>
+                  <span className={ROW_END}>{t("palette.terminal")}</span>
                 </button>
                 ),
               };
@@ -442,9 +538,21 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
                     <span className="truncate text-[13px] font-medium text-ink">{sessionTitle(h.s)}</span>
                     {r.previous && <span className="shrink-0 rounded-[5px] bg-field px-1.5 text-[10.5px] text-ink-3 shadow-hairline">{t("palette.previous")}</span>}
                   </span>
-                  <span className="block truncate text-[11.5px] text-ink-3">{[meta, shortPath(h.s.cwd)].filter(Boolean).join(" · ")}</span>
+                  {h.evidence ? (
+                    <span className={ROW_DETAIL} data-evidence={h.evidence.role}>
+                      {h.evidence.before}
+                      <mark className="rounded-[3px] bg-accent-tint text-ink">{h.evidence.match}</mark>
+                      {h.evidence.after}
+                    </span>
+                  ) : h.said ? (
+                    <span className={ROW_DETAIL} data-said>
+                      {(found.marks?.(h.said.snippet, h.said.ranges, phone ? "phone" : "wide") ?? [[h.said.snippet, false] as [string, boolean]]).map(([words, match], k) => (match ? <mark key={k} className="rounded-[3px] bg-accent-tint text-ink">{words}</mark> : <span key={k}>{words}</span>))}
+                    </span>
+                  ) : (
+                    <span className={ROW_DETAIL}>{[meta, shortPath(h.s.cwd)].filter(Boolean).join(" · ")}</span>
+                  )}
                 </span>
-                <span className="shrink-0 text-[11px] text-ink-3">{st === "offline" || h.assistant ? ago(h.s.updated_at) : STATE_LABEL[st]}</span>
+                <span className={ROW_END}>{st === "offline" || h.assistant ? ago(h.s.updated_at) : STATE_LABEL[st]}</span>
               </button>
               ),
             };
@@ -480,6 +588,16 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
             </div>
           )}
         </div>
+        {listable && (
+          <button type="button" onClick={filterList} data-testid="palette-filter-list" className="flex w-full items-center gap-2.5 border-t border-line px-4 py-2.5 text-left hover:bg-hover">
+            <span className="flex size-5 shrink-0 items-center justify-center"><Icon name="filter" size={13} className="text-ink-3" /></span>
+            <span className="min-w-0 flex-1 truncate text-meta text-ink">{t("palette.filter_agents_list", { query: text })}</span>
+            <span className="flex shrink-0 items-center gap-1 [@media(pointer:coarse)]:hidden">
+              <Kbd>⇧</Kbd>
+              <Kbd>↵</Kbd>
+            </span>
+          </button>
+        )}
         <div className="flex items-center gap-3 border-t border-line bg-inset px-4 py-2 text-[11px] text-ink-3 [@media(pointer:coarse)]:hidden">
           <span className="flex items-center gap-1">
             <Kbd>↑</Kbd>

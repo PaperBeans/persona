@@ -120,6 +120,11 @@ class WiredPairingService @Inject constructor(application: Application, private 
         activeClient().checkUpdate(saved.deviceToken)
     }
 
+    override suspend fun lookup(): AppUpdateLookup = lock.withLock {
+        val saved = requireNotNull(runtime.activeCredentials()) { "Updates require a paired hub" }
+        activeClient().lookupUpdate(saved.deviceToken)
+    }
+
     override suspend fun download(update: AppUpdate, destination: OutputStream) = lock.withLock {
         activeClient().download(requireNotNull(runtime.activeCredentials()).deviceToken, update, destination)
     }

@@ -275,7 +275,7 @@ struct InboxExtensionItemPage: View {
     /// The renderer hands its links here.
     private var links: Binding<LinkTarget?> {
         Binding(get: { nil }, set: { target in
-            guard let url = target?.url, !slot.open(url), !AppModel.shared.openIfExtensionSettings(url) else { return }
+            guard let url = target?.url, !slot.open(url), !AppModel.shared.openIfExtensionSettings(url, from: .page(page.selectedManager)) else { return }
             openURL(url)
         })
     }

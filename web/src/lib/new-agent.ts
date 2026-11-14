@@ -213,12 +213,16 @@ export interface NewAgentPreset {
   prompt?: string;
   machineId?: string;
   cwd?: string;
-  /** A message forwarded to a new Agent (#3899): its card over the first message, which carries it in front; and the
-   *  pictures it had, attached. */
-  forward?: ContextRef;
+  /** Messages forwarded to a new Agent (#3899; several at once, #3838): their card over the first message, which carries
+   *  them in front; and the pictures they had, attached. */
+  forwards?: ContextRef[];
   images?: DraftImage[];
   /** An exact workspace destination takes precedence over the legacy machine/folder preset. */
   workspace?: WorkspaceTarget;
+  /** Hears the Agent started from this opening once its launch is ready, its first message sent (Inbox's "Hand to AI" ›
+   *  "New agent…", #5933: it files the item and remembers the Agent; lib/new-agent-started.ts). Never for a cancelled
+   *  sheet or a launch dropped before that. */
+  onStarted?: (session: Session) => void;
 }
 
 const openers = new Set<(preset: NewAgentPreset) => void>();

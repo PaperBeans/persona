@@ -27,7 +27,14 @@ struct SettingsView: View {
         return s.version
     }
 
-    nonisolated private struct SlotsKey: Hashable, Sendable { var source: ExtensionSlots.Source; var depth: Int; var revision: Int }
+    /// What the Extensions row's count and the slots are read again for; the current assistant too, as a switch from
+    /// Settings' own heading leaves the path as it is.
+    nonisolated private struct SlotsKey: Hashable, Sendable {
+        var source: ExtensionSlots.Source
+        var depth: Int
+        var revision: Int
+        var manager: String?
+    }
 
     /// Translation's row value: off, or the target language.
     private var translationSummary: String { translating ? TranslationPrefs.name(of: translateTarget) : String(localized: "state.off", defaultValue: "Off") }
@@ -119,7 +126,7 @@ struct SettingsView: View {
             #endif
             #if os(macOS) && DEBUG
             // `-tab settings -openPairSheet YES` (Demo Mode, or paired: Pair Again): the Connect Hub sheet, for screenshots
-            // (scripts/app/mac_shot.sh; with `-openPairSSH YES` its SSH Tunnel sheet over it).
+            // (scripts/app/sim.sh; with `-openPairSSH YES` its SSH Tunnel sheet over it).
             .onAppear { if UserDefaults.standard.bool(forKey: "openPairSheet") { showPair = true } }
             #endif
         } empty: {
@@ -160,11 +167,14 @@ struct SettingsView: View {
                     .accessibilityIdentifier("settings-machines")
             }
             .bareListRow()
-        } header: { SettingsAssistantHeading() }
+        } header: { SettingsAssistantHeading() } footer: {
+            SettingsAssistantFooter()
+        }
         .task(id: model.hubFeatures.contains(AssistantReadiness.feature)) {
             if !model.isDemo { await model.refreshReadiness(force: false) }
         }
-        .task(id: SlotsKey(source: ExtensionSlots.source(model), depth: model.settingsPath.count, revision: model.managersRevision)) {
+        .task(id: SlotsKey(source: ExtensionSlots.source(model), depth: model.settingsPath.count, revision: model.managersRevision,
+                           manager: model.assistantManagerID)) {
             guard let api = model.api else { return }
             let context = api.currentAssistantSettings()
             let loaded = try? await context.plugins()
@@ -199,8 +209,6 @@ struct SettingsView: View {
         } header: {
             SettingsHeading(String(localized: "This Device [Settings Scope]"))
                 .accessibilityIdentifier("settings-group-device")
-        } footer: {
-            Text("These settings stay the same when you switch assistants.")
         }
     }
 
@@ -230,7 +238,7 @@ struct SettingsView: View {
             SettingsHeading(String(localized: "Hub"))
                 .accessibilityIdentifier("settings-group-hub")
         } footer: {
-            Text("These settings stay the same when you switch assistants.")
+            Text(SettingsAssistantHeading.commonGroupsFooter)
         }
     }
 
@@ -308,6 +316,7 @@ struct SettingsView: View {
         else if d.bool(forKey: "openConnectors") { p.append(SettingsPage.connectors) }
         else if d.bool(forKey: "openSkills") { p.append(SettingsPage.skills) }
         else if d.bool(forKey: "openInboxSources") { p.append(SettingsPage.inboxSources) } // Settings › Inbox Sources (#5278)
+        else if d.bool(forKey: "openSourcesGraph") { p.append(SettingsPage.inboxSources); p.append(SettingsPage.sourcesGraph) } // › Source Relationships (#5741)
         else if let scope = str("openSubscriptions") { // the source subscription pages: `all`, or their first state (#2041)
             p.append(SettingsPage.subscriptions(state: scope == "all" ? nil : scope))
         }
@@ -336,7 +345,7 @@ struct SettingsView: View {
         else if d.bool(forKey: "openCodexSettings") { p.append(SettingsPage.codex) }
         else if d.bool(forKey: "openClaudeSettings") { p.append(SettingsPage.claude) } // with its Blocked Config Folders
         else if d.bool(forKey: "openConnectorMail") || d.bool(forKey: "addMail") { p.append(SettingsPage.mail) }
-        else if d.bool(forKey: "openConnectorFeishu") { p.append(SettingsPage.feishu) }
+        else if d.bool(forKey: "openConnectorFeishu") { p.append(SettingsPage.feishu()) }
         else if d.bool(forKey: "openConnectorGitHub") { p.append(SettingsPage.connector("github")) }
         else if d.bool(forKey: "openConnectorTelegram") { p.append(SettingsPage.connector("telegram")) }
         else if let id = d.string(forKey: "openConnectorPlugin") { p.append(SettingsPage.connector(id)) } // a plugin's connector by its id
@@ -356,6 +365,7 @@ struct SettingsView: View {
         else if d.bool(forKey: "openTriageSettings") { p.append(SettingsPage.triage) }
         else if d.string(forKey: "openKnowledgeSelection") != nil { p.append(SettingsPage.knowledgeSelection) } // (rule | chat | doc: with that sheet)
         else if d.string(forKey: "openAppearance") == "layout" { p.append(SettingsPage.layout) } // Layout (#2530)
+        else if d.string(forKey: "openAppearance") == "navigation" { p.append(SettingsPage.navigation) } // Navigation (#6332)
         else if d.string(forKey: "openAppearance") == "language" { p.append(SettingsPage.language) } // Language and dictation (#5005)
         else if let a = d.string(forKey: "openAppearance"), a != "chat" { // persona (or YES, or icon: the icon is the Avatar's) | color | style | scheme
             p.append(a == "color" ? SettingsPage.themeColor : a == "style" ? SettingsPage.style
@@ -389,12 +399,21 @@ enum SettingsPage: Hashable {
     /// Settings › Meetings (#2981): Persona's default role in a recorded meeting.
     case meetings
     #endif
-    case persona, themeColor, style, colorScheme, language, assistant, claude, codex, devices, phoneData, mail, feishu, feishuBot, notifications, storage, translation, modelConfiguration
+    case persona, themeColor, style, colorScheme, language, assistant, claude, codex, devices, phoneData, mail, feishuBot, notifications, storage, translation, modelConfiguration
+    /// Settings › Connectors › the chat connector; `manager`: whose (Messages' Settings names the default's, whose
+    /// account its chats follow; nil: the current assistant's).
+    case feishu(manager: String? = nil)
     case models, agents, appearance, about, pairing, computers
     /// Settings › Session Triage (docs/assistant/agent-work.md「开关」).
     case triage
+    /// Assistant Profile › Standing Authorizations (#7002): the go-aheads Persona answers for the owner, each revocable.
+    case standingAuthorizations
+    /// Assistant Profile › Agent Follow-Up (#7005): how Persona starts and follows up the work it hands out.
+    case agentFollowUp
     /// Settings › Appearance › Layout (#2530): how the Agents list draws its agents.
     case layout
+    /// Settings › Appearance › Navigation (#6332): Separate or Sidebar (`NavigationLayout`).
+    case navigation
     /// Settings › Knowledge Selection (docs/assistant/knowledge.md "Selection"): what the knowledge base reads and keeps.
     case knowledgeSelection
     /// Settings › hub: the hubs paired, by group (docs/protocol/multi-hub.md).
@@ -411,11 +430,14 @@ enum SettingsPage: Hashable {
     /// otherwise; `manager`: the plugin's (nil: the default's).
     case pluginPage(plugin: String, ui: String, title: String, manager: String? = nil)
     /// The source subscription pages (#2041, docs/extensions/subscriptions.md "Pages"), drawn by the manager; `state` opens them on
-    /// one extension's or one connector's (`SubscriptionsUI.state`), nil on every subscription.
-    case subscriptions(state: String? = nil)
+    /// one extension's or one connector's (`SubscriptionsUI.state`), nil on every subscription. `manager`: whose (a page's
+    /// of its own manager's things; nil: the current assistant's).
+    case subscriptions(state: String? = nil, manager: String? = nil)
     /// Settings › Inbox Sources (#5278): the same pages unnarrowed, every source of the Inbox, once the manager reports
     /// `inbox_sources`.
     case inboxSources
+    /// Inbox Sources' relationship view (#5741), pushed from its Source Relationships row.
+    case sourcesGraph
     /// Settings › Extensions › Extension Market, one plugin of a market, and the markets (docs/extensions/extensions.md「Extension marketplace」).
     case pluginMarket
     case marketExtension(market: String, id: String)
@@ -458,6 +480,7 @@ private struct SettingsDestinations: ViewModifier {
             .navigationDestination(for: ModelPurposeRoute.self) { r in ModelPurposeEditorView(purposeID: r.id).splitDetailPage() }
             .navigationDestination(for: ModelLauncherRoute.self) { r in ModelLauncherDetailView(name: r.name).splitDetailPage() }
             .navigationDestination(for: MachineDetailRoute.self) { r in MachineDetailView(ref: r.ref).splitDetailPage() }
+            .navigationDestination(for: TerminalsRoute.self) { r in TerminalsView(only: r.machine).splitDetailPage() }
             .navigationDestination(for: MessagesChatsRoute.self) { r in MessagesChatListView(manager: r.manager).splitDetailPage() }
             .navigationDestination(for: MessagesThreadRoute.self) { r in MessagesThreadView(id: r.id, name: r.name, manager: r.manager).splitDetailPage() }
             .navigationDestination(for: SessionKey.self) { key in ChatView(key: key).id(key).splitDetailPage(ownsBack: true) }
@@ -465,7 +488,7 @@ private struct SettingsDestinations: ViewModifier {
     }
 
     @ViewBuilder private func destination(_ page: SettingsPage) -> some View {
-        if page.belongsToCurrentAssistant, let manager = model.assistantManagerOffline {
+        if page.belongsToCurrentAssistant(in: model), let manager = model.assistantManagerOffline {
             SettingsForm {
                 Section { ManagerOfflineNote(manager: manager) }
             }
@@ -490,9 +513,11 @@ private struct SettingsDestinations: ViewModifier {
         case .language: LanguageSettingsPage()
         #if os(iOS)
         case .layout: LayoutSettingsPage()
+        case .navigation: NavigationSettingsPage()
         case .knowledgeSelection: KnowledgeSelectionView()
         #else
         case .layout: EmptyView()
+        case .navigation: EmptyView()
         case .knowledgeSelection: EmptyView()
         #endif
         #if os(iOS) || os(visionOS)
@@ -506,7 +531,7 @@ private struct SettingsDestinations: ViewModifier {
         case .devices: DevicesView()
         case .phoneData: PhoneDataView()
         case .mail: MailAccountsView(inSheet: false)
-        case .feishu: FeishuConnectorView()
+        case .feishu(let manager): FeishuConnectorView(manager: manager)
         case .connector(let id, let manager):
             if id == "imessage" { MessagesConnectorView(manager: manager ?? model.assistantManagerID) } else { HubConnectorView(id: id, manager: manager) }
         case .feishuBot: FeishuBotView()
@@ -518,6 +543,8 @@ private struct SettingsDestinations: ViewModifier {
         case .storage: StorageView()
         case .translation: TranslationSettingsView()
         case .triage: TriageSettingsView()
+        case .standingAuthorizations: StandingAuthorizationsView()
+        case .agentFollowUp: AgentFollowUpView()
         case .modelConfiguration: ModelConfigurationView()
         case .hubs: HubsView()
         case .sshTunnel(let id): HubSSHTunnelPage(hubID: id)
@@ -534,10 +561,12 @@ private struct SettingsDestinations: ViewModifier {
         case .plugins: ExtensionsView()
         case .plugin(let id, let manager): ExtensionDetailView(id: id, manager: manager)
         case .pluginPage(let plugin, let ui, let title, let manager): ExtensionPageView(plugin: plugin, ui: ui, title: title, manager: manager ?? model.assistantManagerID)
-        case .subscriptions(let state):
-            ExtensionPageView(plugin: SubscriptionsUI.id, ui: SubscriptionsUI.page, title: String(localized: "Subscriptions [Source Subscriptions]"), state: state, manager: model.assistantManagerID)
+        case .subscriptions(let state, let manager):
+            ExtensionPageView(plugin: SubscriptionsUI.id, ui: SubscriptionsUI.page, title: String(localized: "Subscriptions [Source Subscriptions]"), state: state,
+                              manager: manager ?? model.assistantManagerID)
         case .inboxSources:
             ExtensionPageView(plugin: SubscriptionsUI.id, ui: SubscriptionsUI.page, title: String(localized: "Inbox Sources"), manager: model.assistantManagerID)
+        case .sourcesGraph: SourcesGraphView(manager: model.assistantManagerID)
         case .pluginMarket: ExtensionMarketView()
         case .marketExtension(let market, let id): MarketExtensionDetailView(market: market, id: id)
         case .pluginMarkets: ExtensionMarketsView()
@@ -650,6 +679,8 @@ struct PhoneDataView: View {
             } footer: {
                 Text("When you come back to Persona after copying something, offers to send it to a computer that shares its clipboard. The clipboard is read only when you tap Send.")
             }
+            // Reminders imported as to-dos (#4009): only while Persona may read Reminders.
+            if isOn(.reminders) { RemindersImportSection() }
             #endif
         }
         .themedPage()
@@ -698,6 +729,53 @@ struct PhoneDataView: View {
         }
     }
 }
+
+#if os(iOS)
+/// Settings › Phone Data › Reminders: import the reminders of the lists picked as to-dos, one way (#4009,
+/// `RemindersImport`). Off by default; every list until the user turns some off.
+private struct RemindersImportSection: View {
+    @Environment(AppModel.self) private var model
+    @StoredValue(RemindersImport.enabledKey) private var importOn = false
+    @State private var lists: [RemindersImport.ReminderList] = []
+    /// nil: every list. Read with the lists in `.task`, not as the initial value (P3).
+    @State private var picked: Set<String>?
+
+    var body: some View {
+        Section {
+            Toggle(isOn: Binding(get: { importOn }, set: { on in
+                importOn = on
+                RemindersImporter.shared.activate(model, force: on)
+            })) {
+                Text("Import into To-dos") // a switch's title: wraps at large sizes
+            }
+            .accessibilityIdentifier("reminders-import")
+            if importOn {
+                ForEach(lists) { list in
+                    Toggle(isOn: Binding(get: { picked?.contains(list.id) ?? true }, set: { on in choose(list.id, on) })) {
+                        Text(list.title)
+                    }
+                }
+            }
+        } header: {
+            Text("Reminders")
+        } footer: {
+            Text("Incomplete reminders in the lists you choose become to-dos, and later changes to their title, notes or due date follow. Nothing is written back to Reminders; completing or deleting a reminder leaves its to-do as it is. Imports happen while Persona is open.")
+        }
+        .task {
+            picked = RemindersImport.lists // before the rows, which only show once the lists are read
+            lists = await RemindersImport.availableLists()
+        }
+    }
+
+    private func choose(_ id: String, _ on: Bool) {
+        var now = picked ?? Set(lists.map(\.id))
+        if on { now.insert(id) } else { now.remove(id) }
+        picked = now
+        UserDefaults.standard.set(Array(now).sorted(), forKey: RemindersImport.listsKey)
+        RemindersImporter.shared.sync(model, force: true)
+    }
+}
+#endif
 
 /// A data source's icon: the iPhone app it comes from, else its symbol on a tile of the same size and shape.
 private struct SourceIcon: View {
@@ -848,7 +926,7 @@ struct WelcomeView: View {
         .sheet(item: $guide) { LinkSheet(target: $0) }
         .onAppear { withAnimation(.spring(duration: 0.8, bounce: 0.35)) { appear = true } }
         #if DEBUG
-        // `-openPairSheet YES` (or `other`): the pairing sheet, for screenshots (scripts/app/mac_shot.sh).
+        // `-openPairSheet YES` (or `other`): the pairing sheet, for screenshots (scripts/app/sim.sh).
         .onAppear {
             switch UserDefaults.standard.string(forKey: "openPairSheet") {
             case "other": pair = .other

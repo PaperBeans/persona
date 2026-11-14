@@ -357,15 +357,23 @@ fun PersonaModelPill(
     LaunchedEffect(management) {
         try { config = management?.config() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { }
     }
-    LaunchedEffect(management, machineId, open) {
+    LaunchedEffect(management, machineId, open, session?.rev) {
         val api = management ?: return@LaunchedEffect
-        if (machineId.isEmpty() || (!open && lists.assistant[machineId] != null)) return@LaunchedEffect
+        if (machineId.isEmpty()) return@LaunchedEffect
+        // A hub push that bumps the conversation (rev) re-reads even while the panel is closed, so the pill keeps
+        // matching the effective Main chat model after a hub-side change (#6542). With no rev to watch, read once and
+        // let opening the panel refresh it; the in-flight guard in readMachine drops a duplicate read.
+        if (!open && session?.rev == null && lists.assistant[machineId] != null) return@LaunchedEffect
         lists.readMachine(lists.assistant, machineId, { api.assistantLauncherList(machineId) })
     }
     val kept = PersonaModelPanel.MODEL_PICK in features
     val shownSession = session?.let { s -> drawn?.takeIf { it.rev == s.rev }?.let { s.copy(modelPick = it.pick) } ?: s }
     val chat = PersonaModelPanel.Chat(shownSession, isMain = session != null && config?.main == session.sessionId, kept = kept,
         config = config?.launcher, pagePick = pagePick)
+    // Only the main conversation has a per-conversation model pick (#6911): a leader, the background supervisor or
+    // another assistant conversation draws no pill and follows the default or what it started with. The new-chat page
+    // (session null) keeps its starter pick, which goes with the main conversation's start.
+    if (session != null && !chat.isMain) return
     val info = lists.assistant[machineId]
     val setup = PersonaModelPanel.setup(chat, info)
     LaunchedEffect(management, machineId, setup.provider) {

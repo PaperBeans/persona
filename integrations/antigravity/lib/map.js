@@ -128,6 +128,8 @@ export function stepsToItems(steps, opts = {}) {
   const pendingCalls = []
   let maxSeq = 0
   let lastText = ''
+  let turnError
+  let afterWork = false
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
@@ -140,14 +142,18 @@ export function stepsToItems(steps, opts = {}) {
     switch (step.type) {
       case 'USER_INPUT': {
         if (step.source && step.source !== 'USER_EXPLICIT') break
+        // A new prompt answers the previous reply. Only assistant words can ask the user for a response.
+        lastText = ''
+        turnError = undefined
+        afterWork = false
         const text = cleanUserText(step.content)
         if (!text) break
-        lastText = snippet(text)
         const item = { id: `${seq}#0`, seq, role: 'user', kind: 'text', text, ts }
         items.push(opts.full ? item : light(item))
         break
       }
       case 'PLANNER_RESPONSE': {
+        turnError = undefined
         let sub = 0
         if (typeof step.thinking === 'string' && step.thinking.trim()) {
           const item = { id: `${seq}#${sub++}`, seq, role: 'assistant', kind: 'thinking', text: step.thinking.trim(), ts }
@@ -156,10 +162,12 @@ export function stepsToItems(steps, opts = {}) {
         if (typeof step.content === 'string' && step.content.trim()) {
           const text = step.content.trim()
           lastText = snippet(text)
+          afterWork = true
           const item = { id: `${seq}#${sub++}`, seq, role: 'assistant', kind: 'text', text, ts }
           items.push(opts.full ? item : light(item))
         }
         const calls = Array.isArray(step.tool_calls) ? step.tool_calls : []
+        if (calls.length) afterWork = true
         for (let k = 0; k < calls.length; k++) {
           const tc = calls[k]
           if (!tc || typeof tc !== 'object') continue
@@ -182,6 +190,7 @@ export function stepsToItems(steps, opts = {}) {
         break
       }
       case 'GENERIC': {
+        afterWork = true
         const paired = pendingCalls.shift()
         const callId = paired ? paired.callId : `call_${seq}_0`
         let rawOut = step.error || step.content || ''
@@ -225,7 +234,10 @@ export function stepsToItems(steps, opts = {}) {
       }
       case 'ERROR_MESSAGE': {
         const text = step.error || step.content || 'Error'
-        items.push({ id: `${seq}#0`, seq, role: 'system', kind: 'notice', text: String(text), ts })
+        turnError = { turn_error: String(text), ...step.turn_error, turn_error_after_work: afterWork }
+        // Clients display this shared API-error format outside the collapsed work summary.
+        const message = String(text).startsWith('API Error:') ? String(text) : `API Error: ${text}`
+        items.push({ id: `${seq}#0`, seq, role: 'assistant', kind: 'text', text: message, ts })
         break
       }
       default:
@@ -233,7 +245,7 @@ export function stepsToItems(steps, opts = {}) {
     }
   }
 
-  return { items, toSeq: maxSeq, lastText }
+  return { items, toSeq: maxSeq, lastText, turnError }
 }
 
 const transcriptCache = new Map()

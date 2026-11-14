@@ -241,6 +241,10 @@
       "sf": "arrow.triangle.branch",
       "phosphor": "git-branch"
     },
+    "gitHubStar": {
+      "sf": "star",
+      "phosphor": "star"
+    },
     "gitUpstream": {
       "sf": "cloud",
       "phosphor": "cloud"

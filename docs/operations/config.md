@@ -36,6 +36,7 @@ One setting has one writer. When two places seem to hold the same thing, this is
 | Per-device `devices.prefs` | quiet hours, translation scope, notification switches | that device | Per-device only; not a settings key and not synced as one |
 | `PERSONA_*` environment | `DATABASE_URL`, `PUBLIC_URL`, `LISTEN`, `NODE_PACKAGES`, `ADMIN_ACCESS` | the deployment | Overrides the matching `hub.json` field, never written back. Each also accepts its former `JARVIS_*` name |
 | Node-local third-party files | Claude / Codex / Antigravity / OMP `settings.json` | the user or those tools | Read by the node on that computer; the Agents settings page edits the allow-listed subset |
+| Node-local `node-signing.json` | the certificate a Mac's resident node signs its builds with | you, on that Mac | Read by the resident node at start; never sent to the hub ([mac-node-signing.md](mac-node-signing.md)) |
 
 Consequences worth remembering:
 
@@ -111,7 +112,7 @@ install a resident node plus the connector persona-link, with one command or one
 - Linux: `curl -fsSL <site>/install.sh | sh -s -- --node --pair '<link from personad hub pair --machine <id>>'` (this computer connects to the hub; in `machines` it is
   `{"id":"laptop","name":"Laptop","kind":"link","icon":"laptop"}`, and the hub needs `public.tls_listen`), or `… --node --listen` (the hub connects to it;
   paste the printed link into the hub admin UI under **Computers › Add computer › Hub connects**, and in `machines` it is kind `service`).
-- Mac: install the menu bar App "Persona Link" (`./scripts/app/mac-link.sh install`); it bundles persona-node, the device's own program, and installs the resident node on first run; pairing is in its menu.
+- Mac: install the independent Persona Link helpers (`./scripts/app/mac-link.sh install`); the connector and resident node run as launchd agents. Pair with the optional desktop setup window or `persona-link pair`.
 
 No `ssh_host`, and no SSH setup on the hub. The SSH setup in steps 1–6 above still works, and is kept only for compatibility from now on.
 
@@ -168,7 +169,7 @@ No `ssh_host`, and no SSH setup on the hub. The SSH setup in steps 1–6 above s
 | `android.application_id` | The Android App's application id (`scripts/app/android.sh`, `docs/android/android.md`); defaults to `app.bundle_id` |
 | `android.release_keystore` | Optional: the keystore `scripts/app/android.sh release` signs the release APK with (`~` is expanded). Needs `android.release_key_alias` and `android.release_keystore_password_command`, a shell command that prints the keystore's password; `android.release_key_password_command` prints the key's own password when it differs. Without `android.release_keystore` the command signs with the SDK's local debug keystore, for your own phone only (`docs/android/android.md`, "Build and install") |
 | `android.google_oauth_scheme` | The scheme the Android App uses for the Google sign-in callback for Gmail: the reversed client ID of the hub's `google.client_id` (`docs/extensions/mail.md` ("Android")); without it Gmail can only be added with an app-specific password |
-| `mac.link_bundle_id` | Bundle id of the Mac menu bar App "Persona Link" (`scripts/app/mac-link.sh`, `docs/operations/link.md`); the env var `PERSONA_LINK_BUNDLE_ID` wins; defaults to the placeholder `com.example.persona.link` |
+| `mac.link_bundle_id` | Bundle-id prefix of the independent Mac Persona Screen helper (`scripts/app/mac-link.sh`, `docs/operations/link.md`); the env var `PERSONA_LINK_BUNDLE_ID` wins; defaults to the placeholder `com.example.persona.link` |
 
 `python3 scripts/persona_config.py env` prints shell variables (scripts `eval` it at the top), and `xcconfig` generates `apple/Config.xcconfig`;
 `sim.sh` / `release.sh` generate it automatically. Before running `xcodegen` directly or opening Xcode, run `python3 scripts/persona_config.py xcconfig` once.
@@ -223,7 +224,7 @@ The sections that are a manager's (whose assistant it is, `ai`, `agents`, `inbox
 - `security.proxy_protocol` (optional, omitted by default): with same-machine port forwarding, a reverse tunnel, or nginx `stream` passthrough in front of the hub, public connections all look like loopback to the hub.
   Set `{"from": ["127.0.0.1/32"]}`: connections from these upstreams must carry a PROXY header (v1 / v2), and the hub checks the real source in the header; `listeners` defaults to only `tls`.
   Syntax, rules, and self-checks in [network.md](network.md#proxy-protocol).
-- `name` (optional): the hub's display name (e.g. "Home"), shown by persona-link on computers (Mac menu bar) and by future linked-hub and multi-hub clients.
+- `name` (optional): the hub's display name (e.g. "Home"), reported by persona-link and shown by clients.
   Defaults to the short host name of the hub machine; if the host name is a Docker container id or `PERSONA_LOCAL_NODE=0`, it uses `hub-<first 6 chars of hub_id>`. Manual file edits require a hub restart;
   edits in the admin UI's "Overview" take effect immediately ([admin.md](admin.md)).
 - `initial_locale` (optional, `en` / `zh-Hans` / `ja`): the user language until a device reports one ([i18n.md](../protocol/i18n.md), "User language").
@@ -377,8 +378,8 @@ A manager's own sections of the configuration are in its `manager.json`, not in 
   since an attachment goes with its line: with `text_days` 365, a source set to 3650 keeps 365 days of attachments,
   `history` (importing chats' older history, **off unless `enabled` is `true`**; `docs/assistant/knowledge.md` "History import"):
   `{"enabled": true, "sources": {"<connector id>": {"profile": "careful", "needs_search_index": true}}}`. Sources run one at a time in the order written, and only after
-  the owner approves each source's plan in the assistant chat. Per source: `profile` (`careful`, the default, or `standard`), `needs_search_index` (default `true`: wait for
-  the knowledge base's search index, #1273; `false` runs before it), `page_limit` (page size asked for, a hint, 50) and pace overrides, each `[least, most]` or one number:
+  the owner approves each source's plan in the assistant chat. Per source: `profile` (`careful`, the default, or `standard`), `needs_search_index` (default `true`: wait until
+  the knowledge base has built its search index, which the manager does by itself within its first minutes on an existing archive, #1273; `false` does not wait), `page_limit` (page size asked for, a hint, 50) and pace overrides, each `[least, most]` or one number:
   `interval_seconds`, `batch_calls`, `rest_minutes`, `long_rest_every_hours` and `long_rest_minutes` (`[0, 0]`: none), `quiet_periods_per_day` and `quiet_hours`,
   `switch_chat_pages`, `image_interval_seconds`, and `slow_factor` (≥ 1: every interval and rest multiplied by it, e.g. `2` after a stop the import caused). A range that
   does not read (most below least, a negative number or bound) or a negative `slow_factor` is an error in `manager.json` like any other (a running manager keeps what it last read). Changing `kb.history`
@@ -492,6 +493,9 @@ A manager's own sections of the configuration are in its `manager.json`, not in 
   `http://[user:password@]host:port`, same format as `google.proxy`; omitted means direct (does not read process `HTTPS_PROXY`). Some networks reach only `api.github.com`, not `github.com`,
   so device-code login cannot obtain a code and needs this proxy. An invalid value does not fall back to direct: every GitHub request fails, and the settings page states that `github.proxy` in manager.json is invalid. Actual addresses belong only in manager.json.
   The extension market also uses it to read markets on GitHub and download extension packages from Releases (`github.com`, `*.github.com`, `*.githubusercontent.com`; when unset, uses process `HTTPS_PROXY`, #3277).
+  Repository binding checks of public GitHub repositories use `github.proxy` too; when unset they use the manager process's `HTTPS_PROXY` and `NO_PROXY`.
+  GitLab and self-hosted repository checks use the process's proxy environment. Checks validate destination DNS locally and tunnel to a pinned IP, preserving TLS hostname checks;
+  they do not pass connector tokens to the repository or fall back to direct when a selected proxy fails. See `docs/assistant/managers.md` ("Repository references").
   `github.inbox` (optional) supplies default Inbox rules (App changes take priority, `docs/assistant/inbox.md` ("Noise reduction")): `ci` (`off` / `default_branch` / `mine` (default) / `all`),
   `muted_repos` (`["owner/name"]`), `ignore_branches` (branches not to notify for, `path.Match` patterns, default `["train/*"]`).
 - `imessage` (optional, **old syntax, retained for one version, read-only**): now choose the Mac to read in **Settings › Extensions › Messages** in the App (#1830). If configured here, the manager migrates it once at startup;

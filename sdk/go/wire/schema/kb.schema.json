@@ -259,7 +259,9 @@
         "start": {"type": "number"},
         "end": {"type": "number"},
         "text": {"type": "string"},
-        "n": {"type": "integer", "description": "An all-day recording's line number: the segment's 1-based position in its uploads (docs/assistant/day-recap.md); absent on other recordings."}
+        "n": {"type": "integer", "description": "An all-day recording's line number: the segment's 1-based position in its uploads (docs/assistant/day-recap.md); absent on other recordings."},
+        "source": {"type": "string", "enum": ["hub", "device"], "description": "Whose text the segment is in a meeting transcribed on the hub (docs/assistant/meeting-minutes.md \"The transcript of record\"): hub or device; absent means device."},
+        "echo": {"type": "boolean", "description": "The line is Persona's own answer as the meeting's microphone heard it (docs/assistant/meeting-minutes.md \"Persona's echo\"): kept in the transcript but not what the meeting said, so leave it out of anything read as the meeting's words; absent (false) on every other line."}
       },
       "required": ["start", "end", "text"]
     },

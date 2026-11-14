@@ -2,6 +2,7 @@ package persona.feature.chat
 
 import persona.core.designsystem.dense
 import persona.core.designsystem.text
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,7 +21,9 @@ import persona.core.domain.lines.isLiveStatus
 import persona.core.domain.sort.AgentSession
 import persona.core.domain.sort.SessionRename
 import persona.core.domain.sort.canAttach
+import persona.core.domain.sort.canClose
 import persona.core.domain.sort.canInterrupt
+import persona.core.domain.sort.canRename
 import persona.core.domain.sort.canTerminal
 import persona.core.domain.sort.closeConfirmation
 import persona.core.domain.sort.deleteConfirmation
@@ -30,6 +33,9 @@ import persona.core.domain.sort.slotLabel
 import persona.core.domain.sort.stateLabel
 import persona.core.domain.sort.source
 import persona.core.domain.sort.sourceSubtitle
+import persona.core.domain.sort.TerminalResume
+import persona.core.domain.sort.terminalResume
+import persona.core.domain.sort.worktreeKind
 
 @Composable
 internal fun ChatHeader(
@@ -47,6 +53,11 @@ internal fun ChatHeader(
     onTerminal: (() -> Unit)? = null,
     /** The chat has a terminal it can't open from here: Brief's and Board's header button explains it instead. */
     onTerminalHelp: (() -> Unit)? = null,
+    /**
+     * Resume in Terminal (#5565): opens the session's terminal and resumes the stopped Agent there (iOS / web same
+     * action). Nil when the shell has no terminal to open.
+     */
+    onResumeInTerminal: (() -> Unit)? = null,
     /** When the turn that runs now began (the newest turn's start, iOS `Turn.startedAt`): "Working 22 min" counts from it. */
     turnStart: java.time.Instant? = null,
     actions: @Composable RowScope.() -> Unit = {},
@@ -63,8 +74,9 @@ internal fun ChatHeader(
     val linkTitle = connectionTitle(connection)
     val online = connection == null || connection == ConnectionState.Online
     val canAct = state.available && online && machine?.online != false && !readOnly && session != null
-    // Renaming changes the terminal tab and Claude's /rename: a session without a terminal has neither.
-    val canRename = state.canRename && online && machine?.online != false && !readOnly && session != null && session.canTerminal
+    // Renaming changes the terminal tab and Claude's /rename; a session without a terminal renames where its node says it
+    // can (a runtime's title, #6294).
+    val canRename = state.canRename && online && machine?.online != false && !readOnly && session != null && session.canRename
     LaunchedEffect(session?.key, menu) { if (session != null && menu) state.loadMute(session) }
     var modeOverlay by remember { mutableStateOf(false) }
     LaunchedEffect(menu, dialog, sharing, modeOverlay) { onOverlay(menu || dialog != null || sharing != null || modeOverlay) }
@@ -141,6 +153,24 @@ internal fun ChatHeader(
         }
         // iOS's first item after the to-do: the terminal comes up over the chat.
         onTerminal?.let { add(JAction(stringResource(R.string.chat_chrome_terminal), PersonaIcons.terminal, onClick = it)) }
+        // Resume in Terminal (#5565): offered for a stopped Agent; disabled with why where its computer has no terminal engine.
+        when (terminalResume(session, machine)) {
+            TerminalResume.Available -> onResumeInTerminal?.let {
+                add(JAction(stringResource(R.string.chat_chrome_resume_in_terminal), PersonaIcons.run, onClick = it))
+            }
+            TerminalResume.NoEngine -> add(
+                JAction(
+                    stringResource(R.string.chat_chrome_resume_in_terminal),
+                    PersonaIcons.run,
+                    enabled = false,
+                    subtitle = stringResource(
+                        R.string.chat_chrome_resume_no_engine,
+                        machine?.displayName?.takeIf(String::isNotBlank) ?: session?.machineId.orEmpty(),
+                    ),
+                ) {},
+            )
+            TerminalResume.Hidden -> Unit
+        }
         onSearch?.let { add(JAction(stringResource(R.string.chat_chrome_search), PhIcons.MagnifyingGlass, onClick = it)) }
         onFiles?.let { add(JAction(stringResource(R.string.chat_chrome_files), PhIcons.FolderSimple, onClick = it)) }
         onGit?.let { add(JAction(gitLabel, onClick = it)) }
@@ -176,8 +206,9 @@ internal fun ChatHeader(
                 copy(command, resumeCopied)
             })
         }
-        // Persona's conversations are not agents in a pane, and a session without a terminal has no pane to close.
-        if (session?.assistant != true && session?.canTerminal != false)
+        // Persona's conversations are not agents in a pane; a session without a terminal closes where its node says it can
+        // (a runtime's, #6294).
+        if (session?.assistant != true && session?.canClose != false)
             add(JAction(stringResource(R.string.chat_chrome_close_agent), destructive = true, enabled = canAct && session?.isLive == true) { dialog = "close" })
         // Only one that is not running (core:contracts Session.canDelete); the same words as the Agents list's.
         if (session?.canDelete == true) add(JAction(stringResource(R.string.chat_chrome_delete_chat), destructive = true, enabled = canAct) { dialog = "delete" })
@@ -196,7 +227,7 @@ internal fun ChatHeader(
     }
     when (dialog) {
         "rename" -> JDialog(onDismiss = { dialog = null }, title = stringResource(R.string.chat_chrome_rename),
-            text = stringResource(if (session?.isTern == true) R.string.chat_chrome_rename_text_tern else R.string.chat_chrome_rename_text),
+            text = chatRenameNote(session)?.let { stringResource(it) },
             confirm = stringResource(R.string.chat_chrome_save) to { dialog = null; state.rename(session!!, title, tabName) },
             confirmEnabled = canRename && session?.let { SessionRename.changes(it, title, tabName).changed } == true,
             content = {
@@ -213,14 +244,14 @@ internal fun ChatHeader(
             val confirmation = if (closing) target.closeConfirmation(machine?.displayName) else target.deleteConfirmation(machine?.displayName)
             val service = remember(worktrees) { worktrees?.invoke() }
             val rawMachine = persona.core.contracts.GroupKeys.raw(target.machineId)
-            val worktree = rememberOurWorktree(service, rawMachine, target.cwd, machine?.online == true)
+            val worktree = rememberOurWorktree(service, rawMachine, target.cwd, machine?.online == true, target.worktreeKind)
             var cleanup by remember(target.key) { mutableStateOf(WorktreeCleanup()) }
             val res = androidx.compose.ui.platform.LocalResources.current
             JDialog(onDismiss = { dialog = null }, title = confirmation.title.text(), text = confirmation.message.text(),
                 confirm = stringResource(if (closing) R.string.chat_chrome_close_agent else R.string.chat_chrome_delete) to {
                     dialog = null
                     state.run(target, if (closing) ChatAction.Close else ChatAction.Delete) { done -> if (done && service != null && worktree != null)
-                        WorktreeCleanups.cleanUp(service, rawMachine, worktree, cleanup, feedback, res) }
+                        WorktreeCleanups.cleanUp(service, rawMachine, worktree, cleanup, feedback, res, target.worktreeKind) }
                 }, destructive = true, confirmEnabled = canAct && WorktreeCleanups.ready(worktree, cleanup),
                 content = worktree?.let { st -> { WorktreeCleanupSection(st, cleanup, { cleanup = it }, machine?.home) } })
         }
@@ -249,6 +280,17 @@ internal fun ChatHeader(
     }
 }
 
+/**
+ * The rename dialog's note: what else the new name renames, the terminal's tab and Claude's /rename (as the Agents
+ * list's `renameNote`). None for a session without a terminal (a runtime's, #6294), which has neither.
+ */
+@StringRes
+internal fun chatRenameNote(session: Session?): Int? = when {
+    session?.canTerminal == false -> null
+    session?.isTern == true -> R.string.chat_chrome_rename_text_tern
+    else -> R.string.chat_chrome_rename_text
+}
+
 /** A scrollable sheet until JActionSheet supports long action lists. */
 @Composable
 internal fun ChatActionsSheet(actions: List<JAction>, onDismiss: () -> Unit, title: String) {
@@ -259,8 +301,9 @@ internal fun ChatActionsSheet(actions: List<JAction>, onDismiss: () -> Unit, tit
         LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp.dense)) {
             items(actions) { action ->
                 JRow(action.label, leadingIcon = action.icon, enabled = action.enabled, destructive = action.destructive,
+                    subtitle = action.subtitle,
                     leading = if (action.icon == null && iconColumn) ({ Spacer(Modifier.width(24.dp.dense)) }) else null,
-                    chevron = false, onClick = { onDismiss(); action.onClick() })
+                    chevron = false, onClick = if (action.enabled) ({ onDismiss(); action.onClick() }) else null)
             }
         }
     }

@@ -1,12 +1,28 @@
 // The model panel's rail (#5032, after Cindy's UnifiedModelRail): a 48 px column of view cells, Recent and Favorites (what
 // you keep), a short rule, then All and one cell per provider in the order given. The cell that is on is filled in the
-// ink; the others are quiet and light up under the pointer. It scrolls on its own, without a bar.
+// ink; the others are quiet and light up under the pointer. It scrolls on its own, without a bar: an edge with more cells
+// beyond it fades out, so a long list of providers shows it goes on.
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { sameView, type PanelProvider, type PanelView } from "../../lib/model-panel";
 import { quotaReset, weeklyQuota, type LauncherQuotaAnswer } from "../../lib/quota";
 import { cx } from "../atoms";
 import { Icon } from "../icons";
 import { ProviderMark } from "./ProviderMark";
+
+/** How far an edge with more beyond it fades. */
+const FADE = "20px";
+
+/** The mask for a column that has more above (`up`) and / or below (`down`); undefined for none. */
+export function railFade(up: boolean, down: boolean): string | undefined {
+  if (!up && !down) return undefined;
+  return `linear-gradient(180deg,${up ? `transparent,#000 ${FADE}` : "#000"},${down ? `#000 calc(100% - ${FADE}),transparent` : "#000"})`;
+}
+
+/** Whether the column scrolled to `scrollTop` has cells hidden above and below. */
+export function railEdges(b: { scrollTop: number; clientHeight: number; scrollHeight: number }): { up: boolean; down: boolean } {
+  return { up: b.scrollTop > 1, down: b.scrollTop + b.clientHeight < b.scrollHeight - 1 };
+}
 
 export function Rail({ providers, view, onView, disabled, quotas }: { providers: PanelProvider[]; view: PanelView; onView: (v: PanelView) => void; disabled?: boolean; quotas?: Readonly<Record<string, LauncherQuotaAnswer>> }) {
   // `tip`: the tooltip when it says more than the name (a provider's startup ID, #5029)
@@ -44,8 +60,30 @@ export function Rail({ providers, view, onView, disabled, quotas }: { providers:
       </button>
     );
   };
+  const box = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ up: false, down: false });
+  const measure = useCallback(() => {
+    const el = box.current;
+    if (!el) return;
+    const e = railEdges(el);
+    setEdges((v) => (v.up === e.up && v.down === e.down ? v : e));
+  }, []);
+  useLayoutEffect(measure, [measure, providers.length]);
+  useEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measure]);
+  const mask = railFade(edges.up, edges.down);
   return (
-    <div role="group" aria-label={t("ui-modelpanel.views")} className="flex min-h-0 w-12 shrink-0 scrollbar-none flex-col items-center gap-0.5 overflow-x-hidden overflow-y-auto border-r border-line px-1.5 py-2">
+    <div
+      ref={box}
+      onScroll={measure}
+      data-rail-fade={[edges.up && "up", edges.down && "down"].filter(Boolean).join(" ") || undefined}
+      style={mask ? { maskImage: mask, WebkitMaskImage: mask } : undefined}
+      role="group" aria-label={t("ui-modelpanel.views")} className="flex min-h-0 w-12 shrink-0 scrollbar-none flex-col items-center gap-0.5 overflow-x-hidden overflow-y-auto border-r border-line px-1.5 py-2">
       {cell({ kind: "recent" }, t("ui-modelpanel.recent"), <Icon name="history" size={16} />)}
       {cell({ kind: "favorites" }, t("ui-modelpanel.favorites"), <Icon name="star" size={16} className={view.kind === "favorites" ? "fill-current" : undefined} />)}
       <div aria-hidden className="my-[3px] w-[22px] shrink-0 border-t border-line" />

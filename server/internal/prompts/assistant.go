@@ -6,6 +6,14 @@ import (
 	"unicode/utf8"
 )
 
+type AssistantSelectedSkill struct {
+	Name, Path, Ref string
+}
+
+func RenderAssistantSelectedSkills(skills []AssistantSelectedSkill) string {
+	return render("assistant/selected_skills", skills)
+}
+
 // AssistantMachine is one computer in the assistant's CLAUDE.md, as seen from where the assistant runs.
 type AssistantMachine struct {
 	Name, ID string
@@ -77,7 +85,7 @@ type SnapshotMachine struct {
 
 // SnapshotApp is the Persona app on one kind of device as it last said its version (assistant/snapshot_app). No
 // time: the node sends only the snapshot's changed lines, and a reconnect must not make this one change.
-// Platform: ios | ipados | watchos | macos | visionos | android.
+// Platform: ios | ipados | watchos | macos | visionos | android | harmony.
 type SnapshotApp struct {
 	Platform, Version, Build, OS string // Build, OS: "" when not said
 	Simulator                    bool
@@ -135,9 +143,19 @@ type SnapshotFollowup struct {
 	Every string // "30 minutes" for a repeating one
 }
 
+// SnapshotFollowing is one open inbox matter being followed: where it happens, who or what it waits on, the next step
+// and when to look again (CheckAt in the user's zone, zero when none). The two flags select the state note in the
+// template, so no prompt wording is assembled in Go.
+type SnapshotFollowing struct {
+	Title, Where, Who, Next string
+	CheckAt                 time.Time
+	FollowUpAsk, CheckDue   bool
+}
+
 // SnapshotPlan is a plan card in the main conversation still waiting for the user's "Start" (#4453): nothing of it has
 // started, and it shows nowhere else.
 type SnapshotPlan struct {
+	ID     string    // the plan's id, for task_plan_withdraw (#6739)
 	At     time.Time // when it was put up, in the user's zone
 	Titles []string  // its tasks' titles (at most three)
 	Tasks  int       // how many tasks it has
@@ -262,6 +280,9 @@ type Snapshot struct {
 	Tasks          []SnapshotTask     // tasks opened from assistant conversations (task_plan), newest first
 	Plans          []SnapshotPlan     // plan cards in the main conversation waiting for "Start", newest first (at most five)
 	PlansTotal     int
+
+	Following      []SnapshotFollowing // open inbox matters being followed, earliest check first (at most five)
+	FollowingTotal int                 // all of them
 	// Asked: the assistant's ask_user questions nobody answered in time, now to-dos waiting for the user's call (#1617),
 	// oldest first.
 	Asked []SnapshotAsked
@@ -277,10 +298,11 @@ type Snapshot struct {
 }
 
 // SnapshotOmit marks the sections a snapshot leaves out for size (#3203). An omitted section still renders its heading
-// and its count, with the tool that lists it, never as empty: the node sends only the sections that changed, so a
-// section that went missing would read as unchanged, and one rendered without its items as "none".
+// and count with where to see the rows (a tool, or the App for Inbox follow-ups), never as empty: the node sends only
+// the sections that changed, so a section that went missing would read as unchanged, and one rendered without its items
+// as "none".
 type SnapshotOmit struct {
-	Waiting, Working, Unread, Routines, Followups, Asked, KB, OtherChats, Unaccepted, Tasks, Approvals bool
+	Waiting, Working, Unread, Routines, Following, Followups, Asked, KB, OtherChats, Unaccepted, Tasks, Approvals bool
 }
 
 // SnapshotCut is the line a snapshot cut short ends with (assistant/snapshot_cut).
@@ -324,6 +346,15 @@ func (s Snapshot) Upcoming() *SnapshotCalendar {
 		}
 	}
 	return &out
+}
+
+// FollowingLeft is how many followed matters are not in the snapshot's bounded list.
+func (s Snapshot) FollowingLeft() int {
+	left := s.FollowingTotal - len(s.Following)
+	if left < 0 {
+		return 0
+	}
+	return left
 }
 
 func RenderSnapshot(s Snapshot) string { return render("assistant/snapshot", s) }
@@ -379,6 +410,9 @@ type TaskRun struct {
 	Continued bool
 	// PushAsked: the task pushes only what the run sends with notify_user (its push "asked", #2396).
 	PushAsked bool
+	// InboxWorthy, InboxEvery: the task's inbox setting (#6430): a run puts a row in the Inbox only when it finds something
+	// worth a look (inbox_post), or the manager puts one after every run.
+	InboxWorthy, InboxEvery bool
 	// Facts: the run's facts Persona worked out (RenderBriefFacts), above the task's prompt; "" for a task without them.
 	Facts string
 }
@@ -403,7 +437,9 @@ type BriefFacts struct {
 	Failed                                                           []BriefFailed
 	Accept                                                           []BriefAccept
 	Progress                                                         []BriefProgress
-	Leaders                                                          []BriefLeader // one per direction (#3609)
+	// InboxWaiting and InboxDue are read-only follow-up facts for the model only; neither is on the card or in the push.
+	InboxWaiting, InboxDue []BriefFollow
+	Leaders                []BriefLeader // one per direction (#3609)
 	// Briefs: the open pieces of work that need the owner or changed since the last briefing, in their own words;
 	// BriefsDone: those that ended since, once, with each criterion's result (#3822).
 	Briefs, BriefsDone []BriefTask
@@ -512,6 +548,9 @@ type BriefFailed struct {
 
 // BriefAccept is a task waiting to be verified, with what it changed in the words of its "Please verify" card.
 type BriefAccept struct{ Line, Changed string }
+
+// BriefFollow is one Inbox matter in the briefing's model-only facts: its title, who or what it waits on and next step.
+type BriefFollow struct{ Title, Who, Next string }
 
 // BriefProgress is a task being worked on and its stage ("plan", "develop", "review", "merge", "deploy", "verify"; "" not known).
 type BriefProgress struct{ Title, Stage string }

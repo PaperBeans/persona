@@ -1,6 +1,9 @@
 package node
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // ---- staying on the fallback that answered (#3788) ----
 //
@@ -76,6 +79,41 @@ func (n *Node) recentFallback(id string) (from modelExecution, launcher string, 
 		return modelExecution{}, "", false
 	}
 	return f.from, f.launcher, true
+}
+
+// assistantUnavailableFor: how long a model a recovery found unavailable on a launcher is not picked again, by any
+// conversation (#5234). A gateway that drops a model keeps it dropped for longer than one chain; one that adds it
+// back is tried again after this.
+const assistantUnavailableFor = 6 * time.Hour
+
+// assistantAnsweredRecently: a model that answered this conversation this recently and now "does not exist" is the
+// gateway's passing failure, not the user's choice (#5234).
+const assistantAnsweredRecently = time.Hour
+
+// noteUnavailable records that launcher's model is unavailable, so later chains skip it. n.mu is held.
+func (n *Node) noteUnavailable(launcher, model string) {
+	if model == "" {
+		return
+	}
+	if n.unavailable == nil {
+		n.unavailable = map[string]time.Time{}
+	}
+	n.unavailable[launcher+"\x00"+model] = time.Now().Add(assistantUnavailableFor)
+}
+
+// markUnavailableUsed marks every model of launcher found unavailable, and not expired, as used by chain r. n.mu is
+// held.
+func (n *Node) markUnavailableUsed(launcher string, used map[string]bool) {
+	now := time.Now()
+	for k, until := range n.unavailable {
+		if now.After(until) {
+			delete(n.unavailable, k)
+			continue
+		}
+		if l, m, ok := strings.Cut(k, "\x00"); ok && l == launcher {
+			used[m] = true
+		}
+	}
 }
 
 // forgetFallback ends conversation id's hold and its sticky window: it compacted, so the refused turns are gone.

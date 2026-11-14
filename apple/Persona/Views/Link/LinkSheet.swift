@@ -33,8 +33,9 @@ nonisolated struct ContextRef: Identifiable, Hashable, Sendable, Codable {
 
     var host: String { URL(string: url)?.host ?? url }
 
-    /// The extra attributes in the order they are written: a forward's metadata first, then any others by name.
-    static let extraOrder = ["role", "author", "chat", "project", "machine", "time"]
+    /// The extra attributes in the order they are written: a forward's metadata and a workspace's location first, then
+    /// any others by name.
+    static let extraOrder = ["role", "author", "chat", "project", "machine", "cwd", "branch", "time"]
 
     var xml: String {
         func esc(_ s: String) -> String {
@@ -55,6 +56,10 @@ nonisolated struct ContextRef: Identifiable, Hashable, Sendable, Codable {
 
     /// The attributes that have fields of their own; the rest go to `extra`.
     private static let ownAttributes: Set<String> = ["kind", "title", "url", "msg", "part"]
+
+    /// The hub's mid-turn interject note title (server/internal/prompts/assistant/interject.md, pinned by
+    /// assistant_interject_test.go): model instructions in a context block, never a quote the owner picked (#6595).
+    static let interjectTitle = "插话" // i18n-ignore: canonical hub prompt title
 
     /// The contexts in a message and the message without them.
     private static let memo = TextMemo<(refs: [ContextRef], rest: String)>()
@@ -77,6 +82,8 @@ nonisolated struct ContextRef: Identifiable, Hashable, Sendable, Codable {
             }
             // Provenance and protected-user sentinels are transport metadata, never selectable context cards.
             guard a["kind"] != "message-source" else { continue }
+            // The hub's interject note is instructions for the model, not an owner-bubble quote (#6595).
+            guard (a["kind"] ?? "context") != "context" || a["title"] != interjectTitle else { continue }
             let extra = a.filter { !Self.ownAttributes.contains($0.key) }
             refs.append(ContextRef(kind: a["kind"] ?? "context", title: a["title"] ?? "", url: a["url"] ?? "",
                                    text: ns.substring(with: m.range(at: 2)), msg: a["msg"] ?? "", part: a["part"],
@@ -99,6 +106,7 @@ nonisolated struct ContextRef: Identifiable, Hashable, Sendable, Codable {
         case "instructions": Theme.Icon.info
         case "doc": Theme.Icon.document
         case "edit": Theme.Icon.ai
+        case "workspace": Theme.Icon.folder
         case ForwardMessage.kind: Theme.Icon.forwardMessage
         default: Theme.Icon.quote
         }
@@ -219,6 +227,11 @@ struct LinkSheet: View {
                         }
                         .font(Theme.Font.label)
                         .foregroundStyle(Theme.accent)
+                        // A caption line hit like a row, the header keeping its height (#6577), and over the title above
+                        // it too: the header has only `Space.s` under it, and the page below takes its own taps.
+                        .padding(.top, Theme.Space.l)
+                        .tapTargetOutset()
+                        .padding(.top, -Theme.Space.l)
                     }
                     .buttonStyle(.plain)
                     .accessibilityHint(String(localized: "Lists this session's dev servers"))
@@ -298,8 +311,7 @@ struct LinkSheet: View {
 /// page. All share the default (on-disk) website data store, so assets and logins carry over.
 /// On iPhone, iPad and Vision Pro a view serves one opening of its link: once a sheet has shown it, the pool lets it go
 /// (`release`, from `PooledWebView`), so a later tap on the link starts on the link's own page with no back/forward
-/// history, not where the last opening was left (#4074). The Mac's panel (frozen, apple/Mac/Link) still reuses its views:
-/// its Open in Separate Window moves the view on screen, page and history, into the window.
+/// history, not where the last opening was left (#4074).
 @MainActor
 final class WebViewPool {
     static let shared = WebViewPool()

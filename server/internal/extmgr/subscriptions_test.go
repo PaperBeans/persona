@@ -220,8 +220,32 @@ func TestSubscriptionsAreInboxAndKnowledgeBaseSources(t *testing.T) {
 	if r.Names[sub.ID] != "Notices" || src == nil || !src.Extension || !src.Counts || src.Kinds["sub_digest"] == "" || len(src.Things) != 2 {
 		t.Fatalf("the round: names %v, source %+v", r.Names, src)
 	}
+	// What it reads and its row's knowledge-base chat, for the AI twin (#6222).
+	if src.Via != "example" || src.ViaSource != "notices" || len(src.Chats) != 1 {
+		t.Fatalf("what the subscription reads: %q %q %v", src.Via, src.ViaSource, src.Chats)
+	}
 	if chats := h.readInbox(ctx, roundChats); chats.Names[sub.ID] != "Notices" || len(chats.Sources) != 0 {
 		t.Fatalf("a round of the Feishu chats: %+v", chats)
+	}
+	// A run that failed: the next round says the subscription is behind, as a built-in's failed read does, and still
+	// hands its rows (#6189).
+	cur, _ := store.GetSubscription(ctx, sub.ID)
+	failing := *cur
+	failing.RunState = subscriptions.StateFailing
+	if ok, err := store.UpdateSubscription(ctx, failing, cur.Revision); !ok || err != nil {
+		t.Fatalf("update: %v %v", ok, err)
+	}
+	found := false
+	for _, s := range h.readInbox(ctx, roundPoll).Sources {
+		if s.ID == sub.ID {
+			found = true
+			if s.ReadError != assistantwire.ReadFailed || len(s.Things) != 2 {
+				t.Fatalf("a failing subscription's source: %+v", s)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the failing subscription left the round")
 	}
 
 	archives := h.kbArchives(ctx)

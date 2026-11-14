@@ -99,25 +99,41 @@ enum ChatNames {
 
 /// Expand / Collapse under words that are folded: an exchange's (`ExchangeText`) and a long message's (`LineFold`).
 /// prefix: the accessibility identifiers, "<prefix>.expand" and "<prefix>.collapse".
+/// tint: the words' color (nil: the accent); a user bubble's link color in your own long message (`BubbleFold`).
+/// showMore: Show More / Show Less, the web's words for your own long message (#5676), whose row is the bubble's width
+/// and takes taps a space around it (the bubble's bottom padding), as a 44 pt target would.
+/// title: other words for it; a pending card's long command says Show All N Lines, as the chat's tool output does (`CardFold`).
 struct FoldToggle: View {
     var open: Bool
     var prefix: String
+    var tint: Color? = nil
+    var showMore = false
+    var title: String? = nil
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: Theme.Space.xs) {
-                Text(open ? String(localized: "Collapse") : String(localized: "Expand")).lineLimit(1)
+                Text(words).lineLimit(1)
                 ThemedIcon(Theme.Icon.disclosure)
                     .rotationEffect(.degrees(open ? -90 : 90))
                     .accessibilityHidden(true)
             }
             .font(Theme.Font.captionStrong)
-            .foregroundStyle(Theme.accent)
-            .contentShape(.rect)
+            .foregroundStyle(tint ?? Theme.accent)
+            .frame(maxWidth: showMore ? .infinity : nil, alignment: .leading)
+            // A bubble's Show More: the caption line and 16 pt around it, at least `Theme.Size.tapTarget` tall, with
+            // nothing laid out around it (what the bubble looks like stays as it is).
+            .contentShape(Rectangle().inset(by: showMore ? -Theme.Space.l : 0))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(prefix + (open ? ".collapse" : ".expand"))
+    }
+
+    private var words: String {
+        if let title { return title }
+        if showMore { return open ? String(localized: "Show Less [Bubble Fold]") : String(localized: "Show More [Bubble Fold]") }
+        return open ? String(localized: "Collapse") : String(localized: "Expand")
     }
 }
 

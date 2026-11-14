@@ -111,6 +111,9 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
   const request = useRef(0);
   const [resp, setResp] = useState<KBDetailResponse | null>(null);
   const [error, setError] = useState("");
+  // The page's own read (opening, after a save elsewhere on the page, Retry) failed while an earlier detail is shown:
+  // the detail stays and this says it may be out of date. Sections reading it again themselves show their own errors.
+  const [reloadError, setReloadError] = useState("");
   const [retry, setRetry] = useState(0);
   const [editing, setEditing] = useState(false);
   const [asking, setAsking] = useState(false);
@@ -148,6 +151,7 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
       remember(r.detail.links ?? []);
       setResp(r);
       setError("");
+      setReloadError("");
       return true;
     } catch (err) {
       if (!valid()) return false;
@@ -158,8 +162,11 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
 
   useEffect(() => {
     setError("");
+    setReloadError("");
     const ac = new AbortController();
-    void load(ac.signal).catch(() => {});
+    void load(ac.signal).catch((err) => {
+      if (!ac.signal.aborted && !isAbort(err)) setReloadError(errorText(err));
+    });
     return () => { ac.abort(); request.current++; };
   }, [load, reloadKey, retry]);
 
@@ -253,9 +260,9 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
               <Loading />
             </div>
           )}
-          {error && !d && (
+          {(d ? reloadError : error) && (
             <div className="mt-6">
-              <ErrorBox text={error} onRetry={() => setRetry((x) => x + 1)} />
+              <ErrorBox text={d ? reloadError : error} onRetry={() => setRetry((x) => x + 1)} />
             </div>
           )}
 

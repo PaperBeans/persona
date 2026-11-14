@@ -12,11 +12,14 @@ import { latestReview } from "../../lib/supervision";
 import { askOptions, openAsk, type Todo } from "../../lib/todos";
 import { Button, toast } from "../../ui/atoms";
 import { AcceptRow } from "./Brief";
+import { BriefingMark } from "./BriefingMark";
 import { DecisionRow } from "./DecisionRow";
+import RuleSuggestionLine from "./RuleSuggestionLine";
+import type { RuleCard } from "../../lib/rule-suggestion";
 
 type Review = NonNullable<Todo["decision_review"]>;
 
-export function TaskDecision({ todo, rowKey }: { todo: Todo; rowKey: string }) {
+export function TaskDecision({ todo, rowKey, hideTitle = false }: { todo: Todo; rowKey?: string; hideTitle?: boolean }) {
   const ask = openAsk(todo);
   const review = latestReview(todo.supervision);
   const round = decisionRound(todo);
@@ -78,13 +81,18 @@ export function TaskDecision({ todo, rowKey }: { todo: Todo; rowKey: string }) {
     if (admission.current || !current()) return;
     later(decisionLaterKey(todo));
   };
-  const controls = <div data-decision-actions className={`${ask && askOptions(ask).length ? "" : "sticky -bottom-2.5 "}-mx-3 -mb-2.5 mt-1 flex items-center gap-2 border-t border-line bg-field px-3 py-2.5`}>
+  const buttons = <>
     <Button className="min-h-11" disabled={busy} onClick={defer}>{t("assistant-tasks.later")}</Button>
     <Button className="min-h-11" disabled={busy || !round} busy={dismissing} onClick={dismiss}>{t("assistant-tasks.dismiss_draft")}</Button>
-  </div>;
-  if (ask && askOptions(ask).length) return <DecisionRow todo={todo} ask={ask} rowKey={rowKey} admission={admission} onBusyChange={setBusy} blocked={busy} footer={controls} />;
-  return <div data-needs-row={rowKey} className="flex min-w-0 flex-col gap-1.5 rounded-control bg-field px-3 py-2.5">
-    {ask ? <AcceptRow stacked admission={admission} onBusyChange={setBusy} blocked={busy} row={{ id: todo.id, title: todo.title, waited_s: Math.max(0, (Date.now() - Date.parse(ask.asked_at)) / 1000), outcome: ask.outcome, verdict: ask.verdict, recommend: ask.recommend, asked_at: ask.asked_at }} /> : <>
+  </>;
+  const controls = <div data-decision-actions className={`${ask && askOptions(ask).length ? "" : "sticky -bottom-2.5 "}-mx-3 -mb-2.5 mt-1 flex items-center gap-2 border-t border-line bg-field px-3 py-2.5`}>{buttons}</div>;
+  // a decision that offers a go-ahead the owner gave three times carries a suggested rule: its line goes under the
+  // row (#5802; always mounted here), answered through the to-do's manager as the row's own answers are
+  // (kept by the decision's round: what Always made is not said under the to-do's next decision)
+  const rule = { id: todo.id + (ask?.asked_at ?? ""), suggestion: ask?.suggestion, headers: { [MANAGER_HEADER]: manager } };
+  if (ask && askOptions(ask).length) return <><DecisionRow todo={todo} ask={ask} rowKey={rowKey} hideTitle={hideTitle} admission={admission} onBusyChange={setBusy} blocked={busy} footer={controls} /><RuleSuggestionLine of={rule} /></>;
+  return <><div data-needs-row={rowKey} className="flex min-w-0 flex-col gap-1.5 rounded-control bg-field px-3 py-2.5">
+    {ask ? <><AcceptRow stacked hideTitle={hideTitle} admission={admission} onBusyChange={setBusy} blocked={busy} secondary={<span data-decision-actions className="contents">{buttons}</span>} row={{ id: todo.id, title: todo.title, waited_s: Math.max(0, (Date.now() - Date.parse(ask.asked_at)) / 1000), outcome: ask.outcome, verdict: ask.verdict, recommend: ask.recommend, asked_at: ask.asked_at }} />{ask.for_briefing && <BriefingMark />}</> : <>
       <div className="flex min-w-0 items-center gap-2 text-sm"><button type="button" onClick={open} className="min-w-0 flex-1 truncate text-left font-medium hover:underline">{todo.title}</button><span className="shrink-0 text-xs text-ink-2">{t("assistant-tasks.review_needs_user")}</span></div>
       {(review?.reason || review?.note) && <p data-decision-legacy className="whitespace-pre-wrap text-sm select-text [overflow-wrap:anywhere]">{review.reason || review.note}</p>}
       {review?.recommend && <p className="text-xs text-ink-2">{t("assistant-brief.recommend", { option: review.recommend })}</p>}
@@ -92,6 +100,20 @@ export function TaskDecision({ todo, rowKey }: { todo: Todo; rowKey: string }) {
       <p className="text-xs text-ink-2">{t("assistant-decisionrow.missing_options")}</p>
       <div><Button disabled={busy} onClick={open}>{t("assistant-decisionrow.another")}</Button></div>
     </>}
-    {controls}
-  </div>;
+    {!ask && controls}
+  </div><RuleSuggestionLine of={rule} /></>;
+}
+
+export type NeedsYouPartProps =
+  /** A task's decision in the tray. */
+  | { decision: Todo; rowKey?: string; hideTitle?: boolean }
+  /** The suggested rule of a plan card or a passed-up question, under it. */
+  | { rule: RuleCard };
+
+/** What views/assistant/Tasks loads, with the first card that draws one and not with the first screen
+ *  (startup-preload's budget): a decision's row, or a suggested rule's line (#5802). One chunk behind one component,
+ *  so the first screen names one file for both. */
+export default function NeedsYouParts(props: NeedsYouPartProps) {
+  if ("decision" in props) return <TaskDecision todo={props.decision} rowKey={props.rowKey} hideTitle={props.hideTitle} />;
+  return <RuleSuggestionLine of={props.rule} />;
 }

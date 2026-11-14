@@ -50,6 +50,8 @@ type TodoRow struct {
 	// SeenAt is when the owner last looked at it in Just finished (#5707): Got it, or opening it; nil when never, or
 	// after an Undo. Only SeeTodo writes it.
 	SeenAt *time.Time `json:"seen_at"`
+	// InboxItem is the id of the Inbox row it was made from (#6480), "" for any other to-do. Set when it is made.
+	InboxItem string `json:"inbox_item"`
 }
 
 // KindConcern is a todo for something the owner raised in the main conversation and wants an answer to (#3561,
@@ -103,13 +105,13 @@ type TodoAgentRow struct {
 }
 
 const todoColumns = `id, title, notes, done_at, created_at, updated_at, origin, plan_id, start_error, done_by, done_reason, reopened_at, quiet,
-	due_at, due_date, remind_at, reminded_at, priority, project, kind, seen_at`
+	due_at, due_date, remind_at, reminded_at, priority, project, kind, seen_at, inbox_item`
 
 // todoDest is where a row of todoColumns is scanned to.
 func todoDest(r *TodoRow) []any {
 	return []any{&r.ID, &r.Title, &r.Notes, &r.DoneAt, &r.CreatedAt, &r.UpdatedAt, &r.Origin, &r.PlanID, &r.StartError, &r.DoneBy,
 		&r.DoneReason, &r.ReopenedAt, &r.Quiet, &r.DueAt, &r.DueDate, &r.RemindAt, &r.RemindedAt, &r.Priority, &r.Project, &r.Kind,
-		&r.SeenAt}
+		&r.SeenAt, &r.InboxItem}
 }
 
 // ListTodos returns all todos ordered by created_at DESC.
@@ -183,10 +185,10 @@ func (d *DB) GetTodo(ctx context.Context, id string) (*TodoRow, error) {
 // CreateTodo inserts a new todo.
 func (d *DB) CreateTodo(ctx context.Context, t TodoRow) error {
 	_, err := d.pool.Exec(ctx, `INSERT INTO todos (id, title, notes, done_at, created_at, updated_at, origin, plan_id, start_error, done_by,
-		done_reason, reopened_at, quiet, due_at, due_date, remind_at, reminded_at, priority, project, kind)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+		done_reason, reopened_at, quiet, due_at, due_date, remind_at, reminded_at, priority, project, kind, inbox_item)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
 		t.ID, t.Title, t.Notes, t.DoneAt, t.CreatedAt, t.UpdatedAt, t.Origin, t.PlanID, t.StartError, t.DoneBy, t.DoneReason, t.ReopenedAt, t.Quiet,
-		t.DueAt, t.DueDate, t.RemindAt, t.RemindedAt, t.Priority, t.Project, t.Kind)
+		t.DueAt, t.DueDate, t.RemindAt, t.RemindedAt, t.Priority, t.Project, t.Kind, t.InboxItem)
 	return err
 }
 
@@ -803,6 +805,30 @@ func (d *DB) linkTodoAgentWithSource(ctx context.Context, todoID, machineID, ses
 		return nil, err
 	}
 	return releasedTodoIDs, nil
+}
+
+// ReleaseTodoAgent lets go of an agent still linked to a todo (released_at only: it stays in the todo's history, unlike
+// UnlinkTodoAgent's dismissal). A link already let go is left as it is. A new agent taking over the todo after this one
+// stopped does it (#6427).
+func (d *DB) ReleaseTodoAgent(ctx context.Context, todoID, machineID, sessionID string, at time.Time) error {
+	conn, err := d.pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+	return pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		if _, err := lockTodoAgentMembership(ctx, tx, todoID, machineID, sessionID); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE todo_agents SET released_at = $4
+			WHERE todo_id = $1 AND machine_id = $2 AND session_id = $3 AND released_at IS NULL`,
+			todoID, machineID, sessionID, at.UTC())
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE todos SET updated_at = $2 WHERE id = $1`, todoID, at.UTC())
+		return err
+	})
 }
 
 // UnlinkTodoAgent marks the agent as released and dismissed on a todo (soft unlink, #762).

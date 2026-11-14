@@ -47,7 +47,19 @@ class HttpTerminalPanesTest {
             assertEquals(Json.parseToJsonElement("""{"workspace_id":"w2","kind":"herdr"}"""), Json.parseToJsonElement(it.body.readUtf8()))
         }
         // No host named: the hub uses the machine's own.
-        assertEquals(Json.parseToJsonElement("""{"workspace_id":"w2"}"""), newTabBody("w2", null))
+        assertEquals(Json.parseToJsonElement("""{"workspace_id":"w2"}"""), newTabBody("w2", null, null))
+    }
+
+    @Test fun aHomeTerminalPostsTheHostAndHomeDirectory() = withHub { server, panes ->
+        server.enqueue(MockResponse().setBody("""{"pane":"w1:p1","terminal":"pane:w1:p1","tab_id":"w1:t1"}"""))
+        panes.newTab("desk", "", "herdr", cwd = "~")
+        server.takeRequest().let {
+            assertEquals("POST", it.method)
+            assertEquals(Json.parseToJsonElement("""{"kind":"herdr","cwd":"~","new_space":true}"""), Json.parseToJsonElement(it.body.readUtf8()))
+        }
+        assertTrue(HttpTerminalPanes.offersNewSpace(emptySet()))
+        assertTrue(HttpTerminalPanes.offersNewSpace(setOf(HttpTerminalPanes.NEW_SPACE)))
+        assertFalse(HttpTerminalPanes.offersNewSpace(setOf(HttpTerminalPanes.TERMINAL_PANES)))
     }
 
     @Test fun aRefusedNewTabSaysTheHubsWords() = withHub { server, panes ->

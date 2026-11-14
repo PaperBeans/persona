@@ -68,7 +68,9 @@ cd server
 # Straight from the default branch, for when a change cannot wait for a release: the build number is the build time
 # (UTC), so an older release never replaces it and the next release does (docs/operations/hub-update.md "Direct deploys").
 BUILD="$(date -u +%Y%m%d%H%M)"
-VERSION="$(git describe --always --dirty 2>/dev/null || echo dev)-$BUILD"
+# The nearest vX.Y.Z tag names it, a lightweight one too (a GitHub release's tag is one; plain `git describe` counts
+# annotated tags only, so builds after v0.4.0 read v0.3.1-…, #7201); testflight/<build> and other tags never do.
+VERSION="$(git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)-$BUILD"
 TARGETS=("$@")
 [ ${#TARGETS[@]} -eq 0 ] && read -ra TARGETS <<< "$PERSONA_MACHINES"
 
@@ -149,6 +151,23 @@ for plat in "${PLATFORMS[@]}"; do
   GOOS=${plat%-*} GOARCH=${plat#*-} CGO_ENABLED=0 go build -tags "$TAGS" -trimpath -ldflags "$LDFLAGS" -o "bin/personad-$plat" ./cmd/personad
   GOOS=${plat%-*} GOARCH=${plat#*-} CGO_ENABLED=0 go build -tags "$TAGS" -trimpath -ldflags "$LDFLAGS" -o "bin/persona-node-$plat" ./cmd/persona-node
 done
+# adhoc_identifiers <dir>: the darwin builds in dir, signed ad hoc again under their program's identifier
+# (com.nwverse.personad, com.nwverse.persona-node, ...) in place of the a.out Go's linker always writes. Only the name
+# changes: an ad-hoc signature's designated requirement stays the build's cdhash, so keeping macOS privacy permissions
+# across updates takes a certificate on the node's Mac (docs/operations/mac-node-signing.md). Only on a Mac, which has
+# codesign; builds made elsewhere keep a.out.
+adhoc_identifiers() {
+  local f prog
+  [ "$(uname -s)" = Darwin ] && command -v codesign >/dev/null 2>&1 || return 0
+  for f in "$1"/*-darwin-amd64 "$1"/*-darwin-arm64; do
+    [ -f "$f" ] || continue
+    prog=${f##*/}
+    prog=${prog%-darwin-*}
+    codesign --force --sign - --identifier "com.nwverse.$prog" "$f" 2>/dev/null ||
+      echo "note: $f keeps the Go linker's ad-hoc identifier a.out (codesign failed)" >&2
+  done
+}
+adhoc_identifiers bin
 echo "built $VERSION"
 # The web client goes with the hub: built here with the binaries, uploaded after the hub restarts.
 if [[ " ${TARGETS[*]} " == *" $HUB "* ]]; then build_web; fi

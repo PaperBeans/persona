@@ -16,8 +16,8 @@ const NAMES = ["需要你", "工作中", "完成未看", "已看", "未运行", 
 /** Names a page used before #3415 for one of those states. */
 const OLD = ["等你", "在做", "待查看", "做完", "做完了", "做完了，还没看", "停着", "等你处理", "需要你处理", "正在工作", "待回答", "全部标为已读"];
 
-/** The same word meaning something else: a file marked reviewed, an inbox item's tier. */
-const OTHER_MEANING = new Set(["extensions-review.viewed", "lib-inbox.tier_action"]);
+/** The same word meaning something else: an inbox item's tier. (A file marked viewed in a code review says 已查看, #6072.) */
+const OTHER_MEANING = new Set(["lib-inbox.tier_action"]);
 
 function others(): [string, string][] {
   const out: [string, string][] = [];

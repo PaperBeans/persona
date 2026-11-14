@@ -30,22 +30,23 @@ func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherChe
 	if name != "claude" && !shellcmd.NameRe.MatchString(name) {
 		return proto.LauncherCheck{Error: fmt.Sprintf("invalid launcher %q", name)}
 	}
-	agent := "claude"
-	if m, managed := n.managedLauncher(name); managed {
-		agent = m.AgentType()
-	} else if name != "claude" {
-		if res, ok := n.runtimeLauncherModels(name); ok && res.Agent != "" {
-			agent = res.Agent
-		} else if d := n.launcherProbeCached(ctx, name); d.Agent != "" {
-			agent = d.Agent
-		}
+	if isDesktopLauncher(name) { // nothing of its own to run: the app's session runs on the app's settings
+		return proto.LauncherCheck{Agent: "claude", Error: desktopCheckMsg}
 	}
+	if isCodexAppLauncher(name) {
+		return proto.LauncherCheck{Agent: "codex", Error: codexAppCheckMsg}
+	}
+	agent := n.launcherAgent(ctx, name)
 	dir, err := os.MkdirTemp("", launcherCheckDir)
 	if err != nil {
 		return proto.LauncherCheck{Error: err.Error()}
 	}
 	defer os.RemoveAll(dir)
 	prompt := prompts.RenderLauncherCheck()
+	if agent == "claude" {
+		// What Claude Code keeps of the run, the shell's or a runtime's (Paseo's probe agent runs it in dir too).
+		defer n.removeCheckProject(dir)
+	}
 	if _, managed := n.managedLauncher(name); !managed {
 		if _, runtime := n.runtimeLauncherModels(name); runtime {
 			if result, handled := n.runtimeLauncherCheck(ctx, name, dir, prompt); handled {
@@ -58,7 +59,6 @@ func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherChe
 		if ready, known := n.claudeOnboardingReady(ctx); known && !ready {
 			return proto.LauncherCheck{Agent: agent, Error: claudeOnboardingNotReadyMsg}
 		}
-		defer n.removeCheckProject(dir)
 	}
 	// The flag that keeps the run off the disk goes between before and after: a transcript per check, a hundred a day on
 	// each computer, filled the newest offline sessions the list keeps and pushed the user's own Agents out (#2959).
@@ -140,6 +140,22 @@ func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherChe
 		res.Error = clipText(redactCheck(err.Error()), 400)
 	}
 	return res
+}
+
+// launcherAgent is the CLI launcher name runs: a managed one's type, a runtime's word for it, what a probe saw, else
+// claude.
+func (n *Node) launcherAgent(ctx context.Context, name string) string {
+	if m, managed := n.managedLauncher(name); managed {
+		return m.AgentType()
+	}
+	if name != "claude" {
+		if res, ok := n.runtimeLauncherModels(name); ok && res.Agent != "" {
+			return res.Agent
+		} else if d := n.launcherProbeCached(ctx, name); d.Agent != "" {
+			return d.Agent
+		}
+	}
+	return "claude"
 }
 
 // checkOutput is the end of what a check printed, as its error says it: the last lines, without keys, URLs or IPs.

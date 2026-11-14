@@ -45,6 +45,8 @@
     <string name="chat_chrome_actions_title">会话操作</string>
     <string name="chat_chrome_todo">待办 · %1$s</string>
     <string name="chat_chrome_terminal">终端</string>
+    <string name="chat_chrome_resume_in_terminal">在终端里恢复</string>
+    <string name="chat_chrome_resume_no_engine">%1$s 没有启用终端引擎</string>
     <string name="chat_chrome_search">搜索</string>
     <string name="chat_chrome_files">文件</string>
     <string name="chat_chrome_details">会话详情</string>
@@ -181,6 +183,17 @@
     <string name="chat_screen_command_ids">请求 %1$s，工具调用 %2$s</string>
     <string name="chat_screen_type_answer">输入回答</string>
     <string name="chat_screen_unreadable">暂时读不出这个对话框，请在电脑上核对并处理。</string>
+    <string name="chat_command_ask_title">%1$s 想运行一条命令</string>
+    <string name="chat_command_ask_risk_delete">无法确认这条命令不会删除文件</string>
+    <string name="chat_command_ask_risk_other">Claude Code 提醒这条命令可能有风险</string>
+    <string name="chat_command_ask_countdown_deny">%1$s 后自动拒绝</string>
+    <string name="chat_command_ask_countdown_allow">%1$s 后自动允许</string>
+    <string name="chat_command_ask_countdown_over_deny">时间到了，Claude Code 会自动拒绝</string>
+    <string name="chat_command_ask_countdown_over_allow">时间到了，Claude Code 会自动允许</string>
+    <string name="chat_command_ask_show_original">显示原文</string>
+    <string name="chat_command_ask_hide_original">隐藏原文</string>
+    <string name="chat_command_ask_show_all">看全部</string>
+    <string name="chat_command_ask_collapse">收起</string>
     <string name="chat_request_unsupported">这个请求还不能在手机上处理。到电脑上看一下再处理。</string>
     <string name="chat_request_terminal_help">终端处理说明</string>
     <string name="chat_request_dismiss">交给电脑处理</string>
@@ -231,7 +244,6 @@
     <string name="chat_links_context_default">参考上面的内容。</string>
     <string name="chat_menu_copied">已拷贝</string>
     <string name="chat_menu_no_share">没有能分享的应用</string>
-    <string name="chat_menu_select_title">选择文本</string>
     <string name="chat_menu_copy">复制</string>
     <string name="chat_menu_select">选择</string>
     <string name="chat_menu_quote">引用</string>
@@ -342,6 +354,9 @@
     <string name="chat_queue_send_now_message">现在就把排队的消息发给 Agent。它正在跑的命令会转到后台继续跑；正在写的回复会带上你的消息重新开始。</string>
     <string name="chat_queue_send_now_message_persona">%1$s 会马上收到，不用等到下一步。它手头的这一步会停下，能转到后台的会在后台继续，然后带上你的消息重新开始。</string>
     <string name="chat_queue_relayed_note">对话空闲后送达</string>
+    <plurals name="chat_queue_relayed_summary">
+        <item quantity="other">还有 %1$d 条别的对话在排队</item>
+    </plurals>
     <string name="chat_queue_sent_now">已立即发给 Agent</string>
     <string name="chat_composer_photos_only">请看图片</string>
     <string name="chat_composer_photo_placeholder">[图片]</string>

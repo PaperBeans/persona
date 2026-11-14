@@ -27,7 +27,6 @@
   "show_all": "すべて表示",
   "pinned_section": "ピン留め",
   "directions": "常駐",
-  "direction_tasks": "{name}のタスク",
   "task_agents": "{name}のエージェント",
   "launching": "起動中",
   "launch_untitled": "新しいエージェント",
@@ -78,7 +77,6 @@
   "show_child_workspaces_other": "{count}件の子ワークツリーを表示",
   "hide_child_workspaces_one": "{count}件の子ワークツリーを非表示",
   "hide_child_workspaces_other": "{count}件の子ワークツリーを非表示",
-  "paged_list": "最近の更新（全セッション）",
   "children_title": "子スペース：{list}",
   "list_separator": "、",
   "child_sr_needs_you": "件の子スペースが要対応",
@@ -148,7 +146,8 @@
   "switcher_label": "{name}、アシスタントを切り替え",
   "switcher_label_waiting": "{name}、アシスタントを切り替え。ほかのアシスタントに対応待ちがあります",
   "switcher_count": "対応待ち {count} 件",
-  "leader_working": "作業中 {count}",
   "leader_needs_you": "対応待ち {count}",
-  "codex_waiting": "最初のメッセージ待ち"
+  "codex_waiting": "最初のメッセージ待ち",
+  "direction_tasks_expand": "「{name}」の進行中タスクを開く",
+  "direction_tasks_collapse": "「{name}」の進行中タスクを閉じる"
 }

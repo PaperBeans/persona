@@ -36,6 +36,7 @@ type Client struct {
 	cfg     Config
 	http    *http.Client
 	resolve func(context.Context) (*Client, error)
+	run     func(context.Context, Request) (Reply, error)
 }
 
 // NewResolved resolves the execution configuration at the start of every request.
@@ -53,6 +54,12 @@ func New(cfg Config) *Client {
 // NewWith is New sending its requests through transport (nil: this machine's network).
 func NewWith(cfg Config, transport http.RoundTripper) *Client {
 	return &Client{cfg: cfg, http: &http.Client{Timeout: 60 * time.Second, Transport: transport}}
+}
+
+// NewRun is a client whose requests run answers instead of an HTTP API: no gate, no key (a launcher's CLI on a
+// computer, cfg.RunLauncher).
+func NewRun(cfg Config, run func(context.Context, Request) (Reply, error)) *Client {
+	return &Client{cfg: cfg, run: run}
 }
 
 func (c *Client) key() (string, error) {
@@ -139,6 +146,11 @@ func (c *Client) Chat(ctx context.Context, r Request) (Reply, error) {
 		}
 		return resolved.Chat(ctx, r)
 	}
+	if c.run != nil {
+		reply, err := c.run(ctx, r)
+		reply.Model = cmp.Or(reply.Model, c.cfg.Model)
+		return reply, err
+	}
 	if !c.cfg.Configured() {
 		return Reply{}, errNotConfigured
 	}
@@ -159,6 +171,13 @@ func (c *Client) Chat(ctx context.Context, r Request) (Reply, error) {
 		copied.Timeout = 0
 		hc = &copied
 	}
+	var found *probeAnswer // this request finds out whether a pause is over: the gate goes at its 200 (limit.go)
+	if probe && hc != nil {
+		found = &probeAnswer{next: hc.Transport, g: g}
+		copied := *hc
+		copied.Transport = found
+		hc = &copied
+	}
 	var reply Reply
 	var answered bool
 	switch c.cfg.API {
@@ -172,7 +191,7 @@ func (c *Client) Chat(ctx context.Context, r Request) (Reply, error) {
 	if reply.Model == "" {
 		reply.Model = c.cfg.Model
 	}
-	return reply, g.done(probe, answered, err)
+	return reply, g.done(probe && !(found != nil && found.let.Load()), answered, err)
 }
 
 // apiEndpoint preserves deployment prefixes and accepts bases with or without /v1.

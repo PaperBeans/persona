@@ -110,7 +110,7 @@ func (s *Service) toolTodoList(ctx context.Context, args json.RawMessage) (strin
 	s.todos.mu.RUnlock()
 	list = slices.DeleteFunc(list, func(t Todo) bool {
 		done := t.DoneAt != nil
-		if status == "open" && done || status == "done" && !done {
+		if status == "open" && done && t.StartError == "" || status == "done" && !done {
 			return true
 		}
 		by, hasDue := t.dueBy(loc)
@@ -166,6 +166,9 @@ func (s *Service) toolTodoGet(ctx context.Context, args json.RawMessage) (string
 			fmt.Fprintf(&b, " (by %s: %s)", t.DoneBy, clip(oneLine(t.DoneReason), 200))
 		}
 		b.WriteString("\n")
+	}
+	if t.StartError != "" {
+		fmt.Fprintf(&b, "failed to start: %s\n", clip(oneLine(t.StartError), 200))
 	}
 	if t.RemindAt != nil && t.RemindedAt != nil {
 		fmt.Fprintf(&b, "reminder pushed %s\n", t.RemindedAt.In(loc).Format(toolTimeLayout))
@@ -529,7 +532,9 @@ const toolTimeLayout = "2006-01-02 Mon 15:04"
 func todoLine(t Todo, now time.Time, loc *time.Location) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s %q [", t.ID, clip(oneLine(t.Title), 120))
-	if t.DoneAt != nil {
+	if t.StartError != "" {
+		b.WriteString("failed to start")
+	} else if t.DoneAt != nil {
 		b.WriteString("done")
 	} else {
 		b.WriteString("open")

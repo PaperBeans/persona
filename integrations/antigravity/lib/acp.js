@@ -284,7 +284,18 @@ export class AgyAcpClient extends EventEmitter {
     await this.ensureStarted()
     const child = this.proc
     const file = this.nativeLogs.get(child)?.file
-    const port = file && Number(/random port at (\d+) for HTTP(?:\r?\n|$)/m.exec(readFileSync(file, 'utf8'))?.[1])
+    const portOf = () => file && Number(/random port at (\d+) for HTTP(?:\r?\n|$)/m.exec(readFileSync(file, 'utf8'))?.[1])
+    // Initialize alone leaves the native service unopened. Listing sessions opens it without resuming one.
+    if (!portOf()) {
+      const state = this.nativeLogs.get(child)
+      state.ready ??= this._rawCall('session/list', {}, 20_000).catch((error) => {
+        delete state.ready
+        throw error
+      })
+      await state.ready
+    }
+    if (child !== this.proc) throw new Error('Antigravity process changed during the conversation operation')
+    const port = portOf()
     if (!port || port > 65535) throw new Error('Antigravity did not expose its native conversation service')
     const body = JSON.stringify(params)
     return new Promise((resolve, reject) => {

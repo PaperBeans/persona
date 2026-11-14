@@ -14,7 +14,7 @@ func listKeyFmt(list []proto.Session) string {
 	var b strings.Builder
 	for _, s := range list {
 		fmt.Fprintf(&b, "%s|%s|%s|%s|%s|%s|%s|%s|%d|%q|%s|%s\n", s.SessionID, s.Status, s.Title, s.PaneID, s.SpaceName, s.ParentSpaceID, s.SlotName, s.LastText, s.UpdatedAt.Unix()/10, s.Queued, s.Suggestion, s.SpawnFrom)
-		fmt.Fprintf(&b, "hierarchy:%q/%q/%q/%v/%q/%q/%q/%q/%q\n", s.ParentThreadID, s.ParentSessionID, s.RootSessionID, s.IsSubagent, s.RepoRoot, s.Worktree, s.Branch, s.SpaceID, s.SpaceKind)
+		fmt.Fprintf(&b, "hierarchy:%q/%q/%q/%q/%v/%q/%q/%q/%q/%q\n", s.ParentThreadID, s.ParentSessionID, s.ParentAgentID(), s.RootSessionID, s.IsSubagent, s.RepoRoot, s.Worktree, s.Branch, s.SpaceID, s.SpaceKind)
 		if h := s.Hierarchy; h != nil {
 			fmt.Fprintf(&b, "lineage:%q/%d\n", h.AskingParentSessionID, unixOf(&h.StartedAt))
 		}
@@ -22,7 +22,7 @@ func listKeyFmt(list []proto.Session) string {
 			fmt.Fprintf(&b, "activity:%s/%d\n", s.Activity, unixOf(s.ActivityAt))
 		}
 		if s.SourceKind == "runtime" {
-			fmt.Fprintf(&b, "runtime-state:%q/%q/%v\n", s.Cwd, s.Launcher, s.StartedByPersona)
+			fmt.Fprintf(&b, "runtime-state:%q/%q/%v/%q\n", s.Cwd, s.Launcher, s.StartedByPersona, s.WorkspaceID)
 		}
 		fmt.Fprintf(&b, "attention:%q/%q/%s\n", s.AttentionReason, s.FailureReason, s.ExternalURL)
 		if s.Chat != "" || len(s.Dispatched) > 0 {
@@ -38,6 +38,9 @@ func listKeyFmt(list []proto.Session) string {
 		}
 		if len(s.Efforts) > 0 {
 			fmt.Fprintf(&b, "effort:%s/%v\n", s.Effort, s.Efforts)
+		}
+		if s.Model != "" || s.PermissionMode != "" || s.Effort != "" {
+			fmt.Fprintf(&b, "modes:%q/%q/%q\n", s.Model, s.PermissionMode, s.Effort)
 		}
 		fmt.Fprintf(&b, "source:%s/%s/%s/%s/%v/%v/%s/%s\n", s.SourceKind, s.SourceThreadID, s.SourceInstanceID, s.ReadOnlyReason, capsFmt(s.Capabilities), s.Attached, s.CodexRoute, s.CodexRouteNote)
 		for _, t := range s.Background {
@@ -87,6 +90,15 @@ func capsFmt(c *proto.SessionCapabilities) string {
 		modes = fmt.Sprint(*c.Modes)
 	}
 	key := fmt.Sprintf("&{%v %v %v %v %v %v %s", c.Read, c.Send, c.Interrupt, c.Approve, c.Terminal, c.Attach, modes)
+	if c.Model != nil {
+		key += fmt.Sprintf(" model=%v", *c.Model)
+	}
+	if c.Close != nil {
+		key += fmt.Sprintf(" close=%v", *c.Close)
+	}
+	if c.Rename != nil {
+		key += fmt.Sprintf(" rename=%v", *c.Rename)
+	}
 	if c.Rewind != nil {
 		key += fmt.Sprintf(" rewind=%v", *c.Rewind)
 	}
@@ -212,6 +224,9 @@ func listKeyVariants() (proto.Session, map[string]proto.Session) {
 		"compact_at":       func(s *proto.Session) { s.Compaction = &proto.Compaction{State: "running", StartedAt: act} },
 		"compact_none":     func(s *proto.Session) { s.Compaction = nil },
 		"effort":           func(s *proto.Session) { s.Effort = "low" },
+		"model":            func(s *proto.Session) { s.Model = "claude-opus-5" },        // #6334
+		"permission_mode":  func(s *proto.Session) { s.PermissionMode = "plan" },        // #6334
+		"effort_alone":     func(s *proto.Session) { s.Efforts, s.Effort = nil, "max" }, // #6334
 		"efforts":          func(s *proto.Session) { s.Efforts = []string{"low", "medium", "high"} },
 		"efforts_none":     func(s *proto.Session) { s.Efforts = nil },
 		"source_kind":      func(s *proto.Session) { s.SourceKind = "claude" },
@@ -223,6 +238,9 @@ func listKeyVariants() (proto.Session, map[string]proto.Session) {
 		"caps_modes":       func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Modes: proto.CanModes(false)} },
 		"caps_rewind":      func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Rewind: proto.CanModes(true)} },
 		"caps_rewind_code": func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{RewindCode: proto.CanModes(true)} },
+		"caps_model":       func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Model: proto.CanModes(false)} },
+		"caps_close":       func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Close: proto.CanModes(true)} },
+		"caps_rename":      func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Rename: proto.CanModes(true)} },
 		"attached":         func(s *proto.Session) { s.Attached = false },
 		"codex_route":      func(s *proto.Session) { s.CodexRoute = "terminal" },
 		"route_note":       func(s *proto.Session) { s.CodexRouteNote = "" },

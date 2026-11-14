@@ -155,11 +155,16 @@ func (s *Service) healthChanged(ctx context.Context, r LauncherHealth, before st
 	s.event(ctx, map[string]any{"type": "launcher_health", "record": r})
 }
 
-// recordStartFailure: a dropped link, refused request or stalled agent says nothing about launcher health. Other
-// failures count, with one shared follow-up check to tell a blink from a broken launcher. A terminal-shell failure
-// (errKindNotInTerminal) skips the check: the login shell is where the launcher already works.
+// recordStartFailure: a dropped link, refused request, stalled agent or a start whose own wait ran out says nothing
+// about launcher health. Other failures count, with one shared follow-up check to tell a blink from a broken launcher.
+// A terminal-shell failure (errKindNotInTerminal) skips the check: the login shell is where the launcher already works.
 func (s *Service) recordStartFailure(ctx context.Context, machine, launcher string, err error) {
 	if err == nil || launcher == "" || transientStartErr(err) || errors.Is(err, ErrNoDevice) || startRefused(err) || startStalled(err) {
+		return
+	}
+	if startWaitEnded(err) {
+		// A failing record here would stand until someone rechecked by hand, and refuse every fixed-machine start.
+		s.logf("launcher health: %s on %s: start ended without an answer (%v); not counted against the launcher", launcher, machine, err)
 		return
 	}
 	if terminalMissing(err) {
@@ -332,6 +337,19 @@ func startRefused(err error) bool {
 		return slices.Contains(startRefusalCodes, re.Code)
 	}
 	return startRequestErr.MatchString(re.Message)
+}
+
+// startWaitEnded: the start's own context ran out or was cancelled before the node answered (its link stuck, a node
+// that never replied within taskStartTimeout), here or on the hub that relayed the call (an uncoded rpc.Error with the
+// context's words). The hub stopped waiting and learned nothing of the launcher. A node's own words about a timeout
+// ("session.start: context deadline exceeded", errKindTimeout) are not this and still count.
+func startWaitEnded(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	var re *rpc.Error
+	return errors.As(err, &re) && re.Code == "" &&
+		(re.Message == context.DeadlineExceeded.Error() || re.Message == context.Canceled.Error())
 }
 
 // startStalled is a node's coded timeout after opening the agent, or a start that ended in the new tab's shell before

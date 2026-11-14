@@ -100,6 +100,8 @@ class TasksStore(
 ) : TodoDecisionsSource {
     private val _todos = MutableStateFlow<List<Todo>>(emptyList())
     val todos: StateFlow<List<Todo>> = _todos.asStateFlow()
+    /** The connected hub's declared capabilities; seen controls are absent without `todo_seen`. */
+    val features: StateFlow<Set<String>>? = api.features
     /** Guards [answered] with the list: the cached list never replaces one the hub has given. */
     private val todosLock = Any()
     /** The hub's last answer (a list, or an older hub's 404 as none); null until it answers, while the cache shows. */
@@ -234,8 +236,8 @@ class TasksStore(
         }
     }
 
-    suspend fun createTodo(title: String, notes: String = ""): Todo {
-        val created = api.createTodo(title, notes)
+    suspend fun createTodo(title: String, notes: String = "", due: TodoDue? = null): Todo {
+        val created = api.createTodo(title, notes, due)
         reloadTodos()
         return created
     }
@@ -250,6 +252,22 @@ class TasksStore(
             updated
         } catch (t: Throwable) {
             _todos.value = before
+            throw t
+        }
+    }
+
+    /** Got it / Undo (#5707): only seen_at changes, at once; [after] keeps a slow phone's mark after the finish it saw. */
+    suspend fun setTodoSeen(id: String, seen: Boolean, after: Long = 0): Todo {
+        val before = _todos.value.firstOrNull { it.id == id } ?: error("no to-do $id")
+        val seenAt = if (seen) Instant.ofEpochMilli(maxOf(clock.millis(), after)).toString() else null
+        val moved = before.copy(seenAt = seenAt)
+        _todos.update { list -> list.map { if (it.id == id) moved else it } }
+        return try {
+            val updated = api.setTodoSeen(id, seen)
+            _todos.update { list -> list.map { if (it.id == updated.id && it == moved) updated else it } }
+            updated
+        } catch (t: Throwable) {
+            _todos.update { list -> list.map { if (it.id == id && it == moved) before else it } }
             throw t
         }
     }
@@ -761,12 +779,19 @@ class TasksStore(
         routes.update { if (todoId == null) it - conversation else it + (conversation to todoId) }
     }
 
-    /** Sends text straight to the task the conversation is routed to; false when there is none or its to-do is gone. */
-    fun sendRouted(conversation: String, text: String, onError: (Throwable) -> Unit): Boolean {
+    /**
+     * Sends text straight to the task the conversation is routed to; false when there is none or its to-do is gone.
+     * The route is consumed only by the hub's accepting response. A failure or cancellation leaves it ready to retry.
+     */
+    suspend fun sendRouted(conversation: String, text: String): Boolean {
         val todoId = routes.value[conversation] ?: return false
-        setRoute(conversation, null)
-        if (_todos.value.none { it.id == todoId }) return false // the hub would refuse it (409): Persona gets it instead
-        scope.launch { runCatching { api.route(conversation, todoId, text) }.onSuccess { received(listOf(it)) }.onFailure(onError) }
+        if (_todos.value.none { it.id == todoId }) {
+            setRoute(conversation, null)
+            return false // the hub would refuse it (409): Persona gets it instead
+        }
+        val routed = api.route(conversation, todoId, text)
+        received(listOf(routed))
+        routes.update { current -> if (current[conversation] == todoId) current - conversation else current }
         return true
     }
 

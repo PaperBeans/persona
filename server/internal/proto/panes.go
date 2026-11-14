@@ -124,10 +124,12 @@ type WorktreePreset struct {
 }
 
 // WorktreeAdded is the worktree worktree.add made for a new agent (#6115): its checkout, its branch, the repository's root.
+// WorkspaceID is the workspace a runtime engine made it as (Paseo's, docs/integrations/runtimes.md "Workspaces"), when one did.
 type WorktreeAdded struct {
-	Path   string `json:"path"`
-	Branch string `json:"branch"`
-	Root   string `json:"root"`
+	Path        string `json:"path"`
+	Branch      string `json:"branch"`
+	Root        string `json:"root"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
 // WorktreeSnapshot is what worktree.snapshot made (#2173): a detached checkout of Root's HEAD at Path with Root's
@@ -173,7 +175,7 @@ type WorktreeCreateResult struct {
 	Branch            string `json:"branch"`
 }
 
-// WorktreeDeletePreview binds confirmation to a host-owned instance and an opaque, short-lived node token.
+// WorktreeDeletePreview binds confirmation to a host-owned workspace and an opaque, short-lived node token.
 type WorktreeDeletePreview struct {
 	WorkspaceID  string `json:"workspace_id"`
 	Kind         string `json:"kind"`
@@ -184,6 +186,7 @@ type WorktreeDeletePreview struct {
 	Dirty        int    `json:"dirty"`
 	Folder       bool   `json:"folder"`
 	PreviewToken string `json:"preview_token"`
+	CloseOnly    bool   `json:"close_only,omitempty"`
 }
 
 // WorktreeDeleteResult reports completion separately from runtime acceptance or an ambiguous transport outcome.

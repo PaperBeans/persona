@@ -54,7 +54,7 @@ struct BrowserLoginsListView: View {
         .environment(\.editMode, $editMode)
         #endif
         .overlay { placeholder }
-        .searchable(text: $typed, prompt: Text("Search Sites"))
+        .pageSearchable(text: $typed, prompt: String(localized: "Search Sites"))
         .task(id: typed) {
             if !typed.isEmpty {
                 try? await Task.sleep(for: Self.settle)

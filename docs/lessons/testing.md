@@ -1,5 +1,25 @@
 # Lessons: testing and validation
 
+- Fixture teardown is part of a test's elapsed time (#5730). A scripted terminal whose shell is ready immediately
+  does not need a fixed startup pause. When a test has finished its assertions, cancel background prompt checks
+  owned by that fixture and join them before restoring package settings or closing sockets. Delivery/recovery tests
+  must still await the check before their assertions; cancellation at teardown must not substitute for those checks.
+  Keep normal detached delivery and production wait limits unchanged, and measure serial and partitioned commands
+  separately when evaluating the gain.
+
+- A transport fixture that already reads every reply should wake its request waiter from that reader (#5730).
+  Register by request ID before sending, retain JSON-RPC errors, remove waiters on cancellation/EOF/write failure,
+  and keep duplicate or late replies from blocking the reader. Polling an already available approval response
+  added about 23 seconds to the complete shell-name security matrix. Keep every classification assertion and
+  verify the transport with real pipes and held approvals; virtual time can expose an unnecessary polling tick.
+
+- A counter of a shared resource (lists, calls, reads) must not include what a fixture's own background passes do
+  (#6121). `TestIdlePassesReadWhatRuns` counted `closeDoneTaskAgents`'s machine lists, but `liveLoop`'s signal-driven
+  pass (a 100 ms coalescing window) listed the same machine from the fixture's earlier calls, so the count was 0 or 1
+  depending on the race (32 failures in 200 runs). Settle the counter before the measurement: wait until no list has
+  happened for a quiet window longer than the background pass's coalescing delay, then count only what the call under
+  test adds. Never fix this class with a plain `time.Sleep` before the call — that only moves the race.
+
 - A test that calls an entry point which sets the process environment must `t.Setenv` that variable first, so the
   test puts it back (#4581). `nodeclient.RunHook` with `--persona-home <dir>` sets `PERSONA_HOME`; one test left it
   pointing at its removed `t.TempDir()`, and every later `internal/node` test put `node.sock` there. On macOS that path
@@ -114,6 +134,7 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 
 - Waiting for one effect does not wait for another made on a different goroutine (2026-11-09, #2152). A source page's tree changes first and its frame is sent later by the delivery goroutine (`ui_page_delivery.go`), so `TestPageNativeFiniteLoadStillStartsWithLoading`, which waited for the tree to say `loaded` and then counted delivered frames, failed only on busy CI. Wait for each effect you assert on (`pageAwait` for the frames too). To reproduce such a gap, slow the receiving side in a scratch copy (a fake `Notify` that sleeps 20 ms failed 10 of 10 runs), or run `go test -cpu 1 -count=60` with every core busy (4 of 60 failed); an idle machine passed 40 of 40.
 - A cancel on a fixed deadline counted from the start races the fake's own startup (2026-11-10, #2674). `TestToolCheckTimeoutStopsItsHelpers` gave the call 300 ms, but its fake had to start a shell and write its helper's pid first; on a busy machine the cancel came before there was a helper, and the test failed (1 of 30 runs with every core busy) without checking what it was about. Cancel once the fake shows it started (the pid file), and time the return from the cancel. Do not lengthen the deadline instead: it only makes the race rarer.
+- A child's `/proc/<pid>/environ` can read empty right after `exec.Cmd.Start` returns (2026-11-14, #7028). `Start` returns once the new program's close-on-exec has run, but the kernel lays out that program's environment later, in the ELF loader; reading it at once came back empty 1835 times in 2000 on the hub machine. `TestCodexTakeoverUsesOnlyTheSelectedWritersTerminalBridge` started `sleep 60` as its stand-in Codex writer and the takeover read the writer's environment a few calls later, so it refused with `codex_takeover_unavailable` about 3% of the time per subtest. A fixture whose code under test reads a child's `/proc` environment (or anything else set up after exec) waits until the child runs its own code: `/bin/sh -c 'echo ready; read -r line'` with stdin held open, then read that line. Keep the blocking step a builtin, since dash execs a last simple command such as `sleep` in place, which opens the same window again. A real process found by a scan has long been running.
 - A recovering assistant conversation's `busy` alone does not mark the end of its turn (2026-11-10, #3815). When recovery moves to the next model, `assistantSend` registers the replacement process (`spawnAssistant`) before it marks it busy and sends the retry, with the context snapshot and the mode sync in between. `sdkFixture.idle` waited for the registered process's `!busy`, so `TestAssistantRecoveryStopsAfterBothModelsAndTheirRetries` counted 2 of its 4 requests (9 of 400 runs on a busy Mac). The node publishes that gap as working (`busy || recovering` in `assistantSessions`); a wait for the end of a turn must use the same rule. To find such a gap, log the internal state at the moment the wait returns in a scratch test: slowing the fake CLI's `initialize`, the first guess, did not widen it.
 
 - Fixtures must use real response shapes (2026-11-06, #2938 / #2017). Assistant-feed `view_actions` is an object indexed by card key, empty as `{}` too. When both web and acceptance drivers mistook it for an array, array fixtures kept unit tests green while the real model lost answered state after reload. Use protocol objects covering empty objects, answered snapshots, and pagination; in a real browser also reload and check latest version, answered state, and no repeat sends.
@@ -130,6 +151,8 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 
 
 - `-race` reports reads/writes without a happens-before relationship; a test's own lock can hide a race (2026-11-05, #2955). `startAsync` reads the launch record's session after `go func()`; a fast background failure changes it in `finish` under a lock. Existing tests read, then wait through the `startLog` lock; `finish` acquires that lock next, so the detector sees the read before the write. It reports only if the caller is preempted just after `go` (one occasional full-suite `-race` failure). Regression `TestStartAsyncAnswersBeforeAFastFailure` waits only on the record's `done` channel and reports every time before the fix. Race-test result waiting must not share a lock with the code under test.
+
+- Taking a sleep out of a race test can leave the detector with nothing to see: a channel orders two goroutines as a lock does (2026-11-14, #1273). `TestSearchesWhileTheIndexIsUpdatedAndRemoved` (`server/internal/kb`) is there for a data race between a search that reads the index again and an update under way. Its first version without sleeps stopped the update at a hook, removed the directory, waited for a search to run and only then let the update go on: every wait was a channel between the two sides, so the update's read came after the search's write for the detector too. With the race put back in a scratch copy, that moment reported nothing in 30 runs of 4 removals each; the test with the sleeps reported it in 20 of 20. Keep the two sides unordered at the moment under test: let the stopped side go on before the other starts, and make whatever comes next wait instead (here the following update), which reported 40 of 40 runs with one removal each. A test whose assertion is the `-race` run is checked by putting the race back and counting runs, per moment, not by passing.
 
 - A fixture goroutine that reads a shared field when it runs races a test that swaps the field, and a socket orders nothing for the race detector (2026-11-11, #3918). `withFakeHub` started `go func() { _ = n.peer.Serve(…) }()`, which reads `n.peer` whenever the goroutine gets to it; `TestCodexRemoteTurnBegunBeforeJoining` then put its own hub in front with `n.peer = …`. `TestOutsideClaudeSendNotTaken` set the fake inbox's `mode` without its lock after the accept loop had started; the node connecting over the Unix socket afterwards gave the connection's goroutine no happens-before edge to that write. Both failed only under `-race`, which the CI node shard does not use. Have a goroutine serve the value the fixture created (a local variable), and change state a running fake reads through a setter under the fake's own lock (`fakeInbox.setMode`).
 
@@ -341,6 +364,17 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 - Background builds/tests require pinned source snapshots; do not merge branches or edit their worktree while running. On 2026-11-05, targeted Go regression enumerated old files before a merge introduced a new caller, producing undefined-method compilation errors. Mixed snapshots cannot judge commits or count as passes. Freeze a commit in a separate detached worktree and rerun.
 - A Go test wrapper embedding a narrow `Store` interface does not gain methods by assigning real Postgres to it. Once card handlers checked optional persistence interfaces first, admin-page tests returned 503; old handlers rejected bad JSON first and hid the fixture gap. Real bus regressions explicitly pass the full DB to the assistant, while hub admin login keeps its wrapper. Retain status assertions, not longer waits or 503 as a pass.
 
+## A test that loads a native library must declare the library as an input (2026-11-13, #6871)
+
+`:core:rustcore`'s tests load a host build of the shared Rust core. They find it through a system property that holds its
+path, and Gradle treats that path as the only input. A change to the Rust code rebuilt the library at the same path, and
+Gradle then called the tests up to date and skipped them. A deliberately broken rule still "passed". The fix:
+
+- The Exec task that builds the library declares it with `outputs.file(...)`.
+- The test task takes that task's outputs as inputs, with `inputs.files(buildHostCore)`.
+
+**To check the setup**, break one rule on purpose and confirm the binding tests fail before trusting them.
+
 ## Running the hosted CI lanes on a Mac (2026-11-09)
 
 The `scripts/ci/` lanes are written for the hosted runners; on a Mac developer machine:
@@ -355,6 +389,20 @@ The `scripts/ci/` lanes are written for the hosted runners; on a Mac developer m
 - `TRUNCATE` gives every table it names new files, whether it had a row or not, so clearing two dozen mostly empty tables before each test cost more than many of the tests. Check the tables the cascade reaches in one statement and truncate only those with a row (`db.truncateNonEmpty`). Don't replace it with `DELETE`: it does not cascade, and `devices` has a `BEFORE DELETE` trigger (`devices_guarded_delete`, hub 0435) that refuses an unguarded delete with "push retirement requires a guarded writer".
 - A database copied with `CREATE DATABASE ... TEMPLATE` keeps none of its template's `ALTER DATABASE ... SET` settings: set `synchronous_commit` on every copy (`dbtest.create`). Nothing may be connected to the template; Postgres waits up to 5 s on its own for backends that are closing, so no sleep after `Close` is needed. Use `STRATEGY wal_log`: `file_copy` checkpoints the whole server twice.
 - Since Postgres 15, every `DROP DATABASE` forces a checkpoint of the whole server, which writes whatever other tests left dirty. On a loaded machine, one drop took 0.07-3.8 s. Count that before giving more tests a database of their own.
+
+## An edit a watcher must see once is written whole (2026-11-13, #2174)
+
+- `TestFsWatchGitStatusChanges` failed its final quiet check under the deploy's test load: one more Git `fs.changed`.
+  The watcher was right. `os.WriteFile` truncates and then writes, and a look in between sees an empty file, a real
+  change of its own; the finished write is a second one. A trace of every Git look (the status text, each listed
+  file's size and time) showed `a.txt` at size 0 in every failing run. The window is well under a millisecond, so
+  about 400 runs at the test's own intervals never hit it, with CPU burners or fsync writers alongside too. With the
+  watcher looking continuously, plain writes failed 8 of 200 runs and whole writes none.
+- Write such an edit beside the watched place and rename it in (`writeWhole` in
+  `server/internal/node/fswatch_test.go`), staged outside a watched Git repository: a staged file inside it is an
+  untracked change. Keep the quiet check; don't lengthen waits or debounce the watcher to hide a state that is real.
+- To catch a narrow window, shorten the watcher's interval in a scratch copy and print the trace only on failure,
+  rather than loading the machine and waiting.
 
 ## "TempDir RemoveAll cleanup: directory not empty" after an assistant test (2026-11-12, #5510)
 
@@ -669,6 +717,22 @@ Retain allow/deny assertions for data directories, private tmp, and proxy. Negat
 - Privilege-separated sessions have two processes (`sshd-session: user [priv]` and its child), with sockets in the child. Kill listener descendants too when simulating disconnection; killing only `[priv]` leaves connections alive. Stopping sshd without descendants leaves orphan sessions parented to 1 indefinitely.
 - `swift test` output arrives only after completion. Find hung cases with file traces or `sample <pid>`; Swift Testing `.timeLimit` cannot stop uncancellable waits.
 - System `.alert` buttons cannot be clicked through accessibility activation; `personactl.py tap` falls back to idb (not installed locally). Use XCUITest for alert-click flows (`app.alerts[...].buttons[...]`).
+
+## Home Screen widgets on a simulator (2026-11-14, #6946)
+
+- **A widget can be placed without touching the Home Screen**: with the simulator shut down, add an entry to
+  SpringBoard's `data/Library/SpringBoard/IconState.plist` (a page in `iconLists`: `elementType` `widget`,
+  `widgetIdentifier` the kind, `containerBundleIdentifier` the app, `bundleIdentifier` the widget extension, `gridSize`
+  `small` / `medium` / `large`, `iconType` `custom`, two fresh UUIDs), delete `DesiredIconState.plist`, then boot. A
+  widget with a static configuration draws from the App Group as on a phone (`-showHomeWidgetSample YES` fills it).
+- **Widgets with Edit Widget options (`AppIntentConfiguration`) never draw on the iOS 27 simulators here**, placed that
+  way or opened in Edit Widget, slim or stock: the extension logs "Unable to get LNAction from intent" after
+  `com.apple.siri.VoiceShortcuts.xpc` answers "No such process", WidgetKit gets no views (`CHSErrorDomain` 1101) and
+  keeps the placeholder entry, and the widget's buttons do nothing. The Agents widget shows the same, so it is not the
+  widget's code. Draw those widgets with the app's gallery (`-showHomeWidgets`, docs/apple/home-widgets.md
+  "Screenshots") and check their buttons on a device.
+- The gallery's rows (light and dark side by side) need a screen wider than an iPhone's: an iPad simulator made for
+  the shots and deleted after them.
 
 ## Verify nonempty udid before deleting simulators (2026-11-03)
 
@@ -1002,3 +1066,32 @@ To check that a failure is this, move `dev.json` aside in the app's data contain
 - `testhome` now resolves `GOENV`, `GOPATH`, `GOMODCACHE` and `GOCACHE` with the real home before swapping it and pins
   them. Anything else that reads the home directory for its own config (git, ssh, a CLI's login) has the same problem
   under testhome: pin what the child needs, or give the test its own config.
+
+## A throw-away HOME also hides Docker's CLI plugins (2026-11-13, #6131)
+
+- The Compose config checks run `docker compose` under a temporary `HOME`, so Docker reads an empty config directory and
+  finds no `docker-compose` plugin where Docker Desktop and Colima register it (`cliPluginsExtraDirs` in the user's
+  `~/.docker/config.json`). The checks skipped only on the text `is not a docker command`; Docker 29 prints
+  `unknown shorthand flag: 'f' in -f` for the same missing plugin, so they failed instead, on `main` too.
+- Don't detect a missing tool by one wording of its error: ask it directly in the test's own environment
+  (`scripts/test/compose_cli.py` runs `docker compose version`) and skip with how to enable the check
+  (`PERSONA_TEST_DOCKER_CONFIG`, `docs/operations/hub-update.md`).
+
+## Swift 6.2 `swift test` copies `.xcstrings` without compiling `.lproj` (2026-11-13, #6258)
+
+- Under Xcode 26.0 (Swift 6.2), `xcrun swift test` copies `Localizable.xcstrings` into `Bundle.module` as-is
+  (`Copying Localizable.xcstrings`) without generating `.lproj` directories, whereas newer toolchains and `xcodebuild`
+  (`scripts/app/mac-link.sh`) compile it at build time.
+- SwiftPM tests that point a bundle override at `<language>.lproj` may need to compile `Localizable.xcstrings` on
+  demand with `/usr/bin/xcrun xcstringstool compile`. The retired menu bar's `LinkTextTests.swift` demonstrated this
+  fallback and its synthetic uncompiled-bundle case; its source is preserved in the history of the removed target.
+
+## A throw-away HOME also hides the login keychain from codesign (2026-11-13, #6368)
+
+- `codesign -s <certificate>` looks for the identity in the keychains of `$HOME`: under the temporary `HOME` the
+  nodeupdate tests set in `TestMain`, a certificate that signs fine from the same shell says `no identity found`. The
+  real-certificate test (`TestRealCertificateSigning`) sets `HOME` back to the user's home (`os/user`) for itself.
+- And the keychain must be open to the process: run from a `Background` session (an ssh login, a terminal an Agent
+  drives) codesign fails with `errSecInternalComponent`. Run such a test where the resident node runs, in the login
+  session: a one-shot job in `gui/$(id -u)` (`launchctl bootstrap`, then `bootout`); `launchctl managername` says `Aqua`
+  there.

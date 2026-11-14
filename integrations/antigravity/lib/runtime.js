@@ -9,6 +9,7 @@ import { createRuntime, interactionId, page, RpcError, snippet, summaryOf } from
 import { isAssistantDir } from '../../runtime-sdk/lib/identity.js'
 import { AgyAcpClient } from './acp.js'
 import { discoverModels, mapModels } from './models.js'
+import { nativeErrorStep } from './errors.js'
 import {
   agyModeToPersona,
   cleanUserText,
@@ -50,6 +51,8 @@ export function createAgyRuntime(options = {}) {
   const rewinding = new Set()
   const nativeCuts = new Map()
   const cutChecks = new Map()
+  const nativeTails = new Map()
+  const promptFailures = new Map()
   const assistants = new Set() // personaId
   const checkTurns = new Map() // availability probes collect text without appearing in user conversations
   const permissionAsks = new Map() // agyId -> Set of AbortControllers, one per permission card still on the phone
@@ -320,7 +323,8 @@ export function createAgyRuntime(options = {}) {
   }
 
   function historyOf(rawId) {
-    return `agy:${rawId}:full`
+    // Refresh cached items emitted before native failures used the shared API-error format.
+    return `agy:${rawId}:full:api-errors`
   }
 
   function cutMatches(cut, transcript) {
@@ -332,7 +336,7 @@ export function createAgyRuntime(options = {}) {
       next: JSON.stringify(transcript.steps.find((step) => step.step_index >= limit)) })
   }
 
-  function transcriptOf(rawId, native = readConversationStates().get(rawId)) {
+  function exportedTranscriptOf(rawId, native = readConversationStates().get(rawId)) {
     const transcript = readTranscript(brainDirOf(rawId), true)
     const latestStep = transcript.steps.reduce((latest, step) => Math.max(latest, Date.parse(step.created_at || '') || 0), 0)
     const summaryCurrent = (Date.parse(native?.last_modified_time || '') || 0) > latestStep
@@ -344,6 +348,58 @@ export function createAgyRuntime(options = {}) {
     const branch = transcript.branch ? `:branch:${transcript.branch}` : ''
     const cut = steps.length < transcript.steps.length ? `:cut:${limit}` : ''
     return { steps, history: historyOf(rawId) + branch + cut }
+  }
+
+  function tailKey(transcript, native) {
+    const last = transcript.steps.at(-1)
+    return [transcript.history, last?.step_index, last?.created_at, native?.step_count, native?.last_modified_time].join('|')
+  }
+
+  function transcriptOf(rawId, native = readConversationStates().get(rawId)) {
+    const transcript = exportedTranscriptOf(rawId, native)
+    const tail = nativeTails.get(rawId)
+    if (tail?.key === tailKey(transcript, native) && tail.error) {
+      return { ...transcript, steps: [...transcript.steps, tail.error] }
+    }
+    return transcript
+  }
+
+  function readNativeError(rawId, native = readConversationStates().get(rawId), transcript = exportedTranscriptOf(rawId, native)) {
+    const next = (transcript.steps.at(-1)?.step_index ?? -1) + 1
+    const count = native?.step_count
+    if (!Number.isInteger(count) || count <= next || nativeWorking(native)) return
+    const key = tailKey(transcript, native)
+    const previous = nativeTails.get(rawId)
+    if (previous?.key === key && (!previous.retryAt || Date.now() < previous.retryAt)) return previous.pending
+    const entry = { key }
+    nativeTails.set(rawId, entry)
+    entry.pending = (async () => {
+      try {
+        const offset = Math.max(next, count - 8)
+        const result = await acp.nativeRequest('GetCascadeTrajectorySteps', { cascadeId: rawId, stepOffset: offset, disableRehydration: true })
+        const steps = result.steps || []
+        const last = steps.findLastIndex((step) => /CORTEX_STEP_TYPE_(USER_INPUT|PLANNER_RESPONSE|GENERIC|ERROR_MESSAGE)$/.test(step?.type))
+        const error = nativeErrorStep(steps[last], offset + last)
+        if (nativeTails.get(rawId) !== entry || stopped) return
+        entry.error = error
+        if (error) {
+          syncTranscriptAppend(rawId)
+          rt.sessionsChanged()
+        }
+      } catch (error) {
+        entry.retryAt = Date.now() + 30_000
+        log(`agy native turn error: ${error.message}`)
+      } finally {
+        entry.pending = undefined
+      }
+    })()
+    return entry.pending
+  }
+
+  function inputKey(rawId) {
+    const transcript = exportedTranscriptOf(rawId)
+    const input = transcript.steps.findLast((step) => step.type === 'USER_INPUT' && (!step.source || step.source === 'USER_EXPLICIT'))
+    return [transcript.history, input?.step_index, input?.created_at].join('|')
   }
 
   // Native rewind restores older summary timestamps. Verify a shorter summary against the native trajectory so
@@ -479,7 +535,9 @@ export function createAgyRuntime(options = {}) {
     })
 
     return chosen.map(({ rawId, pid, summary, native, cwd, mtimeMs, running, hasTranscript }) => {
-      const { steps, history } = transcriptOf(rawId, native || null)
+      const transcript = transcriptOf(rawId, native || null)
+      if (!running) void readNativeError(rawId, native, transcript)
+      const { steps, history } = transcript
       const parsed = stepsToItems(steps, { brainDir: brainDirOf(rawId), full: false })
       if (!lastPushedSeq.has(pid)) lastPushedSeq.set(pid, parsed.toSeq)
       if (!lastPushedHistory.has(pid)) lastPushedHistory.set(pid, history)
@@ -494,6 +552,8 @@ export function createAgyRuntime(options = {}) {
         summary?.Title ||
         (cwd ? basename(cwd) : 'Antigravity')
       const modeInfo = sessionModes.get(rawId)
+      const failure = promptFailures.get(rawId)
+      if (failure && failure.input !== inputKey(rawId)) promptFailures.delete(rawId)
       const row = {
         session_id: pid,
         title,
@@ -505,6 +565,7 @@ export function createAgyRuntime(options = {}) {
         model: sessionModels.get(rawId),
         launcher: 'agy',
         agent_label: LABEL,
+        ...(!running && (parsed.turnError || promptFailures.get(rawId)?.fields)),
       }
       if (cwd) {
         row.space_id = cwd
@@ -529,6 +590,7 @@ export function createAgyRuntime(options = {}) {
   async function items(params) {
     const rawId = ownedId(params.session_id)
     await reconcileNativeCut(rawId)
+    await readNativeError(rawId)
     const bDir = brainDirOf(rawId)
     const { steps, history } = transcriptOf(rawId)
     const { items: allItems, toSeq } = stepsToItems(steps, { brainDir: bDir, full: false })
@@ -538,6 +600,7 @@ export function createAgyRuntime(options = {}) {
   async function cursor(sessionId) {
     const rawId = ownedId(sessionId)
     await reconcileNativeCut(rawId)
+    await readNativeError(rawId)
     const { steps, history } = transcriptOf(rawId)
     const { toSeq } = stepsToItems(steps, { brainDir: brainDirOf(rawId), full: false })
     return { to_seq: toSeq, history }
@@ -546,6 +609,7 @@ export function createAgyRuntime(options = {}) {
   async function item(params) {
     const rawId = ownedId(params.session_id)
     await reconcileNativeCut(rawId)
+    await readNativeError(rawId)
     const bDir = brainDirOf(rawId)
     const { steps } = transcriptOf(rawId)
     const { items: fullItems } = stepsToItems(steps, { brainDir: bDir, full: true })
@@ -736,12 +800,21 @@ export function createAgyRuntime(options = {}) {
       .catch(() => {})
       .then(() => {
         if (archived.has(rawId)) return
+        promptFailures.delete(rawId)
         promptTurns.set(pid, turn)
         rt.streamEnd(pid)
         return acp.prompt(rawId, blocks)
       })
-      .catch((err) => log(`agy prompt error (${pid}): ${err.message}`))
-      .finally(() => {
+      .catch((err) => {
+        if (!stopped && !cancelling.has(rawId)) {
+          promptFailures.set(rawId, { input: inputKey(rawId), fields: {
+            turn_error: err.message, turn_error_after_work: Boolean(turn.streamingText || turn.newMessage),
+          } })
+        }
+        log(`agy prompt error (${pid}): ${err.message}`)
+      })
+      .finally(async () => {
+        if (!stopped) await readNativeError(rawId)
         // The turn is over: a card still waiting has nothing to answer for any more.
         cancelling.delete(rawId)
         withdrawPermissionAsks(rawId, 'the turn ended')

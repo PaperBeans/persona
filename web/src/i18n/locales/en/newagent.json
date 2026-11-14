@@ -50,5 +50,6 @@
   "follow_row": "Follow Model settings",
   "carry_dropped": "{name} can’t run on {computer}, so its default is used.",
   "preset_picked": "Preset {name} · {what}",
-  "typed_now": "Typed for this start"
+  "typed_now": "Typed for this start",
+  "temporary_session": "Temporary session"
 }

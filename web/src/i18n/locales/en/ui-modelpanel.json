@@ -40,5 +40,6 @@
   "presets": "Presets",
   "how_to_fix": "How to fix",
   "engine_via": "Runs through {provider}",
-  "effort_unset": "Model default"
+  "effort_unset": "Model default",
+  "show_all": "Show all {count} models"
 }

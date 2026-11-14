@@ -88,12 +88,19 @@ type runtimeHello struct {
 		// (#3974): its permission cards that offer always get the node's key for the tool. A runtime that keeps its own
 		// rule (opencode's save rule, Paseo's suggestions) does not say it, so its grant is never widened to the tool.
 		KeepAlways bool `json:"keep_always"`
+		// Seen: session.seen goes to it when the user saw one of its sessions in Persona (#6299), for a runtime that
+		// keeps an unread mark of its own (Paseo's requiresAttention) to clear it there too.
+		Seen bool `json:"seen"`
 		// Archive: session.archive / session.unarchive go to it, for its own reversible archive (archive.go): a
 		// session the user archives in Persona is archived there too, and restored with it.
 		Archive bool `json:"archive"`
 		// Readonly: a session.start with permission_mode "plan" either starts in a read-only mode before its first
 		// prompt runs or is refused with readonly_unsupported; it never falls back to a writable provider (#3238).
 		Readonly bool `json:"readonly"`
+		// Workspaces: it keeps workspaces of its own, pushes them (runtime.workspaces) and makes worktrees as its
+		// workspaces (workspace.prepare, workspace.create): as the machine's engine, they are the catalog's and its
+		// worktrees are made by it (runtimeworkspaces.go).
+		Workspaces bool `json:"workspaces"`
 	} `json:"caps"`
 }
 
@@ -118,6 +125,10 @@ type runtimeConn struct {
 	resume       map[string][]string
 	transcripts  map[string]string
 	codexThreads map[string]string
+	// workspaces are its own workspaces, as its last runtime.workspaces said (caps.workspaces, runtimeworkspaces.go);
+	// workspacesSaid: it said them on this connection (a workspace missing from them is gone).
+	workspaces     []runtimeWorkspace
+	workspacesSaid bool
 	// daemon is its id in daemons.json when the node dialed it (daemons.go), "" for a runtime on the socket.
 	daemon string
 	// pid is the process at the other end of the runtime socket; 0 when not known (a daemon's link, the Orca bridge,

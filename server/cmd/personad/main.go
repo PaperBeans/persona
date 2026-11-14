@@ -57,7 +57,9 @@ const usage = `usage:
                            its data moved into its own (without --yes: list them)
   personad assistant north-star [--date YYYY-MM-DD] [--split RFC3339] [--tz Area/City] [--brief en]
                            read the interruption and availability north star from the databases, read-only
-  personad manager join|run|install|uninstall|status
+  personad assistant search-reindex  empty the built-in manager's chat search index: it reads its chats again from
+                           the start (personad manager search-reindex for a manager made in the app)
+  personad manager join|run|install|uninstall|status|search-reindex
                            another manager made in the app: trade its install code, run it, install it as a service
                            (docs/assistant/managers.md; personad manager for the details)
 ` + nodecmd.NodeUsage + `

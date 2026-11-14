@@ -22,6 +22,14 @@ You also need a **model**, Persona's brain: if you already use Claude Code, use 
                               model (Claude Code or API key)
 ```
 
+### Who runs what
+
+No central backend holds your data. Everything above is yours: you run the hub, on your own always-on Linux machine, Mac or NAS, and your computers do the work. Your messages, settings and memory stay on the hub ([the table below](#first-check-what-you-have) says which machine suits you).
+
+One shared service may be involved on Apple devices. Apple only lets the Apple Team that owns the App send it a push, and a self-hosted hub doesn't have that team's key. So when the hub has no APNs key of its own (`~/.persona/apns.json`), its notifications go through the **push relay**, which the App's publisher runs. Ordinary notifications reach the relay as ciphertext that only your phone can read; a Live Activity's content is the exception and is visible to the relay. With a key of your own the hub talks to Apple directly and the publisher's relay is not involved. [Push relay](push-relay.md) has the exact boundary and "Running your own relay" (it means signing and installing the App under your own Apple Team).
+
+The hub and the relay are both in the public repository (`server/internal/hub`, `server/internal/relay`); what a deployment holds, such as its APNs key and signing keys, is the operator's own configuration and is not in it.
+
 ## First, check what you have
 
 | What you have | Where the hub goes | How far you can get now |
@@ -44,7 +52,7 @@ If you have an always-on computer, put the hub on it. A laptop works as the hub 
 | Apple Watch | Installs along with the iPhone version |
 | Web | Nothing to install: once the hub is set up, open the hub's address in a browser (explained below). On a computer you can also install it as an app ([web.md](../web/web.md), "On computers") |
 | Android | No public package yet; build it yourself ([android.md](../android/android.md)) |
-| Mac App | Frozen: it gets fixes, not new features ([mac.md](../apple/mac.md)). On a Mac, use the web app (it can be installed as an app); a Mac whose Agents Persona should reach also needs Persona Link ("Connect a computer" below) |
+| Desktop app | Electron around the hub-hosted web UI ([desktop.md](../desktop/desktop.md)); no local node is required just to chat or use Agents on another computer. A computer whose Agents Persona should reach also needs the separately installed Persona Link ("Connect a computer" below) |
 
 ## Install the hub: paste one command
 
@@ -122,9 +130,9 @@ To add another computer (say, your Mac laptop), do it on the web:
 2. Choose that computer's system and give it a name, for example "My MacBook".
 3. Follow the on-screen instructions on that computer; each system is different:
    - **Linux**: copy the line on screen, open a terminal on that computer, paste, press Return. It installs Persona's background service and connects by itself.
-   - **Mac**: you first need Persona Link, a small menu bar App. There's no package yet, so you build it from source: that needs Xcode (several GB; the download can take over an hour) and Go, plus a few commands in the terminal. Follow [persona-link-install.md](persona-link-install.md) step by step.
-     Once installed, send the pairing link to that Mac (with **Copy Pairing Link** or **Share…**), click the Persona Link menu bar icon › **Pair…**, and paste it in.
-   - **Windows**: build two programs yourself, then paste one line in PowerShell ([windows.md](windows.md)). There's no package or tray app yet.
+   - **Mac**: you first need the independently installed Persona Link background service. There's no signed package yet, so you build its helpers from source: that needs Xcode and Go. Follow [persona-link-install.md](persona-link-install.md) step by step.
+     Once installed, send the pairing link to that Mac (with **Copy Pairing Link** or **Share…**) and use the optional Electron setup window or the `persona-link pair` command shown there. Link starts at login and does not need a menu bar app.
+   - **Windows**: build two programs yourself, then paste one line in PowerShell ([windows.md](windows.md)). The optional Electron desktop is separate from Link and is not required by its scheduled task.
 4. Once that computer connects, the same screen asks "A computer wants to join: <name>. Is it yours?". If it's yours click **It's mine**; if you don't recognize it click **No, remove**.
 
 Why confirm again: if someone else gets hold of the pairing link, their computer can connect too. Until you confirm, the computer gets none of your model keys and Persona won't do work on it; if it isn't confirmed within 24 hours, it's removed automatically.

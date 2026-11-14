@@ -25,13 +25,17 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import persona.core.contracts.CoreText
+import persona.core.contracts.DialogOption
 import persona.core.contracts.Interaction
 import persona.core.contracts.Machine
 import persona.core.contracts.Resolution
+import persona.core.contracts.ScreenDialog
+import persona.core.contracts.parseTime
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.answer.*
+import java.time.Duration
 import java.time.Instant
 import kotlinx.coroutines.delay
 
@@ -101,7 +105,7 @@ internal fun InteractionPanel(
     DecisionStack(requests.size, maxHeight, modifier, keyboard = keyboard, keys = ids, counted = counted) { scrolling ->
         for (request in PendingStack.order(requests, scrolling, first)) key(request.id) {
             val folded = folds.isFolded(request.id)
-            val headline = request.headline.text()
+            val headline = request.cardTitle()
             // A card with its line is at most the stack's height; its form scrolls inside it.
             Column(Modifier.heightIn(max = maxHeight).testTag("pending-card-${request.id}"), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
                 labels[request.id]?.let { StackLabelLine(it) }
@@ -129,7 +133,7 @@ internal fun InteractionPanel(
         }
     }
     requests.firstOrNull { it.id == full }?.let { request ->
-        JSheet(onDismiss = { full = null }, title = request.headline.text()) {
+        JSheet(onDismiss = { full = null }, title = request.cardTitle()) {
             Column(Modifier.fillMaxHeight().imePadding()) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     JTextButton(stringResource(R.string.chat_request_collapse_full), { full = null })
@@ -141,8 +145,14 @@ internal fun InteractionPanel(
     }
 }
 
+@Composable
+private fun Interaction.cardTitle(): String = dialog?.commandAsk?.let {
+    stringResource(R.string.chat_command_ask_title, agentDisplayName ?: "Claude")
+} ?: headline.text()
+
 /** What a folded card says after its title: what it asks in its own words, else a plan's first line (iOS `previewText`). */
-internal fun Interaction.foldPreview(): CoreText? = askWords() ?: plan?.lineSequence()
+internal fun Interaction.foldPreview(): CoreText? = dialog?.commandAsk?.let { CoreText.plain(it.description ?: it.command) }
+    ?: askWords() ?: plan?.lineSequence()
     ?.map { it.trim().trimStart('#', '-', '*', ' ').trim() }?.firstOrNull { it.isNotEmpty() }?.let(CoreText::plain)
 
 /** The task a card comes from, over it (iOS `TaskQuestions`): its name, and how many more its tasks ask. */
@@ -215,6 +225,7 @@ internal fun InteractionForm(
             else -> ScreenOptionKind.Unknown
         })
     } ?: fallback?.options.orEmpty()
+    val commandPair = interaction.dialog?.commandAllowDeny()
     val actions: @Composable () -> Unit = {
         when (interaction.kind) {
             // A password card (#1137, #1581): its password, Decline and Run, nothing else.
@@ -275,7 +286,20 @@ internal fun InteractionForm(
                 val multi = interaction.dialog?.multi == true
                 val plain = options.filter { it.kind != ScreenOptionKind.Chat }
                 fun positionOf(option: ParsedScreenOption) = plain.indexOfFirst { it === option } + 1 to plain.size
-                options.forEach { option ->
+                if (commandPair != null) {
+                    val allow = draft.copy(option = commandPair.first.key)
+                    val deny = draft.copy(option = commandPair.second.key)
+                    DecisionButtons(
+                        primary = JAction(stringResource(R.string.chat_request_allow),
+                            enabled = AnswerBuilder.build(interaction, AnswerAction.ScreenOption, allow, context).allowed) {
+                            act(AnswerAction.ScreenOption, allow)
+                        },
+                        secondary = JAction(stringResource(R.string.chat_request_deny),
+                            enabled = AnswerBuilder.build(interaction, AnswerAction.ScreenOption, deny, context).allowed) {
+                            act(AnswerAction.ScreenOption, deny)
+                        },
+                    )
+                } else options.forEach { option ->
                     val value = draft.copy(option = option.key)
                     val allowed = option.kind != ScreenOptionKind.Unknown &&
                         AnswerBuilder.build(interaction, AnswerAction.ScreenOption, value, context).allowed
@@ -379,14 +403,18 @@ internal fun InteractionForm(
                     singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = editable)
                 Text(stringResource(R.string.chat_screen_password_note), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
             } else {
-                interaction.dialog?.header?.takeIf(String::isNotBlank)?.let { JTag(it) }
-                ChatLinkText(interaction.dialog?.question ?: fallback?.question ?: interaction.headline.text())
-                val command = interaction.requestCommand(items)
-                if (command != null) {
-                    Text(stringResource(R.string.chat_screen_full_command), style = PersonaTheme.type.headline)
-                    JCodeBlock(command.command)
-                    Text(stringResource(R.string.chat_screen_command_ids, command.requestId, command.toolUseId), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
-                } else (interaction.dialog?.detail ?: fallback?.detail)?.let { ChatLinkText(it) }
+                val ask = interaction.dialog?.commandAsk
+                if (ask != null) CommandAskContent(ask, now)
+                else {
+                    interaction.dialog?.header?.takeIf(String::isNotBlank)?.let { JTag(it) }
+                    ChatLinkText(interaction.dialog?.question ?: fallback?.question ?: interaction.headline.text())
+                    val command = interaction.requestCommand(items)
+                    if (command != null) {
+                        Text(stringResource(R.string.chat_screen_full_command), style = PersonaTheme.type.headline)
+                        JCodeBlock(command.command)
+                        Text(stringResource(R.string.chat_screen_command_ids, command.requestId, command.toolUseId), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+                    } else (interaction.dialog?.detail ?: fallback?.detail)?.let { ChatLinkText(it) }
+                }
                 options.mapNotNull { it.detail }.forEach { ChatLinkText(it, style = PersonaTheme.type.caption.copy(color = PersonaTheme.palette.ink2)) }
                 if (options.any { it.kind == ScreenOptionKind.TypeSomething }) JTextField(draft.text,
                     { update(draft.copy(text = it)) }, label = stringResource(R.string.chat_screen_type_answer), modifier = Modifier.fillMaxWidth(), enabled = editable)
@@ -419,6 +447,80 @@ internal fun InteractionForm(
         }
     }
     if (terminalHelp) TerminalHelpDialog { terminalHelp = false }
+}
+
+/** Claude Code's command prompt read off its terminal (#5265), with the same field and answer rules as iOS and web. */
+internal data class CommandAsk(
+    val command: String,
+    val description: String?,
+    val warning: String?,
+    val risk: String?,
+    val deadline: String?,
+    val deadlineAt: Instant?,
+    val deadlineAllows: Boolean,
+) {
+    val original: String? get() = listOfNotNull(warning, deadline).joinToString("\n").ifEmpty { null }
+    /** The same approximate three-row threshold as iOS, without a second layout pass after a theme change. */
+    val folds: Boolean get() = command.split('\n').sumOf { maxOf(1, (it.length + 37) / 38) } > 3
+
+    /** Whole seconds rounded up; zero once the hub's deadline has passed. */
+    fun countdownSeconds(now: Instant): Long? {
+        val end = deadlineAt ?: return null
+        val millis = runCatching { Duration.between(now, end).toMillis() }.getOrElse { return null }
+        if (millis <= 0) return 0
+        return millis / 1_000 + if (millis % 1_000 == 0L) 0 else 1
+    }
+}
+
+internal val ScreenDialog.commandAsk: CommandAsk?
+    get() {
+        fun text(value: String?) = value?.trim()?.takeIf(String::isNotEmpty)
+        val command = text(command) ?: return null
+        return CommandAsk(command, text(description), text(warning), text(risk), text(deadline),
+            deadlineAt = parseTime(deadlineAt), deadlineAllows = deadlineAction == "allow")
+    }
+
+/** Allow / Deny only replace a command prompt's exactly two plain Yes / No choices. */
+internal fun ScreenDialog.commandAllowDeny(): Pair<DialogOption, DialogOption>? {
+    if (commandAsk == null || multi) return null
+    val choices = options.filter { it.kind.orEmpty().let { kind -> kind.isEmpty() || kind == "plain" } }
+    if (choices.size != 2 || choices.size != options.size) return null
+    if (choices.map { it.label.trim().lowercase() } != listOf("yes", "no")) return null
+    return choices[0] to choices[1]
+}
+
+@Composable
+private fun CommandAskContent(ask: CommandAsk, now: Instant) {
+    var showAll by rememberSaveable(ask.command) { mutableStateOf(false) }
+    var showOriginal by rememberSaveable(ask.command) { mutableStateOf(false) }
+    ask.description?.let { Text(it, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink) }
+    JCodeBlock(ask.command, modifier = Modifier.testTag("screen-command"), maxLines = if (showAll) Int.MAX_VALUE else 3)
+    if (ask.folds) JTextButton(stringResource(
+        if (showAll) R.string.chat_command_ask_collapse else R.string.chat_command_ask_show_all),
+        { showAll = !showAll }, modifier = Modifier.testTag("screen-command-all"))
+    if (ask.warning != null) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), modifier = Modifier.testTag("screen-command-risk")) {
+            JIcon(PersonaIcons.errorFilled, null, size = Tokens.Size.markS, tint = PersonaTheme.palette.cautionText)
+            Text(stringResource(if (ask.risk == "delete") R.string.chat_command_ask_risk_delete else R.string.chat_command_ask_risk_other),
+                style = PersonaTheme.type.callout, color = PersonaTheme.palette.cautionText)
+        }
+        val original = ask.original
+        if (original != null) {
+            JTextButton(stringResource(if (showOriginal) R.string.chat_command_ask_hide_original else R.string.chat_command_ask_show_original),
+                { showOriginal = !showOriginal }, modifier = Modifier.testTag("screen-command-original"))
+            if (showOriginal) JSelectableText(original, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+        }
+    }
+    ask.countdownSeconds(now)?.let { left ->
+        val line = if (left <= 0) stringResource(if (ask.deadlineAllows) R.string.chat_command_ask_countdown_over_allow
+            else R.string.chat_command_ask_countdown_over_deny)
+        else {
+            val time = "${left / 60}:${(left % 60).toString().padStart(2, '0')}"
+            stringResource(if (ask.deadlineAllows) R.string.chat_command_ask_countdown_allow
+                else R.string.chat_command_ask_countdown_deny, time)
+        }
+        Text(line, Modifier.testTag("screen-command-countdown"), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2)
+    }
 }
 
 /** "1. Option": the number or key the terminal shows beside an option, when it is a short one. */

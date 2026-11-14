@@ -80,6 +80,20 @@ final class FileViewerUITests: XCTestCase {
         shot(app, "json-open")
     }
 
+    /// A picture opened as a file shows its own full-screen viewer on top of the sheet at a tap (#1331): the chat page's
+    /// viewer cannot present while the sheet is up.
+    @MainActor func testPictureOpensItsViewerOverTheSheet() throws {
+        let app = launch(["-openFilePath", "data/chart.png"])
+        let tappable = app.descendants(matching: .any)["file-image"].firstMatch
+        let found = tappable.waitForExistence(timeout: 30)
+        shot(app, "picture")
+        XCTAssertTrue(found, "no picture:\n\(app.debugDescription)")
+        XCTAssertGreaterThan(tappable.frame.width, 300, "the picture is a thumbnail, not the sheet's width")
+        tappable.tap()
+        XCTAssertTrue(app.buttons["viewer-close"].waitForExistence(timeout: 5), "the tap opened no viewer while the sheet is up")
+        shot(app, "picture-viewer")
+    }
+
     @MainActor func testMarkdownIsRendered() throws {
         let app = launch(["-openFilePath", "README.md"])
         XCTAssertTrue(app.descendants(matching: .any)["file-markdown"].waitForExistence(timeout: 20), "no rendered markdown")

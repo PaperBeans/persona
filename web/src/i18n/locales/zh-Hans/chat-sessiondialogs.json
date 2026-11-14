@@ -57,7 +57,6 @@
   "wt_removed": "已移除 worktree",
   "wt_removed_branch": "已移除 worktree 和分支",
   "wt_remove_failed": "没能移除 worktree：{error}",
-  "archive_close_title": "归档并关闭 Agent",
   "archive_close_detail": "Persona 会归档「{title}」，并关闭它在 {machine} 上的标签页和进程。对话会保留：可以在「已归档的 Agent」里找回，再在它的终端页点「恢复」让它接着做。",
   "archive_close": "归档并关闭",
   "bypass_confirm": "确认切到完全访问",
@@ -65,5 +64,8 @@
   "speed_fast": "Fast 加速",
   "header_mode": "权限模式：{mode}",
   "leave_bypass_confirm": "切到 {mode}",
-  "leave_bypass_detail": "这个 Agent 不是以完全访问启动的，切走后在这里切不回来。"
+  "leave_bypass_detail": "这个 Agent 不是以完全访问启动的，切走后在这里切不回来。",
+  "bypass_restart_detail": "这一轮结束后将重启会话以生效，对话接着进行",
+  "bypass_pending": "这一轮结束后会重启会话，切到完全访问",
+  "bypass_next_message": "从下一条消息起生效"
 }

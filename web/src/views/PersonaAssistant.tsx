@@ -13,7 +13,8 @@ import { codedFailure, helpTopic, passesBySelf, refreshReadiness, type CodedFail
 import { conversationPage } from "../lib/conversation-page";
 import { navigate } from "../lib/router";
 import { hubHas, refreshAssistant, useStore } from "../lib/store";
-import { effectiveLauncher, NEW_CONVERSATION, pickedEffort, pickedLauncher, pickedModel, pickEffort, pickLauncher } from "../lib/assistant-chat";
+import { effectiveLauncher, NEW_CONVERSATION, pickedEffort, pickedFast, pickedLauncher, pickedModel, pickEffort, pickFast, pickLauncher, usePickedLauncher } from "../lib/assistant-chat";
+import { ASSISTANT_START_SERVICE_TIER_FEATURE } from "../lib/assistant-models";
 import { adoptedConversation, noteSent, outboxMessage } from "../lib/outbox";
 import { CLEAR_MAIN_FEATURE, isClearCommand, mainCommands, useMainCleared } from "../lib/main-clear";
 import { Button, cx, EASE, IconButton, Loading } from "../ui/atoms";
@@ -48,7 +49,6 @@ const NO_SESSIONS: never[] = [];
 const noop = () => {};
 
 // @ in a new conversation: other sessions as context; no chat yet, so no files it touched (typed / and ~ paths still browse)
-const NEW_MENTION: MentionSource = { self: "persona-new", files: () => [], workspaces: true };
 
 /** What a conversation's address says of it (lib/conversation-page.ts): the computer it runs on, its manager when
  *  another than the default. */
@@ -113,7 +113,7 @@ function useAssistantMachine(manager: string | undefined): { machine: string; er
   return manager && state.manager === manager ? state : { machine: "", error: "" };
 }
 
-export function PersonaAssistant({ sid, fresh, routed, onToggleSidebar }: { sid?: string; fresh?: boolean; routed?: RoutedConversation; onToggleSidebar: () => void }) {
+export function PersonaAssistant({ sid, fresh, routed, at, onToggleSidebar }: { sid?: string; fresh?: boolean; routed?: RoutedConversation; at?: string; onToggleSidebar: () => void }) {
   const assistant = useStore((s) => s.assistant);
   const assistantError = useStore((s) => s.assistantError);
   const loaded = useStore((s) => s.loaded);
@@ -184,6 +184,7 @@ export function PersonaAssistant({ sid, fresh, routed, onToggleSidebar }: { sid?
         refreshError={id === main ? assistantError ?? undefined : undefined}
         onRefresh={id === main ? () => void refreshAssistant().catch(() => {}) : undefined}
         offline={offline?.composer}
+        landAt={at}
       />
     );
   }
@@ -229,6 +230,11 @@ function Centered({ children }: { children: React.ReactNode }) {
  *  cleared (`cleared`, as Cindy's /clear leaves an empty chat), the conversation's own layout with nothing in it yet. */
 function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?: boolean; onToggleSidebar: () => void }) {
   const assistant = useStore((s) => s.assistant);
+  const manager = useShownManager();
+  const selectedLauncher = usePickedLauncher(NEW_CONVERSATION);
+  const mention = useMemo<MentionSource>(() => ({ self: "persona-new", files: () => [], workspaces: true,
+    skills: { manager, launcher: selectedLauncher, environment: assistant?.launcher ?? "" },
+  }), [manager, selectedLauncher, assistant?.launcher]);
   // the starter names the current assistant's computers, the ones it can work on
   const machines = useScopedMachines();
   const persona = usePersona();
@@ -247,6 +253,7 @@ function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?:
   const docked = Boolean(sending) || Boolean(main && cleared);
   // /clear on the main conversation's page while there is none: nothing to clear, and never its first message
   const clearable = useStore((s) => Boolean(main) && hubHas(s.features, CLEAR_MAIN_FEATURE));
+  const startServiceTier = useStore((s) => hubHas(s.features, ASSISTANT_START_SERVICE_TIER_FEATURE));
   const commands = useMemo(() => (clearable && docked ? mainCommands() : []), [clearable, docked]);
   // the box is the same element in both layouts (a refused start gets its words and pictures back in it): it moves
   const box = useRef<HTMLDivElement>(null);
@@ -275,11 +282,11 @@ function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?:
   };
 
   const startOnce = async (out: Outgoing): Promise<boolean> => {
-    // what the model pill picked for this new chat (#5033): the launcher, its model, the effort
+    // what the model pill picked for this new chat (#5033): launcher, model, effort and native speed stay independent
     const launcher = pickedLauncher(NEW_CONVERSATION);
-    const body = { prompt: out.text, images: out.images.length ? out.images : undefined, launcher, model: launcher ? pickedModel(NEW_CONVERSATION) : undefined, effort: pickedEffort(NEW_CONVERSATION), main: main || undefined };
     // written for the manager shown now: its retries go there even if the switcher moves meanwhile
     const chosen = chosenManager() ?? undefined;
+    const body = { prompt: out.text, images: out.images.length ? out.images : undefined, launcher, model: launcher ? pickedModel(NEW_CONVERSATION) : undefined, effort: pickedEffort(NEW_CONVERSATION), service_tier: startServiceTier && !chosen && pickedFast() ? "priority" : undefined, main: main || undefined };
     const headers = ownerHeaders(chosen);
     const from = shownManager();
     // one op id for this message, its quiet retries included (#1382); sent again after a refusal, it gets a new one
@@ -294,6 +301,7 @@ function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?:
         noteSent(r.session.machine_id, r.session.session_id, out);
         if (launcher) pickLauncher(NEW_CONVERSATION, undefined);
         pickEffort(NEW_CONVERSATION, undefined);
+        pickFast(false);
         void refreshAssistant().catch(() => {});
         navigate(conversationPage(r.session.session_id, r.session.machine_id, from));
         return true;
@@ -410,7 +418,7 @@ function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?:
           {gate.dialog}
           {/* the box: in the page's middle, or docked at the bottom as the conversation's (ChatView's dock) while the start is on its way */}
           <div ref={box} className={docked ? "mx-auto flex w-full max-w-[880px] flex-col justify-end gap-2 px-4 pb-4 sm:px-7 [@media(max-height:500px)]:pb-2" : undefined}>
-            <Composer key={seed} blocked={offline ? undefined : gate.blocked} disabled={Boolean(offline) || Boolean(sending)} draftKey="persona-new" placeholder={offline ? offline.composer : t("personaassistant.ask_placeholder", { name: persona.name })} machineId={assistant?.machine_id} mention={NEW_MENTION} onSend={start} autoFocus commands={commands} trailing={assistant && !sending ? <AssistantModelPill /> : undefined} />
+            <Composer key={seed} blocked={offline ? undefined : gate.blocked} disabled={Boolean(offline) || Boolean(sending)} draftKey="persona-new" placeholder={offline ? offline.composer : t("personaassistant.ask_placeholder", { name: persona.name })} machineId={assistant?.machine_id} mention={mention} onSend={start} autoFocus commands={commands} trailing={assistant && !sending ? <AssistantModelPill /> : undefined} />
           </div>
           {!docked && (
           <div className="mt-4 grid grid-cols-1 gap-1.5 sm:grid-cols-2">

@@ -21,6 +21,9 @@ type Config struct {
 	// ViaMachine is the computer whose node sends the requests (an API connection's "Send through"); empty: the
 	// manager sends them itself. The manager's client is built for it (assistant/models_via.go).
 	ViaMachine string `json:"-"`
+	// RunLauncher is a launcher on ViaMachine whose CLI answers each request headless there instead of an HTTP API: no
+	// address or key here (assistant/models_run.go, docs/assistant/model-config.md "Running API purposes on a launcher").
+	RunLauncher string `json:"-"`
 }
 
 // Over is c with its empty fields taken from base: a task that uses another model names only what differs.
@@ -47,5 +50,8 @@ func (c Config) Over(base Config) Config {
 // assumed (it used to default to one person's gateway and key file): without a model set up, the helpers that need
 // one say so.
 func (c Config) Configured() bool {
+	if c.RunLauncher != "" {
+		return c.ViaMachine != ""
+	}
 	return c.BaseURL != "" && c.Model != "" && (c.APIKeyFile != "" || c.APIKey != "")
 }

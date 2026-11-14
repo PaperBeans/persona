@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -226,6 +227,7 @@ type todoStage struct {
 	Stage    string        `json:"stage"`
 	Kind     string        `json:"stage_kind,omitempty"`
 	PR       string        `json:"pr,omitempty"`
+	PRs      []string      `json:"prs,omitempty"`      // the PRs named before PR, newest last, at most stagePRsKept (#6507)
 	Delivery *TodoDelivery `json:"delivery,omitempty"` // delivery.go
 	Deploy   *deployWatch  `json:"deploy,omitempty"`   // deploy_check.go: held until the running hub has the work
 	Verified bool          `json:"verified,omitempty"` // explicit acceptance outranks delivery and reply keywords
@@ -233,6 +235,21 @@ type todoStage struct {
 }
 
 const reportStagesKey = "assistant.todo_stages"
+
+// empty: st keeps nothing (its row can go).
+func (st todoStage) empty() bool {
+	return st.Stage == "" && st.Kind == "" && st.PR == "" && len(st.PRs) == 0 && st.Delivery == nil && st.Deploy == nil && !st.Verified &&
+		st.Check == nil
+}
+
+// stagePRsKept bounds a task's earlier PRs (todoStage.PRs).
+const stagePRsKept = 20
+
+// keptPRs is prs with pr moved to its end (a PR named again is the newest), at most stagePRsKept.
+func keptPRs(prs []string, pr string) []string {
+	out := append(slices.DeleteFunc(slices.Clone(prs), func(p string) bool { return p == pr }), pr)
+	return out[max(0, len(out)-stagePRsKept):]
+}
 
 // taskReport notes a change of task t for the next card. ix: what it asks (needs).
 func (s *Service) taskReport(t Todo, state, machine string, session [2]string, text string, ix *proto.Interaction) {
@@ -322,6 +339,9 @@ func (s *Service) setTaskStageKind(ctx context.Context, id, stage, pr, kind stri
 		cur.Stage, changed = stage, true
 	}
 	if pr != "" && pr != cur.PR {
+		if cur.PR != "" {
+			cur.PRs = keptPRs(cur.PRs, cur.PR)
+		}
 		cur.PR, changed = pr, true
 	}
 	if changed {
@@ -338,7 +358,7 @@ func (s *Service) setTaskStageKind(ctx context.Context, id, stage, pr, kind stri
 	}
 	s.todos.mu.Lock()
 	if t := s.todos.todos[id]; t != nil {
-		t.Stage, t.PRURL, t.StageKind, t.stageVerified = cur.Stage, cur.PR, cur.Kind, cur.Verified
+		t.Stage, t.PRURL, t.PRs, t.StageKind, t.stageVerified = cur.Stage, cur.PR, cur.PRs, cur.Kind, cur.Verified
 	}
 	s.todos.mu.Unlock()
 	s.todosChanged(ctx)

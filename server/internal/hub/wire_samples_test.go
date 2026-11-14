@@ -256,6 +256,22 @@ func wireSamples(t *testing.T) map[string][]wireSample {
 	add("machines", "machines_event", "机器事件使用与列表一致的机器类型。", "event", ws(map[string]any{"type": "machines", "machines": machines}),
 		map[string]any{"/type": "machines", "/machines/0/id": "m1", "/machines/1/id": "m2"}, "server/internal/hub/http.go: Hub.serveWS", "apple/Shared/LiveConnection.swift: ServerEvent.decode")
 
+	concernMachines := []map[string]any{
+		{"id": "pending", "name": "Pending computer", "online": true, "trust": "pending"},
+		{"id": "offline", "name": "Offline computer", "online": false, "last_seen": now},
+		{"id": "critical", "name": "Critical computer", "online": true},
+		{"id": "warning", "name": "Warning computer", "online": true},
+		{"id": "needs-you", "name": "Waiting agents computer", "online": true},
+		{"id": "mismatch", "name": "Deploying computer", "online": true, "deploying": true, "deploy_phase": "transferring"},
+		{"id": "normal", "name": "Normal computer", "online": true, "node_version": "fixture-version"},
+	}
+	add("machines-concern", "machines_concern_projection",
+		"Anonymous machine wire data for Android concern-grid presentation tests.", "machines",
+		httpJSON(map[string]any{"machines": concernMachines}),
+		map[string]any{"/machines/0/trust": "pending", "/machines/1/online": false, "/machines/5/deploying": true,
+			"/machines/5/deploy_phase": "transferring", "/machines/6/online": true},
+		"android/feature/machines/src/main/kotlin/persona/feature/machines/MachineConcern.kt",
+		"apple/Persona/Views/Machines/MachinesView.swift")
 	item := func(id string, seq int, role, kind, text string) proto.Item {
 		return proto.Item{ID: id, Seq: seq, TS: now, Role: role, Kind: kind, Text: text}
 	}

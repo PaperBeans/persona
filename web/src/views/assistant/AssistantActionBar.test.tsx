@@ -8,6 +8,7 @@ import { setAgentOpenMode } from "../../lib/agent-open";
 import { closePanel, getPanel } from "../../lib/panel";
 import { putTodo, refresh, refreshTodos, reset, upsertSession } from "../../lib/store";
 import type { Todo } from "../../lib/todos";
+import { usageLimitLabel } from "../../lib/usage-limit";
 import type { Interaction, Session } from "../../lib/types";
 import { AssistantActionBar, DOCK_CAPSULE, FeedLineView, TaskDock } from "./Tasks";
 
@@ -75,6 +76,9 @@ afterEach(() => {
 const entries = () => [...host.querySelectorAll<HTMLButtonElement>("[data-assistant-actionbar] [data-tray-entry]")];
 const entry = (key: string) => host.querySelector<HTMLButtonElement>(`[data-assistant-actionbar] [data-tray-entry="${key}"]`)!;
 
+/** Opens the Needs you rows the tray folds to a line (#5569); a row with its key opens that one. */
+const openRows = (key?: string) => act(async () => host.querySelectorAll<HTMLButtonElement>(`button[data-needs-row${key ? `="${key}"` : ""}][aria-expanded="false"]`).forEach((b) => b.click()));
+
 const label = { needs: t("assistant-tasks.tray_needs_you"), running: t("assistant-tasks.tray_running") };
 // where a click went as a page (set to Full page, #5096); the side panel, the default, says so itself (getPanel)
 const opened = () => location.pathname + location.search;
@@ -107,14 +111,40 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(writes).toEqual([]);
   });
 
+  it("puts a row's status in its own column, with › where it opens and the reset time under a usage limit (#5569)", () => {
+    act(() => entry("running").click());
+    const row = () => host.querySelector("[data-task-slot]")!;
+    const status = () => row().querySelector<HTMLElement>("[data-task-status]")!;
+    expect(status().textContent).toBe(t("lib-state-labels.working"));
+    expect(row().querySelector(".font-semibold")!.textContent).toBe("Demo task"); // the title no longer carries the word
+    const limited: Session = { machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", status: "idle", state: "idle", updated_at: at,
+      turn_error: "You've hit your usage limit.", turn_error_kind: "usage_limit", turn_error_resets_at: new Date(now.getTime() + 3 * 3_600_000).toISOString() };
+    act(() => upsertSession(limited));
+    expect(status().dataset.taskStatus).toBe("usage_limit");
+    expect(status().className).toContain("text-orange");
+    expect(row().textContent).toContain(usageLimitLabel(limited, now.getTime())!);
+    act(() => upsertSession({ ...limited, turn_error: undefined, turn_error_kind: undefined, turn_error_resets_at: undefined, state: "working", status: "working" }));
+    expect(status().className).toContain("text-ink-2");
+  });
+
+  it("says Starting, not Not started, on a task whose Agent is not up yet", async () => {
+    todo.agents = [];
+    await act(async () => {
+      await refreshTodos();
+    });
+    act(() => entry("running").click());
+    expect(host.querySelector("[data-task-status]")!.textContent).toBe(t("assistant-tasks.status_starting"));
+  });
+
   it("keeps two entries in order, collapses by default and replaces conversation cards with the dispatch's hand-off card", () => {
     expect(entries().map((button) => button.getAttribute("data-tray-entry"))).toEqual(["needs", "running"]);
     expect(entries().map((button) => button.textContent)).toEqual([label.needs, `${label.running}1`]);
     expect(host.querySelector("section")).toBeNull();
-    // the plan's one Agent; the task line of a planned task adds none
+    // the plan's one Agent; the task line of a planned task adds none; the task's conclusion is its own card (#5569)
     expect(host.querySelectorAll("[data-handoff-cards]")).toHaveLength(1);
     expect(host.querySelectorAll("[data-handoff-card]")).toHaveLength(1);
-    expect(host.textContent).not.toContain("Demo result");
+    expect(host.querySelectorAll("[data-receipt]")).toHaveLength(1);
+    expect(host.textContent).toContain("Demo result");
     act(() => entry("running").click());
     expect(entry("running").getAttribute("aria-expanded")).toBe("true");
     expect(host.querySelectorAll("[data-task-slot]")).toHaveLength(1);
@@ -184,6 +214,24 @@ describe("Assistant Needs you / In progress trays", () => {
     }
   });
 
+  it("counts an unexpired parked task in In progress even after days without activity, as the To-dos page does", async () => {
+    const stale = "2026-11-05T08:00:00Z";
+    moreSessions = [{ machine_id: "demo", session_id: "parked-worker", title: "Parked agent", cwd: "/demo", state: "idle", status: "idle", updated_at: stale } as Session];
+    moreTodos = [{
+      ...todo, id: "tray-parked", pr_url: undefined, plan_id: undefined, created_at: stale, updated_at: stale,
+      agents: [{ machine_id: "demo", session_id: "parked-worker", linked_at: stale }],
+      supervision: { supervisor: conversation, state: "parked", updated_at: stale, reviews: [], parked: { reason: "Waiting on another team", until: "2026-11-14T09:00:00Z", waiting_on: "someone_else", count: 1 } },
+    }];
+    await act(async () => { await refresh(); await refreshTodos(); });
+    // Both tasks remain unfinished; explicit parking is not the inactivity fold.
+    expect(entry("running").textContent).toBe(`${label.running}2`);
+    act(() => entry("running").click());
+    const slots = host.querySelectorAll("[data-task-slot]");
+    expect(slots).toHaveLength(2);
+    // Its parked line and the shared open count survive the inactivity window.
+    expect(host.textContent).toContain("Waiting on another team");
+  });
+
   it("updates the same row while it runs, opens the task, and drops it once it is accepted", () => {
     act(() => entry("running").click());
     const row = host.querySelector("[data-task-slot]");
@@ -215,7 +263,9 @@ describe("Assistant Needs you / In progress trays", () => {
     todo = { ...todo, ask: firstRound, supervision: { ...todo.supervision!, state: "needs_user" } };
     await act(async () => putTodo(todo));
     await act(async () => { entry("needs").click(); await import("./TaskDecision"); });
-    expect(host.querySelectorAll('[data-brief-row="accept"]')).toHaveLength(1);
+    await openRows();
+    // A lazy card can commit after its module import resolves.
+    await expect.poll(() => host.querySelectorAll('[data-brief-row="accept"]')).toHaveLength(1);
     expect(host.textContent).not.toContain(t("assistant-tasks.review_needs_user"));
     const first = [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === t("assistant-brief.take"))!;
     const nextRound = "2026-11-10T08:20:00Z";
@@ -224,6 +274,11 @@ describe("Assistant Needs you / In progress trays", () => {
       todo = { ...todo, ask: { ...firstRound, asked_at: nextRound } };
       putTodo(todo);
     });
+    await openRows(); // the next round asks folded again
+    await expect.poll(() => {
+      const button = [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === t("assistant-brief.take"));
+      return button !== undefined && button !== first;
+    }).toBe(true);
     const second = [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === t("assistant-brief.take"))!;
     expect(second).not.toBe(first);
     await act(async () => second.click());
@@ -237,8 +292,10 @@ describe("Assistant Needs you / In progress trays", () => {
     todo = { ...todo, ask, supervision: { ...todo.supervision!, state: "needs_user" } };
     await act(async () => putTodo(todo));
     await act(async () => { entry("needs").click(); await import("./TaskDecision"); });
+    await openRows();
+    expect(host.textContent!.split(todo.title).length - 1, "an opened row names its task once").toBe(1);
     const row = host.querySelector('[data-brief-row="accept"]')!;
-    expect([...row.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual([t("assistant-brief.open"), t("assistant-brief.finish"), t("assistant-brief.take")]);
+    expect([...row.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual([t("assistant-brief.open"), t("assistant-brief.finish"), t("assistant-tasks.later"), t("assistant-tasks.dismiss_draft"), t("assistant-brief.take")]);
     const read = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation(async (url, init) => {
       if (init?.method === "PATCH") {
@@ -268,7 +325,9 @@ describe("Assistant Needs you / In progress trays", () => {
       await import("./MessageDraft");
       await import("./TaskDecision");
     });
-    expect(host.querySelector('[data-testid="message-card"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="message-card"]')).toBeNull(); // folded until opened
+    await openRows();
+    await expect.poll(() => host.querySelector('[data-testid="message-card"]')).not.toBeNull();
     expect(host.textContent).toContain(t("assistant-tasks.review_needs_user"));
     const draftCard = host.querySelector('[data-testid="message-card"]')!;
     const actions = [...draftCard.querySelectorAll("button")];
@@ -293,6 +352,27 @@ describe("Assistant Needs you / In progress trays", () => {
     const row = host.querySelector('[data-needs-row="task:tray-task"]')!;
     expect(row.textContent).toContain("Demo task");
     expect(row.textContent).toContain("Which port?");
+    // a line until opened (#5569): the question under the title, no card, no answer buttons
+    const head = row as HTMLButtonElement;
+    expect(head.tagName).toBe("BUTTON");
+    expect(head.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector("[data-card]")).toBeNull();
+    // it opens where it is (a real button: Enter and Space do the same as the click); its separate chevron folds it again
+    act(() => head.click());
+    const opened = host.querySelector('[data-needs-row="task:tray-task"]')!;
+    expect(opened.hasAttribute("data-needs-open")).toBe(true);
+    expect(opened.querySelector("button[aria-expanded=true]")).not.toBeNull();
+    expect(opened.textContent).toContain("8080");
+    // the additional Open entry still leads to the task (#6255); the title opens the asking Agent
+    expect(opened.querySelectorAll("[data-needs-open-entry]")).toHaveLength(1);
+    expect(opened.querySelector("[data-needs-open-entry]")!.getAttribute("title")).toContain("Demo task");
+    act(() => opened.querySelector<HTMLButtonElement>("button[aria-expanded=true]")!.click());
+    expect(host.querySelector('[data-needs-row="task:tray-task"]')!.tagName).toBe("BUTTON");
+    // every row is folded again when the tray is closed and opened
+    act(() => host.querySelector<HTMLButtonElement>('button[data-needs-row="task:tray-task"]')!.click());
+    act(() => entry("needs").click());
+    act(() => entry("needs").click());
+    expect(host.querySelector('[data-needs-row="task:tray-task"]')!.tagName).toBe("BUTTON");
     // the agent is not a row of its own in either tray (the chat's hand-off card names it)
     expect(trays()).not.toContain("Demo agent");
     moreInteractions = [];
@@ -325,6 +405,51 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(host.querySelector('[data-running-agent="demo/worker"]')).toBeNull();
     act(() => (host.querySelector('[data-running-agent="demo/by-hand-works"]') as HTMLButtonElement).click());
     expect(getPanel()).toEqual({ kind: "agent", mid: "demo", sid: "by-hand-works" });
+  });
+
+  it.each(["task", "agent"] as const)("opens the asking Agent from an expanded %s title without sending an answer", async (kind) => {
+    const sid = kind === "task" ? "worker" : "by-hand-asks";
+    const title = kind === "task" ? todo.title : "Hand asks";
+    mainChat = conversation;
+    moreSessions = [{ machine_id: "demo", session_id: sid, title, cwd: "/demo", state: "needs_you", status: "blocked", updated_at: at } as Session];
+    moreInteractions = [{ id: "ix-title", machine_id: "demo", session_id: sid, kind: "question", questions: [{ question: "Which port?", options: null }] } as Interaction];
+    await act(async () => {
+      await refresh();
+      upsertSession(moreSessions[0]);
+    });
+    act(() => entry("needs").click());
+    await openRows();
+    const row = host.querySelector<HTMLElement>(`[data-needs-row="${kind === "task" ? "task:tray-task" : "agent:demo/by-hand-asks"}"]`)!;
+    const titleButton = [...row.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === title)!;
+    act(() => titleButton.click());
+    expect(getPanel()).toEqual({ kind: "agent", mid: "demo", sid });
+    expect(row.hasAttribute("data-needs-open")).toBe(true);
+    closePanel();
+    setAgentOpenMode("page");
+    act(() => titleButton.click());
+    expect(opened()).toBe(`/s/demo/${sid}`);
+    expect(writes).toEqual([]);
+  });
+
+  it("keeps an expanded task question's free-text draft editable without sending it", async () => {
+    moreSessions = [{ machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", state: "needs_you", status: "blocked", updated_at: at } as Session];
+    moreInteractions = [{ id: "ix-draft", machine_id: "demo", session_id: "worker", kind: "question", questions: [{ question: "Which port?", options: null }] } as Interaction];
+    await act(async () => {
+      await refresh();
+      upsertSession(moreSessions[0]);
+    });
+    act(() => entry("needs").click());
+    await openRows();
+    const input = host.querySelector<HTMLInputElement>('[data-card="ix-draft"] input')!;
+    expect(input.matches(":disabled")).toBe(false);
+    act(() => {
+      input.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Draft only; do not send");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(input.value).toBe("Draft only; do not send");
+    expect(document.activeElement).toBe(input);
+    expect(writes).toEqual([]);
   });
 
   it("draws the entries as the dock's old All / task capsules, with the open tray selected", () => {
@@ -431,6 +556,13 @@ describe("Assistant Needs you / In progress trays", () => {
       act(() => entry("needs").click());
       expect(entry("needs").getAttribute("aria-expanded")).toBe("true");
       expect(host.querySelector("section")?.textContent).toContain("Diet card");
+      // folded: the plan's first task and how many more; Start is not on the screen until the row is opened
+      expect(host.querySelector("section")?.textContent).toContain(t("assistant-tasks.needs_more", { title: "Diet card", count: 1 }));
+      const plan = host.querySelector<HTMLButtonElement>("button[data-needs-row]")!;
+      expect(plan.getAttribute("aria-expanded")).toBe("false");
+      expect(host.querySelector("[data-plan-actions]")).toBeNull();
+      act(() => plan.click());
+      expect(host.querySelector("[data-needs-open]")).not.toBeNull();
       expect(host.querySelector("section")?.textContent).toContain("Fix the supervisor");
       expect([...host.querySelectorAll("section button")].some((button) => button.textContent?.includes(t("assistant-tasks.plan_start_n", { count: 2 })))).toBe(true);
       // once it is started or dismissed it leaves Needs you

@@ -13,6 +13,8 @@ internal fun agentRangeKey(scope: String) = stringPreferencesKey("agent-range:$s
 internal fun scopedAgentList(
     rows: List<AgentSession>, machines: List<Machine>, preferences: AgentsPreferencesSnapshot, settings: AgentListSettings,
     todos: List<persona.core.contracts.Todo> = emptyList(), ownRows: Set<String> = emptySet(),
+    /** The hub's direction tree, for "By direction" (#4352). */
+    directions: persona.core.contracts.DirectionTree? = null,
 ): AgentListResult {
     // The rows this range's list of running sessions draws, where it has one: a subtask among them hangs under its
     // parent only while a row above it is among them too, so a working agent whose creator was let go is not lost with
@@ -24,8 +26,8 @@ internal fun scopedAgentList(
         AgentRange.History -> null
     }
     val tree = codexTaskForest(rows, ownRows, runs)
-    return scopedRootAgentList(tree.roots, machines, preferences, tree.searchSettings(settings), todos)
-        .copy(children = tree.children)
+    return scopedRootAgentList(tree.roots, machines, preferences, tree.searchSettings(settings), todos, directions)
+        .let { it.copy(children = tree.children.plusChildren(it.children)) }
 }
 
 /** "All" lists these with the running ones (Codex threads of the past too), every other session with the history. */
@@ -35,9 +37,10 @@ private val persona.core.contracts.Session.runsInAll: Boolean get() = isLive || 
 private fun scopedRootAgentList(
     rows: List<AgentSession>, machines: List<Machine>, preferences: AgentsPreferencesSnapshot, settings: AgentListSettings,
     todos: List<persona.core.contracts.Todo> = emptyList(),
+    directions: persona.core.contracts.DirectionTree? = null,
 ): AgentListResult {
     if (preferences.range == AgentRange.Running)
-        return buildFlatAgentList(rows, machines, preferences.pins, preferences.mutes, settings, todos)
+        return buildFlatAgentList(rows, machines, preferences.pins, preferences.mutes, settings, todos, directions)
     val history = rows.filter { !it.session.isLive && !(preferences.range == AgentRange.All && it.session.isCodexTask) && settings.admitsHistory(it.session) && !(settings.hideBotmux && it.session.isBotmux) }
     val filtered = history.filter { settings.quick.matches(it) }
     val groups = filtered.groupBy { it.session.machineId to if (it.session.isCodexTask) repoOf(it.session.cwd, it.session.repoRoot).repo else it.session.cwd }.map { (project, members) ->
@@ -47,7 +50,7 @@ private fun scopedRootAgentList(
         AgentListGroup(id, persona.core.contracts.CoreText.plain(project.second), ordered, if (folded) emptyList() else ordered, folded)
     }.sortedWith(compareByDescending<AgentListGroup> { it.rows.first().updatedAt }.thenBy { it.id })
     val running = if (preferences.range == AgentRange.All)
-        buildFlatAgentList(rows.filter { it.session.runsInAll }, machines, preferences.pins, preferences.mutes, settings.copy(includeCodexHistory = true), todos)
+        buildFlatAgentList(rows.filter { it.session.runsInAll }, machines, preferences.pins, preferences.mutes, settings.copy(includeCodexHistory = true), todos, directions)
     else AgentListResult(emptyMap(), emptyList(), emptyList())
     return running.copy(groups = running.groups + groups, counts = AgentQuickFilter.entries.associateWith { filter ->
         (running.counts[filter] ?: 0) + history.count { !it.isNestedSubtask && filter.matches(it) }

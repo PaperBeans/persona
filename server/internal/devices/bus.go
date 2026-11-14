@@ -23,7 +23,7 @@ func (d *Devices) Request(ctx context.Context, method string, params json.RawMes
 		return nil
 	}
 	switch method {
-	case devicewire.MethodCall:
+	case devicewire.MethodCall, devicewire.MethodFileCall:
 		var p devicewire.NodeCall
 		if err := decode(&p); err != nil {
 			return nil, true, err
@@ -259,6 +259,9 @@ func (d *Devices) Handler(next http.Handler) http.Handler {
 		m.reconnect()
 		writeJSON(w, map[string]any{"ok": true})
 	})
+	route("GET /api/v1/machines/{mid}/codex/{sid}/takeover", d.prepareCodexTakeover)
+	route("GET /api/v1/sessions/{mid}/{sid}/skills", d.getSessionSkills)
+	route("POST /api/v1/machines/{mid}/codex/{sid}/takeover", d.commitCodexTakeover)
 	route("PUT /api/v1/machines/{mid}/engine", d.putEngine)
 	route("GET /api/v1/machines/{mid}/herdr", d.getHerdr)
 	route("PUT /api/v1/machines/{mid}/herdr", d.putHerdr)
@@ -283,6 +286,7 @@ func (d *Devices) Handler(next http.Handler) http.Handler {
 	route("PUT /api/v1/machines/{mid}/clipboard/settings", d.putClipboardSettings)
 	route("GET /api/v1/machines/{mid}/file-transfer/settings", d.getFileTransferSettings)
 	route("PUT /api/v1/machines/{mid}/file-transfer/settings", d.putFileTransferSettings)
+	route("GET /api/v1/machines/{mid}/files/operations/{oid}", d.getFileOperation)
 	d.transferRoutes(mux)
 	d.metricsRoutes(mux)
 	d.usageRoutes(mux)

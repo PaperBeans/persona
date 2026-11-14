@@ -106,6 +106,11 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 	if !caps.Send {
 		readOnly = label + " 没有开放从手机发消息"
 	}
+	// A row names the workspace it is in only for an engine runtime whose workspaces are the catalog's
+	// (runtimeworkspaces.go): the apps tie the session to that catalog row by it. Any other runtime's workspace_id is no
+	// workspace the apps know, and would only keep them from placing the session by its folder.
+	_, engine := engineRuntimes[rt]
+	ownWorkspaces := engine && caps.Workspaces && !daemon
 	seen := make(map[string]bool, len(list))
 	panes := map[string]string{}
 	defer func() {
@@ -152,16 +157,26 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 		} else {
 			s.Host = ""
 		}
+		// Rename and rewind (#6294) are for the runtime's own top-level sessions, not a sub-Agent's row: a "<session>@<id>"
+		// is an agent inside a session, not one the runtime lists, and a session another one started folds under it.
+		sub := s.IsSubagent || strings.Contains(s.SessionID, subagentSep)
+		// A row may narrow the runtime's rewind for its own session, and only a row may offer to restore the files with it
+		// (what the agent behind it can do: Paseo's providers differ).
+		rewind := caps.Rewind && !sub && (s.Capabilities == nil || s.Capabilities.Rewind == nil || *s.Capabilities.Rewind)
+		rewindCode := rewind && s.Capabilities != nil && s.Capabilities.RewindCode != nil && *s.Capabilities.RewindCode
 		s.Capabilities = &proto.SessionCapabilities{Read: true, Send: caps.Send, Interrupt: caps.Interrupt, Approve: true,
-			Close: &caps.Close, Modes: proto.CanModes(runtimeModes(caps.Modes, rt, s)),
-			Rewind: proto.CanModes(caps.Rewind && !s.IsSubagent && !strings.Contains(s.SessionID, subagentSep)), RewindCode: proto.CanModes(false),
+			Close: &caps.Close, Rename: proto.CanModes(caps.Rename && !sub), Modes: proto.CanModes(runtimeModes(caps.Modes, rt, s)),
+			Rewind: proto.CanModes(rewind), RewindCode: proto.CanModes(rewindCode),
 			Model: proto.CanModes(caps.Modes && caps.Model && !strings.Contains(s.SessionID, subagentSep))}
 		s.ReadOnlyReason, s.Attached, s.CodexRoute, s.CodexRouteNote = readOnly, false, "", ""
 		// The pane is the engine's to show (pi.go joins it with the engine's pane), not part of the runtime's row.
 		if s.PaneID != "" && validPane(s.PaneID) {
 			panes[s.SessionID] = s.PaneID
 		}
-		s.PaneID, s.TabID, s.WorkspaceID = "", "", ""
+		s.PaneID, s.TabID = "", ""
+		if !ownWorkspaces || !runtimeIDRe.MatchString(s.WorkspaceID) {
+			s.WorkspaceID = ""
+		}
 		switch s.Status {
 		case proto.StatusWorking, proto.StatusDone, proto.StatusIdle, proto.StatusOffline:
 		case proto.StatusBlocked:

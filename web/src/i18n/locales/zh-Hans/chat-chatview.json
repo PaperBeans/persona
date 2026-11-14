@@ -1,4 +1,5 @@
 {
+  "skills_route": "所选技能属于当前助手，请先取消任务转发再发送。",
   "share": "分享…",
   "forked": "已分支到新聊天",
   "fork_failed": "分支失败：{error}",
@@ -56,7 +57,6 @@
   "copy_session_id": "拷贝会话 ID",
   "copy_folder": "拷贝目录",
   "copy_resume_command": "拷贝恢复命令",
-  "close_agent_menu": "关闭 Agent…",
   "delete_chat": "删除对话…",
   "sidebar": "侧边栏",
   "same_space_count": "同空间 {count}",
@@ -111,6 +111,8 @@
   "codex_first_placeholder": "给 Codex 的第一条消息",
   "handoff_from": "从「{title}」跳来 · 点这里返回",
   "handoff_dismiss": "关闭返回提示",
+  "inbox_back_title": "回到「{title}」",
+  "inbox_back_generic": "回到收件箱里的这件事",
   "team": "协同",
   "team_needs_you": "协同：有子 Agent 在等你",
   "more_actions": "更多操作",
@@ -129,7 +131,9 @@
   "search_no_progress": "本次没有载入更早的记录，可稍后重试",
   "search_page_cap": "本次已加载 20 页，可继续加载",
   "search_not_found": "这条记录暂时无法定位，可返回搜索前位置",
+  "message_further_up": "这条消息在更早的记录里。",
   "search_origin_changed": "原来的记录已变化，请继续浏览当前记录",
   "search_return": "返回搜索前位置",
-  "search_menu": "会话内搜索"
+  "search_menu": "会话内搜索",
+  "todo_completed_label": "待办（已完成）：{title}"
 }

@@ -12,7 +12,7 @@ import (
 // (assistant/task_notice), a scheduled task's run (assistant/task_run), a wake-up (agents/wake), the continue after a
 // usage limit reset (agents/limit_continue), the background tasks
 // a node restart stopped (assistant/lost_tasks), news of an inbox item for a conversation it was handed to
-// (inbox/handoff_note). The model reads them as they are; the apps show one line instead
+// (inbox/handoff_note), how a question asked without waiting ended (assistant/ask_later). The model reads them as they are; the apps show one line instead
 // (docs/protocol/protocol.md "Messages injected by Persona"). ParseInjected reads them back off the transcript's text, so old lines are
 // known too; its tests render every template and parse the result, which keeps the two in step.
 
@@ -22,6 +22,7 @@ var (
 	wakeHeadRe     = lazyre.New(`^⏰（Persona 叫醒你，第 \d+ 次）你上一轮停下时说在等「(.*?)」`)
 	superviseRe    = lazyre.New(`^📋 督办：你派出去的任务有 (\d+) 个要你处理$`)
 	inboxHeadRe    = lazyre.New(`^📥 收件箱事件「(.+)」有了下文$`)
+	askLaterHeadRe = lazyre.New(`^🔔 你 .+ 用 ask_user 问过用户（wait: false，当时没有等回答）：$`)
 	leadContextRe  = lazyre.New(`^(?s)\s*<persona-context\b[^>]*>.*?</persona-context>`)
 )
 
@@ -33,6 +34,20 @@ const superviseMarker = "这是 Persona 的督办消息"
 
 // inboxMarker is in every inbox note for a conversation an item was handed to (inbox/handoff_note, #1194).
 const inboxMarker = "这是 Persona 的收件箱通知"
+
+// askLaterMarker ends every assistant/ask_later message (#4928): a first line alone could be the user's.
+const askLaterMarker = "（这是 Persona 的通知，不是用户在这里发的消息。）"
+
+// askAnswered, askExpired and askSpoke start ask_later's sections for an answered card, one that ran out and made a
+// to-do or took the defaults, and one that ran out after the user wrote in the conversation; any other ended unanswered.
+const (
+	askAnswered = "用户在卡片上回答了："
+	askExpired  = "卡片到点没人回："
+	askSpoke    = "卡片到点了，没人在卡片上回答。"
+)
+
+// askAnswerCap is how many characters of the answers the line keeps.
+const askAnswerCap = 60
 
 // limitContinueHead starts agents/limit_continue: the manager continues an agent once its usage limit reset.
 const limitContinueHead = "⏰（Persona 叫你接着做）订阅的用量额度已经重置了"
@@ -116,6 +131,12 @@ func ParseInjected(text string) *proto.Injected {
 			return nil
 		}
 		return &proto.Injected{Kind: proto.InjectedSystem, State: "inbox", Title: m[1], Line: "收件箱「" + m[1] + "」有了下文"}
+	case strings.HasPrefix(head, "🔔 你 "):
+		// Only hubs that write it mark it: it is not in the shared fixtures the apps' own recognition runs.
+		if !askLaterHeadRe.MatchString(head) || !strings.HasSuffix(rest, askLaterMarker) {
+			return nil
+		}
+		return askLaterInjected(rest)
 	case strings.HasPrefix(head, lostTasksHead):
 		n := 0
 		for _, l := range strings.Split(rest, "\n") {
@@ -130,6 +151,46 @@ func ParseInjected(text string) *proto.Injected {
 		return &proto.Injected{Kind: proto.InjectedSystem, State: "lost_tasks", Line: line}
 	}
 	return nil
+}
+
+// askLaterInjected is how the card of an ask_later message (its text after the first line) ended (#6421): the
+// answers, as one clipped line, when the user answered on it; that it ran out; or that it closed unanswered.
+func askLaterInjected(rest string) *proto.Injected {
+	lines := strings.Split(rest, "\n")
+	for i, l := range lines {
+		switch {
+		case l == askAnswered:
+			var answers []string
+			for _, l := range lines[i+1:] {
+				if strings.HasPrefix(l, "- ") {
+					answers = append(answers, l[len("- "):])
+				} else if strings.HasPrefix(l, " ") && len(answers) > 0 { // a question or an answer of several lines
+					answers[len(answers)-1] += " " + strings.TrimSpace(l)
+				} else {
+					break
+				}
+			}
+			for j, a := range answers {
+				if k := strings.LastIndex(a, " → "); k >= 0 {
+					answers[j] = strings.TrimSpace(a[k+len(" → "):])
+				}
+			}
+			title := clipRunes(strings.Join(answers, " · "), askAnswerCap)
+			return &proto.Injected{Kind: proto.InjectedSystem, State: "ask_answered", Title: title, Line: "你回答了：" + title}
+		case strings.HasPrefix(l, askExpired), strings.HasPrefix(l, askSpoke):
+			return &proto.Injected{Kind: proto.InjectedSystem, State: "ask_expired", Line: "问题到时间了，卡片上没有回答"}
+		}
+	}
+	return &proto.Injected{Kind: proto.InjectedSystem, State: "ask_closed", Line: "问题卡片关掉了，没有回答"}
+}
+
+// clipRunes is s cut to at most n characters, with "…" when cut.
+func clipRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
 }
 
 // followupDetail is a run's prompt: after the notes under its first line, without the knowledge base hint.

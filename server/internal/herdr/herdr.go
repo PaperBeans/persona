@@ -141,7 +141,7 @@ const worktreeTimeout = 2 * time.Minute
 
 // timeoutOf is how long a call may take: a worktree checkout is slow, everything else is one quick request.
 func timeoutOf(method string) time.Duration {
-	if method == "worktree.create" {
+	if method == "worktree.create" || method == "worktree.remove" || method == "workspace.close" {
 		return worktreeTimeout
 	}
 	return rpcTimeout
@@ -499,12 +499,17 @@ func (c *Client) AgentGet(ctx context.Context, target string) (*Agent, error) {
 }
 
 type Workspace struct {
-	ID      string `json:"workspace_id"`
-	Label   string `json:"label"`
-	Number  int    `json:"number"`
-	Cwd     string `json:"cwd,omitempty"`
-	Branch  string `json:"branch,omitempty"`
-	Focused bool   `json:"focused,omitempty"`
+	ID       string `json:"workspace_id"`
+	Label    string `json:"label"`
+	Number   int    `json:"number"`
+	Cwd      string `json:"cwd,omitempty"`
+	Branch   string `json:"branch,omitempty"`
+	Focused  bool   `json:"focused,omitempty"`
+	Worktree *struct {
+		RepoRoot         string `json:"repo_root"`
+		CheckoutPath     string `json:"checkout_path"`
+		IsLinkedWorktree bool   `json:"is_linked_worktree"`
+	} `json:"worktree,omitempty"`
 }
 
 type Tab struct {
@@ -567,12 +572,30 @@ type WorktreeCreated struct {
 
 // WorktreeCreate has herdr make a Git worktree checkout at path (an absolute path) from the repository of a workspace
 // and open it as a workspace grouped under that one, without moving the computer's focus. An existing local branch is
-// checked out; any other name becomes a new branch from the workspace's HEAD. herdr never forces anything: a branch
+// checked out; any other name becomes a new branch from base when given, else from the workspace's HEAD. herdr never forces anything: a branch
 // checked out elsewhere, or a path git refuses, is an error.
-func (c *Client) WorktreeCreate(ctx context.Context, workspace, branch, path string) (*WorktreeCreated, error) {
+func (c *Client) WorktreeCreate(ctx context.Context, workspace, branch, path string, base ...string) (*WorktreeCreated, error) {
+	params := map[string]any{"workspace_id": workspace, "branch": branch, "path": path, "focus": false}
+	args := []string{"worktree", "create", "--workspace", workspace, "--branch", branch, "--path", path}
+	if len(base) > 0 && base[0] != "" {
+		params["base"] = base[0]
+		args = append(args, "--base", base[0])
+	}
 	var res WorktreeCreated
-	err := c.call(ctx, "worktree.create", map[string]any{"workspace_id": workspace, "branch": branch, "path": path, "focus": false}, &res,
-		"worktree", "create", "--workspace", workspace, "--branch", branch, "--path", path, "--no-focus")
+	err := c.call(ctx, "worktree.create", params, &res, append(args, "--no-focus")...)
+	return &res, err
+}
+
+// WorktreeCreateFromCwd is WorktreeCreate from a main checkout that has no open workspace.
+func (c *Client) WorktreeCreateFromCwd(ctx context.Context, cwd, branch, path string, base ...string) (*WorktreeCreated, error) {
+	params := map[string]any{"cwd": cwd, "branch": branch, "path": path, "focus": false}
+	args := []string{"worktree", "create", "--cwd", cwd, "--branch", branch, "--path", path}
+	if len(base) > 0 && base[0] != "" {
+		params["base"] = base[0]
+		args = append(args, "--base", base[0])
+	}
+	var res WorktreeCreated
+	err := c.call(ctx, "worktree.create", params, &res, append(args, "--no-focus")...)
 	return &res, err
 }
 
@@ -590,6 +613,18 @@ func (c *Client) TabRename(ctx context.Context, tab, label string) error {
 func (c *Client) WorkspaceRename(ctx context.Context, workspace, label string) error {
 	return c.call(ctx, "workspace.rename", map[string]any{"workspace_id": workspace, "label": label}, nil,
 		"workspace", "rename", workspace, label)
+}
+
+func (c *Client) WorkspaceClose(ctx context.Context, workspace string) error {
+	return c.call(ctx, "workspace.close", map[string]any{"workspace_id": workspace}, nil, "workspace", "close", workspace)
+}
+
+func (c *Client) WorktreeRemove(ctx context.Context, workspace string, force bool) error {
+	args := []string{"worktree", "remove", "--workspace", workspace}
+	if force {
+		args = append(args, "--force")
+	}
+	return c.call(ctx, "worktree.remove", map[string]any{"workspace_id": workspace, "force": force}, nil, args...)
 }
 
 func (c *Client) TabClose(ctx context.Context, tab string) error {
@@ -838,5 +873,29 @@ func (c *Client) PaneReportResume(ctx context.Context, pane, source, agent, sess
 	return err
 }
 
+// ServerID names the server instance listening on c's socket: every server start (a restart, a live handoff, an
+// upgrade) binds the socket anew, so its modification time changes. "" when there is no socket. A reporter compares it
+// to the one it reported to: state a server keeps only in memory (or an older herdr ignored, such as resume_argv
+// before 0.9.2) has to be reported again to a new one.
+func (c *Client) ServerID() string {
+	if c.Socket == "" {
+		return ""
+	}
+	fi, err := os.Stat(c.Socket)
+	if err != nil {
+		return ""
+	}
+	return strconv.FormatInt(fi.ModTime().UnixNano(), 10)
+}
+
 // ReportSeq orders a reporter's reports (herdr drops one older than the last it took); tests fix it.
 var ReportSeq = func() int64 { return time.Now().UnixNano() }
+
+// Panes lists all panes in a workspace, including panes with no detected agent.
+func (c *Client) Panes(ctx context.Context, workspace string) ([]Agent, error) {
+	var res struct {
+		Panes []Agent `json:"panes"`
+	}
+	err := c.call(ctx, "pane.list", map[string]any{"workspace_id": workspace}, &res, "pane", "list", "--workspace", workspace)
+	return res.Panes, err
+}

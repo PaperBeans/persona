@@ -3,6 +3,7 @@ import SwiftUI
 /// A Mac's VNC on the whole screen (#1343), where it can be operated: its picture, the touches as the mode says (Mouse /
 /// Trackpad), the clipboard both ways, the keyboard with a row of the Mac's shortcuts, Help, and Picture in Picture back to picture in
 /// picture. When the agent whose chat opened it waits on the user, 「我完成了」 hands the Mac back (closing does too).
+/// On an iPhone a button next to the clipboard turns the page on its side and back (#6196).
 struct VNCPage: View {
     @Environment(AppModel.self) private var model
     let ref: MachineRef
@@ -19,10 +20,22 @@ struct VNCPage: View {
     @State private var bottomRailFit = 0
     #if os(iOS) || os(visionOS)
     @State private var screenView: VNCScreenUIView?
+    /// The picture is zoomed in (a pinch, or ⋯ › Zoom In): ⋯ offers Zoom to Fit instead of Zoom In.
+    @State private var zoomed = false
     @State private var modifiers = VNCModifiers()
     /// The display shown alone (`VNCDisplay.id`, kept per Mac, #80); nil: all of them.
     @State private var display: String?
     @State private var pipLog = false
+    /// The picture channel for this Mac (#3954): hardware video or VNC. Loaded from the per-Mac pref on appear.
+    @State private var picture: ScreenPicture = .vnc
+    /// The video channel's quality bias (#3954, interface for #6396), per Mac.
+    @State private var quality: ScreenQuality = .auto
+    /// Whether the connection-stats overlay is shown (#3954), per Mac, off by default.
+    @State private var statsOn = false
+    /// `-showScreenFallbackDemo`'s reason, for screenshots of the fallback line (#3954); the real one is `fallback`.
+    @State private var fallbackDemo: ScreenVideoFallback?
+    /// The not-allowed line's "How to turn it on" is showing its one sentence.
+    @State private var fallbackHelp = false
     /// The app went to the background with the page up (not just Control Center or an alert over it).
     @State private var wentBackground = false
     /// When the app came back from the background with the connection not (yet) known to be down: a drop reported
@@ -57,9 +70,18 @@ struct VNCPage: View {
                 TimelineView(.periodic(from: .now, by: 1)) { ctx in
                     if let a = model.computerActivities[ref], a.shown(at: ctx.date) { stepLine(a) }
                 }
+                #if os(iOS) || os(visionOS)
+                if let f = fallback { fallbackBanner(f) }
+                #endif
                 ZStack {
                     Color.black
                     if let s = session { content(s) }
+                    #if os(iOS) || os(visionOS)
+                    if statsOn, let stats = currentStats {
+                        ScreenStatsOverlay(stats: stats) { statsOn = false; ScreenStatsPref.set(false, for: ref) }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    }
+                    #endif
                 }
                 #if os(iOS) || os(visionOS)
                 // Over the keyboard while it is up (the bars ride above it).
@@ -75,10 +97,30 @@ struct VNCPage: View {
             mode = VNCMode.of(ref)
             #if os(iOS) || os(visionOS)
             display = VNCDisplayChoice.of(ref)
+            // Picture defaults to video on a Mac whose node offers it (it falls back to VNC by itself when it can't show);
+            // a saved choice always wins.
+            picture = ScreenPicture.of(ref) ?? (videoAdvertised ? .video : .vnc)
+            quality = ScreenQuality.of(ref)
+            statsOn = ScreenStatsPref.of(ref)
+            #if DEBUG
+            let args = ProcessInfo.processInfo.arguments
+            // `-showScreenVideoDemo` stands in for a node that advertises the video channel (videoAdvertised), and picks
+            // the video channel, so a screenshot shows the Picture and Quality items the switcher offers.
+            if args.contains("-showScreenVideoDemo") { picture = .video }
+            if args.contains("-showScreenStatsDemo") { statsOn = true }
+            if args.contains("-showScreenFallbackDemo") { fallbackDemo = .lost }
+            #endif
+            #endif
+            #if os(iOS) && canImport(PersonaScreenKit)
+            session?.video.want(videoWant)
             #endif
         }
+        #if os(iOS) && canImport(PersonaScreenKit)
+        .onChange(of: videoWant) { _, want in session?.video.want(want) }
+        #endif
         .onDisappear {
             #if os(iOS)
+            VNCPiP.shared.pagePicture(nil)
             VNCPiP.shared.pageGone(ref)
             #endif
             VNC.release(ref)
@@ -102,8 +144,16 @@ struct VNCPage: View {
         #if os(iOS) || os(visionOS)
         // Back from the background: the suspended app's connection is usually gone. Reconnect instead of waiting on
         // Reconnect being tapped; a sign-in asked for, or a connection still up, is left as it is.
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in wentBackground = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            wentBackground = true
+            #if os(iOS) && canImport(PersonaScreenKit)
+            session?.video.hold("background", true) // the small window, if any, shows RFB's picture meanwhile
+            #endif
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            #if os(iOS) && canImport(PersonaScreenKit)
+            session?.video.hold("background", false)
+            #endif
             guard wentBackground, let s = session else { return }
             wentBackground = false
             if case .closed = s.phase {
@@ -310,6 +360,31 @@ struct VNCPage: View {
                 Label("Mouse Mode", systemImage: Theme.Icon.pointer).tag(VNCMode.mouse)
                 Label("Trackpad Mode", systemImage: Theme.Icon.trackpad).tag(VNCMode.trackpad)
             }
+            // Picture channel and its quality bias (#3954), remembered per Mac — only when this Mac's node advertises the
+            // video channel, so no Mac shows a control it can't use (the switcher stays hidden until it does). Input stays
+            // on RFB in both; only the picture path changes. Video falls back to VNC on its own and says why on the page.
+            if videoAdvertised {
+                Picker(selection: Binding(get: { picture }, set: { picture = $0; ScreenPicture.set($0, for: ref) })) {
+                    ForEach(ScreenPicture.allCases, id: \.self) { p in Label(p.label, systemImage: p.icon).tag(p) }
+                } label: {
+                    Label("Picture", systemImage: Theme.Icon.video)
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("screen-picture")
+                if picture == .video {
+                    Picker(selection: Binding(get: { quality }, set: { quality = $0; ScreenQuality.set($0, for: ref) })) {
+                        ForEach(ScreenQuality.allCases, id: \.self) { q in Text(q.label).tag(q) }
+                    } label: {
+                        Label("Quality", systemImage: Theme.Icon.pluginGauge)
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("screen-quality")
+                }
+            }
+            Toggle(isOn: Binding(get: { statsOn }, set: { statsOn = $0; ScreenStatsPref.set($0, for: ref) })) {
+                Label("Connection Stats", systemImage: Theme.Icon.pluginChart)
+            }
+            .accessibilityIdentifier("screen-stats-toggle")
             let displays = offeredDisplays
             if displays.count > 1 {
                 Picker(selection: Binding(get: { shownDisplay?.id }, set: { display = $0; VNCDisplayChoice.set($0, for: ref) })) {
@@ -322,6 +397,14 @@ struct VNCPage: View {
                 }
                 .pickerStyle(.menu)
                 .accessibilityIdentifier("vnc-displays")
+            }
+            // The only zoom in Trackpad Mode, which has no pinch (#6196); one tap back to the whole screen in either.
+            if zoomed {
+                Button { screenView?.zoomToFit() } label: { Label("Zoom to Fit", systemImage: Theme.Icon.zoomOut) }
+                    .accessibilityIdentifier("vnc-zoom-fit")
+            } else {
+                Button { screenView?.zoomIn() } label: { Label("Zoom In", systemImage: Theme.Icon.zoomIn) }
+                    .accessibilityIdentifier("vnc-zoom-in")
             }
             #endif
             Button { centerPointer() } label: { Label("Center Pointer", systemImage: Theme.Icon.pointerCenter) }
@@ -362,6 +445,9 @@ struct VNCPage: View {
             .themedButton()
             .accessibilityLabel("Clipboard")
             .accessibilityIdentifier("vnc-clipboard")
+            #if os(iOS)
+            if AppOrientation.phone { rotateButton }
+            #endif
             Spacer(minLength: Theme.Space.s)
             if waiting {
                 Button { handBack() } label: {
@@ -390,6 +476,20 @@ struct VNCPage: View {
         #endif
     }
 
+    #if os(iOS)
+    /// Next to the clipboard (#6196): upright, it turns the page on its side; on its side (down the trailing rail, under
+    /// the clipboard), back upright. Only on an iPhone: an iPad is not made to turn.
+    private var rotateButton: some View {
+        Button { ScreenWindow.shared.turn() } label: {
+            ThemedIcon(railed ? Theme.Icon.rotateToPortrait : Theme.Icon.rotateToLandscape).font(Theme.Font.heading)
+                .scaledFrame(width: Theme.Size.icon, height: Theme.Size.icon)
+        }
+        .themedButton()
+        .accessibilityLabel(railed ? String(localized: "Rotate to Portrait") : String(localized: "Rotate to Landscape"))
+        .accessibilityIdentifier("vnc-rotate")
+    }
+    #endif
+
     #if os(iOS) || os(visionOS)
     static let fromPhone = String(localized: "Paste from iPhone"), toPhone = String(localized: "Copy to iPhone")
     #else
@@ -404,13 +504,128 @@ struct VNCPage: View {
             .accessibilityIdentifier("screen-step")
     }
 
+    #if os(iOS) || os(visionOS)
+    /// A one-line reason under the bars when the video channel falls back to VNC (#3954).
+    private func fallbackBanner(_ f: ScreenVideoFallback) -> some View {
+        let line = HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
+            ThemedIcon(Theme.Icon.info).font(Theme.Font.caption).foregroundStyle(Theme.caution)
+            Text(Self.fallbackLine(f)).font(Theme.Font.label).foregroundStyle(.secondary)
+                .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Theme.Space.page)
+        .padding(.bottom, Theme.Space.xs)
+        return Group {
+            if f == .notAllowed {
+                // The one reason the user can fix themselves: the whole line is the way to the one sentence saying where
+                // (a whole-width target, and "How to turn it on" wraps with the words at any text size).
+                Button { fallbackHelp = true } label: { line.contentShape(.rect) }
+                    .buttonStyle(.plain)
+                    .accessibilityHint(Text("How to turn it on"))
+                    .accessibilityIdentifier("screen-fallback-help")
+            } else {
+                line.accessibilityElement(children: .combine).accessibilityIdentifier("screen-fallback")
+            }
+        }
+        .alert("Turn On Video for This Mac", isPresented: $fallbackHelp) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(ScreenVideoFallback.howToAllow)
+        }
+    }
+
+    /// The fallback's words; the not-allowed one ends with "How to turn it on" in the accent color.
+    private static func fallbackLine(_ f: ScreenVideoFallback) -> AttributedString {
+        var line = AttributedString(f.message)
+        if f == .notAllowed {
+            var how = AttributedString(String(localized: "How to turn it on"))
+            how.foregroundColor = Theme.accent
+            line += AttributedString(" ") + how
+        }
+        return line
+    }
+
+    /// The reading the stats overlay draws (#3954): the video channel's while its picture shows, else RFB's. A
+    /// `-showScreenStatsDemo` build shows sample video-mode numbers.
+    private var currentStats: ScreenStats? {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-showScreenStatsDemo") { return .demoVideo }
+        #endif
+        guard let s = session else { return nil }
+        #if os(iOS) && canImport(PersonaScreenKit)
+        if s.video.showing {
+            let v = s.video, r = v.reading
+            return ScreenStats(mode: .video, path: .relay, bitrateMbps: r.mbps, fps: r.fps, codec: v.codec,
+                               resolution: v.size.map { "\(Int($0.width))×\(Int($0.height))" }, captureMs: r.captureMs,
+                               encodeMs: r.encodeMs, networkMs: r.networkMs, decodeMs: r.decodeMs, totalMs: r.totalMs)
+        }
+        #endif
+        return ScreenStats(mode: .vnc, path: .relay,
+                           bitrateMbps: s.mbps > 0 ? s.mbps : nil,
+                           fps: s.fps > 0 ? s.fps : nil,
+                           roundTripMs: s.latency)
+    }
+
+    /// Why the page shows VNC while video is chosen (#3954); nil when there is nothing to explain. Only while VNC is
+    /// live: while it connects or is closed, the page says so itself.
+    private var fallback: ScreenVideoFallback? {
+        #if DEBUG
+        if let fallbackDemo { return fallbackDemo }
+        #endif
+        #if os(iOS) && canImport(PersonaScreenKit)
+        guard picture == .video, videoAdvertised, let s = session, s.phase == .live else { return nil }
+        if model.screenVideo(ref)?.permission == "missing" { return .notAllowed }
+        return s.video.fallback
+        #else
+        return nil
+        #endif
+    }
+
+    #if os(iOS) && canImport(PersonaScreenKit)
+    /// What the page asks of the video channel (#3954): video chosen, a Mac that offers and allows it, and one display
+    /// shown — its only one, or one chosen of several the node numbered (`display-<id>`); nil keeps VNC (all of several
+    /// displays at once stay RFB's, since video carries one).
+    private var videoWant: ScreenVideoLink.Want? {
+        guard picture == .video, videoAdvertised, model.screenVideo(ref)?.permission != "missing" else { return nil }
+        if let d = shownDisplay {
+            guard d.id.hasPrefix("display-"), let id = Int(d.id.dropFirst("display-".count)) else { return nil }
+            return .init(display: id, rect: d.frame)
+        }
+        return offeredDisplays.isEmpty ? .init(display: nil, rect: nil) : nil
+    }
+    #endif
+
+    /// Whether this Mac's node advertises the hardware video channel (#3954): the Picture and Quality items appear only
+    /// then, so no Mac shows a control it can't use. A `-showScreenVideoDemo` build forces it on for screenshots.
+    private var videoAdvertised: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-showScreenVideoDemo") { return true }
+        #endif
+        return model.screenVideoAdvertised(ref)
+    }
+    #endif
+
     // MARK: Content
 
     @ViewBuilder private func content(_ s: RFBSession) -> some View {
         switch s.phase {
         case .live:
             #if os(iOS) || os(visionOS)
-            VNCScreen(session: s, mode: mode, interactive: true, region: shownDisplay?.frame) { v in DispatchQueue.main.async { screenView = v } }
+            #if os(iOS)
+            // The small window's source lies over this picture, and the picture goes into it as it starts (#6333):
+            // hidden while the small window has it, also as the page comes back on Restore until it has grown back.
+            // It fades as it goes: the system's copy comes over it a few frames after the start, and gone at once it
+            // left a blank there until then. It is back at once, where the small window has just grown into it.
+            let handedOver = model.vncPiP == ref
+            VNCScreen(session: s, mode: mode, interactive: true, region: shownDisplay?.frame,
+                      onView: { v in DispatchQueue.main.async { screenView = v; zoomed = false } }, onZoom: { zoomed = $0 },
+                      onPicture: { VNCPiP.shared.pagePicture($0) })
+                .opacity(handedOver ? 0 : 1)
+                .animation(handedOver ? Theme.Motion.conceal : nil, value: handedOver)
+            #else
+            VNCScreen(session: s, mode: mode, interactive: true, region: shownDisplay?.frame,
+                      onView: { v in DispatchQueue.main.async { screenView = v; zoomed = false } }, onZoom: { zoomed = $0 })
+            #endif
             #else
             VNCScreen(session: s, mode: mode, interactive: true)
             #endif
@@ -622,7 +837,12 @@ struct VNCHelp: View {
                 Section("Moving Around") {
                     #if !os(macOS)
                     row(Theme.Icon.pointer, String(localized: "Mouse mode (default)"), String(localized: "Tap to click there. Drag with one finger to drag. Drag with two fingers to scroll. Two-finger tap or touch and hold to right-click."))
-                    row(Theme.Icon.search, String(localized: "Zoom"), String(localized: "Pinch to zoom in and out. When zoomed in, dragging with two fingers moves the view instead of scrolling."))
+                    row(Theme.Icon.search, String(localized: "Zoom"), String(localized: "In Mouse Mode, pinch to zoom in and out; when zoomed in, dragging with two fingers moves the view instead of scrolling. In either mode, “…” › Zoom In zooms in around the pointer and Zoom to Fit shows the whole screen again. In Trackpad Mode two fingers only scroll, and a zoomed view follows the pointer."))
+                    #if os(iOS)
+                    if AppOrientation.phone {
+                        row(Theme.Icon.rotateToLandscape, String(localized: "Landscape"), String(localized: "Tap the rotate button next to the clipboard to turn the screen sideways for a larger view, and tap it again to turn it back upright. Once tapped, the screen keeps that orientation until you close it."))
+                    }
+                    #endif
                     row(Theme.Icon.displays, String(localized: "Displays"), String(localized: "When the Mac has more than one display, choose one in “…” › Displays to show only that display. Zooming, taps and the pointer then stay on it."))
                     #else
                     row(Theme.Icon.pointer, String(localized: "Mouse"), String(localized: "Click for the left mouse button; right-click (or Control-click) for the right button; press and hold the mouse button and move to drag."))

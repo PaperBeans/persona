@@ -413,10 +413,12 @@ nonisolated extension Item {
         return Int(id[id.index(after: hash)...]) ?? 0
     }
 
-    /// Work a fold may stand for: tool calls, their results and images, thoughts, folds.
+    /// Work a fold may stand for: tool calls, their results and images, thoughts, narration text, folds.
     var isWork: Bool {
         switch kind {
         case .thinking, .toolUse, .toolResult, .fold: true
+        // Only a fold's range distinguishes narration from a final assistant answer.
+        case .text: role == "assistant"
         case .image: toolUseID != nil
         default: false
         }
@@ -459,6 +461,9 @@ final class ChatStore {
     /// agent's live message its newest items do not hold yet (`agentStreamed`). Set through `showLive`, which a clear's
     /// fallback watches.
     private(set) var liveText: String = ""
+    /// The stream of `liveText` is over (a clear came) and it only waits for its transcript line: drawn whole at once,
+    /// no longer revealed a few characters a frame (`StreamReveal`, #6651).
+    private(set) var liveDone = false
     /// Bumped each time `liveText` is set: a clear's fallback (`clearLive`) does nothing once anything else set it.
     @ObservationIgnored private var liveStamp = 0
     /// The newest line when the live text began: its copy is written after it, so lines up to this one are not.
@@ -848,6 +853,7 @@ final class ChatStore {
     func showLive(_ text: String) {
         if liveText.isEmpty, !text.isEmpty { liveSince = items.last?.seq ?? 0 }
         liveText = text
+        if liveDone { liveDone = false }
         liveStamp += 1
     }
 
@@ -899,6 +905,7 @@ final class ChatStore {
         if let text, !text.isEmpty, text.hasPrefix(liveText) { showLive(text) }
         let shown = liveText
         guard !shown.isEmpty else { return }
+        liveDone = true
         if Self.holdsLive(items, shown, after: liveSince) { return endLive(shown) }
         let stamp = liveStamp
         Task { @MainActor [weak self] in
@@ -1521,10 +1528,11 @@ nonisolated enum ChatCache {
     /// their denied or interrupted calls would stay red.
     /// v17: refusal notices carry `model_refusal` and their text is the refusal's words (#4489); an older hub made it the
     /// record's whole line, which v16's copies would keep showing.
+    /// v18: Codex commentary is assistant text rather than thinking; older cached items would keep hiding mid-turn answers.
     /// Bump it whenever the item structure or the text the hub gives an item changes.
-    static let folder = "chats-v17"
+    static let folder = "chats-v18"
     /// The folder before, removed on the first launch with this one.
-    private static let previous = "chats-v16"
+    private static let previous = "chats-v17"
 
     /// Once per launch, before the first copy is read or written (a static let runs once, on whichever thread asks first).
     private static let dropOlder: Void = {
@@ -1662,8 +1670,11 @@ nonisolated struct PendingMessage: Identifiable, Hashable, Codable, Sendable {
     /// How the app wrote it when the user did not type it (a card's button): sent with it, so it never counts as the
     /// user's own words for a secret hand-off's Always rule.
     var via: APIClient.MessageVia?
+    /// It was written while the agent worked (the composer's queue mode): the queue strip draws it, not the chat
+    /// (`QueuePlacement`, #1461). nil for one written while the agent was idle, and in outboxes saved before this.
+    var queuedMode: Bool?
 
-    private enum CodingKeys: String, CodingKey { case id, text, images, state, failure, inboxHandOff, createdAt, mayHaveArrived, refused, via }
+    private enum CodingKeys: String, CodingKey { case id, text, images, state, failure, inboxHandOff, createdAt, mayHaveArrived, refused, via, queuedMode }
 
     /// Only on this phone as far as it knows: failed, or waiting for the network. Deleting it (its long press, its mark's
     /// menu) drops the bubble and its outbox entry and sends nothing (#4626). One being sent may be arriving and a sent

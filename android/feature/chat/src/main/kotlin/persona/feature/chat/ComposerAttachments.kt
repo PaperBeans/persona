@@ -62,7 +62,7 @@ internal fun attachmentName(context: Context, uri: Uri): String =
  * [uri] as an attachment of the draft. [video]: one from the photo picker, sent as it is up to the hub's 200 MB (iOS
  * compresses a longer one; Android refuses it as it does any file over the limit), its length read for its card.
  */
-internal fun selectAttachment(context: Context, uri: Uri, image: Boolean, video: Boolean = false): ComposerAttachment {
+fun selectAttachment(context: Context, uri: Uri, image: Boolean, video: Boolean = false): ComposerAttachment {
     val resolver = context.contentResolver
     runCatching { resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
     val name = runCatching { attachmentName(context, uri) }.getOrDefault(context.getString(R.string.chat_attach_default_name))
@@ -145,7 +145,7 @@ internal fun decodePhoto(context: Context, uri: Uri): Bitmap =
  * uploaded. Back from the camera or a picker the connection is often still catching up (the app was in the
  * background): it waits for it a little instead of failing at once with "Retry the upload once reconnected".
  */
-internal suspend fun uploadAttachment(context: Context, service: ChatComposerService, session: SessionKey, attachment: ComposerAttachment): String {
+suspend fun uploadAttachment(context: Context, service: ChatComposerService, session: SessionKey, attachment: ComposerAttachment): String {
     (service as? MessageTransport)?.readyToSend?.let { ready ->
         withTimeoutOrNull(UPLOAD_READY_WAIT_MILLIS) { ready.first { it } }
     }
@@ -162,7 +162,7 @@ internal fun thumbnailScale(width: Int, height: Int, target: Int): Double =
     if (width <= 0 || height <= 0 || target <= 0) 1.0 else minOf(1.0, target.toDouble() / minOf(width, height))
 
 /** A small copy of a local photo for the composer, or null when it cannot be read. Call off the main thread. */
-internal fun decodeThumbnail(context: Context, uri: String, target: Int): ImageBitmap? = runCatching {
+fun decodeThumbnail(context: Context, uri: String, target: Int): ImageBitmap? = runCatching {
     ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, Uri.parse(uri))) { decoder, info, _ ->
         val scale = thumbnailScale(info.size.width, info.size.height, target)
         decoder.setTargetSize(maxOf(1, (info.size.width * scale).roundToInt()), maxOf(1, (info.size.height * scale).roundToInt()))

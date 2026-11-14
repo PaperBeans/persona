@@ -314,7 +314,9 @@ python3 scripts/release/asc_testflight.py external   # create the group, enable/
   (`docs/apple/ios.md`, "Demo mode"). Review notes (`review.notes`) must give that entry and its limits, and explain that full use
   requires the user's own self-hosted hub. Never give reviewers access to a developer's personal hub or private data.
 
-## Mac version (2026-11-02)
+## Retired native Mac version (2026-11-02)
+
+**This native `PersonaMac` distribution path is retired (#6770). Do not run it for new desktop releases.** The Electron desktop's universal macOS DMG/ZIP, unsigned development configuration and separate signing/notarization gates are in [desktop.md](../desktop/desktop.md). The former TestFlight Mac build process is retained below only as a historical record; it is not evidence that an Electron Developer ID or Windows signing identity exists.
 
 The Mac App (target and scheme `PersonaMac`) shares the iPhone's bundle id, so it is **the same app record** in App Store Connect (macOS platform added, version 1.0),
 and uses the same TestFlight: the same Internal / Friends groups and public link. Testers install TestFlight on a Mac to see Mac builds.
@@ -331,7 +333,7 @@ and uses the same TestFlight: the same Internal / Friends groups and public link
 - **Info.plist**: `LSApplicationCategoryType` (productivity) and all permission descriptions are defined in the `PersonaMac` target in `apple/project.yml`.
 - **Sandbox**: `com.apple.security.app-sandbox`, plus networking (client and local server for port forwarding), user-selected files, contacts / calendar / location / photos,
   microphone / camera (entitlements in `project.yml`).
-- **Push** (since 2026-11-02, `docs/apple/mac.md` ("Remote push (Mac)")): `com.apple.developer.aps-environment` (the macOS name; iOS uses `aps-environment`).
+- **Push** (historical, since 2026-11-02): `com.apple.developer.aps-environment` (the macOS name; iOS uses `aps-environment`).
   The App ID is UNIVERSAL and already has Push Notifications enabled, so no developer-account change is needed; the archive has `development`, and cloud signing at App Store export changes it to `production`.
   The package also includes notification service extension `PersonaNotify.appex` (target `PersonaMacNotify`, module / notification main class still `PersonaNotify`, in `Contents/PlugIns/`, sandbox + `.push` keychain group, #432).
   Its bundle id is the same as the iPhone extension's (UNIVERSAL App ID); cloud signing creates its Mac profile at export. `entitlements.py sign / check` signs and checks it too.
@@ -345,8 +347,8 @@ and uses the same TestFlight: the same Internal / Friends groups and public link
   "files that are only readable by the root user" (macOS verifies signatures as the user running the App). auto-tf's umask is 077;
   the script's `cp -R` made the copied archive entirely 0700 / 0600, which never showed up when testing in an interactive shell (umask 022). The release script now starts with `umask 022` and copies archives with `ditto` (preserves permissions).
   It checks the `.app` before export and the App unpacked from the `.pkg` afterwards: every file a+r, every directory a+rx, otherwise no upload. The iPhone script was changed too (ipas aren't checked for this; 110 passed there).
-- **Automatic release**: after releasing the iPhone build, if this commit includes changes used by the Mac App (`apple/Mac`, `apple/Shared`, `apple/Persona` except a few iOS-only
-  files, `apple/Packages`, `project.yml`, `Package.resolved`), release Mac next with the same number. Report the Mac result separately; its failure doesn't affect the iPhone release.
+- **Automatic release (historical)**: after releasing the iPhone build, if a commit included changes used by the Mac App (its native-Mac source directory, `apple/Shared`, `apple/Persona` except a few iOS-only
+  files, `apple/Packages`, `project.yml`, `Package.resolved`), the former process released Mac next with the same number. This step is retired with `PersonaMac`; use the Electron packaging workflow.
 
 ## Publishing personad (`scripts/release/publish.sh`, 2026-10-31)
 
@@ -409,7 +411,11 @@ curl -fsSL <publish.site_url>/install.sh | sh   # install to ~/.persona/bin/pers
 
 ## Publishing a release (`.github/workflows/release.yml`)
 
-A `v*` tag publishes the hub container image and creates a GitHub Release. Docker hubs (`docs/operations/docker.md`) use the ghcr image, linux/amd64 + linux/arm64:
+A `v*` tag publishes the hub container image and creates a GitHub Release. **Only `chyroc` may create, update or delete a `v*` tag, dispatch an image release or rerun its jobs.** The repository's `Release tags: administrators only` ruleset permits only the administrator role to bypass its create/update/delete restrictions; other collaborators cannot publish a version tag. The workflow independently requires both the run's actor and its triggering actor to be `chyroc` before any checkout, build or upload, including manual dispatches and reruns. The Release's `github-actions[bot]` author identifies the workflow that created it, not the person who pushed the tag; the Actions run records that triggering actor.
+
+This boundary covers automated publication; collaborators retain their existing write permissions. GitHub does not offer a separate release-only permission on this organization, so those permissions still allow a manual GitHub Release from an existing ref. Restricting manual releases too would require a separate collaborator-permission change, outside this policy.
+
+Docker hubs (`docs/operations/docker.md`) use the ghcr image, linux/amd64 + linux/arm64:
 
 ```sh
 git tag v1.2.0 && git push origin v1.2.0
@@ -418,7 +424,7 @@ git tag v1.2.0 && git push origin v1.2.0
 ```
 
 - Smoke-test first (amd64 + compose), then build and push both architectures only after it passes. Once image publication succeeds, the same job creates a GitHub Release named for the full tag with automatically generated notes. Prerelease tags containing `-` (`v1.3.0-rc1`) only push the version image, without touching `latest`, and mark the GitHub Release as a prerelease. Creating the Release does not push another tag.
-- To get an image of the current branch without a tag or GitHub Release: manually run release in Actions (`edge`, `sha-<commit>`).
+- To get an image of the current branch without a tag or GitHub Release, `chyroc` can manually run release in Actions (`edge`, `sha-<commit>`).
 - Image smoke tests run through an explicit workflow dispatch; only the documented `v*` release-tag event starts image and GitHub Release publication automatically (`packages: write` and `contents: write` are granted only to the publish job). This exception supplies the version and `latest` images used by Docker installations; no branch push or PR starts it. A manual dispatch never creates a GitHub Release.
 - If Release creation fails after the images were pushed, rerun the failed job for the same tag. Rebuilding and pushing the same immutable image tags does not advance `latest` to another source revision; fix any reported tag or Release conflict rather than creating a replacement tag.
 - The image's personad uses the tag minus `v` as its version (`personad version`); when node differs, the App prompts to redeploy, using the image's own builds or the release's (`docs/operations/docker.md` ("Node builds")).

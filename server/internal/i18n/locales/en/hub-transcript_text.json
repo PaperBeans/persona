@@ -1,5 +1,6 @@
 {
   "interrupted": "Interrupted",
+  "stopped_from_phone": "Stopped from the phone",
   "loop_fired": "/loop is due, starting a new round",
   "loop_fired_prompt": "/loop is due, starting a new round: {prompt}",
   "codex_extension": "Codex extension event: {kind} (the full record is in the original session)",
@@ -103,6 +104,7 @@
   "read_only_claude_no_inbox": "This Claude session has no message channel (an older version, or turned off): view only here; reply on the computer",
   "read_only_claude_inbox": "Persona can’t use this Claude session’s message channel (unknown version or missing key): view only here; reply on the computer",
   "attention_claude_computer": "It’s waiting on a question or a permission prompt that can only be answered on the computer",
+  "attention_claude_answer": "It’s asking you a question: your reply is the answer",
   "model_refusal": "Claude Code refusal notice ({subtype}).",
   "model_refusal_fallback": "Claude Code reported an upstream refusal and switched from {original} to {fallback}. Category: {category}. Scope: {scope}. If the fallback model is unavailable, start a new conversation or use /model in the Claude Code terminal to select the configured model. The request may be refused again.",
   "card_remaining": "Remaining",

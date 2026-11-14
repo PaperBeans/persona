@@ -129,3 +129,31 @@ func TestRoot(t *testing.T) {
 		}
 	}
 }
+
+// The key replaces the placeholder in the address path too, escaped as a path segment, for a path and for an absolute
+// address; the gateway's echo of it is taken out again.
+func TestDoPutsTheKeyInThePath(t *testing.T) {
+	var got struct{ path, raw, query string }
+	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.path, got.raw, got.query = r.URL.Path, r.URL.EscapedPath(), r.URL.RawQuery
+		_, _ = io.WriteString(w, r.URL.EscapedPath())
+	}))
+	defer gw.Close()
+	for _, c := range []struct{ key, wantPath, wantRaw string }{
+		{"sk-example-123", "/api/keys/sk-example-123/usage", "/api/keys/sk-example-123/usage"},
+		{"sk-a/b c?d", "/api/keys/sk-a/b c?d/usage", "/api/keys/sk-a%2Fb%20c%3Fd/usage"},
+	} {
+		for _, address := range []string{"/keys/" + KeyPlaceholder + "/usage?tz=UTC", gw.URL + "/api/keys/" + KeyPlaceholder + "/usage?tz=UTC"} {
+			resp, err := Do(context.Background(), nil, gw.URL+"/api/v1", c.key, Request{URL: address})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.path != c.wantPath || got.raw != c.wantRaw || got.query != "tz=UTC" {
+				t.Fatalf("key %q, address %q: the gateway got path %q (%q) and query %q", c.key, address, got.path, got.raw, got.query)
+			}
+			if strings.Contains(resp.Body, c.key) || strings.Contains(resp.Body, url.PathEscape(c.key)) || !strings.Contains(resp.Body, KeyPlaceholder) {
+				t.Fatalf("key %q, address %q: the key came back or was not marked: %+v", c.key, address, resp)
+			}
+		}
+	}
+}

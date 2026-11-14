@@ -43,9 +43,14 @@ extension AppModel {
             // types it once. Through a short drop (a hub restart) it keeps trying with that id instead of going to
             // the outbox's clock; once the drop's grace is over the outbox takes it (flushOutbox).
             let launcher = assistantLaunchers[key], model = assistantModels[key]
-            try await OpRetry.untilDelivered(keepTrying: { socket?.takesWrites == true }) {
+            let waits = try await OpRetry.untilDelivered(keepTrying: { socket?.takesWrites == true }) {
                 try await api.send(key, text: msg.text, images: msg.images, launcher: launcher, model: model,
                                    clientMsgID: msg.id.uuidString, clearDraft: clearDraft, via: msg.via, opID: msg.id)
+            }
+            if waits, visibleSession == key {
+                // Sent, but the Agent reads it only after the question on the computer is answered (#5890). Only on
+                // that chat's screen: the toast does not name the chat, and an outbox flush can run from anywhere.
+                toast = Toast(String(localized: "Sent. The Agent will read it after the question on the computer is answered."))
             }
             return .sent
         } catch let e as APIError where e.code == "input_draft" {

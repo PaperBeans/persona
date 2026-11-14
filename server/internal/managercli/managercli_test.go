@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/clitext"
 	"github.com/nwverse/persona/server/internal/manager"
 	"github.com/nwverse/persona/server/internal/update"
 )
@@ -39,5 +40,16 @@ func TestManagerExit(t *testing.T) {
 	}
 	if _, done := managerExit(errors.New("boom"), &stderr); done || stderr.Len() != 0 {
 		t.Fatalf("another error was handled here (stderr %q); it is the caller's", stderr.String())
+	}
+}
+
+// assistant search-reindex is a command of the built-in manager's (#6340), not a usage mistake: an argument it does
+// not take is its own error.
+func TestAssistantSearchReindexIsACommand(t *testing.T) {
+	t.Setenv("PERSONA_HOME", t.TempDir())
+	err := Assistant(context.Background(), update.Build{}, []string{"search-reindex", "extra"}, nil)
+	var ue clitext.UsageError
+	if err == nil || errors.As(err, &ue) || !strings.Contains(err.Error(), "search-reindex takes no arguments") {
+		t.Fatalf("assistant search-reindex extra: %v", err)
 	}
 }

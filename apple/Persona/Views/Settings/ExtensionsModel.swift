@@ -262,15 +262,6 @@ nonisolated struct ExtensionSecret: Codable, Hashable, Sendable, Identifiable {
     var id: String { name }
 }
 
-/// A secret provider's reference a setting holds: whose it is, the reference and what it names in words.
-nonisolated struct SecretReference: Codable, Hashable, Sendable {
-    var provider: String
-    var providerName: String
-    var reference: String
-    var title: String?
-    private enum CodingKeys: String, CodingKey { case provider, reference, title, providerName = "provider_name" }
-}
-
 /// A setting that holds one of a provider's references: another extension's secret, or a model provider's key (on one
 /// computer when `machine` is set).
 nonisolated struct ExtensionSecretUser: Codable, Hashable, Sendable, Identifiable {
@@ -448,6 +439,16 @@ enum ExtensionText {
         case "error": String(localized: "Something Went Wrong")
         default: String(localized: "Unknown [Connectors Views 93e474]")
         }
+    }
+
+    /// Where a reference's value comes from: "From <provider> · <item>"; the reference itself once its provider is gone
+    /// (the hub then answers its id and name empty).
+    static func referenceState(_ r: SecretReference) -> String {
+        let provider = r.providerName.isEmpty ? r.provider : r.providerName
+        guard !provider.isEmpty else { return r.title.flatMap { $0.isEmpty ? nil : $0 } ?? r.reference }
+        let from = String(localized: "From \(provider)", comment: "A secret that holds a secret provider's reference")
+        guard let title = r.title, !title.isEmpty else { return from }
+        return from + " · " + title
     }
 
     /// A secret's row: set (with its last four characters when the hub gives them, #5906), or not set (required).
@@ -728,13 +729,14 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
         if let name = await name { managerName = name }
     }
 
-    /// Reads the hub's launchers when the form has a launcher field and they aren't in yet. GET /api/v1/launchers asks
-    /// every machine (up to half a minute), so it runs apart from load. They are the hub's, not a manager's: asked of
-    /// the default client.
+    /// Reads the launchers when the form has a launcher field and they aren't in yet. GET /api/v1/launchers asks every
+    /// machine (up to half a minute), so it runs apart from load. They are the model providers of this copy's manager
+    /// (the current assistant's in Settings, Models › Providers and Keys), whose extension picks one: asked of it, as the
+    /// page's other requests.
     func loadLaunchersIfNeeded() async {
         guard launchers == nil, !loadingLaunchers, let form = detail?.form,
               form.contains(where: { $0.picksLauncher || ($0.fields ?? []).contains(where: \.picksLauncher) }),
-              let api = deps.api() else { return }
+              let api else { return }
         loadingLaunchers = true
         defer { loadingLaunchers = false }
         launchers = try? await api.allLaunchers()

@@ -42,11 +42,10 @@ func TestLCUCallsAreJavaScript(t *testing.T) {
 
 func TestLCUElicitationUsesTheExistingCard(t *testing.T) {
 	h, _ := extensionTestHub(t)
+	keepSessions(t, h)
 	_, _ = computerMac(t, h, "mac")
 	mac := h.machineByName("mac")
-	mac.mu.Lock()
-	mac.sessions = []proto.Session{{SessionID: "conv-assistant", Assistant: true, Title: "Persona"}}
-	mac.mu.Unlock()
+	listSessions(h, "mac", []proto.Session{{SessionID: "conv-assistant", Assistant: true, Title: "Persona"}})
 	deskOf(h)
 	raw := json.RawMessage(`{"conversation":"conv-assistant","params":{"mode":"form","message":"Allow Computer Use to use \"Calculator\"?","requestedSchema":{"type":"object","properties":{}},"_meta":{"codex_approval_kind":"mcp_tool_call","connector_id":"computer-use","tool_params":{"app":"com.apple.calculator"},"tool_params_display":[{"name":"app","value":"Calculator"}],"persist":["always","session"],"riskLevel":"high","warningSubtitle":"Allowing ChatGPT to use this app"}}}`)
 	out := make(chan map[string]any, 1)

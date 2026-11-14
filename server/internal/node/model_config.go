@@ -12,8 +12,11 @@ import (
 
 // modelExecution is non-secret per-turn execution metadata supplied by the hub.
 type modelExecution struct {
-	Model       string
-	Effort      string
+	Model  string
+	Effort string
+	// ServiceTier is a one-shot native speed request for a new Codex conversation. It is consumed before the first turn,
+	// never kept as process state or included in the execution fingerprint.
+	ServiceTier string `json:"-"`
 	UseEffort   bool
 	Fingerprint string
 	Ultracode   *bool `json:"-"` // explicit TUI start request; never a default or execution fingerprint
@@ -34,12 +37,13 @@ type modelExecution struct {
 }
 
 // check refuses a model that is not a model id (proto.ValidModelID, #1644) before anything runs; the error's text is
-// what the manager reads as a refused request (assistant startRequestErr), so it stays "invalid model".
-func (m modelExecution) check() error {
+// what the manager reads as a refused request (assistant startRequestErr), so it stays "invalid model". The effort is
+// checked against the launcher's own levels: a codex one takes ultra (validModesFor).
+func (m modelExecution) check(launcher string) error {
 	if m.Model != "" && !proto.ValidModelID(m.Model) {
 		return errors.New("invalid model")
 	}
-	return validModes("", m.Effort)
+	return validModesFor(launcher, "", m.Effort)
 }
 
 // executionFingerprint also detects a managed provider changed before the next turn (any of its fields, the #2455 ones

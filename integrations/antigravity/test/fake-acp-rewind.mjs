@@ -24,6 +24,10 @@ const server = createServer(async (req, res) => {
     res.end(JSON.stringify(snapshot))
     return
   }
+  if (method === 'GetCascadeTrajectorySteps') {
+    res.end(JSON.stringify({ steps: (snapshot.trajectory.steps || []).slice(params.stepOffset) }))
+    return
+  }
   if (method === 'RevertToCascadeStep') {
     snapshot.trajectory.steps = (snapshot.trajectory.steps || []).slice(0, params.stepIndex + 1)
     writeFileSync(`${directory}/trajectory.json`, JSON.stringify(snapshot))
@@ -37,12 +41,19 @@ const server = createServer(async (req, res) => {
   res.writeHead(404).end('{"message":"Unknown native method"}')
 })
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-writeFileSync(log, `Language server listening on random port at ${server.address().port} for HTTP\n`)
+const openService = () => writeFileSync(log, `Language server listening on random port at ${server.address().port} for HTTP\n`)
+if (!JSON.parse(readFileSync(`${directory}/trajectory.json`, 'utf8')).lazyService) openService()
 const input = createInterface({ input: process.stdin })
 input.on('line', (line) => {
   const req = JSON.parse(line)
   appendFileSync(calls, JSON.stringify(req) + '\n')
   if (req.id === undefined) return
+  if (req.method === 'session/list') openService()
+  const snapshot = JSON.parse(readFileSync(`${directory}/trajectory.json`, 'utf8'))
+  if (req.method === 'session/prompt' && snapshot.promptError) {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: req.id, error: { code: -32000, message: snapshot.promptError } }) + '\n')
+    return
+  }
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} }) + '\n')
 })
 input.on('close', () => server.close(() => process.exit(0)))

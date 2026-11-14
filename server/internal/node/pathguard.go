@@ -24,6 +24,8 @@ import (
 var (
 	errICloud    = errors.New("iCloud Drive files are not readable remotely")
 	errOffLimits = errors.New("this path holds secrets and is not readable remotely")
+	// errTooManyLinks: more than maxLinks links on the way (a loop of links): the file tree calls such a link broken.
+	errTooManyLinks = errors.New("too many links")
 )
 
 // maxLinks bounds the links one path may go through (a loop of links ends here).
@@ -365,7 +367,7 @@ func (n *Node) realPath(path string) (string, error) {
 			return "", errOffLimits
 		}
 		if links++; links > maxLinks {
-			return "", fmt.Errorf("too many links: %s", path)
+			return "", fmt.Errorf("%w: %s", errTooManyLinks, path)
 		}
 		target, err := os.Readlink(next)
 		if err != nil {

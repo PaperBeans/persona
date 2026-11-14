@@ -125,7 +125,11 @@ export interface RecordingMinutes {
   decisions?: MinutesPoint[];
   actions?: MinutesAction[];
   open?: MinutesPoint[];
+  /** The summary card (#6563): the headline, the core conclusions and the points and decisions grouped by topic. Read
+   *  defensively on its own (lib/minutes-overview.ts `minutesOverview`), so a broken one never costs the fields above. */
+  overview?: unknown;
   partial?: boolean;
+  /** The same minutes as Markdown, what Copy sends; it follows the summary card when there is one. */
   markdown: string;
 }
 
@@ -184,6 +188,9 @@ export interface KBSegment {
   start: number;
   end: number;
   text: string;
+  /** Persona's own answer heard by the meeting's microphone (#5905, docs/assistant/meeting-minutes.md "Persona's echo"):
+   *  kept on the hub, not shown as the meeting's. */
+  echo?: boolean;
 }
 
 /** One question asked in an attended meeting (docs/assistant/meeting-minutes.md "Attending a meeting", `Ask`). `state`,
@@ -891,6 +898,7 @@ export function recordingView(kind: string, meta?: Record<string, unknown> | nul
   const clock = (sec: number) => recordingClock(started, sec, tz);
   const at: { sec: number; line: RecordingView["lines"][number] }[] = [];
   for (const s of segments ?? []) {
+    if (s?.echo === true) continue; // Persona's echo is not the meeting's: hidden, as the phone hides it
     const sec = Number(s?.start) || 0;
     if (typeof s?.text === "string" && s.text.trim()) at.push({ sec, line: { seconds: sec, clock: clock(sec), text: s.text.trim() } });
   }

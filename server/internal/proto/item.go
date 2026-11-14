@@ -176,6 +176,9 @@ type Item struct {
 	// Wake marks a background task's notice that started new work after the agent had finished its turn
 	// (not one absorbed mid-turn): the exchange before it is over and its last words are an answer.
 	Wake bool `json:"wake,omitempty"`
+	// Narration is assistant text that belongs to the work summary (Codex commentary). It is internal to the
+	// transcript and FoldWork: on the wire it is ordinary text, so clients need no new item kind or cache migration.
+	Narration bool `json:"-"`
 	// From names the Claude session that sent this message (cross-session messaging), not the user.
 	From string `json:"from,omitempty"`
 	// Injected: this user line is a message Persona put into the conversation for the model (a task's notice, a
@@ -186,6 +189,9 @@ type Item struct {
 	// Unknown nonempty kinds are still not user-authored input.
 	Source *MessageSource `json:"source,omitempty"`
 	Fold   *Fold          `json:"fold,omitempty"`
+	// SupervisionUser is a user's visible action folded into this work item. Ordinary items retain it across pages
+	// and cache restores, matching the iOS model; old items without the field stay unmarked.
+	SupervisionUser bool `json:"supervision_user,omitempty"`
 	// Task: a background task notice, or a subagent tool result associated with its launching call.
 	Task         *TaskNote     `json:"task,omitempty"`
 	TurnDuration *TurnDuration `json:"turn_duration,omitempty"`
@@ -299,8 +305,8 @@ type Injected struct {
 	// Level classifies supervision: info updates only, triage folds the turn, user is visible.
 	Level   string `json:"level,omitempty"`
 	Kind    string `json:"kind"`              // InjectedTaskNotice | InjectedFollowup | InjectedSystem
-	State   string `json:"state,omitempty"`   // task_notice: done|needs|interrupted|failed; followup: once|daily|interval|wake; system: lost_tasks|supervise|inbox
-	Title   string `json:"title,omitempty"`   // the task's, the scheduled task's, the inbox item's, or what a woken agent waits for
+	State   string `json:"state,omitempty"`   // task_notice: done|needs|interrupted|failed; followup: once|daily|interval|wake; system: lost_tasks|supervise|inbox|ask_answered|ask_expired|ask_closed
+	Title   string `json:"title,omitempty"`   // the task's, the scheduled task's, the inbox item's, what a woken agent waits for, or a question's answers
 	Machine string `json:"machine,omitempty"` // task_notice: where its agent runs (a name)
 	TodoID  string `json:"todo_id,omitempty"` // task_notice: the task, when the hub can tell
 	Line    string `json:"line"`              // the one line to show

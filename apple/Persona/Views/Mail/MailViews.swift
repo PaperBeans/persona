@@ -156,12 +156,12 @@ struct MailDetailView: View {
                 translationBar
                 if let m = message {
                     if let t = translated {
-                        Text(t.text).font(Theme.Font.body).lineHeight(.body).textSelection(.enabled)
+                        Text(t.text).font(Theme.Font.body).lineHeight(.body).textSelection(.enabled).readingContent()
                         if t.clipped == true {
                             Text("This email is long, so only the beginning was translated. See the original for the full text.").font(Theme.Font.caption).foregroundStyle(.secondary)
                         }
                     } else if let text = m.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(text).font(Theme.Font.body).lineHeight(.body).textSelection(.enabled)
+                        Text(text).font(Theme.Font.body).lineHeight(.body).textSelection(.enabled).readingContent()
                     } else if let html = m.html, !html.isEmpty {
                         HTMLView(html: html, height: $webHeight).frame(height: webHeight)
                     }
@@ -661,7 +661,7 @@ struct AddMailAccountView: View {
                         Text("Choose an account on Google and let Persona send and receive mail. No password needed. You can revoke access anytime under “Third-party apps & services” in your Google Account; if access expires, just sign in again.")
                     }
                 } else if form.kind == .outlook {
-                    OutlookSignInSection(error: $error) { dismiss() }
+                    OutlookSignInSection(api: settingsAPI ?? capturedAPI, error: $error) { dismiss() }
                 } else {
                     Section {
                         TextField(String(localized: "Email address"), text: $form.email).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()

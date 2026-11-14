@@ -481,11 +481,12 @@ nonisolated struct Lossy<T: Decodable & Sendable>: Decodable, Sendable {
 }
 
 nonisolated extension Session {
-    /// Its workflows still running. A summary row (`summary=1`, the Agents list's Recent grouping) has no `workflows`:
-    /// its `workflow_progress`, the newest running run without its agents and phases, stands for them (#5888).
+    /// Its workflows still running. On a summary row (`summary=1`, for example the Agents list's Recent grouping) its
+    /// `workflow_progress`, the newest running run without its agents and phases, stands for them (#5888), even when
+    /// the row kept an older complete row's `workflows` (`preservingDetails`): fresh summary counts win (#3588).
     var runningWorkflows: [WorkflowRun] {
-        if let workflows { return workflows.filter(\.isRunning) }
-        return listWorkflowProgress.map { $0.isRunning ? [$0] : [] } ?? []
+        if listWaiting != nil { return listWorkflowProgress.map { $0.isRunning ? [$0] : [] } ?? [] }
+        return (workflows ?? []).filter(\.isRunning)
     }
 
     /// The chat header's cards: the running ones, and those that ended in the last hour (what happened to it), running
@@ -505,7 +506,7 @@ nonisolated extension Session {
     /// Working while its turn has ended, because a workflow runs (#2935; the hub counts it as working): 「工作中（后台）」.
     /// A summary row's `running_workflows` also counts a run it sends no progress for (an older runtime's background entry).
     var isBackgroundWorking: Bool {
-        !assistant && state == .working && (!runningWorkflows.isEmpty || (workflows == nil && (listRunningWorkflows ?? 0) > 0))
+        !assistant && state == .working && (!runningWorkflows.isEmpty || (listWaiting != nil && (listRunningWorkflows ?? 0) > 0))
     }
 
     /// Background tasks to count apart from the workflows (the hub also lists a running workflow in `background`, for

@@ -21,6 +21,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.domain.inbox.buildInboxList
 import persona.core.domain.inbox.InboxListSettings
 import persona.core.navigation.ChatRoute
+import persona.core.navigation.RouteSource
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.Locale
@@ -107,12 +108,12 @@ class InboxEventsTest {
         val byId = chat.event.chain.associateBy { it.id }
         assertEquals(ChainTarget.Page(LarkRoute("oc_demo3", "lark:oc_demo3:300", 300)), chainTarget(byId.getValue("c1"), chat))
         assertEquals(ChainTarget.Inline, chainTarget(byId.getValue("c2"), chat))
-        assertEquals(ChainTarget.Page(ChatRoute("m1", "s-demo3")), chainTarget(byId.getValue("c3"), chat))
+        assertEquals(ChainTarget.Page(ChatRoute("m1", "s-demo3", source = RouteSource.InboxItem("lark:oc_demo3:300"))), chainTarget(byId.getValue("c3"), chat))
         assertEquals(ChainTarget.Inline, chainTarget(byId.getValue("c4"), chat))
         assertEquals(ChainTarget.Page(LarkRoute("oc_demo3", "lark:oc_demo3:300", 305)), chainTarget(byId.getValue("c5"), chat))
         val mail = record("mail:a1:ci:77")
         assertEquals(ChainTarget.Page(MailRoute("mail:a1:ci:77")), chainTarget(mail.event.chain.first(), mail))
-        assertEquals(ChainTarget.Page(ChatRoute("m1", "s-demo4")), chainTarget(mail.event.chain.last(), mail))
+        assertEquals(ChainTarget.Page(ChatRoute("m1", "s-demo4", source = RouteSource.InboxItem("mail:a1:ci:77"))), chainTarget(mail.event.chain.last(), mail))
         fun entry(link: InboxChainLink?, detail: String? = null) = InboxChainEntry("x", kind = "sent", link = link, detail = detail)
         assertEquals(ChainTarget.Url("https://example.com/pr/1"), chainTarget(entry(InboxChainLink("source", url = "https://example.com/pr/1")), chat))
         assertEquals(ChainTarget.Source, chainTarget(entry(InboxChainLink("source")), chat))
@@ -125,17 +126,39 @@ class InboxEventsTest {
         assertEquals(persona.core.designsystem.icons.PhIcons.Info, chainIcon("from_the_future", chat))
     }
 
-    @Test fun theChainFoldsToItsNewestEntry() {
+    @Test fun theChainFoldsToItsThreeNewestEntries() {
         val chain = record("lark:oc_demo3:300").event.chain
-        assertEquals(listOf("c6"), shownChain(chain, expanded = false).map { it.id })
+        assertEquals(listOf("c4", "c5", "c6"), shownChain(chain, expanded = false).map { it.id })
         assertEquals(chain, shownChain(chain, expanded = true))
-        assertEquals(chain.take(1), shownChain(chain.take(1), expanded = false))
+        assertEquals(chain.take(2), shownChain(chain.take(2), expanded = false))
     }
 
-    @Test fun chainTimesAreTheClockTodayAndTheDateBefore() {
+    @Test fun chainTimesUseThe24HourClockInEveryLocale() {
         val now = Instant.parse("2026-11-05T12:00:00Z")
-        assertEquals("10:00", chainTime("2026-11-05T10:00:00Z", Locale.SIMPLIFIED_CHINESE, now, ZoneOffset.UTC))
-        assertEquals("11月4日 10:00", chainTime("2026-11-04T10:00:00Z", Locale.SIMPLIFIED_CHINESE, now, ZoneOffset.UTC))
-        assertEquals("", chainTime(null, Locale.SIMPLIFIED_CHINESE, now, ZoneOffset.UTC))
+        val at = "2026-11-05T14:05:00Z"
+        assertEquals("14:05", chainTime(at, Locale.US, now, ZoneOffset.UTC))
+        assertEquals("14:05", chainTime(at, Locale.SIMPLIFIED_CHINESE, now, ZoneOffset.UTC))
+        assertEquals("14:05", chainTime(at, Locale.JAPAN, now, ZoneOffset.UTC))
+    }
+
+    @Test fun chainTimesShowTheLocalizedShortDateBeforeToday() {
+        val now = Instant.parse("2026-11-05T12:00:00Z")
+        val at = "2026-11-04T14:05:00Z"
+        assertEquals("Nov 4, 14:05", chainTime(at, Locale.US, now, ZoneOffset.UTC))
+        assertEquals("11月4日 14:05", chainTime(at, Locale.SIMPLIFIED_CHINESE, now, ZoneOffset.UTC))
+        assertEquals("11月4日 14:05", chainTime(at, Locale.JAPAN, now, ZoneOffset.UTC))
+    }
+
+    @Test fun chainTimesAreEmptyForMissingOrMalformedValues() {
+        val now = Instant.parse("2026-11-05T12:00:00Z")
+        assertEquals("", chainTime(null, Locale.US, now, ZoneOffset.UTC))
+        assertEquals("", chainTime("not-a-time", Locale.US, now, ZoneOffset.UTC))
+    }
+
+    @Test fun chainTimeUsesTheInjectedZoneAndNowToChooseToday() {
+        val now = Instant.parse("2026-11-05T00:30:00Z")
+        val at = "2026-11-04T23:45:00Z"
+        assertEquals("Nov 4, 23:45", chainTime(at, Locale.US, now, ZoneOffset.UTC))
+        assertEquals("01:45", chainTime(at, Locale.US, now, ZoneOffset.ofHours(2)))
     }
 }

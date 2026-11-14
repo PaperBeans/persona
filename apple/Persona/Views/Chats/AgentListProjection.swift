@@ -461,7 +461,7 @@ nonisolated struct AgentListProjection: Sendable {
         } else if settings.grouping == "app" {
             result.apps = AppGroups.build(result.unpinned) // the list's sections, built once (`AppGroups`)
             result.menuSections = result.apps.map(\.id)
-        } else if settings.grouping != "recent" && settings.grouping != "todo" {
+        } else if settings.grouping != "recent" && settings.grouping != "todo" && settings.grouping != "direction" {
             result.menuSections = order.sectionIDs(result.unpinned, byMachine: settings.grouping == "machine")
         }
         return result

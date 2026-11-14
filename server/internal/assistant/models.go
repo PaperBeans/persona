@@ -377,6 +377,14 @@ func (s *Service) voicePlugins(ctx context.Context) []assistantwire.VoicePlugin 
 	return res.Plugins
 }
 
+// viewAgent is the CLI a launcher runs, its name telling when it says none.
+func viewAgent(v LauncherView) string {
+	if v.Agent == "" && slices.Contains([]string{"codex", "traex", "agy", "omp"}, v.Name) {
+		return v.Name
+	}
+	return v.Agent
+}
+
 func (s *Service) modelProviders(ctx context.Context) []ModelProvider {
 	l := s.requestCtxLang(ctx)
 	out := []ModelProvider{}
@@ -401,8 +409,8 @@ func (s *Service) modelProviders(ctx context.Context) []ModelProvider {
 			apiName = "messages"
 		}
 		agent := v.Agent
-		if agent == "" && kind == "launcher" && (v.Name == "codex" || v.Name == "traex" || v.Name == "agy" || v.Name == "omp") {
-			agent = v.Name
+		if kind == "launcher" {
+			agent = viewAgent(v)
 		}
 		out = append(out, ModelProvider{ID: "launcher." + v.Name, Name: cmp.Or(v.DisplayName, v.Name), Kind: kind, Agent: agent, API: apiName, Model: v.Model, Machines: v.Machines, Hidden: v.Hidden, HasKey: v.HasKey})
 	}

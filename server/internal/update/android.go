@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,7 +91,13 @@ func SyncAndroid(ctx context.Context, client *http.Client, base, dir string) (An
 	}
 	data, err := get(ctx, client, base+"/android.json", androidManifestLimit)
 	if errors.Is(err, errNotFound) {
-		return AndroidNone, nil, nil
+		base, data, err = githubAndroidManifest(ctx, client, base)
+		if err != nil {
+			return AndroidNone, nil, err
+		}
+		if data == nil {
+			return AndroidNone, nil, nil
+		}
 	}
 	if err != nil {
 		return AndroidNone, nil, err
@@ -155,6 +162,79 @@ func SyncAndroid(ctx context.Context, client *http.Client, base, dir string) (An
 	}
 	pruneAndroid(dir, keep)
 	return AndroidUpdated, &r, nil
+}
+
+// githubAndroidManifest finds the newest stable GitHub release with android.json when the latest release has none.
+// Other update sources keep their existing meaning: a missing android.json publishes nothing.
+func githubAndroidManifest(ctx context.Context, client *http.Client, base string) (string, []byte, error) {
+	const latest = "/releases/latest/download"
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme != "https" || u.Host != "github.com" || !strings.HasSuffix(u.Path, latest) {
+		return "", nil, nil
+	}
+	repo := strings.TrimSuffix(u.Path, latest)
+	if len(strings.Split(strings.Trim(repo, "/"), "/")) != 2 {
+		return "", nil, nil
+	}
+	var releases []struct {
+		Draft      bool `json:"draft"`
+		Prerelease bool `json:"prerelease"`
+		Assets     []struct {
+			Name string `json:"name"`
+			URL  string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	// Bound a malformed or unexpectedly large release history without reporting an unchecked tail as no APK.
+	for page := 1; page <= 100; page++ {
+		data, err := get(ctx, client, fmt.Sprintf("https://api.github.com/repos%s/releases?per_page=100&page=%d", repo, page), 4<<20)
+		if err != nil {
+			return "", nil, err
+		}
+		if err := json.Unmarshal(data, &releases); err != nil {
+			return "", nil, fmt.Errorf("GitHub releases: %w", err)
+		}
+	stableReleases:
+		for _, release := range releases {
+			if release.Draft || release.Prerelease {
+				continue
+			}
+			for _, asset := range release.Assets {
+				if asset.Name != "android.json" {
+					continue
+				}
+				assetURL, err := url.Parse(asset.URL)
+				if err != nil || assetURL.Scheme != "https" || assetURL.Host != "github.com" || assetURL.User != nil ||
+					assetURL.RawQuery != "" || assetURL.Fragment != "" ||
+					!strings.HasPrefix(assetURL.Path, repo+"/releases/download/") || !strings.HasSuffix(assetURL.Path, "/android.json") {
+					return "", nil, errors.New("GitHub releases: android.json has an invalid download URL")
+				}
+				base = strings.TrimSuffix(asset.URL, "/android.json")
+				data, err = get(ctx, client, base+"/android.json", androidManifestLimit)
+				if errors.Is(err, errNotFound) {
+					continue stableReleases
+				}
+				if err != nil {
+					return "", nil, err
+				}
+				var manifest AndroidRelease
+				if json.Unmarshal(data, &manifest) != nil || !androidAPKName.MatchString(manifest.Name) {
+					// Preserve SyncAndroid's validation error for a malformed manifest.
+					return base, data, nil
+				}
+				for _, apk := range release.Assets {
+					if apk.Name == manifest.Name {
+						return base, data, nil
+					}
+				}
+				// A manifest without its APK is not a complete Android release.
+				continue stableReleases
+			}
+		}
+		if len(releases) < 100 {
+			return "", nil, nil
+		}
+	}
+	return "", nil, errors.New("GitHub releases: more than 10000 releases without an Android app")
 }
 
 // androidCurrent is what SyncAndroid reads of the latest.json already published.

@@ -15,6 +15,7 @@ import { askOptions, type AskOption, type AskResponse, type Todo, type TodoAsk }
 import { Button, IconButton, Menu, toast, useMenu } from "../../ui/atoms";
 import type { MenuItem } from "../../ui/menu-model";
 import { RecommendedTag } from "../../ui/RecommendedTag";
+import { BriefingMark } from "./BriefingMark";
 
 /** Where answering the round stands: not yet, being sent, or answered (with what the row then says). */
 type Answering = { state: "idle" } | { state: "busy"; key: string } | { state: "done"; text: string };
@@ -86,7 +87,7 @@ function useFitting(count: number, round: string) {
   return { row, fit: Math.min(fit, count) };
 }
 
-export function DecisionRow({ todo, ask, rowKey, admission, onBusyChange, blocked = false, footer }: { todo: Pick<Todo, "id" | "title">; ask: TodoAsk; rowKey: string; admission?: { current: boolean }; onBusyChange?: (busy: boolean) => void; blocked?: boolean; footer?: ReactNode }) {
+export function DecisionRow({ todo, ask, rowKey, admission, onBusyChange, blocked = false, footer, hideTitle = false }: { todo: Pick<Todo, "id" | "title">; ask: TodoAsk; rowKey?: string; admission?: { current: boolean }; onBusyChange?: (busy: boolean) => void; blocked?: boolean; footer?: ReactNode; hideTitle?: boolean }) {
   const options = askOptions(ask);
   const responses = askResponses(ask);
   const [answering, setAnswering] = useState<Answering>({ state: "idle" });
@@ -138,12 +139,14 @@ export function DecisionRow({ todo, ask, rowKey, admission, onBusyChange, blocke
 
   return (
     <div data-needs-row={rowKey} data-decision-row={ask.why_owner || ""} className="flex min-w-0 flex-col gap-1.5 rounded-control bg-field px-3 py-2.5">
-      <div className="flex min-w-0 items-center gap-2">
-        <button type="button" onClick={open} className="block min-w-0 flex-1 truncate text-left text-[12px] text-ink-2 hover:underline" title={t("assistant-brief.open_row", { title: todo.title })}>
-          {todo.title}
-        </button>
-        <span className="shrink-0 text-xs text-ink-2">{t("assistant-tasks.review_needs_user")}</span>
-      </div>
+      {!hideTitle && (
+        <div className="flex min-w-0 items-center gap-2">
+          <button type="button" onClick={open} className="block min-w-0 flex-1 truncate text-left text-[12px] text-ink-2 hover:underline" title={t("assistant-brief.open_row", { title: todo.title })}>
+            {todo.title}
+          </button>
+          <span className="shrink-0 text-xs text-ink-2">{t("assistant-tasks.review_needs_user")}</span>
+        </div>
+      )}
       <p data-decision-question className="text-[13.5px] font-medium select-text [overflow-wrap:anywhere]">
         {question}
       </p>
@@ -168,6 +171,8 @@ export function DecisionRow({ todo, ask, rowKey, admission, onBusyChange, blocke
           {ask.cost_of_waiting && <span data-decision-cost>{t("assistant-decisionrow.cost", { cost: ask.cost_of_waiting })}</span>}
         </p>
       )}
+      {/* held for the briefing (#5803): nothing was pushed for it, which is why it did not ring */}
+      {ask.for_briefing && answering.state !== "done" && <BriefingMark />}
       {ask.response && answering.state !== "done" && (
         <p data-decision-response={ask.response} className="truncate text-[12px] text-ink-2">
           {t("assistant-decisionrow.responded")}

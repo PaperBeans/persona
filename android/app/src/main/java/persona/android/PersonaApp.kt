@@ -42,6 +42,9 @@ class PersonaApp : Application() {
     /** Settings › Interface style; device-wide, kept across pairings. */
     val appearance: persona.core.designsystem.AppStyleStore by lazy { persona.core.designsystem.AppStyleStore(this) }
 
+    /** The GitHub star prompts (#5761); device-wide like the appearance, kept across pairings. */
+    val starPrompt: persona.core.designsystem.StarPromptStore by lazy { persona.core.designsystem.StarPromptStore(this) }
+
     /** Settings › Appearance › Persona look's hub packages; device-wide, listed again whenever the hub comes online. */
     val personas: persona.core.designsystem.PersonaStore by lazy {
         persona.core.designsystem.PersonaStore(this, appearance) {

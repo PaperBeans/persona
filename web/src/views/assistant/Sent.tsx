@@ -1,11 +1,11 @@
 // What Persona sent to its tasks' agents (`routed` items it wrote, #1542, docs/assistant/unified-entry.md "Messages to
 // agents"): never the user's bubble. A message on its own is one folded line on the left (SentLine); a task's card lists
-// every one sent to it (TaskSentList), and the hand-off sent together with the card is drawn only there (lib/feed takenIn).
-import { useMemo, useState } from "react";
-import { field, firstLine, sentTo, useFeed, type FeedItem } from "../../lib/feed";
+// the hand-off sent together with a task's card is not drawn on its own (lib/feed takenIn).
+import { useState } from "react";
+import { field, firstLine, type FeedItem } from "../../lib/feed";
 import { Collapse, copyText, cx } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
-import { formatDate, t } from "../../i18n";
+import { t } from "../../i18n";
 
 /** "Sent to “task”", or "Stopped “task” and sent" when Persona cut in first. */
 export function sentTitle(item: FeedItem, title: string): string {
@@ -59,48 +59,6 @@ function SentText({ text, className }: { text: string; className?: string }) {
         <Icon name="copy" size={12} />
         {t("assistant-tasks.copy")}
       </button>
-    </div>
-  );
-}
-
-/** On a task's card: what Persona sent to its agent, "N instructions sent"; a click lists them (time and first line), and
- *  a click on one opens its whole text. Nothing when it sent none (a task the user started from a plan). Clicks stay here:
- *  they don't open the task as the rest of the card does. */
-export function TaskSentList({ todoId, conversation }: { todoId: string; conversation: string }) {
-  const feed = useFeed((s) => s.feeds[conversation]);
-  const sent = useMemo(() => sentTo(feed ?? [], todoId), [feed, todoId]);
-  const [open, setOpen] = useState(false);
-  const [shown, setShown] = useState<string>();
-  if (sent.length === 0) return null;
-  return (
-    <div className="flex cursor-default flex-col gap-1.5" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-      <button
-        type="button"
-        data-testid="task-sent"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className="inline-flex items-center gap-1 self-start whitespace-nowrap text-[12px] font-medium text-ink-2 hover:text-ink"
-      >
-        <Icon name="send" size={12} />
-        {t("assistant-tasks.sent_count", { count: sent.length })}
-        <Icon name="chevronRight" size={12} stroke={2.2} className="text-ink-3 transition-transform duration-200" style={{ transform: open ? "rotate(90deg)" : "none" }} />
-      </button>
-      {open &&
-        sent.map((it) => {
-          const text = field(it, "text") ?? "";
-          const isOpen = shown === it.id;
-          return (
-            <div key={it.id} data-testid="task-sent-entry" className="flex flex-col rounded-control bg-field">
-              <button type="button" aria-expanded={isOpen} onClick={() => setShown(isOpen ? undefined : it.id)} className="flex min-w-0 items-center gap-2 px-3 py-1.5 text-left">
-                <span className="shrink-0 text-[12px] tabular-nums text-ink-3">{formatDate(it.at, { hour: "2-digit", minute: "2-digit" })}</span>
-                {it.body?.interrupted === true && <Icon name="stop" size={11} className="shrink-0 text-ink-2" />}
-                <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{firstLine(text)}</span>
-                <Icon name="chevronRight" size={12} stroke={2.2} className="shrink-0 text-ink-3 transition-transform duration-200" style={{ transform: isOpen ? "rotate(90deg)" : "none" }} />
-              </button>
-              {isOpen && <SentText text={text} className="px-3 pb-2.5" />}
-            </div>
-          );
-        })}
     </div>
   );
 }

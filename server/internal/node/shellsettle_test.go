@@ -41,8 +41,8 @@ func TestShellQuestion(t *testing.T) {
 	}
 }
 
-// watchShell has n's starts wait for the new tab's shell to settle, as a node does (testNode pauses instead).
-func watchShell(n *Node) { n.shellPause = 0 }
+// watchShell has n's starts observe the new tab's shell, as a real node does.
+func watchShell(n *Node) { n.shellSettled = false }
 
 // startLinePath is the start file of a line a start typed (". <path> && true <id>", quoted when it must be).
 var startLinePath = regexp.MustCompile(`^(?:\.|source) '?([^' ]+)'?`)

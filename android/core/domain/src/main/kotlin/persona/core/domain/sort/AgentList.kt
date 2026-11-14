@@ -3,7 +3,9 @@ package persona.core.domain.sort
 import persona.core.contracts.CoreText.Key
 import persona.core.contracts.CoreText
 import persona.core.contracts.AgentState
+import persona.core.contracts.DirectionTree
 import persona.core.contracts.Machine
+import persona.core.contracts.SessionKey
 import persona.core.contracts.Todo
 import persona.core.contracts.state
 
@@ -38,6 +40,8 @@ enum class AgentSort {
 
 enum class AgentGrouping {
     Repo, MachineSpace, State, Todo,
+    /** The hub's direction tree (#4352): direction › to-do › agent, the rest under "No to-do"; never the default. */
+    Direction,
     // Retained for callers of the original list projection; stored preferences migrate to MachineSpace.
     Space, Machine;
 
@@ -47,9 +51,10 @@ enum class AgentGrouping {
             null, Repo.name -> Repo
             State.name -> State
             Todo.name -> Todo
+            Direction.name -> Direction
             else -> MachineSpace
         }
-        val selectable = listOf(Repo, MachineSpace, State, Todo)
+        val selectable = listOf(Repo, MachineSpace, State, Todo, Direction)
     }
 }
 
@@ -184,11 +189,17 @@ fun buildAgentList(
     sessions: List<AgentSession>, machines: List<Machine> = emptyList(),
     pins: AgentPreferences = AgentPreferences(), mutes: AgentPreferences = AgentPreferences(),
     settings: AgentListSettings = AgentListSettings(), todos: List<Todo> = emptyList(),
+    /** The hub's direction tree, which "By direction" ([AgentGrouping.Direction]) is built from; null: none to group by. */
+    directions: DirectionTree? = null,
 ): AgentListResult {
     val tree = codexTaskForest(sessions, runs = { settings.draws(it, pins) })
-    return buildFlatAgentList(tree.roots, machines, pins, mutes, tree.searchSettings(settings, pins, machines.associate { it.id to it.name }), todos)
-        .copy(children = tree.children)
+    return buildFlatAgentList(tree.roots, machines, pins, mutes, tree.searchSettings(settings, pins, machines.associate { it.id to it.name }), todos, directions)
+        .let { it.copy(children = tree.children.plusChildren(it.children)) }
 }
+
+/** [this] list's children with [more] added under the same parents (each child once). */
+fun Map<String, List<AgentSession>>.plusChildren(more: Map<String, List<AgentSession>>): Map<String, List<AgentSession>> =
+    if (more.isEmpty()) this else (keys + more.keys).associateWith { id -> (this[id].orEmpty() + more[id].orEmpty()).distinctBy { it.id } }
 
 /**
  * The list of [sessions] as they come, no subtask hung under another here: the roots of the [codexTaskForest] its caller
@@ -201,6 +212,7 @@ fun buildFlatAgentList(
     mutes: AgentPreferences = AgentPreferences(),
     settings: AgentListSettings = AgentListSettings(),
     todos: List<Todo> = emptyList(),
+    directions: DirectionTree? = null,
 ): AgentListResult {
     val machineNames = machines.associate { it.id to it.name }
     val base = sessions.filter { settings.admits(it.session, pins, machineNames) && !(settings.hideBotmux && it.session.isBotmux) }
@@ -230,6 +242,32 @@ fun buildFlatAgentList(
         else AgentListGroup("pinned", CoreText.of(Key.AgentsPinned), pinned, pinned, waitingInBackground = waiting(pinned))
     var quietTitle: CoreText? = null
     fun stateCounts(rows: List<AgentSession>) = AgentState.entries.associateWith { state -> rows.count { !it.isNestedSubtask && it.state == state } }
+    // "By direction"'s parts (#4352): a heading holds no rows itself (the to-dos under it do).
+    fun leaf(id: String, title: CoreText, members: List<AgentSession>, under: String) {
+        val rows = ordered(members)
+        val folded = id in settings.folded
+        result += AgentListGroup(id, title, rows, if (folded) emptyList() else rows, folded, stateCounts = stateCounts(rows), under = under)
+    }
+    fun heading(id: String, title: CoreText, members: List<AgentSession>, folded: Boolean) {
+        result += AgentListGroup(id, title, emptyList(), emptyList(), folded, stateCounts = stateCounts(members))
+    }
+    // "By to-do"'s flat sections (#4338 A5), and "No to-do" in "By to-do" and "By direction".
+    fun todoSection(id: String, title: CoreText, members: List<AgentSession>, folded: Boolean) {
+        val rows = ordered(members)
+        result += AgentListGroup(id, title, rows, if (folded) emptyList() else rows, folded, stateCounts = stateCounts(rows))
+    }
+    /** "No to-do" after the sections above ([above]): folded under them unless something in it needs you, open alone. */
+    fun noTodo(rest: List<AgentSession>, above: Boolean) {
+        if (rest.isEmpty()) return
+        // Open with none above, as it is the whole list (iOS `TodoAgentGroup.folded`). The user's own fold wins either way
+        // ([TodoNoneOpened] once they opened it), and a search opens it.
+        val byDefault = above && rest.none { it.state == AgentState.NeedsYou }
+        val folded = settings.query.isEmpty() &&
+            (TodoNoneGroup in settings.folded || (byDefault && TodoNoneOpened !in settings.expandedIdle))
+        todoSection(TodoNoneGroup, CoreText.of(Key.AgentsNoTodo), rest, folded)
+    }
+    // Agents the direction tree puts under another agent of the list (#4352): drawn as that agent's children.
+    val placedChildren = mutableMapOf<String, List<AgentSession>>()
     when (settings.grouping) {
         AgentGrouping.Repo -> {
             // Computer → repository → working tree → sessions, from each cwd (web `buildRepoMachineTree`, iOS `RepoTree`).
@@ -329,11 +367,6 @@ fun buildFlatAgentList(
                     .thenByDescending { it.created ?: java.time.Instant.EPOCH }
                     .thenBy { it.id }
             )
-            fun counts(rows: List<AgentSession>) = AgentState.entries.associateWith { state -> rows.count { !it.isNestedSubtask && it.state == state } }
-            fun section(id: String, title: CoreText, members: List<AgentSession>, folded: Boolean) {
-                val rows = ordered(members)
-                result += AgentListGroup(id, title, rows, if (folded) emptyList() else rows, folded, stateCounts = counts(rows))
-            }
             // Each agent sits under one to-do only, as on the web (`assignedSessionKeys`): a to-do's agents list can still hold
             // an agent the session's own `todo` (pushed with the session, so newer) already moved to another, and one row twice
             // would repeat its list key. Unlike the web, which takes the first to-do listing it, the session's own open to-do
@@ -348,21 +381,49 @@ fun buildFlatAgentList(
                 val matched = live.filter { home[it.session.key] == todo.id }
                 if (matched.isEmpty()) null else todo to matched
             }
-            linked.forEach { (todo, rows) -> section("todo/${todo.id}", CoreText.plain(todo.title), rows, "todo/${todo.id}" in settings.folded) }
+            linked.forEach { (todo, rows) -> todoSection("todo/${todo.id}", CoreText.plain(todo.title), rows, "todo/${todo.id}" in settings.folded) }
             val unlinked = live.filter { it.session.key !in claimed }
             // Opened by hand in herdr and on no to-do: a section of its own before "No to-do", open.
             val manual = unlinked.filter { it.session.isManualHerdr }
-            if (manual.isNotEmpty()) section(TodoManualGroup, CoreText.of(Key.AgentsManual), manual, TodoManualGroup in settings.folded)
-            val rest = unlinked.filterNot { it.session.isManualHerdr }
-            if (rest.isNotEmpty()) {
-                // Folded under the sections above unless something in it needs you; with none above it is the whole list, so
-                // open (iOS `TodoAgentGroup.folded`). The user's own fold wins either way ([TodoNoneOpened] once they opened
-                // it), and a search opens it.
-                val byDefault = (linked.isNotEmpty() || manual.isNotEmpty()) && rest.none { it.state == AgentState.NeedsYou }
-                val folded = settings.query.isEmpty() &&
-                    (TodoNoneGroup in settings.folded || (byDefault && TodoNoneOpened !in settings.expandedIdle))
-                section(TodoNoneGroup, CoreText.of(Key.AgentsNoTodo), rest, folded)
+            if (manual.isNotEmpty()) todoSection(TodoManualGroup, CoreText.of(Key.AgentsManual), manual, TodoManualGroup in settings.folded)
+            // Folded under the sections above ("Opened by hand" included) unless something in it needs you.
+            noTodo(unlinked.filterNot { it.session.isManualHerdr }, above = linked.isNotEmpty() || manual.isNotEmpty())
+        }
+        AgentGrouping.Direction -> {
+            // Direction › To-do › Agent, as the hub's tree has them (#4352): no regrouping here. Each agent shows once, where
+            // the tree first has it; one the tree puts under another agent of the list is that agent's child. Agents the
+            // tree does not have (or every agent, without a tree) go under "No to-do", so none goes missing.
+            val byKey = live.associateBy { it.session.key }
+            val placed = mutableSetOf<SessionKey>()
+            fun take(key: SessionKey): AgentSession? = byKey[key]?.takeIf { placed.add(key) }
+            var above = false
+            directions?.directions.orEmpty().forEach { direction ->
+                val id = DirectionGroupPrefix + direction.id
+                val tasks = direction.tasks.mapNotNull { task ->
+                    val rows = mutableListOf<AgentSession>()
+                    fun place(agents: List<persona.core.contracts.DirectionAgent>, parent: AgentSession?) {
+                        for (agent in agents) {
+                            // An in-session sub-agent is part of its parent's row already.
+                            val row = if (agent.isSubagent) null else take(agent.key)
+                            if (row != null) {
+                                if (parent == null) rows += row
+                                else placedChildren[parent.id] = placedChildren[parent.id].orEmpty() + row
+                            }
+                            place(agent.children, row ?: parent)
+                        }
+                    }
+                    place(task.agents, null)
+                    if (rows.isEmpty()) null else task to rows
+                }
+                if (tasks.isEmpty()) return@forEach
+                above = true
+                val title = direction.title
+                // Every agent under the heading counts, children of children too (each is placed once, so this ends).
+                fun withChildren(row: AgentSession): List<AgentSession> = listOf(row) + placedChildren[row.id].orEmpty().flatMap(::withChildren)
+                heading(id, title, tasks.flatMap { it.second }.flatMap(::withChildren), id in settings.folded)
+                tasks.forEach { (task, rows) -> leaf("$DirectionTaskPrefix${direction.id}/${task.id}", CoreText.plain(task.title), rows, id) }
             }
+            noTodo(live.filter { it.session.key !in placed }, above)
         }
         AgentGrouping.Machine -> (if (latest) machines.sortedByDescending { m ->
             live.filter { it.session.machineId == m.id }.mapNotNull { it.sortDate }.maxOrNull() } else machines).forEach { machine ->
@@ -412,11 +473,17 @@ fun buildFlatAgentList(
             result += quiet.map { spaceGroup(it, true) }
         }
     }
-    return AgentListResult(counts, result, filtered.filter { it.state == AgentState.Unread }.map { it.id }, quietTitle)
+    return AgentListResult(counts, result, filtered.filter { it.state == AgentState.Unread }.map { it.id }, quietTitle,
+        children = placedChildren)
 }
 
 /** A repository's or working tree's heading: its name, "Other" for sessions without a cwd ([UnnamedRepo]). */
 private fun repoTitle(name: String): CoreText = if (name == UnnamedRepo) CoreText.of(Key.RepoOther) else CoreText.plain(name)
+
+/** "By direction"'s headings (#4352): `direction/<leader conversation id>` (the main one's for the secretary group). */
+const val DirectionGroupPrefix = "direction/"
+/** "By direction"'s to-dos: `direction-task/<direction id>/<to-do id>`. */
+const val DirectionTaskPrefix = "direction-task/"
 
 /** "By to-do"'s sections that are not a to-do: agents opened by hand, then those on none. */
 /**

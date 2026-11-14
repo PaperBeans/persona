@@ -134,7 +134,7 @@ describe("code review (UI version 5)", () => {
     expect(treeMark.classList.contains("bg-green-tint")).toBe(true);
     expect(treeMark.classList.contains("text-green")).toBe(true);
     expect(d.querySelector(".code-hl")).toBeNull();
-    expect(root.textContent).toContain("已看 2 / 5");
+    expect(root.textContent).toContain("已查看 2 / 5");
   });
 
   it("folds generated files and does not load them until asked", () => {

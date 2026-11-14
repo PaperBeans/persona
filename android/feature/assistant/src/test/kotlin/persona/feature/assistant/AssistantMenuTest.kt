@@ -58,6 +58,11 @@ class AssistantMenuTest {
         assertEquals(listOf(listOf(Knowledge, Details), listOf(CopyDirectory, CopyInfo, CopySessionId, CopyDiagnostics),
             listOf(Compact, NewMain), listOf(SessionInfo)),
             assistantMenu(offline = false, voice = false, main = main, active = main, compact = true, newMain = true, working = false))
+        // Clear context (#5100) between them, as the web's menu has it; alone when the hub offers only it.
+        assertEquals(listOf(Compact, ClearContext, NewMain),
+            assistantMenu(offline = false, voice = false, main = main, active = main, compact = true, newMain = true, working = false, clear = true)[2])
+        assertEquals(listOf(ClearContext),
+            assistantMenu(offline = false, voice = false, main = main, active = main, compact = false, newMain = false, working = false, clear = true)[2])
         // A blank page copies what a new conversation would use, and has no session to show or stop.
         assertEquals(listOf(listOf(Knowledge, Details, BackToMain), listOf(CopyDirectory, CopyInfo)),
             assistantMenu(offline = false, voice = false, main = main, active = null, compact = false, newMain = false, working = true))
@@ -153,6 +158,8 @@ class AssistantMenuTest {
             Voice to PersonaIcons.voiceChannel, BackToMain to PersonaIcons.home, CopyDirectory to PersonaIcons.folder,
             CopyInfo to PersonaIcons.copy, CopySessionId to PersonaIcons.id, CopyDiagnostics to PersonaIcons.diagnostics,
             Compact to PersonaIcons.compactContext, NewMain to PersonaIcons.newConversation, SessionInfo to PersonaIcons.info,
+            // Clear context: the web's mark for it; the icon set has no meaning of iOS's eraser (only its pane /clear has one).
+            ClearContext to PersonaIcons.retry,
             Interrupt to PersonaIcons.interrupt,
         )
         assertEquals(AssistantMenuItem.entries.toSet(), expected.keys)

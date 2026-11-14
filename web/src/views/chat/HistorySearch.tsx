@@ -3,8 +3,15 @@
 // Enter or Tab puts the message in the box, Esc or Ctrl+G cancels. lib/send-history.ts holds the matching and the keys.
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { t } from "../../i18n";
-import { composing, moveActive, readAllHistory, searchAction, searchSent } from "../../lib/send-history";
+import { composing } from "../../lib/send-history";
+import { moveActive, readAllHistory, searchAction, searchSent } from "../../lib/send-history-search";
 import { cx, EASE } from "../../ui/atoms";
+import { splitSkillDraft } from "../../lib/skill-mentions";
+
+function historyLabel(text: string): string {
+  const split = splitSkillDraft(text);
+  return [...split.skills.map((s) => `${s.title} · ${s.text.split("\n")[0]}`), split.text].filter(Boolean).join("\n");
+}
 
 export function HistorySearch({ onPick, onClose }: { onPick: (text: string) => void; onClose: () => void }) {
   const id = useId();
@@ -71,13 +78,13 @@ export function HistorySearch({ onPick, onClose }: { onPick: (text: string) => v
               type="button"
               role="option"
               aria-selected={i === active}
-              title={text}
+              title={historyLabel(text)}
               onMouseDown={(e) => e.preventDefault()}
               onMouseEnter={() => setActive(i)}
               onClick={() => pickAt(i)}
               className={cx("flex h-9 w-full items-center rounded-[6px] px-2 text-left text-[12.5px] text-ink", i === active && "bg-hover")}
             >
-              <span className="min-w-0 flex-1 truncate">{text.replace(/\s*\n\s*/g, " ⏎ ")}</span>
+              <span className="min-w-0 flex-1 truncate">{historyLabel(text).replace(/\s*\n\s*/g, " ⏎ ")}</span>
             </button>
           ))
         )}

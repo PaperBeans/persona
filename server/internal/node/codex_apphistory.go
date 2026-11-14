@@ -121,22 +121,33 @@ func withoutGoneRollout(src codexSource, pass *codexListPass) codexSource {
 	return src
 }
 
-// codexAppHistoryPath: the transcript written for src, an App chat with no rollout, while it exists; else "".
+// codexAppHistoryPath: the transcript written for src while it exists, else "": for an App chat with no rollout, and for
+// a paginated chat whose history goes on in another rollout segment (its rollout path, or the lineage the file was
+// written from: codex_history_lineage.go) whether a rollout is there or not. The list asks for every Codex row each
+// second, and almost every row is an ordinary chat whose rollout is its transcript: that is known from the rollout's
+// stat, which the list pass already has, so the file is not stat'ed for it (#5970).
 func (n *Node) codexAppHistoryPath(src codexSource, pass *codexListPass) string {
 	p := n.codexAppHistoryFile(src)
 	if p == "" {
 		return ""
 	}
+	rolloutless := func() bool { // an App chat whose rollout is gone, as the App still lists it
+		src := withoutGoneRollout(src, pass)
+		if src.path != "" {
+			return false
+		}
+		_, ok := codexAppThreadOf(src)
+		return ok
+	}
+	t, paginated := pass.paginatedThreadOf(src)
+	if !paginated && !rolloutless() {
+		return ""
+	}
 	if _, err := pass.stat(p); err != nil {
 		return ""
 	}
-	t, paginated := codexPaginatedThreadOf(src)
-	mark, _ := readCodexHistoryMark(p)
-	if !paginated || !codexContinuationPath(t.RolloutPath) && !codexContinuationPath(mark.Lineage) {
-		if withoutGoneRollout(src, pass).path != "" {
-			return ""
-		}
-		if _, ok := codexAppThreadOf(withoutGoneRollout(src, pass)); !ok {
+	if paginated && !codexContinuationPath(t.RolloutPath) && !rolloutless() {
+		if mark, _ := readCodexHistoryMark(p); !codexContinuationPath(mark.Lineage) {
 			return ""
 		}
 	}

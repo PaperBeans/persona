@@ -6,6 +6,8 @@ import (
 	"errors"
 	"slices"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // recordBackgroundTasks preserves the difference between an explicit empty
@@ -51,6 +53,24 @@ func (p *assistantProc) observedUpdateTasks() ([]string, uint64, error) {
 	return slices.Clone(p.tasks), p.tasksRevision, nil
 }
 
+// syncSDKTasks asks the Agent SDK bridge for the CLI's background tasks (#5234): the SDK holds the CLI's
+// background_tasks_changed lists, and its own initialize is not one the node can send. The bridge answers
+// persona_background_tasks with the last list, an empty one once a turn ended with none sent, and null before that
+// (unknown). An older bridge refuses the request, which leaves the set unknown as before.
+func (p *assistantProc) syncSDKTasks(ctx context.Context) {
+	raw, err := p.controlAnswer(ctx, map[string]any{"subtype": "persona_background_tasks"})
+	if err != nil || len(raw) == 0 {
+		return
+	}
+	var answer struct {
+		Tasks json.RawMessage `json:"tasks"`
+	}
+	if json.Unmarshal(raw, &answer) != nil || len(answer.Tasks) == 0 || string(answer.Tasks) == "null" {
+		return
+	}
+	_, _ = p.recordBackgroundTasks(answer.Tasks)
+}
+
 // claudeTasksSnapshotWait bounds the wait for the task list that follows a repeated initialize's success.
 const claudeTasksSnapshotWait = 2 * time.Second
 
@@ -62,6 +82,10 @@ const claudeTasksSnapshotWait = 2 * time.Second
 func (p *assistantProc) syncClaudeTasks(ctx context.Context) {
 	if p.stdin == nil || !p.alive() {
 		return // no process to ask
+	}
+	if p.runtime == proto.AssistantRuntimeAgentSDK {
+		p.syncSDKTasks(ctx)
+		return
 	}
 	for range 2 {
 		p.mu.Lock()

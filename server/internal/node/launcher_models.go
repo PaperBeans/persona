@@ -58,6 +58,12 @@ func (n *Node) launcherModels(ctx context.Context, name, agentType string, refre
 	if name != "claude" && !shellcmd.NameRe.MatchString(name) {
 		return proto.LauncherModels{}, fmt.Errorf("invalid launcher %q", name)
 	}
+	if isDesktopLauncher(name) { // the app runs its session on the model it picks (claudedesktop_new.go)
+		return proto.LauncherModels{Agent: "claude", Models: []proto.AgentModel{}, Locked: desktopModelLocked}, nil
+	}
+	if isCodexAppLauncher(name) { // so does the Codex App (codexapp_new.go)
+		return proto.LauncherModels{Agent: "codex", Models: []proto.AgentModel{}, Locked: codexAppModelLocked}, nil
+	}
 	if res, ok := n.runtimeLauncherModels(name); ok { // a runtime's launcher: static advertisement or native discovery
 		return n.liveRuntimeModels(ctx, name, refresh, res)
 	}
@@ -142,6 +148,14 @@ func (n *Node) knownLauncher(ctx context.Context, name string) bool {
 	}
 	if _, ok := n.managedLauncher(name); ok {
 		return true
+	}
+	if isDesktopLauncher(name) {
+		_, offered := n.withDesktopLauncher(nil)
+		return offered
+	}
+	if isCodexAppLauncher(name) {
+		_, offered := n.withCodexAppLauncher(nil)
+		return offered
 	}
 	if n.runtimes.launcherRuntime(name) != nil || shellLauncherNames()[name] {
 		return true // the shell's last list will do: no login shell to wait for when the models are kept anyway
@@ -397,13 +411,14 @@ func codexModelList(w io.Writer, r io.Reader) ([]proto.AgentModel, error) {
 		}
 		var res struct {
 			Data []struct {
-				Model         string `json:"model"`
-				ID            string `json:"id"`
-				DisplayName   string `json:"displayName"`
-				Description   string `json:"description"`
-				Hidden        bool   `json:"hidden"`
-				IsDefault     bool   `json:"isDefault"`
-				DefaultEffort string `json:"defaultReasoningEffort"`
+				Model         string              `json:"model"`
+				ID            string              `json:"id"`
+				DisplayName   string              `json:"displayName"`
+				Description   string              `json:"description"`
+				Hidden        bool                `json:"hidden"`
+				IsDefault     bool                `json:"isDefault"`
+				DefaultEffort string              `json:"defaultReasoningEffort"`
+				ServiceTiers  []proto.ServiceTier `json:"serviceTiers"`
 				Efforts       []struct {
 					Effort string `json:"reasoningEffort"`
 				} `json:"supportedReasoningEfforts"`
@@ -421,7 +436,7 @@ func codexModelList(w io.Writer, r io.Reader) ([]proto.AgentModel, error) {
 			if m.Hidden || id == "" {
 				continue
 			}
-			a := proto.AgentModel{ID: id, Name: m.DisplayName, Description: m.Description, Default: m.IsDefault, DefaultEffort: m.DefaultEffort}
+			a := proto.AgentModel{ID: id, Name: m.DisplayName, Description: m.Description, Default: m.IsDefault, DefaultEffort: m.DefaultEffort, ServiceTiers: m.ServiceTiers}
 			if a.Name == "" {
 				a.Name = id
 			}

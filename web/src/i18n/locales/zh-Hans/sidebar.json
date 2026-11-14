@@ -27,7 +27,6 @@
   "show_all": "看全部",
   "pinned_section": "置顶",
   "directions": "常驻",
-  "direction_tasks": "{name}的任务",
   "task_agents": "{name}的 Agent",
   "launching": "正在启动",
   "launch_untitled": "新 Agent",
@@ -78,7 +77,6 @@
   "show_child_workspaces_other": "显示 {count} 个子工作树",
   "hide_child_workspaces_one": "隐藏 {count} 个子工作树",
   "hide_child_workspaces_other": "隐藏 {count} 个子工作树",
-  "paged_list": "最近更新（全部会话）",
   "children_title": "子项：{list}",
   "list_separator": "，",
   "child_sr_needs_you": "个子项需要你",
@@ -148,7 +146,8 @@
   "switcher_label": "{name}，切换助手",
   "switcher_label_waiting": "{name}，切换助手。别的助手有事等你处理",
   "switcher_count": "{count} 件等你处理",
-  "leader_working": "在做 {count}",
   "leader_needs_you": "等你 {count}",
-  "codex_waiting": "等第一条消息"
+  "codex_waiting": "等第一条消息",
+  "direction_tasks_expand": "展开「{name}」的在办任务",
+  "direction_tasks_collapse": "收起「{name}」的在办任务"
 }

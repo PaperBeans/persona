@@ -35,6 +35,8 @@ type Store interface {
 	CommitRun(ctx context.Context, c RunCommit) error
 	// HeldItems are the subscription's held items q picks, in the order they were stored (#2039).
 	HeldItems(ctx context.Context, id string, q ItemQuery) ([]Held, error)
+	// HeldItem is the subscription's held item uid (the newest stored, if several); nil when it holds none (#6198).
+	HeldItem(ctx context.Context, id, uid string) (*Held, error)
 	// PruneItems removes the subscription's held items stored before before (their dedup keys stay).
 	PruneItems(ctx context.Context, id string, before time.Time) error
 }
@@ -55,7 +57,8 @@ type Held struct {
 	Item
 }
 
-// RunCommit is what a run writes at once: the new dedup keys and items, the cursor and history, and the state. The
+// RunCommit is what a run writes at once: the new dedup keys and items, the SinceAt cursor or bounded continuation
+// with its original window, the history, and the state. The
 // state (RunState, Error, FailCount, FailingSince, PausedUntil, ShapeMisses, ToolFingerprint) is written only while
 // the subscription is still at Revision: a run that started before the user changed the recipe does not undo the
 // change. The run's lease is released.
@@ -64,7 +67,9 @@ type RunCommit struct {
 	Revision int64
 	Seen     []Seen
 	Items    []Item
-	Now      time.Time
+	// Read are uids of held items the run read as seen in the source (#6176): marked seen, never unmarked.
+	Read []string
+	Now  time.Time
 	// Baseline is the baseline mark the run took (Subscription.Baseline): it is cleared only while it is still that
 	// one, so a recipe changed again during the run keeps its own.
 	Baseline *time.Time
@@ -183,6 +188,11 @@ func (m *MemStore) CommitRun(_ context.Context, c RunCommit) error {
 		m.seq++
 		m.items = append(m.items, Held{Seq: m.seq, Stored: c.Now, Item: it})
 	}
+	for i := range m.items {
+		if h := &m.items[i]; h.SubscriptionID == c.Sub.ID && slices.Contains(c.Read, h.UID) {
+			h.Seen = true
+		}
+	}
 	m.pruneSeen(c.Sub.ID, c.Now)
 	applyRun(&cur, c, cur.Revision == c.Revision)
 	cur.LeaseUntil = nil
@@ -232,6 +242,17 @@ func (m *MemStore) HeldItems(_ context.Context, id string, q ItemQuery) ([]Held,
 	return slices.Clone(out), nil
 }
 
+func (m *MemStore) HeldItem(_ context.Context, id, uid string) (*Held, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := len(m.items) - 1; i >= 0; i-- {
+		if h := m.items[i]; h.SubscriptionID == id && h.UID == uid {
+			return &h, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *MemStore) PruneItems(_ context.Context, id string, before time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -263,11 +284,18 @@ func applyRun(cur *Subscription, c RunCommit, withState bool) {
 	if c.Baseline != nil && sameTime(cur.Baseline, c.Baseline) {
 		cur.Baseline = nil
 	}
-	cur.SinceAt, cur.SnapshotHash, cur.Runs = out.SinceAt, out.SnapshotHash, out.Runs
+	cur.SnapshotHash, cur.Runs = out.SnapshotHash, out.Runs
+	if SameRecipe(cur.Recipe, out.Recipe) {
+		cur.SinceAt, cur.Continuation = out.SinceAt, cloneContinuation(out.Continuation)
+		if !on(*cur) && cur.Continuation != nil && !cur.Continuation.Manual {
+			cur.Continuation = nil // turned off while this page ran: the position went with it (#6310)
+		}
+	}
 	cur.LastRunAt, cur.LastOKAt, cur.LastNewCount = out.LastRunAt, out.LastOKAt, out.LastNewCount
 	cur.WeakDedup, cur.Shape, cur.NextRunAt = out.WeakDedup, out.Shape, out.NextRunAt
 	cur.SourceName, cur.Icon, cur.Service, cur.SourceMin, cur.MaxCallsPerHour = out.SourceName, out.Icon, out.Service, out.SourceMin, out.MaxCallsPerHour
-	if sameTime(cur.InboxFrom, out.InboxFrom) { // the catch-up mark of the Inbox turned on as the run saw it, not of another
+	// The catch-up mark of the Inbox turned on (or switched to it, #6265) as the run saw it, not of another.
+	if sameTime(cur.InboxFrom, out.InboxFrom) && sameTime(cur.Migrated, out.Migrated) {
 		cur.InboxCatchup = out.InboxCatchup
 		if out.InboxGroup == groupOf(cur.Recipe) { // the rows' grouping, while the recipe still groups that way
 			cur.InboxGroup, cur.InboxGroupFrom = out.InboxGroup, out.InboxGroupFrom
@@ -285,5 +313,6 @@ func sameTime(a, b *time.Time) bool {
 
 func clone(s Subscription) Subscription {
 	s.Runs = slices.Clone(s.Runs)
+	s.Continuation = cloneContinuation(s.Continuation)
 	return s
 }

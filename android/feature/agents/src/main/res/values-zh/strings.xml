@@ -56,6 +56,10 @@
     <string name="agents_count_pair">%1$s，%2$s</string>
     <string name="agents_flag_space_pinned">空间已置顶</string>
     <string name="agents_flag_space_muted">空间已屏蔽</string>
+    <string name="agents_kind_todo">待办</string>
+    <plurals name="agents_count_todos">
+        <item quantity="other">%1$d 个待办</item>
+    </plurals>
     <string name="agents_kind_space">空间</string>
     <string name="agents_view_todo">查看待办</string>
     <string name="agents_history_unknown_folder">未知目录</string>
@@ -71,6 +75,7 @@
     <string name="agents_grouping_state">按状态</string>
     <string name="agents_grouping_todo">按待办</string>
     <string name="agents_grouping_project">按项目</string>
+    <string name="agents_grouping_direction">按常驻</string>
     <string name="agents_menu_compact">细列表</string>
     <string name="agents_menu_detailed">详细列表</string>
     <string name="agents_menu_display">显示</string>
@@ -266,6 +271,12 @@
     <string name="agents_new_parent">上一级</string>
     <string name="agents_new_no_subdirectories">这个目录下没有子目录</string>
     <string name="agents_new_git_repo">Git 仓库</string>
+    <string name="agents_workspace_title">工作区</string>
+    <string name="agents_workspace_main">主检出</string>
+    <string name="agents_workspace_folder">文件夹</string>
+    <string name="agents_workspace_other">其他工作区</string>
+    <string name="agents_workspace_choose_folder">按文件夹选择</string>
+    <string name="agents_workspace_kind_branch">%1$s · %2$s</string>
     <string name="agents_new_retry_open">重试打开</string>
     <string name="agents_new_tab_in">在「%1$s」开新标签</string>
     <string name="agents_new_online">在线</string>
@@ -518,6 +529,9 @@
     <string name="agents_todos_filter_button">筛选和排序</string>
     <string name="agents_todos_filter_show">显示</string>
     <string name="agents_todos_sort_by">排序方式</string>
+    <string name="agents_todos_group_by">分组方式</string>
+    <string name="agents_todos_group_status">状态</string>
+    <string name="agents_todos_group_direction">常驻</string>
     <string name="agents_todos_filter_all">全部</string>
     <string name="agents_todos_filter_no_due">无截止日期</string>
     <string name="agents_todos_filter_today">今天</string>
@@ -538,6 +552,10 @@
         <item quantity="other">%d 条</item>
     </plurals>
     <string name="agents_todo_restore">恢复</string>
+    <string name="agents_todo_seen">知道了</string>
+    <string name="agents_todo_seen_moved">已移到「已完成」</string>
+    <string name="agents_todo_seen_undo">撤销</string>
+    <string name="agents_todo_seen_failed">操作失败：%1$s</string>
     <string name="agents_todo_pr_moved">%1$s · %2$s有动静</string>
     <string name="agents_todo_for_briefing">这项决定随下一次简报一起送达</string>
     <string name="agents_todo_pr">PR</string>
@@ -566,6 +584,20 @@
     <string name="agents_todo_calendar_change_due_of">改截止时间：%1$s…</string>
     <string name="agents_todo_calendar_date">日期</string>
     <string name="agents_todo_calendar_time">时间</string>
+    <string name="agents_todo_calendar_mode_day">日</string>
+    <string name="agents_todo_calendar_mode_week">周</string>
+    <string name="agents_todo_calendar_mode_month">月</string>
+    <string name="agents_todo_calendar_previous_day">前一天</string>
+    <string name="agents_todo_calendar_next_day">后一天</string>
+    <string name="agents_todo_calendar_previous_week">上一周</string>
+    <string name="agents_todo_calendar_next_week">下一周</string>
+    <string name="agents_todo_calendar_show_day">查看当天</string>
+    <string name="agents_todo_calendar_due">截止</string>
+    <string name="agents_todo_calendar_add">添加</string>
+    <string name="agents_todo_calendar_add_hint">提醒、优先级和备注在待办页面里设置。</string>
+    <plurals name="agents_todo_calendar_open">
+        <item quantity="other">%1$d 条待办</item>
+    </plurals>
     <plurals name="agents_todo_calendar_undated">
         <item quantity="other">%1$d 条没有截止</item>
     </plurals>

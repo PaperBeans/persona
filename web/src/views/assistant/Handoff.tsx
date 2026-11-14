@@ -1,7 +1,8 @@
 // The card an Agent the conversation handed work to is drawn as (#5096): cindy's SessionHandoffCard in Persona's tokens.
 // One card per Agent a dispatch started or a task took over, in the chat where it happened; a click opens that Agent's
 // own page (lib/handoff.ts), never a panel. Before its Agent is up the card stands for the task: starting, or why it
-// did not start (the task's Needs you row has Retry and Remove).
+// did not start (the task's Needs you row has Retry and Remove; its failed conclusion card in the chat says why and has
+// Retry, so the card then only says it did not start).
 import { openAgent, openTask } from "../../lib/handoff";
 import { startFailure, type TaskPlan } from "../../lib/feed";
 import type { Todo } from "../../lib/todos";
@@ -49,6 +50,8 @@ export interface Handoff {
   todo?: string;
   /** Why the task did not start (no Agent). */
   failure?: string;
+  /** The conversation has a failed conclusion card for the task, which says why: the card only says it did not start. */
+  failureBelow?: boolean;
   /** The task has no Agent and never will: closed before one started, or removed since (no `todo`). */
   ended?: boolean;
 }
@@ -94,7 +97,7 @@ export function lastActive(session: Pick<Session, "activity_at" | "updated_at"> 
 }
 
 export function HandoffCard({ handoff }: { handoff: Handoff }) {
-  const { mid, sid, todo, failure, wake } = handoff;
+  const { mid, sid, todo, failure, failureBelow, wake } = handoff;
   const agent = mid && sid ? { mid, sid } : undefined;
   const session = useStore((s) => (agent ? sessionIn(s, agent.mid, agent.sid) : undefined));
   useNow(60_000, Boolean(agent)); // "last active" moves on by the minute
@@ -129,7 +132,7 @@ export function HandoffCard({ handoff }: { handoff: Handoff }) {
       )}
     </>
   ) : failure ? (
-    <span className="truncate text-[12px] leading-4 text-red">{t("assistant-tasks.start_failed", { error: failure })}</span>
+    <span className="truncate text-[12px] leading-4 text-red">{failureBelow ? t("assistant-tasks.handoff_not_started") : t("assistant-tasks.start_failed", { error: failure })}</span>
   ) : handoff.ended ? (
     <span className="truncate text-[12px] leading-4 text-ink-3">{todo ? t("assistant-tasks.handoff_closed") : t("assistant-tasks.handoff_gone")}</span>
   ) : (

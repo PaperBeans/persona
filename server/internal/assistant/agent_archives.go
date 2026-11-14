@@ -174,12 +174,25 @@ func archiveSnapshot(s proto.Session) proto.Session {
 // mark is archiveMark taken before list was read: a record changed after it is not
 // weighed against the list (agentArchive.active).
 func (svc *Service) archivedSessions(ctx context.Context, machine string, list []proto.Session, mark uint64) ([]proto.Session, bool, error) {
+	return svc.applyArchives(ctx, machine, list, mark, true)
+}
+
+// archivedListed is archivedSessions without the rows only the archive keeps: list's own rows with the archive's
+// marks, and its restores, for a reader of rows the node lists (listedSession, listedSessions). The records the
+// machine has gathered over months are not copied for it.
+func (svc *Service) archivedListed(ctx context.Context, machine string, list []proto.Session, mark uint64) ([]proto.Session, error) {
+	list, _, err := svc.applyArchives(ctx, machine, list, mark, false)
+	return list, err
+}
+
+// applyArchives is archivedSessions; rest: the archive's rows list does not have are appended.
+func (svc *Service) applyArchives(ctx context.Context, machine string, list []proto.Session, mark uint64, rest bool) ([]proto.Session, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, agentArchiveTimeout)
 	defer cancel()
 	b := &svc.agentArchives
 	if err := b.lock(ctx); err != nil {
 		if records := b.snapshot.Load(); records != nil {
-			list = overlayAgentArchives(machine, list, *records, nil, mark)
+			list = overlayAgentArchives(machine, list, *records, nil, mark, rest)
 		}
 		return list, false, err
 	}
@@ -221,7 +234,7 @@ func (svc *Service) archivedSessions(ctx context.Context, machine string, list [
 			}
 		}
 	}
-	return overlayAgentArchives(machine, list, b.records, b.pending, mark), next != nil && saveErr == nil, saveErr
+	return overlayAgentArchives(machine, list, b.records, b.pending, mark, rest), next != nil && saveErr == nil, saveErr
 }
 
 // archivedInventory is machine's whole list with the archive applied (archivedSessions), its children folded under
@@ -233,11 +246,57 @@ func (svc *Service) archivedInventory(ctx context.Context, machine string) ([]pr
 	return list, changed, err
 }
 
-func overlayAgentArchives(machine string, list []proto.Session, records map[string]agentArchive, pending map[string]bool, mark uint64) []proto.Session {
-	seen := make(map[string]bool, len(list))
+// archivedRow is the row machine's whole list (archivedInventory) has for session sid when its node does not list it:
+// its archive record's, found by its key instead of by building the list with every record of the machine. Its fold
+// is the caller's (foldSubset).
+func (svc *Service) archivedRow(ctx context.Context, machine, sid string) (proto.Session, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, agentArchiveTimeout)
+	defer cancel()
+	b := &svc.agentArchives
+	if err := b.lock(ctx); err != nil { // as archivedSessions: the records last published
+		if records := b.snapshot.Load(); records != nil {
+			row, ok := archiveRowOf(machine, sid, *records)
+			return row, ok, err
+		}
+		return proto.Session{}, false, err
+	}
+	defer b.unlock()
+	if err := svc.loadAgentArchivesLocked(ctx); err != nil {
+		return proto.Session{}, false, err
+	}
+	row, ok := archiveRowOf(machine, sid, b.records)
+	return row, ok, nil
+}
+
+// archiveRowOf is the row overlayAgentArchives appends for machine's session sid, when records has one.
+func archiveRowOf(machine, sid string, records map[string]agentArchive) (proto.Session, bool) {
+	rec, ok := records[runtimeListID(machine, sid)]
+	if !ok || rec.Session.MachineID != machine {
+		return proto.Session{}, false
+	}
+	return archiveRow(rec), true
+}
+
+// archiveRow is a record's row in its machine's list.
+func archiveRow(rec agentArchive) proto.Session {
+	s := rec.Session
+	s.Archived = rec.Archived
+	s.ArchiveChangedAt = archiveChangedAt(rec.ChangedAt)
+	return s
+}
+
+// overlayAgentArchives puts the archive's marks on list's rows and, rest, appends the rows of the machine's records
+// list does not have.
+func overlayAgentArchives(machine string, list []proto.Session, records map[string]agentArchive, pending map[string]bool, mark uint64, rest bool) []proto.Session {
+	var seen map[string]bool // the keys list has, when the rest are appended
+	if rest {
+		seen = make(map[string]bool, len(list))
+	}
 	for i := range list {
 		key := runtimeListID(machine, list[i].SessionID)
-		seen[key] = true
+		if rest {
+			seen[key] = true
+		}
 		if rec, ok := records[key]; ok && !list[i].Assistant {
 			// A storage timeout must neither reveal unrelated archived rows nor hide
 			// new work. The durable restore remains pending until its write succeeds.
@@ -245,6 +304,9 @@ func overlayAgentArchives(machine string, list []proto.Session, records map[stri
 			list[i].Archived = rec.Archived && !pending[key] && !active
 			list[i].ArchiveChangedAt = archiveChangedAt(rec.ChangedAt)
 		}
+	}
+	if !rest {
+		return list
 	}
 	keys := make([]string, 0, len(records))
 	for key, rec := range records {
@@ -254,11 +316,7 @@ func overlayAgentArchives(machine string, list []proto.Session, records map[stri
 	}
 	sort.Strings(keys) // stable inventories avoid needless delta/list revisions
 	for _, key := range keys {
-		rec := records[key]
-		s := rec.Session
-		s.Archived = rec.Archived
-		s.ArchiveChangedAt = archiveChangedAt(rec.ChangedAt)
-		list = append(list, s)
+		list = append(list, archiveRow(records[key]))
 	}
 	return list
 }

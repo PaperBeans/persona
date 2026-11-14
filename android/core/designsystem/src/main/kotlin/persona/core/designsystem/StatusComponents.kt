@@ -33,13 +33,23 @@ import persona.core.designsystem.icons.PhIcons
  * A status mark: a glowing dot in glass, a dot in brief, a small square holder on the board.
  * Decorative for accessibility; always pair it with visible text. [waiting]: the working agents it stands for only wait in
  * the background, so Glass draws it in that state's lighter tone ([PersonaPalette.backgroundWaiting]) without the darker rim.
+ * [spinning]: a lead row whose Agents work while its own conversation is idle (#6230). It draws the working spinner instead
+ * of a dot, so "something under this row is running" reads the same as a turn the conversation runs itself; reduced motion
+ * freezes it as a static arc. The spinner turns while drawing only ([JSpinner]); iOS's dense rows turn it too (`RowStateMark`).
+ * [breathes]: false where iOS draws Needs You as a still dot or mark (the quick filters, a heading's counts, a badge on an
+ * avatar or a button, a request's card and panel, the sidebar's rows): the same dot, without the ring.
  */
 @Composable
-fun JStatusDot(status: Status, modifier: Modifier = Modifier, size: Dp = 8.dp, waiting: Boolean = false) {
+fun JStatusDot(status: Status, modifier: Modifier = Modifier, size: Dp = 8.dp, waiting: Boolean = false, spinning: Boolean = false, breathes: Boolean = true) {
     val tone = PersonaTheme.palette.status(status, waiting)
+    if (spinning) {
+        // the dense row's mark slot is small; the arc keeps the dot's footprint rather than the 20dp default spinner
+        JSpinner(modifier.size(size + Tokens.Space.Standard.xs), color = tone.dot, stroke = SpinnerTokens.compactStroke)
+        return
+    }
     when (PersonaTheme.style) {
         AppStyle.Glass -> {
-            val breath = needsYouBreath(status == Status.NeedsYou && !PersonaTheme.reduceMotion)
+            val breath = needsYouBreath(breathes && status == Status.NeedsYou && !PersonaTheme.reduceMotion)
             // the lighter dot keeps its glow as light as itself, and no darker rim
             val lighter = waiting && status == Status.Working
             val glow = tone.dot.copy(alpha = if (lighter) tone.dot.alpha * 0.55f else 0.55f)

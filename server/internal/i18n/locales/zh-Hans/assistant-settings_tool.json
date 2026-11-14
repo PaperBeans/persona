@@ -46,5 +46,15 @@
   "minutes_applied": "会议纪要保留已设为 {saved}，当前生效为 {after}。转写仍按录音保留时间清理。",
   "title_main_background_folded": "后台轮次默认折叠",
   "change_main_background_folded": "「后台轮次默认折叠」：{before} → {after}",
-  "title_standing_authorizations": "长期授权"
+  "title_standing_authorizations": "长期授权",
+  "title_meeting_transcription_default": "会议转写",
+  "change_meeting_transcription_default": "会议转写：{before} → {after}，从新开始的会议起生效。使用 Hub 转写时，会议音频会发送给 Hub 的转写服务。纪要写好后，Hub 会删除音频。",
+  "meeting_transcription_device": "在设备上",
+  "meeting_transcription_hub": "在 Hub 上",
+  "meeting_transcription_not_ready": "会议转写：{before} → {after}，从新开始的会议起生效。使用 Hub 转写时，会议音频会发送给 Hub 的转写服务。纪要写好后，Hub 会删除音频。Hub 转写尚未就绪，就绪后才会在会议开始页面提供此选项。",
+  "meeting_transcription_no_database": "此 Hub 没有数据库。请先连接数据库，再更改会议转写默认方式。",
+  "meeting_transcription_unchanged": "会议转写默认方式未变。",
+  "meeting_transcription_applied": "会议转写已设为{mode}，从新开始的会议起生效。",
+  "title_admission": "执行 Agent 准入闸",
+  "change_admission": "执行 Agent 准入闸：{before} → {after}"
 }

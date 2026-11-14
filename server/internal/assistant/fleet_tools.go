@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -25,17 +27,11 @@ const runtimeCLITool = "phone_runtime_cli"
 // are ok and give their tools to agents too (mail); for the assistant also its own, then Cua's, ego's and those of
 // the connectors only it gets (Feishu, GitHub…).
 func (s *Service) mcpTools(ctx context.Context, assistant bool) []proto.Tool {
-	var phone struct {
-		Tools []proto.Tool `json:"tools"`
-	}
-	if err := s.appCall(ctx, assistantwire.AppPhone, assistantwire.PhoneTools, map[string]any{}, &phone); err != nil {
-		s.logf("mcp tools: the phone's: %v", err)
-	}
 	var agents, assistantOnly []proto.Tool
 	if s.ext != nil {
 		agents, assistantOnly = s.ext.AgentTools(ctx, assistant)
 	}
-	tools := append(phone.Tools, agents...)
+	tools := append(s.phoneTools(ctx), agents...)
 	if !assistant {
 		tools = append(tools, s.AgentTools()...)       // report_to_supervisor, todo_decisions, todo_decision_add, todo_bind_thread (agentToolNames)
 		tools = append(tools, s.dispatchTools(ctx)...) // dispatch_start, dispatch_read, when agents.dispatch is on (dispatch.go)
@@ -44,6 +40,63 @@ func (s *Service) mcpTools(ctx context.Context, assistant bool) []proto.Tool {
 		tools = append(tools, s.Tools(ctx)...)
 		tools = append(tools, assistantOnly...)
 	}
+	return tools
+}
+
+// phoneToolTries is how many times a tool list asks the hub for the phone's tools, phoneToolRetry apart, before it
+// takes the ones the hub last listed (#6422); tests shorten the wait.
+var (
+	phoneToolTries = 3
+	phoneToolRetry = 500 * time.Millisecond
+)
+
+// keptPhoneTools is the phone's tools as the hub last listed them (ok: it has answered since the manager started).
+type keptPhoneTools struct {
+	mu    sync.Mutex
+	tools []proto.Tool
+	ok    bool
+}
+
+// phoneTools are the phone's tools for a tool list, as the hub lists them now. A conversation lists its tools once
+// (personad mcp says listChanged false), so one that starts while the hub can't answer (restarting, its link coming
+// back) would have none of the phone's for its whole life, and the model would tell the user the phone can't (#6422):
+// the hub is asked again briefly, then the list it last gave is used. A call is still the phone's to refuse (a source
+// turned off since). Only a manager the hub never answered lists none, as before.
+func (s *Service) phoneTools(ctx context.Context) []proto.Tool {
+	var err error
+	for try := 1; ; try++ {
+		var phone struct {
+			Tools []proto.Tool `json:"tools"`
+		}
+		if err = s.appCall(ctx, assistantwire.AppPhone, assistantwire.PhoneTools, map[string]any{}, &phone); err == nil {
+			k := &s.phoneKept
+			k.mu.Lock()
+			k.tools, k.ok = slices.Clone(phone.Tools), true
+			k.mu.Unlock()
+			return phone.Tools
+		}
+		if try >= phoneToolTries || ctx.Err() != nil {
+			break
+		}
+		t := time.NewTimer(phoneToolRetry)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+		case <-t.C:
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	k := &s.phoneKept
+	k.mu.Lock()
+	tools, ok := slices.Clone(k.tools), k.ok
+	k.mu.Unlock()
+	if !ok {
+		s.logf("mcp tools: the phone's: %v; none listed yet, so none", err)
+		return nil
+	}
+	s.logf("mcp tools: the phone's: %v; the %d the hub last listed", err, len(tools))
 	return tools
 }
 
@@ -73,6 +126,7 @@ func (s *Service) sessionMCPTools(ctx context.Context, machine, session string, 
 		tools := s.mcpTools(ctx, assistant)
 		if !assistant {
 			tools = append(tools, s.leaderTools(ctx, machine, session)...) // a task leader's task_plan (task_leader.go)
+			tools = append(tools, s.spawnTools(ctx, machine, session)...)
 		}
 		return tools
 	}
@@ -120,6 +174,13 @@ func (s *Service) mcpCall(ctx context.Context, machine, session, name string, ar
 	}
 	if !assistant && isAgentTool(name) {
 		return s.agentTool(ctx, machine, session, name, args)
+	}
+	if !assistant && name == "task_spawn" {
+		text, err := s.taskSpawn(ctx, machine, session, args)
+		if err != nil {
+			return proto.TextResult(err.Error(), true)
+		}
+		return proto.TextResult(text, false)
 	}
 	if !assistant && name == "task_plan" { // only a task leader's agent has it (task_leader.go)
 		return s.leaderTaskPlan(ctx, machine, session, args)

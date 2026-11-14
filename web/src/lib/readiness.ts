@@ -283,7 +283,8 @@ export function refreshReadiness(o: { force?: boolean; probe?: boolean; changed?
   const p = (o.probe ? api<Readiness>(`${READINESS_PATH}?probe=1`, { timeout: pastHub(PROBE_HUB_MS) }) : api<Readiness>(READINESS_PATH))
     .then((r) => {
       // a newer answer replaces a failed try's words, as it replaces a try's result
-      if (lands()) set({ readiness: r, unsupported: false, probeError: "", at: Date.now() });
+      if (!lands()) return;
+      set({ readiness: r, unsupported: false, probeError: "", at: Date.now() });
     })
     .catch((e) => {
       // 404: an older hub; 503 assistant_offline and the rest: keep what was there, ask again next time

@@ -74,6 +74,21 @@ class ModelsTest {
         assertNull(old.sourceKind); assertNull(old.capabilities); assertEquals(false, old.attached)
     }
 
+    // #6294: what a runtime's session can do without a terminal, where its node says it; null where an older node doesn't.
+    @Test fun optionalCapabilitiesDecodeWhereTheNodeSaysThem() {
+        fun caps(json: String) = JsonCodec.decodeFromString<Session>("""{"session_id":"s","source_kind":"runtime","capabilities":$json}""").capabilities!!
+        val said = caps("""{"read":true,"close":true,"rename":false,"model":true,"rewind":true,"rewind_code":false}""")
+        assertEquals(SessionCapabilities(read = true, close = true, rename = false, model = true, rewind = true, rewindCode = false), said)
+        val older = caps("""{"read":true,"send":true}""")
+        assertEquals(listOf(null, null, null, null, null), listOf(older.close, older.rename, older.model, older.rewind, older.rewindCode))
+        // A malformed one drops only itself (D5): null, the app's own rule, never a refusal.
+        assertEquals(SessionCapabilities(read = true, rename = true), caps("""{"read":true,"close":"yes","rename":true,"rewind_code":1}"""))
+        // They go back out under their wire names.
+        val encoded = JsonCodec.encodeToString(said)
+        assertTrue(encoded, encoded.contains(""""rewind_code":false"""))
+        assertEquals(said, JsonCodec.decodeFromString<SessionCapabilities>(encoded))
+    }
+
     @Test fun agentLabelNamesEveryAgent() {
         fun label(json: String) = JsonCodec.decodeFromString<Session>("""{"session_id":"s",$json}""").agentLabel
         assertEquals("Claude", label(""""status":"idle""""))
@@ -176,5 +191,26 @@ class ModelsTest {
         assertEquals("请求使用 github · create issue：Fix login", (ix.headline).zhAny())
         assertEquals("请求使用 Persona · mail send", (ix.copy(toolName = "mcp__persona__mail_send", summary = null).headline).zhAny())
         assertEquals("Codex 请求使用 github · create issue", (ix.copy(agent = "codex", summary = null).headline).zhAny())
+    }
+
+    @Test fun screenDialogDecodesCommandAskFieldsAndKeepsOldHubsCompatible() {
+        val ix = JsonCodec.decodeFromString<Interaction>(
+            """{"id":"ix_command","kind":"screen","dialog":{"question":"Do you want to proceed?",""" +
+                """"command":"rm -rf build","description":"Remove generated files","warning":"Dangerous rm operation","""+
+                """"risk":"delete","deadline":"Automatically denied in 1:44","deadline_action":"deny","""+
+                """"deadline_at":"2026-11-12T11:00:00+08:00","rev":"abc","options":[{"key":"1","label":"Yes"},{"key":"2","label":"No"}]}}""",
+        )
+        val dialog = ix.dialog!!
+        assertEquals("rm -rf build", dialog.command)
+        assertEquals("Remove generated files", dialog.description)
+        assertEquals("Dangerous rm operation", dialog.warning)
+        assertEquals("delete", dialog.risk)
+        assertEquals("Automatically denied in 1:44", dialog.deadline)
+        assertEquals("deny", dialog.deadlineAction)
+        assertEquals(java.time.Instant.parse("2026-11-12T03:00:00Z"), parseTime(dialog.deadlineAt))
+        assertEquals(ix, JsonCodec.decodeFromString<Interaction>(JsonCodec.encodeToString(ix)))
+        val old = JsonCodec.decodeFromString<Interaction>("""{"id":"old","kind":"screen","dialog":{"question":"Continue?"}}""").dialog!!
+        assertNull(old.command); assertNull(old.description); assertNull(old.warning); assertNull(old.risk)
+        assertNull(old.deadline); assertNull(old.deadlineAction); assertNull(old.deadlineAt)
     }
 }
