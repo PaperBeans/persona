@@ -155,6 +155,7 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
 - A Codex pane title that names no thread in `session_index.jsonl` is not evidence that the pane runs another thread: the index may simply lack the name.
   Discarding herdr's reported session id for it left the pane mapped to nothing, so a Persona-started Codex joined on its app-server was listed only as the `codex_app_server` row, with no pane or terminal (#7538).
   Drop the reported id only when the index knows that thread under a different name; a remembered pane binding is still dropped.
+  Check the name of the thread herdr reported, not of the main chat a sub-Agent id was replaced with: that name says nothing about the reported thread.
   Claude panes likewise: pane bindings for Persona-started sessions live in hub's database and reload after node restart, but can be stale; `sessions/<pid>.json` takes priority.
   After changing pane identification logic, rerun verification after deployment (restart); pre- and post-restart results may differ.
 - herdr `agent.prompt` pastes, then waits about 300 ms before Enter: serialize sends to the same session, or the second screen read mistakes the first message for an input draft. Sending deduplication lives in hub Postgres (`sent_messages`):

@@ -423,6 +423,8 @@ pane that cannot be identified uses neither a stale pane binding nor directory-b
 The session id herdr reports for the pane stands under such a title while `session_index.jsonl` has no name for that
 thread: nothing says the title names another one, and dropping it left the pane unlisted and its thread only as its
 app-server's row, without a terminal (#7538). A reported thread the index knows under another name is still dropped.
+A reported sub-Agent id is not: the name the index has is its main chat's, not the reported thread's, so the pane stays
+the main chat's row.
 
 | On the computer | Behavior |
 | --- | --- |

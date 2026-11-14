@@ -110,3 +110,34 @@ func TestCodexPaneUnderAnotherNameThanItsReportedThreadsIsLeftOut(t *testing.T) 
 		t.Fatalf("the pane shows %v, want %s", n.agents, started)
 	}
 }
+
+// herdr names a subagent's thread, which stands for its conversation, and the conversation has a name in the index.
+// The title is not that name (the user's own, or the subagent's): the name tells nothing of a thread herdr did not
+// name, so the pane stays its conversation's row.
+func TestCodexPaneReportingASubagentKeepsItsConversationsRowUnderAnotherTitle(t *testing.T) {
+	n, home := testNode(t)
+	n.metas, n.bgScans, n.panes, n.panePIDs = map[string]quickMeta{}, map[string]*bgScan{}, map[string]string{}, map[string]panePID{}
+	const (
+		parent = "0a000000-0000-4000-8000-000000000021"
+		sub    = "0a000000-0000-4000-8000-000000000022"
+		cwd    = "/work/repo"
+	)
+	now := time.Now()
+	writeRollout(t, home, parent, cwd, now, now.Add(-time.Minute), event("task_started"), event("task_complete"))
+	writeMetaRollout(t, filepath.Join(home, ".codex"), sub, `{"id":"`+sub+`","session_id":"`+parent+`","parent_thread_id":"`+parent+
+		`","cwd":"`+cwd+`","source":{"subagent":{"thread_spawn":{"parent_thread_id":"`+parent+`","depth":1}}},"thread_source":"subagent"}`, now)
+	index := `{"id":"` + parent + `","thread_name":"主会话的名字"}` + "\n"
+	if err := os.WriteFile(filepath.Join(home, ".codex", "session_index.jsonl"), []byte(index), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pane := host.Agent{Agent: "codex", PaneID: "w4:p1", TabID: "w4:t1", Cwd: cwd, ForegroundCwd: cwd, AgentStatus: proto.StatusIdle,
+		Title: "自己起的标题 | repo", AgentSession: &host.AgentSession{Kind: "id", Value: sub}}
+	n.setAgents([]host.Agent{pane})
+	if a, ok := n.agents[parent]; !ok || a.PaneID != "w4:p1" || len(n.agents) != 1 {
+		t.Fatalf("the pane shows %v, want its conversation %s", n.agents, parent)
+	}
+	rows := rowsOf(n, parent)
+	if len(rows) != 1 || rows[0].PaneID != "w4:p1" || rows[0].TabID != "w4:t1" {
+		t.Fatalf("the conversation is listed as %+v, want its pane's row", rows)
+	}
+}
