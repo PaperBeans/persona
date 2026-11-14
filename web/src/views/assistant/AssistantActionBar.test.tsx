@@ -8,6 +8,7 @@ import { setAgentOpenMode } from "../../lib/agent-open";
 import { closePanel, getPanel } from "../../lib/panel";
 import { putTodo, refresh, refreshTodos, reset, upsertSession } from "../../lib/store";
 import type { Todo } from "../../lib/todos";
+import { stateName } from "../../lib/state-labels";
 import { usageLimitLabel } from "../../lib/usage-limit";
 import type { Interaction, Session } from "../../lib/types";
 import { AssistantActionBar, DOCK_CAPSULE, FeedLineView, TaskDock } from "./Tasks";
@@ -134,6 +135,71 @@ describe("Assistant Needs you / In progress trays", () => {
     });
     act(() => entry("running").click());
     expect(host.querySelector("[data-task-status]")!.textContent).toBe(t("assistant-tasks.status_starting"));
+    expect(host.querySelector("[data-task-slot] .status-mark")!.getAttribute("data-state")).toBe("working");
+  });
+
+  /** The In progress row of to-do id (its own slot, with no plan card), and the dock's pill titles. */
+  const trayRow = (id: string) => host.querySelector<HTMLElement>(`[data-task-slot="task:${id}"]`);
+  const dockTitles = () => {
+    const dockHost = document.createElement("div");
+    document.body.append(dockHost);
+    const dockRoot = createRoot(dockHost);
+    act(() => dockRoot.render(<TaskDock conversation={conversation} />));
+    const titles = [...dockHost.querySelectorAll("button .truncate")].map((el) => el.textContent);
+    act(() => dockRoot.unmount());
+    dockHost.remove();
+    return titles;
+  };
+
+  it("says Not started, with a still mark and no dock pill, on a to-do nobody dispatched (#7552)", async () => {
+    // a to-do of this conversation (a leader's piece, a todo_create) with no Agent, no plan and no start: nothing is starting
+    moreTodos = [{ id: "own-todo", title: "Decide the release", origin: conversation, created_at: at, updated_at: at, agents: [] }];
+    await act(async () => {
+      await refreshTodos();
+    });
+    act(() => entry("running").click());
+    const row = trayRow("own-todo")!;
+    expect(row.querySelector("[data-task-status]")!.textContent).toBe(stateName("not_started"));
+    expect(row.querySelector(".status-mark")!.getAttribute("data-state")).toBe("offline");
+    // still a row of In progress, counted open as the To-dos page counts it (#3331)
+    expect(row.getAttribute("data-counts-open")).toBe("true");
+    expect(dockTitles()).not.toContain("Decide the release");
+  });
+
+  it("says Starting while a plan that took over a to-do starts its Agent, and moves it to Needs you once that start failed (#7552)", async () => {
+    // a to-do a plan reuses keeps no plan_id (tasks_recover.go): the plan's task names it
+    const reuse: TaskPlan = { id: "reuse-plan", conversation, state: "started", created_at: at, tasks: [{ title: "Reused", prompt: "Go on", cwd: "/demo", machine: "demo", todo_id: "reused-todo" }] };
+    getFeedState().plans[reuse.id] = reuse;
+    moreTodos = [{ id: "reused-todo", title: "Carry on the work", origin: conversation, created_at: at, updated_at: at, agents: [] }];
+    await act(async () => {
+      await refreshTodos();
+    });
+    act(() => entry("running").click());
+    expect(trayRow("reused-todo")!.querySelector("[data-task-status]")!.textContent).toBe(t("assistant-tasks.status_starting"));
+    expect(trayRow("reused-todo")!.querySelector(".status-mark")!.getAttribute("data-state")).toBe("working");
+    expect(dockTitles()).toContain("Carry on the work");
+    // the hub ends a failed start with done_at and start_error (#1077): the owner's to retry, in Needs you
+    moreTodos = [{ ...moreTodos[0], done_at: at, start_error: "the computer is offline" }];
+    await act(async () => {
+      await refreshTodos();
+    });
+    expect(trayRow("reused-todo")).toBeNull();
+    act(() => entry("needs").click());
+    expect(host.querySelector('[data-needs-row="task:reused-todo"]')?.textContent).toContain("Carry on the work");
+    delete getFeedState().plans[reuse.id];
+  });
+
+  it("says Not started on the owner's own to-do in the main conversation's In progress (#7552)", async () => {
+    mainChat = conversation;
+    moreTodos = [{ id: "owner-todo", title: "Book the dentist", created_at: at, updated_at: at, agents: [] }];
+    await act(async () => {
+      await refresh();
+      await refreshTodos();
+    });
+    act(() => entry("running").click());
+    const row = trayRow("owner-todo")!;
+    expect(row.querySelector("[data-task-status]")!.textContent).toBe(stateName("not_started"));
+    expect(row.querySelector(".status-mark")!.getAttribute("data-state")).not.toBe("working");
   });
 
   it("keeps two entries in order, collapses by default and replaces conversation cards with the dispatch's hand-off card", () => {
