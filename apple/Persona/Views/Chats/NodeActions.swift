@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 // The node menu of the Agents list (docs/integrations/terminal.md「Node menus」, the web's #2329): what changes a computer's terminals from
 // a space's ⋯ and an agent row's long press — split the agent's pane, close its tab, run an agent in a plain shell of the
@@ -176,7 +177,7 @@ nonisolated enum NodeMenu {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .pull: String(localized: "Pull")
+            case .pull: String(localized: "git.pull", defaultValue: "Pull")
             case .push: String(localized: "Push")
             case .fetch: String(localized: "Fetch")
             }

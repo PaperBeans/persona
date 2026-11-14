@@ -223,12 +223,12 @@ func TestFoldLeavesReviewersOut(t *testing.T) {
 		foldRow("reviewer", proto.StateNeedsYou, func(s *proto.Session) { s.IsSubagent, s.ParentSessionID = true, "lead" }),
 	}
 	s.foldInventory("m1", again)
-	if under, _ := s.foldedUnder("m1", "reviewer"); again[0].Hierarchy != nil || under != "" {
+	if under, _, _ := s.foldedUnder("m1", "reviewer"); again[0].Hierarchy != nil || under != "" {
 		t.Fatalf("a reviewer folded: %+v", again[0].Hierarchy)
 	}
 	other := []proto.Session{again[0], foldRow("reviewer", proto.StateNeedsYou, func(s *proto.Session) { s.IsSubagent, s.ParentSessionID = true, "lead" })}
 	s.foldInventory("m2", other)
-	if under, _ := s.foldedUnder("m2", "reviewer"); under != "lead" {
+	if under, _, _ := s.foldedUnder("m2", "reviewer"); under != "lead" {
 		t.Fatal("another machine's session of the reviewer's id was left out")
 	}
 }
@@ -424,7 +424,7 @@ func TestPublishedListFoldsTabTeam(t *testing.T) {
 }
 
 // foldSessions skips its walk for a list where no row can fold (mayFold) and says what the walk says of it: nothing.
-// An orphan child (its parent is not listed) makes the walk run and folds nothing, so the fold of every list, with the
+// A list whose only fold is a side session (#7944) is walked and folds. An orphan child (its parent is not listed) makes the walk run and folds nothing, so the fold of every list, with the
 // orphan or without, is the same, whether a list is walked or not.
 func TestFoldSessionsWithoutWalk(t *testing.T) {
 	orphan := foldRow("orphan", proto.StateWorking, func(s *proto.Session) { s.ParentSessionID = "not-listed" })
@@ -477,13 +477,38 @@ func TestFoldSessionsWithoutWalk(t *testing.T) {
 			foldRow("parent", proto.StateIdle, nil),
 			foldRow("kid", proto.StateWorking, func(s *proto.Session) { s.ParentSessionID, s.Archived = "parent", true }),
 		}},
+		// A side session (#7944) is no child and in no tab: it alone has to make the walk run.
+		{name: "a side, no tabs, no children", may: true, folds: true, list: []proto.Session{
+			foldRow("main", proto.StateIdle, nil),
+			foldRow("side", proto.StateWorking, func(s *proto.Session) { s.SetParentAgentID("main") }),
+		}},
+		{name: "a side of an unlisted row", may: true, list: []proto.Session{
+			foldRow("main", proto.StateIdle, nil),
+			foldRow("side", proto.StateWorking, func(s *proto.Session) { s.SetParentAgentID("gone") }),
+		}},
+		{name: "a row naming itself its side parent", list: []proto.Session{
+			foldRow("main", proto.StateIdle, nil),
+			foldRow("side", proto.StateWorking, func(s *proto.Session) { s.SetParentAgentID("side") }),
+		}},
+		{name: "an archived side", list: []proto.Session{
+			foldRow("main", proto.StateIdle, nil),
+			foldRow("side", proto.StateWorking, func(s *proto.Session) { s.SetParentAgentID("main"); s.Archived = true }),
+		}},
+		{name: "an assistant row naming a side parent", list: []proto.Session{
+			foldRow("main", proto.StateIdle, nil),
+			foldRow("side", proto.StateWorking, func(s *proto.Session) { s.SetParentAgentID("main"); s.Assistant = true }),
+		}},
 	} {
 		listed := func(s *proto.Session) bool { return (!s.Archived || s.Assistant) && !c.hidden[s.SessionID] }
 		if may := mayFold(c.list, listed); may != c.may {
 			t.Errorf("%s: mayFold %v, want %v", c.name, may, c.may)
 		}
-		if f := same(t, c.name, c.list, c.hidden); (f.under != nil) != c.folds {
+		f := same(t, c.name, c.list, c.hidden)
+		if (f.under != nil) != c.folds {
 			t.Errorf("%s: folded %+v", c.name, f)
+		}
+		if c.name == "a side, no tabs, no children" && (f.under["side"] != "main" || f.as["side"] != proto.FoldedAsSide) {
+			t.Errorf("%s: the side folds %+v", c.name, f)
 		}
 	}
 
@@ -508,6 +533,8 @@ func TestFoldSessionsWithoutWalk(t *testing.T) {
 				s.ParentSessionID = pick(append(ids, "gone"))
 			case 1:
 				s.IsSubagent, s.RootSessionID = true, pick(ids)
+			case 2:
+				s.SetParentAgentID(pick(append(ids, "gone")))
 			}
 			list[i] = s
 		}
