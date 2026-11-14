@@ -55396,6 +55396,29 @@
         }
       }
     },
+    "Direct · LAN · UDP" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Direct · LAN · UDP"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直接接続 · LAN · UDP"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直连 · 局域网 · UDP"
+          }
+        }
+      }
+    },
     "Direct · Tailscale" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55415,6 +55438,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "直连 · Tailscale"
+          }
+        }
+      }
+    },
+    "Direct · Tailscale · UDP" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Direct · Tailscale · UDP"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直接接続 · Tailscale · UDP"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直连 · Tailscale · UDP"
           }
         }
       }

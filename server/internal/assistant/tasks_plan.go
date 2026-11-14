@@ -69,6 +69,9 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 			return "", err
 		}
 	}
+	if err := s.ensureTodosLoaded(ctx); err != nil {
+		return "", fmt.Errorf("todos are unavailable: %v", err)
+	}
 	reused := map[string]bool{}
 	modes := map[string]string{} // each computer's Claude Code default mode, read once for this plan
 	for i := range a.Tasks {
@@ -103,6 +106,11 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		t.StartedWhy = clip(oneLine(t.StartedWhy), 300)
 		if err := briefRequired(t); err != nil && !(s.briefsOptional && t.Continues == "") {
 			return "", fmt.Errorf("task %d (%s): %w", i+1, t.Title, err)
+		}
+		if scope == nil {
+			if err := s.takeOver(ctx, sessionID, t); err != nil {
+				return "", fmt.Errorf("task %d: %v", i+1, err)
+			}
 		}
 		if t.Model != "" && !proto.ValidModelID(t.Model) { // it goes to the agent as --model (#1644)
 			return "", fmt.Errorf("task %d: model %q is not a model id: %s", i+1, t.Model, proto.ModelIDRule)
@@ -158,17 +166,6 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 			return "", fmt.Errorf("task %d: %w", i+1, err)
 		}
 	}
-	if err := s.ensureTodosLoaded(ctx); err != nil {
-		return "", fmt.Errorf("todos are unavailable: %v", err)
-	}
-	for i := range a.Tasks {
-		if scope != nil { // a task leader's workers are new pieces of its task, never a takeover
-			break
-		}
-		if err := s.takeOver(ctx, sessionID, &a.Tasks[i]); err != nil {
-			return "", fmt.Errorf("task %d: %v", i+1, err)
-		}
-	}
 	for i, t := range a.Tasks {
 		if t.ReuseTodo == "" {
 			continue
@@ -177,8 +174,10 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 			return "", fmt.Errorf("task %d: todo_id %s is already the todo of another task in this plan", i+1, t.ReuseTodo)
 		}
 		reused[t.ReuseTodo] = true
-		if _, err := s.reusableTodo(ctx, sessionID, t.ReuseTodo, false); err != nil {
-			return "", fmt.Errorf("task %d: %v", i+1, err)
+		if t.Continues == "" {
+			if _, err := s.reusableTodo(ctx, sessionID, t.ReuseTodo, false); err != nil {
+				return "", fmt.Errorf("task %d: %v", i+1, err)
+			}
 		}
 	}
 	if err := s.planBriefs(ctx, machine, sessionID, a.Tasks); err != nil {

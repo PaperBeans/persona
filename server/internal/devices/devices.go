@@ -588,7 +588,13 @@ func (d *Devices) BusUp() {
 		m.mu.Lock()
 		list := slices.Clone(m.sessions)
 		has := m.online || m.warmLocked(time.Now()) || len(list) > 0
+		unknown := list == nil && !m.sessionsListed
 		m.mu.Unlock()
+		if unknown {
+			// No snapshot has arrived on the current connection: nil is unknown, not an empty snapshot.
+			// The initial forward or an existing refresh path publishes the real list once a call succeeds.
+			continue
+		}
 		if has {
 			if list == nil {
 				list = []proto.Session{}

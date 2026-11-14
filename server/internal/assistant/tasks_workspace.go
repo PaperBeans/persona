@@ -128,7 +128,7 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 				if !source.Available || !proto.NodeAbs(source.Cwd) {
 					return i18n.ErrEnglish("assistant-tasks_workspace.unavailable", i18n.Args{"path": t.Cwd})
 				}
-				sourceCwd, owner = source.Cwd, s.taskWorkspaceOwner(ctx, t.Machine, source.Cwd, t.TodoID)
+				sourceCwd, owner = source.Cwd, s.taskWorkspaceOwner(ctx, t.Machine, source.Cwd, firstNonEmpty(t.TodoID, t.ReuseTodo))
 				if s.taskWorkspacePreference(ctx) == preferNew || owner != nil {
 					mode = workspaceNew
 				}

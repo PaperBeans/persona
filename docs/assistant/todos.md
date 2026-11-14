@@ -862,6 +862,14 @@ A to-do it makes is the user's own (no `origin`): work for an agent still goes t
 2. **No stored state**: overall state derives entirely from linked Agents' live runtime states (questioning, working, finished unread, etc.). Agent state changes frequently; derivation avoids dual-write consistency problems and large synchronization overhead.
 3. **One active to-do**: `UNIQUE (machine_id, session_id) WHERE released_at IS NULL` ensures each Agent serves only one current to-do at a time. Assigning other work automatically marks the previous task "Previously involved", keeping context and execution goal clear.
 4. **Automatic completion only for chat-dispatched tasks, judged by model**: these have explicit requirements (dispatch prompt) and deliverables (Agent's final reply), so requiring individual user completion taps is a burden; manual to-dos often represent the user's own plans, whose completion hub cannot know. Stopped is not finished, so do not close by state alone; judgment model decides, leaving open when uncertain. Wrong auto-close (user thinks finished) costs much more than missed close (one extra tap), hence reversible, reasoned, and not reclosed by the same work after reopening.
+5. **A continuation is the same task**: `continues` reuses the original to-do and its immutable brief. At Start, stop and release prior Agents and reopen the to-do in place if closed; planning does not mutate a running Agent or closed task. A failed or unauthorized takeover must not create another to-do; an unreachable prior Agent and legacy open successor duplicates are refused. Plain `todo_id` remains limited to an open to-do without live Agents.
+
+   Reuse the existing `task_plan` fields instead of adding an API: `agent_send` is enough for a plain follow-up to a live Agent when no permission change is wanted. To move from investigation to implementation, use `continues: "<original to-do id>"`, `continues_why`, `readonly: false`, a new implementation prompt, and an explicit writable `permission` (for example `bypassPermissions` for Codex). A fresh writable process removes Codex's launch-time plan/read-only sandbox instead of attempting to mutate it in place. The original brief and `out_of_bounds` remain unchanged; use `task_scope` for an authorized scope change.
+
+`continues` is an explicit task handoff, separate from automatic task closure. It stops prior Agents only when the
+plan starts, keeps their terminals and released links in the task history, and reopens the original to-do if needed.
+The waiting plan card leaves Agents and task completion unchanged. A refused stop fails the handoff without making
+a new to-do. Existing historical successor chains are still guarded against duplicate continuation.
 
 ## Known limitations
 

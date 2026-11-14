@@ -56,14 +56,14 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if !s.placeTask(ctx, &p.Tasks[i]) {
 			return nil, i18n.Err("assistant-tasks.task_no_machine", i18n.Args{"task": p.Tasks[i].Title, "machine": strconv.Quote(p.Tasks[i].Machine)})
 		}
+		// Recheck waiting cards, including ones saved before continuations always reused their original to-do.
+		if p.Tasks[i].Parent == "" {
+			if err := s.takeOver(ctx, p.Conversation, &p.Tasks[i]); err != nil {
+				return nil, planInvalid{fmt.Errorf("task %d: %w", i+1, err)}
+			}
+		}
 		if err := s.resolveTaskWorkspace(ctx, &p.Tasks[i]); err != nil {
 			return nil, planInvalid{err}
-		}
-		// A card left waiting while another plan carried on the same to-do would open a second one for the same work.
-		if t := p.Tasks[i]; t.Continues != "" && t.ReuseTodo == "" {
-			if succ, ok := s.openSuccessor(t.Continues); ok {
-				return nil, planInvalid{fmt.Errorf("task %d: %w", i+1, errContinued(t.Continues, succ))}
-			}
 		}
 	}
 	p.State = planStarted
@@ -83,7 +83,7 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if t.ReuseTodo != "" {
 			// The todo is already there with its own title, notes and task card in the conversation's feed (a Lark topic
 			// opened it): the task runs on it, and nothing is made or shown twice.
-			todo, err = s.takeTodoForTask(ctx, p.ID, p.Conversation, t.ReuseTodo)
+			todo, err = s.takeTodoForTask(ctx, p.ID, p.Conversation, *t)
 			if err != nil {
 				t.Error = err.Error()
 				continue
@@ -160,6 +160,17 @@ func notReusable(id, why string) error {
 	return fmt.Errorf("todo_id %s cannot be used: %s (leave todo_id out and the task gets a todo of its own)", id, why)
 }
 
+func (s *Service) taskTodoForConversation(conversation, id string) (Todo, error) {
+	t, ok := s.todoNow(id)
+	switch {
+	case !ok:
+		return Todo{}, notReusable(id, "there is no such todo")
+	case conversation == "" || t.Origin != conversation && (t.Supervision == nil || t.Supervision.Supervisor != conversation):
+		return Todo{}, notReusable(id, "it was not opened from this conversation, nor is it supervised by it")
+	}
+	return t, nil
+}
+
 // reusableTodo says whether a task of a plan from conversation may run on todo id (task_plan's todo_id): the todo is
 // one that conversation opened or supervises (a handover after its agent stopped carries on in the same to-do, #6427),
 // is not done, has no live agent on it and is not taken by a plan that started and has not linked its agent yet. An
@@ -168,13 +179,11 @@ func notReusable(id, why string) error {
 // let go (releaseStoppedAgents). A computer that cannot be reached is not an answer: its agent counts as working.
 // taking: the plan hold is what the caller is about to claim itself, so it is not looked at (takeTodoForTask holds it).
 func (s *Service) reusableTodo(ctx context.Context, conversation, id string, taking bool) (stopped []TodoAgent, err error) {
-	t, ok := s.todoNow(id)
-	switch {
-	case !ok:
-		return nil, notReusable(id, "there is no such todo")
-	case conversation == "" || t.Origin != conversation && (t.Supervision == nil || t.Supervision.Supervisor != conversation):
-		return nil, notReusable(id, "it was not opened from this conversation, nor is it supervised by it")
-	case t.DoneAt != nil:
+	t, err := s.taskTodoForConversation(conversation, id)
+	if err != nil {
+		return nil, err
+	}
+	if t.DoneAt != nil {
 		return nil, notReusable(id, "it is already done")
 	}
 	for _, a := range t.Agents {
@@ -219,7 +228,8 @@ func (s *Service) todoAgentStopped(ctx context.Context, a TodoAgent) bool {
 // takeTodoForTask is the todo a started plan's task runs on (PlanTask.ReuseTodo), checked again now (it may have been
 // closed or taken since the plan was made) and held until the task's agent is linked (releaseTakenTodo). The stopped
 // agents still linked to it are let go first: the new agent is the one working on it.
-func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation, id string) (Todo, error) {
+func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation string, task PlanTask) (Todo, error) {
+	id := task.ReuseTodo
 	s.tasks.mu.Lock()
 	if s.tasks.reusing[id] {
 		s.tasks.mu.Unlock()
@@ -227,7 +237,17 @@ func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation, id 
 	}
 	s.tasks.reusing[id] = true
 	s.tasks.mu.Unlock()
-	stopped, err := s.reusableTodo(ctx, conversation, id, true)
+	var stopped []TodoAgent
+	var err error
+	if task.Continues == id {
+		var todo Todo
+		todo, err = s.taskTodoForConversation(conversation, id)
+		if err == nil {
+			stopped, err = s.stopContinuedTaskAgents(ctx, todo)
+		}
+	} else {
+		stopped, err = s.reusableTodo(ctx, conversation, id, true)
+	}
 	if err != nil {
 		s.releaseTakenTodo(id)
 		return Todo{}, err
@@ -264,8 +284,49 @@ func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation, id 
 		s.releaseTakenTodo(id)
 		return Todo{}, err
 	}
+	if task.Continues == id {
+		if err := s.reopenTodo(ctx, id); err != nil {
+			s.releaseTakenTodo(id)
+			return Todo{}, err
+		}
+	}
 	t, _ := s.todoNow(id)
 	return formatTodo(t), nil
+}
+
+// stopContinuedTaskAgents is an explicit handoff, not the idle task-closure pass: stop the old process but keep its
+// terminal and history. A refusal leaves the handoff failed on this to-do, with no replacement Agent.
+func (s *Service) stopContinuedTaskAgents(ctx context.Context, todo Todo) ([]TodoAgent, error) {
+	var stopped []TodoAgent
+	for _, a := range todo.Agents {
+		if !a.active() {
+			continue
+		}
+		s.todos.mu.RLock()
+		other := s.todos.activeBySession[[2]string{a.MachineID, a.SessionID}]
+		s.todos.mu.RUnlock()
+		if other != "" && other != todo.ID {
+			// A historical link cannot authorize stopping an Agent that now belongs to another task.
+			// Return only this to-do's stale link for release, not the other to-do's live link.
+			// releaseStoppedAgents does not stop the process.
+			stopped = append(stopped, a)
+			continue
+		}
+		if _, ok := s.device(ctx, a.MachineID); !ok {
+			return nil, fmt.Errorf("continues: cannot confirm agent %s/%s stopped: its computer is unavailable", a.MachineID, a.SessionID)
+		}
+		if !s.todoAgentStopped(ctx, a) {
+			cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+			err := s.call(cctx, a.MachineID, deviceSessionStop, map[string]any{"session_id": a.SessionID}, nil)
+			cancel()
+			if err != nil {
+				return nil, fmt.Errorf("continues: cannot stop agent %s/%s on to-do %s: %w", a.MachineID, a.SessionID, todo.ID, err)
+			}
+			s.endSessionCards(a.MachineID, a.SessionID)
+		}
+		stopped = append(stopped, a)
+	}
+	return stopped, nil
 }
 
 // todoAgentReleaser is the store's letting go of one agent link (released_at only); a store without it keeps that in

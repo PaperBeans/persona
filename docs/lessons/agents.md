@@ -1,5 +1,10 @@
 # Lessons: Claude Code, Codex, and herdr
 
+# A continuation must stay on its original to-do (#6820)
+
+When replacing an Agent to fix or retry work, keep the original to-do and immutable brief. Stop/release prior Agents at Start and reopen a closed to-do in place; failed starts must not create successor tasks. For Codex edits, a plan/read-only sandbox needs a fresh process with explicit writable permission. Keep takeover and legacy-successor duplicate refusals intact.
+
+
 Pitfalls, odd behavior, and the trade-offs made at the time (formerly in `CLAUDE.md`, index in `docs/lessons/README.md`). Add new lessons to the matching section; create a section if none fits.
 
 ## A saved task name can disappear without another model failure (#7337)

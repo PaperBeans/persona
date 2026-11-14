@@ -69,13 +69,17 @@ struct ScreenStats: Equatable {
     enum Mode { case video, vnc
         var label: String { self == .video ? String(localized: "Video") : String(localized: "VNC") }
     }
-    /// Which network path the stream is on (#6398).
+    /// Which network path the stream is on (#6398), and whether the video rides a UDP flow beside the direct route
+    /// (#7873).
     enum Path: Equatable {
         case directLAN, directTailscale, relay
+        case directLANUDP, directTailscaleUDP
         var label: String {
             switch self {
             case .directLAN: String(localized: "Direct · LAN")
             case .directTailscale: String(localized: "Direct · Tailscale")
+            case .directLANUDP: String(localized: "Direct · LAN · UDP")
+            case .directTailscaleUDP: String(localized: "Direct · Tailscale · UDP")
             case .relay: String(localized: "Via hub")
             }
         }
@@ -297,6 +301,14 @@ extension ScreenStats {
         tierReason: String(localized: "Connection is steady") + " · " + String(localized: "\(12) s ago"),
         bitrateMbps: 3.4, fps: 60, codec: "HEVC", resolution: "2268×1472",
         captureMs: nil, encodeMs: 9, networkMs: 6, decodeMs: 8, totalMs: 23, roundTripMs: nil)
+    /// The same with the video on a UDP flow (#7873): `-showScreenStatsDemo` with `-showScreenUDP`.
+    static let demoVideoUDP: ScreenStats = {
+        var s = demoVideo
+        s.path = .directLANUDP
+        s.routeRttMs = 4
+        s.routeLoss = 0.02
+        return s
+    }()
     static let demoVNC = ScreenStats(
         mode: .vnc, path: .relay, tier: nil, tierReason: nil,
         bitrateMbps: 24.0, fps: 6, codec: nil, resolution: nil,
