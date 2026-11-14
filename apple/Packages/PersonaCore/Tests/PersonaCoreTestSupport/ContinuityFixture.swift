@@ -140,7 +140,7 @@ public extension ContinuityJSON {
             has_more: try require(boolean("has_more"), "http_reload has_more")
         )
         case "http_older": .older(items_json: try itemsJSON(), has_more: try require(boolean("has_more"), "http_older has_more"))
-        case "http_range": .range(items_json: try itemsJSON(), more: flag("more"))
+        case "http_range": .range(fold_id: nil, items_json: try itemsJSON(), more: flag("more"))
         case "reconnect": .reconnected
         case "load_older": .loadOlder
         case "open_fold": .openFold(fold_id: try require(text("fold_id"), "open_fold fold_id"))
@@ -180,7 +180,7 @@ public extension Request {
             if let since { object["since_seq"] = .number(Double(since)) }
         case let .fetchOlder(before_seq: before, fold_work: fold):
             object = ["kind": .string("fetch_older"), "before_seq": .number(Double(before)), "fold_work": .bool(fold)]
-        case let .fetchRange(from_seq: from, through_seq: through):
+        case let .fetchRange(fold_id: _, from_seq: from, through_seq: through):
             object = ["kind": .string("fetch_range"), "from_seq": .number(Double(from)), "through_seq": .number(Double(through))]
         }
         return .object(object)

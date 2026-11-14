@@ -6,6 +6,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../i18n";
+import { webVideo } from "./video";
 
 type FakeRFB = EventTarget & { canvas: HTMLCanvasElement };
 const rfbs = vi.hoisted(() => [] as FakeRFB[]);
@@ -68,12 +69,14 @@ beforeAll(async () => {
 beforeEach(() => {
   rfbs.length = 0;
   status.video = { version: 1, codecs: ["hevc", "h264"] };
+  webVideo.plays = true; // the switcher as it will be once the browser plays video (not yet: see the last test)
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
 });
 
 afterEach(() => {
+  webVideo.plays = false;
   act(() => root.unmount());
   host.remove();
   localStorage.clear();
@@ -142,5 +145,12 @@ describe("the picture switcher otherwise", () => {
     await open(true);
     await connect();
     expect(button()).toBeNull();
+  });
+
+  it("is not offered while this browser can't play video, even for a Mac that advertises it", async () => {
+    webVideo.plays = false; // as shipped until the web's decoder lands
+    await open();
+    await connect();
+    expect(button(), "the web keeps RFB and shows no Video it can't play").toBeNull();
   });
 });

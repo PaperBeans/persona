@@ -3152,6 +3152,11 @@ and the node follows (`node/plugins.go`). Reconciliation runs on computer connec
   Installation permission rows choose icons by key (`node_runs_code`, `node_network`, `node_files`, `node_macos_privacy`, `node_secrets`).
 - **Status**: every extension with a `node` section includes `nodes: [{machine_id, version, state, error?}]` in the extension list, where `state` is `running` / `starting` / `error` /
   `missing` (this computer lacks this package version) / `lease_expired` / `offline` / `outdated` (personad too old to recognize `plugin.node.*`).
+  The same view carries `node_status: {total, running, starting, stopped, offline, abnormal}` while that aggregate drives the status — it is omitted while a live hub process keeps its own status, and on the disabled / needs_setup / incompatible states. `abnormal` counts `error`, `missing`,
+  `lease_expired`, `outdated` and any state this build does not know. While the hub runs no process of its own for the extension (an on-call program that is idle, or a manifest with only
+  a `node` section), its top-level `status` follows the aggregate instead of saying `stopped`: `running` while at least one machine runs it, `error` when none run and one is abnormal,
+  `starting` while a machine is starting it, otherwise `stopped` (including every machine offline). Web, iOS and Android render one line from `node_status` with their own localized
+  plural wording ("Running on 2 machines", with the abnormal and offline counts); a view without `node_status` keeps the hub process's own status wording.
 - **Built-in node programs (cua, ego, #1830 step 5)**: computer/browser control node code lives in personad, not packages or subprocesses (`node/builtin.go`).
   The node reports `["cua", "ego"]` in `node.info`'s `builtin_programs`; the hub then calls via `plugin.node.call {id, method, params}` (`status`, `call`, `install`, `grant`, `cancel`,
   `clipboard`, `cursor`, `nolock`, `lock`; ego `status`, `install`, `open`, `cancel`, `call`, `cookies.list/import/clear`). Old nodes not reporting them use `computer.*` / `browser.*`

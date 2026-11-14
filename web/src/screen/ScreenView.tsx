@@ -11,7 +11,7 @@ import "../views/theme"; // follows the system's light / dark while open (index.
 import { ensureSubtleAES } from "./aes";
 import { displayChoice, framing, keepPointerIn, layoutDisplays, machineDisplays, setDisplayChoice, type MachineDisplay, type Rect, type Size } from "./displays";
 import { accountOf, keepLabel, keysymsOf, screenSocket, toApp, type ScreenTarget } from "./screen";
-import { pictureChoice, qualityChoice, setPictureChoice, setQualityChoice, setStatsShown, statsShown, videoAdvertised, type ScreenPicture, type ScreenQuality } from "./video";
+import { pictureChoice, qualityChoice, setPictureChoice, setQualityChoice, setStatsShown, statsShown, videoOffered, type ScreenPicture, type ScreenQuality } from "./video";
 
 type DisplayMenuView = typeof import("./DisplayMenu").default;
 type ScreenMenuView = typeof import("./ScreenMenu").default;
@@ -87,7 +87,7 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
         const on = await sharing(target);
         if (!gone) {
           setDisplays(machineDisplays(on.displays));
-          setHasVideo(videoAdvertised(on.screen_video));
+          setHasVideo(videoOffered(on.screen_video));
           setPhase({ kind: "connecting" });
           setGo(true);
         }

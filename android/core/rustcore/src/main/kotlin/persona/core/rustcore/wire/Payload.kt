@@ -131,6 +131,7 @@ sealed class Payload {
     }
 
     data class Range(
+        val fold_id: String?,
         val body: String
     ) : Payload() {
 
@@ -138,6 +139,7 @@ sealed class Payload {
         override fun serialize(serializer: com.novi.serde.Serializer) {
             serializer.increase_container_depth()
             serializer.serialize_variant_index(4)
+            TraitHelpers.serialize_option_str(this.fold_id, serializer)
             serializer.serialize_str(this.body)
             serializer.decrease_container_depth()
         }
@@ -146,9 +148,10 @@ sealed class Payload {
             @Throws(com.novi.serde.DeserializationError::class)
             fun load(deserializer: com.novi.serde.Deserializer): Range {
                 deserializer.increase_container_depth()
+                val fold_id = TraitHelpers.deserialize_option_str(deserializer)
                 val body = deserializer.deserialize_str()
                 deserializer.decrease_container_depth()
-                return Range(body)
+                return Range(fold_id, body)
             }
         }
     }

@@ -298,6 +298,7 @@ export function StatusMenu({ it, row, status, showName }: { it: InboxItem; row: 
           anchor={menu.anchor}
           onClose={menu.close}
           header={status.name}
+          headerAsWritten
           width={180}
           items={status.options.map((o) => ({ key: o.name, label: o.name, checked: o.name === status.value, onSelect: () => void setDocStatus(it, row, status, o.name) }))}
         />

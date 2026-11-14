@@ -45,7 +45,7 @@ import { machineWithHub } from "../../lib/mesh";
 import { openPanel } from "../../lib/panel";
 import { href, onLinkClick, type Route } from "../../lib/router";
 import { conversationRoute } from "../../lib/inbox";
-import { getState, useStore } from "../../lib/store";
+import { getState, onHubEvent, useStore } from "../../lib/store";
 import type { Session } from "../../lib/types";
 import { Button, Collapse, copyText, cx, IconButton, Loading, StatePill, toast } from "../../ui/atoms";
 import { StatusMark } from "../../ui/StatusMark";
@@ -169,6 +169,10 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
     });
     return () => { ac.abort(); request.current++; };
   }, [load, reloadKey, retry]);
+  // The error the page shows (a failed read while the hub was away) is read again once it is back (its hello), as Retry
+  // would. A section's own detail read that failed (a meeting's photos) keeps its own rules for when to read again.
+  const failed = Boolean(resp ? reloadError : error);
+  useEffect(() => (failed ? onHubEvent("hello", () => setRetry((x) => x + 1)) : undefined), [failed]);
 
   const d = resp?.detail;
 

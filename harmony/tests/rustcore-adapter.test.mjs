@@ -32,7 +32,7 @@ const wire = await import('../entry/src/main/ets/core/rustcore/Wire.ts');
 
 test('the ArkTS adapter owns one NAPI handle, decodes effects and closes idempotently', () => {
   globalThis.handle = 0;
-  globalThis.patchBytes = wire.encodeChatPatch({version: 1, covered: 0, history: null, has_more: null, loaded_once: false, ops: []});
+  globalThis.patchBytes = wire.encodeChatPatch({version: 1, covered: 0, history: null, has_more: null, loaded_once: false, verified: false, acked: null, ops: []});
   let effects = [];
   const core = new PersonaCore();
   core.open({changed() {}, run(effect) { effects.push(effect); }});

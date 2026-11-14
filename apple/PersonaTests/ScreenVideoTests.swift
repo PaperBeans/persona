@@ -53,6 +53,20 @@ struct ScreenVideoTests {
         }
     }
 
+    /// "How to turn it on" (#3954): before the node has asked macOS, its alert is about to show on the Mac; once asked
+    /// (or when the grant was taken away later), Persona Screen is in System Settings' list.
+    @Test func howToAllowDependsOnWhetherMacOSAsked() {
+        let window = ScreenVideoFallback.howToAllow(permission: "missing", asked: false)
+        let settings = ScreenVideoFallback.howToAllow(permission: "missing", asked: true)
+        #expect(window != settings)
+        #expect(ScreenVideoFallback.howToAllow(permission: "granted", asked: false) == settings, "taken away while streaming")
+        #expect(ScreenVideoFallback.howToAllow(permission: nil, asked: false) == settings)
+        for text in [window, settings] {
+            #expect(text.contains("Persona Screen"))
+            for word in ["RFB", "HEVC", "helper", "TCC"] { #expect(!text.contains(word), "\(text)") }
+        }
+    }
+
     @Test func theFixtureDecodes() throws {
         let messages = try Self.messages()
         guard case let .hello(hello) = messages[0], case let .format(format) = messages[1] else {

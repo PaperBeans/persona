@@ -29,7 +29,7 @@ import { connect, disconnect, reset, type State, useHubUnreachable, useStore } f
 import { watchRoster } from "./lib/managers";
 import { t } from "./i18n";
 import { Button, cx, EASE, IconButton, Loading, Spinner, Toasts } from "./ui/atoms";
-import { focusables, trapTab } from "./ui/overlay";
+import { focusables, trapTabIn } from "./ui/overlay";
 import { Empty } from "./views/session/files/parts";
 import { AgentsPage } from "./views/AgentsPage";
 import { AgentArchives } from "./views/agents/AgentArchives";
@@ -361,7 +361,7 @@ function Shell() {
       if (document.querySelector("[role=menu]") || document.querySelectorAll("[role=dialog]").length > 1) return;
       if (e.key === "Tab" && drawerBox.current) {
         const list = focusables(drawerBox.current);
-        const to = trapTab(list.length, list.indexOf(document.activeElement as HTMLElement), e.shiftKey);
+        const to = trapTabIn(drawerBox.current, list, e.shiftKey);
         if (to === null) return;
         e.preventDefault();
         list[to]?.focus();

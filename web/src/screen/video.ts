@@ -80,6 +80,16 @@ const write = (key: string, value: string | null): void => {
   }
 };
 
+/** Whether this browser plays the video channel. Not yet: the web's decoder (WebCodecs) is a follow-up of #3954, so the
+ *  web keeps RFB and offers no Picture / Quality switcher even for a Mac that advertises `screen_video` (the iPhone
+ *  does). An object so the switcher's tests can turn it on. */
+export const webVideo = { plays: false };
+
+/** Whether the page offers the picture switcher: this browser plays video and the Mac advertises it. */
+export function videoOffered(screenVideo: unknown): boolean {
+  return webVideo.plays && videoAdvertised(screenVideo);
+}
+
 /** Whether a computer / browser status advertises the hardware video channel (#3954): `screen_video` present with a
  *  protocol version > 0. The Picture / Quality switcher appears only then, so no Mac shows a control it can't use — the
  *  same test the iOS app makes (AppModel.advertisesVideo). An unreadable value is "not advertised", never a guess. */

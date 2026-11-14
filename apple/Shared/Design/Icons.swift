@@ -198,6 +198,8 @@ extension Theme {
         static let undo = "arrow.uturn.backward"
         static let redo = "arrow.uturn.forward"
         static let interrupt = "stop.fill"
+        /// The dictation bar's stop: the words go into the draft, nothing is sent (`DictationBar`).
+        static let stopDictating = interrupt
         static let stopLoop = "stop.circle"
         static let run = "play.fill"
         /// Resume a stopped Agent in a terminal on its computer (#5521): the web's Resume shows the same play mark.
