@@ -30,6 +30,10 @@ The first version of the fix still failed an independent review, on what the hub
   memory), and the hub's leftovers are closed by exclusion: whatever the account in use holds no thing of.
 - A mark put only where a collision was noticed (the retired thing's last move) misses the collisions nobody remembered: the hub's item
   one move behind, or a third account meeting the first one's move. Mark every move, or none.
+- A step done once and then recorded has two wrong orders. "Tell the hub, then save that it is done" closes the wrong items after a
+  failed save and a restart; "save, then tell" at worst leaves old items open. Pick the order whose failure is the harmless one, and
+  say which it is. The same review found the record forgotten after `Reload` (whoever held the id had saved over it) and a secret that
+  no longer opens taking a computer's sign-in down: a record added to an existing store inherits every way that store is rewritten or fails.
 - Closing by thread meets the hub's own rule, which starts an item only for a move later than the thread's closed one: a round trip to
   another account and back does not bring the first inbox back. That is a limit, written down in `docs/assistant/inbox.md`, not a bug to
   work around by moving a thing's time.

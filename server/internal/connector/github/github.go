@@ -134,8 +134,8 @@ type Connector struct {
 	devLoaded bool
 	// devUnreadable: the last read of the secrets failed (the store is down, or the secret no longer opens).
 	devUnreadable bool
-	saving    sync.Mutex // one save of dev at a time (saveDevice)
-	pending   *devicePending
+	saving        sync.Mutex // one save of dev at a time (saveDevice)
+	pending       *devicePending
 }
 
 // noteRate records how many requests GitHub still allows, per quota (X-RateLimit-Resource): the hour's core requests
