@@ -389,13 +389,14 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 	s.pruneTurns(ctx) // the turns' ledger: read before the first signal (what was told before a restart is not told again), closed tasks off it
 	// Only the open tasks: everything below passes the finished ones by, and there can be thousands of them.
 	tasks := s.todosWhere(ctx, "*", func(t *Todo) bool { return t.DoneAt == nil })
+	lists := machineSessions{}   // each machine listed once for all the supervised tasks (#3029)
 	s.backfillBriefs(ctx, tasks) // tasks from before briefs get one from what they still have (task_brief.go)
 	for _, t := range tasks {
 		if t.Supervision == nil || t.DoneAt != nil {
 			continue
 		}
 		s.remedyWatch(ctx, t, now) // a failed start's kept tab expired (start_remedy.go)
-		agents := s.taskAgents(ctx, t)
+		agents := s.taskAgentsIn(ctx, t, lists)
 		for _, g := range watchSignals(t, agents, now) {
 			if g.Kind == sigNeedsYou && routed[[2]string{g.Machine, g.Session}] {
 				continue // its card is with the supervisor as an ask already

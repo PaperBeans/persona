@@ -64,6 +64,10 @@ func (h *Hub) assistantRoutesRelayed(api *http.ServeMux) {
 			api.HandleFunc(pattern, h.forwardAgentArchives)
 			continue
 		}
+		if pattern == "POST /api/v1/sessions/{mid}/{sid}/autoname" { // a full device, a capable owner (agent_autoname.go)
+			api.HandleFunc(pattern, h.forwardAgentAutoname)
+			continue
+		}
 		if key, ok := mergedLists[pattern]; ok { // the todos: every manager's
 			api.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) { h.mergeList(w, r, key, h.forwardHTTP) })
 			continue
@@ -268,7 +272,7 @@ func (l assistantLink) appCallFrom(ctx context.Context, from string, p assistant
 	if out, ok, err := h.extAppCall(ctx, from, p); ok { // what the manager's extensions ask of the hub (extensions_link.go)
 		return out, err
 	}
-	if out, ok, err := h.fleetAppCall(ctx, p); ok { // what the hub still runs for the nodes (fleet_link.go)
+	if out, ok, err := h.fleetAppCall(ctx, from, p); ok { // what the hub still runs for the nodes (fleet_link.go)
 		return out, err
 	}
 	if p.Method == assistantwire.AppTool {
@@ -285,10 +289,13 @@ func (h *Hub) appTool(ctx context.Context, from, app string, params json.RawMess
 		Arguments json.RawMessage `json:"arguments"`
 		MachineID string          `json:"machine_id"`
 		SessionID string          `json:"session_id"`
+		CallID    json.RawMessage `json:"call_id"`
 	}
 	if err := json.Unmarshal(params, &a); err != nil {
 		return nil, err
 	}
+	var callID string
+	_ = json.Unmarshal(a.CallID, &callID)
 	if len(a.Arguments) == 0 {
 		a.Arguments = json.RawMessage(`{}`)
 	}
@@ -300,7 +307,7 @@ func (h *Hub) appTool(ctx context.Context, from, app string, params json.RawMess
 		if m == nil {
 			return nil, fmt.Errorf("%w %q", assistantwire.ErrNoDevice, a.MachineID)
 		}
-		res, err = h.toolPersonaSettings(ctx, from, m, a.SessionID, a.Arguments)
+		res, err = h.toolPersonaSettings(ctx, from, m, a.SessionID, a.Arguments, h.mcpWaitReporter(from, a.MachineID, callID))
 	default:
 		return nil, fmt.Errorf("app %s has no tool %s", app, a.Name)
 	}
@@ -375,16 +382,23 @@ func init() {
 		}
 		from, id := c.managerID(), p.Notification.ID
 		if id != "" && !h.firstHandOver(ctx, from, id) {
-			return map[string]bool{"ok": true}, nil // delivered already: it came again (outbox_relay.go)
+			return map[string]any{"ok": true}, nil // delivered already: it came again (outbox_relay.go)
 		}
 		// Only about its own machines, sessions and cards (fleet_link.go deliverPushFrom).
-		if err := h.deliverPushFrom(from, p.Notification); err != nil {
+		heldReason, err := h.deliverPushFrom(from, p.Notification)
+		if err != nil {
 			if id != "" {
 				h.forgetHandOver(from, id)
 			}
 			return nil, busCodedError(err)
 		}
-		return map[string]bool{"ok": true}, nil
+		// held/reason let the assistant's notify_user tell the model the notice went to the briefing, not the phone.
+		res := map[string]any{"ok": true}
+		if heldReason != "" {
+			res["held"] = true
+			res["reason"] = heldReason
+		}
+		return res, nil
 	})
 	handleBus(assistantwire.MethodSnapshot, func(h *Hub, ctx context.Context, c *busConn, params json.RawMessage) (any, error) {
 		var s assistantwire.Snapshot

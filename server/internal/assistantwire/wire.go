@@ -190,8 +190,8 @@ const (
 	// the hub's clock and the user's time zone. The Lark bot's nudges (#6084) wait for it to turn false.
 	NotifyQuietGet = "notify.quiet"
 
-	// AppTool: {name, arguments, machine_id, session_id} → proto.ToolResult, one of the assistant's tools that is the
-	// app's to run (persona_settings).
+	// AppTool: {name, arguments, machine_id, session_id, call_id?} → proto.ToolResult, one of the assistant's tools that
+	// is the app's to run (persona_settings).
 	AppTool = "app.tool"
 )
 
@@ -219,6 +219,15 @@ type ModelBinding struct {
 // NotifyRequest is notify.request's params.
 type NotifyRequest struct {
 	Notification Notification `json:"notification"`
+}
+
+// NotifyResult is notify.request's answer. Held says the hub's low-distraction (ln) mode kept the push off the phone
+// (for the "Needs you" list / briefings); Reason is why ("" when it went out), one of the hub's intercept reasons.
+// The assistant's notify_user tool shows it to the model, which otherwise would assume the user was alerted.
+type NotifyResult struct {
+	OK     bool   `json:"ok"`
+	Held   bool   `json:"held,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // Notification is one notification intent: a push (kind assistant) to every device whose settings take it, like an
@@ -250,7 +259,20 @@ type Notification struct {
 	// RecordingID is the recording a NotifyPush push is about (a meeting's minutes, #3862 phase 6): the push carries it
 	// as `recording_id`, and apps that know it open the meeting's thread instead of the session. Older hubs drop it.
 	RecordingID string `json:"recording_id,omitempty"`
+	// Level is how urgent the push is for the hub's low-distraction (ln) mode: "P0", "P1" or "P2". "" lets the hub
+	// derive one from the kind. Hubs from before the field derive the level, so older and newer managers interoperate.
+	Level string `json:"level,omitempty"`
+	// RelatedKey links the push to what it is about (a to-do id, a PR URL, a subject): in ln mode the same key pushes
+	// at most once in 12 hours, and same-minute P1 conclusion pushes with it merge into one intercepted entry.
+	RelatedKey string `json:"related_key,omitempty"`
 }
+
+// Push levels a Notification may carry (hub low-distraction mode, docs/server/server.md "Push policy").
+const (
+	LevelP0 = "P0" // must interrupt: a decision or a card that needs the owner now
+	LevelP1 = "P1" // worth knowing: a conclusion, an explicit notify_user; held for the briefing in ln mode
+	LevelP2 = "P2" // background news: silent in ln mode
+)
 
 // NotifyTodo is the to-do a NotifyDecide push asks about: its id, when the decision now waiting was asked (what
 // POST /api/v1/todos/{id}/accept takes, so an OK from an earlier round takes nothing) and the option it recommends.

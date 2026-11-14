@@ -20,7 +20,8 @@ const conv = (sid: string, p: Partial<Session> = {}): Session => ({
 } as Session);
 vi.mock("../lib/store", async (importOriginal) => {
   const real = await importOriginal<typeof import("../lib/store")>();
-  const assistant = { machine_id: "server", main: "main", conversations: [conv("main"), conv("trip"), conv("keep")] };
+  // "ctx": a chat started from picked context, titled by its <persona-context> tag (docs/protocol/protocol.md "Tags in messages")
+  const assistant = { machine_id: "server", main: "main", conversations: [conv("main"), conv("trip"), conv("keep"), conv("ctx", { title: '<persona-context kind="context" title="Lark · Release &quot;Fri&quot;" url="">' })] };
   return { ...real, useStore: <T,>(select: (s: ReturnType<typeof real.getState>) => T) => select({ ...real.getState(), assistant, features: fake.features } as unknown as ReturnType<typeof real.getState>) };
 });
 vi.mock("../lib/assistant-search", async (importOriginal) => ({
@@ -52,6 +53,14 @@ async function search(query: string) {
   setPaletteQuery(query);
   act(() => root.render(<Palette open onClose={() => {}} onNewAgent={() => {}} />));
   await act(async () => { await new Promise((ok) => setTimeout(ok, 300)); });
+  // The palette loads lib/assistant-search with the first query typed and asks after its debounce, later than 300 ms on a
+  // busy machine: wait for the ask, each poll in act, so the results are in before anything is read.
+  if (fake.features.includes("assistant_search")) {
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise((ok) => setTimeout(ok, 20)); });
+      expect(fake.asked).toContain(query);
+    }, { timeout: 5000, interval: 20 });
+  }
   for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
   return document.body;
 }
@@ -74,6 +83,17 @@ describe("⌘K with the manager's chat search", () => {
   it("an archived chat the page does not list comes from the result itself", async () => {
     fake.answer = { results: [{ session_id: "old", machine_id: "server", title: "Old trip", archived: true, hits: [{ item_id: "i3#0", seq: 3, role: "assistant", snippet: "旧的 BlueLane", ranges: [[3, 11]] }] }], partial: false };
     expect((await search("BlueLane")).textContent).toContain("Old trip");
+  });
+
+  it("calls a chat titled by its <persona-context> tag by the tag's title, as the sidebar does, never by the raw tag", async () => {
+    fake.answer = {
+      results: [{ session_id: "old-ctx", machine_id: "server", title: '<persona-context kind="context" title="Mail · Invoice &amp; receipt" url="">', archived: true, hits: [{ item_id: "i4#0", seq: 4, role: "user", snippet: "Release the invoice", ranges: [[0, 7]] }] }],
+      partial: false,
+    };
+    const body = await search("Release");
+    expect(body.textContent).toContain('Lark · Release "Fri"');
+    expect(body.textContent).toContain("Mail · Invoice & receipt");
+    expect(body.textContent).not.toContain("persona-context");
   });
 
   it("does not ask without the hub's feature", async () => {
