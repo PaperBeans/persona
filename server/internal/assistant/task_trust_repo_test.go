@@ -80,7 +80,7 @@ func TestTaskTrustCoversEveryWorktreeOfTheRepository(t *testing.T) {
 
 	// Reading and editing stay apart: the trusted edit kind is not the read kind, and a trusted read kind does not
 	// let an edit start.
-	trusted := s.trustedKinds(ctx)
+	trusted := s.trustCover(ctx)
 	if readB := resolvedTask(s, "/wt/app/perf-b", true); trustedTask(trusted, readB) {
 		t.Errorf("the edit kind covers reading: %q", trustKey(readB))
 	}
@@ -92,7 +92,7 @@ func TestTaskTrustCoversEveryWorktreeOfTheRepository(t *testing.T) {
 	if editOther := resolvedTask(s, "/wt/other/perf-b", false); s.planStartsAtOnce(ctx, []PlanTask{editOther}) {
 		t.Error("a trusted read kind lets an edit start without asking")
 	}
-	if !trustedTask(s.trustedKinds(ctx), resolvedTask(s, "/wt/other/perf-b", true)) {
+	if !trustedTask(s.trustCover(ctx), resolvedTask(s, "/wt/other/perf-b", true)) {
 		t.Error("the read kind does not cover the repository's other worktree")
 	}
 }

@@ -33,12 +33,16 @@ Auto for the Agents the assistant starts, as for the ones started from the Agent
 saved before this, or a task that reaches the start with no mode, is settled the same way on the computer it starts
 on. A computer that is offline, an older node, or a mode Persona does not know (such as `dontAsk`) gives `default`.
 The card names Auto (`auto` is one of `task_plan`'s modes, and Edit offers it on every client); a Codex launcher still
-takes only `plan` from it (`assistant/tasks_permission.go`).
+takes only `plan` from it (`assistant/tasks_permission.go`). None of this reaches a launcher whose Agents run with Allow all
+(Claude Code, and a Paseo provider whose approval is Auto Accept, #8141): its card says Allow all, the mode that runs
+("Read-only planned tasks" below).
 
 ## Read-only planned tasks
 
 `task_plan` treats `readonly: true` as task metadata and a first-prompt constraint. Claude-family launchers save and start with
-`permission: bypassPermissions`, whether the task is read-only or writable. A read-only task's first message adds
+`permission: bypassPermissions`, whether the task is read-only or writable, and so do Paseo providers whose approval is
+Auto Accept (their launcher says `auto_accept`; Grok and Paseo's other ACP providers, OpenCode): they start with it on,
+as the owner decided (#8141, `docs/integrations/paseo.md` "Agents Persona starts"). A read-only task's first message adds
 `本任务只读：不改项目文件、不提交、不对外写入` after its own prompt, without changing the saved prompt or duplicating the
 constraint on retries. Codex read-only tasks keep `permission: plan` and the hard read-only sandbox. Planning, card edits,
 legacy plans, retries, and the final dispatch all resolve the launcher before applying this rule; a permission change is
@@ -65,7 +69,7 @@ change by the user.
 
 Health-space plans and mixed plans still wait for Start. Clients show the Read-only requested label on a waiting plan and
 collapse a started plan to "Started N tasks". The saved task's `permission` is the actual launch mode:
-`bypassPermissions` for Claude and `plan` for Codex read-only tasks.
+`bypassPermissions` for Claude and an Auto Accept provider, and `plan` for Codex read-only tasks.
 
 ## Data model
 
@@ -90,6 +94,7 @@ Server state is stored in the hub's Postgres database (read/written by the assis
 - `project` (text, NOT NULL, DEFAULT ''): the slug of the knowledge-base project the to-do belongs to, `''` for none. Migration `0461` (manager side, #2581, "Project" below). Not a foreign key: projects live in the knowledge base's files.
 - `kind` (text, NOT NULL, DEFAULT ''): `''` for a to-do or a task, `concern` for one of the owner's concerns (#3561, "Concerns" below). Set when it is made, never changed. Migration `0487` (manager side). `done_by` gains `reported` for a concern closed by its report.
 - (Not in the table) `stage`, `stage_kind`, `pr_url`, `delivery`: stage strip, task kind, change link and delivery-card location, stored in settings `assistant.todo_stages`, merged when reading to-dos ("Delivery"). `pr_url` comes from the full PR or merge request link in an Agent's reply; a PR named by number alone ("PR #7350", or "#7350" in a reply that speaks of a PR) becomes a full GitHub URL when its repository is known without guessing: the task's own PRs, the one repository the reply or the to-do's title or notes link, or the repository earlier full links from the same repository root on that computer showed (settings `assistant.repo_roots`, `assistant/pr_number_ref.go`, #7921). Anything ambiguous records nothing.
+  Number-only references are recorded only after GitHub confirms a pull request, normally through the issue response's non-null `pull_request` field (#8248). An issue URL alone is not a delivery PR. If acceptance encounters a stale PR record and verification fails, it removes that record only after confirming an ordinary issue or a missing item with readable PR access; remaining PRs still pass the same delivery gate. A 404 from an inaccessible repository, permission failures, rate limits and transient errors do not discard the record. Item-level 404/422 responses do not pause unrelated PR checks.
   `stage_kind` is `code` or `general` (#3380): read-only tasks are general (plan permission alone is not: code tasks start in plan mode to get a plan approved). Otherwise, only nonempty `done_when` with research, investigation, report, plan, triage, cleanup, summary, analysis or doc-review wording and no code wording is general; missing or ambiguous criteria default to code. Code wording includes PR, MR, merge, deploy, release, fix, bug, implement, code, test, commit, build, feature and refactor, with Chinese equivalents. A linked GitHub PR or an HTTPS merge request on any host overrides general. Older clients ignore the new field; the web omits the strip for general tasks and retains its existing task status.
   Mid-task replies (session lists, full followed items and supervisor progress reports) and final handoffs update the same forward-only progress. List snippets ending in an ellipsis and followed items marked with `FullSize` are skipped, without fetching transcripts from the session-list handler. GitHub `/pull/N` and any host's `/merge_requests/N` or `/-/merge_requests/N` links count; bare `MR !N` does not. Web links use `PR #N` or `MR !N` respectively.
   A pending `IxPlan` approval temporarily shows `plan` before review; answering it restores the stored stage, without recording a backwards progress change. Agent-link changes recompute pending plans for both the old and new task. Other permissions and questions never imply plan approval.

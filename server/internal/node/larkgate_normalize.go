@@ -8,102 +8,132 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/nwverse/persona/server/internal/proto"
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// normalizeLarkCommand removes inert here-documents and resolves immediately preceding
-// literal command assignments solely for classification. It never executes the input.
-func normalizeLarkCommand(cmd, cwd string) string {
+// normalizeLarkCommand removes inert here-documents, reads programs handed over in here-documents and one-command
+// groups as written inline (larkgate_inline.go) and resolves immediately preceding literal command assignments
+// solely for classification. It never executes the input.
+func normalizeLarkCommand(cmd, cwd string, gates []proto.CommandGate) string {
 	tree, err := syntax.NewParser().Parse(strings.NewReader(cmd), "")
 	if err != nil {
 		return cmd
 	}
-	// Only `;`, `&&` and `||` lists of simple commands take part.
-	stmts, ok := larkFlatStmts(tree.Stmts)
-	if !ok {
+	inlined := larkInlineSyntax(tree, gates)
+	if inlined {
+		var out bytes.Buffer
+		if syntax.NewPrinter().Print(&out, tree) != nil {
+			return cmd
+		}
+		cmd = out.String()
+		if tree, err = syntax.NewParser().Parse(strings.NewReader(cmd), ""); err != nil {
+			return cmd
+		}
+	}
+	// Only `;`, `&&` and `||` lists of simple commands take part, and for literal command assignments pipes of them.
+	stmts, flat := larkFlatStmts(tree.Stmts)
+	units, piped := larkPipeUnits(tree.Stmts)
+	if !flat && !piped {
 		return cmd
 	}
-	for _, stmt := range stmts {
-		call := stmt.Cmd.(*syntax.CallExpr)
-		for _, a := range call.Assigns {
-			if a.Name == nil || a.Append || a.Index != nil || a.Array != nil || a.Value == nil {
-				return cmd
-			}
-			if a.Name.Value == "IFS" || larkExecutableEnv[a.Name.Value] {
-				return cmd // executable lookup and field splitting invalidate earlier inferences
-			}
-			if _, dynamic := executionWord(a.Value); dynamic {
-				return cmd // expansions can assign shell state or alter executable lookup
+	for _, unit := range append(units, stmts) {
+		for _, stmt := range unit {
+			call := stmt.Cmd.(*syntax.CallExpr)
+			for _, a := range call.Assigns {
+				if a.Name == nil || a.Append || a.Index != nil || a.Array != nil || a.Value == nil {
+					return cmd
+				}
+				if a.Name.Value == "IFS" || larkExecutableEnv[a.Name.Value] {
+					return cmd // executable lookup and field splitting invalidate earlier inferences
+				}
+				if _, home := larkHomeWord(a.Value, cmd); home {
+					continue
+				}
+				if _, dynamic := executionWord(a.Value); dynamic {
+					return cmd // expansions can assign shell state or alter executable lookup
+				}
 			}
 		}
 	}
 	vars := map[string]string{}
-	// Variables resolve only in a straight sequence: an assignment after && or || may never have happened.
-	changed, unsafe := false, len(stmts) != len(tree.Stmts)
-	for _, stmt := range tree.Stmts {
-		if unsafe {
-			break
-		}
-		call := stmt.Cmd.(*syntax.CallExpr)
-		if len(call.Args) == 0 {
-			for _, a := range call.Assigns {
-				if a.Name == nil {
-					continue
-				}
-				delete(vars, a.Name.Value)
-				if a.Append || a.Index != nil || a.Array != nil || a.Value == nil {
-					continue
-				}
-				value, dynamic := executionWord(a.Value)
-				if !dynamic && safeLiteralCommand(value) {
-					vars[a.Name.Value] = value
-				}
+	// Variables resolve only in a straight sequence: an assignment after && or || may never have happened. A pipe's
+	// commands run apart from the shell: its assignments set nothing for the commands after it.
+	changed, unsafe := false, !piped
+	for _, unit := range units {
+		for _, stmt := range unit {
+			if unsafe {
+				break
 			}
-			continue
-		}
-		words := make([]string, len(call.Args))
-		for i, word := range call.Args {
-			words[i], _ = executionWord(word)
-		}
-		suffix, ok := unwrapCommand(words)
-		resolvedAbsolute := false
-		if ok && len(suffix) > 0 {
-			index := len(words) - len(suffix)
-			dynamicArgs := false
-			for i, arg := range call.Args {
-				if i == index {
-					continue
-				}
-				_, dynamic := executionWord(arg)
-				if dynamic || wordExpandsToMany(arg) {
-					dynamicArgs = true
+			call := stmt.Cmd.(*syntax.CallExpr)
+			if len(call.Args) == 0 {
+				if len(unit) > 1 {
+					unsafe = true // an assignment in a pipe sets nothing the next command sees
 					break
 				}
+				for _, a := range call.Assigns {
+					if a.Name == nil {
+						continue
+					}
+					delete(vars, a.Name.Value)
+					if a.Append || a.Index != nil || a.Array != nil || a.Value == nil {
+						continue
+					}
+					value, dynamic := executionWord(a.Value)
+					if home, ok := larkHomeWord(a.Value, cmd); ok {
+						value, dynamic = home, false
+					}
+					if !dynamic && safeLiteralCommand(value) {
+						vars[a.Name.Value] = value
+					}
+				}
+				continue
 			}
-			if dynamicArgs {
-				unsafe = true
-				break // do not resolve the executable after another argument can change shell state
+			words := make([]string, len(call.Args))
+			for i, word := range call.Args {
+				words[i], _ = executionWord(word)
 			}
-			word := call.Args[index]
-			if len(word.Parts) == 1 {
-				if p, ok := word.Parts[0].(*syntax.ParamExp); ok && p.Param != nil && !p.Excl && !p.Length && !p.Width && p.Index == nil && p.Slice == nil && p.Repl == nil && p.Exp == nil && p.Names == 0 {
-					if value, ok := vars[p.Param.Value]; ok {
-						word.Parts = []syntax.WordPart{&syntax.Lit{Value: value}}
-						resolvedAbsolute = filepath.IsAbs(value) && (index == 0 || filepath.Base(words[0]) == "timeout")
-						changed = true
+			suffix, ok := unwrapCommand(words)
+			resolvedAbsolute := false
+			if ok && len(suffix) > 0 {
+				index := len(words) - len(suffix)
+				dynamicArgs := false
+				for i, arg := range call.Args {
+					if i == index {
+						continue
+					}
+					_, dynamic := executionWord(arg)
+					if dynamic || wordExpandsToMany(arg) {
+						dynamicArgs = true
+						break
+					}
+				}
+				if dynamicArgs {
+					unsafe = true
+					break // do not resolve the executable after another argument can change shell state
+				}
+				word := call.Args[index]
+				if len(word.Parts) == 1 {
+					if p, ok := word.Parts[0].(*syntax.ParamExp); ok && p.Param != nil && !p.Excl && !p.Length && !p.Width && p.Index == nil && p.Slice == nil && p.Repl == nil && p.Exp == nil && p.Names == 0 {
+						if value, ok := vars[p.Param.Value]; ok {
+							word.Parts = []syntax.WordPart{&syntax.Lit{Value: value}}
+							resolvedAbsolute = filepath.IsAbs(value) && (index == 0 || filepath.Base(words[0]) == "timeout")
+							changed = true
+						}
 					}
 				}
 			}
-		}
-		// Only commands that cannot change the parent shell's state can take part.
-		name := words[0]
-		unchanged := resolvedAbsolute || map[string]bool{"echo": true, ":": true, "true": true, "false": true, "ls": true, "git": true, "go": true, "pwd": true, "date": true, "sleep": true, "cat": true, "tee": true, "head": true, "wc": true, "grep": true, "jq": true}[name]
-		if !unchanged {
-			unsafe = true
-			break
-		}
-		if len(call.Assigns) != 0 || len(stmt.Redirs) != 0 {
-			clear(vars)
+			// Only commands that cannot change the parent shell's state can take part. In a pipe that is its last
+			// command (zsh runs it in the shell itself); the others run apart.
+			name := words[0]
+			unchanged := resolvedAbsolute || stmt != unit[len(unit)-1] || map[string]bool{"echo": true, ":": true, "true": true, "false": true, "ls": true, "git": true, "go": true, "pwd": true, "date": true, "sleep": true, "cat": true, "tee": true, "head": true, "tail": true, "cut": true, "sort": true, "uniq": true, "tr": true, "wc": true, "grep": true, "jq": true}[name]
+			if !unchanged {
+				unsafe = true
+				break
+			}
+			if len(call.Assigns) != 0 || len(stmt.Redirs) != 0 {
+				clear(vars)
+			}
 		}
 	}
 	if unsafe && changed {
@@ -111,6 +141,9 @@ func normalizeLarkCommand(cmd, cwd string) string {
 		tree, _ = syntax.NewParser().Parse(strings.NewReader(cmd), "")
 		stmts, _ = larkFlatStmts(tree.Stmts)
 		changed = false
+	}
+	if !flat {
+		stmts = nil // here-documents are judged only in lists of simple commands
 	}
 
 	// A heredoc fed only to a file writer is data, except when a later command
@@ -225,7 +258,7 @@ func normalizeLarkCommand(cmd, cwd string) string {
 		changed = true
 	}
 	if !changed {
-		return cmd
+		return cmd // with the inline rewrites, if any
 	}
 	var out bytes.Buffer
 	if err := syntax.NewPrinter().Print(&out, tree); err != nil {
@@ -322,6 +355,34 @@ func larkHomePath(p string) string {
 		}
 	}
 	return p
+}
+
+// larkPipeUnits lists the top-level statements of a `;` list, each as its simple commands: one, or a pipe's in
+// order; false for anything else (&&, ||, loops, subshells, background jobs).
+func larkPipeUnits(in []*syntax.Stmt) ([][]*syntax.Stmt, bool) {
+	var out [][]*syntax.Stmt
+	for _, s := range in {
+		var unit []*syntax.Stmt
+		var add func(*syntax.Stmt) bool
+		add = func(s *syntax.Stmt) bool {
+			if s.Background || s.Negated || s.Coprocess {
+				return false
+			}
+			switch c := s.Cmd.(type) {
+			case *syntax.CallExpr:
+				unit = append(unit, s)
+				return true
+			case *syntax.BinaryCmd:
+				return (c.Op == syntax.Pipe || c.Op == syntax.PipeAll) && len(s.Redirs) == 0 && add(c.X) && add(c.Y)
+			}
+			return false
+		}
+		if !add(s) {
+			return nil, false
+		}
+		out = append(out, unit)
+	}
+	return out, true
 }
 
 // larkFlatStmts lists the simple commands of a `;`, `&&` and `||` list, in order; false for anything else (pipes,

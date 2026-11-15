@@ -6,6 +6,53 @@ XcodeGen source is `apple/project.yml`, generating `apple/Persona.xcodeproj` (ge
 Performance rules, budgets and how to measure: `docs/apple/performance.md` (read before changing `apple/` code).
 Bundle ID comes from configuration (`app.bundle_id`, watch `<id>.watchkitapp`, `docs/operations/config.md`). The UI supports English, Simplified Chinese and Japanese (`en` / `zh-Hans` / `ja`).
 
+## Side sessions (#7944)
+
+Who it serves: people who use Agents with the Claude desktop app. A desktop app's side chat, /btw question or spawned
+session (`parent_agent_id`) lives in the chat of the session it was started from, not in any list. Default: on with a
+hub that lists `sessions_side_fold` in its hello, nothing to set; with any other hub everything stays as before (plain
+rows).
+
+- **The rules** are `apple/Shared/SideFold.swift` (Foundation only, nonisolated, built for watchOS 10 too). A row the
+  hub folds under a listed row on its machine (`folded_under`) as a side (`folded_as: "side"`) or as a row of a side's
+  chat (`folded_side`) leaves the list; one whose parent the app does not hold stays a row, so nothing is out of
+  sight. The parent shows and counts in its folded state (needs you when it or a row of its sides does; working when one
+  of them works, unless it is unread or awaits a reply; unread when it or one of its sides is), its sides' pending
+  cards added to its own and its time the newest of theirs. The rollup comes from the side rows the app holds, so
+  seeing a side updates the parent at once; only a row whose sides it does not hold goes by the hub's `children.sides*`.
+- **One fold, one place**: `AppModel.sessionsByMachine`'s didSet (`sessionsChanged`) folds once per push, and the paged
+  Agents window folds in `AgentListProjection.build`, off `body` (performance.md P4/P5). `allSessions` (the lists, the
+  filter and header counts, Needs You, the tab badge, the app icon badge, the Persona tab's dock, widgets, the watch
+  summary, machines pages, next-needs-you) is the folded list; a session's own page still finds a side by key
+  (`session(_:)`). Siri and Shortcuts fold what they read (`IntentSupport.folded`), and the watch folds its own reads by
+  the groups the phone's summary names (`WatchSummary.sideFold`). Each hub's last word is remembered
+  (`SideFold.remembered`), so a restored list shows no sides before the hello.
+- **With the child fold (#8010)**: `SideFold` runs in front of `ChildSessions`. A side is no child card in its parent's
+  chat (`AppModel.foldedChildren` leaves it out), its own unread makes its parent unread, and in a paged window
+  (`roots=1`, which holds no side) the sides the child index reads for an open parent fold into the lists too, so the
+  chip and sheet list them and a side's page finds its row.
+- **Cards**: a side's card is shown on its parent by its `folded_under`, as every folded child's
+  (`Interaction.requestHome`): one Needs You row for the parent, counted once, its line "From Side Session · <title>".
+  In the parent's chat it is a card among its own with that line under its title, and it is left out there while that
+  side's page is shown; a row of a side's chat (`folded_side`) has its card in that side's chat too.
+- **Entry point**: row two of the parent's header (`contextRow`) leads its trailing group with the Side Sessions chip
+  (`SideSessionsChip`: `Theme.Icon.sideSessions`, the count, the needs-you dot while one waits), drawn like the row's
+  activity pill; ⋯ has "Side Sessions (N)". Neither shows without sides, and nothing opens by itself. A hosted chat (a
+  task's sheet, a side's own page) has neither.
+- **The sheet** (`SideSessionsSheet`, `.medium` / `.large`): the sides flat, sides of sides too, the ones that need you
+  first, then the working ones, then the newest, the stopped ones last; each row its state mark, title and state word.
+  A tap closes it, then the side's own chat (`SideSessionPage`, a `ChatView` hosted as `TaskDetailSheet` hosts a task's
+  agent) rises over the parent's on a phone, or is pushed into the detail column in regular width; ✕ / ‹ goes back to
+  the parent, and the title's ⌄ switches to the other sides. No New Side Session: the desktop app makes them.
+- **Landing**: a notification, a Needs You card or a link that names a side opens its parent with the side shown
+  (`AppModel.openChat` sets `sideLanding`; a `ChatView` given a folded side opens its parent the same way).
+- **Words** (`Localizable.xcstrings`): Side Sessions, Side Sessions (N), From Side Session · <title>, A side session
+  needs you, No Side Sessions; zh-Hans 分支会话 (「来自分支会话 · <title>」), ja 子セッション (「子セッション・<title>から」).
+- **Not yet**: a search hit inside a side (`search_hits[<id>].hit_session_id`) lands on the parent without the side.
+- Screenshots: `-openSession <machine>/<session> -showSideSessions chip|sheet|side` hangs three sample sides under that
+  session (one asking, one working, one stopped) and opens nothing, the sheet, or the first side;
+  `-showSideSessions <machine>/<session>` hangs them under that session and opens nothing (the Agents list).
+
 ## Agents recently used view
 
 The Agents grouping menu adds Recently used (Mac: View › Group by), still stored locally in `dev.grouping`; defaults and existing grouping choices stay unchanged.
@@ -2560,6 +2607,8 @@ default assistant.
 Check history rendering: `-loadAll YES` (load all history and scroll to the top), `-showFromSeq <seq>` (display from the turn containing this user message; scroll positioning can drift in long histories),
 `-dropUsers YES` (hide that turn's user bubbles to fit its process rows and answer on one screen). `-openPane terminal|git|files` opens the chat page's terminal (from the bottom) / Git / Files;
 `-openNeedsRow plan:|task:|message:` (the Needs You tray with the first row of that kind opened in place; use with `-openAssistant`), `-openReceiptAll YES` (task receipts open on their whole summary), `-simulateTap <machine>/<session>` runs the notification-tap handler 4 seconds after launch; `-tab settings -openNotificationSettings YES` (Settings › Notifications; add `-openIslandSettings YES` for Dynamic Island); `-tab settings -openSentAsYou YES` (Settings › Sent as You, #5278); `-showFleetSample needsYou|working|done` (`-fleetDetails YES`, `-fleetIsland b|c|custom:<left>,<right>`) starts a Live Activity with fake data; `-showTestNotification permission|plan` shows a local notification matching an interaction push 3 seconds after backgrounding (UI tests use it to test buttons); `-openFilePath <path>` (open this file after opening the chat; `-openFileLine <line>` jumps to that line), `-showFilePerf YES` (write file-open timings and per-second frame rates to Caches/file-perf.log; `-showFileAutoScroll YES` scrolls the file at constant speed, `-showFileAutoScrollSpeed 1500` changes the speed); `-showMenu YES` opens the long-press action bar on the last reply (with `-showFromSeq`, that turn's reply); `-openWelcome YES` forgets pairing and exits demo mode at launch, stopping on the pairing page (`DemoModeTests`); `-openChangeAnswer YES` opens Change Answer on the first **Answered by the assistant** card (#544).
+
+`-showSideSessions chip|sheet|side|<machine>/<session>` (with `-openSession` for the first three): sample side sessions under that session, and the sheet or the first side's page opened (#7944, "Side sessions" above).
 
 `-showVoiceOrbs YES`: without connecting to the hub or opening the microphone, show a sheet listing every phase of the voice orb (fake fluctuating volume) and two large orbs; combine with `-ui.style`, `-ui.scheme` for screenshots (#3506).
 

@@ -285,6 +285,8 @@ struct CardFormKeepsEnd: PreferenceKey {
 struct InteractionPanel: View {
     @Environment(AppModel.self) private var model
     var interaction: Interaction
+    /// Whose card it is when it is not the chat's own session's: a side session's card in its parent's chat (#7944).
+    var from: String? = nil
     @State private var collapsed = false
     @State private var formHeight: CGFloat = 0
     /// What the page has (PendingCards measures it): the form's cap. Not `containerRelativeFrame`: inside the cards'
@@ -390,51 +392,57 @@ struct InteractionPanel: View {
 
     /// The title, ⋯ and fold; a tap anywhere on it folds the card.
     private var header: some View {
-        HStack(spacing: Theme.Space.sm) {
-            ThemedIcon(interaction.symbol)
-                .font(Theme.Font.labelStrong)
-                .foregroundStyle(StatusPalette.needsYou.dot)
-            Text(panelTitle).font(Theme.Font.labelStrong).foregroundStyle(StatusPalette.needsYou.text)
-                .lineLimit(1)
-            VoiceAskMark(interaction: interaction) // Asking by Voice (docs/assistant/voice.md 1.2 H)
-            if collapsed {
-                Text(previewText).font(Theme.Font.secondary).foregroundStyle(.primary).lineLimit(1)
-            }
-            Spacer(minLength: 4)
-            if interaction.kind == .plan && !collapsed {
-                Button { showFullPlan = true } label: {
-                    ThemedIcon(Theme.Icon.enlarge)
-                        .font(Theme.Font.captionStrong)
-                        .foregroundStyle(.secondary)
-                        .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
-                        .contentShape(.rect)
+        VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+            HStack(spacing: Theme.Space.sm) {
+                ThemedIcon(interaction.symbol)
+                    .font(Theme.Font.labelStrong)
+                    .foregroundStyle(StatusPalette.needsYou.dot)
+                Text(panelTitle).font(Theme.Font.labelStrong).foregroundStyle(StatusPalette.needsYou.text)
+                    .lineLimit(1)
+                VoiceAskMark(interaction: interaction) // Asking by Voice (docs/assistant/voice.md 1.2 H)
+                if collapsed {
+                    Text(previewText).font(Theme.Font.secondary).foregroundStyle(.primary).lineLimit(1)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("View plan full screen")
-            }
-            if interaction.toolName != "ask_user" {
-                Menu {
-                    Button { Task { await model.resolve(interaction, .dismissed) } } label: {
-                        Label("Handle in Terminal on Computer", systemImage: Theme.Icon.machine)
+                Spacer(minLength: 4)
+                if interaction.kind == .plan && !collapsed {
+                    Button { showFullPlan = true } label: {
+                        ThemedIcon(Theme.Icon.enlarge)
+                            .font(Theme.Font.captionStrong)
+                            .foregroundStyle(.secondary)
+                            .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
+                            .contentShape(.rect)
                     }
-                } label: {
-                    ThemedIcon(Theme.Icon.more)
-                        .font(Theme.Font.captionStrong)
-                        .foregroundStyle(.secondary)
-                        .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
-                        .contentShape(.rect)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("View plan full screen")
                 }
-                .labelOnlyMenu() // just the ⋯, next to the fold ⌄
-                .accessibilityIdentifier("interaction-menu")
-                #if os(macOS)
-                .help("More")
-                #endif
+                if interaction.toolName != "ask_user" {
+                    Menu {
+                        Button { Task { await model.resolve(interaction, .dismissed) } } label: {
+                            Label("Handle in Terminal on Computer", systemImage: Theme.Icon.machine)
+                        }
+                    } label: {
+                        ThemedIcon(Theme.Icon.more)
+                            .font(Theme.Font.captionStrong)
+                            .foregroundStyle(.secondary)
+                            .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
+                            .contentShape(.rect)
+                    }
+                    .labelOnlyMenu() // just the ⋯, next to the fold ⌄
+                    .accessibilityIdentifier("interaction-menu")
+                    #if os(macOS)
+                    .help("More")
+                    #endif
+                }
+                ThemedIcon(Theme.Icon.expand)
+                    .font(Theme.Font.captionStrong)
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(collapsed ? 180 : 0))
+                    .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
             }
-            ThemedIcon(Theme.Icon.expand)
-                .font(Theme.Font.captionStrong)
-                .foregroundStyle(.secondary)
-                .rotationEffect(.degrees(collapsed ? 180 : 0))
-                .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
+            // A side session's card in its parent's chat says whose it is: "From Side Session · <title>" (#7944).
+            if let from {
+                Text(from).font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
         }
         .contentShape(.rect)
         .onTapGesture { withAnimation(Theme.Motion.standard) { collapsed.toggle() } }
@@ -2452,6 +2460,10 @@ extension Interaction {
     func placeLine(machine: String?) -> String {
         if let under = foldedUnder, !under.isEmpty, under != sessionID {
             let title = sessionTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            // A side session's card says so (#7944), in the words its parent's chat uses.
+            if foldedAs == SideFold.side || foldedSide != nil, !title.isEmpty {
+                return String(localized: "From Side Session · \(title)")
+            }
             let name = title.isEmpty ? String(localized: "Subagent task [Child Session]") : title
             return String(localized: "From subagent · \(name)")
         }

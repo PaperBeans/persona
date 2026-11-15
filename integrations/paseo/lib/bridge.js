@@ -12,9 +12,9 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { createRuntime, interactionId, light, page, RpcError, snippet } from '../../runtime-sdk/index.js'
 import {
   AUTO_ACCEPT, AUTO_ACCEPT_ROOTS, CHECK_LABEL, EFFORTS, KEPT, KEPT_LABEL, RUNTIME, SESSION_LABEL, WORKSPACE_ID, agentRoot, agentRow, appAgent,
-  archivedUnderOwnId, autoAcceptOf, claudeId, codexThreadOf, defaultProvider, effortFor, formModel, interactionOf, launchersOf, linkedWorktree,
-  parentAgentId, paseoCheckouts, paseoMode, projectSpaces, promptKey, providerRoots, responseOf, rewindOf, sameKindProvider, sessionIdOf, slotNameOf,
-  spaceIdOf, strayRecord, timelineItems, transcriptOf, workspaceRow,
+  archivedUnderOwnId, asksForTool, autoAcceptOf, claudeId, codexThreadOf, defaultProvider, effortFor, formModel, interactionOf, launchersOf,
+  linkedWorktree, parentAgentId, paseoCheckouts, paseoMode, projectSpaces, promptKey, providerRoots, responseOf, rewindOf, sameKindProvider,
+  sessionIdOf, slotNameOf, spaceIdOf, strayRecord, timelineItems, transcriptOf, workspaceRow,
 } from './map.js'
 import { createLineage } from './lineage.js'
 import { personaMcpServers } from './mcp.js'
@@ -1055,22 +1055,23 @@ export function createPaseoBridge(deps = {}, options = {}) {
   }
 
   /**
-   * Whether request is Claude Code asking for one of the Agent's own Persona tools (allowTools) in an Agent Persona
-   * started (it carries SESSION_LABEL): those run without a card, as the node allows them in the Claude Agents it starts
-   * (docs/integrations/claude-integration.md "Persona tools Agents call without a card"). An agent made in Paseo's own
-   * app (one whose id the bridge kept, KEPT_LABEL, too), every other tool and every other provider's request still go
-   * to the phone.
+   * Whether request asks for one of the Agent's own Persona tools (allowTools; any provider, asksForTool) in an Agent
+   * Persona started (it carries SESSION_LABEL): those run without a card, as the node allows them in the Claude Agents
+   * it starts (docs/integrations/claude-integration.md "Persona tools Agents call without a card"). An agent made in
+   * Paseo's own app (one whose id the bridge kept, KEPT_LABEL, too) and every other tool still go to the phone.
    */
   function ownTool(agentId, request) {
-    if (!allowTools.has(request.name) || request.provider !== 'claude' || request.kind === 'question' || request.kind === 'plan') return false
+    if (request.kind === 'question' || request.kind === 'plan') return false
     const labels = agents.get(agentId)?.agent?.labels
     const label = labels?.[SESSION_LABEL]
-    return typeof label === 'string' && label !== '' && !labels[KEPT_LABEL]
+    if (typeof label !== 'string' || label === '' || labels[KEPT_LABEL]) return false
+    return [...allowTools].some((name) => asksForTool(request, name))
   }
 
   /**
    * The Agent's own Persona tools (allowTools) as Paseo's preapproval for a new Claude Code agent (toolPolicy): those
-   * of the servers it is given, by server and tool (`mcp__<server>__<tool>`). Undefined when there are none.
+   * of the servers it is given, by server and tool (`mcp__<server>__<tool>`). Undefined when there are none. Never for
+   * Codex or OpenCode (docs/lessons/paseo.md): ownTool answers their asks.
    */
   function preapproved(mcpServers) {
     const grants = []

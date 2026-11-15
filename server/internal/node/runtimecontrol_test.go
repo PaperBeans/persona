@@ -88,6 +88,46 @@ func TestRuntimeLaunchers(t *testing.T) {
 	})
 }
 
+// A launcher whose agents' approval is a switch Allow all turns on (Paseo's Auto Accept) says so in launchers.list, the
+// runtime's own launcher too: the manager starts its own Agents there with Allow all (#8141). One the runtime does not
+// say it of has no such field, and runtime.launchers carries it as hello does.
+func TestRuntimeLauncherAutoAccept(t *testing.T) {
+	n, _ := runtimeNode(t)
+	h := paseoEngineHello()
+	h["launcher"] = "paseo-grok"
+	h["launchers"] = []map[string]any{
+		{"name": "paseo-claude", "agent": "claude"},
+		{"name": "paseo-grok", "agent": "paseo", "auto_accept": true},
+		{"name": "paseo-pi", "agent": "paseo"},
+	}
+	host := dialRuntime(t, n, h)
+	enablePaseo(n)
+	autoAccept := func() map[string]bool {
+		raw, err := nodeCall(t, n, "launchers.list", map[string]any{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var res struct {
+			Launchers []proto.Launcher `json:"launchers"`
+		}
+		_ = json.Unmarshal(raw, &res)
+		got := map[string]bool{}
+		for _, l := range res.Launchers {
+			if l.Source == "paseo" {
+				got[l.Name] = l.AutoAccept
+			}
+		}
+		return got
+	}
+	if got := autoAccept(); len(got) != 3 || !got["paseo-grok"] || got["paseo-claude"] || got["paseo-pi"] {
+		t.Fatalf("auto_accept by launcher: %v", got)
+	}
+	_ = host.peer.Notify("runtime.launchers", map[string]any{"launchers": []map[string]any{
+		{"name": "paseo-grok", "agent": "paseo"}, {"name": "paseo-pi", "agent": "paseo", "auto_accept": true},
+	}})
+	waitFor(t, "the new launchers", func() bool { got := autoAccept(); return got["paseo-pi"] && !got["paseo-grok"] })
+}
+
 // The phone's permission mode and effort reach a runtime that takes them; one that does not refuses them.
 func TestRuntimeModes(t *testing.T) {
 	n, _ := runtimeNode(t)

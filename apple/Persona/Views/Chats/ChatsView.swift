@@ -889,7 +889,7 @@ private struct AgentsList: View {
                      pinnedOnly: pinnedOnly, hub: hubFilter, multiHub: model.isMultiHub, kept: kept,
                      held: model.heldInList, preferences: preferences,
                      pagedGroups: Set(model.sessionLists.lists.filter { $0.value.paged }.keys),
-                     listQuery: listQuery)
+                     listQuery: listQuery, sideFold: model.sideFoldGroups)
     }
 
     private func listProjection() -> AgentListProjection {

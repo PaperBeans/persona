@@ -38,30 +38,30 @@ func agentStartHost(m Device, asked string) string {
 // that provider offers it and the effort the start had (the engine lowers it to one the model offers, and says so);
 // with none of that kind it is refused. done false: the node did not answer so for that host (its list unreadable, an
 // older node, the engine away, or one that takes any launcher), and fitLauncher goes on as for a terminal.
-func (s *Service) fitEngineLauncher(ctx context.Context, m Device, host string, params map[string]any) (note, agent string, err error, done bool) {
+func (s *Service) fitEngineLauncher(ctx context.Context, m Device, host string, params map[string]any) (note string, agent startAgent, err error, done bool) {
 	name, _ := params["launcher"].(string)
 	list, hostRuntime, known := s.launchersHereOn(withUnhidden(ctx, name), m.ID, host)
 	if !known || !hostRuntime {
-		return "", "", nil, false
+		return "", startAgent{}, nil, false
 	}
 	configured := make([]ConfiguredLauncher, 0, len(list))
 	for _, l := range list {
 		configured = append(configured, ConfiguredLauncher{Launcher: l})
 	}
 	configured = sessionLaunchers(configured, s.hello(ctx).Models.Launchers[m.ID])
-	agentOf := func(name string) string {
+	agentOf := func(name string) startAgent {
 		for _, l := range configured {
 			if l.Name == name {
-				return l.AgentType
+				return launcherStartAgent(l)
 			}
 		}
-		return ""
+		return startAgent{}
 	}
 	if name == "" { // none named: the engine's default provider, the first it lists
 		if i := slices.IndexFunc(list, func(l proto.Launcher) bool { return compat.Source(l.Source) == host }); i >= 0 {
 			return "", agentOf(list[i].Name), nil, true
 		}
-		return "", "", nil, true
+		return "", startAgent{}, nil, true
 	}
 	if slices.ContainsFunc(list, func(l proto.Launcher) bool { return l.Name == name }) {
 		return "", agentOf(name), nil, true
@@ -76,7 +76,7 @@ func (s *Service) fitEngineLauncher(ctx context.Context, m Device, host string, 
 				names = append(names, l.Name)
 			}
 		}
-		return "", "", i18n.Err("assistant-tasks.launcher_kind_missing", i18n.Args{
+		return "", startAgent{}, i18n.Err("assistant-tasks.launcher_kind_missing", i18n.Args{
 			"engine": engine, "machine": firstNonEmpty(m.Name, m.ID), "launcher": name, "kind": kindName(kind),
 			"launchers": cmp.Or(strings.Join(names, ", "), "—"),
 		}), true
@@ -97,7 +97,7 @@ func (s *Service) fitEngineLauncher(ctx context.Context, m Device, host string, 
 		params["effort"] = effort
 	}
 	if err := s.applyModel(ctx, "agent.new", params); err != nil {
-		return "", "", err, true
+		return "", startAgent{}, err, true
 	}
 	s.logf("start on %s: %s has no %s, using %s of the same kind (%s)", m.ID, engine, name, to, kind)
 	note = apierr.StartInstead(s.lang(ctx), engine, firstNonEmpty(m.Name, m.ID), &proto.StartInstead{Launcher: name, Model: dropped},
@@ -158,7 +158,7 @@ func (s *Service) launcherKindOn(ctx context.Context, machine, name string) stri
 	if l, ok := s.configuredLauncher(ctx, machine, name); ok && l.AgentType != "" {
 		return l.AgentType
 	}
-	if a := s.lastSeenAgent(ctx, machine, name); a != "" {
+	if a := s.lastSeenAgent(ctx, machine, name).agent; a != "" {
 		return a
 	}
 	switch name {

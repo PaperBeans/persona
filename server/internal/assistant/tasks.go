@@ -534,9 +534,9 @@ func (s *Service) feedPlans(ctx context.Context, items []FeedItem) map[string]*T
 }
 
 // planStartsAtOnce: every task only reads, was asked for by the user in this turn (while start_requested_tasks is on),
-// or is a kind the user said to start without asking.
+// or is a kind the user said to start without asking (its directory or one it is under, task_trust_scope.go).
 func (s *Service) planStartsAtOnce(ctx context.Context, tasks []PlanTask) bool {
-	trusted := s.trustedKinds(ctx)
+	trusted := s.trustCover(ctx)
 	requested := s.startRequestedTasks(ctx)
 	for _, t := range tasks {
 		if !t.Readonly && !(requested && t.UserRequested) && !trustedTask(trusted, t) {
@@ -569,10 +569,10 @@ func trustMode(t PlanTask) string {
 	return "edit"
 }
 
-// trustedTask: the user lets t's kind start without asking, by its repository or by its exact directory (a key
-// remembered before #8259, or while the repository was unknown).
-func trustedTask(trusted map[string]bool, t PlanTask) bool {
-	return trusted[trustKey(t)] || trusted[trustFolderKey(t)]
+// trustedTask: the user lets t's kind start without asking (covered: trustCover), by its repository or by its exact
+// directory (a key remembered before #8259, or while the repository was unknown).
+func trustedTask(covered func(key string) bool, t PlanTask) bool {
+	return covered(trustKey(t)) || covered(trustFolderKey(t))
 }
 
 // repoLookup bounds asking a machine which repository a task's directory is in.

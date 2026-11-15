@@ -90,7 +90,8 @@ the Agent's own bookkeeping.
   skill's rule). It is Claude Code's own rule for that process only: nothing is written to the machine's Claude settings
   or to the files every session shares, so Claude sessions the user starts themselves ask as before, and a deny rule
   of the user's still wins. The Paseo bridge is given the same names (`--allow-tools`) and answers them itself for the
-  Agents it created (`docs/integrations/paseo.md`); an agent made in Paseo's own app still asks.
+  Agents it created, whatever their provider (#8141, `docs/integrations/paseo.md` "Mapping"); an agent made in Paseo's own
+  app still asks.
 - **Still asked**: the phone's tools (`phone_*`) and the connectors' (mail and others), which act outside Persona, and
   `dispatch_start` / `dispatch_read`, which start an Agent on another computer on its model and read that computer's
   work: their effects reach past the calling Agent's own task, so they keep the card by default. Every other tool and

@@ -307,6 +307,19 @@ func (h *Manager) removeMailAccount(_ context.Context, id string) (*selfChange, 
 }
 
 func (h *Manager) toolPersonaSettings(ctx context.Context, machineID, sessionID string, args json.RawMessage) (string, error) {
+	out, err := h.personaSettings(ctx, machineID, sessionID, args)
+	// iPhone control's own setting read or changed while no iPhone is allowed: the rest of its setup (this iPhone's
+	// consent, pairing, Developer Mode) happens on the iPhone, in the guided setup (#8199).
+	var a struct {
+		Key string `json:"key"`
+	}
+	if err == nil && json.Unmarshal(args, &a) == nil && a.Key == "extension."+iphoneExtensionID && !h.iphoneSomeAllowed() {
+		out += "\n" + iphoneSetupHint
+	}
+	return out, err
+}
+
+func (h *Manager) personaSettings(ctx context.Context, machineID, sessionID string, args json.RawMessage) (string, error) {
 	var a struct {
 		Action string          `json:"action"`
 		Key    string          `json:"key"`

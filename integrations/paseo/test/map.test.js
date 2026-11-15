@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  AUTO_ACCEPT_ROOTS, CANCELED_NOTE, ERROR_LEAD, ERROR_TEXT, agentRoot, agentRow, archivedUnderOwnId, autoAcceptOf, codexThreadOf, backgroundOf,
-  defaultProvider, effortFor, exitNote, interactionOf, launchersOf, linkedWorktree, modeBeforePlan,
+  AUTO_ACCEPT_ROOTS, CANCELED_NOTE, ERROR_LEAD, ERROR_TEXT, agentRoot, agentRow, archivedUnderOwnId, asksForTool, autoAcceptOf, codexThreadOf,
+  backgroundOf, defaultProvider, effortFor, exitNote, interactionOf, launchersOf, linkedWorktree, modeBeforePlan,
   parentAgentId, paseoMode, promptKey, providerRoots, responseOf, rewindOf, rowStatus, projectSpaces, sameKindProvider, sessionIdOf, slotNameOf, spaceIdOf,
   strayRecord, timelineItems, toolCall, transcriptOf, workspaceRow, paseoCheckouts,
 } from '../lib/map.js'
@@ -304,7 +304,7 @@ test("spaces: a project's checkout and its worktrees are one space; a workspace 
   assert.deepEqual([bare.space_id, bare.space_name, bare.slot_id], ['wks_x', 'x', undefined], 'no placement: its workspace, as before')
 })
 
-test("launchers: one per usable provider, with the agent it starts and its models' Persona efforts", () => {
+test("launchers: one per usable provider, with the agent it starts, its models' Persona efforts, and whether its approval is Auto Accept", () => {
   const entries = [
     { provider: 'claude', enabled: false, status: 'unavailable', models: [] },
     { provider: 'my-claude', enabled: true, status: 'ready', label: 'My Claude', models: [
@@ -315,8 +315,12 @@ test("launchers: one per usable provider, with the agent it starts and its model
     { provider: 'my-codex', enabled: true, status: 'loading', label: 'My Codex', models: [] },
     { provider: 'grok', enabled: true, status: 'ready', label: 'Grok', models: [{ id: 'g', label: 'G', thinkingOptions: [{ id: 'xhigh' }, { id: 'ultra' }], defaultThinkingOptionId: 'ultra' }] },
     { provider: 'bad.name', enabled: true, status: 'ready', models: [] },
+    { provider: 'opencode', enabled: true, status: 'ready', label: 'OpenCode', models: [] },
+    { provider: 'pi', enabled: true, status: 'ready', label: 'Pi', models: [] },
   ]
   const roots = providerRoots(CONFIG, entries)
+  // Grok (over ACP) and OpenCode approve through Paseo's Auto Accept switch (#8141); Claude Code and Codex have modes,
+  // pi neither.
   assert.deepEqual(launchersOf(entries, roots), [
     { name: 'my-claude', agent: 'claude', model: 'Fable (1M)', models: [
       { id: 'fable[1m]', name: 'Fable (1M)', default: true, efforts: ['low', 'medium', 'high', 'max'], default_effort: 'max' },
@@ -324,7 +328,9 @@ test("launchers: one per usable provider, with the agent it starts and its model
     ] },
     // Paseo creates a Codex agent with no first message: the form need not ask for one (#8140).
     { name: 'my-codex', agent: 'codex', model: 'My Codex', models: [], prompt_optional: true },
-    { name: 'grok', agent: 'paseo', model: 'G', models: [{ id: 'g', name: 'G', efforts: ['xhigh'] }] },
+    { name: 'grok', agent: 'paseo', model: 'G', models: [{ id: 'g', name: 'G', efforts: ['xhigh'] }], auto_accept: true },
+    { name: 'opencode', agent: 'paseo', model: 'OpenCode', models: [], auto_accept: true },
+    { name: 'pi', agent: 'paseo', model: 'Pi', models: [] },
   ])
   assert.equal(defaultProvider(entries, roots), 'my-claude', "Claude Code's own is off: the first running Claude Code")
   assert.equal(defaultProvider([{ provider: 'claude', enabled: true, status: 'ready' }, ...entries], roots), 'claude')
@@ -385,6 +391,38 @@ test("Grok's own tools, named in its ACP input (variant), as the apps' tools, an
   // Its permission card says the tool and what it is about.
   const card = interactionOf('s1', { id: 'p1', provider: 'grok', name: 'other', kind: 'tool', title: 'List directory', input: { variant: 'ListDir', target_directory: '/w/app' } })
   assert.deepEqual([card.tool_name, card.tool_input, card.summary, card.reason], ['LS', { path: '/w/app' }, '/w/app', 'List directory'])
+})
+
+test("a request for an MCP tool, whichever provider asks: Claude Code's name, an ACP call, OpenCode's name, Codex's approval (#8141)", () => {
+  const own = 'mcp__persona__report_to_supervisor'
+  // Claude Code names it.
+  assert.equal(asksForTool({ provider: 'claude', name: own, kind: 'tool' }, own), true)
+  assert.equal(asksForTool({ provider: 'claude', name: 'mcp__persona__phone_notify', kind: 'tool' }, own), false)
+  // Grok over ACP: Paseo names the request after the ACP kind; its input (in the detail Paseo maps) names the tool.
+  const grok = (tool, at = 'detail') => {
+    const input = { variant: 'UseTool', tool_name: tool, tool_input: { kind: 'done', text: 'x' } }
+    return { provider: 'acp', name: 'other', kind: 'tool', title: 'Use tool', ...(at === 'detail' ? { detail: { type: 'unknown', input, output: null } } : { input }) }
+  }
+  assert.equal(asksForTool(grok('persona__report_to_supervisor'), own), true)
+  assert.equal(asksForTool(grok('persona__report_to_supervisor', 'input'), own), true)
+  assert.equal(asksForTool(grok('persona__phone_notify'), own), false, 'another tool of the same server')
+  assert.equal(asksForTool(grok('other__report_to_supervisor'), own), false, "another server's tool of the same name")
+  assert.equal(asksForTool({ provider: 'acp', name: 'execute', kind: 'tool', detail: { type: 'shell', command: 'ls' } }, own), false)
+  // OpenCode's name for an MCP tool is <server>_<tool>, its permission key.
+  assert.equal(asksForTool({ provider: 'opencode', name: 'persona_report_to_supervisor', kind: 'tool' }, own), true)
+  assert.equal(asksForTool({ provider: 'opencode', name: 'persona_phone_notify', kind: 'tool' }, own), false)
+  assert.equal(asksForTool({ provider: 'opencode', name: 'bash', kind: 'tool' }, own), false)
+  // Codex asks for an MCP tool as an approval of its server, the tool named in the message.
+  const codex = (server, message) => ({ provider: 'codex', name: 'CodexMcpElicitation', kind: 'tool', title: `MCP approval: ${server}`,
+    description: message, input: { mode: 'form', requestedSchema: null, url: null }, metadata: { threadId: 't1', turnId: null, serverName: server, elicitationId: null } })
+  assert.equal(asksForTool(codex('persona', 'Allow the persona MCP server to run tool "report_to_supervisor"?'), own), true)
+  assert.equal(asksForTool(codex('persona', 'Allow the persona MCP server to run tool "phone_notify"?'), own), false)
+  assert.equal(asksForTool(codex('other', 'Allow the other MCP server to run tool "report_to_supervisor"?'), own), false)
+  assert.equal(asksForTool(codex('persona', 'Something else entirely'), own), false, 'a message that names no tool')
+  assert.equal(asksForTool({ provider: 'codex', name: 'CodexBash', kind: 'tool', metadata: { serverName: 'persona' },
+    description: 'Allow the persona MCP server to run tool "report_to_supervisor"?' }, own), false, "Codex's other requests")
+  // A name that is no MCP tool's matches nothing.
+  assert.equal(asksForTool({ provider: 'claude', name: 'Bash', kind: 'tool' }, 'Bash'), false)
 })
 
 test("the bridge's own words are the Chinese the hub rewrites in the reader's language; a compaction is the node's divider (#8133)", () => {

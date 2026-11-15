@@ -150,11 +150,12 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 			if err != nil {
 				return "", fmt.Errorf("task %d: %w", i+1, err)
 			}
-			claude, err := s.fitTaskLauncher(ctx, t, m, own, params)
+			// The card shows the mode that runs: Allow all for Claude Code and an Auto Accept provider (#8141).
+			allowAll, err := s.fitTaskLauncher(ctx, t, m, own, params)
 			if err != nil {
 				return "", fmt.Errorf("task %d: %w", i+1, err)
 			}
-			if claude {
+			if allowAll {
 				t.Permission = "bypassPermissions"
 			}
 		}

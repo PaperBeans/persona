@@ -46,7 +46,7 @@ describe("which suggestions are drawn", () => {
 
 describe("what Always stores, in words", () => {
   it("a remembered kind of task, with the directory and the computer", () => {
-    expect(ruleCreates(ruleSuggestion(plan)!)).toEqual(["Always remembers this kind of task: tasks that change files in /code/example on Example node start without asking."]);
+    expect(ruleCreates(ruleSuggestion(plan)!)).toEqual(["Always remembers this kind of task: tasks that change files in /code/example and its subfolders on Example node start without asking."]);
   });
 
   it("a standing authorization with its action, its conditions and the words kept as the owner's", () => {

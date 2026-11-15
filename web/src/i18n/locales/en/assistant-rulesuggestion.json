@@ -6,7 +6,7 @@
   "not_now_title": "Don't suggest this for 30 days",
   "joined": "{first} {second}",
   "list_separator": ", ",
-  "creates_plan_start": "Always remembers this kind of task: tasks that change files in {directory} on {machine} start without asking.",
+  "creates_plan_start": "Always remembers this kind of task: tasks that change files in {directory} and its subfolders on {machine} start without asking.",
   "creates_standing": "Always adds a standing authorization for {directory} on {machine}: {action}.",
   "creates_conditions": "Only when: {conditions}.",
   "creates_quote": "Kept as your words: “{quote}”.",

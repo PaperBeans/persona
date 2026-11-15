@@ -44,6 +44,15 @@ pair)
   fi
   echo '{"udid":"'"$udid"'","name":"Test Phone","model":"iPhone99,1","product_version":"26.1"}'
   ;;
+reveal-developer-mode)
+  # reveal-developer-mode --udid <udid>: noted in FAKE_REVEAL_LOG
+  if [ -n "$FAKE_REVEAL_LOG" ]; then echo "$2" >> "$FAKE_REVEAL_LOG"; fi
+  if [ -n "$FAKE_REVEAL_FAIL" ]; then
+    echo '{"v":1,"ok":false,"error":{"code":"failed","message":"no AMFI service"}}' >&2
+    exit 1
+  fi
+  echo '{"udid":"'"$2"'","revealed":true}'
+  ;;
 match)
   # match --record <path> --identifier <id> --auth-tag <tag>: the record "knows" the tag TAG-1
   if [ "$6" = "TAG-1" ]; then echo '{"match":true}'; else echo '{"match":false}'; fi
@@ -54,7 +63,11 @@ serve)
     exit 1
   fi
   echo "$@" > "$FAKE_SERVE_ARGS"
-  echo '{"event":"ready","device":{"name":"Test Phone"}}'
+  if [ -n "$FAKE_DDI_UNMOUNTED" ]; then
+    echo '{"event":"ready","device":{"name":"Test Phone","developer_mode":true,"ddi_mounted":false}}'
+  else
+    echo '{"event":"ready","device":{"name":"Test Phone"}}'
+  fi
   while IFS= read -r line; do
     id=$(printf '%s' "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/')
     op=$(printf '%s' "$line" | sed 's/.*"op":"\([^"]*\)".*/\1/')
@@ -425,5 +438,102 @@ func TestDeveloperModeFollowsThePhone(t *testing.T) {
 	m.remember(testUDID, Endpoint{}, json.RawMessage(`{"name":"Test Phone"}`))
 	if rec, _ := m.store.Load(testUDID); rec.DeveloperMode == nil || !*rec.DeveloperMode {
 		t.Fatalf("record = %+v", rec)
+	}
+}
+
+// TestPrepareMountsAndThenAgainByItself: Prepare mounts the developer disk image through the session and allows this
+// computer to mount it again by itself; a phone that then comes back without it (restarted) gets it mounted on
+// connecting, once per link, and one whose owner never prepared it never does (#8199).
+func TestPrepareMountsAndThenAgainByItself(t *testing.T) {
+	m, log := bridgeManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := m.Pair(ctx, testUDID, nil); err != nil {
+		t.Fatal(err)
+	}
+	_ = m.SetAddress(testUDID, "192.0.2.7")
+	ops := func() string { b, _ := os.ReadFile(log); return strings.Join(strings.Fields(string(b)), ",") }
+
+	// Never prepared: a phone without the image is left as it is.
+	t.Setenv("FAKE_DDI_UNMOUNTED", "1")
+	if _, err := m.Call(ctx, testUDID, "tap", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := ops(); got != "tap" {
+		t.Fatalf("mounted without the owner: %s", got)
+	}
+
+	if err := m.StartPrepare(testUDID); err != nil {
+		t.Fatal(err)
+	}
+	if j := waitJob(t, m); j.State != JobDone || j.Kind != "prepare" || j.UDID != testUDID {
+		t.Fatalf("job = %+v", j)
+	}
+	if rec, _ := m.store.Load(testUDID); !rec.AutoPrepare {
+		t.Fatal("prepared, but not allowed to mount again")
+	}
+	if d := m.Devices(ctx); !d[0].AutoPrepare {
+		t.Fatalf("Devices = %+v", d[0])
+	}
+	if got := ops(); got != "tap,mount_ddi" {
+		t.Fatalf("ops %s", got)
+	}
+
+	// The phone restarted: the next link comes up without the image and mounts it by itself, once.
+	m.disconnect(testUDID)
+	if _, err := m.Call(ctx, testUDID, "screenshot", nil); err != nil {
+		t.Fatal(err)
+	}
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	for strings.Count(ops(), "mount_ddi") < 2 {
+		select {
+		case <-tick.C:
+		case <-ctx.Done():
+			t.Fatalf("not mounted again: %s", ops())
+		}
+	}
+	if _, err := m.Call(ctx, testUDID, "tap", nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(ops(), "mount_ddi"); n != 2 {
+		t.Fatalf("mounted %d times on one link: %s", n, ops())
+	}
+	// Pairing again keeps the owner's word.
+	if _, err := m.Pair(ctx, testUDID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ := m.store.Load(testUDID); !rec.AutoPrepare {
+		t.Fatal("pairing again dropped AutoPrepare")
+	}
+	if err := m.StartPrepare("00000000-NOTPAIRED"); err == nil {
+		t.Fatal("preparing a phone that isn't paired")
+	}
+}
+
+// TestPairShowsDeveloperModeWhenItIsOff: a phone that paired with Developer Mode off gets its hidden switch shown in
+// Settings while it is still on the cable; one with it on, or a simulator, doesn't; a bridge that can't show it
+// doesn't fail the pairing (#8199).
+func TestPairShowsDeveloperModeWhenItIsOff(t *testing.T) {
+	m, _ := bridgeManager(t)
+	reveals := filepath.Join(t.TempDir(), "reveals")
+	t.Setenv("FAKE_REVEAL_LOG", reveals)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	asked := func() string { b, _ := os.ReadFile(reveals); return strings.TrimSpace(string(b)) }
+	if _, err := m.Pair(ctx, testUDID, nil); err != nil || asked() != "" {
+		t.Fatalf("Developer Mode not off: %v, asked %q", err, asked())
+	}
+	t.Setenv("FAKE_DEVMODE_OFF", "1")
+	var steps []string
+	if _, err := m.Pair(ctx, testUDID, func(step, _ string) { steps = append(steps, step) }); err != nil || asked() != testUDID {
+		t.Fatalf("Developer Mode off: %v, asked %q", err, asked())
+	}
+	if !strings.Contains(strings.Join(steps, "|"), "showing Developer Mode") {
+		t.Fatalf("steps %v", steps)
+	}
+	t.Setenv("FAKE_REVEAL_FAIL", "1")
+	if rec, err := m.Pair(ctx, testUDID, nil); err != nil || rec.DeveloperMode == nil || *rec.DeveloperMode {
+		t.Fatalf("a bridge that can't show it: %+v, %v", rec, err)
 	}
 }

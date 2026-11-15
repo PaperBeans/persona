@@ -68,6 +68,7 @@ test("Paseo's agents are the engine's sessions: Claude Code's by its session and
     models: true, check: true, rewind: true, seen: true, workspaces: true, resume: true, readonly: true, same_kind: true })
   assert.deepEqual(node.hello.launchers.map((l) => [l.name, l.agent, l.prompt_optional]),
     [['my-claude', 'claude', undefined], ['my-codex', 'codex', true], ['grok', 'paseo', undefined]])
+  assert.deepEqual(node.hello.launchers.map((l) => l.auto_accept), [undefined, undefined, true], "Grok's approval is Paseo's Auto Accept (#8141)")
   assert.deepEqual(node.hello.launchers[0].models, [{ id: 'fable[1m]', name: 'Fable', default: true, efforts: ['low', 'high', 'max'], default_effort: 'max' }])
   const byId = Object.fromEntries(rows().map((r) => [r.session_id, r]))
   assert.deepEqual(Object.keys(byId).sort(), [SID, 'paseo-e1', `paseo-${a.codex.id}`, `paseo-${a.grok.id}`].sort(), 'a Claude agent without a session yet is not listed')
@@ -1703,6 +1704,52 @@ test("an Agent Persona started calls its own Persona tools without a card; every
     ['paseo-e1', 'mcp__persona__dispatch_start'], ['paseo-e1', 'mcp__persona__phone_notify'], [SID, 'mcp__persona__report_to_supervisor'],
   ].sort())
   assert.equal(fake.requestsOf('set_agent_mode_request').length, 0)
+})
+
+test("an Agent Persona started on any provider calls its own Persona tools without a card: Grok, OpenCode, Codex (#8141)", async (t) => {
+  const own = ['mcp__persona__report_to_supervisor', 'mcp__persona__todo_decision_add']
+  const providers = { ...PROVIDERS, opencode: {} }
+  const entries = [...ENTRIES, { provider: 'opencode', enabled: true, status: 'ready', label: 'OpenCode', models: [] }]
+  const { fake, node, a, rows } = await setup(t, { allowTools: own, providers, entries })
+  node.resolve = () => ({ allow: true })
+  const started = (provider, sid) => {
+    const x = agentSnapshot({ provider, cwd: '/tmp', title: sid, status: 'running', labels: { 'persona.session': sid } })
+    fake.upsert(x, PROJECT)
+    return x
+  }
+  const grok = started('grok', 'paseo-g1')
+  const opencode = started('opencode', 'paseo-o1')
+  const codex = started('my-codex', 'paseo-c1')
+  await until('listed', () => ['paseo-g1', 'paseo-o1', 'paseo-c1'].every((id) => rows().some((r) => r.session_id === id)))
+  // Grok over ACP names an MCP tool in its input; OpenCode by <server>_<tool>; Codex in its approval of the server.
+  const useTool = (tool) => ({ type: 'unknown', input: { variant: 'UseTool', tool_name: tool, tool_input: { kind: 'done', text: 'x' } }, output: null })
+  const elicitation = (server, tool) => ({ provider: 'codex', name: 'CodexMcpElicitation', kind: 'tool', title: `MCP approval: ${server}`,
+    description: `Allow the ${server} MCP server to run tool "${tool}"?`, input: { mode: 'form', requestedSchema: null, url: null },
+    metadata: { threadId: 'th-1', turnId: null, serverName: server, elicitationId: null } })
+  const mine = [
+    [grok.id, { id: 'g-own', provider: 'acp', name: 'other', kind: 'tool', title: 'Use tool', detail: useTool('persona__report_to_supervisor') }],
+    [opencode.id, { id: 'o-own', provider: 'opencode', name: 'persona_todo_decision_add', kind: 'tool', title: 'Persona todo decision add', input: {} }],
+    [codex.id, { id: 'c-own', ...elicitation('persona', 'report_to_supervisor') }],
+  ]
+  for (const [agentId, request] of mine) fake.permission(agentId, request)
+  await until('the own tools answered', () => fake.requestsOf('agent_permission_response').length === mine.length)
+  assert.deepEqual(fake.requestsOf('agent_permission_response').map((r) => [r.requestId, r.response]).sort(),
+    [['c-own', { behavior: 'allow' }], ['g-own', { behavior: 'allow' }], ['o-own', { behavior: 'allow' }]], 'allowed once each: no rule kept, no mode set')
+  // Still asked: another of Persona's tools in those Agents, another server's tool of the same name, and any tool of an
+  // agent made in Paseo's own app.
+  const asks = [
+    [grok.id, { id: 'g-phone', provider: 'acp', name: 'other', kind: 'tool', title: 'Use tool', detail: useTool('persona__phone_notify') }],
+    [opencode.id, { id: 'o-phone', provider: 'opencode', name: 'persona_phone_notify', kind: 'tool', title: 'Persona phone notify', input: {} }],
+    [codex.id, { id: 'c-other', ...elicitation('other', 'report_to_supervisor') }],
+    [a.grok.id, { id: 'g-mine', provider: 'acp', name: 'other', kind: 'tool', title: 'Use tool', detail: useTool('persona__report_to_supervisor') }],
+  ]
+  for (const [agentId, request] of asks) fake.permission(agentId, request)
+  await until('the others asked', () => node.asked.length === asks.length)
+  assert.deepEqual(node.asked.map((ix) => [ix.session_id, ix.tool_name]).sort(), [
+    ['paseo-c1', 'CodexMcpElicitation'], ['paseo-g1', 'mcp__persona__phone_notify'], ['paseo-o1', 'persona_phone_notify'],
+    [`paseo-${a.grok.id}`, 'mcp__persona__report_to_supervisor'],
+  ].sort())
+  assert.equal(fake.requestsOf('set_agent_mode_request').length + fake.requestsOf('set_agent_feature_request').length, 0)
 })
 
 for (const toolName of ['mcp__persona__report_to_supervisor', 'mcp__jarvis__report_to_supervisor']) {
