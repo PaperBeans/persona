@@ -669,8 +669,6 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 	var p struct {
 		Path             string        `json:"path"`
 		Paths            []string      `json:"paths"`
-		Offset           int64         `json:"offset"`
-		Stream           bool          `json:"stream"`
 		Detail           bool          `json:"detail"` // fs.stat: the Info sheet's fields (files_info.go)
 		SessionID        string        `json:"session_id"`
 		CreationID       string        `json:"creation_id"`
@@ -1765,15 +1763,15 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		}
 		list, err := n.getClaudeSettings(i18n.Resolve(a.Locale))
 		return map[string]any{"settings": list}, err
-	case "file.upload.begin", "file.upload.chunk", "file.upload.end", "file.upload.abort":
+	case methodFileUploadBegin, methodFileUploadChunk, methodFileUploadEnd, methodFileUploadAbort:
 		return n.uploadCall(method, params)
-	case "file.rename", "file.move", "file.trash", "file.restore":
+	case methodFileRename, methodFileMove, methodFileTrash, methodFileRestore:
 		return n.fileEditCall(method, params)
-	case "file.mkdir", "file.write", "file.zip", "file.copy", "file.chmod", "file.operation": // new folders, text files, zips, copies, permissions and their progress (filemake.go, filecopy.go)
+	case methodFileMkdir, methodFileWrite, methodFileZip, methodFileCopy, methodFileChmod, methodFileOperation: // new folders, text files, zips, copies, permissions and their progress (filemake.go, filecopy.go)
 		return n.fileMake(ctx, method, params)
 	case "health.reports.list", "health.reports.delete":
 		return n.healthReportsCall(method, params)
-	case "file.chunk":
+	case methodFileChunk:
 		var chunk proto.FileChunkRequest
 		if err := json.Unmarshal(params, &chunk); err != nil {
 			return nil, err
@@ -1785,20 +1783,24 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			return nil, err
 		}
 		return n.gitBlob(ctx, b)
-	case "file.convert":
+	case methodFileConvert:
 		var c proto.FileConvertRequest
 		if err := json.Unmarshal(params, &c); err != nil {
 			return nil, err
 		}
 		return n.convertFile(ctx, c)
-	case "file.thumb":
+	case methodFileThumb:
 		var t proto.FileThumbRequest
 		if err := json.Unmarshal(params, &t); err != nil {
 			return nil, err
 		}
 		return n.fileThumb(ctx, t)
-	case "file.read":
-		return n.readFile(p.Path, p.Cwd, p.Offset, p.Stream)
+	case methodFileRead:
+		var in fileReadParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.readFile(in.Path, in.Cwd, in.Offset, in.Stream)
 	case "port.dial":
 		return n.portDial(ctx, params)
 	case "screen.dial": // live-screen video channel (#3954): start the capture helper for a signed-in pair (screen.go)
