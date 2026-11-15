@@ -205,6 +205,17 @@ type liveActivities struct {
 	now          func() time.Time
 	minGap       time.Duration // fleetMinGap (0 in the replay of how it was before, pushreplay_test.go)
 	storeTimeout time.Duration // bounds each token write; tests shorten it
+	// answers: the phones whose apps registered (register_phone), waiting for their holds to be lifted off the app's
+	// read loop (phoneConnectedLater); answering while a goroutine drains them.
+	answerMu  sync.Mutex
+	answers   []phoneAnswer
+	answering bool
+}
+
+// phoneAnswer is one register_phone: the push id it named, its connection's credential, and when it arrived.
+type phoneAnswer struct {
+	pushID, credential string
+	at                 time.Time
 }
 
 func newLiveActivities(h *Hub) *liveActivities {
@@ -616,27 +627,41 @@ func (la *liveActivities) flush(st FleetState, urgent, force bool, settingsDevic
 			// Token registration or foreground entry during the database call wins.
 			// The spent budget is deliberately not refunded: a crash or ambiguous
 			// delivery must not let the other blue-green process start again.
-			la.mu.Lock()
-			current := la.rows[r.DeviceID]
-			la.mu.Unlock()
-			latest, _ := json.Marshal(la.snapshot())
-			currentDevice, present := la.h.push.device(r.DeviceID)
-			valid := current == r && bytes.Equal(observed, latest) && present && bytes.Equal(currentDevice.Prefs, d.Prefs)
-			if !valid || la.h.phoneOpen(r.DeviceID) {
+			unchanged := func() bool {
+				la.mu.Lock()
+				current := la.rows[r.DeviceID]
+				la.mu.Unlock()
+				latest, _ := json.Marshal(la.snapshot())
+				currentDevice, present := la.h.push.device(r.DeviceID)
+				return current == r && bytes.Equal(observed, latest) && present && bytes.Equal(currentDevice.Prefs, d.Prefs) &&
+					!la.h.phoneOpen(r.DeviceID)
+			}
+			suppressed := func() {
 				la.h.logf("live activity start suppressed: reason=state_changed device=%s due=%s", trafficIdentity(r.DeviceID), due.UTC().Format(time.RFC3339))
 				if next.IsZero() || due.Before(next) {
 					next = due
 				}
+			}
+			if !unchanged() {
+				suppressed()
+				continue
+			}
+			// Held before it is sent, so the phone's answer, which may follow at once, is what lifts it. So does a
+			// start APNs or the relay refused, or that never left the hub (startRefused); one nobody answered at all
+			// may be on the phone, and stays held.
+			la.holdStart(context.Background(), r.DeviceID, now, fleetMaxAge)
+			// The hold write can take up to storeTimeout: the app may have come to the foreground or reported an
+			// update token meanwhile, and its answer's lift may have reached the store before this hold and been
+			// overwritten by it. Nothing is sent then, and the hold goes back to the claim's cooldown (#7641 review).
+			if !unchanged() {
+				la.liftHold(context.Background(), r.DeviceID, now)
+				suppressed()
 				continue
 			}
 			la.mu.Lock()
 			la.started[r.DeviceID] = episode
 			la.mu.Unlock()
 			la.markSent(r.DeviceID, dst, now, true)
-			// Held before it is sent, so the phone's answer, which may follow at once, is what lifts it. So does a
-			// start APNs or the relay refused, or that never left the hub (startRefused); one nobody answered at all
-			// may be on the phone, and stays held.
-			la.holdStart(context.Background(), r.DeviceID, now, fleetMaxAge)
 			// "Phone Muted" while a desktop is online, the device's quiet hours (quiethours.go), or the device turned off
 			// the pushes of the manager whose agents it counts (NotifyPrefs.MutedManagers): the activity still starts,
 			// without its alert (desktops.go).
@@ -710,9 +735,10 @@ func (la *liveActivities) holdStart(ctx context.Context, device string, asOf tim
 	}
 }
 
-// phoneAnswered: the phone reached the hub (it reported an activity's update token, or its app connected), so the
-// hub hears of what it starts there again: the next start waits only for the rolling cooldown. The answer is stamped
-// now: it lifts the hold of a start claimed up to now, never of one claimed while its write was on its way.
+// phoneAnswered: the phone reached the hub (it reported an activity's update token; its app connecting is
+// phoneConnected), so the hub hears of what it starts there again: the next start waits only for the rolling cooldown.
+// The answer is stamped now: it lifts the hold of a start claimed up to now, never of one claimed while its write was
+// on its way.
 // device is the phone's push id, which the start was claimed under (the activity's row, the start budget).
 func (la *liveActivities) phoneAnswered(ctx context.Context, device string) {
 	if la == nil || device == "" {
@@ -721,19 +747,59 @@ func (la *liveActivities) phoneAnswered(ctx context.Context, device string) {
 	la.liftHold(ctx, device, la.now())
 }
 
+// phoneConnectedLater is phoneConnected off the app's read loop, which never waits for the store (#6889): one
+// goroutine at a time lifts the queued answers in order, each as of when it arrived, and ends when none is left. A
+// repeated registration replaces its queued one; past helloPendingLimit a new one is dropped (logged): the hold then
+// lasts until the phone reports a token, registers again or fleetMaxAge passes.
+func (la *liveActivities) phoneConnectedLater(pushID, credential string) {
+	if la == nil {
+		return
+	}
+	a := phoneAnswer{pushID: pushID, credential: credential, at: la.now()}
+	la.answerMu.Lock()
+	defer la.answerMu.Unlock()
+	if i := slices.IndexFunc(la.answers, func(q phoneAnswer) bool { return q.pushID == pushID && q.credential == credential }); i >= 0 {
+		la.answers[i].at = a.at
+	} else if len(la.answers) >= helloPendingLimit {
+		la.h.logf("live activity start hold: answer dropped, %d waiting", len(la.answers))
+		return
+	} else {
+		la.answers = append(la.answers, a)
+	}
+	if !la.answering {
+		la.answering = true
+		go la.liftAnswers()
+	}
+}
+
+func (la *liveActivities) liftAnswers() {
+	for {
+		la.answerMu.Lock()
+		if len(la.answers) == 0 {
+			la.answering = false
+			la.answerMu.Unlock()
+			return
+		}
+		a := la.answers[0]
+		la.answers = la.answers[1:]
+		la.answerMu.Unlock()
+		la.phoneConnected(context.Background(), a.pushID, a.credential, a.at)
+	}
+}
+
 // phoneConnected: a phone's app registered over its connection (register_phone), which answers the starts claimed
 // for that phone. They are claimed under its push id, so that is what names it: pushID when the app gave one. An
 // older app gives none, and what its registration is kept under instead (the connection's credential, or "legacy")
 // is no push id: lifting that would lift nothing. Such a phone is the devices its credential registered (or took
 // since, Device.Credential) or, on a connection without a credential, the devices that have none, as wakeDevices
 // finds the phone of such a registration. Never a Mac or a watch: they register as devices too and run no activity
-// of the phone's.
-func (la *liveActivities) phoneConnected(ctx context.Context, pushID, credential string) {
+// of the phone's. at is when the app registered: its answer lifts the holds of starts claimed up to then.
+func (la *liveActivities) phoneConnected(ctx context.Context, pushID, credential string, at time.Time) {
 	if la == nil {
 		return
 	}
 	if pushID != "" {
-		la.phoneAnswered(ctx, pushID)
+		la.liftHold(ctx, pushID, at)
 		return
 	}
 	if la.h.push == nil {
@@ -745,7 +811,7 @@ func (la *liveActivities) phoneConnected(ctx context.Context, pushID, credential
 			its = d.CredentialID == "" && d.Credential == ""
 		}
 		if its && d.Kind != kindMac && d.Kind != "watch" {
-			la.phoneAnswered(ctx, d.DeviceID)
+			la.liftHold(ctx, d.DeviceID, at)
 		}
 	}
 }
@@ -905,7 +971,7 @@ func (la *liveActivities) sendStart(d Device, r db.LiveActivity, claimed time.Ti
 				v.PushToStartToken = ""
 			}
 		})
-	}, func(o pushOutcome) {
+	}, func(o pushResult) {
 		if o == pushRefused {
 			la.startRefused(r.DeviceID, claimed)
 		}

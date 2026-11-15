@@ -371,7 +371,7 @@ func TestSendFailureOutcome(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		err  error
-		want pushOutcome
+		want pushResult
 	}{
 		{"registration changed", errRegistrationChanged, pushRefused},
 		{"request not made", fmt.Errorf("%w: %v", errNotSent, errors.New("bad URL")), pushRefused},
@@ -561,5 +561,108 @@ func TestFleetHoldLiftedOnTheOtherSlot(t *testing.T) {
 				t.Fatalf("B started %d, want its 1", got)
 			}
 		})
+	})
+}
+
+// fleetHoldHookStore runs duringHold before the first start's hold reaches the store, as an answer that arrives while
+// that write is on its way and lands first does.
+type fleetHoldHookStore struct {
+	Store
+	duringHold func()
+	fired      bool
+}
+
+func (s *fleetHoldHookStore) HoldLiveActivityStart(ctx context.Context, device string, asOf time.Time, hold time.Duration) (bool, error) {
+	if hold == fleetMaxAge && !s.fired {
+		s.fired = true
+		s.duringHold()
+	}
+	return s.Store.HoldLiveActivityStart(ctx, device, asOf, hold)
+}
+
+// The hold write can block for the store's timeout after the start was claimed and checked. When the phone's app
+// connects or it reports an update token meanwhile, no start goes out, and the hold its answer lifted (and this late
+// write put back) is lifted again (#7641 review).
+func TestFleetStartRechecksAfterSlowHold(t *testing.T) {
+	for _, change := range []string{"register_phone", "update_token"} {
+		t.Run(change, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				h, sink, stop := localFleetLoop(t)
+				stop()
+				store := h.store.(*fleetStartStore)
+				h.live.update("phone", func(v *db.LiveActivity) { v.ActivityID, v.PushToken = "", "" })
+				reportLive(t, h, fleetWorking, FleetStats{})
+				h.store = &fleetHoldHookStore{Store: store, duringHold: func() {
+					switch change {
+					case "register_phone":
+						app := &client{hub: h, device: "credential-ios", role: roleFull, out: make(chan []byte, 64), clean: true}
+						addTestClient(h, app)
+						h.onClientMessage(context.Background(), app, []byte(`{"type":"register_phone","device_id":"phone","tools":[]}`))
+					case "update_token":
+						h.live.update("phone", func(v *db.LiveActivity) { v.PushToken, v.StartedAt = "fresh", time.Now() })
+					}
+				}}
+				due := h.live.flush(fleetWorking, true, true)
+				synctest.Wait()
+				if !h.store.(*fleetHoldHookStore).fired {
+					t.Fatal("no start was claimed and held")
+				}
+				if got := fleetStarts(sink); got != 0 {
+					t.Fatalf("%s during the hold write still pushed %d starts", change, got)
+				}
+				if hold := startHold(store, "phone"); hold != fleetRefresh {
+					t.Fatalf("next start %v after the claim, want the cooldown %v", hold, fleetRefresh)
+				}
+				if !due.Equal(time.Now().Add(fleetRefresh)) {
+					t.Fatalf("spent claim lost retry deadline: %s", due)
+				}
+			})
+		})
+	}
+}
+
+// fleetHoldGateStore holds every HoldLiveActivityStart until release closes.
+type fleetHoldGateStore struct {
+	Store
+	release chan struct{}
+}
+
+func (s *fleetHoldGateStore) HoldLiveActivityStart(ctx context.Context, device string, asOf time.Time, hold time.Duration) (bool, error) {
+	<-s.release
+	return s.Store.HoldLiveActivityStart(ctx, device, asOf, hold)
+}
+
+// register_phone lifts the hold off the app's read loop (#6889): a slow store keeps neither the registration nor the
+// app's next message waiting, and the lift lands once the store answers.
+func TestRegisterPhoneLiftsWithoutHoldingTheReadLoop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newFleetRun(t)
+		h, sink := r.h, r.sink
+		store := h.store.(*fleetStartStore)
+		h.live.update("phone", func(v *db.LiveActivity) { v.ActivityID, v.PushToken = "", "" })
+		reportLive(t, h, fleetWorking, FleetStats{})
+		elapse(fleetCoalesce)
+		if got, hold := fleetStarts(sink), startHold(store, "phone"); got != 1 || hold != fleetMaxAge {
+			t.Fatalf("%d starts held for %v, want 1 held for %v", got, hold, fleetMaxAge)
+		}
+		gate := &fleetHoldGateStore{Store: store, release: make(chan struct{})}
+		h.store = gate
+		app := &client{hub: h, device: "credential-ios", role: roleFull, out: make(chan []byte, 64), clean: true}
+		addTestClient(h, app)
+		h.onClientMessage(context.Background(), app, []byte(`{"type":"register_phone","device_id":"phone","tools":[]}`))
+		h.onClientMessage(context.Background(), app, []byte(`{"type":"ping","id":"behind"}`))
+		if msg := waitClientMessage(t, app, "pong"); msg["id"] != "behind" {
+			t.Fatalf("pong: %v", msg)
+		}
+		if hold := startHold(store, "phone"); hold != fleetMaxAge {
+			t.Fatalf("lifted before the store answered: %v", hold)
+		}
+		close(gate.release)
+		synctest.Wait()
+		if hold := startHold(store, "phone"); hold != fleetRefresh {
+			t.Fatalf("after the store answered: next start %v after its last, want %v", hold, fleetRefresh)
+		}
+		h.dropClient(app)
+		synctest.Wait()
 	})
 }

@@ -146,11 +146,11 @@ func (p *Pusher) sendLiveActivity(d Device, token string, payload map[string]any
 	return p.sendLiveActivityThen(d, token, payload, priority, gone, nil)
 }
 
-// pushOutcome is what came of one push once its retries are over.
-type pushOutcome int
+// pushResult is what came of one Live Activity push once its retries are over (pushOutcome is where an alert went).
+type pushResult int
 
 const (
-	pushAccepted pushOutcome = iota // APNs took it (directly, or the relay said it did)
+	pushAccepted pushResult = iota // APNs took it (directly, or the relay said it did)
 	// pushRefused: it was never sent, or APNs or the relay answered with a status other than 200 (410 included): it
 	// is not on the phone.
 	pushRefused
@@ -161,9 +161,9 @@ const (
 
 // sendLiveActivityThen is sendLiveActivity that tells outcome (nil: nobody) what came of the push, before the returned
 // channel closes. It runs on the push's own goroutine, or on the caller's when nothing is sent.
-func (p *Pusher) sendLiveActivityThen(d Device, token string, payload map[string]any, priority string, gone func(), outcome func(pushOutcome)) <-chan struct{} {
+func (p *Pusher) sendLiveActivityThen(d Device, token string, payload map[string]any, priority string, gone func(), outcome func(pushResult)) <-chan struct{} {
 	done := make(chan struct{})
-	tell := func(o pushOutcome) {
+	tell := func(o pushResult) {
 		if outcome != nil {
 			outcome(o)
 		}
@@ -222,7 +222,7 @@ func (p *Pusher) sendLiveActivityThen(d Device, token string, payload map[string
 
 // sendFailure is the outcome of a send that returned err: refused when it was never sent or the relay answered with a
 // status (relayRefusal), unknown when nothing answered.
-func sendFailure(err error) pushOutcome {
+func sendFailure(err error) pushResult {
 	var refusal *relayRefusal
 	if errors.Is(err, errNotSent) || errors.As(err, &refusal) {
 		return pushRefused
