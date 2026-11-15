@@ -9,7 +9,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
-import { createRuntime, light, page, RpcError, snippet } from '../../runtime-sdk/index.js'
+import { createRuntime, interactionId, light, page, RpcError, snippet } from '../../runtime-sdk/index.js'
 import {
   AUTO_ACCEPT, AUTO_ACCEPT_ROOTS, CHECK_LABEL, EFFORTS, KEPT, KEPT_LABEL, RUNTIME, SESSION_LABEL, WORKSPACE_ID, agentRoot, agentRow, appAgent,
   archivedUnderOwnId, autoAcceptOf, claudeId, codexThreadOf, defaultProvider, formModel, interactionOf, launchersOf, linkedWorktree,
@@ -58,6 +58,13 @@ const MCP_UNSUPPORTED = /does not support MCP servers/i
 // What Paseo says when a provider cannot preapprove MCP tools (provider-options ToolPolicyUnsupportedError, agent-manager).
 const POLICY_UNSUPPORTED = /cannot preapprove exact MCP tools/i
 const REWIND_WAIT = 120_000 // ms: Paseo answers a rewind once it is done (a Claude Code fork, files put back)
+// A card's time on the phone, asked for (the node's own most, 30 minutes): Paseo waits on a request for as long as it
+// takes, so a card whose time ran out goes up again (dismissed).
+const CARD_LIFE = 30 * 60 // s
+const EXPIRY_SLACK = 60_000 // ms: a dismissal this near the end is its time running out (the hub's clock may be ahead)
+// The hub answers at once, from its record, for a card it ended already (a gap, or a bridge before this one, left it
+// behind); a person takes longer to see a card and hand it back.
+const AT_ONCE = 5000 // ms
 // A launcher check (check): the probe's answer within this, and the rest of the node's 90 s for creating and cleaning up.
 const CHECK_WAIT = 70_000 // ms
 
@@ -66,9 +73,11 @@ const CHECK_WAIT = 70_000 // ms
  *   paseo: a PaseoClient (default: one for options.home).
  * @param {{ home?: string, socketPath?: string, mcpConfig?: string, allowTools?: string[], retryMs?: number, pushDelayMs?: number,
  *   refreshMs?: number, awayGrace?: number, callWait?: number, listMax?: number, pageSize?: number, closedChecks?: number[],
- *   sweepMs?: number, claudeHome?: string, claudeEnv?: object }} [options]
+ *   sweepMs?: number, claudeHome?: string, claudeEnv?: object, resumeWaitMs?: number, atOnceMs?: number }} [options]
  *   allowTools: the Persona tools (full MCP names) an Agent Persona created calls without a card (the node's, #4966).
  *   sweepMs: 0 never reads the directory again.
+ *   resumeWaitMs: the runtime SDK's wait for the next node under a card (tests). atOnceMs: how soon after a card went up
+ *   (or the hub was back) a dismissal is the hub's own answer, not a person's (AT_ONCE; tests).
  *   claudeHome, claudeEnv: where Claude Code's transcripts are looked for (lineage.js): home's .claude and env's
  *   $CLAUDE_CONFIG_DIR (default: this process's).
  */
@@ -81,6 +90,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
   const pageSize = options.pageSize ?? PAGE
   const closedChecks = options.closedChecks ?? CLOSED_CHECKS
   const sweepMs = options.sweepMs ?? SWEEP_EVERY
+  const atOnce = options.atOnceMs ?? AT_ONCE
 
   const agents = new Map() // agent id → { agent, project }
   const bySession = new Map() // session id → agent id
@@ -90,9 +100,19 @@ export function createPaseoBridge(deps = {}, options = {}) {
   let labels = {} // provider id → its label
   let launchers = []
   const watches = new Map() // session id → watch (see watchChanged)
-  const asks = new Map() // permission id → { abort, agentId }
+  // permission id → its card while it is on the phone, and then while its answer is on its way to Paseo (askFor):
+  // { agentId, abort, round, fresh, since, askedAt, epoch, answer?, sending? }
+  const asks = new Map()
   const allowTools = new Set(options.allowTools ?? [])
-  const handedBack = new Set() // permission ids the phone handed back to the computer: Paseo's own app answers them
+  const handedBack = new Set() // permission ids a person handed back to the computer: Paseo's own app answers them
+  // permission id → { agentId, round, used, since }: the round its card goes up in, whether that round's id went up
+  // already, and when it first did here. Round 0's id is the one any bridge gives the request (a card a node restart
+  // left on the hub is taken up again under it); a later round's is this bridge's own (boot), never one an earlier
+  // bridge used.
+  const rounds = new Map()
+  const boot = randomUUID()
+  let hubEpoch = 0 // bumped whenever the node or its hub comes or goes (onHub): a card up across that may be ended there
+  let hubBackAt = 0 // when a node with a hub was last there again
   const echoes = new Map() // Paseo message id → the client_msg_id the phone sent it with
   const lastTexts = new Map() // agent id → its last words (agents whose content is not a transcript)
   // agent id → { agent, project, transcript?, at }: archived Claude agents and Persona-owned Codex agents (noteArchived),
@@ -142,8 +162,14 @@ export function createPaseoBridge(deps = {}, options = {}) {
     retryMs: options.retryMs,
     pushDelayMs: options.pushDelayMs,
     refreshMs: options.refreshMs,
+    resumeWaitMs: options.resumeWaitMs,
+    // After every hello and whenever the node's hub comes or goes: a card up across it may have been ended on the hub
+    // (dismissed); the requests not on the phone go up once a hub is there.
     onHub: (connected) => {
-      if (connected) askPending()
+      hubEpoch++
+      if (!connected) return
+      hubBackAt = Date.now()
+      askPending()
     },
   }
   const rt = createRuntime({
@@ -220,10 +246,11 @@ export function createPaseoBridge(deps = {}, options = {}) {
       index(agent)
       retarget()
     }
-    // Its requests: new ones to the phone, those no longer pending off it.
+    // Its requests: new ones to the phone, those no longer pending off it (and forgotten).
     const pending = new Set((agent.pendingPermissions ?? []).map((r) => r?.id))
     for (const r of agent.pendingPermissions ?? []) askFor(agent.id, r)
     for (const [id, a] of asks) if (a.agentId === agent.id && !pending.has(id)) a.abort()
+    for (const [id, c] of rounds) if (c.agentId === agent.id && !pending.has(id)) forgetRequest(id)
     if (agent.status === 'closed' && prev && prev.agent.status !== 'closed') closedSoon(agent.id)
     if (!transcriptOf(agent, roots) && agent.status !== 'closed' && prev?.agent.updatedAt !== agent.updatedAt) lastTextSoon(agent.id)
     for (const [sid, w] of watches) if (w.agentId === agent.id) scheduleRefresh(sid)
@@ -313,6 +340,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
     timelines.delete(agentId)
     lastTexts.delete(agentId)
     for (const [id, x] of asks) if (x.agentId === agentId) x.abort()
+    for (const [id, c] of rounds) if (c.agentId === agentId) forgetRequest(id)
     reindex()
     scheduleWorkspaces()
   }
@@ -752,10 +780,11 @@ export function createPaseoBridge(deps = {}, options = {}) {
         break
       }
       case 'agent_permission_resolved': {
+        // Answered: in Paseo's own app (the card leaves the phone), or the bridge's own answer confirmed.
         const a = agents.get(p.agentId)?.agent
         if (a) a.pendingPermissions = (a.pendingPermissions ?? []).filter((r) => r?.id !== p.requestId)
         asks.get(p.requestId)?.abort()
-        handedBack.delete(p.requestId)
+        forgetRequest(p.requestId)
         rt.sessionsChanged(50)
         break
       }
@@ -778,41 +807,149 @@ export function createPaseoBridge(deps = {}, options = {}) {
 
   // ---- cards ----
 
-  /** Put a pending request on the phone (once); the answer goes back to Paseo. Answered in Paseo: withdrawn. */
+  /**
+   * Put a pending request on the phone (once); the answer goes back to Paseo. Answered in Paseo: withdrawn. With no hub
+   * it waits for one (onHub). One whose answer could not reach Paseo (it was away) has that answer sent again once
+   * Paseo is back and still asks.
+   */
   function askFor(agentId, request) {
-    if (!request?.id || asks.has(request.id) || handedBack.has(request.id)) return
+    if (!request?.id || handedBack.has(request.id)) return
+    const had = asks.get(request.id)
+    if (had) {
+      if (had.answer && !had.sending && paseo.connected) void deliver(request.id, had)
+      return
+    }
     if (ownTool(agentId, request)) return allowOwn(agentId, request)
-    if (!rt.connected) return
+    if (!rt.hubConnected) return
     const sessionId = sessionOf(agentId)
     if (!sessionId) return
+    let card = rounds.get(request.id)
+    if (!card) rounds.set(request.id, card = { agentId, round: 0, used: true, since: undefined })
     const ac = new AbortController()
-    const entry = { agentId, abort: () => ac.abort(new Error('answered elsewhere')) }
+    const entry = {
+      agentId, round: card.round, fresh: !card.used, since: undefined, askedAt: 0, epoch: hubEpoch,
+      abort: () => {
+        if (asks.get(request.id) === entry) asks.delete(request.id)
+        ac.abort(new Error('answered elsewhere'))
+      },
+    }
+    card.used = true
     asks.set(request.id, entry)
-    withPlan(agentId, request).then((r) => rt.ask(interactionOf(sessionId, r), { signal: ac.signal })).then(async (res) => {
+    withPlan(agentId, request).then((r) => {
+      entry.askedAt = Date.now()
+      entry.epoch = hubEpoch
+      card.since ??= entry.askedAt
+      entry.since = card.since
+      return rt.ask(cardOf(sessionId, r, entry.round), { signal: ac.signal, timeoutSeconds: CARD_LIFE })
+    }).then((res) => {
       if (asks.get(request.id) !== entry) return
-      asks.delete(request.id)
       const agent = agents.get(agentId)?.agent
-      const root = agentRoot(agent, roots)
-      const out = responseOf(request, res, root)
-      if (!out) {
-        // Handed back (or no hub to ask: asked again when it is back): Paseo's app answers it meanwhile.
-        if (rt.hubConnected) handedBack.add(request.id)
-        return
+      const out = responseOf(request, res, agentRoot(agent, roots), modesOf(agent))
+      if (out) {
+        entry.answer = out
+        return deliver(request.id, entry)
       }
-      try {
-        await paseo.request('agent_permission_response', { agentId, response: out.response },
-          { requestId: request.id, expect: 'agent_permission_resolved', timeoutMs: 30_000 })
-        const modeId = paseoMode(root, out.setMode)
-        if (modeId) {
-          const r = await paseo.request('set_agent_mode_request', { agentId, modeId })
-          if (r?.accepted === false) log(`paseo: mode ${modeId} for ${agentId}: ${r.error ?? 'refused'}`)
-        }
-      } catch (err) {
-        log(`paseo: answer ${request.id} of ${agentId}: ${err.message}`)
-      }
+      asks.delete(request.id)
+      if (res?.dismiss) dismissed(agentId, request, entry)
+      else handedBack.add(request.id) // an answer that says nothing Paseo takes: its own app answers it
     }, () => {
       if (asks.get(request.id) === entry) asks.delete(request.id)
     })
+  }
+
+  /**
+   * A request's card: in round 0 under the id any bridge gives it (interactionOf: the hub hangs a bridge's ask after a
+   * node restart on the card the phone already shows), in a later round under one of this bridge's own, a new card.
+   */
+  function cardOf(sessionId, request, round) {
+    const ix = interactionOf(sessionId, request)
+    if (round > 0) ix.id = interactionId(RUNTIME, sessionId, ix.kind, `${request.id}\0${boot}\0${round}`)
+    return ix
+  }
+
+  /** An agent's modes with their labels: as its record lists them, else as its provider does. */
+  function modesOf(agent) {
+    if (agent?.availableModes?.length) return agent.availableModes
+    return entries.find((e) => e?.provider === agent?.provider)?.modes ?? []
+  }
+
+  /**
+   * A card came back dismissed. Only a person's "Return to computer" leaves the request to Paseo's own app: one that
+   * came while the card was up, the hub there since it went up and before its time ran out. With no hub now it goes up
+   * again, under the same id, once a hub is back (onHub). One whose time ran out, or that the hub ended while it was
+   * away or before this card went up (then its answer comes at once), goes up again as a new card while Paseo still
+   * asks: a request Paseo waits on keeps its home on the phone (#8128).
+   */
+  function dismissed(agentId, request, e) {
+    if (!rt.hubConnected) return
+    const now = Date.now()
+    const gap = e.epoch !== hubEpoch
+    // When the hub last got the card: as it went up, or again when the hub was back after the gap.
+    const sent = gap ? Math.max(e.askedAt, hubBackAt) : e.askedAt
+    const expired = now - e.since >= CARD_LIFE * 1000 - EXPIRY_SLACK
+    // A card this bridge just made for the request was never on the hub: its dismissal is a person's, however soon.
+    const ended = (gap || !e.fresh) && now - sent < atOnce
+    if (!expired && !ended) {
+      handedBack.add(request.id)
+      return
+    }
+    log(`paseo: the card for ${request.id} of ${agentId} ${expired ? 'ran out of time' : 'was ended on the hub'}; a new one while Paseo still asks`)
+    askAgain(agentId, request.id, e.round)
+  }
+
+  /**
+   * The request on the phone again, as a new card (the round after the one given), while Paseo still lists it: the hub
+   * keeps how the last card ended, an answer included, under its id.
+   */
+  function askAgain(agentId, requestId, round) {
+    const card = rounds.get(requestId)
+    if (card?.round === round) {
+      card.round++
+      card.used = false
+      card.since = undefined
+    }
+    const r = (agents.get(agentId)?.agent.pendingPermissions ?? []).find((x) => x?.id === requestId)
+    if (r) askFor(agentId, r)
+  }
+
+  /**
+   * The phone's answer to Paseo. The card stays pending (asks) until Paseo confirms it, so an update of the agent that
+   * still lists the request meanwhile does not put it on the phone again. One that failed because Paseo was away waits
+   * there and goes again once Paseo is back and still asks (askFor). One Paseo refused goes up again as a new card.
+   */
+  async function deliver(requestId, e) {
+    e.sending = true
+    const root = agentRoot(agents.get(e.agentId)?.agent, roots)
+    try {
+      await paseo.request('agent_permission_response', { agentId: e.agentId, response: e.answer.response },
+        { requestId, expect: 'agent_permission_resolved', timeoutMs: 30_000 })
+    } catch (err) {
+      e.sending = false
+      if (asks.get(requestId) !== e) return // answered or gone meanwhile
+      if (err?.code === 'disconnected') {
+        log(`paseo: the answer to ${requestId} of ${e.agentId} waits for Paseo: ${err.message}`)
+        return
+      }
+      asks.delete(requestId)
+      log(`paseo: answer ${requestId} of ${e.agentId}: ${err.message}; asking again`)
+      askAgain(e.agentId, requestId, e.round)
+      return
+    }
+    if (asks.get(requestId) === e) asks.delete(requestId)
+    const modeId = paseoMode(root, e.answer.setMode)
+    if (!modeId) return
+    try {
+      const r = await paseo.request('set_agent_mode_request', { agentId: e.agentId, modeId })
+      if (r?.accepted === false) log(`paseo: mode ${modeId} for ${e.agentId}: ${r.error ?? 'refused'}`)
+    } catch (err) {
+      log(`paseo: mode ${modeId} for ${e.agentId}: ${err.message}`)
+    }
+  }
+
+  /** A request that is no longer pending (answered, or its agent gone): nothing kept of its cards. */
+  function forgetRequest(requestId) {
+    rounds.delete(requestId)
+    handedBack.delete(requestId)
   }
 
   /**

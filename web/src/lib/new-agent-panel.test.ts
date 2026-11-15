@@ -53,6 +53,11 @@ const panel = (o: Partial<Parameters<typeof newAgentPanel>[0]> = {}) =>
 const provider = (p: ReturnType<typeof panel>, id: string) => p.providers.find((x) => x.id === id)!;
 
 describe("the panel's providers", () => {
+  it("says which Persona providers pi can use too (#8194)", () => {
+    const p = panel({ launchers: [...launchers.slice(0, 4), { name: "p-relay", display_name: "Team relay", source: "persona", pi: true }] });
+    expect(provider(p, "p-relay").alsoNote).toBe("pi 也能用");
+    expect(provider(p, "claude").alsoNote).toBeUndefined();
+  });
   it("one per launcher in the hub's order, named by display name, each led by its Default row", () => {
     const p = panel();
     expect(p.providers.map((x) => [x.id, x.name, x.engine])).toEqual([

@@ -385,31 +385,55 @@ func (s *Service) decisionsChanged(ctx context.Context, todoID string, at time.T
 	s.todosChanged(ctx)
 }
 
-// todoDecisionsContext is the context block of a todo's decisions in effect that goes before what is handed to an
-// agent for it; empty when it has none or they cannot be read (the handoff goes on without them).
+// todoDecisionsContext is the context block of one todo's decisions in effect, for supervision and card delegation;
+// empty when it has none or they cannot be read.
 func (s *Service) todoDecisionsContext(ctx context.Context, todoID string) string {
+	return s.renderTodoDecisionsContext(ctx, todoID, []string{todoID})
+}
+
+// todoHandoffDecisionsContext also carries the decisions of the todo's actual continuation ancestors. Their records
+// stay historical context: no decision supersedes one on another todo, and none creates an authorization.
+func (s *Service) todoHandoffDecisionsContext(ctx context.Context, todoID string) string {
+	return s.renderTodoDecisionsContext(ctx, todoID, s.continuationTodos(todoID))
+}
+
+// renderTodoDecisionsContext renders the effective decisions of ids (oldest first), globally in time order. A read
+// failure omits only that todo's decisions and is logged; the handoff still goes on with the rest.
+func (s *Service) renderTodoDecisionsContext(ctx context.Context, todoID string, ids []string) string {
 	st := s.todoDB()
 	if st == nil || todoID == "" {
 		return ""
 	}
-	list, err := st.ListTodoDecisions(ctx, todoID, false)
-	if err != nil {
-		s.logf("decisions: todo %s: %v", todoID, err)
-		return ""
+	var list []db.TodoDecisionRow
+	for _, id := range ids {
+		rows, err := st.ListTodoDecisions(ctx, id, false)
+		if err != nil {
+			s.logf("decisions: todo %s: %v", id, err)
+			continue
+		}
+		list = append(list, rows...)
 	}
 	if len(list) == 0 {
 		return ""
 	}
-	var title string
+	slices.SortFunc(list, func(a, b db.TodoDecisionRow) int {
+		if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	titles := map[string]string{}
 	agents := map[[2]string]string{}
-	if t, ok := s.todoNow(todoID); ok {
-		title = t.Title
-		for _, a := range t.Agents {
-			agents[[2]string{a.MachineID, a.SessionID}] = a.Title
+	for _, id := range ids {
+		if t, ok := s.todoNow(id); ok {
+			titles[id] = t.Title
+			for _, a := range t.Agents {
+				agents[[2]string{a.MachineID, a.SessionID}] = a.Title
+			}
 		}
 	}
 	loc := s.location(ctx)
-	d := prompts.TodoDecisions{Title: contextText(title)}
+	d := prompts.TodoDecisions{Title: contextText(titles[todoID])}
 	for i, r := range list {
 		from := ""
 		if r.Source == db.DecisionOutcome {
@@ -424,6 +448,16 @@ func (s *Service) todoDecisionsContext(ctx context.Context, todoID string) strin
 				from = "在「" + contextText(oneLine(t)) + "」的提问里答的"
 			}
 		}
+		if r.TodoID != todoID {
+			ancestor := strings.TrimSpace(titles[r.TodoID])
+			if ancestor == "" {
+				ancestor = r.TodoID
+			}
+			if from != "" {
+				from += "；" // i18n-ignore: a line of the prompt the model reads (prompts/todo/decisions.md)
+			}
+			from += "前序任务「" + contextText(oneLine(ancestor)) + "」" // i18n-ignore: a line of the prompt the model reads
+		}
 		d.Decisions = append(d.Decisions, prompts.TodoDecision{N: i + 1, Question: contextText(r.Question),
 			Choice: contextText(r.Choice), Reason: contextText(r.Reason), When: r.CreatedAt.In(loc).Format("01-02 15:04"), From: from})
 	}
@@ -436,12 +470,13 @@ func contextText(s string) string {
 	return strings.ReplaceAll(strings.TrimSpace(prompts.ContextBody(s)), "\n", "\n      ")
 }
 
-// withTodoDecisions puts the todo's decisions before text handed to an agent for it; text as it is without any.
+// withTodoDecisions puts the todo's and its continuation ancestors' decisions before text handed to an agent;
+// text as it is without any.
 func (s *Service) withTodoDecisions(ctx context.Context, todoID, text string) string {
 	if strings.TrimSpace(text) == "" {
 		return text
 	}
-	if c := s.todoDecisionsContext(ctx, todoID); c != "" {
+	if c := s.todoHandoffDecisionsContext(ctx, todoID); c != "" {
 		return c + "\n\n" + text
 	}
 	return text

@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { RpcError } from '../../runtime-sdk/index.js'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { createPaseoBridge, TIMELINES_MAX, uuidOf } from '../lib/bridge.js'
 import { PaseoClient } from '../lib/paseo.js'
@@ -44,9 +45,11 @@ async function setup(t, o = {}) {
   writeFileSync(join(home, 'paseo.pid'), JSON.stringify({ pid: process.pid, listen: `127.0.0.1:${fake.port}` }))
   const logs = []
   const paseo = new PaseoClient({ home, retryMin: 30, retryMax: 100, log: (m) => logs.push(m) })
+  // The fake node answers a card at once, as no person can: such a dismissal is taken for a person's unless a test
+  // says how soon the hub's own answer comes (atOnceMs).
   const bridge = createPaseoBridge({ paseo, log: (m) => logs.push(m) },
     { socketPath: node.path, mcpConfig: o.mcpConfig, allowTools: o.allowTools, retryMs: 30, pushDelayMs: 5, refreshMs: 0, awayGrace: o.awayGrace ?? 400, callWait: 1500,
-      listMax: o.listMax, pageSize: o.pageSize, closedChecks: o.closedChecks, sweepMs: o.sweepMs ?? 0 })
+      listMax: o.listMax, pageSize: o.pageSize, closedChecks: o.closedChecks, sweepMs: o.sweepMs ?? 0, atOnceMs: o.atOnceMs ?? 0, resumeWaitMs: o.resumeWaitMs })
   bridge.start()
   t.after(() => bridge.stop())
   await node.ready
@@ -1286,6 +1289,159 @@ test('an approved plan with a mode: implement, then that mode; the plan read fro
   assert.equal(node.asked[0].plan, '## 计划\n\n1. 先写测试')
   assert.deepEqual(fake.requestsOf('agent_permission_response')[0].response, { behavior: 'allow', selectedActionId: 'implement' })
   assert.equal(fake.requestsOf('set_agent_mode_request')[0].modeId, 'bypassPermissions')
+})
+
+// #8128: cards and their answers across link drops.
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const codexAsk = (id) => ({ id, provider: 'codex', name: 'exec', kind: 'tool', title: 'Run a command', detail: { type: 'shell', command: 'make' } })
+
+test("an answer given while Paseo is away reaches it once it is back, and its card does not go up again", async (t) => {
+  const { fake, node, bridge, a } = await setup(t, { awayGrace: 5000 })
+  let answer
+  node.resolve = () => new Promise((r) => { answer = r })
+  fake.permission(a.codex.id, codexAsk('perm-away'))
+  await until('on the phone', () => node.asked.length === 1 && answer)
+  fake.refuse = 4500 // Paseo goes away (the laptop slept) and does not take the bridge back yet
+  fake.drop()
+  await until('the bridge sees Paseo gone', () => !bridge.paseo.connected)
+  answer({ allow: true }) // the phone answers meanwhile
+  await sleep(100)
+  assert.equal(fake.requestsOf('agent_permission_response').length, 0)
+  fake.refuse = undefined
+  await until('the answer, once Paseo is back', () => fake.requestsOf('agent_permission_response').length === 1, 5000)
+  const r = fake.requestsOf('agent_permission_response')[0]
+  assert.deepEqual([r.agentId, r.requestId, r.response], [a.codex.id, 'perm-away', { behavior: 'allow' }])
+  await until('settled', () => !bridge.state.asks.has('perm-away'))
+  assert.equal(node.asked.length, 1, 'not asked a second time')
+})
+
+test("a card stays pending until Paseo confirms its answer; Paseo's resolution reaches the bridge's events too", async (t) => {
+  const { fake, node, a } = await setup(t)
+  let confirm
+  fake.handlers.agent_permission_response = (msg, c) => {
+    confirm = () => fake.resolvePermission(msg.agentId, msg.requestId, msg.response, c)
+    return null // answered later
+  }
+  node.resolve = () => ({ allow: true })
+  fake.permission(a.codex.id, codexAsk('perm-gap'))
+  await until('the answer on its way', () => confirm)
+  fake.update(a.codex.id, { title: 'B, still asking' }) // an update in between that still lists the request
+  await sleep(150)
+  assert.equal(node.asked.length, 1, 'not put on the phone again while its answer is on its way')
+  confirm()
+  await until('off the list', () => !node.last('runtime.sessions').sessions.find((s) => s.session_id === `paseo-${a.codex.id}`)?.status?.startsWith('blocked'))
+  assert.equal(node.asked.length, 1)
+})
+
+test("a reply that is also a subscription's event reaches both: the answer settles, and the subscription hears the resolution", async (t) => {
+  const a = agents()
+  const fake = await startFakePaseo(t, { providers: PROVIDERS, entries: ENTRIES, agents: [{ agent: a.codex, project: PROJECT }] })
+  const home = mkdtempSync('/tmp/ppaseo-')
+  t.after(() => rmSync(home, { recursive: true, force: true }))
+  writeFileSync(join(home, 'paseo.pid'), JSON.stringify({ pid: process.pid, listen: `127.0.0.1:${fake.port}` }))
+  const paseo = new PaseoClient({ home, retryMin: 30, retryMax: 100 })
+  const up = new Promise((r) => paseo.once('connected', r))
+  paseo.start()
+  t.after(() => paseo.stop())
+  await up
+  const heard = []
+  await paseo.subscribe('session.events.set_subscription.request', { events: ['agent_permission_request', 'agent_permission_resolved'] }, (inner) => heard.push(inner))
+  fake.permission(a.codex.id, codexAsk('perm-own'))
+  // Paseo tells the subscriptions under the permission's id, the answer's requestId, before it replies to the answer.
+  const reply = await paseo.request('agent_permission_response', { agentId: a.codex.id, response: { behavior: 'allow' } },
+    { requestId: 'perm-own', expect: 'agent_permission_resolved' })
+  assert.equal(reply.requestId, 'perm-own')
+  await until('the subscription heard it', () => heard.some((m) => m.type === 'agent_permission_resolved' && m.payload.requestId === 'perm-own'))
+})
+
+test('a card on the phone when the hub link drops: asked again with the same id once the hub is back, however long it was up', async (t) => {
+  const { fake, node, a } = await setup(t, { resumeWaitMs: 300 })
+  let drop
+  node.resolve = () => new Promise((_, reject) => { drop = () => reject(new RpcError('node going away', 'node_gone')) })
+  fake.permission(a.codex.id, codexAsk('perm-drop'))
+  await until('on the phone', () => drop)
+  await sleep(400) // up longer than the wait for the next node
+  // The node answers node_gone as its hub link drops, and tells the runtime the hub is gone after that.
+  node.resolve = () => Promise.reject(new RpcError('no hub connected', 'node_gone'))
+  drop()
+  await sleep(20)
+  node.setHub(false)
+  await sleep(200)
+  fake.permission(a.claude.id, { id: 'perm-meanwhile', provider: 'claude', name: 'Bash', kind: 'tool', input: { command: 'ls' } })
+  await sleep(100)
+  node.resolve = () => ({ allow: true })
+  node.setHub(true)
+  await until('both answered', () => fake.requestsOf('agent_permission_response').length === 2, 5000)
+  const sent = Object.fromEntries(fake.requestsOf('agent_permission_response').map((r) => [r.requestId, r.response]))
+  assert.deepEqual(sent, { 'perm-drop': { behavior: 'allow' }, 'perm-meanwhile': { behavior: 'allow' } })
+  const drops = node.asked.filter((ix) => ix.session_id === `paseo-${a.codex.id}`)
+  assert.ok(drops.length >= 2 && drops.every((ix) => ix.id === drops[0].id), 'the same card each time')
+  assert.equal(node.asked.filter((ix) => ix.session_id === SID).length, 1, 'one asked with no hub went up once the hub was back')
+})
+
+test("a card the hub ended while it was away goes up again as a new card; a person's Return to computer stays", async (t) => {
+  const { fake, node, a } = await setup(t, { resumeWaitMs: 200, atOnceMs: 300 })
+  let drop
+  node.resolve = () => new Promise((_, reject) => { drop = () => reject(new RpcError('node going away', 'node_gone')) })
+  fake.permission(a.codex.id, codexAsk('perm-ended'))
+  await until('on the phone', () => drop)
+  const first = node.asked[0].id
+  // The hub link drops for longer than the node waits for it (and than the hub keeps the card).
+  node.resolve = () => Promise.reject(new RpcError('no hub connected', 'node_gone'))
+  drop()
+  node.setHub(false)
+  await sleep(1500) // the runtime stops waiting: no hub, nothing handed back
+  // Back: the hub answers the old card at once, from its record (cancelled); the new card is answered.
+  node.resolve = (ix) => (ix.id === first ? { dismiss: true } : { allow: true })
+  node.setHub(true)
+  await until('the new card answered', () => fake.requestsOf('agent_permission_response').length === 1, 5000)
+  const ids = node.asked.map((ix) => ix.id)
+  assert.deepEqual(ids.slice(0, -1).every((id) => id === first), true)
+  assert.notEqual(ids.at(-1), first, 'a new card: the hub keeps the old one as ended')
+  assert.deepEqual(fake.requestsOf('agent_permission_response')[0].requestId, 'perm-ended')
+
+  // A person hands one back (a while after it went up): it stays with Paseo's app, also across a hub flap.
+  const asked = node.asked.length
+  node.resolve = () => sleep(400).then(() => ({ dismiss: true }))
+  fake.permission(a.codex.id, codexAsk('perm-person'))
+  await until('handed back', () => node.asked.length === asked + 1)
+  await sleep(600)
+  node.setHub(false)
+  node.setHub(true)
+  await sleep(300)
+  assert.equal(node.asked.length, asked + 1, 'not put up again')
+
+  // A card the bridge has just made for a request was never on the hub: dismissed however soon, it is a person's.
+  node.resolve = () => ({ dismiss: true })
+  fake.permission(a.claude.id, { id: 'perm-quick', provider: 'claude', name: 'Bash', kind: 'tool', input: { command: 'ls' } })
+  await until('asked', () => node.asked.length === asked + 3)
+  await sleep(300)
+  const quick = node.asked.slice(asked + 1)
+  assert.equal(quick.length, 2, 'the id any bridge gives it (the hub may have ended it before), then one new card, and no more')
+  assert.notEqual(quick[0].id, quick[1].id)
+})
+
+test("a card whose time ran out goes up again as a new card while Paseo still asks", async (t) => {
+  const { fake, node, a } = await setup(t)
+  let expire
+  node.resolve = () => new Promise((r) => { expire = () => r({ dismiss: true }) })
+  fake.permission(a.codex.id, codexAsk('perm-old'))
+  await until('on the phone', () => expire)
+  const realNow = Date.now
+  t.after(() => { Date.now = realNow })
+  node.resolve = () => new Promise(() => {})
+  Date.now = () => realNow() + 30 * 60_000 // its 30 minutes are over: the hub ends it
+  expire()
+  await until('up again', () => node.asked.length === 2)
+  Date.now = realNow
+  assert.notEqual(node.asked[1].id, node.asked[0].id, 'a new card: the hub keeps the old one as expired')
+  assert.deepEqual([node.asked[1].session_id, node.asked[1].tool_name, node.asked[1].summary], [node.asked[0].session_id, node.asked[0].tool_name, node.asked[0].summary])
+  // Answered in Paseo's own app: the new card leaves the phone, and nothing goes up again.
+  fake.resolvePermission(a.codex.id, 'perm-old', { behavior: 'allow' })
+  await until('withdrawn', () => node.all('interaction.cancel').some((c) => c.id === node.asked[1].id))
+  await sleep(100)
+  assert.equal(node.asked.length, 2)
 })
 
 test('Paseo restarting: the bridge connects again and keeps the sessions; gone for good, it leaves the node', async (t) => {

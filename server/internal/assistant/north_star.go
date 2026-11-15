@@ -27,7 +27,7 @@ import (
 // the interactions' first-dispatch markers (#4443, confirmation_metrics.go), the work events (session_work_events) and
 // the scheduled runs. Recording adds two work events and one setting, no table:
 //
-//   - notifyEvent: a notify_user call, when it is sent.
+//   - notifyEvent: a notify_user call, when it is sent; one that no device took says why (detail "missed").
 //   - sendEvent: a start or a resume of the main or a leader conversation and how it went, from the manager's own sends
 //     (call) and from an app's message the hub sent (ConversationSent).
 //   - northStarSinceKey: when this build began recording, so what lies before it reads as unknown, not zero.
@@ -229,9 +229,13 @@ func (s *Service) ConversationSent(_ context.Context, r ConversationSent) {
 	s.recordSend(r.MachineID, r.SessionID, "resume", originApp, false, outcome, r.Code, r.Error)
 }
 
-// recordNotify keeps a notify_user call (notifyEvent): its task and whether it came from a test probe's directory.
-func (s *Service) recordNotify(ctx context.Context, machine, session string) {
+// recordNotify keeps a notify_user call (notifyEvent): its task, whether it came from a test probe's directory, and
+// why no device took it when none did (missed, notifyMissed; "" when one did or the hub did not say).
+func (s *Service) recordNotify(ctx context.Context, machine, session, missed string) {
 	detail := map[string]any{}
+	if missed != "" {
+		detail["missed"] = missed
+	}
 	if t, ok := s.todoOfSession(ctx, machine, session); ok {
 		detail["todo"] = t.ID
 	}
@@ -326,6 +330,9 @@ type InterruptExcluded struct {
 	SupervisorEscalated int `json:"supervisor_escalated"`
 	AutoAuthorized      int `json:"auto_authorized"`
 	Probe               int `json:"probe"`
+	// NotifyMissed counts the notify_user calls no device took when they were made, by why (notifyMissed): the hub
+	// handed them to no phone, computer or browser, so they did not interrupt the owner.
+	NotifyMissed map[string]int `json:"notify_missed"`
 }
 
 // InterruptSource is one source's count in one category.
@@ -487,7 +494,8 @@ func readNorthStar(ctx context.Context, st northStarStore, q northStarQuery) (No
 }
 
 func interruptions(q northStarQuery, roles convRoles, cards []db.NorthStarCard, events []db.WorkEvent, recorded func(time.Time) bool) Interruptions {
-	in := Interruptions{Categories: map[string]*InterruptCategory{}, Sources: []InterruptSource{}}
+	in := Interruptions{Categories: map[string]*InterruptCategory{}, Sources: []InterruptSource{},
+		Excluded: InterruptExcluded{NotifyMissed: map[string]int{}}}
 	for _, c := range nsCategories {
 		in.Categories[c] = &InterruptCategory{BySource: map[string]int{}, ByKind: map[string]int{}}
 	}
@@ -559,6 +567,10 @@ func interruptions(q northStarQuery, roles convRoles, cards []db.NorthStarCard, 
 		case notifyEvent:
 			if probe, _ := e.Detail["probe"].(bool); probe {
 				in.Excluded.Probe++
+				continue
+			}
+			if missed, _ := e.Detail["missed"].(string); missed != "" {
+				in.Excluded.NotifyMissed[missed]++
 				continue
 			}
 			todo, _ := e.Detail["todo"].(string)

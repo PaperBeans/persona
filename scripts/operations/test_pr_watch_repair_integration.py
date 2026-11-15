@@ -89,6 +89,293 @@ class RepairIntegrationTests(unittest.TestCase):
                 pr_watch_repair.commit_and_push_repair("example/one", self.pr, str(self.repo), self.base, "failure", {"profile": "commands", "commands": [["true"]]})
         self.assertEqual(self.git("ls-remote", "origin", "refs/heads/fix/example").split()[0], self.head)
 
+    # #7840: main moves every few minutes and a verification takes longer; a repair follows it when it only moved on.
+    def push_main(self, name, parent=None):
+        """A new commit on origin's main, on top of `parent` (a rewrite) or of its current tip; the checkout stays put."""
+        branch = self.git("rev-parse", "--abbrev-ref", "HEAD")
+        self.git("fetch", "-q", "origin", "main")
+        self.git("checkout", "-q", "--detach", parent or "FETCH_HEAD")
+        (self.repo / (name + ".txt")).write_text(name + "\n")
+        self.git("add", name + ".txt")
+        self.git("commit", "-qm", name)
+        self.git("push", "-q", "--force", "origin", "HEAD:refs/heads/main")
+        tip = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-q", branch)
+        return tip
+
+    def passthrough(self):
+        return patch.object(pr_watch_repair, "checked", side_effect=lambda argv, **kwargs:
+                            self.git(*argv[1:], cwd=kwargs.get("cwd")) if argv[0] == "git" else "")
+
+    def test_merge_follows_main_that_moved_after_the_pr_was_read(self):
+        newer = self.push_main("newer")
+        updated = pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main)
+        self.assertEqual(self.git("show", "-s", "--format=%P", updated).split(), [self.head, newer])
+        self.assertEqual(pr_watch_repair.merged_main(str(self.repo), updated), newer)
+
+    def test_a_pr_up_to_date_with_its_verified_base_is_not_merged_when_only_main_moved(self):
+        self.git("merge", "-q", "--no-edit", self.main)
+        head = self.git("rev-parse", "HEAD")
+        self.push_main("newer")
+        self.assertIsNone(pr_watch_repair.update_branch_with_main("example/one", dict(self.pr, headRefOid=head),
+                                                                  str(self.repo), self.main))
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
+
+    def test_a_rewritten_main_stops_the_merge(self):
+        self.push_main("rewritten", parent=self.base)
+        with self.assertRaisesRegex(pr_watch_repair.WatchError, "main was rewritten"):
+            pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main)
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
+
+    def fork_merge(self):
+        pr = dict(self.pr, isCrossRepository=True)
+        updated = pr_watch_repair.update_branch_with_main("example/one", pr, str(self.repo), self.main)
+        base = pr_watch_repair.merged_main(str(self.repo), updated)
+        return pr, dict(pr, headRefOid=updated, baseRefOid=base), base
+
+    def test_fork_continuation_follows_main_moving_during_verification(self):
+        pr, merged, base = self.fork_merge()
+        later = self.push_main("later")
+        snapshots = {7: dict(pr, baseRefOid=later), 8: dict(merged, number=8)}
+        with patch.object(pr_watch_repair, "verify", return_value=[]), self.passthrough(), \
+                patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={"repair_command": "repair-worker"}), \
+                patch.object(pr_watch_repair, "pr_snapshot", side_effect=lambda repo, number: snapshots[number]), \
+                patch.object(pr_watch_repair, "gh_json", side_effect=lambda argv, **kwargs: [] if argv[:2] == ["pr", "list"] else {"number": 8}):
+            number, _ = pr_watch_repair.commit_and_push_repair("example/one", merged, str(self.repo), base, "failure",
+                                                               {"profile": "commands", "commands": [["true"]]},
+                                                               allow_merge_only=True, original_pr=pr)
+        self.assertEqual(number, 8)
+        branch = "refs/heads/pr-watch/repair-7-" + merged["headRefOid"][:12]
+        self.assertEqual(self.git("ls-remote", "origin", branch).split()[0], merged["headRefOid"])
+
+    def test_fork_continuation_refuses_a_main_rewritten_before_the_push(self):
+        pr, merged, base = self.fork_merge()
+        rewritten = self.push_main("rewritten", parent=self.base)
+        with patch.object(pr_watch_repair, "verify", return_value=[]), self.passthrough(), \
+                patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={"repair_command": "repair-worker"}), \
+                patch.object(pr_watch_repair, "pr_snapshot", return_value=dict(pr, baseRefOid=rewritten)), \
+                patch.object(pr_watch_repair, "gh_json") as gh:
+            with self.assertRaisesRegex(pr_watch_repair.WatchError, "base moved before the repair push"):
+                pr_watch_repair.commit_and_push_repair("example/one", merged, str(self.repo), base, "failure",
+                                                       {"profile": "commands", "commands": [["true"]]},
+                                                       allow_merge_only=True, original_pr=pr)
+        gh.assert_not_called()
+        self.assertEqual(self.git("ls-remote", "origin", "refs/heads/pr-watch/*"), "")
+
+    def test_a_model_repair_still_refuses_a_moved_base(self):
+        (self.repo / "repair.txt").write_text("repair\n")
+        self.git("add", "repair.txt")
+        with patch.object(pr_watch_repair, "verify", return_value=[]), self.passthrough(), \
+                patch.object(pr_watch_repair, "pr_snapshot", return_value=dict(self.pr, baseRefOid="d" * 40)):
+            with self.assertRaisesRegex(pr_watch_repair.WatchError, "head/base moved"):
+                pr_watch_repair.commit_and_push_repair("example/one", self.pr, str(self.repo), self.main, "failure",
+                                                       {"profile": "commands", "commands": [["true"]]})
+        self.assertEqual(self.git("ls-remote", "origin", "refs/heads/fix/example").split()[0], self.head)
+
+    def conflicting_merge(self):
+        self.git("checkout", "-q", "main")
+        (self.repo / "file.txt").write_text("main conflict\n")
+        self.git("commit", "-qam", "main conflict")
+        self.git("push", "-q", "origin", "main")
+        self.main = self.git("rev-parse", "HEAD")
+        self.pr["baseRefOid"] = self.main
+        self.git("checkout", "-q", "fix/example")
+
+    def conflict_worker(self, action, envelope='{"is_error":false,"permission_denials":[],"result":"resolved"}'):
+        def resolve(argv, **kwargs):
+            if argv[0] == "git":
+                command = argv[1:]
+                while command and command[0] == "-c":
+                    command = command[2:]
+                if command and command[0] == "merge":
+                    return subprocess.run(argv, cwd=kwargs.get("cwd"), env=self.env, capture_output=True, text=True)
+                result = subprocess.run(argv, cwd=kwargs.get("cwd"), env=self.env, capture_output=True, text=True)
+                if result.returncode and command[:2] != ["merge-base", "--is-ancestor"]:
+                    self.fail(result.stdout + result.stderr)
+                return result
+            self.assertEqual(Path(argv[0]).name, "bwrap")
+            self.assertEqual(argv[argv.index("--") + 1], "repair-worker")
+            self.assertNotIn("GH_TOKEN", kwargs["environ"])
+            self.assertNotIn("origin", self.git("remote", cwd=kwargs["cwd"]))
+            action(Path(kwargs["cwd"]))
+            return subprocess.CompletedProcess(argv, 0, envelope, "")
+        return patch.object(pr_watch_repair, "run", side_effect=resolve)
+
+    def test_worker_clone_ignores_source_hooks_and_local_configuration(self):
+        hook = self.root / "hook.sh"
+        hook.write_text("#!/bin/sh\nprintf executed > " + str(self.root / "hook-ran") + "\n")
+        hook.chmod(0o755)
+        self.git("config", "core.hooksPath", str(self.root))
+        self.git("config", "user.name", "Untrusted source name")
+        with pr_watch_repair.repair_repository_copy(str(self.repo)) as copy:
+            self.assertEqual(self.git("config", "--local", "--get", "core.hooksPath", cwd=copy), os.devnull)
+            self.assertEqual(subprocess.run(["git", "config", "--local", "--get", "user.name"], cwd=copy,
+                                            env=self.env, capture_output=True, text=True).returncode, 1)
+            self.assertFalse((self.root / "hook-ran").exists())
+
+    def test_conflict_worker_rejects_a_permission_denial_even_after_a_correct_edit(self):
+        self.conflicting_merge()
+        def resolve(root):
+            (root / "file.txt").write_text("pr\nmain conflict\n")
+            self.git("add", "file.txt", cwd=root)
+        with self.conflict_worker(resolve, '{"is_error":false,"permission_denials":[{"tool_name":"Bash"}]}'), \
+                patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
+                patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}):
+            with self.assertRaisesRegex(pr_watch_repair.WatchError, "outside its edit-only boundary"):
+                pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main, {"repair_command": "repair-worker"})
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_conflict_worker_rejects_a_gitlink_resolution(self):
+        self.conflicting_merge()
+        def resolve(root):
+            nested = root / "nested"
+            nested.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=nested, env=self.env, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=nested, env=self.env, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=nested, env=self.env, check=True)
+            (nested / "x").write_text("x\n")
+            subprocess.run(["git", "add", "."], cwd=nested, env=self.env, check=True)
+            subprocess.run(["git", "commit", "-qm", "nested"], cwd=nested, env=self.env, check=True)
+            (root / "file.txt").unlink()
+            nested.rename(root / "file.txt")
+            self.git("add", "-A", "file.txt", cwd=root)
+        with self.conflict_worker(resolve), patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
+                patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}):
+            with self.assertRaisesRegex(pr_watch_repair.WatchError, "regular file"):
+                pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main, {"repair_command": "repair-worker"})
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(self.git("ls-remote", "origin", "refs/heads/fix/example").split()[0], self.head)
+
+    def test_conflict_sandbox_only_exposes_conflict_files_for_writing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "conflicted.txt").write_text("conflict\n")
+            (root / "other.txt").write_text("keep\n")
+            argv = pr_watch_repair.repair_worker_argv(["repair-worker"], root, home=root / "home",
+                                                      writable_paths=["conflicted.txt"])
+            self.assertIn(["--bind", str(root), str(root)], [argv[i:i + 3] for i in range(len(argv) - 2)])
+            self.assertIn(["--ro-bind", str(root / "other.txt"), str(root / "other.txt")],
+                          [argv[i:i + 3] for i in range(len(argv) - 2)])
+            self.assertNotIn(["--ro-bind", str(root / "conflicted.txt"), str(root / "conflicted.txt")],
+                             [argv[i:i + 3] for i in range(len(argv) - 2)])
+    def test_committed_conflict_repair_never_calls_merge_abort(self):
+        self.conflicting_merge()
+        def resolve(root):
+            (root / "file.txt").write_text("pr\nmain conflict\n")
+            self.git("add", "file.txt", cwd=root)
+        with self.conflict_worker(resolve), \
+                patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
+                patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}):
+            updated = pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main, {"repair_command": "repair-worker"})
+        self.assertEqual(self.git("rev-parse", "HEAD"), updated)
+        self.assertEqual(self.git("show", "-s", "--format=%P", updated).split(), [self.head, self.main])
+        self.assertFalse((self.repo / ".git" / "MERGE_HEAD").exists())
+
+    def test_conflict_worker_resolves_only_conflict_and_preserves_merge_parents(self):
+        self.conflicting_merge()
+        def resolve(root):
+            (root / "file.txt").write_text("pr\nmain conflict\n")
+            self.git("add", "file.txt", cwd=root)
+        with self.conflict_worker(resolve), \
+                patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
+                patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}):
+            updated = pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main, {"repair_command": "repair-worker"})
+        self.assertEqual((self.repo / "file.txt").read_text(), "pr\nmain conflict\n")
+        self.assertEqual((self.repo / "main.txt").read_text(), "new main\n")
+        self.assertEqual(self.git("show", "-s", "--format=%P", updated).split(), [self.head, self.main])
+        self.assertEqual(self.git("ls-remote", "origin", "refs/heads/fix/example").split()[0], self.head)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_conflict_worker_cannot_change_an_unconflicted_path(self):
+        self.conflicting_merge()
+        def resolve(root):
+            (root / "file.txt").write_text("resolved\n")
+            (root / "main.txt").write_text("overwritten main\n")
+            self.git("add", "-A", cwd=root)
+        with self.conflict_worker(resolve), patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
+                patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}):
+            with self.assertRaisesRegex(pr_watch_repair.WatchError, "outside the merge conflicts"):
+                pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main, {"repair_command": "repair-worker"})
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(self.git("ls-remote", "origin", "refs/heads/fix/example").split()[0], self.head)
+
+    def test_conflict_worker_must_resolve_every_conflict(self):
+        self.conflicting_merge()
+        with self.conflict_worker(lambda root: None), patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr):
+            with self.assertRaisesRegex(pr_watch_repair.WatchError, "unresolved"):
+                pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main, {"repair_command": "repair-worker"})
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_conflict_worker_refuses_a_moved_pr_head(self):
+        self.conflicting_merge()
+        def resolve(root):
+            (root / "file.txt").write_text("resolved\n")
+            self.git("add", "file.txt", cwd=root)
+        with self.conflict_worker(resolve), \
+                patch.object(pr_watch_repair, "pr_snapshot", return_value=dict(self.pr, headRefOid="d" * 40)):
+            with self.assertRaisesRegex(pr_watch_repair.WatchError, "head moved"):
+                pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main, {"repair_command": "repair-worker"})
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
+        self.assertEqual(self.git("ls-remote", "origin", "refs/heads/fix/example").split()[0], self.head)
+
+    def test_nested_conflict_directory_stays_writable_in_real_bwrap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nested = root / "src" / "deep"
+            nested.mkdir(parents=True)
+            (nested / "file.txt").write_text("base\n")
+            (root / "other.txt").write_text("keep\n")
+            home = root / "home"
+            home.mkdir()
+            script = nested / "write.py"
+            script.write_text("from pathlib import Path\nPath('src/deep/file.txt').write_text('resolved\\n')\n")
+            argv = pr_watch_repair.repair_worker_argv(["/usr/bin/python3", str(script)], root,
+                                                      home=home, writable_paths=["src/deep/file.txt"])
+            result = pr_watch_repair.run(argv, cwd=root, timeout=45,
+                                         environ={key: value for key, value in os.environ.items() if key in ("PATH", "LANG")})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((nested / "file.txt").read_text(), "resolved\n")
+            self.assertEqual((root / "other.txt").read_text(), "keep\n")
+
+    def test_pr_symlink_cannot_mount_an_external_sentinel_into_the_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            repo.mkdir()
+            (repo / "file.txt").write_text("conflict\n")
+            sentinel = root / "sentinel.txt"
+            sentinel.write_text("must not be mounted\n")
+            (repo / "link.txt").symlink_to(sentinel)
+            (root / "home").mkdir()
+            argv = pr_watch_repair.repair_worker_argv(["repair-worker"], repo, home=root / "home",
+                                                      writable_paths=["file.txt"])
+            triples = [argv[i:i + 3] for i in range(len(argv) - 2)]
+            self.assertNotIn(["--ro-bind", str(repo / "link.txt"), str(repo / "link.txt")], triples)
+            self.assertNotIn(["--ro-bind", str(sentinel), str(sentinel)], triples)
+            result = pr_watch_repair.run(argv[:-1] + ["/usr/bin/python3", "-c",
+                                                       "from pathlib import Path\ntry:\n print(Path('link.txt').read_text())\nexcept FileNotFoundError:\n print('external sentinel unavailable')"],
+                                         cwd=repo, timeout=45,
+                                         environ={key: value for key, value in os.environ.items() if key in ("PATH", "LANG")})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "external sentinel unavailable")
+
+    def test_conflict_worker_can_resolve_a_deletion(self):
+        self.conflicting_merge()
+        def resolve(root):
+            (root / "file.txt").unlink()
+            # The real edit-only worker cannot stage through its read-only
+            # index. Leave the conflict in the index for the outer stager.
+        with self.conflict_worker(resolve), patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
+                patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}):
+            updated = pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main, {"repair_command": "repair-worker"})
+        self.assertFalse((self.repo / "file.txt").exists())
+        self.assertEqual(self.git("show", "-s", "--format=%P", updated).split(), [self.head, self.main])
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
 
 if __name__ == "__main__":
     unittest.main()

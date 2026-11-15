@@ -791,12 +791,29 @@ export function interactionOf(sessionId, request) {
 }
 
 /**
+ * The mode a Claude Code agent had before it planned, as its plan request says: Paseo offers implement_resume only to
+ * go back to that mode (bypassPermissions or auto), labelled "Implement with <the mode's label>". modes: the agent's,
+ * with their labels. Undefined when the request does not say (no such action, or a label none of the modes has).
+ */
+export function modeBeforePlan(request, modes) {
+  const label = (request?.actions ?? []).find((a) => a?.id === 'implement_resume')?.label
+  if (typeof label !== 'string') return undefined
+  let found
+  for (const m of modes ?? []) {
+    const name = typeof m?.label === 'string' ? m.label.trim() : ''
+    if (m?.id && name && label.trim().endsWith(` ${name}`) && name.length > (found?.name.length ?? 0)) found = { id: m.id, name }
+  }
+  return found?.id
+}
+
+/**
  * The answer to send for a request (agent_permission_response's response), undefined when the phone handed it back
  * (Paseo's own app answers it). mode: for an approved plan, the mode the phone chose; the response picks the plan's
- * action, and setMode is what is left to set after it (Paseo's implement switches to acceptEdits).
+ * action, and setMode is what is left to set after it (Paseo's implement switches to acceptEdits). modes: the agent's,
+ * with their labels (modeBeforePlan).
  * @returns {{ response: object, setMode?: string } | undefined}
  */
-export function responseOf(request, res, root) {
+export function responseOf(request, res, root, modes) {
   if (!res || res.dismiss) return undefined
   const r = request ?? {}
   if (r.kind === 'question' && res.answers && typeof res.answers === 'object') {
@@ -818,7 +835,9 @@ export function responseOf(request, res, root) {
       return { response: { behavior: 'deny', message: msg, ...(ids.has('reject') ? { selectedActionId: 'reject' } : {}) } }
     }
     const mode = MODES.includes(res.mode) ? res.mode : 'bypassPermissions'
-    if (ids.has('implement_resume') && (mode === 'bypassPermissions' || mode === 'auto')) {
+    // implement_resume puts the agent back in the mode it had before it planned, not in the one chosen on the phone:
+    // only when the two are the same. Otherwise implement, then switch to the phone's.
+    if (ids.has('implement_resume') && mode === modeBeforePlan(r, modes)) {
       return { response: { behavior: 'allow', selectedActionId: 'implement_resume' } }
     }
     if (ids.has('implement')) return { response: { behavior: 'allow', selectedActionId: 'implement' }, ...(mode !== 'acceptEdits' ? { setMode: mode } : {}) }

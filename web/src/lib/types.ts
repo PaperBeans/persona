@@ -633,6 +633,8 @@ export interface Item {
   tool_name?: string;
   tool_input?: Record<string, unknown>;
   is_error?: boolean;
+  /** The runtime's own outcome, when the node recorded one (docs/protocol/protocol.md "Tool outcomes"). */
+  outcome?: { status?: string; exit_code?: number };
   full_size?: number;
   queued?: boolean;
   wake?: boolean;
@@ -871,6 +873,9 @@ export interface Launcher {
   /** How its last check or start went on the computer the list is for (GET /machines/{mid}/launchers,
    *  docs/server/launcher-health.md); absent: never checked, a failure too old to count, or an older hub. */
   health?: LauncherHealth;
+  /** A Persona-managed provider pi on this computer can use too (docs/integrations/pi.md "Persona's model providers");
+   *  absent for every other launcher and from an older hub. */
+  pi?: boolean;
 }
 
 /** A launcher's health record on one computer (#1643). */

@@ -9,10 +9,11 @@ import (
 
 // The hub's low-distraction mode, as the assistant honours it (docs/server/server.md "Low-distraction
 // mode"). The hub filters the phone pushes by level; what never was a hub push is the assistant's to hold back: with
-// the switch on, an agent's card does not climb to the owner on its own (ask_route.go askTick), an escalated card
-// pushes only when what it asks is the owner's alone (escalateLevel), and conclusions, "Please verify" asks and leader
-// progress reach the owner through the briefing and the board instead of a card (quietHoldsAsk, leaderReportLevel).
-// With the switch off, everything is as before.
+// the switch on, an ordinary agent card does not climb to the owner on its own (ask_route.go askTick; owner-only
+// cards keep their absolute deadline and needs_you release), an escalated card pushes only when what it asks is the
+// owner's alone (escalateLevel), and conclusions, "Please verify" asks and leader progress reach the owner through the
+// briefing and the board instead of a card (quietHoldsAsk, leaderReportLevel). With the switch off, everything is as
+// before.
 
 // quietSwitch overrides the hub's answer in tests.
 type quietSwitch struct {

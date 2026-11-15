@@ -41,6 +41,7 @@
   "dispatch_notes": "由 {from_machine} 上的 {from} 派出（dispatch_start）：{machine} · {cwd}",
   "adopt_failed": "收编没成功：{reason}",
   "interrupt_summary": "停下 {agent} · {machine}",
+  "resume_note": "恢复了 {agent} · {machine}（同一个会话，带着原来的上下文）：{why}",
   "start_remedy_notice": "没开起来：「{title}」。{reason}",
   "admission_no_metrics": "这台电脑还没有上报过资源指标。",
   "admission_stale": "这台电脑的资源指标已经过期。",

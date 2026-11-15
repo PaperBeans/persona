@@ -30,7 +30,9 @@ var EngineNames = map[string]string{
 }
 
 // Engine is one engine as found on a machine: Available when its socket is reachable (herdr: or its binary is there).
-// Note says why one that is there cannot be used (Orca too old or too new), in Chinese for the app.
+// Note says why one that is there cannot be used (Orca too old or too new, Paseo's bridge not connected) or asks to
+// update it (Paseo), in Chinese; the hub words the node-engine catalog's notes in each reader's language
+// (i18n.EngineText), the others reach the app as they are.
 type Engine struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`

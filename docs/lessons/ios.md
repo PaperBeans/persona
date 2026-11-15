@@ -169,6 +169,48 @@ A SwiftUI container's `accessibilityIdentifier` can replace the identifiers on a
   it. `testNeedsYouAtTheLargestTextSize` lets the page settle without asking for anything, and counts the rows at its
   first look.
 
+## A split's posture belongs to SwiftUI (#4206)
+
+- **Don't set what `NavigationSplitView` sets.** SwiftUI writes the `UISplitViewController`'s `preferredSplitBehavior`,
+  `minimumSecondaryColumnWidth` and `presentsWithGesture` back on every update. A representable that reached the split and set
+  them started a tug: each set laid the split out, the layout updated SwiftUI, SwiftUI set its own back, 5–11 times a second
+  on a turn. A Debug build on the open iPhone Duo ran past the scene-update watchdog (0x8BADF00D, 10 s). Say it to SwiftUI
+  instead: the detail column's least width is `navigationSplitViewColumnWidth(min:ideal:)` on the detail content, and SwiftUI
+  sets `minimumSecondaryColumnWidth` from it (`SplitPageMin`).
+- **A column and page at the edge of fitting never settle.** With a 320 pt column on the Duo upright (349 pt left for the
+  page) and the system's own least page width, UIKit put the column away and back on every pass, 728 times in 290 s on the
+  simulator, and the chat was laid out again each time. Give the page an explicit least width
+  (`Theme.Size.splitPageMin`), so the decision is never borderline.
+- **A turn's sizes do not arrive together.** As a turn lays the split out, SwiftUI's geometry and the split's own bounds
+  change at different moments, and the split's change of columns can come before either. Before keeping a person's choice,
+  check both (`SplitColumnState.fitsBeside`). In the Separate layout the tab not shown is turned too, and its size is not
+  read until it shows: keep nothing for a split that is not in a window.
+- **The app switcher's snapshots lay a backgrounded app out in the other orientations.** The watchdog's stack shows
+  `-[UIApplication _performSnapshotsWithAction:…]` → `_createSnapshotContextForScene`. Don't write UserDefaults or change
+  layout state there (`scenePhase != .active`). `StoredValue` writes only a changed value: a write wakes every `@AppStorage`
+  view, whatever its key, and waits on the preferences daemon. A key a launch argument sets is written still: the value
+  read is the argument's, and skipping the write left an earlier test's stale value for the next launch without it.
+- **Watching a column's geometry costs a frame each time it goes or comes.** #4853's margin read each column's top safe
+  area with `onGeometryChange` on the column itself. On the iPad that laid the column out once more, its list's rows too,
+  as it went and as it came: about 40 ms of main-thread time in an extra frame at each fold's end and show's start. A
+  transform that returned a constant still cost the same, so the cost is the observation itself, not the state writes.
+  Watch only where the value is used, from a clear view behind the column whose `if` comes and goes (`readsSafeTop`): an
+  `if` around the modifier on the column would rebuild the column's content as the Duo turns, losing its scroll position and view state.
+- **Finding which change costs a frame.** Line up `deltas_ms` / `busies_ms` with the cue to find the frame that grew.
+  Then put temporary DEBUG launch-argument switches in one optimized build, one switch per suspect piece. Each test run
+  turns one piece off, and the piece whose removal brings the frame back to main's is the cause. Split a switch that
+  covers several pieces into finer ones before fixing. A `sample` diff of the two builds only says that SwiftUI layout
+  grew, not whose.
+- **Finding such a loop.** A temporary per-second count of view bodies and of the split's column changes, with
+  `Thread.callStackSymbols` on the first few changes, printed to stdout (`devicectl device process launch --console`) and to
+  the app's `tmp/` (`simctl get_app_container … data`). It names the loop in one run; the watchdog's crash report only shows
+  where the main thread happened to be.
+- **The open Duo simulator in Device Hub.** Folding switches only in Device Hub (`simctl io … screenConfig` cannot).
+  `XCUIDevice.shared.orientation` does nothing there, and Simulator.app's rotate items are disabled. Device Hub turns it
+  with ⌘← / ⌘→ (osascript to System Events, to Device Hub's window for that simulator), each a quarter turn from where it
+  is. XCUITest's synthetic drags do not reach it either; a mouse drag in its window does (`CGEvent` left-button events at
+  the screen's place in the window, found from `screencapture -l <window id>` and the device's bezel).
+
 ## Tab selection and targeted opens are different navigation intents (#5641)
 
 - An Agent pushed on Assistant's stack still uses the dev chat view, which writes the shared last-opened Agent marker.

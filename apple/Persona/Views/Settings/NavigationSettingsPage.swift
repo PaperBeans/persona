@@ -1,17 +1,19 @@
 import SwiftUI
 
 #if os(iOS)
-/// Settings › Appearance › Navigation (#6332): Separate (Assistant | Agents, the default) or Sidebar (everything in one
-/// sidebar, as the web app). Each choice shows an iPhone and an iPad sketched that way. Picking one applies at once:
-/// `RootView` reads the same value, and this page stays open (the settings path is the app model's).
+/// Settings › Appearance › Sidebar (#6332, #4206): Merged (everything in one sidebar, as the web app) or Separate
+/// (Assistant | Agents). Each choice shows an iPhone and an iPad sketched that way. Picking one applies at once:
+/// `RootView` reads the same value, and this page stays open (the settings path is the app model's). With nothing
+/// picked the one in effect is checked: Merged where wide, Separate on a phone (`NavigationLayout.effective`).
 struct NavigationSettingsPage: View {
-    @StoredValue(NavigationLayout.key) private var layout: NavigationLayout = .separate
+    @StoredValue(NavigationLayout.key) private var picked = ""
+    private var layout: NavigationLayout { NavigationLayout.effectiveNow(picked: picked) }
 
     var body: some View {
         SettingsForm {
             Section {
                 ForEach(NavigationLayout.allCases) { choice in
-                    Button { layout = choice } label: {
+                    Button { picked = choice.rawValue } label: {
                         NavigationChoice(layout: choice, selected: layout == choice)
                     }
                     .buttonStyle(.plain)
@@ -19,11 +21,14 @@ struct NavigationSettingsPage: View {
                     .accessibilityAddTraits(layout == choice ? .isSelected : [])
                 }
             } footer: {
-                Text("Only this device. It applies at once; open chats and drafts stay as they are.")
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text("Only this device. It applies at once; open chats and drafts stay as they are.")
+                    if picked.isEmpty { Text("Until you pick one: Merged where the sidebar fits beside the page (iPad, an open iPhone Duo), Separate on a phone.") }
+                }
             }
         }
         .themedGroupedPage()
-        .detailTitle(String(localized: "Navigation"))
+        .detailTitle(String(localized: "Sidebar [Appearance]"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }

@@ -24,6 +24,9 @@ type Launcher struct {
 	RunHere bool `json:"run_here,omitempty"`
 	// Assistant: a runtime's launcher that may run the Persona assistant (docs/integrations/runtimes.md "Assistant"), whatever its agent.
 	Assistant bool `json:"assistant,omitempty"`
+	// Pi: a Persona-managed provider pi can use on this computer too (ManagedLauncher.PiAPI, docs/integrations/pi.md
+	// "Persona's model providers").
+	Pi bool `json:"pi,omitempty"`
 }
 
 // LauncherDetail is what a ~/.zshrc launcher really sets (the node runs it with the agent stubbed out,
@@ -292,6 +295,30 @@ func (l ManagedLauncher) AgentType() string {
 		return l.Agent
 	}
 	return "claude"
+}
+
+// PiAPI is the pi API (pi's registerProvider "api") a provider speaks when pi can use it too (docs/integrations/pi.md
+// "Persona's model providers"): "anthropic-messages" for a Messages provider that runs Claude Code (or Oh My Pi, which
+// takes the same gateway), "openai-responses" for a Codex one; "" for the rest (Antigravity, a direct API connection
+// that speaks Responses or Chat Completions, which the node is never sent), and for a provider with a proxy of its
+// own: pi sends straight to the gateway, and one reachable only through that proxy would fail every turn.
+func (l ManagedLauncher) PiAPI() string {
+	if l.Proxy != "" {
+		return ""
+	}
+	if l.Kind == "api" {
+		if l.API == "" || l.API == "messages" {
+			return "anthropic-messages"
+		}
+		return ""
+	}
+	switch l.AgentType() {
+	case "claude", "omp":
+		return "anthropic-messages"
+	case "codex":
+		return "openai-responses"
+	}
+	return ""
 }
 
 // MessagesBase: the provider's Base URL reaches its agent as ANTHROPIC_BASE_URL (node managedEnv), which gets

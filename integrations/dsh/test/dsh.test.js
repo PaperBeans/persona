@@ -551,6 +551,330 @@ test('the assistant\'s conversations: hello says so, the snapshot goes first, th
   assert.deepEqual(ctl.prompts.at(-1).content.map((b) => b.text), ['plain'])
 })
 
+test('assistant presets are active before prompt admission in both directions, without duplicate Plan sets (#8168)', async (t) => {
+  const id = 'assistant-modes'
+  const session = { id }
+  const agents = { get: (sessionId) => sessionId === id ? { session } : undefined }
+  const events = []
+  let activePreset = 'workspace-write'
+  const permissionPresets = { set: (target, name) => {
+    assert.equal(target, session)
+    activePreset = name
+    events.push(`set:${name}`)
+  } }
+  const { n, ctl, ev, rt } = await setup(t, { assistant: true, agents, permissionPresets })
+  const prompt = ctl.prompt.bind(ctl)
+  ctl.prompt = async (request) => {
+    events.push(`prompt:${request.content.at(-1).text}:${activePreset}`)
+    return prompt(request)
+  }
+  rt.start()
+  await n.ready
+
+  const send = (text, mode, client_msg_id) => n.peer.call('session.send', { session_id: id, text, assistant: true, mode, client_msg_id })
+  await send('full access', 'bypassPermissions', 'mode-1')
+  ev.emit('session/event', { id }, { type: 'turn/start', seq: 1, data: { turn: 1 } })
+  await send('inspect only', 'plan', 'mode-2')
+  await send('inspect only', 'plan', 'mode-2') // a retry shares the first send's answer
+  await send('still inspect', 'plan', 'mode-3')
+  await send('full access again', 'bypassPermissions', 'mode-4')
+
+  assert.deepEqual(events, [
+    'set:danger-full-access',
+    'prompt:full access:danger-full-access',
+    'set:read-only',
+    'prompt:inspect only:read-only',
+    'prompt:still inspect:read-only',
+    'set:danger-full-access',
+    'prompt:full access again:danger-full-access',
+  ])
+  assert.deepEqual(ctl.prompts.map((request) => request.requestId), ['mode-1', 'mode-2', 'mode-3', 'mode-4'])
+  assert.equal(ctl.prompts[0].mode, 'queue')
+  assert.ok(ctl.prompts.slice(1).every((request) => request.mode === 'steer'), 'a running session still steers every later prompt')
+})
+
+test('concurrent warm Plan and bypass sends admit each prompt under its own preset (#8168)', async (t) => {
+  const id = 'assistant-concurrent-warm'
+  const session = { id }
+  const agents = { get: (sessionId) => sessionId === id ? { session } : undefined }
+  const events = []
+  let activePreset = 'workspace-write'
+  const permissionPresets = { set: (target, name) => {
+    assert.equal(target, session)
+    activePreset = name
+    events.push(`set:${name}`)
+  } }
+  const { n, ctl, ev, rt } = await setup(t, { assistant: true, agents, permissionPresets })
+  const prompt = ctl.prompt.bind(ctl)
+  ctl.prompt = async (request) => {
+    events.push(`prompt:${request.content.at(-1).text}:${activePreset}`)
+    return prompt(request)
+  }
+  rt.start()
+  await n.ready
+  ev.emit('session/event', { id }, { type: 'turn/start', seq: 1, data: { turn: 1 } })
+
+  const send = (text, mode, client_msg_id) => n.peer.call('session.send', { session_id: id, text, assistant: true, mode, client_msg_id })
+  await Promise.all([
+    send('plan', 'plan', 'warm-plan'),
+    send('bypass', 'bypassPermissions', 'warm-bypass'),
+  ])
+
+  assert.deepEqual(events, [
+    'set:read-only',
+    'prompt:plan:read-only',
+    'set:danger-full-access',
+    'prompt:bypass:danger-full-access',
+  ])
+  assert.deepEqual(ctl.prompts.map((request) => [request.requestId, request.mode]), [
+    ['warm-plan', 'steer'],
+    ['warm-bypass', 'steer'],
+  ])
+})
+
+test('concurrent sends sharing a cold resume keep Plan read-only through prompt admission (#8168)', async (t) => {
+  const id = 'assistant-concurrent-cold'
+  const live = new Map()
+  const agents = { get: (sessionId) => live.get(sessionId) }
+  const events = []
+  let activePreset = 'danger-full-access'
+  let resumeCount = 0
+  let releaseResume
+  const resume = new Promise((resolve) => { releaseResume = resolve })
+  const permissionPresets = { set: (session, name) => {
+    activePreset = name
+    events.push(`set:${name}`)
+  } }
+  const { n, ctl, rt } = await setup(t, { assistant: true, agents, permissionPresets })
+  ctl.add(id, { cwd: '/home/u/.persona/assistant' })
+  ctl.resolveAgent = (sessionId) => {
+    resumeCount++
+    return resume.then(() => {
+      const agent = { session: { id: sessionId } }
+      live.set(sessionId, agent)
+      return { agent }
+    })
+  }
+  const prompt = ctl.prompt.bind(ctl)
+  ctl.prompt = async (request) => {
+    events.push(`prompt:${request.content.at(-1).text}:${activePreset}`)
+    return prompt(request)
+  }
+  rt.start()
+  await n.ready
+
+  const send = (text, mode, client_msg_id) => n.peer.call('session.send', { session_id: id, text, assistant: true, mode, client_msg_id })
+  const pending = Promise.all([
+    send('plan', 'plan', 'cold-plan'),
+    send('bypass', 'bypassPermissions', 'cold-bypass'),
+  ])
+  await until('the shared cold resume', () => resumeCount > 0)
+  await new Promise((resolve) => setImmediate(resolve))
+  releaseResume()
+  await pending
+
+  assert.deepEqual(events, [
+    'set:read-only',
+    'prompt:plan:read-only',
+    'set:danger-full-access',
+    'prompt:bypass:danger-full-access',
+  ])
+  assert.equal(resumeCount, 1, 'the later send reuses the Agent resumed by the first')
+  assert.deepEqual(ctl.prompts.map((request) => [request.requestId, request.mode]), [
+    ['cold-plan', 'queue'],
+    ['cold-bypass', 'queue'],
+  ])
+})
+
+test('prompt admission is serialized per session, not globally or until a model turn ends (#8168)', async (t) => {
+  const ids = ['assistant-queue-a', 'assistant-queue-b']
+  const sessions = new Map(ids.map((id) => [id, { id }]))
+  const agents = { get: (id) => sessions.has(id) ? { session: sessions.get(id) } : undefined }
+  const active = new Map(ids.map((id) => [id, 'workspace-write']))
+  const events = []
+  const admitted = []
+  let releaseFirst
+  const firstAdmission = new Promise((resolve) => { releaseFirst = resolve })
+  const permissionPresets = { set: (session, name) => {
+    active.set(session.id, name)
+    events.push(`${session.id}:set:${name}`)
+  } }
+  const { n, ctl, ev, rt } = await setup(t, { assistant: true, agents, permissionPresets })
+  const prompt = ctl.prompt.bind(ctl)
+  ctl.prompt = async (request) => {
+    admitted.push(request.requestId)
+    events.push(`${request.sessionId}:prompt:${request.content.at(-1).text}:${active.get(request.sessionId)}`)
+    if (request.requestId === 'queue-a-plan') await firstAdmission
+    return prompt(request)
+  }
+  rt.start()
+  await n.ready
+  for (const id of ids) ev.emit('session/event', { id }, { type: 'turn/start', seq: 1, data: { turn: 1 } })
+
+  const send = (id, text, mode, client_msg_id) => n.peer.call('session.send', { session_id: id, text, assistant: true, mode, client_msg_id })
+  const pending = Promise.all([
+    send(ids[0], 'plan', 'plan', 'queue-a-plan'),
+    send(ids[0], 'bypass', 'bypassPermissions', 'queue-a-bypass'),
+    send(ids[1], 'other plan', 'plan', 'queue-b-plan'),
+  ])
+  await until('the other session admits while the first admission is pending', () => admitted.includes('queue-b-plan'))
+  assert.ok(!admitted.includes('queue-a-bypass'), 'the second send to the same session waits for prompt admission')
+  releaseFirst()
+  await pending
+
+  assert.deepEqual(admitted, ['queue-a-plan', 'queue-b-plan', 'queue-a-bypass'])
+  assert.deepEqual(events.filter((event) => event.startsWith(ids[0])), [
+    `${ids[0]}:set:read-only`,
+    `${ids[0]}:prompt:plan:read-only`,
+    `${ids[0]}:set:danger-full-access`,
+    `${ids[0]}:prompt:bypass:danger-full-access`,
+  ])
+  assert.deepEqual(events.filter((event) => event.startsWith(ids[1])), [
+    `${ids[1]}:set:read-only`,
+    `${ids[1]}:prompt:other plan:read-only`,
+  ])
+  assert.ok(ctl.prompts.every((request) => request.mode === 'steer'), 'both turns stay open; only admission is awaited')
+})
+
+for (const failure of ['resolution', 'preset']) test(`a queued ${failure} failure rejects only its own send and permits a client id retry (#8168)`, async (t) => {
+  const id = `assistant-${failure}-queue-failure`
+  const session = { id }
+  const live = new Map(failure === 'preset' ? [[id, { session }]] : [])
+  const agents = { get: (sessionId) => live.get(sessionId) }
+  let shouldFail = true
+  let activePreset = 'danger-full-access'
+  const admitted = []
+  const permissionPresets = { set: (target, name) => {
+    if (failure === 'preset' && shouldFail) {
+      shouldFail = false
+      throw new Error('preset failed')
+    }
+    activePreset = name
+  } }
+  const { n, ctl, rt } = await setup(t, { assistant: true, agents, permissionPresets })
+  ctl.resolveAgent = async (sessionId) => {
+    if (shouldFail) {
+      shouldFail = false
+      return { error: new Error('resolution failed') }
+    }
+    const agent = { session: { id: sessionId } }
+    live.set(sessionId, agent)
+    return { agent }
+  }
+  const prompt = ctl.prompt.bind(ctl)
+  ctl.prompt = async (request) => {
+    admitted.push([request.requestId, activePreset])
+    return prompt(request)
+  }
+  rt.start()
+  await n.ready
+
+  const send = (text, mode, client_msg_id) => n.peer.call('session.send', { session_id: id, text, assistant: true, mode, client_msg_id })
+  const results = await Promise.allSettled([
+    send('do not admit', 'plan', `retry-${failure}`),
+    send('next prompt', 'bypassPermissions', `after-${failure}`),
+  ])
+  assert.equal(results[0].status, 'rejected')
+  assert.match(results[0].reason.message, new RegExp(`${failure} failed`))
+  assert.equal(results[1].status, 'fulfilled')
+  assert.deepEqual(admitted, [[`after-${failure}`, 'danger-full-access']])
+
+  await send('retry after the queued failure', 'plan', `retry-${failure}`)
+  assert.deepEqual(admitted, [
+    [`after-${failure}`, 'danger-full-access'],
+    [`retry-${failure}`, 'read-only'],
+  ])
+})
+
+test('an initial Plan prompt resolves a cold Agent and applies read-only before admission (#8168)', async (t) => {
+  const id = 'assistant-cold'
+  const live = new Map()
+  const agents = { get: (sessionId) => live.get(sessionId) }
+  const events = []
+  let activePreset = 'danger-full-access'
+  const permissionPresets = { set: (session, name) => {
+    activePreset = name
+    events.push(`set:${name}`)
+  } }
+  const { n, ctl, rt } = await setup(t, { assistant: true, agents, permissionPresets })
+  ctl.add(id, { cwd: '/home/u/.persona/assistant' })
+  ctl.resolveAgent = async (sessionId) => {
+    events.push('resolve')
+    const agent = { session: { id: sessionId } }
+    live.set(sessionId, agent)
+    return { agent }
+  }
+  const prompt = ctl.prompt.bind(ctl)
+  ctl.prompt = async (request) => {
+    events.push(`prompt:${activePreset}`)
+    // The real controller resolves a cold Agent while admitting the prompt; that is too late to protect this turn.
+    const found = await ctl.resolveAgent(request.sessionId)
+    if ('error' in found) throw found.error
+    return prompt(request)
+  }
+  rt.start()
+  await n.ready
+
+  await n.peer.call('session.send', { session_id: id, text: 'inspect after restart', assistant: true, mode: 'plan', client_msg_id: 'cold-plan' })
+
+  assert.deepEqual(events.slice(0, 3), ['resolve', 'set:read-only', 'prompt:read-only'])
+  assert.equal(activePreset, 'read-only')
+  assert.equal(ctl.prompts.length, 1)
+  assert.equal(ctl.prompts[0].requestId, 'cold-plan')
+  assert.equal(ctl.prompts[0].mode, 'queue')
+})
+
+test('a cold Agent resolution failure admits no assistant Plan prompt (#8168)', async (t) => {
+  const id = 'assistant-resolution-failure'
+  const agents = { get: () => undefined }
+  const set = []
+  let activePreset = 'danger-full-access'
+  const { n, ctl, rt } = await setup(t, { assistant: true, agents, permissionPresets: { set: (...args) => set.push(args) } })
+  ctl.resolveAgent = async () => ({ error: new Error('cold resume failed') })
+  const prompt = ctl.prompt.bind(ctl)
+  const admitted = []
+  ctl.prompt = async (request) => {
+    admitted.push(activePreset)
+    return prompt(request)
+  }
+  rt.start()
+  await n.ready
+
+  await assert.rejects(
+    n.peer.call('session.send', { session_id: id, text: 'do not run with full access', assistant: true, mode: 'plan' }),
+    /cold resume failed/,
+  )
+  assert.deepEqual(admitted, [])
+  assert.equal(activePreset, 'danger-full-access')
+  assert.equal(ctl.prompts.length, 0)
+  assert.equal(set.length, 0)
+})
+
+test('a preset setter failure admits no assistant Plan prompt under the previous full access (#8168)', async (t) => {
+  const id = 'assistant-set-failure'
+  const session = { id }
+  const agents = { get: () => ({ session }) }
+  let activePreset = 'danger-full-access'
+  const permissionPresets = { set: () => { throw new Error('read-only is unavailable') } }
+  const { n, ctl, rt } = await setup(t, { assistant: true, agents, permissionPresets })
+  const prompt = ctl.prompt.bind(ctl)
+  const admitted = []
+  ctl.prompt = async (request) => {
+    admitted.push(activePreset)
+    return prompt(request)
+  }
+  rt.start()
+  await n.ready
+
+  await assert.rejects(
+    n.peer.call('session.send', { session_id: id, text: 'do not run with full access', assistant: true, mode: 'plan' }),
+    /read-only is unavailable/,
+  )
+  assert.deepEqual(admitted, [])
+  assert.equal(activePreset, 'danger-full-access')
+  assert.equal(ctl.prompts.length, 0)
+})
+
 test('the assistant\'s approvals go to the phone even with the Web GUI open; its memory writes are not asked', async (t) => {
   const { n, ctl, ev, rt } = await setup(t, { assistant: true, liveClient: true })
   ctl.add('session-asst', { cwd: '/home/u/.persona/assistant' })

@@ -31,8 +31,8 @@ func (h *Hub) startDevices(ctx context.Context) {
 	if err := h.loadMachineOwners(ctx); err != nil {
 		h.logf("devices: ownership unavailable; dedicated local machines stay unassigned: %v", err)
 	}
-	_ = h.loadMachinesKept(ctx) // and the machines their managers keep out of hub.json (machines_kept.go)
-	h.loadMachineEntries(ctx)   // what each manager last reported of them (machine_entries.go)
+	_ = h.loadMachinesKept(ctx)   // and the machines their managers keep out of hub.json (machines_kept.go)
+	_ = h.loadMachineEntries(ctx) // what each manager last reported of them (machine_entries.go)
 	var saved devicesWarm
 	if h.store != nil {
 		if ok, err := h.store.TakeSetting(ctx, devicesWarmKey, &saved); err != nil || !ok || time.Since(saved.SavedAt) > devicesWarmStale {

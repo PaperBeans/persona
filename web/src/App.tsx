@@ -34,6 +34,7 @@ import { Empty } from "./views/session/files/parts";
 import { AgentsPage } from "./views/AgentsPage";
 import { AgentArchives } from "./views/agents/AgentArchives";
 import { ChatView } from "./views/chat/ChatView";
+import { preloadCloseoutEvidence } from "./views/chat/CloseoutCard";
 import { RequestPage } from "./views/RequestPage";
 import { Home } from "./views/Home";
 import { PersonaAssistant } from "./views/PersonaAssistant";
@@ -322,6 +323,7 @@ function Shell() {
   const [newAgent, setNewAgent] = useState(false);
   const [preset, setPreset] = useState<NewAgentPreset | null>(null);
   useEffect(() => preloadPages(), []);
+  useEffect(() => preloadCloseoutEvidence(), []);
   useEffect(() => onOpenNewAgent((p) => {
     setPreset(p);
     setNewAgent(true);

@@ -5,7 +5,7 @@
 // those that fails comes here (keepFailed), so its words stay in the chat and not in the box, as in the apps (#1122).
 import { t } from "../i18n";
 import { toast } from "../ui/atoms";
-import { api, ApiError, errorText, sessionPath } from "./api";
+import { api, ApiError, credentialOwner, errorText, getToken, sessionPath } from "./api";
 import { pickedLauncher, pickedModel, conversationKey } from "./assistant-chat";
 import { showLauncherNote, startConversation } from "./assistant-start";
 import { removeStoredValue, storedValue, storeValue } from "./compatibility";
@@ -40,10 +40,10 @@ export interface OutboxEntry {
   error?: string;
   /** The computer's input box holds text (input_draft): what "Clear and send" clears, when it can. */
   clearable?: string;
-  /** The hub could not tell whether it went in: a retry is a new message. */
+  /** The hub keeps this id's definite answer, so an ordinary Retry is another operation. */
   newId?: boolean;
-  /** Its send ended with delivered "unknown" (no answer in the hub's time, the link dropped while it went): its words
-   *  in the transcript after it was sent are its copy, so it shows as sent instead of asking to be sent again. */
+  /** Its send ended with delivered "unknown" (no answer in the hub's time, the link dropped while it went): Check reads
+   *  the same operation and refreshes the transcript, never another message POST. A reliable copy shows it as sent. */
   inDoubt?: boolean;
   /** Brought back after a reload: even an unconfirmed send can settle by the transcript's words. */
   restored?: boolean;
@@ -84,9 +84,9 @@ export function arrived(e: Described, users: Seen[]): boolean {
  *  answer wrote the message after the hub stopped waiting), and a failed bubble over a message that went in had the
  *  owner send it again. A refusal (nothing went in) is never settled by words alone.
  *  `users`: the latest user messages and the items the hub tied to a message (taggedSeen). `claimed`: the ones that
- *  already answered one, kept across calls. */
+ *  already answered one, kept across calls. A definite new-id failure never settles by words alone: its Retry must stay. */
 export function settle(list: OutboxEntry[], users: Seen[], now: number, claimed = new Set<string>()): OutboxEntry[] {
-  const shown = echoed(list.filter((e) => e.state !== "failed" || e.restored || e.inDoubt), users, seenAs, claimed);
+  const shown = echoed(list.filter((e) => e.state !== "failed" || (!e.newId && (e.restored || e.inDoubt))), users, seenAs, claimed);
   const tied = new Set(users.flatMap((u) => u.client_msg_id ?? []));
   return list.filter((e) => !shown.has(e) && !(e.state === "failed" && !e.wordsOnly && tied.has(e.id)) && (e.state !== "sent" || now - (e.acceptedAt ?? e.at) < SENT_GRACE_MS));
 }
@@ -188,15 +188,16 @@ export function settleOutbox(mid: string, sid: string, users: Seen[]) {
 
 /** A failed entry's fields for the error its send ended with. */
 function failedWith(err: unknown): Pick<OutboxEntry, "state" | "error" | "clearable" | "newId" | "inDoubt"> {
+  const inDoubt = err instanceof ApiError && err.body.delivered === "unknown";
   return {
     // the hub stopped waiting (delivered "unknown"): it may have gone in, and its copy in the transcript settles it (settle)
-    inDoubt: err instanceof ApiError && err.body.delivered === "unknown",
+    inDoubt,
     state: "failed",
     error: failureText(err),
     clearable: err instanceof ApiError && err.code === "input_draft" && typeof err.body.clearable === "string" ? err.body.clearable : undefined,
-    // the hub answered: it keeps that answer for this id, so a retry is another operation; a gap it never
-    // answered is retried with the same id (the hub does it at most once)
-    newId: !isTransient(err),
+    // A definite answer stays on this id, so its ordinary Retry is another operation. An uncertain send has no Retry:
+    // Check queries the original operation instead (a network gap with no answer still retries with the same id).
+    newId: !inDoubt && !isTransient(err),
   };
 }
 
@@ -231,14 +232,14 @@ export function inSendOrder<T>(key: string, post: () => Promise<T>): Promise<T> 
 
 const KEPT_PREFIX = "outbox-msg:";
 const keptKey = (key: string, id: string) => `${KEPT_PREFIX}${key}/${id}`;
-type Outgoing = Pick<OutboxEntry, "id" | "text" | "images" | "at" | "launcher" | "model"> & Partial<Pick<OutboxEntry, "newId" | "error" | "state" | "wordsOnly" | "acceptedAt" | "clearable">>;
+type Outgoing = Pick<OutboxEntry, "id" | "text" | "images" | "at" | "launcher" | "model"> & Partial<Pick<OutboxEntry, "newId" | "inDoubt" | "error" | "state" | "wordsOnly" | "acceptedAt" | "clearable">>;
 
 /** Keeps one message's words until its transcript copy arrives (pictures are not kept: they would fill the
  *  storage). Storage can be full or refused; the message then lasts only as long as the page. */
 export function keepOutgoing(key: string, e: Outgoing) {
   if (!e.text.trim()) return;
   try {
-    storeValue(keptKey(key, e.id), JSON.stringify({ id: e.id, text: e.text, at: e.at, launcher: e.launcher, model: e.model, newId: e.newId, error: e.error, state: e.state, acceptedAt: e.acceptedAt, wordsOnly: e.wordsOnly, clearable: e.clearable, images: e.images.length }));
+    storeValue(keptKey(key, e.id), JSON.stringify({ id: e.id, text: e.text, at: e.at, launcher: e.launcher, model: e.model, newId: e.newId, inDoubt: e.inDoubt, error: e.error, state: e.state, acceptedAt: e.acceptedAt, wordsOnly: e.wordsOnly, clearable: e.clearable, images: e.images.length }));
   } catch {
     // only this page's copy then
   }
@@ -251,12 +252,12 @@ export function acceptOutgoing(key: string, id: string, acceptedAt = Date.now())
   // too; the original component's setPending no longer reaches it. An already settled entry stays absent.
   const entries = list(key);
   if (entries.some((e) => e.id === id && e.state !== "sent")) {
-    setOutbox(key, entries.map((e) => e.id === id ? { ...e, state: "sent", acceptedAt, error: undefined, clearable: undefined, newId: undefined } : e));
+    setOutbox(key, entries.map((e) => e.id === id ? { ...e, state: "sent", acceptedAt, error: undefined, clearable: undefined, newId: undefined, inDoubt: undefined } : e));
   }
   try {
     const saved = storedValue(keptKey(key, id));
     if (saved === null) return;
-    storeValue(keptKey(key, id), JSON.stringify({ ...JSON.parse(saved), state: "sent", acceptedAt, error: undefined, newId: undefined }));
+    storeValue(keptKey(key, id), JSON.stringify({ ...JSON.parse(saved), state: "sent", acceptedAt, error: undefined, newId: undefined, inDoubt: undefined }));
   } catch {
     // storage unavailable: keep only the current page's bubble
   }
@@ -288,8 +289,9 @@ function keptEntries(key: string): (Omit<Outgoing, "images"> & { lostImages: boo
 
 const restored = new Set<string>();
 
-/** After a reload: accepted messages return as sent, without resending; unconfirmed ones as failed with Retry and Delete,
- *  once the transcript is in, so a message that did reach the hub is settled (settle) before it shows.
+/** After a reload: accepted messages return as sent, without resending; unconfirmed ones as failed with Retry (or Check
+ *  when their outcome was uncertain) and Delete, once the transcript is in, so a message that did reach the hub is
+ *  settled (settle) before it shows.
  *  `inFlight`: ids this page is sending right now, which already have their bubble. */
 export function restoreOutbox(mid: string, sid: string, inFlight: string[] = []) {
   const key = outboxKey(mid, sid);
@@ -365,6 +367,108 @@ export function outboxEntry(mid: string, sid: string, id: string): OutboxEntry |
   return list(outboxKey(mid, sid)).find((e) => e.id === id);
 }
 
+interface ClientOperation {
+  id?: string;
+  kind?: string;
+  target?: { path?: string };
+  state?: string;
+  result?: { status?: number; body?: string };
+}
+
+export type OutboxCheck = "applied" | "not_applied" | "unknown" | "stale";
+const checks = new Map<string, Promise<OutboxCheck>>();
+const rechecks = new Map<string, Set<() => void>>();
+
+/** Every mounted view of a conversation receives late Check refreshes, including for a Check started before a leave
+ *  and return. Each cleanup removes only its own registration, leaving other mounted views registered. */
+export function registerOutboxRecheck(mid: string, sid: string, recheck: () => void): () => void {
+  const key = outboxKey(mid, sid);
+  const mounted = rechecks.get(key) ?? new Set<() => void>();
+  mounted.add(recheck);
+  rechecks.set(key, mounted);
+  return () => {
+    mounted.delete(recheck);
+    if (!mounted.size && rechecks.get(key) === mounted) rechecks.delete(key);
+  };
+}
+
+function messageOperation(op: ClientOperation, mid: string, sid: string, id: string): boolean {
+  // Go stores r.URL.Path, already decoded once. Compare the raw ids directly: decoding the receipt again would turn a
+  // literal "%2F" in an id into a slash. Also accept the previously encoded form for compatibility.
+  const decoded = `/api/v1/sessions/${mid}/${sid}/messages`, encoded = `/api/v1${sessionPath(mid, sid)}/messages`;
+  return op.id?.toLowerCase() === id.toLowerCase() && op.kind === "message" && (op.target?.path === decoded || op.target?.path === encoded);
+}
+
+/** The original HTTP reason on a definite receipt, without putting the operation's internals in the bubble. */
+function operationFailure(op: ClientOperation): string {
+  const saved = op.result;
+  if (saved?.body && typeof saved.status === "number") {
+    try {
+      const bytes = Uint8Array.from(atob(saved.body), (c) => c.charCodeAt(0));
+      const body = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+      const message = typeof body.error === "string" && body.error ? body.error : `HTTP ${saved.status}`;
+      return failureText(new ApiError(saved.status, message, body));
+    } catch {
+      // A receipt without readable original JSON still has its authoritative state below.
+    }
+  }
+  return t("lib-outbox.delivery_failed");
+}
+
+/** Read-only reconciliation of an uncertain send: query its original operation, then let the open transcript's ordinary
+ *  echo check run. Only a saved success or a reliable echo settles it; only a saved definite failure brings Retry back. */
+export function checkOutbox(mid: string, sid: string, id: string): Promise<OutboxCheck> {
+  const key = outboxKey(mid, sid), checkKey = `${key}/${id}`;
+  const existing = checks.get(checkKey);
+  if (existing) return existing;
+  const e = list(key).find((x) => x.id === id);
+  if (!e || e.state !== "failed" || !e.inDoubt) return Promise.resolve("stale");
+  const token = getToken(), tokenOwner = credentialOwner();
+  const current = () => credentialOwner() === tokenOwner && getToken() === token && list(key).find((x) => x.id === id) === e;
+  const reread = () => {
+    if (!current()) return;
+    // Snapshot the registrations: views mounted or unmounted by a reload take part in the next Check, not this one.
+    for (const recheck of [...(rechecks.get(key) ?? [])]) {
+      try { recheck(); } catch {
+        // A view that closed cannot refresh; the other views still can, and the next visit reconciles the same entry.
+      }
+    }
+  };
+  const run = (async (): Promise<OutboxCheck> => {
+    let op: ClientOperation;
+    try {
+      op = await api<ClientOperation>(`/ops/${encodeURIComponent(id)}`, { token, tokenOwner, isAuthContextCurrent: current });
+    } catch {
+      if (!current()) return "stale";
+      reread(); // A missing receipt (404 included) proves nothing; a transcript copy may still settle the message.
+      return "unknown";
+    }
+    if (!current()) return "stale";
+    if (!messageOperation(op, mid, sid, id)) {
+      reread();
+      return "unknown";
+    }
+    if (op.state === "done") {
+      reread();
+      if (!current()) return "stale";
+      update(key, id, { state: "sent", acceptedAt: Date.now(), error: undefined, clearable: undefined, newId: undefined, inDoubt: undefined });
+      return "applied";
+    }
+    if (op.state === "failed") {
+      reread();
+      if (!current()) return "stale";
+      update(key, id, { inDoubt: false, newId: true, error: operationFailure(op) });
+      return "not_applied";
+    }
+    reread(); // pending and unknown stay uncertain: never a new message id, never an ordinary Retry.
+    return "unknown";
+  })();
+  checks.set(checkKey, run);
+  const forget = () => { if (checks.get(checkKey) === run) checks.delete(checkKey); };
+  void run.then(forget, forget);
+  return run;
+}
+
 /** A message that already went in another way (the prompt that started a conversation): its bubble until the transcript has it. */
 export function noteSent(mid: string, sid: string, out: { text: string; images?: OutboxImage[] }) {
   const key = outboxKey(mid, sid);
@@ -375,13 +479,15 @@ export function retryOutbox(mid: string, sid: string, id: string, clearDraft?: s
   return retryOutboxEntry(mid, sid, id, clearDraft).sent;
 }
 
-/** retryOutbox, also naming the entry the retry is (a new id when the hub answered the last try). */
+/** retryOutbox, also naming the entry the retry is (a new id only after a definite answer). */
 export function retryOutboxEntry(mid: string, sid: string, id: string, clearDraft?: string): { id: string; sent: Promise<boolean> } {
   const key = outboxKey(mid, sid);
   const e = list(key).find((x) => x.id === id);
   if (!e || e.state !== "failed") return { id, sent: Promise.resolve(false) };
-  // the hub said it may have gone in: the user looked and wants it sent again, as a new message. One that was in doubt
-  // stays so: its copy is written after this, and the first try's, landing late, must not stand in for it (lib/echo.ts isEcho)
+  // Every entry point is held to the same rule: an uncertain send is checked, never posted again under a new id.
+  if (e.inDoubt) return { id, sent: checkOutbox(mid, sid, id).then((result) => result === "applied") };
+  // A gap the hub never answered is retried with the same id (the hub does it at most once). A definite answer stays
+  // on the old receipt, so this ordinary Retry is a new operation.
   const next: OutboxEntry = { ...e, id: e.newId ? uuid() : e.id, newId: false, state: "sending", error: undefined, acceptedAt: undefined, at: Date.now() };
   const flight = beginMessageSend(mid, sid, next.id, next.text);
   noteWritten(next.id, next.at);

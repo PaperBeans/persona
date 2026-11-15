@@ -423,12 +423,13 @@ func (w *webPusher) dispatch(s webSub, plaintext []byte, m webpush.Message) {
 // webPushNotify sends a notify event (notifyWSFrom's msgIn) to every subscribed browser with no Persona page open
 // now that has the capability it requires and whose settings take it (wantsOn, the decision a socket gets: manager
 // mutes, the "Needs you" and "Done" choices, quiet hours, posted without a sound inside them). Called under h.mu by
-// notifyWSFrom: what is sent goes in the background.
-func (h *Hub) webPushNotify(kind string, required []string, wantsOn func(device string) (ok, quiet bool), msgIn func(i18n.Lang) map[string]any) {
+// notifyWSFrom: what is sent goes in the background. It returns how many browsers it was handed to (sent) and how many
+// could take this kind before their settings decided (capable).
+func (h *Hub) webPushNotify(kind string, required []string, wantsOn func(device string) (ok, quiet bool), msgIn func(i18n.Lang) map[string]any) (sent, capable int) {
 	w := h.push.webPusher()
 	subs := w.list()
 	if len(subs) == 0 {
-		return
+		return 0, 0
 	}
 	open := h.openWebDevicesLocked()
 	for _, s := range subs {
@@ -438,6 +439,7 @@ func (h *Hub) webPushNotify(kind string, required []string, wantsOn func(device 
 		if len(required) > 0 && !slices.Contains(s.Features, required[0]) {
 			continue
 		}
+		capable++
 		ok, quiet := wantsOn(s.Device)
 		if !ok {
 			continue
@@ -449,7 +451,9 @@ func (h *Hub) webPushNotify(kind string, required []string, wantsOn func(device 
 			continue
 		}
 		w.dispatch(s, plain, webpush.Message{TTL: webPushTTL, Urgency: webPushUrgency(kind), Topic: webpush.TopicFor(webPushTag(msg))})
+		sent++
 	}
+	return sent, capable
 }
 
 // credentialKey keys a connection by its credential in openWebDevicesLocked, apart from device ids.

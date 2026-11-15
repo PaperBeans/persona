@@ -35,6 +35,8 @@ type runtimeHub struct {
 	resolve  func(proto.Interaction) proto.Resolution
 	nodePeer *rpc.Peer
 	cancel   context.CancelFunc
+	// drop ends the link from the hub's side: the node's connection closes, as when the hub goes away.
+	drop func()
 	// answer takes the other hub calls (mcp.tools, assistant.context…); handled false: an unexpected call.
 	answer func(method string, params json.RawMessage) (res any, err error, handled bool)
 }
@@ -91,7 +93,8 @@ func runtimeNodeTapped(t *testing.T, shared *RuntimeHost, tap io.Writer) (*Node,
 	n.peer.OnRequest = n.handle
 	peer := n.peer // served below: a test may give the node another connection later
 	hub := rpc.New("h", h2nW)
-	end := &runtimeHub{nodePeer: hub, cancel: cancel, resolve: func(proto.Interaction) proto.Resolution { return proto.Resolution{Dismiss: true} }}
+	end := &runtimeHub{nodePeer: hub, cancel: cancel, resolve: func(proto.Interaction) proto.Resolution { return proto.Resolution{Dismiss: true} },
+		drop: func() { _ = h2nW.Close() }}
 	hub.OnEvent = func(event string, params json.RawMessage) {
 		end.mu.Lock()
 		defer end.mu.Unlock()
@@ -163,6 +166,7 @@ type fakeRuntime struct {
 	answer func(method string, params json.RawMessage) (any, error)
 	events []string       // event names the node pushed, in order
 	hubs   []bool         // runtime.hub pushes: whether a hub is connected
+	driven []string       // runtime.driven pushes: the sessions the hub started through another runtime
 	helloR map[string]any // what runtime.hello answered
 	closed chan struct{}  // closed when the connection ends (helloAt)
 }
@@ -208,6 +212,13 @@ func dialRuntimeAt(t *testing.T, path string, hello map[string]any) *fakeRuntime
 			}
 			_ = json.Unmarshal(params, &p)
 			f.hubs = append(f.hubs, p.Connected)
+		}
+		if event == "runtime.driven" {
+			var p struct {
+				SessionID string `json:"session_id"`
+			}
+			_ = json.Unmarshal(params, &p)
+			f.driven = append(f.driven, p.SessionID)
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -613,6 +624,80 @@ func TestRuntimeInteractionGoesToThePhone(t *testing.T) {
 	if err := host.peer.Call(ctx, "interaction.create", map[string]any{"interaction": map[string]any{
 		"kind": "permission", "session_id": "not-listed"}}, &res); err == nil {
 		t.Fatal("asked for a session the host does not list")
+	}
+}
+
+// A card under an id the runtime chose is resumable, as one with a tool call id is: the runtime SDK asks the next node
+// with the same card. So the hub keeps it through a hub link drop, and the drop answers node_gone (the runtime asks
+// again once a hub is back), never a dismiss: that reached the runtime before it heard the hub was gone, and the Paseo
+// bridge took a Codex or ACP card, which carries no tool call id, for one the user handed back (#8128). A card with
+// neither id is still dismissed: its next ask would be another card.
+func TestRuntimeCardSurvivesAHubLinkDrop(t *testing.T) {
+	for _, tc := range []struct {
+		name, id, toolUseID string
+		resumable           bool
+	}{
+		{name: "the runtime's own id", id: "paseo-0123456789abcdef", resumable: true},
+		{name: "a tool call id", toolUseID: "call_9", resumable: true},
+		{name: "neither", resumable: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n, hub := runtimeNode(t)
+			host := dialRuntime(t, n, dshHello())
+			_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{{"session_id": "session-7", "title": "build"}}})
+			waitFor(t, "listed", func() bool { _, ok := listed(t, n)["session-7"]; return ok })
+			asked, release := make(chan struct{}), make(chan struct{})
+			t.Cleanup(func() { close(release) })
+			hub.mu.Lock()
+			hub.resolve = func(proto.Interaction) proto.Resolution { // on the phone, unanswered, until the link drops
+				close(asked)
+				<-release
+				return proto.Resolution{Dismiss: true}
+			}
+			hub.mu.Unlock()
+
+			var res proto.Resolution
+			done := make(chan error, 1)
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				ix := map[string]any{"kind": "permission", "session_id": "session-7", "tool_name": "shell", "summary": "make"}
+				if tc.id != "" {
+					ix["id"] = tc.id
+				}
+				if tc.toolUseID != "" {
+					ix["tool_use_id"] = tc.toolUseID
+				}
+				done <- host.peer.Call(ctx, "interaction.create", map[string]any{"interaction": ix}, &res)
+			}()
+			select {
+			case <-asked:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the card never reached the hub")
+			}
+			hub.mu.Lock()
+			ix := hub.asked[0]
+			hub.mu.Unlock()
+			if ix.Resumable != tc.resumable || (tc.id != "" && ix.ID != tc.id) {
+				t.Fatalf("asked %s resumable %v (want %v)", ix.ID, ix.Resumable, tc.resumable)
+			}
+
+			hub.drop() // the hub link drops under the card
+			var err error
+			select {
+			case err = <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the runtime got no answer after the hub link dropped")
+			}
+			var re *rpc.Error
+			gone := errors.As(err, &re) && re.Code == "node_gone"
+			if tc.resumable && !gone {
+				t.Fatalf("a resumable card under a dropped hub link: %v, %+v (want node_gone: the runtime asks the next hub)", err, res)
+			}
+			if !tc.resumable && (err != nil || !res.Dismiss) {
+				t.Fatalf("a card with no stable id under a dropped hub link: %v, %+v (want a dismiss)", err, res)
+			}
+		})
 	}
 }
 

@@ -29,7 +29,10 @@ func deliveryReviewService(t *testing.T, forge *fakeForge, hub *runningHub, off 
 
 func acceptReview(s *Service, todo string, extra map[string]any) (string, error) {
 	args := map[string]any{"todo_id": todo, "verdict": "accepted", "note": "做完了",
-		"checks": []ReviewCheck{{Criterion: "PR 合并到 master", Met: true, Evidence: "draft PR"}}}
+		"checks": []ReviewCheck{
+			{Criterion: "PR 合并到 master", Met: true, Evidence: "draft PR"},
+			{Criterion: "浅色 / 深色截图贴进 PR", Met: true, Evidence: "both screenshots verified"},
+		}}
 	for k, v := range extra {
 		args[k] = v
 	}

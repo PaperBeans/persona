@@ -64,6 +64,8 @@ export interface PanelProvider {
   /** The startup ID under a display name (#5029, lib/provider-names.ts providerIdNote): the group's header shows it small
    *  in monospace, the rail's tooltip after the name. */
   idNote?: string;
+  /** Another harness that can use it too, said after the group's name ("pi can use it too"). */
+  alsoNote?: string;
 }
 
 /** A setup: what a pick applies, what a favorite or a recent entry keeps. */

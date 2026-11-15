@@ -116,6 +116,8 @@ type runtimeConn struct {
 	ready    bool            // runtime.hello arrived
 	sessions []proto.Session // its last runtime.sessions
 	watched  map[string]bool // sessions this connection was asked to watch
+	// drivenTold: sessions this connection was told the hub started through another runtime (runtime.driven).
+	drivenTold map[string]bool
 	// What its list said beyond the rows the apps see: the terminal pane a session runs in (pane_id: the extension of a
 	// pi in a herdr pane, pi.go), how the terminal engine resumes one it lists offline (resume_argv), the Claude
 	// session whose transcript holds a session's conversation (transcript: a runtime running Claude Code through its

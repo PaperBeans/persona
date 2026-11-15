@@ -674,8 +674,11 @@ nonisolated struct LauncherModels: Codable, Hashable, Sendable {
     var machine: String? = nil
 
     /// The agent takes a model ID typed by hand (#1644): Claude Code's `--model` / `/model` and Codex's `--model` take any
-    /// string; the hub remembers typed IDs for these two only. Other agents' lists are empty (no model row).
-    static func takesTypedModel(agent: String) -> Bool { agent == "claude" || agent == "codex" }
+    /// string, and so does a work agent started in herdr (`pi`, the Cursor CLI, the Antigravity CLI: `workagent.go`).
+    /// The hub remembers typed IDs for these. Other agents' lists are empty (no model row).
+    static func takesTypedModel(agent: String) -> Bool {
+        agent == "claude" || agent == "codex" || agent == "pi" || agent == "cursor" || agent == "agy"
+    }
 
     /// A typed ID can reach the agent: one of those two, and the launcher does not pass its own --model.
     var takesTypedModel: Bool { locked == nil && Self.takesTypedModel(agent: agent) }

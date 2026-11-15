@@ -22,6 +22,9 @@ The bridge is a runtime (`docs/integrations/runtimes.md`), speaking Paseo's WebS
 Nothing else needs to be installed. The bridge requires Node.js 22 or newer. Node uses Paseo's own copy: the node used by the CLI version, or the desktop App's binary,
 run with `ELECTRON_RUN_AS_NODE=1`. A plain `node` always runs the bridge without that variable, even when Node itself was started from an Electron host (such as an editor's extension host) and inherited it.
 
+Persona is tested with Paseo 0.15.0 and newer (#8134). An older Paseo still works, but has known problems (in 0.14, a message sent while a turn starts cancels that turn),
+and the engine's note under Settings › Machines asks to update it.
+
 ## Which sessions appear
 
 - **Listed Agents**: all unarchived Paseo Agents, up to 300. Running Agents and those waiting for you are always included.
@@ -151,7 +154,8 @@ run with `ELECTRON_RUN_AS_NODE=1`. A plain `node` always runs the bridge without
     worktree's guards (below).
   - **Terminals for a Paseo Agent's folder**: a Paseo workspace has no terminal, so Open Terminal Here and a dev server's Start for one of its
     Agents open in the terminal engine's workspace that holds the folder, else in a new workspace there, never in one that only happens to be first;
-    the web and iOS offer Start only for sessions with a terminal.
+    the web and iOS offer Start only for sessions with a terminal. For that, Open Terminal Here sends the Agent's Paseo workspace with the folder
+    (the web did not, and its tab went to the first workspace, #8135).
   - **Rename and delete** (#6297; on the web, a Paseo row's ⋯ in By repository, and Rename space in the Agents space menu): Rename sets the
     workspace's title in Paseo (`workspace.title.set.request`); its branch, folder and Agents keep their names. Rename space renames the Paseo
     project (`project.rename.request`, its custom name), by the project's id or by one of its workspaces' (Android names a space that way),
@@ -192,7 +196,7 @@ run with `ELECTRON_RUN_AS_NODE=1`. A plain `node` always runs the bridge without
 | List sessions and show state | ✅ | Pushed immediately when Paseo's catalog changes |
 | Send messages and images | ✅ | While an Agent is working, messages steer the current turn (Paseo's `steer`, like typing while Claude Code works); resending the same message delivers it only once |
 | Interrupt | ✅ | |
-| Permission, question, and plan cards | ✅ | Both the phone and Paseo App can answer; the first answer wins. Answering in Paseo removes the phone's card. Tapping "Return to computer" on the phone leaves the answer to the Paseo App |
+| Permission, question, and plan cards | ✅ | Both the phone and Paseo App can answer; the first answer wins. Answering in Paseo removes the phone's card. Tapping "Return to computer" on the phone leaves the answer to the Paseo App. A card stays on the phone across link drops and goes up again after its 30 minutes while Paseo still waits (Mapping, "Cards") |
 | Create sessions from the phone | ✅ | Each available Paseo provider is a launcher, with its models, reasoning effort, and permission modes (permission modes: Claude Code's five; for providers on Codex, `bypassPermissions` starts Paseo's `full-access`; for providers whose approval is Paseo's Auto Accept switch (`auto_accept`: the ones on ACP, such as Grok, and OpenCode, #7758), `bypassPermissions` starts it with Auto Accept on; the others leave Paseo's default). A read-only start (`plan`, #3238) runs only on a provider running Claude Code, in Paseo's `plan` mode: a launcher Paseo lacks falls back to such a provider, a non-Claude one is refused (`readonly_unsupported`), and an agent Paseo reports in another mode is archived and refused. Workspace selection: use the workspace explicitly named in the form if it exists in Paseo; otherwise, if the directory is exactly a worktree, use that worktree's workspace (prefer one under the main-repository project, then the most recent), matching Paseo's own directory-based lookup. For a main checkout or ordinary directory, Paseo creates a new workspace under that project |
 | Resume a "Not running" Claude session | ✅ | Paseo imports the chat without changing its session ID. If Paseo already has it, reuse it, restoring it first if archived. An archived Agent that keeps its own ID (above) is restored under that ID. Reject if another claude process outside Paseo is using it, to prevent two processes writing at once |
 | Rename | ✅ | Changes the Agent's title in Paseo. iOS, Android and web show Rename on a Paseo session from its row's `capabilities.rename` (#6294; not on an Agent another Agent started), with the session's name only (no tab) |
@@ -224,16 +228,25 @@ no launcher. Permission mode, workspace and the first message keep their existin
   `node bridge.mjs --socket <runtime.sock> --paseo-home <Paseo home> --mcp-config <mcp.json beside runtime.sock> --allow-tools <the Agent's own Persona tools>`.
 - **Which Node.js**: the first version 22 or newer, in this order:
   1. `PERSONA_NODEJS`
-  2. The one used by the Paseo daemon (the process in `paseo.pid`)
+  2. The one used by the Paseo daemon (the process in `paseo.pid`; see "Finding Paseo" for when it is trusted)
   3. `node` on PATH
   4. Common Homebrew, `/usr/local`, volta, and nvm installation locations
+  5. On a Mac, Paseo's desktop App: `/Applications/Paseo.app/Contents/MacOS/Paseo`, then the same under `~/Applications`, run with `ELECTRON_RUN_AS_NODE=1`.
+     So a Mac with only the App installed finds it before Paseo runs, or when the daemon's process cannot be read.
+
+  The node's log names the one chosen at each start: `paseo bridge: Node.js 22.20.0, the Paseo daemon's: <path>` (where it was found: `PERSONA_NODEJS`, `the Paseo daemon's`, `PATH`, `installed` or `Paseo's app`).
 - **Exit and shutdown**:
   - After the bridge exits, node runs it again with exponential backoff starting at 1 second, capped at 1 minute. After 5 minutes of stable operation, the interval resets to 1 second.
   - When switching away from this engine, node stops it: SIGTERM to its process group, then SIGKILL after 3 seconds.
   - Node keeps the bridge's stdin open. If node suddenly disappears (is killed), stdin closes and the bridge exits. This avoids leaving an old bridge holding the runtime ID and blocking the new node's bridge.
-- **Logs**: bridge output is written line by line to node's log, prefixed with `paseo bridge:`.
-- **node.info**: Paseo appears available in the engine list when the bridge is connected, with Paseo's version. It also appears available if the daemon responds even though the bridge has not connected;
-  the bridge startup failure reason goes in `note` (displayed below the engine option in the App).
+- **Logs**: bridge output is written line by line to node's log, prefixed with `paseo bridge:`. Node also keeps the bridge's last 50 lines for the engine's note.
+- **node.info**: Paseo appears available in the engine list when the bridge is connected, with Paseo's version; a Paseo older than 0.15.0 gets a `note` asking to update it.
+  It also appears available if the daemon responds even though the bridge has not connected, and `note` (displayed below the engine option in the App) says why (#8134):
+  - The bridge could not start (no Node.js 22, say), or it exited: the error it printed last, such as Node.js's `SyntaxError: …` or the bridge's `uncaught: Error: …`
+    (up to three lines of its message, without the stack), rather than its exit status. While the next run starts, the note keeps that reason.
+  - The bridge has run for 30 seconds without connecting: the last line it printed, such as Paseo refusing its connection.
+  - Node writes the note in Chinese from the hub's `node-engine` catalog, and the hub words it in each reader's language (`docs/protocol/protocol.md` "Engines").
+    Like the rest of the engine list, it is what node reported when it last connected to the hub: `node.info` is asked once per connection (`docs/integrations/engines.md`).
 
 ## Finding Paseo
 
@@ -242,6 +255,13 @@ no launcher. Permission mode, workspace and the first message keep their existin
   - No `paseo.pid`: Paseo is not running.
   - `paseo.pid` exists but has no address yet: Paseo is starting.
   - Retry later in either case.
+- **Its Node.js** (#8134): the bridge runs on the daemon's own Node.js (the process `pid` in `paseo.pid` names) only while the daemon answers at that file's address, and only when that
+  process's executable is a Node.js (by its name: `node`, `nodejs…`, `node-…`) or an Electron app (its framework in the Mac app bundle the file is in, or `resources/app.asar` beside it elsewhere).
+  A `paseo.pid` left behind by a Paseo that crashed, or from before a reboot, names a process that may now be any program of yours, and finding Node.js runs what it finds with `-e …`.
+  - The executable is the kernel's: `/proc/<pid>/exe` on Linux, the executable path of `KERN_PROCARGS2` on macOS (`node/update_inventory_argv_darwin.go`).
+    Never the process's name: Paseo's processes rename themselves ("Paseo Supervisor"), which is also what `ps -o comm=` shows.
+  - Otherwise node goes on down the list ("How the bridge runs"); a Mac with only the Paseo App finds the App's binary.
+- **Version**: Persona is tested with Paseo 0.15.0 and newer. The version comes from Paseo's answer to the bridge's hello (`server_info`); below 0.15.0 the engine still works, and its note asks to update Paseo.
 - **Password**: if Paseo has a password, log in using `local-credential` in its home (as Paseo's CLI does). With no password, Paseo skips the check.
 - **Declared connection capabilities**: the bridge connects as a `cli` client and declares `owned_subscriptions`, receiving only replies to its own requests and messages from its own subscriptions, not broadcasts.
   It subscribes to four things:
@@ -279,16 +299,34 @@ no launcher. Permission mode, workspace and the first message keep their existin
 - **Cards**:
   - Paseo `question` → question card. Answers for Claude Code use the original question text as the key; other Agents use the `header` from Paseo's card.
   - `plan` → plan card:
-    - Approval selects Paseo's `implement`, then switches to the mode selected on the phone. If the previous mode was bypass / auto, use `implement_resume` to return to it.
+    - Approval selects Paseo's `implement`, then switches to the mode selected on the phone. Paseo's `implement_resume`, offered when the agent was in bypass or auto
+      before it planned, goes back to that earlier mode, whatever the phone chose: it is used only when the phone chose that same mode (its label names it, #8128).
     - Rejection sends the feedback as the denial reason.
   - One of the Agent's own Persona tools (`--allow-tools`: `report_to_supervisor`, the to-do decision tools, a leader's `task_plan` / `task_review`) asked by Claude Code in an Agent Persona started (it carries the `persona.session` label) → allowed by the bridge once, with no card, no rule kept and no mode changed (#4966, `docs/integrations/claude-integration.md` "Persona tools Agents call without a card"). An agent made in Paseo's own app (also one whose ID the bridge kept, `persona.kept`), and every other tool, still ask.
     Claude Code Agents created since #6293 do not ask at all: they are created with these tools preapproved (below); this answer covers the Agents created before.
   - Everything else → permission card:
     - If Claude Code provides a suggested rule, the card offers "Always allow," stating which rule will be added and where it applies.
     - Denial includes the reason you entered.
-  - Card IDs are derived from Paseo request IDs, reconnecting to the original card after a bridge restart.
+  - Card IDs are derived from Paseo request IDs: after a node restart the next bridge asks with the same ID, and the hub hangs that on the card the phone already shows.
+    A card put up again (below) has an ID of its own.
   - Plan requests Claude Code gives Paseo contain no plan body (`ExitPlanMode` input is empty). The bridge reads the body from that tool call in the timeline.
+  - **Across link drops** (#8128): while Paseo waits on a request, its card is on the phone, whatever happened to the links in between ("each pending request has one
+    home", `docs/design/DESIGN_SYSTEM.md`).
+    - **The hub link drops** (the computer sleeps, its network changes): the card stays on the phone. It carries the bridge's own ID, so the hub keeps it as `resumable`
+      (Codex, ACP, OpenCode and pi cards too, which have no `toolUseId`), and the node answers the bridge `node_gone`, not a dismiss. The bridge asks the next hub
+      with the same card for 2 minutes from the drop, however long the card was up before, and an answer given meanwhile reaches Paseo. A request that comes up
+      while there is no hub goes to the phone once the hub is back. If the hub was away longer than it keeps a card (3 minutes), it ended the card: its answer for
+      it comes at once, and the bridge puts up a new card.
+    - **The bridge's link to Paseo drops**: an answer given meanwhile waits in the bridge and goes to Paseo when it is back, if Paseo still asks; the card does not go
+      up a second time. A card stays pending until Paseo confirms its answer (`agent_permission_resolved`), so an update of the agent in between does not show it again.
+    - **Nobody answers for 30 minutes**: the card's time on the phone runs out, but Paseo keeps waiting, so the bridge puts up a new card (and the phone is notified
+      again) while Paseo still lists the request. DSH instead keeps the phone's card when its own timed question runs out first and hands a late answer back to its
+      agent (`docs/integrations/runtimes.md` ("Interactions")); here the phone's card is the one with a time limit, so it is the one renewed.
+    - **"Return to computer"** is the only dismissal that leaves a request to Paseo's app: one made while the card is up, the hub there since it went up and before
+      its 30 minutes are over. A dismissal that comes at once is the hub's answer for a card it had ended (a person takes longer), so the bridge puts up a new card,
+      except for a card it has just made, which was never on the hub. A hand-back holds until the request is answered.
 - **Create**: use Paseo's `agent.create`. The bridge chooses the Agent ID and includes the form's selected model, permission mode (Allow all on an Auto Accept provider as `featureValues.auto_accept`, "Capabilities"), and reasoning effort. The first message is `initialPrompt`.
+  - The apps start a provider other than Codex with no first message and send it once the start is answered, as an ordinary message that can carry photos and files (iOS and the web; Android since #8143): such a start has no `initialPrompt`.
   - Creating from a workspace places it in that Paseo workspace, Agents in it or not; one Paseo no longer has is refused (above).
   - If Paseo does not finish creation within 25 seconds, return the session row first and keep waiting in the background.
   - **Agent MCP tools** (#3655): the bridge reads the node's `mcp.json` (the one terminal Agents load) at each creation and puts its stdio servers (`personad mcp`) into the request's `config.mcpServers`.
@@ -322,6 +360,9 @@ no launcher. Permission mode, workspace and the first message keep their existin
 - New worktree, Rename and Delete worktree are on the web only: iOS and Android offer them for herdr and Orca workspaces. Android's Rename space renames a
   Paseo space too (by the session's workspace); the web's chat ⋯ offers Rename space for terminal spaces only.
 - Images in Paseo's timeline are not displayed. Claude Code sessions are unaffected; their images come from the transcript.
+- The bridge keeps "Return to computer" in memory: after it restarts (a node update restarts it), a request handed back before goes to the phone once more,
+  since the hub's answer for the old card, at once, reads like that for a card it ended ("Cards" above). A card the next bridge takes up again after a node
+  restart ends at the first bridge's 30 minutes, which the next one does not know: if nobody answers until then, that end counts as a hand-back.
 - Paseo's own plugins, scheduled tasks, and hub execution are not integrated.
 
 ## Verification
@@ -357,8 +398,13 @@ no launcher. Permission mode, workspace and the first message keep their existin
 ## Troubleshooting
 
 - **Engine shows "Not detected"**: Paseo is not running, or `paseo.pid` is not in the home node expects. For a custom home, set `PASEO_HOME` for personad.
-- **Engine is available, but the note says "Paseo is running, but Persona cannot connect to it: …"**: the bridge cannot start; the rest gives the reason, commonly a missing Node.js 22.
-  Set `PERSONA_NODEJS` to a node executable version 22 or newer.
+- **Engine is available, but the note says "Paseo is running, but Persona can’t connect to it: …"**: the bridge cannot start, or it exited; the rest is the reason, or the error the bridge printed
+  last. Commonly a missing Node.js 22 (`no Node.js found (set PERSONA_NODEJS)`, or `no usable Node.js (…)` naming each one tried and why): set `PERSONA_NODEJS` to a node executable version 22 or newer.
+- **The note says "Paseo is running, but Persona still hasn’t connected to it: …"**: the bridge has run for 30 seconds without connecting. The rest is the last line it printed, such as
+  `paseo: Paseo refused the connection (…)` (Paseo did not accept the bridge's hello, or the `local-credential` of a Paseo with a password) or `persona: this personad node lacks …` (update personad).
+- **The note says "Update Paseo: …"**: the Paseo there is older than 0.15.0. It still works, with the problems fixed since; update the Paseo App or CLI and restart its daemon.
+- **Which Node.js runs the bridge**: the line `paseo bridge: Node.js …` in node's log at each start says which, and where it was found.
+- **A note that seems out of date**: the engine list is what node reported when it last connected to the hub, so a bridge that started failing later shows its note after node reconnects.
 - **Sessions appear, but content uses Paseo's format rather than Claude's transcript**: node did not find the transcript, for example because the provider uses a different
   `CLAUDE_CONFIG_DIR`. Add that directory to the machine's `machines[].claude_config_dirs` in hub.json (`docs/operations/config.md`).
 - **Detailed logs**: look for lines beginning with `paseo bridge:` in node's log.

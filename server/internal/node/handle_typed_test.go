@@ -130,6 +130,116 @@ func TestTypedHandleParamsDecodeAsTheSharedStructDid(t *testing.T) {
 				return reflect.DeepEqual(reflect.ValueOf(l).Elem().Convert(reflect.TypeOf(gitLogParams{})).Interface(), *n.(*gitLogParams))
 			},
 		},
+		{
+			name:   methodWorktreePrepare,
+			sample: `{"composer":true,"kind":"herdr","workspace_id":"w1","cwd":"/repo","branch":"b"}`,
+			legacy: &struct {
+				Composer    bool   `json:"composer"`
+				Kind        string `json:"kind"`
+				WorkspaceID string `json:"workspace_id"`
+				Cwd         string `json:"cwd"`
+			}{},
+			typed: &worktreePrepareParams{},
+			same: func(l, n any) bool {
+				return reflect.DeepEqual(reflect.ValueOf(l).Elem().Convert(reflect.TypeOf(worktreePrepareParams{})).Interface(), *n.(*worktreePrepareParams))
+			},
+		},
+		{
+			name:   methodWorktreeCreate,
+			sample: `{"composer":false,"kind":"herdr","workspace_id":"w1","cwd":"/repo","branch":"feat","path":"/wt","parent_workspace_id":"w0","auto_name":true,"locale":"en"}`,
+			legacy: &struct {
+				Composer          bool   `json:"composer"`
+				Kind              string `json:"kind"`
+				WorkspaceID       string `json:"workspace_id"`
+				Cwd               string `json:"cwd"`
+				Branch            string `json:"branch"`
+				Path              string `json:"path"`
+				ParentWorkspaceID string `json:"parent_workspace_id"`
+				AutoName          bool   `json:"auto_name"`
+			}{},
+			typed: &worktreeCreateParams{},
+			same: func(l, n any) bool {
+				return reflect.DeepEqual(reflect.ValueOf(l).Elem().Convert(reflect.TypeOf(worktreeCreateParams{})).Interface(), *n.(*worktreeCreateParams))
+			},
+		},
+		{
+			name:   methodWorktreeSource,
+			sample: `{"kind":"orca","workspace_id":"w1","cwd":"/repo","name":"x"}`,
+			legacy: &struct {
+				Kind        string `json:"kind"`
+				WorkspaceID string `json:"workspace_id"`
+			}{},
+			typed: &worktreeSourceParams{},
+			same: func(l, n any) bool {
+				return reflect.DeepEqual(reflect.ValueOf(l).Elem().Convert(reflect.TypeOf(worktreeSourceParams{})).Interface(), *n.(*worktreeSourceParams))
+			},
+		},
+		{
+			name:   methodWorktreeAdd,
+			sample: `{"kind":"herdr","cwd":"/repo","branch":"b","name_hint":"fix","path":"/x"}`,
+			legacy: &struct {
+				Kind     string `json:"kind"`
+				Cwd      string `json:"cwd"`
+				Branch   string `json:"branch"`
+				NameHint string `json:"name_hint"`
+			}{},
+			typed: &worktreeAddParams{},
+			same: func(l, n any) bool {
+				return reflect.DeepEqual(reflect.ValueOf(l).Elem().Convert(reflect.TypeOf(worktreeAddParams{})).Interface(), *n.(*worktreeAddParams))
+			},
+		},
+		{
+			name:   methodWorktreeStatus,
+			sample: `{"kind":"herdr","cwd":"/repo","branch":"b"}`,
+			legacy: &struct {
+				Kind string `json:"kind"`
+				Cwd  string `json:"cwd"`
+			}{},
+			typed: &worktreeStatusParams{},
+			same: func(l, n any) bool {
+				return reflect.DeepEqual(reflect.ValueOf(l).Elem().Convert(reflect.TypeOf(worktreeStatusParams{})).Interface(), *n.(*worktreeStatusParams))
+			},
+		},
+		{
+			name:   methodWorktreeRemove,
+			sample: `{"kind":"herdr","path":"/wt","delete_branch":true,"force":true,"cwd":"/repo"}`,
+			legacy: &struct {
+				Kind         string `json:"kind"`
+				Path         string `json:"path"`
+				DeleteBranch bool   `json:"delete_branch"`
+				Force        bool   `json:"force"`
+			}{},
+			typed: &worktreeRemoveParams{},
+			same: func(l, n any) bool {
+				return reflect.DeepEqual(reflect.ValueOf(l).Elem().Convert(reflect.TypeOf(worktreeRemoveParams{})).Interface(), *n.(*worktreeRemoveParams))
+			},
+		},
+		{
+			name:   methodWorktreeSnapshot,
+			sample: `{"kind":"herdr","cwd":"/repo","name_hint":"review","branch":"b"}`,
+			legacy: &struct {
+				Kind     string `json:"kind"`
+				Cwd      string `json:"cwd"`
+				NameHint string `json:"name_hint"`
+			}{},
+			typed: &worktreeSnapshotParams{},
+			same: func(l, n any) bool {
+				return reflect.DeepEqual(reflect.ValueOf(l).Elem().Convert(reflect.TypeOf(worktreeSnapshotParams{})).Interface(), *n.(*worktreeSnapshotParams))
+			},
+		},
+		{
+			name:   methodWorktreeRename,
+			sample: `{"kind":"herdr","workspace_id":"w1","name":"New","cwd":"/repo"}`,
+			legacy: &struct {
+				Kind        string `json:"kind"`
+				WorkspaceID string `json:"workspace_id"`
+				Name        string `json:"name"`
+			}{},
+			typed: &worktreeRenameParams{},
+			same: func(l, n any) bool {
+				return reflect.DeepEqual(reflect.ValueOf(l).Elem().Convert(reflect.TypeOf(worktreeRenameParams{})).Interface(), *n.(*worktreeRenameParams))
+			},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

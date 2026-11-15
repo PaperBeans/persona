@@ -113,9 +113,8 @@ func switchUnsupported(c proto.Session, launcher string) error {
 	case c.Agent != "" && c.Agent != "claude":
 		return fmt.Errorf("%s runs %s: only a Claude Code agent moves to another launcher", label, c.Agent)
 	case stoppedAgent(c) || c.Status == proto.StatusOffline:
-		return fmt.Errorf("%s has stopped: nothing here starts it again, so it was not moved. Only the user can resume it, with Resume "+
-			"on its terminal page; agents_switch can make that Resume come up on the launcher, or start a new agent with agent_start in "+
-			"its directory on that launcher", label)
+		return fmt.Errorf("%s has stopped, so it was not moved. agents_switch can make its next resume (the user's Resume, or "+
+			"agent_send with resume) come up on the launcher, or start a new agent with agent_start in its directory on that launcher", label)
 	case cmp.Or(c.Launcher, "claude") == launcher:
 		return errOnLauncherAlready
 	}

@@ -238,6 +238,7 @@ machines.read        GET /api/v1/machines/{id}/usage
 -                    GET /api/v1/machines/{mid}/computer
 -                    GET /api/v1/machines/{mid}/computer/apps
 -                    GET /api/v1/machines/{mid}/computer/clipboard
+-                    GET /api/v1/machines/{mid}/diagnosis
 -                    GET /api/v1/machines/{mid}/dirs
 -                    GET /api/v1/machines/{mid}/doctor
 -                    GET /api/v1/machines/{mid}/file
@@ -478,6 +479,7 @@ agents.control       POST /api/v1/interactions/{id}/resolve
 -                    POST /api/v1/machines/{id}/reject
 -                    POST /api/v1/machines/{mid}/browser/cookies
 -                    POST /api/v1/machines/{mid}/browser/{action}
+-                    POST /api/v1/machines/{mid}/cleanup
 -                    POST /api/v1/machines/{mid}/codex/{sid}/takeover
 -                    POST /api/v1/machines/{mid}/computer/clipboard
 -                    POST /api/v1/machines/{mid}/computer/{action}

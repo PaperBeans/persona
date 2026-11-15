@@ -145,8 +145,7 @@ internal fun ChildSessionCard(sessionId: String, assistant: Boolean) {
     val effort = row.effort?.takeIf { it in setOf("minimal", "low", "medium", "high", "xhigh", "max", "ultra") }
         ?.let { SessionModes.effortLabel(it, res) }
     val model = listOfNotNull(persona.core.domain.modelShortName(row.model).ifEmpty { null }, effort).joinToString(" · ").ifEmpty { null }
-    val harness = if (row.isClaude) res.getString(R.string.chat_subagent_harness_claude) else row.agentLabel
-    val meta = SubagentCardText.Meta(if (assistant) null else harness, model, null, null, took)
+    val meta = SubagentCardText.Meta(if (assistant) null else subagentHarness(row, res), model, null, null, took)
     val actions = remember(row.key, children.repository) {
         ChatRowActions(row.key, fullText = { children.repository.fullText(row.key, it.id) }, openPath = null,
             photos = null, pictures = { emptyList() }, openImages = { _, _ -> }, menu = null, retryLineId = null, onRetry = {})

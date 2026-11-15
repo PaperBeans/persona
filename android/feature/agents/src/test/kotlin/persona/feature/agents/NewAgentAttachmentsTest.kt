@@ -150,6 +150,57 @@ class NewAgentAttachmentsTest {
         } finally { model.viewModelScope.cancel() }
     }
 
+    /**
+     * #8143: Paseo's providers other than Claude Code and Codex ("paseo") take attachments as iOS and the web send them:
+     * the start carries no first message, which goes as an ordinary message once the hub answers, with the files' paths
+     * and the photos. Without attachments their first message goes the same way.
+     */
+    @Test fun aPaseoProviderTakesAttachmentsInTheFirstMessageAfterTheStart() = test {
+        val sender = Sender()
+        val service = Service().apply {
+            available = listOf(AgentLauncher("claude"), AgentLauncher("grok", agentType = "paseo"), AgentLauncher("codex", agentType = "codex"))
+            result = AgentStartResult.Created(Session(machineId = "first", sessionId = "paseo-1", agent = "paseo", launcher = "grok", status = "idle"))
+        }
+        val model = NewAgentViewModel(service, MemoryStore(), machines, sender, uploads = uploads(Source(Composer())))
+        try {
+            advanceUntilIdle()
+            model.selection(model.state.value.selection.copy(launcher = "grok", cwd = "/code"))
+            assertTrue(model.state.value.takesAttachments)
+            model.attach(listOf(photo("p1"), file("notes.txt")))
+            advanceUntilIdle()
+            assertNull(model.state.value.attachmentsHold)
+            model.prompt("整理这些照片")
+            model.submit()
+            advanceUntilIdle()
+            val request = requireNotNull(service.request)
+            assertEquals("grok", request.launcher)
+            assertEquals("paseo", request.agentType)
+            assertEquals(true, request.async)
+            assertNull(request.prompt)
+            assertEquals("整理这些照片", request.nameHint)
+            assertEquals(listOf(SessionKey("first", "paseo-1") to "整理这些照片 /up/notes.txt\n\n<attached_images>\n/up/p1.heic\n</attached_images>"),
+                sender.sent.map { it.first to it.second })
+        } finally { model.viewModelScope.cancel() }
+    }
+
+    @Test fun aPaseoProvidersFirstMessageGoesAfterTheStartWithoutAttachmentsToo() = test {
+        val sender = Sender()
+        val service = Service().apply {
+            available = listOf(AgentLauncher("grok", agentType = "paseo"))
+            result = AgentStartResult.Created(Session(machineId = "first", sessionId = "paseo-2", agent = "paseo", launcher = "grok", status = "idle"))
+        }
+        val model = NewAgentViewModel(service, MemoryStore(), machines, sender, uploads = uploads(Source(Composer())))
+        try {
+            advanceUntilIdle()
+            model.selection(model.state.value.selection.copy(launcher = "grok", cwd = "/code"))
+            model.prompt("看一下构建")
+            model.submit()
+            advanceUntilIdle()
+            assertNull(service.request?.prompt)
+            assertEquals(listOf("看一下构建"), sender.sent.map { it.second })
+        } finally { model.viewModelScope.cancel() }
+    }
+
     @Test fun aFailedUploadSaysWhyInAToastAndTheAttachmentGoes() = test {
         val composer = Composer().apply { failures = 1 }
         val service = Service()

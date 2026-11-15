@@ -125,13 +125,15 @@ final class InboxSourceDirectTests: XCTestCase {
         return byLabel.first(where: { usableItemRow($0) })
     }
 
-    /// At regular width, a matching title belongs to the Inbox only on the same side of the divider as its toolbar.
+    /// At regular width, a matching title belongs to the Inbox only on the same side of the line beside the sidebar as its
+    /// toolbar (the sidebar's main row ends at that line; the column has no handle on it since #4206).
     @MainActor private func usableItemRow(_ row: XCUIElement) -> Bool {
         guard row.exists && row.isHittable else { return false }
         guard regularWidth else { return true }
-        let divider = element("split.divider.assistant.list"), inbox = element("inbox.more")
-        guard divider.exists, inbox.exists else { return true }
-        return (row.frame.midX > divider.frame.midX) == (inbox.frame.midX > divider.frame.midX)
+        let column = element("sidebar-main"), inbox = element("inbox.more")
+        guard column.exists, inbox.exists else { return true }
+        let line = column.frame.maxX
+        return (row.frame.midX > line) == (inbox.frame.midX > line)
     }
 
     // MARK: - Direct native chat

@@ -497,6 +497,8 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		f.agents++
 		return json.Marshal(map[string]any{"session": proto.Session{SessionID: fmt.Sprintf("s%d", f.agents), Cwd: a["cwd"].(string), Agent: "claude",
 			StartError: f.startFailed}})
+	case "session.interrupt": // a node whose agent's turn ended (settled); tests answer otherwise through f.nodes
+		return json.RawMessage(`{"ok":true,"settled":true}`), nil
 	case DeviceSessionSend:
 		if f.failSend != nil {
 			return nil, f.failSend

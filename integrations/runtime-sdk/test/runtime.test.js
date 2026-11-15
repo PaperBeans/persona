@@ -221,6 +221,44 @@ test('asking the phone marks the session as needing you, and a withdrawn ask tak
   assert.equal(interactionId('toy', 's1', 'permission', 'call-1'), id, 'stable ids')
 })
 
+test("a card up longer than the resume wait still waits for the hub that went away under it, from when it went", async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal(), { runtime: 'toy', socketPath: n.path, retryMs: 20, pushDelayMs: 5, resumeWaitMs: 400 })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await until('listed', () => n.last('runtime.sessions'))
+  const gone = () => Promise.reject(new RpcError('node going away', 'node_gone')) // the node's hub link dropped under the card
+  let drop
+  n.resolve = () => new Promise((_, reject) => { drop = () => reject(new RpcError('node going away', 'node_gone')) })
+  const id = interactionId('toy', 's1', 'permission', 'call-1')
+  const asking = rt.ask({ id, kind: 'permission', session_id: 's1', tool_name: 'Bash' })
+  await until('on the phone', () => n.asked.length === 1 && drop)
+  await new Promise((r) => setTimeout(r, 600)) // up longer than the wait
+  n.resolve = gone
+  n.setHub(false)
+  drop()
+  await new Promise((r) => setTimeout(r, 250)) // a while with no hub
+  n.resolve = () => ({ allow: true })
+  n.setHub(true) // back: the next ask, with the same id, is answered
+  assert.deepEqual(await asking, { allow: true }, 'the next hub answers it, not a dismiss at once')
+  assert.deepEqual(n.asked.map((ix) => ix.id), [id, id], 'asked again with the same id')
+
+  // A hub that does not come back: the wait ends that long after it went, not at once and not never.
+  n.resolve = () => new Promise((_, reject) => { drop = () => reject(new RpcError('node going away', 'node_gone')) })
+  drop = undefined
+  const again = rt.ask({ id: 'toy-2', kind: 'permission', session_id: 's1', tool_name: 'Bash' })
+  await until('on the phone again', () => drop)
+  await new Promise((r) => setTimeout(r, 600))
+  n.resolve = gone
+  n.setHub(false)
+  const lostAt = Date.now()
+  drop()
+  assert.deepEqual(await again, { dismiss: true })
+  const waited = Date.now() - lostAt
+  assert.ok(waited >= 350 && waited < 1500, `dismissed ${waited} ms after the hub went`)
+})
+
 test('rewrites held while a watch catches up go out in order: to another history and back', async (t) => {
   const n = await startFakeNode(t)
   let release
@@ -796,4 +834,56 @@ test('seen is advertised only by a driver that has it, and reaches the driver (#
   await other.ready
   assert.equal(other.hello.caps.seen, undefined, 'not said without the method')
   await assert.rejects(other.peer.call('session.seen', { session_id: 's1' }), /unsupported/)
+})
+
+test('runtime_driven_from_the_node_makes_the_phone_answer_first', async (t) => {
+  // The session was started from Persona through another runtime (pi's companion starts it in pi-web): the node tells
+  // the runtime running it, which then puts its cards on the phone first.
+  const n = await startFakeNode(t)
+  let asked
+  const rt = createRuntime(minimal({ hasLocalClient: (id) => { asked = id; return true } }), { runtime: 'toy', socketPath: n.path, retryMs: 20, pushDelayMs: 5 })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await until('list', () => n.last('runtime.sessions'))
+  assert.equal(rt.phoneFirst('s1'), false, 'a local UI is open and the phone never drove it')
+  assert.equal(asked, 's1', 'the driver is asked about that session')
+  n.peer.notify('runtime.driven', { session_id: 's1' })
+  await until('driven', () => rt.phoneFirst('s1'))
+  assert.equal(rt.touched('s1'), true)
+})
+
+test('waiting_on_user_lists_the_session_blocked_until_released', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal(), { runtime: 'toy', socketPath: n.path, retryMs: 20, pushDelayMs: 5, refreshMs: 0 })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await until('idle', () => n.last('runtime.sessions')?.sessions[0].status === 'idle')
+  const release = rt.waitingOnUser('s1')
+  await until('blocked', () => n.last('runtime.sessions')?.sessions[0].status === 'blocked')
+  assert.equal(rt.busy(), true, 'a question waiting holds a version switch too')
+  release()
+  release() // twice: once
+  await until('idle again', () => n.last('runtime.sessions')?.sessions[0].status === 'idle')
+  assert.equal(rt.busy(), false)
+})
+
+test('send_and_interrupt_say_queued_and_settled_as_the_driver_does', async (t) => {
+  const n = await startFakeNode(t)
+  let queue = false
+  let settle = false
+  const rt = createRuntime(minimal({
+    send: async () => (queue ? { queued: true } : undefined),
+    interrupt: async () => (settle ? { settled: true } : undefined),
+  }), { runtime: 'toy', socketPath: n.path, retryMs: 20, pushDelayMs: 5 })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  assert.deepEqual(await n.peer.call('session.send', { session_id: 's1', text: 'a' }), { ok: true })
+  queue = true
+  assert.deepEqual(await n.peer.call('session.send', { session_id: 's1', text: 'b' }), { ok: true, queued: true })
+  assert.deepEqual(await n.peer.call('session.interrupt', { session_id: 's1' }), { ok: true }, 'a stop not confirmed says nothing more')
+  settle = true
+  assert.deepEqual(await n.peer.call('session.interrupt', { session_id: 's1' }), { ok: true, settled: true })
 })

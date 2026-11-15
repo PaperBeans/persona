@@ -25,5 +25,6 @@
   "doc_comment_rule": "规则：文档评论提到了你，或回复了你参与过的评论。",
   "larkcli_name": "飞书 · 我的消息",
   "github_rate_low": "这个小时的 GitHub 请求额度快用完了，约 {minutes} 分钟内只看通知",
-  "github_paused": "GitHub 要求暂停请求，约 {minutes} 分钟内不读取任何内容"
+  "github_paused": "GitHub 要求暂停请求，约 {minutes} 分钟内不读取任何内容",
+  "github_account_before": "GitHub：换了账号，这条是之前那个账号的"
 }

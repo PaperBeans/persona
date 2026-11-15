@@ -87,10 +87,10 @@ final class InboxSourceDirectSplitTests: XCTestCase {
         shot("view-1-detail")
     }
 
-    /// The row in the list column: its title, hittable, on the divider's side of the Inbox's own toolbar (the list is
-    /// not assumed to be the left column).
+    /// The row in the list column: its title, hittable, on the Inbox's own toolbar's side of the line beside the sidebar
+    /// (the list is not assumed to be the left column).
     @MainActor private func itemRow() -> XCUIElement? {
-        let divider = element("split.divider.assistant.list")
+        let divider = element("sidebar-main")
         let inbox = element("inbox.more")
         _ = divider.waitForExistence(timeout: 10)
         for attempt in 0..<8 {
@@ -102,11 +102,13 @@ final class InboxSourceDirectSplitTests: XCTestCase {
         return nil
     }
 
-    /// `e` is in the list column: shown, and with the divider read, on the same side of it as the Inbox's toolbar.
+    /// `e` is in the list column: shown, and with the line beside the sidebar read (where the sidebar's main row ends; the
+    /// column has no handle on it since #4206), on the same side of it as the Inbox's toolbar.
     @MainActor private func listSide(_ e: XCUIElement, divider: XCUIElement, inbox: XCUIElement, hittable: Bool = true) -> Bool {
         guard e.exists, !hittable || e.isHittable else { return false }
         guard divider.exists, inbox.exists else { return true }
-        return (e.frame.midX > divider.frame.midX) == (inbox.frame.midX > divider.frame.midX)
+        let line = divider.frame.maxX
+        return (e.frame.midX > line) == (inbox.frame.midX > line)
     }
 
     // MARK: - The chat, the list and the way back
@@ -125,8 +127,8 @@ final class InboxSourceDirectSplitTests: XCTestCase {
 
     /// The push stays in the detail column: the list keeps its rows beside the chat.
     @MainActor private func assertListStaysBeside() {
-        let divider = element("split.divider.assistant.list"), inbox = element("inbox.more")
-        XCTAssertTrue(divider.exists, "the split lost its divider when the chat opened")
+        let divider = element("sidebar-main"), inbox = element("inbox.more")
+        XCTAssertTrue(divider.exists, "the sidebar went away when the chat opened")
         let rows = app.staticTexts.matching(NSPredicate(format: "label == %@", Self.itemTitle)).allElementsBoundByIndex
         XCTAssertTrue(rows.contains { listSide($0, divider: divider, inbox: inbox, hittable: false) },
                       "the inbox list is gone from beside the chat:\n\(app.debugDescription)")

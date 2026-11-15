@@ -68,8 +68,18 @@ struct AssistantView: View {
     @State private var showRecordings = false
     /// The sidebar (Chat History, or a drag to the right anywhere on the page): docs/apple/ios.md「Persona top bar and sidebar」.
     @State private var drawer = AssistantDrawer()
-    /// Regular width (iPhone Duo open): the sidebar is a column beside the conversation; Chat History shows or hides it.
+    #if os(iOS)
+    /// Regular width (iPad, iPhone Duo open; the Separate layout): the sidebar is a column beside the conversation; Chat
+    /// History shows or hides it. As it was last left (`SplitListMemory`, #2624, #4206).
+    @State private var columns = SplitListMemory.startsClosed(Self.listKey) ? .detailOnly : SplitColumns.shown
+    /// Where the history column's shown state is kept.
+    private static let listKey = "assistant.list"
+    /// The history column as UIKit has it (`SplitColumnControl`).
+    @State private var columnState = SplitColumnState()
+    #else
+    /// Regular width: the sidebar is a column beside the conversation; Chat History shows or hides it.
     @State private var columns = SplitColumns.shown
+    #endif
     /// iPhone Duo's bars down the side: the top bar is the side rail, and the page's top is free.
     @Environment(\.shellRailEdge) private var railEdge
     /// A phone's tabs (iPhone Duo open): the column's own button folds it, at its top (#2623).
@@ -126,17 +136,31 @@ struct AssistantView: View {
             }
             #else
             NavigationSplitView(columnVisibility: $columns) {
-                // The system sizes the column on iPhone Duo (and moves the divide onto the fold); iPad, as the other tabs.
+                // One width, the other splits' (`SidebarWidth`, #4206).
                 sidebar(column: true)
                     .toolbarVisibility(.hidden, for: .navigationBar)
                     .modifier(SidebarWidth())
             } detail: {
                 stack
+                    #if os(iOS)
+                    // Slid by a finger, as the other splits' lists (`SplitColumnControl`, #4206).
+                    .background {
+                        SplitColumnControl(drags: true, state: columnState) { shown in
+                            var t = Transaction()
+                            t.disablesAnimations = true
+                            withTransaction(t) { columns = shown ? SplitColumns.shown : .detailOnly }
+                            SplitListMemory.keep(Self.listKey, shown: shown, state: columnState)
+                        }
+                    }
+                    .modifier(SplitPageMin())
+                    #endif
             }
             .modifier(SidebarTopFill(shown: columns != .detailOnly))
             .navigationSplitViewStyle(.balanced)
-            // The line beside the history: dragged wider, narrower or closed, remembered (#2624).
-            .modifier(SplitDividerHandle(columns: $columns, key: "assistant.list"))
+            #if os(iOS)
+            // Shown or not, remembered; beside the page or over it by the width (#2624, #4206).
+            .modifier(SplitListMemory(columns: $columns, key: Self.listKey, state: columnState))
+            #endif
             #endif
         } else {
             // The sidebar takes the whole height, like ChatGPT's: the tab bar fades away as it comes out
@@ -210,6 +234,15 @@ struct AssistantView: View {
         }
     }
 
+    /// A phone's page (the iPhone, the open iPhone Duo): the iPhone's new conversation (`ShellHome`), not the iPad's.
+    private var phonePage: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        false
+        #endif
+    }
+
     /// Nothing pushed on the page: the sidebar's drag only works here (pushed pages have their own back swipe).
     private var atRoot: Bool {
         var pushed = showProfile || showKnowledge || showRoutines || showTodos || openedExtension != nil || showHealth || showRecordings
@@ -245,9 +278,9 @@ struct AssistantView: View {
                     // The iPad draws the shell's composer too (`ChatComposerKind.padCard`): the assistant's, as on the iPhone.
                     // The Sidebar layout's phone page too: the iPhone's conversation, as in the shell (#6332).
                     .environment(\.shellChat, shell != nil || ChatComposerKind.padCard || drawerPage)
-            } else if shell != nil || pageTabSwitch || drawerPage {
-                // A phone's tabs too (iPhone Duo open, #3680): the iPhone's new conversation, with what needs the user
-                // over the composer. The iPad keeps `AssistantHome`.
+            } else if shell != nil || drawerPage || phonePage {
+                // A phone's page at regular width too (iPhone Duo open, either layout; #3680, #3641): the iPhone's new
+                // conversation, with what needs the user over the composer. The iPad keeps `AssistantHome`.
                 ShellHome(pending: shownStart, error: shownFailure?.reason, launcher: $starterLauncher, mode: $starterMode,
                           effort: $starterEffort, openInbox: { navPath.wrappedValue.append($0) }, resend: resend, delete: deleteFailed) { text, images in
                     Task { await start(text, images) }
@@ -282,6 +315,7 @@ struct AssistantView: View {
                             sidebarShown: sidebarColumnShown,
                             sidebarCounts: embedded,
                             drawerTitle: drawerPage,
+                            newChatInSidebar: embedded && widthClass == .regular || padPlaces,
                             openSidebar: toggleSidebar,
                             // In a health conversation New opens Health's new conversation page, whose list has the
                             // space's past ones (#4329); elsewhere the assistant's.

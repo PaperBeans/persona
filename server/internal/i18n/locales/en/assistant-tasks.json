@@ -41,6 +41,7 @@
   "dispatch_notes": "Handed out by {from} on {from_machine} (dispatch_start): {machine} · {cwd}",
   "adopt_failed": "Could not take it under supervision: {reason}",
   "interrupt_summary": "Stop {agent} · {machine}",
+  "resume_note": "Resumed {agent} · {machine} (same session, with its context): {why}",
   "start_remedy_notice": "Didn’t start: “{title}”. {reason}",
   "admission_no_metrics": "This computer has not reported resource metrics.",
   "admission_stale": "This computer's resource metrics are stale.",

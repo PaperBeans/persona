@@ -119,16 +119,28 @@ func (n *Node) listStarted(h *runtimeConn, started proto.Session) (*proto.Sessio
 	h.mu.Unlock()
 	b.recomputeOwners()
 	b.remember(h, s.SessionID, time.Now())
+	b.noteStarted(h, s.SessionID, time.Now())
+	var tell *runtimeConn // runs it already, and is to hear that the hub started it (runtime.driven)
 	if o := b.owner[s.SessionID]; o != nil && o != h {
 		o.mu.Lock()
 		for _, r := range o.sessions {
 			if r.SessionID == s.SessionID {
 				s = r // the running one's row: its status, title, agent
+				if r.Status != proto.StatusOffline && !o.drivenTold[r.SessionID] {
+					if o.drivenTold == nil {
+						o.drivenTold = map[string]bool{}
+					}
+					o.drivenTold[r.SessionID] = true
+					tell = o
+				}
 			}
 		}
 		o.mu.Unlock()
 	}
 	b.mu.Unlock()
+	if tell != nil && tell.peer != nil {
+		_ = tell.peer.Notify("runtime.driven", map[string]any{"session_id": s.SessionID})
+	}
 	n.publish(n.sessionList(context.Background(), false))
 	return &s, nil
 }

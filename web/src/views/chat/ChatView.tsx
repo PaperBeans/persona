@@ -31,7 +31,7 @@ import { runStep, sameStep, turnDone, type RunStep } from "../../lib/run-step";
 import { stabilizeLines, stableValue } from "../../lib/stable-lines";
 import { planProgress, workLineStyle } from "../../lib/work-groups";
 import { echoed, taggedSeen } from "../../lib/echo";
-import { acceptOutgoing, forgetOutgoing, inSendOrder, keepFailed, keepOutgoing, noteWritten, outboxKey, placeFailed, restoreOutbox, retryOutbox, SENT_GRACE_MS, settleOutbox } from "../../lib/outbox";
+import { acceptOutgoing, forgetOutgoing, inSendOrder, keepFailed, keepOutgoing, noteWritten, outboxKey, placeFailed, registerOutboxRecheck, restoreOutbox, retryOutbox, SENT_GRACE_MS, settleOutbox } from "../../lib/outbox";
 import { apiOp } from "../../lib/ops";
 import { beginMessageSend, observeMessageItems, settleMessageEcho, stopMessageFeedback, useMessageFeedback } from "../../lib/message-send";
 import { conversationKey, pickedLauncher, pickedModel, usePickedLauncher } from "../../lib/assistant-chat";
@@ -351,6 +351,11 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   trNow.current = { ...tr, hasMore: earlier.liveHasMore };
   const railChat = useRef(`${mid}/${sid}`);
   railChat.current = `${mid}/${sid}`;
+  // The mounted conversation owns late Check refreshes, including a Check started before leaving and returning.
+  const recheckTranscript = useCallback(() => {
+    if (railChat.current === `${mid}/${sid}`) trNow.current.reload();
+  }, [mid, sid]);
+  useEffect(() => registerOutboxRecheck(mid, sid, recheckTranscript), [mid, sid, recheckTranscript]);
   const railRun = useRef(0);
   useEffect(() => () => { railRun.current++; }, [mid, sid]);
   const fine = useFinePointer();
@@ -1381,7 +1386,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   const closeoutSegment = useMemo(() => {
     if (!closeoutShown) return undefined;
     const last = lines.findLast((line) => line.kind === "segment");
-    return last?.kind === "segment" ? last.seg.id : undefined;
+    return last?.kind === "segment" ? last.seg : undefined;
   }, [closeoutShown, lines]);
   // The child sessions folded under this one (#5120, a Codex subagent, an Agent a Paseo Agent created): each a card in
   // the exchange during which it started (lib/child-cards.ts). The placement is kept while nothing moves it, so a push
@@ -1427,7 +1432,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkedChild, session, tr.loading, tr.loadingEarlier, tr.hasMore, detail.loading, kids.loaded, childRows, places, mid, sid, jump]);
   const ctx = useMemo<ChatContextValue>(
-    () => ({ tasks, subagents: assistant ? NO_SUBAGENTS : (subagents ?? NO_SUBAGENTS), scope: `${mid}/${sid}:`, jumpToCall: jump, workflowCalls: wfCalls, lineStyle, opening: openingId && openingOrigin ? { id: openingId, origin: openingOrigin } : undefined, closeoutSegment, children: places, embedded }),
+    () => ({ tasks, subagents: assistant ? NO_SUBAGENTS : (subagents ?? NO_SUBAGENTS), scope: `${mid}/${sid}:`, jumpToCall: jump, workflowCalls: wfCalls, lineStyle, opening: openingId && openingOrigin ? { id: openingId, origin: openingOrigin } : undefined, closeoutSegment: closeoutSegment?.id, children: places, embedded }),
     [tasks, subagents, assistant, mid, sid, jump, wfCalls, lineStyle, openingId, openingOrigin, closeoutSegment, places, embedded],
   );
   // ── "Search in chat" (ChatSearch.tsx, Android ChatSearchState): where the reader was when it opened, going to a hit (the
@@ -1864,7 +1869,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
       <div className={switchable ? "relative min-h-0 flex-1" : "contents"}>
       <ViewLayer bare={!switchable} on={view === "chat"} from="start">
       {/* what a stopped agent said of its own work, above the transcript and not part of it (#3612) */}
-      {closeoutShown && session && <CloseoutCard key={`${mid}/${sid}`} session={session} />}
+      {closeoutShown && session && <CloseoutCard key={`${mid}/${sid}`} session={session} segment={closeoutSegment} expandFold={tr.expandFold} />}
       <div className="relative min-h-0 flex-1">
         {(tr.notLive || refreshFailed) && <NotLivePill error={refreshFailed} onReload={() => { tr.reload(); onRefresh?.(); }} lower={Boolean(picked && !search.open)} />}
         <div ref={scrollRef} onScroll={onScroll} data-chat-scroll className="relative h-full overflow-y-auto [overflow-anchor:none]">

@@ -27,6 +27,7 @@ import { t } from "../../i18n";
 import { DiffView, KeysHelp, ReviewBar, ReviewKeys, ReviewProvider, ReviewToolbar } from "../extensions/DiffReview";
 import { PanelHeader } from "../../ui/PanelHeader";
 import { Empty, Segmented } from "./files/parts";
+import { fileURL } from "./files/FileView";
 
 /** The panel sits beside the chat (it covers it below this width). */
 const besideChat = () => typeof matchMedia === "undefined" || matchMedia("(min-width: 1024px)").matches;
@@ -76,6 +77,7 @@ export function ReviewPanel({ mid, sid, cwd, scope, at, opened, onClose }: { mid
   const [inside, setInside] = useState(false);
   const caches = useRef(new Map<string, LineCache>());
   const files = useRef(new Map<string, string[] | null>());
+  const fileReads = useRef(new Map<string, Promise<string[] | null>>());
   const pending = usePendingReview(session);
   const key = commentKey(mid, sid);
   const you = t("review.you");
@@ -92,6 +94,7 @@ export function ReviewPanel({ mid, sid, cwd, scope, at, opened, onClose }: { mid
         setLoaded(new Map());
         caches.current = new Map();
         files.current = new Map();
+        fileReads.current = new Map();
       })
       .catch((e) => {
         if (isAbort(e)) return;
@@ -158,17 +161,38 @@ export function ReviewPanel({ mid, sid, cwd, scope, at, opened, onClose }: { mid
   }, [at, scope, res, loading, failure, target.scope, mid, sid, cwd]);
 
   /** The lines of a file on disk (the new side), read once per review. */
-  const fileLines = async (path: string): Promise<string[] | null> => {
-    if (files.current.has(path)) return files.current.get(path)!;
+  const fileLines = (path: string): Promise<string[] | null> => {
+    const cache = files.current;
+    if (cache.has(path)) return Promise.resolve(cache.get(path)!);
+    const reads = fileReads.current;
+    const pending = reads.get(path);
+    if (pending) return pending;
     const root = res?.root ?? cwd;
-    try {
-      const f = await api<FileContent>(`/machines/${enc(mid)}/file?path=${enc(`${root.replace(/\/+$/, "")}/${path}`)}&cwd=${enc(cwd)}`);
-      const lines = typeof f.text === "string" ? splitLines(f.text) : null;
-      files.current.set(path, lines);
-      return lines;
-    } catch {
-      return null;
-    }
+    const read = (async () => {
+      try {
+        let offset = 0;
+        let text = "";
+        let revision = "";
+        do {
+          const f = await api<FileContent>(fileURL(mid, `${root.replace(/\/+$/, "")}/${path}`, cwd, offset));
+          if (typeof f.text !== "string" || (revision && f.revision && revision !== f.revision)) return null;
+          revision ||= f.revision || "";
+          text += f.text;
+          const next = f.next ?? 0;
+          if ((next > 0 && next <= offset) || (!next && f.truncated)) return null;
+          offset = next;
+        } while (offset > 0);
+        const lines = splitLines(text);
+        if (files.current !== cache) return null;
+        cache.set(path, lines);
+        return lines;
+      } catch {
+        return null;
+      }
+    })();
+    reads.set(path, read);
+    void read.finally(() => reads.delete(path));
+    return read;
   };
 
   const fetch = async (a: UIAction, v: Record<string, string> = {}): Promise<UIActionResult | null> => {

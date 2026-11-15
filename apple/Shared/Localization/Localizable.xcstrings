@@ -5674,6 +5674,41 @@
       },
       "extractionState" : "manual"
     },
+    "%lld Agents [Full Search]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld Agent"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld Agents"
+                }
+              }
+            }
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld件のエージェント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld 个 Agent"
+          }
+        }
+      }
+    },
     "%lld Chats [Assistant Sidebar a72a2a]" : {
       "localizations" : {
         "en" : {
@@ -41049,6 +41084,28 @@
         }
       }
     },
+    "Concern" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Concern"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "関心事"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关注点"
+          }
+        }
+      }
+    },
     "Concurrency limit reached" : {
       "localizations" : {
         "en" : {
@@ -47443,6 +47500,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没能移到「已完成」：%@"
+          }
+        }
+      }
+    },
+    "Couldn't move it to Other open: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't move it to Other open: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「その他の未完了」に移動できませんでした：%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能移到「其余没完成」：%@"
           }
         }
       }
@@ -68071,6 +68151,29 @@
         }
       }
     },
+    "Got It: move %@ to Other open" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Got It: move %@ to Other open"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "了解：「%@」をその他の未完了に移動"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "知道了：把「%@」移到其余没完成"
+          }
+        }
+      }
+    },
     "Got it, continuing with your choice.\\n\\n%@" : {
       "localizations" : {
         "en" : {
@@ -76625,6 +76728,29 @@
           }
         }
       }
+    },
+    "Its members are turned off too: %@. They're only turned off, not removed; settings and data are kept. Turning the pack back on turns them on again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Its members are turned off too: %1$@. They're only turned off, not removed; settings and data are kept. Turning the pack back on turns them on again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メンバーも一緒にオフになります：%1$@。オフにするだけで、アンインストールはしません。設定とデータは保持されます。パックをオンに戻すと、これらもオンに戻ります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它的成员也会一起停用：%1$@。只是停用，不会卸载，设置和数据都会保留。重新启用合集时会重新启用它们。"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Its minutes are never used when Persona answers in later meetings." : {
       "extractionState" : "manual",
@@ -86338,6 +86464,29 @@
         }
       }
     },
+    "Merged [Navigation Layout]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Merged"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まとめる"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "合并"
+          }
+        }
+      }
+    },
     "Merged into Another Project" : {
       "localizations" : {
         "en" : {
@@ -89504,6 +89653,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已移到「已完成」"
+          }
+        }
+      }
+    },
+    "Moved to Other open" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Moved to Other open"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「その他の未完了」に移動しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已移到「其余没完成」"
           }
         }
       }
@@ -131497,6 +131669,29 @@
       },
       "extractionState" : "manual"
     },
+    "Search Agents [Full Search]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search Agents"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェントを検索"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索 Agent"
+          }
+        }
+      }
+    },
     "Search Chats [Assistant Sidebar 55c9e4]" : {
       "localizations" : {
         "en" : {
@@ -131565,6 +131760,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Search In [Full Search]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search In"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "検索対象"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索范围"
+          }
+        }
+      }
     },
     "Search Knowledge" : {
       "localizations" : {
@@ -138888,6 +139106,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Sidebar [Appearance]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sidebar"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サイドバー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "侧边栏"
+          }
+        }
+      }
     },
     "Sign In" : {
       "localizations" : {
@@ -169365,6 +169606,29 @@
       },
       "extractionState" : "manual"
     },
+    "Turn Off All [Extension Pack]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn Off All"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まとめて無効化"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一起停用"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Turn Off Dependent Extensions and Uninstall?" : {
       "localizations" : {
         "en" : {
@@ -169456,6 +169720,29 @@
           }
         }
       }
+    },
+    "Turn Off “%@” and Its Members?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn Off “%1$@” and Its Members?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%1$@」とそのメンバーをオフにしますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停用「%1$@」和它的成员？"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Turn On" : {
       "localizations" : {
@@ -170072,6 +170359,75 @@
           }
         }
       }
+    },
+    "Turning the pack back on turns on %@ again. A member you turn on or off yourself stays as you set it." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turning the pack back on turns on %1$@ again. A member you turn on or off yourself stays as you set it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パックをオンに戻すと、%1$@ もオンに戻ります。自分で個別にオン・オフしたメンバーはそのままです。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新启用合集会重新启用 %1$@。你自己单独启用或停用过的成员保持你的选择。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Turning the pack off turns off its members too, and they stop running. Turning it back on turns on the members it turned off; a member you turn on or off yourself stays as you set it." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turning the pack off turns off its members too, and they stop running. Turning it back on turns on the members it turned off; a member you turn on or off yourself stays as you set it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パックをオフにすると、メンバーもオフになり、実行が止まります。パックをオンに戻すと、パックがオフにしたメンバーもオンに戻ります。自分で個別にオン・オフしたメンバーはそのままです。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停用合集会一起停用它的成员，成员随之停止运行。重新启用合集时，会重新启用当初由合集停用的成员；你自己单独启用或停用过的成员保持你的选择。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Turning the pack off turns off only the pack itself. Turn each member on or off on its own page." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turning the pack off turns off only the pack itself. Turn each member on or off on its own page."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パックをオフにしても、オフになるのはパック自体だけです。メンバーはそれぞれのページでオン・オフしてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停用合集只会停用合集本身。请到每个成员自己的页面启用或停用它。"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Turns with no output" : {
       "extractionState" : "manual",
@@ -172574,6 +172930,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "終了"
+          }
+        }
+      }
+    },
+    "Until you pick one: Merged where the sidebar fits beside the page (iPad, an open iPhone Duo), Separate on a phone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Until you pick one: Merged where the sidebar fits beside the page (iPad, an open iPhone Duo), Separate on a phone."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選ぶまでは、サイドバーをページの横に置ける画面（iPad、開いた iPhone Duo）では「まとめる」、iPhone では「分ける」になります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没选之前：侧边栏放得下页面旁边的地方（iPad、展开的 iPhone Duo）用合并，手机上用分开。"
           }
         }
       }

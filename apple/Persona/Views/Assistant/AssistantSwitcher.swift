@@ -138,6 +138,8 @@ struct AssistantSwitcherHeader: View {
     var compact = false
     var showsSwitchLabel = false
     var identityStyle: IdentityStyle = .sidebar
+    /// Between the face and the name (the Sidebar layout's head brings the name onto its rows' titles line, #4206).
+    var faceGap = Theme.Space.m
     /// Opens Settings on the page `AppModel.settingsPath` names.
     var openSettings: () -> Void
 
@@ -159,7 +161,7 @@ struct AssistantSwitcherHeader: View {
         let othersWaiting = model.othersWaiting
         let showsFace = !compact
         Button { listShown.toggle() } label: {
-            HStack(spacing: Theme.Space.m) {
+            HStack(spacing: faceGap) {
                 switch identityStyle {
                 case .sidebar:
                     if showsFace {

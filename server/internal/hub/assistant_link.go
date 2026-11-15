@@ -387,20 +387,14 @@ func init() {
 			return map[string]any{"ok": true}, nil // delivered already: it came again (outbox_relay.go)
 		}
 		// Only about its own machines, sessions and cards (fleet_link.go deliverPushFrom).
-		heldReason, err := h.deliverPushFrom(from, p.Notification)
+		out, err := h.deliverPushFrom(from, p.Notification)
 		if err != nil {
 			if id != "" {
 				h.forgetHandOver(from, id)
 			}
 			return nil, busCodedError(err)
 		}
-		// held/reason let the assistant's notify_user tell the model the notice went to the briefing, not the phone.
-		res := map[string]any{"ok": true}
-		if heldReason != "" {
-			res["held"] = true
-			res["reason"] = heldReason
-		}
-		return res, nil
+		return notifyAnswer(out), nil
 	})
 	handleBus(assistantwire.MethodSnapshot, func(h *Hub, ctx context.Context, c *busConn, params json.RawMessage) (any, error) {
 		var s assistantwire.Snapshot
@@ -411,6 +405,29 @@ func init() {
 		return res, busCodedError(err)
 	})
 	// ws.broadcast is relayBroadcastFrom's (bus_forward.go).
+}
+
+// notifyAnswer is notify.request's answer for a push that went where out says (nil: not reported). held/reason let
+// the assistant's notify_user tell the model the notice went to the briefing, not the phone; devices (always there when
+// out is) the devices it was handed to, and with none, reason "no_device" or "filtered" as POST /api/v1/notify; kept the
+// offline devices that get it when they connect again. A hub before devices answered only ok and held.
+func notifyAnswer(out *pushOutcome) map[string]any {
+	res := map[string]any{"ok": true}
+	if out == nil {
+		return res
+	}
+	res["devices"] = out.devices
+	if out.kept > 0 {
+		res["kept"] = out.kept
+	}
+	switch {
+	case out.held != "":
+		res["held"] = true
+		res["reason"] = out.held
+	case out.devices == 0:
+		res["reason"] = out.reason()
+	}
+	return res
 }
 
 // busCodedError puts what the assistant's code tells errors apart by on the wire as a code: a machine the hub does

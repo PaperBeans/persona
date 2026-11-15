@@ -122,16 +122,11 @@ func (s *Service) remedyOf(ctx context.Context, id string) (Todo, *TaskPlan, int
 	if todo.PlanID == "" {
 		return todo, nil, 0, errTaskNotInPlan
 	}
-	p, err := s.loadPlan(ctx, todo.PlanID)
+	p, i, err := s.currentPlanAssignment(ctx, todo)
 	if err != nil {
 		return todo, nil, 0, err
 	}
-	for i, pt := range p.Tasks {
-		if pt.TodoID == id {
-			return todo, p, i, nil
-		}
-	}
-	return todo, nil, 0, errTaskNotInPlan
+	return todo, p, i, nil
 }
 
 // remedyTool is the task a remedy tool names, checked: the main conversation's own, and its start being remedied.

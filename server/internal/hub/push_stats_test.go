@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,6 +140,73 @@ func TestPushDailyStatsCounts(t *testing.T) {
 	if got.Intercepted != 222 || got.ByReason[interceptReasonP2] != 221 || got.ByReason[interceptReasonP1] != 1 {
 		t.Fatalf("stats = %+v, want 222 held (221 P2, 1 P1), exact past 200", got)
 	}
+}
+
+// lnZonedClock installs one race-free clock whose instant and UTC offset can move independently.
+func lnZonedClock(h *Hub) (instant, offset *atomic.Int64) {
+	instant, offset = &atomic.Int64{}, &atomic.Int64{}
+	instant.Store(time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC).UnixNano())
+	h.push.now = func() time.Time {
+		return time.Unix(0, instant.Load()).In(time.FixedZone("", int(offset.Load())))
+	}
+	return instant, offset
+}
+
+func TestPushDailyStatsWindowUsesUTCCalendarDay(t *testing.T) {
+	read := func(t *testing.T, h *Hub, target string) (string, []pushDayStats) {
+		t.Helper()
+		code, body := statsRequest(t, h, extPrincipal("manager-a"), target)
+		if code != http.StatusOK {
+			t.Fatalf("stats: %d %s", code, body)
+		}
+		var out struct {
+			Since string         `json:"since"`
+			Days  []pushDayStats `json:"days"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Since, out.Days
+	}
+
+	t.Run("UTC+8 does not start in the future", func(t *testing.T) {
+		h, f := lnHub(t)
+		clock, offset := lnZonedClock(h)
+		clock.Store(time.Date(2026, 11, 14, 23, 30, 0, 0, time.UTC).UnixNano())
+		offset.Store(8 * 60 * 60) // local 2026-11-15 07:30 +08:00
+		if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP1, "utc-east-day", "one")); err != nil {
+			t.Fatal(err)
+		}
+		f.calls(t, 1)
+		for _, target := range []string{"/api/v1/push/stats/daily", "/api/v1/push/stats/daily?days=1"} {
+			since, days := read(t, h, target)
+			if since != "2026-11-14T00:00:00Z" || len(days) != 1 || days[0].Date != "2026-11-14" ||
+				days[0].Manager != "manager-a" || days[0].Sent != 1 {
+				t.Fatalf("%s: since %s days %+v, want the current UTC day with one sent push", target, since, days)
+			}
+		}
+	})
+
+	t.Run("UTC-8 does not include the previous UTC day", func(t *testing.T) {
+		h, f := lnHub(t)
+		clock, offset := lnZonedClock(h)
+		clock.Store(time.Date(2026, 11, 14, 23, 30, 0, 0, time.UTC).UnixNano())
+		offset.Store(8 * 60 * 60) // the previous notification is at local 2026-11-15 07:30 +08:00
+		if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP1, "utc-previous-day", "old")); err != nil {
+			t.Fatal(err)
+		}
+		clock.Store(time.Date(2026, 11, 15, 0, 30, 0, 0, time.UTC).UnixNano())
+		offset.Store(-8 * 60 * 60) // the current clock reads local 2026-11-14 16:30 -08:00
+		if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP1, "utc-current-day", "new")); err != nil {
+			t.Fatal(err)
+		}
+		f.calls(t, 2)
+		since, days := read(t, h, "/api/v1/push/stats/daily?days=1")
+		if since != "2026-11-15T00:00:00Z" || len(days) != 1 || days[0].Date != "2026-11-15" ||
+			days[0].Manager != "manager-a" || days[0].Sent != 1 {
+			t.Fatalf("since %s days %+v, want only the current UTC day with one sent push", since, days)
+		}
+	})
 }
 
 // The stats endpoint answers only the extension's own manager, understands since/days and rejects bad windows. Days

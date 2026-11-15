@@ -21,6 +21,9 @@ var typedHandleNamespaces = []struct {
 	{"file.", []string{"Offset", "Stream"}},
 	{"fs.", []string{"Paths", "Detail"}},
 	{"git.", []string{"IdentityOnly", "Staged", "Hash", "Skip"}},
+	{"worktree.", []string{"Branch", "ParentWorkspaceID", "AutoName"}},
+	{"clipboard.", nil}, // reads none of the shared fields
+	{"preview.", nil},   // the same
 }
 
 func TestTypedHandleNamespacesStayTyped(t *testing.T) {

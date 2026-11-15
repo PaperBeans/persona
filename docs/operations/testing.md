@@ -51,6 +51,12 @@ count may stay the same or go down, never up, and a new file starts at zero. Com
 `// sleep-ok: <reason>` (the reason must be non-empty) do not count. `python3 scripts/ci/sleep_ratchet.py --update` only lowers
 the baseline; it refuses to raise a count or to add a file that still sleeps. See `docs/lessons/testing.md`.
 Each file under `web/src` has a committed count of hard-coded pixel font sizes (`text-[13px]`, `text-[length:13px]`, inline `fontSize: 13`, CSS `font-size: 13px`; tests excluded) in `scripts/ci/web_font_baseline.json`. `python3 scripts/ci/web_font_ratchet.py` (in `scripts/ci/guards.sh`) fails when a count rises or a new file has one; `--update` only lowers the baseline. Use the named sizes (`text-xs`, `text-sm`, the `--chat-*` variables) instead; the role table is `docs/design/task-cards.md` section 4.1.
+Both ratchets also run when a PR merges (#7977): `scripts/hooks/merge-pr.sh` runs `scripts/ci/changed_ratchets.py --base <base sha> --head <head sha>`.
+It reads only the Go test files and `web/src` sources the PR changes and the baseline entries it edits, from Git objects and as the
+squash merge leaves them (`git merge-file` where `main` changed a file too), without a checkout. Each ratchet's own counting and
+messages apply, the sleep ratchet's never-raise check included, and the merge is refused when a file ends further from its baseline
+than `main` has it. A file `main` already fails is left to its own fix unless the PR moves it further; a file both sides change in
+conflicting ways is left to the merge, which refuses it. A new per-file ratchet goes into that script's `RATCHETS` too.
 With `lanes=auto`, the base defaults to `origin/main`; an explicit `base` is resolved to a commit before guards and path selection.
 
 Dispatched code runs with `contents: read`, without persisted checkout credentials, private config or new secrets. The issue-link
@@ -213,7 +219,7 @@ Path mapping:
 | `.github/**` | `scripts/test/pr_needs_issue_test.mjs` |
 | `schema/**` | `scripts/test/test_extension_schema.py`, `scripts/test/test_sdk_bundle.py`, plus `go test ./...` in sdk/go (the same three checks as CI's Extension schema job) |
 | `scripts/test/test_external_service_refs.py`, `scripts/{gen,test}/sdk_bundle*` | The scripts' own tests |
-| `scripts/**` | Select second-scale privacy / PR / schema / refs / bundle / i18n checks by path; when uncertain run PR and schema. Also run changed `scripts/<subdirectory>/test_*.py`, and `test_<name>.py` for changed `<name>.py` / `<name>.sh` scripts (`-`→`_`; `.sh` also checks `test_<name>_sh.py`), from the test directory like CI (#3968). `scripts/hooks/**` also runs `scripts/test/test_privacy_check.py` (it runs the hooks in its temp repositories); `scripts/privacy_check.py` also runs `scripts/release/test_check_bundle_privacy.py` (it imports `privacy_check`) |
+| `scripts/**` | Select second-scale privacy / PR / schema / refs / bundle / i18n checks by path; when uncertain run PR and schema. Also run changed `scripts/<subdirectory>/test_*.py`, and `test_<name>.py` for changed `<name>.py` / `<name>.sh` scripts (`-`→`_`; `.sh` also checks `test_<name>_sh.py`), from the test directory like CI (#3968). `scripts/hooks/**` also runs `scripts/test/test_privacy_check.py` (it runs the hooks in its temp repositories); `scripts/privacy_check.py` also runs `scripts/release/test_check_bundle_privacy.py` (it imports `privacy_check`); `scripts/ci/changed_ratchets.py`, `scripts/ci/sleep_ratchet.py` and `scripts/ci/web_font_ratchet.py` also run `scripts/test/test_merge_pr_sh.py` (it copies them into its temp repositories, where `merge-pr.sh` runs them), and the two ratchets `scripts/ci/test_changed_ratchets.py` (it imports them) |
 | `docs/**`, any `*.md` | `scripts/test/test_doc_paths.py`, `scripts/test/test_doc_go_paths.py` (quoted paths and CLAUDE.md documentation index), `scripts/test/test_doc_sections.py` (section names quoted after a doc path match a heading, a **bold** label, an `<a id>` or a list item's opening phrase of that doc; `scripts/test/doc_sections_known.txt` lists the ones left for now and only shrinks), `scripts/test/test_doc_wire.py` (protocol.md and extensions.md list every WebSocket type, feature flag, extension point and manifest field the code has) |
 | `server/internal/{proto,hub,extension}/**`, `schema/extension/manifest.schema.json` | Also `scripts/test/test_doc_wire.py`: these hold the code side of the lists it compares with the docs |
 | `server/**`, `web/src/**`, `web/e2e/**`, `scripts/**`, `sdk/**`, `apple/**`, `android/**`, `integrations/**`, `spec/**`, `schema/**` | Also `scripts/test/test_doc_sections.py`: most of the section names it checks are in code comments there |
@@ -1153,8 +1159,8 @@ precommit hooks: `git config core.hooksPath scripts/hooks` (`pre-commit` staged 
 **Message lines** (#1107): `--message <file>` checks every line, Markdown headings included (a PR's title and body become the squash commit's message as they are).
 `commit-msg` passes `--commit-msg`, which checks only what `git commit` records: when git opened an editor it skips the comment lines (hints, branch, paths) and everything from the scissors line down (the `commit -v` diff);
 a `-m` / `-F` message keeps its `#` lines, so they are checked. It follows git's comment string and `commit.cleanup` (`commit_msg_lines`), but cannot see `--cleanup` or `-v` on the command line; `pre-push` still reads every recorded line.
-**Block again before merge** (#3696): `scripts/hooks/merge-pr.sh <PR number>` reads the PR once (`gh pr view --json`), fetches its base and head, runs `privacy_check.py --range <fetched base sha>..<head> --message <file>` on the squash message (`<title> (#N)`, blank line, body),
-then only passes to `gh pr merge --squash --match-head-commit <head> --subject <title> (#N) --body-file <body>` (exact scanned head and message merge; an edit after the scan does not reach `main`) and deletes a same-repository branch through the API. `--range <base>..<head>` checks changed head-file contents and commit messages, not worktree, in seconds. Tests: `scripts/test/test_merge_pr_sh.py` (fake `gh`).
+**Block again before merge** (#3696): `scripts/hooks/merge-pr.sh <PR number>` reads the PR once (`gh pr view --json`), fetches its base and head, runs `privacy_check.py --range <fetched base sha>..<head> --message <file>` on the squash message (`<title> (#N)`, blank line, body)
+and `scripts/ci/changed_ratchets.py` on the files the PR changes ("Hosted CI" above), then only passes to `gh pr merge --squash --match-head-commit <head> --subject <title> (#N) --body-file <body>` (exact scanned head and message merge; an edit after the scan does not reach `main`) and deletes a same-repository branch through the API. `--range <base>..<head>` checks changed head-file contents and commit messages, not worktree, in seconds. Tests: `scripts/test/test_merge_pr_sh.py` (fake `gh`).
 Why not CI: private values come from local configs unavailable to CI, which only checks generic private-IP/email/npm rules; merge machine must possess values to block them.
 2026-11-05–06 six scheduled releases failed initial repo scan because machine-name docs had already been merged directly with `gh pr merge`.
 
@@ -1290,7 +1296,7 @@ iOS shell and regular-width card inputs retain their original tree: single-line�
 
 ### 全页面性能 UI 测试（#5730）
 
-`./scripts/app/perf-test.sh [launch|agents|assistant|composer|inbox|settings|machines …]` 用优化 Debug 构建、各套件独立 mock 和共享模拟器锁运行。指定已有的专用模拟器 `PERF_SIM`，`PERF_ONLY=PerfMachinesTests/testMachineDetailScroll` 可只运行一项；`PERF_SKIP_BUILD=1` 只在确认 DerivedData 与当前源码一致时使用。编译和执行均经过 `xcode-slot`，输出目录已存在时拒绝覆盖。
+`./scripts/app/perf-test.sh [launch|agents|assistant|composer|inbox|settings|machines|sidebar …]` 用优化 Debug 构建、各套件独立 mock 和共享模拟器锁运行。指定已有的专用模拟器 `PERF_SIM`，`PERF_ONLY=PerfMachinesTests/testMachineDetailScroll` 可只运行一项；`PERF_SKIP_BUILD=1` 只在确认 DerivedData 与当前源码一致时使用。编译和执行均经过 `xcode-slot`，输出目录已存在时拒绝覆盖。
 
 | 测试文件（`apple/PersonaUITests/`） | 入口及主要跳转 |
 | --- | --- |

@@ -415,6 +415,23 @@ class CheckFastScriptsTests(unittest.TestCase):
         self.assertIn("FAIL     scripts/release/test_check_bundle_privacy.py", out)
         self.assertIn("FAIL     scripts/test/test_merge_pr_sh.py", out)
 
+    def test_a_ratchet_change_also_runs_the_suites_that_load_it(self):
+        # test_changed_ratchets.py imports the two ratchets; test_merge_pr_sh.py copies them and changed_ratchets.py
+        # into its temp repositories, where merge-pr.sh runs them (#7977).
+        scripts = ("changed_ratchets.py", "sleep_ratchet.py", "web_font_ratchet.py")
+        for name in scripts:
+            self.commit_on_top("scripts/ci/" + name, "print('clean')\n", "base")
+        self.commit_on_top("scripts/ci/test_changed_ratchets.py", FAILING, "base")
+        self.break_suite("test_merge_pr_sh.py")
+        for name in scripts:
+            with self.subTest(name):
+                self.git("checkout", "-q", "--", ".")
+                self.write("scripts/ci/" + name, "print('clean')\n# changed\n")
+                code, out = self.check_fast()
+                self.assertEqual(1, code, out)
+                self.assertIn("FAIL     scripts/ci/test_changed_ratchets.py", out)
+                self.assertIn("FAIL     scripts/test/test_merge_pr_sh.py", out)
+
     def test_a_migration_edit_runs_the_freeze_check(self):
         self.write("scripts/ci/migration_freeze.py", "print('freeze-ran')\n")
         self.write("server/internal/db/migrations/hub/0001_init.sql", "CREATE TABLE t (id int);\n")

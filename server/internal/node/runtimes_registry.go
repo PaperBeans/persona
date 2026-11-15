@@ -40,6 +40,39 @@ type runtimeRegistry struct {
 	// hostOff says a runtime is an engine host the serving node does not enable (Node.engineHostOff, set by attach):
 	// its launchers are neither listed nor started. nil: every runtime may offer launchers.
 	hostOff func(runtime string) bool
+	// started: sessions the hub started through a runtime (session.start), by session id: the runtime that started
+	// it and when. Another runtime that comes to run one (pi's companion starts sessions in pi-web) is told the hub
+	// drove it (runtime.driven), so its cards go to the phone first as the starter's would.
+	started map[string]startedSession
+}
+
+// startedSession is who started a session for the hub, and when (runtimeRegistry.started).
+type startedSession struct {
+	runtime string
+	at      time.Time
+}
+
+// drivenFor is how long after its start a session counts as driven from the hub (the runtime SDK's PHONE_DRIVEN_FOR).
+const drivenFor = 6 * time.Hour
+
+// maxStarted bounds runtimeRegistry.started; the oldest go first.
+const maxStarted = 256
+
+// noteStarted records that h started session id for the hub. Callers hold b.mu.
+func (b *runtimeRegistry) noteStarted(h *runtimeConn, id string, now time.Time) {
+	if b.started == nil {
+		b.started = map[string]startedSession{}
+	}
+	b.started[id] = startedSession{runtime: h.hello.Runtime, at: now}
+	for len(b.started) > maxStarted {
+		oldest, at := "", now
+		for k, v := range b.started {
+			if !v.at.After(at) {
+				oldest, at = k, v.at
+			}
+		}
+		delete(b.started, oldest)
+	}
 }
 
 // knownSession is the runtime a session belongs to, by the runtime's id (a reconnect is the same runtime).
@@ -358,8 +391,9 @@ func (b *runtimeRegistry) recomputeOwners() {
 }
 
 // setSessions records a runtime's list and returns the watched sessions this connection has not been asked to watch
-// yet (with the seq to start after).
-func (b *runtimeRegistry) setSessions(h *runtimeConn, list []proto.Session) map[string]int {
+// yet (with the seq to start after), and the sessions it now runs that another runtime started for the hub lately,
+// which it has not been told of yet (runtime.driven).
+func (b *runtimeRegistry) setSessions(h *runtimeConn, list []proto.Session) (map[string]int, []string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	h.mu.Lock()
@@ -367,6 +401,7 @@ func (b *runtimeRegistry) setSessions(h *runtimeConn, list []proto.Session) map[
 	h.mu.Unlock()
 	b.recomputeOwners()
 	rewatch := map[string]int{}
+	var driven []string
 	now := time.Now()
 	h.mu.Lock()
 	for _, s := range list {
@@ -374,13 +409,21 @@ func (b *runtimeRegistry) setSessions(h *runtimeConn, list []proto.Session) map[
 			continue // another runtime has it running (recomputeOwners)
 		}
 		b.remember(h, s.SessionID, now)
+		if st, ok := b.started[s.SessionID]; ok && st.runtime != h.hello.Runtime && now.Sub(st.at) < drivenFor &&
+			s.Status != proto.StatusOffline && !h.drivenTold[s.SessionID] {
+			if h.drivenTold == nil {
+				h.drivenTold = map[string]bool{}
+			}
+			h.drivenTold[s.SessionID] = true
+			driven = append(driven, s.SessionID)
+		}
 		if since, ok := b.watching[s.SessionID]; ok && !h.watched[s.SessionID] {
 			h.watched[s.SessionID] = true
 			rewatch[s.SessionID] = since
 		}
 	}
 	h.mu.Unlock()
-	return rewatch
+	return rewatch, driven
 }
 
 func (b *runtimeRegistry) ownerOf(id string) *runtimeConn {

@@ -200,6 +200,7 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 		}
 		var opts sendOpts
 		_ = json.Unmarshal(params, &opts)
+		var said json.RawMessage // what the runtime answered: it may say the message only queued behind the turn
 		err := n.sends.once(opts.ClientMsgID, func() error {
 			var after int
 			if opts.ClientMsgID != "" {
@@ -209,8 +210,9 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 				}
 			}
 			return n.sendEchoed(p.SessionID, opts.ClientMsgID, p.Text, len(p.Images), after, func() error { // echo.go
-				_, err := call("session.send", map[string]any{"session_id": p.SessionID, "text": p.Text, "images": p.Images,
+				out, err := call("session.send", map[string]any{"session_id": p.SessionID, "text": p.Text, "images": p.Images,
 					"client_msg_id": opts.ClientMsgID})
+				said = out
 				return err
 			})
 		})
@@ -218,13 +220,14 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 			res, err := n.handOver(ctx, h, p.SessionID, params)
 			return res, err, true
 		}
-		return okResult(err), err, true
+		return withFlag(okResult(err), said, "queued"), err, true
 	case "session.interrupt":
 		if !caps.Interrupt {
 			return nil, errRuntimeUnsupported(label, "中断"), true
 		}
-		_, err := call("session.interrupt", map[string]any{"session_id": p.SessionID})
-		return okResult(err), err, true
+		// A runtime that waited for the turn to end says so (settled); one that only asked it to stop does not.
+		out, err := call("session.interrupt", map[string]any{"session_id": p.SessionID})
+		return withFlag(okResult(err), out, "settled"), err, true
 	case "session.close":
 		if !caps.Close {
 			return nil, errRuntimeUnsupported(label, "从手机关闭"), true
@@ -373,6 +376,21 @@ func okResult(err error) any {
 		return nil
 	}
 	return map[string]any{"ok": true}
+}
+
+// withFlag carries the runtime's boolean flag (session.send's queued, session.interrupt's settled) from its answer
+// into the node's ok result, when it is set.
+func withFlag(res any, answer json.RawMessage, flag string) any {
+	m, ok := res.(map[string]any)
+	if !ok || len(answer) == 0 {
+		return res
+	}
+	var a map[string]json.RawMessage
+	if json.Unmarshal(answer, &a) != nil || string(a[flag]) != "true" {
+		return res
+	}
+	m[flag] = true
+	return m
 }
 
 func isRPCError(err error) bool {

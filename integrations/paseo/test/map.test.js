@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   AUTO_ACCEPT_ROOTS, agentRoot, agentRow, archivedUnderOwnId, autoAcceptOf, codexThreadOf, backgroundOf, defaultProvider, interactionOf,
-  launchersOf, linkedWorktree,
+  launchersOf, linkedWorktree, modeBeforePlan,
   parentAgentId, paseoMode, promptKey, providerRoots, responseOf, rewindOf, rowStatus, projectSpaces, sessionIdOf, slotNameOf, spaceIdOf,
   strayRecord, timelineItems, toolCall, transcriptOf, workspaceRow, paseoCheckouts,
 } from '../lib/map.js'
@@ -385,9 +385,24 @@ test("the phone's answers as Paseo's responses", () => {
   const question = { id: 'p', kind: 'question', input: { questions: [{ question: '用哪个库？', header: '库', options: [] }] } }
   assert.deepEqual(responseOf(question, { answers: { '用哪个库？': 'A' } }, 'claude'), { response: { behavior: 'allow', updatedInput: { answers: { '用哪个库？': 'A' } } } })
   assert.deepEqual(responseOf(question, { answers: { '用哪个库？': 'A' } }, 'codex'), { response: { behavior: 'allow', updatedInput: { answers: { 库: 'A' } } } }, "others take Paseo's card's key")
-  const plan = { id: 'p', kind: 'plan', actions: [{ id: 'reject' }, { id: 'implement' }, { id: 'implement_resume' }] }
-  assert.deepEqual(responseOf(plan, { approve: true, mode: 'bypassPermissions' }, 'claude'), { response: { behavior: 'allow', selectedActionId: 'implement_resume' } })
-  assert.deepEqual(responseOf(plan, { approve: true, mode: 'acceptEdits' }, 'claude'), { response: { behavior: 'allow', selectedActionId: 'implement' } })
+  // Paseo's implement_resume goes back to the mode the agent had before it planned (its label names it), whatever was
+  // chosen on the phone (#8128): taken only when that is the phone's mode; otherwise implement, then the phone's mode.
+  const modes = [{ id: 'default', label: 'Always Ask' }, { id: 'acceptEdits', label: 'Accept File Edits' }, { id: 'plan', label: 'Plan Mode' },
+    { id: 'auto', label: 'Auto mode' }, { id: 'bypassPermissions', label: 'Bypass' }]
+  const plan = { id: 'p', kind: 'plan', actions: [{ id: 'reject' }, { id: 'implement' }, { id: 'implement_resume', label: 'Implement with Auto mode' }] }
+  assert.equal(modeBeforePlan(plan, modes), 'auto')
+  assert.deepEqual(responseOf(plan, { approve: true, mode: 'auto' }, 'claude', modes), { response: { behavior: 'allow', selectedActionId: 'implement_resume' } })
+  assert.deepEqual(responseOf(plan, { approve: true, mode: 'bypassPermissions' }, 'claude', modes),
+    { response: { behavior: 'allow', selectedActionId: 'implement' }, setMode: 'bypassPermissions' }, 'auto before planning, Bypass chosen: not resumed into auto')
+  const bypassed = { ...plan, actions: [{ id: 'reject' }, { id: 'implement' }, { id: 'implement_resume', label: 'Implement with Bypass' }] }
+  assert.deepEqual(responseOf(bypassed, { approve: true, mode: 'bypassPermissions' }, 'claude', modes), { response: { behavior: 'allow', selectedActionId: 'implement_resume' } })
+  assert.deepEqual(responseOf(bypassed, { approve: true, mode: 'auto' }, 'claude', modes),
+    { response: { behavior: 'allow', selectedActionId: 'implement' }, setMode: 'auto' })
+  assert.deepEqual(responseOf({ ...plan, actions: [{ id: 'reject' }, { id: 'implement' }, { id: 'implement_resume' }] }, { approve: true, mode: 'auto' }, 'claude', modes),
+    { response: { behavior: 'allow', selectedActionId: 'implement' }, setMode: 'auto' }, 'a mode before planning the request does not name: implement, then switch')
+  assert.deepEqual(responseOf(plan, { approve: true, mode: 'auto' }, 'claude'),
+    { response: { behavior: 'allow', selectedActionId: 'implement' }, setMode: 'auto' }, 'no modes to read the label with: the same')
+  assert.deepEqual(responseOf(plan, { approve: true, mode: 'acceptEdits' }, 'claude', modes), { response: { behavior: 'allow', selectedActionId: 'implement' } })
   assert.deepEqual(responseOf({ ...plan, actions: [{ id: 'reject' }, { id: 'implement' }] }, { approve: true, mode: 'bypassPermissions' }, 'claude'),
     { response: { behavior: 'allow', selectedActionId: 'implement' }, setMode: 'bypassPermissions' })
   assert.deepEqual(responseOf(plan, { approve: false, feedback: '先写测试' }, 'claude'),

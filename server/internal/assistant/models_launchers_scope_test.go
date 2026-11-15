@@ -306,3 +306,45 @@ func TestModelConfigExplainsAnOutOfScopeProvider(t *testing.T) {
 		t.Fatalf("assistant purpose: machine %q status %q providers %v", p.MachineID, p.Status, p.ProviderIDs)
 	}
 }
+
+// launchers.agents_default tells a node the provider and model Model Settings › Agents names, for pi (#8194): only a
+// provider pi can use and the computer is in scope for, names only, never the key.
+func TestAgentsDefaultForPi(t *testing.T) {
+	s, _ := scopeService(t)
+	addProvider(t, s, `{"name":"box","base_url":"https://gw.example.com","model":"m1","api_key":"sk-test-box-000000","share":"selected","scope_machines":["server"]}`)
+	addProvider(t, s, `{"name":"gem","agent":"agy","base_url":"https://gm.example.com","model":"g1","api_key":"sk-test-gem-000000"}`)
+	ask := func(machine string) map[string]any {
+		t.Helper()
+		out, handled, err := s.NodeAnswer(context.Background(), machine, NodeAgentsDefault, []byte(`{}`))
+		if !handled || err != nil {
+			t.Fatalf("not answered: %v %v", handled, err)
+		}
+		b, _ := json.Marshal(out)
+		if strings.Contains(string(b), "sk-test") {
+			t.Fatalf("a key in the answer: %s", b)
+		}
+		return out.(map[string]any)
+	}
+	setModel(t, s, "agent.new", ModelBinding{Provider: "launcher.box", Model: "m2", Effort: "high"})
+	if got := ask("server"); got["launcher"] != "box" || got["model"] != "m2" || got["effort"] != "high" {
+		t.Fatalf("in scope: %v", got)
+	}
+	if got := ask("mac"); len(got) != 0 {
+		t.Fatalf("out of scope: %v", got)
+	}
+	setModel(t, s, "agent.new", ModelBinding{Provider: "launcher.gem"})
+	if got := ask("server"); len(got) != 0 {
+		t.Fatalf("a provider pi cannot use: %v", got)
+	}
+	var list struct {
+		Launchers []LauncherView `json:"launchers"`
+	}
+	_ = json.Unmarshal(request(s, "GET", "/api/v1/launchers", "").Body.Bytes(), &list)
+	pi := map[string]bool{}
+	for _, l := range list.Launchers {
+		pi[l.Name] = l.Pi
+	}
+	if !pi["box"] || pi["gem"] {
+		t.Fatalf("pi in the list: %v", pi)
+	}
+}
