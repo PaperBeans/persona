@@ -147,6 +147,8 @@ type Device struct {
 	// ClaudeVersion is Claude Code's version there ("" when it has none or never said): 设置 › 模型供应商's built-in
 	// claude lists the machines that have it.
 	ClaudeVersion string `json:"claude_version,omitempty"`
+	// HomeReal is Home with its links followed, when the node says it is another path (proto.NodeInfo.HomeReal).
+	HomeReal string `json:"home_real,omitempty"`
 	// Engine is the host its starts open in when they name none, as its node reports it (its default engine host:
 	// herdr, orca, paseo…); "" while it has not said. The manager holds a new Agent to what that host can run
 	// (launcher_fit.go, #8140).

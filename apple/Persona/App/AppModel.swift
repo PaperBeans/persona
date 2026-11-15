@@ -2961,6 +2961,12 @@ final class AppModel {
     func discard(_ key: SessionKey, _ msg: PendingMessage) {
         let store = chat(key)
         guard let i = store.pending.firstIndex(where: { $0.id == msg.id }) else { return }
+        // As it is now, not as the menu saw it: one the outbox started sending since may be arriving, and stays
+        // (#8171: it went out with its bubble gone, and Undo put it back sending, which nothing settled).
+        guard store.pending[i].onlyHere else {
+            toast = Toast(String(localized: "It's already being sent, so it can't be stopped."))
+            return
+        }
         let gone = store.pending.remove(at: i)
         saveOutbox()
         toast = .messageDeleted { [weak self] in self?.undoDiscard(key, gone, at: i) }

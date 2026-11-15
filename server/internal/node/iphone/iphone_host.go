@@ -55,7 +55,8 @@ func (s iphoneSessions) Devices(ctx context.Context) []iphoneLink {
 	out := make([]iphoneLink, 0, len(devices))
 	for _, d := range devices {
 		out = append(out, iphoneLink{ID: d.UDID, Name: d.Name, ProductType: d.ProductType, IOS: d.OSVersion, Paired: d.Paired,
-			USB: d.USB, State: d.State, Transport: d.Transport, ErrorCode: d.LastErrorCode, Info: d.Info, DeveloperMode: d.DeveloperMode})
+			USB: d.USB, State: d.State, Transport: d.Transport, ErrorCode: d.LastErrorCode, Info: d.Info, DeveloperMode: d.DeveloperMode,
+			AutoPrepare: d.AutoPrepare})
 	}
 	return out
 }
@@ -87,7 +88,9 @@ func (s iphoneSessions) Forget(device string) error  { return s.m().StartForget(
 func (s iphoneSessions) Install(src iphone.InstallSource) error {
 	return s.m().StartInstall(src)
 }
-func (s iphoneSessions) Cancel() { s.m().Cancel() }
+func (s iphoneSessions) Prepare(device string) error { return s.m().StartPrepare(device) }
+func (iphoneSessions) DDIPresent() bool              { return iphone.DDIPresent() }
+func (s iphoneSessions) Cancel()                     { s.m().Cancel() }
 
 func (s iphoneSessions) Job() *iphoneJob {
 	j := s.m().Job()

@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { createOpencodeHost } from '../lib/opencode.js'
@@ -30,6 +31,34 @@ function fakeDb({ busy = true } = {}) {
     openDb: async () => ({ all: (sql, ...p) => db.prepare(sql).all(...p), close() {} }),
   }
   return api
+}
+
+/** The experimental media_blob tables, with the keys and indexes opencode's migration creates. */
+function fakeBlobDb() {
+  const d = fakeDb()
+  d.db.exec(`create table blob_ref (
+    session_id text not null, message_id text not null, hash text not null, seq integer not null,
+    constraint blob_ref_pk primary key (session_id, message_id, hash),
+    constraint fk_blob_ref_session_id_session_v2_id_fk foreign key (session_id) references session_v2(id) on delete cascade,
+    constraint fk_blob_ref_hash_blob_hash_fk foreign key (hash) references blob(hash) on delete cascade);
+    create table blob (hash text primary key, mime text not null, bytes integer not null,
+      width integer, height integer, data blob not null, time_created integer not null);
+    create index blob_ref_hash_idx on blob_ref(hash);
+    create index blob_ref_session_seq_idx on blob_ref(session_id, seq);`)
+  d.blob = (hash, data, { mime = 'image/png', bytes = data.byteLength } = {}) => {
+    d.db.prepare('insert into blob (hash, mime, bytes, width, height, data, time_created) values (?,?,?,null,null,?,?)')
+      .run(hash, mime, bytes, data, T0)
+  }
+  d.ref = (session, message, seq, hash) => {
+    d.db.prepare('insert into blob_ref (session_id, message_id, hash, seq) values (?,?,?,?)').run(session, message, hash, seq)
+  }
+  return d
+}
+
+const hashOf = (data) => createHash('sha256').update(data).digest('hex')
+
+async function imageNotFound(n, session, item) {
+  await assert.rejects(n.peer.call('session.image', { session_id: session, item_id: item }), (err) => err.code === 'not_found')
 }
 
 /** The plugin context of one location: the session / permission API as calls it records, and an event stream the test feeds. */
@@ -167,6 +196,156 @@ test('sends into the session (once per client_msg_id), interrupts and renames th
   await n.peer.call('session.rename', { session_id: 'ses_c', title: 'Build fix' })
   assert.deepEqual(lib.calls.slice(-2), [['session.interrupt', { sessionID: 'ses_c' }], ['session.update', { sessionID: 'ses_c', title: 'Build fix' }]])
   await assert.rejects(n.peer.call('session.send', { session_id: 'ses_c', text: '   ', client_msg_id: 'm3' }), /消息是空的/)
+})
+
+test('a blob-backed FileRef image loads its exact bytes as standard base64 with the FileRef MIME', async (t) => {
+  const d = fakeBlobDb()
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+  const hash = hashOf(png)
+  d.session('ses_blob')
+  d.message('ses_blob', 4, 'user', { text: 'look', files: [{ mime: 'image/png', source: { type: 'inline' }, name: 'shot.png', uri: `media:${hash}` }] })
+  d.blob(hash, png, { mime: 'image/jpeg' }) // the FileRef, not a conflicting blob row, describes the attachment
+  d.ref('ses_blob', 'msg_ses_blob_4', 4, hash)
+
+  // Both sqlite drivers return views. Exercise a Buffer and a Uint8Array with non-zero offsets and trailing bytes.
+  const openDb = d.openDb
+  let blobReads = 0
+  d.openDb = async () => {
+    const handle = await openDb()
+    return {
+      close: handle.close,
+      all(sql, ...params) {
+        const result = handle.all(sql, ...params)
+        if (!/\bfrom\s+blob\b/i.test(sql)) return result
+        blobReads++
+        return result.map((row) => {
+          const raw = Buffer.from(row.data.buffer, row.data.byteOffset, row.data.byteLength)
+          const padded = Buffer.alloc(raw.length + 8, 0xa5)
+          raw.copy(padded, 4)
+          const view = padded.subarray(4, 4 + raw.length)
+          return { ...row, data: blobReads % 2 ? view : new Uint8Array(view.buffer, view.byteOffset, view.byteLength) }
+        })
+      },
+    }
+  }
+  const { n, host } = await setup(t, { db: d })
+  host.register(fakeCtx())
+  await n.ready
+
+  const page = await n.peer.call('session.items', { session_id: 'ses_blob', limit: 10 })
+  const item = page.items.find((it) => it.kind === 'image')
+  assert.equal(item.id, '4#1')
+  assert.deepEqual(item.image, { mime: 'image/png', data: '', lazy: true })
+  const expected = { mime: 'image/png', data: png.toString('base64') }
+  assert.deepEqual(await n.peer.call('session.image', { session_id: 'ses_blob', item_id: item.id }), expected)
+  assert.deepEqual(await n.peer.call('session.image', { session_id: 'ses_blob', item_id: item.id }), expected)
+  assert.equal(blobReads, 2)
+})
+
+test('a legacy inline image keeps its existing session.image behavior', async (t) => {
+  const d = fakeBlobDb()
+  const data = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe, 0x80]).toString('base64')
+  d.session('ses_inline')
+  d.message('ses_inline', 3, 'user', { files: [{ mime: 'image/png', name: 'legacy.png', data }] })
+  const { n, host } = await setup(t, { db: d })
+  host.register(fakeCtx())
+  await n.ready
+  assert.deepEqual(await n.peer.call('session.image', { session_id: 'ses_inline', item_id: '3#1' }), { mime: 'image/png', data })
+})
+
+test('malformed, percent-encoded, uppercase and arbitrary image URIs are not fetched as blobs', async (t) => {
+  const d = fakeBlobDb()
+  const hash = 'a'.repeat(64)
+  const uris = [
+    'media:not-a-hash',
+    `media:${'a'.repeat(63)}`,
+    `media:${'A'.repeat(64)}`,
+    `media:%61${'a'.repeat(63)}`,
+    `media:${hash}%0A`,
+    `media:${hash}?download=1`,
+    'https://example.test/image.png',
+    'file:///tmp/image.png',
+  ]
+  d.session('ses_uri')
+  d.message('ses_uri', 4, 'user', { files: uris.map((uri) => ({ mime: 'image/png', name: 'bad.png', uri })) })
+  const { n, host } = await setup(t, { db: d })
+  host.register(fakeCtx())
+  await n.ready
+  for (let i = 0; i < uris.length; i++) await imageNotFound(n, 'ses_uri', `4#${i + 1}`)
+})
+
+test('a media hash cannot load through a missing, foreign or stale blob_ref', async (t) => {
+  const d = fakeBlobDb()
+  d.session('ses_guard')
+  d.session('ses_other')
+  const cases = [
+    { seq: 10, name: 'missing blob' },
+    { seq: 11, name: 'orphan hash without blob_ref' },
+    { seq: 12, name: 'cross-session ref' },
+    { seq: 13, name: 'cross-message ref' },
+    { seq: 14, name: 'wrong message seq' },
+    { seq: 15, itemSeq: 16, name: 'rewritten message seq' },
+  ]
+  for (const c of cases) {
+    const raw = Buffer.from(c.name)
+    const hash = hashOf(raw)
+    const message = `msg_ses_guard_${c.seq}`
+    d.message('ses_guard', c.seq, 'user', { files: [{ mime: 'image/png', name: 'guarded.png', uri: `media:${hash}` }] })
+    if (c.name !== 'missing blob') d.blob(hash, raw)
+    switch (c.name) {
+      case 'missing blob':
+        // A database written with foreign keys off can retain this dangling ref; the reader must still reject it.
+        d.db.exec('pragma foreign_keys = off')
+        d.ref('ses_guard', message, c.seq, hash)
+        d.db.exec('pragma foreign_keys = on')
+        break
+      case 'cross-session ref':
+        d.message('ses_other', c.seq, 'user', { text: 'other session' })
+        d.ref('ses_other', `msg_ses_other_${c.seq}`, c.seq, hash)
+        break
+      case 'cross-message ref':
+        d.message('ses_guard', 90, 'user', { text: 'other message' })
+        d.ref('ses_guard', 'msg_ses_guard_90', 90, hash)
+        break
+      case 'wrong message seq':
+        d.ref('ses_guard', message, c.seq + 1, hash)
+        break
+      case 'rewritten message seq':
+        d.ref('ses_guard', message, c.seq, hash)
+        d.db.prepare('update session_message set seq = ? where id = ?').run(c.itemSeq, message)
+        break
+    }
+  }
+  const { n, host } = await setup(t, { db: d })
+  host.register(fakeCtx())
+  await n.ready
+  for (const c of cases) await imageNotFound(n, 'ses_guard', `${c.itemSeq ?? c.seq}#1`)
+})
+
+test('an oversized blob is rejected by actual raw length before base64 allocation', async (t) => {
+  const d = fakeBlobDb()
+  // This alone would need the RPC's whole 64 MiB line as base64, before the JSON envelope. Lie in blob.bytes to
+  // prove the loader checks the actual BLOB view, not upstream's metadata or an encoded-size check after allocation.
+  const raw = Buffer.alloc(48 * 1024 * 1024, 0x69)
+  const hash = hashOf(raw)
+  d.session('ses_oversize')
+  d.message('ses_oversize', 4, 'user', { files: [{ mime: 'image/png', name: 'large.png', uri: `media:${hash}` }] })
+  d.blob(hash, raw, { bytes: 1 })
+  d.ref('ses_oversize', 'msg_ses_oversize_4', 4, hash)
+  const { n, host } = await setup(t, { db: d })
+  host.register(fakeCtx())
+  await n.ready
+
+  const toString = Buffer.prototype.toString
+  Buffer.prototype.toString = function (encoding, ...args) {
+    if (encoding === 'base64') throw new Error('base64 was allocated before the raw-size check')
+    return toString.call(this, encoding, ...args)
+  }
+  try {
+    await imageNotFound(n, 'ses_oversize', '4#1')
+  } finally {
+    Buffer.prototype.toString = toString
+  }
 })
 
 test('a watched session gets each finished message once, as a continuous batch; its live text as deltas; the state follows the turn', async (t) => {

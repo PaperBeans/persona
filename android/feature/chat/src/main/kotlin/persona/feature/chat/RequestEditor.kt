@@ -18,6 +18,7 @@ import persona.core.contracts.*
 import persona.core.contracts.api.*
 import persona.core.designsystem.PersonaTheme
 import persona.core.domain.sort.canApprove
+import persona.core.domain.sort.fromSide
 import persona.core.domain.answer.*
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -103,12 +104,15 @@ fun RequestEditor(
 ) {
     val context = LocalContext.current.applicationContext
     val childRows = LocalChatChildren.current?.rows
-    val child = childRows?.get(request.sessionId)
+    // A side session's own card in its parent's chat (#7944) follows that side's capabilities and title.
+    val side = LocalChatChildren.current?.sides?.takeIf { request.fromSide }?.firstOrNull { it.key == request.sessionKey }
+    val child = childRows?.get(request.sessionId) ?: side
     val requestBlock = requestApprovalBlockedReason(request, child, blockedReason) {
         approvalBlockedReason(context.resources, it)
     }
     val shown = if (!request.foldedUnder.isNullOrBlank() && request.sessionTitle.isNullOrBlank())
-        request.copy(sessionTitle = stringResource(R.string.chat_subagent_untitled)) else request
+        request.copy(sessionTitle = side?.displayTitle
+            ?: stringResource(if (request.fromSide) R.string.chat_side_session_untitled else R.string.chat_subagent_untitled)) else request
     val services = remember(context) { EntryPointAccessors.fromApplication(context, RequestEditorServices::class.java) }
     val store = remember(services) { services.requestDrafts() }
     val local by store.storage.collectAsStateWithLifecycle()

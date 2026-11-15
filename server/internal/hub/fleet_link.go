@@ -675,6 +675,23 @@ func (h *Hub) deliverPush(n assistantwire.Notification) error {
 	return err
 }
 
+// relatedTodoID maps only source forms with a defined meaning. A quiet supervisor's ask:<id> is a real to-do, but a
+// model-controlled notify_user key (Asked=true) is not promoted from that prefix. todo:<id> is already a form every
+// held-push client follows, so carrying it into todo_id preserves that destination's precedence over the session.
+func relatedTodoID(key string, allowAsk bool) string {
+	key = strings.TrimSpace(key)
+	if id, ok := strings.CutPrefix(key, "todo:"); ok {
+		id, _, _ = strings.Cut(id, "@")
+		return strings.TrimSpace(id)
+	}
+	if allowAsk {
+		if id, ok := strings.CutPrefix(key, "ask:"); ok {
+			return strings.TrimSpace(id)
+		}
+	}
+	return ""
+}
+
 // deliverPushFrom delivers what manager from asks (notify.request): an assistant's push, an agent's finished turn, a
 // card. Only the center has apps and devices. Only about its own (ownership.go): a card's push is for a card it
 // reported that is pending, and the hub pushes its own copy of it; any other push names a machine and session of its
@@ -705,7 +722,7 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 	}
 	switch n.Kind {
 	case assistantwire.NotifyPush: // one with an id shows once, sent again however late (a day recap's push)
-		policy := pushPolicy{level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey}
+		policy := pushPolicy{level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey, todoID: relatedTodoID(n.RelatedKey, !n.Asked)}
 		policy.level = h.lnNotifyPushLevel(n, policy.level)
 		o := h.notifyDoneUnder(from, "assistant", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, pushWants{}, managerPushCollapseID(from, n.ID),
 			pushRecordingID(n.RecordingID), policy)
@@ -713,7 +730,7 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 	case assistantwire.NotifyDone:
 		o := h.notifyDoneUnder(from, "done", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body,
 			pushWants{Kind: "done", Took: time.Duration(n.TookMS) * time.Millisecond, Long: time.Duration(n.LongMS) * time.Millisecond},
-			"", "", pushPolicy{level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey})
+			"", "", pushPolicy{level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey, todoID: relatedTodoID(n.RelatedKey, false)})
 		out = &o
 	case assistantwire.NotifyReply:
 		h.notifyReplyKeyed(from, n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, n.RelatedKey)

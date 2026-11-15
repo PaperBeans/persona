@@ -1,5 +1,7 @@
 # Lessons: assistant (headless Claude / Codex)
 
+- A GitHub number is not proof of a delivery PR (#8248). Resolve number-only references through issue metadata before recording them; an ordinary issue has no `pull_request` object. Recover old false PR records on acceptance, but do not turn a masked permission 404 into proof of absence: confirm PR access, preserve real historical PRs, and persist removal before publishing it. Item-level misses must not put unrelated PR checks on an outage cooldown.
+
 - A presence window is not an owner-turn guarantee (#6394). The two-minute `ownerPresentFor` hold and the
   five-minute `relayDecisionMax` cap let queued relayed/decision messages start new rounds behind the owner's back
   once the window expires, even while the owner is still waiting on their own round. Keep the ranked queue and the

@@ -56,6 +56,7 @@ def features():
                 ["conversation_origin"] if os.environ.get("MOCK_AUTO_CONVERSATIONS") == "1" else []) + (
                 ["sessions_list", "sessions_lookup", "sessions_hierarchy", "sessions_todo", "sessions_quick_filters"] if os.environ.get("MOCK_SESSIONS_LIST") == "1" else []) + (
                 ["sessions_catalog"] if CATALOG else []) + (
+                ["sessions_side_fold"] if SIDE_FOLD else []) + (
                 ["preview"] if os.environ.get("MOCK_PREVIEW") else []) + (
                 ["task_cron"] if os.environ.get("MOCK_CRON") == "1" else []) + (
                 [] if os.environ.get("MOCK_TODO_SEEN") == "off" else ["todo_seen"]) + (
@@ -1591,16 +1592,25 @@ if os.environ.get("MOCK_OVERVIEW_DENSE"):
                          capabilities={"read": True, "send": True, "interrupt": True, "approve": True, "terminal": True, "attach": False}))
 
 # MOCK_SIDE_SESSIONS=1 (#5935): two sessions the Claude desktop app started from the PR review, newer than it: a /btw
-# question that waits for the user and a side chat. They name the review in parent_agent_id, as the node sets it, and the
-# Agents list draws them under it.
-if os.environ.get("MOCK_SIDE_SESSIONS") == "1":
+# question that waits for the user and a side chat. They name the review in parent_agent_id, as the node sets it. #7944
+# adds a side session of the side chat that has stopped, and the /btw question's card. With the hub's side folding
+# (`sessions_side_fold`, on unless MOCK_SIDE_FOLD=0, which is the older hub that the Agents list nests them for) the
+# three fold into the review's chat: its Side sessions button and panel (fold_hierarchy).
+SIDE_BTW = "a1f3c2d4-0000-4000-8000-0000000059a1"
+SIDE_CHAT = "a1f3c2d4-0000-4000-8000-0000000059a2"
+SIDE_STOPPED = "a1f3c2d4-0000-4000-8000-0000000059a3"
+MOCK_SIDE_SESSIONS = os.environ.get("MOCK_SIDE_SESSIONS") == "1"
+SIDE_FOLD = MOCK_SIDE_SESSIONS and os.environ.get("MOCK_SIDE_FOLD") != "0"
+if MOCK_SIDE_SESSIONS:
     _desktop = dict(space_kind="", space_id="", space_name="", space_index=0, slot_id="", slot_name="", slot_index=0, pane_id="",
                     tab_id="", workspace_id="", started_by_persona=False, parent_agent_id=REVIEW)
     SESSIONS += [
-        sess("macbook", "a1f3c2d4-0000-4000-8000-0000000059a1", "btw: 这个 PR 现在能合吗", "/Users/me/code/weather", "blocked",
+        sess("macbook", SIDE_BTW, "btw: 这个 PR 现在能合吗", "/Users/me/code/weather", "blocked",
              "needs_you", "", 0, "", 0, 4, "想先确认一下：两条命名建议要不要等改完再合？", pending=1, **_desktop),
-        sess("macbook", "a1f3c2d4-0000-4000-8000-0000000059a2", "Side chat", "/Users/me/code/weather", "idle", "idle", "", 0, "", 0,
+        sess("macbook", SIDE_CHAT, "Side chat", "/Users/me/code/weather", "idle", "idle", "", 0, "", 0,
              9, "两条命名建议都改成英文会更统一。", seen_at=ago(minutes=8), **_desktop),
+        sess("macbook", SIDE_STOPPED, "查一下 CI 为什么慢", "/Users/me/code/weather", "offline", "offline", "", 0, "", 0,
+             30, "缓存没命中，依赖每次都重新装。", **dict(_desktop, parent_agent_id=SIDE_CHAT)),
     ]
 
 # MOCK_SESSIONS_MANY=<n> (#4410): n more idle sessions, enough to page an Agents list several pages deep with
@@ -9929,8 +9939,9 @@ def mock_interactions():
             titles = {a["session_id"]: t["title"] for t in TODOS if t.get("origin") and not t.get("done_at") for a in t.get("agents", [])}
             out = [dict(x, task_title=titles[x["session_id"]]) if x.get("session_id") in titles else x for x in out]
     # the session a card's session folds under (Interaction.folded_under, #5120): its home is that session's page; a tab
-    # worker's card says so too (folded_as, #5180)
-    folds = {(r["machine_id"], r["session_id"]): {k: r[k] for k in ("folded_under", "folded_as") if r.get(k)}
+    # worker's card says so too (folded_as, #5180), and a side session's, or the card of a row of a side's own (folded_side,
+    # #7944)
+    folds = {(r["machine_id"], r["session_id"]): {k: r[k] for k in ("folded_under", "folded_as", "folded_side") if r.get(k)}
              for r in all_sessions() if r.get("folded_under")}
     out = [dict(x, suggestion=sg) if (sg := rule_suggestion(x["id"])) else x for x in out]  # MOCK_RULE_SUGGESTIONS
     return [dict(x, **folds[(x.get("machine_id"), x.get("session_id"))]) if (x.get("machine_id"), x.get("session_id")) in folds else x for x in out]
@@ -16766,6 +16777,22 @@ if os.environ.get("MOCK_TAB_PANES"):
              "cwd": "/home/me/code/app", "kind": "permission", "agent": "codex", "tool_use_id": "toolu_panes_review_test",
              "created_at": ago(minutes=1), "expires_at": later(minutes=29), "tool_name": "Bash",
              "summary": "go test ./auth/...", "tool_input": {"command": "go test ./auth/..."}})
+if MOCK_SIDE_SESSIONS:
+    # #7944: the /btw question's card (with side folding the hub sends it folded_under the review, folded_as "side"), and
+    # what each side session said
+    INTERACTIONS.append(
+        {"id": "ix_side_btw", "machine_id": "macbook", "session_id": SIDE_BTW, "session_title": "btw: 这个 PR 现在能合吗",
+         "cwd": "/Users/me/code/weather", "kind": "question", "created_at": ago(minutes=4), "expires_at": later(minutes=26),
+         "tool_name": "AskUserQuestion", "tool_use_id": "toolu_side_btw",
+         "questions": [{"question": "两条命名建议要不要等改完再合？", "header": "合并", "multi_select": False, "options": [
+             {"label": "等改完再合", "description": "命名统一以后再合进主分支"},
+             {"label": "现在就合", "description": "命名之后单独提一个改动"}]}]})
+    ITEMS[SIDE_BTW] = [it("user", "text", 6, text="btw 这个 PR 现在能合吗"),
+                       it("assistant", "text", 4, text="逻辑和测试都没问题。想先确认一下：两条命名建议要不要等改完再合？")]
+    ITEMS[SIDE_CHAT] = [it("user", "text", 12, text="命名建议你倾向哪种写法？"),
+                        it("assistant", "text", 9, text="两条命名建议都改成英文会更统一。")]
+    ITEMS[SIDE_STOPPED] = [it("user", "text", 34, text="查一下 CI 为什么慢"),
+                           it("assistant", "text", 30, text="缓存没命中，依赖每次都重新装。")]
 if os.environ.get("MOCK_BOTMUX"):
     ITEMS[BOTMUX_BLOCKED] = [it("user", "text", 5, text="把周报导出改成按部门分 sheet")] + [
         it("assistant", "text", 3, text="导出脚本改好了，正在跑全量。")]
@@ -17552,14 +17579,15 @@ def is_child_row(r):
     return bool(r.get("is_subagent") or r.get("parent_session_id") or r.get("asking_parent_session_id") or (root and root != r["session_id"]))
 
 
-def tab_leads(rows):
+def tab_leads(rows, sides=frozenset()):
     """The manager's tab teams (#5180, fold_hierarchy): for each worker's (machine, session id), its lead's row. A tab is the
-    rows of one machine, space kind, space and slot, both named; an assistant row or an archived one is in none. Its lead is
-    the one row in its first pane (pane_index 0) that is no child and not offline: none or two such rows, and its Agents
-    are peers. Every other row of a tab with a lead that is no child and not offline is its worker."""
+    rows of one machine, space kind, space and slot, both named; an assistant row or an archived one is in none, nor is a
+    side session (`sides`, #7944: side wins over worker). Its lead is the one row in its first pane (pane_index 0) that is
+    no child and not offline: none or two such rows, and its Agents are peers. Every other row of a tab with a lead that
+    is no child and not offline is its worker."""
     def tab(r):
         if (r.get("assistant") or r.get("archived") or not r.get("space_id") or not r.get("slot_id") or is_child_row(r)
-                or r.get("state") == "offline"):
+                or r.get("state") == "offline" or (r["machine_id"], r["session_id"]) in sides):
             return None
         return (r["machine_id"], r.get("space_kind") or "", r["space_id"], r["slot_id"])
     first = {}
@@ -17581,21 +17609,36 @@ def fold_hierarchy(rows):
     (is_subagent, a parent, or the parent a waiting runtime child names in asking_parent_session_id) whose topmost listed
     ancestor on its machine is another listed row gets folded_under that ancestor, which gets children (its descendants by
     their own state). A tab's worker (tab_leads) has its lead as its parent and gets folded_as "worker" too; the lead's
-    children count its workers. Orphans and cycles fold nowhere."""
+    children count its workers. Orphans and cycles fold nowhere.
+    With side folding (#7944, SIDE_FOLD) a row that is no child and no Assistant row, whose parent_agent_id names another
+    listed non-Assistant row on its machine, has that row as its parent (before any tab lead): it gets folded_as "side"
+    when that is its own step up, and a row that folds through a side without being one names the nearest in folded_side.
+    The topmost row's children count the sides apart too (sides, sides_working, sides_needs_you, sides_unread)."""
     by = {(r["machine_id"], r["session_id"]): r for r in rows}
-    lead = tab_leads(rows)
+
+    def side_parent(r):
+        if not SIDE_FOLD or is_child_row(r) or r.get("assistant"):
+            return None
+        p = r.get("parent_agent_id")
+        row = by.get((r["machine_id"], p)) if p and p != r["session_id"] else None
+        return row if row is not None and not row.get("assistant") else None
+    side_of = {(r["machine_id"], r["session_id"]): p for r in rows if (p := side_parent(r)) is not None}
+    lead = tab_leads(rows, frozenset(side_of))
 
     def parent(r):
+        k = (r["machine_id"], r["session_id"])
+        if k in side_of:
+            return side_of[k]
         if not is_child_row(r):
-            return lead.get((r["machine_id"], r["session_id"]))
+            return lead.get(k)
         for k in ("parent_session_id", "asking_parent_session_id", "root_session_id"):
             v = r.get(k)
             if v and v != r["session_id"] and (r["machine_id"], v) in by:
                 return by[(r["machine_id"], v)]
         return None
-    top = {}
+    top, through = {}, {}
     for r in rows:
-        cur, seen, found = r, {r["session_id"]}, None
+        cur, seen, found, side = r, {r["session_id"]}, None, None
         while True:
             p = parent(cur)
             if p is None:
@@ -17604,28 +17647,42 @@ def fold_hierarchy(rows):
                 found = None
                 break
             seen.add(p["session_id"])
+            # the nearest side on the way up that is not the row itself (#7944)
+            if side is None and cur is not r and (cur["machine_id"], cur["session_id"]) in side_of:
+                side = cur["session_id"]
             found = cur = p
         if found is not None:
             top[(r["machine_id"], r["session_id"])] = found["session_id"]
+            if side is not None and (r["machine_id"], r["session_id"]) not in side_of:
+                through[(r["machine_id"], r["session_id"])] = side
     if not top and not any("folded_under" in r or "folded_as" in r or "children" in r for r in rows):
         return rows
     rollup = {}
     for (mid, sid), root in top.items():
-        c = rollup.setdefault((mid, root), {"total": 0, "working": 0, "needs_you": 0, "workers": 0})
+        c = rollup.setdefault((mid, root), {"total": 0, "working": 0, "needs_you": 0, "workers": 0,
+                                            "sides": 0, "sides_working": 0, "sides_needs_you": 0, "sides_unread": 0})
         c["total"] += 1
         state = by[(mid, sid)].get("state")
         if state in ("working", "needs_you"):
             c[state] += 1
-        if (mid, sid) in lead:
+        if (mid, sid) in lead and (mid, sid) not in side_of:
             c["workers"] += 1
+        if (mid, sid) in side_of:
+            c["sides"] += 1
+            if state in ("working", "needs_you", "unread"):
+                c["sides_" + state] += 1
     out = []
     for r in rows:
         k = (r["machine_id"], r["session_id"])
-        r = {x: v for x, v in r.items() if x not in ("folded_under", "folded_as", "children")}
+        r = {x: v for x, v in r.items() if x not in ("folded_under", "folded_as", "folded_side", "children")}
         if k in top:
             r["folded_under"] = top[k]
-            if k in lead:
+            if k in side_of:
+                r["folded_as"] = "side"
+            elif k in lead:
                 r["folded_as"] = "worker"
+            if k in through:
+                r["folded_side"] = through[k]
         if k in rollup:
             r["children"] = {x: v for x, v in rollup[k].items() if v or x == "total"}
         out.append(r)
@@ -17644,6 +17701,9 @@ def folded_state(s):
         return "needs_you"
     if c.get("working") and own != "unread" and not (own == "idle" and s.get("awaits_reply")):
         return "working"
+    # #7944: an unread side makes its parent unread, unless the parent works itself (sides only)
+    if c.get("sides_unread") and own != "working":
+        return "unread"
     return own
 
 
@@ -24158,7 +24218,7 @@ MOCK_HELP = [
     "MOCK_KB_SELECTION=missing|future|fail  Settings › Knowledge selection: a hub from before it (404) / a document with a field clients don't know / a save the hub refuses (503)",
     "MOCK_SESSIONS_LIST=1  Paged Agents, counts, exact lookup and by to-do (todo=, #6662); list-mode sockets send hints instead of full lists (#6362)",
     "MOCK_SESSIONS_MANY=<n>  n more idle sessions to page through; GET /mock/sessions/touch expires the old cursors (#4410)",
-    "MOCK_SIDE_SESSIONS=1  Two Claude desktop side sessions under the PR review (parent_agent_id, #5935), one waiting for you",
+    "MOCK_SIDE_SESSIONS=1  Three Claude desktop side sessions of the PR review (parent_agent_id, #5935): one waiting for you with its card, one a stopped side of a side; the hub folds them into the review's chat (sessions_side_fold, #7944) unless MOCK_SIDE_FOLD=0",
     "MOCK_SESSIONS_CATALOG=1  With MOCK_SESSIONS_LIST=1: catalog=1, place= and space= on the paged list, a Windows PC, one repository on two computers and a plain notes folder on two",
     "MOCK_MANUAL_HERDR=1  没挂待办的 herdr Agent 算手动开的（started_by_persona 为假），Agents「按待办」里出「手动开的」一段（#2917）",
     "MOCK_ORCA_CHILDREN=1  MacBook 上一个 Orca 工作区带三个子工作区（其中一个还有子项，parent_space_id，#2073）",

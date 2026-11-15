@@ -161,6 +161,8 @@ type Device struct {
 	Locked *bool `json:"locked,omitempty"`
 	// DeveloperMode is what the phone last said of it (at pairing, then in each device_info); nil when it never did.
 	DeveloperMode *bool `json:"developer_mode,omitempty"`
+	// AutoPrepare: the owner prepared it once, so this computer mounts its developer disk image again by itself.
+	AutoPrepare bool `json:"auto_prepare,omitempty"`
 	// Address and Port are where the session is connected, AddressSource how that was found (manual / bonjour /
 	// last). Local to this computer: the phone's network address isn't sent to the hub.
 	Address       string `json:"address,omitempty"`
@@ -189,7 +191,8 @@ func (m *Manager) Devices(ctx context.Context) []Device {
 	out := make([]Device, 0, len(recs)+len(usb))
 	for _, r := range recs {
 		d := Device{UDID: r.UDID, Name: r.Name, ProductType: r.ProductType, OSVersion: r.OSVersion, Paired: true, State: StateIdle,
-			Transport: cmp.Or(r.Transport, TransportNetwork), ManualAddress: r.Address, PairedAt: r.PairedAt, DeveloperMode: r.DeveloperMode}
+			Transport: cmp.Or(r.Transport, TransportNetwork), ManualAddress: r.Address, PairedAt: r.PairedAt, DeveloperMode: r.DeveloperMode,
+			AutoPrepare: r.AutoPrepare}
 		_, d.USB = usb[r.UDID]
 		delete(usb, r.UDID)
 		m.mu.Lock()
@@ -353,8 +356,12 @@ const (
 	CodeLocked       = "locked"
 )
 
-// pairRetry is how often Pair asks the bridge again while the phone waits for its user.
-var pairRetry = 2 * time.Second
+// pairRetry is how often Pair asks the bridge again while the phone waits for its user; revealTimeout bounds
+// showing Developer Mode in Settings after pairing.
+var (
+	pairRetry     = 2 * time.Second
+	revealTimeout = 15 * time.Second
+)
 
 // Pair pairs the phone udid, plugged in over USB, with this computer: the bridge's trusted pairing, the record kept
 // here. The phone asks its user to trust this computer (and for its passcode) meanwhile: while the bridge answers
@@ -414,6 +421,17 @@ func (m *Manager) Pair(ctx context.Context, udid string, progress PairProgress) 
 		cleanup()
 		return Record{}, err
 	}
+	// Paired with Developer Mode off: the phone neither advertises nor takes connections until it is on, and its
+	// switch is hidden in Settings until a developer tool asks for it. Ask while the phone is still on the cable;
+	// a bridge or phone that can't is only logged (the app still says where the switch is).
+	if info.DeveloperMode != nil && !*info.DeveloperMode && info.Transport != TransportSimulator {
+		step("showing Developer Mode in the phone's Settings", "")
+		rctx, cancel := context.WithTimeout(ctx, revealTimeout)
+		if err := b.RevealDeveloperMode(rctx, udid); err != nil {
+			m.logf("iphone %s: showing Developer Mode in Settings: %v", short(udid), err)
+		}
+		cancel()
+	}
 	step("saving the pairing record", "")
 	if err := os.Chmod(tmp, 0o600); err != nil {
 		cleanup()
@@ -430,6 +448,7 @@ func (m *Manager) Pair(ctx context.Context, udid string, progress PairProgress) 
 	}
 	if prevErr == nil {
 		rec.Address = prev.Address
+		rec.AutoPrepare = prev.AutoPrepare // the owner's word for this phone on this computer stands
 	}
 	if err := m.store.Save(rec); err != nil {
 		return Record{}, err
