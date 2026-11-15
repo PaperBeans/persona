@@ -3,8 +3,11 @@ package hub
 import (
 	"context"
 	"sort"
+	"sync/atomic"
 	"time"
 )
+
+var fsWatchEpochCounter atomic.Uint64
 
 // Live Files / Git for the web panels (#2439, docs/web/web.md "Live refresh"). A browser tells the hub, over its
 // WebSocket, which folders of one machine it has open: {type: "fs_watch", machine_id, cwd, paths, git}. Each call
@@ -77,10 +80,45 @@ func (h *Hub) fsWatchSet(c *client, machineID string, req fsWatchReq) {
 	h.queueFSWatchSync(m)
 }
 
+func (h *Hub) nextFSWatchGeneration(id string) uint64 {
+	h.fsWatchGenMu.Lock()
+	defer h.fsWatchGenMu.Unlock()
+	if h.fsWatchEpoch == 0 {
+		h.fsWatchEpoch = uint64(time.Now().Unix()) + fsWatchEpochCounter.Add(1)
+	}
+	if h.fsWatchGen == nil {
+		h.fsWatchGen = map[string]uint64{}
+	}
+	h.fsWatchGen[id]++
+	return h.fsWatchEpoch<<32 | h.fsWatchGen[id]
+}
+
+func (h *Hub) markFSWatchForce(id string) {
+	h.fsWatchForceMu.Lock()
+	if h.fsWatchForceByID == nil {
+		h.fsWatchForceByID = map[string]bool{}
+	}
+	h.fsWatchForceByID[id] = true
+	h.fsWatchForceMu.Unlock()
+}
+
+func (h *Hub) takeFSWatchForce(id string) bool {
+	h.fsWatchForceMu.Lock()
+	defer h.fsWatchForceMu.Unlock()
+	forced := h.fsWatchForceByID[id]
+	delete(h.fsWatchForceByID, id)
+	return forced
+}
+
 // queueFSWatchSync keeps one sync worker per machine. A change made while its node call is out marks one trailing
 // sync; every later change coalesces into that same sync, which reads the union when its turn comes. The connection's
 // read loop only records its own set and returns, and the hub's nodeWorkers join covers both the call and the tail.
 func (h *Hub) queueFSWatchSync(m *Machine) {
+	if h.takeFSWatchForce(m.cfg.ID) {
+		m.fswMu.Lock()
+		m.fswForce = true
+		m.fswMu.Unlock()
+	}
 	m.fswMu.Lock()
 	if m.fswRunning {
 		m.fswPending = true
@@ -128,8 +166,9 @@ type fsWatchDirParam struct {
 }
 
 type fsWatchParam struct {
-	Dirs []fsWatchDirParam `json:"dirs"`
-	Git  []string          `json:"git"`
+	Dirs       []fsWatchDirParam `json:"dirs"`
+	Git        []string          `json:"git"`
+	Generation uint64            `json:"generation,omitempty"`
 }
 
 // fsWatchUnion is every connected browser's folders on the machine, deduplicated.
@@ -185,6 +224,13 @@ func (h *Hub) fsWatchClients() []*client {
 // node connection forced a resend. A node from before this (no fs.watch) answers with an error that is only logged,
 // the panels then refresh by hand as they always did.
 func (h *Hub) fsWatchSync(m *Machine) {
+	if h.localMachine(m.cfg.ID) != m {
+		h.markFSWatchForce(m.cfg.ID)
+		if current := h.localMachine(m.cfg.ID); current != nil {
+			h.queueFSWatchSync(current)
+		}
+		return // a removed instance has no union of its own to send any more
+	}
 	m.fswMu.Lock()
 	force := m.fswForce
 	m.fswForce = false
@@ -200,7 +246,17 @@ func (h *Hub) fsWatchSync(m *Machine) {
 	if p.Dirs == nil {
 		p.Dirs = []fsWatchDirParam{}
 	}
+	p.Generation = h.nextFSWatchGeneration(m.cfg.ID)
 	err := m.call(ctx, "fs.watch", p, nil)
+	if current := h.localMachine(m.cfg.ID); current != m {
+		h.markFSWatchForce(m.cfg.ID)
+		if current != nil {
+			// The old in-flight call may still have landed on the recreated node. It cannot be unsent, so the current
+			// instance must replay the latest union last, even when that union is empty or the old call failed.
+			h.queueFSWatchSync(current)
+		}
+		return
+	}
 	m.fswMu.Lock()
 	defer m.fswMu.Unlock()
 	if err != nil {

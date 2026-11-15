@@ -121,6 +121,7 @@ func TestFsWatchUnionAndRelease(t *testing.T) {
 
 	say(h, a, map[string]any{"type": "fs_watch", "machine_id": "m1", "cwd": "/w", "paths": []string{"/w", "/w/src"}, "git": true})
 	got := lastFsWatch(t, tn, 1)
+	got.Generation = 0 // generation is fencing metadata, not the browser's folder set
 	want := fsWatchParam{Dirs: []fsWatchDirParam{{Path: "/w", Cwd: "/w"}, {Path: "/w/src", Cwd: "/w"}}, Git: []string{"/w"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("first union = %+v", got)
@@ -154,6 +155,13 @@ func TestFsWatchUnionAndRelease(t *testing.T) {
 	}
 }
 
+func TestFSWatchGenerationAdvancesAcrossHubs(t *testing.T) {
+	first, second := newTestHub(t), newTestHub(t)
+	if got, next := first.nextFSWatchGeneration("m1"), second.nextFSWatchGeneration("m1"); next <= got {
+		t.Fatalf("a new hub restarted generation backwards: %d → %d", got, next)
+	}
+}
+
 // A browser that opened folders with the id an absorbed hub.json entry used to have reaches the computer, so the
 // node is told to watch them and the changes come back to it under the id it asked with: the set is kept under the
 // computer's own id, the event echoes the browser's.
@@ -182,6 +190,9 @@ func TestFsWatchByAbsorbedAliasReachesTheNodeAndRoutesChanges(t *testing.T) {
 	})
 	mu.Lock()
 	got := append([]fsWatchParam(nil), watched...)
+	if len(got) > 0 {
+		got[0].Generation = 0
+	}
 	mu.Unlock()
 	want := fsWatchParam{Dirs: []fsWatchDirParam{{Path: "/w", Cwd: "/w"}}, Git: []string{"/w"}}
 	if len(got) != 1 || !reflect.DeepEqual(got[0], want) {
@@ -204,6 +215,7 @@ func TestFsWatchByAbsorbedAliasReachesTheNodeAndRoutesChanges(t *testing.T) {
 	})
 	mu.Lock()
 	last := watched[len(watched)-1]
+	last.Generation = 0
 	mu.Unlock()
 	if len(last.Dirs) != 0 || len(last.Git) != 0 {
 		t.Fatalf("after closing by the alias the node was told %+v", last)
@@ -258,7 +270,11 @@ func TestFsWatchByBothIDsOfOneComputerKeepsEach(t *testing.T) {
 	eventually(t, 3*time.Second, "the canonical set after the alias panel closed", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(watched) > 0 && reflect.DeepEqual(watched[len(watched)-1], want)
+		return len(watched) > 0 && func() bool {
+			last := watched[len(watched)-1]
+			last.Generation = 0
+			return reflect.DeepEqual(last, want)
+		}()
 	})
 	h.fsChanged("canonical", []string{"/w", "/w/a"}, nil)
 	m := nextFsChanged(c)

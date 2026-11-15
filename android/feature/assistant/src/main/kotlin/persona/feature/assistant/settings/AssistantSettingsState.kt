@@ -301,6 +301,19 @@ internal class AssistantSettingsState(
         if (!ok) set { copy(config = this.config?.copy(mainBackgroundFolded = !on)) }
     }
 
+    /** Suggest the next message: moves at once, follows the hub's answer, and rolls back on failure. */
+    suspend fun setNextSuggestions(on: Boolean) {
+        val config = state.value.config ?: return
+        val was = config.nextSuggestions ?: return
+        if (state.value.busy || was == on) return
+        set { copy(config = config.copy(nextSuggestions = on)) }
+        val ok = perform(SettingsText(R.string.assistant_settings_save_failed)) {
+            val updated = api.updateConfig(AssistantConfigUpdate(nextSuggestions = on))
+            set { copy(config = updated.copy(nextSuggestions = updated.nextSuggestions ?: on)) }
+        }
+        if (!ok) set { copy(config = this.config?.copy(nextSuggestions = was)) }
+    }
+
     /**
      * "The main chat supervises its own tasks" (#4927): off, the background supervisor follows them up. Moves at once;
      * a failure puts it back and says so.

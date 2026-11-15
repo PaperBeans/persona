@@ -515,7 +515,7 @@ two sources (`server/internal/assistant/suggest_next.go`):
 Rules for the hub-made one:
 
 - **Switch**: `next_suggestions` in the assistant's settings (`GET/PUT /api/v1/assistant`, Settings › Persona on the web and Settings ›
-  Assistant on iOS/iPadOS), **off by default**. A native client keeps the value nil and hides the row when an older hub omits the field.
+  Assistant on iOS/iPadOS and Android), **off by default**. A native client keeps the value nil and hides the row when an older hub omits the field.
   Default in one sentence: no chat gets a model-made suggestion until you turn it on. Claude Code's own suggestion
   (`promptSuggestionEnabled`) is untouched by it.
 - **When**: once per turn, when a turn ends well (working to done or idle in the node's list) and an app has the chat open at that moment
@@ -529,11 +529,11 @@ Rules for the hub-made one:
 - **Risky suggestions** (either source): one that names a command, a path, a link, a secret-looking string or one of the risky actions
   of the Agents' safety boundary (`riskyWords`: delete, push, deploy, send…) carries `suggestion_risky: true`. The apps fill it in but
   show no one-tap send.
-- **Clients**: the web and iOS/iPadOS show the strip in Agent and assistant conversations, the main Persona conversation included,
+- **Clients**: the web, iOS/iPadOS and Android show the strip in Agent and assistant conversations, the main Persona conversation included,
   through their existing shared composer. A risky one has no one-tap send: iOS/iPadOS retains tap / Fill In and the preview but omits
-  Send Now, the VoiceOver direct-send action and its long-press-send hint; filling never sends, and the ordinary composer Send remains
-  available after review. Non-risky actions are unchanged. Android still shows the strip only where it did and does not read
-  `suggestion_risky` yet (follow-up issue).
+  Send Now, the VoiceOver direct-send action and its long-press-send hint; Android retains tap-to-fill but omits its long-press menu and
+  direct-send accessibility action. Filling never sends, and the ordinary composer Send remains available after review. Non-risky actions
+  are unchanged; Android treats an absent `suggestion_risky` as safe and keeps retained suggestion text and its risk from the same row.
 
 ## Main chat, knowledge base, and context flow
 

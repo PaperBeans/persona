@@ -1580,6 +1580,24 @@ The task cards follow `docs/design/task-cards.md`, which holds the state tables 
 
 A record of something that went wrong (an interrupted task, #3834) says what became of it once that is known: a grey line with the result ("Cancelled", "Dispatched again", "Resumed", "Accepted", "Done"), never a red card that outlives the problem. Several records with one cause in a short time are one card that counts handled and pending and opens to each item. The danger color is only for what is still pending. The hub works out the result and the grouping; the clients only draw them (principle 4; `docs/assistant/unified-entry.md`, "Interrupted receipts after the fact"). In an assistant conversation an interrupted task is not a record in the chat any more (#8237, section 4.8.0): its hand-off card says it, and its row in Needs You offers Continue.
 
+### 4.8.2 Guided setups (step by step)
+
+A setup that takes the user through several things, some of them outside the app (a cable, a restart, a computer), goes
+like the iPhone's guided setup (#8199, `IPhoneSetupView`, docs/extensions/iphone.md "Guided setup"), built from the same
+pieces as the computer page's install guides (`.card()`, `.themedButton(prominent:)`, numbered steps):
+
+- **An overview first**: what it does in one sentence, what it needs, each step with its state, the safety rule, one
+  button (Set Up, or Continue once some steps are done).
+- **One screen per step**: a progress bar of the steps, "Step n of N", the step's title and one sentence, a card with its
+  state, and Details folded for the technical words. One primary button at the bottom; a step that waits on the
+  world has none, or a secondary one (Cancel, Check Again).
+- **State words from `StateName`**: Done, Working (`taskWorking`), Needs You, as chips. Every state comes from the hub's
+  answer, never from a tap: a step done elsewhere is skipped, and a screen moves on by itself when its step is done.
+- **Asking again only while waiting**: every two seconds while a step waits on something outside the app, and only while
+  the page is in front (`.tabActiveTask`).
+- **The page the user comes back to** is the same page: its switches (turning it off there), a way to try it, and at
+  most one optional switch.
+
 ### 4.9 Sharing a conversation publicly
 
 Sharing an Agent session follows the user-control rules: everything that widens exposure (more messages, work

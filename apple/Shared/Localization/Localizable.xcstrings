@@ -30133,6 +30133,28 @@
       },
       "extractionState" : "manual"
     },
+    "Chats your scheduled tasks and the background supervisor start also appear in the sidebar's Recent, by time. All your devices follow." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chats your scheduled tasks and the background supervisor start also appear in the sidebar's Recent, by time. All your devices follow."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "定期タスクとバックグラウンド監督が始めたチャットも、時間順にサイドバーの「最近」に並びます。すべてのデバイスに反映されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "定时任务和后台督办开的对话，也按时间排进侧边栏的「最近」。你的所有设备都会跟着变。"
+          }
+        }
+      }
+    },
     "Choose the Fastest Route Automatically" : {
       "localizations" : {
         "en" : {
@@ -138357,6 +138379,28 @@
       },
       "extractionState" : "manual"
     },
+    "Show Scheduled Task Chats" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Scheduled Task Chats"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "定期タスクのチャットを表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示定时任务的对话"
+          }
+        }
+      }
+    },
     "Show Session Info" : {
       "localizations" : {
         "en" : {
@@ -139461,6 +139505,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "侧边栏"
+          }
+        }
+      }
+    },
+    "Sidebar's Recent" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sidebar's Recent"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サイドバーの「最近」"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "侧边栏「最近」"
           }
         }
       }
@@ -198368,6 +198434,1392 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你改了画质"
+          }
+        }
+      }
+    },
+    "Through one of your computers, the assistant can see this iPhone’s screen, open apps, tap and type." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Through one of your computers, the assistant can see this iPhone’s screen, open apps, tap and type."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたのコンピューターの1台を通して、アシスタントはこのiPhoneの画面を見たり、Appを開いたり、タップや入力をしたりできます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "经你的一台电脑，助手能看这台 iPhone 的屏幕、打开 App、点按和输入。"
+          }
+        }
+      }
+    },
+    "You need a cable and a Mac that’s on. About 5 minutes." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You need a cable and a Mac that’s on. About 5 minutes."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ケーブルと電源の入ったMacが必要です。5分ほどかかります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要一根数据线和一台开着的 Mac，大约 5 分钟。"
+          }
+        }
+      }
+    },
+    "Phone control is off. Turn it on so your computers can reach your iPhones." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phone control is off. Turn it on so your computers can reach your iPhones."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone操作は今オフです。オンにすると、コンピューターからiPhoneに接続できるようになります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手机操控现在是关着的。打开后，你的电脑才能连到你的 iPhone。"
+          }
+        }
+      }
+    },
+    "The assistant reaches this iPhone through this computer. Pick a Mac that’s usually on." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The assistant reaches this iPhone through this computer. Pick a Mac that’s usually on."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アシスタントはこのコンピューターを通してこのiPhoneを操作します。普段電源が入っているMacを選んでください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "助手经这台电脑操控这台 iPhone。选一台平时一直开着的 Mac。"
+          }
+        }
+      }
+    },
+    "Connect this iPhone to %@ with a cable, then unlock it." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect this iPhone to %@ with a cable, then unlock it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiPhoneを%@にケーブルでつないで、ロックを解除してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用数据线把这台 iPhone 连到 %@，然后解锁。"
+          }
+        }
+      }
+    },
+    "A computer can see the screen and tap only with Developer Mode on. Your iPhone restarts once." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A computer can see the screen and tap only with Developer Mode on. Your iPhone restarts once."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "デベロッパモードがオンのときだけ、コンピューターは画面を見てタップできます。iPhoneは一度再起動します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开开发者模式后，电脑才能看屏幕、点按。打开时 iPhone 会重启一次。"
+          }
+        }
+      }
+    },
+    "Developer Mode is on" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Developer Mode is on"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "デベロッパモードはオンです"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发者模式已打开"
+          }
+        }
+      }
+    },
+    "Only you can allow this, and only here on this iPhone." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only you can allow this, and only here on this iPhone."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "許可できるのはあなただけで、このiPhone上でのみ許可できます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有你能打开，而且只能在这台 iPhone 上打开。"
+          }
+        }
+      }
+    },
+    "All Set" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All Set"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定完了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置好了"
+          }
+        }
+      }
+    },
+    "The assistant can operate this iPhone through %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The assistant can operate this iPhone through %@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アシスタントは%@を通してこのiPhoneを操作できます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "助手现在可以经 %@ 操控这台 iPhone 了。"
+          }
+        }
+      }
+    },
+    "Ask Me Before Every Step" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask Me Before Every Step"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "毎回操作前に確認する"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每一步都先问我"
+          }
+        }
+      }
+    },
+    "Off: only paying, deleting, sending messages and passwords ask you." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off: only paying, deleting, sending messages and passwords ask you."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オフのときは、支払い、削除、メッセージ送信、パスワード入力のときだけ確認します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关着时只有付款、删除、发消息和输密码会先问你。"
+          }
+        }
+      }
+    },
+    "Screenshot of this iPhone" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Screenshot of this iPhone"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiPhoneのスクリーンショット"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 的截屏"
+          }
+        }
+      }
+    },
+    "Now ask the assistant, for example “Turn on Low Power Mode on my iPhone”." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Now ask the assistant, for example “Turn on Low Power Mode on my iPhone”."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アシスタントに頼んでみましょう。たとえば「iPhoneで低電力モードをオンにして」。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "现在可以跟助手说，比如「帮我在 iPhone 上开低电量模式」。"
+          }
+        }
+      }
+    },
+    "Details" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Details"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "詳細"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "详情"
+          }
+        }
+      }
+    },
+    "Paying, deleting, sending messages and typing passwords always ask you first. You can turn this off here at any time." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paying, deleting, sending messages and typing passwords always ask you first. You can turn this off here at any time."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "支払い、削除、メッセージ送信、パスワード入力の前には必ず確認します。ここでいつでもオフにできます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "付款、删除、发消息和输密码之前一定先问你。随时可以在这里关掉。"
+          }
+        }
+      }
+    },
+    "This iPhone has iOS %@, so the assistant can look at the screen and open apps, but can’t tap or type. That needs iOS 27 or later." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This iPhone has iOS %@, so the assistant can look at the screen and open apps, but can’t tap or type. That needs iOS 27 or later."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiPhoneはiOS %@のため、アシスタントは画面を見たりAppを開いたりはできますが、タップや入力はできません。それにはiOS 27以降が必要です。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 是 iOS %@：助手能看屏幕、打开 App，但不能点按和输入。点按和输入要 iOS 27 或更新。"
+          }
+        }
+      }
+    },
+    "Off for now [iPhone Setup]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off for now"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在オフです"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "现在是关着的"
+          }
+        }
+      }
+    },
+    "Turns on the built-in extension “Phone control” on your hub. You can turn it off again in Settings › Extensions." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turns on the built-in extension “Phone control” on your hub. You can turn it off again in Settings › Extensions."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ハブの内蔵機能拡張「iPhone操作」をオンにします。「設定 › 機能拡張」でいつでもオフにできます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 hub 上的内置扩展「手机操控」。之后可以在「设置 › 扩展」里再关掉。"
+          }
+        }
+      }
+    },
+    "None of your computers can do this yet. Connect a Mac with Persona Link, then come back." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "None of your computers can do this yet. Connect a Mac with Persona Link, then come back."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まだこれができるコンピューターがありません。MacにPersona Linkを入れてから戻ってきてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的电脑还都做不了这件事。先在一台 Mac 上装好 Persona Link，再回来。"
+          }
+        }
+      }
+    },
+    "Installing the iPhone helper…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installing the iPhone helper…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhoneヘルパーをインストールしています…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在安装 iPhone 助手程序…"
+          }
+        }
+      }
+    },
+    "Couldn’t install the iPhone helper." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t install the iPhone helper."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhoneヘルパーをインストールできませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能安装 iPhone 助手程序。"
+          }
+        }
+      }
+    },
+    "Turns on “Allow the assistant to operate iPhones through this computer” on that computer’s page, and installs the iPhone helper there when it isn’t yet." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turns on “Allow the assistant to operate iPhones through this computer” on that computer’s page, and installs the iPhone helper there when it isn’t yet."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "そのコンピューターのページで「このコンピューターを通してアシスタントにiPhoneを操作させる」をオンにし、まだなければiPhoneヘルパーもインストールします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会打开那台电脑页面上的「允许助手经这台电脑操控 iPhone」，没装 iPhone 助手程序时顺便装上。"
+          }
+        }
+      }
+    },
+    "Waiting for the cable…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for the cable…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ケーブルの接続を待っています…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等你插上数据线…"
+          }
+        }
+      }
+    },
+    "Pairing with this iPhone…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pairing with this iPhone…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiPhoneとペアリングしています…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在和这台 iPhone 配对…"
+          }
+        }
+      }
+    },
+    "Couldn’t pair." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t pair."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ペアリングできませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能配对。"
+          }
+        }
+      }
+    },
+    "%@ keeps a key that lets it reach this iPhone over your network afterwards. The key never leaves that computer. Keep the cable in until setup is done." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ keeps a key that lets it reach this iPhone over your network afterwards. The key never leaves that computer. Keep the cable in until setup is done."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@は、あとでネットワーク経由でこのiPhoneに接続するための鍵を保存します。鍵がそのコンピューターの外に出ることはありません。設定が終わるまでケーブルは抜かないでください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 会保存一把钥匙，之后经你的网络连到这台 iPhone。钥匙不会离开那台电脑。设置完成前先别拔线。"
+          }
+        }
+      }
+    },
+    "Developer Mode is off on this iPhone." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Developer Mode is off on this iPhone."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiPhoneのデベロッパモードはオフです。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 的开发者模式还没打开。"
+          }
+        }
+      }
+    },
+    "Connecting to this iPhone…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecting to this iPhone…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiPhoneに接続しています…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在连接这台 iPhone…"
+          }
+        }
+      }
+    },
+    "%@ needs Xcode first. Install it from the App Store on that Mac, then come back." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ needs Xcode first. Install it from the App Store on that Mac, then come back."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@には先にXcodeが必要です。そのMacにApp Storeからインストールしてから戻ってきてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 要先装 Xcode：在那台 Mac 上从 App Store 装好，再回来。"
+          }
+        }
+      }
+    },
+    "%@ is getting this iPhone ready…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is getting this iPhone ready…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@がこのiPhoneを準備しています…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 正在准备这台 iPhone…"
+          }
+        }
+      }
+    },
+    "%@ puts a small developer component from Apple on this iPhone. Nothing is reinstalled or erased. It goes away when the iPhone restarts, and the computer adds it again by itself." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ puts a small developer component from Apple on this iPhone. Nothing is reinstalled or erased. It goes away when the iPhone restarts, and the computer adds it again by itself."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@はAppleの小さなデベロッパ用コンポーネントをこのiPhoneに入れます。再インストールや消去は一切しません。iPhoneを再起動すると消え、コンピューターが自動でもう一度入れます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 会往这台 iPhone 里临时放一个 Apple 的开发者组件。不会重装 iPhone，也不会抹掉任何东西；iPhone 重启后它会消失，电脑会自动再放一次。"
+          }
+        }
+      }
+    },
+    "Apple’s developer disk image. Each time, Apple’s signing server makes it for this iPhone, so Apple receives this iPhone’s chip ID." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple’s developer disk image. Each time, Apple’s signing server makes it for this iPhone, so Apple receives this iPhone’s chip ID."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appleのデベロッパディスクイメージです。毎回Appleの署名サーバーがこのiPhone用に作るため、AppleはこのiPhoneのチップIDを受け取ります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这是 Apple 的开发者磁盘映像。每次都由 Apple 的签名服务器为这台 iPhone 生成，所以 Apple 会收到这台 iPhone 的芯片 ID。"
+          }
+        }
+      }
+    },
+    "This iPhone can’t be reached right now." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This iPhone can’t be reached right now."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今はこのiPhoneに接続できません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "现在连不上这台 iPhone。"
+          }
+        }
+      }
+    },
+    "Your computers don’t list this iPhone right now. Keep it near the computer and unlocked." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your computers don’t list this iPhone right now. Keep it near the computer and unlocked."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今はコンピューターにこのiPhoneが表示されていません。コンピューターの近くに置いて、ロックを解除しておいてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的电脑现在看不到这台 iPhone：把它放在电脑附近，并保持解锁。"
+          }
+        }
+      }
+    },
+    "Taking a screenshot, then opening Weather…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Taking a screenshot, then opening Weather…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スクリーンショットを撮ってから「天気」を開いています…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在截屏，然后打开「天气」…"
+          }
+        }
+      }
+    },
+    "Took a screenshot" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Took a screenshot"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スクリーンショットを撮りました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "截了一张屏"
+          }
+        }
+      }
+    },
+    "No screenshot" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No screenshot"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スクリーンショットは撮れませんでした"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没截到屏"
+          }
+        }
+      }
+    },
+    "Opened Weather" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opened Weather"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「天気」を開きました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开了「天气」"
+          }
+        }
+      }
+    },
+    "Didn’t open Weather" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Didn’t open Weather"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「天気」を開けませんでした"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能打开「天气」"
+          }
+        }
+      }
+    },
+    "Set Up [iPhone Setup]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set Up"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定を始める"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始设置"
+          }
+        }
+      }
+    },
+    "Try It" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try It"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "試してみる"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "试一下"
+          }
+        }
+      }
+    },
+    "iPhone Control" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone Control"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone操作"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 操控"
+          }
+        }
+      }
+    },
+    "Let the Assistant Operate This iPhone" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Let the Assistant Operate This iPhone"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アシスタントにこのiPhoneを操作させる"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让助手操控这台 iPhone"
+          }
+        }
+      }
+    },
+    "Turn On Phone Control" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn On Phone Control"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone操作をオンにする"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开手机操控"
+          }
+        }
+      }
+    },
+    "Connect and Pair" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect and Pair"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接続してペアリング"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用线连上并配对"
+          }
+        }
+      }
+    },
+    "Turn On Developer Mode" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn On Developer Mode"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "デベロッパモードをオンにする"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开开发者模式"
+          }
+        }
+      }
+    },
+    "Allow This iPhone" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow This iPhone"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiPhoneを許可"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许操控这台 iPhone"
+          }
+        }
+      }
+    },
+    "Open Settings › Privacy & Security › Developer Mode (near the bottom)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Settings › Privacy & Security › Developer Mode (near the bottom)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「設定 › プライバシーとセキュリティ › デベロッパモード」を開きます（下のほうにあります）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开「设置 › 隐私与安全性 › 开发者模式」（在最下面）"
+          }
+        }
+      }
+    },
+    "Turn it on and tap Restart" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn it on and tap Restart"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オンにして「再起動」をタップします"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开它，点「重新启动」"
+          }
+        }
+      }
+    },
+    "After the restart, unlock, tap Turn On and enter your passcode" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "After the restart, unlock, tap Turn On and enter your passcode"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再起動したらロックを解除し、「オンにする」をタップしてパスコードを入力します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重启后解锁，点「打开」并输入锁屏密码"
+          }
+        }
+      }
+    },
+    "Open Persona again: setup picks up here" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Persona again: setup picks up here"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "もう一度Personaを開くと、ここから設定を続けます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再打开 Persona，会接着在这里设置"
+          }
+        }
+      }
+    },
+    "On this iPhone, tap Trust, then enter your passcode." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On this iPhone, tap Trust, then enter your passcode."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiPhoneで「信頼」をタップしてから、パスコードを入力してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这台 iPhone 上点「信任」，再输入锁屏密码。"
+          }
+        }
+      }
+    },
+    "Unlock this iPhone so pairing can go on." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlock this iPhone so pairing can go on."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ペアリングを続けるには、このiPhoneのロックを解除してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解锁这台 iPhone，配对才能继续。"
+          }
+        }
+      }
+    },
+    "Not available yet: this needs a Mac with Xcode" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not available yet: this needs a Mac with Xcode"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まだ使えません：Xcodeの入ったMacが必要です"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂时不能用：要一台装了 Xcode 的 Mac"
+          }
+        }
+      }
+    },
+    "Mac · offline" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac · offline"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac · オフライン"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac · 离线"
+          }
+        }
+      }
+    },
+    "Mac · needs Xcode from the App Store" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac · needs Xcode from the App Store"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac · App StoreからXcodeが必要です"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac · 要先从 App Store 装 Xcode"
+          }
+        }
+      }
+    },
+    "Mac · online" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac · online"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac · オンライン"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac · 在线"
+          }
+        }
+      }
+    },
+    "through %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "through %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@経由"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "经 %@"
+          }
+        }
+      }
+    },
+    "On · through %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On · through %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オン · %@経由"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已打开 · 经 %@"
+          }
+        }
+      }
+    },
+    "Not set up · about 5 minutes" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not set up · about 5 minutes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未設定 · 約5分"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没设置 · 大约 5 分钟"
+          }
+        }
+      }
+    },
+    "%lld of %lld steps done" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld of %2$lld steps done"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$lld ステップ中 %1$lld ステップ完了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已完成 %1$lld 步，共 %2$lld 步"
+          }
+        }
+      }
+    },
+    "Use %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@を使う"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用 %@"
           }
         }
       }

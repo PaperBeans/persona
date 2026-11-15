@@ -53,6 +53,9 @@ interface AssistantState extends AgentAutoNamingState {
   task_workspace_preference?: "prefer-existing" | "prefer-new";
   /** "Fold background rounds" (#4314, docs/assistant/assistant.md "Background rounds"): on by default; unset from a hub before it (on). */
   main_background_folded?: boolean;
+  /** "Show scheduled task chats" in the sidebar's Recent (#8324): off by default, one value for all of the user's
+   *  devices; unset from a hub before it (no switch). All chats' ⋯ menu has the same switch (lib/recent-task-chats.ts). */
+  recent_task_chats?: boolean;
   /** The role a meeting recording pre-selects (#2981, docs/assistant/meeting-minutes.md "Attendance fields"); only from a hub
    *  that attends meetings. */
   meeting_attendance_default?: string;
@@ -114,6 +117,7 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
   const [open, setOpen] = useState<{ file: MemoryFile; index?: boolean } | null>(null);
   const [quietBusy, setQuietBusy] = useState(false);
   const [foldBusy, setFoldBusy] = useState(false);
+  const [recentBusy, setRecentBusy] = useState(false);
   const [startBusy, setStartBusy] = useState(false);
   const [permissionBusy, setPermissionBusy] = useState(false);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
@@ -192,6 +196,22 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
       toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
     } finally {
       setFoldBusy(false);
+    }
+  };
+
+  const setRecentTaskChats = async (on: boolean) => {
+    setRecentBusy(true);
+    setInfo((i) => (i ? { ...i, recent_task_chats: on } : i));
+    try {
+      const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: { recent_task_chats: on } });
+      setInfo((i) => (i ? { ...i, recent_task_chats: r.recent_task_chats ?? on } : i));
+      // the sidebar reads it from the store's /assistant answer
+      void refreshAssistant().catch(() => {});
+    } catch (e) {
+      setInfo((i) => (i ? { ...i, recent_task_chats: !on } : i));
+      toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
+    } finally {
+      setRecentBusy(false);
     }
   };
 
@@ -317,6 +337,15 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
           <Switch on={info?.main_background_folded ?? true} onChange={(on) => void setFolded(on)} disabled={!info || foldBusy} label={t("settings-assistantsettings.background_folded")} />
         </Row>
       </Group>
+
+      {/* Show scheduled task chats in the sidebar's Recent (#8324): only from a hub that has the setting */}
+      {typeof info?.recent_task_chats === "boolean" && (
+        <Group title={t("settings-assistantsettings.recent_task_chats_title")} footer={t("settings-assistantsettings.recent_task_chats_footer")} anchor="recent-task-chats">
+          <Row label={t("settings-assistantsettings.recent_task_chats")}>
+            <Switch on={info.recent_task_chats} onChange={(on) => void setRecentTaskChats(on)} disabled={recentBusy} label={t("settings-assistantsettings.recent_task_chats")} />
+          </Row>
+        </Group>
+      )}
 
       {/* The next-message suggestion for chats without one of their own (#4644): only from a hub that has the setting */}
       {typeof info?.next_suggestions === "boolean" && (

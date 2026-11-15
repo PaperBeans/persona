@@ -25,5 +25,6 @@
   "renamed": "Renamed",
   "rename_title": "Rename chat",
   "title_placeholder": "Chat title",
-  "rename_hint": "A title you set won't be replaced by an automatic one."
+  "rename_hint": "A title you set won't be replaced by an automatic one.",
+  "display_options": "Display options"
 }

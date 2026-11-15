@@ -28,8 +28,9 @@ Three things, all needed before the assistant can touch an iPhone:
    While it is off the manager asks no node about iPhones, the machines carry no `iphone` and the assistant has no `iphone_*` tools.
 2. **The computer**: on each computer's page, **Phone Control** › **Allow the assistant to operate iPhones through this computer**
    (`PUT /api/v1/machines/{mid}/iphone`), kept in the extension's `machines`. The extension's page shows the same list, one toggle per computer (`x-os: darwin, linux`).
-3. **The iPhone's own consent**: in the Persona app on that iPhone, Settings › Connectors › This iPhone ›
-   **Control of This iPhone** (`PUT /api/v1/iphone/consent`), kept in the extension's `phones` by the node's device id.
+3. **The iPhone's own consent**: in the Persona app on that iPhone, the guided setup's last step (Settings › Connectors ›
+   This iPhone › **Let the Assistant Operate This iPhone**, "Guided setup" below; `PUT /api/v1/iphone/consent`), kept in
+   the extension's `phones` by the node's device id.
    Only the user's own signed-in apps can give it (a master token or an extension's token gets 403). The hub cannot tell
    which of the user's devices sent it (an app cannot prove it is a given iPhone), so the switch is offered only in the
    app on an iPhone, for the iPhone it identifies as itself (below). Taking it back works even while the extension is off.
@@ -45,16 +46,45 @@ The extension's `confirm` (**Ask on the phone before every action**, off by defa
 (`proto.IPhoneCall.Confirm`); the node core asks step by step, with the screen in view, and the manager asks nothing
 first itself. Without it only the steps the core marks as needing approval are asked.
 
+### Guided setup
+
+Who it serves: an everyday user who wants the assistant to use their phone (#8199). The way in is the first row of Settings ›
+Connectors › This iPhone (always there on an iPhone, its line saying how far setup is), the link `persona://iphone/setup` (what a
+failed iPhone tool call has the assistant give, "Setup not finished"), and `-openIPhoneSetup YES` in DEBUG builds. It opens
+`IPhoneSetupView`: an overview (what it does, what it needs, the five steps with their state, the safety rule), then one screen per
+step, then the page the user comes back to. Every step's state (Done, Working, Needs you) comes from the hub, never from a tap
+(`IPhoneSetupFlow`), so a step done elsewhere is skipped and a screen moves on by itself:
+
+1. **Turn On Phone Control**: the extension, in place (`PUT /api/v1/extensions/iphone/-/enabled`).
+2. **Choose a Computer**: the computers that are Macs and online; a Linux computer is listed as not available yet, since the
+   developer disk image comes with Xcode (the owner's call: a Mac with Xcode for now). Choosing one turns its switch on and installs
+   the iPhone helper there when it isn't yet (`POST …/iphone/install`). A Mac without the image (`ddi_present` false) says to
+   install Xcode.
+3. **Connect and Pair**: once this iPhone shows on that computer's cable the app starts pairing by itself, once, and the screen
+   says what the job waits for (`job.code`: tap Trust and enter the passcode; unlock). The iPhone that paired from here is the one
+   this app remembers as itself.
+4. **Turn On Developer Mode**: when the computer reports it off, where to turn it on, that the iPhone restarts once, and that
+   setup picks up after. Then **Prepare** (`POST …/iphone/prepare`), with what it does in plain words: nothing reinstalled or erased,
+   a component that goes away at the next restart and comes back by itself; Details says it is Apple's developer disk image and
+   that Apple's signing server receives the chip ID.
+5. **Allow This iPhone**: this iPhone's consent as a switch on this screen ("Which iPhone is this one" below), with the safety
+   rule. Below iOS 27 the overview and this step say the assistant can look and open apps but not tap or type.
+
+Done, the page holds the consent switch (turning it off here), **Try It** (`POST /api/v1/iphone/try`: a screenshot and Weather
+opened, without the model) and **Ask Me Before Every Step** (the extension's `confirm`), the only optional switch. The page asks
+the hub again every two seconds while a step waits on the cable, the phone or a job, and only while it is in front.
+
 ### Which iPhone is this one
 
 The app on an iPhone cannot read its own device id (iOS gives apps no UDID, and the device name is just "iPhone"). So the
-section lists what the computers report (`GET /api/v1/iphone`) and matches on what the app does know: its model identifier
+guided setup lists what the computers report (`GET /api/v1/iphone`) and matches on what the app does know: its model identifier
 (`utsname.machine`, such as `iPhone17,1`) and iOS version, against each device's `product_type` and `ios`.
 
 - **Exactly one match**: that is this iPhone; the switch acts on it.
-- **Several**: the section lists them (name, model, the computers that reach it) and the user picks **This Is the One**. The pick is
-  remembered on the phone (by device id) until the hub no longer lists it.
-- **None**: the switch is off and says why: not paired with a computer that is online, or the extension is off.
+- **Several**: the last step lists them (name, the computers that reach it) and the user picks **This One**. The pick is
+  remembered on the phone (by device id) until the hub no longer lists it; an iPhone paired from this app's guided setup is
+  picked by itself.
+- **None**: there is no switch, and the step says to keep the iPhone near its computer and unlocked.
 
 A wrong pick can only allow the other iPhone the user also owns and paired; the consent is still the user's, from their own app.
 
