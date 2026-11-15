@@ -162,9 +162,10 @@ type Session struct {
 	// OutputTokens is cumulative generated output, not the latest context size or transcript revision.
 	OutputTokens int `json:"output_tokens,omitempty"`
 	// Efforts are the levels session.modes takes for Effort when they are not Claude Code's (which the apps know): a
-	// Codex thread the phone drives through its app-server (node/codex_effort.go), its model's levels weakest first.
-	// Speed has its own advertised choices in ServiceTiers. Empty for every other session: Claude's and the assistant's keep the apps' own
-	// list, the rest cannot change it from the phone.
+	// Codex thread the phone drives through its app-server (node/codex_effort.go), its model's levels weakest first; a
+	// runtime's row of an agent that is not Claude Code's, as the runtime lists them (Paseo's, #8133; the node drops
+	// them where the runtime takes no session.modes). Speed has its own advertised choices in ServiceTiers. Empty for
+	// every other session: Claude's and the assistant's keep the apps' own list, the rest cannot change it from the phone.
 	Efforts []string `json:"efforts,omitempty"`
 	// ServiceTier is the acknowledged native speed, omitted while unknown.
 	ServiceTier  string        `json:"service_tier,omitempty"`
@@ -441,6 +442,13 @@ const (
 	// CodeModesNotRunning: no process or pane runs the session; a message resumes it.
 	CodeModesNotRunning = "modes_not_running"
 )
+
+// CodeNotLoaded is what session.items and session.item refuse with when reading the session would start its agent: an
+// engine that lets idle agents go (Paseo's closed and archived ones) loads one to answer for its conversation, which
+// relaunches its provider's process, so a runtime reads such a session only while it is watched (someone has its chat
+// open, docs/integrations/runtimes.md "What to implement", #8132). Nothing was read; the text is in the request's
+// language (apierr.Call). 409.
+const CodeNotLoaded = "not_loaded"
 
 // PendingSwitch is Session.PendingSwitch: the launcher the Agent moves to, the model and effort to run it with ("":
 // the launcher's own default model; the effort it runs with now), and when the user picked it. Agent is the engine

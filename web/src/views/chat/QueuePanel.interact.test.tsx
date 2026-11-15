@@ -112,6 +112,15 @@ describe("QueuePanel row actions", () => {
     expect(host.querySelector("[data-queue-relayed-list]")).toBeNull();
     expect(rows()).toHaveLength(1);
   });
+
+  it("only shows a runtime Agent's queue: the node takes no edit, reorder or Send now there (#8142)", () => {
+    // a Claude Code Agent on Paseo: its queue is Claude Code's, read off its transcript
+    const paseo = { ...session, source_kind: "runtime", source_instance_id: "paseo", launcher: "my-claude" } as unknown as Session;
+    render(<QueuePanel session={paseo} draftKey="qp-runtime" canEdit />);
+    expect(texts()).toEqual(["第一条", "第二条", "第三条"]);
+    for (const r of rows()) expect(r.querySelector("button")).toBeNull();
+    expect(host.querySelector("[data-queue-explain]")).toBeNull();
+  });
 });
 
 describe("QueuePanel reorder", () => {

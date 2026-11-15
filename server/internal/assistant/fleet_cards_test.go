@@ -278,6 +278,42 @@ func TestScreenCardUpgradeAbortedWhenCardEnded(t *testing.T) {
 	}
 }
 
+// Cancellation stops future polls, but an accepted upgrade whose notification window already expired still rings its
+// current card once. Earlier cancellation, an earlier ring, or a replaced card stays silent.
+func TestScreenCardUpgradeCancellationRingsOnlyDueCurrentCard(t *testing.T) {
+	for _, c := range []struct {
+		name               string
+		window             time.Duration
+		announced, current bool
+		want               int
+	}{
+		{"due current card", -time.Second, false, true, 1},
+		{"already announced", -time.Second, true, true, 0},
+		{"window still open", time.Hour, false, true, 0},
+		{"card replaced", -time.Second, false, false, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ft, _ := newCardFleet(t, false)
+			s := ft.s
+			s.fleet.upgradeEvery, s.fleet.upgradeFor = time.Hour, c.window
+			runCtx, cancel := context.WithCancel(context.Background())
+			s.running.Store(&runCtx)
+			p := &pending{ix: proto.Interaction{ID: "scr_mac_s1", MachineID: "mac", SessionID: "s1", Kind: proto.IxScreen}, announced: c.announced}
+			s.fleet.mu.Lock()
+			s.ixMapLocked()[p.ix.ID] = p
+			if !c.current {
+				s.ixMapLocked()[p.ix.ID] = &pending{}
+			}
+			s.fleet.mu.Unlock()
+			cancel()
+			s.upgradeScreenCard("mac", "s1", p.ix.ID, p)
+			if got := ft.pushesOf(assistantwire.NotifyInput, c.want, 50*time.Millisecond); len(got) != c.want {
+				t.Fatalf("pushes after cancellation = %d, want %d", len(got), c.want)
+			}
+		})
+	}
+}
+
 // Another manager's upgrade loop is still running at the default timing, as one an earlier test leaves behind:
 // shortening this manager's timing touches nothing that loop reads, so -race has nothing to report (#4554), and this
 // manager's card still upgrades.

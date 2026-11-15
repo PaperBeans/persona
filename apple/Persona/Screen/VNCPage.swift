@@ -45,6 +45,8 @@ struct VNCPage: View {
     @State private var fallbackDemo: ScreenVideoFallback?
     /// The not-allowed line's "How to turn it on" is showing its one sentence.
     @State private var fallbackHelp = false
+    /// The smooth scrolling line's alert is up (#7775).
+    @State private var smoothScrollingHelp = false
     /// The app went to the background with the page up (not just Control Center or an alert over it).
     @State private var wentBackground = false
     /// When the app came back from the background with the connection not (yet) known to be down: a drop reported
@@ -81,6 +83,7 @@ struct VNCPage: View {
                 }
                 #if os(iOS) || os(visionOS)
                 if let f = fallback { fallbackBanner(f) }
+                if session?.askedForSmoothScrolling == true, model.screenInput(ref)?.granted != true { smoothScrollingLine }
                 #endif
                 #if os(iOS) && canImport(PersonaScreenKit)
                 if mobileDataCard || session?.video.askMobileData == true {
@@ -547,6 +550,31 @@ struct VNCPage: View {
     }
 
     #if os(iOS) || os(visionOS)
+    /// Pixel scrolling (#7775): this connection's first two-finger scroll had the Mac's node ask macOS for Persona Input's
+    /// permission, so a window is now on the Mac's screen. Under the bar, as the video's fallback line: what it is for in
+    /// a line, the way through it on a tap; it goes once the Mac allows it. Scrolling works meanwhile, by notches.
+    private var smoothScrollingLine: some View {
+        Button { smoothScrollingHelp = true } label: {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
+                ThemedIcon(Theme.Icon.info).font(Theme.Font.caption).foregroundStyle(Theme.caution)
+                Text("To scroll more smoothly, allow Persona Input on this Mac.").font(Theme.Font.label).foregroundStyle(.secondary)
+                    .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.Space.page)
+            .padding(.bottom, Theme.Space.xs)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(Text("How to turn it on"))
+        .accessibilityIdentifier("screen-smooth-scrolling")
+        .alert("Turn On Smooth Scrolling", isPresented: $smoothScrollingHelp) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("In the window that just opened on this Mac, choose Open System Settings, then turn on Persona Input (Privacy & Security › Accessibility). Until then, scrolling still works.")
+        }
+    }
+
     /// A one-line reason under the bars when the video channel falls back to VNC (#3954).
     private func fallbackBanner(_ f: ScreenVideoFallback) -> some View {
         let line = HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
@@ -591,7 +619,8 @@ struct VNCPage: View {
     /// `-showScreenStatsDemo` build shows sample video-mode numbers.
     private var currentStats: ScreenStats? {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-showScreenStatsDemo") { return .demoVideo }
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("-showScreenStatsDemo") { return args.contains("-showScreenUDP") ? .demoVideoUDP : .demoVideo }
         #endif
         guard let s = session else { return nil }
         #if os(iOS) && canImport(PersonaScreenKit)
@@ -621,11 +650,13 @@ struct VNCPage: View {
 
     #if os(iOS) && canImport(PersonaScreenKit)
     /// The overlay's route (#6398): which one, its numbers, and why it last changed. Without a screen session: the hub.
+    /// While the video rides a UDP flow (#7873) the row says so, with the flow's own round trip and loss.
     private static func route(_ v: ScreenVideoLink) -> (path: ScreenStats.Path, rtt: Double?, loss: Double?, reason: String?) {
         let kind = v.link?.kind ?? v.route?.to.kind ?? .relay
+        let udp = v.route?.to.transport == .udp
         let path: ScreenStats.Path = switch kind {
-        case .lan: .directLAN
-        case .tailscale: .directTailscale
+        case .lan: udp ? .directLANUDP : .directLAN
+        case .tailscale: udp ? .directTailscaleUDP : .directTailscale
         case .ipv6, .relay: .relay
         }
         let reason: String? = switch v.route?.reason {
@@ -636,6 +667,7 @@ struct VNCPage: View {
         case .directOff?: ScreenRouteReason.text(.turnedOff)
         case .start?, nil: v.directUnavailable == "firewall" ? ScreenRouteReason.text(.firewall) : nil
         }
+        if udp, kind != .relay { return (path, v.udp?.rttMs ?? v.link?.srttMs, v.udp?.loss, reason) }
         return (path, v.link?.srttMs, v.link?.packetLoss, reason)
     }
     #endif

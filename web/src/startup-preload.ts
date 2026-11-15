@@ -314,6 +314,11 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
 // a part at a time (views/WindowedRows.tsx), the fold-all a group missed while it was not drawn (lib/fold-all.ts) and
 // the headings' heights from one ResizeObserver (views/SidebarSection.tsx). WindowedRows is not a chunk of its own: the
 // sidebar has no error boundary, so a failed download of it would leave the whole app blank.
+// #8116: the changes since used the rest of the room, and main measured ja 480,853 B at cc030f78d, 214 B over. The
+// budget stays; the startup catalog takes just the keys the first screen reads of thirteen more namespaces it reads
+// part of (agentmenus, chat-comments, chat-contextgroup, chat-modelpill, chat-subagentcard, composer, context,
+// lib-tasks, lib-todos, node-health, settings-nav, work-entry, worktree), measured in one environment against that
+// main: ja 480,853 B to 479,549 B (en 477,669 B to 476,385 B, zh-Hans 478,451 B to 477,198 B), 1,090 B of room.
 export const FIRST_SCREEN_BUDGET = 480_639;
 
 // The hash in a built file's name: the 8 characters of Rollup's [hash] (url-safe base64) between "-" and the

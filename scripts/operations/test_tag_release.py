@@ -1,4 +1,5 @@
 """The private tag consumer never broadens signing credentials or public refs."""
+import io
 import json
 import os
 from pathlib import Path
@@ -261,6 +262,40 @@ class TagReleaseTests(unittest.TestCase):
             tag_release.check_release_manifest([item for item in self.release_receipt() if item["name"] != other])
         # Another platform's receipt, without latest.json, is not a release manifest to check.
         tag_release.check_release_manifest([item for item in self.release_receipt() if item["name"] != "latest.json"])
+
+    def test_helpers_are_checked_without_a_build_number(self):
+        # persona-iphone-bridge (#8199): its own version, no build number; its bytes still have to be the receipt's.
+        import gzip
+        assets = self.release_receipt()
+        directory = Path(assets[0]["path"]).parent
+        body = b"\x7fELF\x00a helper with no build number"
+        name = "persona-iphone-bridge-linux-arm64.gz"
+        (directory / name).write_bytes(gzip.compress(body, mtime=0))
+        data = (directory / name).read_bytes()
+        index = json.loads((directory / "latest.json").read_text())
+        index["helpers"] = {"persona-iphone-bridge": {"linux-arm64": {
+            "name": name, "size": len(data), "sha256": tag_release.hashlib.sha256(data).hexdigest(),
+            "binary_sha256": tag_release.hashlib.sha256(body).hexdigest()}}}
+        (directory / "latest.json").write_text(json.dumps(index))
+        assets = [{"path": str(path), "name": path.name} for path in sorted(directory.iterdir())]
+        tag_release.check_release_manifest(assets)
+        with self.assertRaisesRegex(tag_release.ConfigError, "not in the receipt"):
+            tag_release.check_release_manifest([item for item in assets if item["name"] != name])
+        # A receipt from an upload command that doesn't carry the helper yet goes up without it, never refused.
+        self.assertEqual(tag_release.drop_missing_helpers(assets, self.root / "state"), assets)
+        without = [item for item in assets if item["name"] != name]
+        with patch.object(tag_release.sys, "stderr", new_callable=io.StringIO) as err:
+            kept = tag_release.drop_missing_helpers(without, self.root / "state")
+        self.assertIn(name, err.getvalue())
+        latest = next(item for item in kept if item["name"] == "latest.json")
+        self.assertEqual(Path(latest["path"]).parent, self.root / "state")
+        self.assertNotIn("helpers", json.loads(Path(latest["path"]).read_text()))
+        self.assertEqual(json.loads(Path(latest["path"]).read_text())["files"], index["files"])
+        tag_release.check_release_manifest(kept)
+        self.assertEqual(sorted(item["name"] for item in kept), sorted(item["name"] for item in without))
+        (directory / name).write_bytes(gzip.compress(b"another build", mtime=0))
+        with self.assertRaisesRegex(tag_release.ConfigError, "size or sha256"):
+            tag_release.check_release_manifest(assets)
 
     def test_build_number_stands_alone_wherever_the_stream_is_cut(self):
         import gzip

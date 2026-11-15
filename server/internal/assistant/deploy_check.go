@@ -54,6 +54,8 @@ func (r deployResult) held() bool {
 
 // prForge answers what a deploy check asks of where the PR lives.
 type prForge interface {
+	// IsPR distinguishes a pull request from an issue or a confirmed missing item.
+	IsPR(ctx context.Context, repo string, number int) (bool, error)
 	// PRMerge: whether PR number of repo (owner/name) is merged, and its merge commit.
 	PRMerge(ctx context.Context, repo string, number int) (merged bool, sha string, err error)
 	// Contains: whether head contains base in repo; found false when either is not a commit of repo.
@@ -208,7 +210,7 @@ func (s *Service) compareGitHub(ctx context.Context, repo string, number int, hu
 		return deployResult{State: deployUnknown, Hub: hub, Err: errors.New("GitHub did not answer a moment ago")}
 	}
 	r := s.compareGitHubNow(ctx, repo, number, hub)
-	if r.State == deployUnknown {
+	if r.State == deployUnknown && !errors.Is(r.Err, errForgeNotFound) && !errors.Is(r.Err, errForgeUnprocessable) {
 		p.mu.Lock()
 		p.githubDown = time.Now().Add(githubPause)
 		p.mu.Unlock()
@@ -512,7 +514,10 @@ func (s *Service) forge() prForge {
 	return g
 }
 
-var errForgeNotFound = errors.New("not found")
+var (
+	errForgeNotFound      = errors.New("not found")
+	errForgeUnprocessable = errors.New("unprocessable entity")
+)
 
 // connectorNotFound: the connector's error for a 404 or 422 ("GitHub GET <path>: 404 …").
 var connectorNotFound = lazyre.New(`: (404|422)\b`)
@@ -520,8 +525,13 @@ var connectorNotFound = lazyre.New(`: (404|422)\b`)
 func (g githubForge) get(ctx context.Context, path string, out any) error {
 	if g.via != nil {
 		if ok, err := g.via(ctx, path, out); ok {
-			if err != nil && connectorNotFound.MatchString(err.Error()) {
-				return errForgeNotFound
+			if err != nil {
+				if m := connectorNotFound.FindStringSubmatch(err.Error()); m != nil {
+					if m[1] == "422" {
+						return errForgeUnprocessable
+					}
+					return errForgeNotFound
+				}
 			}
 			return err
 		}
@@ -544,12 +554,49 @@ func (g githubForge) get(ctx context.Context, path string, out any) error {
 	}
 	defer resp.Body.Close()
 	switch {
-	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusUnprocessableEntity:
-		return errForgeNotFound // compare answers 404 (or 422) for a commit the repository does not have
+	case resp.StatusCode == http.StatusNotFound:
+		return errForgeNotFound
+	case resp.StatusCode == http.StatusUnprocessableEntity:
+		return errForgeUnprocessable
 	case resp.StatusCode != http.StatusOK:
 		return fmt.Errorf("GitHub answered %d", resp.StatusCode)
 	}
 	return json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(out)
+}
+
+func (g githubForge) IsPR(ctx context.Context, repo string, number int) (bool, error) {
+	var issue struct {
+		PR *struct{} `json:"pull_request"`
+	}
+	err := g.get(ctx, fmt.Sprintf("/repos/%s/issues/%d", repo, number), &issue)
+	if errors.Is(err, errForgeNotFound) {
+		// Issue access and PR access can differ. A readable repository alone does not establish PR permissions.
+		var pr struct {
+			Number int `json:"number"`
+		}
+		err := g.get(ctx, fmt.Sprintf("/repos/%s/pulls/%d", repo, number), &pr)
+		if err == nil {
+			if pr.Number != number {
+				return false, fmt.Errorf("PR identity could not be confirmed for %s#%d", repo, number)
+			}
+			return true, nil
+		}
+		if !errors.Is(err, errForgeNotFound) {
+			return false, err
+		}
+		var prs []struct{}
+		if err := g.get(ctx, "/repos/"+repo+"/pulls?state=all&per_page=1", &prs); err != nil {
+			return false, err
+		}
+		if prs == nil {
+			return false, fmt.Errorf("PR access could not be confirmed for %s", repo)
+		}
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return issue.PR != nil, nil
 }
 
 func (g githubForge) PRMerge(ctx context.Context, repo string, number int) (bool, string, error) {
@@ -569,7 +616,7 @@ func (g githubForge) Contains(ctx context.Context, repo, base, head string) (boo
 	}
 	// per_page=1: only the status is read, not the commits and files between them
 	err := g.get(ctx, fmt.Sprintf("/repos/%s/compare/%s...%s?per_page=1", repo, base, head), &c)
-	if errors.Is(err, errForgeNotFound) {
+	if errors.Is(err, errForgeNotFound) || errors.Is(err, errForgeUnprocessable) {
 		return false, false, nil
 	}
 	if err != nil {

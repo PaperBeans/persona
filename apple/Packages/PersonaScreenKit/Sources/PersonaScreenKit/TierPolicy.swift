@@ -320,8 +320,8 @@ public struct TierPolicy: Sendable {
 
     // MARK: Start
 
-    /// Which rung of the full ladder a route starts on: the same network 0; Tailscale (or direct IPv6) 0 under 30 ms,
-    /// else 1; the relay 1 over Wi-Fi, 2 over cellular. Nothing measured yet: the relay over Wi-Fi.
+    /// Which of the bias's steps a route starts on: the same network 0; Tailscale (or direct IPv6) 0 under 30 ms, else 1;
+    /// the relay 1 over Wi-Fi, 2 over cellular. Nothing measured yet: the relay over Wi-Fi.
     static func rung(_ link: LinkStats?) -> Int {
         guard let link else { return 1 }
         switch link.kind {
@@ -342,11 +342,17 @@ public struct TierPolicy: Sendable {
         return kept.isEmpty ? Array(all.suffix(1)) : kept
     }
 
-    /// The tier of `ladder` for a rung of the uncapped ladder: the best one no richer in pixels a second.
+    /// The tier of `ladder` for a rung: the bias's step of that rank (`TierLadder.steps`) on this display, under the
+    /// phone's frame-rate cap and `maxScale`, and the best tier no richer in pixels a second. Counted on the steps, not
+    /// on the ladder: where steps merge (a display at one pixel per point) the ladder is shorter, and the relay started
+    /// a tier lower on such a display than on a Retina one (30 fps instead of 60).
     static func index(rung: Int, in ladder: [TierLadder.Tier], display: Display, bias: TierLadder.Bias, maxFps: Int,
                       maxScale: Double? = nil) -> Int {
-        let full = tiers(display: display, bias: bias, capKbps: CapturePlan.maxKbps, maxFps: maxFps, maxScale: maxScale)
-        let ref = full[min(rung, full.count - 1)].pixelRate
+        let steps = TierLadder.steps(bias)
+        let step = steps[min(max(rung, 0), steps.count - 1)]
+        let scale = maxScale.map { min(step.scale, $0) } ?? step.scale
+        let size = CapturePlan.size(points: display.pointSize, pixels: display.pixelSize, scale: scale, maxSize: display.maxSize)
+        let ref = size.width * size.height * CapturePlan.fps(min(step.fps, maxFps))
         return ladder.indices.first { ladder[$0].pixelRate <= ref } ?? ladder.count - 1
     }
 }

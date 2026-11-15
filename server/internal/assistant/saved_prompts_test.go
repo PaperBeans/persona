@@ -3,26 +3,27 @@ package assistant
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/assistant/saved"
 	"strings"
 	"testing"
 )
 
 const savedPromptsPath = "/api/v1/assistant/saved-prompts"
 
-func listedSavedPromptsOf(t *testing.T, s *Service) []SavedPrompt {
+func listedSavedPromptsOf(t *testing.T, s *Service) []saved.Prompt {
 	t.Helper()
 	rec := placeDo(s, "", "GET", savedPromptsPath, "")
-	var out struct{ Prompts []SavedPrompt }
+	var out struct{ Prompts []saved.Prompt }
 	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &out) != nil {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body)
 	}
 	return out.Prompts
 }
 
-func addedSavedPrompt(t *testing.T, s *Service, body string) SavedPrompt {
+func addedSavedPrompt(t *testing.T, s *Service, body string) saved.Prompt {
 	t.Helper()
 	rec := placeDo(s, "", "POST", savedPromptsPath, body)
-	var out struct{ Prompt SavedPrompt }
+	var out struct{ Prompt saved.Prompt }
 	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &out) != nil {
 		t.Fatalf("add %s: %d %s", body, rec.Code, rec.Body)
 	}
@@ -54,10 +55,10 @@ func TestSavedPromptRoutes(t *testing.T) {
 		{`{"name":"two words","text":"x"}`, "a name with a space"},
 		{`{"name":"a/b","text":"x"}`, "a slash inside the name"},
 		{`{"name":"@me","text":"x"}`, "a mention's @"},
-		{`{"name":"` + strings.Repeat("长", savedPromptNameMax+1) + `","text":"x"}`, "a name too long"},
+		{`{"name":"` + strings.Repeat("长", saved.PromptNameMax+1) + `","text":"x"}`, "a name too long"},
 		{`{"name":"empty","text":"  \n "}`, "no text"},
 		{`{"name":"bell","text":"ring\u0007"}`, "a control character in the text"},
-		{`{"name":"long","text":"` + strings.Repeat("a", savedPromptTextMax+1) + `"}`, "a text too long"},
+		{`{"name":"long","text":"` + strings.Repeat("a", saved.PromptTextMax+1) + `"}`, "a text too long"},
 		{`{"name":"x"`, "broken JSON"},
 	} {
 		if rec := placeDo(s, "", "POST", savedPromptsPath, bad.body); rec.Code < 400 {
@@ -67,7 +68,7 @@ func TestSavedPromptRoutes(t *testing.T) {
 	if rec := placeDo(s, "", "POST", savedPromptsPath, `{"name":"Review","text":"x"}`); rec.Code != 409 || !strings.Contains(rec.Body.String(), "/Review") {
 		t.Fatalf("the same name twice is a conflict that names it: %d %s", rec.Code, rec.Body)
 	}
-	if rec := placeDo(s, "", "POST", savedPromptsPath, `{"name":"long","text":"`+strings.Repeat("长", savedPromptTextMax)+`"}`); rec.Code != 200 {
+	if rec := placeDo(s, "", "POST", savedPromptsPath, `{"name":"long","text":"`+strings.Repeat("长", saved.PromptTextMax)+`"}`); rec.Code != 200 {
 		t.Fatalf("the text limit counts characters, not bytes: %d %s", rec.Code, rec.Body)
 	}
 	if got := listedSavedPromptsOf(t, s); len(got) != 4 || got[0].Name != "review" || got[1].Name != "发布说明" || got[2].Name != "pr-check_v2.1" {
@@ -75,7 +76,7 @@ func TestSavedPromptRoutes(t *testing.T) {
 	}
 
 	rec := placeDo(s, "", "PUT", savedPromptsPath+"/"+review.ID, `{"name":"Review","text":"Review this diff for security issues."}`)
-	var changed struct{ Prompt SavedPrompt }
+	var changed struct{ Prompt saved.Prompt }
 	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &changed) != nil {
 		t.Fatalf("change: %d %s", rec.Code, rec.Body)
 	}
@@ -162,7 +163,7 @@ func TestSavedPromptsNeedADatabase(t *testing.T) {
 func TestSavedPromptsAreLimited(t *testing.T) {
 	s := newTestService(t, newFakeHub())
 	ids := map[string]bool{}
-	for i := range savedPromptsMax {
+	for i := range saved.PromptsMax {
 		p := addedSavedPrompt(t, s, fmt.Sprintf(`{"name":"p%d","text":"text %d"}`, i, i))
 		if ids[p.ID] {
 			t.Fatalf("prompts added in a row get ids of their own: %s twice", p.ID)

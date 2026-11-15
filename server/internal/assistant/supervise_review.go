@@ -160,6 +160,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	over, refused, parks := false, false, 0
 	var waiting *OwnerWait // accepted while the work stopped on the owner's decision: refused, nothing written (#1277)
 	judgedDone := false    // it was waiting for review: the judge had found it done
+	var criteriaErr error
 	var v Supervision
 	if ledger {
 		v, _, err = s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
@@ -167,6 +168,11 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 				w := *v.Waits
 				waiting = &w
 				return false
+			}
+			if verdict == reviewAccepted && a.Outcome != outcomeCannot {
+				if criteriaErr = completeReviewCriteriaError(v.DoneWhen, a.Checks); criteriaErr != nil {
+					return false
+				}
 			}
 			judgedDone = v.State == reviewPending
 			if isMain && !s.isLeader(ctx, v.Supervisor) && !s.isLeaderRef(v.Supervisor) {
@@ -223,6 +229,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	}
 	if err != nil {
 		return "", err
+	}
+	if criteriaErr != nil {
+		return "", criteriaErr
 	}
 	if refused {
 		return "", reworkOverError(t.ID)
@@ -557,6 +566,12 @@ func pickTaskAgent(agents []proto.Session) proto.Session {
 // (routedFromAssistant); an agent closed after a stretch of work is resumed first (that can take minutes: it goes on in
 // the background). What it says about it: "sent to the agent" or "being sent".
 func (s *Service) sendToTask(ctx context.Context, t Todo, text string) (string, error) {
+	return s.sendToTaskAs(ctx, t, text, false)
+}
+
+// sendToTaskAs is sendToTask; with wait, a closed agent's resume and send is waited for too (up to 5 minutes), so the
+// caller learns whether the text reached it (inboxToAgent, #7346).
+func (s *Service) sendToTaskAs(ctx context.Context, t Todo, text string, wait bool) (string, error) {
 	agents := s.taskAgents(ctx, t)
 	if len(agents) == 0 {
 		return "", errors.New("the task has no agent")
@@ -583,6 +598,14 @@ func (s *Service) sendToTask(ctx context.Context, t Todo, text string) (string, 
 		}
 		_, err := s.appendFeed(ctx, t.Origin, feedRouted, t.ID, map[string]string{"text": text, "from": routedFromAssistant})
 		return err
+	}
+	if c.Status == proto.StatusOffline && wait {
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		defer cancel()
+		if err := send(sctx); err != nil {
+			return "", err
+		}
+		return "sent to the agent after resuming it", nil
 	}
 	if c.Status == proto.StatusOffline {
 		go func() {

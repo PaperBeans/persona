@@ -59,7 +59,7 @@ type HistoryState struct {
 }
 
 // PositionState is how far an anchor import by position got, for a source whose positions are consecutive numbers
-// and that can search for the anchors (the assistant's driver, assistant/kb_history_anchor.go): the chat's anchors,
+// and that can search for the anchors (the assistant's driver, assistant/kbhistory/anchor.go): the chat's anchors,
 // the positions read so far, the times of the messages at the windows' edges (to stamp the omission lines), and the
 // calendar years the search found nothing in, which are read backwards through an AnchorFilter afterwards (with
 // HistoryState.Cursor and Filter).

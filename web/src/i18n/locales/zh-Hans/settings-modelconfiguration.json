@@ -23,6 +23,8 @@
   "custom": "自定义",
   "separately_configured": "单独设置",
   "follow_agents": "跟随 Agents",
+  "follow_category": "跟随 {name}",
+  "claude_code_only": "只能用 Claude Code：可选 Claude Code 启动器或 Messages API 连接。",
   "manage_providers": "管理共享模型提供者",
   "restored": "已恢复继承",
   "saved": "已保存，下一次运行生效",

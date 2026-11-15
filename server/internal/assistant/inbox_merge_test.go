@@ -2,10 +2,13 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/db"
 )
 
 func mergeItems(h *inboxHub) {
@@ -19,6 +22,21 @@ func mergeItems(h *inboxHub) {
 	for _, it := range []*InboxItem{a, b, c} {
 		h.inbox.items[it.ID] = it
 	}
+}
+
+// undoDeleteFailStore fails the next to-do deletion once, as a transient store error does.
+type undoDeleteFailStore struct {
+	Store
+	todoStore
+	fail bool
+}
+
+func (s *undoDeleteFailStore) DeleteTodo(ctx context.Context, id string) error {
+	if s.fail {
+		s.fail = false
+		return fmt.Errorf("synthetic delete failure")
+	}
+	return s.todoStore.DeleteTodo(ctx, id)
 }
 
 func listedIDs(t *testing.T, h *inboxHub) string {
@@ -130,7 +148,7 @@ func TestInboxTodoAndUndo(t *testing.T) {
 		if td["due_date"] != "2026-11-15" || td["inbox_item"] == "" {
 			t.Fatalf("todo %v", td)
 		}
-		if m.(map[string]any)["item"] == "b" && td["title"] != "Send Ana the numbers" {
+		if m.(map[string]any)["item"].(map[string]any)["id"] == "b" && td["title"] != "Send Ana the numbers" {
 			t.Fatalf("title %v", td["title"])
 		}
 	}
@@ -147,6 +165,68 @@ func TestInboxTodoAndUndo(t *testing.T) {
 	}
 	if _, ok := h.todoNow(made[0].(map[string]any)["todo"].(map[string]any)["id"].(string)); ok {
 		t.Fatal("to-do stays after Undo")
+	}
+}
+
+// Each made to-do names its row as {"id": …}, the shape the iPhone app decodes (#7215): with a bare string id the app
+// failed the whole answer and showed a decoding error, though the to-do was made and the row filed (#8310).
+func TestInboxTodoReplyItemIsAnObject(t *testing.T) {
+	h := muteHub(t)
+	mergeItems(h)
+	code, out := inboxCall(t, h.routes(), "POST", "/api/v1/inbox/todo", `{"items":[{"id":"a"}]}`)
+	if code != 200 {
+		t.Fatalf("%d %v", code, out)
+	}
+	var reply struct {
+		Todos []struct {
+			Item struct {
+				ID string `json:"id"`
+			} `json:"item"`
+			Todo struct {
+				ID string `json:"id"`
+			} `json:"todo"`
+		} `json:"todos"`
+	}
+	if err := json.Unmarshal(rawJSON(out), &reply); err != nil {
+		t.Fatalf("an app decoding item and todo as objects cannot read the answer: %v", err)
+	}
+	if len(reply.Todos) != 1 || reply.Todos[0].Item.ID != "a" || reply.Todos[0].Todo.ID == "" {
+		t.Fatalf("todos %+v", reply.Todos)
+	}
+}
+
+func TestInboxTodoUndoDeleteFailureKeepsRowFiled(t *testing.T) {
+	h := muteHub(t)
+	database, err := db.Open(context.Background(), newDatabase(t), db.ManagerSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(database.Close)
+	failing := &undoDeleteFailStore{Store: h.st, todoStore: database, fail: true}
+	h.store = func() Store { return failing }
+	mergeItems(h)
+	code, out := inboxCall(t, h.routes(), "POST", "/api/v1/inbox/todo", `{"items":[{"id":"a"}]}`)
+	if code != 200 {
+		t.Fatalf("%d %v", code, out)
+	}
+	todoID := out["todos"].([]any)[0].(map[string]any)["todo"].(map[string]any)["id"].(string)
+	res := h.undoInboxTodos(context.Background(), []inboxTodoUndoItem{{ID: "a", Todo: todoID}}, time.Now())
+	if len(res.Changed) != 0 || strings.Join(res.Failed, ",") != "a" {
+		t.Fatalf("a failed deletion must stay filed and report its ID: %+v", res)
+	}
+	if row := h.inbox.items["a"]; row.open() || row.DoneBy != doneByTodo {
+		t.Fatalf("the failed row must remain filed as a to-do: %+v", row)
+	}
+	if _, ok := h.todoNow(todoID); !ok {
+		t.Fatal("the failed deletion must retain the to-do")
+	}
+
+	res = h.undoInboxTodos(context.Background(), []inboxTodoUndoItem{{ID: "a", Todo: todoID}}, time.Now())
+	if len(res.Changed) != 1 || len(res.Failed) != 0 || !h.inbox.items["a"].open() {
+		t.Fatalf("the retry must reopen the row once: %+v", res)
+	}
+	if _, ok := h.todoNow(todoID); ok {
+		t.Fatal("the retry must delete the to-do")
 	}
 }
 

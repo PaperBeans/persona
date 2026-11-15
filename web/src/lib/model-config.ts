@@ -36,6 +36,8 @@ export interface ModelPurpose {
   parent?: string;
   /** Owning category; a child with nonempty fields can still have its own editable record. */
   category_id?: string;
+  /** A category's read-only list of what follows it; none on a use (#7980: how a use set apart is told from a category). */
+  uses?: { name: string }[];
   machine_id?: string;
   override: ModelBinding;
   effective: ModelBinding;

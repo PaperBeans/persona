@@ -130,7 +130,7 @@ The plugin goes first (`prepend`) on DSH's two response chains, `approval/reques
 - **Return to computer / expiry / no hub**: call `next()`, and the Web GUI prompts normally. While the phone holds a card, the Web GUI cannot see it (the response chain is a chain, not a broadcast),
   the same trade-off as Claude hooks intercepting dialogs so they do not appear in the computer TUI.
 - **Timed questions**: `ask_user_question` waits only 45 seconds by default. At timeout, DSH first reports "Not answered yet" to the model, without withdrawing the phone card; a later answer goes through `userQuestions.answer` (late answer).
-- **Node restart**: interaction ids derive from session + tool call; after connecting to the next node, the plugin asks again with the same id (waiting at most 2 minutes), preserving the same phone card.
+- **Node restart, hub link drop**: interaction ids derive from session + tool call; after connecting to the next node (or once its hub is back), the plugin asks again with the same id (waiting at most 2 minutes from the drop), preserving the same phone card: the hub keeps a card under the runtime's own id through the gap (#8128).
 
 ## Phone tools
 

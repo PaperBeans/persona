@@ -106,7 +106,7 @@ describe("ScreenVideoStream", () => {
     expect(t.sent.filter((m) => m.type === "update")).toEqual([{ type: "update", paused: true }]);
   });
 
-  it("with tiers: the hello's start tier goes out as an update; frames, decodes, timing and the 250 ms tick reach them, not while paused", async () => {
+  it("with tiers: the start tier goes out as an update with the first frame; frames, decodes, timing and the 250 ms tick reach them, not while paused", async () => {
     vi.useFakeTimers();
     let micros = 1_000_000;
     const t = scripted(), events: StreamEvent[] = [];
@@ -117,12 +117,15 @@ describe("ScreenVideoStream", () => {
     const message = (i: number) => encode(decode(raws[i].type, raws[i].body));
     const h = decode(raws[0].type, raws[0].body) as Hello;
     t.feed(framed({ ...h, features: ["tiers"], points: [960, 600], pixels: [1920, 1200] })); // a helper with tiers
+    // nothing yet: an update before the helper's capture runs can be lost (#7856), so the tier waits for a frame
+    expect([events.some((e) => e.type === "tier"), t.sent.some((m) => m.type === "update")]).toEqual([false, false]);
+    // format and the first frame in one read; the second frame over two reads: it began arriving with the first part
+    t.feed(new Uint8Array([...message(1), ...message(2)]));
     const change = events.find((e) => e.type === "tier");
     expect(change).toMatchObject({ type: "tier", change: { reason: "start" } });
     const c = (change as { change: { tier: { fps: number; maxKbps: number; scale: number; minKbps: number }; targetKbps: number } }).change;
-    expect(t.sent.at(-1)).toEqual({ type: "update", fps: c.tier.fps, max_kbps: c.tier.maxKbps, scale: c.tier.scale, min_kbps: c.tier.minKbps, target_kbps: c.targetKbps });
-    // format and the first frame in one read; the second frame over two reads: it began arriving with the first part
-    t.feed(new Uint8Array([...message(1), ...message(2)]));
+    const update = { type: "update", fps: c.tier.fps, max_kbps: c.tier.maxKbps, scale: c.tier.scale, min_kbps: c.tier.minKbps, target_kbps: c.targetKbps };
+    expect(t.sent.filter((m) => m.type !== "report")).toEqual([start, update]);
     const second = message(3);
     micros = 2_000_000;
     t.feed(second.slice(0, 10));
@@ -140,5 +143,37 @@ describe("ScreenVideoStream", () => {
     t.feed(framed({ type: "paused", reason: "locked" }));
     vi.advanceTimersByTime(1_000);
     expect(ticks, "no decisions while capture is paused").toHaveBeenCalledTimes(4);
+  });
+
+  it("with tiers: changes before the first frame wait for it, the newest going out; again after paused and a new hello", () => {
+    const t = scripted(), events: StreamEvent[] = [];
+    const tiers = new ScreenVideoTiers({ bias: "auto", budget: { maxKbps: 12_000, fps: 60 }, maxSize: 1920, link: null, remembered: null });
+    const s = new ScreenVideoStream(t, start, (e) => events.push(e), { makeDecoder: fakeDecoders().make, nowMicros: () => 1_000_000, tiers });
+    const raws = new VideoParser().push(prefix(3)); // hello, format, a frame
+    const message = (i: number) => encode(decode(raws[i].type, raws[i].body));
+    const h = decode(raws[0].type, raws[0].body) as Hello;
+    const tiered = framed({ ...h, features: ["tiers"], points: [960, 600], pixels: [1920, 1200] });
+    t.feed(tiered);
+    s.tierBias("smoother"); // ⋯ › Quality before the first frame
+    expect(t.sent.some((m) => m.type === "update")).toBe(false);
+    t.feed(new Uint8Array([...message(1), ...message(2)]));
+    const updates = () => t.sent.filter((m) => m.type === "update");
+    expect(updates()).toHaveLength(1);
+    expect(events.filter((e) => e.type === "tier").map((e) => (e as { change: { reason: string } }).change.reason)).toEqual(["choice"]);
+    // paused (the Mac locked): capture starts again on resume, so a change waits for the next frame
+    t.feed(framed({ type: "paused", reason: "locked" }));
+    s.tierBias("sharper");
+    expect(updates()).toHaveLength(1);
+    t.feed(framed({ type: "resumed" }));
+    t.feed(message(2));
+    expect(updates()).toHaveLength(2);
+    // capture starts over with a new hello: a change held from before is dropped, the new policy's start waits
+    t.feed(tiered);
+    s.tierBias("smoother");
+    t.feed(tiered);
+    expect(updates()).toHaveLength(2);
+    t.feed(new Uint8Array([...message(1), ...message(2)]));
+    expect(updates()).toHaveLength(3);
+    expect(events.filter((e) => e.type === "tier").map((e) => (e as { change: { reason: string } }).change.reason).at(-1)).toBe("start");
   });
 });

@@ -38,6 +38,8 @@ type Item struct {
 	// Private: a row a reader with Options.NoPrivate is never shown, in its rows, totals or counts (a health-space
 	// conversation, which an extension's token does not see).
 	Private bool
+	// Assistant marks an Assistant conversation, excluded from the active Agent aggregate.
+	Assistant bool
 	// Fold is the item's optional per-row metadata: its place in the session hierarchy (#5120) and its open to-do
 	// (#6662). Nil for an item with neither, which shows its own State and BackgroundWaiting. It sits behind a pointer
 	// to keep Item in its allocation size class: an adapter builds a whole batch as one []Item, as the hub does on every
@@ -56,10 +58,14 @@ type Item struct {
 // works or needs the user either. Todo is the id of the open to-do the row is on ("" for none): what Options.Todo
 // selects and Counts.Todo counts. The adapter knows which to-dos are open; the index only compares ids. Options.Roots
 // leaves out the items with a Root and filters and counts the others by their folded state; Options.Under selects the
-// items folded under one. Like the rest of an Item it is immutable once handed to Replace: copies of the item share it.
+// items folded under one. SearchAs is the ID of the item (Root's) a search with Options.Roots returns a hit in this
+// item as, and SearchSession the session id the hit names it by (SearchHit.HitSessionID): the adapter sets both on a
+// side session folded under Root (#7944), whose chat is reached from Root's. Like the rest of an Item it is immutable
+// once handed to Replace: copies of the item share it.
 type Fold struct {
-	Root, State, Todo string
-	BackgroundWaiting bool
+	Root, State, Todo       string
+	SearchAs, SearchSession string
+	BackgroundWaiting       bool
 }
 
 // root is the session v is folded under ("" for none).
@@ -142,12 +148,14 @@ type Page struct {
 // Empty attribute values are counted under the empty string key. PaneSource
 // is omitted for adapters that do not supply an origin attribute.
 type Counts struct {
-	Total      int            `json:"total"`
-	Machine    map[string]int `json:"machine"`
-	Project    map[string]int `json:"project"`
-	Group      map[string]int `json:"group"`
-	State      map[string]int `json:"state"`
-	PaneSource map[string]int `json:"pane_source,omitempty"`
+	Total   int            `json:"total"`
+	Machine map[string]int `json:"machine"`
+	// ActiveAgentsByMachine is populated for roots counts, including an empty map for a known zero.
+	ActiveAgentsByMachine map[string]int `json:"active_agents_by_machine,omitzero"`
+	Project               map[string]int `json:"project"`
+	Group                 map[string]int `json:"group"`
+	State                 map[string]int `json:"state"`
+	PaneSource            map[string]int `json:"pane_source,omitempty"`
 	// Todo counts the items by Fold.Todo, "" for the items on no to-do (#6662).
 	Todo map[string]int `json:"todo"`
 	// BackgroundWaiting: how many of State["working"] only wait in the background (#6045): a client that shows them
@@ -272,7 +280,7 @@ func (i *Index) initialize() {
 	i.sources = make(map[string]map[string]*record)
 	i.cache = make(map[cacheKey]*cacheEntry)
 	i.snapshots = make(map[string]*snapshot)
-	i.counts = emptyCounts(i.revisionToken())
+	i.counts = emptyCounts(i.revisionToken(), false)
 	if i.now == nil {
 		i.now = time.Now
 	}

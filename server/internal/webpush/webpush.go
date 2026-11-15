@@ -278,8 +278,13 @@ func NewRequest(ctx context.Context, s Subscription, k Keys, subject string, pla
 	return req, nil
 }
 
-// TopicFor is the Topic header for pushes about key: at most 32 base64url characters, as RFC 8030 asks.
+// TopicFor is the Topic header for pushes about key: at most 32 base64url characters, as RFC 8030 asks. A push about
+// no key replaces nothing, so it has no Topic (""): one shared Topic would have the push service keep only the last of
+// such pushes waiting for a browser that is away (RFC 8030 section 5.4).
 func TopicFor(key string) string {
+	if key == "" {
+		return ""
+	}
 	sum := sha256.Sum256([]byte(key))
 	return b64(sum[:16])
 }

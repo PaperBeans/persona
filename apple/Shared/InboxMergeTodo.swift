@@ -105,8 +105,13 @@ nonisolated struct InboxTodoReply: Decodable, Sendable, Equatable {
         private struct Ref: Decodable { var id: String }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            itemID = try c.decode(Ref.self, forKey: .item).id
-            todoID = try c.decode(Ref.self, forKey: .todo).id
+            itemID = try Self.id(c, .item)
+            todoID = try Self.id(c, .todo)
+        }
+        /// `{"id": …}`, or the bare id: hubs before #8310 sent the row's id as a string.
+        private static func id(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) throws -> String {
+            if let id = try? c.decode(String.self, forKey: key) { return id }
+            return try c.decode(Ref.self, forKey: key).id
         }
         init(itemID: String, todoID: String) { self.itemID = itemID; self.todoID = todoID }
     }

@@ -2,6 +2,7 @@ package node
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -19,24 +21,48 @@ import (
 // unarchived session once (a side session nested under its parent), however long it has been quiet. The offline list
 // follows it (#3304): it lists the transcript each unarchived session runs whatever its age, on a count of its own (with
 // the entry's title and directory where the transcript has none yet), and leaves out the transcripts of archived
-// sessions, and a session's earlier transcripts once the one it runs now is listed. Only what an entry says is acted on:
-// a transcript no entry names, or an entry that cannot be read, hides nothing; at worst a session shows twice, never not
-// at all. Only these files are read, never the app's config file (it holds credentials).
+// sessions, and a session's earlier transcripts once the one it runs now is listed. Only these files are read, never the
+// app's config file (it holds credentials).
+//
+// Deleting a session in the app removes its entry and leaves its transcript. A transcript the desktop app ran (its
+// entrypoint says so) that no entry names, now or as an earlier transcript, is such a session's and is left out too
+// (claudeDesktopIndex.gone, #8314). Only that: a transcript another client ran is never judged by the index; an index
+// with no readable entry (not there, another layout) leaves out nothing; an entry that cannot be read keeps every id it
+// mentions; and a transcript written in the last desktopEntryGrace stays, as the app may not have written its entry yet.
+//
+// A scheduled task's runs are sessions of their own in the index, each naming the task (scheduledTaskId); the app's
+// sidebar lists them under the task in its own section, apart from the projects. The list draws a task's runs the
+// same way, under its newest run, as it draws a side session (linkSideSessions, #8314).
 //
 // A session another one started (a side chat, a /btw question, a session spawned for a task) names that one in
 // spawnedFrom.sessionId (its local_<id>), and the app's sidebar nests it there. The list draws it the same way (#5935):
 // its row names the parent's current transcript in parent_agent_id while both are listed (linkSideSessions), and stays a
 // session of its own. An entry without that id, or whose parent is archived or not in the index, links nothing.
 
-// claudeDesktopDirs are the desktop apps' data directories under home (a variable: tests use their own). Only macOS's
-// layout is known.
-var claudeDesktopDirs = func(home string) []string {
-	if runtime.GOOS != "darwin" {
+// claudeDesktopDirs are the desktop apps' data directories under home (a variable: tests use their own).
+var claudeDesktopDirs = func(home string) []string { return desktopDataDirs(runtime.GOOS, home) }
+
+// desktopDataDirs are the desktop apps' data directories under home on goos: macOS's Application Support, Windows'
+// local app data (measured 2026-11-15: the Store build, Claude 3.6556, keeps its index in %LOCALAPPDATA%\Claude-3p, not
+// in its package's folder). Another system's layout is not known: none.
+func desktopDataDirs(goos, home string) []string {
+	var base string
+	switch goos {
+	case "darwin":
+		base = filepath.Join(home, "Library", "Application Support")
+	case "windows":
+		base = filepath.Join(home, "AppData", "Local")
+	default:
 		return nil
 	}
-	base := filepath.Join(home, "Library", "Application Support")
 	return []string{filepath.Join(base, "Claude"), filepath.Join(base, "Claude-3p")}
 }
+
+// claudeDesktopOpens: the desktop app here opens a session at its link in the background (/usr/bin/open -g), so a
+// message to a session nothing runs and a new session can go to the app (claudedesktop_open.go, claudedesktop_new.go).
+// Only macOS: on Windows the index is read for the list alone, and such a send is handled as before. A variable: tests
+// model the Mac's app on any system.
+var claudeDesktopOpens = runtime.GOOS == "darwin"
 
 type claudeDesktopEntry struct {
 	transcript string   // cliSessionId
@@ -45,6 +71,8 @@ type claudeDesktopEntry struct {
 	title, cwd string   // as the sidebar shows it, and where it runs
 	local      string   // the app's own id of the session (sessionId, local_<uuid>): its link opens it (claudedesktop_open.go)
 	parent     string   // the local_<uuid> of the session that started this one (spawnedFrom.sessionId), or ""
+	task       string   // the scheduled task this session is a run of (scheduledTaskId), or ""
+	created    int64    // when the app made the session (createdAt, ms; 0 unknown): the newest run of a task heads it
 
 	// focused and turnEdge (ms, 0 unknown): when the app last brought the session into view (lastFocusedAt), and when a
 	// turn of it last began or ended (lastTurnEdgeAt). claudedesktop_unread.go reads them.
@@ -54,7 +82,9 @@ type claudeDesktopEntry struct {
 type claudeDesktopFile struct {
 	mtime time.Time
 	size  int64
-	entry claudeDesktopEntry // transcript "": unreadable, names nothing
+	entry claudeDesktopEntry // transcript "": unreadable
+	// mentions are the ids an unreadable entry holds as far as it is read (mentionedIDs): none of them is gone.
+	mentions []string
 }
 
 var claudeDesktopFiles = struct {
@@ -74,6 +104,10 @@ type claudeDesktopIndex struct {
 	// lastShown (ms) is the latest time the app brought any unarchived session into view: the session it shows now
 	// was brought into view then (claudeDesktopIndex.shown).
 	lastShown int64
+	// named: every transcript some entry names (current or earlier, archived or not) or an unreadable entry mentions;
+	// entries counts the readable entries. gone reads both.
+	named   map[string]bool
+	entries int
 }
 
 type claudeDesktopAbout struct{ title, cwd, local string }
@@ -92,26 +126,41 @@ func readClaudeDesktopIndex(home string) claudeDesktopIndex {
 		paths = append(paths, found...)
 	}
 	x := claudeDesktopIndex{visible: map[string]bool{}, earlier: map[string][]claudeDesktopNow{}, about: map[string]claudeDesktopAbout{},
-		parents: map[string]string{}, seen: map[string]claudeDesktopSeen{}}
+		parents: map[string]string{}, seen: map[string]claudeDesktopSeen{}, named: map[string]bool{}}
 	claudeDesktopFiles.Lock()
 	defer claudeDesktopFiles.Unlock()
 	current := make(map[string]bool, len(paths))
 	byLocal := map[string]claudeDesktopEntry{} // the readable entries by the app's own id, to find a side session's parent
 	var started []claudeDesktopEntry           // the unarchived entries another session started
+	runs := map[string][]claudeDesktopEntry{}  // a scheduled task → its unarchived runs no session started
 	for _, p := range paths {
 		st, err := os.Stat(p)
-		if err != nil || st.Size() > 4<<20 {
+		if err != nil {
 			continue
 		}
 		current[p] = true
 		f, ok := claudeDesktopFiles.byPath[p]
 		if !ok || !f.mtime.Equal(st.ModTime()) || f.size != st.Size() {
-			f = claudeDesktopFile{mtime: st.ModTime(), size: st.Size(), entry: readClaudeDesktopEntry(p)}
+			f = claudeDesktopFile{mtime: st.ModTime(), size: st.Size()}
+			if st.Size() <= 4<<20 {
+				f.entry = readClaudeDesktopEntry(p)
+			}
+			if f.entry.transcript == "" {
+				f.mentions = mentionedIDs(p)
+			}
 			claudeDesktopFiles.byPath[p] = f
+		}
+		for _, id := range f.mentions {
+			x.named[id] = true
 		}
 		e := f.entry
 		if e.transcript == "" {
 			continue
+		}
+		x.entries++
+		x.named[e.transcript] = true
+		for _, old := range e.prior {
+			x.named[old] = true
 		}
 		x.visible[e.transcript] = x.visible[e.transcript] || !e.archived
 		if !e.archived {
@@ -120,6 +169,8 @@ func readClaudeDesktopIndex(home string) claudeDesktopIndex {
 			x.lastShown = max(x.lastShown, e.focused)
 			if e.parent != "" {
 				started = append(started, e)
+			} else if e.task != "" {
+				runs[e.task] = append(runs[e.task], e)
 			}
 		}
 		if e.local != "" {
@@ -132,6 +183,19 @@ func readClaudeDesktopIndex(home string) claudeDesktopIndex {
 	for _, e := range started {
 		if p, ok := byLocal[e.parent]; ok && !p.archived && p.transcript != e.transcript {
 			x.parents[e.transcript] = p.transcript
+		}
+	}
+	for _, rs := range runs { // a task's runs under its newest (the latest createdAt; the larger transcript id on a tie)
+		head := rs[0]
+		for _, e := range rs[1:] {
+			if e.created > head.created || e.created == head.created && e.transcript > head.transcript {
+				head = e
+			}
+		}
+		for _, e := range rs {
+			if e.transcript != head.transcript {
+				x.parents[e.transcript] = head.transcript
+			}
 		}
 	}
 	for p := range claudeDesktopFiles.byPath {
@@ -158,6 +222,8 @@ func readClaudeDesktopEntry(path string) claudeDesktopEntry {
 		SpawnedFrom json.RawMessage `json:"spawnedFrom"`
 		Focused     float64         `json:"lastFocusedAt"`
 		TurnEdge    float64         `json:"lastTurnEdgeAt"`
+		Task        string          `json:"scheduledTaskId"`
+		Created     float64         `json:"createdAt"`
 	}
 	if json.Unmarshal(b, &raw) != nil || !validID(raw.Transcript) {
 		return claudeDesktopEntry{}
@@ -173,7 +239,33 @@ func readClaudeDesktopEntry(path string) claudeDesktopEntry {
 		cwd = ""
 	}
 	return claudeDesktopEntry{transcript: raw.Transcript, archived: raw.Archived, prior: raw.Prior, title: raw.Title, cwd: cwd,
-		local: localID(raw.Local), parent: localID(spawned.Local), focused: int64(raw.Focused), turnEdge: int64(raw.TurnEdge)}
+		local: localID(raw.Local), parent: localID(spawned.Local), focused: int64(raw.Focused), turnEdge: int64(raw.TurnEdge),
+		task: raw.Task, created: int64(raw.Created)}
+}
+
+// mentionedIDs are the session ids in the first 64 KB of an entry that cannot be read (cut short while the app wrote
+// it, too big, another shape): what it names is not known, so a transcript it may name is never taken for gone.
+func mentionedIDs(path string) []string {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	b, _ := io.ReadAll(io.LimitReader(f, 64<<10))
+	return desktopIDRe.FindAllString(string(b), -1)
+}
+
+var desktopIDRe = lazyre.New(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+
+// desktopEntryGrace is how long a transcript the desktop app ran may go without an entry naming it before it is taken
+// for a deleted session's: the app writes a new session's entry as it starts the session.
+const desktopEntryGrace = 2 * time.Minute
+
+// gone: transcript id, which the desktop app ran, belongs to a session deleted in the app: the index has readable
+// entries, none names id and nothing unreadable mentions it, and the transcript was last written (written) longer than
+// desktopEntryGrace ago. The caller asks only about a transcript whose entrypoint is the desktop app's.
+func (x claudeDesktopIndex) gone(id string, written time.Time) bool {
+	return x.entries > 0 && !x.named[id] && time.Since(written) > desktopEntryGrace
 }
 
 // localID is id when it is the app's own form of a session id (local_<uuid>), else "": it goes into a link.

@@ -25,14 +25,16 @@ func (n *Node) launcherModelCheck(ctx context.Context, name, model string) (stri
 	if err := (modelExecution{Model: model}).check(name); err != nil {
 		return "", err
 	}
+	// A runtime's launcher first: where ctx's start host is an engine that runs only its own launchers, its provider
+	// of the name runs whatever else has it (#8140); elsewhere a runtime never has a managed or a shell launcher's name.
+	if res, ok := n.runtimeLauncherModelsIn(ctx, name); ok {
+		return res.Agent, nil
+	}
 	if m, managed := n.managedLauncher(name); managed {
 		return m.AgentType(), nil
 	}
 	if _, ok := n.codexLauncher(ctx, name); ok {
 		return "codex", nil
-	}
-	if res, ok := n.runtimeLauncherModels(name); ok {
-		return res.Agent, nil
 	}
 	key := n.home + "\x00" + name + "\x00" + model
 	modelProbeCache.Lock()
@@ -94,6 +96,10 @@ func withoutModelArgs(args []string) []string {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if arg == "--" { // prompt words after the separator are not the launcher's model options
+			out = append(out, args[i:]...)
+			break
+		}
 		if arg == "--model" || arg == "-m" {
 			if i+1 < len(args) {
 				i++
