@@ -25,8 +25,8 @@ type modelExecution struct {
 	PlanThen string `json:"-"`
 	// Runtime: the assistant's runtime, proto.AssistantRuntimeAgentSDK or "" (the CLI; "cli" reads as ""). Omitted
 	// when empty so a fingerprint from before #2455 stays the same.
-	Runtime   string `json:",omitempty"`
-	IsMain    bool   `json:",omitempty"`
+	Runtime string `json:",omitempty"`
+	IsMain  bool   `json:",omitempty"`
 	// FollowsSetting: a leader/background supervisor conversation the manager sends with the main chat's model
 	// setting (#7824). With IsMain it identifies the protected conversations whose recovery is visible and reversible;
 	// worker Agent conversations have neither flag.

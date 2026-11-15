@@ -297,13 +297,14 @@ interruption bookkeeping below and the trays' order still read them. How a task 
   reason and **Continue** (`POST /api/v1/todos/{id}/retry`), which only the receipt card had; a usage limit nothing
   continues by itself gets Continue on its In Progress row. A tap on the row opens the task's details, where a receipt's
   **Look** went.
-- iOS since #8237 (`ChatLines.drawnFeed`, `AssistantEntries.Result.justFinished`, `DispatchHandoffCard.interruption`);
-  the web follows in its own PR, Android in its own issue. Mock: `MOCK_TASKS=1 MOCK_TASKS_FINISHED=1` (two finished
+- iOS (`ChatLines.drawnFeed`, `AssistantEntries.Result.justFinished`, `DispatchHandoffCard.interruption`,
+  `StartFailureWords`) and the web (`drawnFeed` in `lib/feed.ts`, `justFinished` in `lib/assistant-entries.ts`,
+  `lib/start-failure.ts`, `WaitingTaskRow`) since #8237; Android in #8312. Mock: `MOCK_TASKS=1 MOCK_TASKS_FINISHED=1` (two finished
   tasks for Just Finished), with `MOCK_TASK_CHECK=1` (a stopped task's reason), `MOCK_TASKS_CUT=1` (an interrupted one) and `MOCK_MANAGERS=1` (one
   manager, so the MacBook's Agents are the default page's), with `MOCK_TASKS_NO_ASKS=1` for a chat no question card
   covers; `QuietReceiptsUITests` checks and shoots them.
 
-What follows is what the hub writes and how the clients drew receipts before #8237 (Android and, until its PR, the web):
+What follows is what the hub writes and how the clients drew receipts before #8237 (Android still does, #8312):
 
 - When a task finishes (an attached Agent ends a turn with no pending interaction), append a green receipt at the bottom: task name, what was done (summary of the Agent's final text block),
   number of changed files, tests, PR, and next actions below: review changes, merge, tell the person who asked, etc.
@@ -342,7 +343,7 @@ keeps one outage from filling the chat:
   receipt in `group`. The first receipt carries `batch` (`total`, `pending`, `resolved`, `machine` when all ran on one
   computer, and `tasks` with each task's resolution), recomputed on every read; a page read with `since` after the first
   receipt still brings it along.
-- **Drawing** (`interruptLook`; Android and, until its PR, the web: iOS draws no receipt since #8237, "Receipts" above): a receipt that names another in `group` is not drawn; a batch is one card,
+- **Drawing** (`interruptLook`; Android only: iOS and the web draw no receipt since #8237, "Receipts" above): a receipt that names another in `group` is not drawn; a batch is one card,
   "<computer> <cause>, N tasks interrupted → handled a / pending b", opening to each task with its result, each opening the
   task; a handled single receipt is a grey line "“<title>” was interrupted · <result>" that opens the task; a pending one is
   the red card as before. Only a batch with something pending, or a pending receipt, uses the danger color. In the main chat,
@@ -674,7 +675,7 @@ On by default. One built-in conversation follows up every supervised task whose 
 - **Its own queue and its rounds**: the owner comes first there as in any assistant conversation (`docs/assistant/assistant.md` "Messages from the system wait for the owner"): what waits for it goes in by rank, and the owner is present there only for 2 minutes after a message they wrote to it themselves, so their talking in the main chat holds nothing that is for the background supervisor. In the availability metrics its rounds are `supervision` rounds with `main: false`, the one its start begins included (`availStartedBy`); a task notice delivered to it is a `notice` round as anywhere.
 - **Pushes**: its turns are held from the pushes as any supervision round is (a normal finish is not pushed; a failed turn is). It counts as an assistant conversation everywhere else: not triaged, not in the dock's agents, no badge; a round of it shows as "assistant answering" on the Live Activity, as a supervision round in the main chat does.
 - **Its reviews say so**: the `review` entry of a review the background supervisor wrote carries `by: "background"` (`reviewFeedBody.By`, #5084); every other review's (the planning chat's own, a leader's, the main chat's, a sampled acceptance) has no `by`. Such a review took no turn of the chat that planned the task, so a client may keep the entry in that chat as the only record of it there.
-- **In the clients today**: it has `origin: "task"` with no `origin_ref`, so the apps list it where they list the scheduled tasks' conversations, titled "Background supervisor" (zh 后台督办, ja バックグラウンド監督). The web (#5082, `docs/web/web.md` "Background supervisor") marks the conversation built in with a menu that only copies its id, has the switch in Settings › Assistant, lists the model purpose after Main chat in Model settings and draws each `review` entry marked `by: "background"` as one line in the main chat. So do the Apple apps for the setting and the model (#5083, `docs/apple/ios.md` "Background supervisor"): the switch in Settings › Assistant, the model use in Settings › Models, and no Archive, Pin or End on the conversation's row; and Android, as the next entry says.
+- **In the clients today**: it has `origin: "task"` with no `origin_ref`, so the apps list it where they list the scheduled tasks' conversations, titled "Background supervisor" (zh 后台督办, ja バックグラウンド監督). The web (#5082, `docs/web/web.md` "Background supervisor") marks the conversation built in with a menu that only copies its id, has the switch in Settings › Assistant, lists the model purpose after Main chat in Model settings, and drew each `review` entry marked `by: "background"` as one line in the main chat until #8237 (a review is no line in the chat since: the task's row says how it went). So do the Apple apps for the setting and the model (#5083, `docs/apple/ios.md` "Background supervisor"): the switch in Settings › Assistant, the model use in Settings › Models, and no Archive, Pin or End on the conversation's row; and Android, as the next entry says.
 - **On Android** (#5084, `docs/android/android.md` "The background supervisor (#5084)"): the same rule, in that app's drawer: it has no group of its own for scheduled tasks' conversations, they are under All chats with every other conversation Persona opened itself, and so is this one; never under 常驻 or Recent, named by the app and without Pin, Archive or End chat. Settings › Assistant has the switch for `main_supervises_own_tasks` and a row for the `assistant.supervise` model, which Settings › Model configuration lists too. A `review` entry marked `by: "background"` is one line in the conversation that opens the task; in Brief and Board the others stay in the background record as before, and Glass draws every review (`docs/plans/android-ios-alignment/chats.md` C13).
 
 ### Task leaders (#3656)
