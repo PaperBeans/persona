@@ -73,6 +73,7 @@
   "mcp_tools.assistant#notify_user": 404,
   "mcp_tools.assistant#persona_settings": 2132,
   "mcp_tools.assistant#repositories_list": 1259,
+  "mcp_tools.assistant#repository_add": 1423,
   "mcp_tools.assistant#repository_get": 904,
   "mcp_tools.assistant#save_place": 802,
   "mcp_tools.assistant#schedule_followup": 4818,

@@ -136,6 +136,11 @@ func rolesNow(ctx context.Context, st interface {
 // recordSend keeps one start or resume of a main or leader conversation (sendEvent). main says the manager sent it
 // with is_main (a new main conversation has no id yet when its start fails).
 func (s *Service) recordSend(machine, session, op, origin string, main bool, outcome, code, msg string) {
+	s.recordSendEvent(machine, session, op, origin, main, outcome, code, msg, s.workEventNow)
+}
+
+func (s *Service) recordSendEvent(machine, session, op, origin string, main bool, outcome, code, msg string,
+	writeEvent func(string, string, string, map[string]any)) {
 	st := s.store()
 	role := ""
 	if main {
@@ -160,7 +165,7 @@ func (s *Service) recordSend(machine, session, op, origin string, main bool, out
 		detail["reason"] = sendReason(code, msg)
 		detail["error"] = clip(oneLine(msg), 200)
 	}
-	s.workEvent(machine, session, sendEvent, detail)
+	writeEvent(machine, session, sendEvent, detail)
 }
 
 // recordManagerSend is call's: the manager's own assistant.send to machine, with params p and the node's answer (or
@@ -195,11 +200,10 @@ func (s *Service) appSendRefused(machine, session string, err error) {
 }
 
 func (s *Service) recordSendAsync(machine, session, op, origin string, main bool, outcome, code, msg string) {
-	s.work.eventWrites.Add(1) // the tests wait for it as for any work event
-	go func() {
-		defer s.work.eventWrites.Done()
-		s.recordSend(machine, session, op, origin, main, outcome, code, msg)
-	}()
+	s.startWorkEventWrite(func() {
+		// Role lookup and the final write are one accepted unit: teardown must not cut it in half at a second scheduling gate.
+		s.recordSendEvent(machine, session, op, origin, main, outcome, code, msg, s.workEventNow)
+	})
 }
 
 func errCode(err error) string {

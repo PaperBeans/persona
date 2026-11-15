@@ -310,7 +310,7 @@ var ErrUnavailable = errors.New("the connector does not offer its history now")
 // push; the error is a *Halt) so that nothing, not even the next kb_history_plan, asks again until a person
 // looked.
 func (s *Tools) ListChats(ctx context.Context, data, source string) ([]connectorwire.HistoryChat, error) {
-	d := New(s.Host.Deps(data)).d
+	d := NewDriver(s.Host.Deps(data)).d
 	d.source = source
 	list, err := d.src.Archives(ctx)
 	if err != nil {

@@ -1,4 +1,4 @@
-package assistant
+package kbsent
 
 import (
 	"context"
@@ -29,7 +29,12 @@ type kbSentLine struct {
 	mine     bool
 }
 
-func (s *Service) kbDaySent(ctx context.Context, e *kb.Engine, p assistantwire.KBDayParams) (assistantwire.KBDayResult, error) {
+// DayStart is the start of the day that now is in, in now's zone.
+type DayStart func(now time.Time) time.Time
+
+// Day is the day p names, each of its lines marked as sent by the user when the store's ledger says so. st is the
+// assistant's store: one without the ledger gives the day as it is, SentOrigin "unavailable".
+func Day(ctx context.Context, st any, dayStart DayStart, e *kb.Engine, p assistantwire.KBDayParams) (assistantwire.KBDayResult, error) {
 	messages, prev, next, identity, err := e.DayWithIdentity(p.ID, p.Day)
 	out := assistantwire.KBDayResult{Day: p.Day, Messages: messages, Prev: prev, Next: next, SentOrigin: "unavailable"}
 	if out.Messages == nil {
@@ -38,7 +43,7 @@ func (s *Service) kbDaySent(ctx context.Context, e *kb.Engine, p assistantwire.K
 	if err != nil {
 		return out, err
 	}
-	st, ok := s.store().(kbSentStore)
+	ledger, ok := st.(kbSentStore)
 	if !ok || identity.Chat == nil {
 		return out, nil
 	}
@@ -68,7 +73,7 @@ func (s *Service) kbDaySent(ctx context.Context, e *kb.Engine, p assistantwire.K
 		}
 		lines = append(lines, kbSentLines(ms, ids, date)...)
 	}
-	rows, err := st.SentAsUsersForArchive(ctx, connector, dayStart(day).Add(-kbSentSlack), dayStart(day.AddDate(0, 0, 1)).Add(kbSentSlack))
+	rows, err := ledger.SentAsUsersForArchive(ctx, connector, dayStart(day).Add(-kbSentSlack), dayStart(day.AddDate(0, 0, 1)).Add(kbSentSlack))
 	if err != nil {
 		return out, err
 	}

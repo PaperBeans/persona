@@ -81,7 +81,7 @@ func (s *Service) kbHistoryRound(ctx context.Context) {
 
 // historyDriver is an import of the knowledge base in data, reaching the connectors through the hub.
 func (s *Service) historyDriver(data string) *kbhistory.Driver {
-	return kbhistory.New(s.historyDeps(data))
+	return kbhistory.NewDriver(s.historyDeps(data))
 }
 
 // historyTools are the assistant's history import tools.

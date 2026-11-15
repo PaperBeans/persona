@@ -92,8 +92,8 @@ func halt(stop bool, code string, kv ...string) *Halt {
 
 func HaltWhy(stop bool, why historyReason) *Halt { return &Halt{stop: stop, why: why} }
 
-// Source is how the import reaches the connectors.
-type Source = historySource
+// ChatSource is how the import reaches the connectors.
+type ChatSource = historySource
 
 // Reason is why a run stopped, as the push says it.
 type Reason = historyReason
@@ -101,7 +101,7 @@ type Reason = historyReason
 // Deps is what a Driver takes from the assistant Service.
 type Deps struct {
 	Data      string
-	Src       Source
+	Src       ChatSource
 	Eng       func(context.Context) (*kb.Engine, error) // the knowledge base, open and writable
 	Cfg       func(context.Context) *assistantwire.KBHistory
 	Connected func() bool
@@ -116,8 +116,8 @@ type Deps struct {
 // Driver is one import of a knowledge base.
 type Driver struct{ d *historyDriver }
 
-// New is an import with the real clock, waits and randomness.
-func New(dp Deps) *Driver {
+// NewDriver is an import with the real clock, waits and randomness.
+func NewDriver(dp Deps) *Driver {
 	return &Driver{d: &historyDriver{
 		data: dp.Data, src: dp.Src, eng: dp.Eng, cfg: dp.Cfg, connected: dp.Connected,
 		now:      time.Now,
