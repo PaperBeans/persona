@@ -2065,6 +2065,111 @@
         ],
         "shelved": []
       }
+    },
+    {
+      "name": "shared_agent_untied_asks_under_its_first_plan_task",
+      "description": "An Agent two tasks of one plan list asks for one approval and the hub ties its session to neither: both cards came with the plan, so its home is the first in the plan's order (the slot id plan:<plan>:<index>), not the to-do with the smaller id or the older to-do.",
+      "source": [
+        "web/src/lib/task-cards.ts taskCardSlots",
+        "web/src/lib/assistant-entries.ts assistantEntries",
+        "apple/Persona/Views/Assistant/Tasks/AssistantActionBar.swift AssistantEntries.split",
+        "docs/design/DESIGN_SYSTEM.md 4.8",
+        "issue #7532"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-10T09:00:00Z",
+        "plans": {
+          "p-split": {
+            "id": "p-split",
+            "conversation": "main-chat",
+            "state": "started",
+            "created_at": "2026-11-10T08:00:00Z",
+            "tasks": [
+              {
+                "title": "Update the docs",
+                "prompt": "Update them",
+                "cwd": "/home/user/project",
+                "machine": "mac",
+                "todo_id": "t-zeta"
+              },
+              {
+                "title": "Add the migration",
+                "prompt": "Add it",
+                "cwd": "/home/user/project",
+                "machine": "mac",
+                "todo_id": "t-alpha"
+              }
+            ]
+          }
+        },
+        "feed": [],
+        "todos": [
+          {
+            "id": "t-zeta",
+            "title": "Update the docs",
+            "origin": "main-chat",
+            "plan_id": "p-split",
+            "created_at": "2026-11-10T08:01:00Z",
+            "updated_at": "2026-11-10T08:01:00Z",
+            "agents": [
+              {
+                "machine_id": "mac",
+                "session_id": "w-plan",
+                "linked_at": "2026-11-10T08:01:00Z"
+              }
+            ]
+          },
+          {
+            "id": "t-alpha",
+            "title": "Add the migration",
+            "origin": "main-chat",
+            "plan_id": "p-split",
+            "created_at": "2026-11-10T08:00:30Z",
+            "updated_at": "2026-11-10T08:00:30Z",
+            "agents": [
+              {
+                "machine_id": "mac",
+                "session_id": "w-plan",
+                "linked_at": "2026-11-10T08:00:30Z"
+              }
+            ]
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "mac",
+            "session_id": "w-plan",
+            "title": "w-plan",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "status": "blocked",
+            "updated_at": "2026-11-10T08:50:00Z",
+            "state_since": "2026-11-10T08:50:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "perm-plan",
+            "machine_id": "mac",
+            "session_id": "w-plan",
+            "kind": "permission",
+            "tool_name": "Bash",
+            "created_at": "2026-11-10T08:55:00Z"
+          }
+        ]
+      },
+      "expected": {
+        "needs_you": [
+          "task:t-zeta"
+        ],
+        "running": [
+          "task:t-alpha"
+        ],
+        "shelved": []
+      }
     }
   ]
 }

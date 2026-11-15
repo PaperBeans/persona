@@ -140,7 +140,8 @@ each count is its rows:
   progress in its working blue and ink until 2026-11-14.
 - **One home for an Agent several tasks list** (every client, 2026-11-14: web #7490, Android #7531, iOS / Mac #7532): an
   Agent that more than one of the conversation's tasks lists asks under one of them, the task the hub ties its session
-  to (`Session.todo`), else the first that lists it (oldest card first). Its cards are that task's row alone and are
+  to (`Session.todo`), else the first that lists it (oldest card first; one plan's tasks in the plan's order, the web's
+  slot id `plan:<plan>:<index>`). Its cards are that task's row alone and are
   counted once; the other tasks do not wait on the user for them and are In progress, unless a decision of their own
   keeps them in Needs you (without the Agent's cards). Before, each task listing the Agent showed and counted the same
   approval. The shared cases (`spec/fixtures/entries`) pin it; the whole-client Needs you rule is #5974's.
