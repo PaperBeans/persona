@@ -106,9 +106,7 @@ func TestChatBridgeFailedFinishAndTerminalStillPushed(t *testing.T) {
 			tc.edit(&sess)
 			driveAgentDone(e.fleetTest, sess)
 			waitFor(t, "the finished card", func() bool { return len(e.agentDoneCards()) == 1 })
-			if got := e.donePushes(); len(got) != 1 {
-				t.Fatalf("pushed %d finished pushes, want 1: %+v", len(got), got)
-			}
+			e.oneDonePush(t)
 			waitFor(t, "the line saying it was sent", func() bool {
 				return len(e.logged("bots: card sent: kind=agent_done machine=mac session="+supAgent)) == 1
 			})
