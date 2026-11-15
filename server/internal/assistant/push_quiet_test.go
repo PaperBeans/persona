@@ -85,7 +85,7 @@ func TestQuietPermissionCardStaysWithItsSupervisor(t *testing.T) {
 
 	e.s.askTick(time.Now().Add(2 * askHoldFor)) // leader → main conversation, as before
 	m := e.noticeWith("conv1", "interaction_id=ix1")
-	if !strings.Contains(m, "不会发给用户") || strings.Contains(m, "自动上交给用户") {
+	if !strings.Contains(m, "signal=ask") || !strings.Contains(m, "low_distraction=true") {
 		t.Fatalf("the main conversation is not told the card stays with the supervisors:\n%s", m)
 	}
 	e.s.askTick(time.Now().Add(4 * askHoldFor)) // past the last rung: back to the leader once, not the owner
@@ -263,7 +263,7 @@ func TestQuietOffPermissionCardReachesTheOwnerAsBefore(t *testing.T) {
 	e.noticeWith("lead1", "interaction_id=ix1")
 	e.s.askTick(time.Now().Add(2 * askHoldFor))
 	m := e.noticeWith("conv1", "interaction_id=ix1")
-	if !strings.Contains(m, "自动上交给用户") {
+	if !strings.Contains(m, "signal=ask") {
 		t.Fatalf("the main conversation's message changed with the switch off:\n%s", m)
 	}
 	e.s.askTick(time.Now().Add(4 * askHoldFor))
@@ -363,13 +363,13 @@ func TestSuperviseMessageUnderTheSwitch(t *testing.T) {
 	on := prompts.RenderSupervise(prompts.Supervise{Leader: true, Background: true, Asked: true, AskMinutes: 5, LowDistraction: true,
 		Entries: []prompts.SuperviseEntry{{Kind: sigAsk, ID: "todo_1", Title: "修登录崩溃",
 			Asks: []prompts.SuperviseAsk{{ID: "ix1", Kind: "permission", Session: "w1", Text: "Bash", Reminded: true}}}}})
-	for _, want := range []string{"低打扰模式", "why_owner", "不会发给用户", "再交给你处理一次"} {
+	for _, want := range []string{"signal=ask", "Question routing: timeout_minutes=5", "low_distraction=true", "session_id=w1"} {
 		if !strings.Contains(on, want) {
 			t.Errorf("lacks %q:\n%s", want, on)
 		}
 	}
 	off := prompts.RenderSupervise(prompts.Supervise{Leader: true, Background: true, Asked: true, AskMinutes: 5})
-	if strings.Contains(off, "低打扰模式") || !strings.Contains(off, "自动上交给用户") {
+	if strings.Contains(off, "low_distraction=true") || !strings.Contains(off, "low_distraction=false") {
 		t.Fatalf("the message changed with the switch off:\n%s", off)
 	}
 }

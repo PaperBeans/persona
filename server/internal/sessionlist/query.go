@@ -15,6 +15,10 @@ func (i *Index) Query(options Options) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
+	var decoded map[*record]decodedDocument
+	if o.Search != "" && o.Cursor == "" {
+		decoded = i.decodeSearchDocuments(o) // before the lock: see decodeSearchDocuments
+	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.initialize()
@@ -35,7 +39,7 @@ func (i *Index) Query(options Options) (Page, error) {
 			}
 		}
 		if o.Search != "" {
-			r, err = i.searchResult(o)
+			r, err = i.searchResult(o, decoded)
 			if err != nil {
 				return Page{}, err
 			}
@@ -67,10 +71,10 @@ func (i *Index) Query(options Options) (Page, error) {
 		}
 		p.Sessions = append(p.Sessions, clone(value))
 		if o.Search != "" {
-			hit := r.searchHits[e.id]
-			if hit.Evidence != nil {
-				copy := *hit.Evidence
-				hit.Evidence = &copy
+			ranked := r.searchHits[e.id]
+			hit := ranked.SearchHit
+			if ranked.snippet != nil {
+				hit.Evidence = searchSnippet(*ranked.snippet, r.searchTerms) // only the page's hits: see rankedHit
 			}
 			p.SearchHits[e.id] = hit
 		}
@@ -129,6 +133,7 @@ func (f filters) matches(r *record) bool {
 	v := r.item
 	todo := v.todo()
 	return (f.ID == "" || f.ID == v.ID) && (!f.NoPrivate || !v.Private) &&
+		(!f.AgentsOnly || (!v.Assistant && !v.Private)) &&
 		(!f.Roots || v.root() == "") && (f.Under == "" || f.Under == v.root()) &&
 		(f.State == "" || f.State == stateOf(v, f.Roots)) &&
 		(f.Machine == "" || f.Machine == v.Machine) &&

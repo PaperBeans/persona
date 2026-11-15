@@ -156,6 +156,18 @@ struct AssistantProfileView: View {
                     Text(Self.foldFooter)
                 }
             }
+            if let recent = recentTaskChats {
+                Section {
+                    Toggle(isOn: recent) {
+                        Label(Self.recentTitle, systemImage: Theme.Icon.schedule).lineLimit(1)
+                    }
+                    .accessibilityIdentifier("assistant-recent-task-chats")
+                } header: {
+                    Text(Self.recentHeading)
+                } footer: {
+                    Text(Self.recentFooter)
+                }
+            }
             #if os(iOS)
             if let suggestions = nextSuggestions {
                 Section {
@@ -248,6 +260,14 @@ struct AssistantProfileView: View {
                         BUIListRow(Self.foldTitle) { IconTile(Theme.Icon.collapseAll, tint: Theme.accent) } trailing: {
                             Toggle(Self.foldTitle, isOn: folded).labelsHidden()
                                 .accessibilityIdentifier("assistant-main-background-folded")
+                        }
+                    }
+                }
+                if let recent = recentTaskChats {
+                    BUIListSection(Self.recentHeading, footer: Self.recentFooter) {
+                        BUIListRow(Self.recentTitle) { IconTile(Theme.Icon.schedule, tint: Theme.accent) } trailing: {
+                            Toggle(Self.recentTitle, isOn: recent).labelsHidden()
+                                .accessibilityIdentifier("assistant-recent-task-chats")
                         }
                     }
                 }
@@ -356,6 +376,16 @@ struct AssistantProfileView: View {
     private static let foldTitle = String(localized: "Fold background rounds")
     private static let foldFooter = String(localized: "Rounds that another conversation, a scheduled task or a follow-up started in the main chat or a leader conversation show as one line you can open. Rounds that ask or tell you something stay shown.")
 
+    /// The sidebar's Recent lists the scheduled tasks' chats too (#8324), one value for all of the user's devices; nil
+    /// (no switch) from a hub without the setting. All Chats' menu has the same switch (`AutoConversationsView`).
+    private var recentTaskChats: Binding<Bool>? {
+        guard let on = model.assistantConfig?.recentTaskChats else { return nil }
+        return Binding(get: { on }, set: { v in Task { await model.setRecentTaskChats(v) } })
+    }
+    static let recentHeading = String(localized: "Sidebar's Recent")
+    static let recentTitle = String(localized: "Show Scheduled Task Chats")
+    private static let recentFooter = String(localized: "Chats your scheduled tasks and the background supervisor start also appear in the sidebar's Recent, by time. All your devices follow.")
+
     /// JSON-object probe payload; the UI-test reader cannot encode a top-level Bool back to JSON.
     private struct NextSuggestionsProbe: Equatable, Encodable {
         var loaded: Bool
@@ -420,7 +450,9 @@ struct AssistantProfileView: View {
         async let s = try? api.standingAuthorizations()
         // The switch shows once the hub says it has the setting (#1731): a hub updated since the app read it, too.
         let held = model.assistantConfig
-        if held?.mainTasksQuiet == nil || held?.mainBackgroundFolded == nil || held?.mainSupervisesOwnTasks == nil { await model.refreshAssistant() }
+        if held?.mainTasksQuiet == nil || held?.mainBackgroundFolded == nil || held?.mainSupervisesOwnTasks == nil || held?.recentTaskChats == nil {
+            await model.refreshAssistant()
+        }
         tasks = await r
         runs = await h
         if let files = await m { memoryCount = files.filter { $0.name != AssistantMemoryEntry.index }.count }

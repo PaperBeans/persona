@@ -529,12 +529,16 @@ nonisolated struct ComputerApp: Codable, Hashable, Sendable, Identifiable {
 }
 
 nonisolated struct ComputerJob: Codable, Hashable, Sendable {
-    /// install | grant
+    /// install | grant (Cua, ego); pair | forget | install | prepare (an iPhone's, #8199)
     var kind: String
     /// running | done | failed | cancelled
     var state: String
     var step: String? = nil
     var error: String? = nil
+    /// An iPhone job's code: while it runs, what it waits for at the phone (trust_pending, locked); once failed, why.
+    var code: String? = nil
+    /// An iPhone job's iPhone.
+    var device: String? = nil
 
     var running: Bool { state == "running" }
 }
@@ -547,10 +551,15 @@ extension Machine {
 
 nonisolated struct Launcher: Codable, Identifiable, Hashable, Sendable {
     var name: String
+    /// What people call it where it has a name of its own: a Persona-managed provider's name, or the label a runtime
+    /// gives its provider (Paseo's "Grok" for `grok`, #8261); nil for the others, which go by `name` (`title`).
+    var displayName: String? = nil
     var baseURL: String?
     var model: String?
     /// "codex" for plain codex or an alias running it (docs/integrations/codex.md「Starting from the phone」); nil: Claude Code.
     var agent: String? = nil
+    /// The configured runtime kind, when the hub supplies one (claude, codex, or another runtime).
+    var agentType: String? = nil
     /// An agent runtime's launcher that can run the Persona assistant (DSH's, docs/integrations/runtimes.md「Assistant」).
     var assistant: Bool? = nil
     /// How its last check or start went on the computer the list is for (`GET …/machines/{id}/launchers`,
@@ -565,7 +574,17 @@ nonisolated struct Launcher: Codable, Identifiable, Hashable, Sendable {
     /// A Codex launcher the computer starts in a shell pane the user picked (Run Agent Here) and keeps that pane when the
     /// start fails (#5504); nil from an older computer, where Run Agent Here offers Claude Code only.
     var runHere: Bool? = nil
+    /// The permission modes a start on it takes when its agent is not Claude Code (#8261, the node's `permission_modes`:
+    /// Paseo's Grok, OpenCode or Codex): `default`, its own approval, sent as no mode, and `bypassPermissions` where it
+    /// has an Allow Everything (`StartModes.listed`). Nil for Claude Code's launchers, which take its five, for the
+    /// others, which take none, and from an older computer.
+    var permissionModes: [String]? = nil
     var id: String { name }
+    /// What the pickers show: its own name, else its startup name (the web's `providerTitle`).
+    var title: String {
+        guard let d = displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !d.isEmpty else { return name }
+        return d
+    }
     /// The launcher that starts the session in Claude's desktop app (docs/integrations/claude-integration.md「New sessions
     /// in the desktop app」): with no folder it runs in the app's scratch folder, and a new folder is made for it.
     var startsInDesktopApp: Bool { source == Self.claudeDesktopSource || source == Self.codexAppSource }
@@ -575,30 +594,38 @@ nonisolated struct Launcher: Codable, Identifiable, Hashable, Sendable {
     static let codexAppSource = "codex_app"
     /// A Codex start sends its first message with it and waits for the thread Codex makes.
     var isCodex: Bool { agent == "codex" }
+    /// The hub's configured kind wins when present; an empty or missing value falls back to the node's agent.
+    var runtimeAgent: String? { agentType?.isEmpty == false ? agentType : agent }
     /// Starting it needs a first message: a Codex on a computer that cannot open it without one.
     var needsFirstMessage: Bool { isCodex && promptOptional != true }
 
     enum CodingKeys: String, CodingKey {
         case name, model, agent, assistant, health, source
+        case displayName = "display_name", agentType = "agent_type"
         case baseURL = "base_url"
         case promptOptional = "prompt_optional"
         case runHere = "run_here"
+        case permissionModes = "permission_modes"
     }
 }
 
 nonisolated extension Launcher {
-    /// A health record this app cannot read is left out, never the launcher (the list is what New Agent starts from).
+    /// A health record this app cannot read is left out, never the launcher (the list is what New Agent starts from);
+    /// so is a `display_name`, `agent_type` or `permission_modes` it cannot read (#8261).
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
+        displayName = (try? c.decodeIfPresent(String.self, forKey: .displayName)).flatMap { $0 }
         baseURL = try c.decodeIfPresent(String.self, forKey: .baseURL)
         model = try c.decodeIfPresent(String.self, forKey: .model)
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
+        agentType = (try? c.decodeIfPresent(String.self, forKey: .agentType)).flatMap { $0 }
         assistant = try c.decodeIfPresent(Bool.self, forKey: .assistant)
         health = (try? c.decodeIfPresent(LauncherHealth.self, forKey: .health)) ?? nil
         promptOptional = try c.decodeIfPresent(Bool.self, forKey: .promptOptional)
         source = try c.decodeIfPresent(String.self, forKey: .source)
         runHere = try c.decodeIfPresent(Bool.self, forKey: .runHere)
+        permissionModes = (try? c.decodeIfPresent([String].self, forKey: .permissionModes)) ?? nil
     }
 }
 
@@ -640,7 +667,8 @@ nonisolated struct ModelPick: Codable, Hashable, Sendable {
 }
 
 /// A launcher or provider the main chat can't run on a machine, and why in the hub's words
-/// (`unavailable` of `GET …/machines/{id}/launchers?purpose=assistant`, #5033).
+/// (`unavailable` of `GET …/machines/{id}/launchers?purpose=assistant`, #5033). New Agent's list (`agent.new`) has
+/// the same shape for the Persona-managed providers whose own-service rule leaves them out there (#8109).
 nonisolated struct UnavailableLauncher: Codable, Identifiable, Hashable, Sendable {
     var name: String
     var displayName: String?
@@ -791,10 +819,15 @@ nonisolated struct SessionCapabilities: Codable, Hashable, Sendable {
     var rewind: Bool?
     /// Rewind Code and Chat as well (`rewind_code`).
     var rewindCode: Bool?
+    /// The permission modes an agent that is not Claude Code's takes (#8261, `permission_modes`: Paseo's Grok, OpenCode
+    /// or Codex): `default`, its own approval, and `bypassPermissions` where it has an Allow Everything
+    /// (`Session.listedModes`). Nil from an older node, on any other row, or a value this app cannot read.
+    var permissionModes: [String]?
 
     enum CodingKeys: String, CodingKey {
         case read, send, interrupt, approve, terminal, attach, modes, takeover, close, rename, model, rewind
         case rewindCode = "rewind_code"
+        case permissionModes = "permission_modes"
     }
 
     init(from decoder: Decoder) throws {
@@ -812,6 +845,7 @@ nonisolated struct SessionCapabilities: Codable, Hashable, Sendable {
         model = try? c.decodeIfPresent(Bool.self, forKey: .model)
         rewind = try? c.decodeIfPresent(Bool.self, forKey: .rewind)
         rewindCode = try? c.decodeIfPresent(Bool.self, forKey: .rewindCode)
+        permissionModes = try? c.decodeIfPresent([String].self, forKey: .permissionModes)
     }
 }
 
@@ -1251,11 +1285,17 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         default: nil
         }
     }
+    private static let nodeReadOnlyPrefix = "仅查看：" // i18n-ignore: the node's prefix it strips
+
     var sourceSubtitle: String? {
         guard let sourceLabel else { return nil }
         let detail = sourceKind == "identity_conflict" ? nil : agentName.flatMap { $0.isEmpty ? nil : $0 }
         let label = detail.map { sourceLabel + " · " + $0 } ?? sourceLabel
-        let reason = readOnlyReason.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "Sending isn't allowed from this source yet")
+        // The node writes some reasons with their own "View only: " in Chinese, which this line adds already (#7803;
+        // Android's `READ_ONLY_PREFIX`).
+        let given = readOnlyReason.map { $0.hasPrefix(Self.nodeReadOnlyPrefix) ? String($0.dropFirst(Self.nodeReadOnlyPrefix.count)) : $0 }
+        let reason = given.map { $0.trimmingCharacters(in: .whitespaces) }.flatMap { $0.isEmpty ? nil : $0 }
+            ?? String(localized: "Sending isn't allowed from this source yet")
         return canSend ? label : String(localized: "\(label) · View only: \(reason)", comment: "A session's source, and why it can only be viewed")
     }
 
@@ -1290,6 +1330,17 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     /// A declared modes capability wins, including a runtime such as Orca or agy; an older hub that omits it keeps the old rule.
     /// As on the web, a non-assistant must be live, while an assistant can apply its modes to the next run even while offline.
     var canChangeModes: Bool { canSend && (assistant || status.isLive) && (capabilities?.modes ?? (assistant || isClaude)) }
+    /// The permission modes an agent that is not Claude Code's switches between (#8261, `capabilities.permission_modes`:
+    /// Paseo's Grok, OpenCode or Codex): its own approval and Allow Everything. Only with two or more, never for a
+    /// Persona conversation, nor where Claude Code's modes stand (`capabilities.modes`, or a Claude Code row from a node
+    /// that does not say).
+    var listedModes: [String]? {
+        guard let list = capabilities?.permissionModes, list.count >= 2, !assistant, capabilities?.modes != true,
+              capabilities?.modes != nil || !isClaude else { return nil }
+        return list
+    }
+    /// The listed modes can be switched now (`POST …/modes`): it runs and takes messages.
+    var canSwitchListedModes: Bool { canSend && status.isLive && listedModes != nil }
     /// Only the thinking effort changes from the phone, among `efforts` (the hub says so by listing them): a Codex
     /// thread driven through its app-server. Claude Code and the assistant change both, the rest neither.
     var setsEffortOnly: Bool { canSend && !assistant && !isClaude && !(efforts ?? []).isEmpty }

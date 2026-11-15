@@ -178,7 +178,9 @@ func (p *Pusher) sendLiveActivityThen(d Device, token string, payload map[string
 	if p.relayed(d) {
 		aps, _ := payload["aps"].(map[string]any)
 		p.notePush(d, nil, event, "relay", "attempt", 0, int64(len(body)), 0)
+		p.sends.Add(1)
 		go func() {
+			defer p.sends.Done()
 			defer close(done)
 			started := time.Now()
 			res, err := p.postRelay(d, relayproto.PushRequest{Type: "liveactivity", Priority: priority, Token: token, APS: aps})
@@ -197,7 +199,9 @@ func (p *Pusher) sendLiveActivityThen(d Device, token string, payload map[string
 		return done
 	}
 	p.notePush(d, nil, event, "apns", "attempt", 0, int64(len(body)), 0)
+	p.sends.Add(1)
 	go func() {
+		defer p.sends.Done()
 		defer close(done)
 		started := time.Now()
 		res, err := p.sendDirect(d, apns.Request{Token: token, Env: d.APNSEnv, Topic: d.Topic, PushType: "liveactivity", Priority: priority, Body: body})
@@ -359,7 +363,9 @@ func (p *Pusher) sendBuiltWith(build localized, collapseID, pushType, priority s
 				continue
 			}
 			p.notePush(d, nil, event, "relay", "attempt", 0, int64(len(body)), 0)
+			p.sends.Add(1)
 			go func(d Device) {
+				defer p.sends.Done()
 				started := time.Now()
 				res, err := p.postRelay(d, relayproto.PushRequest{Type: pushType, Priority: priority, CollapseID: relayCollapseID(collapseID), Sealed: sealed})
 				p.noteRelayResult(d, nil, event, err, res.gone, int64(len(body)), time.Since(started))
@@ -376,7 +382,9 @@ func (p *Pusher) sendBuiltWith(build localized, collapseID, pushType, priority s
 			continue
 		}
 		p.notePush(d, nil, event, "apns", "attempt", 0, int64(len(body)), 0)
+		p.sends.Add(1)
 		go func(d Device) {
+			defer p.sends.Done()
 			sent := time.Now()
 			res, err := p.sendDirect(d, apns.Request{Token: d.APNSToken, Env: d.APNSEnv, Topic: d.Topic,
 				PushType: pushType, Priority: priority, CollapseID: collapseID, Body: body})

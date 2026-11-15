@@ -125,7 +125,7 @@ export function RemovedAgents() {
               <div key={s.id} className={SESSION_LIST_STYLE.personalRow}>
                 <AgentAvatar s={s} size={SESSION_LIST_METRICS.avatar} />
                 <span className="min-w-0 flex-1 truncate text-[13px] text-ink-2">{s.title || t("lib-format.untitled_session")}</span>
-                <Button tone="quiet" onClick={() => void restoreAgentSession(s, personalHideDeps).then((ok) => ok && setList((x) => x.filter((y) => y.id !== s.id)))}>{t("lib-agents.restore")}</Button>
+                <Button tone="quiet" onClick={() => void restoreAgentSession(s, personalHideDeps).then((ok) => ok && setList((x) => x.filter((y) => y.id !== s.id)))}>{t("agents-agentsview.restore")}</Button>
               </div>
             ))}
           </div>

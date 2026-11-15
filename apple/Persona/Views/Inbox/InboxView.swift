@@ -1,5 +1,6 @@
 import BeautifulUI
 import SwiftUI
+import PersonaWire
 
 @MainActor final class InboxAccountState: ObservableObject {
     @Published var accounts = InboxMailAccounts.cached(AppModel.shared.assistantManagerID)
@@ -646,13 +647,18 @@ struct InboxPage: View {
     /// `InboxBulk.confirmFrom` items on it asks first. One request, Undo after (docs/assistant/inbox.md「Clean up all」).
     private var cleanButton: some View {
         let scope = cleanScope
+        // Nothing to count yet (#7551): nothing shown while the list is read (the page's spinner), or after a read that
+        // failed (its red line); then the menu says no scope at all rather than that nothing is left.
+        let unread = store.items.isEmpty
+        let line = InboxBulk.scopeLine(filters: filterNames, query: query, count: scope.count,
+                                       loading: unread && (store.loading || !store.listed), failed: unread && store.error != nil)
         return Button { clean(confirmed: false) } label: {
             Label("Clean up all", systemImage: Theme.Icon.cleanUpAll)
-            Text(InboxBulk.scopeLine(filters: filterNames, query: query, count: scope.count))
+            if let line { Text(line) }
         }
         .disabled(scope.isEmpty)
         // A menu item's subtitle is drawn but not read out: the spoken name says what it covers and how many too.
-        .accessibilityLabel(Text("Clean up all") + Text(verbatim: String(localized: ", ")) + Text(InboxBulk.scopeLine(filters: filterNames, query: query, count: scope.count)))
+        .accessibilityLabel(line.map { Text("Clean up all") + Text(verbatim: String(localized: ", ")) + Text($0) } ?? Text("Clean up all"))
         .accessibilityIdentifier("inbox.cleanUpAll")
     }
 
@@ -663,6 +669,51 @@ struct InboxPage: View {
             return
         }
         withAnimation(Theme.Motion.standard) { store.clean(scope) }
+    }
+
+    // MARK: Nothing open (#7551)
+
+    /// What the list says with nothing open in it: the seal for the whole Inbox only.
+    nonisolated enum EmptyKind: Equatable {
+        /// No chip and no search: the whole Inbox is done.
+        case caughtUp
+        /// A source or kind chip leaves nothing open (a search too, maybe): the Inbox outside it may still hold plenty.
+        case filtered
+        /// A search alone finds nothing open.
+        case noMatch
+    }
+
+    /// The web's rule (#7478): a chip, with or without a search, is "filters"; a search alone is "no matches".
+    nonisolated static func emptyKind(source: String, kind: String, query: String) -> EmptyKind {
+        if !source.isEmpty || !kind.isEmpty { return .filtered }
+        return query.isEmpty ? .caughtUp : .noMatch
+    }
+
+    /// Nothing open: All Caught Up and its seal, or under the chips or a search a neutral mark that says what is empty and
+    /// the way back to the whole Inbox (the chips are kept on this device, so a list left filtered opens filtered).
+    @ViewBuilder private var emptyState: some View {
+        switch Self.emptyKind(source: source, kind: kind, query: query) {
+        case .caughtUp:
+            EmptyStateView(symbol: "checkmark.seal", title: String(localized: "All Caught Up"),
+                           message: String(localized: "New Lark messages and emails show up here."))
+        case .filtered:
+            EmptyStateView(symbol: Theme.Icon.filter, title: String(localized: "Nothing Open Matches These Filters"),
+                           message: String(localized: "Clear the filters to see the whole Inbox."),
+                           action: (String(localized: "Clear Filters"), clearFilters), tint: .secondary)
+        case .noMatch:
+            EmptyStateView(symbol: Theme.Icon.search, title: String(localized: "No Matches"), message: String(localized: "Try a different search."),
+                           action: (String(localized: "Clear Search"), clearFilters), tint: .secondary)
+        }
+    }
+
+    /// Clear Filters / Clear Search: back to the whole Inbox, its chips and its search both cleared (as the web's).
+    private func clearFilters() {
+        withAnimation(Theme.Motion.standard) {
+            source = ""
+            kind = ""
+            query = ""
+        }
+        Haptics.tap()
     }
 
     private var list: some View {
@@ -711,8 +762,7 @@ struct InboxPage: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             } else if openItems.isEmpty && waitingAgents.isEmpty && !store.loading {
-                EmptyStateView(symbol: "checkmark.seal", title: query.isEmpty ? String(localized: "All Caught Up") : String(localized: "No Matches"),
-                               message: query.isEmpty ? String(localized: "New Lark messages and emails show up here.") : String(localized: "Try a different search."))
+                emptyState
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -1408,9 +1458,10 @@ struct InboxAgentRow: View {
 
 // MARK: - Detail
 
-/// One inbox item opened: on iOS a native chat or mail stays behind View original until asked for, so the detail alone
-/// reports nothing read; the other sources keep their existing body (placement inbox_item, `InboxItemSlotContent`). The
-/// AI's summary with AI Draft Reply / Hand to AI is on top, Done in the toolbar, whoever draws the body.
+/// One inbox item opened: on iOS an ordinary native chat or mail stays behind View original until asked for, so the detail
+/// alone reports nothing read; an extension's source action opens that native source directly. Other sources keep their
+/// existing body (placement inbox_item, `InboxItemSlotContent`). The AI's summary with AI Draft Reply / Hand to AI is on
+/// top, Done in the toolbar, whoever draws the body.
 struct InboxDetailView: View {
     var item: InboxItem
     var accounts: [MailAccount]
@@ -1508,7 +1559,7 @@ struct InboxDetailView: View {
     }
 
     /// An event (inbox phase 1: recap, a suggestion, the chain) opens as its own page, the source behind 'view original';
-    /// anything else keeps the actions over its body, with a native chat or mail collapsed on iOS until its row is tapped.
+    /// anything else keeps the actions over its body, with an ordinary native chat or mail collapsed on iOS until opened.
     @ViewBuilder private var page: some View {
         if current.isEvent {
             InboxEventPage(item: current, accounts: accounts, draft: { drafting = true })
@@ -1531,7 +1582,11 @@ struct InboxDetailView: View {
             LarkMomentsPostView(postID: m.postID, pushed: true, manager: model.linkManager(current.manager)) // the post and its comments, as a shared Moments card opens
         } else if item.larkConversation != nil || item.mailSummary != nil {
             #if os(iOS)
-            collapsibleSource
+            if slot.showsSource {
+                originalSource
+            } else {
+                collapsibleSource
+            }
             #else
             originalSource
             #endif
@@ -1540,7 +1595,7 @@ struct InboxDetailView: View {
         }
     }
 
-    /// The unchanged source, shared by the platforms that open it directly and by iOS once it is explicitly expanded.
+    /// The unchanged source, opened directly on other platforms and by an extension, or explicitly expanded on iOS.
     @ViewBuilder private var originalSource: some View {
         if let c = item.larkConversation {
             LarkChatView(conversation: c, manager: model.linkManager(current.manager))

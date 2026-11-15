@@ -14,10 +14,11 @@ export function useOpened(open: boolean): boolean {
 
 /**
  * Keeps a lazy overlay's failure (its chunk would not load: offline, or the hub was redeployed) from taking the shell
- * down, since it sits outside PageBoundary: the overlay shows nothing and is closed, so the next open from any entry
- * (shortcut, sidebar button) is a fresh open that tries again (lazyPage does not keep a failed load).
+ * down, since it sits outside PageBoundary: with a `fallback`, that local UI stays available; otherwise the overlay
+ * shows nothing and is closed, so the next open from any entry (shortcut, sidebar button) is a fresh open that tries
+ * again (lazyPage does not keep a failed load).
  */
-export class OverlayBoundary extends Component<{ open: boolean; onClose: () => void; children: ReactNode }, { failed: boolean }> {
+export class OverlayBoundary extends Component<{ open: boolean; onClose: () => void; children: ReactNode; fallback?: ReactNode }, { failed: boolean }> {
   state = { failed: false };
 
   static getDerivedStateFromError() {
@@ -28,7 +29,7 @@ export class OverlayBoundary extends Component<{ open: boolean; onClose: () => v
     // a chunk that would not load is a warning (a redeploy), anything else a render crash (docs/web/web.md "Error reports")
     reportBoundary(error, "overlay_boundary", isChunkError(error), info.componentStack);
     // left open, an open request would not change the state, and the entry points would do nothing until a reload
-    this.props.onClose();
+    if (!this.props.fallback) this.props.onClose();
   }
 
   componentDidUpdate(prev: { open: boolean }) {
@@ -36,7 +37,7 @@ export class OverlayBoundary extends Component<{ open: boolean; onClose: () => v
   }
 
   render() {
-    return this.state.failed ? null : this.props.children;
+    return this.state.failed ? (this.props.fallback ?? null) : this.props.children;
   }
 }
 

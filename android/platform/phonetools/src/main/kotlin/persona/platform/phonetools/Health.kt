@@ -55,7 +55,9 @@ object Health {
     )
 
     /** What Settings › Phone data › Health asks for: read access to every metric, nothing to write. */
-    val permissions: Set<String> by lazy { recordTypes.values.map { HealthPermission.getReadPermission(it) }.toSet() }
+    val permissions: Set<String> by lazy {
+        recordTypes.values.map { HealthPermission.getReadPermission(it) }.toSet() + Workouts.permissions
+    }
 
     /** The schema's enum (iOS builds it from a dictionary, so its order differs run to run; the set is the same). */
     val metricNames: List<String> get() = recordTypes.keys.toList()
@@ -71,7 +73,7 @@ object Health {
     }
 
     /** The same, in the words the tool result gives the model (not the phone's language). */
-    private fun modelReason(c: Context): String? = when (status(c)) {
+    internal fun modelReason(c: Context): String? = when (status(c)) {
         HealthConnectClient.SDK_AVAILABLE -> null
         HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> "Health Connect 需要更新"  // i18n-ignore: tool result for the model
         else -> "这台手机没有 Health Connect"  // i18n-ignore: tool result for the model

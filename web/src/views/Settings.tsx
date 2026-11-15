@@ -408,7 +408,7 @@ function itemParent(tab: Tab, sub: string): { sub: string | null; label: string 
   return { sub: null, label: t("settings.back_to", { name: TAB_INFO[tab].label }) };
 }
 
-const AGENT_LABEL: Record<AgentTab, string> = { claude: "Claude Code", codex: "Codex", agy: "Antigravity", omp: "omp" };
+const AGENT_LABEL: Record<AgentTab, string> = { claude: "Claude Code", codex: "Codex", agy: "Antigravity", omp: "omp", grok: "Grok" };
 
 function isAgentSection(section: SettingsSection | null): section is AgentTab {
   return section != null && (AGENT_KINDS as readonly string[]).includes(section);

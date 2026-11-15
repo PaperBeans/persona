@@ -129,8 +129,8 @@ describe.each(["agents", "assistant"] as const)("%s: the timeline", (style) => {
     expect(host.querySelector("[data-latest-text]")?.textContent).toContain("Checking once more.");
     tap(head(outer()));
     await loaded();
-    const [done, going] = inner();
-    expect(title(done)).toBe("已工作 5s");
+    const [first, second, going] = inner();
+    expect([title(first), title(second)]).toEqual(["已工作 5s", "已工作 7s"]);
     expect(going.dataset.workGroup).toBe("live");
     expect(title(going)).toMatch(/^正在工作…\d/);
     expect(rows().join(" ")).toContain("echo 13");
@@ -142,7 +142,7 @@ describe.each(["agents", "assistant"] as const)("%s: the timeline", (style) => {
     tap(head(outer()));
     const lines = host.querySelectorAll('[data-thinking="live"]');
     expect(lines).toHaveLength(1);
-    expect(inner()[1].contains(lines[0])).toBe(true);
+    expect(inner().at(-1)?.contains(lines[0])).toBe(true);
     expect(lines[0].textContent).toContain("正在思考");
     // without a timeline the outer group is the live one
     draw(seg([tool(1), tool(2, false)]), true, style);

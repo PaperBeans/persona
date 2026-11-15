@@ -36,6 +36,10 @@ import (
 // (<file>.lock: the others wait for its write). The database is read while the App has it closed too (codexDBTarget).
 // Without sqlite3 or the history database there is none, as before.
 
+// codexAppHistoryVersion changes when already-written JSONL no longer matches what the converter produces. A mark
+// without it is a legacy cache and is rebuilt once, even when the App database has not changed.
+const codexAppHistoryVersion = 1
+
 // codexAppHistoryWait bounds one read of the history database; a long chat's turns stream in well under it.
 const codexAppHistoryWait = 30 * time.Second
 
@@ -65,6 +69,7 @@ type codexHistoryFailure struct {
 // files (the App may write a turn's rows after updating the chat, and finish a turn without updating it) — and the size
 // the file had then (-1: no file, the chat has no finished turn).
 type codexHistoryMark struct {
+	Version int    `json:"version,omitempty"`
 	Turn    int64  `json:"turn"`
 	TurnID  string `json:"turn_id"`
 	Status  string `json:"status"`
@@ -204,7 +209,7 @@ func (n *Node) refreshCodexAppHistory(id string) error {
 	if db != "" {
 		history = fileStamp(db) + fileStamp(db+"-wal")
 	}
-	if mark.Updated == t.UpdatedAtMs && mark.History == history && mark.Size == size && (!t.Paginated || mark.Lineage == t.RolloutPath) {
+	if mark.Version == codexAppHistoryVersion && mark.Updated == t.UpdatedAtMs && mark.History == history && mark.Size == size && (!t.Paginated || mark.Lineage == t.RolloutPath) {
 		return nil // up to date
 	}
 	if db == "" {
@@ -222,14 +227,14 @@ func (n *Node) refreshCodexAppHistory(id string) error {
 	if t.Paginated {
 		lineage = t.RolloutPath
 	}
-	grow := mark.Size >= 0 && mark.Size == size && mark.TurnID != "" && mark.Lineage == lineage
+	grow := mark.Version == codexAppHistoryVersion && mark.Size >= 0 && mark.Size == size && mark.TurnID != "" && mark.Lineage == lineage
 	res, err := writeCodexAppHistory(ctx, db, t, p, mark, grow)
 	if errors.Is(err, errCodexHistoryChanged) { // a written turn is not what it was (the App rolled back): anew
 		res, err = writeCodexAppHistory(ctx, db, t, p, codexHistoryMark{Turn: -1}, false)
 	}
 	if err == nil {
 		_, size = readCodexHistoryMark(p)
-		err = writeCodexHistoryMark(p, codexHistoryMark{Turn: res.turn, TurnID: res.turnID, Status: res.status,
+		err = writeCodexHistoryMark(p, codexHistoryMark{Version: codexAppHistoryVersion, Turn: res.turn, TurnID: res.turnID, Status: res.status,
 			Updated: t.UpdatedAtMs, History: history, Size: size, Lineage: lineage})
 	}
 	codexAppHistoryFailed.Lock()
@@ -607,8 +612,10 @@ func codexRolloutItem(kind string, raw []byte) map[string]any {
 		Arguments        json.RawMessage `json:"arguments"`
 		Result           *struct {
 			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
+				Type     string `json:"type"`
+				Text     string `json:"text"`
+				Data     string `json:"data"`
+				MimeType string `json:"mimeType"`
 			} `json:"content"`
 			IsError bool `json:"isError"`
 		} `json:"result"`

@@ -90,7 +90,7 @@ describe("Markdown table copy button", () => {
     const html = renderToStaticMarkup(createElement(Markdown, { text: md }));
     const doc = new DOMParser().parseFromString(html, "text/html");
     const button = doc.querySelector("button");
-    expect(button?.getAttribute("aria-label")).toBe("拷贝表格");
+    expect(button?.getAttribute("aria-label")).toBe("复制表格");
     // it shows with the cap it sits on (audit item 77): on hover, and while the button has the keyboard's focus, not
     // after a click (a clicked button keeps the focus, and the cap would stay over the header taking no clicks)
     const cap = button?.closest("[data-table-copy]");

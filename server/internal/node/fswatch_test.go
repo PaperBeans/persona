@@ -439,6 +439,53 @@ func TestListDirMarksIgnoredBesideMagicNames(t *testing.T) {
 	check(list(odd), odd)
 }
 
+func TestFsWatchGenerationRejectsLateOlderSet(t *testing.T) {
+	n, dir := testNode(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	n.fsw.start(ctx, func(fsChanged) {})
+	defer n.fsw.close()
+	old, fresh := filepath.Join(dir, "old"), filepath.Join(dir, "new")
+
+	entered, release := make(chan struct{}), make(chan struct{})
+	n.fsw.beforeSet = func() {
+		select {
+		case <-entered:
+			// The newer set has no reason to wait for the older one.
+		default:
+			close(entered)
+			<-release
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		n.fsw.set(n, fsWatchParams{Dirs: []fsWatchDir{{Path: old, Cwd: dir}}, Generation: 1})
+	}()
+	<-entered
+	n.fsw.set(n, fsWatchParams{Dirs: []fsWatchDir{{Path: fresh, Cwd: dir}}, Generation: 2})
+	close(release)
+	<-done
+	current := func() string {
+		n.fsw.mu.Lock()
+		defer n.fsw.mu.Unlock()
+		if len(n.fsw.dirs) != 1 {
+			return fmt.Sprintf("%v", n.fsw.dirs)
+		}
+		for d := range n.fsw.dirs {
+			return d.Path
+		}
+		return ""
+	}
+	if got := current(); got != fresh {
+		t.Fatalf("a late generation-1 set replaced generation 2: %q", got)
+	}
+	n.fsw.set(n, fsWatchParams{Dirs: []fsWatchDir{{Path: old, Cwd: dir}}, Generation: 1})
+	if got := current(); got != fresh {
+		t.Fatalf("an older generation accepted later: %q", got)
+	}
+}
+
 // The RPC the hub calls: the JSON of fs.watch becomes the watched set, and an empty one releases it.
 func TestFsWatchRPC(t *testing.T) {
 	n, dir := testNode(t)

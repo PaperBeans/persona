@@ -1,6 +1,5 @@
 #if os(iOS)
 import Foundation
-import PersonaWire
 
 /// A recorded meeting's one thread (#3862, docs/assistant/meeting-minutes.md "Meeting conversation (#3862)"): the room
 /// conversation's items, oldest first, and the follow-up's, read apart into what the meeting page shows. The room's
@@ -474,3 +473,4 @@ nonisolated extension MeetingThread.AskInfo {
     }
 }
 #endif
+import PersonaWire

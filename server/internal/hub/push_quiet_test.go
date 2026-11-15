@@ -81,7 +81,7 @@ func TestQuietReplyReminderKeyedByQuestion(t *testing.T) {
 // the hub's settings itself.
 func TestQuietSwitchReachesTheManagerOverTheHello(t *testing.T) {
 	h := newTestHub(t)
-	h.push.store = &lnStore{settingsStore{vals: map[string][]byte{}}}
+	h.push.store = newLnStore()
 	a := connectAssistant(t, h)
 	quietPush := func() bool { hello, _ := a.bh.Hello(context.Background()); return hello.QuietPush }
 	if quietPush() {

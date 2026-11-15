@@ -25,6 +25,7 @@ const AGENT_SETTINGS: { name: string; anchor: string; keys: string[] }[] = [
   { name: "Claude Code", anchor: "settings-claude", keys: ["effortLevel", "alwaysThinkingEnabled", "awaySummaryEnabled", "language", "promptSuggestionEnabled", "spinnerTipsEnabled", "prefersReducedMotion", "autoUpdatesChannel"] },
   { name: "Codex", anchor: "settings-codex", keys: ["model", "model_reasoning_effort", "service_tier", "model_reasoning_summary", "model_verbosity", "approval_policy", "sandbox_mode", "hide_agent_reasoning", "show_raw_agent_reasoning"] },
   { name: "Antigravity", anchor: "settings-agy", keys: ["model", "agentMode"] },
+  { name: "Grok", anchor: "settings-grok", keys: ["models.default", "models.default_reasoning_effort", "ui.permission_mode", "ui.yolo", "ui.compact_mode"] },
 ];
 
 /** What the search box matches beyond the categories (a curated static index): the pages' group headings and, by their
@@ -62,6 +63,7 @@ export const SEARCH_INDEX: SearchGroup[] = [
   { tab: "persona", group: t("settings-assistantsettings.routines"), hint: t("settings-assistantsettings.proactive_title"), anchor: "routines" },
   { tab: "persona", group: t("settings-assistantsettings.quiet_tasks"), anchor: "quiet-tasks" },
   { tab: "persona", group: t("settings-assistantsettings.background_folded"), anchor: "background-folded" },
+  { tab: "persona", group: t("settings-assistantsettings.recent_task_chats"), anchor: "recent-task-chats" },
   { tab: "persona", group: t("settings-assistantsettings.next_suggestions"), anchor: "next-suggestions" },
   { tab: "persona", group: t("settings-assistantsettings.start_requested"), hint: t("settings-assistantsettings.start_title"), anchor: "start-requested" },
   { tab: "persona", group: t("settings-assistantsettings.workspace_preference"), anchor: "workspace-preference" },
@@ -77,6 +79,7 @@ export const SEARCH_INDEX: SearchGroup[] = [
     anchor: "agents",
   },
   { tab: "persona", group: t("settings-assistantsettings.default_permissions"), anchor: "default-permissions" },
+  { tab: "persona", group: t("settings-assistantsettings.readonly_mode"), anchor: "readonly-mode" },
   { tab: "persona", group: t("settings-standing.title"), anchor: "standing-authorizations" },
   { tab: "persona", group: t("settings-assistantsettings.meeting_attendance"), hint: t("settings-assistantsettings.meetings_title"), anchor: "meetings" },
   { tab: "persona", group: t("settings-assistantsettings.recordings_title"), hint: words(t("settings-assistantsettings.recording_days"), t("settings-assistantsettings.minutes_days")), anchor: "recordings" },
@@ -111,6 +114,7 @@ export const SEARCH_INDEX: SearchGroup[] = [
   { tab: "agents", group: "Codex", anchor: "settings-codex" },
   { tab: "agents", group: "Antigravity", anchor: "settings-agy" },
   { tab: "agents", group: "omp", anchor: "settings-omp" },
+  { tab: "agents", group: "Grok", anchor: "settings-grok" },
   ...AGENT_SETTINGS.flatMap(({ name, anchor, keys }) => keys.map((key): SearchGroup => ({ tab: "agents", group: path(name, t(`lib-agent-settings.setting_${key}`)), anchor }))),
   { tab: "knowledge", group: t("settings-knowledge.topics_title"), anchor: "knowledge-topics" },
   { tab: "knowledge", group: t("settings-knowledge.topics_switch"), anchor: "knowledge-topics-switch" },
@@ -126,6 +130,8 @@ export const SEARCH_INDEX: SearchGroup[] = [
   { tab: "notifications", group: t("settings-notifications.input"), anchor: "notify-input" },
   { tab: "notifications", group: t("settings-notifications.done_title"), anchor: "done" },
   { tab: "notifications", group: t("settings-notifications.quiet"), hint: words(t("settings-notifications.quiet_start"), t("settings-notifications.quiet_end")), anchor: "notify-quiet" },
+  // the hub's switch (#8157), by its group, which it draws on any hub and while it loads (LowDistractionSettings.tsx)
+  { tab: "notifications", group: t("settings-notifications.low_distraction"), hint: t("settings-notifications.low_distraction_hint"), anchor: "low-distraction" },
   // Connectors
   { tab: "connectors", group: t("settings-connectors.mail"), anchor: "mail" },
   { tab: "connectors", group: t("settings-connectors.lark"), anchor: "lark" },

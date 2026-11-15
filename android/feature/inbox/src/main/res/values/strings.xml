@@ -287,6 +287,8 @@
     <string name="inbox_event_view_source">View original</string>
     <string name="inbox_done_by_manager">Handled by the assistant</string>
     <string name="inbox_event_related">Related</string>
+    <string name="inbox_open_chat">Open the chat</string>
+    <string name="inbox_content">Content</string>
     <!-- Source subscriptions (#2041): with the Inbox's other settings. Inbox Sources (#5308) once the hub says so. -->
     <string name="inbox_subscriptions">Subscriptions</string>
     <string name="inbox_sources">Inbox Sources</string>

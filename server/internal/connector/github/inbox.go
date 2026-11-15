@@ -330,7 +330,15 @@ func (c *Connector) applyNotifications(ctx context.Context, ns []notification, c
 		if err != nil {
 			continue // read again next time
 		}
-		thing.Thread, thing.Kind, thing.Label, thing.Last = thread, kind, label, markLast(stamp, epoch)
+		thing.Thread, thing.Kind, thing.Label = thread, kind, label
+		last := thing.Last // describe's newest comment or review names a PR's or issue's move; else the notification
+		if last == "" {
+			last = stamp
+		}
+		thing.Last = markLast(last, epoch)
+		if err := c.rememberMessageLast(ctx, thread, thing.Last, n.UpdatedAt); err != nil {
+			continue
+		}
 		thing.Tags = tagsOf(n, run, kind, thing.Sender)
 		if !st.enter(epoch) {
 			return moved
@@ -446,6 +454,7 @@ func threadOf(n notification) string {
 
 // move is a comment or a review, for the preview and the context.
 type move struct {
+	id              string
 	who, verb, text string
 	at              time.Time
 	bot             bool
@@ -497,30 +506,50 @@ func (c *Connector) describe(ctx context.Context, n notification, me string) (co
 		}
 		it.Comments = iss.Comments
 	}
-	var moves []move
-	var cs []comment
+	var moves, messages []move
+	var cs []remark
 	page := max(1, (it.Comments+99)/100)
 	if _, err := c.Get(ctx, fmt.Sprintf("/repos/%s/issues/%s/comments?per_page=100&page=%d", repo, number, page), &cs); err != nil {
 		return t, err
 	}
 	for _, cm := range cs {
-		moves = append(moves, move{who: who(cm.User), text: strings.TrimSpace(cm.Body), at: cm.CreatedAt, bot: isBot(cm.User)})
+		message := move{id: fmt.Sprintf("comment:%d", cm.ID), who: who(cm.User), text: strings.TrimSpace(cm.Body), at: cm.CreatedAt, bot: isBot(cm.User)}
+		moves = append(moves, message)
+		messages = append(messages, message)
 	}
 	reviewed := false
 	if pr {
-		var rs []comment
-		if _, err := c.Get(ctx, fmt.Sprintf("/repos/%s/pulls/%s/reviews?per_page=100", repo, number), &rs); err != nil {
+		// Reviews come oldest first with no count on the PR: the Link header names the last page, which holds the newest.
+		var rs []remark
+		h, err := c.Get(ctx, fmt.Sprintf("/repos/%s/pulls/%s/reviews?per_page=100", repo, number), &rs)
+		if err != nil {
 			return t, err
+		}
+		last, err := listLastPage(strings.Join(h.Values("Link"), ", "))
+		if err != nil {
+			return t, err
+		}
+		if last > 1 {
+			var tail []remark
+			if _, err := c.Get(ctx, fmt.Sprintf("/repos/%s/pulls/%s/reviews?per_page=100&page=%d", repo, number, last), &tail); err != nil {
+				return t, err
+			}
+			rs = append(rs, tail...)
 		}
 		for _, r := range rs {
 			verb := map[string]string{"APPROVED": "批准了", "CHANGES_REQUESTED": "要求修改", "COMMENTED": "评审了"}[r.State]
-			if verb == "" || r.State == "COMMENTED" && strings.TrimSpace(r.Body) == "" {
+			if verb == "" || r.SubmittedAt.IsZero() {
+				continue
+			}
+			message := move{id: fmt.Sprintf("review:%d", r.ID), who: who(r.User), verb: verb, text: strings.TrimSpace(r.Body), at: r.SubmittedAt, bot: isBot(r.User), state: r.State}
+			messages = append(messages, message)
+			if r.State == "COMMENTED" && strings.TrimSpace(r.Body) == "" {
 				continue
 			}
 			if strings.EqualFold(r.User.Login, me) {
 				reviewed = true
 			}
-			moves = append(moves, move{who: who(r.User), verb: verb, text: strings.TrimSpace(r.Body), at: r.SubmittedAt, bot: isBot(r.User), state: r.State})
+			moves = append(moves, message)
 		}
 	}
 	sort.SliceStable(moves, func(i, j int) bool { return moves[i].at.Before(moves[j].at) })
@@ -533,15 +562,24 @@ func (c *Connector) describe(ctx context.Context, n notification, me string) (co
 	t.Title, t.URL = it.Title, it.HTMLURL
 	t.ReplyTo, t.CanReply = "评论到 "+ref+"（仓库可见的人都能看到）", !it.Locked
 	t.Sender, t.Preview = it.User.String(), firstLine(it.Body)
+	lastStamp, newestID := newestMessageLast(messages, c.previousMessageLast(ctx, threadOf(n)))
+	t.Last = lastStamp
+	var last move
 	if len(moves) > 0 {
-		last := moves[len(moves)-1]
+		last = moves[len(moves)-1]
+		for i := len(moves) - 1; newestID != "" && i >= 0; i-- {
+			if moves[i].id == newestID {
+				last = moves[i]
+				break
+			}
+		}
 		t.Sender, t.Preview = last.who, strings.TrimSpace(last.verb+" "+firstLine(last.text))
 	}
 
 	switch {
 	case it.Merged || it.State == "closed":
 		t.Done = connector.DoneRead
-	case len(moves) > 0 && strings.EqualFold(strings.TrimSuffix(moves[len(moves)-1].who, " (bot)"), me):
+	case len(moves) > 0 && strings.EqualFold(strings.TrimSuffix(last.who, " (bot)"), me):
 		t.Done = connector.DoneReplied
 	case n.Reason == "review_requested" && len(it.Teams) == 0 && !hasLogin(it.Reviewers, me):
 		// no longer asked: reviewed (answered) or the request withdrawn

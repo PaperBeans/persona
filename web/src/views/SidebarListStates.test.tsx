@@ -176,7 +176,7 @@ describe("By to-do whose to-dos cannot be read (audit item 27)", () => {
       if (path === "/api/v1/machines") return json({ machines: [mac] });
       return json({});
     }));
-    online(["sessions_list", "sessions_todo"]);
+    online(["sessions_list", "sessions_agents_only", "sessions_todo"]);
     await render();
     expect(host.querySelector("[data-paged-sessions]")).not.toBeNull();
     expect(checked()).toBe("按状态");
@@ -208,7 +208,7 @@ describe("the paged Agents list's read fails (audit item 4)", () => {
   it("says it could not read the Agents list, as the complete list does, with Retry", async () => {
     let sessions = failed;
     vi.stubGlobal("fetch", hub({ sessions: () => sessions() }));
-    online(["sessions_list", "sessions_todo"]);
+    online(["sessions_list", "sessions_agents_only", "sessions_todo"]);
     await render();
     expect(host.querySelector("[data-paged-sessions]")).not.toBeNull();
     const said = alerts();

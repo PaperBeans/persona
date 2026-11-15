@@ -1,7 +1,6 @@
 #if os(iOS)
 import Foundation
 import Observation
-import PersonaWire
 
 /// The meeting conversation (#3862 phase 1) of the meetings this phone records: the room's state, the private mark and the
 /// follow-up as the hub reports them (`GET …/live`, the upload's `200`, `meeting_live`), Just me questions, follow-up
@@ -910,3 +909,4 @@ extension MeetingConversation.Deps {
     }
 }
 #endif
+import PersonaWire

@@ -89,7 +89,7 @@ final class InboxSourceCollapsedTests: XCTestCase {
                                "-inbox.kind", "", "-inbox.source", "", "-openInboxItem", item]
         app.launchPinned()
         acceptIconAlert()
-        requireHittable(element("inbox.detail.done"), "the \(item) detail")
+        requireHittable(element("inbox.detail.more"), "the \(item) detail")
     }
 
     @MainActor private func sourceToggle() -> XCUIElement {

@@ -2,6 +2,7 @@ package persona.core.contracts
 
 import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -29,6 +30,18 @@ class ModelsTest {
         // D5 preserves unknown states instead of inferring a known state from status.
         assertEquals(AgentState.Unknown, s.agentState)
         assertEquals(0, s.pendingInteractions)
+    }
+
+    @Test fun suggestionRiskDecodesAndAnAbsentFieldIsSafeByDefault() {
+        for ((field, expected) in mapOf("\"suggestion_risky\":true" to true,
+            "\"suggestion_risky\":false" to false, "" to false)) {
+            val comma = if (field.isEmpty()) "" else ","
+            val session = JsonCodec.decodeFromString<Session>(
+                """{"session_id":"s","suggestion":"Review the plan"$comma$field}""",
+            )
+            assertEquals(field.ifEmpty { "absent" }, expected, session.suggestionRisky)
+            assertEquals("Review the plan", session.suggestion)
+        }
     }
 
     @Test fun zeroTimeIsUnset() {
@@ -177,6 +190,17 @@ class ModelsTest {
         assertEquals("Claude 在问你", (JsonCodec.decodeFromString<Interaction>("""{"id":"c","kind":"question"}""").headline).zhAny())
     }
 
+    @Test fun questionOptionDecodesDeferActionAndDefaultsForOldHubs() {
+        val marked = JsonCodec.decodeFromString<QuestionOption>(
+            """{"label":"Leave it","description":"Handle it later","action":"defer"}""",
+        )
+        assertEquals("Leave it", marked.label)
+        assertEquals("Handle it later", marked.description)
+        assertEquals("defer", marked.action)
+        assertEquals(marked, JsonCodec.decodeFromString<QuestionOption>(JsonCodec.encodeToString(marked)))
+        assertNull(JsonCodec.decodeFromString<QuestionOption>("""{"label":"Continue"}""").action)
+    }
+
     @Test fun sessionInfoDecodes() {
         val info = JsonCodec.decodeFromString<SessionInfo>(
             """{"session_id":"s1","cwd":"/x","model":"claude-opus","context_tokens":51234,"output_tokens":9,"turns":3,""" +
@@ -189,6 +213,9 @@ class ModelsTest {
         assertEquals(java.time.Instant.parse("2026-11-01T02:00:00Z"), parseTime(info.startedAt))
         assertNull(info.lastActivity)
         assertEquals(SessionInfo(), JsonCodec.decodeFromString<SessionInfo>("{}"))
+        // A runtime's session says nobody gives its counts (#8261): its zeros stand in for older apps.
+        assertTrue(JsonCodec.decodeFromString<SessionInfo>("""{"session_id":"s1","turns":0,"usage_unknown":true}""").usageUnknown)
+        assertFalse(info.usageUnknown)
     }
 
     @Test fun interactionHeadline() {

@@ -27,6 +27,26 @@ class InboxRepositoryTest {
         }
     }
 
+    @Test fun assistantConnectorKeepsItsConversationUrl() = runTest {
+        val directory = Files.createTempDirectory("assistant-connector-url").toFile()
+        val url = "https://hub.example.com/chat/server/session-1"
+        try {
+            val transport = FakeTransport().apply {
+                items = JsonArray(listOf(buildJsonObject {
+                    put("id", "assistant:1"); put("source", "assistant"); put("kind", "assistant_post")
+                    put("account_name", "Assistant"); put("title", "Morning briefing"); put("preview", "Ready")
+                    put("connector", buildJsonObject {
+                        put("thread", "server/session-1"); put("label", "Assistant"); put("url", url)
+                    })
+                }))
+            }
+            val repository = repository(transport, directory, backgroundScope, FakeHub())
+            val record = repository.snapshot.first { it.records.isNotEmpty() }.records.single()
+            val connector = JsonCodec.encodeToJsonElement(InboxConnectorRef.serializer(), record.connector!!).jsonObject
+            assertEquals(url, connector["url"]?.jsonPrimitive?.content)
+        } finally { directory.deleteRecursively() }
+    }
+
     @Test fun persistentSnapshotSubscribersDoNotPollAHubButInboxEventsStillRefresh() = runTest {
         val directory = Files.createTempDirectory("inbox-no-poll-test").toFile()
         try {

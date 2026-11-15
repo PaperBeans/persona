@@ -59,6 +59,10 @@ type Pusher struct {
 	// fleet.clients, whether a phone would be pushed an MCP form). It may run under the Pusher's locks: it must not block.
 	devicesChanged func()
 
+	// sends counts the APNs and relay posts still on their way (sendBuiltWith, sendLiveActivity): each runs in its own
+	// goroutine and logs when it ends, so whoever closes what they post to (a test's fake APNs) waits for them first.
+	sends sync.WaitGroup
+
 	mu sync.Mutex
 	// sendMu lets maintenance skip an active transport instead of retiring a
 	// target whose acceptance is still in flight. Reads remain concurrent.
@@ -92,8 +96,17 @@ type Pusher struct {
 	intercepts   []pushIntercept
 	sent         []pushSent
 	lnDirty      bool // the held-push list changed since the last save
-	sentDirty    bool // the delivered-push list changed since the last save
-	lnWriting    bool // the one saver goroutine is running
+	// sentPending are the delivered pushes not yet appended to the store's record (pushSentStore); sentPrunedAt is
+	// when its last sweep ran.
+	sentPending  []pushSent
+	sentPrunedAt time.Time
+	// The hub.push_sent setting a build from before the table reads (mirrorSent): sentMirrorable once this hub read
+	// both at start, sentMirrorDue while it holds pushes the setting lacks, sentMirroredAt its last write.
+	sentMirrorable bool
+	sentMirrorDue  bool
+	sentMirroredAt time.Time
+	sentMirrorMu   sync.Mutex
+	lnWriting      bool // the one saver goroutine is running
 }
 
 // deviceStoreTimeout: how long a device row write may take before it gives up (the pool has no statement_timeout).

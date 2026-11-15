@@ -347,7 +347,9 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		return nil
 	}
 	out = out[:j]
-	linkSideSessions(out, n.offlineParents()) // the desktop app's side sessions under the sessions that started them (#5935)
+	parents, origins := n.offlineDesktop()
+	linkSideSessions(out, parents)           // the desktop app's side sessions under the sessions that started them (#5935)
+	placeClaudeDesktop(out, origins, n.home) // and in their projects (#8521)
 	sortNewestFirst(out)
 	return out
 }
@@ -394,6 +396,7 @@ func (n *Node) decorateIn(s *proto.Session, pass *codexListPass) {
 		s.PendingSwitch = st.PendingSwitch   // launcher_switch.go
 		s.SetEngineHistory(st.EngineHistory) // engine_switch.go
 	}
+	n.decorateModelRecovery(s) // node-owned recovery marker, and the shipped fallback-card projection (#7824)
 	if s.PendingSwitch == nil {
 		s.PendingSwitch = n.unrecordedSwitch(s.SessionID)
 	}

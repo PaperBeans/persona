@@ -559,10 +559,78 @@ func TestRuntimeRowNarrowsModesAndModel(t *testing.T) {
 	}
 	// A runtime that declared no modes: the node refuses session.modes for its sessions, so none lists efforts.
 	other := dialRuntime(t, n, map[string]any{"runtime": "acme-cloud", "caps": map[string]any{"send": true}})
-	_ = other.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{{"session_id": "no-modes", "status": "idle", "efforts": []string{"low"}}}})
+	_ = other.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{{"session_id": "no-modes", "status": "idle", "efforts": []string{"low"},
+		"capabilities": map[string]any{"permission_modes": []string{"default", "bypassPermissions"}}}}})
 	waitFor(t, "listed", func() bool { _, ok := listed(t, n)["no-modes"]; return ok })
-	if e := listed(t, n)["no-modes"].Efforts; e != nil {
-		t.Fatalf("efforts %v on a runtime without modes", e)
+	if s := listed(t, n)["no-modes"]; s.Efforts != nil || s.Capabilities.PermissionModes != 0 {
+		t.Fatalf("efforts %v, permission modes %v on a runtime without modes", s.Efforts, s.Capabilities.PermissionModes)
+	}
+}
+
+// A row of an agent that is not Claude Code lists the permission modes session.modes takes for it (#8261): Persona's
+// own, each once, beside capabilities.modes false (older apps show no Claude Code chips there). None where the Claude
+// Code chips stand or where the row takes its modes away (archived); and a switch between them reaches the runtime.
+func TestRuntimeRowListsItsPermissionModes(t *testing.T) {
+	n, _ := runtimeNode(t)
+	hello := paseoHello()
+	hello["caps"].(map[string]any)["modes"] = true
+	h := dialRuntime(t, n, hello)
+	both := []string{"default", "bypassPermissions"}
+	listedModes := map[string]any{"permission_modes": []string{"default", "yolo", "bypassPermissions", "default"}}
+	_ = h.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
+		{"session_id": "grok", "status": "idle", "agent": "paseo", "capabilities": listedModes},
+		{"session_id": "pi", "status": "idle", "agent": "paseo", "capabilities": map[string]any{"permission_modes": []string{"default"}}},
+		{"session_id": "claude", "status": "idle", "agent": "claude", "capabilities": listedModes},
+		{"session_id": "archived", "status": "offline", "agent": "paseo",
+			"capabilities": map[string]any{"modes": false, "permission_modes": both}},
+		{"session_id": "older-bridge", "status": "idle", "agent": "paseo"},
+	}})
+	waitFor(t, "rows listed", func() bool { _, ok := listed(t, n)["older-bridge"]; return ok })
+	rows := listed(t, n)
+	for _, c := range []struct {
+		id    string
+		modes bool
+		want  []string
+	}{
+		{"grok", false, both},
+		{"pi", false, []string{"default"}},
+		{"claude", true, nil},
+		{"archived", false, nil},
+		{"older-bridge", false, nil},
+	} {
+		got := rows[c.id].Capabilities
+		if got == nil || got.Modes == nil || *got.Modes != c.modes || got.PermissionModes != proto.PermissionModeSetOf(c.want...) {
+			t.Errorf("%s: %+v, want modes %v and permission modes %v", c.id, got, c.modes, c.want)
+		}
+	}
+	if _, err := nodeCall(t, n, "session.modes", map[string]any{"session_id": "grok", "permission_mode": "bypassPermissions"}); err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(h.got("session.modes")[0], &m)
+	if m["session_id"] != "grok" || m["permission_mode"] != "bypassPermissions" {
+		t.Fatalf("modes %v", m)
+	}
+}
+
+// session.info of a runtime's session whose counts nobody gives (no transcript here) says they are unknown, so the
+// apps leave them out (#8261); the zeros stay for older apps, which decode them as required numbers.
+func TestRuntimeSessionInfoSaysItsCountsAreUnknown(t *testing.T) {
+	n, _ := runtimeNode(t)
+	h := dialRuntime(t, n, paseoHello())
+	_ = h.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
+		{"session_id": "grok", "status": "idle", "agent": "paseo", "model": "grok-5", "permission_mode": "bypassPermissions"},
+	}})
+	waitFor(t, "listed", func() bool { _, ok := listed(t, n)["grok"]; return ok })
+	raw, err := nodeCall(t, n, "session.info", map[string]any{"session_id": "grok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info map[string]any
+	_ = json.Unmarshal(raw, &info)
+	if info["usage_unknown"] != true || info["turns"] != float64(0) || info["context_tokens"] != float64(0) || info["model"] != "grok-5" ||
+		info["permission_mode"] != "bypassPermissions" {
+		t.Fatalf("info %s", raw)
 	}
 }
 

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PersonaWire
 
 /// Capabilities follow provenance, never the extension's current running state.
 /// Raw origins may contain local paths or credentials and must not be shown.

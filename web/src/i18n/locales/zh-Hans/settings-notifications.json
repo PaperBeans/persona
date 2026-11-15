@@ -60,5 +60,10 @@
   "webpush_test": "发送测试",
   "webpush_test_sent": "测试已发送，稍后就会出现。",
   "webpush_test_failed": "测试没有发出去：{error}",
-  "webpush_footer": "默认关闭，每个浏览器单独设置。下面的选项同样适用，和页面打开时一样。通知经由这个浏览器的推送服务传送，全程加密，只有这个浏览器能读。如果这台电脑上的 Persona Link 或桌面应用已经会通知你，请保持关闭。"
+  "webpush_footer": "默认关闭，每个浏览器单独设置。下面的选项同样适用，和页面打开时一样。通知经由这个浏览器的推送服务传送，全程加密，只有这个浏览器能读。如果这台电脑上的 Persona Link 或桌面应用已经会通知你，请保持关闭。",
+  "low_distraction": "低打扰模式",
+  "low_distraction_hint": "只提醒要你处理的事，其余留给简报",
+  "low_distraction_footer": "对你所有的设备生效。开启后，要你回答、批准或拍板的事、你设的提醒和主对话的通知照常提醒；任务结论、「请验收」和其他对话的通知留给简报和「被拦推送」，Agent 做完不再提醒。",
+  "low_distraction_load_failed": "读不到低打扰模式",
+  "low_distraction_unsupported": "这台 hub 还不支持低打扰模式，更新 hub 后可以在这里开启"
 }

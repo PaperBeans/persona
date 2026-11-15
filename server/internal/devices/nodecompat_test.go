@@ -244,6 +244,33 @@ func TestMachineCallGatesAssistantServiceTier(t *testing.T) {
 	}
 }
 
+func TestMachineCallGatesSupervisionInstructions(t *testing.T) {
+	d := newTestDevices(t)
+	m := newMachine(d, MachineConfig{ID: "box", Name: "Box", Kind: "ssh", SSHHost: "box.invalid"})
+	without := current("old")
+	without.Capabilities = slices.DeleteFunc(slices.Clone(without.Capabilities), func(c string) bool {
+		return c == nodeproto.AssistantSupervisionInstructions
+	})
+	for _, info := range []proto.NodeInfo{current("new"), without, {Version: "pre-handshake", ModelConfiguration: true}} {
+		m.mu.Lock()
+		m.info, m.online = info, true
+		m.mu.Unlock()
+		for _, method := range []string{"assistant.send", "assistant.warm", "session.send"} {
+			for _, policy := range []string{"", "Static supervisor policy"} {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel() // an admitted call cannot reach a process in this fixture
+				var re *rpc.Error
+				err := m.call(ctx, method, map[string]any{"supervision_instructions": policy}, nil)
+				refused := errors.As(err, &re) && re.Code == proto.CodeNodeOutdated
+				want := policy != "" && !nodeHas(info, nodeproto.AssistantSupervisionInstructions)
+				if refused != want {
+					t.Fatalf("%s %s policy bytes=%d: refused=%v want=%v: %v", info.Version, method, len(policy), refused, want, err)
+				}
+			}
+		}
+	}
+}
+
 func TestNodeInfoHandshakeIsOptionalOnTheWire(t *testing.T) {
 	// An old node's node.info (no handshake fields) still decodes, and an old manager's decoder ignores the new ones.
 	var info proto.NodeInfo

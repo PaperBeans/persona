@@ -131,7 +131,7 @@ func TestHandStartedAgentUnderALeaderGetsItsSignals(t *testing.T) {
 
 	agentTurn(s, f, proto.StatusDone, "做完了，PR https://github.com/o/r/pull/7 已合并", 0)
 	waitFor(t, "the leader's message", func() bool { return len(f.noticesTo("lead1")) == 1 })
-	if n := f.noticesTo("lead1")[0]; !strings.Contains(n, "📋 督办") || !strings.Contains(n, "你是这些任务的 leader 对话") {
+	if n := f.noticesTo("lead1")[0]; !strings.Contains(n, "📋 督办") || !strings.Contains(n, "signal=review") {
 		t.Fatalf("the leader's message:\n%s", n)
 	}
 	if got := f.noticesTo("conv1"); len(got) != 0 {

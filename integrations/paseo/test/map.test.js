@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  AUTO_ACCEPT_ROOTS, CANCELED_NOTE, ERROR_LEAD, ERROR_TEXT, agentRoot, agentRow, archivedUnderOwnId, asksForTool, autoAcceptOf, codexThreadOf,
-  backgroundOf, defaultProvider, effortFor, exitNote, interactionOf, launchersOf, linkedWorktree, modeBeforePlan,
-  parentAgentId, paseoMode, promptKey, providerRoots, responseOf, rewindOf, rowStatus, projectSpaces, sameKindProvider, sessionIdOf, slotNameOf, spaceIdOf,
-  strayRecord, timelineItems, toolCall, transcriptOf, workspaceRow, paseoCheckouts,
+  AGENT_NOTICE, AUTO_ACCEPT_ROOTS, CANCELED_NOTE, ERROR_LEAD, ERROR_TEXT, FROM_SESSION, SCHEDULE_NOTICE, agentRoot, agentRow, archivedUnderOwnId, asksForTool,
+  autoAcceptOf, codexThreadOf, backgroundOf, defaultProvider, effortFor, exitNote, interactionOf, launchersOf, linkedWorktree, modeBeforePlan,
+  parentAgentId, paseoMode, permissionModesOf, promptKey, providerRoots, responseOf, rewindOf, rowStatus, projectSpaces, sameKindProvider, sessionIdOf,
+  slotNameOf, spaceIdOf, startedByPersona, strayRecord, timelineItems, toolCall, transcriptOf, workspaceRow, paseoCheckouts,
 } from '../lib/map.js'
 import { agentSnapshot, autoAcceptFeature, entry, workspaceDescriptor } from './fake-paseo.js'
 
@@ -174,6 +174,19 @@ test("a row that is not Claude Code's lists the efforts its model takes, among P
   assert.equal(agentRow(claude, { roots, thinking: ['low', 'high'] }).efforts, undefined, "Claude Code's are the apps' own")
 })
 
+test("rows of agents Persona started or took over say so; an agent made in Paseo's app does not, nor one whose id the bridge only kept (#8130)", () => {
+  const roots = providerRoots(CONFIG)
+  const claude = (labels) => agentSnapshot({ provider: 'my-claude', cwd: '/w/proj', labels,
+    persistence: { provider: 'my-claude', sessionId: CLAUDE_SID, metadata: { provider: 'claude' } } })
+  const started = claude({ 'persona.session': 'bbbbbbbb-0000-4000-8000-000000000042' })
+  const takenOver = claude({ 'persona.session': CLAUDE_SID })
+  const own = claude({})
+  const kept = claude({ 'persona.session': 'cccccccc-0000-4000-8000-000000000003', 'persona.kept': '1' })
+  assert.deepEqual([started, takenOver, own, kept].map(startedByPersona), [true, true, false, false])
+  assert.deepEqual([started, takenOver, own, kept].map((a) => agentRow(a, { roots }).started_by_persona), [true, true, undefined, undefined])
+  assert.equal(startedByPersona(claude({ 'persona.session': '../x' })), false, 'not a session id the node takes')
+})
+
 test('an archived Codex conversation keeps a Persona-owned id, without changing Paseo-originated agents (#5129)', () => {
   const roots = providerRoots({ ...CONFIG, 'codex-alias': { extends: 'my-codex' } })
   const thread = '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0003'
@@ -258,6 +271,22 @@ test("Allow all is Paseo's Auto Accept where that is the approval (Grok); off, o
     [true, false, undefined])
 })
 
+test("a provider that is not Claude Code's takes its own approval, and Allow all where Paseo has one: its rows and launchers say so (#8261)", () => {
+  const both = ['default', 'bypassPermissions']
+  assert.deepEqual([permissionModesOf('acp'), permissionModesOf('opencode'), permissionModesOf('codex'), permissionModesOf('pi'), permissionModesOf('pi', true),
+    permissionModesOf('claude')], [both, both, both, ['default'], both, undefined])
+  const roots = providerRoots(CONFIG, [{ provider: 'pi' }])
+  const row = (provider, fields) => agentRow(agentSnapshot({ provider, cwd: '/w/x', ...fields }), { roots })
+  assert.deepEqual(row('grok').capabilities.permission_modes, both, "Grok's Auto Accept, though Paseo has not loaded it")
+  assert.deepEqual(row('my-codex').capabilities.permission_modes, both, "Codex's full-access")
+  assert.deepEqual(row('pi').capabilities.permission_modes, ['default'], 'no Allow all: its own alone, nothing to switch')
+  assert.deepEqual(row('pi', { features: [autoAcceptFeature(false)] }).capabilities.permission_modes, both, 'a switch Paseo lists for it')
+  assert.equal(row('my-claude', { persistence: { sessionId: CLAUDE_SID, metadata: { provider: 'claude' } } }).capabilities.permission_modes, undefined,
+    "Claude Code's five are the apps' own")
+  const archived = agentSnapshot({ id: 'g1', provider: 'grok', archivedAt: '2026-11-04T10:00:00.000Z', labels: { 'persona.session': 'paseo-g1' } })
+  assert.equal(agentRow(archived, { roots, archived: true }).capabilities.permission_modes, undefined, 'archived: Paseo changes none of it')
+})
+
 test("spaces: a project's checkout and its worktrees are one space; a workspace names where an agent is, and is no slot", () => {
   // The placement's projectKey is Paseo's project record id.
   const at = (dir, o = {}) => ({ cwd: dir, isGit: true, currentBranch: o.branch ?? null, remoteUrl: null, worktreeRoot: dir,
@@ -320,18 +349,23 @@ test("launchers: one per usable provider, with the agent it starts, its models' 
   ]
   const roots = providerRoots(CONFIG, entries)
   // Grok (over ACP) and OpenCode approve through Paseo's Auto Accept switch (#8141); Claude Code and Codex have modes,
-  // pi neither.
+  // pi neither. Each is named as in Paseo, and one that is not Claude Code's says the permission modes a start takes:
+  // Allow all with Auto Accept or Codex's full-access, else its own alone (#8261).
+  const both = ['default', 'bypassPermissions']
   assert.deepEqual(launchersOf(entries, roots), [
-    { name: 'my-claude', agent: 'claude', model: 'Fable (1M)', models: [
+    { name: 'my-claude', agent: 'claude', model: 'Fable (1M)', display_name: 'My Claude', models: [
       { id: 'fable[1m]', name: 'Fable (1M)', default: true, efforts: ['low', 'medium', 'high', 'max'], default_effort: 'max' },
       { id: 'haiku', name: 'Haiku' },
     ] },
     // Paseo creates a Codex agent with no first message: the form need not ask for one (#8140).
-    { name: 'my-codex', agent: 'codex', model: 'My Codex', models: [], prompt_optional: true },
-    { name: 'grok', agent: 'paseo', model: 'G', models: [{ id: 'g', name: 'G', efforts: ['xhigh'] }], auto_accept: true },
-    { name: 'opencode', agent: 'paseo', model: 'OpenCode', models: [], auto_accept: true },
-    { name: 'pi', agent: 'paseo', model: 'Pi', models: [] },
+    { name: 'my-codex', agent: 'codex', model: 'My Codex', models: [], prompt_optional: true, display_name: 'My Codex', permission_modes: both },
+    { name: 'grok', agent: 'paseo', model: 'G', models: [{ id: 'g', name: 'G', efforts: ['xhigh'] }], auto_accept: true, display_name: 'Grok',
+      permission_modes: both },
+    { name: 'opencode', agent: 'paseo', model: 'OpenCode', models: [], auto_accept: true, display_name: 'OpenCode', permission_modes: both },
+    { name: 'pi', agent: 'paseo', model: 'Pi', models: [], display_name: 'Pi', permission_modes: ['default'] },
   ])
+  assert.equal(launchersOf([{ provider: 'pi', enabled: true, status: 'ready', label: 'pi' }], { pi: 'pi' })[0].display_name, undefined,
+    'a label that is its id names nothing more')
   assert.equal(defaultProvider(entries, roots), 'my-claude', "Claude Code's own is off: the first running Claude Code")
   assert.equal(defaultProvider([{ provider: 'claude', enabled: true, status: 'ready' }, ...entries], roots), 'claude')
 })
@@ -440,6 +474,44 @@ test("the bridge's own words are the Chinese the hub rewrites in the reader's la
   ], "an error with nothing said is the bare word; a compaction is the node's notice, a divider the apps word themselves")
   const roots = providerRoots(CONFIG)
   assert.equal(agentRow(agentSnapshot({ provider: 'grok', status: 'error', lastError: 'boom' }), { roots }).last_text, '出错了：boom')
+})
+
+test("what another agent hands this one is a message from another session, a subagent's task note or a notice, as from a transcript (#8220)", () => {
+  // The node's words for the same lines read from a transcript (server/internal/transcript/paseo.go): change both sides together.
+  assert.deepEqual([FROM_SESSION, AGENT_NOTICE, SCHEDULE_NOTICE], ['另一个会话',
+    { completed: '子 Agent 完成', failed: '子 Agent 失败', stopped: '子 Agent 已停止', waiting: '子 Agent 等待批准' }, '定时任务到点'])
+  const child = '00000000-0000-4000-8000-00000000c41d'
+  // Paseo's projection of an envelope (agent-messages/envelope.ts projectAgentMessage), and of a bare one (`heartbeat`).
+  const said = (callId, event, text, sender = { id: child, title: 'Ticket 01' }) => ({ type: 'tool_call', callId, name: 'agent_message', status: 'completed',
+    error: null, agentMessage: { event, sender, text }, detail: { type: 'plain_text', text, icon: 'bot' } })
+  const bare = (text) => ({ type: 'tool_call', callId: 'paseo-system:abc', name: 'heartbeat', status: 'completed', error: null,
+    detail: { type: 'plain_text', text, icon: 'sparkles' } })
+  const request = JSON.stringify({ agentId: child, requestId: 'permission-1', request: { id: 'permission-1', name: 'Bash', kind: 'tool',
+    input: { command: 'make smoke', description: 'Run the smoke test' } } }, null, 2)
+  const items = timelineItems([
+    entry(1, said('paseo-agent-message:m1', 'message', 'Ticket 01 is done, please review.')),
+    entry(2, said('paseo-agent-message:m2', 'message', 'Found it.', { id: child })),
+    entry(3, said('paseo-agent-message:n1', 'finished', `Agent ${child} (Ticket 01) finished.\n\nServer: srv_test\n\n<agent-response>\nAll checks pass.\n` +
+      '[truncated 99 chars; use get_agent_activity for the full response]\n</agent-response>')),
+    entry(4, said('paseo-agent-message:n2', 'permission-required', `Agent ${child} (Ticket 01) needs permission.\n\nServer: srv_test\n\n` +
+      'Respond with `respond_to_permission` using the `agentId` and `requestId` below.\n\n<permission-request>\n' + request + '\n</permission-request>')),
+    entry(5, said('paseo-agent-message:n3', 'errored', `Agent ${child} (${child}) was canceled.`, { id: child, title: child })),
+    entry(6, bare('Schedule "nightly review" fired (id=s1, run=r1).\nReview the day.')),
+    entry(7, bare(`Agent ${child} (Ticket 02) errored.\n\n<agent-response>\nNo database.\n</agent-response>`)),
+    entry(8, bare('Something Paseo has not sent yet.\nMore of it.')),
+    entry(9, said('paseo-agent-message:m4', 'message', '  ')),
+  ], { maxSeq: 9 }).items
+  assert.deepEqual(items.map((i) => [i.id, i.role, i.kind, i.text ?? i.tool_name, i.from, i.task]), [
+    ['1#0', 'user', 'text', 'Ticket 01 is done, please review.', 'Ticket 01', undefined],
+    ['2#0', 'user', 'text', 'Found it.', '另一个会话', undefined],
+    ['3#0', 'system', 'notice', '子 Agent 完成 · Ticket 01', undefined, { kind: 'agent', status: 'completed', title: 'Ticket 01', detail: 'All checks pass.…' }],
+    ['4#0', 'system', 'notice', '子 Agent 等待批准 · Ticket 01', undefined, { kind: 'agent', status: 'waiting', title: 'Ticket 01', detail: 'Bash: Run the smoke test' }],
+    ['5#0', 'system', 'notice', '子 Agent 已停止', undefined, { kind: 'agent', status: 'stopped', title: '' }],
+    ['6#0', 'system', 'notice', '定时任务到点：nightly review', undefined, undefined],
+    ['7#0', 'system', 'notice', '子 Agent 失败 · Ticket 02', undefined, { kind: 'agent', status: 'failed', title: 'Ticket 02', detail: 'No database.' }],
+    ['8#0', 'system', 'notice', 'Something Paseo has not sent yet.', undefined, undefined], // a bare envelope of another kind
+  ], 'an empty message shows nothing')
+  assert.ok(items.every((i) => !i.wake && !i.queued), 'the timeline does not say whether one started a run')
 })
 
 test('a timeline as items: results where they finished, the text being written held back, echoes tagged', () => {

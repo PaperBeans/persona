@@ -436,29 +436,30 @@ data class JSegment(val label: String, val count: Int? = null, val status: Statu
 
 /**
  * A small set of mutually exclusive filters: a sliding pill in glass, underlined text tabs in brief, a ruled
- * strip of cells on the board.
+ * strip of cells on the board. [compact] reduces spacing only; text keeps the ambient font scale.
  */
 @Composable
-fun JSegmented(options: List<JSegment>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+fun JSegmented(options: List<JSegment>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, compact: Boolean = false) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
     fun text(segment: JSegment) = segment.label + (segment.count?.let { " $it" } ?: "")
     when (PersonaTheme.style) {
         AppStyle.Glass -> Row(
             modifier.clipDrawing(CircleShape).background(palette.surface)
-                .border(1.dp, Brush.verticalGradient(listOf(palette.strokeTop, palette.strokeBottom)), CircleShape).padding(4.dp.dense),
+                .border(1.dp, Brush.verticalGradient(listOf(palette.strokeTop, palette.strokeBottom)), CircleShape)
+                .padding(if (compact) Tokens.Space.xxs else 4.dp.dense),
         ) {
             options.forEachIndexed { index, segment ->
                 val on = index == selected
                 Box(
                     Modifier.clip(CircleShape).background(if (on) palette.action else Color.Transparent)
                         .clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = on }
-                        .padding(horizontal = 16.dp.dense, vertical = 9.dp.dense),
+                        .padding(horizontal = if (compact) Tokens.Space.s else 16.dp.dense, vertical = 9.dp.dense),
                     contentAlignment = Alignment.Center,
                 ) { Text(text(segment), style = type.labelSmall, color = if (on) palette.onAction else palette.ink2, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }
             }
         }
-        AppStyle.Brief -> Row(modifier, horizontalArrangement = Arrangement.spacedBy(22.dp.dense)) {
+        AppStyle.Brief -> Row(modifier, horizontalArrangement = Arrangement.spacedBy(if (compact) Tokens.Space.s else 22.dp.dense)) {
             options.forEachIndexed { index, segment ->
                 val on = index == selected
                 Column(
@@ -491,7 +492,7 @@ fun JSegmented(options: List<JSegment>, selected: Int, onSelect: (Int) -> Unit, 
                     Text(
                         text(segment), style = type.labelSmall.copy(fontWeight = if (on) FontWeight.Bold else FontWeight.Medium),
                         color = if (on) palette.ink else palette.ink2, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 14.dp.dense, vertical = 10.dp.dense),
+                        modifier = Modifier.padding(horizontal = if (compact) Tokens.Space.s else 14.dp.dense, vertical = 10.dp.dense),
                     )
                 }
             }

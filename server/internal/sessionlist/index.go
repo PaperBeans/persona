@@ -38,7 +38,7 @@ type Item struct {
 	// Private: a row a reader with Options.NoPrivate is never shown, in its rows, totals or counts (a health-space
 	// conversation, which an extension's token does not see).
 	Private bool
-	// Assistant marks an Assistant conversation, excluded from the active Agent aggregate.
+	// Assistant marks a Persona conversation, excluded from the Agents list and active Agent aggregate.
 	Assistant bool
 	// Fold is the item's optional per-row metadata: its place in the session hierarchy (#5120) and its open to-do
 	// (#6662). Nil for an item with neither, which shows its own State and BackgroundWaiting. It sits behind a pointer
@@ -110,6 +110,8 @@ type Options struct {
 	// NoPrivate leaves the Private items out of the rows, the totals and every count; like Manager it is the adapter's
 	// to set (who asks), not a key Parse reads, and it binds a cursor as the other filters do.
 	NoPrivate bool
+	// AgentsOnly excludes assistant and health-space conversations from the filtered view.
+	AgentsOnly bool
 	// Places (place=["<machine>","<project>"], repeatable) selects the items at any of these machine and project
 	// pairs: one project's directories across computers. Spaces (space=["<machine>","<group>"]) does the same by
 	// machine and group. An empty key selects the items of that machine without the attribute. Each combines with
@@ -200,8 +202,8 @@ type journalEntry struct {
 type filters struct {
 	ID, State, Machine, Project, Group, Source, Provider, Q, PaneSource, Manager, Under, Todo, Waiting, ExcludePaneSource string
 	// Places and Spaces are Options' as placesKey spells them: filters stay comparable.
-	Places, Spaces   string
-	Roots, NoPrivate bool
+	Places, Spaces               string
+	Roots, NoPrivate, AgentsOnly bool
 }
 
 type binding struct {
@@ -223,10 +225,11 @@ type event struct {
 }
 
 type result struct {
-	searchHits map[string]SearchHit
-	events     []event
-	counts     Counts
-	ordered    bool // counts-only views must not be mistaken for an empty ordered list
+	searchHits  map[string]rankedHit
+	searchTerms []string // the terms a page's evidence is built for
+	events      []event
+	counts      Counts
+	ordered     bool // counts-only views must not be mistaken for an empty ordered list
 }
 
 type cacheEntry struct {
@@ -259,7 +262,10 @@ type Index struct {
 	cacheClock     uint64
 	snapshots      map[string]*snapshot
 	snapshotOrder  []string
-	now            func() time.Time // optional clock used by package tests
+	// undecoded counts the current records without a search document: a search with none to decode lists none
+	// (decodeSearchDocuments).
+	undecoded int
+	now       func() time.Time // optional clock used by package tests
 }
 
 func randomToken() string {
@@ -346,9 +352,13 @@ func (i *Index) ReplaceOwned(source, owner string, items []Item) {
 	for id, c := range changes {
 		if c.before != nil {
 			addCount(&i.counts, c.before.item, false, -1)
+			if c.before.searchDocument == nil {
+				i.undecoded--
+			}
 		}
 		if c.after != nil {
 			addCount(&i.counts, c.after.item, false, 1)
+			i.undecoded++ // a new record: its document is decoded by the first search that reads it
 		}
 		if c.after == nil {
 			delete(i.items, id)

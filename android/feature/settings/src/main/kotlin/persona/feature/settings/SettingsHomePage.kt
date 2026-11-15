@@ -23,6 +23,7 @@ private data class HomeEntry(val key: NavKey, val title: Int, val icon: PhIcon, 
 internal fun SettingsHomePage(
     services: SettingsServices, query: String, onQuery: (String) -> Unit,
     extensionsAvailable: Boolean, inboxSources: Boolean, extensionSummary: String?, channelsAvailable: Boolean, channelList: List<HubChannel>?,
+    knowledgeSelectionAvailable: Boolean,
     connection: ConnectionState, translationValue: String?, hubUpdateStatus: HubUpdateStatus?, updateValue: String?,
     selected: NavKey?, onOpen: (SettingsPage) -> Unit, onNavigate: ((NavKey) -> Unit)?, onClose: (() -> Unit)?,
     onDemo: (() -> Unit)?, onExitDemo: (() -> Unit)?, slots: LazyListScope.() -> Unit,
@@ -43,6 +44,8 @@ internal fun SettingsHomePage(
             R.string.settings_inbox_sources, PersonaIcons.inProgress, R.string.settings_inbox_sources_detail,
             R.string.settings_search_inbox_sources_aliases),
         if (!extensionsAvailable) null else entry(SettingsPage.Extensions, R.string.settings_section_extensions, PersonaIcons.skills, R.string.settings_home_extensions_detail, R.string.settings_search_extensions_aliases, extensionSummary),
+        if (!knowledgeSelectionAvailable) null else entry(SettingsPage.KnowledgeSelection, R.string.settings_knowledge_selection_title, PersonaIcons.knowledge,
+            R.string.settings_knowledge_selection_subtitle, R.string.settings_knowledge_selection_search_aliases),
         if (!channelsAvailable) null else entry(SettingsPage.Channels, R.string.settings_src_channels_title, PersonaIcons.channels, R.string.settings_home_channels_detail),
         entry(SettingsPage.AgentSettings, R.string.settings_home_agents, PersonaIcons.agents, R.string.settings_home_agents_detail, R.string.settings_search_agents_aliases),
     )

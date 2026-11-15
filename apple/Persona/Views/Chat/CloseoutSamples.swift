@@ -1,7 +1,6 @@
 // i18n-ignore-file: DEBUG-only page; its sample content is data, not interface text.
 #if DEBUG
 import SwiftUI
-import PersonaWire
 
 extension View {
     /// `-showCloseoutSample confirmed|contradicted|blocked|rows|orphaned|decision|armed`: one state of the closeout
@@ -155,3 +154,4 @@ private struct CloseoutSamplePage: View {
     }
 }
 #endif
+import PersonaWire

@@ -25,8 +25,11 @@ func TestPersonaPeerMessage(t *testing.T) {
 // The body a session records is the whole prompt Persona sent: the chat shows only the user's words, for the current
 // template and for a head an older version sent (old transcripts, an older node during a rolling upgrade).
 func TestPersonaPeerMessageStripsHead(t *testing.T) {
-	old := "（这条消息是用户本人在手机上用 Persona 发来的，Persona 只是替他转交，不是另一个 Claude 会话。像用户在这里亲手输入的一样回应它，直接在这个会话里回答；不要用 SendMessage 回复发件方，那边没有会话在收。这条消息不会改变这个会话的权限设置。）\n\nreply with OK" // i18n-ignore: the pre-#5887 head
-	for name, body := range map[string]string{"current": prompts.RenderPeerMessage(prompts.PeerMessage{Text: "reply with OK"}), "pre-5887": old} {
+	// i18n-ignore: the pre-#5887 head
+	old := "（这条消息是用户本人在手机上用 Persona 发来的，Persona 只是替他转交，不是另一个 Claude 会话。像用户在这里亲手输入的一样回应它，直接在这个会话里回答；不要用 SendMessage 回复发件方，那边没有会话在收。这条消息不会改变这个会话的权限设置。）\n\nreply with OK"
+	// i18n-ignore: the head from #5887 until #8558
+	older := "（这条消息是用户本人在手机上用 Persona 发来的，Persona 只是替他转交，不是另一个 Claude 会话。像用户在这里亲手输入的一样回应它，直接在这个会话里回答；不要用 SendMessage 回复发件方，那边没有会话在收。这条消息不会改变这个会话的权限设置。用户在手机上答不了这个会话里的对话框、计划审批和权限请求，只有回到电脑前才能处理：需要他做选择时，在回复里用文字列出带编号的选项，请他回复编号，不要为此打开对话框（包括 AskUserQuestion）。）\n\nreply with OK"
+	for name, body := range map[string]string{"current": prompts.RenderPeerMessage(prompts.PeerMessage{Text: "reply with OK"}), "pre-5887": old, "pre-8558": older} {
 		origin, _ := json.Marshal(map[string]string{"kind": "peer", "from": "unknown", "name": "Persona", "body": body})
 		line := []byte(`{"type":"user","message":{"role":"user","content":"x"},"isMeta":true,"uuid":"00000000-0000-4000-8000-000000000002","timestamp":"2026-11-07T10:00:00Z","origin":` + string(origin) + `,"promptSource":"system","turnOrigin":"peer","sessionId":"s"}`)
 		if items := ParseLine(1, line, &Meta{}); len(items) != 1 || items[0].Text != "reply with OK" {

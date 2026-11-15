@@ -409,6 +409,7 @@ fun JTopBar(
     }
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
+    val compactHeight = 56.dp
     val leading: @Composable () -> Unit = {
         when {
             onBack != null -> JBackButton(onClick = onBack)
@@ -453,7 +454,11 @@ fun JTopBar(
             }
         }
         else -> Row(
-            Modifier.fillMaxWidth().background(palette.background).statusBarsPadding().height(56.dp).padding(horizontal = 4.dp.dense),
+            // Board keeps its summary beside the title here. Let their measured lines grow the bar; PageFrame uses
+            // that same measured height to place the list and its pull-refresh content. Brief keeps its fixed bar.
+            Modifier.fillMaxWidth().background(palette.background).statusBarsPadding()
+                .then(if (style == AppStyle.Board) Modifier.heightIn(min = compactHeight) else Modifier.height(compactHeight))
+                .padding(horizontal = 4.dp.dense),
             verticalAlignment = Alignment.CenterVertically,
         ) { leading(); titleBlock(); actions() }
     }

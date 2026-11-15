@@ -4,7 +4,9 @@
 import { t } from "../i18n";
 import type { IconName } from "../ui/icons";
 import type { MenuItem } from "../ui/menu-model";
-import { BYPASS_MODE, BYPASS_WARNING, canSwitchToBypass, hasModes, modeTitle, PERMISSION_MODES, switchableModes } from "./session-actions";
+import {
+  BYPASS_MODE, BYPASS_WARNING, canSwitchToBypass, hasModes, listedModeNow, listedModeOption, listedModesOf, modeTitle, PERMISSION_MODES, switchableModes,
+} from "./session-actions";
 import type { Session } from "./types";
 import { paneClaude } from "./composer-commands";
 
@@ -27,18 +29,42 @@ export function bypassNote(s: Session, assistant?: boolean): string {
 const asksFirst = (s: Session, assistant?: boolean) => !(assistant || s.assistant || s.agent === "agy");
 
 /** What a pick asks first (#3719): going into Allow Everything, and leaving it when the agent cannot come back to it from
- *  here (`bypass_available` false: only a new start picks it). */
+ *  here (`bypass_available` false: only a new start picks it). The modes a session lists (#8261) are a switch both ways:
+ *  only going into Full access asks. */
 export function modeConfirmation(s: Session, to: string, assistant?: boolean): "allow" | "leave" | null {
   if (!asksFirst(s, assistant) || to === s.permission_mode) return null;
   if (to === BYPASS_MODE) return "allow";
-  if (s.permission_mode === BYPASS_MODE && !s.bypass_available) return "leave";
+  if (s.permission_mode === BYPASS_MODE && !s.bypass_available && !listedModesOf(s)) return "leave";
   return null;
+}
+
+/** The rows of a session that lists its modes (#8261, `listedModesOf`): its own approval and Full access, the one it runs
+ *  in checked; going into Full access asks first, as Claude Code's does. */
+function listedMenuItems(s: Session, listed: string[], pick: (mode: string) => void, locked?: boolean): MenuItem[] {
+  const now = listedModeNow(s, listed);
+  return listed.map((id) => {
+    const m = listedModeOption(id);
+    const ask = !locked && id === BYPASS_MODE && now !== BYPASS_MODE;
+    return {
+      key: id,
+      label: m.title,
+      detail: m.detail,
+      radio: true,
+      checked: now === id,
+      disabled: locked,
+      ...(ask ? { danger: true, confirm: t("chat-sessiondialogs.bypass_confirm"), confirmDetail: BYPASS_WARNING } : {}),
+      onSelect: () => pick(id),
+    };
+  });
 }
 
 /** The mode menu's rows, the header's and the composer chip's: the modes it can switch to, the current one checked, the
  *  picks that ask first asking (the row turns into its question, a second choice runs it), and Allow Everything shown
- *  disabled with its reason where the agent cannot take it while it runs. `locked`: nothing can be picked (not running). */
+ *  disabled with its reason where the agent cannot take it while it runs. `locked`: nothing can be picked (not running).
+ *  A session that lists its own modes has those rows alone (`listedMenuItems`). */
 export function modeMenuItems(s: Session, pick: (mode: string) => void, opts: { assistant?: boolean; locked?: boolean } = {}): MenuItem[] {
+  const listed = opts.assistant ? undefined : listedModesOf(s);
+  if (listed) return listedMenuItems(s, listed, pick, opts.locked);
   const mode = s.permission_mode;
   const restart = bypassRestarts(s, opts.assistant);
   const note = bypassNote(s, opts.assistant);

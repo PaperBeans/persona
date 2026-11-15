@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 // What Persona and a task's agent say to each other in the new conversation layout (#1666, `ChatLayout`): Persona's
 // message to the task (feed `routed` with `from` "assistant", #1542) reads "Persona → @task", the agent's report (feed
@@ -57,37 +58,6 @@ struct UserRoutedExchange: View {
         .padding(.leading, Theme.Space.xxl)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("exchange.userRouted")
-    }
-}
-
-/// A task's agent to Persona (`report`): a question, a block, done, or how far it got.
-struct ReportExchange: View {
-    var item: FeedItem
-    var taskTitle: String
-    var layout: ChatLayout
-    private var store: TasksStore { .shared }
-
-    var body: some View {
-        let kind = item.reportKind ?? ""
-        let attention = ReviewText.reportWantsAttention(kind)
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Button {
-                if let id = item.ref, store.todos[id] != nil { store.detailTask = id }
-            } label: {
-                ExchangeHeader(from: taskTitle, to: ChatNames.persona, icon: Theme.Icon.reported,
-                               tint: attention ? Theme.cautionText : .secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(item.ref.flatMap { store.todos[$0] } == nil)
-            ExchangeText(text: ReviewText.reportLine(kind: kind, text: ExchangeText.withoutHeadingMarks(item.text ?? ""), step: item.step, steps: item.steps),
-                         shown: layout.shownLines, pinKey: "report-" + item.id)
-                .chatBoxed(Theme.ChatBox.persona)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.trailing, Theme.Space.xxl)
-        .chatPinned("report-" + item.id)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("exchange.report")
     }
 }
 

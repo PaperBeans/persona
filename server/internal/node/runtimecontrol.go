@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -32,24 +33,31 @@ type runtimeLauncher struct {
 	// AutoAccept: its agents' approval is a switch a start in bypassPermissions turns on (Paseo's Auto Accept), passed on
 	// in launchers.list (proto.Launcher.AutoAccept, #8141).
 	AutoAccept bool `json:"auto_accept,omitempty"`
+	// DisplayName and PermissionModes: what the apps call it (Paseo's label for the provider) and, when its agent is
+	// not Claude Code, the permission modes a start takes (proto.Launcher's, #8261).
+	DisplayName     string                  `json:"display_name,omitempty"`
+	PermissionModes proto.PermissionModeSet `json:"permission_modes,omitempty"`
 }
 
-// Bounds on a runtime's launchers.
+// Bounds on a runtime's launchers. A display name is as long as a provider's may be (the manager's maxDisplayName).
 const (
-	maxRuntimeLaunchers = 64
-	maxLauncherModels   = 200
-	maxLauncherText     = 200
+	maxRuntimeLaunchers    = 64
+	maxLauncherModels      = 200
+	maxLauncherText        = 200
+	maxLauncherDisplayName = 64
 )
 
 // cleanLaunchers keeps the launchers a runtime may offer: names a launcher may have (shellcmd.NameRe, the shell's
-// rule), each once, agents that are ids, text clipped, the lists bounded.
+// rule), each once, agents that are ids, text clipped, the lists bounded. Its permission modes are Persona's once read
+// (proto.PermissionModeSet).
 func cleanLaunchers(list []runtimeLauncher) []runtimeLauncher {
-	clip := func(s string) string {
-		if r := []rune(strings.TrimSpace(s)); len(r) > maxLauncherText {
-			return string(r[:maxLauncherText])
+	clipTo := func(s string, n int) string {
+		if r := []rune(strings.TrimSpace(s)); len(r) > n {
+			return string(r[:n])
 		}
 		return strings.TrimSpace(s)
 	}
+	clip := func(s string) string { return clipTo(s, maxLauncherText) }
 	out := make([]runtimeLauncher, 0, len(list))
 	seen := map[string]bool{}
 	for _, l := range list {
@@ -61,6 +69,7 @@ func cleanLaunchers(list []runtimeLauncher) []runtimeLauncher {
 		}
 		seen[l.Name] = true
 		l.Model = clip(l.Model)
+		l.DisplayName = clipTo(l.DisplayName, maxLauncherDisplayName)
 		models := make([]proto.AgentModel, 0, min(len(l.Models), maxLauncherModels))
 		for _, m := range l.Models {
 			if len(models) == maxLauncherModels {
@@ -100,6 +109,7 @@ func (h *runtimeConn) launcherList() []runtimeLauncher {
 				entry.Agent = l.Agent
 				entry.Models = l.Models
 				entry.AutoAccept = l.AutoAccept
+				entry.DisplayName, entry.PermissionModes = l.DisplayName, l.PermissionModes
 				break
 			}
 		}
@@ -165,6 +175,10 @@ type runtimeStartParams struct {
 	Model, PermissionMode, Effort string
 	WorkspaceID                   string // a space of the runtime's to start in (one of its sessions' space_id)
 	Resume                        string // the Claude session to take over and continue (caps.resume)
+	// SessionID: the id the hub named for a new session (session.start's session_id, #8130): the manager finds a
+	// start whose answer it lost by it. A runtime that can give its session that id does (Paseo); one that cannot
+	// picks its own, and the manager looks among the sessions Persona started instead (started_by_persona).
+	SessionID string
 	// AgentType: the kind of agent Launcher starts (claude, codex…), for a runtime that runs only its own launchers
 	// (caps.same_kind) and does not have it: it starts one of its own of that kind, or refuses.
 	AgentType     string
@@ -249,10 +263,12 @@ func (n *Node) takeOverInRuntime(ctx context.Context, h *runtimeConn, p runtimeS
 	// else's would get a second writer, and the runtime refuses (open_elsewhere): the refusal says where it runs.
 	elsewhere := n.openElsewhereRefusal(p.Resume)
 	p.OpenElsewhere = elsewhere != nil
-	if p.Cwd == "" {
-		st, _ := n.state.get(p.Resume)
-		p.Cwd = st.Cwd
-	}
+	// What the session ran with, for what the takeover leaves out: its directory, and its launcher — a branch's is the
+	// provider of the session it was branched from (fork.go), so the runtime continues it on the same account rather
+	// than on whichever provider ran last (#8130).
+	st, _ := n.state.get(p.Resume)
+	p.Cwd = cmp.Or(p.Cwd, st.Cwd)
+	p.Launcher = cmp.Or(p.Launcher, st.Launcher)
 	if p.Cwd == "" {
 		if path := n.transcriptPath(p.Resume); path != "" {
 			if fi, err := os.Stat(path); err == nil {
@@ -273,7 +289,25 @@ func (n *Node) takeOverInRuntime(ctx context.Context, h *runtimeConn, p runtimeS
 	if s.SessionID != p.Resume {
 		return nil, fmt.Errorf("%s took session %s over as %s", h.label(), p.Resume, s.SessionID)
 	}
+	n.watchTakenOver(h, p.Resume)
 	return s, nil
+}
+
+// watchTakenOver: runtime h has just taken session id over while the hub watches it (the node followed its transcript
+// itself: the session was not running anywhere). Its conversation is still that transcript, but its live text comes
+// from h now, and h follows a session only while it is asked to (Paseo subscribes to the agent's timeline per watched
+// session): h is asked to watch it, as the hub's own session.watch would have once the session was h's
+// (runtimeTranscriptCall). Without this the open chat showed no live text until it was opened again (#8130). Asked
+// before the takeover answers, so the runtime follows the session before the message that follows it starts a turn.
+func (n *Node) watchTakenOver(h *runtimeConn, id string) {
+	n.mu.Lock()
+	w := n.watches[id]
+	n.mu.Unlock()
+	if w == nil || w.parent == nil || w.ctx.Err() != nil || n.runtimes.watchedOn(h, id) {
+		return
+	}
+	n.runtimes.watch(h, id, 0, w.parent)
+	n.runtimeWatch(h, id, 0)
 }
 
 // continueInRuntime is a message to a Claude session not running anywhere on a machine whose engine is a runtime: the

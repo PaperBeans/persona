@@ -31,16 +31,29 @@ enum ModelFallbackText {
     }
 
     /// A Persona conversation's one sentence for the refusal (#5202): the switch, by the model's short name, or only
-    /// that the upstream refused. The rest of the record goes under Details.
+    /// that the upstream refused. The node's own recovery adds the cause in plain words (#7824); a runtime-written
+    /// record without one of the known categories keeps the earlier sentence untouched. The rest goes under Details.
     static func plainRefusal(_ r: ModelRefusal) -> String {
         guard r.isFallback else { return refusalTitle }
         let to = model(r.fallbackModel)
+        if let cause = r.recoveryCategory?.phrase {
+            return String(localized: "The upstream refused this request, so it switched to \(to) (\(cause)).")
+        }
         return String(localized: "The upstream refused this request, so it switched to \(to).")
     }
 
-    /// A Persona conversation's card title while on the fallback model (#5202), naming the model that answers now.
+    /// The short line while the configured model answered a probe: the next request runs on it again (#7824).
+    static func returningLine(_ r: ModelRefusal) -> String? {
+        guard r.recoveryReturning, let o = r.originalModel, !o.isEmpty else { return nil }
+        return String(localized: "\(model(o)) is available again; your next message switches back")
+    }
+
+    /// A Persona conversation's card title while on the fallback model (#5202), naming the model that answers now. The
+    /// node's own recovery (#7824) says the switch with its cause, the same sentence as the refusal's line; a
+    /// runtime-written record keeps the earlier title.
     static func plainCard(_ s: Session) -> String? {
         guard let f = s.modelFallback, f.isFallback else { return nil }
+        if f.recoveryCategory != nil { return plainRefusal(f) }
         let m = model(f.fallbackModel)
         return String(localized: "After an upstream refusal, this conversation answers with \(m).")
     }
@@ -81,6 +94,9 @@ enum ModelFallbackText {
         lines.append(headless
             ? String(localized: "No message is resent; the same request may be refused again.")
             : String(localized: "For a terminal session, type /model in Claude Code yourself; it may also change the default model for new sessions."))
+        // A successful probe says the next request runs on the configured model again (#7824): one visible line.
+        let returning = returningLine(f)
+        if let returning { lines.append(returning) }
         let pendingTitle = String(localized: "The next start will use the configured model")
         guard headless else {
             return Card(title: pending ? pendingTitle : String(localized: "After an upstream refusal, this session switched to a fallback model"),
@@ -89,8 +105,38 @@ enum ModelFallbackText {
         // A Persona conversation is for everyday people (#5202): one sentence, the configured model while pending,
         // and the record under Details.
         let configured = pending ? s.modelRestore?.to.map { m in String(localized: "Configured model: \(model(m))") } : nil
-        return Card(title: pending ? pendingTitle : plainCard(s) ?? pendingTitle, lines: configured.map { [$0] } ?? [],
-                    details: lines.filter { $0 != configured }, offersRestore: !pending)
+        var visible = configured.map { [$0] } ?? []
+        if let returning { visible.append(returning) }
+        return Card(title: pending ? pendingTitle : plainCard(s) ?? pendingTitle, lines: visible,
+                    details: lines.filter { $0 != configured && $0 != returning }, offersRestore: !pending)
+    }
+
+    /// The words an exhausted recovery chain adds to the last API error's card (#7824). Nil for any other session,
+    /// including a runtime-written fallback record, so only the node's own exhausted marker changes the failure card.
+    struct ExhaustedRecovery: Equatable {
+        /// The cause in plain words, as a full line on the card.
+        var causeLine: String
+        /// When the configured model is available again, in the user's time zone; nil when the upstream named none.
+        var resetLine: String?
+        /// The models tried, shown only inside the folded details.
+        var triedLine: String?
+    }
+
+    static func exhaustedRecovery(_ s: Session?, now: Date = Date(), calendar: Calendar = .current) -> ExhaustedRecovery? {
+        guard let f = s?.modelFallback, f.recoveryExhausted, let cause = f.recoveryCategory?.phrase else { return nil }
+        return ExhaustedRecovery(
+            causeLine: String(localized: "Every model tried failed: \(cause)."),
+            resetLine: f.recoveryReset.map {
+                String(localized: "Available again: \(Session.usageLimitClock($0, now: now, calendar: calendar))")
+            },
+            triedLine: f.recoveryTried.map { String(localized: "Models tried: \($0)") }) // decoding drops an empty one
+    }
+
+    /// Whether the last API error's card offers Retry, before the chat's own checks (the last line, nothing working):
+    /// the usual transient rule, or an exhausted recovery chain on a session that can send (#7824), whose Retry runs the
+    /// request again even when the error text alone calls it final (a safeguards refusal, for example).
+    static func offersRetry(transient: Bool?, session: Session?) -> Bool {
+        transient != false || (session?.modelFallback?.recoveryExhausted == true && session?.canSend == true)
     }
 
     /// A refused going back, in words: the codes the hub documents, else its own words.

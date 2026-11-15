@@ -76,6 +76,20 @@ describe("t", { timeout: 30_000 }, () => {
     expect(interpolate("{a} and {b}", { a: 1 })).toBe("1 and {b}");
   });
 
+  // A whole sentence filled into a longer one (a hub refusal as the reason) keeps one full stop, not "。），" (#6822).
+  it("drops a filled-in sentence's full stop before the text's own punctuation", () => {
+    const refusal = "这个会话正在 Claude 桌面版里开着。这次没有发送。";
+    expect(interpolate("这条没发出去（{error}），字还在输入框里", { error: refusal })).toBe("这条没发出去（这个会话正在 Claude 桌面版里开着。这次没有发送），字还在输入框里");
+    expect(interpolate("不能开始：{error}。重试", { error: "电脑没连上。 " })).toBe("不能开始：电脑没连上。重试");
+    expect(interpolate("Not sent ({error}).", { error: "Nothing was sent." })).toBe("Not sent (Nothing was sent).");
+    // kept: before plain text, at the end, an ellipsis, and any other mark
+    expect(interpolate("{a} 再试", { a: "没连上。" })).toBe("没连上。 再试");
+    expect(interpolate("没发出去：{error}", { error: "这次没有发送。" })).toBe("没发出去：这次没有发送。");
+    expect(interpolate("（{a}）", { a: "等一下..." })).toBe("（等一下...）");
+    expect(interpolate("（{a}）", { a: "真的吗？" })).toBe("（真的吗？）");
+    expect(interpolate("（{a}）", { a: 1.5 })).toBe("（1.5）");
+  });
+
   // formatList keeps the system's region when the system is in the interface language, and Node's navigator reports the
   // machine's locale: on an en-SG machine an unpinned check got "a, b and c" on every run (#4955).
   it("joins lists the language's way", async () => {

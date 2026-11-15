@@ -17,9 +17,10 @@ import { encode, FRAME_KEYFRAME, FRAME_REFINEMENT, VideoParser, VideoWireError, 
 export type VideoTransport = {
   send(bytes: Uint8Array): void;
   close(): void;
-  /** Bytes as they come; `closed` once, when it is over (never after `close()`). */
+  /** Bytes as they come; `closed` once, when it is over (never after `close()`), with the node's code when the hub
+   *  refused the stream (`busy`: two others already watch, #8320). */
   onBytes: (bytes: Uint8Array) => void;
-  onClosed: () => void;
+  onClosed: (refused?: string) => void;
 };
 
 /** What the stream needs of a decoder: WebCodecs' VideoDecoder, or a test's. */
@@ -34,7 +35,8 @@ export type DecoderMaker = (output: (picture: Picture) => void, error: (e: unkno
 /** A decoded picture: what WebCodecs gives (a VideoFrame), closed by whoever holds it last. */
 export type Picture = { timestamp: number; close(): void; displayWidth?: number; displayHeight?: number };
 
-export type Ending = "closed" | "silent" | "undecodable";
+/** How a stream ended; `busy`: the hub refused it because the Mac already sends video to two others (#8320). */
+export type Ending = "closed" | "silent" | "undecodable" | "busy";
 export type StreamEvent =
   | { type: "hello"; hello: Hello }
   | { type: "picture"; picture: Picture; decodeMs: number }
@@ -98,7 +100,7 @@ export class ScreenVideoStream {
     this.tiers = opts.tiers ?? null;
     this.heardAt = this.now();
     transport.onBytes = (b) => this.bytes(b);
-    transport.onClosed = () => this.finish("closed");
+    transport.onClosed = (refused) => this.finish(refused === "busy" ? "busy" : "closed");
     transport.send(encode(start));
     this.watch = setInterval(() => {
       const limit = this.heardAny ? (this.opts.silenceMs ?? SILENCE_MS) : (this.opts.openingMs ?? OPENING_MS);
@@ -311,10 +313,11 @@ export class ScreenVideoStream {
 }
 
 /** The WebSocket of the Mac's live-screen video channel (#3954): bound to the RFB connection that carried `pair` and
- *  signed in, so no password travels anywhere new. */
+ *  signed in, so no password travels anywhere new. `refusals=close`: a refused stream opens and closes at once with
+ *  4000 + the HTTP status and the node's code (#8320), since a page can't read a refused handshake's status. */
 export function videoSocket(location: { protocol: string; host: string }, mid: string, token: string, pair: string): string {
   const scheme = location.protocol === "https:" ? "wss" : "ws";
-  return `${scheme}://${location.host}${BASE}/api/v1/machines/${encodeURIComponent(mid)}/screen/video/connect?token=${encodeURIComponent(token)}&pair=${encodeURIComponent(pair)}`;
+  return `${scheme}://${location.host}${BASE}/api/v1/machines/${encodeURIComponent(mid)}/screen/video/connect?token=${encodeURIComponent(token)}&pair=${encodeURIComponent(pair)}&refusals=close`;
 }
 
 /** The relay WebSocket as a video transport. */
@@ -338,8 +341,8 @@ export function relayTransport(url: string): VideoTransport {
   ws.onmessage = (e) => {
     if (e.data instanceof ArrayBuffer) t.onBytes(new Uint8Array(e.data));
   };
-  ws.onclose = () => {
-    if (!closed) t.onClosed();
+  ws.onclose = (e) => {
+    if (!closed) t.onClosed(e.code >= 4000 && e.code < 5000 ? e.reason : undefined);
   };
   return t;
 }

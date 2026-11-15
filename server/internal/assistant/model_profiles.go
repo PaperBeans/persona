@@ -187,6 +187,17 @@ func (s *Service) readModelProfiles(ctx context.Context) (modelProfiles, bool, e
 		return ps, false, i18n.Err("assistant-models.err_no_database")
 	}
 	ok, err := st.Setting(ctx, modelProfilesKey, &ps)
+	// The profile the main chat's new conversations start in is never a model profile's (#4633): one stored holding
+	// it anyway is read without it, so it neither shows a change it cannot make nor fails checkModelProfile at a
+	// switch or an edit, and the next write stores it clean.
+	for _, p := range ps.Profiles {
+		for id, b := range p.Purposes {
+			if b.ConfigDir != "" {
+				b.ConfigDir = ""
+				p.Purposes[id] = b
+			}
+		}
+	}
 	return ps, ok, err
 }
 
@@ -253,7 +264,7 @@ func (s *Service) captureModels(ctx context.Context) (map[string]ModelBinding, m
 			return nil, nil, nil, err
 		}
 		b := r.Binding
-		b.Runtime = ""
+		b.Runtime, b.ConfigDir = "", ""
 		purposes[id] = b
 		effective, err := s.resolveModelRecord(ctx, id, &r)
 		if err != nil {

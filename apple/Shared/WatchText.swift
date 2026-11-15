@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 /// A message as the watch shows it: plain text without the markup the phone and Claude Code put into messages
 /// (`<persona-context>` blocks fold into one mark, 「〔title〕」 or 「〔上下文 N 项〕」, ahead of what the user wrote, the note listing attached photos and Claude's `[Image #n]`

@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -82,5 +83,35 @@ func TestStartInAKeptTab(t *testing.T) {
 	_, _ = request(t, n, "session.start", map[string]any{"cwd": home, "workspace_id": "w1", "launcher": "claude", "in_pane": "w1:p7"})
 	if got := f.trace("tab.create"); len(got) != 2 {
 		t.Errorf("a pane that is not kept: tabs %v", got)
+	}
+}
+
+func TestReusingKeptTabClaimsOnlyOnce(t *testing.T) {
+	n, _, _ := herdrNode(t)
+	created := &host.Created{Pane: host.PaneRef{ID: "w1:p2", Kind: host.Herdr}, SlotID: "w1:t2", SpaceID: "w1"}
+	n.mu.Lock()
+	n.keptStarts = map[string]keptStart{
+		"w1:p2": {created: created, until: time.Now().Add(time.Minute)},
+	}
+	n.mu.Unlock()
+	start := make(chan struct{})
+	got := make(chan bool, 2)
+	for range 2 {
+		go func() {
+			<-start
+			ctx := n.reusingKeptTab(context.Background(), "w1:p2")
+			_, ok := ctx.Value(reusedTabKey{}).(*host.Created)
+			got <- ok
+		}()
+	}
+	close(start)
+	claimed := 0
+	for range 2 {
+		if <-got {
+			claimed++
+		}
+	}
+	if claimed != 1 {
+		t.Fatalf("kept tab was claimed %d times, want exactly once", claimed)
 	}
 }

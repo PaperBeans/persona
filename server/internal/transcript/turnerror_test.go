@@ -312,6 +312,107 @@ func TestTailSettleDoesNotInheritHiddenResume(t *testing.T) {
 	}
 }
 
+func TestTailSkippedTurnStartKeepsVisibleState(t *testing.T) {
+	const failure = "API Error: 529 Overloaded"
+	for _, kind := range []string{"wake", "image"} {
+		t.Run(kind, func(t *testing.T) {
+			var m Meta
+			var tail Tail
+			for i, line := range []string{prompt("u1", "A"), apiErrorLine(t, "e1", failure, map[string]any{"error": "server_error"}), turnEndLine} {
+				tail.Line(&m, ParseLine(i, []byte(line), &m))
+			}
+			if kind == "wake" {
+				tail.Skipped([]byte(`{"type":"user","uuid":"bigw","timestamp":"2026-01-01T12:00:00Z","message":{"role":"user","content":"<task-notification><task-id>w</task-id><status>completed</status><summary>` + strings.Repeat("x", 9<<10) + `</summary></task-notification>"}}`))
+			} else {
+				tail.Skipped([]byte(`{"type":"user","uuid":"img","parentUuid":"p","timestamp":"2026-01-01T12:00:00Z","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + strings.Repeat("A", 20<<10) + `"}}]}}`))
+			}
+			tail.Rewound([]string{"ub", "r", "d"})
+			for i, line := range []string{prompt("ub", "B"), replyLine, turnEndLine} {
+				tail.Line(&m, ParseLine(i+3, []byte(line), &m))
+			}
+			if !tail.Settle(&m) {
+				t.Fatalf("%s skipped turn start did not settle", kind)
+			}
+			if !m.TurnOpen || m.TurnClosed || m.TurnError != "" {
+				t.Fatalf("%s: open=%v closed=%v error=%q; want a new visible turn with no inherited failure", kind, m.TurnOpen, m.TurnClosed, m.TurnError)
+			}
+			if got, want := m.LastTurnWake, kind == "wake"; got != want {
+				t.Fatalf("%s: LastTurnWake=%v, want %v", kind, got, want)
+			}
+		})
+	}
+}
+
+func TestTailSkippedToolResultStaysStructural(t *testing.T) {
+	var m Meta
+	var tail Tail
+	feed := func(lines []string) {
+		for i, line := range lines {
+			tail.Line(&m, ParseLine(i, []byte(line), &m))
+		}
+	}
+	const failure = "API Error: 529 Overloaded"
+	feed([]string{prompt("u1", "A"), apiErrorLine(t, "e1", failure, map[string]any{"error": "server_error"}), turnEndLine})
+	bEnd := strings.Replace(strings.Replace(turnEndLine, `"uuid":"d"`, `"uuid":"db"`, 1), `"parentUuid":"x"`, `"parentUuid":"r"`, 1)
+	tail.Rewound([]string{"ub", "r", "db"})
+	feed([]string{prompt("ub", "B"), replyLine, bEnd})
+	tail.Skipped([]byte(`{"type":"user","uuid":"big","parentUuid":"p","timestamp":"2026-01-01T12:00:00Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"` + strings.Repeat("A", 20<<10) + `"}]},"toolUseResult":{"stdout":"` + strings.Repeat("A", 20<<10) + `"}}`))
+	if !tail.Settle(&m) {
+		t.Fatal("the hidden turn did not settle")
+	}
+	if m.TurnOpen || !m.TurnClosed || m.TurnError != failure {
+		t.Fatalf("a large tool result became a new turn: open=%v closed=%v error=%q", m.TurnOpen, m.TurnClosed, m.TurnError)
+	}
+}
+
+func TestTailSkippedImageDoesNotInheritResume(t *testing.T) {
+	var m Meta
+	var tail Tail
+	for i, line := range []string{prompt("u1", "A"),
+		apiErrorLine(t, "e1", fixtureLimit, map[string]any{"error": "rate_limit", "quotaLimits": map[string]any{"status": "rejected", "resetsAt": 1767284400}}),
+		informational("Usage limit reached · continuing automatically at 4:20pm · esc to cancel"), turnEndLine} {
+		tail.Line(&m, ParseLine(i, []byte(line), &m))
+	}
+	bEnd := strings.Replace(strings.Replace(turnEndLine, `"uuid":"d"`, `"uuid":"db"`, 1), `"parentUuid":"x"`, `"parentUuid":"r"`, 1)
+	tail.Rewound([]string{"ub", "r", "db"})
+	for i, line := range []string{prompt("ub", "B"), replyLine, bEnd} {
+		tail.Line(&m, ParseLine(i+3, []byte(line), &m))
+	}
+	tail.Skipped([]byte(`{"type":"user","uuid":"img","parentUuid":"p","timestamp":"2026-01-01T12:00:00Z","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + strings.Repeat("A", 20<<10) + `"}}]}}`))
+	if !tail.Settle(&m) {
+		t.Fatal("the image turn did not settle")
+	}
+	if m.TurnErrorResumes || m.LastTurnWake {
+		t.Fatalf("image-only inherited wake/resume state: wake=%v resumes=%v", m.LastTurnWake, m.TurnErrorResumes)
+	}
+	if !m.TurnOpen || m.TurnClosed || m.TurnError != "" {
+		t.Fatalf("image-only did not start a fresh user turn: open=%v closed=%v error=%q", m.TurnOpen, m.TurnClosed, m.TurnError)
+	}
+}
+
+func TestTailSettleKeepsSessionModelFallback(t *testing.T) {
+	var m Meta
+	m.ModelFallback = &proto.ModelRefusal{OriginalModel: "primary-model", FallbackModel: "fallback-model", Scope: "session"}
+	var tail Tail
+	tail.PriorModelFallback(m.ModelFallback)
+	fallbackReplyA := strings.Replace(strings.Replace(replyLine, `"uuid":"r"`, `"uuid":"a1"`, 1), `"model":"claude-opus-5-5"`, `"model":"fallback-model"`, 1)
+	fallbackReplyB := strings.Replace(strings.Replace(replyLine, `"uuid":"r"`, `"uuid":"b1"`, 1), `"model":"claude-opus-5-5"`, `"model":"fallback-model"`, 1)
+	for i, line := range []string{prompt("u1", "A"), fallbackReplyA, turnEndLine} {
+		tail.Line(&m, ParseLine(i, []byte(line), &m))
+	}
+	bEnd := strings.Replace(strings.Replace(turnEndLine, `"uuid":"d"`, `"uuid":"db"`, 1), `"parentUuid":"x"`, `"parentUuid":"b1"`, 1)
+	tail.Rewound([]string{"ub", "b1", "db"})
+	for i, line := range []string{prompt("ub", "B"), fallbackReplyB, bEnd} {
+		tail.Line(&m, ParseLine(i+3, []byte(line), &m))
+	}
+	if !tail.Settle(&m) {
+		t.Fatal("the fallback did not settle")
+	}
+	if got := m.ModelFallback; got == nil || got.OriginalModel != "primary-model" || got.FallbackModel != "fallback-model" || got.Scope != "session" {
+		t.Fatalf("the pre-tail session fallback was lost: %+v", got)
+	}
+}
+
 // Whether Claude Code still goes on by itself once the limit resets: its notices say it and take it back, a wake
 // leaves it, a message cancels it, a reply or another kind of failure ends it.
 func TestClaudeLimitResumes(t *testing.T) {

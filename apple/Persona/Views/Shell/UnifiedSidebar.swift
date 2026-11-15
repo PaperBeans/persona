@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 /// The Sidebar layout (Settings › Appearance › Navigation, #6332; docs/apple/ios.md「Sidebar layout」): one sidebar with
 /// the main conversation, the pages, Persona's chats and the Agents list, as the web app's, and the page picked in it

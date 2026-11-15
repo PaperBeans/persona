@@ -6,7 +6,6 @@ import Observation
 import UIKit
 import UniformTypeIdentifiers
 import Vision
-import PersonaWire
 
 /// A photo as the hub keeps it (`Photo`, docs/assistant/meeting-minutes.md "Phase 3: photos").
 nonisolated struct MeetingPhoto: Codable, Hashable, Sendable, Identifiable {
@@ -1200,3 +1199,4 @@ nonisolated enum MeetingPhotoPipeline {
     }
 }
 #endif
+import PersonaWire

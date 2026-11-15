@@ -2,6 +2,7 @@ import MarkdownUI
 import PDFKit
 import PersonaKit
 import SwiftUI
+import PersonaWire
 
 nonisolated struct FileContent: Decodable, Sendable {
     var path: String
@@ -507,6 +508,7 @@ struct FileViewer: View {
         case "xls", "xlsx", "numbers", "csv", "tsv": Theme.Icon.sheet
         case "ppt", "pptx": Theme.Icon.slides
         case "json", "yml", "yaml", "toml", "plist": "curlybraces"
+        case "zip", "gz", "tgz", "tar", "7z", "rar", "xz", "bz2": Theme.Icon.fileArchive
         case "": path.hasSuffix("/") ? Theme.Icon.folder : Theme.Icon.file
         default: Theme.Icon.code
         }

@@ -124,6 +124,9 @@ type codexItem struct {
 		Content []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
+			// An image block (MCP content: base64 data and its type), a connector's or computer use's picture.
+			Data     string `json:"data"`
+			MimeType string `json:"mimeType"`
 		} `json:"content"`
 		IsError bool `json:"isError"`
 	} `json:"result"`
@@ -418,9 +421,18 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 			}
 		}
 		text := strings.TrimSpace(strings.Join(parts, "\n"))
-		if len(images) > 0 { // the apps show these paths as thumbnails (the phone's own photos travel the same way)
-			text = strings.TrimSpace(text + "\n\n<attached_images>\n" + strings.Join(images, "\n") + "\n</attached_images>")
+		items, paseo := paseoInput(func(n int, role, kind string) proto.Item { return mk(n, it.ID, role, kind) }, 0, text)
+		if paseo && (len(images) == 0 || attachImages(items, images)) {
+			if meta.codexUserID == "" && len(items) > 0 { // it started the turn: its notices woke the agent
+				markWake(items)
+				meta.codexUserID = items[0].ID
+			}
+			if meta.FirstUser == "" && len(items) > 0 && items[0].Kind == proto.KindText {
+				meta.FirstUser = items[0].Text
+			}
+			return items
 		}
+		text = strings.TrimSpace(text + imagesNote(images))
 		if text == "" {
 			return nil
 		}
@@ -506,12 +518,16 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 			args = json.RawMessage(`{}`)
 		}
 		var parts []string
+		var images []*proto.Image
 		isErr := it.Status == "failed" || len(it.Error) > 0 && string(it.Error) != "null"
 		if it.Result != nil {
 			isErr = isErr || it.Result.IsError
 			for _, c := range it.Result.Content {
-				if c.Type == "text" {
+				switch {
+				case c.Type == "text":
 					parts = append(parts, c.Text)
+				case c.Type == "image" && c.Data != "" && len(c.Data) <= maxImageLen && strings.HasPrefix(c.MimeType, "image/"):
+					images = append(images, &proto.Image{Mime: c.MimeType, Data: c.Data})
 				}
 			}
 		}
@@ -520,6 +536,11 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 		}
 		items := codexTool(mk, it.ID, "mcp__"+it.Server+"__"+it.Tool, args, strings.Join(parts, "\n"), isErr)
 		items[1].Outcome.Status = codexStatus(it.Status, isErr)
+		for j, img := range images { // after the result, on the call's card, as a Claude tool result's pictures are
+			im := mk(2+j, it.ID, "user", proto.KindImage)
+			im.ToolUseID, im.Image = it.ID, img
+			items = append(items, im)
+		}
 		return items
 	case "ImageView":
 		input, _ := json.Marshal(map[string]string{"file_path": strings.TrimPrefix(it.Path, "file://")})
@@ -567,6 +588,27 @@ var (
 	// Ambient state the Codex app attaches to a message (open browser tabs and such), not something the user said.
 	codexAmbientRe = lazyre.New(`(?s)<in-app-browser-context[^>]*>.*?</in-app-browser-context>`)
 )
+
+// imagesNote is the note a user message's pictures become after its words ("" for none): their local paths, which the
+// apps show as thumbnails (the phone's own photos travel the same way).
+func imagesNote(images []string) string {
+	if len(images) == 0 {
+		return ""
+	}
+	return "\n\n<attached_images>\n" + strings.Join(images, "\n") + "\n</attached_images>"
+}
+
+// attachImages puts a message's pictures (imagesNote) after the words of the last user text among items: false when
+// none can carry them.
+func attachImages(items []proto.Item, images []string) bool {
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i].Role == "user" && items[i].Kind == proto.KindText {
+			items[i].Text = strings.TrimSpace(items[i].Text + imagesNote(images))
+			return true
+		}
+	}
+	return false
+}
 
 // codexUserText cleans what Codex records as the user's message: ambient context (and Persona's) goes, and the answer to a question
 // Codex asked (request_user_input, stored as JSON) reads as the answer itself ("question: answer", with a full-width colon, when several).

@@ -426,6 +426,14 @@ sys.exit(2)
         self.assertFalse((self.state / 'bin/personad').is_symlink())
         self.assertEqual(os.readlink(self.state / 'bin' / (FORMER_NAME + 'd')), 'personad')
 
+    def test_an_admin_option_without_a_value_is_refused_with_a_message(self):
+        for option in ('--admin-access', '--admin-cidrs'):
+            result = subprocess.run(['bash', str(self.repo / 'scripts/deploy/deploy.sh'), 'web', option], env=self.env,
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 2, option + '\n' + result.stdout + result.stderr)
+            self.assertIn(option + ' needs a value', result.stderr)
+            self.assertFalse((self.state / 'web/index.html').exists())
+
     def test_web_only_deploy_keeps_the_selected_remote_profile(self):
         self.run_script('scripts/deploy/deploy.sh', 'web')
         self.assertEqual((self.state / 'web/index.html').read_text(), 'Persona fixture web')

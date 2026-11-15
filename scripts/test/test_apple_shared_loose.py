@@ -15,7 +15,11 @@ APPLE = ROOT / "apple"
 
 # package -> (files that left apple/Shared, directories that left it, types the package now owns)
 MOVED = {
-    "PersonaWire": (["JSONValue.swift"], ["Generated"], ["JSONValue", "JSON"]),
+    "PersonaWire": (
+        ["JSONValue.swift", "AppClock.swift", "AssistantCardText.swift", "AssistantViewBlocks.swift", "BrowserCookies.swift", "ChatUserInputIndex.swift", "CloudflareAccess.swift", "ExtensionActionValues.swift", "ExtensionOperation.swift", "RetryIDs.swift", "SecretReference.swift", "TaskBrief.swift", "TextMemo.swift", "UsageWindows.swift", "TokenUsage.swift", "ModelID.swift", "Closeout.swift", "ExtensionAuthState.swift", "ExtensionStreamJSON.swift", "HubTransport.swift", "Keychain.swift", "MachineMetrics.swift", "StateCache.swift", "HubFanOut.swift"],
+        ["Generated"],
+        ["JSONValue", "JSON", "AppClock", "AssistantCardText", "AssistantViewBlocks", "BrowserCookie", "BrowserCookies", "BrowserCookieSite", "BrowserSiteList", "ChatUserInputIndex", "CloudflareAccess", "CloudflareAccessError", "CookieFile", "CookieFileSite", "ExtensionActionInputError", "ExtensionActionValues", "ExtensionOperation", "ExtensionOperationStep", "HubAccess", "HubRedirects", "MachineUsageSeries", "MemoScope", "ModelID", "RetryIDs", "SecretReference", "TaskBrief", "TextMemo", "TokenFormat", "UsageAccount", "UsageCard", "UsageKind", "UsagePoint", "UsageRange", "UsageShare", "UsageTokens", "UsageWindow", "UsageWindows", "ClaimState", "Closeout", "Debouncer", "ExtensionAuth", "ExtensionStreamSchema", "HubFanOut", "HubTransport", "InAppTunnelRoute", "Keychain", "KeychainAccess", "LocalProxyRoute", "MachineMetrics", "MachineSystem", "MetricAlert", "MetricFormat", "MetricLevel", "MetricPoint", "MetricRange", "MetricSample", "OSFamily", "SSHRoute", "StateCache", "Throttle", "WorkArtifact"],
+    ),
 }
 
 

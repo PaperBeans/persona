@@ -100,6 +100,9 @@ type LauncherHealth struct {
 	CheckedAt time.Time `json:"checked_at"`
 	Source    string    `json:"source"`          // check | start (an agent's start failed) | session (an agent's turn met a usage limit)
 	Fails     int       `json:"fails,omitempty"` // failures in a row
+	// MissingFails: of those, the latest ones in a row that found no claude command ("command not found: claude"); any
+	// other outcome resets it. Readiness tells one such miss, which a Claude Code self-update can cause, from a removal.
+	MissingFails int `json:"missing_fails,omitempty"`
 	// Repairs are this run of failures' repair rounds; BlockedReason says why it was given up on.
 	Repairs       int            `json:"repairs,omitempty"`
 	Repair        *LauncherFixed `json:"repair,omitempty"`

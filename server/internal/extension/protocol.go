@@ -145,10 +145,13 @@ const (
 	// with an empty batch and the event's id), and a fallback plan's messages for events already handled
 	// (docs/assistant/inbox.md "Following up"). It is listed in HubCapabilities.
 	HubInboxGroupState = "inbox_group_state"
+	// HubToolImages: a connector's tools.call answer may carry pictures for the model (images, #8484), within the
+	// limits of connector.ToolImagesMost and the rest. It is listed in HubCapabilities.
+	HubToolImages = "tool_images"
 )
 
 // HubCapabilities are this hub's.
-func HubCapabilities() []string { return []string{HubInboxGroup, HubInboxGroupState} }
+func HubCapabilities() []string { return []string{HubInboxGroup, HubInboxGroupState, HubToolImages} }
 
 // ExtensionInfo is the plugin as the hub installed it.
 type ExtensionInfo struct {

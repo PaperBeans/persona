@@ -47,6 +47,25 @@ class AgentCreationServiceTest {
         assertEquals("claude", JsonCodec.decodeFromString<AgentLauncher>("""{"name":"default","agent_type":"","agent":null}""").agentType)
     }
 
+    /**
+     * A runtime's provider (#8261): its label as `display_name` and, when its agent is not Claude Code, the permission
+     * modes a start takes. A list that is not of words is left out, never the launcher with it.
+     */
+    @Test fun aProvidersNameAndPermissionModesDecode() = runBlocking {
+        MockWebServer().use { server ->
+            val service = HttpAgentCreationService("hub/pairing", server.url("/").toString(), "test-token", OkHttpClient())
+            server.enqueue(MockResponse().setBody("""{"launchers":[""" +
+                """{"name":"grok","agent":"paseo","display_name":"Grok","permission_modes":["default","bypassPermissions"]},""" +
+                """{"name":"kimi","agent":"paseo","permission_modes":["default"]},""" +
+                """{"name":"odd","agent":"paseo","permission_modes":"default"},{"name":"claude"}]}"""))
+            val launchers = service.launchers("computer")
+            assertEquals(listOf("grok", "kimi", "odd", "claude"), launchers.map { it.name })
+            assertEquals(listOf("Grok", "kimi", "odd", "claude"), launchers.map { it.title })
+            assertEquals(listOf(listOf("default", "bypassPermissions"), listOf("default"), null, null), launchers.map { it.permissionModes })
+            assertEquals(listOf("paseo", "paseo", "paseo", "claude"), launchers.map { it.agentType })
+        }
+    }
+
     @Test fun lostStartResponseQueriesTheReceiptWithoutPostingAgain() = runBlocking {
         MockWebServer().use { server ->
             val service = HttpAgentCreationService("hub/pairing", server.url("/").toString(), "test-token", OkHttpClient())

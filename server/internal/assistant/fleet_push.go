@@ -11,6 +11,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/sessionorigin"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
@@ -291,6 +292,14 @@ func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings)
 	if s.quietTaskFinish(sess) || s.quietScheduledInput(context.Background(), machine, sess) {
 		return
 	}
+	// A session a Lark chat bridge hosts, finished normally (#8592): the bridge posted its answer in the topic it was
+	// asked in, so a push and a Lark card would say it a second time, as for a turn asked through the bot
+	// (channelAnsweredPush). An error, a cut-off, a stuck turn or a usage limit is pushed as ever. The to-do's own topic
+	// still gets its line.
+	if chatBridgeFinish(sess) {
+		s.threadAgentDone(machine, sess)
+		return
+	}
 	// A turn a follow-up (supervision) message started, finished normally (#3124): what the user needs to know went out with notify_user.
 	if s.supervising(id) && assistantwire.SupervisedFinish(sess, true) {
 		return
@@ -554,6 +563,21 @@ func (s *Service) supervisedTurn(machine, session string, start time.Time) bool 
 				return true
 			}
 		}
+	}
+	return false
+}
+
+// chatBridgeFinish: sess is hosted in a Lark chat bridge (sessionorigin "feishu", the Agents rows' "Lark group"),
+// which answers in the topic the turn was asked in, and its turn ended normally (assistantwire.NormalFinish, the host
+// reporting no failure of its own). Only on Claude Code and Codex, which tell a failed turn on the session; another
+// agent's is pushed as ever.
+func chatBridgeFinish(sess proto.Session) bool {
+	if sessionorigin.Of(sess) != "feishu" || strings.TrimSpace(sess.FailureReason) != "" {
+		return false
+	}
+	switch sess.Agent {
+	case "", "claude", "codex":
+		return assistantwire.NormalFinish(sess)
 	}
 	return false
 }

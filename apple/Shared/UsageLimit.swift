@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 /// A subscription usage limit that stopped a turn (docs/assistant/agent-work.md "Usage limits"; the web's
 /// `lib/usage-limit.ts`). The hub reports it on the session; rows and cards say when it resumes instead of calling the

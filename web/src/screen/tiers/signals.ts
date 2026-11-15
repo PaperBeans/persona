@@ -18,6 +18,9 @@ export type TierSignals = {
   frames: number;
   queueP50Ms: number | null;
   queueP95Ms: number | null;
+  /** The newest frame's: whether there is still a backlog now (a backlog that just came in all at once leaves the p50
+   *  high for a moment, and its newest frame barely waited). */
+  queueLastMs: number | null;
   queueRising: boolean;
   queueFalling: boolean;
   deliveredKbps: number | null;
@@ -109,6 +112,7 @@ export class ReceiverSignals {
       frames: recent.length,
       queueP50Ms: percentile(recent, 0.5),
       queueP95Ms: percentile(window.filter((q) => !q.wake).map((q) => q.ms), 0.95),
+      queueLastMs: window.length ? window[window.length - 1].ms : null,
       queueRising: false,
       queueFalling: false,
       deliveredKbps: null,

@@ -62,5 +62,10 @@
   "webpush_test": "Send Test",
   "webpush_test_sent": "Test sent. It should appear in a moment.",
   "webpush_test_failed": "The test didn’t go out: {error}",
-  "webpush_footer": "Off by default and kept per browser. Your choices below apply, as they do while a page is open. Notifications travel through this browser’s push service, encrypted so only this browser can read them. On a computer where Persona Link or the desktop app already notifies you, leave this off."
+  "webpush_footer": "Off by default and kept per browser. Your choices below apply, as they do while a page is open. Notifications travel through this browser’s push service, encrypted so only this browser can read them. On a computer where Persona Link or the desktop app already notifies you, leave this off.",
+  "low_distraction": "Low-distraction mode",
+  "low_distraction_hint": "Only what needs you notifies you; the rest waits for the briefing",
+  "low_distraction_footer": "For all your devices. When on, questions, approvals, decisions only you can make, your reminders and the main conversation's notices still notify you; task results, “Please verify” requests and other conversations' notices wait for the briefing and Held pushes, and finished agents stay silent.",
+  "low_distraction_load_failed": "Couldn't load low-distraction mode",
+  "low_distraction_unsupported": "This hub doesn't support low-distraction mode yet. Update the hub to turn it on here."
 }

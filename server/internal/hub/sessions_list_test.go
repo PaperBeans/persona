@@ -46,6 +46,90 @@ func runtimePage(t *testing.T, h *Hub, query string) listTestPage {
 	return page
 }
 
+func TestRuntimeAgentsOnly(t *testing.T) {
+	h := newTestHub(t)
+	m := newMachine(h, MachineConfig{ID: "demo"})
+	h.machines, h.byID["demo"] = []*Machine{m}, m
+	h.sessionListIndex()
+	m.sessions = []proto.Session{
+		{MachineID: "demo", SessionID: "agent-a", State: "working"},
+		{MachineID: "demo", SessionID: "agent-b", State: "idle"},
+		{MachineID: "demo", SessionID: "assistant", State: "working", Assistant: true},
+		{MachineID: "demo", SessionID: "former-main", State: "working", Assistant: true, Archived: true},
+		{MachineID: "demo", SessionID: "health", State: "working", Space: "health"},
+	}
+
+	indexRows := func() {
+		list := h.shown("demo", m.sessions)
+		h.sessionsMu.Lock()
+		defer h.sessionsMu.Unlock()
+		h.indexSessionsLocked("demo", list, encodeSessions(list))
+	}
+	indexRows()
+
+	read := func(query string, status int, dst any) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		h.listSessions(w, httptest.NewRequest("GET", "/api/v1/sessions?"+query, nil))
+		if w.Code != status {
+			t.Fatalf("%s: %d %s", query, w.Code, w.Body)
+		}
+		if dst != nil {
+			if err := json.Unmarshal(w.Body.Bytes(), dst); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	if !slices.Contains(h.features(), featureSessionsAgentsOnly) || slices.Contains(proto.Features, featureSessionsAgentsOnly) {
+		t.Fatal("the hub must advertise the Agents-only filter independently of node capabilities")
+	}
+	if page := runtimePage(t, h, "limit=50&agents_only=0"); page.Total != 5 || len(page.Sessions) != 5 {
+		t.Fatalf("ordinary list changed: %+v", page)
+	}
+	first := runtimePage(t, h, "limit=1&summary=1&agents_only=1")
+	if first.Total != 2 || !first.HasMore || len(first.Sessions) != 1 || first.Sessions[0].SessionID != "agent-a" {
+		t.Fatalf("first page: %+v", first)
+	}
+	var counts sessionlist.Counts
+	read("agents_only=1&counts=1", 200, &counts)
+	if counts.Total != 2 || !reflect.DeepEqual(counts.State, map[string]int{"working": 1, "idle": 1}) {
+		t.Fatalf("scoped counts: %+v", counts)
+	}
+	var withCounts struct {
+		listTestPage
+		Counts sessionlist.Counts
+	}
+	read("agents_only=1&summary=1&with_counts=1&state=working", 200, &withCounts)
+	if withCounts.Total != 1 || withCounts.Counts.Total != 1 || withCounts.Counts.State["working"] != 1 {
+		t.Fatalf("scoped page with counts: %+v", withCounts)
+	}
+	var catalog sessionCatalog
+	read("agents_only=1&catalog=1", 200, &catalog)
+	if catalog.Total != 2 {
+		t.Fatalf("scoped catalog: %+v", catalog)
+	}
+
+	// One row leaves the scope, another enters it. Neither a frozen cursor nor other runtime views should change scope.
+	m.sessions[0].Assistant = true
+	m.sessions[2].Assistant = false
+	indexRows()
+	cursor := neturl.QueryEscape(first.Cursor)
+	next := runtimePage(t, h, "limit=1&summary=1&agents_only=true&cursor="+cursor)
+	if next.Total != 2 || next.Revision != first.Revision || next.HasMore ||
+		len(next.Sessions) != 1 || next.Sessions[0].SessionID != "agent-b" {
+		t.Fatalf("scoped cursor: %+v", next)
+	}
+	read("limit=1&summary=1&cursor="+cursor, 400, nil)
+	read("agents_only=invalid", 400, nil)
+	read("agents_only=1&agents_only=0", 400, nil)
+	delta := runtimePage(t, h, "agents_only=1&summary=1&since="+neturl.QueryEscape(first.Revision))
+	if delta.Total != 2 || len(delta.Sessions) != 1 || delta.Sessions[0].SessionID != "assistant" ||
+		!slices.Equal(delta.Remove, []string{runtimeListID("demo", "agent-a")}) {
+		t.Fatalf("scoped delta: %+v", delta)
+	}
+}
+
 func TestRuntimeExactLookupFullRow(t *testing.T) {
 	h := newTestHub(t)
 	m := newMachine(h, MachineConfig{ID: "demo"})
@@ -400,7 +484,7 @@ func fullIndexItems(mid string, list []proto.Session, encoded []sentSession) []s
 		items = append(items, sessionlist.Item{
 			ID: string(id), Machine: mid, Project: cmp.Or(row.RepoRoot, row.WorkspaceCwd, row.Cwd), Group: cmp.Or(row.SpaceID, row.WorkspaceID),
 			PaneSource: sessionorigin.Of(row), State: row.State, BackgroundWaiting: row.BackgroundWaiting, Source: row.SourceKind,
-			Provider: row.Agent, UpdatedAt: row.UpdatedAt, Fold: fold,
+			Provider: row.Agent, UpdatedAt: row.UpdatedAt, Fold: fold, Private: healthSession(&row), Assistant: row.Assistant,
 			SearchText: strings.Join([]string{row.Title, row.Cwd, row.RepoRoot, row.Branch, row.SpaceName, row.SlotName, row.AgentName, row.LastText}, "\n"),
 			Summary:    json.RawMessage(summary),
 			Full: runtimeListFields(full[row.SessionID], struct {

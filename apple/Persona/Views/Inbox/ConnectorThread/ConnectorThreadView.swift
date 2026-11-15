@@ -1,6 +1,7 @@
 import MarkdownUI
 import PersonaKit
 import SwiftUI
+import PersonaWire
 
 // A chat app's conversation opened from the inbox (Telegram's), laid out like the Feishu chat page: others on the
 // left, (in a group) the name over the first of a run and the avatar beside its last, mine on the right; a time

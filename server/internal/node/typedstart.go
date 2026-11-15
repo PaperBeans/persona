@@ -83,6 +83,17 @@ func (n *Node) runAgentCommand(ctx context.Context, launch host.Launcher, create
 	return t.done, nil
 }
 
+// runWorkAgentCommand is runAgentCommand without automatic terminal cleanup. A launch.Run error can mean the pane
+// accepted the command but its response was lost, so the caller gets done even on error and cleans the agent, not the
+// terminal. done is nil only when no command could be typed; it removes an unsourced start file in every case.
+func (n *Node) runWorkAgentCommand(ctx context.Context, launch host.Launcher, created *host.Created, ws, anchor, cmd string, shells ...string) (done func(), err error) {
+	t, err := n.typeStartMode(ctx, launch, created, ws, anchor, cmd, false, shells...)
+	if t == nil {
+		return nil, err
+	}
+	return t.done, err
+}
+
 // typedStart is a start's line typed into its new pane (typeStart): the line, and the start file it sources ("" when
 // the command was typed out).
 type typedStart struct {
@@ -118,19 +129,30 @@ func (t *typedStart) again(ctx context.Context) error {
 // line (startLine); else as it is. When the pane does not take it, the tab is closed (closeNewTab) and
 // pane_send_failed comes back as terminalNotReady.
 func (n *Node) typeStart(ctx context.Context, launch host.Launcher, created *host.Created, ws, anchor, cmd string, shells ...string) (*typedStart, error) {
+	return n.typeStartMode(ctx, launch, created, ws, anchor, cmd, true, shells...)
+}
+
+// typeStartMode is typeStart with closeOnError controlling only its own failure cleanup. Work agents keep the terminal
+// on every error because launch.Run cannot prove an accepted command did not run; other starts retain closeNewTab.
+func (n *Node) typeStartMode(ctx context.Context, launch host.Launcher, created *host.Created, ws, anchor, cmd string, closeOnError bool, shells ...string) (*typedStart, error) {
 	t := &typedStart{launch: launch, created: created, line: cmd}
 	if n.typesStartFile(launch, shells...) {
 		path, err := writeStartScript(n.dir, cmd)
 		if err != nil {
-			n.closeNewTab(ctx, launch, created, ws)
+			if closeOnError {
+				n.closeNewTab(ctx, launch, created, ws)
+			}
 			return nil, err
 		}
 		t.path, t.line = path, startLine(path, anchor, shells...)
 	}
 	if err := launch.Run(ctx, created.Pane, t.line); err != nil {
 		t.done()
-		n.closeNewTab(ctx, launch, created, ws)
-		return nil, startRunError(err)
+		if closeOnError {
+			n.closeNewTab(ctx, launch, created, ws)
+			return nil, startRunError(err)
+		}
+		return t, startRunError(err)
 	}
 	return t, nil
 }

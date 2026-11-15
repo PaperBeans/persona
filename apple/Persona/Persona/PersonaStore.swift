@@ -5,6 +5,7 @@ import UIKit
 #elseif canImport(AppKit)
 import AppKit
 #endif
+import PersonaWire
 
 /// The personas on this phone (docs/apple/persona.md「On the phone」): which one is chosen, what the hub offers, and the packages
 /// downloaded, one directory per rev under Application Support/Personas/<id>/<rev>. A package is used only once all of

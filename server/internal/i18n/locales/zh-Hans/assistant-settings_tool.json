@@ -1,4 +1,6 @@
 {
+  "title_readonly_mode": "只读任务保护",
+  "change_readonly_mode": "只读任务保护：{before} -> {after}。sandbox 保持现有保护（Codex 使用只读沙箱，Claude 使用指令约束）；prompt 只靠指令约束，不是安全隔离，仍遵循启动器原有权限。对新启动和重试的任务生效，不改变正在运行的任务。改回 sandbox 可恢复默认行为。",
   "title_task_workspace_preference": "派发任务时优先使用",
   "change_task_workspace_preference": "派发任务时优先使用：{before} → {after}",
   "title_notes": "关于我",
@@ -46,6 +48,8 @@
   "minutes_applied": "会议纪要保留已设为 {saved}，当前生效为 {after}。转写仍按录音保留时间清理。",
   "title_main_background_folded": "后台轮次默认折叠",
   "change_main_background_folded": "「后台轮次默认折叠」：{before} → {after}",
+  "title_recent_task_chats": "最近列表显示定时任务的对话",
+  "change_recent_task_chats": "「最近列表显示定时任务的对话」：{before} → {after}",
   "title_standing_authorizations": "长期授权",
   "title_meeting_transcription_default": "会议转写",
   "change_meeting_transcription_default": "会议转写：{before} → {after}，从新开始的会议起生效。使用 Hub 转写时，会议音频会发送给 Hub 的转写服务。纪要写好后，Hub 会删除音频。",

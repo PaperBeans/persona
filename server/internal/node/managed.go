@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/extension/sandbox"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/nodeclient"
@@ -567,14 +568,14 @@ func launchExec(agent, exe string, argv, env []string) (string, []string, []stri
 	home, _ := os.UserHomeDir()
 	cwd, _ := os.Getwd()
 	rest := argv[1:]
-	inner := func() string {
+	inner := func() *sandbox.StatusReason {
 		switch agent {
 		case "claude":
-			return claudeInner(rest, env, cwd, home, nil)
+			return claudeInnerReason(rest, env, cwd, home, nil)
 		case "codex":
-			return codexInner(append([]string{"codex"}, rest...), env, cwd, home)
+			return codexInnerReason(append([]string{"codex"}, rest...), env, cwd, home)
 		}
-		return "这类 agent（" + agent + "）的自带沙箱还没核对过，先不包"
+		return sandbox.NewStatusReason("node-doctor.sandbox_unmanaged_agent", i18n.Args{"agent": agent})
 	}
 	logf := func(format string, a ...any) { fmt.Fprintf(os.Stderr, "personad launch: "+format+"\n", a...) }
 	wrapped, wenv, st := wrapAgent("launch "+agent, home, identity.DataDir(home), cwd, settingsArgs(rest), inner, append([]string{exe}, rest...), env, logf)

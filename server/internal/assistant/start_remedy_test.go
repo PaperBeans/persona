@@ -92,7 +92,7 @@ func TestAStartWhoseTabIsKeptIsRemediedFirst(t *testing.T) {
 	waitFor(t, "the supervision message", func() bool { return len(f.notices()) == 1 })
 	n := f.notices()[0]
 	for _, want := range []string{"Agent 没开起来，它的启动标签在电脑上保留到", "停在一个提问上「[oh-my-zsh] Would you like to update? [Y/n]」",
-		"| Last login:", "还能重试 3 次", "task_start_screen"} {
+		"| Last login:", "还能重试 3 次", "signal=failed"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("message lacks %q:\n%s", want, n)
 		}
@@ -210,9 +210,7 @@ func TestRemedyTurnEndLeavesARetryRunning(t *testing.T) {
 	s, f := newQuietService(t)
 	todo, _ := remedyingTask(t, s, f, keptRefusal(proto.CodeShellWaiting))
 	waitFor(t, "the supervision message", func() bool { return len(f.notices()) == 1 })
-	s.tasks.mu.Lock()
-	s.tasks.retrying[todo.ID] = true
-	s.tasks.mu.Unlock()
+	s.claimTaskStart(todo.ID)
 	s.remedyTurnEnded(context.Background(), "conv1")
 	if got := todoNow(s, todo.ID); got.DoneAt != nil {
 		t.Fatalf("given up under a retry: %+v", got)
@@ -301,9 +299,7 @@ func TestARetryThatFailsTheSameWayIsTold(t *testing.T) {
 				t.Fatal(err)
 			}
 			waitFor(t, "the retry to end", func() bool {
-				s.tasks.mu.Lock()
-				busy := s.tasks.retrying[todo.ID]
-				s.tasks.mu.Unlock()
+				busy := s.taskStartOnWay(todo.ID)
 				r := remedyState(t, s, p.ID)
 				return !busy && len(f.started()) >= 2 && r != nil && r.State == c.state && r.Attempt == 1
 			})

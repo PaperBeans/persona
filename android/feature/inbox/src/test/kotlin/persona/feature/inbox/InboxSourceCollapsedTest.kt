@@ -101,7 +101,7 @@ class InboxSourceCollapsedTest {
 
         override suspend fun item(itemId: String): MailInboxItem {
             itemCalls += itemId
-            return MailInboxItem(itemId, MailReference(ACCOUNT_ID, uids = listOf(40L, LATEST_MAIL_UID)))
+            return MailInboxItem(itemId, MailReference(ACCOUNT_ID, uids = listOf(OLDER_MAIL_UID, LATEST_MAIL_UID)))
         }
 
         override suspend fun message(ref: MailReference, uid: Long): MailMessage {
@@ -136,7 +136,7 @@ class InboxSourceCollapsedTest {
             Source.Mail -> InboxRecord(
                 InboxItem("mail-item", kind = "mail", title = "Mail item", preview = "Mail preview", status = event.status),
                 source = "mail",
-                mail = InboxMailRef(ACCOUNT_ID, uids = listOf(40L, LATEST_MAIL_UID)),
+                mail = InboxMailRef(ACCOUNT_ID, uids = listOf(OLDER_MAIL_UID, LATEST_MAIL_UID)),
                 event = event,
             )
         }
@@ -224,13 +224,15 @@ class InboxSourceCollapsedTest {
             Source.Chat -> "Open the positioned source chat"
             Source.Mail -> "Open the source mail by UID"
         }
+        val newestChainText = "Open the newest source mail by UID"
         val link = when (source) {
             Source.Chat -> InboxChainLink(type = "source", position = JsonPrimitive(CHAT_POSITION.toString()))
-            Source.Mail -> InboxChainLink(type = "source", uid = LATEST_MAIL_UID)
+            Source.Mail -> InboxChainLink(type = "source", uid = OLDER_MAIL_UID)
         }
-        val record = base.copy(event = base.event.copy(chain = listOf(
-            InboxChainEntry("source-chain", kind = "received", text = chainText, link = link),
-        )))
+        val chain = mutableListOf(InboxChainEntry("source-chain", kind = "received", text = chainText, link = link))
+        if (source == Source.Mail) chain += InboxChainEntry("source-chain-newest", kind = "received", text = newestChainText,
+            link = InboxChainLink(type = "source", uid = LATEST_MAIL_UID))
+        val record = base.copy(event = base.event.copy(chain = chain))
         val pages = InboxItemPages()
         val repository = RecordingRepository(record)
         val transport = RecordingMailTransport()
@@ -270,10 +272,10 @@ class InboxSourceCollapsedTest {
                 assertTrue(transport.seenCalls.isEmpty())
             }
             Source.Mail -> {
-                assertEquals(MailRoute(record.item.id), stack.last())
+                assertEquals(MailRoute(record.item.id, OLDER_MAIL_UID), stack.last())
                 assertEquals(listOf(record.item.id), transport.itemCalls)
-                assertEquals(listOf(LATEST_MAIL_UID), transport.messageCalls)
-                assertEquals(listOf(LATEST_MAIL_UID to true), transport.seenCalls)
+                assertEquals(listOf(OLDER_MAIL_UID), transport.messageCalls)
+                assertEquals(listOf(OLDER_MAIL_UID to true), transport.seenCalls)
                 assertTrue(repository.conversationCalls.isEmpty())
                 assertTrue(repository.conversationSubscriptions.isEmpty())
                 assertTrue(repository.visibleCalls.isEmpty())
@@ -287,6 +289,17 @@ class InboxSourceCollapsedTest {
         assertEquals(listOf(InboxEventRoute(record.item.id)), stack.toList())
         assertEquals("Returning from a source-chain page mounted or read the source again", callsBeforeBack,
             sourceCallCounts(repository, transport))
+
+        if (source == Source.Mail) {
+            rule.onNodeWithText(newestChainText).assertExists().performClick()
+            rule.waitForIdle()
+            advancePastReadWindow()
+
+            assertEquals(MailRoute(record.item.id, LATEST_MAIL_UID), stack.last())
+            assertEquals(1, stack.count { it is MailRoute })
+            assertEquals(listOf(OLDER_MAIL_UID, LATEST_MAIL_UID), transport.messageCalls)
+            assertEquals(listOf(OLDER_MAIL_UID to true, LATEST_MAIL_UID to true), transport.seenCalls)
+        }
     }
 
     @Test fun eventChatStaysCollapsedUntilViewOriginal() {
@@ -339,6 +352,7 @@ class InboxSourceCollapsedTest {
         const val CHAT_MESSAGE_ID = "chat-message"
         const val CHAT_POSITION = 41L
         const val ACCOUNT_ID = "account"
+        const val OLDER_MAIL_UID = 40L
         const val LATEST_MAIL_UID = 41L
     }
 }

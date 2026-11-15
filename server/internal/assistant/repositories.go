@@ -28,6 +28,7 @@ type RepositoryBinding struct {
 	Name       string    `json:"name,omitempty"`
 	Aliases    []string  `json:"aliases,omitempty"`
 	Purpose    string    `json:"purpose,omitempty"`
+	CloneURL   string    `json:"clone_url,omitempty"`
 	VerifiedAt time.Time `json:"verified_at"`
 }
 
@@ -43,12 +44,21 @@ type repositoryDocument struct {
 	Removed      []repositoryRemoved `json:"removed,omitempty"`
 }
 
+func (doc repositoryDocument) taskCatalog() repository.Catalog {
+	out := repository.Catalog{Revision: doc.Revision, Repositories: make([]repository.CatalogEntry, 0, len(doc.Repositories))}
+	for _, entry := range doc.Repositories {
+		out.Repositories = append(out.Repositories, repository.CatalogEntry{Identity: entry.Identity, ID: entry.ID, CloneURL: entry.CloneURL})
+	}
+	return out
+}
+
 type repositoryInput struct {
 	URL      string   `json:"url"`
 	Provider string   `json:"provider"`
 	Name     string   `json:"name"`
 	Aliases  []string `json:"aliases"`
 	Purpose  string   `json:"purpose"`
+	CloneURL *string  `json:"clone_url,omitempty"`
 }
 
 type repositoryProblem string
@@ -67,6 +77,13 @@ func (in repositoryInput) binding() (RepositoryBinding, error) {
 		return RepositoryBinding{}, repositoryProblem("remote")
 	}
 	out := RepositoryBinding{Identity: id, Name: strings.TrimSpace(in.Name), Purpose: strings.TrimSpace(in.Purpose)}
+	if in.CloneURL != nil {
+		transport, err := repository.CloneTransport(*in.CloneURL, id)
+		if err != nil {
+			return out, repositoryProblem("remote")
+		}
+		out.CloneURL = transport
+	}
 	if !repositoryText(out.Name, 80) || !repositoryText(out.Purpose, 500) || len(in.Aliases) > 10 {
 		return out, repositoryProblem("metadata")
 	}
@@ -158,6 +175,9 @@ func (s *Service) saveRepository(ctx context.Context, id string, binding Reposit
 		}
 		if index >= 0 && doc.Repositories[index].Identity == binding.Identity {
 			binding.ID, binding.VerifiedAt = id, doc.Repositories[index].VerifiedAt
+			if binding.CloneURL == "" {
+				binding.CloneURL = doc.Repositories[index].CloneURL
+			}
 		} else {
 			if err := s.checkRepository(ctx, binding.Identity); err != nil {
 				return err
@@ -273,7 +293,7 @@ func (s *Service) repositoryRoutes() {
 			repositoryError(w, err)
 			return
 		}
-		apierr.WriteJSON(w, map[string]any{"manager": s.managerIdentity(), "repositories": doc.Repositories})
+		apierr.WriteJSON(w, map[string]any{"manager": s.managerIdentity(), "repositories": doc.Repositories, "catalog_revision": doc.Revision})
 	})
 	s.handle("GET /api/v1/assistant/repositories/{id}", func(w http.ResponseWriter, r *http.Request) {
 		binding, err := s.repositoryByID(r.Context(), r.PathValue("id"))

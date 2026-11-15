@@ -1,7 +1,6 @@
 #if DEBUG
 // i18n-ignore-file: DEBUG-only made-up knowledge-base sample for screenshots
 import Foundation
-import PersonaWire
 
 /// Knowledge-base search for screenshots of the demo (DEBUG only): the demo's search answers nothing, so its hits, an
 /// entry's matches and a chat's day were never seen. Only with `-showKnowledgeSearch <text>` or `-showKnowledgeDay YES`
@@ -110,3 +109,4 @@ enum DemoKBSample {
     }
 }
 #endif
+import PersonaWire

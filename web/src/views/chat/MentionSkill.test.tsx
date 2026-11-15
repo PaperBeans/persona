@@ -7,9 +7,13 @@ import { getContexts, removeContext } from "../../lib/links";
 import { sendDraft } from "../../lib/drafts";
 import { parseQueued } from "../../lib/queue";
 import { restoreQueued } from "./QueueStrip";
+import { t } from "../../i18n";
 import { skillContext, skillDraft } from "../../lib/skill-mentions";
+import { onModelPicker } from "../../lib/model-switch";
+import { onPermissionPicker } from "../../lib/permissions-command";
 import { Composer, type Outgoing } from "./Composer";
 import type { MentionSource } from "./ComposerPanel";
+import type { ComposerCommand } from "../../lib/extension-prompts";
 
 vi.hoisted(() => {
   window.matchMedia = ((query: string) => ({ matches: query === "(any-pointer: fine)", media: query, onchange: null,
@@ -26,7 +30,7 @@ let host: HTMLDivElement;
 let root: Root;
 const source: MentionSource = { files: () => [], skills: { manager: "helper-a", session: "chat", launcher: "codex", environment: "profile-a" } };
 const onSend = vi.fn(async (_m: Outgoing) => true);
-const render = (mention = source) => act(() => root.render(<Composer draftKey="skill-test" placeholder="" mention={mention} machineId="computer" onSend={onSend} />));
+const render = (mention = source, commands?: ComposerCommand[], machineId = "computer") => act(() => root.render(<Composer draftKey="skill-test" placeholder="" mention={mention} machineId={machineId} commands={commands} onSend={onSend} />));
 const box = () => host.querySelector("textarea")!;
 const options = () => [...host.querySelectorAll<HTMLButtonElement>('[role="option"]')];
 const waitForOptions = (count: number) => vi.waitFor(async () => {
@@ -42,7 +46,18 @@ async function type(text: string) {
   });
 }
 const key = (k: string) => act(() => { box().dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true })); });
-beforeAll(() => loadPages());
+async function press(k: string, extra: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...extra });
+  await act(async () => {
+    box().dispatchEvent(event);
+    await Promise.resolve();
+  });
+  return event;
+}
+beforeAll(async () => {
+  await loadPages();
+  await loadPages(); // the slash palette registers its skill-aware second stage while the first pass loads
+});
 beforeEach(() => {
   Element.prototype.scrollIntoView ??= () => {};
   localStorage.clear();
@@ -77,6 +92,17 @@ it("searches name/description locally, disambiguates equal names, selects with k
   key("ArrowDown");
   expect(box().value).toBe("");
   expect(getContexts("skill-test")).toHaveLength(0);
+});
+
+it("sends on Ctrl+Enter with a highlighted @ skill instead of inserting its chip", async () => {
+  render();
+  await type("@security");
+  await waitForOptions(1);
+  expect(options()[0].getAttribute("aria-selected")).toBe("true");
+  expect((await press("Enter", { ctrlKey: true })).defaultPrevented).toBe(true);
+  expect(onSend.mock.calls.map(([message]) => message.text)).toEqual(["@security"]);
+  expect(box().value).toBe("");
+  expect(getContexts("skill-test").filter((row) => row.kind === "skill")).toHaveLength(0);
 });
 
 it("supports touch/click removal, restores edit/queue references and persists the selected identity in the draft", async () => {
@@ -155,4 +181,308 @@ it("keeps existing file rows reachable beside a large skill catalog and searches
   expect(options()).toHaveLength(1);
   expect(options()[0].textContent).toContain("review-49");
   expect(api).toHaveBeenCalledTimes(1);
+});
+
+const COMMANDS: ComposerCommand[] = [
+  { word: "/alpha", desc: "First command", text: "/alpha" },
+  { word: "/beta", desc: "Second command", text: "/beta" },
+];
+const focused = () => host.querySelector<HTMLButtonElement>('[role="option"][aria-selected="true"]');
+
+it("lists matching skills after commands in the slash palette and reads the catalog only on opening", async () => {
+  render(source, COMMANDS);
+  expect(api).not.toHaveBeenCalled();
+  await type("/");
+  await waitForOptions(4);
+  expect(api).toHaveBeenCalledTimes(1);
+  expect(options().slice(0, 2).map((o) => o.textContent)).toEqual(["alpha", "beta"]);
+  expect(options()[2].textContent).toContain("Inspect security boundaries");
+  expect(options()[2].textContent).toContain("project · .");
+  expect(options()[3].textContent).toContain("Check wording");
+  expect(options()[3].textContent).toContain("user");
+});
+
+it("keeps commands usable without a machine or a skill source and never invents a catalog request", async () => {
+  render(source, COMMANDS, "");
+  await type("/");
+  await waitForOptions(2);
+  expect(options().map((o) => o.textContent)).toEqual(["alpha", "beta"]);
+  expect(api).not.toHaveBeenCalled();
+});
+
+it("keeps the slash palette command-only where the chat has no skill source", async () => {
+  render({ files: () => [] }, COMMANDS);
+  await type("/");
+  await waitForOptions(2);
+  expect(options().map((o) => o.textContent)).toEqual(["alpha", "beta"]);
+  expect(api).not.toHaveBeenCalled();
+});
+
+it("ranks slash skills by exact, prefix, contained and description matches after every command", async () => {
+  api.mockImplementationOnce(async () => ({ catalog_version: 1, complete: true, skills: [
+    { id: "description", name: "audit", description: "Review the result", source: "project" },
+    { id: "contains", name: "preview", description: "", source: "project" },
+    { id: "prefix", name: "review-later", description: "", source: "project" },
+    { id: "exact", name: "review", description: "", source: "project" },
+  ] }));
+  render(source, [...COMMANDS, { word: "/audit", desc: "Review command", text: "/audit" }]);
+  await type("/review");
+  await waitForOptions(5);
+  expect(options().map((o) => o.textContent)).toEqual([
+    "audit", // every command, even a description-tier match, precedes every skill
+    expect.stringContaining("review"),
+    expect.stringContaining("review-later"),
+    expect.stringContaining("preview"),
+    expect.stringContaining("audit"),
+  ]);
+});
+
+it("adds the exact skill reference by pointer, removes the slash token and preserves it in drafts and Edit", async () => {
+  render(source, COMMANDS);
+  await type("/wording");
+  await waitForOptions(1);
+  await act(async () => options()[0].click());
+  expect(box().value).toBe("");
+  expect(getContexts("skill-test")[0]).toMatchObject({ kind: "skill", title: "review", attrs: { ref: "b" } });
+  expect(box().value).not.toContain("review");
+  await type("Use this");
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 280)); });
+  const draft = localStorage.getItem("draft:skill-test")!;
+  expect(draft).toContain('ref="b"');
+  expect(draft).not.toContain("@review");
+  act(() => sendDraft("skill-test", { type: "replace", text: draft }));
+  expect(box().value).toBe("Use this");
+  expect(getContexts("skill-test")[0].attrs?.ref).toBe("b");
+});
+
+it("selects a slash skill with the keyboard and retains its identity through retry and send history", async () => {
+  render(source, COMMANDS);
+  await type("/security");
+  await waitForOptions(1);
+  key("Enter");
+  expect(box().value).toBe("");
+  expect(getContexts("skill-test")[0].attrs?.ref).toBe("a");
+  await type("Check this");
+  onSend.mockImplementationOnce(async () => false);
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.click());
+  const attempted = onSend.mock.calls[0][0].text;
+  expect(attempted).toContain('kind="skill" title="review" url="" ref="a"');
+  expect(getContexts("skill-test")[0].attrs?.ref).toBe("a");
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.click());
+  expect(onSend.mock.calls[1][0].text).toBe(attempted);
+  key("ArrowUp");
+  expect(box().value).toBe("Check this");
+  expect(getContexts("skill-test")[0].attrs?.ref).toBe("a");
+});
+
+it.each([{ name: "Ctrl", modifier: { ctrlKey: true } }, { name: "Cmd", modifier: { metaKey: true } }])("sends the draft on $name+Enter instead of picking the highlighted slash skill", async ({ modifier }) => {
+  render(source, COMMANDS);
+  await type("/security");
+  await waitForOptions(1);
+  expect(focused()?.textContent).toContain("Inspect security boundaries");
+  expect((await press("Enter", modifier)).defaultPrevented).toBe(true);
+  expect(onSend.mock.calls.map(([message]) => message.text)).toEqual(["/security"]);
+  expect(box().value).toBe("");
+  expect(getContexts("skill-test").filter((row) => row.kind === "skill")).toHaveLength(0);
+});
+
+it("leaves Mod+Alt+Enter and Mod+Shift+Enter for the window with a slash skill highlighted", async () => {
+  render(source, COMMANDS);
+  await type("/security");
+  await waitForOptions(1);
+  const seen: KeyboardEvent[] = [];
+  const listener = (event: KeyboardEvent) => seen.push(event);
+  window.addEventListener("keydown", listener);
+  try {
+    for (const modifier of [
+      { ctrlKey: true, altKey: true }, { metaKey: true, altKey: true },
+      { ctrlKey: true, shiftKey: true }, { metaKey: true, shiftKey: true },
+    ]) {
+      expect((await press("Enter", modifier)).defaultPrevented).toBe(false);
+      expect(onSend).not.toHaveBeenCalled();
+      expect(getContexts("skill-test").filter((row) => row.kind === "skill")).toHaveLength(0);
+      expect(box().value).toBe("/security");
+      expect(focused()?.textContent).toContain("Inspect security boundaries");
+    }
+  } finally {
+    window.removeEventListener("keydown", listener);
+  }
+  expect(seen).toHaveLength(4);
+});
+
+it.each([{ name: "model", key: "Enter" }, { name: "permissions", key: "Tab" }])("picks a $name skill with $key instead of running the typed special command", async ({ name, key: pressed }) => {
+  api.mockImplementationOnce(async () => ({ catalog_version: 1, complete: true, skills: [{ id: `skill-${name}`, name, description: "Skill, not the command", source: "project" }] }));
+  const opened = vi.fn();
+  const off = name === "model" ? onModelPicker("skill-test", opened) : onPermissionPicker("skill-test", opened);
+  try {
+    render(source, [{ word: `/${name}`, desc: "Built-in command", text: `/${name}` }, COMMANDS[1]]);
+    await type(`/${name}`);
+    await waitForOptions(2);
+    key("ArrowDown");
+    expect(focused()?.textContent).toContain("Skill, not the command");
+    key(pressed);
+    expect(opened).not.toHaveBeenCalled();
+    expect(box().value).toBe("");
+    expect(getContexts("skill-test")[0].attrs?.ref).toBe(`skill-${name}`);
+  } finally { off(); }
+});
+
+it("wraps arrows across the whole command and skill list", async () => {
+  render(source, COMMANDS);
+  await type("/");
+  await waitForOptions(4);
+  expect(focused()?.textContent).toBe("alpha");
+  key("ArrowUp");
+  expect(focused()?.textContent).toContain("Check wording");
+  key("ArrowDown");
+  expect(focused()?.textContent).toBe("alpha");
+});
+
+it("resets a stale skill highlight when the execution environment changes", async () => {
+  render(source, COMMANDS);
+  await type("/");
+  await waitForOptions(4);
+  key("ArrowDown");
+  key("ArrowDown");
+  key("ArrowDown");
+  expect(focused()?.textContent).toContain("Check wording");
+  let resolve!: (value: unknown) => void;
+  api.mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
+  render({ ...source, skills: { ...source.skills!, environment: "profile-b" } }, COMMANDS);
+  await vi.waitFor(() => expect(api).toHaveBeenCalledTimes(2));
+  expect(focused()?.textContent).toBe("alpha");
+  await act(async () => resolve({ catalog_version: 1, complete: true, skills: [{ id: "new", name: "replacement", description: "New environment", source: "project" }] }));
+  await waitForOptions(3);
+  expect(focused()?.textContent).toBe("alpha");
+});
+
+it("keeps commands and the highlighted row stable while the slash catalog loads, then keeps commands on failure", async () => {
+  let resolve!: (value: unknown) => void;
+  api.mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
+  render(source, COMMANDS);
+  await type("/");
+  await waitForOptions(2);
+  await vi.waitFor(() => expect(api).toHaveBeenCalledTimes(1));
+  expect(host.textContent).toContain("正在读取");
+  key("ArrowDown");
+  expect(focused()?.textContent).toBe("beta");
+  await act(async () => resolve({ catalog_version: 1, complete: true, skills }));
+  await waitForOptions(4);
+  expect(focused()?.textContent).toBe("beta");
+  key("ArrowDown");
+  expect(focused()?.textContent).toContain("Inspect security boundaries");
+  key("ArrowUp");
+  expect(focused()?.textContent).toBe("beta");
+  act(() => options()[0].dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+  expect(focused()?.textContent).toBe("beta"); // a shifted command under a resting pointer is not a hover either
+  act(() => options()[0].dispatchEvent(new MouseEvent("mousemove", { bubbles: true })));
+  expect(focused()?.textContent).toBe("alpha");
+  key("ArrowDown");
+  expect(focused()?.textContent).toBe("beta");
+  act(() => options()[2].dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+  expect(focused()?.textContent).toBe("beta"); // appearing under a resting pointer does not steal the row
+  act(() => options()[2].dispatchEvent(new MouseEvent("mousemove", { bubbles: true })));
+  expect(focused()?.textContent).toContain("Inspect security boundaries");
+  key("ArrowUp");
+  expect(focused()?.textContent).toBe("beta");
+
+  key("Escape");
+  await type("text");
+  api.mockImplementationOnce(async () => { throw new Error("unavailable"); });
+  await type("/");
+  await waitForOptions(2);
+  await vi.waitFor(() => expect(host.textContent).toContain("技能暂不可用"));
+  expect(options().map((o) => o.textContent)).toEqual(["alpha", "beta"]);
+});
+
+it("opens the slash palette for a Persona chat with no commands and restores a picked skill through queue pullback", async () => {
+  render(source, []);
+  await type("/wording");
+  await waitForOptions(1);
+  key("Tab");
+  expect(getContexts("skill-test")[0].attrs?.ref).toBe("b");
+  const raw = skillDraft(getContexts("skill-test"), "Queued words");
+  await act(async () => restoreQueued("skill-test", { machine_id: "computer", session_id: "chat" } as import("../../lib/types").Session, parseQueued(raw)));
+  expect(box().value).toBe("Queued words");
+  expect(getContexts("skill-test")[0].attrs?.ref).toBe("b");
+});
+
+it("names both commands and skills when an unavailable slash catalog has no matching rows", async () => {
+  api.mockImplementationOnce(async () => { throw new Error("unavailable"); });
+  render(source, []);
+  await type("/zzz");
+  await vi.waitFor(() => expect(host.textContent).toContain("技能暂不可用"));
+  expect(options()).toHaveLength(0);
+  expect(host.textContent).toContain(t("chat-slashpalette.no_match_skills"));
+});
+
+it("waits for the first skill answer before announcing an empty skills-only palette", async () => {
+  let resolve!: (value: unknown) => void;
+  api.mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
+  render(source, []);
+  await type("/");
+  await vi.waitFor(() => expect(api).toHaveBeenCalledTimes(1));
+  expect(options()).toHaveLength(0);
+  expect(host.textContent).not.toContain(t("chat-slashpalette.no_match_skills"));
+  expect(host.querySelectorAll('[role="status"]')).toHaveLength(1);
+  expect(host.textContent).toContain("正在读取");
+  await act(async () => resolve({ catalog_version: 1, complete: true, skills }));
+  await waitForOptions(2);
+  expect(host.textContent).not.toContain(t("chat-slashpalette.no_match_skills"));
+});
+
+it("never lets a large skill catalog push commands out of the shared slash row cap", async () => {
+  render(source, Array.from({ length: 30 }, (_, i) => ({ word: `/command-${i}`, desc: "", text: `/command-${i}` })));
+  await type("/");
+  await waitForOptions(25);
+  expect(options().map((o) => o.textContent)).toEqual(Array.from({ length: 25 }, (_, i) => `command-${i}`));
+  expect(api).toHaveBeenCalledTimes(1);
+});
+
+it("keeps commands but no skill rows when the slash catalog uses an unsupported version", async () => {
+  api.mockImplementationOnce(async () => ({ catalog_version: 2, complete: true, skills }));
+  render(source, COMMANDS);
+  await type("/");
+  await vi.waitFor(() => expect(host.textContent).toContain(t("chat-composerpanel.skills_error")));
+  expect(options().map((row) => row.textContent)).toEqual(["alpha", "beta"]);
+  expect(host.textContent).not.toContain("Inspect security boundaries");
+});
+
+it("shows the partial-inventory line only for a partial slash catalog", async () => {
+  api.mockImplementationOnce(async () => ({ catalog_version: 1, complete: false, skills }));
+  render(source, COMMANDS);
+  await type("/security");
+  await waitForOptions(1);
+  expect(options()[0].textContent).toContain("Inspect security boundaries");
+  expect(host.textContent).toContain(t("chat-composerpanel.skills_partial"));
+
+  key("Escape");
+  await type("text");
+  await type("/security");
+  await waitForOptions(1);
+  await vi.waitFor(() => expect(host.textContent).not.toContain(t("chat-composerpanel.skills_loading")));
+  expect(options()[0].textContent).toContain("Inspect security boundaries");
+  expect(host.textContent).not.toContain(t("chat-composerpanel.skills_partial"));
+  expect(host.querySelector("[role=status]")).toBeNull();
+});
+
+it.each((["Enter", "Tab", "ArrowDown", "ArrowUp"] as const).flatMap((pressed) => [
+  { composition: "isComposing", pressed },
+  { composition: "keyCode 229", pressed },
+]))("does not navigate or pick a skill with $pressed during $composition", async ({ composition, pressed }) => {
+  render(source, COMMANDS);
+  await type("/");
+  await waitForOptions(4);
+  key("ArrowUp");
+  const selected = focused()?.textContent;
+  expect(selected).toContain("Check wording");
+  await act(async () => {
+    const event = new KeyboardEvent("keydown", { key: pressed, bubbles: true, cancelable: true, isComposing: composition === "isComposing" });
+    if (composition === "keyCode 229") Object.defineProperty(event, "keyCode", { value: 229 });
+    box().dispatchEvent(event);
+    await Promise.resolve();
+  });
+  expect(focused()?.textContent).toBe(selected);
+  expect(box().value).toBe("/");
+  expect(getContexts("skill-test").filter((row) => row.kind === "skill")).toHaveLength(0);
 });

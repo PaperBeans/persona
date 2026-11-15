@@ -28,6 +28,7 @@ import persona.core.contracts.CoreText
 import persona.core.contracts.DialogOption
 import persona.core.contracts.Interaction
 import persona.core.contracts.Machine
+import persona.core.contracts.Question
 import persona.core.contracts.Resolution
 import persona.core.contracts.ScreenDialog
 import persona.core.contracts.parseTime
@@ -89,15 +90,19 @@ internal fun InteractionPanel(
         }
     }
     val closeCard: @Composable (Interaction) -> Unit = { request ->
-        val localOnly = blockedReason != null || (request.kind == "question" && request.canCancel != true)
-        if ((localOnly && onDiscardLocal != null) || (request.kind == "question" && request.canCancel == true)) {
+        val requestBlock = resolveRequestApprovalBlockedReason(request, blockedReason)
+        val stoppedWork = requestBlock != null && request.isManagerWorkCard
+        val localOnly = !stoppedWork && (requestBlock != null || (request.kind == "question" && request.canCancel != true))
+        if ((localOnly && onDiscardLocal != null) || stoppedWork || (request.kind == "question" && request.canCancel == true)) {
             val canClose = busyId == null && !linkVisible && if (localOnly) onDiscardLocal != null else
                 request.id !in uncertainIds && !RequestExpiry.expired(request.expiresAt, now)
             JIconButton(PhIcons.X, stringResource(if (localOnly) R.string.chat_card_discard_local else R.string.chat_question_close), {
                 if (canClose) {
                     if (localOnly) onDiscardLocal?.invoke(request)
-                    else if (!RequestExpiry.expired(request.expiresAt, Instant.now()))
-                        AnswerBuilder.build(request, AnswerAction.CancelQuestion).resolution?.let { onResolve(request, it) }
+                    else if (!RequestExpiry.expired(request.expiresAt, Instant.now())) {
+                        val action = if (stoppedWork) AnswerAction.Dismiss else AnswerAction.CancelQuestion
+                        AnswerBuilder.build(request, action).resolution?.let { onResolve(request, it) }
+                    }
                 }
             }, enabled = canClose)
         }
@@ -199,19 +204,37 @@ internal fun InteractionForm(
     val expired = RequestExpiry.expired(interaction.expiresAt, now)
     var password by rememberTransientSecret(interaction.id, clearWhen = expired || uncertain)
     var fieldValues by rememberTransient(interaction.id, clearWhen = expired || uncertain, empty = emptyMap<String, String>())
-    // A session whose source cannot approve (blockedReason) shows the request but answers nothing, not even "Handle on computer".
+    // A stopped Agent cannot receive a message, but its manager can still settle explicit defer choices and dismiss
+    // its own work card. Other blocked cards, including permissions, keep the original read-only behavior (#6839).
     val blocked = blockedReason != null
-    val context = AnswerContext(state = if (expired || uncertain || readOnly || linkVisible || blocked) "unknown" else "pending", sending = busy,
+    val stoppedWork = blocked && interaction.isManagerWorkCard
+    val unavailable = expired || uncertain || readOnly || linkVisible
+    val context = AnswerContext(state = if (unavailable || (blocked && !stoppedWork)) "unknown" else "pending", sending = busy,
         fullPlanRead = planRead)
-    val editable = !busy && !expired && !uncertain && !readOnly && !linkVisible && !blocked
+    val editable = !busy && !expired && !uncertain && !readOnly && !linkVisible && (!blocked || stoppedWork)
     fun act(action: AnswerAction, value: AnswerDraft = draft) {
         if (RequestExpiry.expired(interaction.expiresAt, Instant.now())) return
+        // A stopped card's page turn is navigation only, as on Web. AnswerBuilder may resolve Advance when every
+        // question is answered, so only the last page's Submit may produce that Resolution (#6839).
+        if (stoppedWork && action == AnswerAction.Advance) {
+            if (!editable || value.page >= interaction.questions.orEmpty().lastIndex) return
+            update(value.copy(page = value.page + 1))
+            return
+        }
+        if (stoppedWork && !interaction.stoppedWorkAnswerAllowed(action, value)) return
         val result = AnswerBuilder.build(interaction, action, value, context)
-        if (!result.allowed) return
+        if (!result.allowed || (stoppedWork && !interaction.stoppedWorkResultAllowed(result))) return
         if (result.resolution == null) update(result.draft)
         else { password = ""; fieldValues = emptyMap(); onAnswer(action, result.draft, planRead) }
     }
-    fun enabled(action: AnswerAction) = AnswerBuilder.build(interaction, action, draft, context).allowed
+    fun enabled(action: AnswerAction): Boolean {
+        if (stoppedWork && action == AnswerAction.Advance) {
+            return editable && draft.page < interaction.questions.orEmpty().lastIndex
+        }
+        if (stoppedWork && !interaction.stoppedWorkAnswerAllowed(action, draft)) return false
+        val result = AnswerBuilder.build(interaction, action, draft, context)
+        return result.allowed && (!stoppedWork || interaction.stoppedWorkResultAllowed(result))
+    }
     val questions = interaction.questions.orEmpty()
     val question = questions.getOrNull(draft.page)
     val fallback = remember(interaction.screen, secret) {
@@ -384,15 +407,16 @@ internal fun InteractionForm(
                     val display = AnswerBuilder.display(option.label)
                     DecisionOption(numberedOption("${index + 1}", display.text), { act(AnswerAction.PickOption, draft.copy(optionIndex = index)) },
                         detail = option.description, recommended = display.recommended,
-                        selected = option.label in draft.picks[question.question].orEmpty(), enabled = editable,
+                        selected = option.label in draft.picks[question.question].orEmpty(),
+                        enabled = editable && (!stoppedWork || question.isDeferChoice(option.label)),
                         multiSelect = question.multiSelect, position = index + 1 to question.options.size, fullText = full)
                 }
                 var otherOpen by rememberSaveable(interaction.id, question.question) { mutableStateOf(false) }
                 if (otherOpen || question.question in draft.other) {
                     JTextField(draft.other[question.question].orEmpty(), {
                         update(draft.copy(other = draft.other + (question.question to it), picks = draft.picks - question.question))
-                    }, label = stringResource(R.string.chat_question_other), modifier = Modifier.fillMaxWidth(), enabled = editable)
-                } else JTextButton(stringResource(R.string.chat_question_other_open), { otherOpen = true }, enabled = editable)
+                    }, label = stringResource(R.string.chat_question_other), modifier = Modifier.fillMaxWidth(), enabled = editable && !stoppedWork)
+                } else JTextButton(stringResource(R.string.chat_question_other_open), { otherOpen = true }, enabled = editable && !stoppedWork)
             }
             "elicitation" -> ElicitationFields(interaction, draft, update, editable)
             "screen" -> if (secret) {
@@ -520,6 +544,45 @@ private fun CommandAskContent(ask: CommandAsk, now: Instant) {
                 else R.string.chat_command_ask_countdown_deny, time)
         }
         Text(line, Modifier.testTag("screen-command-countdown"), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2)
+    }
+}
+
+internal val Interaction.isManagerWorkCard: Boolean
+    get() = kind == "question" && toolName == "persona_triage"
+
+private fun Question.isDeferChoice(label: String): Boolean =
+    !multiSelect && options.any { it.label == label && it.action == "defer" }
+
+/** The stopped-Agent subset of Web's workCardLocalResolution: bare dismiss, or answers made only from explicit,
+ * single-choice defer options. Missing actions from an older hub never turn into local answers. */
+private fun Interaction.stoppedWorkAnswerAllowed(action: AnswerAction, draft: AnswerDraft): Boolean {
+    val questions = questions.orEmpty()
+    fun deferredPick(question: Question): Boolean {
+        if (!draft.other[question.question].isNullOrBlank()) return false
+        val picks = draft.picks[question.question].orEmpty()
+        return picks.isNotEmpty() && picks.all(question::isDeferChoice)
+    }
+    return when (action) {
+        AnswerAction.Dismiss -> true
+        AnswerAction.PickOption -> questions.getOrNull(draft.page)?.let { question ->
+            question.options.getOrNull(draft.optionIndex)?.let { question.isDeferChoice(it.label) } == true
+        } == true
+        AnswerAction.Advance -> questions.getOrNull(draft.page)?.let(::deferredPick) == true
+        AnswerAction.Submit -> questions.isNotEmpty() && questions.all(::deferredPick)
+        else -> false
+    }
+}
+
+/** Validate the actual post-action wire result, as Web's workCardLocalResolution does. In particular, Advance can
+ * resolve immediately when a retained draft completes every question; a defer on the current page is not enough. */
+private fun Interaction.stoppedWorkResultAllowed(result: AnswerResult): Boolean {
+    val resolution = result.resolution ?: return true
+    if (resolution == Resolution(dismiss = true)) return true
+    val answers = resolution.answers ?: return false
+    if (answers.isEmpty() || resolution != Resolution(answers = answers)) return false
+    val questions = questions.orEmpty()
+    return answers.all { (questionText, answer) ->
+        questions.firstOrNull { it.question == questionText }?.isDeferChoice(answer) == true
     }
 }
 

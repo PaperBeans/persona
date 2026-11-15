@@ -202,6 +202,9 @@ func TestAgentSandboxFallsBack(t *testing.T) {
 			if st.State != c.state || st.Why == "" {
 				t.Errorf("status %+v, want %s with why", st, c.state)
 			}
+			if st.State == sandbox.AgentSkipped && st.Reason == nil {
+				t.Errorf("Persona-owned inner reason has no metadata: %+v", st)
+			}
 		})
 	}
 	t.Run("off says nothing", func(t *testing.T) {
@@ -212,6 +215,35 @@ func TestAgentSandboxFallsBack(t *testing.T) {
 			t.Errorf("sandbox.enabled false: not wrapped %q", cmd.Args)
 		}
 	})
+}
+
+func TestClaudeSandboxReasonKeepsLegacyText(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, key, want string
+	}{
+		{name: "invalid JSON", input: "{", key: "node-doctor.sandbox_claude_settings_invalid_json",
+			want: "Claude 的设置 --settings 不是合法的 JSON，判断不出它有没有开自带 sandbox"},
+		{name: "invalid sandbox", input: `{"sandbox":"unknown"}`, key: "node-doctor.sandbox_claude_settings_invalid_sandbox",
+			want: "Claude 的设置 --settings 里的 sandbox 看不懂，判断不出它有没有开自带 sandbox"},
+		{name: "enabled", input: `{"sandbox":{"enabled":true}}`, key: "node-doctor.sandbox_claude_own",
+			want: "Claude 在 --settings 里开了自带 sandbox（sandbox.enabled），和外层沙箱不能同时用"},
+		{name: "disabled", input: `{"sandbox":{"enabled":false}}`},
+		{name: "options only", input: `{"sandbox":{"autoAllowBashIfSandboxed":true}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reason := claudeSandboxInReason([]byte(tc.input), "--settings")
+			if got := claudeSandboxIn([]byte(tc.input), "--settings"); got != reason.Error() || got != tc.want {
+				t.Errorf("wrapper = %q, reason = %q, legacy text = %q", got, reason.Error(), tc.want)
+			}
+			if tc.key == "" {
+				if reason != nil {
+					t.Errorf("unexpected reason: %+v", reason)
+				}
+			} else if reason == nil || reason.Key != tc.key {
+				t.Errorf("reason = %+v, want key %q", reason, tc.key)
+			}
+		})
+	}
 }
 
 // A Codex is wrapped only when it surely runs its tools itself with no sandbox of its own: danger-full-access, in its
@@ -248,9 +280,10 @@ func TestCodexInner(t *testing.T) {
 			if c.config != "" {
 				writeFile(t, filepath.Join(home, ".codex", "config.toml"), c.config)
 			}
+			reason := codexInnerReason(c.argv, nil, filepath.Join(home, "proj"), home)
 			why := codexInner(c.argv, nil, filepath.Join(home, "proj"), home)
-			if (why == "") != c.wrap {
-				t.Errorf("wrap %v, why %q", c.wrap, why)
+			if (why == "") != c.wrap || (reason == nil) != c.wrap || why != reason.Error() {
+				t.Errorf("wrap %v, why %q, reason %+v", c.wrap, why, reason)
 			}
 		})
 	}

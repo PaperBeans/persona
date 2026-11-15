@@ -21,6 +21,7 @@ internal fun InboxItemRow(record: InboxRecord, repository: InboxRepository, navi
     selection: InboxRowSelection? = null,
 ) {
     val item = record.item
+    val summary = item.summary?.takeIf { it.isNotBlank() }
     val groupEvent = record.feedId != null && record.isGroup != false && item.kind in setOf("group", "mention", "bot")
     val pages = LocalInboxItemPages.current
     val translated = rememberItemTranslation(record)
@@ -35,22 +36,30 @@ internal fun InboxItemRow(record: InboxRecord, repository: InboxRepository, navi
     val handOffLabel = stringResource(R.string.inbox_hand_to_ai)
     if (menu) JActionSheet(title = item.title, onDismiss = { menu = false }, actions = buildList {
         add(JAction(doneLabel, doneIcon(done), enabled = !busy, onClick = onDone))
-        add(JAction(handOffLabel, PhIcons.Robot, onClick = onHandOff))
+        if (!record.isAssistantRow) add(JAction(handOffLabel, PhIcons.Robot, onClick = onHandOff))
         // What the item can be muted by, the name with each (iOS `rowMenu`): its repository, chat or sender; then a rule for each.
         addAll(muteAndRuleActions(res, record, onMute, onRule))
     })
     val selecting = selection?.selecting == true
     JSwipeActions(end = inboxRowSwipe(doneLabel, done, busy, selecting, onDone)) {
-        MessageItem(sender = item.sender.orEmpty().ifBlank { item.title }, title = translated?.subject?.ifBlank { null } ?: item.title,
+        MessageItem(sender = if (record.isAssistantRow) item.sender.orEmpty().ifBlank { record.sourceLabel }.ifBlank { item.title }
+                else item.sender.orEmpty().ifBlank { item.title }, title = if (groupEvent) record.groupName ?: stringResource(R.string.inbox_kind_group)
+                else translated?.subject?.ifBlank { null } ?: item.title,
             heading = item.title.takeIf { groupEvent },
             titleIcon = translated?.let { PhIcons.Translate }, titleIconLabel = translated?.let { stringResource(R.string.inbox_translated) },
             titleTag = stringResource(R.string.inbox_kind_dm).takeIf { item.kind == "dm" },
             unread = if (record.count > 1) record.count else 0,
             selected = isInboxItemSelected(LocalDetailKey.current, item.id, record.feedId),
-            position = position, avatar = rememberLarkAvatar(record.avatar.takeIf { record.doc == null }, onlineSince), avatarIcon = record.doc?.let { docIcon(it.type) },
-            // A hub connector's item is any connector's (#2726): a neutral mark and the hub's name for it, never a brand.
+            position = position,
+            avatar = rememberLarkAvatar(record.avatar.takeIf { record.doc == null && !record.isAssistantRow }, onlineSince),
+            avatarIcon = when {
+                record.isAssistantRow -> PersonaIcons.persona
+                record.doc != null -> docIcon(record.doc.type)
+                else -> null
+            },
+            // The assistant wears Persona's own mark with no source badge; other connectors keep a neutral mark and the hub's name.
             source = when {
-                record.isConnector -> MessageSource.Other
+                record.isAssistantRow || record.isConnector -> MessageSource.Other
                 record.feedId != null || record.source == "lark" -> MessageSource.Lark
                 record.isMail -> MessageSource.Mail
                 else -> MessageSource.Other
@@ -59,7 +68,7 @@ internal fun InboxItemRow(record: InboxRecord, repository: InboxRepository, navi
             group = record.groupName.takeIf { groupEvent },
             time = item.updatedAt?.let { displayTime(it, currentLocale, res, zone, clock()) },
             // Every row keeps title / AI summary / source-specific latest line, with or without where.
-            preview = item.summary?.takeIf { it.isNotBlank() },
+            preview = summary,
             meta = MessageItemMeta(metaText, nowText, inboxNowStatus(record.event.now), problem = record.event.now == "failed",
                 key = record.event.now),
             status = when { done -> null; item.isWorking || record.agent?.state in setOf("running", "queued") -> Status.Working

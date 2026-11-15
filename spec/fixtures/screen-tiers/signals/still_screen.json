@@ -12,6 +12,7 @@
         "frames" : 0,
         "lateShare" : null,
         "queueFalling" : false,
+        "queueLastMs" : null,
         "queueP50Ms" : null,
         "queueP95Ms" : null,
         "queueRising" : false,

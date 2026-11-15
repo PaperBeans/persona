@@ -234,7 +234,7 @@ User decision: the hub is only a communication center, and computers belong to t
 
 ## UI (iOS / Mac, #2889)
 
-Same rules as the web (pure functions in `apple/Shared/UsageWindows.swift`, unit tests `UsageWindowsTests` share the web's cases; views in `Persona/Views/Machines/UsageWindowsViews.swift`):
+Same rules as the web (pure functions in `apple/Packages/PersonaWire/Sources/PersonaWire/UsageWindows.swift`, unit tests `UsageWindowsTests` share the web's cases; views in `Persona/Views/Machines/UsageWindowsViews.swift`):
 
 - **iOS**: on the Machines page (**Machines** in the drawer / Settings / Agents menu), a **Subscription Usage** section below the cards lists every window of every account directly (no hover on a phone, so no two layers of thin bar + popover).
   The sample time sits right of the account title, the next line gives the plan and sources, and there is a one-line explanation when the gateway cannot read; one row per window: length, used, ahead / behind pace, reset countdown, with a bar carrying the pace tick below. With no data the whole section is not drawn.

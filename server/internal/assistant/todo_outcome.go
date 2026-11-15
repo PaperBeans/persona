@@ -57,6 +57,33 @@ func outcomeKey(todoID string, doneAt time.Time) string {
 	return "outcome:" + todoID + ":" + doneAt.UTC().Format(time.RFC3339Nano)
 }
 
+// completionOfDecision recognizes only the rows written by outcomeDecisions, not manual or extension outcome notes.
+func completionOfDecision(d db.TodoDecisionRow) (time.Time, bool) {
+	if d.Source != db.DecisionOutcome {
+		return time.Time{}, false
+	}
+	key, ok := strings.CutPrefix(d.SourceMessage, "outcome:"+d.TodoID+":")
+	if !ok {
+		return time.Time{}, false
+	}
+	stamp, _, ok := strings.Cut(key, "#")
+	if !ok {
+		return time.Time{}, false
+	}
+	at, err := time.Parse(time.RFC3339Nano, stamp)
+	return at, err == nil
+}
+
+func earlierPhase(t Todo, d db.TodoDecisionRow) (time.Time, bool) {
+	at, ok := completionOfDecision(d)
+	return at, ok && (t.DoneAt == nil || !at.Truncate(time.Microsecond).Equal(t.DoneAt.Truncate(time.Microsecond)))
+}
+
+func earlierOutcomeSummary(t Todo, d db.TodoDecisionRow) (time.Time, bool) {
+	at, earlier := earlierPhase(t, d)
+	return at, earlier && strings.HasSuffix(d.SourceMessage, "#o")
+}
+
 // recordTaskOutcome writes what task t came to; doneAt is when it was marked done. t is the todo as it was then, with
 // its agents. Nothing for a todo that is not a task (no origin), or one already recorded for this completion.
 func (s *Service) recordTaskOutcome(t Todo, doneAt time.Time) {

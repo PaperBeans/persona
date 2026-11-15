@@ -234,6 +234,9 @@ Codex App (`docs/integrations/codex.md` ("Sessions in the Codex desktop App (App
 (`space_id` = `codex-project:<repository root>`, `space_name` = the App's name for it) or its chats in no project (`codex-chats:<CODEX_HOME>`);
 `space_index` is the project's place in the App's sidebar, from 1 (its `project-order`), absent for a project the App does not order and for chats in no project.
 
+Claude desktop app (`docs/integrations/claude-integration.md` ("The desktop app's sidebar"), #8521): `space_kind` is `claude_desktop`, the space is the repository the session works in
+(a worktree the app made is its repository's; until that is read, the folder the app started the session in), the same `space_id` as the Codex App's chats there (`codex-project:<repository root>`, `space_name` its folder name); a folder that is no repository is a space of its own, the home folder none. No slots.
+
 Paseo (`docs/integrations/paseo.md` ("Which sessions appear")): `space_kind` is `paseo`, the space is a Paseo project (`space_id` = project record id, `space_name` = project name);
 a repository's main checkout and its worktrees share a space. No slots (#4493): a workspace's Agents are separate conversations, not the panes of one tab;
 `slot_name` alone carries the Paseo workspace's title, as the Agent's place label.

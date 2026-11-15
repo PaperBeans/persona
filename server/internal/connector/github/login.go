@@ -34,6 +34,8 @@ type deviceLogin struct {
 	// Account is the account the inbox was last read as (account.go), kept with the sign-in so that a restart does
 	// not forget it. It is not a secret; this is the one store the connector has.
 	Account *accountRecord `json:"account,omitempty"`
+	// InboxMessages preserves message identities across a restart, in the same store as the account.
+	InboxMessages map[string]inboxMessageRecord `json:"inbox_messages,omitempty"`
 }
 
 // devicePending is a device code waiting for the user.

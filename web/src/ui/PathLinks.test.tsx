@@ -24,7 +24,14 @@ const settle = async () => {
 };
 
 // The machine has these (relative paths in /repo).
-const there: Record<string, string> = { "/tmp/persona-tasks/1664-lark-test.md": "file", "src/a.ts": "file", "~/notes/": "dir" };
+const there: Record<string, string> = {
+  "/tmp/persona-tasks/1664-lark-test.md": "file",
+  "src/a.ts": "file",
+  "~/notes/": "dir",
+  "/home/me/report/": "dir",
+  "/home/me/report/报表_2026H2.xlsx": "file",
+  "~/ドキュメント/メモ.txt": "file",
+};
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -91,6 +98,19 @@ describe("links in messages", () => {
     expect(html.match(/<a /g)).toHaveLength(4); // the three paths and the link
     // without a machine (a file's own Markdown), nothing is asked or linked
     expect(renderToStaticMarkup(<Markdown text="见 src/a.ts:40" />)).not.toContain("<a ");
+  });
+
+  it("links a path whose names are not ASCII whole, and leaves the words glued to it out", async () => {
+    const md = "已保存到 /home/me/report/报表_2026H2.xlsx，摘要在 ~/ドキュメント/メモ.txtにあります。";
+    askPaths("mac", "/repo", textPaths(md));
+    await settle();
+    const html = renderToStaticMarkup(<Markdown text={md} mid="mac" cwd="/repo" />);
+    expect(html).toMatch(/<a [^>]*>\/home\/me\/report\/报表_2026H2.xlsx<\/a>，/);
+    expect(html).toMatch(/<a [^>]*>~\/ドキュメント\/メモ.txt<\/a>にあります。/);
+    expect(html.match(/<a /g)).toHaveLength(2);
+    const bubble = renderToStaticMarkup(<PathText text={md} mid="mac" cwd="/repo" />);
+    expect(bubble).toContain(">/home/me/report/报表_2026H2.xlsx</a>，");
+    expect(bubble.match(/<a /g)).toHaveLength(2);
   });
 
   it("while streaming, leaves out the word still being written", () => {

@@ -203,11 +203,11 @@ describe("Mermaid blocks", () => {
     const { Markdown } = await import("./Markdown");
     // a code block's Copy is in its title bar, always shown (#2984); a diagram's buttons show on a touch screen
     const code = renderToStaticMarkup(createElement(Markdown, { text: "```js\nlet a = 1\n```" }));
-    expect(code).toMatch(/data-code-bar[^]*aria-label="拷贝代码"[^>]*touch-hit/);
+    expect(code).toMatch(/data-code-bar[^]*aria-label="复制代码"[^>]*touch-hit/);
     expect(code).not.toContain("opacity-0");
     const diagram = renderToStaticMarkup(createElement(Markdown, { text: "```mermaid\ngraph TD; A-->B\n```" }));
     expect(diagram).toContain("[@media(hover:none)]:opacity-100");
-    expect(diagram).toMatch(/aria-label="拷贝代码"[^>]*touch-hit/);
+    expect(diagram).toMatch(/aria-label="复制代码"[^>]*touch-hit/);
   });
 
   it("errors read in Chinese with the line, Mermaid's text kept", async () => {
@@ -337,7 +337,7 @@ describe("Markdown table widths and the copy button (audit item 77)", () => {
     const { createElement } = await import("react");
     const { Markdown } = await import("./Markdown");
     const html = renderToStaticMarkup(createElement(Markdown, { text: "| a | b |\n| --- | --- |\n| 1 | 2 |" }));
-    const cap = /<span data-table-copy="[^"]*" class="([^"]*)"><button[^>]*aria-label="拷贝表格"/.exec(html);
+    const cap = /<span data-table-copy="[^"]*" class="([^"]*)"><button[^>]*aria-label="复制表格"/.exec(html);
     expect(cap).not.toBeNull();
     expect(cap![1]).toContain("to-inset");
     expect(cap![1]).toContain("rounded-tr-card");

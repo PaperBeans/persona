@@ -100,6 +100,54 @@ import PersonaWire
         #expect(!repos.tree.isEmpty && repos.active.isEmpty && repos.quiet.isEmpty)
     }
 
+    @Test func openAgentSelectsOnlyItsFoldedQuietRepository() throws {
+        let open = try session("open")
+        let unrelated = try session("unrelated", cwd: "/code/unrelated")
+        let wrong = SpaceGroup(id: "repo/wrong", machineID: "fixture-box", spaceID: "-", name: "wrong", index: 0, sessions: [unrelated])
+        let matching = SpaceGroup(id: "repo/matching", machineID: "fixture-box", spaceID: "-", name: "matching", index: 1, sessions: [open])
+        let membership = AgentListProjection.quietRepositoryMembership(groups: [wrong, matching], tasks: [:])
+        // The unrelated repository comes first in the same quiet section: membership, not position or name, selects.
+        #expect(AgentListProjection.selectedQuietRepositoryID(open: open.key, membership: membership, expandedQuiet: [],
+                                                              forceExpanded: false) == matching.id)
+    }
+
+    @Test func aNestedAgentSelectsItsFoldedQuietRepository() throws {
+        let parent = try session("parent")
+        var child = try session("child")
+        child.sourceKind = "runtime"
+        child.isSubagent = true
+        child.parentSessionID = parent.sessionID
+        var folded = try session("folded")
+        folded.foldedUnder = parent.sessionID
+        let result = AgentListProjection.build(input([parent, child, folded]))
+        let group = try #require(result.quietRepositories.values.first?.first)
+        #expect(result.tasks[parent.key]?.map(\.id) == [child.key])
+        #expect(result.quietRepositoryBySession[parent.key] == group.id)
+        #expect(result.quietRepositoryBySession[child.key] == group.id)
+        #expect(result.quietRepositoryBySession[folded.key] == group.id)
+        #expect(AgentListProjection.selectedQuietRepositoryID(open: child.key, membership: result.quietRepositoryBySession,
+                                                              expandedQuiet: [], forceExpanded: false) == group.id)
+    }
+
+    @Test func builtAgentRowsSuppressFoldedQuietRepositorySelection() throws {
+        let open = try session("open")
+        let group = SpaceGroup(id: "repo/matching", machineID: "fixture-box", spaceID: "-", name: "matching", index: 0, sessions: [open])
+        #expect(AgentListProjection.selectedQuietRepositoryID(open: open.key, membership: [open.key: group.id],
+                                                              expandedQuiet: [group.id], forceExpanded: false) == nil)
+        #expect(AgentListProjection.selectedQuietRepositoryID(open: open.key, membership: [open.key: group.id],
+                                                              expandedQuiet: [], forceExpanded: true) == nil, "search builds every agent row")
+    }
+
+    @Test func noOpenAgentOrNoMatchingQuietRepositorySelectsNothing() throws {
+        let listed = try session("listed")
+        let unlisted = try session("unlisted")
+        let group = SpaceGroup(id: "repo/matching", machineID: "fixture-box", spaceID: "-", name: "matching", index: 0, sessions: [listed])
+        #expect(AgentListProjection.selectedQuietRepositoryID(open: nil, membership: [listed.key: group.id],
+                                                              expandedQuiet: [], forceExpanded: false) == nil)
+        #expect(AgentListProjection.selectedQuietRepositoryID(open: unlisted.key, membership: [listed.key: group.id],
+                                                              expandedQuiet: [], forceExpanded: false) == nil)
+    }
+
     @Test func anUnchangedWarmKeyDoesNotCaptureOrRebuildTheInventory() throws {
         let captured = input([try session("one", state: "working")])
         let key = AgentListProjectionCache.Key(revision: 1, partitions: [], settings: captured.settings)

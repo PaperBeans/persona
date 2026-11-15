@@ -52,6 +52,19 @@ func (s *Service) resumeAllowed(ctx context.Context, self string, am Device, c p
 	if c.Capabilities != nil {
 		cause = c.Capabilities.StopCause
 	}
+	if c.Archived {
+		// Archive snapshots may predate the stop or a later user close. Only the node's saved cause authorizes resume.
+		var info struct {
+			StopCause proto.StopCause `json:"stop_cause"`
+		}
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := s.call(cctx, am.ID, "session.info", map[string]any{"session_id": c.SessionID}, &info)
+		cancel()
+		if err != nil {
+			return resumeFailed(c, am, fmt.Errorf("could not verify the node's stop cause: %w", err))
+		}
+		cause = info.StopCause
+	}
 	if !cause.AllowsSupervisorResume() {
 		return fmt.Errorf("%s cannot be resumed by the assistant: stop cause is %s. User stops and unknown causes require "+
 			"the user's Resume on its terminal page. Nothing was started or sent", agentLabel(c), cause)
