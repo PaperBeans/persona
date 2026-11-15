@@ -112,6 +112,7 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 	}
 	var sourceCwd string // the inferred cwd's workspace, and the other task that writes there
 	var owner *Todo
+	t.cwdStatus, t.cwdStatusOf = nil, "" // never an answer about a folder an earlier resolve asked of
 	if t.Workspace == nil || t.WorkspaceInferred {
 		mode := workspaceNone
 		if !t.Readonly {
@@ -119,7 +120,8 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 			if err := s.call(ctx, t.Machine, "worktree.status", map[string]any{"cwd": t.Cwd}, &st); err != nil {
 				return fmt.Errorf("%s: %w", i18n.T(s.lang(ctx), "assistant-tasks_workspace.infer", i18n.Args{"machine": t.Machine}), err)
 			}
-			t.cwdStatus, t.cwdStatusOf = &st, t.Machine+"\x00"+t.Cwd // its repository, for resolveTaskRepo
+			// What the machine says of t.Cwd, for resolveTaskRepo: used only while t runs in that folder (or its checkout).
+			t.cwdStatus, t.cwdStatusOf = &st, t.Machine+"\x00"+proto.NodeClean(t.Cwd)
 			if st.Path != "" {
 				mode = workspaceExisting
 				var source proto.Workspace
@@ -299,6 +301,16 @@ func (s *Service) admitTaskWorkspace(ctx context.Context, t *PlanTask) error {
 		}
 	}
 	t.Cwd = t.WorkspaceResolved.Path
+	// A shared fallback has mode none, but its resolved marker must still survive the start.
+	keep := t.Workspace.Mode != workspaceNone || t.WorkspaceResolved.Shared
+	// The repository is the one this folder is in, not the one the plan was made from: an existing workspace, or the
+	// checkout the engine made, can be another repository (#8259). Saved below with the admitted cwd, and what
+	// "start these directly" remembers. A task without a workspace runs where it was planned: nothing to ask again
+	// unless it is to be remembered.
+	repo := t.Repo
+	if t.repoOf != t.Machine+"\x00"+proto.NodeClean(t.Cwd) && (keep || t.rememberKind) {
+		s.resolveTaskRepo(ctx, t)
+	}
 	if t.Workspace.Mode != workspaceNone {
 		if err := s.taskWorkspaceBusy(ctx, t.Machine, t.Cwd, t.TodoID); err != nil {
 			return err
@@ -312,13 +324,15 @@ func (s *Service) admitTaskWorkspace(ctx context.Context, t *PlanTask) error {
 			s.tasks.mu.Unlock()
 		}
 	}
-	// A shared fallback has mode none, but its resolved marker must still survive the start.
-	if t.planID != "" && (t.Workspace.Mode != workspaceNone || t.WorkspaceResolved != nil && t.WorkspaceResolved.Shared) {
+	if t.planID != "" && keep {
 		// Persist the engine's answer before starting, so a retry never creates a second tree.
 		return s.patchPlanTask(ctx, t.planID, t.planIndex, func(pt *PlanTask) {
-			pt.Cwd, pt.Workspace, pt.WorkspaceResolved = t.Cwd, t.Workspace, t.WorkspaceResolved
+			pt.Cwd, pt.Repo, pt.Workspace, pt.WorkspaceResolved = t.Cwd, t.Repo, t.Workspace, t.WorkspaceResolved
 			pt.WorkspaceInferred, pt.ReservedTodoID, pt.MachinePolicy = t.WorkspaceInferred, t.ReservedTodoID, t.MachinePolicy
 		})
+	}
+	if t.planID != "" && t.Repo != repo { // no workspace, same folder: only what its repository is came out otherwise
+		return s.patchPlanTask(ctx, t.planID, t.planIndex, func(pt *PlanTask) { pt.Repo = t.Repo })
 	}
 	return nil
 }

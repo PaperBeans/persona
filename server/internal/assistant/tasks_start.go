@@ -65,11 +65,14 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if err := s.resolveTaskWorkspace(ctx, &p.Tasks[i]); err != nil {
 			return nil, planInvalid{err}
 		}
-		s.resolveTaskRepo(ctx, &p.Tasks[i]) // where it starts after the card's edits: the kind remember keeps
+		s.resolveTaskRepo(ctx, &p.Tasks[i]) // where it runs after the card's edits (its workspace, not the plan's cwd)
 	}
 	p.State = planStarted
 	for i := range p.Tasks {
 		p.Tasks[i].OwnerStarted = ownerStarts(ctx)
+		// Remembered by startTaskAgent once admission fixed the folder that runs: its repository is the kind, never
+		// the one the plan was made from when the workspace is in another (#8259).
+		p.Tasks[i].rememberKind = remember
 	}
 	ok, err := s.movePlan(ctx, p, planOpen)
 	if err != nil {
@@ -141,9 +144,6 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 	}
 	if _, err := s.movePlan(ctx, p, planStarted); err != nil { // keep the todo ids
 		s.logf("plan %s: %v", p.ID, err)
-	}
-	if remember {
-		s.trustKinds(ctx, p.Tasks)
 	}
 	s.event(ctx, map[string]any{"type": "task_plan", "plan": p})
 	for i := range p.Tasks {

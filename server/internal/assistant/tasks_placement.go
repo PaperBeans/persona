@@ -211,6 +211,10 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	if err := s.admitTaskWorkspace(ctx, t); err != nil {
 		return "", "", err
 	}
+	if t.rememberKind { // "start these directly": the machine and repository that run, now that admission fixed them
+		t.rememberKind = false
+		s.trustKinds(ctx, []PlanTask{*t})
+	}
 	prompt := t.Prompt
 	if t.Continues != "" {
 		prompt += "\n\n" + prompts.RenderTaskContinuation(prompts.TaskContinuation{TodoID: t.Continues, Readonly: t.Readonly})

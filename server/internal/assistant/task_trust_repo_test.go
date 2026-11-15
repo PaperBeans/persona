@@ -239,3 +239,104 @@ func TestTaskPlanRememberCoversTheRepositoryAcrossWorktrees(t *testing.T) {
 	}
 	waitFor(t, "the third task's agent", func() bool { return starts() == 3 })
 }
+
+// repoPlan makes a one-task plan on box in cwd through task_plan (extra adds or overrides the task's fields), and
+// returns its id and what the tool said.
+func repoPlan(t *testing.T, s *Service, cwd string, extra map[string]any) (id, out string) {
+	t.Helper()
+	task := map[string]any{"title": "修登录崩溃", "prompt": "修好并补测试", "machine": "box", "cwd": cwd,
+		"permission": "bypassPermissions", "why": "这个仓库在 box 上"}
+	for k, v := range extra {
+		task[k] = v
+	}
+	raw, _ := json.Marshal(map[string]any{"tasks": []any{task}})
+	out, err := s.toolTaskPlan(context.Background(), "side1", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return planIDPattern.FindString(out), out
+}
+
+func fakeStarts(f *fakeHub) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.starts)
+}
+
+// A plan made in repository A whose card picks an existing workspace in repository B: Start with "start these
+// directly" remembers B, the repository that runs, and saves it with the admitted cwd; A stays a kind that asks.
+func TestTaskTrustRemembersTheRepositoryOfTheExistingWorkspaceThatRuns(t *testing.T) {
+	ctx := context.Background()
+	st := &profileTaskStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}
+	s, f := newTaskServiceOn(t, st)
+	repoMachine(f, nil)
+
+	id, out := repoPlan(t, s, "/wt/app/fix-a", nil)
+	if id == "" || !strings.Contains(out, "nothing has started") {
+		t.Fatalf("an untrusted writable task did not wait for Start: %s", out)
+	}
+	p, err := s.startPlan(ctx, id, []PlanTask{{Workspace: &TaskWorkspace{Mode: workspaceExisting, Existing: "/wt/other/fix-b"}}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Tasks[0].Repo != "/code/other" {
+		t.Fatalf("Start named repository %q for a task that runs in /wt/other/fix-b", p.Tasks[0].Repo)
+	}
+	waitFor(t, "the task's agent", func() bool { return fakeStarts(f) == 1 })
+	if got := storedTrust(t, st.memStore); !slices.Equal(got, []string{"box|/code/other|edit"}) {
+		t.Fatalf("tasks.trust = %v, want only the repository that runs (/code/other)", got)
+	}
+	saved, err := s.loadPlan(ctx, id)
+	if err != nil || saved.Tasks[0].Cwd != "/wt/other/fix-b" || saved.Tasks[0].Repo != "/code/other" {
+		t.Fatalf("saved task = %+v (%v), want the admitted cwd with its repository", saved.Tasks[0], err)
+	}
+
+	if _, out := repoPlan(t, s, "/wt/app/next", nil); !strings.Contains(out, "nothing has started") {
+		t.Fatalf("the repository the plan was made in, which did not run, starts without asking: %s", out)
+	}
+	if _, out := repoPlan(t, s, "/wt/other/next", nil); !strings.Contains(out, "without asking") {
+		t.Fatalf("a task in the repository that ran still waits for Start: %s", out)
+	}
+	// The other way round: trusted B does not let a plan made in B that picks a workspace in A start at once.
+	if _, out := repoPlan(t, s, "/wt/other/third", map[string]any{"workspace": map[string]any{"existing": "/wt/app/third"}}); !strings.Contains(out, "nothing has started") {
+		t.Fatalf("a plan made in the trusted repository but running in another started without asking: %s", out)
+	}
+}
+
+// A new checkout the engine makes somewhere else than the plan's repository: what is remembered is the repository the
+// checkout is in, or, when the machine names none for it, that exact folder; never the repository the plan came from.
+func TestTaskTrustRemembersTheRepositoryOfTheCheckoutMade(t *testing.T) {
+	for _, tc := range []struct{ name, made, want string }{
+		{"another repository", "/wt/other/made-x", "box|/code/other|edit"},
+		{"no repository named", "/scratch/made-y", "box|/scratch/made-y|edit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := &profileTaskStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}
+			s, f := newTaskServiceOn(t, st)
+			repoMachine(f, nil)
+			f.answerNode(DeviceWorktreeCreate, func(string, json.RawMessage) (any, error) {
+				return proto.WorktreeCreateResult{WorkspaceID: "ws-made", Path: tc.made, Branch: "task/made"}, nil
+			})
+
+			id, out := repoPlan(t, s, "/wt/app/fix-a", map[string]any{"workspace": map[string]any{"new": map[string]any{"branch": "task/made"}}})
+			if id == "" || !strings.Contains(out, "nothing has started") {
+				t.Fatalf("an untrusted writable task did not wait for Start: %s", out)
+			}
+			if _, err := s.startPlan(ctx, id, nil, true); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, "the task's agent", func() bool { return fakeStarts(f) == 1 })
+			if got := storedTrust(t, st.memStore); !slices.Equal(got, []string{tc.want}) {
+				t.Fatalf("tasks.trust = %v, want only %s", got, tc.want)
+			}
+			saved, err := s.loadPlan(ctx, id)
+			if err != nil || saved.Tasks[0].Cwd != tc.made || trustKey(saved.Tasks[0]) != tc.want {
+				t.Fatalf("saved task = %+v (%v), want the checkout made with its kind %s", saved.Tasks[0], err, tc.want)
+			}
+			if _, out := repoPlan(t, s, "/wt/app/next", nil); !strings.Contains(out, "nothing has started") {
+				t.Fatalf("the repository the plan was made in, which did not run, starts without asking: %s", out)
+			}
+		})
+	}
+}
