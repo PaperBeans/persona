@@ -30,6 +30,12 @@ func classifyLark(cmd string, gates []proto.CommandGate, cwd string, risk larkRi
 }
 
 func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk larkRisk, depth int) larkVerdict {
+	return classifyLarkAt(cmd, gates, cwd, risk, depth, false)
+}
+
+// classifyLarkAt is classifyLarkDepth for a command run here or, remote, on another machine through ssh: there PATH
+// names that machine's directories, which say nothing about the programs here.
+func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk larkRisk, depth int, remote bool) larkVerdict {
 	var v larkVerdict
 	if depth > 16 {
 		v.other, v.unparsed, v.unknown = true, true, true
@@ -76,7 +82,7 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 		}
 		return v
 	}
-	cmd = normalizeLarkCommand(cmd, cwd)
+	cmd = normalizeLarkCommand(cmd, cwd, gates)
 	v.unknown = shellCommandUnknown(cmd, false, depth)
 	segs, ok := shellcmd.Split(cmd)
 	if !ok {
@@ -86,9 +92,33 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 	vars := map[string]string{}
 	varsStable := larkVariableScopeStable(cmd, gates)
 	executableEnv := false
+	// Text naming lark-cli is a call only where a program executes it (larkgate_text.go): flow notes each
+	// segment for larkTextRuns.
+	flow := make([]larkFlow, 0, len(segs))
+	// sequential: a `;` / `&&` / `||` list of simple commands, run one after another in the order written.
+	sequential := false
+	if tree, err := syntax.NewParser().Parse(strings.NewReader(cmd), ""); err == nil {
+		_, sequential = larkFlatStmts(tree.Stmts)
+	}
 	for _, s := range segs {
+		writes, notes := larkWritesFile(s.Redirect)
+		flow = append(flow, larkFlow{text: s.Text, writes: writes, notes: notes})
+		seg := &flow[len(flow)-1]
 		nestedUnsure := false
 		for _, nested := range s.Nested {
+			if inner, ok := larkArithmetic(nested); ok {
+				// $((…)) is arithmetic, not a subshell: it runs only its own $(…). It stays unsure (a variable's
+				// value is evaluated as an expression, which may hold a substitution of its own).
+				nestedUnsure = true
+				for _, c := range inner {
+					child := classifyLarkDepth(c, gates, cwd, risk, depth+1)
+					if len(child.calls) > 0 || child.unknown || child.unparsed {
+						v.other = true
+					}
+					merge(child)
+				}
+				continue
+			}
 			child := classifyLarkDepth(nested, gates, cwd, risk, depth+1)
 			if len(child.calls) > 0 || child.unknown || child.unparsed {
 				v.other = true
@@ -119,8 +149,7 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 			if !isAssignment(w) {
 				break
 			}
-			k, _, _ := strings.Cut(w, "=")
-			executableEnv = executableEnv || larkExecutableEnv[k]
+			executableEnv = executableEnv || larkExecutableAssignment(w, remote)
 		}
 		var env []string
 		for len(words) > 0 && isAssignment(words[0]) {
@@ -131,6 +160,10 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 			if varsStable {
 				for _, a := range env {
 					k, val, _ := strings.Cut(a, "=")
+					if strings.ContainsAny(val, "$`") {
+						delete(vars, k) // known only when it runs: stays a variable
+						continue
+					}
 					vars[k] = val
 				}
 			}
@@ -138,8 +171,7 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 		}
 		for _, word := range words {
 			if isAssignment(word) {
-				k, _, _ := strings.Cut(word, "=")
-				executableEnv = executableEnv || larkExecutableEnv[k]
+				executableEnv = executableEnv || larkExecutableAssignment(word, remote)
 			}
 		}
 		var parsed bool
@@ -173,10 +205,19 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 			v.other = true
 			merge(classifyLarkDepth(strings.Join(words[1:], " "), gates, cwd, risk, depth+1))
 		case isLarkCLI(name):
-			if strings.ContainsAny(strings.Join(words[1:], " "), "$`") {
-				v.other, v.unknown = true, true
+			// As for gated calls (parseGateCall): literal assignments earlier in the command resolve; what stays a
+			// variable may be a flag value of a read, never a command word, an api route or anything of a write.
+			args := make([]string, len(words)-1)
+			for i, a := range words[1:] {
+				args[i] = shellVarRef.ReplaceAllStringFunc(a, func(m string) string {
+					if val, ok := vars[strings.Trim(m, "${}")]; ok {
+						return val
+					}
+					return m
+				})
 			}
-			c, deny, ok := parseLarkCLI(words[1:], risk)
+			dynamic := strings.ContainsAny(strings.Join(args, " "), "$`")
+			c, deny, ok := parseLarkCLI(args, risk)
 			if deny != "" {
 				v.deny = deny
 				return v
@@ -188,7 +229,15 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 			if !c.cliRead() {
 				v.cliWrite = true
 			}
+			// An unquoted variable can add words; that matters only to a read that --dry-run or --help made one
+			// (a later --dry-run=false sends): a command's own risk and an api method are set by its literal words.
+			flagRead := flagOn(args, "--dry-run") || flagOn(args, "-h", "--help")
+			if dynamic && (!c.cliRead() || strings.Contains(c.Path, "$") || strings.Contains(strings.Join(args, " "), "`") || flagRead && splitGateArguments(s.Text)) {
+				v.other, v.unknown = true, true
+			}
 			v.calls = append(v.calls, c)
+			seg.call = true // its words go to lark-cli alone, its output is data
+			continue
 		case gate >= 0:
 			g := gates[gate]
 			for _, a := range env {
@@ -219,13 +268,53 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 				return v
 			}
 			v.other = true
-		case larkFilters[name] && len(env) == 0:
-		default:
+		case filepath.Base(name) == "ssh":
 			v.other = true
-			if larkCLIRe.MatchString(s.Text) || dynamicCommandName(name) || larkCLIRe.MatchString(cmd) && indirectLarkCommand(name) {
+			remote, ok := sshRemoteCommand(words[1:])
+			if !ok || remote == "" {
+				seg.opaque = true // a login shell there runs whatever comes in
+				v.unknown = v.unknown || larkCLIRe.MatchString(s.Text)
+				continue
+			}
+			// lark-cli there acts as the user too: only what the gate can read as reads stays out of the way.
+			child := classifyLarkAt(remote, gates, "", risk, depth+1, true)
+			for _, c := range child.calls {
+				child.unknown = child.unknown || !c.CLI // a gated command there is not this machine's gate
+			}
+			merge(child)
+			v.unsure = v.unsure || child.unsure
+			v.unknown = v.unknown || child.unparsed && larkCLIRe.MatchString(remote)
+			seg.call = true // the remote command, read above, is what its words do
+		case filepath.Base(name) == "perl" && perlSubstitution(words[1:]):
+			v.other = true // it edits text and runs none of it, whatever its pattern names
+		case name == "for" || name == "done" || name == "fi":
+			v.other = true // a loop's words are its variable's values: run only where a command uses $var (dynamicCommandName)
+		case larkFilters[name] && len(env) == 0:
+			seg.filter = true
+		case name == "tee":
+			v.other, seg.filter, seg.writes = true, true, true
+		default:
+			v.other, seg.program = true, true
+			// Inline Python that can start nothing holds lark-cli's name as data (#8148); it may write it to a file.
+			inert := inertPythonCode(words)
+			if larkCLIRe.MatchString(s.Text) && !inert || dynamicCommandName(name) {
 				v.unknown = true // an interpreter, wrapper or script may invoke the CLI
 			}
+			if inert && larkCLIRe.MatchString(s.Text) {
+				if files, ok := pythonWrites(words); ok {
+					seg.notes = append(seg.notes, files...)
+				} else {
+					seg.writes = true
+				}
+			}
+			// A program whose code the command does not show may run lark-cli; inline code that runs nothing
+			// else is read by its own words above.
+			seg.opaque = indirectLarkCommand(name) && !selfContainedCode(words) && !inert
+			sequential = sequential && name != "trap" // its code runs later
 		}
+	}
+	if larkTextRuns(cmd, flow, sequential) {
+		v.other, v.unknown = true, true
 	}
 	if executableEnv && (len(v.calls) > 0 || larkCLIRe.MatchString(cmd)) {
 		v.other, v.unknown = true, true
@@ -415,8 +504,15 @@ func larkVariableScopeStable(cmd string, gates []proto.CommandGate) bool {
 				return false
 			}
 		case *syntax.BinaryCmd:
-			stable = false
-			return false
+			// A pipeline's parts and what follows && or || may run in a subshell or not at all: an assignment there
+			// may never reach later commands. Commands there are checked as anywhere else.
+			syntax.Walk(n, func(inner syntax.Node) bool {
+				if call, ok := inner.(*syntax.CallExpr); ok && len(call.Assigns) > 0 {
+					stable = false
+				}
+				return stable
+			})
+			return stable
 		case *syntax.Assign:
 			if n.Append || n.Index != nil || n.Array != nil || n.Value == nil {
 				stable = false

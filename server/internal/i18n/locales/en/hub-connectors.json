@@ -25,5 +25,6 @@
   "doc_comment_rule": "Rule: a document comment mentions you or replies to your comment.",
   "larkcli_name": "Lark · my messages",
   "github_rate_low": "The GitHub request quota for this hour is nearly exhausted; only reading notifications for about {minutes} min",
-  "github_paused": "GitHub asked for a pause; not reading anything for about {minutes} min"
+  "github_paused": "GitHub asked for a pause; not reading anything for about {minutes} min",
+  "github_account_before": "GitHub: the account changed; this item is from the account before"
 }

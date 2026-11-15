@@ -121,7 +121,7 @@ func TestLeaderSupervisesItsTasks(t *testing.T) {
 	}
 
 	// The leader closes it; the main conversation could too, and the task stays the leader's.
-	res, err = review("lead1", "accepted", "用户选了只修 iPad，已合并", nil)
+	res, err = review("lead1", "accepted", "用户选了只修 iPad，已合并", map[string]any{"checks": completeReviewChecks(todoNow(s, todo.ID))})
 	if err != nil || !strings.Contains(res, "accepted and closed") {
 		t.Fatalf("the leader's accept: %s %v", res, err)
 	}

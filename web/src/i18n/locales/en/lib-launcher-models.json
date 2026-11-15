@@ -1,5 +1,5 @@
 {
   "default": "Default",
   "default_named": "Default: {name}",
-  "one_off": "This time only"
+  "pi_too": "pi can use it too"
 }

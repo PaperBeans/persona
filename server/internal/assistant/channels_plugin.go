@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -688,17 +689,28 @@ func (s *Service) channelPush(machine, session, title, body string) {
 // each channel's result, by id; the error is the list's when it could not be read while the hub is away (nothing was
 // sent then).
 func (s *Service) channelPushTo(parent context.Context, machine, session, title, body, ref string, took func(id string) bool) (map[string]error, error) {
+	return s.channelPushTold(parent, machine, session, title, body, ref, took, nil)
+}
+
+// channelPushTold is channelPushTo telling r which channels the push goes to and how each send went (notify_user's
+// answer, channels_copies.go).
+func (s *Service) channelPushTold(parent context.Context, machine, session, title, body, ref string, took func(id string) bool,
+	r *copyReport) (map[string]error, error) {
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	if _, err := s.channelsNow(ctx); err != nil && !answered(err) {
+		r.going()
 		return nil, err
 	}
 	var to []string
+	var copies []pushCopy
 	for _, v := range s.textChannels(ctx) {
 		if v.Capabilities.Push && featureOn(v, channel.FeaturePushes) && (took == nil || !took(v.ID)) {
 			to = append(to, v.ID)
+			copies = append(copies, pushCopy{channel: v.ID, name: cmp.Or(v.Name, v.ID)})
 		}
 	}
+	r.going(copies...)
 	text := strings.TrimSpace("🔔 " + title + "\n\n" + body)
 	var mu sync.Mutex
 	out := map[string]error{}
@@ -712,6 +724,7 @@ func (s *Service) channelPushTo(parent context.Context, machine, session, title,
 		if err == nil {
 			s.markPushed(id, machine, session)
 		}
+		r.went(id, err)
 		mu.Lock()
 		out[id] = err
 		mu.Unlock()

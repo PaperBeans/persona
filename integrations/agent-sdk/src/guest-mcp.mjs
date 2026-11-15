@@ -27,6 +27,12 @@ export async function guestMcpServer(config) {
     for (const waiter of pending.values()) waiter.reject(err)
     pending.clear()
   })
+  child.on('exit', (code, signal) => {
+    if (closed) return
+    const err = new Error(`Persona MCP exited (${signal ?? `code ${code}`})`)
+    for (const waiter of pending.values()) waiter.reject(err)
+    pending.clear()
+  })
   const call = (method, params = {}) => new Promise((resolve, reject) => {
     if (closed) { reject(new Error('Persona MCP is closed')); return }
     const id = ++nextID

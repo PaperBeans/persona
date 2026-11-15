@@ -94,7 +94,7 @@ import { projectChoices, projectNames, useTodoProjects } from "../lib/todo-proje
 import { useFolded } from "../lib/use-folded";
 import { stateName } from "../lib/state-labels";
 import { answeredLookup } from "./assistant/answered-lookup";
-import { Empty, Segmented } from "./assistant/parts";
+import { Empty, Segmented, Tag } from "./assistant/parts";
 import { OfflineState, useShownOffline } from "./ManagerParts";
 import { TodoCalendar, type CalendarSlot } from "./TodoCalendar";
 import { dayKey, isCalendarMode, parseDayKey, startOfDay, type CalendarMode } from "../lib/todo-calendar";
@@ -178,6 +178,7 @@ export function TodosView({
   }, [everyTodo, ownTodos, selectedId]);
   const todosLoaded = useStore((s) => s.todosLoaded);
   const todosError = useStore((s) => s.todosError);
+  const todosSupported = useStore((s) => s.todosSupported);
   // the current assistant offline (several assistants): the hub's merged list leaves it out, so none here means it
   // couldn't answer; the page says so instead of the empty one
   const offline = useShownOffline();
@@ -232,6 +233,16 @@ export function TodosView({
   useEffect(() => {
     if (selectedId) setActiveId(selectedId);
   }, [selectedId]);
+  // A link to a to-do the list doesn't have (deleted, or an old link): said once, and the address loses it, so another
+  // to-do is not shown under it (web usability audit item 42). Not while the list can't tell: the current assistant
+  // offline (the merged list leaves its to-dos out) or a hub without to-dos (an empty list); the link is kept for later.
+  const linkGone = todosLoaded && !todosError && todosSupported && !offline && Boolean(selectedId) && !todos.some((td) => td.id === selectedId);
+  useEffect(() => {
+    if (!linkGone) return;
+    toast(t("not-found.todo_gone"));
+    navigate(calendarOn ? calendarRoute(calendarMode, anchor) : { name: "todos" }, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per link that is gone
+  }, [linkGone]);
 
   // a minute's tick moves to-dos across the 24 h and 48 h lines (and today's end) while nothing else changes
   const [tick, setTick] = useState(() => Date.now());
@@ -1555,10 +1566,11 @@ const TodoListItem = memo(function TodoListItem({
       {/* Body */}
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          {view.ultracode ? (
+          {view.ultracode || todo.kind === "concern" ? (
             <span className="flex min-w-0 items-center gap-1">
-              <span className="truncate text-[13.5px] font-semibold text-ink" data-testid="todo-title">{todo.title}</span>
-              <UltraMark size={11} />
+              <span className={cx("truncate text-[13.5px] font-semibold text-ink", !view.ultracode && !open && "line-through text-ink-3 font-normal")} data-testid="todo-title">{todo.title}</span>
+              {view.ultracode && <UltraMark size={11} />}
+              {todo.kind === "concern" && <Tag><span data-testid="todo-concern">{t("todos.concern")}</span></Tag>}
             </span>
           ) : (
             <span className={cx("truncate text-[13.5px] font-semibold text-ink", !open && "line-through text-ink-3 font-normal")} data-testid="todo-title">

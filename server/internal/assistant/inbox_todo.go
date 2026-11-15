@@ -3,7 +3,9 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -40,10 +42,15 @@ type inboxTodoTarget struct {
 	Title string `json:"title,omitempty"`
 }
 
-// inboxTodoMade is one to-do made from a row.
+// inboxTodoMade is one to-do made from a row. Item is an object, {"id": …}: the iPhone app decodes it so (#7215), and
+// an app installed before #8310 fails the whole answer on a bare string id.
 type inboxTodoMade struct {
-	Item string `json:"item"`
-	Todo Todo   `json:"todo"`
+	Item inboxTodoRow `json:"item"`
+	Todo Todo         `json:"todo"`
+}
+
+type inboxTodoRow struct {
+	ID string `json:"id"`
 }
 
 type inboxTodoReply struct {
@@ -112,7 +119,7 @@ func (s *Service) addInboxTodos(ctx context.Context, targets []inboxTodoTarget, 
 	drop := map[string]Todo{}
 	for id, td := range made {
 		if kept[id] {
-			out.Todos = append(out.Todos, inboxTodoMade{Item: id, Todo: td})
+			out.Todos = append(out.Todos, inboxTodoMade{Item: inboxTodoRow{ID: id}, Todo: td})
 			out.Undo = &inboxTodoUndo{Items: append(undoItems(out.Undo), inboxTodoUndoItem{ID: id, Todo: td.ID})}
 		} else {
 			drop[id] = td
@@ -141,15 +148,26 @@ func (s *Service) rollbackTodos(ctx context.Context, made map[string]Todo) {
 // error; one that belongs to another row is left alone.
 func (s *Service) undoInboxTodos(ctx context.Context, items []inboxTodoUndoItem, now time.Time) inboxBulkResult {
 	var back []inboxBulkTarget
+	failed := map[string]bool{}
 	for _, u := range items {
 		if td, ok := s.todoNow(u.Todo); ok && td.InboxItem == u.ID {
-			if err := s.deleteTodo(ctx, u.Todo); err != nil {
+			if err := s.deleteTodo(ctx, u.Todo); err != nil && !errors.Is(err, db.ErrTodoNotFound) {
 				s.logf("inbox: to-do %s not deleted by Undo: %v", u.Todo, err)
+				failed[u.ID] = true
 			}
 		}
-		back = append(back, inboxBulkTarget{ID: u.ID})
+		if !failed[u.ID] {
+			back = append(back, inboxBulkTarget{ID: u.ID})
+		}
 	}
-	return s.setInboxBulk(ctx, bulkReopen, back, nil, time.Time{}, now)
+	res := s.setInboxBulk(ctx, bulkReopen, back, nil, time.Time{}, now)
+	for id := range failed {
+		if !slices.Contains(res.Failed, id) {
+			res.Failed = append(res.Failed, id)
+		}
+	}
+	slices.Sort(res.Failed)
+	return res
 }
 
 func (s *Service) inboxTodoRoutes() {

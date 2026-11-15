@@ -81,4 +81,60 @@ final class TierPolicySimulationTests: XCTestCase {
         XCTAssertTrue(r.changes.isEmpty, "1.5×30 is the cap's best: \(r.changes)")
         XCTAssertLessThan(r.latency(from: 5, to: 120).p95, 60)
     }
+
+    /// #7842: a 1080p display at one pixel per point, scrolling text (light content) and the helper's keyframe every
+    /// 10 s, as on a real Mac; the phone reads several frames at once when `batched`.
+    private func lightScreen(batched: Bool) -> LinkSimulation {
+        var sim = LinkSimulation()
+        sim.display = TierPolicy.Display(points: [1920, 1080], pixels: [1920, 1080], maxSize: 2868)
+        sim.content = 0.011
+        sim.keyframeEvery = 10
+        sim.keyframeBits = 1
+        sim.readEvery = batched ? 0.025 : nil
+        return sim
+    }
+
+    func testAKeyframeOnASlowLinkIsNotASlowerLink() {
+        // 25 Mbit/s, then 3 for a minute from 30 s, then 25 again: 2×60's floor at 1080p60 (2.5 Mbit/s) doesn't fit 80% of
+        // 3, 1.5×30's (1.2) does, so one step down and no more, whatever the keyframes queue.
+        let link = LinkSimulation.Link(kbps: { $0 >= 30 && $0 < 90 ? 3_000 : 25_000 }, rttMs: 6, jitterMs: 2,
+                                       stats: LinkStats(kind: .lan, via: .wifi))
+        for batched in [false, true] {
+            let r = lightScreen(batched: batched).run(link, seconds: 180)
+            report("1× display, light content, keyframes, 25 → 3 → 25 Mbit/s\(batched ? ", frames read together under a backlog" : "")", r,
+                   [("before", 0, 30), ("capped", 30, 90), ("after", 90, 180)])
+            let down = r.changes.filter { $0.at >= 30 && $0.at < 90 }
+            XCTAssertEqual(down.map(\.to), ["1.5x30"], "one step down, batched \(batched): \(r.changes)")
+        }
+    }
+
+    func testLightContentClimbsBackAfterADip() {
+        let link = LinkSimulation.Link(kbps: { $0 >= 30 && $0 < 90 ? 3_000 : 25_000 }, rttMs: 6, jitterMs: 2,
+                                       stats: LinkStats(kind: .lan, via: .wifi))
+        for batched in [false, true] {
+            let r = lightScreen(batched: batched).run(link, seconds: 180)
+            let back = r.changes.first { $0.at >= 90 && $0.to == "2x60" }
+            XCTAssertNotNil(back, "back to the best tier, batched \(batched): \(r.changes)")
+            XCTAssertLessThan((back?.at ?? .infinity) - 90, 30, "within half a minute")
+        }
+    }
+
+    /// A stall on the relay is no slower link: light content on a 1× display rides out the link carrying nothing for up
+    /// to 3 s without stepping down; a link that really carries less than 30 fps needs (1.4 Mbit/s for 6 s) steps down and
+    /// back (the browser, 2026-11-15).
+    func testAStallIsNotASlowerLink() {
+        for stall in [0.6, 1.5, 3.0] {
+            let link = LinkSimulation.Link(kbps: { $0 >= 20 && $0 < 20 + stall ? 0 : 25_000 }, rttMs: 20, jitterMs: 40,
+                                           stats: LinkStats(kind: .relay, via: .wifi))
+            let r = lightScreen(batched: false).run(link, seconds: 90)
+            report("relay, light content, nothing carried for \(stall) s at 20 s", r, [("all", 0, 90)])
+            XCTAssertFalse(r.changes.contains { $0.reason == .linkSlowed }, "\(r.changes)")
+        }
+        let squeezed = LinkSimulation.Link(kbps: { $0 >= 20 && $0 < 26 ? 1_400 : 25_000 }, rttMs: 20, jitterMs: 40,
+                                           stats: LinkStats(kind: .relay, via: .wifi))
+        let r = lightScreen(batched: false).run(squeezed, seconds: 90)
+        report("relay, light content, 1.4 Mbit/s for 6 s at 20 s", r, [("all", 0, 90)])
+        XCTAssertEqual(r.changes.first { $0.reason == .linkSlowed }?.to, "1x15")
+        XCTAssertEqual(r.changes.last?.to, "2x60", "and back: \(r.changes)")
+    }
 }

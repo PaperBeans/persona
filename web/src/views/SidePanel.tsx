@@ -26,6 +26,8 @@ const TaskPanel = lazy(() => import("./assistant/TaskPanel").then((m) => ({ defa
 const AgentPanel = lazy(() => import("./assistant/TaskPanel").then((m) => ({ default: m.AgentPanel })));
 // a lead's Team (#5180): only on a lead's page, outside the first screen
 const TeamPanel = lazy(() => import("./chat/TeamPanel").then((m) => ({ default: m.TeamPanel })));
+// a session's Side sessions (#7944): the Team panel's layout, in the same chunk
+const SidesPanel = lazy(() => import("./chat/TeamPanel").then((m) => ({ default: m.SidesPanel })));
 // an Agent's Background tasks (#5421): opened by hand, outside the first screen
 const BackgroundPanel = lazy(() => import("./chat/BackgroundPanel").then((m) => ({ default: m.BackgroundPanel })));
 
@@ -138,7 +140,7 @@ export function SidePanel() {
 }
 
 function panelLabel(p: Panel) {
-  return p.kind === "files" ? t("sidepanel.files") : p.kind === "git" ? "Git" : p.kind === "review" ? t("sidepanel.review") : p.kind === "file" ? t("sidepanel.files") : p.kind === "preview" ? t("sidepanel.preview") : p.kind === "team" ? t("sidepanel.team") : p.kind === "background" ? t("sidepanel.background") : p.kind === "task" ? t("sidepanel.task") : p.kind === "agent" ? t("sidepanel.agent") : t("sidepanel.link");
+  return p.kind === "files" ? t("sidepanel.files") : p.kind === "git" ? "Git" : p.kind === "review" ? t("sidepanel.review") : p.kind === "file" ? t("sidepanel.files") : p.kind === "preview" ? t("sidepanel.preview") : p.kind === "team" ? t("sidepanel.team") : p.kind === "sides" ? t("sidepanel.sides") : p.kind === "background" ? t("sidepanel.background") : p.kind === "task" ? t("sidepanel.task") : p.kind === "agent" ? t("sidepanel.agent") : t("sidepanel.link");
 }
 
 function body(p: Panel) {
@@ -160,6 +162,9 @@ function body(p: Panel) {
       return <AgentPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} onClose={closePanel} />;
     case "team":
       return <TeamPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} worker={p.worker} onClose={closePanel} />;
+    case "sides":
+      // keyed by the parent, not the side: picking another pill keeps the strip where it is
+      return <SidesPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} side={p.side} at={p.at} onClose={closePanel} />;
     case "background":
       // keyed by the session, not the run: asking for another run (a new object) goes to its detail without a remount
       return <BackgroundPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} opened={p} onClose={closePanel} />;

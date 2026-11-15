@@ -227,6 +227,8 @@ nonisolated struct AgentListProjection: Sendable {
         var preferences: [String: Preferences] = [:]
         var pagedGroups = Set<String>()
         var listQuery = SessionListQuery()
+        /// The hubs that fold side sessions into their parent's chat (`SideFold`, #7944).
+        var sideFold = Set<String>()
 
         func pinned(_ key: SessionKey) -> Bool {
             preferences[key.group]?.pins.sessions.contains("\(key.machineID)/\(key.sessionID)") == true
@@ -263,6 +265,8 @@ nonisolated struct AgentListProjection: Sendable {
         var machines: [Machine]
         var settings: Settings
         var workspaces: [HostWorkspace] = []
+        /// What a waiting child asks, keyed by the parent the card is shown on. Empty leaves every row's own line.
+        var asks: [SessionKey: String] = [:]
     }
 
     struct Rows: Sendable {
@@ -318,7 +322,11 @@ nonisolated struct AgentListProjection: Sendable {
         let plan = AgentSearchPlan.compile(query: settings.query, settings: settings)
         result.searchPlan = plan
         let parsed = plan.parsed
-        result.sessionsByKey = Dictionary(input.sessions.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+        // A side session lives in its parent's chat (#7944): a paged window's rows fold here, once per revision (the
+        // model's own list is folded already, and folding it again changes nothing). Then the folded children are not
+        // rows; what the hub did not fold still goes through CodexTasks below.
+        let sessions = ChildSessions.fold(SideFold.fold(input.sessions, groups: settings.sideFold).listed, asks: input.asks)
+        result.sessionsByKey = Dictionary(sessions.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
         result.machinesByRef = Dictionary(input.machines.map { ($0.ref, $0) }, uniquingKeysWith: { a, _ in a })
         // Subtasks go under the session that started them, as in the Codex App and on Android: the list and its counts
         // are the others'. A working one hangs under its parent only while the list draws a row above it (`runs`): the
@@ -326,7 +334,7 @@ nonisolated struct AgentListProjection: Sendable {
         let runs: ((Session) -> Bool)? = settings.grouping == "recent" || settings.grouping == "app" ? nil
             : { $0.state.isLive || settings.pinned($0.key) }
         // A row a quick filter showed stays a row while it is on, a subtask answered under Needs You too.
-        let forest = CodexTasks.build(input.sessions, ownRows: settings.filter == .all ? [] : settings.kept, runs: runs)
+        let forest = CodexTasks.build(sessions, ownRows: settings.filter == .all ? [] : settings.kept, runs: runs)
         let admits: (Session) -> Bool = { session in
             guard !session.assistant else { return false }
             guard settings.machine.isEmpty || session.machineRef.path == settings.machine else { return false }

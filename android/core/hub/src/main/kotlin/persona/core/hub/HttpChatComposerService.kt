@@ -30,13 +30,13 @@ class HttpChatComposerService internal constructor(
     private val hubScope: HubScope,
     private val transport: MessageTransport,
     private val request: suspend (String, RequestBody, Map<String, String>) -> Response,
-    /** A refusal retry's delivery, with the operation id the retry goes under. */
-    private val onRetryDelivery: suspend (String, ComposerDelivery, String) -> Unit = { _, _, _ -> },
+    /** A refusal retry's delivery, operation id, and actual transport result (null until a final response). */
+    private val onRetryDelivery: suspend (String, ComposerDelivery, String, MessageTransportResult?) -> Unit = { _, _, _, _ -> },
     private val onPairingExpired: () -> Unit = {},
 ) : ChatComposerService, MessageTransport by transport {
     constructor(
         hubScope: HubScope, transport: MessageTransport, connection: OkHttpHubConnection, token: String,
-        onRetryDelivery: suspend (String, ComposerDelivery, String) -> Unit,
+        onRetryDelivery: suspend (String, ComposerDelivery, String, MessageTransportResult?) -> Unit,
         onPairingExpired: () -> Unit,
         isCurrent: () -> Boolean = { true },
     ) :
@@ -135,17 +135,17 @@ class HttpChatComposerService internal constructor(
         // The refused id is spent: the hub answers it again from its first try (the 409, or op_id_reused once
         // clear_draft is added), so the retry goes under a new one, as on iOS.
         val retry = original.copy(clearDraft = clearable, opId = UUID.randomUUID().toString())
-        onRetryDelivery(clientMessageId, ComposerDelivery(DeliveryState.Sending), retry.opId)
+        onRetryDelivery(clientMessageId, ComposerDelivery(DeliveryState.Sending), retry.opId, null)
         record(original, ComposerDelivery(DeliveryState.Sending))
         val result = try { sendLocked(retry) }
         catch (cancelled: CancellationException) {
             val unknown = ComposerDelivery(DeliveryState.Unknown)
             record(original, unknown)
-            withContext(NonCancellable) { onRetryDelivery(clientMessageId, unknown, retry.opId) }
+            withContext(NonCancellable) { onRetryDelivery(clientMessageId, unknown, retry.opId, null) }
             throw cancelled
         }
         if (result == MessageTransportResult.NotSent) record(original, ComposerDelivery(DeliveryState.Refused, refusal))
-        deliveries.value.getValue(clientMessageId).also { onRetryDelivery(clientMessageId, it, retry.opId) }
+        deliveries.value.getValue(clientMessageId).also { onRetryDelivery(clientMessageId, it, retry.opId, result) }
     }
 
     override suspend fun upload(session: SessionKey, name: String, file: File): String {

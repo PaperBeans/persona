@@ -153,6 +153,8 @@ import UIKit
     private(set) var link: LinkStats?
     /// The node said why it has no direct routes (`firewall`).
     private(set) var directUnavailable: String?
+    /// The UDP flow carrying the video, about once a second (#7873); nil when none does. The overlay shows its numbers.
+    private(set) var udp: ScreenUDPStatus?
 
     @ObservationIgnored private var want: Want?
     @ObservationIgnored private var ready: Ready?
@@ -174,6 +176,11 @@ import UIKit
     @ObservationIgnored private var net: (expensive: Bool, constrained: Bool, cellular: Bool) = (false, false, false)
     /// ⋯ › Quality for this computer (#6396).
     @ObservationIgnored private var bias: TierLadder.Bias = .auto
+    /// The UDP flow's parity and resends per byte of video (#7873), in 5 % steps: on mobile data the cap leaves room
+    /// for them, so the bytes on the wire stay within it.
+    @ObservationIgnored private var udpOverhead = 0.0
+    /// The share of the cap the flow lets the video use while it loses packets to congestion (#7873), in 5 % steps.
+    @ObservationIgnored private var udpScale = 1.0
     /// The tier each computer last settled on, by computer and kind of route, for this app run: the next stream starts
     /// there (`TierPolicy`'s `remembered`).
     @ObservationIgnored private static var settled: [String: Int] = [:]
@@ -199,6 +206,18 @@ import UIKit
     func measured(_ stats: LinkStats?, unavailable: String?) {
         if stats != link { link = stats }
         if unavailable != directUnavailable { directUnavailable = unavailable }
+    }
+
+    /// The UDP flow carrying the video (#7873), about once a second; nil when none does.
+    func flowChanged(_ status: ScreenUDPStatus?) {
+        if status != udp { udp = status }
+        let o = ((status?.overhead ?? 0) * 20).rounded(.up) / 20
+        let sc = ((status?.scale ?? 1) * 20).rounded(.down) / 20
+        guard o != udpOverhead || sc != udpScale else { return }
+        let budgetMoves = sc != udpScale || net.expensive
+        udpOverhead = o
+        udpScale = sc
+        if budgetMoves { rebudget() }
     }
 
     func routeChanged(_ change: PathChange) {
@@ -307,6 +326,8 @@ import UIKit
                 Task { @MainActor in self?.helperTiming(t) }
             case let .tier(c):
                 Task { @MainActor in self?.tierChanged(c) }
+            case let .encoding(e):
+                Task { @MainActor in self?.encodingChanged(e) }
             case let .ended(why):
                 Task { @MainActor in self?.ended(why) }
             }
@@ -357,6 +378,13 @@ import UIKit
         tier = c
         tierAt = .now
         if let ready { Self.settled[settledKey(ready)] = c.index }
+    }
+
+    /// The encoder's size after a change in place (#6396): the overlay shows what runs, not what `hello` said.
+    private func encodingChanged(_ e: EncodingMessage) {
+        guard stream != nil else { return }
+        let s = CGSize(width: e.width, height: e.height)
+        if s != size { size = s }
     }
 
     private func settledKey(_ r: Ready) -> String { "\(r.group)/\(r.machine)/\(route?.to.kind.rawValue ?? "relay")" }
@@ -442,7 +470,7 @@ import UIKit
             stream?.tierBudget(tieredBudget)
             return
         }
-        let b = Self.currentBudget(path: (net.expensive, net.constrained))
+        let b = onWire(Self.currentBudget(path: (net.expensive, net.constrained)))
         guard b != budget else { return }
         budget = b
         stream?.send(UpdateMessage(fps: b.fps, maxKbps: b.maxKbps))
@@ -450,7 +478,17 @@ import UIKit
 
     /// The caps with tiers (#6396): mobile data as the user chose (`ScreenMobileData`).
     private var tieredBudget: ScreenVideoBudget {
-        Self.currentBudget(path: (net.expensive, net.constrained), mobileData: ScreenMobileData.current)
+        onWire(Self.currentBudget(path: (net.expensive, net.constrained), mobileData: ScreenMobileData.current))
+    }
+
+    /// The cap with the UDP flow in mind (#7873): its congestion scale on any network, and on mobile data room for its
+    /// parity and resends, so video × (1 + overhead) stays within Data Saver's 1.5 Mbit/s and the card's figures hold.
+    private func onWire(_ b: ScreenVideoBudget) -> ScreenVideoBudget {
+        let divisor = net.expensive ? 1 + udpOverhead : 1
+        guard udpScale < 1 || divisor > 1 else { return b }
+        var out = b
+        out.maxKbps = max(300, Int(Double(b.maxKbps) * udpScale / divisor))
+        return out
     }
 
     private static func currentBudget(path: (expensive: Bool, constrained: Bool)?, mobileData: ScreenMobileData? = nil)
@@ -540,6 +578,36 @@ nonisolated struct ScreenVideoTally {
         let s = values.sorted(), mid = s.count / 2
         let m = s.count % 2 == 1 ? s[mid] : (s[mid - 1] + s[mid]) / 2
         return (m * 10).rounded() / 10
+    }
+}
+
+/// The tier as Connection Stats shows it (#6396): the Quality choice, the scale and frame rate, and why it last changed
+/// in plain words with how long ago.
+enum ScreenTierText {
+    /// The scale is the picture's own (#7842): "1×" for every tier of a display at one pixel per point, "1.9×" for 2×
+    /// under the phone's long-edge cap.
+    static func value(_ quality: ScreenQuality, _ tier: TierLadder.Tier) -> String {
+        let tenths = (tier.pixelsPerPoint * 10).rounded() / 10
+        let scale = tenths == tenths.rounded() ? String(Int(tenths)) : String(format: "%.1f", tenths)
+        return "\(quality.label) · \(scale)× · \(tier.fps) fps"
+    }
+
+    static func reason(_ r: TierReason, at: Date, now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(at)))
+        let ago = seconds < 60 ? String(localized: "\(seconds) s ago") : String(localized: "\(seconds / 60) min ago")
+        return "\(words(r)) · \(ago)"
+    }
+
+    static func words(_ r: TierReason) -> String {
+        switch r {
+        case .start: String(localized: "Picked for this connection")
+        case .linkSlowed: String(localized: "Connection slowed down")
+        case .linkSteady: String(localized: "Connection is steady")
+        case .networkChanged: String(localized: "Network changed")
+        case .phoneWarm: String(localized: "iPhone is warm or saving power")
+        case .phoneBehind: String(localized: "iPhone couldn’t keep up")
+        case .choice: String(localized: "You changed Quality")
+        }
     }
 }
 

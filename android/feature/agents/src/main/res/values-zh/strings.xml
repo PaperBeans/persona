@@ -287,6 +287,7 @@
     <string name="agents_new_prefill_offline">「%1$s」现在离线，先选了另一台；它连上后可以换回去</string>
     <string name="agents_new_reload">重新加载选项</string>
     <string name="agents_new_agent_type">Agent 类型</string>
+    <string name="agents_new_type_other">其他 Agent</string>
     <string name="agents_new_launcher_this_time">启动器（只换这一次）</string>
     <string name="agents_new_launcher">启动器</string>
     <string name="agents_new_search_launcher">搜索启动器或模型</string>
@@ -329,6 +330,7 @@
     <string name="agents_model_failed_detail">%1$s\n不影响开始，会用默认模型</string>
     <string name="agents_model_retry">重试</string>
     <string name="agents_model_sheet_note">「%1$s」里 %2$s 的模型，和在终端里输入 /model 看到的一样。只用于这次启动。</string>
+    <string name="agents_model_sheet_note_provider">「%1$s」提供的模型。只用于这次启动。</string>
     <string name="agents_model_configured">模型配置：%1$s</string>
     <string name="agents_new_error_pending">上次启动的结果待确认，请核对结果</string>
     <string name="agents_new_error_record">读不出启动记录。关掉再试一次</string>
@@ -373,6 +375,7 @@
     <string name="agents_todos_done">已完成</string>
     <string name="agents_todo_reopen_failed">重新打开待办失败：%1$s</string>
     <string name="agents_todo_auto_done">自动完成</string>
+    <string name="agents_todo_concern">关注点</string>
     <string name="agents_todo_state_needs_you">等你</string>
     <string name="agents_todo_state_unread">待查看</string>
     <string name="agents_todo_state_working">进行中</string>

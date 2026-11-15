@@ -214,6 +214,12 @@ type SnapshotTask struct {
 	Plan *SnapshotAgentPlan
 }
 
+// SnapshotOpenTodo is the compact index of one open todo. Full task details are
+// limited separately so every open todo remains discoverable in the context.
+type SnapshotOpenTodo struct {
+	ID, Title, Link string
+}
+
 // SnapshotReport is a supervised task's agent's latest report: its kind (progress, question, blocked, done), the step
 // of how many (0: not said), what it said in a line and how many minutes ago.
 type SnapshotReport struct {
@@ -263,23 +269,26 @@ type Snapshot struct {
 	Awaiting []SnapshotAgent
 	// Muted: agents (or their spaces) the user turned notifications off for that would be in one of the above; in
 	// none of them, as the Live Activity and the Agents badge count none of them (#4562).
-	Muted          []SnapshotAgent
-	Working        []SnapshotAgent
-	Workflows      []SnapshotWorkflow // background workflow runs still running, newest first
-	PhoneOnline    bool
-	Apps           []SnapshotApp      // one per kind of device, the user's own before a simulator
-	KB             string             // RenderKBDigest, "" leaves it out
-	Chats          *SnapshotChats     // nil: Feishu did not answer in time
-	Calendar       *SnapshotCalendar  // nil: the calendar did not answer in time
-	Followups      []SnapshotFollowup // the next eight
-	FollowupsTotal int                // all of them
-	Routines       []SnapshotRoutine  // the daily tasks that are on (at most eight)
-	RoutinesTotal  int                // all of them
-	Missed         []SnapshotMiss     // scheduled runs that failed or were skipped since yesterday 18:00, newest first
-	MissedTotal    int                // all of them (Missed is the newest six)
-	Tasks          []SnapshotTask     // tasks opened from assistant conversations (task_plan), newest first
-	Plans          []SnapshotPlan     // plan cards in the main conversation waiting for "Start", newest first (at most five)
-	PlansTotal     int
+	Muted           []SnapshotAgent
+	Working         []SnapshotAgent
+	Workflows       []SnapshotWorkflow // background workflow runs still running, newest first
+	PhoneOnline     bool
+	Apps            []SnapshotApp      // one per kind of device, the user's own before a simulator
+	KB              string             // RenderKBDigest, "" leaves it out
+	Chats           *SnapshotChats     // nil: Feishu did not answer in time
+	Calendar        *SnapshotCalendar  // nil: the calendar did not answer in time
+	Followups       []SnapshotFollowup // the next eight
+	FollowupsTotal  int                // all of them
+	Routines        []SnapshotRoutine  // the daily tasks that are on (at most eight)
+	RoutinesTotal   int                // all of them
+	Missed          []SnapshotMiss     // scheduled runs that failed or were skipped since yesterday 18:00, newest first
+	MissedTotal     int                // all of them (Missed is the newest six)
+	Tasks           []SnapshotTask     // tasks opened from assistant conversations (task_plan), newest first
+	OpenTodos       []SnapshotOpenTodo // compact index of open todos, including personal todos
+	OpenTodosTotal  int                // all open todos; OpenTodos is bounded for very large lists
+	OpenTodosLoaded bool               // false when the store could not be read; do not report that as zero
+	Plans           []SnapshotPlan     // plan cards in the main conversation waiting for "Start", newest first (at most five)
+	PlansTotal      int
 
 	FollowingEnabled bool                // Inbox is enabled and available; false leaves the whole section out
 	Following        []SnapshotFollowing // open inbox matters being followed, earliest check first (at most five)
@@ -303,7 +312,7 @@ type Snapshot struct {
 // the sections that changed, so a section that went missing would read as unchanged, and one rendered without its items
 // as "none".
 type SnapshotOmit struct {
-	Waiting, Working, Unread, Routines, Following, Followups, Asked, KB, OtherChats, Unaccepted, Tasks, Approvals bool
+	Waiting, Working, Unread, Routines, Following, Followups, Asked, KB, OtherChats, Unaccepted, OpenTodos, Tasks, Approvals bool
 }
 
 // SnapshotCut is the line a snapshot cut short ends with (assistant/snapshot_cut).
@@ -399,12 +408,10 @@ type TaskRun struct {
 	Label          string
 	Once, Interval bool   // neither: daily
 	Every          string // interval: "30 minutes"
-	// Accelerated: a leader's open supervised todos shortened this run's interval.
-	Accelerated bool
-	Late        string // "" when on time; else how late ("25 minutes")
-	Due         time.Time
-	Prompt      string
-	KBHint      bool // daily runs with the knowledge base on
+	Late           string // "" when on time; else how late ("25 minutes")
+	Due            time.Time
+	Prompt         string
+	KBHint         bool // daily runs with the knowledge base on
 	// KnowledgeDir: the knowledge base directory the hint names; "" is the default ~/.persona/data.
 	KnowledgeDir string
 	// Continued: it goes into the task's own conversation, which got the background on the first run.
@@ -704,6 +711,9 @@ type Supervise struct {
 	// they wait here before going up a rung.
 	Asked      bool
 	AskMinutes int
+	// LowDistraction: the owner's low-distraction mode is on: a card is never handed to the user on a timeout, and ask_escalate
+	// pushes only what is the owner's alone (why_owner).
+	LowDistraction bool
 	// Decisions: an entry is about a decision the owner cannot answer as it is (recheck, undecidable,
 	// owner_cannot_answer; #3804).
 	Decisions bool
@@ -766,7 +776,20 @@ type SuperviseEntry struct {
 type SuperviseInbox struct {
 	Item, Title, Sender, Preview string
 	Count                        int
+	// URL is a GitHub PR's or issue's address; ToAgent is "sent" once the note reached the task's agent (InboxToAgent,
+	// #7346), "" when the supervisor is the only one told.
+	URL, ToAgent string
 }
+
+// InboxToAgent is the note a task's agent gets when someone else writes on the task's GitHub thread (#7346): who,
+// how many new messages, a line of the newest, and the thread to read.
+type InboxToAgent struct {
+	Sender, Preview, URL string
+	Count                int
+}
+
+// RenderInboxToAgent is that note.
+func RenderInboxToAgent(d InboxToAgent) string { return render("assistant/inbox_to_agent", d) }
 
 // SuperviseParked is what a task was parked for (task_review parked), as its parked_due entry repeats it: the reason,
 // what kind of thing it waits on, until when (local), how many times in a row it was parked with no agent turn in
@@ -795,6 +818,8 @@ type SuperviseOption struct{ Label, LeadsTo string }
 type SuperviseAsk struct {
 	ID, Kind, Machine, Session, Text string
 	Raised                           bool
+	// Reminded: low-distraction mode kept the card from the user when its time ran out, and gives it to its supervisor once more.
+	Reminded bool
 }
 
 func RenderSupervise(s Supervise) string { return render("assistant/supervise", s) }

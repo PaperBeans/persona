@@ -466,13 +466,13 @@ func (n *Node) fileEditCall(method string, params json.RawMessage) (any, error) 
 		return nil, fmt.Errorf("bad params: %w", err)
 	}
 	switch method {
-	case "file.rename":
+	case methodFileRename:
 		return n.renameFile(p.Path, p.Cwd, p.Name)
-	case "file.move":
+	case methodFileMove:
 		return n.moveFiles(p.Paths, p.Cwd, p.Dir, p.Conflict)
-	case "file.trash":
+	case methodFileTrash:
 		return n.trashFiles(p.Paths, p.Cwd)
-	case "file.restore":
+	case methodFileRestore:
 		return n.restoreFiles(p.TrashIDs)
 	}
 	return nil, fmt.Errorf("unknown method %s", method)

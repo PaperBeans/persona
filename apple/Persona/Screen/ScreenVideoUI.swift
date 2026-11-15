@@ -69,13 +69,17 @@ struct ScreenStats: Equatable {
     enum Mode { case video, vnc
         var label: String { self == .video ? String(localized: "Video") : String(localized: "VNC") }
     }
-    /// Which network path the stream is on (#6398).
+    /// Which network path the stream is on (#6398), and whether the video rides a UDP flow beside the direct route
+    /// (#7873).
     enum Path: Equatable {
         case directLAN, directTailscale, relay
+        case directLANUDP, directTailscaleUDP
         var label: String {
             switch self {
             case .directLAN: String(localized: "Direct · LAN")
             case .directTailscale: String(localized: "Direct · Tailscale")
+            case .directLANUDP: String(localized: "Direct · LAN · UDP")
+            case .directTailscaleUDP: String(localized: "Direct · Tailscale · UDP")
             case .relay: String(localized: "Via hub")
             }
         }
@@ -88,8 +92,8 @@ struct ScreenStats: Equatable {
     var routeLoss: Double? = nil
     /// Why the route last changed, in plain words (`ScreenRouteReason`); nil at the start.
     var routeReason: String? = nil
-    var tier: String? = nil            // #6396, e.g. "1080p · 60"
-    var tierReason: String? = nil      // #6396, a short reason shown on a tier change
+    var tier: String? = nil            // #6396, e.g. "Auto · 1.5× · 60 fps" (`ScreenTierText`)
+    var tierReason: String? = nil      // #6396, why it last changed and how long ago, in plain words
     var bitrateMbps: Double? = nil
     var fps: Double? = nil
     var codec: String? = nil           // video only, e.g. "HEVC"
@@ -182,8 +186,17 @@ struct ScreenStatsOverlay: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             header
-            if let route = routeText { kv(String(localized: "Route [Screen Stats]"), route, note: stats.routeReason) }
-            if let tier = stats.tier { kv(String(localized: "Tier"), tier, note: stats.tierReason) }
+            if let route = routeText {
+                kv(String(localized: "Route [Screen Stats]"), route)
+                // Why it last changed, on its own line as the tier's: the reasons are words and would widen the panel
+                // past the screen at the larger text sizes.
+                if let why = stats.routeReason { Text(why).foregroundStyle(.tertiary) }
+            }
+            if let tier = stats.tier {
+                kv(String(localized: "Tier"), tier)
+                // Why it last changed, on its own line: the reasons are words and would widen the panel past the screen.
+                if let why = stats.tierReason { Text(why).foregroundStyle(.tertiary) }
+            }
             rateLine
             latencyLine
             if let hub = stats.hubRoundTripMs {
@@ -284,9 +297,18 @@ extension ScreenStats {
     /// Capture ≈ 0 ms on the Mac (gate ①: the frame reaches us before its display time), so it's folded into the total.
     static let demoVideo = ScreenStats(
         mode: .video, path: .directLAN, routeRttMs: 6, routeLoss: 0, routeReason: ScreenRouteReason.text(.faster),
-        tier: "1080p · 60", tierReason: nil,
-        bitrateMbps: 1.8, fps: 60, codec: "HEVC", resolution: "1920×1080",
+        tier: String(localized: "Auto") + " · 1.5× · 60 fps",
+        tierReason: String(localized: "Connection is steady") + " · " + String(localized: "\(12) s ago"),
+        bitrateMbps: 3.4, fps: 60, codec: "HEVC", resolution: "2268×1472",
         captureMs: nil, encodeMs: 9, networkMs: 6, decodeMs: 8, totalMs: 23, roundTripMs: nil)
+    /// The same with the video on a UDP flow (#7873): `-showScreenStatsDemo` with `-showScreenUDP`.
+    static let demoVideoUDP: ScreenStats = {
+        var s = demoVideo
+        s.path = .directLANUDP
+        s.routeRttMs = 4
+        s.routeLoss = 0.02
+        return s
+    }()
     static let demoVNC = ScreenStats(
         mode: .vnc, path: .relay, tier: nil, tierReason: nil,
         bitrateMbps: 24.0, fps: 6, codec: nil, resolution: nil,

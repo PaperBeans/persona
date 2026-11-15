@@ -14,25 +14,81 @@ import (
 
 // ---- what the assistant sees ----
 
-// snapshotTasks are the tasks opened from assistant conversations that are going on or ended in the last day.
+const snapshotOpenTodoLimit = 100
+
+// snapshotOpenTodos is the compact index that keeps every ordinary-sized open todo discoverable.
+func (s *Service) snapshotOpenTodos(ctx context.Context, web string) ([]prompts.SnapshotOpenTodo, int) {
+	if s.ensureTodosLoaded(ctx) != nil {
+		return nil, 0
+	}
+	asked := s.askedInSnapshot(ctx)
+	s.todos.mu.RLock()
+	list := make([]Todo, 0, len(s.todos.todos))
+	for _, t := range s.todos.todos {
+		if t.DoneAt == nil && !asked[t.ID] {
+			list = append(list, copyTodoLocked(t))
+		}
+	}
+	s.todos.mu.RUnlock()
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].CreatedAt.Equal(list[j].CreatedAt) {
+			return list[i].ID < list[j].ID
+		}
+		return list[i].CreatedAt.After(list[j].CreatedAt)
+	})
+	total := len(list)
+	if len(list) > snapshotOpenTodoLimit {
+		list = list[:snapshotOpenTodoLimit]
+	}
+	out := make([]prompts.SnapshotOpenTodo, 0, len(list))
+	for _, t := range list {
+		out = append(out, prompts.SnapshotOpenTodo{ID: t.ID, Title: clip(oneLine(t.Title), 40), Link: todoLink(web, t.ID)})
+	}
+	return out, total
+}
+
+// askedInSnapshot are the question to-dos the snapshot's own line (snapshotAsked) shows. Only those stay out of the
+// roster and the task list: one whose ask record was pruned (askTodoKeep, askTodoMax), or that line no longer shows, is
+// an ordinary to-do and is listed like any other, so no open to-do drops out of both.
+func (s *Service) askedInSnapshot(ctx context.Context) map[string]bool {
+	out := map[string]bool{}
+	for _, a := range s.snapshotAsked(ctx) {
+		out[a.TodoID] = true
+	}
+	return out
+}
+
+// snapshotTasks are the highest-priority open todos plus recent conversation tasks that have ended.
 func (s *Service) snapshotTasks(ctx context.Context, web string) []prompts.SnapshotTask {
 	var list []Todo
-	for _, t := range s.todosOf(ctx, "*") {
-		if t.Origin != "" && (t.DoneAt == nil || time.Since(*t.DoneAt) < 24*time.Hour) && time.Since(t.UpdatedAt) < 7*24*time.Hour {
+	if s.ensureTodosLoaded(ctx) != nil {
+		return nil
+	}
+	asked := s.askedInSnapshot(ctx)
+	s.todos.mu.RLock()
+	for _, row := range s.todos.todos {
+		t := copyTodoLocked(row)
+		if asked[t.ID] {
+			continue // questions have their own line in the snapshot
+		}
+		if t.DoneAt == nil || (t.Origin != "" && time.Since(*t.DoneAt) < 24*time.Hour && time.Since(t.UpdatedAt) < 7*24*time.Hour) {
 			list = append(list, t)
 		}
 	}
+	s.todos.mu.RUnlock()
 	sort.Slice(list, func(i, j int) bool { return list[i].CreatedAt.After(list[j].CreatedAt) })
 	type ranked struct {
 		task prompts.SnapshotTask
 		rank int
+		open bool
 	}
 	var all []ranked
 	now := time.Now()
+	lists := machineSessions{} // each machine listed once for all the tasks
 	for _, t := range list {
-		agents := s.taskAgents(ctx, t)
+		agents := s.taskAgentsIn(ctx, t, lists)
 		st := taskState(t, agents)
-		if st == "followup" && time.Since(t.UpdatedAt) > 24*time.Hour {
+		if t.DoneAt != nil && st == "followup" && time.Since(t.UpdatedAt) > 24*time.Hour {
 			continue
 		}
 		if st == "done" && t.DoneBy == db.DoneByAuto {
@@ -61,12 +117,17 @@ func (s *Service) snapshotTasks(ctx context.Context, web string) []prompts.Snaps
 				reported(&task, p, taskLead(st, agents), now)
 			}
 		}
-		all = append(all, ranked{task, rank})
-		if len(all) == 30 {
-			break
-		}
+		all = append(all, ranked{task: task, rank: rank, open: t.DoneAt == nil})
 	}
-	sort.SliceStable(all, func(i, j int) bool { return all[i].rank < all[j].rank })
+	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].open != all[j].open {
+			return all[i].open
+		}
+		if all[i].rank != all[j].rank {
+			return all[i].rank < all[j].rank
+		}
+		return false // list was newest first, so ties keep that order
+	})
 	var out []prompts.SnapshotTask
 	for _, r := range all {
 		out = append(out, r.task)

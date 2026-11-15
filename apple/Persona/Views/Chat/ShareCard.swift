@@ -2,6 +2,7 @@ import MarkdownUI
 import PersonaKit
 import Photos
 import SwiftUI
+import PersonaWire
 
 /// A message to share as a picture (Share in the long-press bar).
 struct ShareMessage: Identifiable {
@@ -9,6 +10,8 @@ struct ShareMessage: Identifiable {
     var isUser: Bool
     var source: String
     var date: Date?
+    /// Who answers, as the chat names its agent (`Session.agentLabel`): its mark is the one that name has
+    /// (`AgentKind.brand(named:)`), else its first letter.
     var agent = "Claude"
     var id: String { text }
 }
@@ -75,8 +78,9 @@ struct MessageShareCard: View {
         .environment(AppModel.shared)
     }
 
-    /// Who wrote it: the user, or the agent's own mark (Claude's, OpenAI's for Codex). TRAEX has no public mark and
-    /// keeps a terminal on green.
+    /// Who wrote it: the user, or the agent's own mark (Claude's, OpenAI's for Codex, TRAE's), else the first letter of
+    /// its name on the same disc, as its row's mark draws it (`AgentKind`): a Paseo provider such as Grok is never drawn
+    /// as Claude (#8144). TRAEX has no public mark and keeps a terminal on green.
     @ViewBuilder private var avatar: some View {
         if message.isUser {
             ThemedIcon(Theme.Icon.user).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
@@ -85,10 +89,15 @@ struct MessageShareCard: View {
             ThemedIcon(Theme.Icon.terminalFilled).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                 .frame(width: 32, height: 32)
                 .background(LinearGradient(colors: [Color(hex: 0x2FD38F), Color(hex: 0x12935E)], startPoint: .top, endPoint: .bottom), in: .circle)
-        } else {
-            Image(message.agent == "Codex" ? Theme.Brand.openAI : Theme.Brand.claude)
+        } else if let mark = AgentKind.brand(named: message.agent) {
+            Image(mark)
                 .resizable().scaledToFit().foregroundStyle(.primary)
                 .padding(7)
+                .frame(width: 32, height: 32)
+                .background(Color(.secondarySystemBackground), in: .circle)
+        } else {
+            Text(AgentKind(brand: nil, name: message.agent, surface: nil).letter)
+                .font(.system(size: 15, weight: .semibold)).foregroundStyle(.secondary)
                 .frame(width: 32, height: 32)
                 .background(Color(.secondarySystemBackground), in: .circle)
         }

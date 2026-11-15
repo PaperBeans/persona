@@ -71,6 +71,7 @@ extension InboxView {
 /// the drawer, docs/apple/ios.md「New shell」), which passes `embedded` so the page brings its destinations and link handling.
 struct InboxPage: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.shell) private var shell
     @Environment(\.pushInboxChat) private var pushChat
     @Binding var path: NavigationPath
     @ObservedObject var accountState: InboxAccountState
@@ -146,42 +147,10 @@ struct InboxPage: View {
                 .pageToolbar {
                     if let picked {
                         selectingToolbar(picked)
+                    } else if shell != nil {
+                        phoneToolbar
                     } else {
-                    ToolbarItem(placement: .principal) { ConnectionTitle(title: String(localized: "Inbox")) }
-                    if model.isMultiHub {
-                        // Each hub has its own inbox (docs/protocol/multi-hub.md「Terminology」): whose this is, and the others.
-                        ToolbarItem(placement: .topBarLeading) { HubSwitcher(compact: true) }
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Select") { withAnimation(Theme.Motion.standard) { picked = [] } }
-                            .disabled(pickable.isEmpty)
-                            .accessibilityIdentifier("inbox.select")
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-
-                        // Mail accounts are managed in Settings › Connectors › Mail (2026-11-01, with this device's data and Lark).
-                        Menu {
-                            cleanButton
-                            Divider()
-                            Button { composing = ComposeDraft(accountID: accounts.first?.id ?? "", manager: model.assistantManagerID, accounts: accounts) } label: { Label("New Email", systemImage: Theme.Icon.compose) }
-                                .disabled(accounts.isEmpty)
-                            Button { showingMutes = true } label: { Label("Muted [Inbox Mutes View e5e468]", systemImage: Theme.Icon.mute) }
-                            Button { showingRules = true } label: { Label("Rules [Inbox Policy]", systemImage: Theme.Icon.inboxRule) }
-                            // Every source subscription, with the Inbox's other settings, once the hub shows them (#2041).
-                            if model.hubFeatures.contains(SubscriptionsUI.feature) {
-                                Button { showingSubscriptions = true } label: {
-                                    if model.hubFeatures.contains(SubscriptionsUI.sourcesFeature) { // every source of the Inbox (#5278)
-                                        Label("Inbox Sources", systemImage: Theme.Icon.subscriptions)
-                                    } else {
-                                        Label("Subscriptions [Source Subscriptions]", systemImage: Theme.Icon.subscriptions)
-                                    }
-                                }
-                                .accessibilityIdentifier("inbox.subscriptions")
-                            }
-                        } label: { ThemedIcon(Theme.Icon.moreMenu) }
-                        .accessibilityLabel("More")
-                        .accessibilityIdentifier("inbox.more")
-                    }
+                        ordinaryToolbar
                     }
                 }
                 // selecting: the bar at the bottom is the selection's (as in Mail), not the tabs'
@@ -500,6 +469,64 @@ struct InboxPage: View {
         }
     }
 
+    @ToolbarContentBuilder private var ordinaryToolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) { ConnectionTitle(title: String(localized: "Inbox")) }
+        if model.isMultiHub {
+            // Each hub has its own inbox (docs/protocol/multi-hub.md「Terminology」): whose this is, and the others.
+            ToolbarItem(placement: .topBarLeading) { HubSwitcher(compact: true) }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("Select") { withAnimation(Theme.Motion.standard) { picked = [] } }
+                .disabled(pickable.isEmpty)
+                .accessibilityIdentifier("inbox.select")
+        }
+        ToolbarItem(placement: .topBarTrailing) { moreMenu(selection: false) }
+    }
+
+    /// iPhone shell: one trailing action; selection and the hub scope join the page's other settings.
+    @ToolbarContentBuilder private var phoneToolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) { ConnectionTitle(title: String(localized: "Inbox")) }
+        ToolbarItem(placement: .topBarTrailing) { moreMenu(selection: true) }
+    }
+
+    private func moreMenu(selection: Bool) -> some View {
+        Menu {
+            if selection {
+                Button("Select") { withAnimation(Theme.Motion.standard) { picked = [] } }
+                    .disabled(pickable.isEmpty)
+                    .accessibilityIdentifier("inbox.select")
+                if model.isMultiHub, let current = model.hub?.group {
+                    Picker("hub", selection: Binding(get: { current }, set: { model.selectHub($0) })) {
+                        ForEach(model.groupIDs, id: \.self) { g in
+                            Label(model.groupName(g), systemImage: Theme.Icon.hubGroup).tag(g)
+                        }
+                    }
+                    .accessibilityIdentifier("hub.switcher")
+                }
+                Divider()
+            }
+            cleanButton
+            Divider()
+            Button { composing = ComposeDraft(accountID: accounts.first?.id ?? "", manager: model.assistantManagerID, accounts: accounts) } label: { Label("New Email", systemImage: Theme.Icon.compose) }
+                .disabled(accounts.isEmpty)
+            Button { showingMutes = true } label: { Label("Muted [Inbox Mutes View e5e468]", systemImage: Theme.Icon.mute) }
+            Button { showingRules = true } label: { Label("Rules [Inbox Policy]", systemImage: Theme.Icon.inboxRule) }
+            // Every source subscription, with the Inbox's other settings, once the hub shows them (#2041).
+            if model.hubFeatures.contains(SubscriptionsUI.feature) {
+                Button { showingSubscriptions = true } label: {
+                    if model.hubFeatures.contains(SubscriptionsUI.sourcesFeature) { // every source of the Inbox (#5278)
+                        Label("Inbox Sources", systemImage: Theme.Icon.subscriptions)
+                    } else {
+                        Label("Subscriptions [Source Subscriptions]", systemImage: Theme.Icon.subscriptions)
+                    }
+                }
+                .accessibilityIdentifier("inbox.subscriptions")
+            }
+        } label: { ThemedIcon(Theme.Icon.moreMenu) }
+        .accessibilityLabel("More")
+        .accessibilityIdentifier("inbox.more")
+    }
+
     /// The picked items the list still has open (one filed meanwhile, elsewhere, drops out).
     private func chosen(_ picked: Set<String>) -> [InboxItem] { openItems.filter { picked.contains($0.key) } }
 
@@ -510,13 +537,26 @@ struct InboxPage: View {
         ToolbarItem(placement: .principal) {
             Text("\(chosen.count) Selected").font(Theme.Font.heading).lineLimit(1)
         }
-        ToolbarItem(placement: .topBarLeading) {
-            // Select All adds what is in sight (a folded group picked whole stays picked); Deselect All clears all
-            Button(all ? String(localized: "Deselect All") : String(localized: "Select All")) {
-                self.picked = all ? [] : picked.union(pickable.map(\.key))
+        if shell != nil {
+            // iPhone's place root has one leading button, ☰, so Select All belongs with the other selection actions below.
+            ToolbarItemGroup(placement: .bottomBar) {
+                // Select All adds what is in sight (a folded group picked whole stays picked); Deselect All clears all.
+                Button(all ? String(localized: "Deselect All") : String(localized: "Select All")) {
+                    self.picked = all ? [] : picked.union(pickable.map(\.key))
+                }
+                .disabled(pickable.isEmpty)
+                .accessibilityIdentifier("inbox.selectAll")
+                Spacer()
             }
-            .disabled(pickable.isEmpty)
-            .accessibilityIdentifier("inbox.selectAll")
+        } else {
+            // The iPad and other non-shell layouts keep their original leading Select All beside Back or the hub picker.
+            ToolbarItem(placement: .topBarLeading) {
+                Button(all ? String(localized: "Deselect All") : String(localized: "Select All")) {
+                    self.picked = all ? [] : picked.union(pickable.map(\.key))
+                }
+                .disabled(pickable.isEmpty)
+                .accessibilityIdentifier("inbox.selectAll")
+            }
         }
         ToolbarItem(placement: .topBarTrailing) {
             Button("Done") { withAnimation(Theme.Motion.standard) { self.picked = nil } }
@@ -1368,13 +1408,14 @@ struct InboxAgentRow: View {
 
 // MARK: - Detail
 
-/// One inbox item opened: the Feishu chat at its first new message, or the mail, or what a plugin draws for its source
-/// (placement inbox_item, `InboxItemSlotContent`); the AI's summary with AI Draft Reply / Hand to AI on top, Done in the
-/// toolbar, whoever draws the body.
+/// One inbox item opened: on iOS a native chat or mail stays behind View original until asked for, so the detail alone
+/// reports nothing read; the other sources keep their existing body (placement inbox_item, `InboxItemSlotContent`). The
+/// AI's summary with AI Draft Reply / Hand to AI is on top, Done in the toolbar, whoever draws the body.
 struct InboxDetailView: View {
     var item: InboxItem
     var accounts: [MailAccount]
     @Environment(AppModel.self) private var model
+    @Environment(\.shell) private var shell
     @Environment(\.dismiss) private var dismiss
     @State private var drafting = false
     @State private var handingOff = false
@@ -1382,6 +1423,10 @@ struct InboxDetailView: View {
     @State private var ruling: InboxPolicyTarget?
     @State private var todoRequest: InboxTodoRequest?
     @State private var slot: InboxItemSlotModel
+    #if os(iOS)
+    /// The expanded item's key; nil keeps every newly opened or reused detail collapsed.
+    @State private var expandedSourceKey: String?
+    #endif
 
     init(item: InboxItem, accounts: [MailAccount]) {
         self.item = item
@@ -1400,6 +1445,11 @@ struct InboxDetailView: View {
             .sheet(isPresented: $sameMatter) { InboxSameMatterPicker(item: current, tree: nil) }
             .sheet(item: $ruling) { InboxPolicySheet(target: $0) }
             .sheet(item: $todoRequest) { InboxDueSheet(request: $0) }
+            #if os(iOS)
+            .onChange(of: item.key) { _, _ in
+                expandedSourceKey = nil
+            }
+            #endif
             #if DEBUG
             // `-showInboxAction draft|handoff`: open that sheet (screenshots).
             .task {
@@ -1413,6 +1463,18 @@ struct InboxDetailView: View {
             .pageToolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        if shell != nil {
+                            if current.isDone {
+                                Button { InboxStore.shared.setDone(current, false) } label: { Label("Move Back", systemImage: Theme.Icon.undo) }
+                            } else {
+                                Button {
+                                    InboxStore.shared.setDone(current, true)
+                                    dismiss()
+                                } label: { Label("Done [Inbox View 59f6c8]", systemImage: Theme.Icon.done) }
+                                    .accessibilityIdentifier("inbox.detail.done")
+                            }
+                            Divider()
+                        }
                         if !current.isDone {
                             // Add to To-Dos (#6480): the row counts as handled, so the page closes like Done
                             Menu {
@@ -1429,22 +1491,24 @@ struct InboxDetailView: View {
                         .accessibilityLabel("More")
                         .accessibilityIdentifier("inbox.detail.more")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if current.isDone {
-                        Button { InboxStore.shared.setDone(current, false) } label: { Label("Move Back", systemImage: Theme.Icon.undo) }
-                    } else {
-                        Button {
-                            InboxStore.shared.setDone(current, true)
-                            dismiss()
-                        } label: { Label("Done [Inbox View 59f6c8]", systemImage: Theme.Icon.done) }
-                            .accessibilityIdentifier("inbox.detail.done")
+                if shell == nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        if current.isDone {
+                            Button { InboxStore.shared.setDone(current, false) } label: { Label("Move Back", systemImage: Theme.Icon.undo) }
+                        } else {
+                            Button {
+                                InboxStore.shared.setDone(current, true)
+                                dismiss()
+                            } label: { Label("Done [Inbox View 59f6c8]", systemImage: Theme.Icon.done) }
+                                .accessibilityIdentifier("inbox.detail.done")
+                        }
                     }
                 }
             }
     }
 
     /// An event (inbox phase 1: recap, a suggestion, the chain) opens as its own page, the source behind 'view original';
-    /// anything else as before: the source with the actions over it.
+    /// anything else keeps the actions over its body, with a native chat or mail collapsed on iOS until its row is tapped.
     @ViewBuilder private var page: some View {
         if current.isEvent {
             InboxEventPage(item: current, accounts: accounts, draft: { drafting = true })
@@ -1465,14 +1529,86 @@ struct InboxDetailView: View {
             InboxConnectorDetailView(item: current)
         } else if let m = current.moment {
             LarkMomentsPostView(postID: m.postID, pushed: true, manager: model.linkManager(current.manager)) // the post and its comments, as a shared Moments card opens
-        } else if let c = item.larkConversation {
-            LarkChatView(conversation: c, manager: model.linkManager(current.manager))
-        } else if let m = item.mailSummary {
-            MailDetailView(summary: m, accounts: accounts)
+        } else if item.larkConversation != nil || item.mailSummary != nil {
+            #if os(iOS)
+            collapsibleSource
+            #else
+            originalSource
+            #endif
         } else {
             EmptyStateView(symbol: "questionmark", title: item.title, message: item.preview)
         }
     }
+
+    /// The unchanged source, shared by the platforms that open it directly and by iOS once it is explicitly expanded.
+    @ViewBuilder private var originalSource: some View {
+        if let c = item.larkConversation {
+            LarkChatView(conversation: c, manager: model.linkManager(current.manager))
+        } else if let m = item.mailSummary {
+            MailDetailView(summary: m, accounts: accounts)
+        }
+    }
+
+    #if os(iOS)
+    private var showsOriginalSource: Bool {
+        expandedSourceKey == item.key
+    }
+
+    /// Only the expanded branch mentions the source views: `InboxItemSlotContent` can evaluate its plain content eagerly,
+    /// so neither a chat nor a mail reader may be constructed while this row is collapsed.
+    @ViewBuilder private var collapsibleSource: some View {
+        Group {
+            if showsOriginalSource {
+                originalSource
+            } else {
+                // The chat owns its title only while expanded; the collapsed detail must keep naming the item.
+                Spacer()
+                    .navigationTitle(current.title)
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+        .safeAreaInset(edge: .top, spacing: Theme.Space.flush) { sourceDisclosure }
+    }
+
+    /// The one entry stays above the source in both states; its preview follows the inbox row's metadata and sender line.
+    private var sourceDisclosure: some View {
+        Button(action: toggleOriginalSource) {
+            HStack(spacing: Theme.Space.s) {
+                Text(sourcePreview)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: Theme.Space.s)
+                Label(showsOriginalSource ? String(localized: "Collapse") : String(localized: "View original"), systemImage: Theme.Icon.openDocument)
+                    .font(Theme.Font.captionMedium)
+                    .foregroundStyle(Theme.accent)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .layoutPriority(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.Space.page)
+            .tapTargetHeight()
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("inbox.detail.source")
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var sourcePreview: String {
+        if let meta = InboxNow.meta(item, lang: interfaceTextLocale.identifier) { return meta }
+        guard let sender = item.sender, !sender.isEmpty, item.lark?.isGroup != false || !item.isLark else { return item.preview }
+        return String(localized: "\(sender): \(item.preview)", comment: "Who wrote it: what they wrote")
+    }
+
+    private func toggleOriginalSource() {
+        withAnimation(Theme.Motion.standard) {
+            expandedSourceKey = showsOriginalSource ? nil : item.key
+        }
+    }
+    #endif
 }
 
 /// Values a destination needs directly: an outer NavigationStack / NavigationSplitView does not reliably forward them

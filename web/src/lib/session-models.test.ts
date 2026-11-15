@@ -156,6 +156,13 @@ describe("what the pill says", () => {
     expect(pillView(session({ launcher: undefined, agent: undefined }), {})).toMatchObject({ engine: "claude", provider: "claude" });
   });
 
+  it("draws one of Paseo's providers as that provider, by its label, never 'paseo' (#8142)", () => {
+    const grok = session({ agent: "paseo", agent_label: "Grok", launcher: "grok", source_kind: "runtime", source_instance_id: "paseo", model: "grok-4", effort: undefined });
+    expect(pillView(grok, {})).toMatchObject({ engine: "grok", engineLabel: "Grok", provider: "grok" });
+    expect(pillView(session({ agent: "paseo", agent_label: "Cursor", launcher: "cursor", source_kind: "runtime" }), {}).engine).toBe("cursor");
+    expect(pillView(session(), {}).engineLabel).toBeUndefined();
+  });
+
   it("loading or failed only while there is no list; no model before one is known, the default entry's name once read", () => {
     expect(pillView(session({ model: undefined }), { loading: true })).toMatchObject({ loading: true, failed: false });
     expect(pillView(session({ model: undefined }), { loading: true }).model).toBeUndefined();
@@ -167,6 +174,11 @@ describe("what the pill says", () => {
   it("names ids briefly where no list does", () => {
     expect(modelLabel("claude-opus-5-5")).toBe("opus 5.5");
     expect(modelLabel("anthropic/claude-opus-5-5")).toBe("opus 5.5");
+    expect(modelLabel("claude-opus-5-5[1m]")).toBe("opus 5.5 1M");
+    expect(modelLabel("claude-fable-5-2[1m]")).toBe("fable 5.2 1M");
+    expect(modelLabel("claude-sonnet-5-5[1m]")).toBe("sonnet 5.5 1M");
+    expect(modelLabel("claude-opus-5-5-20260101")).toBe("opus 5.5");
+    expect(modelLabel("claude-haiku-5-5")).toBe("haiku 5.5");
     expect(modelLabel("gpt-5.5-codex")).toBe("5.5 Codex");
     expect(modelLabel("vendor/model-x")).toBe("model-x");
     expect(currentModelRow(claudeList.models, "CLAUDE-HAIKU-5-5")?.id).toBe("haiku");

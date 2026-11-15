@@ -16,7 +16,9 @@ final class DictationBarModel {
     private(set) var slow = false
     /// Which way the wave goes as the bar closes: into ✕ (cancel) or into ↑ / ■ (kept).
     private(set) var closing: Ending = .cancel
-    @ObservationIgnored private var run = UUID()
+    /// Which start, stop or send a late answer belongs to. Lazy: the model is a `@State` value, built again with each
+    /// rebuild of the composer's initializer, and keeps no work there (docs/apple/performance.md P3).
+    @ObservationIgnored private lazy var run = UUID()
     /// One generator, prepared before it is needed: `Haptics.tap()` makes a new one each time, and the first impact of a
     /// cold one started the haptic engine on the main thread right as the bar moved (100–600 ms frames on a simulator).
     @ObservationIgnored private var haptic: UIImpactFeedbackGenerator?
@@ -133,9 +135,12 @@ struct DictationBar: View {
         let on = model.on
         // Always built, hidden while off: what a tap shows already exists (the wave's canvas and its render layer,
         // the buttons), so turning the bar on only animates scale and opacity (inserting them on the tap cost a ~40 ms
-        // frame on a simulator).
+        // frame on a simulator). Off, the parts also drop their accessibility labels and identifiers: XCUITest still
+        // lists built views hidden from accessibility, and the off ↑ answered UI tests' lookups of the composer's send
+        // (#7684).
+        let named = { (name: String) in on ? name : "" }
         HStack(spacing: Theme.Space.xs) {
-            ComposerRoundButton(symbol: Theme.Icon.close, label: String(localized: "Cancel"), id: "dictation-bar-cancel",
+            ComposerRoundButton(symbol: Theme.Icon.close, label: named(String(localized: "Cancel")), id: named("dictation-bar-cancel"),
                                 pressScales: !reduceMotion, muted: true, action: cancel)
                 .disabled(ending != nil)
                 .modifier(BarPart(on: on, reduceMotion: reduceMotion))
@@ -147,14 +152,14 @@ struct DictationBar: View {
                 .opacity(on ? 1 : Theme.DictationBar.hiddenInk)
                 // VoiceOver reads the wave as where dictation stands, between ✕ and ■.
                 .accessibilityElement()
-                .accessibilityLabel(ending == nil ? String(localized: "Listening…") : String(localized: "Transcribing…"))
+                .accessibilityLabel(named(ending == nil ? String(localized: "Listening…") : String(localized: "Transcribing…")))
                 .accessibilityAddTraits(.updatesFrequently)
                 .accessibilityHidden(!on)
-            ComposerRoundButton(symbol: Theme.Icon.stopDictating, label: String(localized: "Stop Dictation"), id: "dictation-bar-stop",
+            ComposerRoundButton(symbol: Theme.Icon.stopDictating, label: named(String(localized: "Stop Dictation")), id: named("dictation-bar-stop"),
                                 pressScales: !reduceMotion, muted: true, busy: model.slow && ending == .stop, action: stop)
                 .disabled(ending != nil)
                 .modifier(BarPart(on: on, reduceMotion: reduceMotion))
-            ComposerRoundButton(symbol: Theme.Icon.send, label: String(localized: "Send"), id: "dictation-bar-send",
+            ComposerRoundButton(symbol: Theme.Icon.send, label: named(String(localized: "Send")), id: named("dictation-bar-send"),
                                 pressScales: !reduceMotion, busy: model.slow && ending == .send, action: send)
                 .disabled(ending != nil)
                 .modifier(BarPart(on: on, reduceMotion: reduceMotion))
@@ -355,7 +360,8 @@ private struct WaveCanvas: View {
 
 /// The wave's samples across ticks, outside SwiftUI's state: taking one must not invalidate anything.
 private final class WaveBox {
-    var state = DictationWave(capacity: 1)
+    /// Lazy for the same reason as `DictationBarModel.run`: the box is a `@State` value (P3).
+    lazy var state = DictationWave(capacity: 1)
     /// When the last sample was due.
     private var last: TimeInterval?
 

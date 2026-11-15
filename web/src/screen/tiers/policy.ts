@@ -2,9 +2,12 @@
 // timelines it writes (spec/fixtures/screen-tiers/policy). Every 250 ms it reads the stream's signals (./signals), the
 // helper's `timing` and the route, and moves to another tier only when the band no longer fits: down fast, to the best
 // tier whose floor fits 80% of what arrived; up slowly, one tier after a calm window and only with proof of headroom.
+// The helper's `timing` comes once a second while frames flow and not at all on a still screen, so it is used only while
+// fresh: its skipped frames until the next one is due (1.25 s), its bitrate as proof once; a new bias or budget starts
+// from at least the current tier's floor (#7842).
 // Times are seconds on any monotonic clock; Swift's `Int(x)` truncates, so does this (`Math.trunc`).
-import { MAX_KBPS } from "./capture-plan";
-import { makeLadder, type Bias, type Tier } from "./ladder";
+import { fpsFor, scaledSize } from "./capture-plan";
+import { makeLadder, steps, type Bias, type Tier } from "./ladder";
 import type { TierSignals } from "./signals";
 
 export type TierReason = "start" | "link_slowed" | "link_steady" | "network_changed" | "phone_warm" | "phone_behind" | "choice";
@@ -29,6 +32,7 @@ const UNDO_WITHIN = 15;
 const LONGEST_WINDOW = 60;
 const WINDOW_RESET = 120;
 const BURST_PROOFS = 3;
+const HELPER_STALE = 1.25;
 
 const pixelRate = (t: Tier) => t.width * t.height * t.fps;
 
@@ -71,6 +75,9 @@ export class TierPolicy {
   private helperTarget: number | null = null;
   private helperSent: number | null = null;
   private helperSkipped = 0;
+  /** A `timing` came since the last tick, and when the last one was first ticked on. */
+  private helperFresh = false;
+  private helperAt: number | null = null;
 
   constructor({ display, bias, capKbps, maxFps, maxScale = null, link, remembered = null, now }: PolicyInit) {
     this.display = display;
@@ -98,11 +105,15 @@ export class TierPolicy {
     this.helperTarget = t.targetKbps ?? null;
     this.helperSent = t.kbps;
     this.helperSkipped = t.skipped ?? 0;
+    this.helperFresh = true;
   }
 
   /** One decision, every 250 ms; a change is returned for the page to send as an `update`. */
   tick(s: TierSignals, now: number): Change | null {
-    const skipping = this.helperSkipped > 0;
+    const fresh = this.helperFresh;
+    this.helperFresh = false;
+    if (fresh) this.helperAt = now;
+    const skipping = this.helperSkipped > 0 && this.helperAt !== null && now - this.helperAt < HELPER_STALE;
     const queue = s.queueP50Ms ?? 0;
 
     // Down, fast: a long queue or skipped frames for a quarter second.
@@ -152,7 +163,7 @@ export class TierPolicy {
     if (this.index > 0) {
       const next = this.ladder[this.index - 1];
       const sent = this.helperSent;
-      if (target !== null && sent !== null && sent >= 0.8 * target && sent >= 1.25 * next.minKbps) {
+      if (fresh && target !== null && sent !== null && sent >= 0.8 * target && sent >= 1.25 * next.minKbps) {
         this.motionKbps = Math.max(this.motionKbps ?? 0, sent);
       }
       for (const b of s.burstKbps) {
@@ -256,8 +267,9 @@ export class TierPolicy {
   }
 
   private rebuild(reason: TierReason, now: number): Change {
-    const rate = this.helperTarget ?? this.last.targetKbps;
     const current = this.tier;
+    // At least the current tier's floor: the link carries it, and a still screen's bitrate says nothing of the link.
+    const rate = Math.max(this.helperTarget ?? this.last.targetKbps, current.minKbps);
     this.ladder = TierPolicy.tiers(this.display, this.bias, this.capKbps, this.maxFps, this.maxScale);
     this.windows.clear();
     this.lastUp = null;
@@ -268,8 +280,8 @@ export class TierPolicy {
     return this.move(i, Math.min(t.maxKbps, Math.max(t.minKbps, rate)), reason, now);
   }
 
-  /** Which rung of the full ladder a route starts on: the same network 0; Tailscale (or direct IPv6) 0 under 30 ms,
-   *  else 1; the relay 1 over Wi-Fi, 2 over cellular. Nothing measured yet: the relay over Wi-Fi. */
+  /** Which of the bias's steps a route starts on: the same network 0; Tailscale (or direct IPv6) 0 under 30 ms, else 1;
+   *  the relay 1 over Wi-Fi, 2 over cellular. Nothing measured yet: the relay over Wi-Fi. */
   static rung(link: Link | null): number {
     if (!link) return 1;
     switch (link.kind) {
@@ -283,18 +295,25 @@ export class TierPolicy {
     }
   }
 
-  /** The ladder under the caps, without the tiers above `maxScale` (never empty: every ladder ends on 1× tiers). */
+  /** The ladder under the caps, without the tiers whose picture has more than `maxScale` pixels per point (Data Saver:
+   *  1× only, which on a display at one pixel per point is every tier; never empty: every ladder ends on 1× tiers). */
   static tiers(display: Display, bias: Bias, capKbps: number, maxFps: number, maxScale: number | null): Tier[] {
     const all = makeLadder({ points: display.points, pixels: display.pixels, maxSize: display.maxSize, bias, capKbps, maxFps });
     if (maxScale === null) return all;
-    const kept = all.filter((t) => t.scale <= maxScale);
+    const kept = all.filter((t) => t.pixelsPerPoint <= maxScale + 1e-9);
     return kept.length ? kept : all.slice(-1);
   }
 
-  /** The tier of `ladder` for a rung of the uncapped ladder: the best one no richer in pixels a second. */
+  /** The tier of `ladder` for a rung: the bias's step of that rank (`steps`) on this display, under the frame-rate cap
+   *  and `maxScale`, and the best tier no richer in pixels a second. Counted on the steps, not on the ladder: where steps
+   *  merge (a display at one pixel per point) the ladder is shorter, and the relay started a tier lower on such a display
+   *  than on a Retina one (30 fps instead of 60). */
   static indexFor(rung: number, ladder: Tier[], display: Display, bias: Bias, maxFps: number, maxScale: number | null = null): number {
-    const full = TierPolicy.tiers(display, bias, MAX_KBPS, maxFps, maxScale);
-    const ref = pixelRate(full[Math.min(rung, full.length - 1)]);
+    const s = steps(bias);
+    const [stepScale, stepFps] = s[Math.min(Math.max(rung, 0), s.length - 1)];
+    const scale = maxScale === null ? stepScale : Math.min(stepScale, maxScale);
+    const size = scaledSize(display.points, display.pixels, scale, display.maxSize);
+    const ref = size.width * size.height * fpsFor(Math.min(stepFps, maxFps));
     const i = ladder.findIndex((t) => pixelRate(t) <= ref);
     return i >= 0 ? i : ladder.length - 1;
   }

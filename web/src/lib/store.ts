@@ -9,8 +9,9 @@ import { useRef, useSyncExternalStore } from "react";
 import { AGENTS_PAGE_COUNTS_FEATURE, agentsChanged, refreshAgentPrefs, refreshAgentSessions, resetAgents, setAgentListMode, setPersonalPageCounts } from "./agents";
 import { onRuntimeChanges, runtimeIdentity, runtimeRemoval, runtimeSessions, SESSIONS_LOOKUP_FEATURE, SESSIONS_PAGE_COUNTS_FEATURE, setRuntimePageCounts } from "./runtime-list";
 import { sameValue } from "./stable-lines";
-import { SESSIONS_LIST_FEATURE, type ListCounts } from "./session-list";
+import { SESSIONS_LIST_CHANGES_FEATURE, SESSIONS_LIST_FEATURE, type ListCounts } from "./session-list";
 import { SESSIONS_HIERARCHY_FEATURE } from "./child-sessions";
+import { SESSIONS_SIDE_FOLD_FEATURE, setSideFold } from "./side-fold";
 import { applySessionDelta, SESSIONS_DELTA_FEATURE, sessionRefreshed, sessionSnapshot } from "./sessions-delta";
 import { dueMarks, heldRows, liveMarks, markOver, newMark, nextDue, unansweredMarks, type SeenMark, type SeenMarks } from "./seen-outbox";
 import { probeEdge } from "./edge-auth";
@@ -581,6 +582,27 @@ export function send(msg: Record<string, unknown>) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
+// What client_hello declares beyond CLIENT_FEATURES now: lib/attention-signals.ts asks for the hub's `notify` events
+// (`ws_notify`) while this page can alert (#8145). Read at every hello.
+let helloExtras: () => string[] = () => [];
+
+function sendHello(sock: WebSocket) {
+  // the interface language: this connection's text, and the user's language for pushes and the assistant (docs/protocol/i18n.md)
+  // and what it can render: MCP forms and links come only to a socket that says so
+  // device_id: this browser's (lib/device-id.ts), so the hub pushes nothing to it while a page is open (#7459)
+  sock.send(JSON.stringify({ type: "client_hello", platform: CLIENT_PLATFORM, version: CLIENT_VERSION, features: [...CLIENT_FEATURES, ...helloExtras()], locale: currentLanguage(), device_id: helloDeviceId(), heartbeat: { pong_timeout: CLIENT_PONG_TIMEOUT } }));
+}
+
+/** Sets what client_hello declares beyond CLIENT_FEATURES, from the next hello on. */
+export function setHelloExtras(extras: () => string[]) {
+  helloExtras = extras;
+}
+
+/** Says client_hello again on the open socket: the hub takes a later one's features in place of the earlier one's. */
+export function sayHello() {
+  if (ws?.readyState === WebSocket.OPEN) sendHello(ws);
+}
+
 export function connect() {
   setCompatibilityFeatures([]);
   stopped = false;
@@ -590,17 +612,14 @@ export function connect() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   socketToken = getToken();
   directionTreeAwaitsHello(true); // its hello reads the direction tree: the screens wait for that read
-  const sock = new WebSocket(`${proto}//${location.host}${BASE}/api/v1/ws?${wsQuery(socketToken, cursor, [SESSIONS_LIST_FEATURE, SESSIONS_DELTA_FEATURE, SESSION_LIVE_FEATURE, "extension_ui_stream_v1", "persona_contracts_v1"])}`);
+  const sock = new WebSocket(`${proto}//${location.host}${BASE}/api/v1/ws?${wsQuery(socketToken, cursor, [SESSIONS_LIST_FEATURE, SESSIONS_LIST_CHANGES_FEATURE, SESSIONS_DELTA_FEATURE, SESSION_LIVE_FEATURE, "extension_ui_stream_v1", "persona_contracts_v1"])}`);
   ws = sock;
   restartNotice = false;
   // an attempt does not move offline back to connecting: the pill stays on one phase while the hub is down instead of
   // flipping at every backoff tick (the app's ConnectionTitle); shownConn decides it when the attempt fails
   sock.onopen = () => {
     socketOpenedAt = Date.now(); // a direction tree read since then serves this hello (lib/direction-tree.ts)
-    // the interface language: this connection's text, and the user's language for pushes and the assistant (docs/protocol/i18n.md)
-    // and what it can render: MCP forms and links come only to a socket that says so
-    // device_id: this browser's (lib/device-id.ts), so the hub pushes nothing to it while a page is open (#7459)
-    sock.send(JSON.stringify({ type: "client_hello", platform: CLIENT_PLATFORM, version: CLIENT_VERSION, features: CLIENT_FEATURES, locale: currentLanguage(), device_id: helloDeviceId(), heartbeat: { pong_timeout: CLIENT_PONG_TIMEOUT } }));
+    sendHello(sock);
     retry = 0;
     fastTries = 0;
     lastMessage = Date.now();
@@ -638,7 +657,7 @@ export function connect() {
     if (stopped) return;
     // an attempt that never got a hello carries no status: ask the hub once whether a sign-in layer in front of it has
     // expired (lib/edge-auth.ts); a socket that was live just dropped, and its reconnect attempt is the one to ask about
-    if (!wasLive && !restartNotice && ev.code !== 1001) void probeEdge();
+    if (!wasLive && !restartNotice && ev.code !== 1001) void probeEdge(undefined, probeCredential);
     const now = Date.now();
     const restart = restartNotice || ev.code === 1001;
     // the drop starts while online; a restart announced on a later attempt stretches its grace
@@ -661,6 +680,12 @@ export function connect() {
     retryTimer = window.setTimeout(connect, wait);
   };
 }
+
+// The hub answered while it refused the socket: a browser can't read why a WebSocket handshake failed, so one ordinary
+// read asks. A credential it no longer takes (removed in Settings › Devices, or the hub forgot it) answers 401, which
+// api() hands to the sign-in page with "signed out" (App.tsx handleUnauthorized) instead of retrying as if the hub were
+// out of reach. The read's own failures change nothing: the socket keeps retrying.
+const probeCredential = () => api("/machines", { timeout: 15_000 }).catch(() => {});
 
 // The grace is over and the socket is still not back: show it as before.
 function showDrop() {
@@ -764,6 +789,8 @@ function onMessage(msg: Record<string, unknown>) {
       helloHooks.forEach((f) => f()); // e.g. a hub that came back may serve a new web build (lib/new-version.ts)
       setCompatibilityFeatures(Array.isArray(msg.features) ? msg.features as string[] : []);
       const mesh = (msg.mesh as { hubs?: MeshHub[] } | undefined)?.hubs;
+      // a hub that folds side sessions into their parent's chat (#7944): set before the features, which redraw the lists
+      setSideFold(Array.isArray(msg.features) && (msg.features as unknown[]).includes(SESSIONS_SIDE_FOLD_FEATURE));
       set({
         conn: "online",
         link: { ...state.link, nextTry: 0, restarting: false, networkUp: true },

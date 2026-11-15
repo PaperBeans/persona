@@ -671,7 +671,25 @@ func pushRecordingID(id string) string {
 
 // deliverPush is deliverPushFrom the assistant the hub starts.
 func (h *Hub) deliverPush(n assistantwire.Notification) error {
-	return h.deliverPushFrom(assistantwire.AssistantID, n)
+	_, err := h.deliverPushFrom(assistantwire.AssistantID, n)
+	return err
+}
+
+// relatedTodoID maps only source forms with a defined meaning. A quiet supervisor's ask:<id> is a real to-do, but a
+// model-controlled notify_user key (Asked=true) is not promoted from that prefix. todo:<id> is already a form every
+// held-push client follows, so carrying it into todo_id preserves that destination's precedence over the session.
+func relatedTodoID(key string, allowAsk bool) string {
+	key = strings.TrimSpace(key)
+	if id, ok := strings.CutPrefix(key, "todo:"); ok {
+		id, _, _ = strings.Cut(id, "@")
+		return strings.TrimSpace(id)
+	}
+	if allowAsk {
+		if id, ok := strings.CutPrefix(key, "ask:"); ok {
+			return strings.TrimSpace(id)
+		}
+	}
+	return ""
 }
 
 // deliverPushFrom delivers what manager from asks (notify.request): an assistant's push, an agent's finished turn, a
@@ -679,40 +697,68 @@ func (h *Hub) deliverPush(n assistantwire.Notification) error {
 // reported that is pending, and the hub pushes its own copy of it; any other push names a machine and session of its
 // own, or none. What the extensions are told of it (agent.finished, agent.needs_you) goes to from's only, and the
 // devices that muted from (NotifyPrefs.MutedManagers) get none of it.
-func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) error {
+//
+// It returns where an assistant's push or a finished turn went (nil for a card, a reply reminder or a decision, whose
+// delivery is not reported): the devices it was handed to, the offline ones that keep it, and the ln-mode reason it was
+// held. The assistant's notify_user tool tells the model from it whether the notice reached a device, the briefing or
+// nothing, and counts it as an interruption only when a device took it.
+func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *pushOutcome, err error) {
 	switch n.Kind {
 	case assistantwire.NotifyInput:
 		if n.Interaction == nil {
-			return errors.New("an input push needs its interaction")
+			return nil, errors.New("an input push needs its interaction")
 		}
 		ix, ok := h.pendingInteraction(n.Interaction.ID)
 		if !ok || cmp.Or(ix.Manager, assistantwire.AssistantID) != from {
-			return &rpc.Error{Code: devicewire.CodeNoDevice, Message: "an input push is for a pending card the manager reported"}
+			return nil, &rpc.Error{Code: devicewire.CodeNoDevice, Message: "an input push is for a pending card the manager reported"}
 		}
-		h.notifyInteraction(from, ix, n.Subtitle, n.LinkCovered)
-		return nil
+		h.notifyInteractionAt(from, ix, n.Subtitle, n.LinkCovered, n.Level, n.RelatedKey)
+		return nil, nil
 	case assistantwire.NotifyPush, assistantwire.NotifyDone, assistantwire.NotifyReply, assistantwire.NotifyDecide:
 		if !h.ownsRef(from, n.DeviceID, n.SessionID) {
-			return &rpc.Error{Code: devicewire.CodeNoDevice, Message: fmt.Sprintf("a push about machine %q, session %q: another manager's",
+			return nil, &rpc.Error{Code: devicewire.CodeNoDevice, Message: fmt.Sprintf("a push about machine %q, session %q: another manager's",
 				clip(n.DeviceID, 64), clip(n.SessionID, 64))}
 		}
 	}
 	switch n.Kind {
 	case assistantwire.NotifyPush: // one with an id shows once, sent again however late (a day recap's push)
-		h.notifyDoneUnder(from, "assistant", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, pushWants{}, managerPushCollapseID(from, n.ID),
-			pushRecordingID(n.RecordingID))
+		policy := pushPolicy{level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey, todoID: relatedTodoID(n.RelatedKey, !n.Asked)}
+		policy.level = h.lnNotifyPushLevel(n, policy.level)
+		o := h.notifyDoneUnder(from, "assistant", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, pushWants{}, managerPushCollapseID(from, n.ID),
+			pushRecordingID(n.RecordingID), policy)
+		out = &o
 	case assistantwire.NotifyDone:
-		h.notifyDone(from, "done", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body,
-			pushWants{Kind: "done", Took: time.Duration(n.TookMS) * time.Millisecond, Long: time.Duration(n.LongMS) * time.Millisecond})
+		o := h.notifyDoneUnder(from, "done", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body,
+			pushWants{Kind: "done", Took: time.Duration(n.TookMS) * time.Millisecond, Long: time.Duration(n.LongMS) * time.Millisecond},
+			"", "", pushPolicy{level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey, todoID: relatedTodoID(n.RelatedKey, false)})
+		out = &o
 	case assistantwire.NotifyReply:
-		h.notifyReply(from, n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body)
+		h.notifyReplyKeyed(from, n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, n.RelatedKey)
 	case assistantwire.NotifyDecide:
 		if n.Todo == nil || n.Todo.ID == "" || n.Todo.AskedAt.IsZero() || n.Todo.Recommend == "" {
-			return errors.New("a decision's push needs its to-do, when it was asked and the option its OK takes")
+			return nil, errors.New("a decision's push needs its to-do, when it was asked and the option its OK takes")
 		}
 		h.notifyDecide(from, n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, *n.Todo)
 	default:
-		return fmt.Errorf("unknown notification kind %q", n.Kind)
+		return nil, fmt.Errorf("unknown notification kind %q", n.Kind)
 	}
-	return nil
+	return out, nil
+}
+
+// lnNotifyPushLevel is a notify_user push's effective level while ln mode is on. A level the caller named explicitly
+// (P0/P1/P2) always stands. A notice that named none and came from the main conversation still interrupts (P0): the
+// owner talking to Persona directly keeps its alerts. Every other conversation's ordinary notice is P1 — held for the
+// "Needs you" list and the briefing instead of alerting. With the switch off the level the caller named stands, so
+// delivery is exactly as before.
+func (h *Hub) lnNotifyPushLevel(n assistantwire.Notification, derived string) string {
+	if h.push == nil || !h.push.lnModeOn() {
+		return derived
+	}
+	if n.Level != "" {
+		return derived
+	}
+	if h.isMainOn(n.DeviceID, n.SessionID) {
+		return assistantwire.LevelP0
+	}
+	return assistantwire.LevelP1
 }

@@ -32,9 +32,9 @@ var launcherCache struct {
 // launcherScript lists the login shell's launchers in one go (sourcing ~/.zshrc takes a while): what the
 // `_claude_launchers` helper prints when the rc file has one, a GS byte, then every alias as its name and its words
 // as zsh itself splits and unquotes them (name US word US … RS), so quoting never has to be parsed here (bash prints
-// `alias -p` after bashAliasMark instead, launchers_shell.go); then, each after a GS byte, where codex, traex and omp
-// are on the PATH, the names of the shell's functions and aliases (one a line: they come before a file on PATH of the
-// same name), and its PATH (for the wrapper scripts on it, pathlaunchers.go). All of it between launcherBegin and
+// `alias -p` after bashAliasMark instead, launchers_shell.go); then, each after a GS byte, where codex, traex, omp,
+// pi, cursor-agent and agy are on the PATH, the names of the shell's functions and aliases (one a line: they come
+// before a file on PATH of the same name), and its PATH (for the wrapper scripts on it, pathlaunchers.go). All of it between launcherBegin and
 // launcherEnd, so what the rc files print around it is never read as a section (launcherOutput).
 const launcherScript = `printf '\001persona-launchers-begin\001'
 __jl_path=$PATH
@@ -57,6 +57,12 @@ printf '\035'
 if [ -n "$ZSH_VERSION" ]; then whence -p traex 2>/dev/null; else command -v traex 2>/dev/null; fi
 printf '\035'
 if [ -n "$ZSH_VERSION" ]; then whence -p omp 2>/dev/null; else command -v omp 2>/dev/null; fi
+printf '\035'
+if [ -n "$ZSH_VERSION" ]; then whence -p pi 2>/dev/null; else command -v pi 2>/dev/null; fi
+printf '\035'
+if [ -n "$ZSH_VERSION" ]; then whence -p cursor-agent 2>/dev/null; else command -v cursor-agent 2>/dev/null; fi
+printf '\035'
+if [ -n "$ZSH_VERSION" ]; then whence -p agy 2>/dev/null; else command -v agy 2>/dev/null; fi
 printf '\035'
 if [ -n "$ZSH_VERSION" ]; then eval 'print -rl -- ${(k)functions} ${(k)aliases}'; elif [ -n "$BASH_VERSION" ]; then compgen -A function; compgen -a; fi
 printf '\035'
@@ -112,8 +118,9 @@ func (n *Node) launchers(ctx context.Context) ([]proto.Launcher, error) {
 
 // mergeLaunchers is launcherScript's output as the launcher list: the helper's, then the aliases it does not name,
 // then the wrapper scripts on PATH no function or alias shadows (nothing at all: plain claude), then Codex's — plain
-// codex when it is on the PATH, and the aliases that run it (how each runs: codex) — then plain traex when it is on the
-// PATH (started without Claude's flags, start_agent.go). settings: the claude aliases' and scripts' own --settings, by
+// codex when it is on the PATH, and the aliases that run it (how each runs: codex) — then plain traex and plain omp when
+// they are on the PATH, then pi, the Cursor CLI and the Antigravity CLI when their programs are (workagent.go: started in
+// a herdr pane with the model the start names). settings: the claude aliases' and scripts' own --settings, by
 // name (launcher_settings.go); an alias is what the shell runs for its name even when the helper lists the name too.
 // scripts: where each wrapper script is.
 func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]string, settings, scripts map[string]string) {
@@ -125,6 +132,9 @@ func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]strin
 	codexPath, rest, _ := strings.Cut(rest, "\x1d")
 	traexPath, rest, _ := strings.Cut(rest, "\x1d")
 	ompPath, rest, _ := strings.Cut(rest, "\x1d")
+	piPath, rest, _ := strings.Cut(rest, "\x1d")
+	cursorPath, rest, _ := strings.Cut(rest, "\x1d")
+	agyPath, rest, _ := strings.Cut(rest, "\x1d")
 	shellNames, pathVar, _ := strings.Cut(rest, "\x1d")
 	list = parseLaunchers(helper)
 	seen := map[string]bool{}
@@ -169,6 +179,15 @@ func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]strin
 	}
 	if strings.TrimSpace(ompPath) != "" && !seen["omp"] && codex["omp"] == nil {
 		list = append(list, proto.Launcher{Name: "omp", Model: "默认", Agent: "omp", Source: "zshrc"})
+	}
+	for _, bin := range []struct{ name, agent, path string }{
+		{"pi", piAgent, piPath},
+		{"cursor", cursorAgent, cursorPath},
+		{"agy", agyAgent, agyPath},
+	} {
+		if strings.TrimSpace(bin.path) != "" && !seen[bin.name] && codex[bin.name] == nil {
+			list = append(list, proto.Launcher{Name: bin.name, Model: "默认", Agent: bin.agent, Source: "zshrc"})
+		}
 	}
 	return list, codex, settings, scripts
 }

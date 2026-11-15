@@ -144,12 +144,23 @@ func (c *darwinCollector) Sample(now time.Time) proto.MetricSample {
 		s.NetRx, s.NetTx = netRates(c.net, cur)
 		c.net = cur
 	}
-	var st syscall.Statfs_t
-	// "/" is the sealed system snapshot (a few GB); what fills up is the data volume.
-	if syscall.Statfs("/System/Volumes/Data", &st) == nil || syscall.Statfs("/", &st) == nil {
-		s.DiskUsed, s.DiskTotal = diskUsage(st.Blocks, st.Bfree, st.Bavail, uint64(st.Bsize))
+	if v := Volumes(); len(v) > 0 {
+		s.DiskUsed, s.DiskTotal = v[0].Used, v[0].Total
 	}
 	return s
+}
+
+// Volumes is the data volume ("/" is the sealed system snapshot, a few GB; what fills up is the data volume), or "/"
+// when there is none.
+func Volumes() []proto.DiskVolume {
+	for _, m := range []string{"/System/Volumes/Data", "/"} {
+		var st syscall.Statfs_t
+		if syscall.Statfs(m, &st) == nil {
+			used, total := diskUsage(st.Blocks, st.Bfree, st.Bavail, uint64(st.Bsize))
+			return []proto.DiskVolume{{Mount: m, Used: used, Total: total}}
+		}
+	}
+	return nil
 }
 
 // ifStats is one RTM_IFINFO2 message of the route socket's interface list.

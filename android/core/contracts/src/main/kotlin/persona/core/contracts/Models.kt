@@ -319,6 +319,24 @@ data class SessionTodo(
     val title: String = "",
 )
 
+/**
+ * What Paseo's bridge calls every agent but Claude Code and Codex (integrations/paseo/lib/map.js `appAgent`): its
+ * engine's id, never the agent's name. Such a session names its provider by `agent_label` (Paseo's label for it,
+ * "Grok") and `launcher` (the provider's id, "grok"); the app never names it after the engine (#8143).
+ */
+const val PaseoAgent = "paseo"
+
+/**
+ * The name of an agent the app does not know by its id ([agent]): what the hub calls it ([label], a runtime's own name,
+ * "DSH"), else the id. Paseo's [PaseoAgent] is its engine, not the agent: there it is the provider's label, else its
+ * launcher (the provider's id), and the engine's name only while neither is known (#8143).
+ */
+fun unknownAgentName(agent: String?, label: String?, launcher: String?): String {
+    val said = label?.trim()?.takeIf(String::isNotEmpty)
+    if (agent != PaseoAgent) return said ?: agent.orEmpty()
+    return said?.takeUnless { it.equals(PaseoAgent, ignoreCase = true) } ?: launcher?.trim()?.takeIf(String::isNotEmpty) ?: said ?: agent
+}
+
 @KeepGeneratedSerializer
 @Serializable(with = SessionSerializer::class)
 data class Session(
@@ -326,7 +344,7 @@ data class Session(
     @SerialName("session_id") val sessionId: String,
     @SerialName("title") val title: String = "",
     @SerialName("cwd") val cwd: String = "",
-    @WireEnum("idle", "working", "blocked", "done", "offline", "unknown")
+    @WireEnum("idle", "working", "blocked", "done", "offline", "interrupted", "unknown")
     @SerialName("status") val status: String = "unknown",
     @SerialName("tab_id") val tabId: String? = null,
     @SerialName("workspace_id") val workspaceId: String? = null,
@@ -362,6 +380,23 @@ data class Session(
     @SerialName("parent_session_id") val parentSessionId: String? = null,
     @SerialName("root_session_id") val rootSessionId: String? = null,
     @SerialName("is_subagent") val isSubagent: Boolean = false,
+    @SerialName("asking_parent_session_id") val askingParentSessionId: String? = null,
+    /** The listed ancestor whose chat owns this child (sessions_hierarchy). */
+    @SerialName("folded_under") val foldedUnder: String? = null,
+    /** Why a row that is no child folds: [FoldedAs.WORKER] (a tab's worker, #5180) or [FoldedAs.SIDE] (#7944). */
+    @SerialName("folded_as") val foldedAs: String? = null,
+    /**
+     * The nearest side session a folded row belongs to when it folds through one and is not that side itself (a side's
+     * own Codex children, #7944): its card and child card are that side's chat's, not the topmost parent's.
+     */
+    @SerialName("folded_side") val foldedSide: String? = null,
+    val children: SessionChildren? = null,
+    /**
+     * The session on the same machine this one was started from while staying a conversation of its own (a Claude
+     * desktop app's side chat or /btw question, #5935). Whether it folds is the hub's [foldedAs], never this.
+     */
+    @SerialName("parent_agent_id") val parentAgentId: String? = null,
+    @WireTime @SerialName("started_at") val startedAt: String? = null,
     /** Why the source only lets the phone read this session. */
     @SerialName("read_only_reason") val readOnlyReason: String? = null,
     val capabilities: SessionCapabilities? = null,
@@ -555,6 +590,18 @@ data class Session(
     /** A chat of the health space ([space]), which the assistant's own lists leave out. */
     val isHealth: Boolean get() = space == persona.core.contracts.api.AssistantSpace.HEALTH
     val agentState: AgentState get() = AgentState.of(state, status)
+    /**
+     * The list state of this session and its folded children; its own wire state stays intact. A side session's result
+     * not looked at yet makes it unread (`sides_unread`, #7944: sides only; Codex children and workers do not), unless it
+     * works itself.
+     */
+    val foldedState: AgentState get() = when {
+        agentState == AgentState.NeedsYou || (children?.needsYou ?: 0) > 0 -> AgentState.NeedsYou
+        (children?.working ?: 0) > 0 && agentState != AgentState.Unread &&
+            !(agentState == AgentState.Idle && awaitsReply) -> AgentState.Working
+        agentState != AgentState.Working && (children?.sidesUnread ?: 0) > 0 -> AgentState.Unread
+        else -> agentState
+    }
     /** Stopped on a model API error ([turnError]): cut off, not finished (#1516). */
     val interrupted: Boolean get() = !turnError.isNullOrBlank() && (agentState == AgentState.Unread || agentState == AgentState.Idle)
     val folderName: String get() = cwd.trimEnd('/').substringAfterLast('/')
@@ -563,12 +610,15 @@ data class Session(
     val isCodex: Boolean get() = agent == "codex" || sourceKind == "codex_app_server" || sourceKind == "codex_history"
     /** Claude Code, or an older hub that does not name the agent: what Claude-only controls (modes, /model, /clear) need. */
     val isClaude: Boolean get() = !isCodex && (agent.isNullOrEmpty() || agent == "claude")
-    /** Who the user talks to: Claude, Codex, a compatible CLI, or what the hub calls a runtime's agent ("DSH"). */
+    /**
+     * Who the user talks to: Claude, Codex, a compatible CLI, what the hub calls a runtime's agent ("DSH"), or a Paseo
+     * provider by its own name ("Grok", [unknownAgentName]), never the engine's.
+     */
     val agentLabel: String get() = when {
         isCodex -> "Codex"
         agent == "traex" -> "TRAEX"
         isClaude -> "Claude"
-        else -> agentLabelHint?.takeIf(String::isNotBlank) ?: agent.orEmpty()
+        else -> unknownAgentName(agent, agentLabelHint, launcher)
     }
     val isLive: Boolean get() = status != "offline"
     /** [failureReason] without the warning sign botmux starts it with (the app draws its own); null when there is none. */
@@ -614,6 +664,30 @@ data class Session(
 /** A host's failure notice without its leading warning signs (U+26A0, U+FE0F) and spaces, as iOS `Session.failureText`. */
 fun failureNoticeText(reason: String): String = reason.trim().trimStart('\u26A0', '\uFE0F').trim()
 
+/** All descendants folded under a listed session, counted by their own states. */
+@Serializable
+data class SessionChildren(
+    val total: Int = 0,
+    val working: Int = 0,
+    @SerialName("needs_you") val needsYou: Int = 0,
+    val workers: Int = 0,
+    /**
+     * The side sessions among them (`folded_as: "side"`, sessions_side_fold, #7944), by their own states, also counted in
+     * the fields above. The app reads them only for a row whose sides it does not hold (core:domain `foldRows`).
+     */
+    val sides: Int = 0,
+    @SerialName("sides_working") val sidesWorking: Int = 0,
+    @SerialName("sides_needs_you") val sidesNeedsYou: Int = 0,
+    @SerialName("sides_unread") val sidesUnread: Int = 0,
+)
+
+/** The hub's `folded_as` values. */
+object FoldedAs {
+    const val WORKER = "worker"
+    /** A side session (a Claude desktop app's side chat or /btw question), folded under its topmost listed parent (#7944). */
+    const val SIDE = "side"
+}
+
 @KeepGeneratedSerializer
 @Serializable(with = SessionCompactionSerializer::class)
 data class SessionCompaction(
@@ -642,6 +716,39 @@ data class ImagePayload(
     @SerialName("width") val width: Int? = null,
     @SerialName("height") val height: Int? = null,
     val size: Int? = null,
+)
+
+/**
+ * What one model request used (`proto.TokenUsage`, docs/protocol/protocol.md "Token usage on items"). Counts are tokens;
+ * [cacheWrite1h] is the part of [cacheWrite] kept for an hour. [id] (`agent:<id>`) marks one subagent's report, counted
+ * once per model and speed. Older nodes omit the list.
+ */
+@Serializable
+data class TokenUsage(
+    val id: String? = null,
+    val model: String? = null,
+    @SerialName("in") val input: Long = 0,
+    @SerialName("out") val output: Long = 0,
+    @SerialName("cache_read") val cacheRead: Long = 0,
+    @SerialName("cache_write") val cacheWrite: Long = 0,
+    @SerialName("cache_write_1h") val cacheWrite1h: Long = 0,
+    val fast: Boolean = false,
+) {
+    /** A subagent's or workflow agent's report. Entries with the same id, model and speed are one report. */
+    val report: Boolean get() = !id.isNullOrBlank()
+}
+
+/**
+ * The built-in catalog's reference price in USD per one million tokens (`proto.ModelPrice`). A missing kind is unknown,
+ * not free. Input and output are present whenever the catalog has a price.
+ */
+@Serializable
+data class ModelPrice(
+    val input: Double? = null,
+    val output: Double? = null,
+    @SerialName("cache_read") val cacheRead: Double? = null,
+    @SerialName("cache_write") val cacheWrite: Double? = null,
+    @SerialName("cache_write_1h") val cacheWrite1h: Double? = null,
 )
 
 @KeepGeneratedSerializer
@@ -685,6 +792,8 @@ data class Item(
      * model); null where it does not say (user items, older hubs). The chat marks where the replies' model changes by it.
      */
     val model: String? = null,
+    /** What the model requests this item stands for used (#5426). Older hubs omit it. */
+    val usage: List<TokenUsage> = emptyList(),
 )
 
 /**
@@ -877,6 +986,10 @@ data class Interaction(
     @SerialName("machine_id") val machineId: String = "",
     @SerialName("session_id") val sessionId: String = "",
     @SerialName("session_title") val sessionTitle: String? = null,
+    @SerialName("folded_under") val foldedUnder: String? = null,
+    @SerialName("folded_as") val foldedAs: String? = null,
+    /** The side session whose chat this card belongs to when it comes from a row folded through one (#7944). */
+    @SerialName("folded_side") val foldedSide: String? = null,
     /** The task its agent works for (docs/assistant/unified-entry.md), named by the hub. */
     @SerialName("task_title") val taskTitle: String? = null,
     @SerialName("cwd") val cwd: String? = null,
@@ -929,13 +1042,23 @@ data class Interaction(
     val suggestion: RuleSuggestion? = null,
 ) {
     val sessionKey: SessionKey get() = SessionKey(machineId, sessionId)
+    /** The page that answers it; resolution still uses this interaction's own id and session. */
+    val homeKey: SessionKey get() = SessionKey(machineId, foldedUnder?.takeIf(String::isNotBlank) ?: sessionId)
 
-    /** The agent's name on a card not from Claude Code ("Codex", "a compatible CLI", "DSH"); null for Claude's. */
+    /** Asked by an agent other than Claude Code (Codex, a compatible CLI, a runtime's): the card is that agent's, never Claude's. */
+    val fromOtherAgent: Boolean get() = !agent.isNullOrEmpty() && agent != "claude"
+
+    /**
+     * The agent's name on a card not from Claude Code ("Codex", "a compatible CLI", "DSH", a Paseo provider's "Grok");
+     * null for Claude's, and for one that names only Paseo, its engine (a node before #8142 labels every card of Paseo's
+     * other providers so): that card reads as one whose agent can't be named (#8143). [fromOtherAgent] says whose card it is.
+     */
     val agentDisplayName: String?
         get() = when (agent) {
             "codex" -> "Codex"
             "traex" -> "TRAEX"
             null, "", "claude" -> null
+            PaseoAgent -> agentLabelHint?.trim()?.takeUnless { it.isEmpty() || it.equals(PaseoAgent, ignoreCase = true) }
             else -> agentLabelHint?.takeIf(String::isNotBlank) ?: agent
         }
 
@@ -960,7 +1083,10 @@ data class Interaction(
     /** One line for a notification or a list row. */
     val headline: CoreText
         get() = when (kind) {
-            "question" -> questions?.firstOrNull()?.question?.let(CoreText::plain) ?: CoreText.of(Key.HeadlineQuestion, agentDisplayName ?: "Claude")
+            // Another agent's card that can't name it says only that it asks (DESIGN_SYSTEM.md 5.6), never "Claude".
+            "question" -> questions?.firstOrNull()?.question?.let(CoreText::plain)
+                ?: agentDisplayName?.let { CoreText.of(Key.HeadlineQuestion, it) }
+                ?: if (fromOtherAgent) CoreText.of(Key.AskQuestion) else CoreText.of(Key.HeadlineQuestion, "Claude")
             "elicitation" -> CoreText.of(Key.HeadlineElicitation)
             "plan" -> CoreText.of(Key.FleetPlanWaiting)
             // A password card names the computer it runs on; its commands are in the card.

@@ -418,9 +418,18 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 			}
 		}
 		text := strings.TrimSpace(strings.Join(parts, "\n"))
-		if len(images) > 0 { // the apps show these paths as thumbnails (the phone's own photos travel the same way)
-			text = strings.TrimSpace(text + "\n\n<attached_images>\n" + strings.Join(images, "\n") + "\n</attached_images>")
+		items, paseo := paseoInput(func(n int, role, kind string) proto.Item { return mk(n, it.ID, role, kind) }, 0, text)
+		if paseo && (len(images) == 0 || attachImages(items, images)) {
+			if meta.codexUserID == "" && len(items) > 0 { // it started the turn: its notices woke the agent
+				markWake(items)
+				meta.codexUserID = items[0].ID
+			}
+			if meta.FirstUser == "" && len(items) > 0 && items[0].Kind == proto.KindText {
+				meta.FirstUser = items[0].Text
+			}
+			return items
 		}
+		text = strings.TrimSpace(text + imagesNote(images))
 		if text == "" {
 			return nil
 		}
@@ -567,6 +576,27 @@ var (
 	// Ambient state the Codex app attaches to a message (open browser tabs and such), not something the user said.
 	codexAmbientRe = lazyre.New(`(?s)<in-app-browser-context[^>]*>.*?</in-app-browser-context>`)
 )
+
+// imagesNote is the note a user message's pictures become after its words ("" for none): their local paths, which the
+// apps show as thumbnails (the phone's own photos travel the same way).
+func imagesNote(images []string) string {
+	if len(images) == 0 {
+		return ""
+	}
+	return "\n\n<attached_images>\n" + strings.Join(images, "\n") + "\n</attached_images>"
+}
+
+// attachImages puts a message's pictures (imagesNote) after the words of the last user text among items: false when
+// none can carry them.
+func attachImages(items []proto.Item, images []string) bool {
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i].Role == "user" && items[i].Kind == proto.KindText {
+			items[i].Text = strings.TrimSpace(items[i].Text + imagesNote(images))
+			return true
+		}
+	}
+	return false
+}
 
 // codexUserText cleans what Codex records as the user's message: ambient context (and Persona's) goes, and the answer to a question
 // Codex asked (request_user_input, stored as JSON) reads as the answer itself ("question: answer", with a full-width colon, when several).

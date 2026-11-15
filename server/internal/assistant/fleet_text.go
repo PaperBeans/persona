@@ -60,14 +60,29 @@ func activityText(l i18n.Lang, s string) string {
 // queuedFrom starts a queued message another session sent (transcript/user_text.go applyQueue).
 const queuedFrom = "【来自 "
 
-// localizeSession rewrites s's node-written lines in l: its activity, a background command's stand-in description, the
-// sender of a queued message, what its workflow agents' and subagents' latest tool calls do. The node's slices are
-// shared: changed ones are copied.
+// runtimeFailureText is a runtime session's last words in l when they are its bridge's own for an agent that stopped on
+// a failure (transcript.RuntimeError…: Paseo's, #8133); its agent's own words stay as they are.
+func runtimeFailureText(l i18n.Lang, s string) string {
+	if s == transcript.RuntimeError {
+		return tt(l, "runtime_error")
+	}
+	if cause, ok := strings.CutPrefix(s, transcript.RuntimeErrorLead); ok {
+		return tt(l, "runtime_error_cause", i18n.Args{"error": cause})
+	}
+	return s
+}
+
+// localizeSession rewrites s's node-written lines in l: its activity, a runtime bridge's last words for a failure, a
+// background command's stand-in description, the sender of a queued message, what its workflow agents' and subagents'
+// latest tool calls do. The node's slices are shared: changed ones are copied.
 func localizeSession(l i18n.Lang, s *proto.Session) {
 	if l == i18n.ZhHans || !i18n.Valid(l) {
 		return
 	}
 	s.Activity = activityText(l, s.Activity)
+	if s.SourceKind == proto.SourceRuntime {
+		s.LastText = runtimeFailureText(l, s.LastText)
+	}
 	localizeWorkflows(l, s)
 	localizeSubagents(l, s)
 	s.RuntimeFallback = runtimeFallbackText(l, s.RuntimeFallback)

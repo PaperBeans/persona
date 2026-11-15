@@ -1,5 +1,10 @@
 # Lessons: Claude Code, Codex, and herdr
 
+# A continuation must stay on its original to-do (#6820)
+
+When replacing an Agent to fix or retry work, keep the original to-do and immutable brief. Stop/release prior Agents at Start and reopen a closed to-do in place; failed starts must not create successor tasks. For Codex edits, a plan/read-only sandbox needs a fresh process with explicit writable permission. Keep takeover and legacy-successor duplicate refusals intact.
+
+
 Pitfalls, odd behavior, and the trade-offs made at the time (formerly in `CLAUDE.md`, index in `docs/lessons/README.md`). Add new lessons to the matching section; create a section if none fits.
 
 ## A saved task name can disappear without another model failure (#7337)
@@ -56,9 +61,20 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
   (`Auto (match terminal)` first, cursor on `✔ Dark mode`), then "Security notes … Press Enter to continue…", then the folder's trust dialog (cursor on `No, exit`).
   The node's picker match expected numbered choices (a hand-written fixture), so starts on a new machine timed out after 1 minute on the picker.
   `firstRunKeys` answers the picker and the notes; fixtures now come from a real capture (`claude-2.1.318-theme-picker-120.txt`, `-security-notes-120.txt`).
+- A dialog drawn at the top of a fresh, tall pane reads as the dialog then dozens of blank rows (2026-11-11: Claude Code 2.1.322's Bypass Permissions confirmation, 36
+  blank rows in a 50-row pane). `screen.ParseDialog` and `dialogTop` looked back a fixed number of rows from the read's last row, so the dialog fell outside: no card
+  choices, and its head read as `❯ No, exit`. Count rows back from the last non-blank one (`withoutBlankTail`), and capture fixtures from a pane taller than the dialog.
+- Claude Code 2.1.322 shows the Bypass Permissions confirmation for `--allow-dangerously-skip-permissions` too (a plan that goes on in bypass), not only for
+  `--permission-mode bypassPermissions`. Several `--settings` flags don't merge: the last one wins, so a per-start settings file can't be added next to Persona's hooks file
+  or a launcher's own. Accepting the confirmation makes Claude Code write `"skipDangerousModePermissionPrompt": true` into the profile's `settings.json`
+  (`CLAUDE_CONFIG_DIR`): reproduce it only with a throwaway config directory, never your own.
 - Seeing an input box doesn't mean Claude can receive text (2026-11-05, #2423): an automatic update on Claude Code startup ("Updated to latest…") also showed an Auto mode explanation.
   After node waited for the input box, `agent prompt` swallowed the first message. The transcript was only 1 KB, with no user message, and the Agent sat idle for 1.5 hours. Check the transcript after sending;
   if it didn't arrive, wait for readiness and resend, finally mark "Needs you" (`node/firstprompt.go`). Sending alone isn't success.
+- A new reason a first message did not go in (`lostFirst`, `node/firstprompt.go`) must reach every reader of the reasons, not only the list (#7897): #5464's
+  `lostDialogHeld` (the node types the held message itself once the dialog is answered) was missed by `firstPromptHeldBack`, and a switch between Claude Code and Codex
+  stopped keeping its handoff for the next message. `grep -n 'lostDialog\b'` finds them. Whether a message went in since is a decision: read the transcript as written now
+  (`metaNow` in `promptedSince`), not the list's read of up to 3 s ago, or a handoff the held message carried goes in front of the next one again.
 - Gray text in Claude's input box (predicted next message, new-chat `Try "…"`) looks identical to user input in plain-text screen reads: detect drafts from ANSI dim (SGR 2).
   The 2.1.312 trust-directory dialog has unnumbered options (`❯ No, exit`); recognize it by the bottom `Enter to confirm · Esc to cancel` (`server/internal/screen`).
 - herdr's `agent_status` can lag behind Claude (#2069, herdr 0.9.3): after the previous turn ended (done, unread), an App message started a new turn, but herdr kept reporting done.
@@ -316,6 +332,19 @@ every guest now also excludes `<dir>/.claude/rules/**` for each directory above 
 the same first request was under 3k tokens. The same goes for `AGENTS.md` and `.claude/AGENTS.md` above it, which Claude
 Code reads in place of CLAUDE.md when the guest's directory has no CLAUDE.md of its own. Check such isolation on the real CLI: pick a marker line from each source and
 count it in the run's transcript, which records the instructions the process loaded.
+
+## A private profile drops `~/.claude`'s settings, not its CLAUDE.md (2026-11-14, #7318)
+
+With `CLAUDE_CONFIG_DIR` set to a private profile, files and settings under `~/.claude` do not reach the conversation
+as the user's: the skills switched off in `~/.claude/settings.json` came back (about 5.1k tokens per request on one
+machine). The one way in is the ancestor walk: for a directory below the home, Claude Code still reads
+`~/.claude/CLAUDE.md` and `~/.claude/rules` as the home's project instructions (about 5.2k tokens there), as it does for
+a guest (above). Exclude those with `claudeMdExcludes` and carry over only what should follow the user (here the
+`skillOverrides` set to `"off"`). "Not `~/.claude`" is not the same as "private": `claude_start_dir`, a wrapper's
+`CLAUDE_CONFIG_DIR` and an explicit `config_dir` elsewhere are profiles the user set up and may run plain `claude` in,
+and the user's switches live in the one `claude_start_dir` names when it is set. Only the directories Persona creates
+count as private. To check on the real CLI without a model, point `ANTHROPIC_BASE_URL` at a local mock that records
+request bodies and count a marker line from each file in what Claude Code sends.
 
 ## Read colors to determine whether Claude's input box is empty (#1434)
 
@@ -874,6 +903,11 @@ a native agent that rejects `session/close`, and republish the closed inventory 
 
 ## Antigravity history freshness does not establish live execution (#3678)
 
+An externally driven AGY conversation needs a watched transcript poll even when Persona owns no ACP prompt. Native
+planner records can also gain response text at an existing step index. Carry those replacements through the history
+token and preserve the branch identity, then let the existing client continuity logic replace retained content. Use
+the last published sequence as an append batch's exclusive lower bound. Cover both cases through `session.watch`.
+
 A completed user-input or tool step can remain the transcript's last entry after a stopped or failed attempt. A 24-hour
 freshness window kept such history working for hours. Working requires an owned ACP turn or explicit native running state.
 Apply that native activity before internal-metadata filtering and history limits, and discover running native summaries even
@@ -1000,3 +1034,7 @@ placeholder examples in complete source text.
 Nanosecond stat fields can repeat across same-size writes within one filesystem timestamp tick. Bypass the parsed
 cache for recently modified exports, and cache settled histories after a quiet window. Run rewrite regressions on
 the deployment filesystem as well as the development machine, including a settled cache hit and atomic replacement.
+
+## Stopped-session ownership is not recovery permission (#8214)
+
+A `codex_history` source can be node-resumable while still rejecting ordinary messages. Keep the generic source-owned read-only guard; admit only the node-qualified terminal row to the explicit supervised Resume path. Persist user stops and fail closed on missing provenance instead of interpreting an old start time or a localized reason string as permission. A cached eligible row also needs a node-side recheck serialized with closes, and a new running observation must clear old eligibility. Keep this metadata in capabilities rather than enlarging the frequently copied Session row past its allocation size class.

@@ -355,6 +355,12 @@ func (n *Node) setAgentsAt(agents []host.Agent, epoch uint64, heard map[string]b
 			codex = append(codex, a)
 			continue
 		}
+		if a.Agent == cursorAgent || a.Agent == agyAgent { // a work agent herdr detects (workagent.go): its own row
+			if id := otherSession(a); id != "" {
+				other[id] = a
+			}
+			continue
+		}
 		if piFamily(a.Agent) { // its session: herdr's integration, or the extension in it (pi.go, pifamily.go)
 			family = append(family, a)
 			continue

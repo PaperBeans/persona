@@ -3,6 +3,7 @@
 // restart, one-line summaries.
 
 import { createHash } from 'node:crypto'
+import { boundInput } from './input-clip.js'
 
 // Pages and pushes carry at most this much text per item; the whole of a cut item comes from session.item.
 export const PAGE_TEXT = 24 * 1024
@@ -11,8 +12,10 @@ export const PAGE_OUTPUT = 4 * 1024
 /** Tool inputs are not fetched whole: long strings in them are clipped for good. */
 export const MAX_INPUT = 24 * 1024
 
+const clipNoteFormat = '\n…（已截断，共 %d 字节）'
+
 /** Cut s to at most n bytes on a UTF-8 boundary, noting the original size. */
-export function clipTo(s, n, note = '\n…（已截断，共 %d 字节）') {
+export function clipTo(s, n, note = clipNoteFormat) {
   const buf = Buffer.from(s, 'utf8')
   if (buf.length <= n) return s
   let end = n
@@ -64,10 +67,11 @@ function clipIfShorter(s, n) {
   return size > n + clipNoteRoom || jsonLen(clipped) < jsonLen(s) ? clipped : s
 }
 
-/** Clip long strings anywhere in a tool input object, with the same two passes as transcript.clipJSON. */
+/** Clip long strings, then bound the whole object with the same three passes as transcript.clipJSON. */
 export function clipInput(input) {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) return input
-  if (jsonLen(input) <= MAX_INPUT) return input
+  const originalSize = jsonLen(input)
+  if (originalSize <= MAX_INPUT) return input
   const out = mapStrings(input, (s) => clipTo(s, MAX_INPUT / 2))
   const size = jsonLen(out)
   if (size <= MAX_INPUT) return out
@@ -80,12 +84,14 @@ export function clipInput(input) {
     kept += Math.min(bytes, MAX_INPUT / 2)
     return ''
   }))
-  if (long === 0) return out
-  // Share the remaining budget, accounting for JSON escapes and the note. The floor means many short values (or
-  // enough long ones) can still exceed MAX_INPUT; dropping values needs a separate policy.
+  if (long === 0) return boundInput(out, originalSize, MAX_INPUT, clipNoteFormat)
+  // Share the remaining budget, accounting for JSON escapes and the note. If the 256-byte floor and short values still
+  // exceed MAX_INPUT, the third pass removes whole array items and object fields without cutting strings below it.
   let share = Math.trunc((MAX_INPUT - rest) * kept / (size - rest) / long)
   share = Math.min(Math.max(share - clipNoteRoom, minInputShare), MAX_INPUT / 2)
-  return mapStrings(input, (s) => clipIfShorter(s, share))
+  const clipped = mapStrings(input, (s) => clipIfShorter(s, share))
+  if (jsonLen(clipped) <= MAX_INPUT) return clipped
+  return boundInput(clipped, originalSize, MAX_INPUT, clipNoteFormat)
 }
 
 /** One line, at most 200 characters (a list row's last_text, a card's summary). */
