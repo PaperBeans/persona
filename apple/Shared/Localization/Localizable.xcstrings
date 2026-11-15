@@ -27000,6 +27000,28 @@
       },
       "extractionState" : "manual"
     },
+    "Awaiting supervisor review" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Awaiting supervisor review"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "監督の確認待ち"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "督办验收中"
+          }
+        }
+      }
+    },
     "Back" : {
       "localizations" : {
         "en" : {

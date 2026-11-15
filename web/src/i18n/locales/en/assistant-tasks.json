@@ -158,6 +158,7 @@
   "board_empty_body": "Say what needs doing in the conversation and Persona turns it into a task.",
   "board_remove": "Remove “{title}”",
   "review_pending": "Awaiting review",
+  "review_supervisor": "Awaiting supervisor review",
   "review_rework": "Rework round {round}",
   "review_needs_user": "Needs your call",
   "review_parked": "Parked",

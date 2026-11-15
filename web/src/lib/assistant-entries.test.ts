@@ -16,6 +16,9 @@ describe("the Assistant's Needs you and In progress entries (spec/fixtures/entri
       expect(got.needsYou.map((item) => item.key)).toEqual(c.expected.needs_you);
       expect(got.running.map((item) => item.key)).toEqual(c.expected.running);
       expect(got.shelved.map((item) => item.key)).toEqual(c.expected.shelved);
+      // the In progress rows that say their supervisor is reviewing them
+      expect(got.running.filter((item) => item.kind === "task" && item.supervisorReview).map((item) => item.key))
+        .toEqual((c.expected as { supervisor_review?: string[] }).supervisor_review ?? []);
       const activity = (c.expected as { activity?: Record<string, unknown> }).activity;
       for (const [key, expected] of Object.entries(activity ?? {})) {
         const work = got.running.find((row) => row.key === key)?.activity;

@@ -144,6 +144,7 @@
   "board_empty_body": "在对话里说要做的事，Persona 会把它变成任务。",
   "board_remove": "移除「{title}」",
   "review_pending": "待验收",
+  "review_supervisor": "督办验收中",
   "review_rework": "返工第 {round} 轮",
   "review_needs_user": "等你决定",
   "review_parked": "已搁置",

@@ -1058,7 +1058,7 @@ function statusTone(state: string, toStart: boolean): string {
 }
 
 /** One slot, one row: live task/session state wins over historical feed metadata. */
-function ProgressTaskRow({ card, conversation, activity, countsOpen }: { card: TaskCardMetadata; conversation: string; activity?: BackgroundWork; countsOpen: boolean }) {
+function ProgressTaskRow({ card, conversation, activity, countsOpen, supervisorReview }: { card: TaskCardMetadata; conversation: string; activity?: BackgroundWork; countsOpen: boolean; supervisorReview?: boolean }) {
   const todo = useTodo(card.todo_id);
   const task = useTaskNow(todo);
   const plans = useFeed((s) => s.plans);
@@ -1085,7 +1085,9 @@ function ProgressTaskRow({ card, conversation, activity, countsOpen }: { card: T
   const liveLine = backgroundWorkLine(liveWork);
   // parked by its supervisor (#3804): the row says so, until when and why, ahead of what its agent last did
   const parked = liveWork || finished || state === "cancelled" ? undefined : parkedLine(todo);
-  const statusLabel = liveWork ? stateName("working") : parked ? t("assistant-tasks.review_parked") : accepted || (!todo && state === "accepted") ? t("assistant-tasks.review_accepted") : state === "cancelled" ? t("assistant-tasks.review_cancelled") : toStart ? t("assistant-tasks.plan_waiting") : state === "not_started" && starting ? t("assistant-tasks.status_starting") : TODO_STATUS_INFO[state as TodoStatus]?.label ?? t("assistant-tasks.no_activity");
+  // judged finished and with its supervisor for review (lib/assistant-entries `supervisorReview`): the row says whose turn it is
+  const reviewing = !!supervisorReview && !liveWork && !finished && state !== "cancelled";
+  const statusLabel = liveWork ? stateName("working") : parked ? t("assistant-tasks.review_parked") : reviewing ? t("assistant-tasks.review_supervisor") : accepted || (!todo && state === "accepted") ? t("assistant-tasks.review_accepted") : state === "cancelled" ? t("assistant-tasks.review_cancelled") : toStart ? t("assistant-tasks.plan_waiting") : state === "not_started" && starting ? t("assistant-tasks.status_starting") : TODO_STATUS_INFO[state as TodoStatus]?.label ?? t("assistant-tasks.no_activity");
   // the mark tells the state at a glance, in the colors the dock and the board use (TaskMark)
   const mark: TodoStatus = liveWork ? "working" : accepted || state === "accepted" ? "done" : state === "cancelled" ? "done" : toStart ? "needs_you" : (TODO_STATUS_INFO[state as TodoStatus] ? state as TodoStatus : "not_started");
   const ask = useStore((s) => taskAsk(todo ? taskInteraction(todo, s.interactions, task?.lead) : undefined));
@@ -1445,7 +1447,7 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
           <div className="flex shrink-0 items-center gap-2 bg-surface px-3 py-2 text-sm"><h2 className="min-w-0 flex-1 truncate font-semibold">{labels[tray]}</h2><Button onClick={() => setBoard(true)}>{t("assistant-tasks.all")}</Button><IconButton icon={expanded ? "collapse" : "expand"} label={t(expanded ? "assistant-tasks.tray_restore" : "assistant-tasks.tray_expand")} onClick={() => setExpanded((v) => !v)} /><IconButton icon="x" label={t("ui-atoms.close")} onClick={() => setTray(null)} /></div>
           <div data-tray-list className="min-h-0 grow overflow-y-auto overscroll-contain">
           {tray === "running" && <div className="divide-y divide-line">
-            {entries.running.map((item) => item.kind === "task" ? <ProgressTaskRow key={item.key} card={item.card} conversation={conversation} activity={item.activity} countsOpen={item.countsOpen} /> : <RunningAgentRow key={item.key} session={item.session} activity={item.activity} />)}
+            {entries.running.map((item) => item.kind === "task" ? <ProgressTaskRow key={item.key} card={item.card} conversation={conversation} activity={item.activity} countsOpen={item.countsOpen} supervisorReview={item.supervisorReview} /> : <RunningAgentRow key={item.key} session={item.session} activity={item.activity} />)}
             {!entries.running.length && <p className="px-3 py-3 text-sm text-ink-2">{t("assistant-tasks.tray_empty_progress")}</p>}
             {entries.shelved.length > 0 && (
               <button type="button" data-progress-shelved aria-expanded={showShelved} onClick={() => setShowShelved((v) => !v)} title={t("assistant-tasks.tray_shelved_hint")} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-ink-2 hover:bg-hover">

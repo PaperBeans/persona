@@ -123,10 +123,25 @@ progress** everything running that does not need them. Each thing is one row in 
 each count is its rows:
 
 - **Needs you**: a task whose current agent asks something (one row, its cards under the task's name), a task waiting
-  for a decision or review (an open `ask`; `pending_review` / `needs_user` on an open task), one whose turn broke off on a
-  model error (`interrupted`) or whose start failed while it is still the user's to retry; in the main chat, an Agent
-  opened by hand (no task) that asks something; a plan waiting for Start (one row per plan); a message card waiting for
-  Send; the conversation's own cards.
+  for a decision or review that is the owner's (an open `ask`; `needs_user` on an open task; a `pending_review` that is
+  overdue, next bullet), one whose turn broke off on a model error (`interrupted`) or whose start failed while it is
+  still the user's to retry; in the main chat, an Agent opened by hand (no task) that asks something; a plan waiting
+  for Start (one row per plan); a message card waiting for Send; the conversation's own cards.
+- **A supervisor's review is not the owner's until it is overdue.** A supervised task judged finished waits in
+  `pending_review` for its supervisor (the background supervisor, a leader, or the conversation that handed it out;
+  "Supervision" and "Background supervisor" below), who closes it with `task_review`. That review is Persona's to do,
+  so the task is **In progress**, its row saying "Awaiting supervisor review" (zh 督办验收中, ja 監督の確認待ち), and
+  the Needs you badge does not count it. It comes to the owner only when something of it is theirs: its agent asks, it
+  has an open `ask` (please verify), the review ends in `needs_user`, or the review is still waiting one hour after
+  the task entered `pending_review` (`supervision.pending_since`; the threshold is `REVIEW_OVERDUE_MS` on the web and
+  Android, `AssistantEntries.reviewOverdueAfter` on Apple), so a stalled or missing supervisor never hides a finished
+  task. A hub that does not send `pending_since` keeps the rule from before: the task is in Needs you. The row stays
+  in In progress whatever the To-dos page files the task under (a review the owner has seen files as Done there), and
+  each client re-reads the clock once a minute, so the row moves at the hour with nothing else changing. Unchanged by
+  this: the To-dos page's sections, the direction tree's `review` state, the Today card's "Waiting for your review"
+  and pushes. Before 2026-11-15 every `pending_review` task was listed under Needs you, a rule older than the
+  background supervisor (#4927): most of what the owner was shown there was a review Persona finished on its own
+  minutes later.
 - **In progress**: every other task the To-dos page counts open (#3331), and in the main chat each working Agent opened by
   hand. A task its supervisor parked (#3804, "Supervision" below) is here on the web, saying "Parked until <time> ·
   <reason>", however long it has been still (never folded under shelved); it is never in Needs you for being parked.
@@ -149,7 +164,8 @@ each count is its rows:
 The split is one pure function per client: web `assistantEntries` (`web/src/lib/assistant-entries.ts`), Android
 `assistantEntries` (`persona.core.domain.tasks`), iOS / iPad / Mac `AssistantEntries.split`
 (`apple/Persona/Views/Assistant/Tasks/AssistantActionBar.swift`, #3393). All three replay `spec/fixtures/entries`, which pins
-which entry every case goes to (Apple: `AssistantEntriesFixtureTests`). The older Pending / Progress / Agents / To start entries
+which entry every case goes to, and which In progress rows say their supervisor is reviewing them (Apple:
+`AssistantEntriesFixtureTests`). The older Pending / Progress / Agents / To start entries
 below are the earlier presentation (#2878, #3162).
 
 ### Background activity in In progress (#3588)

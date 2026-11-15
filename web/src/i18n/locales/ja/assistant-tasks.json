@@ -144,6 +144,7 @@
   "board_empty_body": "会話でやることを伝えると、Personaがタスクにします。",
   "board_remove": "「{title}」を削除",
   "review_pending": "検収待ち",
+  "review_supervisor": "監督の確認待ち",
   "review_rework": "差し戻し {round} 回目",
   "review_needs_user": "判断待ち",
   "review_parked": "保留中",

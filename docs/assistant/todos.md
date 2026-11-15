@@ -168,6 +168,7 @@ Ledger for tasks supervised by the main chat (#3124, `docs/assistant/unified-ent
 - `done_when` (jsonb, NOT NULL, DEFAULT '[]'): acceptance criteria (string array); `expect_minutes` (integer, NOT NULL, DEFAULT 0): expected minutes.
 - `state` (text, NOT NULL, DEFAULT ''): `''` in progress, `pending_review`, `rework`, `needs_user`, `accepted`, `cancelled`; `round` (integer): rework round.
 - `reviews` (jsonb, NOT NULL, DEFAULT '[]'): each review (`verdict`, per-item `checks`, `note`), at most 20 kept; `updated_at` (timestamptz).
+- `pending_since` (timestamptz, NULL): when the task entered `pending_review`; kept by every write while the review waits, NULL in every other state. The apps read it to tell a supervisor's review under way from one that is overdue (`docs/assistant/unified-entry.md` "Needs you and In progress: each thing once (#3387)"). Rows already waiting when the column was added started from `updated_at`.
 
 ### 6. task_briefs and task_brief_todos tables
 A task's brief (#3822, `docs/assistant/unified-entry.md`, "Briefs"): what was asked when the work was handed out.

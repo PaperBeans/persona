@@ -43,6 +43,7 @@
     <string name="chat_tray_accept_changed">確認依頼が更新されました。最新の内容を確認してください。</string>
     <string name="chat_tray_cancelled">キャンセル済み</string>
     <string name="chat_tray_stopped_state">停止中</string>
+    <string name="chat_tray_supervisor_review">監督の確認待ち</string>
     <string name="chat_tray_stopped">止まったまま未完了</string>
     <string name="chat_tray_stopped_reason">止まったまま未完了 · %1$s</string>
     <string name="chat_tray_pr_number">PR #%1$s</string>
