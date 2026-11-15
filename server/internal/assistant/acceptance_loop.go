@@ -244,8 +244,9 @@ func (s *Service) briefingClock(ctx context.Context) (int, int) {
 	return acceptMorningHour, 0
 }
 
-// snapshotUnaccepted are the deployed tasks still waiting for the user to check them, the oldest eight, and how many
-// there are (the snapshot's "waiting for the user to verify", which the morning briefing brings up).
+// snapshotUnaccepted are the deployed tasks still waiting for the user to check them, oldest first, and how many there
+// are (the snapshot's "waiting for the user to verify", which the morning briefing brings up; scopeSnapshot shows a
+// conversation the oldest snapshotAcceptLimit of its own).
 func (s *Service) snapshotUnaccepted(ctx context.Context, loc *time.Location) ([]prompts.SnapshotAccept, int) {
 	b := &s.accept
 	b.mu.Lock()
@@ -281,10 +282,8 @@ func (s *Service) snapshotUnaccepted(ctx context.Context, loc *time.Location) ([
 			continue
 		}
 		total++
-		if len(out) < 8 { // the oldest eight; the total says how many more
-			out = append(out, prompts.SnapshotAccept{Title: clip(oneLine(t.Title), 40), Verdict: clip(oneLine(verdictText(s.botLang(ctx), &x.a)), 120),
-				Changed: x.a.Changed, Link: x.a.Link, Since: x.a.AskedAt.In(loc)})
-		}
+		out = append(out, prompts.SnapshotAccept{Title: clip(oneLine(t.Title), 40), Verdict: clip(oneLine(verdictText(s.botLang(ctx), &x.a)), 120),
+			Changed: x.a.Changed, Link: x.a.Link, Since: x.a.AskedAt.In(loc), Owner: todoOwner(t)})
 	}
 	if len(ended) > 0 {
 		b.mu.Lock()

@@ -14,9 +14,16 @@ import (
 
 // ---- what the assistant sees ----
 
-const snapshotOpenTodoLimit = 100
+// snapshotOpenTodoLimit, snapshotTaskLimit: how many rows of the open to-do index and of the task details one
+// conversation's snapshot shows. The cached snapshot keeps them all, so a conversation's own come first whatever the
+// others have (scopeSnapshot).
+const (
+	snapshotOpenTodoLimit = 100
+	snapshotTaskLimit     = 12
+)
 
-// snapshotOpenTodos is the compact index that keeps every ordinary-sized open todo discoverable.
+// snapshotOpenTodos is the compact index that keeps every ordinary-sized open todo discoverable: all of them, newest
+// first, and how many (scopeSnapshot shows a conversation the first snapshotOpenTodoLimit of its own).
 func (s *Service) snapshotOpenTodos(ctx context.Context, web string) ([]prompts.SnapshotOpenTodo, int) {
 	if s.ensureTodosLoaded(ctx) != nil {
 		return nil, 0
@@ -36,15 +43,11 @@ func (s *Service) snapshotOpenTodos(ctx context.Context, web string) ([]prompts.
 		}
 		return list[i].CreatedAt.After(list[j].CreatedAt)
 	})
-	total := len(list)
-	if len(list) > snapshotOpenTodoLimit {
-		list = list[:snapshotOpenTodoLimit]
-	}
 	out := make([]prompts.SnapshotOpenTodo, 0, len(list))
 	for _, t := range list {
-		out = append(out, prompts.SnapshotOpenTodo{ID: t.ID, Title: clip(oneLine(t.Title), 40), Link: todoLink(web, t.ID)})
+		out = append(out, prompts.SnapshotOpenTodo{ID: t.ID, Title: clip(oneLine(t.Title), 40), Link: todoLink(web, t.ID), Owner: todoOwner(t)})
 	}
-	return out, total
+	return out, len(out)
 }
 
 // askedInSnapshot are the question to-dos the snapshot's own line (snapshotAsked) shows. Only those stay out of the
@@ -58,7 +61,8 @@ func (s *Service) askedInSnapshot(ctx context.Context) map[string]bool {
 	return out
 }
 
-// snapshotTasks are the highest-priority open todos plus recent conversation tasks that have ended.
+// snapshotTasks are the open todos plus recent conversation tasks that have ended, the highest-priority first: all of
+// them (scopeSnapshot shows a conversation the first snapshotTaskLimit of its own).
 func (s *Service) snapshotTasks(ctx context.Context, web string) []prompts.SnapshotTask {
 	var list []Todo
 	if s.ensureTodosLoaded(ctx) != nil {
@@ -131,18 +135,24 @@ func (s *Service) snapshotTasks(ctx context.Context, web string) []prompts.Snaps
 	var out []prompts.SnapshotTask
 	for _, r := range all {
 		out = append(out, r.task)
-		if len(out) == 12 {
-			break
-		}
 	}
 	return out
+}
+
+// todoOwner is whose task t is in the snapshot: the conversation that handed it out and the one that supervises it.
+func todoOwner(t Todo) prompts.SnapshotOwner {
+	o := prompts.SnapshotOwner{Origin: t.Origin}
+	if t.Supervision != nil {
+		o.Supervisor = t.Supervision.Supervisor
+	}
+	return o
 }
 
 // snapshotTask is one task in the snapshot, in state st: its lead agent's (taskLead) last words, the step it is on
 // while it works (or has said nothing yet: an agent that only runs tools, #1583) and its running subagents, as the
 // task cards show them (docs/assistant/unified-entry.md "Task cards").
 func snapshotTask(t Todo, st string, agents []proto.Session, now time.Time) prompts.SnapshotTask {
-	task := prompts.SnapshotTask{ID: t.ID, Title: clip(oneLine(t.Title), 60), State: taskStateLabel(st)}
+	task := prompts.SnapshotTask{ID: t.ID, Title: clip(oneLine(t.Title), 60), State: taskStateLabel(st), Owner: todoOwner(t)}
 	last := taskLead(st, agents)
 	if last.SessionID == "" {
 		return task

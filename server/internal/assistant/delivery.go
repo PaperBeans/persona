@@ -236,7 +236,8 @@ func deliverySummary(t Todo) string {
 	return out
 }
 
-// snapshotApprovals are the open tasks held for the user's nod, oldest first (at most ten).
+// snapshotApprovals are the open tasks held for the user's nod, oldest first (scopeSnapshot shows a conversation the
+// oldest snapshotApprovalLimit of its own).
 func (s *Service) snapshotApprovals(ctx context.Context, web string) []prompts.SnapshotApproval {
 	var list []Todo
 	for _, t := range s.todosOf(ctx, "*") {
@@ -253,10 +254,7 @@ func (s *Service) snapshotApprovals(ctx context.Context, web string) []prompts.S
 		}
 		out = append(out, prompts.SnapshotApproval{ID: t.ID, Title: clip(oneLine(t.Title), 60), Stage: deliveryLabels[t.Delivery.State],
 			Gate: clip(oneLine(gate), 60),
-			Link: todoLink(web, t.ID)})
-		if len(out) == 10 {
-			break
-		}
+			Link: todoLink(web, t.ID), Owner: todoOwner(t)})
 	}
 	return out
 }

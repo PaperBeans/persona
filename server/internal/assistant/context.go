@@ -28,7 +28,7 @@ func (s *Service) Context(ctx context.Context, p ContextParams) ContextResult {
 		}
 		return ContextResult{}
 	}
-	c := prompts.AssistantContext{Snapshot: s.contextSnapshot(ctx), Owner: s.owner(ctx),
+	c := prompts.AssistantContext{Snapshot: s.contextSnapshot(ctx, s.snapshotScope(ctx, p.SessionID)), Owner: s.owner(ctx),
 		Main: s.isMain(ctx, p.SessionID), Leader: s.isLeader(ctx, p.SessionID), Background: s.isBackground(ctx, p.SessionID)}
 	switch {
 	case c.Main:
@@ -63,8 +63,9 @@ type contextState struct {
 // agents waiting for the user, unread Feishu chats and the rest of today's meetings. It is taken on every message, so
 // it must not hold the message up: the sources are read at most every snapshotFresh, a message waits for a new read
 // at most snapshotWait and otherwise goes with the last one (the time is always now). Each source has a short
-// deadline; a slow one is left out.
-func (s *Service) contextSnapshot(ctx context.Context) string {
+// deadline; a slow one is left out. The sources are read once for every conversation: scope ("" for all of them,
+// snapshotScope) picks the tasks this one's lists show.
+func (s *Service) contextSnapshot(ctx context.Context, scope string) string {
 	cs := &s.live
 	cs.mu.Lock()
 	snap, at := cs.snap, cs.at
@@ -97,7 +98,77 @@ func (s *Service) contextSnapshot(ctx context.Context) string {
 	out := *snap
 	out.Now = time.Now().In(s.location(ctx))
 	out.ModelProfile = s.modelProfileContext(ctx)
-	return fitSnapshot(out)
+	return fitSnapshot(scopeSnapshot(out, scope))
+}
+
+// snapshotScope is whose tasks conversation id's snapshot lists (#8666): "" for every task in the main conversation,
+// the background supervisor that follows its tasks up (supervise_background.go), a scheduled task's own conversation
+// (a briefing goes over all of them) and while there is no main conversation; else id, for only the tasks it handed
+// out or supervises, as agent_control.go othersTask counts them. A leader is such a conversation. The design gives the
+// whole list to the main conversation (docs/assistant/todos.md); another conversation that got it took the user's
+// question for one of the others' tasks, which crowded its own out of the first rows.
+func (s *Service) snapshotScope(ctx context.Context, id string) string {
+	if id == "" || s.settings(ctx).Main == "" || s.isMain(ctx, id) || s.isBackground(ctx, id) || s.runsScheduledTask(ctx, id) {
+		return ""
+	}
+	return id
+}
+
+// runsScheduledTask: session is a scheduled task's own conversation (Task.RunSessionID).
+func (s *Service) runsScheduledTask(ctx context.Context, session string) bool {
+	sc, err := s.lockedSchedule(ctx)
+	if err != nil {
+		return false
+	}
+	defer sc.mu.Unlock()
+	for _, t := range sc.tasks {
+		if t.RunSessionID == session {
+			return true
+		}
+	}
+	return false
+}
+
+// scopeSnapshot is snap for a conversation (scope "" for all, snapshotScope): its task lists cut to what one message
+// shows, after leaving out, for a scoped one, the tasks that are neither handed out nor supervised by it, so another
+// conversation's tasks never crowd its own out. The lists are new: snap shares its own with the cached snapshot.
+func scopeSnapshot(snap prompts.Snapshot, scope string) prompts.Snapshot {
+	mine := func(o prompts.SnapshotOwner) bool { return scope == "" || o.Origin == scope || o.Supervisor == scope }
+	snap.Scoped = scope != ""
+	snap.Tasks, _ = firstOf(snap.Tasks, snapshotTaskLimit, func(t prompts.SnapshotTask) bool { return mine(t.Owner) })
+	snap.Approvals, _ = firstOf(snap.Approvals, snapshotApprovalLimit, func(a prompts.SnapshotApproval) bool { return mine(a.Owner) })
+	var accepts int
+	snap.Unaccepted, accepts = firstOf(snap.Unaccepted, snapshotAcceptLimit, func(a prompts.SnapshotAccept) bool { return mine(a.Owner) })
+	if snap.Scoped {
+		snap.UnacceptedTotal = accepts
+	}
+	shown := map[string]bool{} // a scoped index lists only the open ones its details do not
+	for _, t := range snap.Tasks {
+		shown[t.ID] = snap.Scoped
+	}
+	snap.OpenTodos, _ = firstOf(snap.OpenTodos, snapshotOpenTodoLimit, func(t prompts.SnapshotOpenTodo) bool { return mine(t.Owner) && !shown[t.ID] })
+	return snap
+}
+
+// snapshotApprovalLimit, snapshotAcceptLimit: how many tasks waiting for the user's nod, and for the user to verify,
+// one conversation's snapshot lists (the oldest; the count says how many more wait to be verified).
+const (
+	snapshotApprovalLimit = 10
+	snapshotAcceptLimit   = 8
+)
+
+// firstOf is a new list of the first limit items of list that keep takes, and how many it takes in all.
+func firstOf[T any](list []T, limit int, keep func(T) bool) ([]T, int) {
+	var out []T
+	n := 0
+	for _, x := range list {
+		if keep(x) {
+			if n++; len(out) < limit {
+				out = append(out, x)
+			}
+		}
+	}
+	return out, n
 }
 
 const (

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/prompts"
 )
 
 // tasksOn300 is fleetOf300 with n open tasks from conversation "c1", each on one of the machine's sessions.
@@ -32,8 +34,8 @@ func BenchmarkSnapshotTasks(b *testing.B) {
 func TestSnapshotTasksListsEachMachineOnce(t *testing.T) {
 	s := tasksOn300(func(string, ...any) {}, 30)
 	d := s.devs.(*fleetDevs)
-	if got := s.snapshotTasks(context.Background(), ""); len(got) != 12 {
-		t.Fatalf("%d tasks in the snapshot, want 12", len(got))
+	if got := scopeSnapshot(prompts.Snapshot{Tasks: s.snapshotTasks(context.Background(), "")}, "").Tasks; len(got) != snapshotTaskLimit {
+		t.Fatalf("%d tasks in the snapshot, want %d", len(got), snapshotTaskLimit)
 	}
 	if n := d.machines["mac"].lists; n != 1 {
 		t.Errorf("the machine's sessions were listed %d times for 30 tasks, want 1", n)

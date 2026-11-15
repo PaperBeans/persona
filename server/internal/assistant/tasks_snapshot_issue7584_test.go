@@ -31,7 +31,7 @@ func TestLiveContextSnapshotIncludesOpenTodoRoster(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("takeSnapshot exceeded 10 seconds")
 	}
-	got := s.contextSnapshot(ctx)
+	got := s.contextSnapshot(ctx, "")
 	if !strings.Contains(got, "开放待办：共 3 件（完整列表用 todo_list）") {
 		t.Fatalf("live context snapshot lacks open count and retrieval hint:\n%s", got)
 	}
@@ -125,8 +125,9 @@ func TestSnapshotOpenTodoRosterCapsHugeListsWithTodoListHint(t *testing.T) {
 		}
 	}
 	rows, total := s.snapshotOpenTodos(ctx, "")
-	text := fitSnapshot(prompts.Snapshot{Now: time.Now(), Zone: "UTC", OpenTodos: rows, OpenTodosTotal: total, OpenTodosLoaded: true})
-	if total != snapshotOpenTodoLimit+7 || len(rows) != snapshotOpenTodoLimit {
+	snap := scopeSnapshot(prompts.Snapshot{Now: time.Now(), Zone: "UTC", OpenTodos: rows, OpenTodosTotal: total, OpenTodosLoaded: true}, "")
+	text := fitSnapshot(snap)
+	if rows = snap.OpenTodos; total != snapshotOpenTodoLimit+7 || len(rows) != snapshotOpenTodoLimit {
 		t.Fatalf("rows/count = %d/%d", len(rows), total)
 	}
 	if !strings.Contains(text, "开放待办：共 107 件（完整列表用 todo_list）") || !strings.Contains(text, "其余用 todo_list 查") {
@@ -161,9 +162,9 @@ func TestSnapshotTaskDetailsPrioritizeOpenTodosAndKeepTwelveDetailLimit(t *testi
 	s.todos.todos[closed.ID].UpdatedAt = now
 	s.todos.mu.Unlock()
 
-	got := s.snapshotTasks(ctx, "")
-	if len(got) != 12 {
-		t.Fatalf("task details = %d, want 12", len(got))
+	got := scopeSnapshot(prompts.Snapshot{Tasks: s.snapshotTasks(ctx, "")}, "").Tasks
+	if len(got) != snapshotTaskLimit {
+		t.Fatalf("task details = %d, want %d", len(got), snapshotTaskLimit)
 	}
 	for _, task := range got {
 		if !strings.HasPrefix(task.ID, "todo_open_") {
