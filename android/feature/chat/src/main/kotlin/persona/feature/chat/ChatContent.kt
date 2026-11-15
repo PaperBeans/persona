@@ -171,6 +171,8 @@ private fun ChatMarkdownBody(text: String, id: String, bodyStyle: TextStyle, col
                 unorderedList = { model -> MarkdownBulletList(model.content, model.node, depth = model.listDepth,
                     markerModifier = { Modifier.alignBy(FirstBaseline).padding(end = 8.dp.dense) },
                     listModifier = { Modifier.weight(1f).alignBy(FirstBaseline) }) },
+                table = { model -> ReadableMarkdownTable(model.content, model.node, model.typography.table,
+                    enabled = !LocalInPicture.current) },
                 codeFence = { model ->
                     MarkdownFence(model.content.substring(model.node.startOffset, model.node.endOffset), color, bodyStyle) {
                         // A card fence the hub's rules do not take as standalone (in a list or a quote): an example, drawn as

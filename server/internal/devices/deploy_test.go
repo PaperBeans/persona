@@ -19,6 +19,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/update/updatetest"
 )
 
 // loginShells are the shells on this machine an ssh target's login shell could be: sshd hands the remote command to
@@ -147,7 +148,7 @@ func TestNodeBinaryMissing(t *testing.T) {
 	}
 	dir := nodeBinaryDir()
 	_ = os.MkdirAll(dir, 0o755)
-	_ = os.WriteFile(filepath.Join(dir, "personad-darwin-arm64"), []byte("x"), 0o755)
+	copyFile(t, updatetest.Program(t, nodeproto.ProgramPersonad, "darwin", "arm64"), filepath.Join(dir, "personad-darwin-arm64"))
 	if p, err := nodeBinary("darwin", "arm64", "", ""); err != nil || filepath.Base(p) != "personad-darwin-arm64" {
 		t.Fatalf("%s %v", p, err)
 	}
@@ -157,7 +158,7 @@ func TestNodeBinaryMissing(t *testing.T) {
 		t.Fatalf("persona-node without its build on the hub: %s", p)
 	}
 	node := filepath.Join(dir, "persona-node-darwin-arm64")
-	_ = os.WriteFile(node, []byte("x"), 0o755)
+	copyFile(t, updatetest.Program(t, nodeproto.ProgramPersonaNode, "darwin", "arm64"), node)
 	if p, _ := nodeBinary("darwin", "arm64", nodeproto.ProgramPersonaNode, "v2"); filepath.Base(p) != "personad-darwin-arm64" {
 		t.Fatalf("a persona-node that does not say its version: %s", p)
 	}

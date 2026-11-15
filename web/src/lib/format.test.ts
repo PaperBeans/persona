@@ -76,6 +76,17 @@ describe("ago", () => {
     expect(ago(iso(at(5, 1)), at(5, 3))).toBe(formatRelative(-2, "hour"));
     expect(ago(iso(at(4, 23)), at(5, 1))).toBe(formatRelative(-2, "hour"));
   });
+
+  it("steps up a unit once rounding reaches it, not 60 minutes or 24 hours ago", () => {
+    const now = at(5, 23);
+    expect(ago(iso(now - 3540_000), now)).toBe(formatRelative(-59, "minute"));
+    expect(ago(iso(now - 3570_000), now)).toBe(formatRelative(-1, "hour"));
+    expect(ago(iso(now - 3599_000), now)).toBe(formatRelative(-1, "hour"));
+    expect(ago(iso(now - 84_600_000), now)).toBe(formatRelative(-1, "day"));
+    // 23.5 hours back within one calendar day still reads as a day ago, not "today"
+    const late = new Date(2026, 10, 5, 23, 50).getTime();
+    expect(ago(iso(late - 84_600_000), late)).toBe(formatRelative(-1, "day"));
+  });
 });
 
 describe("baseName", () => {

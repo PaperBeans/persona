@@ -316,7 +316,7 @@ Package contract:
   ordinary files/directories are accepted. No links, special files, traversal, absolute/drive/UNC/backslash paths,
   reserved names, duplicate entries, case/Unicode-normalization collisions or internal provisioning stamps.
 - Preview extracts into a private temporary sibling and removes it before replying; only bounded, expiring metadata
-  receipts remain (32 per node, ten minutes). Install rechecks the exact same ZIP, current environment and conflicts,
+  receipts remain (32 operations per node, ten minutes, with lookup aliases for completed installs). Install rechecks the exact same ZIP, current environment and conflicts,
   then publishes by an exclusive atomic rename. No existing directory, built-in, plugin or local runtime skill is
   overwritten or shadowed. Unsupported exclusive-rename platforms fail closed. Failure/cancellation removes staging.
 
@@ -330,6 +330,21 @@ for the user; no background job deletes it or reinstalls an undone package.
 A canceled preview has no durable staged files. Cancellation before the atomic publish cleans staging; a lost response
 after publish may mean the whole installation completed, so refresh the list before retrying. Writes are never
 automatically retried. Repeated/concurrent installation cannot replace the winning name.
+
+Assistant-only MCP `skill_import` exposes `preview`, `install`, `status`, `cancel` and `undo` through that same manager
+service and importer. It accepts base64 ZIP bytes, not download URLs or local paths. Preview returns an environment
+and receipt; install sends the identical bytes with both. Before install or undo, the manager reads the exact node
+receipt and shows a localized permission card naming the validated skill, computer and shared-account impact.
+Only the user's own approval counts; no archive bytes or skill instructions appear in the card. The settings lock
+is released while waiting and reacquired to recheck the target before the node call. New tools remain subject to
+existing assistant/meeting restrictions; ordinary coding Agents do not receive them.
+
+`status` accepts the original preview or install reference and environment. It records `previewed`, `installed` or
+`undone` and recovers the installation's undo receipt or retained recovery location after a lost response. It does
+not replay the effect or claim to be a live inventory. Receipt metadata survives only for its ten-minute node
+lifetime; expiration or node restart requires inspecting Settings › Skills instead of assuming failure. Older
+nodes without receipt status require an update before MCP installation. HTTP clients keep their existing flow and
+may also query status; the additive result fields are backward compatible.
 
 Discovery uses existing provisioning: `assistantLarkEnv` links the user store into `.claude/skills`, and
 `assistantRuntimeSkills` links it into `.agents/skills`. Claude reads the existing assistant directory; Codex's

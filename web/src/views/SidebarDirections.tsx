@@ -69,7 +69,7 @@ const DirectionTasks = memo(function DirectionTasks({ id, name, row, node, reg, 
       </div>
       {tasks > 0 && (
         <Collapse open={!folded} sidebarFold>
-          <div className="flex flex-col gap-px pl-3" inert={folded || undefined}>
+          <div className="flex flex-col gap-px sidebar-indent" inert={folded || undefined}>
             {todos.map((td) => (
               <TreeTodoRows key={td.key} td={td} machineLabel={machineLabel} noContext keyPrefix={`d:${id}:`} reg={reg} hover={hover} activeKey="" go={go} onNavigate={onNavigate} />
             ))}

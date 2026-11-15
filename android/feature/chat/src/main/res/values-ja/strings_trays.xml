@@ -48,6 +48,8 @@
     <string name="chat_tray_stopped_reason">止まったまま未完了 · %1$s</string>
     <string name="chat_tray_pr_number">PR #%1$s</string>
     <string name="chat_tray_done">完了</string>
+    <string name="chat_tray_just_finished">完了したばかり</string>
+    <string name="chat_tray_finished_done">完了</string>
     <string name="chat_tray_accepted">検収済み</string>
     <string name="chat_tray_in_progress">進行中</string>
     <string name="chat_tasks_dismiss_draft">対応しない</string>

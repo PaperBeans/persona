@@ -81,6 +81,7 @@
   "mcp_tools.assistant#schedule_followup": 4818,
   "mcp_tools.assistant#schedule_routine": 4872,
   "mcp_tools.assistant#secret_run": 2673,
+  "mcp_tools.assistant#skill_import": 2154,
   "mcp_tools.assistant#subscription_dry_run": 1827,
   "mcp_tools.assistant#subscription_get": 1242,
   "mcp_tools.assistant#subscription_list": 849,

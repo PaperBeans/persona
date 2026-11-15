@@ -90,7 +90,7 @@
  "web/src/views/assistant/Brief.tsx": 8,
  "web/src/views/assistant/DecisionRow.tsx": 7,
  "web/src/views/assistant/Handoff.tsx": 8,
- "web/src/views/assistant/History.tsx": 11,
+ "web/src/views/assistant/History.tsx": 10,
  "web/src/views/assistant/LookUpload.tsx": 6,
  "web/src/views/assistant/MessageDraft.tsx": 9,
  "web/src/views/assistant/Persona.tsx": 10,

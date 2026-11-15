@@ -229,10 +229,14 @@ export function ago(iso?: string, now = Date.now(), style: Intl.RelativeTimeForm
   const opts: Intl.RelativeTimeFormatOptions = { numeric: "auto", style };
   // "Just now" rather than Intl's "now" for under a minute
   if (s < 45) return t("lib-format.just_now");
-  if (s < 3600) return formatRelative(-Math.round(s / 60), "minute", opts);
-  if (s < 86400) return formatRelative(-Math.round(s / 3600), "hour", opts);
+  // Rounded, a unit steps up once it reaches the next one: 59.5 minutes is "1 hour ago", not "60 minutes ago".
+  const minutes = Math.round(s / 60);
+  if (minutes < 60) return formatRelative(-minutes, "minute", opts);
+  const hours = Math.round(s / 3600);
+  if (hours < 24) return formatRelative(-hours, "hour", opts);
   // Days by the local calendar, not by 24 h spans: yesterday morning seen late tonight is yesterday, not the day before yesterday (#4281).
-  const days = calendarDays(ts, now);
+  // At least 1: 23.5 hours ago within one calendar day still reads as "yesterday", not "today".
+  const days = Math.max(1, calendarDays(ts, now));
   if (days < 7) return formatRelative(-days, "day", opts);
   return formatDate(ts, { month: "numeric", day: "numeric" });
 }

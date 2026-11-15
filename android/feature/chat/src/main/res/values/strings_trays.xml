@@ -50,6 +50,8 @@
     <string name="chat_tray_stopped_reason">Stopped, not done yet · %1$s</string>
     <string name="chat_tray_pr_number">PR #%1$s</string>
     <string name="chat_tray_done">Completed</string>
+    <string name="chat_tray_just_finished">Just finished</string>
+    <string name="chat_tray_finished_done">Done</string>
     <string name="chat_tray_accepted">Accepted</string>
     <string name="chat_tray_in_progress">In progress</string>
     <string name="chat_tasks_dismiss_draft">Don\'t handle</string>

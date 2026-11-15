@@ -2,7 +2,7 @@
   "archived_toast": "Archived \"{title}\"",
   "unarchived_toast": "Unarchived \"{title}\"",
   "sidebar": "Sidebar",
-  "title": "Persona chats",
+  "scope_help": "This page lists chats with Persona. The total excludes archived chats and stays the same when you search or filter. Archived shows the number of archived chats that match.",
   "refresh": "Refresh",
   "new_chat": "New chat",
   "search_placeholder": "Search titles or last messages",

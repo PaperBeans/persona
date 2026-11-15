@@ -38,7 +38,8 @@ class TaskRecordsTest {
 
     @Test fun glassDrawsTheRecordsAmongTheLines() {
         val lines = AssistantTaskCards.lines(emptyList(), feed, mapOf(plan.id to plan), todos, inline = true)
-        assertEquals(listOf("handoff", "asked", "report", "review", "receipt", "notice", "message"), feedIds(lines))
+        assertEquals(listOf("handoff", "asked", "notice", "message"), feedIds(lines))
+        assertEquals(listOf("handoff", "asked", "report", "review", "receipt", "notice", "message"), feed.map { it.id }.filter { it in setOf("handoff", "asked", "report", "review", "receipt", "notice", "message") })
         // the plan and the task card are the dispatched line, once
         assertEquals(listOf(listOf("Fix the login")), hints(lines).map { hint -> hint.tasks.map { it.title } })
     }
@@ -51,7 +52,7 @@ class TaskRecordsTest {
         val lines = AssistantTaskCards.lines(emptyList(), feed, mapOf(plan.id to plan), todos)
         // the user's own word to the task stays, as before
         assertEquals(listOf("asked"), feedIds(lines))
-        assertEquals(listOf("plan-feed", "task-feed", "handoff", "report", "review", "receipt", "notice", "message"),
+        assertEquals(listOf("plan-feed", "task-feed", "handoff", "notice", "message"),
             AssistantTaskCards.backgroundFeed(feed).map { it.id })
     }
 
@@ -63,7 +64,7 @@ class TaskRecordsTest {
     @Test fun glassDrawsAPlanNobodyStartedAsACardAmongTheLines() {
         val lines = AssistantTaskCards.lines(emptyList(), feed + openFeed, mapOf(plan.id to plan, open.id to open), todos, inline = true)
         // iOS's `FeedLine`: the open plan is `PlanCard`, at the end of the exchange it happened in; the started one is the dispatched line
-        assertEquals(listOf("handoff", "asked", "report", "review", "receipt", "notice", "message", "open-feed"), feedIds(lines))
+        assertEquals(listOf("handoff", "asked", "notice", "message", "open-feed"), feedIds(lines))
         assertEquals(listOf(listOf("Fix the login")), hints(lines).map { hint -> hint.tasks.map { it.title } })
         // Brief and Board keep every plan behind the trays
         val behind = AssistantTaskCards.lines(emptyList(), feed + openFeed, mapOf(plan.id to plan, open.id to open), todos)

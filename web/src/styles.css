@@ -299,7 +299,8 @@ body {
 /* Sidebar rows (#1647): a minimum height and a fixed line, not the text's own height, so a row is as tall in every
    language and script. 32px is the desktop sidebar row (macOS medium 28 + the web's larger 13px text); fingers get 44
    (touch-hit / min-h-11). */
-:root { --sidebar-row: 32px; --sidebar-row-pad: 4px; }
+:root { --sidebar-row: 32px; --sidebar-row-pad: 4px; --sidebar-indent: 12px; }
+@utility sidebar-indent { padding-inline-start: var(--sidebar-indent); }
 @utility sidebar-row { min-height: var(--sidebar-row); padding-block: var(--sidebar-row-pad); line-height: 18px; }
 /* The machine page's load chart (iOS MetricColor.load): its own hue, apart from CPU / memory / network. */
 :root { --chart-load: #e87ba4; }

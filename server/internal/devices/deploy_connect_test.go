@@ -16,6 +16,7 @@ import (
 	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/update/updatetest"
 )
 
 // A machine that comes back on another node build is sent this hub's build (deploy.go updateOnConnect): scripts/deploy
@@ -90,9 +91,7 @@ func connectMachine(t *testing.T, d *Devices, cfg MachineConfig, n *buildNode) *
 func hubNodeBinary(t *testing.T, goos, arch string) {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "personad-"+goos+"-"+arch), []byte("the hub's node"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	copyFile(t, updatetest.Program(t, "personad", goos, arch), filepath.Join(dir, "personad-"+goos+"-"+arch))
 	t.Setenv("PERSONA_NODE_BINARIES", dir)
 }
 

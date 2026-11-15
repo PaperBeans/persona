@@ -38,15 +38,21 @@ const val JUST_DONE_MS: Long = 24 * 3_600_000L
 private fun ms(at: String?): Long = parseTime(at)?.toEpochMilli() ?: 0L
 
 /** The web's todo status (`web/src/lib/todos.ts` `todoStatus`), which the triage reads: an open ask does not make it Needs you. */
-enum class TriageStatus { Failed, Done, NotStarted, NeedsYou, Interrupted, Unread, Working, FollowUp }
+enum class TriageStatus { Failed, Done, NotStarted, NeedsYou, Interrupted, UsageLimit, Unread, Working, FollowUp }
 
-/** The status the triage reads from the to-do and its current agents' sessions, as the web computes it. */
-fun Todo.triageStatus(lookup: (SessionKey) -> Session?): TriageStatus {
+/**
+ * The status the triage reads from the to-do and its current agents' sessions, as the web computes it.
+ * A subscription usage limit ([Session.isUsageLimited]) is its own status (iOS `AgentsStatus.usageLimit`): it is not
+ * [Session.interrupted], which stays the shared flag the capsule and the Agents list already use. [now] is epoch
+ * millis, so a limit past its grace reads as interrupted on the next tick.
+ */
+fun Todo.triageStatus(lookup: (SessionKey) -> Session?, now: Long = System.currentTimeMillis()): TriageStatus {
     if (!startError.isNullOrEmpty()) return TriageStatus.Failed
     if (isDone) return TriageStatus.Done
     val active = currentAgents
     if (active.isEmpty()) return TriageStatus.NotStarted
     var interrupted = false
+    var limit = false
     var unread = false
     var working = false
     for (a in active) {
@@ -55,6 +61,7 @@ fun Todo.triageStatus(lookup: (SessionKey) -> Session?): TriageStatus {
         val st = s?.agentState ?: AgentState.Offline
         if (st == AgentState.NeedsYou) return TriageStatus.NeedsYou
         when {
+            s?.isUsageLimited(now) == true -> limit = true
             s?.interrupted == true -> interrupted = true
             st == AgentState.Unread -> unread = true
             st == AgentState.Working || s?.starting == true -> working = true
@@ -62,6 +69,7 @@ fun Todo.triageStatus(lookup: (SessionKey) -> Session?): TriageStatus {
     }
     return when {
         interrupted -> TriageStatus.Interrupted
+        limit -> TriageStatus.UsageLimit
         unread -> TriageStatus.Unread
         working -> TriageStatus.Working
         else -> TriageStatus.FollowUp
@@ -134,7 +142,7 @@ fun Todo.triage(
     superseded: Boolean = false,
 ): Triage {
     val last = lastActivity(lookup, restoredAt)
-    val status = triageStatus(lookup)
+    val status = triageStatus(lookup, now)
     // seen: the owner looked at it (`seen_at`, #5707) at or after `at`; fresh: it got to Just finished at `at`, under a day
     // ago, and is not seen since
     val seenMs = ms(this.seenAt)
@@ -208,7 +216,7 @@ fun Todo.checksAsOpen(t: Triage?): Boolean =
  * An open concern still waits for its report, so neither Accepted nor its done styling applies (#3582). */
 fun Todo.acceptedAtRest(lookup: (SessionKey) -> Session?): Boolean =
     kind != "concern" && !isDone && acceptanceStands && triageStatus(lookup).let {
-        it == TriageStatus.FollowUp || it == TriageStatus.Unread || it == TriageStatus.NotStarted
+        it == TriageStatus.FollowUp || it == TriageStatus.Unread || it == TriageStatus.NotStarted || it == TriageStatus.UsageLimit
     }
 
 // ── Related to-dos ────────────────────────────────────────────

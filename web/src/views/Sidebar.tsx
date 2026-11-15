@@ -31,7 +31,8 @@ import { href, navigate, onLinkClick, showsSession, type Route } from "../lib/ro
 import { retryFullAgentSessions, useAgentSessions, useFullAgentSessions } from "../lib/sessions";
 import { getState, refresh, refreshTodos, useHubUnreachable, useStore } from "../lib/store";
 import { SESSIONS_SIDE_FOLD_FEATURE } from "../lib/side-fold";
-import { conversationTitle } from "./assistant/conversations";
+import { conversationTitle, mergeConversations } from "./assistant/conversations";
+import { useShownManager } from "../lib/manager-choice";
 import { agentGroupLabel, agentTreeState, buildTodoTree, shareTree, worstTreeState, type TodoTree } from "../lib/todo-tree";
 import { openTodoFromTag, sortTodos, TODO_STATUS_INFO, type TodoStatus } from "../lib/todos";
 import type { Machine, Session } from "../lib/types";
@@ -272,10 +273,20 @@ function GlideHighlight({ box }: { box: ReturnType<typeof glideStore> }) {
 /** Recent's Show more / Show less, as the Agents block's Recent (not running) draws its own. */
 const MORE_BUTTON = "whitespace-nowrap rounded-[7px] px-2 py-1 text-left text-[12px] text-ink-3 hover:text-ink-2 [@media(pointer:coarse)]:min-h-11";
 
+const NO_CONVERSATIONS: Session[] = [];
+
 export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActions }: { route: Route; onSearch: () => void; onNewAgent: () => void; onNavigate?: () => void; workspaceActions?: WorkspaceTreeActions }) {
   const bindings = useBindings();
   const searchHint = jumpHint(bindings);
   const assistant = useStore((s) => s.assistant);
+  const manager = useShownManager();
+  const assistantMachine = assistant?.machine_id;
+  const liveChats = useStore((s) => (assistantMachine ? s.sessions[assistantMachine] ?? NO_CONVERSATIONS : NO_CONVERSATIONS));
+  const unarchived = useMemo(
+    () => mergeConversations([], assistant?.conversations ?? NO_CONVERSATIONS, liveChats, manager)
+      .filter((c) => !c.archived).length,
+    [assistant?.conversations, liveChats, manager],
+  );
   const { phase, online, total, main: mainConversation, pages, more } = useNavPages();
   // a phone's drawer has the pages as two rows of icons, so its first screen reaches the Agents (#1996)
   const narrow = useMedia(NARROW);
@@ -380,30 +391,48 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
               </>
             }
           >
-            {directions.length > 0 && <SubHeading label={t("sidebar.directions")} />}
-            {/* each 常驻 row folds open to its tasks (#4352) */}
-            {directions.map((c) => <SidebarDirectionRow key={c.session_id} id={c.session_id} name={directionLabel(directionNames, c.session_id, conversationTitle(c))} row={directionRow(c)} reg={reg} hover={hover} go={go} onNavigate={onNavigate} />)}
-            {recent.length > 0 && <SubHeading label={t("sidebar.recent_chats")} folded={recentFolded} onToggle={toggleRecent} />}
-            {recent.length > 0 && (
-            <Collapse open={!recentFolded} sidebarFold>
-              {recent.map(recentRow)}
-              {(recentLeft > 0 || recentLess) && (
-                <div className="relative z-10 flex flex-wrap">
-                  {recentLeft > 0 && (
-                    <button type="button" onClick={() => setRecentMore(recentMore + 1)} className={MORE_BUTTON}>
-                      {t("sidebar.show_more", { count: Math.min(recentCount, recentLeft) })}
-                    </button>
-                  )}
-                  {recentLess && (
-                    <button type="button" onClick={() => setRecentMore(0)} className={MORE_BUTTON}>
-                      {t("sidebar.show_less")}
-                    </button>
-                  )}
-                </div>
+            <div className="sidebar-indent">
+              {directions.length > 0 && (
+                <>
+                  <SubHeading label={t("sidebar.directions")} />
+                  <div className="sidebar-indent">
+                    {directions.map((c) => <SidebarDirectionRow key={c.session_id} id={c.session_id} name={directionLabel(directionNames, c.session_id, conversationTitle(c))} row={directionRow(c)} reg={reg} hover={hover} go={go} onNavigate={onNavigate} />)}
+                  </div>
+                </>
               )}
-            </Collapse>
-            )}
-            {assistant && <NavRow k="history" reg={reg} hover={hover} active={activeKey === "history"} to={{ name: "history" }} go={go} icon="list" label={t("sidebar.all_chats")} hint={assistant.conversations.length > 0 ? String(assistant.conversations.length) : undefined} />}
+              {recent.length > 0 && (
+                <>
+                  <SubHeading label={t("sidebar.recent_chats")} folded={recentFolded} onToggle={toggleRecent} help={t("sidebar.recent_chats_help")} />
+                  <Collapse open={!recentFolded} sidebarFold>
+                    <div className="sidebar-indent" inert={recentFolded || undefined}>
+                      {recent.map(recentRow)}
+                      {(recentLeft > 0 || recentLess) && (
+                        <div className="relative z-10 flex flex-wrap">
+                          {recentLeft > 0 && (
+                            <button type="button" onClick={() => setRecentMore(recentMore + 1)} className={MORE_BUTTON}>
+                              {t("sidebar.show_more", { count: Math.min(recentCount, recentLeft) })}
+                            </button>
+                          )}
+                          {recentLess && (
+                            <button type="button" onClick={() => setRecentMore(0)} className={MORE_BUTTON}>
+                              {t("sidebar.show_less")}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </Collapse>
+                </>
+              )}
+              {assistant && (
+                <NavRow k="history" reg={reg} hover={hover} active={activeKey === "history"} to={{ name: "history" }} go={go} icon="list"
+                  label={t("sidebar.all_chats")}
+                  hintCount={unarchived > 0 ? {
+                    n: unarchived,
+                    label: t("sidebar.unarchived_chat_count", { count: unarchived }),
+                  } : undefined} />
+              )}
+            </div>
           </Section>
         )}
 
@@ -547,7 +576,7 @@ function MorePages({ more, reg, hover, activeKey, go }: { more: NavPage[]; reg: 
         <Icon name="chevron" size={10} stroke={2.4} className="shrink-0 text-ink-3 transition-transform" style={{ ...sidebarFoldMotion(!folded), transform: folded ? "rotate(-90deg)" : "none" }} />
       </button>
       <Collapse open={!folded} sidebarFold>
-        <div className="flex flex-col gap-px pl-3" inert={folded || undefined}>
+        <div className="flex flex-col gap-px sidebar-indent" inert={folded || undefined}>
           {more.map((p) => <NavRow key={p.k} {...p} reg={reg} hover={hover} active={activeKey === p.k} go={go} />)}
         </div>
       </Collapse>

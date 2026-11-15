@@ -456,6 +456,29 @@ sys.exit(2)
         self.assertIn('does not run there', result.stderr)
         self.assertNotIn('hub restarted', result.stdout)
 
+    def test_failed_staged_check_preserves_the_installed_binary_direct_and_nested(self):
+        executable(self.commands / 'go', '#!' + sys.executable + '\n' + r'''
+import pathlib, sys
+if sys.argv[1] == 'generate': sys.exit(0)
+if sys.argv[1] == 'build':
+    p = pathlib.Path(sys.argv[sys.argv.index('-o')+1]); p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b'\x7fELF built for another platform'); p.chmod(0o755); sys.exit(0)
+sys.exit(2)
+''')
+        binary = self.state / 'bin/personad'
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        old = b'#!/bin/sh\nprintf "installed-old\\n"\n'
+        for target in ('node-fixture', 'via-fixture'):
+            with self.subTest(target=target):
+                binary.write_bytes(old)
+                binary.chmod(0o755)
+                result = subprocess.run(['bash', str(self.repo / 'scripts/deploy/deploy.sh'), target],
+                                        env=self.env, capture_output=True, text=True, timeout=DEPLOY_TIMEOUT)
+                self.assertEqual(result.returncode, 0, result.stdout + '\n' + result.stderr)
+                self.assertIn('not installed, skipped', result.stderr)
+                self.assertEqual(binary.read_bytes(), old, 'a failed staged check replaced the installed binary')
+                self.assertFalse(Path(str(binary) + '.new').exists(), 'the rejected staged binary was left behind')
+
     def test_a_checkout_missing_master_commits_deploys_nothing(self):
         # merge-base --is-ancestor fails: HEAD does not contain origin/master (#1314)
         executable(self.commands / 'git', '#!/bin/sh\ncase "$1" in merge-base) exit 1;; describe) printf "fixture-version\\n";; rev-parse) printf "fixture-commit\\n";; esac\n')

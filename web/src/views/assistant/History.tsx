@@ -13,9 +13,12 @@ import { conversationPage } from "../../lib/conversation-page";
 import { href, navigate, onLinkClick, type Route } from "../../lib/router";
 import { onHubEvent, refreshAssistant, useStore } from "../../lib/store";
 import { isResumed } from "../../lib/reconnect";
+import { useShownManager } from "../../lib/manager-choice";
 import type { AssistantInfo, Session } from "../../lib/types";
+import { GroupCount } from "../SidebarSection";
 import { leaderItem } from "../ConversationMenu";
 import { Button, Collapse, copyText, cx, Dialog, IconButton, Loading, Menu, StatePill, toast, useMenu, useNow, type MenuItem } from "../../ui/atoms";
+import { InfoTip } from "../../ui/InfoTip";
 import { Icon } from "../../ui/icons";
 import { arrange, conversationTitle, filterConversations, mergeConversations, splitTitle, type Conversation } from "./conversations";
 import { Empty, inputClass, SectionTitle } from "./parts";
@@ -38,6 +41,7 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
   const filter = parseOriginFilter(origin);
   const assistant = useStore((s) => s.assistant);
   const mid = assistant?.machine_id;
+  const manager = useShownManager();
   const live = useStore((s) => (mid ? s.sessions[mid] ?? NONE : NONE));
   const [fetched, setFetched] = useState<Conversation[] | null>(null);
   const [error, setError] = useState("");
@@ -100,12 +104,12 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
 
   const all = useMemo(
     () =>
-      mergeConversations(fetched ?? [], assistant?.conversations ?? [], live.filter((s) => s.assistant)).map((s) => {
+      mergeConversations(fetched ?? [], assistant?.conversations ?? [], live, manager).map((s) => {
         const title = titles[s.session_id];
         const archived = marked[s.session_id];
         return title || archived !== undefined ? { ...s, ...(title ? { title } : {}), ...(archived !== undefined ? { archived } : {}) } : s;
       }),
-    [fetched, assistant?.conversations, live, titles, marked],
+    [fetched, assistant?.conversations, live, manager, titles, marked],
   );
   const background = assistant?.background_supervisor;
   // what was said in them too (#6283): the manager's search, merged into the local matches (titles, last messages), as
@@ -173,10 +177,13 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
     <div className="flex h-full flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-3 sm:px-4">
         <IconButton icon="sidebar" label={t("assistant-history.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />
-        <h1 className="min-w-0 flex-1 truncate text-[14px] font-semibold text-ink">
-          {t("assistant-history.title")}
-          {total > 0 && <span className="ml-2 text-[12px] font-normal text-ink-3 tabular-nums">{total}</span>}
-        </h1>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <h1 className="min-w-0 truncate text-[14px] font-semibold text-ink">{t("sidebar.all_chats")}</h1>
+          {total > 0 && (
+            <GroupCount n={total} label={t("sidebar.unarchived_chat_count", { count: total })} className="shrink-0" />
+          )}
+          <InfoTip name={t("sidebar.all_chats")} text={t("assistant-history.scope_help")} className="[@media(pointer:coarse)]:size-11" />
+        </div>
         <IconButton icon="retry" label={t("assistant-history.refresh")} onClick={() => void after()} />
         <IconButton icon="more" label={t("assistant-history.display_options")} onClick={options.open} active={!!options.anchor} />
         {options.anchor && <Menu anchor={options.anchor} onClose={options.close} align="right" header={t("settings-assistantsettings.recent_task_chats_title")} items={optionItems} />}
@@ -260,7 +267,7 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
                 type="button"
                 aria-expanded={showArchived || searching}
                 onClick={() => setShowArchived((v) => !v)}
-                className="mb-1.5 flex items-center gap-1.5 whitespace-nowrap rounded-[6px] px-1 text-[12px] font-medium text-ink-3 transition-colors hover:text-ink-2"
+                className="touch-hit mb-1.5 flex items-center gap-1.5 whitespace-nowrap rounded-[6px] px-1 text-[12px] font-medium text-ink-3 transition-colors hover:text-ink-2"
               >
                 <Icon name="archive" size={13} />
                 {t("assistant-history.archived_count", { count: archived.length })}

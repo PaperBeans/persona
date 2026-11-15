@@ -1,6 +1,7 @@
 // "All chats" (docs/assistant/assistant.md "Managing its own conversations"): the assistant's conversations, the main one first, the rest newest first
 // by day; search on the title and the last message; the archived ones apart. Pure functions, tested without a DOM.
 import type { Session } from "../../lib/types";
+import { sameManager } from "../../lib/manager-choice";
 import { t } from "../../i18n";
 
 /** A conversation as `GET /api/v1/assistant?archived=1` lists it. */
@@ -74,14 +75,15 @@ export function groupByDay<T extends Session>(list: T[], now: Date): { title: st
 
 /** One list from what was fetched with the archived ones (`fetched`), the store's list (newer conversations, without
  *  the archived ones) and the live sessions pushed since (state, title, last message, and the archive mark: the hub
- *  marks every assistant session it pushes, `archived` only when it is, so one without it was brought back since). */
-export function mergeConversations(fetched: Conversation[], listed: Session[], live: Session[]): Conversation[] {
+ *  marks every assistant session it pushes, `archived` only when it is, so one without it was brought back since).
+ *  Live sessions must belong to the selected manager and the main assistant space. */
+export function mergeConversations(fetched: Conversation[], listed: Session[], live: Session[], manager?: string): Conversation[] {
   const by = new Map<string, Conversation>();
   for (const s of fetched) by.set(s.session_id, s);
   for (const s of listed) by.set(s.session_id, { ...by.get(s.session_id), ...s });
   for (const s of live) {
-    const had = by.get(s.session_id);
-    if (had) by.set(s.session_id, { ...had, ...s, archived: s.archived === true });
+    if (!s.assistant || s.space || !sameManager(s.manager, manager)) continue;
+    by.set(s.session_id, { ...by.get(s.session_id), ...s, archived: s.archived === true });
   }
   return [...by.values()];
 }

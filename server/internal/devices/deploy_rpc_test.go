@@ -19,6 +19,7 @@ import (
 	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/update/updatetest"
 )
 
 type updatingNode struct {
@@ -235,6 +236,8 @@ func TestLinkedDeployTransfersAndConfirms(t *testing.T) {
 // Redeploy sends the kind of program the node says it runs: persona-node to persona-node, personad to the rest; so
 // does an update the hub queued before it restarted, when the node comes back (nodeUpdateConnected).
 func TestRedeployBringsTheProgramTheNodeRuns(t *testing.T) {
+	fullBuild := updatetest.Program(t, nodeproto.ProgramPersonad, "linux", "amd64")
+	nodeBuild := updatetest.Program(t, nodeproto.ProgramPersonaNode, "linux", "amd64")
 	for _, tc := range []struct{ program, via string }{{nodeproto.ProgramPersonaNode, "redeploy"}, {nodeproto.ProgramPersonad, "redeploy"},
 		{"", "redeploy"}, {nodeproto.ProgramPersonaNode, "reconnect"}, {"", "reconnect"}} {
 		program := tc.program
@@ -247,8 +250,8 @@ func TestRedeployBringsTheProgramTheNodeRuns(t *testing.T) {
 			dir := nodeBinaryDir()
 			_ = os.MkdirAll(dir, 0o755)
 			full, node := filepath.Join(dir, "personad-linux-amd64"), filepath.Join(dir, "persona-node-linux-amd64")
-			_ = os.WriteFile(full, bytes.Repeat([]byte("personad"), 1000), 0o755)
-			_ = os.WriteFile(node, bytes.Repeat([]byte("persona-node"), 1000), 0o755)
+			copyFile(t, fullBuild, full)
+			copyFile(t, nodeBuild, node)
 			_ = os.WriteFile(node+".version", []byte(h.hubVersion()+"\n"), 0o644)
 			h.opts.Store = newMemStore()
 			want := full

@@ -150,7 +150,7 @@ export function TreeBranch({ branch, top, folded, onToggle, toggleLabel, icon, t
   );
   const body = (
     <Collapse open={!folded} sidebarFold>
-      <div data-tree-branch-list className="flex flex-col gap-px pl-3" inert={folded || undefined}>
+      <div data-tree-branch-list className="flex flex-col gap-px sidebar-indent" inert={folded || undefined}>
         {children ?? (empty ? <EmptyHint text={empty} /> : null)}
       </div>
     </Collapse>
@@ -593,7 +593,7 @@ function TreeBlock({ foldKey, sessions, activeKey, state, title, right, children
         {right(folded)}
       </div>
       <Collapse open={!folded} sidebarFold>
-        <div className="flex flex-col gap-px pl-3" inert={folded || undefined}>{children}</div>
+        <div className="flex flex-col gap-px sidebar-indent" inert={folded || undefined}>{children}</div>
       </Collapse>
     </div>
   );
@@ -766,7 +766,7 @@ function TabRow({ t: tab, ...p }: { t: HerdrTab } & TreeProps) {
         </button>
       </div>
       <Collapse open={!folded} sidebarFold>
-        <div className="flex flex-col gap-px pl-3" inert={folded || undefined}>
+        <div className="flex flex-col gap-px sidebar-indent" inert={folded || undefined}>
           {tab.sessions.map((s, i) => {
             const key = rowKey(s);
             const branch = Boolean(tab.launcher) && s !== tab.launcher;

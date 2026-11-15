@@ -189,7 +189,7 @@ class AssistantConversationShotsTest {
                 val loader = remember { ImageLoader.Builder(context).build() }
                 DisposableEffect(loader) { onDispose { loader.shutdown() } }
                 Box(Modifier.fillMaxSize().background(PersonaTheme.palette.background)) {
-                    AssistantBackgroundRecords(AssistantLines.lines(emptyList(), feed), session, loader,
+                    AssistantBackgroundRecords(AssistantLines.lines(emptyList(), AssistantTaskCards.backgroundFeed(feed)), session, loader,
                         onToggle = {}, onFold = {}, folding = emptySet(), foldErrors = emptyMap(), onFullText = {}, onDismiss = {})
                 }
             }
@@ -200,8 +200,8 @@ class AssistantConversationShotsTest {
                 style = appearance; dark = night
                 Snapshot.sendApplyNotifications()
                 rule.mainClock.advanceTimeBy(500)
-                rule.onNodeWithText("receipt-feed", substring = true).assertExists()
-                rule.onNodeWithText("Verification passed. Evidence remains available.", substring = true).assertExists()
+                rule.onNodeWithText("receipt-feed", substring = true).assertDoesNotExist()
+                rule.onNodeWithText("Verification passed. Evidence remains available.", substring = true).assertDoesNotExist()
                 rule.onNodeWithTag("assistant-dispatch-hint").assertDoesNotExist()
                 rule.onNodeWithText("Assistant layout", substring = false).assertDoesNotExist()
                 val bitmap = rule.runOnIdle { captureWindows() }

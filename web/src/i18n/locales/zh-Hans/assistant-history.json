@@ -2,7 +2,7 @@
   "archived_toast": "已归档「{title}」",
   "unarchived_toast": "已取消归档「{title}」",
   "sidebar": "侧边栏",
-  "title": "Persona 的对话",
+  "scope_help": "这里列出与 Persona 的对话。总数不含已归档的对话，也不随搜索或筛选而变化。「已归档」显示符合当前条件的归档对话数量。",
   "refresh": "刷新",
   "new_chat": "新对话",
   "search_placeholder": "搜索标题或最后一句",

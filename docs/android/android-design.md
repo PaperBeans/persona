@@ -72,6 +72,7 @@ Performance measurements are in section 5.
 | `PersonaTheme.glass` | the glass level actually rendered |
 | `SpinnerTokens` | `JSpinner`'s fixed stroke widths; `compactStroke` is the 1.8dp compact activity arc, not density-scaled spacing |
 | `ContentTokens` | Existing mail, media, profile, reaction and task-content dimensions that cannot be expressed by the common spacing tokens; keeps page geometry unchanged while adopting tokens |
+| `RichTextTokens` | Rich-message geometry outside the common scale, including content-driven Markdown table minimum / maximum column widths (160 / 220 dp before applying the message's font scale) |
 
 Material 3's ColorScheme, Typography and Shapes are also generated from the current style, so Material components not yet replaced change colors and fonts along with it, but pages should switch to the components below.
 The old `PersonaTypography.*`, `statusTone(...)`, `PrimaryButton` / `SecondaryButton` / `Card` / `EmptyState` still work and now map to the current style internally; new code uses the new components directly.

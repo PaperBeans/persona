@@ -213,7 +213,7 @@ rows for `AssistantTrayActivityUITests` on iPhone and Mac. No new endpoint, task
 
 The approved simplified Assistant presentation places a task's **only card in the Progress tray**, not in the conversation.
 Planning, running, blocked progress, PR references and acceptance update that same task row in place. Tapping the row opens
-the existing task details. On iOS and Android the dispatch answer is one hand-off card per Agent a dispatch started or a task took over (#5110; iOS `DispatchHandoffCard`: title, New / Already Active / Resumed, when that Agent last moved and its state, ↗). A card with an Agent opens that Agent's page. The web draws the same cards, which open that Agent in the side panel or as its page, as Settings says ("Hand-off cards (web)" below). Historical plan/task/receipt/review/report cards use the same lightweight entry or are omitted from the chat; receipts, reviews and reports are not drawn at all on iOS since #8237 ("Receipts" below); Android's Glass style still draws them, with Persona's hand-offs, message cards and the hub's notice lines, as iOS did before (`docs/plans/android-ios-alignment/chats.md` C13).
+the existing task details. On iOS and Android the dispatch answer is one hand-off card per Agent a dispatch started or a task took over (#5110; iOS `DispatchHandoffCard`: title, New / Already Active / Resumed, when that Agent last moved and its state, ↗). A card with an Agent opens that Agent's page. The web draws the same cards, which open that Agent in the side panel or as its page, as Settings says ("Hand-off cards (web)" below). Historical plan/task/receipt/review/report cards use the same lightweight entry or are omitted from the chat; receipts, reviews and reports are not drawn at all since #8237 (Android: #8312; "Receipts" below). Persona's hand-offs, message cards and the hub's notice lines stay in the conversation (`docs/plans/android-ios-alignment/chats.md` C13).
 
 **Pending** holds plans that still require Start and acceptance decisions, alongside ordinary questions/approvals. Drafts sent
 on the user's behalf are a separate group and require their own explicit Send; Approve all never sends drafts or chooses an
@@ -316,7 +316,7 @@ interruption bookkeeping below and the trays' order still read them. How a task 
   manager, so the MacBook's Agents are the default page's), with `MOCK_TASKS_NO_ASKS=1` for a chat no question card
   covers; `QuietReceiptsUITests` checks and shoots them.
 
-What follows is what the hub writes and how the clients drew receipts before #8237 (Android still does, #8312):
+What follows is what the hub writes and how the clients drew receipts before #8237:
 
 - When a task finishes (an attached Agent ends a turn with no pending interaction), append a green receipt at the bottom: task name, what was done (summary of the Agent's final text block),
   number of changed files, tests, PR, and next actions below: review changes, merge, tell the person who asked, etc.
@@ -355,7 +355,7 @@ keeps one outage from filling the chat:
   receipt in `group`. The first receipt carries `batch` (`total`, `pending`, `resolved`, `machine` when all ran on one
   computer, and `tasks` with each task's resolution), recomputed on every read; a page read with `since` after the first
   receipt still brings it along.
-- **Drawing** (`interruptLook`; Android only: iOS and the web draw no receipt since #8237, "Receipts" above): a receipt that names another in `group` is not drawn; a batch is one card,
+- **Drawing** (`interruptLook`; no client draws a receipt in an assistant conversation since #8237, Android #8312, "Receipts" above): a receipt that names another in `group` is not drawn; a batch is one card,
   "<computer> <cause>, N tasks interrupted → handled a / pending b", opening to each task with its result, each opening the
   task; a handled single receipt is a grey line "“<title>” was interrupted · <result>" that opens the task; a pending one is
   the red card as before. Only a batch with something pending, or a pending receipt, uses the danger color. In the main chat,

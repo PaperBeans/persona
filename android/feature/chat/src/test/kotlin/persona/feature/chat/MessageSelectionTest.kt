@@ -342,6 +342,23 @@ class MessageSelectionTest {
         assertEquals("长按它，再点选择。", copied.last())
     }
 
+    @Test fun tableCellsKeepTheMessageMenuAndJoinSelectionInReadingOrder() {
+        val table = "| Area | Finding | 中文说明 | Next step |\n| --- | --- | --- | --- |\n" +
+            "| Network retry | A complete English sentence that wraps at a readable width. | 一句需要合适列宽才能阅读的中文。 | Retry |\n" +
+            "| Layout | Another complete sentence that wraps instead of being ellipsized. | 第二句中文内容。 | Read |"
+        show { Reply("a", table) }
+        rule.onNodeWithTag("a").performTouchInput { longClick() }
+        rule.waitForIdle()
+        assertEquals("a long press on the table still opens the message menu", "a", menu.target?.id)
+        rule.runOnIdle { menu.close() }
+        select("a", "…")
+        copy()
+        assertEquals(listOf("Area", "Finding", "中文说明", "Next step", "Network retry",
+            "A complete English sentence that wraps at a readable width.", "一句需要合适列宽才能阅读的中文。", "Retry",
+            "Layout", "Another complete sentence that wraps instead of being ellipsized.", "第二句中文内容。", "Read"),
+            copied.last().lines().map(String::trim))
+    }
+
     @Test fun aQuoteOfPickedWordsIsAPartOfTheMessage() {
         val words = ChatLinkContext.quote("改好了", "Claude", "msg-1", ChatLinkContext.PART_SELECTION)
         assertEquals("<persona-context kind=\"quote\" title=\"Claude\" url=\"\" msg=\"msg-1\" part=\"selection\">\n改好了\n</persona-context>", words.xml())

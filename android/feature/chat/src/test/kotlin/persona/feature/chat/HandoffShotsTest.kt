@@ -136,7 +136,7 @@ class HandoffShotsTest {
         rule.onNodeWithText("last active just now", substring = true).assertIsDisplayed()
         rule.onNodeWithText("Needs you", substring = true).assertIsDisplayed()
         rule.onNodeWithText("Starting the agent").assertIsDisplayed()
-        rule.onNodeWithText("Didn't start: launcher missing").assertIsDisplayed()
+        rule.onNodeWithText("Didn't start. Open it for details.").assertIsDisplayed()
         rule.onNodeWithText("This task no longer exists").assertIsDisplayed()
         rule.onNodeWithText("0f3c2a91", substring = true).assertDoesNotExist()
         rule.onNodeWithText("Dispatched:", substring = true).assertDoesNotExist()

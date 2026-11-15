@@ -74,6 +74,23 @@ describe("arrange", () => {
     ]);
   });
 
+  it("includes live-only chats from the selected manager once, with their archive state", () => {
+    const listed = [conv("listed", { manager: "work" })];
+    const live = [
+      conv("listed", { manager: "work", archived: true }),
+      conv("new", { manager: "work" }),
+      conv("new-archived", { manager: "work", archived: true }),
+      conv("other-manager"),
+      conv("health-chat", { manager: "work", space: "health" }),
+      conv("agent", { manager: "work", assistant: false }),
+    ];
+    const history = mergeConversations([conv("fetched-archive", { archived: true })], listed, live, "work");
+    const sidebar = mergeConversations([], listed, live, "work");
+    expect(history.filter((s) => !s.archived).map((s) => s.session_id)).toEqual(["new"]);
+    expect(sidebar.filter((s) => !s.archived).map((s) => s.session_id)).toEqual(["new"]);
+    expect(sidebar.filter((s) => s.archived).map((s) => s.session_id)).toEqual(["listed", "new-archived"]);
+  });
+
   it("takes the archive mark from the live sessions both ways: one brought back elsewhere leaves 已归档", () => {
     // the hub marks every assistant session it pushes (archived only when it is, omitempty): one unarchived on another
     // device, by a message sent to it or by Persona comes without the mark

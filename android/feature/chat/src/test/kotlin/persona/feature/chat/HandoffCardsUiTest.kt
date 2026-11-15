@@ -36,7 +36,7 @@ import persona.core.domain.tasks.TasksStore
 
 /**
  * The cards the conversation draws, through [DispatchHandoffCards]: a to-do still on its way is starting, a plan's
- * task stays New, and a failed receipt below the card takes the reason off it (#5110).
+ * task stays New, and a failed start says to open the task when its error names no known cause (#5110, #8312).
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35], qualifiers = "en")
@@ -113,7 +113,7 @@ class HandoffCardsUiTest {
 
         rule.onNodeWithText("This task no longer exists").assertDoesNotExist()
         rule.onNodeWithText("launcher missing").assertDoesNotExist()
-        rule.onNodeWithText("Didn't start", substring = false).assertIsDisplayed()
+        rule.onNodeWithText("Didn't start. Open it for details.").assertIsDisplayed()
         rule.onAllNodesWithText("Starting the agent").assertCountEquals(2)
         rule.onAllNodesWithText("NEW").assertCountEquals(2)
         rule.onNodeWithText("RESUMED").assertIsDisplayed()

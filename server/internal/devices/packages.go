@@ -301,6 +301,13 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 		return nodePackage{}, i18n.Err("devices-deploy.os_unknown")
 	}
 	plat := k.goos + "-" + k.arch
+	localBuildOK := func(path, program string) bool {
+		if err := checkPackagePlatform(path, k.goos, k.arch, program); err != nil {
+			d.logf("node package for %s: ignore local %s: %v", plat, filepath.Base(path), err)
+			return false
+		}
+		return true
+	}
 	local := func(path, program string) nodePackage {
 		// The hub's version, or what <name>.version beside it says (a build put there that is not the hub's own: a
 		// release's, on a Docker hub without internet access, docs/operations/docker.md "Node builds").
@@ -316,11 +323,11 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 			// Only deploy.sh puts persona-node there, with the version it is in <name>.version: the hub's own updates
 			// replace personad-* alone, so one left from an earlier deploy is another build than the hub's.
 			node := filepath.Join(dir, nodeproto.ProgramPersonaNode+"-"+plat)
-			if b, err := os.ReadFile(node + ".version"); err == nil && k.hub != "" && strings.TrimSpace(string(b)) == k.hub && fileExists(node) {
+			if b, err := os.ReadFile(node + ".version"); err == nil && k.hub != "" && strings.TrimSpace(string(b)) == k.hub && fileExists(node) && localBuildOK(node, nodeproto.ProgramPersonaNode) {
 				return local(node, nodeproto.ProgramPersonaNode), nil
 			}
 		}
-		if p := filepath.Join(dir, "personad-"+plat); personad == "" && fileExists(p) {
+		if p := filepath.Join(dir, "personad-"+plat); personad == "" && fileExists(p) && localBuildOK(p, nodeproto.ProgramPersonad) {
 			personad = p
 		}
 	}
@@ -734,27 +741,36 @@ func (d *Devices) downloadPackage(ctx context.Context, p nodePackage, bin, entry
 	return nil
 }
 
-// checkPackageBuild: the file is a build for p's OS and architecture of p's kind of program, and on this machine's
-// own platform it runs and says the release's version and build.
-func checkPackageBuild(ctx context.Context, path string, p nodePackage) error {
+// checkPackagePlatform: path's Go build info names the requested OS, architecture and kind of program. Unlike a
+// downloaded build's full check, a local build is never run here: it may be for another machine's platform.
+func checkPackagePlatform(path, goos, goarch, program string) error {
 	info, err := buildinfo.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("not a Go executable: %w", err)
 	}
-	var goos, goarch string
+	var builtOS, builtArch string
 	for _, s := range info.Settings {
 		switch s.Key {
 		case "GOOS":
-			goos = s.Value
+			builtOS = s.Value
 		case "GOARCH":
-			goarch = s.Value
+			builtArch = s.Value
 		}
 	}
-	if goos != p.goos || goarch != p.arch {
-		return fmt.Errorf("built for %s/%s, not %s/%s", goos, goarch, p.goos, p.arch)
+	if builtOS != goos || builtArch != goarch {
+		return fmt.Errorf("built for %s/%s, not %s/%s", builtOS, builtArch, goos, goarch)
 	}
-	if !strings.HasSuffix(info.Path, "/cmd/"+p.Program) { // the main package: server/cmd/personad or cmd/persona-node
-		return fmt.Errorf("it is %s, not %s", info.Path, p.Program)
+	if !strings.HasSuffix(info.Path, "/cmd/"+program) { // the main package: server/cmd/personad or cmd/persona-node
+		return fmt.Errorf("it is %s, not %s", info.Path, program)
+	}
+	return nil
+}
+
+// checkPackageBuild: the file is a build for p's OS and architecture of p's kind of program, and on this machine's
+// own platform it runs and says the release's version and build.
+func checkPackageBuild(ctx context.Context, path string, p nodePackage) error {
+	if err := checkPackagePlatform(path, p.goos, p.arch, p.Program); err != nil {
+		return err
 	}
 	if p.goos == runtime.GOOS && p.arch == runtime.GOARCH {
 		if err := os.Chmod(path, 0o755); err != nil {

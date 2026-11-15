@@ -64,8 +64,17 @@ sealed interface RunningEntry {
     }
 }
 
-/** [shelved]: open tasks with no progress for 48 hours and nothing running, folded under In progress and not counted. */
-data class AssistantEntries(val needsYou: List<NeedsYouEntry>, val running: List<RunningEntry>, val shelved: List<RunningEntry>)
+/**
+ * [shelved]: open tasks with no progress for 48 hours and nothing running, folded under In progress and not counted.
+ * [justFinished]: handed-out tasks that finished in the last day and that the owner has not opened since (the To-dos
+ * page's Just finished), newest first, under In progress and not counted (#8237).
+ */
+data class AssistantEntries(
+    val needsYou: List<NeedsYouEntry>,
+    val running: List<RunningEntry>,
+    val shelved: List<RunningEntry>,
+    val justFinished: List<RunningEntry> = emptyList(),
+)
 
 /** How long a task's review is its supervisor's alone (docs/assistant/unified-entry.md "Needs you and In progress"):
  *  past it the review is overdue and the task is the owner's, under Needs you. The web's `REVIEW_OVERDUE_MS`. */
@@ -100,6 +109,7 @@ private fun Todo.entryRank(status: TriageStatus): Int {
     return when (status) {
         TriageStatus.NeedsYou -> 0
         TriageStatus.Interrupted -> 10
+        TriageStatus.UsageLimit -> 15
         TriageStatus.Failed -> 30
         TriageStatus.Working -> 40
         TriageStatus.NotStarted -> 50
@@ -125,6 +135,7 @@ fun assistantEntries(
     val deciding = mutableListOf<Pair<NeedsYouEntry.Task, Int>>()
     val open = mutableListOf<Pair<RunningEntry.Task, Int>>()
     val shelved = mutableListOf<RunningEntry.Task>()
+    val finished = mutableListOf<Pair<RunningEntry.Task, Long>>()
     val folded = mutableSetOf<SessionKey>()
     // failed starts whose work finished in a related to-do: closed, as the To-dos page has them (#3713)
     val superseded = supersededFailedStarts(todos)
@@ -141,9 +152,9 @@ fun assistantEntries(
         val active = if (todo.isDone) emptyList() else todo.activeAgents
         val own = active.filter { homes[it.key] == todo.id }
         val hasAgentsElsewhere = own.size < active.size
-        val allStatus = todo.triageStatus(lookup)
+        val allStatus = todo.triageStatus(lookup, now)
         val status = if (hasAgentsElsewhere && allStatus == TriageStatus.NeedsYou) {
-            when (val ownStatus = todo.copy(agents = own).triageStatus(lookup)) {
+            when (val ownStatus = todo.copy(agents = own).triageStatus(lookup, now)) {
                 TriageStatus.NotStarted -> TriageStatus.Working
                 else -> ownStatus
             }
@@ -166,7 +177,14 @@ fun assistantEntries(
                     supervisorReview = reviewing && status in RESTING) to todo.entryRank(status)
             }
             bucket == TodoBucket.Shelved -> shelved += RunningEntry.Task(todo, status, hasAgentsElsewhere = hasAgentsElsewhere)
-            else -> continue
+            else -> {
+                // finished work a conversation handed out; a failed start a related to-do finished is history, not news
+                val placed = todo.triage(lookup, now, restored[todo.id] ?: 0L, superseded = todo.id in superseded)
+                if (placed.section == TriageSection.JustDone && status != TriageStatus.Failed && !todo.origin.isNullOrBlank()) {
+                    finished += RunningEntry.Task(todo, status) to placed.last
+                }
+                continue
+            }
         }
         folded += active.map { it.key }
     }
@@ -197,5 +215,16 @@ fun assistantEntries(
         running = open.sortedWith(compareBy<Pair<RunningEntry.Task, Int>> { it.second }.thenByDescending { time(it.first.todo.createdAt) }).map { it.first } +
             agentsRunning,
         shelved = shelved.sortedByDescending { time(it.todo.createdAt) },
+        justFinished = finished.sortedByDescending { it.second }.map { it.first },
     )
+}
+
+/**
+ * What a finished task did, in one line (#8237): its latest review's note, why it closed, its latest receipt's summary,
+ * else its Agent's last words. Null when none of those has words.
+ */
+fun finishedSummary(todo: Todo, feed: List<FeedItem>, lead: Session?): String? {
+    val receipt = feed.lastOrNull { it.kind == "receipt" && it.ref == todo.id && receiptState(it) != "failed" }?.field("summary")
+    return listOf(todo.supervision?.latestReview?.note, todo.doneReason, receipt, lead?.lastText)
+        .firstNotNullOfOrNull { it?.trim()?.takeIf(String::isNotEmpty) }
 }

@@ -26,6 +26,7 @@ type ImportRequest struct {
 }
 
 type ImportResult struct {
+	Status      string    `json:"status,omitempty"`
 	Name        string    `json:"name,omitempty"`
 	Description string    `json:"description,omitempty"`
 	Destination string    `json:"destination,omitempty"`
@@ -78,7 +79,7 @@ func (i *Importer) Import(ctx context.Context, target ImportTarget, in ImportReq
 		}
 	}
 	switch in.Op {
-	case "preview", "install", "cancel", "undo":
+	case "preview", "install", "cancel", "undo", "status":
 	default:
 		return empty, importErr("skill_import_request")
 	}
@@ -92,7 +93,7 @@ func (i *Importer) Import(ctx context.Context, target ImportTarget, in ImportReq
 			return empty, importErr("skill_environment_changed")
 		}
 		if in.Op == "cancel" {
-			if ref.installed != nil {
+			if ref.result.Status != "previewed" {
 				return empty, importErr("skill_import_request")
 			}
 			delete(i.refs, in.Reference)
@@ -101,15 +102,25 @@ func (i *Importer) Import(ctx context.Context, target ImportTarget, in ImportReq
 		if !sameImportRoot(ref) {
 			return empty, importErr("skill_environment_changed")
 		}
+		if in.Op == "status" {
+			return ref.result, nil // receipts record outcomes; this does not re-run an effect
+		}
 	}
 	if in.Op == "undo" {
 		return i.undo(ctx, in.Reference, ref)
 	}
-	if in.Op == "install" && (ref.installed != nil || ref.digest != sha256.Sum256(in.Archive)) {
+	if in.Op == "install" && (ref.result.Status != "previewed" || ref.digest != sha256.Sum256(in.Archive)) {
 		return empty, importErr("skill_import_changed")
 	}
-	if in.Op == "preview" && len(i.refs) >= 32 {
-		return empty, importErr("skill_import_busy")
+	if in.Op == "preview" {
+		// An installed operation has two lookup keys but only one metadata receipt.
+		operations := map[*importReference]struct{}{}
+		for _, ref := range i.refs {
+			operations[ref] = struct{}{}
+		}
+		if len(operations) >= 32 {
+			return empty, importErr("skill_import_busy")
+		}
 	}
 	p, err := inspectArchive(ctx, in.Archive)
 	if err != nil {
@@ -147,7 +158,7 @@ func (i *Importer) Import(ctx context.Context, target ImportTarget, in ImportReq
 		}
 		return empty, importErr("skill_import_io")
 	}
-	result := ImportResult{Name: p.name, Description: p.description, Files: len(p.files), Bytes: p.bytes,
+	result := ImportResult{Status: "previewed", Name: p.name, Description: p.description, Files: len(p.files), Bytes: p.bytes,
 		Destination: filepath.Join(root, p.name), ExpiresAt: time.Now().Add(importReceiptTTL)}
 	tree, err := importTree(ctx, stage)
 	if err != nil {
@@ -182,10 +193,13 @@ func (i *Importer) Import(ctx context.Context, target ImportTarget, in ImportReq
 		}
 		return empty, importErr("skill_import_io")
 	}
-	delete(i.refs, in.Reference)
+	result.Status = "installed"
 	result.Reference = importID()
-	i.refs[result.Reference] = &importReference{target: target, root: root, rootInfo: rootInfo,
+	installed := &importReference{target: target, root: root, rootInfo: rootInfo,
 		installed: info, tree: tree, expires: result.ExpiresAt, result: result}
+	// Retain the preview key too: a caller that lost the install response can recover
+	// its outcome and undo receipt without repeating the installation.
+	i.refs[in.Reference], i.refs[result.Reference] = installed, installed
 	// Publication is the commit point. A disconnect after it cannot turn a completed install into a partial one.
 	return result, nil
 }
@@ -270,7 +284,7 @@ func importTree(ctx context.Context, dir string) (string, error) {
 // an open file across the rename cannot lose its changes. No arbitrary name/path removal endpoint is exposed.
 func (i *Importer) undo(ctx context.Context, key string, ref *importReference) (ImportResult, error) {
 	var empty ImportResult
-	if ref.installed == nil {
+	if ref.installed == nil || ref.result.Status != "installed" {
 		return empty, importErr("skill_import_request")
 	}
 	at := ref.result.Destination
@@ -296,6 +310,7 @@ func (i *Importer) undo(ctx context.Context, key string, ref *importReference) (
 		_ = importRename(recovery, at)
 		return empty, importErr("skill_undo_changed")
 	}
-	delete(i.refs, key)
-	return ImportResult{Name: ref.result.Name, Recovery: recovery}, nil
+	ref.result = ImportResult{Status: "undone", Name: ref.result.Name, Recovery: recovery,
+		Reference: key, ExpiresAt: ref.expires}
+	return ref.result, nil
 }

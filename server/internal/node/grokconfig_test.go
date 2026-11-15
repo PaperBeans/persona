@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -263,5 +264,55 @@ func TestTomlSetDottedKeepsDottedKeyTables(t *testing.T) {
 	}
 	if want := "[tui]\nui.yolo = true\nui.compact_mode = true\n"; got != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestAgentSettingsSavedTogetherKeepEachOther(t *testing.T) {
+	grokHome := filepath.Join(t.TempDir(), "grok")
+	t.Setenv("GROK_HOME", grokHome)
+	n := &Node{home: t.TempDir()}
+	path := filepath.Join(grokHome, "config.toml")
+	if err := os.MkdirAll(grokHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("theme = \"dark\"\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	keys := []string{"ui.yolo", "ui.compact_mode"}
+	for round := 0; round < 50; round++ {
+		want := round%2 == 0
+		var wg sync.WaitGroup
+		errs := make(chan error, len(keys))
+		for _, k := range keys {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				errs <- n.setGrokSetting(k, want)
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v := tomlValues(string(b))
+		for _, k := range keys {
+			if v[k] != want {
+				t.Fatalf("round %d: two saves at once lost %s:\n%s", round, k, b)
+			}
+		}
+	}
+	if st, err := os.Stat(path); err != nil || st.Mode().Perm() != 0o640 {
+		t.Fatalf("the file keeps its mode: %v %v", st.Mode(), err)
+	}
+	left, _ := filepath.Glob(filepath.Join(grokHome, "*.tmp"))
+	if more, _ := filepath.Glob(filepath.Join(grokHome, ".*.tmp")); len(left)+len(more) > 0 {
+		t.Fatalf("temp files left behind: %v %v", left, more)
 	}
 }

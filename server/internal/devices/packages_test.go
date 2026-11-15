@@ -190,6 +190,25 @@ func TestNodePackageLookupOrder(t *testing.T) {
 		}
 	})
 
+	t.Run("misnamed own build", func(t *testing.T) {
+		mac := updatetest.Program(t, "personad", "darwin", "arm64")
+		site := newFakeRelease(t)
+		site.publish(t, "v2", overlapping("v2", 2), false, map[string]string{"personad-" + plat: full})
+		d, dir, _ := packageDevices(t, "v2", site.srv.URL)
+		copyTo(t, mac, filepath.Join(dir, "personad-"+plat)) // actually darwin/arm64, not the name's platform
+		pkg, err := d.nodePackageFor(ctx, otherOS, otherArch, nodeproto.ProgramPersonad)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pkg.path != "" {
+			t.Fatalf("a local build for another platform was selected: %+v", pkg)
+		}
+		bin, err := d.fetchPackage(ctx, pkg)
+		if err != nil || update.ProgramOf(bin) != nodeproto.ProgramPersonad {
+			t.Fatalf("the matching release build was not fetched: %s %v", bin, err)
+		}
+	})
+
 	t.Run("persona-node from the release", func(t *testing.T) {
 		site := newFakeRelease(t)
 		site.publish(t, "v2", overlapping("v2", 2), false, map[string]string{"personad-" + plat: full, "persona-node-" + plat: node})
