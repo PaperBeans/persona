@@ -807,6 +807,14 @@ func (s *Service) reportNow(ctx context.Context, t Todo, machine, session, kind,
 // stoppedAgent: c is an agent that has stopped and is read-only (node stopped.go, #4754): its terminal engine keeps its
 // conversation and terminal, and a message to it is refused (agent_stopped).
 func stoppedAgent(c proto.Session) bool {
-	return c.SourceKind == "" && c.Capabilities != nil && !c.Capabilities.Send &&
-		(c.Status == proto.StatusOffline || c.Status == proto.StatusInterrupted)
+	if c.SourceKind == "codex_history" {
+		return c.Capabilities != nil && !c.Capabilities.Send && c.Capabilities.Read && c.Capabilities.Terminal && !c.IsSubagent
+	}
+	if c.Status != proto.StatusOffline && c.Status != proto.StatusInterrupted {
+		return false
+	}
+	if c.SourceKind == "" {
+		return c.Capabilities == nil || !c.Capabilities.Send
+	}
+	return false
 }

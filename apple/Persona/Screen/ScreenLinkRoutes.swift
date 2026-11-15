@@ -28,9 +28,10 @@ enum ScreenRoutes {
     /// Whether this phone asks the hub for a screen session: offered, and the Settings switch on (it is by default).
     nonisolated static var enabled: Bool { offered && ScreenRoutePrefs.automatic }
 
-    /// The video over UDP on direct routes (#7873) stays off in release builds until the check on real devices; a
-    /// DEBUG build launched with -showScreenUDP has it. It needs direct routes on: the same Settings switch covers it.
-    nonisolated static let udpReleaseEnabled = false
+    /// The video over UDP on direct routes (#7873), never on cellular: on in release builds since the live check against
+    /// a real Mac. False turns it off again; a DEBUG build launched with -showScreenUDP has it either way. It needs
+    /// direct routes on: the same Settings switch covers it.
+    nonisolated static let udpReleaseEnabled = true
 
     nonisolated static var udpEnabled: Bool {
         #if DEBUG

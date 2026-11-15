@@ -223,6 +223,7 @@ Apply in order; on a match, do not call the model:
 
 - Purpose `agent.triage`, "Session Triage" (**Settings › Model Settings**, under "Information filtering"; defaults to inheriting the inexpensive Inbox triage model).
 - Input: Agent name, directory / project, the user's request for this turn (`lastTurn` ask), final reply (first and last 1500 characters), other working Agents on the same computer (name + short id), current time, and up to 20 resolved user question/answer pairs from the session's latest 100 interactions, newest first. Each question and answer is capped at 200 runes. Non-question interactions, assistant-authored answers, cancellations and deferrals (including localized canned pause/wait/hold answers) are excluded. A history read failure leaves triage retryable. This history is decision context, not permission to send an automatic wake.
+- The model's input is read once per turn (#8132): a turn whose model call failed is tried again (an unread one within a day, every 10 minutes), and the retry uses what the first attempt read rather than asking the node again (only a read that failed is read again). A session not running is not triaged, and a read its runtime refuses because it would start the agent (`not_loaded`: Paseo loads an Agent it let go to read it) counts as read with nothing in it: the row's last words stand in for the reply, and the retries ask nothing either.
 - JSON output (`server/internal/prompts/agents/triage.md`):
 
   ```json

@@ -443,6 +443,13 @@ const (
 	CodeModesNotRunning = "modes_not_running"
 )
 
+// CodeNotLoaded is what session.items and session.item refuse with when reading the session would start its agent: an
+// engine that lets idle agents go (Paseo's closed and archived ones) loads one to answer for its conversation, which
+// relaunches its provider's process, so a runtime reads such a session only while it is watched (someone has its chat
+// open, docs/integrations/runtimes.md "What to implement", #8132). Nothing was read; the text is in the request's
+// language (apierr.Call). 409.
+const CodeNotLoaded = "not_loaded"
+
 // PendingSwitch is Session.PendingSwitch: the launcher the Agent moves to, the model and effort to run it with ("":
 // the launcher's own default model; the effort it runs with now), and when the user picked it. Agent is the engine
 // ("claude" or "codex") a switch to another engine moves the conversation to (#5054, docs/protocol/protocol.md

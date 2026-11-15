@@ -16,7 +16,7 @@ import (
 func stoppedBoxAgent(sid string) proto.Session {
 	c := boxAgent(sid)
 	c.Status, c.State = proto.StatusOffline, ""
-	c.Capabilities, c.ReadOnlyReason = &proto.SessionCapabilities{Read: true, Terminal: true}, "stopped"
+	c.Capabilities, c.ReadOnlyReason = &proto.SessionCapabilities{Read: true, Terminal: true, StopCause: proto.StopIdle}, "stopped"
 	return c
 }
 
@@ -85,8 +85,8 @@ func TestStoppedAgentRefusalSaysHowToChoose(t *testing.T) {
 }
 
 // From the main conversation, agent_send with resume and task resumes a stopped agent through the user's Resume's
-// node call (session.start with resume_session_id only, so the node keeps its launcher, directory and permission
-// mode), the text as its first message; nothing goes through session.send. The agent becomes a supervised task whose
+// node call (session.start with resume_session_id, prompt, and resume_automatic, so the node keeps its launcher,
+// directory and permission mode), the text as its first message; nothing goes through session.send. The agent becomes a supervised task whose
 // card says it was resumed, and the card also says which agent was resumed and why.
 func TestAssistantResumesAStoppedAgentOnATask(t *testing.T) {
 	s, f := newQuietService(t)
@@ -99,7 +99,7 @@ func TestAssistantResumesAStoppedAgentOnATask(t *testing.T) {
 		t.Fatal(err)
 	}
 	starts := startCalls(f)
-	if len(starts) != 1 || !maps.Equal(starts[0], map[string]any{"resume_session_id": "stop0001", "prompt": "根因清楚了，接着修"}) {
+	if len(starts) != 1 || !maps.Equal(starts[0], map[string]any{"resume_session_id": "stop0001", "prompt": "根因清楚了，接着修", "resume_automatic": true}) {
 		t.Fatalf("session.start: %v", starts)
 	}
 	if sent := sentToAgent(f); len(sent) != 0 {
@@ -123,7 +123,7 @@ func TestAssistantResumesAStoppedAgentOnATask(t *testing.T) {
 	}
 }
 
-// A stopped agent still on an open task of this conversation is resumed without a new task: it stays on that task,
+// An idle-stopped agent still on an open task of this conversation is resumed without a new task: it stays on that task,
 // whose card gets what it was told and the resume's note.
 func TestAssistantResumesAStoppedAgentOnItsOwnTask(t *testing.T) {
 	s, f := newQuietService(t)

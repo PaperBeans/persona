@@ -140,6 +140,7 @@ func (s *Service) postInteractionCard(ctx context.Context, ix proto.Interaction)
 	s.keepBotCardLocked(ix.ID, &botCard{}) // claimed: a second announce of the same card does not post twice
 	b.mu.Unlock()
 	reply, to, topic := s.interactionPlace(ix)
+	ctx = feishuSendAs(ctx, string(ix.Kind), ix.MachineID, ix.SessionID)
 	fallback := ""
 	switch ix.Kind {
 	case proto.IxQuestion:

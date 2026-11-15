@@ -489,7 +489,7 @@ func TestLateTaskDecisionDoesNotSendAfterCompletion(t *testing.T) {
 	}
 }
 
-// The automatic-send guard must not change a deliberate user message from a task card.
+// A task-card message still goes through, but an unknown stop needs a successor, not an implicit resume.
 func TestCompletedTaskDirectMessageStillReachesAgent(t *testing.T) {
 	s, f, todo := newSupervisedService(t)
 	c := idleAgent(time.Now().Add(-time.Hour))
@@ -498,11 +498,18 @@ func TestCompletedTaskDirectMessageStillReachesAgent(t *testing.T) {
 	e := &todoEnv{t: t, s: s, f: f}
 	e.must("PATCH", "/api/v1/todos/"+todo.ID, `{"done":true}`)
 	sent := len(sentToAgent(f))
+	started := len(startCalls(f))
 	if _, err := s.routeToTask(context.Background(), todo.Origin, todo.ID, "Check one more case"); err != nil {
 		t.Fatal(err)
 	}
-	if got := sentToAgent(f)[sent:]; len(got) != 1 || got[0] != "Check one more case" {
-		t.Fatalf("direct user message: %v", got)
+	starts := startCalls(f)[started:]
+	prompt := ""
+	if len(starts) == 1 {
+		prompt, _ = starts[0]["prompt"].(string)
+	}
+	if len(sentToAgent(f)) != sent || len(starts) != 1 || starts[0]["resume_session_id"] != nil ||
+		!strings.HasSuffix(prompt, "Check one more case") {
+		t.Fatalf("unknown stop was resumed or lost the user's message: %v", starts)
 	}
 	s.taskWorking(context.Background(), "box", "s1")
 	if todoNow(s, todo.ID).DoneAt == nil {

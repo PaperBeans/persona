@@ -76,7 +76,7 @@ func (n *Node) runtimeFor(ctx context.Context, method, id string) (*runtimeConn,
 		}
 		err := c.peer.Call(cctx, "session.items", map[string]any{"session_id": id, "limit": 1}, &page)
 		cancel()
-		if err == nil {
+		if hasSession(err) {
 			n.runtimes.claim(c, id)
 			return c, nil
 		}
@@ -86,6 +86,13 @@ func (n *Node) runtimeFor(ctx context.Context, method, id string) (*runtimeConn,
 	}
 	n.runtimes.unclaim(id, gone)
 	return nil, gone
+}
+
+// hasSession: a runtime's answer to session.items {limit: 1} says the session is its own. A page does, and so does a
+// refusal to read it without starting its agent (proto.CodeNotLoaded: an agent Paseo let go, #8132), which only the
+// runtime that has the session gives; the call itself then goes to it, and a watch or a send there starts the agent.
+func hasSession(err error) bool {
+	return err == nil || rpcCode(err) == proto.CodeNotLoaded
 }
 
 // codeNotFound is what a node, or a runtime it asks, answers for a session it does not have (the manager's
@@ -373,7 +380,7 @@ func (n *Node) handOver(ctx context.Context, from *runtimeConn, id string, param
 				cctx, cancel := context.WithTimeout(ctx, runtimeClaimTimeout)
 				err := c.peer.Call(cctx, "session.items", map[string]any{"session_id": id, "limit": 1}, nil)
 				cancel()
-				if err == nil {
+				if hasSession(err) {
 					n.runtimes.claim(c, id)
 					return forward(c)
 				}

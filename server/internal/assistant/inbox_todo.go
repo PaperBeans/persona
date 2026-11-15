@@ -42,10 +42,15 @@ type inboxTodoTarget struct {
 	Title string `json:"title,omitempty"`
 }
 
-// inboxTodoMade is one to-do made from a row.
+// inboxTodoMade is one to-do made from a row. Item is an object, {"id": …}: the iPhone app decodes it so (#7215), and
+// an app installed before #8310 fails the whole answer on a bare string id.
 type inboxTodoMade struct {
-	Item string `json:"item"`
-	Todo Todo   `json:"todo"`
+	Item inboxTodoRow `json:"item"`
+	Todo Todo         `json:"todo"`
+}
+
+type inboxTodoRow struct {
+	ID string `json:"id"`
 }
 
 type inboxTodoReply struct {
@@ -114,7 +119,7 @@ func (s *Service) addInboxTodos(ctx context.Context, targets []inboxTodoTarget, 
 	drop := map[string]Todo{}
 	for id, td := range made {
 		if kept[id] {
-			out.Todos = append(out.Todos, inboxTodoMade{Item: id, Todo: td})
+			out.Todos = append(out.Todos, inboxTodoMade{Item: inboxTodoRow{ID: id}, Todo: td})
 			out.Undo = &inboxTodoUndo{Items: append(undoItems(out.Undo), inboxTodoUndoItem{ID: id, Todo: td.ID})}
 		} else {
 			drop[id] = td

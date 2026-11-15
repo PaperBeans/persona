@@ -25,9 +25,15 @@ import (
 // of headroom). Raised by 1,048 B for the Paseo bridge's agents on one Claude session (one id, the newer agent takes the
 // messages) and its takeover of an archived agent with that agent's own provider (#8131: 460,362 B over main's 459,314 B,
 // with main's 35 B of headroom). Raised by 484 B for the Paseo bridge answering Persona's own tools on every provider
-// and marking Auto Accept launchers (#8141: 460,876 B over main's 460,392 B, with main's 5 B of headroom).
+// and marking Auto Accept launchers (#8141: 460,876 B over main's 460,392 B, with main's 5 B of headroom). Raised by
+// 784 B for the Paseo bridge reading an agent Paseo let go only while its chat is open (#8132: 461,660 B over main's
+// 460,876 B, with main's 5 B of headroom). Raised by 1,795 B for the Paseo bridge's state across a reconnect: no page
+// older than what Paseo said meanwhile, the archive read again, live text ended, archived agents' deletions, a
+// keepalive that sleep does not trip (#8129: 463,455 B over main's 461,660 B, with main's 5 B of headroom). Raised by
+// 2,257 B for the Paseo bridge drawing what another agent hands one (a message, a child's notice, a schedule's run) as a
+// message, a task note or a notice (#8220: 465,712 B over main's 463,455 B, with main's 5 B of headroom).
 func TestDistBudget(t *testing.T) {
-	const budget = 460_881
+	const budget = 465_717
 	_, out := generateIntegrations(t)
 	entries, err := os.ReadDir(out)
 	if err != nil {

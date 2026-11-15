@@ -253,6 +253,8 @@ func TestRPCFailureLocalePreservesOutcomeAndDiagnostics(t *testing.T) {
 		{"send now unsupported", &rpc.Error{Code: "send_now_unsupported", Message: "node's own words", Data: json.RawMessage(`{"delivered":"none"}`)}, "rpc-errors.send_now_unsupported"},
 		{"send now unrecognized", &rpc.Error{Code: "send_now_unrecognized", Message: "node's own words", Data: json.RawMessage(`{"delivered":"none"}`)}, "rpc-errors.send_now_unrecognized"},
 		{"untypable directory", &rpc.Error{Code: "directory_untypable", Message: "node's own words", Data: json.RawMessage(`{"delivered":"none"}`)}, "rpc-errors.directory_untypable"},
+		// a read of an agent its engine let go, which only an open chat starts (Paseo, #8132)
+		{"not loaded", &rpc.Error{Code: proto.CodeNotLoaded, Message: "the runtime's own words"}, "rpc-errors.not_loaded"},
 	}
 	for _, tc := range cases {
 		legacy := httptest.NewRecorder()

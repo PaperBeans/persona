@@ -291,7 +291,14 @@ func (a approval) covers(w *proto.WorkState) bool {
 }
 
 // triedTurn is a turn a triage was attempted on: a failed one is tried again after workRetryTriage, not every tick.
-type triedTurn struct{ turn, at time.Time }
+// read is what an attempt read of the turn (triageRead), which the attempts after it on the same turn use again.
+type triedTurn struct {
+	turn, at time.Time
+	read     *turnRead
+}
+
+// turnRead is a session's latest turn as triage read it: what the user asked in it and its last reply ("" when none).
+type turnRead struct{ ask, reply string }
 
 // triageCfg is manager.json's agents.triage, as the hello has it.
 func (s *Service) triageCfg(ctx context.Context) assistantwire.TriageConfig {

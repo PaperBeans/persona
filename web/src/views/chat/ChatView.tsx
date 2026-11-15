@@ -96,6 +96,7 @@ import { useChatScrollbar } from "./useChatScrollbar";
 import { ChatLineView, closedRecap, closeRecap, dismissedError, dismissError, ErrorBanner, errorKey, OpenRecapLine } from "./Lines";
 import { useTranscript } from "./useTranscript";
 import { useEarlierStretches } from "./useEarlierStretches";
+import { dayRowKey, withDayDividers } from "./day-dividers";
 import { useFoldSearch } from "./useFoldSearch";
 import { DeleteSessionDialog, RenameDialog, RenameSpaceDialog, renameTitle, SessionInfoDialog } from "./SessionDialogs";
 import { PermissionPicker, usePlanMode } from "./PermissionPicker";
@@ -1234,6 +1235,16 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
     [earlier.liveItems, lastLive, outgoing, foldBackground],
   );
   lastLines.current = lines;
+  // a DayLine over the first line of each new calendar day (#8160); day-only keys keep them stable as pages and
+  // midnight arrivals land. Days the earlier stretches already open with a divider are not repeated here.
+  const dayTaken = useMemo(() => new Set(earlier.stretchDays), [earlier.stretchDays]);
+  const dayRows = useMemo(
+    () => withDayDividers(lines).filter((row) => {
+      const d = dayRowKey(row);
+      return d === undefined || !dayTaken.has(d);
+    }),
+    [lines, dayTaken],
+  );
   // the last exchange while the chat is at work, even while a message of yours on its way draws it finished (live needs
   // !outgoing above): its words get no reply bar until the work is over (#5314, SegmentView `busy`)
   const busySegment = useMemo(() => (lastLive ? lines.findLast((line) => line.kind === "segment")?.id : undefined), [lastLive, lines]);
@@ -1925,7 +1936,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
             {/* also over a chat whose first page came back empty (#2450): it reads as loaded and empty, not as still loading;
                 not under a notice that the chat's details are missing */}
             {((!earlier.hasMore && !tr.loading && (tr.items.length > 0 || earlier.stretches.length > 0 || (!tr.error && !starting && !session?.start_error && !noDetails))) || opening) && <div className="text-center text-[11.5px] text-ink-3">{session?.cwd && !assistant ? t("chat-chatview.started_in", { path: shortPath(session.cwd) }) : t("chat-chatview.chat_start")}</div>}
-            {opening && <DayLine date={startOfDay(Date.now())} />}
+            {opening && !dayTaken.has(new Date().toLocaleDateString("sv")) && <DayLine date={startOfDay(Date.now())} />}
             {waitsFirst && !tr.items.length && (
               // a Codex opened with no first message (lib/codex-waiting.ts): it waits for one, from here or its terminal
               <p data-testid="codex-waiting" className="rounded-control bg-inset px-3 py-2 text-[13px] leading-relaxed text-ink-2">
@@ -1975,21 +1986,23 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
                       />
                     ),
                   ])
-                : lines.flatMap((line) => [...failedBefore(line.id), open?.line === line.id ? (
-                <OpenRecapLine key={line.id} open={open} onClose={dismissRecap} />
-              ) : line.id === bannerError?.id ? null : (
+                : dayRows.flatMap((row) => row.kind === "day" ? (
+                  <div key={row.id} data-day-divider={row.id}><DayLine date={row.date} /></div>
+                ) : [...failedBefore(row.line.id), open?.line === row.line.id ? (
+                <OpenRecapLine key={row.line.id} open={open} onClose={dismissRecap} />
+              ) : row.line.id === bannerError?.id ? null : (
                 <ChatLineView
-                  key={line.id}
-                  line={line}
+                  key={row.line.id}
+                  line={row.line}
                   // only a live line streams: the others keep their memo
                   mid={mid}
                   sid={sid}
-                  streaming={(line.kind === "segment" || line.kind === "supervision") && line.live ? tr.streaming || undefined : undefined}
+                  streaming={(row.line.kind === "segment" || row.line.kind === "supervision") && row.line.live ? tr.streaming || undefined : undefined}
                   expandFold={tr.expandFold}
-                  limit={line.kind === "apiError" && line.id === limitOn ? limitLine : undefined}
+                  limit={row.line.kind === "apiError" && row.line.id === limitOn ? limitLine : undefined}
                   assistant={assistant}
-                  offscreen={offscreen(line)}
-                  busy={line.id === busySegment || undefined}
+                  offscreen={offscreen(row.line)}
+                  busy={row.line.id === busySegment || undefined}
                 />
               )])}
               </CardConversation.Provider>

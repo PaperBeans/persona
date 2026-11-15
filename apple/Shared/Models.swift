@@ -1210,6 +1210,11 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     /// A model pick goes through POST …/modes rather than a typed `/model` (#6294): the node said it takes one. Such a
     /// session's menus offer its launcher's list only, never Claude Code's fixed aliases.
     var picksModelByModes: Bool { capabilities?.model == true }
+    /// `/model` typed as a message switches its model: Claude Code in a terminal pane, which reads the command itself
+    /// (the web's `paneClaude && canSwitchModel`). Only such a session gets `/model` in the composer's "/" list. A
+    /// runtime's session (Paseo's Grok, #8144) would get the words as a plain message; its model menus switch it
+    /// through POST …/modes instead.
+    var takesModelCommand: Bool { switchesModel && isClaude && !hasSource && paneID != nil && canTerminal }
     /// Rewind Code and Chat is offered as well (the web's `rewind_code ?? !rewind`): the node's `rewind_code` where it
     /// declares rewind (#6294); a Claude terminal, which declares nothing, keeps both choices.
     var rewindsCode: Bool { capabilities?.rewindCode ?? (capabilities?.rewind != true) }
@@ -1288,12 +1293,26 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     /// Only the thinking effort changes from the phone, among `efforts` (the hub says so by listing them): a Codex
     /// thread driven through its app-server. Claude Code and the assistant change both, the rest neither.
     var setsEffortOnly: Bool { canSend && !assistant && !isClaude && !(efforts ?? []).isEmpty }
-    /// Who the user talks to in this session: "Claude", "Codex", "TRAEX", or what the hub calls a runtime's agent ("DSH").
+    /// Who the user talks to in this session: "Claude", "Codex", "TRAEX", or what the hub calls a runtime's agent ("DSH",
+    /// a Paseo provider's label such as "Grok"). Never the engine of several providers that runs it: a row that names
+    /// only Paseo (no label of its own, or the node's "Paseo") names its provider by its launcher instead (#8144).
     var agentLabel: String {
         if isCodex { return "Codex" }
         if isTraex { return "TRAEX" }
         if isClaude { return "Claude" }
+        if Self.namesOnlyEngine(agent: agent, label: agentLabelHint), let launcher, !launcher.isEmpty { return launcher }
         return agentLabelHint ?? agent ?? "Claude"
+    }
+    /// The engines that run agents of several providers and report every agent that is neither Claude Code nor Codex
+    /// under their own id (Paseo's Grok, Kimi, Cursor…: `agent` "paseo"). Their name says nothing about who answers.
+    static let providerEngines: Set<String> = [MachineEngine.paseo.rawValue]
+    /// `label` names only the engine that runs `agent`, not its provider: an engine of several providers with no label
+    /// for it, or its own name, which the node puts on a row or a card that has none ("Paseo"). The session's provider
+    /// (its launcher, `agentLabel`) is the better name then.
+    static func namesOnlyEngine(agent: String?, label: String?) -> Bool {
+        guard let agent, providerEngines.contains(agent.lowercased()) else { return false }
+        let name = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty || name.caseInsensitiveCompare(agent) == .orderedSame
     }
     /// Resume in Terminal (#5521): whether the chat's ⋯ offers to bring it back in a terminal on its computer
     /// (`TerminalResume`); `machine` is its computer.

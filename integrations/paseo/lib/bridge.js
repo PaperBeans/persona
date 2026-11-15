@@ -20,7 +20,6 @@ import { createLineage } from './lineage.js'
 import { personaMcpServers } from './mcp.js'
 import { PaseoClient } from './paseo.js'
 
-export const BRIDGE_VERSION = '0.1.0'
 const AWAY_GRACE = 30_000 // ms: Paseo gone this long and the bridge leaves the node (its sessions go with it)
 const CALL_WAIT = 25_000 // ms: the node waits 30 s for a start or a send; Paseo's answer may take longer
 const LIST_MAX = 300 // sessions listed at most (those running or waiting always)
@@ -37,9 +36,10 @@ const ARCHIVED_MAX = 500 // archived agents kept (the latest)
 // LIST_MAX: as many as the node lists sessions not running, the latest 80 archived in the last 7 days.
 const ARCHIVED_DAYS = 7
 const ARCHIVED_ROWS = 80
-// Paseo tells that an agent was deleted only to the client that deleted it (whatBecameOf). Any other sees an agent that
-// ran closed, and Paseo is asked for it this long after, twice: it closes an agent before it removes its record. Of an
-// agent that did not run nothing is seen: the directory is read again this often (sweep).
+// Paseo 0.15 tells every client that an agent was deleted, archived ones too (the list's removal: whatBecameOf). Should
+// that be missed (Paseo 0.14 told only the client that deleted it), an agent that ran is seen closed, and Paseo is asked
+// for it this long after, twice: it closes an agent before it removes its record. And the directory is read again this
+// often (sweep), which also takes what Paseo has now of an agent whose update was lost.
 const CLOSED_CHECKS = [1000, 5000] // ms
 const SWEEP_EVERY = 120_000 // ms
 // Whole timelines kept at most (the most recently read; a watched agent's stays whatever the count): each is an
@@ -68,6 +68,8 @@ const EXPIRY_SLACK = 60_000 // ms: a dismissal this near the end is its time run
 const AT_ONCE = 5000 // ms
 // A launcher check (check): the probe's answer within this, and the rest of the node's 90 s for creating and cleaning up.
 const CHECK_WAIT = 70_000 // ms
+// A read of an agent Paseo let go that no watch asked for (timeline): refused as not_loaded, which the hub words.
+const NOT_LOADED = "This agent isn't running in Paseo: its conversation is read while its chat is open. Nothing was read."
 
 /**
  * @param {{ paseo?: object, log?: (msg: string) => void, connect?: (path: string) => import('node:net').Socket }} [deps]
@@ -84,7 +86,7 @@ const CHECK_WAIT = 70_000 // ms
  */
 export function createPaseoBridge(deps = {}, options = {}) {
   const log = deps.log ?? (() => {})
-  const paseo = deps.paseo ?? new PaseoClient({ home: options.home, log, appVersion: `persona-paseo-bridge/${BRIDGE_VERSION}` })
+  const paseo = deps.paseo ?? new PaseoClient({ home: options.home, log })
   const awayGrace = options.awayGrace ?? AWAY_GRACE
   const callWait = options.callWait ?? CALL_WAIT
   const listMax = options.listMax ?? LIST_MAX
@@ -132,6 +134,10 @@ export function createPaseoBridge(deps = {}, options = {}) {
   const keptIds = new Map()
   const pinning = new Set()
   let loading = false
+  // The readings of Paseo's directories under way (loadAgents, loadWorkspaces, sweep), each { kind: 'agents' |
+  // 'workspaces', told: the ids Paseo told of meanwhile, cards: whether a card's event counts }. A page can be older
+  // than what Paseo told while it was read, so a reading takes no page's copy of those (told).
+  const readings = new Set()
   const lineage = createLineage({ dirs: () => Object.values(configProviders).map((p) => p.configDir).filter(Boolean),
     home: options.claudeHome, env: options.claudeEnv })
   const timelines = new Map() // agent id → { key, at, tl, history } (the last whole read), the least recently read first
@@ -480,11 +486,12 @@ export function createPaseoBridge(deps = {}, options = {}) {
 
   /**
    * What became of an agent Paseo's list no longer has, or may no longer have. A removal from the list does not say
-   * why: archived, deleted, or only hidden (its provider switched off). And Paseo tells that an agent was deleted only
-   * to the client that deleted it: any other sees an agent that ran closed (closedSoon), and of one that did not,
-   * nothing (sweep). Asked for the agent, Paseo answers with an archived one's record, and with none for a deleted one.
-   * Only an archived agent's session stays (noteArchived): a deleted conversation is gone, as it is in Paseo, and an
-   * update of it that comes late does not list it again.
+   * why: archived, deleted, or only hidden (its provider switched off); of an archived agent kept here, deleted or its
+   * record changed. Asked for the agent, Paseo answers with an archived one's record, and with none for a deleted one.
+   * Should a removal be missed (Paseo 0.14 told a deletion only to the client that made it), an agent that ran is seen
+   * closed (closedSoon), and the directory is read again (sweep). Only an archived agent's session stays
+   * (noteArchived): a deleted conversation is gone, as it is in Paseo, and an update of it that comes late does not list
+   * it again.
    */
   async function whatBecameOf(agentId) {
     const was = agents.get(agentId)
@@ -524,33 +531,56 @@ export function createPaseoBridge(deps = {}, options = {}) {
   }
 
   /**
-   * The agents deleted in Paseo that nothing told of (whatBecameOf): its directory is read again, and Paseo is asked
-   * for each agent listed here that the directory no longer has, and for each archived one kept here that its archive
-   * no longer has. Asked, not taken as gone: an agent that changed between the reading of two pages is on neither.
-   * The archived ones it still has are taken as it has them now: Paseo tells no list of a change to one (a rename in
-   * its own app).
+   * Paseo's directory read again, for what nothing told of: an agent deleted (whatBecameOf), an update lost or undone by
+   * an older copy. Paseo is asked for each agent listed here that the directory no longer has, and for each archived
+   * one kept here that its archive no longer has. Asked, not taken as gone: an agent that changed between the reading of
+   * two pages is on neither. An agent it lists that differs from the copy here is taken as it has it now, unless Paseo
+   * told of the agent while the pages were read (told: the page may be the older then). The archived ones it still has
+   * are taken as it has them now: Paseo tells no list of a change to one (a rename in its own app). And its archive is
+   * read as at connect until that succeeds once (readArchive).
    */
   async function sweep() {
     if (sweeping || !runtimeOn || !paseo.connected) return
     sweeping = true
+    // A card's event counts too: the directory's update that carries the card can come after the page. The agents are
+    // listed here, and that update comes (at connect it may never come: loadAgents).
+    const reading = { kind: 'agents', told: new Set(), cards: true }
+    readings.add(reading)
     try {
       const listed = [...agents.keys()]
       const named = [...archived.keys()]
       const missing = []
       if (listed.length) {
         const there = new Set()
+        let changed = false
+        let whole = false
         let cursor
-        for (let i = 0; ; i++) {
-          if (i === PAGES_MAX) return // more agents than are read at connect: which of them are gone cannot be told
+        for (let i = 0; i < PAGES_MAX; i++) {
           const p = await paseo.request('fetch_agents_request', { page: cursor ? { limit: pageSize, cursor } : { limit: pageSize } }, { timeoutMs: 60_000 })
-          if (!Array.isArray(p?.entries)) return
-          for (const e of p.entries) if (e?.agent?.id) there.add(e.agent.id)
-          if (!p.pageInfo?.hasMore || !p.pageInfo.nextCursor) break
+          if (!Array.isArray(p?.entries)) break
+          for (const e of p.entries) {
+            const id = e?.agent?.id
+            if (!id) continue
+            there.add(id)
+            // As upsert keeps it: a page lists no features of an agent Paseo has not loaded, and those here stand (withFeatures).
+            const was = agents.get(id)
+            const now = Array.isArray(was?.agent.features) && !Array.isArray(e.agent.features) ? { ...e.agent, features: was.agent.features } : e.agent
+            if (reading.told.has(id) || JSON.stringify(was?.agent) === JSON.stringify(now)) continue
+            upsert(e.agent, e.project ?? undefined)
+            if (agents.get(id) !== was) changed = true // one upsert refuses (a launcher check's probe) is no change
+          }
+          if (!p.pageInfo?.hasMore || !p.pageInfo.nextCursor) {
+            whole = true
+            break
+          }
           cursor = p.pageInfo.nextCursor
         }
-        missing.push(...listed.filter((id) => !there.has(id)))
+        if (changed) rt.sessionsChanged()
+        // More agents than are read at connect (or a page Paseo did not give): which of them are gone cannot be told.
+        if (whole) missing.push(...listed.filter((id) => !there.has(id) && !reading.told.has(id)))
       }
-      if (named.length) {
+      if (!archiveRead) await readArchive()
+      else if (named.length) {
         const there = new Set()
         let changed = false
         for (const e of await readArchived()) {
@@ -572,14 +602,16 @@ export function createPaseoBridge(deps = {}, options = {}) {
       log(`paseo: reading its directory again: ${err.message}`)
     } finally {
       sweeping = false
+      readings.delete(reading)
     }
   }
 
   /**
    * The Claude sessions of the agents archived lately that are not in the list again under another agent. Nothing
-   * (the node keeps what it was told before) until Paseo's archive was read once: the bridge was just started and
-   * knows none of them yet. Not the transcript of an agent that keeps an id of its own: its row names it (archivedRows),
-   * and named here it would be listed under the transcript's id too while that row is not there.
+   * (the node keeps what it was told before) until Paseo's archive was read once (readArchive): the bridge was just
+   * started, or that read failed, and it knows none of them yet. Not the transcript of an agent that keeps an id of its
+   * own: its row names it (archivedRows), and named here it would be listed under the transcript's id too while that row
+   * is not there.
    */
   function unlistedTranscripts() {
     if (!archiveRead) return undefined
@@ -640,6 +672,12 @@ export function createPaseoBridge(deps = {}, options = {}) {
   paseo.on('connected', (info) => void onPaseo(info))
   paseo.on('disconnected', (why) => {
     log(`paseo: disconnected (${why})`)
+    // The live text ends with the connection: Paseo tells a new connection none of what was written meanwhile, nor the
+    // end of a turn that ended meanwhile. What comes after the reconnect is a live text of its own.
+    for (const [sessionId, w] of watches) {
+      if (w.live.text) rt.streamEnd(sessionId)
+      w.live = { key: '', text: '' }
+    }
     clearTimeout(awayTimer)
     // Paseo restarting (an update) comes back in seconds: the sessions stay meanwhile. Longer, and the engine is away.
     awayTimer = setTimeout(() => {
@@ -686,12 +724,20 @@ export function createPaseoBridge(deps = {}, options = {}) {
     askPending()
     rt.sessionsChanged(0)
     // Not needed to list what Paseo lists, so not waited for: a Paseo that cannot say leaves its archived agents'
-    // sessions unnamed.
-    void loadArchived().catch((err) => log(`paseo: reading its archived agents: ${err.message}`)).then(() => {
-      archiveRead = true
-      keepShared()
-      rt.sessionsChanged()
-    })
+    // sessions unnamed meanwhile.
+    void readArchive().catch((err) => log(`paseo: reading its archived agents: ${err.message}`))
+  }
+
+  /**
+   * Paseo's archive read (loadArchived), at connect and by the sweep until that succeeds once: until then the node is
+   * told nothing of the archived agents' sessions (unlistedTranscripts), and keeps what it was told before. A read that
+   * failed is no news that there are none.
+   */
+  async function readArchive() {
+    await loadArchived()
+    archiveRead = true
+    keepShared()
+    rt.sessionsChanged()
   }
 
   /**
@@ -715,11 +761,20 @@ export function createPaseoBridge(deps = {}, options = {}) {
   async function loadAgents() {
     deleted.clear() // the directory is read afresh: what it lists is there
     const seen = new Set()
+    // What the subscription tells of an agent while the pages are read is newer than a page's copy of it: no page's
+    // copy of those is taken (told), and they count as seen. Paseo sends what changed while it built the first page
+    // right after its reply, often in the same read, so it is handled before this goes on with the page; and the end of
+    // a turn leaves updatedAt as it was, so upsert cannot tell the older copy (an agent left Working, an answered card
+    // back, an archived agent listed again). Only the subscription's own updates count: a card's event can come before
+    // the subscription is made, and then no update with the card follows, so skipping the page would keep the copy from
+    // before the reconnect (the sweep counts cards).
+    const reading = { kind: 'agents', told: new Set(), cards: false }
+    readings.add(reading)
     const take = (list) => {
       for (const e of list ?? []) {
         if (!e?.agent?.id) continue
         seen.add(e.agent.id)
-        upsert(e.agent, e.project)
+        if (!reading.told.has(e.agent.id)) upsert(e.agent, e.project)
       }
     }
     // The lines of forks are read once every agent is known (keepLines): none is followed into another's session.
@@ -734,9 +789,10 @@ export function createPaseoBridge(deps = {}, options = {}) {
         info = p?.pageInfo
       }
       // Gone while Paseo was away.
-      if (!info?.hasMore) for (const id of [...agents.keys()]) if (!seen.has(id)) remove(id)
+      if (!info?.hasMore) for (const id of [...agents.keys()]) if (!seen.has(id) && !reading.told.has(id)) remove(id)
     } finally {
       loading = false
+      readings.delete(reading)
     }
     keepLines()
   }
@@ -776,19 +832,28 @@ export function createPaseoBridge(deps = {}, options = {}) {
    */
   async function loadWorkspaces() {
     const seen = new Set()
+    // As for the agents (loadAgents): what the subscription tells of a workspace while the pages are read (one archived,
+    // one made) is newer than a page's copy, which is not taken for it; it counts as seen.
+    const reading = { kind: 'workspaces', told: new Set(), cards: false }
+    readings.add(reading)
     const take = (list) => {
-      for (const d of list ?? []) if (keepWorkspace(d)) seen.add(d.id)
+      for (const d of list ?? []) if (reading.told.has(d?.id) || keepWorkspace(d)) seen.add(d.id)
     }
-    const first = await paseo.subscribe('fetch_workspaces_request', { subscribe: {}, page: { limit: pageSize } }, onWorkspaceUpdate, { timeoutMs: 60_000 })
-    take(first?.entries)
-    let info = first?.pageInfo
-    for (let i = 1; info?.hasMore && info.nextCursor && i < PAGES_MAX; i++) {
-      const p = await paseo.request('fetch_workspaces_request', { page: { limit: pageSize, cursor: info.nextCursor } }, { timeoutMs: 60_000 })
-      take(p?.entries)
-      info = p?.pageInfo
+    let info
+    try {
+      const first = await paseo.subscribe('fetch_workspaces_request', { subscribe: {}, page: { limit: pageSize } }, onWorkspaceUpdate, { timeoutMs: 60_000 })
+      take(first?.entries)
+      info = first?.pageInfo
+      for (let i = 1; info?.hasMore && info.nextCursor && i < PAGES_MAX; i++) {
+        const p = await paseo.request('fetch_workspaces_request', { page: { limit: pageSize, cursor: info.nextCursor } }, { timeoutMs: 60_000 })
+        take(p?.entries)
+        info = p?.pageInfo
+      }
+      // Gone while Paseo was away.
+      if (!info?.hasMore) for (const id of [...workspaces.keys()]) if (!seen.has(id) && !reading.told.has(id)) workspaces.delete(id)
+    } finally {
+      readings.delete(reading)
     }
-    // Gone while Paseo was away.
-    if (!info?.hasMore) for (const id of [...workspaces.keys()]) if (!seen.has(id)) workspaces.delete(id)
     workspacesRead = true
     scheduleWorkspaces(0)
   }
@@ -807,6 +872,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
   function onWorkspaceUpdate(inner) {
     const p = inner.payload
     if (inner.type !== 'workspace_update' || !p) return
+    told('workspaces', p.kind === 'upsert' ? p.workspace?.id : p.id)
     if (p.kind === 'upsert' && p.workspace) keepWorkspace(p.workspace)
     else if (p.kind === 'remove' && p.id) workspaces.delete(p.id)
     scheduleWorkspaces()
@@ -853,16 +919,27 @@ export function createPaseoBridge(deps = {}, options = {}) {
     return workspaceRow(d, { spaceId, spaceName: spaceId ? s.names.get(spaceId) : undefined, canon })
   }
 
+  /** Paseo told of id (an agent's or a workspace's, by kind): the readings under way take no page's copy of it. */
+  function told(kind, id, card = false) {
+    if (typeof id !== 'string' || !id) return
+    for (const r of readings) if (r.kind === kind && (r.cards || !card)) r.told.add(id)
+  }
+
   function onAgentUpdate(inner) {
     const p = inner.payload
     if (inner.type !== 'agent_update' || !p) return
+    told('agents', p.kind === 'upsert' ? p.agent?.id : p.agentId)
     if (p.kind === 'upsert' && p.agent) {
       upsert(p.agent, p.project ?? undefined)
       pin(agents.get(p.agent.id)?.agent)
     } else if (p.kind === 'remove' && p.agentId) {
       // Paseo also sends a removal for every change of an agent it never listed (its own internal ones, which name
-      // the others): only one that was listed is asked about.
-      if (!agents.has(p.agentId)) return
+      // the others): only one that was listed is asked about, and an archived one kept here (Paseo 0.15 tells every
+      // client of a deletion, archived agents too), which stays until Paseo says it is gone.
+      if (!agents.has(p.agentId)) {
+        if (archived.has(p.agentId)) void whatBecameOf(p.agentId)
+        return
+      }
       remove(p.agentId)
       void whatBecameOf(p.agentId)
     }
@@ -871,6 +948,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
 
   function onSessionEvent(inner) {
     const p = inner.payload ?? {}
+    if (inner.type === 'agent_permission_request' || inner.type === 'agent_permission_resolved') told('agents', p.agentId, true)
     switch (inner.type) {
       case 'agent_permission_request': {
         const a = agents.get(p.agentId)?.agent
@@ -1259,17 +1337,39 @@ export function createPaseoBridge(deps = {}, options = {}) {
     return res
   }
 
-  /** An agent's whole conversation as items (read again only when the agent moved). */
-  async function timeline(agent) {
+  /**
+   * Whether Paseo let the agent go: closed (its idle runtime collected) or archived (archivedRows). Paseo loads such an
+   * agent to answer any request about its timeline, relaunching its provider (0.15.4 ensureAgentLoaded: no read leaves
+   * it stored), so only a person loads one: a watch of its chat, a send, a rewind, a mode change (#8132).
+   */
+  const unloaded = (agent) => agent?.status === 'closed' || Boolean(agent?.archivedAt)
+
+  /**
+   * An agent's whole conversation as items (read again only when the agent moved). load: the read may load an agent
+   * Paseo let go (unloaded), as a watch's may. Any other read of one (the manager's, an app's background sync) gets the
+   * last whole read while that is all of it (taken once it stopped, at the updatedAt it has now: a stored conversation
+   * does not change), else is refused (not_loaded), asking Paseo nothing.
+   */
+  async function timeline(agent, o = {}) {
     const key = `${agent.updatedAt}|${agent.status}`
     const c = timelines.get(agent.id)
     if (c && c.key === key && (agent.status !== 'running' || Date.now() - c.at < 500)) {
       keepTimeline(agent.id, c)
       return c
     }
+    if (unloaded(agent) && !o.load) {
+      if (c?.stopped && c.updatedAt === agent.updatedAt) {
+        keepTimeline(agent.id, c)
+        return c
+      }
+      throw new RpcError(NOT_LOADED, 'not_loaded')
+    }
     const res = await fetchTimeline(agent.id)
-    const tl = timelineItems(res.entries, { maxSeq: res.window?.maxSeq, running: isRunning(res.agent ?? agent), echoes })
-    const out = { key, at: Date.now(), tl, history: history(agent.id, res.epoch), epoch: res.epoch }
+    const running = isRunning(res.agent ?? agent)
+    const tl = timelineItems(res.entries, { maxSeq: res.window?.maxSeq, running, echoes })
+    // When the read is all of the conversation: Paseo answers with the agent as it is once loaded.
+    const out = { key, at: Date.now(), tl, history: history(agent.id, res.epoch), epoch: res.epoch,
+      updatedAt: res.agent?.updatedAt ?? agent.updatedAt, stopped: !running }
     keepTimeline(agent.id, out)
     if (tl.lastText) lastTexts.set(agent.id, tl.lastText)
     return out
@@ -1292,9 +1392,14 @@ export function createPaseoBridge(deps = {}, options = {}) {
 
   const isRunning = (a) => a?.status === 'running' || a?.status === 'initializing' || Boolean(a?.activeTurn)
 
+  // A read may load an agent Paseo let go (timeline) while its session is watched: every app watches a chat it opens
+  // (the web and Android just after their first page, which the watch's backlog sends again), and the manager the turn
+  // of a message a channel delivered; nothing else watches.
+  const mayLoad = (sessionId) => watches.has(sessionId)
+
   async function items(params) {
     const agent = agentFor(params.session_id)
-    const t = await timeline(agent)
+    const t = await timeline(agent, { load: mayLoad(params.session_id) })
     const res = page(t.tl.items, params, { history: t.history, toSeq: t.tl.toSeq })
     const w = watches.get(params.session_id)
     if (w && !w.transcript && params.after_seq !== undefined && typeof res.to_seq === 'number') {
@@ -1308,7 +1413,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
 
   async function cursor(sessionId) {
     const agent = agentFor(sessionId)
-    const t = await timeline(agent)
+    const t = await timeline(agent, { load: mayLoad(sessionId) }) // asked by a watch as it starts
     const w = watches.get(sessionId)
     if (w && !w.transcript) {
       w.last = t.tl.toSeq
@@ -1320,7 +1425,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
 
   async function item(params) {
     const agent = agentFor(params.session_id)
-    const t = await timeline(agent)
+    const t = await timeline(agent, { load: mayLoad(params.session_id) })
     const it = t.tl.items.find((x) => x.id === params.item_id)
     if (!it) throw new RpcError(`no item ${params.item_id}`, 'not_found')
     return it
@@ -2185,6 +2290,9 @@ export function createPaseoBridge(deps = {}, options = {}) {
     try {
       const agent = agents.get(w.agentId)?.agent
       if (!agent || !paseo.connected) return
+      // Paseo let it go while its chat was open: a stored conversation does not change, and reading it would load it
+      // again each time (#8132). A watch moved to another agent (switched) reads the one it shows now, as opening does.
+      if (unloaded(agent) && !w.switched) return
       // Another agent's timeline (switched) is read whole, whatever a page read of it set meanwhile.
       const incremental = !w.switched && w.epoch !== undefined && w.safe !== undefined
       let res = await fetchTimeline(agent.id, incremental ? { epoch: w.epoch, seq: w.safe } : undefined)

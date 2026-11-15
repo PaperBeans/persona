@@ -320,6 +320,9 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 	j = 0
 	for i := range out {
 		s := &out[i]
+		if !s.Assistant && s.PaneID != "" && s.Status != proto.StatusOffline && s.Status != proto.StatusInterrupted {
+			n.observedRunning(s.SessionID)
+		}
 		if earlier[s.SessionID] || !n.sessionScopeAllows(s.Cwd) {
 			continue
 		}

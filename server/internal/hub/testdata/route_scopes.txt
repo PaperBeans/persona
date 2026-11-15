@@ -463,6 +463,7 @@ inbox.write          POST /api/v1/inbox/{id}/task-link/recheck
 agents.control       POST /api/v1/interactions/{id}/choose
 agents.control       POST /api/v1/interactions/{id}/reanswer
 agents.control       POST /api/v1/interactions/{id}/resolve
+-                    POST /api/v1/iphone/try
 -                    POST /api/v1/kb-trash/{id}/restore
 -                    POST /api/v1/later/{id}/handled
 -                    POST /api/v1/launchers

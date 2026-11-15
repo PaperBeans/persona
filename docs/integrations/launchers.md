@@ -140,6 +140,7 @@ What these agents do not do here, and why:
 - No conversation in the app for cursor and agy. herdr drives the pane; reading their transcripts would be a runtime of their own (agy's `agy acp` is the candidate, `docs/plans/plan-antigravity.md`), which this change does not add.
 - No phone approval cards for cursor and agy. pi's come from its extension; the other two have no Persona hook, so their own dialogs stay on the terminal.
 - Supervision (`report_to_supervisor`, done checks) reaches an agent Persona can send to. pi qualifies once its extension is in; cursor and agy qualify for a message through herdr, and nothing more.
+- **No read-only start.** A `task_plan` task with `readonly: true` is saved with `permission: plan` and dispatched as `permission_mode: plan` (`server/internal/assistant/tasks.go`, `normalizeReadonlyPermission`). Claude is then switched to `bypassPermissions` with the constraint written into the first message, and Codex gets `--sandbox read-only`; these three have neither, so the node refuses the start before any pane opens (`readonly_unsupported`, `server/internal/node/control.go`). The task stays unstarted with that error — it is not started writable, and nothing fails silently. A prompt-only constraint would not hold an agent whose own tools write files, and Persona does not substitute another launcher: a read-only task for one of these agents needs a Claude or Codex launcher instead.
 
 ## Running Persona-managed launchers
 
