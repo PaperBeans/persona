@@ -6,6 +6,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import persona.core.contracts.PaseoAgent
 import persona.core.contracts.api.AgentModel
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
@@ -54,8 +55,11 @@ internal fun NewAgentModelSheet(
         LaunchedEffect(Unit) { onDismiss() }
         return
     }
+    // A Paseo provider has no terminal and its own name: its note names only it, never the engine (#8143).
+    val agent = list.agent.ifBlank { state.agentType }
     JModelSheet(
-        note = stringResource(R.string.agents_model_sheet_note, state.modelLauncher, list.agent.ifBlank { state.agentType }.agentLabel()),
+        note = if (agent == PaseoAgent) stringResource(R.string.agents_model_sheet_note_provider, state.modelLauncher)
+            else stringResource(R.string.agents_model_sheet_note, state.modelLauncher, agent.agentLabel()),
         models = list.models, selected = state.model, defaultDetail = defaultModelDetail(agentResources(), state),
         loading = state.models.loading, error = state.models.error?.text(),
         onPick = onPick, onRefresh = onRefresh, onDismiss = onDismiss, initialQuery = initialQuery,

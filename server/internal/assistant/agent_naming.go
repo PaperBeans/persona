@@ -58,6 +58,7 @@ type agentNamingBook struct {
 	interval  time.Duration // zero is the production pass interval; tests use a shorter queue delay
 	timer     *time.Timer
 	timerSeq  uint64
+	runs      sync.WaitGroup     // active naming passes; database-backed test fixtures wait before closing their store
 	requests  singleflight.Group // one model call per session for requested names (agent_naming_request.go)
 	// beforeRequest lets a concurrency test observe every caller reaching the singleflight gate; nil in production.
 	beforeRequest func()
@@ -219,11 +220,12 @@ func (s *Service) putAgentNameLocked(ctx context.Context, key string, rec agentN
 // Queue-local one-shot timers drain existing bad names even without another node event.
 // They stop once no candidate is due; periodic refresh still requires new node output.
 func (s *Service) agentNamesChanged(d DeviceSessions) {
-	if s.runCtx().Err() != nil {
-		return
-	}
 	b := &s.agentNames
 	b.mu.Lock()
+	if s.runCtx().Err() != nil {
+		b.mu.Unlock()
+		return
+	}
 	if b.pending == nil {
 		b.pending = map[string][]proto.Session{}
 	}
@@ -252,8 +254,10 @@ func (s *Service) agentNamesChanged(d DeviceSessions) {
 		interval = 30 * time.Second
 	}
 	b.scanAfter = time.Now().Add(interval)
+	b.runs.Add(1)
 	b.mu.Unlock()
 	go func() {
+		defer b.runs.Done()
 		attempted := false
 		defer func() {
 			b.mu.Lock()

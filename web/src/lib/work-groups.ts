@@ -361,6 +361,21 @@ export function workDuration(msValue: number, opts: { minimumSeconds?: number; a
   return s || opts.alwaysShowRemainder ? t("lib-work-groups.dur_minutes_seconds", { m, s }) : t("lib-work-groups.dur_minutes", { m });
 }
 
+/** A tool call's own elapsed time, from its call timestamp to its result's (#8163). Both are transcript timestamps
+ *  rather than provider-recorded timing; null when either is missing or unparseable, or the result predates the call. */
+export function toolDurationMs(s: ToolStep): number | null {
+  const start = tsMs(s.use.ts);
+  const end = tsMs(s.result?.ts);
+  return start !== null && end !== null && end >= start ? end - start : null;
+}
+
+/** The quiet duration shown on an action row: a real span of a second or more. A sub-second or unfinished call says
+ *  nothing rather than guessing. */
+export function toolDurationLabel(s: ToolStep): string | null {
+  const ms = toolDurationMs(s);
+  return ms !== null && ms >= 1000 ? workDuration(ms) : null;
+}
+
 /** A finished group's title: "Worked for 1m 5s" ("Work details" without its times), and what it read when that is all
  *  it did directly (an outer timeline's tools are in its inner groups, so it says only how long). */
 export function groupTitle(g: WorkGroupNode): string {

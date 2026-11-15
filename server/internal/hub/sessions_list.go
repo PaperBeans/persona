@@ -2,6 +2,7 @@ package hub
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"errors"
@@ -10,7 +11,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/sessionlist"
@@ -39,6 +42,11 @@ const (
 	// with machine_id (the children folded under that session), docs/protocol/protocol.md "Session hierarchy" (#5120).
 	// An older hub reads neither key, so an app sends them only to a hub that says this.
 	featureSessionsHierarchy = "sessions_hierarchy"
+	// featureSessionsSideFold: the rows carry the side-session fold (folded_as "side", folded_side, the children's
+	// sides rollup; docs/protocol/protocol.md "Session hierarchy", #7944), and a client folds side sessions into their
+	// parent's chat. The fold is the managers' (assistant/fleet_fold.go): the hub lists the feature only while every
+	// manager that carries Agents names it (sessionsSideFoldFeatures).
+	featureSessionsSideFold = assistantwire.CapabilitySessionsSideFold
 	// featureSessionsCatalog: a paged GET /api/v1/sessions takes catalog=1 (the projects and spaces of the filtered
 	// list, a repository's directories on every computer as one project: sessions_catalog.go), and
 	// place=["<machine>","<project>"] and space=["<machine>","<group>"], both repeatable (the sessions at those
@@ -55,6 +63,24 @@ const (
 	// filters on the paged list, docs/protocol/protocol.md "Quick filters" (#6662). An older hub ignores both keys.
 	featureSessionsQuickFilters = "sessions_quick_filters"
 )
+
+// sessionsSideFoldFeatures is sessions_side_fold while every manager that carries Agents (the default one, each
+// connected one and each computer's owner) is connected and folds side sessions, as agent_session_archives is: a
+// hub-wide feature cannot promise the fold for part of the fleet, so mixed versions keep side sessions as rows.
+func (h *Hub) sessionsSideFoldFeatures() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	ids := h.archiveManagers(ctx)
+	if len(ids) == 0 {
+		return nil
+	}
+	for _, id := range ids {
+		if h.archiveManagerHas(id, assistantwire.CapabilitySessionsSideFold) != http.StatusOK {
+			return nil
+		}
+	}
+	return []string{featureSessionsSideFold}
+}
 
 // runtimeList is a transport cache of the manager's already-decorated rows. It
 // does not derive agent state or store business data. sessionsMu orders updates
@@ -183,7 +209,7 @@ func indexedRow(mid, id string, row *proto.Session, stamp bool, manager, root st
 	item := sessionlist.Item{
 		ID: id, Machine: mid, Project: project, Group: group, PaneSource: pane,
 		State: row.State, BackgroundWaiting: row.BackgroundWaiting, Source: row.SourceKind, Provider: row.Agent, UpdatedAt: row.UpdatedAt,
-		Fold: indexedFold(row, root, todo, indexed.Fold), Private: healthSession(row),
+		Fold: indexedFold(mid, row, root, todo, indexed.Fold), Private: healthSession(row), Assistant: row.Assistant,
 	}
 	// What q finds a row by: the fields the apps' own searches read, the branch too (#4770).
 	text := [...]string{row.Title, row.Cwd, row.RepoRoot, row.Branch, row.SpaceName, row.SlotName, row.AgentName, row.LastText}
@@ -208,12 +234,16 @@ func indexedRow(mid, id string, row *proto.Session, stamp bool, manager, root st
 	return item
 }
 
-// indexedFold is row's optional sessionlist.Fold: its fold under root and open to-do, nil when it has neither and shows
-// its own state and background wait (a row without children or a to-do), else was when that is the same metadata, else a
-// new one. Folds are shared between copies of an item and never written in place.
-func indexedFold(row *proto.Session, root, todo string, was *sessionlist.Fold) *sessionlist.Fold {
+// indexedFold is machine mid's row's optional sessionlist.Fold: its fold under root and open to-do, nil when it has
+// neither and shows its own state and background wait (a row without children or a to-do), else was when that is the
+// same metadata, else a new one. A side session folded under root is searched as root's row (SearchAs, #7944). Folds
+// are shared between copies of an item and never written in place.
+func indexedFold(mid string, row *proto.Session, root, todo string, was *sessionlist.Fold) *sessionlist.Fold {
 	kids := row.Children()
 	fold := sessionlist.Fold{Root: root, State: row.FoldedState(), Todo: todo, BackgroundWaiting: row.BackgroundWaiting && kids.Working == 0 && kids.NeedsYou == 0}
+	if root != "" && row.FoldedAs() == proto.FoldedAsSide {
+		fold.SearchAs, fold.SearchSession = runtimeListID(mid, root), row.SessionID
+	}
 	switch {
 	case fold == sessionlist.Fold{State: row.State, BackgroundWaiting: row.BackgroundWaiting}:
 		return nil
@@ -621,6 +651,9 @@ func (h *Hub) extensionMachines(r *http.Request) (own []string, limited bool) {
 // ownCounts are the counts of opts over the machines own only (each machine's, added up).
 func ownCounts(index *sessionlist.Index, opts sessionlist.Options, own []string) (sessionlist.Counts, error) {
 	out := sessionlist.Counts{Machine: map[string]int{}, Project: map[string]int{}, Group: map[string]int{}, State: map[string]int{}}
+	if opts.Roots {
+		out.ActiveAgentsByMachine = make(map[string]int)
+	}
 	for _, mid := range own {
 		o := opts
 		o.Machine, o.Cursor = mid, "" // current membership (a cursor's frozen view is of every machine)
@@ -630,7 +663,7 @@ func ownCounts(index *sessionlist.Index, opts sessionlist.Options, own []string)
 		}
 		out.Total += c.Total
 		out.Revision = c.Revision
-		for dst, src := range map[*map[string]int]map[string]int{&out.Machine: c.Machine, &out.Project: c.Project, &out.Group: c.Group, &out.State: c.State} {
+		for dst, src := range map[*map[string]int]map[string]int{&out.Machine: c.Machine, &out.ActiveAgentsByMachine: c.ActiveAgentsByMachine, &out.Project: c.Project, &out.Group: c.Group, &out.State: c.State} {
 			for k, n := range src {
 				(*dst)[k] += n
 			}
@@ -701,11 +734,15 @@ func (h *Hub) reindexSessions(m *Machine) {
 	if revision == before {
 		return
 	}
-	hint := h.sessionListHint(before, revision)
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	var hint *listHint // worked out for the first app that lists, as broadcastSessions does: none may
 	for c := range h.clients {
 		if c.listMode {
+			if hint == nil {
+				x := h.sessionListHint(before, revision)
+				hint = &x
+			}
 			hint.send(c)
 		}
 	}
@@ -723,20 +760,27 @@ type listHint struct{ plain, detailed []byte }
 // after before up to revision, the ["<machine>","<session>"] tuples a page's `remove` holds. A change made by
 // another pass in between is in it too, which only makes an app read once more.
 func (h *Hub) sessionListHint(before, revision string) listHint {
-	plain, _ := json.Marshal(map[string]any{"type": "sessions_list", "revision": revision})
-	hint := listHint{plain: plain}
+	// Written by hand, keys in json.Marshal's order for a map: no encoder state to set up for each hint (#2809's
+	// allocation ceilings, TestReindexOneRevAllocation).
+	plain := appendJSONID(append(make([]byte, 0, 64), `{"revision":`...), revision)
+	hint := listHint{plain: append(plain, `,"type":"sessions_list"}`...)}
 	ids, ok := h.listCache.index.Changed(before, revision, sessionListChangedMax)
 	if !ok {
 		return hint
 	}
-	changed := make([]json.RawMessage, len(ids))
+	detailed := []byte(`{"changed":[`)
 	for i, id := range ids {
 		if !json.Valid([]byte(id)) {
 			return hint
 		}
-		changed[i] = json.RawMessage(id)
+		if i > 0 {
+			detailed = append(detailed, ',')
+		}
+		detailed = append(detailed, id...)
 	}
-	hint.detailed, _ = json.Marshal(map[string]any{"type": "sessions_list", "revision": revision, "since": before, "changed": changed})
+	detailed = appendJSONID(append(detailed, `],"revision":`...), revision)
+	detailed = appendJSONID(append(detailed, `,"since":`...), before)
+	hint.detailed = append(detailed, `,"type":"sessions_list"}`...)
 	return hint
 }
 

@@ -13,10 +13,12 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isPopup
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -113,6 +115,61 @@ class InboxSectionHeaderShotsTest {
         rule.onNodeWithTag("inbox.section.overflow").performClick()
         rule.onNodeWithText("Mark all as read").assertExists()
         rule.onNodeWithText("Collapse").assertExists()
+    }
+
+    @Test fun boardLightMenuOpenAt200PercentText() = menuOpenShot(AppStyle.Board, false)
+    @Test fun boardDarkMenuOpenAt200PercentText() = menuOpenShot(AppStyle.Board, true)
+    @Test fun briefLightMenuOpenAt200PercentText() = menuOpenShot(AppStyle.Brief, false)
+    @Test fun briefDarkMenuOpenAt200PercentText() = menuOpenShot(AppStyle.Brief, true)
+    @Test fun glassLightMenuOpenAt200PercentText() = menuOpenShot(AppStyle.Glass, false)
+    @Test fun glassDarkMenuOpenAt200PercentText() = menuOpenShot(AppStyle.Glass, true)
+
+    private fun menuOpenShot(appearance: AppStyle, night: Boolean) {
+        val inbox = HeaderInbox(listOf(item("first", "First event"), item("second", "Second event")))
+        inbox.conversationInbox.value = InboxConversations(inbox, "synthetic-pairing", owner, ReplyComposers(inbox, owner))
+        rule.setContent {
+            // Keep the configured xhdpi density fixed; only the text scale is 200%.
+            CompositionLocalProvider(
+                LocalDensity provides Density(LocalDensity.current.density, 2f),
+                LocalInboxClock provides { java.time.Instant.parse("2026-11-14T10:00:00Z") },
+                LocalInboxZone provides java.time.ZoneId.of("UTC"),
+            ) {
+                PersonaTheme(style = appearance, darkTheme = night, reduceMotion = true) {
+                    Box(Modifier.testTag("shot").width(400.dp).height(1000.dp).background(PersonaTheme.palette.background)) {
+                        InboxScreen(inbox, navigator)
+                    }
+                }
+            }
+        }
+        rule.onNodeWithTag("inbox.section.overflow").assertIsDisplayed().performClick()
+        rule.waitForIdle()
+        rule.onNode(isPopup()).assertExists()
+        rule.onNode(hasText("Mark all as read") and hasAnyAncestor(isPopup())).assertIsDisplayed()
+        rule.onNode(hasText("Collapse") and hasAnyAncestor(isPopup())).assertIsDisplayed()
+        captureMenuOpen("${appearance.name.lowercase()}-${if (night) "dark" else "light"}-2.0x-menu-open")
+    }
+
+    /** Draw the real page and popup windows at their actual screen positions; the page alone omits the menu. */
+    @Suppress("UNCHECKED_CAST")
+    private fun captureMenuOpen(name: String) {
+        val bitmap = rule.runOnIdle {
+            val global = Class.forName("android.view.WindowManagerGlobal")
+            val instance = global.getMethod("getInstance").invoke(null)
+            val views = global.getDeclaredField("mViews").apply { isAccessible = true }.get(instance) as List<android.view.View>
+            assertTrue("The overflow menu has no real popup window", views.size > 1)
+            android.graphics.Bitmap.createBitmap(views.first().width, views.first().height, android.graphics.Bitmap.Config.ARGB_8888).also { image ->
+                val canvas = android.graphics.Canvas(image)
+                views.forEach { view ->
+                    val position = IntArray(2).also { view.getLocationOnScreen(it) }
+                    canvas.save()
+                    canvas.translate(position[0].toFloat(), position[1].toFloat())
+                    view.draw(canvas)
+                    canvas.restore()
+                }
+            }
+        }
+        val dir = File("build/inbox-section-header-shots").apply { mkdirs() }
+        File(dir, "$name.png").outputStream().use { assertTrue(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)) }
     }
 
     private fun capture(name: String) {

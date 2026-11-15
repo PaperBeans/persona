@@ -6,8 +6,8 @@
 // fresh: its skipped frames until the next one is due (1.25 s), its bitrate as proof once; a new bias or budget starts
 // from at least the current tier's floor (#7842).
 // Times are seconds on any monotonic clock; Swift's `Int(x)` truncates, so does this (`Math.trunc`).
-import { MAX_KBPS } from "./capture-plan";
-import { makeLadder, type Bias, type Tier } from "./ladder";
+import { fpsFor, scaledSize } from "./capture-plan";
+import { makeLadder, steps, type Bias, type Tier } from "./ladder";
 import type { TierSignals } from "./signals";
 
 export type TierReason = "start" | "link_slowed" | "link_steady" | "network_changed" | "phone_warm" | "phone_behind" | "choice";
@@ -280,8 +280,8 @@ export class TierPolicy {
     return this.move(i, Math.min(t.maxKbps, Math.max(t.minKbps, rate)), reason, now);
   }
 
-  /** Which rung of the full ladder a route starts on: the same network 0; Tailscale (or direct IPv6) 0 under 30 ms,
-   *  else 1; the relay 1 over Wi-Fi, 2 over cellular. Nothing measured yet: the relay over Wi-Fi. */
+  /** Which of the bias's steps a route starts on: the same network 0; Tailscale (or direct IPv6) 0 under 30 ms, else 1;
+   *  the relay 1 over Wi-Fi, 2 over cellular. Nothing measured yet: the relay over Wi-Fi. */
   static rung(link: Link | null): number {
     if (!link) return 1;
     switch (link.kind) {
@@ -304,10 +304,16 @@ export class TierPolicy {
     return kept.length ? kept : all.slice(-1);
   }
 
-  /** The tier of `ladder` for a rung of the uncapped ladder: the best one no richer in pixels a second. */
+  /** The tier of `ladder` for a rung: the bias's step of that rank (`steps`) on this display, under the frame-rate cap
+   *  and `maxScale`, and the best tier no richer in pixels a second. Counted on the steps, not on the ladder: where steps
+   *  merge (a display at one pixel per point) the ladder is shorter, and the relay started a tier lower on such a display
+   *  than on a Retina one (30 fps instead of 60). */
   static indexFor(rung: number, ladder: Tier[], display: Display, bias: Bias, maxFps: number, maxScale: number | null = null): number {
-    const full = TierPolicy.tiers(display, bias, MAX_KBPS, maxFps, maxScale);
-    const ref = pixelRate(full[Math.min(rung, full.length - 1)]);
+    const s = steps(bias);
+    const [stepScale, stepFps] = s[Math.min(Math.max(rung, 0), s.length - 1)];
+    const scale = maxScale === null ? stepScale : Math.min(stepScale, maxScale);
+    const size = scaledSize(display.points, display.pixels, scale, display.maxSize);
+    const ref = size.width * size.height * fpsFor(Math.min(stepFps, maxFps));
     const i = ladder.findIndex((t) => pixelRate(t) <= ref);
     return i >= 0 ? i : ladder.length - 1;
   }

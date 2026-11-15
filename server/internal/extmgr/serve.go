@@ -155,6 +155,7 @@ func (h *Manager) registerRoutes(api *http.ServeMux) {
 	api.HandleFunc("POST /api/v1/machines/{mid}/iphone/{action}", withMachine(h.postIPhoneJob))
 	api.HandleFunc("GET /api/v1/iphone", h.getIPhoneList)
 	api.HandleFunc("PUT /api/v1/iphone/consent", h.putIPhoneConsent)
+	api.HandleFunc("POST /api/v1/iphone/try", h.postIPhoneTry)
 	if h.mail != nil {
 		api.Handle("/api/v1/mail/", h.mail.Handler())
 	} else {

@@ -15,6 +15,9 @@ struct AssistantTopBarTests {
         #expect(options.map { $0.custom == true } == [false, false, true])
         #expect(AssistantTopBar.takesTypedModel(Launcher(name: "claude")))
         #expect(AssistantTopBar.takesTypedModel(Launcher(name: "cx", agent: "codex")))
+        #expect(AssistantTopBar.takesTypedModel(Launcher(name: "pi", agent: "pi")))
+        #expect(AssistantTopBar.takesTypedModel(Launcher(name: "cursor", agent: "cursor")))
+        #expect(AssistantTopBar.takesTypedModel(Launcher(name: "agy", agent: "agy")))
         #expect(!AssistantTopBar.takesTypedModel(Launcher(name: "traex", baseURL: "(traex)")))
         #expect(!AssistantTopBar.takesTypedModel(Launcher(name: "rt", agent: "dsh")))
     }

@@ -446,6 +446,7 @@
     <string name="chat_slash_report_text">Briefly report your progress so far and what\'s left</string>
     <string name="chat_slash_clear_title">Clear context /clear</string>
     <string name="chat_slash_clear_detail">Clear the context and start a new session</string>
+    <string name="chat_slash_clear_main_detail">Clear the chat and start over</string>
     <string name="chat_tasks_origin_gone">The earlier record is no longer in the list</string>
     <string name="chat_tasks_load_failed">Couldn\'t load the related records. Expand the work steps and try again</string>
     <string name="chat_tasks_record_gone">The related record is no longer in the list</string>

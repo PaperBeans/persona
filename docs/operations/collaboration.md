@@ -173,7 +173,7 @@ EOF
   conflicts are resolved once instead of once per commit, and the push is a plain push with no force while other Agents work in the repository (#5988).
   In a merge "ours" is your branch and "theirs" is `main`, the reverse of a rebase: mind it with `git checkout --ours/--theirs` and `scripts/i18n/apple_l10n.py merge`.
   A rebase is still allowed, for example for a single-commit branch.
-- Merging: once the PR's relevant local verification passes, `scripts/hooks/merge-pr.sh <number>`, not `gh pr merge` directly. It first scans the PR's changed files, commit messages, title and body with this machine's private values, and only squash-merges and deletes the branch if that passes (`docs/operations/testing.md`, "Privacy scan"). PRs do not automatically start hosted CI.
+- Merging: once the PR's relevant local verification passes, `scripts/hooks/merge-pr.sh <number>`, not `gh pr merge` directly. It first scans the PR's changed files, commit messages, title and body with this machine's private values (`docs/operations/testing.md`, "Privacy scan"), checks that the merge adds no fixed-sleep or web font ratchet failure in the files the PR changes (`docs/operations/testing.md`, "Hosted CI"), and only squash-merges and deletes the branch if both pass. PRs do not automatically start hosted CI.
 - `Fixes #N` / `Closes #N`: GitHub closes the issue automatically after merging. `Refs #N`: links without closing (an issue split into several PRs, or only partly fixed).
 - PR titles and bodies are in English (after a squash merge they are the commit on `main`); issues and comments are also in English.
 

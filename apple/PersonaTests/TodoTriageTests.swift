@@ -25,11 +25,19 @@ struct TodoTriageTests {
     }
 
     private func todo(_ id: String, title: String? = nil, updated: Double = 1, done: Double? = nil, agents: [String] = [],
-                      origin: String? = "conv", build: (inout TodoItem) -> Void = { _ in }) -> TodoItem {
+                      origin: String? = "conv", kind: String? = nil,
+                      build: (inout TodoItem) -> Void = { _ in }) -> TodoItem {
         var t = TodoItem(id: id, title: title ?? id, doneAt: done.map(ago), createdAt: ago(300), updatedAt: ago(updated),
                          origin: origin, agents: agents.map(agent))
         build(&t)
-        return t
+        guard let kind else { return t }
+        do {
+            var object = try #require(JSONSerialization.jsonObject(with: JSON.encoder.encode(t)) as? [String: Any])
+            object["kind"] = kind
+            return try JSON.decoder.decode(TodoItem.self, from: JSONSerialization.data(withJSONObject: object))
+        } catch {
+            fatalError("bad kind fixture: \(error)")
+        }
     }
 
     /// An accepted task the hub reopened when its agent was sent more work: eight criteria, the review judged five.
@@ -348,13 +356,285 @@ struct TodoTriageTests {
         bad.doneAt = ago(3)
         #expect(at(bad).section == .justDone)
     }
+
+    @Test func kindDecodesAndSurvivesTheTodoCacheRoundTrip() throws {
+        // The unversioned todo-items cache is the same [TodoItem] JSON as the wire: an old entry has no kind.
+        let cached = Data(#"[{"id":"old","title":"old"},{"id":"c","title":"c","kind":"concern"},{"id":"new","title":"new","kind":"future"}]"#.utf8)
+        let decoded = try JSON.decoder.decode([TodoItem].self, from: cached)
+        #expect(decoded.map(\.kind) == [nil, "concern", "future"])
+        #expect(decoded.map(\.isConcern) == [false, true, false])
+        let roundTrip = try JSON.decoder.decode([TodoItem].self, from: JSON.encoder.encode(decoded))
+        #expect(roundTrip.map(\.kind) == decoded.map(\.kind))
+        let malformed = try JSON.decoder.decode(TodoItem.self, from: Data(#"{"id":"bad","title":"bad","kind":7}"#.utf8))
+        #expect(malformed.kind == nil && !malformed.isConcern)
+    }
 }
 
 extension TodoTriageTests {
+    @Test func r1FailedStartOwnerWaitAndRunningRulesApplyToConcerns() {
+        let failed = at(todo("failed", kind: "concern") { $0.startError = "no launcher" })
+        #expect(failed.section == .waiting && failed.rule == .failedStart)
+        #expect(at(todo("asking", agents: ["ask"], kind: "concern")).rule == .agentAsks)
+        #expect(at(todo("decision", kind: "concern") { $0.ask = ask("decide") }).rule == .ownerDecides)
+        #expect(at(todo("running", agents: ["run"], kind: "concern")).rule == .agentRunning)
+
+        var starting = session("starting", state: .idle)
+        starting.starting = true
+        let startingResult = TodoTriageLogic.triage(todo("starting", agents: ["starting"], kind: "concern"),
+                                                    lookup: TodosLogic.makeSessionLookup([starting]), now: now)
+        #expect(startingResult.section == .working && startingResult.rule == .agentRunning)
+    }
+
+    @Test func r2ConcernFailedStartAfter48HoursIsOtherOpen() {
+        let concern = todo("failed", updated: 100, kind: "concern") { $0.startError = "no launcher" }
+        let result = at(concern)
+        #expect(result.section == .other && result.rule == .rest)
+        #expect(TodoTriageLogic.bucket(concern, lookup: lookup, now: now) == .open)
+    }
+
+    @Test func r3ConcernSkipsAcceptedAndDeployed() {
+        let accepted = at(todo("accepted", agents: ["idle"], kind: "concern") { $0.supervision = acceptedReopened() })
+        #expect(accepted.section == .other && accepted.rule == .rest)
+        let deployed = at(todo("deployed", kind: "concern") { $0.delivery = .init(state: "live", at: ago(2)) })
+        #expect(deployed.section == .other && deployed.rule == .rest)
+    }
+
+    @Test func r4ConcernKeepsFinishedUnseenAndPROpen() {
+        let unseen = at(todo("unseen", agents: ["unseen"], kind: "concern"))
+        #expect(unseen.section == .justDone && unseen.rule == .finishedUnseen)
+        let pr = at(todo("pr", updated: 100, agents: ["old"], kind: "concern") {
+            $0.prURL = "https://example.com/pull/3582"
+        })
+        #expect(pr.section == .pr && pr.rule == .prOpen)
+    }
+
+    @Test func r5SeenFinishedConcernStaysOtherOpen() {
+        let concern = todo("seen", agents: ["unseen"], kind: "concern") { $0.seenAt = ago(0.5) }
+        let result = at(concern)
+        #expect(result.section == .other && result.rule == .rest)
+        #expect(TodoTriageLogic.bucket(concern, lookup: lookup, now: now) == .open)
+    }
+
+    @Test func r6QuietConcernNeverShelves() {
+        let concern = todo("quiet", updated: 100, agents: ["old"], kind: "concern")
+        #expect(!TodoTriageLogic.shelvable(concern, now: now))
+        let result = at(concern)
+        #expect(result.section == .other && result.rule == .rest)
+        #expect(at(todo("ordinary", updated: 100, agents: ["old"])).section == .shelved)
+    }
+
+    @Test func r7OtherwiseOpenConcernIsOtherOpen() {
+        let result = at(todo("open", kind: "concern"))
+        #expect(result.section == .other && result.rule == .rest)
+    }
+
+    @Test func closedConcernFreshIsJustFinished() {
+        let result = at(todo("closed", done: 3, kind: "concern"))
+        #expect(result.section == .justDone && result.rule == .closed)
+    }
+
+    @Test func closedConcernAfter24HoursIsDone() {
+        let result = at(todo("closed", updated: 30, done: 30, kind: "concern"))
+        #expect(result.section == .done && result.rule == .closed)
+    }
+
+    @Test func openConcernAndRelatedOpenTaskHaveTwoRows() {
+        let result = TodoTriageLogic.triageTodos([
+            todo("concern", kind: "concern") { $0.planID = "shared" },
+            todo("task") { $0.planID = "shared" },
+        ], lookup: lookup, now: now)
+        #expect(result.groups(.other).map { $0.members.map(\.id) } == [["concern"], ["task"]])
+        #expect(result.open == 2)
+    }
+
+    @Test func twoRelatedOpenConcernsHaveTwoRows() {
+        let result = TodoTriageLogic.triageTodos([
+            todo("first", kind: "concern") { $0.planID = "shared" },
+            todo("second", kind: "concern") { $0.planID = "shared" },
+        ], lookup: lookup, now: now)
+        #expect(result.groups(.other).map { $0.members.map(\.id) } == [["first"], ["second"]])
+        #expect(result.open == 2)
+    }
+
+    @Test func openConcernCannotJoinARowTransitively() {
+        let result = TodoTriageLogic.triageTodos([
+            // Only the concern shares the issue with one task and the plan with the other: it must not bridge their rows.
+            todo("concern", title: "Investigate #3582", kind: "concern") { $0.planID = "shared" },
+            todo("task", title: "Fix #3582"),
+            todo("followup") { $0.planID = "shared" },
+        ], lookup: lookup, now: now)
+        let rows = Set(result.groups(.other).map { Set($0.members.map(\.id)) })
+        #expect(rows == Set([Set(["concern"]), Set(["task"]), Set(["followup"])]))
+        #expect(result.open == 3)
+    }
+
+    @Test func closedConcernGroupsWithRelatedClosedTodo() {
+        let result = TodoTriageLogic.triageTodos([
+            todo("concern", done: 1, kind: "concern") { $0.planID = "shared" },
+            todo("task", done: 2) { $0.planID = "shared" },
+        ], lookup: lookup, now: now)
+        #expect(result.groups(.justDone).map { $0.members.map(\.id) } == [["concern", "task"]])
+        #expect(result.finished == 2)
+    }
+
+    @Test func unknownKindBehavesAsAnOrdinaryTodo() {
+        #expect(at(todo("future", updated: 100, agents: ["old"], kind: "future")).section == .shelved)
+    }
+
     @Test func issueNumberMatchesTheWebPattern() {
         #expect(TodoTriageLogic.issueNumber("Fix #412 lost pushes") == "412")
         #expect(TodoTriageLogic.issueNumber("#7 too short, #12345678 too long, then #99") == "99")
         #expect(TodoTriageLogic.issueNumber("#123abc") == nil)
         #expect(TodoTriageLogic.issueNumber("修复 #3206。") == "3206")
+    }
+}
+
+/// Native counterparts of the concern cases added to spec/fixtures/triage on main (#3582). Apple tests do not load those
+/// fixture files, so each test below carries the case's exact JSON and names it; the coordinator's shared fixtures stay canonical.
+extension TodoTriageTests {
+    private func sharedTodo(_ json: String) throws -> TodoItem {
+        try JSON.decoder.decode(TodoItem.self, from: Data(json.utf8))
+    }
+
+    private func sharedLookup(_ sessions: [String]) throws -> TodosLogic.SessionLookup {
+        TodosLogic.makeSessionLookup(try sessions.map { try JSON.decoder.decode(Session.self, from: Data($0.utf8)) })
+    }
+
+    private func sharedAt(_ todo: String, sessions: [String] = []) throws -> TodoTriage {
+        TodoTriageLogic.triage(try sharedTodo(todo), lookup: try sharedLookup(sessions), now: now)
+    }
+
+    private func sharedGroups(_ todos: [String], sessions: [String] = []) throws -> TodoTriageResult {
+        TodoTriageLogic.triageTodos(try todos.map(sharedTodo), lookup: try sharedLookup(sessions), now: now)
+    }
+
+    /// Shared case `concern_agent_running`: Working / agent_running.
+    @Test func sharedConcernAgentRunning() throws {
+        let t = try sharedAt(#"{"id":"concern-run","title":"Answer the backup question","kind":"concern","created_at":"2026-10-01T00:00:00.000Z","updated_at":"2026-10-20T00:00:00.000Z","done_at":null,"agents":[{"machine_id":"m","session_id":"run","linked_at":"2026-11-10T10:00:00.000Z"}],"origin":"main"}"#,
+                             sessions: [#"{"machine_id":"m","session_id":"run","state":"working","status":"working","updated_at":"2026-11-10T11:00:00.000Z"}"#])
+        #expect(t.section == .working && t.rule == .agentRunning)
+    }
+
+    /// Shared case `concern_failed_start_old`: Other open / rest, not Done.
+    @Test func sharedConcernFailedStartOld() throws {
+        let t = try sharedAt(#"{"id":"concern-failed","title":"Answer the launch question","kind":"concern","created_at":"2026-11-01T00:00:00.000Z","updated_at":"2026-11-08T00:00:00.000Z","done_at":null,"agents":[],"origin":"main","start_error":"no launcher"}"#)
+        #expect(t.section == .other && t.rule == .rest)
+    }
+
+    /// Shared case `concern_accepted`: Other open / rest, with open status words, tone and checkbox.
+    @Test func sharedConcernAccepted() throws {
+        let json = #"{"id":"concern-accepted","title":"Answer the review question","kind":"concern","created_at":"2026-11-09T00:00:00.000Z","updated_at":"2026-11-10T10:00:00.000Z","done_at":null,"agents":[],"origin":"main","supervision":{"supervisor":"main","done_when":[],"state":"accepted","reviews":[{"at":"2026-11-10T09:00:00.000Z","verdict":"accepted","checks":[]}]}}"#
+        let td = try sharedTodo(json)
+        let t = try sharedAt(json)
+        #expect(t.section == .other && t.rule == .rest)
+        let status = TodosLogic.todoStatus(td, lookup: try sharedLookup([]))
+        #expect(status == .notStarted && !td.acceptedAtRest(status))
+        #expect(td.shownState(status) == .notStarted && td.statusLabel(status) == "未开始")
+        #expect(TodoTriageLogic.checksAsOpen(td, t))
+    }
+
+    /// Shared case `concern_deployed`: Other open / rest.
+    @Test func sharedConcernDeployed() throws {
+        let t = try sharedAt(#"{"id":"concern-deployed","title":"Answer the deployment question","kind":"concern","created_at":"2026-11-09T00:00:00.000Z","updated_at":"2026-11-10T10:00:00.000Z","done_at":null,"agents":[],"origin":"main","delivery":{"state":"live","at":"2026-11-10T09:00:00.000Z"}}"#)
+        #expect(t.section == .other && t.rule == .rest)
+    }
+
+    /// Shared case `concern_finished_unseen`: Just finished / finished_unseen.
+    @Test func sharedConcernFinishedUnseen() throws {
+        let t = try sharedAt(#"{"id":"concern-unseen","title":"Answer the report question","kind":"concern","created_at":"2026-11-09T00:00:00.000Z","updated_at":"2026-11-10T10:00:00.000Z","done_at":null,"agents":[{"machine_id":"m","session_id":"unseen","linked_at":"2026-11-10T09:00:00.000Z"}],"origin":"main"}"#,
+                             sessions: [#"{"machine_id":"m","session_id":"unseen","state":"unread","status":"idle","updated_at":"2026-11-10T11:00:00.000Z"}"#])
+        #expect(t.section == .justDone && t.rule == .finishedUnseen)
+    }
+
+    /// Shared case `concern_pr_open`: PR to merge / pr_open.
+    @Test func sharedConcernPROpen() throws {
+        let t = try sharedAt(#"{"id":"concern-pr","title":"Answer the merge question","kind":"concern","created_at":"2026-11-01T00:00:00.000Z","updated_at":"2026-11-04T10:00:00.000Z","done_at":null,"agents":[],"origin":"main","pr_url":"https://example.com/pull/7","stage":"review"}"#)
+        #expect(t.section == .pr && t.rule == .prOpen)
+    }
+
+    /// Shared case `concern_finished_seen`: Other open / rest, not Done.
+    @Test func sharedConcernFinishedSeen() throws {
+        let t = try sharedAt(#"{"id":"concern-seen","title":"Answer the seen question","kind":"concern","created_at":"2026-11-09T00:00:00.000Z","updated_at":"2026-11-10T10:00:00.000Z","done_at":null,"agents":[{"machine_id":"m","session_id":"unseen","linked_at":"2026-11-10T09:00:00.000Z"}],"origin":"main","seen_at":"2026-11-10T11:30:00.000Z"}"#,
+                             sessions: [#"{"machine_id":"m","session_id":"unseen","state":"unread","status":"idle","updated_at":"2026-11-10T11:00:00.000Z"}"#])
+        #expect(t.section == .other && t.rule == .rest)
+    }
+
+    /// Shared case `concern_stale`: Other open / rest, never Shelved.
+    @Test func sharedConcernStale() throws {
+        let t = try sharedAt(#"{"id":"concern-stale","title":"Answer the quiet question","kind":"concern","created_at":"2026-10-01T00:00:00.000Z","updated_at":"2026-10-20T12:00:00.000Z","done_at":null,"agents":[{"machine_id":"m","session_id":"old","linked_at":"2026-10-02T00:00:00.000Z"}],"origin":"main"}"#,
+                             sessions: [#"{"machine_id":"m","session_id":"old","state":"idle","status":"idle","updated_at":"2026-10-20T12:00:00.000Z"}"#])
+        #expect(t.section == .other && t.rule == .rest)
+    }
+
+    /// Shared case `concern_stale_ordinary_task_control`: Shelved / stale.
+    @Test func sharedConcernStaleOrdinaryTaskControl() throws {
+        let t = try sharedAt(#"{"id":"task-stale-control","title":"Answer the quiet question","created_at":"2026-10-01T00:00:00.000Z","updated_at":"2026-10-20T12:00:00.000Z","done_at":null,"agents":[{"machine_id":"m","session_id":"old","linked_at":"2026-10-02T00:00:00.000Z"}],"origin":"main"}"#,
+                             sessions: [#"{"machine_id":"m","session_id":"old","state":"idle","status":"idle","updated_at":"2026-10-20T12:00:00.000Z"}"#])
+        #expect(t.section == .shelved && t.rule == .stale)
+    }
+
+    /// Shared case `concern_rest`: Other open / rest.
+    @Test func sharedConcernRest() throws {
+        let t = try sharedAt(#"{"id":"concern-rest","title":"Answer the ordinary question","kind":"concern","created_at":"2026-11-09T00:00:00.000Z","updated_at":"2026-11-10T11:00:00.000Z","done_at":null,"agents":[],"origin":"main"}"#)
+        #expect(t.section == .other && t.rule == .rest)
+    }
+
+    /// Shared case `concern_closed_fresh`: Just finished / closed.
+    @Test func sharedConcernClosedFresh() throws {
+        let t = try sharedAt(#"{"id":"concern-closed-fresh","title":"Answer the fresh report question","kind":"concern","created_at":"2026-11-09T00:00:00.000Z","updated_at":"2026-11-10T10:00:00.000Z","done_at":"2026-11-10T10:00:00.000Z","done_by":"reported","agents":[],"origin":"main"}"#)
+        #expect(t.section == .justDone && t.rule == .closed)
+    }
+
+    /// Shared case `concern_closed_old`: Done / closed.
+    @Test func sharedConcernClosedOld() throws {
+        let t = try sharedAt(#"{"id":"concern-closed-old","title":"Answer the old report question","kind":"concern","created_at":"2026-11-01T00:00:00.000Z","updated_at":"2026-11-08T10:00:00.000Z","done_at":"2026-11-08T10:00:00.000Z","done_by":"reported","agents":[],"origin":"main"}"#)
+        #expect(t.section == .done && t.rule == .closed)
+    }
+
+    /// Shared case `concern_closed_failed_start_old`: a closed concern keeps the ordinary old failed-start result.
+    @Test func sharedConcernClosedFailedStartOld() throws {
+        let t = try sharedAt(#"{"id":"concern-closed-failed","title":"Answer the closed launch question","kind":"concern","created_at":"2026-11-01T00:00:00.000Z","updated_at":"2026-11-08T00:00:00.000Z","done_at":"2026-11-08T00:00:00.000Z","done_by":"reported","agents":[],"origin":"main","start_error":"no launcher"}"#)
+        #expect(t.section == .done && t.rule == .failedStart)
+    }
+
+    /// Shared case `concern_open_related_task`: two open rows and two open to-dos.
+    @Test func sharedConcernOpenRelatedTask() throws {
+        let r = try sharedGroups([
+            #"{"id":"concern-open","title":"Answer the launch concern","kind":"concern","created_at":"2026-11-09T00:00:00.000Z","updated_at":"2026-11-10T11:00:00.000Z","done_at":null,"agents":[],"origin":"main","plan_id":"plan-concern"}"#,
+            #"{"id":"task-open","title":"Implement the launch task","created_at":"2026-11-09T00:00:00.000Z","updated_at":"2026-11-10T10:00:00.000Z","done_at":null,"agents":[],"origin":"main","plan_id":"plan-concern"}"#,
+        ])
+        #expect(r.groups(.other).map { $0.members.map(\.id) } == [["concern-open"], ["task-open"]])
+        #expect(r.open == 2 && r.shelved == 0 && r.finished == 0)
+    }
+
+    /// Shared case `concern_open_related_concern`: two open rows and two open concerns.
+    @Test func sharedConcernOpenRelatedConcern() throws {
+        let r = try sharedGroups([
+            #"{"id":"concern-first","title":"Answer the first concern","kind":"concern","created_at":"2026-11-09T00:00:00.000Z","updated_at":"2026-11-10T11:00:00.000Z","done_at":null,"agents":[],"origin":"main","plan_id":"plan-two-concerns"}"#,
+            #"{"id":"concern-second","title":"Answer the second concern","kind":"concern","created_at":"2026-11-09T00:00:00.000Z","updated_at":"2026-11-10T10:00:00.000Z","done_at":null,"agents":[],"origin":"main","plan_id":"plan-two-concerns"}"#,
+        ])
+        #expect(r.groups(.other).map { $0.members.map(\.id) } == [["concern-first"], ["concern-second"]])
+        #expect(r.open == 2 && r.shelved == 0 && r.finished == 0)
+    }
+
+    /// Shared case `concern_closed_related_todo`: one Just finished row and two finished to-dos.
+    @Test func sharedConcernClosedRelatedTodo() throws {
+        let r = try sharedGroups([
+            #"{"id":"concern-closed","title":"Answer the reported concern","kind":"concern","created_at":"2026-11-09T00:00:00.000Z","updated_at":"2026-11-10T11:00:00.000Z","done_at":"2026-11-10T11:00:00.000Z","done_by":"reported","agents":[],"origin":"main","plan_id":"plan-closed-concern"}"#,
+            #"{"id":"task-closed","title":"Finish the reported task","created_at":"2026-11-09T00:00:00.000Z","updated_at":"2026-11-10T10:00:00.000Z","done_at":"2026-11-10T10:00:00.000Z","agents":[],"origin":"main","plan_id":"plan-closed-concern"}"#,
+        ])
+        #expect(r.groups(.justDone).map { $0.members.map(\.id) } == [["concern-closed", "task-closed"]])
+        #expect(r.open == 0 && r.shelved == 0 && r.finished == 2)
+    }
+
+    /// Shared case `concern_stale_next_to_task`: one Other open row, one Shelved row and per-to-do counts.
+    @Test func sharedConcernStaleNextToTask() throws {
+        let r = try sharedGroups([
+            #"{"id":"stale-concern","title":"Answer the quiet concern","kind":"concern","created_at":"2026-10-20T12:00:00.000Z","updated_at":"2026-10-20T12:00:00.000Z","done_at":null,"agents":[],"origin":"main"}"#,
+            #"{"id":"stale-task","title":"Finish the quiet task","created_at":"2026-10-20T12:00:00.000Z","updated_at":"2026-10-20T12:00:00.000Z","done_at":null,"agents":[],"origin":"main"}"#,
+        ])
+        #expect(r.groups(.other).map { $0.members.map(\.id) } == [["stale-concern"]])
+        #expect(r.groups(.shelved).map { $0.members.map(\.id) } == [["stale-task"]])
+        #expect(r.open == 1 && r.shelved == 1 && r.finished == 0)
     }
 }

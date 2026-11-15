@@ -20,7 +20,9 @@ import persona.core.designsystem.PersonaTheme
 /**
  * The main conversation's `/clear` in its composer (#5100, the web's #5095): offered in the "/" list and sent alone it
  * clears through [LocalMainChatClear] instead of going to Persona, with no confirmation; a failure puts `/clear` back;
- * anything more is a message. Without the local (another chat, a hub without `assistant_main_clear`) nothing changes.
+ * anything more is a message. Its + sheet offers no Agent quick messages, while an Agent's sheet keeps them. Without the
+ * local on an Assistant chat (a hub without `assistant_main_clear`) no command is offered and sending is unchanged; Agent
+ * composers leave [ChatComposer]'s `assistantChat` flag false.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35], qualifiers = "en-w400dp-h900dp-xhdpi")
@@ -30,12 +32,12 @@ class MainChatClearTest {
     private val clears = mutableListOf<() -> Unit>()
     private var sent = 0
 
-    private fun mount(clear: MainChatClear? = MainChatClear { onFailed -> clears += onFailed }, working: Boolean = false) {
+    private fun mount(clear: MainChatClear? = MainChatClear { onFailed -> clears += onFailed }, working: Boolean = false, assistant: Boolean = true) {
         rule.setContent {
             PersonaTheme(reduceMotion = true) {
                 CompositionLocalProvider(LocalMainChatClear provides clear) {
                     ChatComposer(SessionKey("mac", "main"), state, working = working, sending = false, canClear = false, service = null,
-                        onSend = { sent++ }, onCommand = {}, onNotice = {})
+                        onSend = { sent++ }, onCommand = {}, onNotice = {}, assistantChat = assistant)
                 }
             }
         }
@@ -67,12 +69,32 @@ class MainChatClearTest {
     @Test fun theSlashListOffersItWhileTheConversationWorksToo() {
         mount(working = true)
         type("/cl")
+        rule.onNodeWithText("Clear the chat and start over").assertExists()
         rule.onNodeWithText("/clear").performClick()
         rule.runOnIdle {
             assertEquals(1, clears.size)
             assertEquals("", state.value.text)
         }
         rule.onAllNodesWithText("Clear context?").assertCountEquals(0)
+    }
+
+    @Test fun thePlusSheetOffersOnlyTheMainClear() {
+        mount()
+        rule.onNodeWithContentDescription("Add attachments and quick messages").performClick()
+        for (title in listOf("Continue", "Compact context /compact", "View context /context", "Commit and push", "Report progress"))
+            rule.onNodeWithText(title).assertDoesNotExist()
+        rule.onNodeWithText("Clear context /clear").performClick()
+        rule.runOnIdle {
+            assertEquals(1, clears.size)
+            assertEquals(0, sent)
+        }
+    }
+
+    @Test fun anAgentPlusSheetKeepsItsQuickMessages() {
+        mount(clear = null, assistant = false)
+        rule.onNodeWithContentDescription("Add attachments and quick messages").performClick()
+        for (title in listOf("Continue", "Compact context /compact", "View context /context", "Commit and push", "Report progress"))
+            rule.onNodeWithText(title).assertExists()
     }
 
     @Test fun moreThanTheWordIsAMessage() {
@@ -87,6 +109,10 @@ class MainChatClearTest {
 
     @Test fun withoutItTheMainConversationHasNoClear() {
         mount(clear = null)
+        type("/")
+        rule.onAllNodesWithText("/clear").assertCountEquals(0)
+        rule.onAllNodesWithText("/compact").assertCountEquals(0)
+        rule.onAllNodesWithText("/continue").assertCountEquals(0)
         type("/cl")
         rule.onAllNodesWithText("/clear").assertCountEquals(0)
         type("/clear")

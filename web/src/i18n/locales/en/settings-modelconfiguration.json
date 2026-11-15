@@ -23,6 +23,8 @@
   "custom": "Custom",
   "separately_configured": "Separately configured",
   "follow_agents": "Follow Agents",
+  "follow_category": "Follow {name}",
+  "claude_code_only": "Runs on Claude Code only: pick a Claude Code launcher or a Messages API connection.",
   "manage_providers": "Manage shared model providers",
   "restored": "Inheritance restored",
   "saved": "Saved; applies from the next run",

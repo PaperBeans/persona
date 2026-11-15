@@ -64,12 +64,15 @@ func (n *Node) launcherModels(ctx context.Context, name, agentType string, refre
 	if isCodexAppLauncher(name) { // so does the Codex App (codexapp_new.go)
 		return proto.LauncherModels{Agent: "codex", Models: []proto.AgentModel{}, Locked: codexAppModelLocked}, nil
 	}
-	if res, ok := n.runtimeLauncherModels(name); ok { // a runtime's launcher: static advertisement or native discovery
-		return n.liveRuntimeModels(ctx, name, refresh, res)
+	// A runtime's launcher, as a start in ctx's host runs it (where that host's engine runs only its own launchers, its
+	// provider of the name, #8140): static advertisement or native discovery.
+	if h := n.runtimeOfIn(ctx, name); h != nil {
+		res, _ := launcherModelsOf(h, name)
+		return n.liveRuntimeModels(ctx, h, name, refresh, res)
 	}
 	if m, ok := n.managedLauncher(name); ok && m.AgentType() == "agy" {
 		if res, ok := n.agyRuntimeModels(); ok {
-			return n.liveRuntimeModels(ctx, "agy", refresh, res)
+			return n.liveRuntimeModels(ctx, n.runtimes.launcherRuntime("agy"), "agy", refresh, res)
 		}
 		return proto.LauncherModels{Agent: "agy", Models: []proto.AgentModel{}}, nil
 	}

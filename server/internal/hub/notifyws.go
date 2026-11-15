@@ -39,11 +39,32 @@ func (h *Hub) notifyDone(owner, kind, machineID, machine, sessionID, title, text
 	h.notifyDoneUnder(owner, kind, machineID, machine, sessionID, title, text, wants, "", "", pushPolicy{level: levelFor(kind, "")})
 }
 
+// pushOutcome is where one push went: the devices it was handed to now (a push route, a ws_notify connection or a
+// browser's Web Push), the devices that could take this kind before their settings decided, the offline devices that
+// keep it for their next connection (notifyring.go), and the ln-mode reason the push was held ("" when it was not).
+// None of these is a delivery receipt.
+type pushOutcome struct {
+	devices, reachable, kept int
+	held                     string
+}
+
+// reason is why nothing took the push now ("" when a device did): "no_device" when no device could take it,
+// "filtered" when every one that could turned it off, as POST /api/v1/notify answers.
+func (o pushOutcome) reason() string {
+	switch {
+	case o.devices > 0:
+		return ""
+	case o.reachable > 0:
+		return "filtered"
+	}
+	return "no_device"
+}
+
 // notifyDoneUnder is notifyDone with the push's apns-collapse-id ("": one of its own) and the recording it is about
 // ("": none; assistantwire.Notification.RecordingID), which the push and the notify carry as `recording_id`. It returns
-// the ln-mode reason the push was held ("" when it went out), so the assistant can tell the model a notify_user notice
-// reached the briefing instead of the phone.
-func (h *Hub) notifyDoneUnder(owner, kind, machineID, machine, sessionID, title, text string, wants pushWants, collapseID, recordingID string, policy pushPolicy) string {
+// where the push went, with the ln-mode reason it was held, so the assistant can tell the model whether a notify_user
+// notice reached a device, the briefing or nothing.
+func (h *Hub) notifyDoneUnder(owner, kind, machineID, machine, sessionID, title, text string, wants pushWants, collapseID, recordingID string, policy pushPolicy) pushOutcome {
 	build := func(l i18n.Lang) map[string]any {
 		p := donePayloadIn(l, machineID, machine, sessionID, title, text)
 		if recordingID != "" {
@@ -53,9 +74,9 @@ func (h *Hub) notifyDoneUnder(owner, kind, machineID, machine, sessionID, title,
 	}
 	h.emitToExtensions(owner, "agent.finished", map[string]any{"machine_id": machineID, "machine": machine, "session_id": sessionID, "title": title})
 	policy.manager, policy.title, policy.body = owner, title, text
-	_, _, heldReason := h.push.sendFromPolicy(owner, policy, build, collapseID, wants.fn(), wants.quiet(), nil, nil)
-	h.notifyWSFrom(owner, kind, build, wants.fn(), wants.quiet())
-	return heldReason
+	pushSelected, pushReachable, heldReason := h.push.sendFromPolicy(owner, policy, build, collapseID, wants.fn(), wants.quiet(), nil, nil)
+	ws := h.notifyWSFrom(owner, kind, build, wants.fn(), wants.quiet())
+	return pushOutcome{devices: pushSelected + ws.selected, reachable: pushReachable + ws.reachable, kept: ws.kept, held: heldReason}
 }
 
 // managerPushCollapseID is the apns-collapse-id of manager's push with notification id (assistantwire.Notification.ID;
@@ -172,10 +193,10 @@ func (h *Hub) notifyInteractionAt(owner string, ix proto.Interaction, machine st
 // hours do to it (quiethours.go): skipped, or marked "quiet" for the client to post without a sound. manager is the
 // one that asked for it: a device that turned that manager's pushes off (NotifyPrefs.MutedManagers) gets none, as with
 // its push (Pusher.sendFrom); "" is the hub's own, for every device wants takes. Returns the selected count and the
-// count of capable connections before preferences are applied; neither is a client delivery receipt. A device without a
-// push route and without a ws_notify socket now keeps what its settings take for its next connection (notifyring.go);
-// that is not counted.
-func (h *Hub) notifyWSFrom(manager, kind string, build localized, wants func(NotifyPrefs) bool, rule quietRule, required ...string) (selected, reachable int) {
+// count of capable connections before preferences are applied, each with the browsers its Web Push went to (or could
+// go to); neither is a client delivery receipt. A device without a push route and without a ws_notify socket now keeps
+// what its settings take for its next connection (notifyring.go): kept counts those, apart from selected.
+func (h *Hub) notifyWSFrom(manager, kind string, build localized, wants func(NotifyPrefs) bool, rule quietRule, required ...string) wsReach {
 	msgs := map[i18n.Lang]map[string]any{}
 	msgIn := func(l i18n.Lang) map[string]any {
 		if m, ok := msgs[l]; ok {
@@ -226,6 +247,7 @@ func (h *Hub) notifyWSFrom(manager, kind string, build localized, wants func(Not
 		quiet = rule != quietNone && prefs.Quiet.activeAt(now, loc)
 		return !(quiet && rule == quietSkip), quiet
 	}
+	var reach wsReach
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	live := map[string]bool{} // the devices with a ws_notify socket now
@@ -237,7 +259,7 @@ func (h *Hub) notifyWSFrom(manager, kind string, build localized, wants func(Not
 		if len(required) > 0 && !c.has(required[0]) {
 			continue
 		}
-		reachable++
+		reach.reachable++
 		ok, quiet := wantsOn(c.device)
 		if !ok {
 			continue
@@ -245,11 +267,19 @@ func (h *Hub) notifyWSFrom(manager, kind string, build localized, wants func(Not
 		if b := msgFor(c.lang(), quiet); b != nil {
 			c.queue(b)
 		}
-		selected++
+		reach.selected++
 	}
-	h.ringNotify(live, required, wantsOn, msgIn, msgFor)
-	h.webPushNotify(kind, required, wantsOn, msgIn) // the browsers with no page open (webpush.go)
-	return selected, reachable
+	reach.kept = h.ringNotify(live, required, wantsOn, msgIn, msgFor)
+	sent, capable := h.webPushNotify(kind, required, wantsOn, msgIn) // the browsers with no page open (webpush.go)
+	reach.selected += sent
+	reach.reachable += capable
+	return reach
+}
+
+// wsReach is where notifyWSFrom put one notify event: selected and reachable as it says, and kept, the offline
+// devices that keep it for their next connection.
+type wsReach struct {
+	selected, reachable, kept int
 }
 
 func notifyMessage(kind string, payload map[string]any) map[string]any {

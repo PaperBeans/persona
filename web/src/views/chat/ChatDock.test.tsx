@@ -16,6 +16,7 @@ import { parseQueued } from "../../lib/queue";
 import { AttachmentTray } from "../../ui/AttachmentTray";
 import { parseAPIError } from "../../lib/api-errors";
 import { ErrorBanner } from "./Lines";
+import { setSideFold } from "../../lib/side-fold";
 
 // stores without a server snapshot: renderToStaticMarkup needs one
 vi.mock("../../lib/links", async (orig) => ({ ...(await orig<typeof import("../../lib/links")>()), useContexts: () => [] }));
@@ -56,6 +57,17 @@ describe("Header", () => {
     expect(html).not.toContain("max-lg:hidden");
     expect(html).not.toContain("max-lg:min-w-16");
     expect(html.match(/aria-label="更多操作"/g)).toHaveLength(1);
+    expect(html).not.toContain("data-side-sessions");
+  });
+
+  it("has a Side sessions button with their count while the session has some, and the dot while one needs you (#7944)", () => {
+    const quiet = header({ sides: { count: 2, open: false, needs: false, onToggle: () => {} } });
+    expect(quiet).toMatch(/<button type="button" aria-label="分支会话（2）" title="分支会话（2）" aria-expanded="false" data-side-sessions="2"[^>]*>.*<span>2<\/span><\/button>/);
+    expect(quiet).not.toContain("data-side-sessions-needs");
+    const waiting = header({ sides: { count: 3, open: true, needs: true, onToggle: () => {} } });
+    expect(waiting).toContain('aria-label="分支会话（3） · 有分支会话需要你"');
+    expect(waiting).toContain('aria-expanded="true"');
+    expect(waiting).toContain("data-side-sessions-needs");
   });
 
   it("is cindy's one line: the Agent's mark, the title, then ⋯ (#5421)", () => {
@@ -258,6 +270,17 @@ describe("PendingCards", () => {
     const questions = [{ question: "用哪个框架？", options: [{ label: "A" }] }] as Interaction["questions"];
     const html = cards({ narrow: false, interactions: [ix("q", "question", { questions, folded_under: "lead", folded_as: "worker", session_title: "Review" })] });
     expect(html).toMatch(/data-permission-from="true" title="来自子 Agent · Review"/);
+  });
+
+  it("names a side session's card as the side's, on its parent's page, once the hub folds sides (#7944)", () => {
+    const card = { folded_under: "review", folded_as: "side" as const, session_title: "btw: can it merge" };
+    expect(permissionFrom(card)).toBe("来自子 Agent · btw: can it merge");
+    setSideFold(true);
+    try {
+      expect(permissionFrom(card)).toBe("来自分支会话 · btw: can it merge");
+    } finally {
+      setSideFold(false);
+    }
   });
 
   it("shows every card on a wide screen, in no box of their own", () => {

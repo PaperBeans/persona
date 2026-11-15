@@ -257,7 +257,7 @@ struct TurnUsageTests {
         #expect(modelCost(row, price) == full)
         var without = price
         without.cacheWrite1h = nil
-        let fallback = 4.0 + 20 + 0.2 + 3 * 5
+        let fallback: Double = 4.0 + 20 + 0.2 + 3 * 5
         #expect(modelCost(row, without) == fallback)
         #expect(modelCost(tokens(input: 10, cacheWrite: 5), ModelPrice(input: 4, output: 20, cacheRead: 0.2)) == nil)
         #expect(modelCost(tokens(input: 10), ModelPrice(input: 4, output: 20)) == 4 * 10 / 1e6)

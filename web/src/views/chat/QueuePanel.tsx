@@ -65,8 +65,12 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
   // the user's own come first; the rest came from other conversations and are only shown (#4342)
   const own = queued.length - Math.min(Math.max(session.queued_relayed ?? 0, 0), queued.length);
   const agent = persona ?? agentLabel(session);
+  // A runtime's Agent (Paseo's) keeps its queue to itself: the node refuses to edit, reorder or send it now, so its
+  // rows are only shown, as the other conversations' are (#8142).
+  const runtime = persona === undefined && session.source_kind === "runtime";
+  const editable = canEdit && !runtime;
   // a Claude takes queued messages at its next step, and can be given them now (#6088); so does a Persona chat's (#4342)
-  const takesNow = session.agent === "claude" || (persona !== undefined && own > 0);
+  const takesNow = !runtime && (session.agent === "claude" || (persona !== undefined && own > 0));
   const path = sessionPath(session.machine_id, session.session_id);
   const listId = useId();
   const explainId = useId();
@@ -232,8 +236,8 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
       row={row}
       n={pos + 1}
       photos={row.own ? (photosOf?.(row.raw) ?? 0) : 0}
-      editable={canEdit && row.own}
-      movable={canEdit && row.own && own > 1}
+      editable={editable && row.own}
+      movable={editable && row.own && own > 1}
       takesNow={takesNow}
       agent={agent}
       explain={explain}

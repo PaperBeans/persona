@@ -4,7 +4,9 @@ Each test builds a throwaway clone (isolated HOME and Git config) whose origin i
 refs/heads/main and refs/pull/7/head, and puts a fake gh first on PATH. The fake serves `pr view` from a state file,
 answers `repo view` and `api`, and logs every call. Like GitHub with squash messages set to PR_TITLE / PR_BODY, it
 records `<title> (#7)` and the body as they are at merge time (`at_merge`: an edit saved after the last view) unless
-the merge passes --subject / --body-file. The real gh never runs.
+the merge passes --subject / --body-file. The real gh never runs. The clone carries this checkout's copies of the scripts
+merge-pr.sh runs: privacy_check.py and scripts/ci/changed_ratchets.py with the two ratchets it loads (#7977). Its main
+has no ratchet baselines unless a test commits them, so only that test's PRs are checked against them.
 """
 import importlib.util
 import json
@@ -27,6 +29,9 @@ CONFIG_ENV = set(_privacy_check.CONFIG_ENV)
 # The automated merge (docs/operations/pr-review-automation.md) takes the same lock.
 sys.path.insert(0, str(SCRIPTS / "operations"))
 import pr_watch_merge  # noqa: E402
+
+RATCHET_SCRIPTS = ("changed_ratchets.py", "sleep_ratchet.py", "web_font_ratchet.py")  # under scripts/ci
+GO_TEST = "server/internal/demo/demo_test.go"
 
 FAKE_GH = r'''
 import json, os, sys
@@ -79,6 +84,9 @@ class MergePrTests(unittest.TestCase):
         (self.repo / "scripts").mkdir()
         shutil.copy2(SCRIPTS / "privacy_check.py", self.repo / "scripts/privacy_check.py")
         shutil.copytree(SCRIPTS / "hooks", self.repo / "scripts/hooks")
+        (self.repo / "scripts/ci").mkdir()
+        for name in RATCHET_SCRIPTS:
+            shutil.copy2(SCRIPTS / "ci" / name, self.repo / "scripts/ci" / name)
         (self.repo / "config.example.json").write_text("{}\n")
         self.git("add", ".")
         self.git("commit", "-q", "-m", "Initial")
@@ -91,11 +99,14 @@ class MergePrTests(unittest.TestCase):
             self.fail(result.stdout + result.stderr)
         return result.stdout.strip()
 
-    def open_pr(self, message="Add notes", content="Public notes.\n"):
-        """A commit on top of main pushed as refs/pull/7/head; returns its sha."""
+    def open_pr(self, message="Add notes", content="Public notes.\n", files=None):
+        """A commit on top of main (notes.md, or files: {path: text}) pushed as refs/pull/7/head; returns its sha."""
         self.git("checkout", "-q", "-B", "feature", "main")
-        (self.repo / "notes.md").write_text(content)
-        self.git("add", "notes.md")
+        files = files or {"notes.md": content}
+        for path, text in files.items():
+            (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / path).write_text(text)
+        self.git("add", "--", *files)
         self.git("commit", "-q", "-m", message)
         self.git("push", "-q", "origin", "+HEAD:refs/pull/7/head")
         return self.git("rev-parse", "HEAD")
@@ -152,6 +163,25 @@ class MergePrTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertIn("not merged", result.stderr)
                 self.assertEqual(self.merges(calls), [])
+
+    def test_a_ratchet_failure_the_merge_would_add_blocks_it(self):
+        """A fixed sleep the PR adds to a Go test stops the merge (changed_ratchets.py); marked sleep-ok, it merges."""
+        self.git("checkout", "-q", "main")
+        for name in ("sleep_baseline.json", "web_font_baseline.json"):
+            (self.repo / "scripts/ci" / name).write_text("{}\n")
+        self.git("add", "scripts/ci")
+        self.git("commit", "-q", "-m", "Baselines")
+        self.git("push", "-q", "origin", "main")
+        wait = "package demo\n\nfunc TestWait(t *testing.T) {\n\ttime.Sleep(time.Second)%s\n}\n"
+        result, calls = self.merge_pr(self.view(self.open_pr(files={GO_TEST: wait % ""})))
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(GO_TEST + ": 1 time.Sleep call(s), baseline 0", result.stderr)
+        self.assertIn("not merged: fix the ratchet failures", result.stderr)
+        self.assertEqual(self.merges(calls), [])
+        self.log.unlink()
+        result, calls = self.merge_pr(self.view(self.open_pr(files={GO_TEST: wait % " // sleep-ok: the child exits"})))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.merges(calls)), 1)
 
     def test_a_moved_head_is_refused(self):
         self.open_pr()

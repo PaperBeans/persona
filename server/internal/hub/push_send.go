@@ -46,6 +46,24 @@ func (p *Pusher) sendFrom(manager string, build localized, collapseID string, wa
 	return selected, reachable
 }
 
+// pushPolicyWithSource keeps the destination the push already carries. Every production alert payload uses the same
+// machine_id / session_id pair; a decision also has a todo object. The related-key conventions stay in deliverPushFrom:
+// a free-form key from notify_user must not become a typed source merely by looking like one.
+func pushPolicyWithSource(policy pushPolicy, payload map[string]any) pushPolicy {
+	if policy.todoID == "" {
+		policy.todoID = todoID(payload["todo"])
+	}
+	machine, _ := payload["machine_id"].(string)
+	session, _ := payload["session_id"].(string)
+	if policy.machineID == "" {
+		policy.machineID = machine
+	}
+	if policy.sessionID == "" {
+		policy.sessionID = session
+	}
+	return policy
+}
+
 // sendFromPolicy is sendFrom with the push's grading policy (level, related key and the held-push record's text).
 // heldReason is "" when the push went out, else why the grading filter held it (lnmode.go): a caller that answers the
 // model (the assistant's notify_user) tells it the notice reached the briefing instead of the phone.
@@ -55,10 +73,12 @@ func (p *Pusher) sendFromPolicy(manager string, policy pushPolicy, build localiz
 	}
 	if p.lnModeOn() { // off: nothing below runs and the push goes exactly as before
 		policy.manager = manager
+		payload := build(i18n.Default)
+		policy = pushPolicyWithSource(policy, payload)
 		if policy.title == "" || policy.body == "" {
 			// The held-push record's text, from the alert when the caller gave none. A payload need not have one (an
 			// extension's push_localized may carry no aps at all).
-			aps, _ := build(i18n.Default)["aps"].(map[string]any)
+			aps, _ := payload["aps"].(map[string]any)
 			alert, _ := aps["alert"].(map[string]any)
 			if t, _ := alert["title"].(string); policy.title == "" {
 				policy.title = t

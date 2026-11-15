@@ -23,6 +23,8 @@
   "custom": "カスタム",
   "separately_configured": "個別設定",
   "follow_agents": "Agentsに従う",
+  "follow_category": "{name}に従う",
+  "claude_code_only": "Claude Code のみで動きます。Claude Code のランチャーか Messages API の接続を選べます。",
   "manage_providers": "共有モデルプロバイダーを管理",
   "restored": "継承に戻しました",
   "saved": "保存しました。次回の実行から反映されます",

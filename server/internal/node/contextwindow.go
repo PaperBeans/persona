@@ -104,9 +104,11 @@ func setContext(s *proto.Session, m quickMeta) {
 // suffix, and behind a gateway another id altogether, so such a session read as 200k, or as no window at all, until
 // a reply passed 200k (#4496). A window the transcript records itself stays, and so does the transcript's word while
 // the session answers as another model: a refusal's fallback, or a reply from a Claude model that is not the one the
-// runtime names (an overload fallback).
+// runtime names (an overload fallback). The title is the runtime's too: it is the first prompt only when it is what
+// Paseo makes of that prompt (runtimetitle.go, #8133).
 func setRuntimeContext(s *proto.Session, m quickMeta) {
 	setContext(s, m)
+	runtimeTitleSource(s, m)
 	if s.ContextTokens == 0 || m.contextWindow > 0 || m.modelFallback != nil {
 		return
 	}

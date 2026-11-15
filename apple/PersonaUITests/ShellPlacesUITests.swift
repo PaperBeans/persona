@@ -54,7 +54,7 @@ final class ShellPlacesUITests: XCTestCase {
         }
     }
 
-    /// Opens the drawer from the page in front: the root's ☰, or ☰ beside Back on a place's page.
+    /// Opens the drawer from the current page's only leading button, its place root's ☰.
     @MainActor private func openDrawer(_ id: String) {
         sleep(1) // a push or a close settled
         see(button(id), "☰ (\(id))").tap()
@@ -85,56 +85,64 @@ final class ShellPlacesUITests: XCTestCase {
     @MainActor private var machines: XCUIElement { app.navigationBars["机器"] }
     @MainActor private var knowledge: XCUIElement { app.navigationBars["知识库"] }
 
-    /// Machines → a machine → ☰ → Knowledge → ☰ → Machines: the machine's page is still in front, Back goes to the
-    /// list and then the conversation. Choosing Machines again while it is in front goes to its root.
+    /// Machines → a machine → Back: a place root has only ☰, a sub-page only Back. The place's path preservation
+    /// stays covered by ShellPlacesTests and the iPad flow below; this phone flow checks the one-button navigation.
     @MainActor func testAPlaceKeepsItsStack() {
         launch()
         openDrawer("assistant-sidebar-button")
         pick("sidebar-machines")
         see(machines, "机器")
+        assertPlaceRoot(machines, "Machines")
+        shot("0-machines-root")
         let card = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'MacBook'")).firstMatch
-        // At the largest text sizes the cards start below the summary.
         for _ in 0..<6 where !(card.exists && card.isHittable) {
             app.swipeUp(velocity: .slow)
         }
         see(card, "MacBook's card").tap()
-        XCTAssertTrue(machines.waitForNonExistence(timeout: 5), "the machine's page did not push")
-        let detail = app.navigationBars.firstMatch
-        see(detail, "the machine's page")
-        let title = detail.identifier
+        let detail = app.navigationBars["MacBook"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5), "the machine's page did not push")
+        XCTAssertTrue(machines.waitForNonExistence(timeout: 5), "the machine list is still in front")
+        assertSubPage(detail, "Machine")
         shot("1-machine-page")
 
-        openDrawer("shell-place-sidebar")
-        shot("2-drawer-over-machine-page")
-        pick("sidebar-知识库")
-        see(knowledge, "知识库")
-        XCTAssertFalse(app.navigationBars[title].exists, "the machine's page is still in front")
+        detail.buttons["BackButton"].firstMatch.tap()
+        XCTAssertTrue(detail.waitForNonExistence(timeout: 5), "Back did not settle on Machines")
+        assertPlaceRoot(machines, "Machines after Back")
+        shot("2-machines-root-after-back")
 
-        openDrawer("shell-place-sidebar")
-        pick("sidebar-machines")
-        see(app.navigationBars[title], "the machine's page again (\(title)), kept while on 知识库")
-        XCTAssertFalse(machines.exists, "Machines came back at its root")
-        shot("3-machine-page-kept")
+        // Re-enter from the root: only Back on the child again, then settle on the root before opening its drawer.
+        see(card, "MacBook after Back").tap()
+        XCTAssertTrue(detail.waitForExistence(timeout: 5), "the machine did not reopen from its root")
+        assertSubPage(detail, "Machine reopened from root")
+        detail.buttons["BackButton"].firstMatch.tap()
+        XCTAssertTrue(detail.waitForNonExistence(timeout: 5), "the second Back did not settle on Machines")
+        assertPlaceRoot(machines, "Machines after reopening and Back")
 
-        // Back: the list, then the conversation.
-        sleep(1)
-        app.navigationBars[title].buttons["BackButton"].firstMatch.tap()
-        see(machines, "机器 under the machine's page")
-
-        // Into the machine again, then Machines from the drawer while it is in front: its root.
-        sleep(1)
-        for _ in 0..<6 where !(card.exists && card.isHittable) {
-            app.swipeUp(velocity: .slow)
-        }
-        see(card, "MacBook's card").tap()
-        see(app.navigationBars[title], "the machine's page")
+        // Back to the conversation is a drawer choice, not a second button beside ☰.
         openDrawer("shell-place-sidebar")
-        pick("sidebar-machines")
-        see(machines, "机器 at its root after choosing it again")
-        XCTAssertFalse(app.navigationBars[title].exists, "choosing Machines again kept its page")
-        sleep(1)
-        machines.buttons["BackButton"].firstMatch.tap()
-        see(chatComposer, "the conversation under Machines")
+        pick("sidebar-main")
+        see(chatComposer, "the conversation chosen from Machines' drawer")
+    }
+
+    @MainActor private func assertPlaceRoot(_ bar: XCUIElement, _ name: String) {
+        XCTAssertTrue(button("shell-place-sidebar").waitForExistence(timeout: 5), "\(name): no ☰")
+        XCTAssertFalse(bar.buttons["BackButton"].exists, "\(name): Back beside ☰")
+        assertSides(bar, leading: 1, trailing: 0, name)
+    }
+
+    @MainActor private func assertSubPage(_ bar: XCUIElement, _ name: String) {
+        XCTAssertTrue(bar.buttons["BackButton"].waitForExistence(timeout: 5), "\(name): no Back")
+        XCTAssertFalse(button("shell-place-sidebar").exists, "\(name): ☰ beside Back")
+        assertSides(bar, leading: 1, trailing: 0, name)
+    }
+
+    /// Count direct bar controls by their frames, not nested accessibility elements inside one menu button.
+    @MainActor private func assertSides(_ bar: XCUIElement, leading: Int, trailing: Int, _ name: String) {
+        let center = bar.frame.midX
+        let left = bar.children(matching: .button).allElementsBoundByIndex.filter { $0.frame.midX < center }
+        let right = bar.children(matching: .button).allElementsBoundByIndex.filter { $0.frame.midX > center }
+        XCTAssertEqual(left.count, leading, "\(name): leading controls: \(bar.debugDescription)")
+        XCTAssertLessThanOrEqual(right.count, max(trailing, 1), "\(name): more than one trailing control: \(bar.debugDescription)")
     }
 
     /// The iPad's sidebar column: the same places keep their stacks beside it (the column never closes).

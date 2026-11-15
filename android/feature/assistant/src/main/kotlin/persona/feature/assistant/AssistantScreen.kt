@@ -976,7 +976,7 @@ fun AssistantScreen(
                                 else stringResource(R.string.assistant_composer_placeholder, assistantName),
                             blockedLabel = blocking?.takeIf { active == null }?.let { stringResource(blockedSendLabel(it)) },
                             onBlocked = { blocking?.primaryAction()?.let { runReadinessAction(it) } },
-                            extraContent = starterQuotes.isNotEmpty(), mentions = mentions, onMention = starterMentions::add,
+                            extraContent = starterQuotes.isNotEmpty(), assistantChat = true, mentions = mentions, onMention = starterMentions::add,
                             onMentionOpen = { mentionOpen = it },
                             // Glass: the model pill and its panel (#5055, the web's new-chat page): the pick is this chat's start.
                             modelPill = if (PersonaTheme.style == AppStyle.Glass && active == null && !healthPage && pageManagement != null &&

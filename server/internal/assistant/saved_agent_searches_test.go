@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/assistant/saved"
 	"math"
 	"reflect"
 	"slices"
@@ -28,7 +29,7 @@ type savedSearchMemoryStore struct {
 func (st *savedSearchMemoryStore) Setting(_ context.Context, key string, out any) (bool, error) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if key != savedAgentSearchesKey {
+	if key != saved.SearchesKey {
 		return false, nil
 	}
 	if st.readError {
@@ -42,14 +43,14 @@ func (st *savedSearchMemoryStore) Setting(_ context.Context, key string, out any
 func (st *savedSearchMemoryStore) CompareSetting(_ context.Context, key string, revision int64, value any) (bool, error) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if key != savedAgentSearchesKey {
+	if key != saved.SearchesKey {
 		return false, errors.New("wrong key")
 	}
 	st.saves++
 	if st.writeError {
 		return false, errors.New("write unavailable")
 	}
-	var before savedAgentSearchDocument
+	var before saved.SearchDocument
 	if st.raw != nil {
 		if err := json.Unmarshal(st.raw, &before); err != nil {
 			return false, err
@@ -88,7 +89,7 @@ func savedSearchService(st Store) (*Service, *savedSearchEventHub) {
 	h := &savedSearchEventHub{}
 	return New(Options{Hub: h, Store: func() Store { return st }}), h
 }
-func savedSearchResponseOf(t *testing.T, s *Service, method string, body any) savedAgentSearchResponse {
+func savedSearchResponseOf(t *testing.T, s *Service, method string, body any) saved.SearchResponse {
 	t.Helper()
 	raw := ""
 	if body != nil {
@@ -99,7 +100,7 @@ func savedSearchResponseOf(t *testing.T, s *Service, method string, body any) sa
 		raw = string(data)
 	}
 	w := serveAs(s, roleFull, method, savedSearchPath, raw)
-	var out savedAgentSearchResponse
+	var out saved.SearchResponse
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil {
 		t.Fatalf("%s %s: %d %s", method, raw, w.Code, w.Body)
 	}
@@ -121,13 +122,13 @@ func TestSavedAgentSearchLifecycleAndRestore(t *testing.T) {
 	}
 	first := savedSearchResponseOf(t, s, "POST", searchMutation("0", "add", map[string]any{"name": "  Review queue  ", "query": "  state:needs_you  "}))
 	item := first.Searches[0]
-	if first.Revision != "1" || !validSavedSearchID(item.ID) || item.Name != "Review queue" || item.Query != "state:needs_you" || item.CreatedAt.IsZero() || !item.CreatedAt.Equal(item.UpdatedAt) {
+	if first.Revision != "1" || !saved.ValidSearchID(item.ID) || item.Name != "Review queue" || item.Query != "state:needs_you" || item.CreatedAt.IsZero() || !item.CreatedAt.Equal(item.UpdatedAt) {
 		t.Fatalf("add: %+v", first)
 	}
 	second := savedSearchResponseOf(t, s, "POST", searchMutation("1", "add", map[string]any{"name": "Builds", "query": "machine:build state:working"}))
 	other := second.Searches[1]
 	moved := savedSearchResponseOf(t, s, "POST", searchMutation("2", "move", map[string]any{"id": other.ID, "before_id": item.ID}))
-	if moved.Revision != "3" || !reflect.DeepEqual(moved.Searches, []SavedAgentSearch{other, item}) {
+	if moved.Revision != "3" || !reflect.DeepEqual(moved.Searches, []saved.AgentSearch{other, item}) {
 		t.Fatalf("move changed metadata: %+v", moved)
 	}
 	renamed := savedSearchResponseOf(t, s, "POST", searchMutation("3", "update", map[string]any{"id": item.ID, "name": "Review Queue", "query": "is:error since:7d"}))
@@ -140,7 +141,7 @@ func TestSavedAgentSearchLifecycleAndRestore(t *testing.T) {
 		t.Fatal(deleted)
 	}
 	restored := savedSearchResponseOf(t, s, "POST", searchMutation("5", "restore", map[string]any{"item": other, "before_id": item.ID}))
-	if restored.Revision != "6" || !reflect.DeepEqual(restored.Searches, []SavedAgentSearch{other, updated}) {
+	if restored.Revision != "6" || !reflect.DeepEqual(restored.Searches, []saved.AgentSearch{other, updated}) {
 		t.Fatalf("restore changed identity, dates or position: %+v", restored)
 	}
 	restarted, _ := savedSearchService(store)
@@ -245,9 +246,9 @@ func TestSavedAgentSearchConflictsBoundsAndTimestamps(t *testing.T) {
 		t.Fatal("refused operations broadcast")
 	}
 	now := time.Now().UTC()
-	full := savedAgentSearchDocument{Revision: 50, Searches: []SavedAgentSearch{}}
+	full := saved.SearchDocument{Revision: 50, Searches: []saved.AgentSearch{}}
 	for i := range 50 {
-		full.Searches = append(full.Searches, SavedAgentSearch{ID: fmt.Sprintf("search_%024x", i), Name: fmt.Sprint("Saved ", i), Query: "x", CreatedAt: now, UpdatedAt: now})
+		full.Searches = append(full.Searches, saved.AgentSearch{ID: fmt.Sprintf("search_%024x", i), Name: fmt.Sprint("Saved ", i), Query: "x", CreatedAt: now, UpdatedAt: now})
 	}
 	store.raw, _ = json.Marshal(full)
 	raw, _ = json.Marshal(searchMutation("50", "add", map[string]any{"name": "Too many", "query": "x"}))
@@ -255,7 +256,7 @@ func TestSavedAgentSearchConflictsBoundsAndTimestamps(t *testing.T) {
 		t.Fatalf("capacity: %d %s", w.Code, w.Body)
 	}
 	// Removing the last entry keeps its revision; undo cannot race past another writer.
-	store.raw, _ = json.Marshal(savedAgentSearchDocument{Revision: 100, Searches: []SavedAgentSearch{first}})
+	store.raw, _ = json.Marshal(saved.SearchDocument{Revision: 100, Searches: []saved.AgentSearch{first}})
 	gone := savedSearchResponseOf(t, s, "POST", searchMutation("100", "delete", map[string]any{"id": first.ID}))
 	if gone.Revision != "101" || len(gone.Searches) != 0 {
 		t.Fatal(gone)
@@ -299,7 +300,7 @@ func TestSavedAgentSearchStoreFailuresKeepData(t *testing.T) {
 	if len(h.messages()) != 1 {
 		t.Fatal("failed persistence broadcast")
 	}
-	store.raw, _ = json.Marshal(savedAgentSearchDocument{Revision: math.MaxInt64, Searches: before.Searches})
+	store.raw, _ = json.Marshal(saved.SearchDocument{Revision: math.MaxInt64, Searches: before.Searches})
 	if got := savedSearchResponseOf(t, s, "GET", nil); got.Revision != "9223372036854775807" {
 		t.Fatal("revision lost integer precision")
 	}

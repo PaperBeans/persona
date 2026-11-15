@@ -114,8 +114,10 @@ func builtinCall(ctx context.Context, id, method string, params json.RawMessage,
 			return iphone.Status(ctx), nil
 		case "call":
 			return iphone.Call(ctx, params)
-		case "pair", "forget": // background jobs; their state comes back with status
+		case "pair", "forget", "prepare": // background jobs; their state comes back with status
 			return iphone.Pair(ctx, method, params)
+		case "install": // the bridge itself, from the release's build the manager found (#8199)
+			return iphone.Install(ctx, params)
 		case "cancel":
 			iphone.Cancel()
 			return iphone.Status(ctx), nil

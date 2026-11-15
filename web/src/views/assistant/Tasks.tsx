@@ -80,7 +80,7 @@ import { cardLine } from "../chat/dock";
 import { interactionKicker } from "../../lib/row-line";
 import { MessageActions } from "../chat/MessageActions";
 import { sessionTitle, stateOf } from "../../lib/format";
-import { formatDate, t } from "../../i18n";
+import { formatDate, formatList, t } from "../../i18n";
 import { interactionAsk } from "../../lib/inbox";
 import { answeredLookup, answeredSessions } from "./answered-lookup";
 import { lazyPage } from "../../lib/lazy-page";
@@ -272,8 +272,18 @@ function usePlanUltracodeBlocked(plan: TaskPlan): string[] | undefined {
 /** A computer can't start with ultracode now (what Start sends checks it as it goes). */
 const ultracodeBlockedNow = (machine: string) => Boolean(machineStartBlocked(getState(), machine));
 
+/** What "Start these directly" remembers, said on the card (#8095): each task that changes files, by its computer and
+ *  folder; the remembered kind then covers that folder's subfolders too. "" when every task only reads: those start
+ *  without asking anyway, so there is nothing to remember. */
+export function rememberScope(tasks: PlanTask[], machines: Machine[]): string {
+  const places = [...new Set(tasks.filter((task) => !task.readonly).map((task) =>
+    t("assistant-tasks.plan_remember_place", { machine: machines.find((m) => m.id === task.machine)?.name ?? task.machine, directory: task.cwd })))];
+  return places.length ? t("assistant-tasks.plan_remember", { places: formatList(places) }) : "";
+}
+
 export function PlanCard({ plan }: { plan: TaskPlan }) {
   const busy = useFeed((s) => s.busy[plan.id]);
+  const machines = useStore((s) => s.machines);
   const [remember, setRemember] = useState(false);
   const [editing, setEditing] = useState(false);
   const [ultraChoice, setUltraChoice] = useState<Record<number, boolean>>({});
@@ -299,6 +309,7 @@ export function PlanCard({ plan }: { plan: TaskPlan }) {
   // opens with it (so a task moved there to a computer that can has it again), and Start sends it, off where it can't
   const ultracode = plan.tasks.map((task, i) => ultraChoice[i] ?? task.ultracode === true);
   const editedPlan = { ...plan, tasks: plan.tasks.map((task, i) => workspaceChoice[i] === undefined ? task : { ...task, workspace: workspaceChoice[i], workspace_resolved: undefined }) };
+  const scope = rememberScope(editedPlan.tasks, machines);
   const startEdits = () => {
     const edits = planUltracodeToSend(plan, ultracode, ultracodeBlockedNow) ?? plan.tasks.map(() => ({}));
     const all = edits.map((e, i) => workspaceChoice[i] === undefined ? e : { ...e, workspace: workspaceChoice[i] });
@@ -318,10 +329,10 @@ export function PlanCard({ plan }: { plan: TaskPlan }) {
           <TaskWorkspaceEditor plan={editedPlan} index={i} disabled={busy} onChange={(workspace) => setWorkspaceChoice((c) => ({ ...c, [i]: workspace }))} />
         </div>
       ))}
-      <label className="flex cursor-pointer items-center gap-2 text-[12.5px] text-ink-2">
+      {scope && <label className="flex cursor-pointer items-center gap-2 text-[12.5px] text-ink-2">
         <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="accent-[var(--accent)]" />
-        {t("assistant-tasks.plan_remember")}
-      </label>
+        {scope}
+      </label>}
       {/* Start stays in reach (#3822): a card taller than the tray it scrolls in (several tasks, an opened brief) keeps
           its buttons at the tray's bottom edge; a card that fits looks as it did (the padding it takes it gives back) */}
       <div data-plan-actions className="sticky bottom-0 z-[1] -mx-4 -mt-2 -mb-4 flex gap-2 rounded-b-card bg-surface px-4 pt-2 pb-4">
@@ -414,6 +425,12 @@ function BackgroundReviewLine({ item, title, known }: { item: FeedItem; title: s
   );
 }
 
+/** The plan a `plan` item carries in its body (the hub writes it there with the item), when it is one of this item's. */
+function itemPlan(item: FeedItem): TaskPlan | undefined {
+  const p = item.body?.plan as TaskPlan | undefined;
+  return p && typeof p === "object" && p.id === item.ref && Array.isArray(p.tasks) ? p : undefined;
+}
+
 // Memoized: the chat re-renders on every streamed item and session push, while an item keeps its identity until its body
 // changes (mergeInto); the plan, todo and "Later" it shows come through its own selectors.
 export const FeedLineView = memo(function FeedLineView({ item, simplified = false }: { item: FeedItem; simplified?: boolean }) {
@@ -428,7 +445,13 @@ export const FeedLineView = memo(function FeedLineView({ item, simplified = fals
   if (simplified) {
     // the Agents a dispatch handed work to, a card each that opens its page (#5096, cindy's hand-off card); never the
     // whole In progress tray (#3700)
-    if (item.kind === "plan") return plan?.state === "started" ? <PlanHandoffs plan={plan} /> : null;
+    // a plan not started yet is its card where it was made, Start / Edit / Dismiss included, as on iOS (FeedLine,
+    // #8193); it is in the Needs you tray as well. The item's own body draws it when the store has none (a missed event).
+    if (item.kind === "plan") {
+      const shown = plan ?? itemPlan(item);
+      if (!shown) return null;
+      return shown.state === "started" ? <PlanHandoffs plan={shown} /> : <PlanCard plan={shown} />;
+    }
     if (item.kind === "task") return planned ? null : <TaskHandoffs item={item} />;
     // a task's conclusion, a card for each of done / stopped / failed / interrupted (#5569); an interrupted one the hub worked
     // out stays as its record (#3834): one card for a batch, a grey line once handled
