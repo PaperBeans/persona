@@ -140,6 +140,10 @@ type InboxItem struct {
 	// TriageRev is the tier criteria's revision (inboxTriageRev) the model last sorted the item under: an open "Needs
 	// you" item sorted under older criteria is sorted again once (inbox_triage.go retriageStale).
 	TriageRev int `json:"triage_rev,omitempty"`
+	// RuleOf is Last when the item's tier came from the rules because the model failed on it (an error or too slow,
+	// not a held connection or no model): TriagedAt stays behind, and later passes ask the model again, a few at a
+	// time and less often while it keeps failing, until it answers (inbox_triage.go retryRuled, #8298).
+	RuleOf string `json:"rule_of,omitempty"`
 	// SettledOf is the evidence the manager filed the item on as handled elsewhere (inbox_settle.go): the newest source
 	// position it read for a conversation, "mail:<uid>" for an answered mail, "todo:<id>" for a finished to-do. Reopened
 	// by hand, the same evidence never files it again.
@@ -200,6 +204,10 @@ type InboxMail struct {
 // open: not filed, and not a member of a merged row (inbox_merge.go): a member is hidden and its survivor stands for it.
 func (it *InboxItem) open() bool { return it.DoneAt == nil && it.MergedInto == "" }
 
+// tiered: the item has a tier for what it holds now, the model's (TriagedAt) or, while the model fails on it, the
+// rules' (RuleOf).
+func (it *InboxItem) tiered() bool { return it.TriagedAt == it.Last || it.RuleOf == it.Last }
+
 // conversationOf is where a chat item opens in its messaging source: the source is the connector's id ("lark", the
 // Lark extension's source of the same id), the account the one the apps would pass as ol_account.
 func conversationOf(it *InboxItem) *wire.MessagingConversationRef {
@@ -218,7 +226,7 @@ func conversationOf(it *InboxItem) *wire.MessagingConversationRef {
 func (it *InboxItem) listed() InboxItem {
 	c := *it
 	c.Context, c.Last, c.TriagedAt, c.BodyOf, c.JudgedAt, c.Rules, c.ArrivedOf, c.FolderOf = "", "", "", "", "", "", "", ""
-	c.TriageRev, c.SettledOf = 0, ""
+	c.TriageRev, c.SettledOf, c.RuleOf = 0, "", ""
 	c.ArrivedAt = time.Time{}
 	c.Meta, c.Group = nil, nil
 	c.ChainSeq, c.SuggestSeq = 0, 0

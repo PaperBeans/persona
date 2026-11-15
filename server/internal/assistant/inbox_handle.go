@@ -303,7 +303,7 @@ func (b *inboxBook) escalate(since, now time.Time) []*inboxWrite {
 		}
 		handled := it.handled()
 		twin := b.policyTwin(it) // the user's policy (inbox_policies.go): first takes what is not Needs you too
-		if !handled && (twin == TwinNever || it.Tier != TierAction && twin != TwinFirst || it.TriagedAt != it.Last) {
+		if !handled && (twin == TwinNever || it.Tier != TierAction && twin != TwinFirst || !it.tiered()) {
 			continue
 		}
 		// A URL-only link has an Agent record but has never asked the twin to work. It follows the same age
