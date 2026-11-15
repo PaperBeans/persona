@@ -407,17 +407,21 @@ struct TodosView: View {
         .accessibilityIdentifier("todos.row.\(todo.id)")
     }
 
-    /// Got It (#5707, docs/assistant/todo-status-sop.md "Seen"): filed under Done at once, the hub keeps the mark for
-    /// every device, and the toast's Undo takes it off. `after`: the moment that put it in Just finished.
+    /// Got It (#5707, docs/assistant/todo-status-sop.md "Seen"): filed under Done at once, or Other open for an open
+    /// concern (#3582); the hub keeps the mark for every device, and the toast's Undo takes it off.
     private func markSeen(_ todo: TodoItem, after: Date) {
         let id = todo.id
+        let openConcern = todo.isConcern && todo.doneAt == nil
         Haptics.success()
         Task {
             do { try await store.setSeen(id: id, true, after: after) } catch {
-                AppModel.shared.toast = Toast(String(localized: "Couldn't move it to Done: \(error.localizedDescription)"), style: .error)
+                AppModel.shared.toast = Toast(openConcern
+                    ? String(localized: "Couldn't move it to Other open: \(error.localizedDescription)")
+                    : String(localized: "Couldn't move it to Done: \(error.localizedDescription)"), style: .error)
             }
         }
-        AppModel.shared.toast = Toast(String(localized: "Moved to Done"), style: .success,
+        AppModel.shared.toast = Toast(openConcern ? String(localized: "Moved to Other open") : String(localized: "Moved to Done"),
+                                      style: .success,
                                       action: Toast.Action(title: String(localized: "Undo")) {
             Task {
                 do { try await TodoStore.shared.setSeen(id: id, false) } catch {
@@ -622,12 +626,29 @@ struct TodoRow: View {
 
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 HStack(alignment: .firstTextBaseline) {
-                    UltracodeMark.after(todo.title, on: ultracode, font: Theme.Font.labelStrong)
+                    let title = UltracodeMark.after(todo.title, on: ultracode, font: Theme.Font.labelStrong)
                         .font(Theme.Font.bodyStrong)
                         .foregroundStyle(shownDone ? Color.secondary : Color.primary)
                         .strikethrough(shownDone)
                         .lineLimit(2)
                         .animation(UltracodeMark.motion, value: ultracode)
+                    if todo.isConcern {
+                        let tag = Chip(text: String(localized: "Concern"), look: .neutral, compact: true)
+                            .accessibilityLabel(String(localized: "Concern"))
+                        // Keep a short title and its tag together; a longer one keeps its two lines above the tag (#3582).
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.sm) {
+                                title.lineLimit(1)
+                                tag
+                            }
+                            VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                                title
+                                tag
+                            }
+                        }
+                    } else {
+                        title
+                    }
                     Spacer(minLength: Theme.Space.xs)
                     if let d = todo.updatedAt ?? todo.createdAt {
                         Text(Fmt.relative(d))
@@ -648,7 +669,8 @@ struct TodoRow: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
-                    if !todo.isDone { ReviewChip(todo: todo, compact: true) }
+                    // An accepted open concern waits for its report in its open state, without an Accepted tag (#3582).
+                    if !todo.isDone && !(todo.isConcern && todo.reviewState == .accepted) { ReviewChip(todo: todo, compact: true) }
                 }
 
                 // Nobody is working on it (#3618): under its state, where its supervision shows.
@@ -697,7 +719,9 @@ struct TodoRow: View {
                     .font(Theme.Font.captionStrong)
                     .foregroundStyle(Theme.accent)
                     .buttonStyle(.borderless)
-                    .accessibilityLabel(Text("Got It: move \(todo.title) to Done"))
+                    .accessibilityLabel(todo.isConcern && todo.doneAt == nil
+                        ? Text("Got It: move \(todo.title) to Other open")
+                        : Text("Got It: move \(todo.title) to Done"))
                     .accessibilityIdentifier("todos.seen.\(todo.id)")
                 }
 

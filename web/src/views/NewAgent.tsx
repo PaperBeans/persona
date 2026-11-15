@@ -8,7 +8,7 @@ import { hubLabel } from "../lib/mesh";
 import { api, ApiError, credentialOwner, enc, errorText, getToken, isAbort, subscribeCredentialOwner } from "../lib/api";
 import { defaultManager, useKnownDefault } from "../lib/manager-choice";
 import { pickAttachment, releaseAttachments, type LocalAttachment } from "../lib/attachments";
-import type { DraftImage } from "../lib/drafts";
+import { safeDraftRemove, safeDraftWrite, type DraftImage } from "../lib/drafts";
 import { withContexts } from "../lib/context-xml";
 import type { ContextRef } from "../lib/links";
 import { ForwardBar } from "./chat/ForwardBar";
@@ -306,8 +306,8 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, preset]);
   useEffect(() => {
-    if (prompt) localStorage.setItem("draft:new-agent", prompt);
-    else localStorage.removeItem("draft:new-agent");
+    if (prompt) safeDraftWrite("draft:new-agent", () => localStorage.setItem("draft:new-agent", prompt));
+    else safeDraftRemove("draft:new-agent");
   }, [prompt]);
   useEffect(() => () => releaseAttachments(attachmentsRef.current), []);
 

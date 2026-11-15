@@ -22,7 +22,7 @@ type repositoryCursor struct {
 }
 
 func repositoryArguments(raw []byte, out any) error {
-	if len(raw) > 4096 {
+	if len(raw) > 16<<10 {
 		return errors.New("repository arguments exceed the limit")
 	}
 	var fields map[string]json.RawMessage

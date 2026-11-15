@@ -56,5 +56,10 @@
   "meeting_transcription_unchanged": "会議の文字起こしの初期設定は変更されていません。",
   "meeting_transcription_applied": "会議の文字起こしを{mode}に設定しました。これから開始する会議に適用されます。",
   "title_admission": "実行エージェントの admission ゲート",
-  "change_admission": "実行エージェントの admission ゲート：{before} → {after}"
+  "change_admission": "実行エージェントの admission ゲート：{before} → {after}",
+  "title_task_trust": "確認なしで開始するタスク",
+  "change_task_trust_add_edit": "今後、「{machine}」の {directory} とそのサブフォルダでファイルを変更するタスクは、計画カードなしですぐに開始します",
+  "change_task_trust_add_read": "今後、「{machine}」の {directory} とそのサブフォルダでファイルを読むだけのタスクは、計画カードなしですぐに開始します",
+  "change_task_trust_remove_edit": "「{machine}」の {directory} でファイルを変更するタスクは、再び計画カードで開始を待ちます",
+  "change_task_trust_remove_read": "「{machine}」の {directory} の読み取り専用タスクを記憶から外します（読み取り専用タスクは引き続きすぐに開始します）"
 }

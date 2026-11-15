@@ -1789,8 +1789,8 @@ func (s *Service) reopenFailedTodo(ctx context.Context, id string) (Todo, bool, 
 
 // TodoHandoff: an agent is handed work for todo h.TodoID (assistant.todo_handoff, POST /api/v1/sessions or
 // …/messages with todo_id): the todo as it is, whether the hand-off may go (no such todo: 404, a done one: 409, the
-// words the hub answers with), and the text with the todo's decisions in effect before it (#1618) and, for a new
-// agent, its project's background before those (#2820); a blank text stays as it is.
+// words the hub answers with), and the text with the todo's and its actual continuation ancestors' decisions in
+// effect before it (#1618) and, for a new agent, its project's background before those (#2820); a blank text stays as it is.
 func (s *Service) TodoHandoff(ctx context.Context, h TodoHandoff) (TodoHandoffResult, error) {
 	t, ok, err := s.todo(ctx, h.TodoID)
 	if err != nil {

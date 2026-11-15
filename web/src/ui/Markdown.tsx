@@ -14,6 +14,7 @@ import { tableHtml, tableToTsv, writeTableClipboard } from "./tableCopy";
 import { t } from "../i18n";
 import { Icon } from "./icons";
 import { MermaidBlock } from "./Mermaid";
+import { ExternalImage } from "./ExternalImage";
 import { AssistantCard, CARD_LANGUAGES } from "./AssistantCard";
 import { rehypePathLinks, textPaths, writtenText } from "./PathLinks";
 import { usePathLinks } from "../lib/path-presence";
@@ -367,6 +368,8 @@ const hasClass = (cls: string | undefined, name: string) => (cls ?? "").split(/\
 
 export const markdownComponents: Components = {
   a: ({ href, children }) => <Link href={href}>{children}</Link>,
+  // third-party images stay unloaded until tapped (#8162); the hub's own images render inline
+  img: (props) => <ExternalImage {...props} />,
   pre: ({ children }) => {
     const code = () => textOf(children).replace(/\n$/, "");
     if (hasClass(codeClass(children), "math-display")) return <div className="whitespace-pre-wrap" data-math-pending="display">{`$$\n${code()}\n$$`}</div>;

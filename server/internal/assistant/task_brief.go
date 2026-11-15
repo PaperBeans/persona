@@ -346,6 +346,34 @@ func (tb *taskBrief) view() TaskBrief {
 
 // ---- reading ----
 
+// continuationTodos is the to-do and its actual continues ancestors, oldest first. Only the parent pointer is
+// followed: another to-do on the same brief is not thereby an ancestor. A missing, cross-brief or already visited
+// parent stops the walk, so a damaged link cannot import unrelated work or loop.
+func (s *Service) continuationTodos(id string) []string {
+	b := &s.tbriefs
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.init()
+	out := []string{id}
+	link, ok := b.links[id]
+	if !ok || link.Brief == "" {
+		return out
+	}
+	brief := link.Brief
+	seen := map[string]bool{id: true}
+	for link.Continues != "" {
+		parent := link.Continues
+		link, ok = b.links[parent]
+		if !ok || link.Brief != brief || seen[parent] {
+			break
+		}
+		out = append(out, parent)
+		seen[parent] = true
+	}
+	slices.Reverse(out)
+	return out
+}
+
 // briefOfTodo is the brief to-do id works for, false when it has none.
 func (s *Service) briefOfTodo(id string) (TaskBrief, bool) {
 	b := &s.tbriefs

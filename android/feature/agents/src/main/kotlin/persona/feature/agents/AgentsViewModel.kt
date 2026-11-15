@@ -802,10 +802,12 @@ internal class AgentsViewModel(
         _delivery.update { it + (interaction.id to RequestDelivery.Sending) }
         viewModelScope.launch {
             try {
-                interactions.resolve(interaction.id, resolution)
+                val outcome = interactions.resolveOutcome(interaction.id, resolution)
                 _delivery.update { it + (interaction.id to RequestDelivery.Sent) }
+                val effective = if (outcome.already) outcome.resolution else resolution
                 // The notice outlives the card: it keeps the answer without a password card's typed value (#1581).
-                _notice.value = AgentText.receipt(persona.feature.chat.AnswerReceipt(latest, resolution.copy(values = null)))
+                _notice.value = if (effective == null) AgentText(persona.feature.chat.R.string.chat_interaction_already)
+                else AgentText.receipt(persona.feature.chat.AnswerReceipt(latest, effective.copy(values = null)))
                 _haptics.tryEmit(Haptic.Success)
             } catch (e: CancellationException) {
                 _delivery.update { it + (interaction.id to RequestDelivery.Unknown) }

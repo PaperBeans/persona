@@ -3,6 +3,7 @@ package persona.feature.agents
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import persona.core.contracts.Machine
+import persona.core.contracts.PaseoAgent
 import persona.core.contracts.Session
 import persona.core.contracts.api.*
 import persona.core.designsystem.UiText
@@ -108,10 +109,12 @@ internal data class NewAgentState(
 ) {
     val locked get() = !initialized || starting || pending != null || created != null
     /**
-     * A Claude start takes attachments: its first message goes as an ordinary message. Codex and other CLIs take theirs
-     * with the start as text, and take none (iOS `FirstMessage.hold`, web `launcher_no_attachments`).
+     * Its first message goes as an ordinary message once the start is answered, so it takes attachments: Claude Code, and
+     * Paseo's other providers ([PaseoAgent], #8143) as iOS and the web send theirs. Codex and other CLIs take theirs with
+     * the start as text, and take none (iOS `FirstMessage.hold`, web `launcher_no_attachments`).
      */
-    val takesAttachments: Boolean get() = agentType == "claude"
+    val firstMessageAfterStart: Boolean get() = agentType == "claude" || agentType == PaseoAgent
+    val takesAttachments: Boolean get() = firstMessageAfterStart
     /** What the attachments hold Start back for, said under it (iOS `FirstMessage.hold`); null: nothing. */
     val attachmentsHold: AgentText? get() = when {
         attachments.isEmpty() -> null
@@ -517,17 +520,18 @@ internal class NewAgentViewModel(
     /**
      * Claude starts in the background (docs/protocol/protocol.md "New session"): the hub answers with a starting session, which
      * opens at once, and the first message goes as an ordinary message (on screen at once, sent once Claude is ready),
-     * its id kept with the operation so it is sent once whatever happens to this process. Codex takes its first message
-     * with the start, and so does any start without a sender.
+     * its id kept with the operation so it is sent once whatever happens to this process. A Paseo provider's first
+     * message goes the same way once the hub answers ([NewAgentState.firstMessageAfterStart], iOS and the web). Codex
+     * takes its first message with the start, and so does any start without a sender.
      */
     private fun newOperation(current: NewAgentState, agentType: String, worktree: String? = null): AgentStartOperation {
         val typed = current.prompt.trim().takeIf { it.isNotEmpty() }
+        val async = sender != null && current.firstMessageAfterStart
         // The photos and the uploaded files go with the first message as the composer writes them (#2321); the tab is
         // named from what was typed, as on iOS.
-        val first = if (sender != null && agentType == "claude" && current.attachments.isNotEmpty())
+        val first = if (async && current.attachments.isNotEmpty())
             NewAgentAttachments.firstMessage(typed.orEmpty(), current.attachments, uploads?.photosOnly?.invoke().orEmpty()).takeIf { it.isNotEmpty() }
         else typed
-        val async = sender != null && agentType == "claude"
         val efforts = current.modelEfforts
         // A catalog workspace picked (#7259): the start goes into it, by its engine's id, in its folder.
         val workspace = current.workspace?.takeIf { current.space == null }

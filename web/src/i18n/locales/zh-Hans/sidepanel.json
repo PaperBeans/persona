@@ -9,5 +9,6 @@
   "team": "协同",
   "background": "后台任务",
   "task": "任务",
-  "agent": "Agent"
+  "agent": "Agent",
+  "sides": "分支会话"
 }

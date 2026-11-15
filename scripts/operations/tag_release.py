@@ -215,6 +215,43 @@ def scan_gzip(path, token, out=None):
     return digest.hexdigest(), found
 
 
+def drop_missing_helpers(assets, state_dir):
+    """Helpers (persona-iphone-bridge, docs/extensions/iphone-bridge.md "Releases") are optional: a receipt whose
+    latest.json lists one it does not carry (a private upload command that names its files and predates them) goes up
+    with a copy of latest.json that leaves those out, with a warning, rather than failing the release. Hubs reading
+    this release then simply find no build of that helper. Returns the assets to upload."""
+    by_name = {item["name"]: item for item in assets}
+    if "latest.json" not in by_name:
+        return assets
+    try:
+        manifest = json.loads(Path(by_name["latest.json"]["path"]).read_text())
+    except (OSError, ValueError):
+        return assets  # check_release_manifest says why
+    helpers = manifest.get("helpers")
+    if not isinstance(helpers, dict):
+        return assets
+    kept, dropped = {}, []
+    for program, platforms in helpers.items():
+        for plat, item in (platforms or {}).items():
+            name = item.get("name") if isinstance(item, dict) else None
+            if name in by_name:
+                kept.setdefault(program, {})[plat] = item
+            else:
+                dropped.append(str(name))
+    if not dropped:
+        return assets
+    print("warning: latest.json lists helper builds this receipt does not carry; uploading it without them: "
+          + ", ".join(sorted(dropped)), file=sys.stderr, flush=True)
+    if kept:
+        manifest["helpers"] = kept
+    else:
+        manifest.pop("helpers", None)
+    path = Path(state_dir) / "latest.json"
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.write_text(json.dumps(manifest, indent=2) + "\n")
+    return [dict(item, path=str(path)) if item["name"] == "latest.json" else item for item in assets]
+
+
 def check_release_manifest(assets):
     """A receipt with latest.json (the hub's) is what every release hub installs from once it is uploaded: latest.json
     must describe the downloads uploaded with it, each must be its build, and the personad among them that runs here
@@ -235,6 +272,12 @@ def check_release_manifest(assets):
         for program, platforms in (manifest.get(group) or {}).items():
             listed += [(program, plat, item) for plat, item in (platforms or {}).items()]
     listed += [("persona-link", plat, item) for plat, item in (manifest.get("links") or {}).items()]
+    # Helpers (persona-iphone-bridge) carry their own version, not the build number: only their bytes are checked.
+    helpers = set()
+    for program, platforms in (manifest.get("helpers") or {}).items():
+        for plat, item in (platforms or {}).items():
+            listed.append((program, plat, item))
+            helpers.add((program, plat))
     here, ran = host_platform(), False
     if not any(program == "personad" for program, _, _ in listed):
         raise ConfigError("latest.json lists no personad")
@@ -255,7 +298,7 @@ def check_release_manifest(assets):
             if inner != item.get("binary_sha256"):
                 raise ConfigError("%s does not unpack to the binary latest.json lists" % name)
             if run is None:
-                if not stamped:
+                if not stamped and (program, plat) not in helpers:
                     raise ConfigError("%s is not build %d: latest.json was written for another build than it" % (name, build))
                 continue
             run.chmod(0o755)
@@ -411,6 +454,7 @@ def publish_once(config, tag, commit):
                PERSONA_RELEASE_PLATFORM=platform, PERSONA_RELEASE_WORKTREE=str(config["worktree"]))
     subprocess.run(command, cwd=config["worktree"], env=env, check=True)
     assets = read_receipt(Path(config["receipt"]).expanduser(), commit)
+    assets = drop_missing_helpers(assets, config["state_dir"])
     check_release_manifest(assets)
     check_android_index(assets, tag[1:])
     upload(config["repository"], tag, assets)

@@ -94,7 +94,7 @@ func (s *jobSlot) start(kind string, run func(ctx context.Context, step func(str
 			job.State, job.Step = "done", ""
 		}
 		s.mu.Unlock()
-		if err == nil && then != nil {
+		if job.State == "done" && then != nil {
 			then()
 		}
 	}()

@@ -150,9 +150,10 @@ func modelCost(_ m: ModelTokens, _ price: ModelPrice?) -> Double? {
         (m.cacheRead > 0 && price.cacheRead == nil) || (m.cacheWrite > 0 && price.cacheWrite == nil) { return nil }
     let write1h = min(m.cacheWrite1h, m.cacheWrite)
     let write1hPrice = price.cacheWrite1h ?? price.cacheWrite ?? 0
-    return (Double(m.input) * (price.input ?? 0) + Double(m.output) * (price.output ?? 0) +
-        Double(m.cacheRead) * (price.cacheRead ?? 0) + Double(m.cacheWrite - write1h) * (price.cacheWrite ?? 0) +
-        Double(write1h) * write1hPrice) / 1e6
+    let ordinary = Double(m.input) * (price.input ?? 0) + Double(m.output) * (price.output ?? 0)
+    let cached = Double(m.cacheRead) * (price.cacheRead ?? 0) + Double(m.cacheWrite - write1h) * (price.cacheWrite ?? 0)
+    // Keep each arithmetic group explicit: the Swift 6.2.4 type checker times out on the single expression.
+    return (ordinary + cached + Double(write1h) * write1hPrice) / 1e6
 }
 
 nonisolated struct ModelShare: Equatable, Sendable {

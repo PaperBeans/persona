@@ -62,10 +62,16 @@ const (
 // environment, it would be authoritative for everything run there later.
 const herdrAgentEnv = "HERDR_AGENT"
 
-// herdrAgentName is what herdr calls an agent of kind, "" for one it has no integration for (a compatible CLI, pi: left to its
-// own detection) and on Windows, where herdr does not read HERDR_AGENT.
+// herdrAgentName is what herdr calls an agent of kind, "" for one it has no integration for (a compatible CLI: left to its
+// own detection) and on Windows, where herdr does not read HERDR_AGENT. pi, the Cursor CLI and the Antigravity CLI
+// are integrations herdr ships (herdr 0.9.5: pi, cursor, antigravity_cli), so a wrapper that execs them under another
+// name is still recognised.
 func herdrAgentName(kind string) string {
-	if runtime.GOOS != "windows" && (kind == "claude" || kind == "codex") {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+	switch kind {
+	case "claude", "codex", piAgent, cursorAgent, agyAgent:
 		return kind
 	}
 	return ""

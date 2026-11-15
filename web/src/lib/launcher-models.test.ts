@@ -238,7 +238,8 @@ describe("手动输入的模型 ID（#1644）", () => {
 
   it("Claude Code and Codex take one, unless the launcher fixes its own --model", () => {
     expect(takesTypedModel("claude") && takesTypedModel("codex")).toBe(true);
-    expect(takesTypedModel("traex") || takesTypedModel("agy")).toBe(false);
+    expect(takesTypedModel("pi") && takesTypedModel("cursor") && takesTypedModel("agy")).toBe(true);
+    expect(takesTypedModel("traex") || takesTypedModel("dsh")).toBe(false);
     expect(typedModelOffered("claude", claude)).toBe(true);
     expect(typedModelOffered("claude", undefined)).toBe(true); // the list couldn't be read
     expect(typedModelOffered("claude", { ...claude, locked: "固定了模型" })).toBe(false);

@@ -27,6 +27,8 @@ type ownSetting struct {
 	Setting
 	get func(ctx context.Context) (string, error)
 	set func(ctx context.Context, v json.RawMessage) (*ownChange, error)
+	// change is a setting's other actions (a list's add and remove: tasks.trust), in place of set.
+	change func(ctx context.Context, action string, v json.RawMessage) (*ownChange, error)
 }
 
 // ownChange is a change waiting for the phone: what the card says and how it is made (none: nothing to change).
@@ -201,6 +203,7 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "the full AdmissionSettings JSON object from get; a nil pointer keeps the code default, every set line must be positive"},
 			get: s.getAdmission,
 			set: s.setAdmission},
+		s.trustSetting(),
 	}
 }
 
@@ -268,14 +271,18 @@ var settingCardWait = 15 * time.Minute
 
 // ownSettingAction reads one of the assistant's settings, or changes it once the user approves on the phone.
 func (s *Service) ownSettingAction(ctx context.Context, call ToolCall, o ownSetting, action string, value json.RawMessage) (string, error) {
-	switch action {
-	case "get":
+	var change *ownChange
+	var err error
+	switch {
+	case action == "get":
 		return o.get(ctx)
-	case "set":
+	case action == "set" && o.set != nil:
+		change, err = o.set(ctx, value)
+	case action != "set" && o.change != nil && slices.Contains(o.Actions, action):
+		change, err = o.change(ctx, action, value)
 	default:
 		return "", fmt.Errorf("%s does not take %q (it takes %s)", o.Key, action, strings.Join(o.Actions, ", "))
 	}
-	change, err := o.set(ctx, value)
 	if err != nil {
 		return "", err
 	}
@@ -322,7 +329,7 @@ var settingTitles = map[string]string{standingAuthorizationsKey: "title_standing
 	"assistant.meeting_transcription_default": "title_meeting_transcription_default",
 	"assistant.meeting_attendance_default":    "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",
 	"assistant.kb_topics": "title_kb_topics", "assistant.main_background_folded": "title_main_background_folded",
-	admissionSettingsKey: "title_admission"}
+	admissionSettingsKey: "title_admission", trustSetting: "title_task_trust"}
 
 // clipped is a value as the card shows it, in l.
 func clipped(l i18n.Lang, s string) string {

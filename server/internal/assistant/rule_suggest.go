@@ -402,8 +402,9 @@ func (s *Service) ruleCount(ctx context.Context, now time.Time) (map[string]*rul
 	if err != nil {
 		return nil, err
 	}
+	homes := s.trustHomes(ctx)
 	for k, n := range starts {
-		if n >= ruleSuggestAfter && !trusted[k] {
+		if n >= ruleSuggestAfter && !trustCovers(trusted, homes, k) { // a kind a remembered directory holds starts already
 			out[ruleSuggestionID(ruleKindPlanStart, k)] = &ruleCandidate{id: ruleSuggestionID(ruleKindPlanStart, k),
 				kind: ruleKindPlanStart, count: n, task: task[k]}
 		}

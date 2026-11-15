@@ -95,6 +95,16 @@ describe("the pill's states", () => {
     expect(markup(<ModelPill current={opus} onOpen={() => {}} />)).not.toContain("data-pill-short");
   });
 
+  it("one of Paseo's providers: its mark and its label, never the engine's id (#8142)", () => {
+    const grok = markup(<ModelPill current={{ engine: "grok", engineLabel: "Grok", provider: "grok", model: "Grok 4" }} onOpen={() => {}} />);
+    expect(grok).toContain('title="Grok · Grok 4 · grok"');
+    expect(grok).toMatch(/data-pill-engine="grok"[^>]*>.*data-agent-mark="letter"/);
+    expect(grok).not.toMatch(/paseo/i);
+    const cursor = markup(<ModelPill current={{ engine: "cursor", engineLabel: "Cursor", provider: "cursor", model: "Auto" }} onOpen={() => {}} />);
+    expect(cursor).toContain('data-agent-mark="cursor"');
+    expect(cursor).toContain('title="Cursor · Auto · cursor"');
+  });
+
   it("Fast: a filled bolt in the neutral colour, and Fast in the tooltip", () => {
     const html = markup(<ModelPill current={{ ...opus, engine: "codex", model: "5.5", fast: true }} onOpen={() => {}} />);
     expect(html).toContain("fill-current");

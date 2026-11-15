@@ -45,8 +45,10 @@ var (
 // user's "Archive and close"); done false (and no error) when it was not running.
 func (n *Node) retire(ctx context.Context, id string, closeTerminal bool) (done bool, err error) {
 	if !closeTerminal {
-		return n.stop(ctx, id, true)
+		return n.stopWithCause(ctx, id, true, proto.StopUnknown)
 	}
+	release := n.recovery.lock(id)
+	defer release()
 	unlock, _, ok, err := n.stoppable(id, true)
 	if err != nil || !ok {
 		return false, err
@@ -61,12 +63,31 @@ func (n *Node) retire(ctx context.Context, id string, closeTerminal bool) (done 
 // stop quits session id's agent and keeps its pane (retire: only one that is still); stopped false (and no error)
 // when it was not running.
 func (n *Node) stop(ctx context.Context, id string, retire bool) (stopped bool, err error) {
+	return n.stopWithCause(ctx, id, retire, proto.StopUser)
+}
+
+func (n *Node) stopWithCause(ctx context.Context, id string, retire bool, cause proto.StopCause) (stopped bool, err error) {
+	release := n.recovery.lock(id)
+	defer release()
+	if cause == proto.StopUser {
+		if err := n.saveStopCause(ctx, id, proto.StopUser); err != nil {
+			return false, err
+		}
+		defer n.state.stopped(id, cause)
+	}
 	unlock, a, ok, err := n.stoppable(id, retire)
 	if err != nil || !ok {
 		return false, err
 	}
 	defer unlock()
-	return n.quitAgent(ctx, id, a.PaneID)
+	if cause != proto.StopUser {
+		n.state.stopped(id, proto.StopUnknown) // An unconfirmed/failed automatic stop never grants recovery.
+	}
+	stopped, err = n.quitAgent(ctx, id, a.PaneID)
+	if stopped && err == nil {
+		n.state.stopped(id, cause)
+	}
+	return stopped, err
 }
 
 // stoppable checks that session id's agent may be stopped now (retire: only a still one) and holds its typing lock

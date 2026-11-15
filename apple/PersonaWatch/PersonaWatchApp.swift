@@ -190,6 +190,10 @@ final class WatchModel {
         WatchSync.shared.onMinutes = { [weak self] m in self?.minutes = m }
         WatchSync.shared.onSummary = { [weak self] s in
             guard let self, WatchGroupRefresh.acceptsSummary(at: s.at, lastUpdate: self.lastUpdate) else { return }
+            // Which hubs fold side sessions (#7944): the watch reads no hello, so its own reads of them fold as the phone said.
+            if let folding = s.sideFold {
+                for g in Set(self.groups).union(folding) { SideFold.remember(folding.contains(g), group: g) }
+            }
             // The phone's summary is every group merged; split it back so a later failed direct fetch keeps the right
             // group's data, and take the phone's word that the groups it covers are reachable (#4369).
             var byGroup: [String: WatchGroupData] = [:]
@@ -217,13 +221,16 @@ final class WatchModel {
     private func apply(sessions: [Session], interactions: [Interaction], machines: [Machine], at: Date = .now) {
         // Agents of quiet tasks and their questions are the main conversation's to tell (#1731), by the hub's word.
         let (sessions, interactions) = QuietTasks.leavingOut(sessions: sessions, interactions: interactions, quiet: \.quiet)
+        // A side session lives in its parent's chat (#7944): no row of its own on the wrist, the parent in its folded state.
+        // The phone's summary is folded already; folding it again changes nothing.
+        let folded = SideFold.fold(sessions, groups: SideFold.rememberedGroups(groups)).listed
         // A muted agent's or space's card never reaches the wrist (#4360): it is neither shown nor buzzed for.
         let shown = WatchInteractions.leavingMuted(interactions)
         // Only a card seen for the first time buzzes: one that vanished with a failed group and came back with it is
         // already in the persisted record (#4369).
         let freshUids = WatchGroupRefresh.newHapticUids(seen: Set(seenInteractionUids), current: shown)
         func rank(_ s: Session) -> Int { s.state.priority }
-        self.sessions = sessions.filter { $0.state.isLive && !$0.assistant || $0.state == .needsYou || $0.state == .working }
+        self.sessions = folded.filter { $0.state.isLive && !$0.assistant || $0.state == .needsYou || $0.state == .working }
             .sorted { rank($0) != rank($1) ? rank($0) < rank($1) : $0.sortDate > $1.sortDate }
         self.interactions = shown
         if !machines.isEmpty { self.machines = machines }

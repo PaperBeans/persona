@@ -315,7 +315,7 @@ func TestTodoDecisionsGolden(t *testing.T) {
 	}
 	golden(t, "todo_decisions.two", prompts.RenderTodoDecisions(prompts.TodoDecisions{Title: `天气 App "1.3"`, Decisions: []prompts.TodoDecision{
 		{N: 1, Question: "先发哪个平台？", Choice: "安卓", Reason: "iOS 审核卡住了", When: "11-04 10:02"},
-		{N: 2, Question: "用哪个迁移号？", Choice: "0311", When: "11-04 11:30", From: "在「发版 Agent」的提问里答的"},
+		{N: 2, Question: "用哪个迁移号？", Choice: "0311", When: "11-04 11:30", Source: prompts.TodoDecisionCard, Asker: "发版 Agent"},
 	}}))
 }
 

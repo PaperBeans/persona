@@ -194,6 +194,8 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 		resp = n.handleNotify(ctx, req)
 	case "launcher.env": // personad launch <name>
 		resp = n.launcherEnvFor(req)
+	case "launcher.pi": // pi's Persona extension: the providers pi can use here (pi_providers.go)
+		resp = n.piProvidersFor(ctx, req)
 	case "secret.env": // personad launch --ticket (secretenv.go)
 		resp = n.secretEnvFor(req)
 	case "mcp.tools":

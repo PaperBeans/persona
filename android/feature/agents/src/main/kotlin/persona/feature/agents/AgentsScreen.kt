@@ -215,7 +215,11 @@ internal fun AgentsScreen(
         if (!row.session.isLive) {
             historyMachine = row.session.machineId
             historySession = row.session.sessionId
-        } else { model.opened(row); open(row.session.key) }
+        } else {
+            model.opened(row)
+            // A search hit inside a side session (#7944) opens the parent with that side shown.
+            open(page.settings.sideHit(row.session, page.sessions, names) ?: row.session.key)
+        }
     }
     fun newSession(space: AgentSpacePreset? = null) { creationModel?.startIn(space); newAgent = true }
     // Built with the page off the main thread (AgentsViewModel).
