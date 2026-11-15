@@ -138,11 +138,12 @@ struct HubAddressesPage: View {
         }
     }
 
+    /// Verbatim: as a `LocalizedStringKey` the example addresses would turn into links.
     private func problem(_ input: HubAddressInput) -> Text {
         switch input {
-        case .unsupportedScheme: Text("Only addresses starting with https:// or http:// work.")
-        case .duplicate: Text("This hub already has this address.")
-        default: Text("This isn't a valid address. Write it like hub.example.com or https://hub.example.com:8443.")
+        case .unsupportedScheme: Text(verbatim: String(localized: "Only addresses starting with https:// or http:// work."))
+        case .duplicate: Text(verbatim: String(localized: "This hub already has this address."))
+        default: Text(verbatim: String(localized: "This isn't a valid address. Write it like hub.example.com or https://hub.example.com:8443."))
         }
     }
 
