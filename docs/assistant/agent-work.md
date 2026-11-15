@@ -14,6 +14,34 @@ not how far the session has progressed **in its work**. The Agents page ends up 
 - Which stopped only because of a transient error such as `API Error: 503`, and simply need a "continue" message;
 - Authorization links that expire within minutes and are already invalid by the time the user sees them.
 
+## All participants stopped (#8400)
+
+For people delegating work through Assistant, the existing supervision watch raises `all_stopped` after every current
+participant has been inactive for **30 minutes**, independent of the task's estimate. It joins a task leader's own
+To-do and its workers through `todo_agents.source = worker` / `via = <leader task id>` and supervisor references,
+including assistant conversations linked as Agents. Each open task's supervisor receives the group's last stated waits;
+the leader's own task also notifies its supervisor. This is a supervision message, not an automatic restart or a push.
+
+Missing/offline sessions remain the orphan signal's responsibility. Finished, parked and review-pending tasks do not
+participate; `needs_user` alone does not suppress this check when there is no answerable card. Pending interactions,
+Awaiting Reply, task-decision cards, queued input, active loops, automatic error resumes and future `session_work.wake_at`
+exclude the group. The manager overlays its work ledger on the session list so newly scheduled wakes and cards count.
+
+Background work must show activity within the same 30-minute interval: running subagents use `updated_at`, workflows use
+their own and their agents' activity times, and background tasks without activity timestamps use `started_at`. If those
+timestamps are absent too, the Agent's known stop time bounds the age: its background work started before it stopped.
+This also covers summary-only background flags and runtime children; missing activity times do not exempt them forever.
+A monitor with a future `expires_at` is a scheduled wake. A long-running shell may therefore need supervision despite still being
+alive; the message tells the supervisor to verify before restarting anything. No node-side output polling is added.
+
+The latest state, transcript, activity, work-turn, past wake or background-activity timestamp starts each participant's
+interval. A sorted `machine/session@timestamp` list is the group's key: unchanged inactivity is told once, and actual
+new activity rearms it. Delivery rechecks the whole group and key, dropping a message invalidated by progress, a card,
+a wake or a parked task. Failed session, work-ledger or card-ledger reads stay pending for retry and are not marked sent.
+Existing signal and persisted fingerprint deduplication are reused: the inactivity fingerprint does not expire with the
+30-minute text-deduplication window. Each task and destination keeps only its latest group key, removed by the watch
+when the task closes or is deleted. A failed delivery rolls the reservation back.
+
 ## Automatic session names (#4812)
 
 Settings › Assistant › Agents can correct recognizable placeholder names with the model configured for

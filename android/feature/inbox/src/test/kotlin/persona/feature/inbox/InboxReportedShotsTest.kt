@@ -46,7 +46,14 @@ import java.io.File
 import java.time.Instant
 import java.time.ZoneOffset
 
-/** Native-graphics evidence that a long reported original expands inline once, including at 200% text. */
+/**
+ * Native-graphics evidence that a long reported original expands inline once, including at 200% text.
+ *
+ * Set `JAVA_TOOL_OPTIONS` to `-Dpersona.shots=<absolute-directory> -Dpersona.shots.phase=expanded` so both
+ * test-JVM properties reach Robolectric. The output root has no timestamp or generated suffix; `expanded` writes only
+ * expanded PNGs, while `collapsed` and the default `all` are also supported. The same before/after command therefore
+ * differs only in its output root, while every layout and interaction check runs.
+ */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "en-w400dp-h2600dp-xhdpi")
@@ -139,7 +146,13 @@ class InboxReportedShotsTest {
         rule.onNodeWithText(REPORTED_SHOTS_ORIGINAL).assertIsEnabled()
     }
 
-    private fun reportedShotsCapture(name: String) {
+    private val reportedShotsSelectedPhase = System.getProperty("persona.shots.phase") ?: "all"
+
+    private fun reportedShotsCapture(name: String, phase: String) {
+        check(reportedShotsSelectedPhase in setOf("all", "collapsed", "expanded")) {
+            "persona.shots.phase must be all, collapsed or expanded"
+        }
+        if (reportedShotsSelectedPhase != "all" && reportedShotsSelectedPhase != phase) return
         rule.waitForIdle()
         val bitmap = rule.onNodeWithTag(REPORTED_SHOTS_TAG).captureToImage().asAndroidBitmap()
         val background = bitmap.getPixel(1, 1)
@@ -158,7 +171,7 @@ class InboxReportedShotsTest {
 
     @Test
     fun reportedOriginalExpandsAndCollapsesInEveryStyleAndAppearance() {
-        reportedShotsMatrix(fontScale = 1f, expandedHeightDp = 900, nameSuffix = "")
+        reportedShotsMatrix(fontScale = 1f, expandedHeightDp = 900, nameSuffix = "-100pct")
     }
 
     @Test
@@ -207,14 +220,14 @@ class InboxReportedShotsTest {
             reportedShotsAssertWholeOriginalIsCaptured("$context collapsed")
             rule.onNodeWithText("11:59", useUnmergedTree = true).assertExists()
             rule.onNodeWithText("Assistant says: $REPORTED_SHOTS_ORIGINAL", useUnmergedTree = true).assertDoesNotExist()
-            reportedShotsCapture("reported-collapsed-${appearance.name.lowercase()}-$mode$nameSuffix")
+            reportedShotsCapture("reported-collapsed-${appearance.name.lowercase()}-$mode$nameSuffix", "collapsed")
 
             rule.onNodeWithText(REPORTED_SHOTS_ORIGINAL).performClick()
             rule.runOnIdle { shotHeightDp = expandedHeightDp }
             rule.waitForIdle()
             reportedShotsAssertExpanded(context)
             reportedShotsAssertWholeOriginalIsCaptured("$context expanded")
-            reportedShotsCapture("reported-expanded-${appearance.name.lowercase()}-$mode$nameSuffix")
+            reportedShotsCapture("reported-expanded-${appearance.name.lowercase()}-$mode$nameSuffix", "expanded")
 
             rule.onNodeWithText(REPORTED_SHOTS_ORIGINAL).performClick()
             rule.runOnIdle { shotHeightDp = 900 }

@@ -241,6 +241,11 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 		return r
 	}
 	if err == nil {
+		if (kind == "codex" || kind == traexAgent) && host.ParsePane(pane).Kind != host.Botmux {
+			if err := n.codexSubmitted(ctx, pane); err != nil {
+				return err
+			}
+		}
 		n.typing.typed(pane, text)
 		n.lostFirst.clear(id) // the message the start could not deliver went in now, or another one
 		if kind == "claude" {

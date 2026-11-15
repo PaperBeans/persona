@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Persona
+import PersonaWire
 
 /// The local proxy route (docs/operations/network.md "Connecting to hub through a local SOCKS5 proxy"): what is kept with
 /// the pairing and what it defaults to, and the forward itself, through a SOCKS5 proxy to a hub started here on the

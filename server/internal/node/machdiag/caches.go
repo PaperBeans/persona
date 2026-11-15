@@ -51,7 +51,7 @@ var catalog = []cacheSpec{
 		}
 		return filepath.Join(xdgCacheDir(home, env), "uv") // uv uses the XDG folder on macOS too
 	}},
-	{id: "yarn-cache", users: []string{"yarn"}, path: func(goos, home string, env func(string) string) string {
+	{id: "yarn-cache", users: []string{"yarn", "node"}, path: func(goos, home string, env func(string) string) string {
 		if v := env("YARN_CACHE_FOLDER"); v != "" {
 			return v
 		}

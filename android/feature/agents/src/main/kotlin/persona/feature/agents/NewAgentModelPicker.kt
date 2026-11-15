@@ -29,7 +29,7 @@ internal fun LazyListScope.newAgentModelItems(state: NewAgentState, editable: Bo
                 list != null -> JRow(state.pickedModel?.label ?: stringResource(R.string.agents_model_default),
                     subtitle = state.pickedModel.let { picked -> if (picked != null) modelDetail(picked) else defaultModelDetail(agentResources(), state) },
                     enabled = editable, onClick = onOpen, trailing = if (models.loading) ({ JSpinner() }) else null)
-                models.loading -> JRow(stringResource(R.string.agents_model_loading), subtitle = stringResource(R.string.agents_model_loading_detail, state.modelLauncher), chevron = false, trailing = { JSpinner() })
+                models.loading -> JRow(stringResource(R.string.agents_model_loading), subtitle = stringResource(R.string.agents_model_loading_detail, state.modelLauncherTitle), chevron = false, trailing = { JSpinner() })
                 else -> JRow(stringResource(R.string.agents_model_failed), subtitle = stringResource(R.string.agents_model_failed_detail, models.error?.text().orEmpty()), subtitleLines = 4, chevron = false,
                     trailing = { JButton(stringResource(R.string.agents_model_retry), onRetry, enabled = editable, kind = JButtonKind.Secondary, size = JButtonSize.Small) })
             }
@@ -55,11 +55,11 @@ internal fun NewAgentModelSheet(
         LaunchedEffect(Unit) { onDismiss() }
         return
     }
-    // A Paseo provider has no terminal and its own name: its note names only it, never the engine (#8143).
+    // A Paseo provider has no terminal and its own name: its note names only it, by its label (#8261), never the engine (#8143).
     val agent = list.agent.ifBlank { state.agentType }
     JModelSheet(
-        note = if (agent == PaseoAgent) stringResource(R.string.agents_model_sheet_note_provider, state.modelLauncher)
-            else stringResource(R.string.agents_model_sheet_note, state.modelLauncher, agent.agentLabel()),
+        note = if (agent == PaseoAgent) stringResource(R.string.agents_model_sheet_note_provider, state.modelLauncherTitle)
+            else stringResource(R.string.agents_model_sheet_note, state.modelLauncherTitle, agent.agentLabel()),
         models = list.models, selected = state.model, defaultDetail = defaultModelDetail(agentResources(), state),
         loading = state.models.loading, error = state.models.error?.text(),
         onPick = onPick, onRefresh = onRefresh, onDismiss = onDismiss, initialQuery = initialQuery,

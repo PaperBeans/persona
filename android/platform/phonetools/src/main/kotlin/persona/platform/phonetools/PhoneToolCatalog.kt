@@ -102,17 +102,23 @@ internal object PhoneToolCatalog {
                 "the user asks something that needs their location.",
             PhoneSource.Location, foreground = true),
         tool("phone_health_summary",
-            "Summarize the user's health data per day. Metrics: steps, distance (meters), " +
-                "active_energy, resting_energy, dietary_energy (kcal, daily totals), " +
-                "protein, carbs, fat (grams, daily totals), heart_rate (bpm, average/min/max over the day), " +
-                "resting_heart_rate (bpm), sleep (hours asleep), weight (kg). " +
-                "Defaults to steps over the last 7 days. Only the requested metrics are read. Days run from local midnight to " +
-                "midnight; today's numbers are partial. Returns one row per day with only the days that have data. Read access is " +
-                "never reported to apps, so an empty result can also mean the user denied read access.",
+            "Summarize the user's health data per day. Metrics: steps, distance (meters), active_energy, resting_energy, dietary_energy (kcal, daily totals), protein, carbs, fat (grams, daily totals), heart_rate (bpm, average/min/max over the day), resting_heart_rate (bpm), sleep (hours asleep), weight (kg). Defaults to steps over the last 7 days. Only the requested metrics are read. Days run from local midnight to midnight; today's numbers are partial. Returns one row per day with only the days that have data. Read access is never reported to apps, so an empty result can also mean the user denied read access. When the iPhone is locked the app cannot read HealthKit: it returns the last snapshot saved while the device was unlocked (\"source\": \"snapshot\" with \"as_of\"), or a device_locked error when no snapshot exists yet.",
             PhoneSource.Health, mapOf(
                 "metrics" to array("Metrics to summarize. Default [\"steps\"].", string("One metric.", Health.metricNames)),
                 "days" to integer("How many days back from today, default 7, max 90.", 1, 90),
             )),
+        tool("phone_workouts_recent",
+            "List the user's recent workouts from Apple Health (the Workout app and any app that saves workouts), newest first. Each row: id, activity, source app, start and end, duration (seconds), distance (meters), active energy (kcal), elevation_gain (meters), heart_rate_avg and heart_rate_max (bpm), and pace (seconds per kilometre) for runs, walks, hikes and rides. Fields without data are left out. Use it to compare a workout with recent ones of the same activity. No route or location is read. Read access is never reported to apps, so an empty result can also mean the user did not allow Persona to read workouts.",
+            PhoneSource.Health, mapOf(
+                "activity" to string("Only this activity; all activities when absent.", listOf("cycling", "hiking", "interval_training", "running", "strength_training", "swimming", "walking", "yoga")),
+                "days" to integer("How many days back from now, default 30, max 365.", 1, 365),
+                "limit" to integer("At most this many workouts, default 20, max 50.", 1, 50),
+            )),
+        tool("phone_workout_detail",
+            "One workout from Apple Health by its id (from phone_workouts_recent or a workout report): the fields phone_workouts_recent gives, plus splits (whole kilometres in order, the seconds each took with pauses left out) for runs, walks, hikes and rides, and heart_rate (the average bpm of each minute from the start). No route or location is read.",
+            PhoneSource.Health, mapOf(
+                "id" to string("The workout's id."),
+            ), listOf("id")),
         tool("phone_photos_recent",
             "List recent photos and videos, newest first. Each row has the Photos local identifier, creation date (ISO " +
                 "8601), media type (image/video), pixel width and height, whether it is a screenshot, whether it is a " +

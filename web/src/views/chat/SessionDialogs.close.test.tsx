@@ -103,9 +103,9 @@ describe("Close…", () => {
 
   it("archives and closes an agent that is not busy", async () => {
     await open(claude);
-    expect(dialog().textContent).toContain(t("chat-sessiondialogs.archive_close_detail", { title: "Fix the build", machine: "Example computer" }));
+    expect(dialog().textContent).toContain(t("close-agent.archive_close_detail", { title: "Fix the build", machine: "Example computer" }));
     expect(dialog().querySelector("[data-close-busy]")).toBeNull();
-    await act(async () => buttonNamed(t("chat-sessiondialogs.archive_close"))!.click());
+    await act(async () => buttonNamed(t("close-agent.archive_close"))!.click());
     expect(posted()).toEqual(["/sessions/m/claude-1/archive?close=1"]);
     expect(closed).toHaveBeenCalledOnce();
   });
@@ -113,7 +113,7 @@ describe("Close…", () => {
   it("says what closing a busy agent interrupts, and closes it anyway without archiving", async () => {
     await open({ ...claude, status: "working", state: "working" });
     expect(dialog().querySelector("[data-close-busy]")?.textContent).toBe(t("close-agent.busy_working"));
-    expect(buttonNamed(t("chat-sessiondialogs.archive_close"))).toBeUndefined();
+    expect(buttonNamed(t("close-agent.archive_close"))).toBeUndefined();
     await act(async () => buttonNamed(t("close-agent.close_anyway"))!.click());
     expect(posted()).toEqual(["/sessions/m/claude-1/close"]);
     expect(closed).toHaveBeenCalledOnce();
@@ -141,7 +141,7 @@ describe("Close…", () => {
   it("stays open when the hub refuses the archive as busy, and then offers to close anyway", async () => {
     fetcher.mockReset().mockImplementation(async (url: string) => String(url).includes("/archive") ? json({ error: "busy", code: "agent_busy" }, 409) : json({ ok: true }));
     await open(claude);
-    await act(async () => buttonNamed(t("chat-sessiondialogs.archive_close"))!.click());
+    await act(async () => buttonNamed(t("close-agent.archive_close"))!.click());
     expect(closed).not.toHaveBeenCalled();
     expect(dialog().querySelector("[data-close-busy]")?.textContent).toBe(t("close-agent.busy_working"));
     await act(async () => buttonNamed(t("close-agent.close_anyway"))!.click());
@@ -153,8 +153,8 @@ describe("Close…", () => {
     // the chat's ⋯ marks its snapshot archived; the listed row may not say so
     act(() => upsertSession(claude));
     await act(async () => root.render(<CloseAgentDialog session={{ ...claude, archived: true }} machineName="Example computer" open onClose={closed} />));
-    expect(dialog().textContent).not.toContain(t("chat-sessiondialogs.archive_close_detail", { title: "Fix the build", machine: "Example computer" }));
-    await act(async () => buttonNamed(t("chat-chatview.close_agent"))!.click());
+    expect(dialog().textContent).not.toContain(t("close-agent.archive_close_detail", { title: "Fix the build", machine: "Example computer" }));
+    await act(async () => buttonNamed(t("close-agent.close_agent"))!.click());
     expect(posted()).toEqual(["/sessions/m/claude-1/close"]);
   });
 });

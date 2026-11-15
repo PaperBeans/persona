@@ -32,6 +32,8 @@ personad notify "title" [body] [--silent] [--error] [--strict]
 | 4 | The phone can't be reached: no node, node not connected to the hub, hub didn't accept it | - |
 | 130 | Ctrl-C / SIGTERM; the card on the phone is withdrawn too | - |
 
+Human-readable diagnostics after the `personad ask: ` / `personad notify: ` prefixes come from the `scriptcli-ask` and `scriptcli-notify` catalogs in the terminal's language (`PERSONA_LANG`, then the POSIX locale variables; English, Simplified Chinese and Japanese, with English for an unknown language). The chosen option on stdout, exit codes, output streams and line order do not change with language. Error detail returned by the node or hub is passed through as it is, never translated by matching its text. Usage and flag help stay English.
+
 - On exit code 4 or "Hand back to computer", if stdin is a real terminal (not `/dev/null` or a pipe) and `--require-remote` is not set, it falls back to asking in the terminal: a numbered list of options (type the number or the option text),
   or `[y/N]` without options. EOF counts as deny, and Ctrl-C / SIGTERM at that question exits 130. A timeout or a denial is an answer, so neither falls back to the terminal.
 - Without `--strict`, a failure only writes one line to stderr, `Not sent: <reason>` (localized), and the exit code stays 0, so a `set -e` script is never broken by a notification.

@@ -338,7 +338,8 @@ async function deliver(mid: string, sid: string, e: OutboxEntry, clearDraft?: st
     if (r?.waits_on_computer) toast(t("lib-outbox.waits_on_computer"), "info");
     return true;
   } catch (err) {
-    if (!flight.current() || flight.echoed()) return true;
+    if (!flight.current()) return false;
+    if (flight.echoed()) return true;
     flight.finish("failed");
     update(key, e.id, failedWith(err));
     return false;

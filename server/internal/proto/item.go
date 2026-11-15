@@ -245,11 +245,21 @@ type ModelRefusal struct {
 	// Raw is the whole JSONL line, for the node's own use only (telling one record from another): never encoded, so
 	// no RPC, REST answer, push or snapshot carries it. Older builds sent it as "raw"; clients must not show that.
 	Raw string `json:"-"`
+	// The following fields are present only when the node projects its own bounded recovery onto this fallback shape
+	// (#7824): a runtime record never sets them, so older clients ignore them safely. RecoveryReset says when the
+	// configured model is available again; RecoveryExhausted marks an exhausted chain; RecoveryReturning that the
+	// configured model answered a probe and the next request runs on it again; RecoveryTried lists every model tried,
+	// in order, joined by " → " (a string, not a slice, so ModelRefusal stays comparable with ==).
+	RecoveryReset     *time.Time `json:"recovery_reset,omitempty"`
+	RecoveryExhausted bool       `json:"recovery_exhausted,omitempty"`
+	RecoveryReturning bool       `json:"recovery_returning,omitempty"`
+	RecoveryTried     string     `json:"recovery_tried,omitempty"`
 }
 
 // ModelRestore is a pending "back to the configured model" (node session.restore_model, #2528): State
 // ModelRestoreNextStart says the session's idle headless process was closed (or none ran), so its next start asks for
-// To, the model the conversation is configured with as the node read it at At. Nothing about which model runs.
+// To, the model the conversation is configured with as the node read it at At. Empty To means the launcher default.
+// Nothing about which model runs.
 type ModelRestore struct {
 	State string    `json:"state"`
 	To    string    `json:"to,omitempty"`
@@ -258,6 +268,50 @@ type ModelRestore struct {
 
 // ModelRestoreNextStart: the next start of the session's process uses the configured model.
 const ModelRestoreNextStart = "next_start"
+
+// ModelRecovery records the node's own bounded recovery moving a conversation off its configured model (#7824).
+// It is node-owned state persisted through session state, not a transcript record: the runtime's own refusal fallback
+// has ModelRefusal, while a switch the node drives by restarting the runtime on the next launcher model had no
+// client-visible evidence before this. Main and leader/supervisor conversations recover automatically and return to
+// the configured model as soon as it is available again; worker Agents keep their own behavior.
+type ModelRecovery struct {
+	// From is the configured model the conversation asked for; empty and "default" both mean the launcher default.
+	// To is the model that answers after the switch.
+	From string `json:"from"`
+	To   string `json:"to"`
+	// ProbeFrom is the concrete configured default used only for availability probes and unavailable-cache cleanup.
+	// It never replaces From in the execution request, so returning does not pin a launcher default to a concrete model.
+	ProbeFrom string `json:"probe_from,omitempty"`
+	// Reason is one of the ModelRecoveryReason* values: why From could not answer.
+	Reason string `json:"reason"`
+	// At is when the node committed the switch to To.
+	At time.Time `json:"at"`
+	// ResetsAt is when the upstream said From becomes available again (a gateway quota's "available again at …"),
+	// when it named one. Nil when the upstream gave no time; clients then offer a manual retry without a countdown.
+	ResetsAt *time.Time `json:"resets_at,omitempty"`
+	// Tried lists every model the recovery chain attempted, in order, including the configured model first.
+	Tried []string `json:"tried,omitempty"`
+	// ChainExhausted marks the final record when every model in the chain failed: the turn ends on the failure card,
+	// which offers Retry and names the cause and ResetsAt. A later successful switch replaces it.
+	ChainExhausted bool `json:"chain_exhausted,omitempty"`
+	// Returning says From answered an availability probe: the conversation stays on To only until its next request,
+	// which runs on From again. It makes the automatic return visible before the model actually changes.
+	Returning bool `json:"returning,omitempty"`
+}
+
+// ModelRecovery Reason values.
+const (
+	// ModelRecoveryReasonSafeguards: the upstream answered with a safety-classifier refusal (stop_reason "refusal").
+	ModelRecoveryReasonSafeguards = "safeguards_refusal"
+	// ModelRecoveryReasonQuota: the gateway's account quota is exhausted (its quota_exhausted 429).
+	ModelRecoveryReasonQuota = "quota_exhausted"
+	// ModelRecoveryReasonRateLimit: ordinary throttling, not a quota window.
+	ModelRecoveryReasonRateLimit = "rate_limited"
+	// ModelRecoveryReasonServer: a 5xx/529 or another transient server failure.
+	ModelRecoveryReasonServer = "server_error"
+	// ModelRecoveryReasonUnavailable: the model is not served (a 404/model_not_found on a recovery-picked model).
+	ModelRecoveryReasonUnavailable = "model_unavailable"
+)
 
 // MessageSource preserves an input's provenance without changing the model's role.
 // ConversationID is a stable session id, never a peer's display name (Item.From).

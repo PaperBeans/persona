@@ -87,7 +87,7 @@ describe("the Inbox strip's place in ChatView", () => {
     await open(<ChatView mid="m1" sid="s1" inPage />);
     await vi.waitFor(() => expect(host.querySelector("[data-handoff-back]")).not.toBeNull(), { timeout: 2_000 });
     expect(host.querySelector("[data-inbox-back]")).toBeNull();
-    act(() => host.querySelector<HTMLButtonElement>(`button[aria-label="${t("chat-chatview.handoff_dismiss")}"]`)!.click());
+    act(() => host.querySelector<HTMLButtonElement>(`button[aria-label="${t("chat-backstrip.handoff_dismiss")}"]`)!.click());
     expect(host.querySelector("[data-handoff-back]")).toBeNull();
     expect(host.querySelector("[data-inbox-back]")).toBeNull();
   });

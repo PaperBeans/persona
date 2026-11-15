@@ -335,6 +335,8 @@ data class Supervision(
     val round: Int = 0,
     val reviews: List<TaskReview> = emptyList(),
     @WireTime @SerialName("updated_at") val updatedAt: String? = null,
+    /** When the task entered `pending_review`; null in every other state, and from an older hub. */
+    @WireTime @SerialName("pending_since") val pendingSince: String? = null,
     /** The agent's explicit report; missing counts never imply a percentage. */
     val progress: TaskProgress? = null,
 )

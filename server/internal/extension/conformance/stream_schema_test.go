@@ -17,8 +17,9 @@ func TestStreamContractsDoNotActivateRuntime(t *testing.T) {
 		t.Fatalf("contract-only stage changed runtime UI version: %d", extension.UIVersion)
 	}
 	// inbox_group_state is intentionally active: the manager accepts grouped read/replied state and fallback
-	// assignments to handled events. Other runtime capabilities remain contract-only.
-	if !reflect.DeepEqual(extension.HubCapabilities(), []string{extension.HubInboxGroup, extension.HubInboxGroupState}) {
+	// assignments to handled events. tool_images is too: connector tools.call answers carry pictures for the model
+	// (#8484). Other runtime capabilities remain contract-only.
+	if !reflect.DeepEqual(extension.HubCapabilities(), []string{extension.HubInboxGroup, extension.HubInboxGroupState, extension.HubToolImages}) {
 		t.Fatalf("hub capabilities changed without an intentional runtime rollout: %v", extension.HubCapabilities())
 	}
 	for _, dir := range []string{"", "invalid"} {

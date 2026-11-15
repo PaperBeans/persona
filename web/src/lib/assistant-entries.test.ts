@@ -16,6 +16,9 @@ describe("the Assistant's Needs you and In progress entries (spec/fixtures/entri
       expect(got.needsYou.map((item) => item.key)).toEqual(c.expected.needs_you);
       expect(got.running.map((item) => item.key)).toEqual(c.expected.running);
       expect(got.shelved.map((item) => item.key)).toEqual(c.expected.shelved);
+      // the In progress rows that say their supervisor is reviewing them
+      expect(got.running.filter((item) => item.kind === "task" && item.supervisorReview).map((item) => item.key))
+        .toEqual((c.expected as { supervisor_review?: string[] }).supervisor_review ?? []);
       const activity = (c.expected as { activity?: Record<string, unknown> }).activity;
       for (const [key, expected] of Object.entries(activity ?? {})) {
         const work = got.running.find((row) => row.key === key)?.activity;
@@ -196,5 +199,32 @@ describe("an Agent several to-dos list", () => {
     const got = run([todo("release"), decide], { ...asking, todo: { id: "release", title: "release" } });
     expect(got.needsYou.map((i) => i.key).sort()).toEqual(["task:release", "task:tests"]);
     expect(got.needsYou.find((i) => i.key === "task:tests")).toMatchObject({ asks: [] });
+  });
+});
+
+// How a task ended is told in In progress, not by a card in the chat (#8237): the handed-out tasks that finished in the
+// last day and were not opened since are a group of their own, newest first and not counted.
+describe("Just finished in the Assistant's entries", () => {
+  const now = Date.parse("2026-11-10T09:00:00Z");
+  const done = (id: string, doneAt: string, extra: Partial<Todo> = {}): Todo => ({
+    id, title: id, origin: "main", created_at: "2026-11-10T07:00:00Z", updated_at: doneAt, done_at: doneAt, agents: [], ...extra,
+  } as unknown as Todo);
+  const run = (todos: Todo[], conversation = "main") => assistantEntries({ conversation, main: "main", todos, sessions: [], interactions: [], plans: {}, feed: [], now });
+
+  it("lists what just finished, newest first, and counts none of it", () => {
+    const got = run([
+      done("older", "2026-11-10T08:00:00Z"),
+      done("newer", "2026-11-10T08:30:00Z"),
+      done("seen", "2026-11-10T08:10:00Z", { seen_at: "2026-11-10T08:20:00Z" }),
+      done("stale", "2026-11-08T08:00:00Z"),
+      done("byHand", "2026-11-10T08:40:00Z", { origin: "" }),
+    ]);
+    expect(got.justFinished.map((i) => i.key)).toEqual(["task:newer", "task:older"]);
+    expect(got.justFinished.every((i) => i.kind === "task" && !i.countsOpen)).toBe(true);
+    expect([...got.needsYou, ...got.running, ...got.shelved]).toEqual([]);
+  });
+
+  it("leaves another conversation's finished work to it", () => {
+    expect(run([done("newer", "2026-11-10T08:30:00Z")], "side").justFinished).toEqual([]);
   });
 });

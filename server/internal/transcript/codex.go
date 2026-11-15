@@ -124,6 +124,9 @@ type codexItem struct {
 		Content []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
+			// An image block (MCP content: base64 data and its type), a connector's or computer use's picture.
+			Data     string `json:"data"`
+			MimeType string `json:"mimeType"`
 		} `json:"content"`
 		IsError bool `json:"isError"`
 	} `json:"result"`
@@ -515,12 +518,16 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 			args = json.RawMessage(`{}`)
 		}
 		var parts []string
+		var images []*proto.Image
 		isErr := it.Status == "failed" || len(it.Error) > 0 && string(it.Error) != "null"
 		if it.Result != nil {
 			isErr = isErr || it.Result.IsError
 			for _, c := range it.Result.Content {
-				if c.Type == "text" {
+				switch {
+				case c.Type == "text":
 					parts = append(parts, c.Text)
+				case c.Type == "image" && c.Data != "" && len(c.Data) <= maxImageLen && strings.HasPrefix(c.MimeType, "image/"):
+					images = append(images, &proto.Image{Mime: c.MimeType, Data: c.Data})
 				}
 			}
 		}
@@ -529,6 +536,11 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 		}
 		items := codexTool(mk, it.ID, "mcp__"+it.Server+"__"+it.Tool, args, strings.Join(parts, "\n"), isErr)
 		items[1].Outcome.Status = codexStatus(it.Status, isErr)
+		for j, img := range images { // after the result, on the call's card, as a Claude tool result's pictures are
+			im := mk(2+j, it.ID, "user", proto.KindImage)
+			im.ToolUseID, im.Image = it.ID, img
+			items = append(items, im)
+		}
 		return items
 	case "ImageView":
 		input, _ := json.Marshal(map[string]string{"file_path": strings.TrimPrefix(it.Path, "file://")})

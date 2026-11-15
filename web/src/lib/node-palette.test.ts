@@ -42,12 +42,12 @@ describe("a node's items as palette commands", () => {
     expect(titles).toContain("重命名");
     expect(titles).toContain("新建窗格 · 向右拆分");
     expect(titles).toContain("Git · 拉取");
-    expect(titles).toContain("Git · 拷贝分支名");
-    expect(titles).toContain("拷贝目录路径");
+    expect(titles).toContain("Git · 复制分支名");
+    expect(titles).toContain("复制目录路径");
     expect(cmds.every((c) => c.section === "Workspace · build")).toBe(true);
     expect(new Set(cmds.map((c) => c.id)).size).toBe(cmds.length);
     expect(cmds.find((c) => c.title === "关闭标签页")?.danger).toBe(true);
-    expect(cmds.find((c) => c.title === "拷贝目录路径")?.danger).toBeFalsy();
+    expect(cmds.find((c) => c.title === "复制目录路径")?.danger).toBeFalsy();
   });
 
   it("a rename asks for the name, and commits a changed one", async () => {
@@ -105,7 +105,7 @@ describe("a node's items as palette commands", () => {
 
   it("a plain item just runs", async () => {
     const d = deps();
-    itemsToCommands("s", tab, nodeActions(tab, d)).find((c) => c.title === "拷贝目录路径")!.run();
+    itemsToCommands("s", tab, nodeActions(tab, d)).find((c) => c.title === "复制目录路径")!.run();
     await flush();
     expect(d.copy).toHaveBeenCalledWith("/home/me/proj");
   });

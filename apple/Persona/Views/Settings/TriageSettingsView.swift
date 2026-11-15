@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 /// Settings › Session Triage (`TriageSettingsModel`): the triage and its model, then what it may do (asking for a
 /// closeout and for a status afterwards, on a hub that knows them and not on the frozen Mac app), then the

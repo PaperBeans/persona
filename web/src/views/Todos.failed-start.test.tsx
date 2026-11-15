@@ -25,6 +25,13 @@ vi.hoisted(() => {
 });
 
 const api = vi.fn(async (_path: string, _init?: unknown): Promise<unknown> => ({}));
+// The unrelated association section has a valid empty store, so its error Retry cannot shadow the task's Retry.
+const defaultReply = (path: string) => {
+  const repositoryRead = path.match(/^\/todos\/([^/]+)\/repositories(?:\?|$)/);
+  return repositoryRead
+    ? { schema_version: 1, manager: "assistant", todo_id: repositoryRead[1], revision: 0, repositories: [] }
+    : {};
+};
 vi.mock("../lib/api", async (orig) => ({
   ...(await orig<typeof import("../lib/api")>()),
   api: (path: string, init?: unknown) => api(path, init),
@@ -60,7 +67,7 @@ const before = { ...getState() };
 
 beforeEach(async () => {
   api.mockReset();
-  api.mockImplementation(async () => ({}));
+  api.mockImplementation(async (path) => defaultReply(path));
   launched.length = 0;
   seed({
     todos: [failed("waits", "Rotate the keys"), failed("gone", "Deploy the panel", "p"), finished, failed("again", "Renew the certificate", "p2"), failed("old", "Clean the build cache", undefined, 3 * 86_400_000)],
@@ -143,7 +150,7 @@ describe("the page of a to-do whose agent never started (audit item 13)", () => 
       }
       // the list's read stays out, so only the retry's answer can show the to-do reopened
       if (path === "/todos" && !(init as { method?: string })?.method) return new Promise(() => {});
-      return {};
+      return defaultReply(path);
     });
     await show("again");
     await act(async () => button(t("todos.retry"))!.click());

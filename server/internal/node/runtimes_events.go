@@ -130,7 +130,12 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 		}
 		seen[s.SessionID] = true
 		s.MachineID, s.State, s.PendingInteractions = "", "", 0 // the hub's to fill
-		s.StartedByPersona, s.Assistant = false, false
+		// Started from Persona is the runtime's word for a session the hub started through it (Paseo keeps it on the
+		// agent's label, #8130): it outlives a node restart in the middle of a start, which the manager then adopts
+		// rather than starting a second agent (assistant/session_adopt.go). A daemon's sessions are another machine's
+		// or another user's: never. The node's own record of a start says so too (decorateState).
+		s.StartedByPersona = s.StartedByPersona && !daemon
+		s.Assistant = false
 		// Of the hierarchy (docs/protocol/protocol.md "Session hierarchy") the runtime says when the session began
 		// (started_at); what it folds under and the rollup are the manager's, the parent a blocked child asks for the
 		// node's (below), from what a daemon's own node named (daemons.go) when the row names no other.
@@ -177,10 +182,18 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 		if !modes {
 			s.Efforts = nil
 		}
+		// The permission modes it lists for an agent that is not Claude Code (#8261) go with its modes too, and only where
+		// the apps' Claude Code chips do not stand (claudeModes): the apps switch between those instead.
+		claudeModes := modes && runtimeModes(caps.Modes, rt, s)
+		permissionModes := own.PermissionModes
+		if !modes || claudeModes {
+			permissionModes = 0
+		}
 		s.Capabilities = &proto.SessionCapabilities{Read: true, Send: caps.Send, Interrupt: caps.Interrupt, Approve: true,
-			Close: &caps.Close, Rename: proto.CanModes(caps.Rename && !sub), Modes: proto.CanModes(modes && runtimeModes(caps.Modes, rt, s)),
+			Close: &caps.Close, Rename: proto.CanModes(caps.Rename && !sub), Modes: proto.CanModes(claudeModes),
 			Rewind: proto.CanModes(rewind), RewindCode: proto.CanModes(rewindCode),
-			Model: proto.CanModes(caps.Modes && caps.Model && keeps(own.Model) && !strings.Contains(s.SessionID, subagentSep))}
+			Model:           proto.CanModes(caps.Modes && caps.Model && keeps(own.Model) && !strings.Contains(s.SessionID, subagentSep)),
+			PermissionModes: permissionModes}
 		s.ReadOnlyReason, s.Attached, s.CodexRoute, s.CodexRouteNote = readOnly, false, "", ""
 		// The pane is the engine's to show (pi.go joins it with the engine's pane), not part of the runtime's row.
 		if s.PaneID != "" && validPane(s.PaneID) {
@@ -358,11 +371,13 @@ func runtimeHealth(h *runtimeConn, ix proto.Interaction) bool {
 	return ok && (s.Space == identity.SpaceHealth || identity.InHealthSpace(s.Cwd))
 }
 
-// runtimeModes is a runtime row's modes capability: the runtime declared caps.modes (the node refuses session.modes
-// otherwise, runtimes_calls.go), the row is not a subagent's, and its agent takes Claude Code's modes (claude: Orca,
-// Paseo's Claude providers) or is the runtime's own (agy). Paseo has no agent of its own: its bridge calls every agent
-// other than Claude Code and Codex "paseo" (integrations/paseo/lib/map.js appAgent), and refuses a permission mode for
-// any of them that is not Claude (bridge.js modes). So a Paseo row running Codex, opencode or any other agent gets none.
+// runtimeModes is a runtime row's modes capability, the apps' Claude Code chips: the runtime declared caps.modes (the
+// node refuses session.modes otherwise, runtimes_calls.go), the row is not a subagent's, and its agent takes Claude
+// Code's modes (claude: Orca, Paseo's Claude providers) or is the runtime's own (agy). Paseo has no agent of its own:
+// its bridge calls every agent other than Claude Code and Codex "paseo" (integrations/paseo/lib/map.js appAgent), and
+// takes only its own approval and Allow all for those and for Codex (bridge.js modes). So a Paseo row running Codex,
+// opencode or any other agent gets none, and older apps show no chips there; its row lists the modes it takes instead
+// (capabilities.permission_modes, #8261).
 func runtimeModes(declared bool, rt string, s proto.Session) bool {
 	own := s.Agent == rt && rt != paseoRuntimeID
 	return declared && !strings.Contains(s.SessionID, subagentSep) && (s.Agent == "claude" || own)

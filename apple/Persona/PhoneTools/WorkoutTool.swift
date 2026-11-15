@@ -1,7 +1,6 @@
 #if os(iOS) || os(visionOS)
 import Foundation
 import HealthKit
-import PersonaWire
 
 /// The time one whole kilometre took, the first being kilometre 1 (the hub's `WorkoutSplit`, #2526).
 nonisolated struct WorkoutSplit: Codable, Equatable, Sendable {
@@ -342,3 +341,4 @@ enum WorkoutTool {
     }
 }
 #endif
+import PersonaWire

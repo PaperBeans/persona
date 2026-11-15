@@ -152,6 +152,7 @@ export function createLoader(opts) {
     const gone = () => stopped || stops !== mine // stop() came (and maybe start() again) while this switch awaited
     const old = current
     let oldStopped = false
+    let next
     let target = offer.hash
     try {
       if (typeof old.instance.fetchPackage !== 'function') throw new Error('the running version cannot fetch packages')
@@ -168,7 +169,7 @@ export function createLoader(opts) {
       await stopInstance(old)
       oldStopped = true
       if (gone()) return
-      const next = await run({ hash, dir, shipped: false })
+      next = await run({ hash, dir, shipped: false })
       if (gone()) {
         // Stopped while it started: stop() has already stopped what it found running (the old version).
         await stopInstance(next)
@@ -176,12 +177,22 @@ export function createLoader(opts) {
       }
       current = next
       writeJSON(join(store, 'current.json'), { hash, shipped: shippedHash, version: typeof offer.version === 'string' ? offer.version : '', at: new Date().toISOString() })
-      prune([hash, old.hash, shippedHash])
+      try {
+        prune([hash, old.hash, shippedHash])
+      } catch (err) {
+        log(`persona: ${name} cleanup after switching to ${short(hash)} failed: ${err.message}; keeping the new version`)
+      }
       log(`persona: ${name} switched to ${short(hash)} (was ${short(old.hash)})`)
     } catch (err) {
       bad.add(target)
       bad.add(offer.hash)
       log(`persona: ${name} update to ${short(target)} failed: ${err.message}; staying on ${short(old.hash)}`)
+      if (next) {
+        // The receipt did not name next, so it must not outlive this rollback. Keep it in current while its stop awaits
+        // so loader.stop() finds it too; clear it before the old restart, whose late start is checked with gone().
+        await stopInstance(next)
+        if (current === next) current = undefined
+      }
       if (oldStopped && !gone()) {
         try {
           const again = await run(old)

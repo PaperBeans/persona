@@ -29,6 +29,5 @@
   "earlier_hint": "{count} sessions last active before this window ({window})",
   "no_folder": "No folder",
   "no_space": "No project",
-  "more_groups": "Show {count} more",
-  "places": "Where it is checked out"
+  "more_groups": "Show {count} more"
 }

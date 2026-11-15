@@ -39,7 +39,7 @@ vi.mock("./assistant/Supervision", async (orig) => {
   };
 });
 
-const { getState, upsertSession, refreshTodos } = await import("../lib/store");
+const { getState, putTodo, upsertSession, refreshTodos } = await import("../lib/store");
 const { TodosView } = await import("./Todos");
 const { t } = await import("../i18n");
 
@@ -82,6 +82,17 @@ afterEach(async () => {
 });
 
 describe("todo rows on a sessions push", () => {
+  it("renders a fresh waiting PR in its own section with link and blocker details", async () => {
+    const url = "https://example.com/repo/pull/91";
+    await act(async () => putTodo({ ...getState().todos[0], id: "ta", title: "Waiting PR", agents: [], pr_url: url, delivery: { state: "pr" }, pr_status: { url, state: "open", draft: false, review: "required", checks: "failure", conflicts: false, checked_at: new Date(Date.now() - 30_000).toISOString() } }));
+    const section = host.querySelector<HTMLElement>('[data-testid="todo-section"][data-section="pr"]');
+    expect(section?.textContent).toContain("Waiting PR");
+    const link = section?.querySelector<HTMLAnchorElement>('[data-testid="todo-pr-line"] a');
+    expect(link?.href).toBe(url);
+    expect(section?.textContent).toContain(t("assistant-tasks.pr_blocker_review_required"));
+    expect(section?.textContent).toContain(t("assistant-tasks.pr_blocker_checks_failed"));
+  });
+
   it("refreshes N/M, evidence and reporter from a to-do update without waiting for a review", async () => {
     const list = getState().todos.map((td) => ({ ...td, supervision: {
       supervisor: "main", done_when: ["Tests pass", "PR opened"],

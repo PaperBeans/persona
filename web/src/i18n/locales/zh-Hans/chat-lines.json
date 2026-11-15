@@ -22,7 +22,7 @@
   "copy_raw": "复制原文",
   "retry": "重试",
   "retry_title": "继续当前任务",
-  "copy_field": "拷贝{label}",
+  "copy_field": "复制{label}",
   "fix_it": "去修",
   "background_done": "后台回报",
   "background_running": "后台处理中…",

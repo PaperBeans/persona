@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Persona
+import PersonaWire
 
 /// The cookie file reader (Shared/BrowserCookies.swift) on the cases the web's lib/cookies.test.ts holds lib/cookies.ts
 /// to (#1304): both clients read a file the same way.

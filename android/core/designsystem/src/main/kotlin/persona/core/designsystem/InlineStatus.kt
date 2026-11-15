@@ -30,9 +30,10 @@ fun inboxNowIcon(key: String?): InboxNowIcon = when (key) {
 }
 
 /**
- * A short status set inside a card or above the composer, up to three lines: a spinner while [tone] is busy, a mark
- * otherwise, on a neutral surface (the chat's "Starting", a machine's "Redeploy" line). [action] sits at the end, for one small
- * button that acts on it. An explicit [icon] replaces the tone's default spinner or mark without changing its colors.
+ * A short status set inside a card or above the composer, up to [maxLines] lines (three by default): a spinner while
+ * [tone] is busy, a mark otherwise, on a neutral surface (the chat's "Starting", a machine's "Redeploy" line). [action]
+ * sits at the end, for one small button that acts on it. An explicit [icon] replaces the tone's default spinner or mark
+ * without changing its colors.
  */
 @Composable
 fun JInlineStatus(
@@ -40,6 +41,7 @@ fun JInlineStatus(
     modifier: Modifier = Modifier,
     tone: InlineTone = InlineTone.Busy,
     icon: PhIcon? = null,
+    maxLines: Int = 3,
     action: (@Composable () -> Unit)? = null,
 ) {
     val palette = PersonaTheme.palette
@@ -61,7 +63,7 @@ fun JInlineStatus(
             tone == InlineTone.Failed -> JIcon(PhIcons.WarningCircle, null, size = 16.dp, tint = palette.danger.dot)
             tone == InlineTone.Done -> JIcon(PhIcons.CheckCircle, null, size = 16.dp, tint = palette.positive)
         }
-        Text(text, Modifier.weight(1f), style = PersonaTheme.type.caption, color = ink, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        Text(text, Modifier.weight(1f), style = PersonaTheme.type.caption, color = ink, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
         action?.invoke()
     }
 }

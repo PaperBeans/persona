@@ -1509,7 +1509,7 @@ class RealInboxRepository(
             doc = persona.feature.inbox.inboxDocRef(data.obj("doc")),
             connector = data.obj("connector")?.let { c ->
                 c.optional("thread")?.let { thread ->
-                    persona.feature.inbox.InboxConnectorRef(thread, c.optional("label"), c.flag("can_reply"), c.optional("reply_to"))
+                    persona.feature.inbox.InboxConnectorRef(thread, c.optional("label"), c.flag("can_reply"), c.optional("reply_to"), c.optional("url"))
                 }
             },
             mutes = persona.feature.inbox.inboxMuteOptions(data),

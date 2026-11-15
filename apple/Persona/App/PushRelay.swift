@@ -1,5 +1,6 @@
 import Foundation
 import os
+import PersonaWire
 
 /// The push relay this build registers with (docs/operations/push-relay.md): it holds the app's APNs key and pushes for hubs that
 /// have none. The phone registers its device token here and hands the grant it gets, with its public key, to its own hub;

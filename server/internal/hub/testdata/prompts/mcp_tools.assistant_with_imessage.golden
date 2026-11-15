@@ -792,7 +792,7 @@
   },
   {
     "name": "agent_start",
-    "description": "Start a new agent in the terminal engine (herdr or Orca) of one of the user's computers, in a project directory, with a first prompt. Use for real development work instead of doing it here. Check machines_list for current machine resources and availability before choosing a machine. Returns the new session id. When the launcher failed its last health check on that machine, the agent starts on a machine where it works (a directory under the home moves to that home) and the answer says so. Claude-family launchers and Paseo providers with Auto Accept always start in bypassPermissions; other agents keep theirs.\n\nThe launcher decides the agent. A Claude Code launcher starts Claude Code. A launcher named pi, cursor or agy (or one the machine lists as that agent) starts that agent in a herdr pane with the model you give: pi, the Cursor CLI (cursor-agent) or the Antigravity CLI (agy). pi's first message goes through its Persona extension; cursor's and agy's go through herdr once it recognises the agent. Those three take no permission mode and no ultracode, and their effort is their own.\n\nWhen the work needs a branch and checkout of its own (work in parallel with what is already open in that repository), give `worktree.branch`: Persona makes the worktree through the machine's engine first (herdr's or Orca's own, so it is listed there and in the app, under the workspace `cwd` is in) and starts the agent in it. Do not tell the agent to run `git worktree add` itself: a worktree made that way is invisible to Orca and to the app. An existing local branch is checked out; a new one starts at the HEAD of the workspace `cwd` is in. A branch already checked out elsewhere is refused.\n\nWhen the agent needs credentials the user keeps in a secret provider (a token in 1Password, say), give `secret_env`: each environment variable it should have, with the reference its value comes from (such as `op://vault/item/field`), never the secret itself. The user approves the hand-off on a card on iPhone or the web before anything starts, and the values reach only that agent's environment, for this run: you never see them, and the answer lists each variable as granted, declined, expired or failed. Only Claude Code agents on a computer this manager connects take them. Tell the agent the variables are there; never ask it to print them.\n\nGive `ultracode: true` for a large task: one that spans many files or needs checking from several angles (design, tests, review). Claude Code then runs every substantial step as a multi-agent workflow: slower and costlier, so leave it off for small or quick work. Do not write the word \"ultracode\" into the prompt instead. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it, and the answer says so. Whether it is really on shows as `ultracode=on` in agents_list once Claude Code confirms it. An organization policy may keep some conversations read-only: a call from such a conversation is refused with the policy's reason. Do not retry the same call; follow what the refusal says instead.",
+    "description": "Start a new agent in the terminal engine (herdr or Orca) of one of the user's computers, in a project directory, with a first prompt. Use for real development work instead of doing it here. Check machines_list for current machine resources and availability before choosing a machine. Returns the new session id. When the launcher failed its last health check on that machine, the agent starts on a machine where it works (a directory under the home moves to that home) and the answer says so. Claude-family launchers and Paseo providers with Auto Accept always start in bypassPermissions; traex and omp: no effort.\n\nThe launcher decides the agent. A Claude Code launcher starts Claude Code. A launcher named pi, cursor or agy (or one the machine lists as that agent) starts that agent in a herdr pane with the model you give: pi, the Cursor CLI (cursor-agent) or the Antigravity CLI (agy). pi's first message goes through its Persona extension; cursor's and agy's go through herdr once it recognises the agent. Those three take no permission mode and no ultracode, and their effort is their own.\n\nWhen the work needs a branch and checkout of its own (work in parallel with what is already open in that repository), give `worktree.branch`: Persona makes the worktree through the machine's engine first (herdr's or Orca's own, so it is listed there and in the app, under the workspace `cwd` is in) and starts the agent in it. Do not tell the agent to run `git worktree add` itself: a worktree made that way is invisible to Orca and to the app. An existing local branch is checked out; a new one starts at the HEAD of the workspace `cwd` is in. A branch already checked out elsewhere is refused.\n\nWhen the agent needs credentials the user keeps in a secret provider (a token in 1Password, say), give `secret_env`: each environment variable it should have, with the reference its value comes from (such as `op://vault/item/field`), never the secret itself. The user approves the hand-off on a card on iPhone or the web before anything starts, and the values reach only that agent's environment, for this run: you never see them, and the answer lists each variable as granted, declined, expired or failed. Only Claude Code agents on a computer this manager connects take them. Tell the agent the variables are there; never ask it to print them.\n\nGive `ultracode: true` for a large task: one that spans many files or needs checking from several angles (design, tests, review). Claude Code then runs every substantial step as a multi-agent workflow: slower and costlier, so leave it off for small or quick work. Do not write the word \"ultracode\" into the prompt instead. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it, and the answer says so. Whether it is really on shows as `ultracode=on` in agents_list once Claude Code confirms it. An organization policy may keep some conversations read-only: a call from such a conversation is refused with the policy's reason. Do not retry the same call; follow what the refusal says instead.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2078,7 +2078,7 @@
   },
   {
     "name": "task_plan",
-    "description": "Hand the user a plan of one or more tasks for agents on their computers, instead of starting agents yourself. Use it for any work that takes an agent (code, research in a repo, anything longer than a few tool calls); one task per independent piece of work. Check machines_list for current machine resources and availability before choosing a machine. Fill in every field from what you know (the knowledge base, agents_list: which machine works in which directory, the user's habits); the user sees each choice as a chip they can change, with your one-line reason. Read-only tasks, tasks the user asked for themselves (user_requested), and kinds the user told you to start without asking, start at once; the rest wait as a card for the user's 开始. Either way this returns at once: don't wait, carry on. Each queued task is a todo (todo id) whose progress shows in your context snapshot; send to a task's agent with agent_send. Quick things you can do with a tool yourself (a reminder, an event) are not tasks. A task stays on its requested machine by default (machine_policy=fixed), including retries. An unavailable launcher fails there; do not reroute machine-local work. Use machine_policy=flexible only when the task may run on another computer: a failed health check can then move it, and its why says so. The response confirms queued dispatch, not a successful Agent start; inspect the task outcome. From a leader conversation (assistant.leaders) or any other side conversation you supervise what you hand out; you get a 督办 message when one needs you, and you close it with task_review, not by repeating its agent's words. What the main conversation hands out to no leader is followed up by the background supervisor by default (a built-in conversation: it gets the 督办 messages and reviews the tasks with task_review; the main conversation may still review them), and by the main conversation itself, in the same way as a leader, when assistant.main_supervises_own_tasks is on. A conversation that cannot be sent a 督办 message leaves what it hands out to that same follow-up (the background supervisor, or the main conversation), and gets a one-line notice with the task's link when each one ends. The answer says who follows the tasks up. The answer lists work already going on that looks like the same task: check it before you let both go on. A todo this conversation opened that has no agent yet (one opened from a Lark topic: the message that handed it to you names its id) is the task's own: give that id as the task's todo_id and the agent works on it, instead of a new todo being made; any other todo_id is refused with why. From the main conversation, supervisor hands the whole plan to a leader conversation (one of assistant.leaders): its tasks are that leader's to supervise and review, as if it had handed them out; leave it out for work of no direction, which is followed up as said above. Every task gets a brief, kept from the moment it starts and never rewritten: the hub records the owner's message that led to it (their words, from this conversation; work you start on your own after a 督办 message, a notice or a routine is recorded as yours, with started_why), and you supply the goal, done_when, expect_minutes and out_of_bounds. A writable task (readonly false) without done_when (at least one result that can be checked) and expect_minutes is refused, and so is a read-only task without goal and expect_minutes; the refusal says what is missing. The card shows the brief, so the owner's 开始 confirms it. A task that continues earlier work (a retry, rework, or replacement Agent) gives continues (that task's todo id) and continues_why. It always stays on the SAME original todo and keeps its original brief, criteria, and clock; write a task-specific prompt without restating or replacing the brief. Do not split continuing work into a new todo. At Start, stop and release any still-active prior Agents on that todo, then reopen the todo if it is closed, before starting the replacement. If a prior Agent may still be running but cannot be reached or stopped, refuse the takeover; never create a successor todo to work around that safeguard. Also refuse unauthorized takeovers and any legacy open successor duplicate; if an open successor already exists, do not start a second continuation. A failed start keeps the original todo and brief; never create another todo on failure. After Start, changes to scope or done_when use task_scope. A task that changes files sets readonly false and uses explicitly authorized writable permission; readonly false with writable permission (for example, Codex bypassPermissions) permits a replacement Agent on the same todo to implement fixes. A Codex plan/read-only sandbox needs a fresh writable process; do not mutate a running read-only Codex sandbox. When no permission change is wanted, a plain follow-up to the same live Agent through agent_send is fine. A task that only reads sets readonly true and its first message automatically includes the read-only constraint. Claude-family launchers use bypassPermissions for both read-only and writable tasks; Codex read-only tasks keep the plan-mode sandbox. role \"leader\" makes the task's agent a task leader, which can hand direct workers to its own task through its own restricted task_plan and task_review and receives their supervision messages; use it only for a task that splits into several agents' work; any conversation may set it. Depth stops there: the leader's workers cannot hand tasks on.\n\nWhen repository identity needs resolving, consult repositories_list and retrieve repository_get details only when useful. The user's explicit repository URL or path takes precedence. A saved binding is a reference, not authorization or an allowlist; never infer a machine or checkout path from it. Non-repository tasks do not need a lookup, and retrieval is not a mandatory dispatch preflight.\n\nWorkspace policy: set workspace=\"new\" for an isolated checkout, {\"new\":{\"branch\":\"task/my-change\"}} for an explicit branch, {\"existing\":\"\u003ccwd or workspace_id\u003e\"} for a named checkout, or \"none\" for no managed workspace. If omitted, readonly defaults to none; writable Git tasks use assistant.task_workspace_preference (prefer-existing by default, prefer-new for isolation); an occupied directory defaults to new. Explicit existing is never silently switched and is refused with the occupying task's id/title. The machine's herdr/Orca engine chooses the new path and registers it; never run git worktree add yourself. The plan card previews the resolved path and lets the user change the policy before Start. New branches default to task/\u003ctodo id\u003e. A creation failure starts no agent. Workspaces are silently retained after acceptance. An organization policy may keep some conversations read-only: a call from such a conversation is refused with the policy's reason. Do not retry the same call; follow what the refusal says instead.",
+    "description": "Hand the user a plan of one or more tasks for agents on their computers, instead of starting agents yourself. Use it for any work that takes an agent (code, research in a repo, anything longer than a few tool calls); one task per independent piece of work. Check machines_list for current machine resources and availability before choosing a machine. Fill in every field from what you know (the knowledge base, agents_list: which machine works in which directory, the user's habits); the user sees each choice as a chip they can change, with your one-line reason. Read-only tasks, tasks the user asked for themselves (user_requested), and kinds the user told you to start without asking, start at once; the rest wait as a card for the user's 开始. Either way this returns at once: don't wait, carry on. Each queued task is a todo (todo id) whose progress shows in your context snapshot; send to a task's agent with agent_send. Quick things you can do with a tool yourself (a reminder, an event) are not tasks. A task stays on its requested machine by default (machine_policy=fixed), including retries. An unavailable launcher fails there; do not reroute machine-local work. Use machine_policy=flexible only when the task may run on another computer: a failed health check can then move it, and its why says so. The response confirms queued dispatch, not a successful Agent start; inspect the task outcome. From a leader conversation (assistant.leaders) or any other side conversation you supervise what you hand out; you get a 督办 message when one needs you, and you close it with task_review, not by repeating its agent's words. What the main conversation hands out to no leader is followed up by the background supervisor by default (a built-in conversation: it gets the 督办 messages and reviews the tasks with task_review; the main conversation may still review them), and by the main conversation itself, in the same way as a leader, when assistant.main_supervises_own_tasks is on. A conversation that cannot be sent a 督办 message leaves what it hands out to that same follow-up (the background supervisor, or the main conversation), and gets a one-line notice with the task's link when each one ends. The answer says who follows the tasks up. The answer lists work already going on that looks like the same task: check it before you let both go on. A todo this conversation opened that has no agent yet (one opened from a Lark topic: the message that handed it to you names its id) is the task's own: give that id as the task's todo_id and the agent works on it, instead of a new todo being made; any other todo_id is refused with why. From the main conversation, supervisor hands the whole plan to a leader conversation (one of assistant.leaders): its tasks are that leader's to supervise and review, as if it had handed them out; leave it out for work of no direction, which is followed up as said above. Every task gets a brief, kept from the moment it starts and never rewritten: the hub records the owner's message that led to it (their words, from this conversation; work you start on your own after a 督办 message, a notice or a routine is recorded as yours, with started_why), and you supply the goal, done_when, expect_minutes and out_of_bounds. A writable task (readonly false) without done_when (at least one result that can be checked) and expect_minutes is refused, and so is a read-only task without goal and expect_minutes; the refusal says what is missing. The card shows the brief, so the owner's 开始 confirms it. A task that continues earlier work (a retry, rework, or replacement Agent) gives continues (that task's todo id) and continues_why. It always stays on the SAME original todo and keeps its original brief, criteria, and clock; write a task-specific prompt without restating or replacing the brief. Do not split continuing work into a new todo. At Start, stop and release any still-active prior Agents on that todo, then reopen the todo if it is closed, before starting the replacement. If a prior Agent may still be running but cannot be reached or stopped, refuse the takeover; never create a successor todo to work around that safeguard. Also refuse unauthorized takeovers and any legacy open successor duplicate; if an open successor already exists, do not start a second continuation. A failed start keeps the original todo and brief; never create another todo on failure. After Start, changes to scope or done_when use task_scope. A task that changes files sets readonly false and uses explicitly authorized writable permission; readonly false with writable permission (for example, Codex bypassPermissions) permits a replacement Agent on the same todo to implement fixes. A Codex plan/read-only sandbox needs a fresh writable process; do not mutate a running read-only Codex sandbox. When no permission change is wanted, a plain follow-up to the same live Agent through agent_send is fine. A task that only reads sets readonly true and its first message automatically includes the read-only constraint. Claude-family launchers use bypassPermissions for both read-only and writable tasks; Codex uses plan unless assistant.readonly_mode=prompt (normal runtime permissions, not a security boundary). pi, cursor and agy have no read-only mode, so they are refused in either setting. role \"leader\" makes the task's agent a task leader, which can hand direct workers to its own task through its own restricted task_plan and task_review and receives their supervision messages; use it only for a task that splits into several agents' work; any conversation may set it. Depth stops there: the leader's workers cannot hand tasks on.\n\nWhen repository identity needs resolving, consult repositories_list and retrieve repository_get details only when useful. The user's explicit repository URL or path takes precedence. A saved binding is a reference, not authorization or an allowlist; never infer a machine or checkout path from it. Non-repository tasks do not need a lookup, and retrieval is not a mandatory dispatch preflight.\n\nWorkspace policy: \"new\" makes an isolated checkout; {\"new\":{\"branch\":\"task/my-change\"}} names its branch; {\"existing\":\"\u003ccwd or workspace_id\u003e\"} selects one; \"none\" creates nothing. Omitted: readonly uses none; writable Git follows assistant.task_workspace_preference (prefer-existing by default, prefer-new for isolation), and an occupied cwd uses new. Explicit existing never switches silently; refusal names its task owner. For an explicit new branch already checked out, reuse requires a clean checkout, no live Agent and no unfinished-task owner; otherwise refuse with its path and known owner. The machine's engine owns creation, location and registration; never run git worktree add. The card previews the path and is editable before Start. Default branch: task/\u003ctodo id\u003e. Creation failure starts no Agent. Workspaces remain after acceptance. Organization read-only policy refusals include their reason: follow it, never retry unchanged.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2189,7 +2189,7 @@
                   "auto",
                   "bypassPermissions"
                 ],
-                "description": "permission mode; empty: the default for writable tasks. Set an explicit writable mode (for example bypassPermissions) with readonly=false when a replacement Agent must implement fixes on the same todo. Claude-family launchers use bypassPermissions; readonly=true adds a read-only prompt constraint. Codex readonly=true keeps plan/read-only sandbox"
+                "description": "permission mode; empty: the default for writable tasks. Set an explicit writable mode (for example bypassPermissions) with readonly=false when a replacement Agent must implement fixes on the same todo. Read-only modes: see the description. traex and omp take none"
               },
               "role": {
                 "type": "string",
@@ -2364,7 +2364,7 @@
         },
         "reason": {
           "type": "string",
-          "description": "accepted: the conclusion card's one sentence of why, in the user's language; default the note's first line. needs_user (required): one sentence saying what is to be decided, in the user's language. parked (required): one sentence saying what the task waits for, in the user's language"
+          "description": "accepted: the conclusion card's one sentence of why, in the user's language; default the note's first line. needs_user (required): one sentence saying what is to be decided, in the user's language. parked (required): one sentence saying what the task waits for, in the user's language; waiting on a PR: include its link"
         },
         "waiting_on": {
           "type": "string",
@@ -2599,8 +2599,227 @@
     }
   },
   {
+    "name": "todo_repositories_get",
+    "description": "Read a to-do's saved repository/issue/PR associations and catalog status. No Git/network calls.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "todo_repositories_set",
+    "description": "Replace associations atomically using revisions from todo_repositories_get and repositories_list. [] removes metadata only. Retained source snapshots stay fixed; remove and reselect to adopt a changed catalog identity. Editable after execution. Omitted links preserve; [] clears. Use {url} or {kind,number}; omitted/empty titles preserve retained titles. On conflict reread and reconcile. No files, task progress or completion changes.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "expected_revision",
+        "expected_catalog_revision",
+        "repositories"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_catalog_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "repositories": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": [
+              "repo_id"
+            ],
+            "properties": {
+              "repo_id": {
+                "type": "string"
+              },
+              "directory_alias": {
+                "type": "string"
+              },
+              "requested_ref": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "default",
+                      "branch",
+                      "tag",
+                      "commit",
+                      "ref"
+                    ]
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "links": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "issue",
+                        "pull_request"
+                      ]
+                    },
+                    "number": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string",
+                      "description": "Full source title as plain text; max 1,024 UTF-8 bytes after trimming.",
+                      "maxLength": 1024
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "todo_repository_links_set",
+    "description": "Replace all links for repo_id at the revision from todo_repositories_get; URLs must match its saved identity. Use {url} or {kind,number}. [] clears; omitted/empty titles preserve retained titles. On conflict reread and reconcile. No files, task progress or completion changes.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "repo_id",
+        "expected_revision",
+        "links"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "repo_id": {
+          "type": "string"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "links": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue",
+                  "pull_request"
+                ]
+              },
+              "number": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string",
+                "description": "Full source title as plain text; max 1,024 UTF-8 bytes after trimming.",
+                "maxLength": 1024
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "todo_repository_links_add",
+    "description": "Record discovered/opened issue/PR links without manual user entry. Accept 1–50 exact URLs across links:[{url,title}] and legacy urls; group repositories automatically, including unlisted ones. Use actual source titles, never guesses; nonempty titles refresh, omitted/empty preserve. Deduplicate links; this explicit call can restore removed links. Atomic; preserves aliases, refs and source snapshots. Use todo_repositories_get and revision-checked set tools to replace/remove. Associations do not prove completion.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "urls": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "type": "string"
+          }
+        },
+        "links": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string",
+                "description": "Full source title as plain text; max 1,024 UTF-8 bytes after trimming.",
+                "maxLength": 1024
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "urls"
+          ]
+        },
+        {
+          "required": [
+            "links"
+          ]
+        }
+      ]
+    }
+  },
+  {
     "name": "todo_list",
-    "description": "List the user's Persona to-dos (the To-dos page in the app, not Feishu tasks): open ones and failed starts by default, earliest due first (those without a due date last), each with its id, title, state, priority, project, due date, reminder and the agents on it, and the first line of its notes. Times are in the user's time zone. Filter by state, by due date (due_before / due_after: a day or a moment), overdue ones only, with or without agents, by knowledge-base project, by kind (concerns only), or a word in the title or notes. Use it before changing a to-do, to find its id; ask with todo_get for one in full.",
+    "description": "List Persona to-dos (not Feishu tasks): open/failed starts by default, due first and undated last. Returns id, title/state, priority/project, due/reminder, agents and first note line; times use the user's time zone. Filter by the schema fields. Find an id here before edits; use todo_get for details.",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -2611,23 +2830,23 @@
             "done",
             "all"
           ],
-          "description": "which to-dos: open (default), done, or all"
+          "description": "Default: open."
         },
         "due_before": {
           "type": "string",
-          "description": "only those due by then: a day (2026-11-15, through its end) or a moment (2026-11-15 18:00, RFC 3339); leaves out those without a due date"
+          "description": "Due no later than this date (inclusive through day's end) or datetime (user's time zone/RFC3339); excludes undated to-dos."
         },
         "due_after": {
           "type": "string",
-          "description": "only those due from then on: a day or a moment; leaves out those without a due date"
+          "description": "Due from this date/datetime onward; excludes undated to-dos."
         },
         "overdue": {
           "type": "boolean",
-          "description": "only open ones whose due date has passed"
+          "description": "Open and past due."
         },
         "with_agents": {
           "type": "boolean",
-          "description": "true: only those agents work on (tasks); false: only the user's own"
+          "description": "true: with agents (tasks); false: user's own."
         },
         "query": {
           "type": "string",
@@ -2635,7 +2854,7 @@
         },
         "project": {
           "type": "string",
-          "description": "only the to-dos in this knowledge-base project (its slug or name)"
+          "description": "Existing knowledge-base project slug/name."
         },
         "kind": {
           "type": "string",
@@ -2643,18 +2862,18 @@
             "todo",
             "concern"
           ],
-          "description": "only concerns (things the user raised in the main conversation that wait for you to report their outcome), or only the other to-dos; both when left out"
+          "description": "todo or user-raised concerns awaiting concern_report; omitted includes both."
         },
         "limit": {
           "type": "integer",
-          "description": "at most this many (default 50, at most 200)"
+          "description": "Default 50; maximum 200."
         }
       }
     }
   },
   {
     "name": "todo_get",
-    "description": "One of the user's Persona to-dos in full: its title, state, priority, due date, reminder (and whether it was pushed), when it was made and changed, the conversation and plan it came from when it is a task, its notes, the agents that work or worked on it, and the decisions in force on it.",
+    "description": "Read a to-do's title/state, priority, due/reminder and push status, timestamps, origin/plan, notes, agents, decisions and canonical repository/issue/PR associations. Maintain links with todo_repository_links_add or the revision-checked set tools; associations do not prove completion.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2670,7 +2889,7 @@
   },
   {
     "name": "todo_create",
-    "description": "Add a to-do to the user's Persona to-dos, when the user asks you to note something to do or to remind them of it (or agrees to your suggestion): it shows on the To-dos page of the app, sorted by its due date, and with remind set the phone is pushed about it at that time. It is the user's own to-do, with no agent on it: work for an agent is task_plan. Done at once, nothing to confirm. An open to-do with the same title and due date is not made twice: you get that one back. Write the title as the thing to do (short, the user's language); put links, amounts and details in notes. Read due dates and times in the user's time zone; when only the day is known, give the day. When it clearly belongs to one of the user's areas of work, give project: the To-dos page groups to-dos by it. With kind concern it records a concern of the user's instead: open until you report its outcome with concern_report. In a leader conversation it records a piece of your direction's work instead: it shows under your direction as not started, you supervise it, and to have an agent do it you use task_plan with its todo_id (no second to-do); finish one done without an agent with todo_complete.",
+    "description": "Create a Persona to-do when the user asks or agrees to record work or a reminder. Immediate, without confirmation; agents execute via task_plan. An open title/due duplicate returns the existing to-do, but refuses supplied bindings: edit those with todo_repositories_get/set. Use a short action title in the user's language and details in notes. In a leader chat, records a piece of that direction; dispatch with task_plan todo_id, or finish unassigned work with todo_complete. Optional repository_bindings save atomically; get IDs/catalog_revision from repositories_list. Metadata does not create files or advance task progress.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2683,15 +2902,15 @@
         },
         "notes": {
           "type": "string",
-          "description": "details: where it came from, links, amounts, what to bring"
+          "description": "Source, links, amounts and other details."
         },
         "due": {
           "type": "string",
-          "description": "when it is due: a day (2026-11-15) when only the day is known, else a moment (2026-11-15 18:00 in the user's time zone, or RFC 3339 with its offset); 2h / 3d from now also work"
+          "description": "Due date YYYY-MM-DD when only the day is known; otherwise YYYY-MM-DD HH:MM in the user's time zone or RFC3339. Relative 2h/3d also accepted."
         },
         "remind": {
           "type": "string",
-          "description": "when to push the phone about it: a moment (2026-11-14 09:00 in the user's time zone, or RFC 3339), or 30m / 2h / 1d from now; not in the past. Leave it out unless the user asked for a reminder or the deadline is close and matters"
+          "description": "Reminder datetime (user's time zone or RFC3339) or relative 30m/2h/1d; never past. Omit unless requested or the deadline is close and important."
         },
         "priority": {
           "type": "string",
@@ -2708,18 +2927,97 @@
             "todo",
             "concern"
           ],
-          "description": "concern (main conversation only): something the user raised and wants an answer to, recorded so it is followed until you report its outcome to them with concern_report; nothing else closes it. todo (the default): one of the user's own to-dos"
+          "description": "todo (default); concern (main chat only) tracks a user-raised matter until concern_report reports its outcome; other completion tools cannot close it."
         },
         "project": {
           "type": "string",
-          "description": "the knowledge-base project it belongs to: the slug or name of an existing project, usually a long-term one for an area of the user's work (kb_list projects). Set it when the area is clear; never make up a near-duplicate of an existing project"
+          "description": "Existing knowledge-base project slug/name (kb_list projects), preferably a long-term work area. Set only when clear; do not invent near-duplicates."
+        },
+        "repository_bindings": {
+          "type": "object",
+          "required": [
+            "catalog_revision",
+            "repositories"
+          ],
+          "properties": {
+            "catalog_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "repositories": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "required": [
+                  "repo_id"
+                ],
+                "properties": {
+                  "repo_id": {
+                    "type": "string"
+                  },
+                  "directory_alias": {
+                    "type": "string"
+                  },
+                  "requested_ref": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "default",
+                          "branch",
+                          "tag",
+                          "commit",
+                          "ref"
+                        ]
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "links": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "issue",
+                            "pull_request"
+                          ]
+                        },
+                        "number": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string",
+                          "description": "Full source title as plain text; max 1,024 UTF-8 bytes after trimming.",
+                          "maxLength": 1024
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
         }
       }
     }
   },
   {
     "name": "todo_update",
-    "description": "Change one of the user's Persona to-dos: its title, notes, due date, reminder, priority or project. Only what you give changes; \"\" clears notes, due, remind or project. A new reminder time is pushed again even when the old one already was. Done at once, nothing to confirm, also for a task's to-do. To mark it done or open it again use todo_complete / todo_reopen.",
+    "description": "Update supplied title, notes, due/reminder, priority or project immediately, including task to-dos; no confirmation. Omitted fields stay; \"\" clears notes/due/remind/project. New reminder times notify again. Completion/reopening uses todo_complete/todo_reopen.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2728,7 +3026,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "the to-do's id (todo_…), as todo_list gives it"
+          "description": "To-do id from todo_list."
         },
         "title": {
           "type": "string",
@@ -2736,15 +3034,15 @@
         },
         "notes": {
           "type": "string",
-          "description": "the new notes (they replace the old ones: keep what should stay); \"\" clears them"
+          "description": "Replacement notes; retain anything still needed. \"\" clears."
         },
         "due": {
           "type": "string",
-          "description": "the new due date: a day (2026-11-15) or a moment (2026-11-15 18:00 in the user's time zone, RFC 3339); \"\" clears it"
+          "description": "New due date YYYY-MM-DD or datetime (user's time zone/RFC3339); \"\" clears."
         },
         "remind": {
           "type": "string",
-          "description": "the new reminder: a moment (2026-11-14 09:00, RFC 3339) or 30m / 2h / 1d from now, not in the past; \"\" clears it"
+          "description": "New reminder datetime (user's time zone/RFC3339) or relative 30m/2h/1d; never past. \"\" clears."
         },
         "priority": {
           "type": "string",
@@ -2756,7 +3054,7 @@
         },
         "project": {
           "type": "string",
-          "description": "the knowledge-base project it belongs to: the slug or name of an existing project, usually a long-term one for an area of the user's work (kb_list projects). Set it when the area is clear; never make up a near-duplicate of an existing project; \"\" takes it out of its project"
+          "description": "Existing knowledge-base project slug/name (kb_list projects), preferably a long-term work area. Set only when clear; do not invent near-duplicates. \"\" clears."
         }
       }
     }

@@ -98,7 +98,9 @@ def schema_property(call):
         if bound:
             prop["minimum" if key == "min" else "maximum"] = int(bound.group(1).replace("_", ""))
     val_m = re.search(r'\bvalues:\s*(\w+)', rest)
-    if val_m:
+    if re.search(r'\bvalues:\s*WorkoutReader\.activities\.keys\.sorted\(\)', rest):
+        prop["enum"] = workout_activity_keys()
+    elif val_m:
         val_name = val_m.group(1)
         if val_name == "metricNames":
             prop["enum"] = ["steps", "distance", "active_energy", "heart_rate", "resting_heart_rate", "sleep", "weight",
@@ -106,6 +108,21 @@ def schema_property(call):
         else:
             raise ValueError("enum values are not exported yet: %s" % call)
     return prop
+
+
+def workout_activity_keys():
+    """Sorted keys of WorkoutReader.activities, read from its dictionary literal (WorkoutTool.swift)."""
+    text = open(os.path.join(SOURCES, "WorkoutTool.swift"), encoding="utf-8").read()
+    start = re.search(r'static let activities\b[^=]*=\s*\[', text)
+    if not start:
+        raise ValueError("WorkoutReader.activities not found in WorkoutTool.swift")
+    open_at = start.end() - 1
+    body = text[open_at:matching(text, open_at)]
+    # Each entry is "key": [types]; match anywhere, so several entries on one line are all kept.
+    keys = re.findall(r'"(\w+)"\s*:\s*\[', body)
+    if not keys:
+        raise ValueError("WorkoutReader.activities has no entries the exporter can read")
+    return sorted(keys)
 
 
 def schema_object(call):

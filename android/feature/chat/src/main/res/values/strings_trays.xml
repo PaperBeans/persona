@@ -45,6 +45,7 @@
     <string name="chat_tray_accept_changed">The acceptance request changed. Review the latest round.</string>
     <string name="chat_tray_cancelled">Cancelled</string>
     <string name="chat_tray_stopped_state">Stopped</string>
+    <string name="chat_tray_supervisor_review">Supervisor reviewing</string>
     <string name="chat_tray_stopped">Stopped, not done yet</string>
     <string name="chat_tray_stopped_reason">Stopped, not done yet · %1$s</string>
     <string name="chat_tray_pr_number">PR #%1$s</string>

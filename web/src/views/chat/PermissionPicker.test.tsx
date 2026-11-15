@@ -362,3 +362,33 @@ describe("the pick drawn before the hub answers (#6476)", () => {
     expect(up).toHaveBeenLastCalledWith(expect.objectContaining({ permission_mode: "bypassPermissions" }));
   });
 });
+
+// #8261: a session of an agent that is not Claude Code lists the modes it takes (Paseo's Grok): the chip names its own
+// approval "Launcher default" (no mode reported is it), the menu offers that and Full access alone, and a pick goes to
+// the session as any mode does.
+describe("a session that lists its modes (#8261)", () => {
+  const grok = (permission_mode?: string) => ({ machine_id: "mac", session_id: "g1", agent: "paseo", agent_label: "Grok", source_kind: "runtime", status: "idle",
+    permission_mode, capabilities: { read: true, send: true, modes: false, permission_modes: ["default", "bypassPermissions"] } }) as unknown as Session;
+
+  it("names its own approval, offers it and Full access alone, and switches", async () => {
+    act(() => root.render(<PermissionPicker session={grok()} />));
+    expect(chip().textContent).toBe(t("lib-session-actions.mode_launcher_default"));
+    expect(chip().getAttribute("title")).toBe(t("lib-session-actions.mode_launcher_default_detail"));
+    expect(chip().dataset.mode).toBe("default");
+    open();
+    expect(rows().map((r) => r.textContent)).toEqual([
+      expect.stringContaining(t("lib-session-actions.mode_launcher_default")), expect.stringContaining(t("lib-session-actions.mode_bypass_permissions")),
+    ]);
+    // into Full access asks first, as Claude Code's does: the row turns into its question, a second choice runs it
+    act(() => rows()[1].click());
+    act(() => rows()[1].click());
+    await act(async () => {});
+    expect(api).toHaveBeenLastCalledWith(expect.stringContaining("/sessions/mac/g1/modes"), expect.objectContaining({ json: { permission_mode: "bypassPermissions" } }));
+  });
+
+  it("in Full access: the chip says so in red", () => {
+    act(() => root.render(<PermissionPicker session={grok("bypassPermissions")} />));
+    expect(chip().textContent).toBe(t("lib-session-actions.mode_bypass_permissions"));
+    expect(chip().className).toContain("text-red");
+  });
+});

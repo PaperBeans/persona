@@ -55,6 +55,26 @@ struct StreamRevealTests {
         #expect(done < 3.94 + 1.0)
     }
 
+    /// Ten frames a second (the app's rate, #7135) with a step of up to 0.2 s: it keeps up as well, in bigger steps.
+    @Test func tenFramesASecondKeepsUp() {
+        var r = StreamReveal(String(Self.reply.prefix(4)))
+        var next = 0
+        var frames: [(TimeInterval, Int)] = []
+        var t = 0.0
+        while t <= 6 {
+            while next < Self.bursts.count, Self.bursts[next].0 <= t {
+                r.receive(String(Self.reply.prefix(Self.bursts[next].1)), at: Self.bursts[next].0)
+                next += 1
+            }
+            if r.advance(to: t, maxStep: 0.2) { frames.append((t, r.shown.count)) }
+            t += 0.1
+        }
+        let steps = zip(frames, frames.dropFirst()).map { $1.1 - $0.1 }
+        #expect(steps.max()! <= 25) // the bursts brought up to 61 characters at once
+        #expect(r.shown == Self.reply[...])
+        #expect(frames.first { $0.1 == 300 }!.0 < 3.94 + 1.0)
+    }
+
     @Test func finishShowsEverythingAtOnce() {
         var r = StreamReveal(String(Self.reply.prefix(4)))
         r.receive(Self.reply, at: 0.1)

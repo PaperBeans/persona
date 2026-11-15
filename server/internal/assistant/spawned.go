@@ -65,6 +65,7 @@ func (s *Service) assistantTurnSettled(ctx context.Context, machine, sid string)
 	}
 	// The node's word, else its last words when they are the error (an older node, fleet.go).
 	sess.TurnError, sess.TurnErrorKind = latestTurnError(sess)
+	s.rememberMainReadinessSuccess(ctx, machine, sess)
 	failed := strings.TrimSpace(sess.TurnError) != ""
 	if failed {
 		// The conversation and launcher, and what kind of error: never its words, which may quote a credential.

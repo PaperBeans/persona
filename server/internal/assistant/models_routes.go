@@ -74,6 +74,9 @@ func (s *Service) modelPurpose(ctx context.Context, id string, providers []Model
 	if len(p.Runtimes) > 0 {
 		p.Fields = append(p.Fields, "runtime")
 	}
+	if len(p.ConfigDirs) > 0 {
+		p.Fields = append(p.Fields, "config_dir")
+	}
 	l := s.requestCtxLang(ctx)
 	p.Status = modelUnverified
 	if room := roomNotClaudeStatus(l, p, providers, stored, roomHere); room != "" {
@@ -211,6 +214,10 @@ func (s *Service) modelConfigRoutes() {
 		}
 		if in.Runtime != nil && string(in.Runtime) != "null" && len(p.Runtimes) == 0 {
 			apierr.Write(w, 400, i18n.Err("assistant-models.err_runtime_assistant_only"))
+			return
+		}
+		if in.ConfigDir != nil && string(in.ConfigDir) != "null" && len(p.ConfigDirs) == 0 {
+			apierr.Write(w, 400, i18n.Err("assistant-models.err_config_dir_assistant_only"))
 			return
 		}
 		b, err := patchModel(p.Override, in)

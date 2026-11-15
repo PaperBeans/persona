@@ -2,10 +2,12 @@ import XCTest
 
 /// Low-distraction mode's held pushes (#7782): in the main conversation the action bar's Held Pushes entry opens the
 /// pushes the hub held today, P1 rows first and the P2 group folded until tapped; a row with a source opens it, and with
-/// the mode off there is no entry. Against scripts/mock/mock_hub.py (PERSONA_MOCK_HUB), whose ln mode the tests switch
-/// with `/mock/ln` and put back after: two P1 rows and one P2 row today (with the mode off as well), the first P1 row
-/// linking the /orders investigation to-do (its `todo_id`; its agent is a session the assistant manager knows), and one
-/// P1 row of yesterday that never shows. With PERSONA_SHOTS set they write
+/// the mode off there is no entry. The tray opens above the bar's row at the bar's width, in the place Needs You's and
+/// In Progress' open, one tray at a time, and the three entries stay on one row (#8223). Against
+/// scripts/mock/mock_hub.py (PERSONA_MOCK_HUB), whose ln mode the tests switch with `/mock/ln` and put back after: two
+/// P1 rows and one P2 row today (with the mode off as well), the first P1 row linking the /orders investigation to-do
+/// (its `todo_id`; its agent is a session the assistant manager knows), and one P1 row of yesterday that never shows.
+/// With PERSONA_SHOTS set they write
 /// `held-pushes-<light|dark>-<entry|tray|p2-folded|p2-open|source|ln-off>.png` there (`p2-folded` only when the folded
 /// P2 header is below the tray's fold in `tray`).
 final class PushInterceptsUITests: XCTestCase {
@@ -37,6 +39,7 @@ final class PushInterceptsUITests: XCTestCase {
             while !entry.label.contains("3") && Date.now < deadline { usleep(200_000) }
             XCTAssertTrue(entry.label.contains("3"), "\(scheme): \(entry.label)")
             sleep(2) // the conversation above settles
+            assertOneRow(app, "\(scheme), closed")
             try shot(app, scheme, "entry")
 
             entry.tap()
@@ -58,6 +61,30 @@ final class PushInterceptsUITests: XCTestCase {
             XCTAssertEqual(linked.count, 1, "\(scheme): \(rowIDs(app))")
             sleep(1)
             try shot(app, scheme, "tray")
+            // Above the row at the bar's full width, not in the entry's column, and the entries stay on one row under it.
+            let bar = app.descendants(matching: .any)["action-bar"].firstMatch
+            XCTAssertTrue(bar.exists, "\(scheme): no action bar:\n\(app.debugDescription)")
+            let trayFrame = tray.frame
+            XCTAssertEqual(trayFrame.width, bar.frame.width, accuracy: 0.5,
+                           "\(scheme): the tray is \(trayFrame.width) pt wide in a \(bar.frame.width) pt bar")
+            XCTAssertEqual(trayFrame.minX, bar.frame.minX, accuracy: 0.5, "\(scheme): the tray starts \(trayFrame.minX - bar.frame.minX) pt into the bar")
+            XCTAssertLessThan(trayFrame.maxY, entry.frame.minY, "\(scheme): the tray is not above the row")
+            assertOneRow(app, "\(scheme), open")
+            // One tray at a time, all in that place: Needs You's takes it and closes this one, and the other way round.
+            let needs = app.buttons["action-bar.needs-you"]
+            needs.tap()
+            let needsTray = app.otherElements["action-tray.needs-you"].firstMatch
+            XCTAssertTrue(needsTray.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(tray.waitForNonExistence(timeout: 5), "\(scheme): Held Pushes stayed open under Needs You")
+            XCTAssertFalse(entry.isSelected, "\(scheme): Held Pushes is still marked open")
+            XCTAssertEqual(needsTray.frame.minX, trayFrame.minX, accuracy: 0.5, "\(scheme): Needs You's tray is not where Held Pushes' was")
+            XCTAssertEqual(needsTray.frame.width, trayFrame.width, accuracy: 0.5, "\(scheme): Needs You's tray is not as wide as Held Pushes'")
+            entry.tap()
+            XCTAssertTrue(tray.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(needsTray.waitForNonExistence(timeout: 5), "\(scheme): Needs You stayed open under Held Pushes")
+            XCTAssertFalse(needs.isSelected, "\(scheme): Needs You is still marked open")
+            XCTAssertTrue(waitForRows(app, 2), "\(scheme): \(rowIDs(app))")
+            sleep(1)
             // The folded P2 header can be below the tray's fold: up into view for its own picture.
             let scroll = tray.scrollViews.firstMatch
             if p2.frame.maxY > scroll.frame.maxY {
@@ -108,6 +135,16 @@ final class PushInterceptsUITests: XCTestCase {
 
     /// A held push's row (`push-intercepts.row.<id>`).
     private static var row: NSPredicate { NSPredicate(format: "identifier BEGINSWITH %@", "push-intercepts.row.") }
+
+    /// Needs You and In Progress on Held Pushes' row, as AssistantActionBarUITests checks the first two (`when` names the
+    /// moment in the failure).
+    @MainActor private func assertOneRow(_ app: XCUIApplication, _ when: String, file: StaticString = #filePath, line: UInt = #line) {
+        let held = app.buttons["action-bar.push-intercepts"].frame
+        for id in ["action-bar.needs-you", "action-bar.running"] {
+            XCTAssertEqual(app.buttons[id].frame.midY, held.midY, accuracy: 0.5,
+                           "\(when): \(id) is \(app.buttons[id].frame.midY - held.midY) pt off Held Pushes' row", file: file, line: line)
+        }
+    }
 
     /// The main conversation, where the entry is, in `scheme` (`light` / `dark`).
     @MainActor private func launch(_ scheme: String) -> XCUIApplication {

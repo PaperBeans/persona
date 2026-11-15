@@ -15,7 +15,8 @@ import java.time.Instant
  * The Assistant's two entries above the composer (#3387, web `lib/assistant-entries.ts`, spec/fixtures/entries):
  * Needs you lists everything waiting on the user, In progress everything running that does not. Each thing is one row
  * in exactly one of them, Needs you first; finished things are in neither (the board has them), and each entry's count
- * is its rows. A task is one row whatever its agents: they are never rows of their own. In the main conversation an
+ * is its rows. A task waiting for its supervisor's review is In progress for the first hour of the wait
+ * ([supervisorReviewing]), then Needs you. A task is one row whatever its agents: they are never rows of their own. In the main conversation an
  * Agent that belongs to no task (opened by hand) is a row of its own.
  */
 sealed interface NeedsYouEntry {
@@ -49,9 +50,10 @@ sealed interface RunningEntry {
      * A dispatched task not finished and not waiting on the user. [waiting]: nothing of it runs and one of its agents waits to
      * be brought back (iOS `TaskState.waiting`), by what it waits on or by background work that only waits.
      * [hasAgentsElsewhere]: some current Agents have another listed task as their request home.
+     * [supervisorReview]: it is here because its supervisor's review is under way, and its row says so.
      */
     data class Task(val todo: Todo, val status: TriageStatus, val activity: BackgroundWork? = null, val waiting: Boolean = false,
-                    val hasAgentsElsewhere: Boolean = false) : RunningEntry {
+                    val hasAgentsElsewhere: Boolean = false, val supervisorReview: Boolean = false) : RunningEntry {
         override val key get() = "task:${todo.id}"
     }
 
@@ -65,17 +67,36 @@ sealed interface RunningEntry {
 /** [shelved]: open tasks with no progress for 48 hours and nothing running, folded under In progress and not counted. */
 data class AssistantEntries(val needsYou: List<NeedsYouEntry>, val running: List<RunningEntry>, val shelved: List<RunningEntry>)
 
-/** The task waits for the user's decision or review: an open ask (a decided one only while the task is open), or its
- *  supervisor's `pending_review` / `needs_user` on an open task. */
-fun Todo.awaitsDecision(): Boolean {
-    openAsk?.let { return !(isDone && it.outcome == "decide") }
-    return !isDone && (supervision?.state == "pending_review" || supervision?.state == "needs_user")
+/** How long a task's review is its supervisor's alone (docs/assistant/unified-entry.md "Needs you and In progress"):
+ *  past it the review is overdue and the task is the owner's, under Needs you. The web's `REVIEW_OVERDUE_MS`. */
+const val REVIEW_OVERDUE_MS = 60 * 60 * 1000L
+
+/**
+ * The task waits for its supervisor's review, which is not the owner's to do yet: open, in `pending_review` for less than
+ * [REVIEW_OVERDUE_MS] at [now] (epoch ms). False past that, and when the hub does not say since when (an older hub): the
+ * review is then the owner's, as it was. An open ask or an asking Agent is the owner's whatever this says.
+ */
+fun Todo.supervisorReviewing(now: Long): Boolean {
+    if (isDone || supervision?.state != "pending_review") return false
+    val since = parseTime(supervision?.pendingSince)?.toEpochMilli() ?: return false
+    return now - since < REVIEW_OVERDUE_MS
 }
+
+/** The task waits for the user's decision or review: an open ask (a decided one only while the task is open), or its
+ *  supervisor's `needs_user` on an open task, or a `pending_review` that is the owner's: one waiting an hour or more at
+ *  [now], or one the hub gives no start for ([supervisorReviewing]). A younger review is its supervisor's to do. */
+fun Todo.awaitsDecision(now: Long): Boolean {
+    openAsk?.let { return !(isDone && it.outcome == "decide") }
+    if (isDone) return false
+    return supervision?.state == "needs_user" || (supervision?.state == "pending_review" && !supervisorReviewing(now))
+}
+
+/** Nothing of the task runs or asks (the web's `awaitsReview` statuses). */
+private val RESTING = setOf(TriageStatus.FollowUp, TriageStatus.Unread, TriageStatus.NotStarted)
 
 /** The web's `todoRank` (what the user must act on first), on the triage status. */
 private fun Todo.entryRank(status: TriageStatus): Int {
-    if ((supervision?.state == "pending_review" || openAsk != null) &&
-        status in setOf(TriageStatus.FollowUp, TriageStatus.Unread, TriageStatus.NotStarted)) return 20
+    if ((supervision?.state == "pending_review" || openAsk != null) && status in RESTING) return 20
     return when (status) {
         TriageStatus.NeedsYou -> 0
         TriageStatus.Interrupted -> 10
@@ -132,13 +153,17 @@ fun assistantEntries(
         // a failed start carries done_at (the hub ends it), yet it is the user's to retry while its bucket says open
         val waits = if (status == TriageStatus.Failed) bucket == TodoBucket.Open
             else !todo.isDone && (status == TriageStatus.NeedsYou || status == TriageStatus.Interrupted)
+        val decision = todo.awaitsDecision(now)
+        // its supervisor's review is under way (not the owner's yet): in progress, whatever the To-dos page files it under
+        val reviewing = !decision && todo.supervisorReviewing(now)
         when {
             asks.isNotEmpty() -> asking += NeedsYouEntry.Task(todo, status, asks)
-            waits || todo.awaitsDecision() -> deciding += NeedsYouEntry.Task(todo, status, asks) to todo.entryRank(status)
-            bucket == TodoBucket.Open -> {
+            waits || decision -> deciding += NeedsYouEntry.Task(todo, status, asks) to todo.entryRank(status)
+            bucket == TodoBucket.Open || reviewing -> {
                 val activity = todo.backgroundWork(lookup)
                 val waiting = activity == null && todo.activeAgents.mapNotNull { lookup(it.key) }.any { it.waitsWithoutBackground() || it.waitsInBackground }
-                open += RunningEntry.Task(todo, status, activity, waiting, hasAgentsElsewhere) to todo.entryRank(status)
+                open += RunningEntry.Task(todo, status, activity, waiting, hasAgentsElsewhere,
+                    supervisorReview = reviewing && status in RESTING) to todo.entryRank(status)
             }
             bucket == TodoBucket.Shelved -> shelved += RunningEntry.Task(todo, status, hasAgentsElsewhere = hasAgentsElsewhere)
             else -> continue

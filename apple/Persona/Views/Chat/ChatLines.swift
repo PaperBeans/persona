@@ -1,5 +1,6 @@
 import Foundation
 import PersonaKit
+import PersonaWire
 
 /// The chat as a flat list of lines (`ChatLine`), from the store's blocks: every message of a turn opens its own
 /// exchange — the message, one work line for what the agent did after it, the agent's last words. Open work lines get
@@ -658,10 +659,17 @@ nonisolated struct ChangedFile: Hashable, Sendable {
 extension ChatLines {
     // MARK: The assistant's feed
 
-    /// What of the feed the cached lines depend on: each item's id, and a receipt's body too, which the hub sends again
-    /// changed (an interrupted receipt resolved or batched, #3834).
+    /// What of the feed the cached lines depend on: each drawn item's id (the cards read the rest from the stores).
     static func feedKey(_ feed: [FeedItem]) -> [String] {
-        feed.map { $0.kind == .receipt ? "\($0.id)#\($0.body.hashValue)" : $0.id }
+        feed.map(\.id)
+    }
+
+    /// The feed items an assistant conversation draws (#8237, docs/assistant/unified-entry.md "Receipts"): a task's card
+    /// comes once, when it is handed out, and updates in place; how it goes on (a receipt for each stretch of work, its
+    /// Agent's reports, its reviews) is its row in Needs You / In Progress, never another card. The hub keeps writing
+    /// them all: the tray reads them, and a hub-side reader (the "Today" card) still does.
+    static func drawnFeed(_ feed: [FeedItem]) -> [FeedItem] {
+        feed.filter { $0.kind != .receipt && $0.kind != .report && $0.kind != .review }
     }
 
     /// The lines with what the hub added to an assistant conversation (docs/assistant/unified-entry.md) among them: an item

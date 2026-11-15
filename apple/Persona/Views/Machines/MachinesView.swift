@@ -1,5 +1,6 @@
 import PersonaKit
 import SwiftUI
+import PersonaWire
 
 /// The machine pages are pushed by value (MachineListRoute, MachineDetailRoute) and so are the chats they open
 /// (SessionKey): a page pushed with `NavigationLink { … }` that pushes by value puts the new page *under* itself, so a

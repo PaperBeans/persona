@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 /// An install, upgrade or removal on the extension's market page (#3307): what is going on, the hub's steps with the
 /// one it is at (a bar while it downloads, when the hub knows the size), and for one that failed the step it stopped

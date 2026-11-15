@@ -13,7 +13,7 @@ import (
 
 // briefService is the main conversation conv1 on a fake hub, with task_plan held to what a brief requires, and the
 // owner's message said in it at asked.
-func briefService(t *testing.T, said string) (*Service, *fakeHub, time.Time) {
+func briefService(t testing.TB, said string) (*Service, *fakeHub, time.Time) {
 	t.Helper()
 	s, f := newQuietService(t)
 	s.briefsOptional = false
@@ -23,7 +23,7 @@ func briefService(t *testing.T, said string) (*Service, *fakeHub, time.Time) {
 }
 
 // tool is a model's call of an assistant tool from conv1, as the hub passes it on.
-func tool(t *testing.T, s *Service, name string, args any) (string, bool) {
+func tool(t testing.TB, s *Service, name string, args any) (string, bool) {
 	t.Helper()
 	raw, err := json.Marshal(args)
 	if err != nil {
@@ -473,9 +473,9 @@ func TestBriefClockRaisesOverdueOnce(t *testing.T) {
 	if !ok || e.Kind != sigOverdue || e.Asked != "please fix the login crash before Friday" || e.AskedAt != "2026-11-03" {
 		t.Fatalf("entry = %+v, %v", e, ok)
 	}
-	if text := prompts.RenderSupervise(prompts.Supervise{Entries: []prompts.SuperviseEntry{e}, Overdue: true}); !strings.Contains(text, "task_scope") ||
+	if text := prompts.RenderSupervise(prompts.Supervise{Entries: []prompts.SuperviseEntry{e}, Overdue: true}); !strings.Contains(text, "signal=overdue") ||
 		!strings.Contains(text, "please fix the login crash before Friday") {
-		t.Fatalf("the supervision message does not say what to do with it:\n%s", text)
+		t.Fatalf("the supervision message is missing brief facts:\n%s", text)
 	}
 	s.clearOverdue(todo.ID)
 	s.briefClock(ctx, todo, late.Add(time.Hour))

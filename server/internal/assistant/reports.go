@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
@@ -130,8 +131,14 @@ func negatedBefore(pre string) bool {
 // stageOf is how far a reply says the work got (at least develop: the agent worked), and the PR it names.
 func stageOf(text string) (stage, pr string) {
 	stage = "develop"
-	if prs := prLink.FindAllString(text, -1); len(prs) > 0 {
-		pr = prs[len(prs)-1]
+	if ref := closeoutPRRef(text); ref != "" {
+		pr = prLink.FindString(ref)
+	} else if deliveryCloseout(text) == "" {
+		if prs := prLink.FindAllString(text, -1); len(prs) > 0 {
+			pr = prs[len(prs)-1]
+		}
+	}
+	if pr != "" {
 		stage = "review"
 		if said(mergedWords, text) {
 			stage = "merge"
@@ -170,6 +177,12 @@ var generalTaskWords = lazyre.New(`(?i)\b(research|investigate|report|plan|triag
 
 // advanceTaskReply handles progress and final answers identically, including the running-hub deploy check.
 func (s *Service) advanceTaskReply(ctx context.Context, t Todo, machine, session, text string) bool {
+	urls := taskRepositoryReportLinks(text)
+	if len(urls) > 0 {
+		if err := s.importTodoRepositoryLinks(ctx, t.ID, urls, "report"); err != nil {
+			s.logf("task %s: repository links not saved: %v", t.ID, err)
+		}
+	}
 	stage, pr := stageOf(text)
 	d, marked := deliveryMark(text)
 	if pr != "" {
@@ -237,11 +250,12 @@ type todoStage struct {
 	Stage    string        `json:"stage"`
 	Kind     string        `json:"stage_kind,omitempty"`
 	PR       string        `json:"pr,omitempty"`
-	PRs      []string      `json:"prs,omitempty"`      // the PRs named before PR, newest last, at most stagePRsKept (#6507)
-	Delivery *TodoDelivery `json:"delivery,omitempty"` // delivery.go
-	Deploy   *deployWatch  `json:"deploy,omitempty"`   // deploy_check.go: held until the running hub has the work
-	Verified bool          `json:"verified,omitempty"` // explicit acceptance outranks delivery and reply keywords
-	Check    *TodoCheck    `json:"check,omitempty"`    // task_check.go
+	PRs      []string      `json:"prs,omitempty"`       // the PRs named before PR, newest last, at most stagePRsKept (#6507)
+	Delivery *TodoDelivery `json:"delivery,omitempty"`  // delivery.go
+	Deploy   *deployWatch  `json:"deploy,omitempty"`    // deploy_check.go: held until the running hub has the work
+	Verified bool          `json:"verified,omitempty"`  // explicit acceptance outranks delivery and reply keywords
+	Check    *TodoCheck    `json:"check,omitempty"`     // task_check.go
+	PRStatus *TodoPRStatus `json:"pr_status,omitempty"` // Observed forge facts, not a task state.
 }
 
 const reportStagesKey = "assistant.todo_stages"
@@ -249,7 +263,7 @@ const reportStagesKey = "assistant.todo_stages"
 // empty: st keeps nothing (its row can go).
 func (st todoStage) empty() bool {
 	return st.Stage == "" && st.Kind == "" && st.PR == "" && len(st.PRs) == 0 && st.Delivery == nil && st.Deploy == nil && !st.Verified &&
-		st.Check == nil
+		st.Check == nil && st.PRStatus == nil
 }
 
 // stagePRsKept bounds a task's earlier PRs (todoStage.PRs).
@@ -261,8 +275,9 @@ func keptPRs(prs []string, pr string) []string {
 	return out[max(0, len(out)-stagePRsKept):]
 }
 
-// forgetTaskPR removes a confirmed non-PR from both current and historical delivery links before publishing it.
-func (s *Service) forgetTaskPR(ctx context.Context, id, pr string) error {
+// forgetTaskPR removes a non-delivery record and installs only an explicitly recovered delivery, never an
+// unproven historical reference. A confirmed no-PR result also discards that reference history and its hold.
+func (s *Service) forgetTaskPR(ctx context.Context, id, pr, replacement string) error {
 	b := &s.reports
 	b.stageWriting.Lock()
 	defer b.stageWriting.Unlock()
@@ -277,19 +292,25 @@ func (s *Service) forgetTaskPR(ctx context.Context, id, pr string) error {
 	changed := removed || len(history) != len(cur.PRs)
 	cur.PRs = history
 	if removed {
-		cur.PR = ""
-		if len(cur.PRs) > 0 {
-			cur.PR = cur.PRs[len(cur.PRs)-1]
-			cur.PRs = cur.PRs[:len(cur.PRs)-1]
+		cur.PR = replacement
+		if replacement != "" {
+			cur.PRs = slices.DeleteFunc(cur.PRs, func(p string) bool { return p == replacement })
+		}
+		if cur.PR == "" {
+			cur.PRs = nil
+		}
+		if cur.PRStatus != nil && (cur.PR == "" || cur.PRStatus.URL == pr) {
+			cur.PRStatus = nil
 		}
 		if cur.PR == "" && !cur.Verified && (cur.Stage == "review" || cur.Stage == "merge") {
 			cur.Stage = "develop"
 		}
 	}
-	if cur.Deploy != nil && cur.Deploy.PR == pr {
+	removedWatch := cur.Deploy != nil && (cur.Deploy.PR == pr || removed && cur.PR == "")
+	if removedWatch {
 		cur.Deploy, changed = nil, true
 	}
-	if removed && cur.PR == "" && cur.Delivery != nil &&
+	if (removed || removedWatch) && cur.Delivery != nil &&
 		(cur.Delivery.State == deliveryPR || cur.Delivery.State == deliveryMerged) {
 		cur.Delivery = nil
 	}
@@ -309,7 +330,7 @@ func (s *Service) forgetTaskPR(ctx context.Context, id, pr string) error {
 	b.mu.Unlock()
 	s.todos.mu.Lock()
 	if t := s.todos.todos[id]; t != nil {
-		t.Stage, t.PRURL, t.PRs, t.Delivery = cur.Stage, cur.PR, cur.PRs, cur.Delivery
+		t.Stage, t.PRURL, t.PRs, t.Delivery, t.PRStatus = cur.Stage, cur.PR, cur.PRs, cur.Delivery, cur.PRStatus
 	}
 	s.todos.mu.Unlock()
 	s.deploy.mu.Lock()
@@ -359,6 +380,17 @@ func (s *Service) setTaskStage(ctx context.Context, id, stage, pr string) {
 }
 
 func (s *Service) setTaskStageKind(ctx context.Context, id, stage, pr, kind string, verified bool) {
+	if _, link, err := repository.ParseTaskLink(pr); err == nil {
+		if err = s.importTodoRepositoryLinks(ctx, id, []string{link.CanonicalURL}, "report"); err != nil {
+			s.logf("task %s: repository link not saved: %v", id, err)
+		}
+	}
+	s.setTaskStageOn(ctx, id, stage, pr, kind, verified, "")
+}
+
+// setTaskStageOn is setTaskStageKind, and when onPR is set it does nothing unless, under the stage lock, the open to-do
+// and its stage still name that PR: an observation of a PR that was replaced meanwhile moves no stage (#7614 review).
+func (s *Service) setTaskStageOn(ctx context.Context, id, stage, pr, kind string, verified bool, onPR string) {
 	if !verified && stage == "verify" {
 		if t, ok := s.todoNow(id); ok && t.Supervision != nil {
 			v := t.Supervision
@@ -370,6 +402,12 @@ func (s *Service) setTaskStageKind(ctx context.Context, id, stage, pr, kind stri
 	b := &s.reports
 	b.stageWriting.Lock()
 	defer b.stageWriting.Unlock()
+	if onPR != "" {
+		// The to-do's PR changes only under stageWriting (below), so it is read before b.mu, in the usual lock order.
+		if t, ok := s.todoNow(id); !ok || t.DoneAt != nil || t.PRURL != onPR {
+			return
+		}
+	}
 	b.mu.Lock()
 	if !s.loadStagesLocked(ctx) {
 		b.mu.Unlock()
@@ -377,6 +415,10 @@ func (s *Service) setTaskStageKind(ctx context.Context, id, stage, pr, kind stri
 		return
 	}
 	cur := b.stages[id]
+	if onPR != "" && cur.PR != onPR {
+		b.mu.Unlock()
+		return
+	}
 	changed := false
 	if verified && !cur.Verified {
 		cur.Verified, changed = true, true

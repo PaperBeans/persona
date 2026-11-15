@@ -374,8 +374,8 @@ func TestEchoTiesAPeerSend(t *testing.T) {
 		peer("p1", "Persona", "reply with OK"),
 		queued,
 	)
-	l.match("s", items)
-	sameTags(t, l.tag("s", items), map[string]string{"p1#0": "P", "q1#0": "Q"})
+	l.match("s", echoInTranscript, items)
+	sameTags(t, l.tag("s", echoInTranscript, items), map[string]string{"p1#0": "P", "q1#0": "Q"})
 }
 
 // A mode or effort change for a Claude outside Persona's terminals is refused with a reason that says where to change

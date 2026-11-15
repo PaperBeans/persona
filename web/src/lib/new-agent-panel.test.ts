@@ -85,6 +85,21 @@ describe("the panel's providers", () => {
     expect(blocked.models?.map((m) => m.name)).toEqual(["默认：glm-5.3"]);
   });
 
+  it("a provider left out on this computer comes after the launchers, off with the hub's reason (#8109)", () => {
+    const reason = "Mac 已经有自己的 Claude Code 服务，而 DeepSeek 设置为跳过这样的电脑";
+    const p = panel({ unavailable: [
+      { name: "deepseek", display_name: "DeepSeek", kind: "launcher", code: "launcher_own_service", reason },
+      { name: "claude", kind: "launcher", code: "launcher_own_service", reason: "not this one" }, // listed already: stays as listed
+      { name: "cx-gw", kind: "launcher", agent: "codex", code: "launcher_own_service", reason },
+    ] });
+    expect(p.providers.map((x) => x.id)).toEqual(["claude", "work_gw", "sonnetcc", "codex", "p-relay", "deepseek", "cx-gw"]);
+    expect(provider(p, "deepseek")).toEqual({ id: "deepseek", name: "DeepSeek", engine: "claude", models: null, unavailable: reason });
+    expect(provider(p, "cx-gw").engine).toBe("codex");
+    expect(provider(p, "claude").unavailable).toBeUndefined();
+    // the row lit stays the launcher that runs
+    expect(p.state.current?.provider).toBe("claude");
+  });
+
   it("a launcher that fixes its own --model offers its Default row alone, with why, and no typed ID", () => {
     const locked = provider(panel(), "sonnetcc");
     expect(locked.models).toHaveLength(1);
@@ -117,6 +132,20 @@ describe("the panel's providers", () => {
     const p = panel();
     expect(provider(p, "codex").models?.every((m) => m.efforts.length === 0)).toBe(true);
     expect(provider(p, "p-relay")).toMatchObject({ models: null, loading: true });
+  });
+
+  // A launcher that lists its permission modes (#8261, Paseo's Grok and its Codex providers) takes the efforts its models
+  // list: each row its model's own, the Default row the default model's, none for a model nobody lists the levels of.
+  it("a launcher that lists its permission modes offers each model's own efforts, and none where nobody says", () => {
+    const grok: Launcher = { name: "grok", agent: "paseo", source: "paseo", display_name: "Grok", permission_modes: ["default", "bypassPermissions"] };
+    const paseoCodex: Launcher = { name: "my-codex", agent: "codex", source: "paseo", permission_modes: ["default", "bypassPermissions"] };
+    const grokList: LauncherModels = { agent: "paseo", models: [{ id: "grok-4", name: "Grok 4", default: true, efforts: ["low", "high"] }, { id: "grok-mini", name: "Grok mini" }] };
+    const p = newAgentPanel({ launchers: [grok, paseoCodex], listOf: (n) => (n === "grok" ? { list: grokList } : { list: codexList }), choice: none, configured: null, runs: "grok", tiers: [] });
+    expect(provider(p, "grok").name).toBe("Grok");
+    expect(provider(p, "grok").models?.map((m) => [m.id, m.efforts])).toEqual([["default", ["low", "high"]], ["grok-4", ["low", "high"]], ["grok-mini", []]]);
+    expect(provider(p, "my-codex").models?.map((m) => m.efforts)).toEqual([["low", "medium", "high"], ["low", "medium", "high"], ["low", "medium", "high"]]);
+    expect(newAgentPill({ launchers: [grok], runs: "grok", list: { list: grokList }, choice: { launcher: "grok", model: "", effort: "high" }, configured: null, fallback: "" }).effort)
+      .toBe("high");
   });
 
   it("an ID typed for this start that the list lacks gets its own row, so it is lit", () => {

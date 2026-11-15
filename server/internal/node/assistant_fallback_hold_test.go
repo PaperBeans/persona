@@ -72,7 +72,7 @@ func TestAssistantFallbackHoldBounds(t *testing.T) {
 		t.Fatalf("the hold outlived its time: %+v", got)
 	}
 	n.mu.Lock()
-	r := n.newAssistantRecovery(id, "claude", from, "primary-model", "primary-model")
+	r := n.newAssistantRecovery(id, "claude", from, "primary-model", "primary-model", "")
 	n.mu.Unlock()
 	if !r.retried["primary-model"] {
 		t.Fatal("a refusal soon after a fallback answered still retries on the same model")
@@ -80,7 +80,7 @@ func TestAssistantFallbackHoldBounds(t *testing.T) {
 	n = hold()
 	n.contextCompacted(id)
 	n.mu.Lock()
-	r = n.newAssistantRecovery(id, "claude", from, "primary-model", "primary-model")
+	r = n.newAssistantRecovery(id, "claude", from, "primary-model", "primary-model", "")
 	n.mu.Unlock()
 	if r.retried["primary-model"] || n.heldFallback(id, "claude", from).Model != "primary-model" {
 		t.Fatal("a compaction left the hold or its sticky window")
@@ -88,7 +88,7 @@ func TestAssistantFallbackHoldBounds(t *testing.T) {
 	n = hold()
 	n.fallbacks[id].at = time.Now().Add(-assistantRefusalSticky - time.Minute)
 	n.mu.Lock()
-	r = n.newAssistantRecovery(id, "claude", from, "primary-model", "primary-model")
+	r = n.newAssistantRecovery(id, "claude", from, "primary-model", "primary-model", "")
 	n.mu.Unlock()
 	if r.retried["primary-model"] {
 		t.Fatal("a refusal long after the last fallback skipped the same-model retry")

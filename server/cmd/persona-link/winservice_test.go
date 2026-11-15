@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,10 +226,10 @@ func TestUninstallOnWindows(t *testing.T) {
 func TestStatusAndNodeOnWindows(t *testing.T) {
 	f, registered := newWindowsEnv(t)
 	r := gather(f.env)
-	var lines []string
-	r.serviceText(func(format string, a ...any) { lines = append(lines, format) }, "me")
-	if r.Service == nil || r.Service.Manager != "schtasks" || len(lines) != 1 || !strings.Contains(lines[0], "没装") {
-		t.Fatalf("%+v %q", r.Service, lines)
+	var out strings.Builder
+	r.serviceText(func(format string, a ...any) { fmt.Fprintf(&out, format+"\n", a...) }, "me")
+	if r.Service == nil || r.Service.Manager != "schtasks" || !strings.Contains(out.String(), "没装") {
+		t.Fatalf("%+v %q", r.Service, out.String())
 	}
 	if err := writeUTF16(f.taskFile(), taskXML(f.user, f.serviceExePath(), "supervise", f.now())); err != nil {
 		t.Fatal(err)

@@ -15,13 +15,13 @@ import (
 
 // newQuietService is newTaskService with the main conversation conv1 (idle, on machine server), a short notice
 // delay and supervision messages (supervise_digest.go) that come at once and often.
-func newQuietService(t *testing.T) (*Service, *fakeHub) {
+func newQuietService(t testing.TB) (*Service, *fakeHub) {
 	t.Helper()
 	return newQuietServiceOn(t, nil)
 }
 
 // newQuietServiceOn is newQuietService with st as its database (nil: none).
-func newQuietServiceOn(t *testing.T, st Store) (*Service, *fakeHub) {
+func newQuietServiceOn(t testing.TB, st Store) (*Service, *fakeHub) {
 	t.Helper()
 	old := quietNoticeDelay
 	quietNoticeDelay = 30 * time.Millisecond
@@ -98,7 +98,7 @@ func TestQuietTaskTellsTheMainConversation(t *testing.T) {
 	agentTurn(s, f, proto.StatusDone, "修好了，提了 https://github.com/o/r/pull/901", 0)
 	waitFor(t, "the notice", func() bool { return len(f.notices()) == 1 })
 	n := f.notices()[0]
-	for _, want := range []string{"📋 督办", "任务「修登录崩溃」（" + todo.ID + "）：hub 判断做完了，等你验收（修好了）；在 box", "修好了，提了 https://github.com/o/r/pull/901", "不是用户发的"} {
+	for _, want := range []string{"📋 督办", "任务「修登录崩溃」（" + todo.ID + "，signal=review）：hub 判断做完了，等你验收（修好了）；在 box", "修好了，提了 https://github.com/o/r/pull/901", "不是用户发的"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("notice lacks %q:\n%s", want, n)
 		}

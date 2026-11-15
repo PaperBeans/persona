@@ -585,6 +585,10 @@ For Linux see "Linux (headless)" below: build `persona-link`, then `persona-link
 
 ## Status line
 
+The status line is a machine contract and is not translated. The same applies to `status --json`, `node status --json`, `ssh --test --json`, the saved `link.status.json`, passive HTTP `message` fields, and the pairing URL written by `pair --listen` on stdout. Candidate errors retain the full-width-semicolon delimiter (`；`) that current and older clients split. Human `status` and `install` output may translate a copy of a recognized saved error, but unknown hub, peer, OS and parser details pass through unchanged.
+
+Plain terminal output uses `i18n.Terminal()`: `PERSONA_LANG`, then `LC_ALL`, `LC_MESSAGES` and `LANG`, with English for C, POSIX, an unset locale or an unknown language. The `link-cli` catalogs ship `en`, `zh-Hans` and `ja`; Chinese terminal output retains its previous wording. Maintainer logs are English. An early `persona-link run` failure follows the terminal language when stderr is a terminal, but is English when a service redirects stderr into a log. One pre-existing exception to locale-independent JSON is `service.missing`: the unavailable-systemd reason was already locale-coupled and keeps that behavior for compatibility.
+
 ```json
 {"state":"connected","machine":"macbook","hub_name":"Home","mesh_hubs":1,"address":"https://192.0.2.10:18662","kind":"lan",
  "since":"…","node":"online","endpoints":[{"url":"https://192.0.2.10:18662","kind":"lan"}]}

@@ -301,6 +301,8 @@ nonisolated struct AgentListProjection: Sendable {
     var repositories: [String: Repository] = [:]
     var busyRepositories: [String: [RepoTree.Repo]] = [:]
     var quietRepositories: [String: [SpaceGroup]] = [:]
+    /// Every listed agent and nested subtask in a folded quiet repository, for the row's O(1) selection lookup.
+    var quietRepositoryBySession: [SessionKey: String] = [:]
     var rows: [String: Rows] = [:]
     /// A listed session's subtasks (`CodexTasks.flattened`: a Codex chat's subagents, the agents a runtime's agent
     /// created): behind its Subtasks row, not rows or counts of the list. None needs the user: one that does is a row.
@@ -465,6 +467,8 @@ nonisolated struct AgentListProjection: Sendable {
                                name: repo.name, index: 0, sessions: order.ordered(result.repositories[repo.id]!.sessions))
                 }
             }
+            result.quietRepositoryBySession = quietRepositoryMembership(
+                groups: result.tree.flatMap { result.quietRepositories[$0.id] ?? [] }, tasks: result.tasks, folded: input.sessions)
             result.menuSections = result.tree.flatMap(\.repos).filter { result.repositories[$0.id]?.quiet != true }.map(\.id)
         } else if settings.grouping == "app" {
             result.apps = AppGroups.build(result.unpinned) // the list's sections, built once (`AppGroups`)
@@ -473,6 +477,31 @@ nonisolated struct AgentListProjection: Sendable {
             result.menuSections = order.sectionIDs(result.unpinned, byMachine: settings.grouping == "machine")
         }
         return result
+    }
+
+    /// Maps a quiet repository's root rows and every nested subtask they can unfold to that repository.
+    static func quietRepositoryMembership(groups: [SpaceGroup], tasks: [SessionKey: [CodexTasks.Task]],
+                                          folded: [Session] = []) -> [SessionKey: String] {
+        var out: [SessionKey: String] = [:]
+        for group in groups {
+            for session in group.sessions {
+                out[session.key] = group.id
+                for task in tasks[session.key] ?? [] { out[task.id] = group.id }
+            }
+        }
+        // The hub can fold a child out of the rendered roots before CodexTasks sees it; its open chat still belongs here.
+        for session in folded {
+            if let parent = ChildSessions.parentKey(session), let repository = out[parent] { out[session.key] = repository }
+        }
+        return out
+    }
+
+    /// The folded quiet repository whose agent is open beside the list. Once its agent row is built, or there is no
+    /// matching open agent, no folded line is selected. Membership was derived with the immutable projection, not here in a row's body.
+    static func selectedQuietRepositoryID(open: SessionKey?, membership: [SessionKey: String], expandedQuiet: Set<String>,
+                                          forceExpanded: Bool) -> String? {
+        guard let open, !forceExpanded, let selected = membership[open], !expandedQuiet.contains(selected) else { return nil }
+        return selected
     }
 
     private static func latestFirst(_ groups: [SpaceGroup]) -> [SpaceGroup] {

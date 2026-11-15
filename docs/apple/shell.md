@@ -170,7 +170,7 @@ on the test side, `shellPage` / `shellValue` / `shellRoom` / `shellTrace` in `Sh
 | --- | --- |
 | `ShellRaceTests` | The user's flow this time: go back after viewing an Agent's chat (button / swipe right, tap after 0–1 s), leave while streaming, fast repeated taps, drag right after a tap, route in from an empty chat's "Needs You" and then switch |
 | `ShellInboxAgentTests` | Tap into an Agent chat from "Needs You" in Inbox (pushed on the assistant) → back → switch to the assistant (still Inbox, with its own navigation bar) → back → switch to Agents again: probe consistent at every step, the switcher isn't on the pushed page, Inbox can scroll and be tapped, no `settle lost` |
-| `ShellSwitchTests` | #182 etc.: switching after pages from the drawer (knowledge base, Inbox, scheduled tasks, machines) are pushed and popped, with coordinate taps |
+| `ShellSwitchTests` | #182 etc.: switching after pages from the drawer (knowledge base, Inbox, scheduled tasks, machines) are pushed and left (☰ → the conversation's row, or the edge swipe; a place's root has no Back, #7799), with coordinate taps |
 | `ShellSearchTests` | #174: search giving way, switching after cancel |
 | `ShellPagerTests` | #190 swiping left / right to flip pages, swiping right on the filter bar to flip back after 56b2ead |
 | `ShellAvatarTests` | #203: the avatar and drawer on both pages, switching between them with coordinate taps |

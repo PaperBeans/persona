@@ -28,6 +28,8 @@ import sys
 import tempfile
 import time
 
+from windows_release import check_windows_archives
+
 TAG = re.compile(r"v[0-9A-Za-z][0-9A-Za-z._-]*\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 ALLOWED_KEYS = {"repo", "worktree", "state_dir", "repository", "platform", "command", "receipt", "agent"}
@@ -455,6 +457,10 @@ def publish_once(config, tag, commit):
     subprocess.run(command, cwd=config["worktree"], env=env, check=True)
     assets = read_receipt(Path(config["receipt"]).expanduser(), commit)
     assets = drop_missing_helpers(assets, config["state_dir"])
+    try:
+        check_windows_archives(assets, tag[1:])
+    except ValueError as error:
+        raise ConfigError(str(error)) from error
     check_release_manifest(assets)
     check_android_index(assets, tag[1:])
     upload(config["repository"], tag, assets)

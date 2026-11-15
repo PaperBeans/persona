@@ -46,7 +46,15 @@ const external = []; // addresses handed to the system browser
 const notifyRequests = []; // what the renderer asked for over the production IPC
 const badges = []; // every count the renderer sent
 const localSettings = []; // the shell-owned options window, observed without exposing it to the hub page
+const presenceDiagnostics = [];
+const safeURL = value => {
+  try { const url = new URL(value); return `${url.origin}${url.pathname}`; } catch { return ""; }
+};
+const recordPresence = (kind, value) => presenceDiagnostics.push({ kind, at: Date.now(), ...value });
 app.on("browser-window-created", (_event, window) => {
+  recordPresence("window-created", { visible: window.isVisible(), focused: window.isFocused(), destroyed: window.isDestroyed() });
+  window.once("ready-to-show", () => recordPresence("ready-to-show", { visible: window.isVisible(), focused: window.isFocused(), destroyed: window.isDestroyed() }));
+  window.once("closed", () => recordPresence("window-closed", { destroyed: window.isDestroyed() }));
   const record = url => {
     if (url.endsWith("/setup.html") && !localSettings.includes(window)) {
       localSettings.push(window);
@@ -71,6 +79,12 @@ Notification.isSupported = () => true;
 Notification.prototype.show = function show() { shown.push({ title: this.title, body: this.body, notification: this }); };
 Notification.prototype.close = function close() { closed.push(this.title); };
 powerMonitor.getSystemIdleTime = () => 0;
+const productionOn = ipcMain.on.bind(ipcMain);
+ipcMain.on = (channel, listener) => productionOn(channel, (event, ...args) => {
+  const result = listener(event, ...args);
+  if (channel === "desktop:presence" || channel === "desktop:notification-permission") recordPresence("ipc-result", { channel, reply: event.returnValue, supported: Notification.isSupported(), idle: powerMonitor.getSystemIdleTime(), destroyed: win.isDestroyed(), focused: win.isFocused(), visible: win.isVisible(), page: safeURL(event.senderFrame.url) });
+  return result;
+});
 shell.openExternal = async url => { external.push(String(url)); };
 // Linux is not a shipping platform, and GTK cannot build the tray's menu without a display server: on a headless
 // build machine the tray keeps its icon and click, and its menu is left out. macOS and Windows run it unchanged.
@@ -315,16 +329,18 @@ async function hubChangeScenario() {
     if (!win.isDestroyed()) throw new Error("the old hub window is still alive after the hub changed");
     win = replacement;
     activeMock = otherMock;
+    const liveHubWindows = BrowserWindow.getAllWindows().filter(candidate => candidate !== options && !candidate.isDestroyed() && (candidate.webContents.getURL().startsWith(otherHub.href) || candidate === win));
+    if (liveHubWindows.length !== 1 || liveHubWindows[0] !== win) throw new Error(`hub replacement left ${liveHubWindows.length} eligible hub windows instead of one`);
     const targetURL = win.webContents.getURL();
     const targetSession = win.webContents.session.storagePath;
     if (targetURL !== otherHub.href || targetSession === previousSession) throw new Error(`wrong replacement window or session: ${JSON.stringify({ targetURL, expected: otherHub.href, previousSession, targetSession })}`);
     if (!win.webContents.getURL().startsWith(otherHub.href)) throw new Error("the replacement still shows the previous hub");
     await until("second hub window is shown", () => !win.isDestroyed() && win.isVisible() && !win.webContents.isLoading());
     await until("second hub sign-in page", () => page("!!document.querySelector('input[type=password]') || document.body.innerText.includes('Let this browser in from a device')"));
-    // This call returning either platform value proves the new window's production IPC is reachable. macOS may
-    // report Notification.isSupported() false before sign-in; the notify() assertion below is the authorization check.
+    // The driver forces notification support and idle=0. A denial here is therefore an IPC authorization failure,
+    // not evidence that the native OS denied notification permission. Never substitute a visible/focused window for it.
     const permission = await page("window.personaDesktop.notificationPermission()");
-    if (permission !== "granted" && permission !== "denied") throw new Error(`the second hub's permission IPC is not reachable: ${permission}`);
+    if (permission !== "granted") throw new Error(`the second hub's notification IPC was not authorized: ${JSON.stringify({permission})}`);
     const loginItemState = await page("window.personaDesktop.getLaunchAtLogin().then(state => ({ok: true, state}), error => ({ok: false, error: String(error)}))");
     if (!loginItemState.ok || typeof loginItemState.state?.enabled !== "boolean") throw new Error(`the second hub lost its public login-item IPC: ${JSON.stringify(loginItemState)}`);
     const loginItemSet = await page(`window.personaDesktop.setLaunchAtLogin(${JSON.stringify(loginItemState.state.enabled)}).then(state => ({ok: true, state}), error => ({ok: false, error: String(error)}))`);
@@ -334,8 +350,8 @@ async function hubChangeScenario() {
     await until("second hub login item is still available", () => page(`window.personaDesktop.getLaunchAtLogin().then(state => typeof state.enabled === 'boolean')`));
     await page("window.personaDesktop.setLaunchAtLogin(false)");
     const presence = await page("window.personaDesktop.desktopPresence()");
-    const windowState = { visible: win.isVisible(), focused: win.isFocused(), enabled: win.isEnabled(), loading: win.webContents.isLoading(), url: win.webContents.getURL() };
-    if (!presence.active) throw new Error(`the second hub's bridge has stale presence: ${JSON.stringify({presence, permission, loginItemState, windowState})}`);
+    const windowState = { visible: win.isVisible(), focused: win.isFocused(), enabled: win.isEnabled(), loading: win.webContents.isLoading(), url: safeURL(win.webContents.getURL()) };
+    if (!presence.active) throw new Error(`the second hub's presence was not authorized under forced support, zero idle and unlocked inputs: ${JSON.stringify({presence, permission, loginItemState, windowState})}`);
     app.emit("second-instance", {}, [`persona://pair?url=${encodeURIComponent(otherHub.href)}&token=${encodeURIComponent(otherToken)}`]);
     await until("second hub signed in", signedIn);
     if (!win.webContents.session.storagePath) throw new Error("the replacement window has no persisted origin-isolated session");
@@ -409,13 +425,14 @@ async function finish(error) {
   if (finished) return;
   finished = true;
   clearTimeout(deadline);
-  const ok = !error && steps.length > 0 && steps.every(s => s.ok);
+  const ok = !error && steps.length > 0 && steps.every(s => s.ok) && consoleErrors.length === 0;
   const result = {
     ok, scenario, platform: process.platform, electron: process.versions.electron, hub: prefix ? `prefix ${prefix}` : "root",
     ...(error ? { error: error instanceof Error ? error.message : String(error) } : {}),
     steps, screenshots: shots,
     boundary: { notifyRequests, shown: shown.map(n => ({ title: n.title, body: n.body })), closed: closed.length, badges, external },
     window: win && !win.isDestroyed() ? win.getBounds() : undefined,
+    presenceDiagnostics,
     consoleErrors: consoleErrors.slice(0, 20),
   };
   try {
@@ -426,7 +443,7 @@ async function finish(error) {
     }
     await writeFile(join(output, "result.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");
   } catch (writeError) { console.error(writeError); }
-  console.log(`desktop e2e ${scenario}: ${ok ? "PASS" : "FAIL"}${error ? ` (${result.error})` : ""}`);
+  console.log(`desktop e2e ${scenario}: ${ok ? "PASS" : "FAIL"}${error ? ` (${result.error})` : consoleErrors.length ? ` (renderer errors: ${consoleErrors.join(" | ")})` : ""}`);
   app.exit(ok ? 0 : 1);
 }
 main().then(() => finish(), error => finish(error));

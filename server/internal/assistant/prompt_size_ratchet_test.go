@@ -122,6 +122,11 @@ func promptSizePieces(t *testing.T) map[string]int {
 		}
 		set(strings.TrimSuffix(filepath.Base(path), ".golden"), len(content))
 	}
+	policy, err := os.ReadFile(filepath.Join("testdata", "prompts", "supervision_instructions.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	set("supervision_instructions", len(policy))
 	return sizes
 }
 

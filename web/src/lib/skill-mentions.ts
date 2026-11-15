@@ -16,6 +16,15 @@ export interface SkillCatalog {
   complete: boolean;
 }
 
+/** Execution environment for a picker's catalog. Ordinary Agents use session-owned facts. */
+export interface SkillSource {
+  manager: string;
+  session?: string;
+  launcher?: string;
+  environment: string;
+  agent?: boolean;
+}
+
 export function matchingSkills(skills: MentionSkill[], query: string): MentionSkill[] {
   const q = query.toLocaleLowerCase();
   return skills.filter((s) => `${s.name}\n${s.description ?? ""}`.toLocaleLowerCase().includes(q));

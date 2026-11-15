@@ -33,8 +33,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceTimeBy
@@ -660,7 +662,11 @@ class InboxHandOffPersistenceDiagnosticTest {
             fixture.messages.readyToSend.value = false
             runCurrent()
             fixture.messages.readyToSend.value = true
-            runCurrent()
+            var waited = 0
+            while (fixture.inbox.records.isEmpty() && waited++ < 500) {
+                runCurrent()
+                withContext(Dispatchers.Default) { delay(10) }
+            }
 
             assertEquals(
                 "later Accepted evidence must retry the cancelled durable publication",

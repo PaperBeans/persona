@@ -212,7 +212,7 @@ func (n *Node) runtimeStartWith(ctx context.Context, h *runtimeConn, params map[
 	if err := h.peer.Call(cctx, "session.start", params, &res); err != nil {
 		return nil, err
 	}
-	return n.listStarted(h, res.Session)
+	return n.listStarted(h, res.Session, "")
 }
 
 // runtimeInstructions is the first message's instructions for an assistant on a runtime: the memory it shares with

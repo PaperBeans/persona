@@ -1,123 +1,22 @@
 // The chat's ⋯ menu dialogs: session info, rename (the agent / its space), delete, close, and the header's permission mode.
 import { useEffect, useRef, useState } from "react";
 import { api, enc, errorText, HubTimeoutError, pastHub, sessionPath } from "../../lib/api";
-import { ago, externalLink, resumeCommand, sessionCan, sessionTitle, shortPath } from "../../lib/format";
-import { openLink } from "../../lib/links";
-import { BYPASS_MODE, effortTitle, modeTitle, renameBody } from "../../lib/session-actions";
+import { sessionCan, sessionTitle, shortPath } from "../../lib/format";
+import { BYPASS_MODE, renameBody } from "../../lib/session-actions";
 import { bypassRestarts } from "../../lib/header-mode";
 import { sessionLauncher } from "../../lib/model-switch";
 import { href, navigate } from "../../lib/router";
 import { dropSession, getSession, refresh, refreshAssistant, upsertSession } from "../../lib/store";
 import type { Session } from "../../lib/types";
-import { Button, copyText, cx, Dialog, Loading, Switch, toast } from "../../ui/atoms";
+import { Button, cx, Dialog, Switch, toast } from "../../ui/atoms";
 import { removeAgentWorktree, worktreeLoss, worktreeStatus, type WorktreeStatus } from "../../lib/worktree";
 import { Icon } from "../../ui/icons";
 import { t } from "../../i18n";
-import { AlwaysPermissions } from "./AlwaysPermissions";
-import { DelegatedHistory } from "./Delegated";
+import { lazyDialog } from "../LazyOverlay";
 
-interface SessionInfo {
-  session_id?: string;
-  transcript_path?: string;
-  cwd?: string;
-  model?: string;
-  launcher?: string;
-  git_branch?: string;
-  version?: string;
-  permission_mode?: string;
-  effort?: string;
-  context_tokens?: number;
-  output_tokens?: number;
-  compactions?: number;
-  turns?: number;
-  started_at?: string;
-  last_activity?: string;
-}
-
-const count = (n?: number) => (n === undefined ? "" : n >= 1000 ? `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}K` : String(n));
-
-// "Session info" (iOS SessionInfoSheet): how it runs, how much it used, where it lives; ids and the resume command copy.
-export function SessionInfoDialog({ session, machineName, open, onClose }: { session: Session; machineName: string; open: boolean; onClose: () => void }) {
-  const [info, setInfo] = useState<SessionInfo | null>(null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    if (!open) return;
-    let live = true;
-    setInfo(null);
-    setError("");
-    api<SessionInfo>(`${sessionPath(session.machine_id, session.session_id)}/info`)
-      .then((r) => live && setInfo(r))
-      .catch((e) => live && setError(errorText(e)));
-    return () => {
-      live = false;
-    };
-  }, [open, session.machine_id, session.session_id]);
-
-  const groups: { title: string; rows: [string, string | undefined, boolean?][] }[] = info
-    ? [
-        { title: t("chat-sessiondialogs.group_run"), rows: [[t("chat-sessiondialogs.model"), info.model], [t("chat-sessiondialogs.launcher"), info.launcher || session.launcher], [t("chat-sessiondialogs.permission_mode"), modeTitle(info.permission_mode)], [t("chat-sessiondialogs.effort"), effortTitle(info.effort)], [t("chat-sessiondialogs.version"), info.version, true]] },
-        { title: t("chat-sessiondialogs.group_usage"), rows: [[t("chat-sessiondialogs.context"), count(info.context_tokens) && `${count(info.context_tokens)} tokens`], [t("chat-sessiondialogs.output"), count(info.output_tokens) && `${count(info.output_tokens)} tokens`], [t("chat-sessiondialogs.turns"), info.turns !== undefined ? String(info.turns) : ""], [t("chat-sessiondialogs.compaction"), info.compactions ? t("chat-sessiondialogs.compactions", { count: info.compactions }) : ""], [t("chat-sessiondialogs.started"), info.started_at && ago(info.started_at)], [t("chat-sessiondialogs.last_activity"), info.last_activity && ago(info.last_activity)]] },
-        { title: t("chat-sessiondialogs.group_location"), rows: [[t("chat-sessiondialogs.machine"), machineName], [t("chat-sessiondialogs.folder"), info.cwd ? shortPath(info.cwd) : undefined, true], [t("chat-sessiondialogs.branch"), info.git_branch, true], [t("chat-sessiondialogs.transcript"), info.transcript_path ? shortPath(info.transcript_path) : undefined, true]] },
-      ]
-    : [];
-
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title={t("chat-sessiondialogs.info_title")}
-      width={480}
-      footer={
-        <>
-          <Button tone="quiet" icon="copy" onClick={() => copyText(session.session_id)}>
-            {t("chat-sessiondialogs.copy_session_id")}
-          </Button>
-          {externalLink(session) && (
-            <Button tone="secondary" icon="external" onClick={() => openLink(externalLink(session)!)}>
-              {t("chat-sessiondialogs.open_in_lark")}
-            </Button>
-          )}
-          {/* none for a runtime's session (resumeCommand): its runtime keeps it */}
-          {!session.assistant && resumeCommand(session) && (
-            <Button tone="secondary" icon="terminal" onClick={() => copyText(resumeCommand(session))}>
-              {t("chat-sessiondialogs.copy_resume_command")}
-            </Button>
-          )}
-        </>
-      }
-    >
-      {!info && !error && (
-        <div className="flex justify-center py-6">
-          <Loading />
-        </div>
-      )}
-      {error && <p className="py-4 text-[13px] text-red">{error}</p>}
-      <div className="flex flex-col gap-3">
-        {open && session.assistant && <AlwaysPermissions key={session.session_id} session={session.session_id} />}
-        {open && !session.assistant && <DelegatedHistory key={`${session.machine_id}/${session.session_id}`} session={session} />}
-        {groups.map((g) => {
-          const rows = g.rows.filter(([, v]) => v);
-          if (!rows.length) return null;
-          return (
-            <section key={g.title}>
-              <h3 className="mb-1 text-[11.5px] font-medium text-ink-3">{g.title}</h3>
-              <div className="divide-y divide-line overflow-hidden rounded-[10px] bg-inset shadow-hairline">
-                {rows.map(([k, v, mono]) => (
-                  <div key={k} className="flex items-center gap-3 px-3 py-1.5 text-[12.5px]">
-                    <span className="w-16 shrink-0 text-ink-3">{k}</span>
-                    <span title={v} className={cx("min-w-0 flex-1 truncate text-ink", mono && "font-mono text-[12px]")}>
-                      {v}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          );
-        })}
-      </div>
-    </Dialog>
-  );
-}
+// "Session info" (iOS SessionInfoSheet, SessionInfoDialog.tsx): its own chunk, loaded on the dialog's first open, so
+// its fetch and rows are not the first screen's (#8261). The same component as before for the header that draws it.
+export const SessionInfoDialog = lazyDialog(() => import("./SessionInfoDialog").then((m) => m.SessionInfoDialog));
 
 // "Rename": the herdr tab and the session's name (Claude's /rename), each only when changed (iOS RenameSessionAlert).
 /** Saves a new title from the header's in-place rename (#5421, cindy's double-click on the title, which updates at once and

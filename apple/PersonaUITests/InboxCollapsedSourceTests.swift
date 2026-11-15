@@ -244,7 +244,7 @@ final class InboxCollapsedSourceTests: XCTestCase {
         acceptIconAlert()
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10), "no app window")
         regularWidth = app.windows.firstMatch.frame.width > 600
-        requireHittable(element("inbox.detail.done"), "the \(item) detail")
+        requireHittable(element("inbox.detail.more"), "the \(item) detail")
     }
 
     /// The default mock's mail 501 carries the body this case looks for; MOCK_MAIL gives it another. Said plainly
@@ -264,11 +264,18 @@ final class InboxCollapsedSourceTests: XCTestCase {
     /// An item's row in the Inbox list, scrolled to: the Inbox is the page the sidebar opened, and its items push over
     /// it, so on that page a row's title is the only one (the open page's own title is in its bar, not here).
     @MainActor private func listRow(_ title: String) -> XCUIElement? {
+        let collection = app.collectionViews.containing(.button, identifier: "inbox.groupTitle").firstMatch
+        guard collection.waitForExistence(timeout: 10), collection.frame.width > 0 else { return nil }
+        let frame = collection.frame
+        let x = (element("inbox.more").frame.midX - frame.minX) / frame.width
+        let start = collection.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.78))
+        let end = collection.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.28))
         let deadline = Date.now.addingTimeInterval(20)
         repeat {
             let rows = app.staticTexts.matching(identifier: title).allElementsBoundByIndex
             if let row = rows.first(where: { $0.isHittable }) { return row }
-            app.swipeUp(velocity: .slow) // a section below the first screen
+            // The collection spans both columns; app-level swipes land on the sidebar/page boundary.
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
             usleep(250_000)
         } while Date.now < deadline
         return nil

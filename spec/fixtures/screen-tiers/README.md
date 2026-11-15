@@ -18,7 +18,7 @@ the whole ladder, best first: `scale` (what the helper is asked for), `fps`, `wi
 - `frame`: `capture`, `arrival` and `firstByte` (µs; `firstByte` null when the frame came in one read), `bytes`,
   `refinement`, `keyframe` (#7842: a keyframe's wake is left out of `queueP95Ms`), `fps`;
 - `decoded`: `ms`, `at` (µs); `shown`: `replaced`, `at` (µs); `pathChanged`: `{}`;
-- `take`: `now` (µs), with `expected`, every `TierSignals` field (`frames`, `queueP50Ms`, `queueP95Ms`,
+- `take`: `now` (µs), with `expected`, every `TierSignals` field (`frames`, `queueP50Ms`, `queueP95Ms`, `queueLastMs`,
   `queueRising`, `queueFalling`, `deliveredKbps`, `burstKbps`, `lateShare`, `decodeP95Ms`, `replacedShare`), null
   where it isn't measured.
 

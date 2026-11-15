@@ -20,6 +20,7 @@
   "open_folder": "打开 {name}",
   "permission_mode": "权限模式",
   "permission_mode_hint": "权限模式在对话里也能随时改，完全访问只能在新开时选。",
+  "provider_mode_hint": "不选完全访问时，这个 Agent 按它自己的审批设置来。之后也能在对话里切换。",
   "no_computer_title": "还没有电脑",
   "no_computer_body": "Agent 要在你的一台电脑上运行，这里才有电脑可选。先添加一台。",
   "worktree": "在新 worktree 里",

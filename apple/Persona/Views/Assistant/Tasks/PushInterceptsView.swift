@@ -77,38 +77,19 @@ final class PushInterceptsModel {
     }
 }
 
+/// The Held Pushes entry in the action bar's row, there while ln mode is on. The bar holds the model and which tray is
+/// open, and opens `PushInterceptsTray` where Needs You's and In Progress' open, above the row at its width (#8223).
 struct PushInterceptsEntry: View {
-    @State private var model: PushInterceptsModel
-    var otherTrayOpen: Bool
-    var onOpen: () -> Void
-    @State private var open = false
-    @State private var p2Open = false
-
-    init(api: APIClient, otherTrayOpen: Bool, onOpen: @escaping () -> Void) {
-        _model = State(initialValue: PushInterceptsModel(api: api))
-        self.otherTrayOpen = otherTrayOpen
-        self.onOpen = onOpen
-    }
-
-    init(model: PushInterceptsModel, otherTrayOpen: Bool = false, onOpen: @escaping () -> Void = {}) {
-        _model = State(initialValue: model)
-        self.otherTrayOpen = otherTrayOpen
-        self.onOpen = onOpen
-    }
+    let model: PushInterceptsModel
+    var open: Bool
+    var toggle: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            if model.enabled {
-            if open {
-                PushInterceptsTray(model: model, p2Open: $p2Open) {
-                    withAnimation(Theme.Motion.state) { open = false }
-                }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
+        // Nothing in the row with the mode off: no gap is left for it either.
+        if model.enabled {
             Button {
                 Haptics.tap()
-                onOpen()
-                withAnimation(Theme.Motion.state) { open.toggle() }
+                toggle()
             } label: {
                 HStack(spacing: Theme.Space.xs) {
                     ThemedIcon(Theme.Icon.notification).accessibilityHidden(true)
@@ -123,27 +104,24 @@ struct PushInterceptsEntry: View {
             .accessibilityLabel(String(localized: "Held pushes, \(model.groups.total) today [Push Intercepts]"))
             .accessibilityAddTraits(open ? .isSelected : [])
             .accessibilityIdentifier("action-bar.push-intercepts")
-            }
-        }
-        .onChange(of: otherTrayOpen) { _, value in if value { open = false } }
-        .onChange(of: model.enabled) { _, value in if !value { open = false } }
-        .onChange(of: open) { _, value in if !value { p2Open = false } }
-        .tabActiveTask { await model.run() }
-        #if DEBUG
-        .onAppear {
-            if UserDefaults.standard.bool(forKey: "openPushIntercepts") {
-                open = true
+            #if DEBUG
+            // -openPushIntercepts YES: the tray opens once, when the entry first shows.
+            .onAppear {
+                guard UserDefaults.standard.bool(forKey: "openPushIntercepts") else { return }
                 UserDefaults.standard.removeObject(forKey: "openPushIntercepts")
+                if !open { toggle() }
             }
+            #endif
         }
-        #endif
     }
 }
 
-private struct PushInterceptsTray: View {
+/// Today's held pushes, opened from their entry, in the action bar's tray slot. P2 starts folded each time it opens: the
+/// tray leaves the bar when it closes, and with it its state.
+struct PushInterceptsTray: View {
     let model: PushInterceptsModel
-    @Binding var p2Open: Bool
     let close: () -> Void
+    @State private var p2Open = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -209,6 +187,8 @@ private struct PushInterceptsTray: View {
         .surface(in: .rect(cornerRadius: Theme.Radius.panel, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("action-tray.push-intercepts")
+        // ln mode turned off: the entry is gone, and its tray with it.
+        .onChange(of: model.enabled) { _, enabled in if !enabled { close() } }
     }
 
     @ViewBuilder private func section(_ title: String, rows: [PushInterceptItem], showTitle: Bool = true) -> some View {

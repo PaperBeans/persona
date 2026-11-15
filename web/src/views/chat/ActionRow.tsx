@@ -275,7 +275,7 @@ export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trac
           </span>
         )}
         {duration && (
-          <span data-tool-duration className="max-lg:hidden shrink-0 font-mono text-[12px] text-tool-ink tabular-nums">
+          <span data-tool-duration className="max-lg:hidden shrink-0 font-mono text-label text-tool-ink tabular-nums">
             {duration}
           </span>
         )}

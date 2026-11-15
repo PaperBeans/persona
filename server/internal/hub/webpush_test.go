@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,7 @@ type fakePushService struct {
 	srv      *httptest.Server
 	mu       sync.Mutex
 	statuses []int
+	holds    map[string]chan struct{}
 	got      chan pushedRequest
 }
 
@@ -34,6 +36,7 @@ type pushedRequest struct {
 	path   string
 	header http.Header
 	body   []byte
+	status int
 }
 
 func newFakePushService(t *testing.T) *fakePushService {
@@ -46,8 +49,16 @@ func newFakePushService(t *testing.T) *fakePushService {
 		if len(f.statuses) > 0 {
 			status, f.statuses = f.statuses[0], f.statuses[1:]
 		}
+		hold := f.holds[r.URL.Path]
+		delete(f.holds, r.URL.Path)
 		f.mu.Unlock()
-		f.got <- pushedRequest{path: r.URL.Path, header: r.Header.Clone(), body: body}
+		f.got <- pushedRequest{path: r.URL.Path, header: r.Header.Clone(), body: body, status: status}
+		if hold != nil {
+			select {
+			case <-hold:
+			case <-r.Context().Done():
+			}
+		}
 		w.WriteHeader(status)
 		if status >= 400 {
 			_, _ = io.WriteString(w, "refused for the test")
@@ -61,6 +72,18 @@ func (f *fakePushService) answer(statuses ...int) {
 	f.mu.Lock()
 	f.statuses = append(f.statuses, statuses...)
 	f.mu.Unlock()
+}
+
+// hold makes the next request to path wait until the returned channel closes or its client goes away.
+func (f *fakePushService) hold(path string) chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.holds == nil {
+		f.holds = map[string]chan struct{}{}
+	}
+	hold := make(chan struct{})
+	f.holds[path] = hold
+	return hold
 }
 
 func (f *fakePushService) next(t *testing.T) pushedRequest {
@@ -346,6 +369,262 @@ func TestWebPushRetriesAndDropsAGoneSubscription(t *testing.T) {
 		t.Fatal("a gone subscription was kept")
 	}
 	done()
+	f.none(t)
+}
+
+func notifyWebAlert(t *testing.T, h *Hub, mux http.Handler, title, id string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"title": title, "id": id})
+	code, out := call(t, mux, "POST", "/api/v1/notify", h.cfg.Token, string(body))
+	if code != http.StatusOK || out["sent"] != true {
+		t.Fatalf("notify %q: %d %v", title, code, out)
+	}
+}
+
+func openedWebPushTitles(t *testing.T, b *webpushtest.Browser, requests []pushedRequest) (titles, order []string, statuses []int) {
+	t.Helper()
+	for _, r := range requests {
+		title, _ := webOpened(t, b, r)["title"].(string)
+		titles = append(titles, title)
+		order = append(order, fmt.Sprintf("%s/%d", title, r.status))
+		statuses = append(statuses, r.status)
+	}
+	return titles, order, statuses
+}
+
+// A later version of one alert cannot pass an earlier version's delayed retry: the last request the service accepts
+// must be the newest version, not the old one again. Exhausting the old alert's retries releases the queue too.
+func TestWebPushDispatchFinishesAnOlderAlertBeforeANewerOne(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		updates      []string
+		answers      []int
+		wantTitles   []string
+		wantStatuses []int
+	}{
+		{name: "retry succeeds", updates: []string{"new"}, answers: []int{503, 201, 201},
+			wantTitles: []string{"old", "old", "new"}, wantStatuses: []int{503, 201, 201}},
+		{name: "retries exhaust", updates: []string{"new"}, answers: []int{503, 503, 201},
+			wantTitles: []string{"old", "old", "new"}, wantStatuses: []int{503, 503, 201}},
+		{name: "newest is last", updates: []string{"new", "newest"}, answers: []int{503, 201, 201, 201},
+			wantTitles: []string{"old", "old", "new", "newest"}, wantStatuses: []int{503, 201, 201, 201}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakePushService(t)
+			h := webPushHub(t, f)
+			h.push.web.retryWaits = []time.Duration{500 * time.Millisecond}
+			mux := h.routes()
+			b := f.browser(t, "/push/fifo")
+			subscribe(t, h, mux, "web-fifo", b, "")
+			f.answer(tc.answers...)
+
+			notifyWebAlert(t, h, mux, "old", "progress")
+			requests := []pushedRequest{f.next(t)} // the old initial attempt, answered 503
+			for _, title := range tc.updates {
+				notifyWebAlert(t, h, mux, title, "progress")
+			}
+			for len(requests) < len(tc.wantTitles) {
+				requests = append(requests, f.next(t))
+			}
+			titles, order, statuses := openedWebPushTitles(t, b, requests)
+			if !slices.Equal(titles, tc.wantTitles) || !slices.Equal(statuses, tc.wantStatuses) {
+				t.Fatalf("acceptance order %v; want titles %v and statuses %v (newest last, no old retry after it)", order, tc.wantTitles, tc.wantStatuses)
+			}
+			for _, r := range requests {
+				if r.header.Get("Topic") != webpush.TopicFor("alert:progress") {
+					t.Fatalf("same-id alert Topic = %q", r.header.Get("Topic"))
+				}
+			}
+			f.none(t)
+		})
+	}
+}
+
+// A nonretryable refusal and a Gone response both finish the old delivery. A newer alert already queued for that
+// subscription still goes out (in the Gone case, with the subscription snapshot it was dispatched with).
+func TestWebPushDispatchAdvancesAfterTerminalFailure(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusGone} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			f := newFakePushService(t)
+			h := webPushHub(t, f)
+			mux := h.routes()
+			b := f.browser(t, "/push/terminal")
+			subscribe(t, h, mux, "web-terminal", b, "")
+			hold := f.hold("/push/terminal")
+			f.answer(status, http.StatusCreated)
+			type outcome struct {
+				status int
+				err    error
+			}
+			outcomes := make(chan outcome, 2)
+			h.push.web.sent = func(_ string, status int, err error) { outcomes <- outcome{status, err} }
+
+			notifyWebAlert(t, h, mux, "old", "progress")
+			if title := webOpened(t, b, f.next(t))["title"]; title != "old" {
+				t.Fatalf("first alert %v", title)
+			}
+			notifyWebAlert(t, h, mux, "new", "progress")
+			close(hold)
+			if title := webOpened(t, b, f.next(t))["title"]; title != "new" {
+				t.Fatalf("alert after terminal failure %v", title)
+			}
+			var got []outcome
+			for len(got) < 2 {
+				select {
+				case o := <-outcomes:
+					got = append(got, o)
+				case <-time.After(5 * time.Second):
+					t.Fatal("a terminal failure left the queue blocked")
+				}
+			}
+			if got[0].status != status || got[0].err == nil || got[1].status != http.StatusCreated || got[1].err != nil {
+				t.Fatalf("outcomes %+v; want old %d then new 201", got, status)
+			}
+			_, subscribed := h.push.web.get("web-terminal")
+			if subscribed == (status == http.StatusGone) {
+				t.Fatalf("after %d, subscribed = %v", status, subscribed)
+			}
+		})
+	}
+}
+
+// Cancellation of the old POST is still a completion: it must not strand the newer alert behind it.
+func TestWebPushDispatchAdvancesAfterTimeout(t *testing.T) {
+	f := newFakePushService(t)
+	h := webPushHub(t, f)
+	h.push.web.client.Timeout = 75 * time.Millisecond
+	mux := h.routes()
+	b := f.browser(t, "/push/timeout")
+	subscribe(t, h, mux, "web-timeout", b, "")
+	hold := f.hold("/push/timeout")
+	defer close(hold)
+	type outcome struct {
+		status int
+		err    error
+	}
+	outcomes := make(chan outcome, 2)
+	h.push.web.sent = func(_ string, status int, err error) { outcomes <- outcome{status, err} }
+
+	notifyWebAlert(t, h, mux, "old", "progress")
+	if title := webOpened(t, b, f.next(t))["title"]; title != "old" {
+		t.Fatalf("first alert %v", title)
+	}
+	notifyWebAlert(t, h, mux, "new", "progress")
+	if title := webOpened(t, b, f.next(t))["title"]; title != "new" {
+		t.Fatalf("alert after timeout %v", title)
+	}
+	var got []outcome
+	for len(got) < 2 {
+		select {
+		case o := <-outcomes:
+			got = append(got, o)
+		case <-time.After(5 * time.Second):
+			t.Fatal("a canceled POST left the queue blocked")
+		}
+	}
+	if got[0].status != 0 || got[0].err == nil || got[1].status != http.StatusCreated || got[1].err != nil {
+		t.Fatalf("outcomes %+v; want the old timeout before the new 201", got)
+	}
+}
+
+// Only one subscription is FIFO. Another browser, and a rotated endpoint of the same browser, keep going while an
+// old endpoint's request is blocked.
+func TestWebPushDispatchDoesNotBlockAnotherSubscription(t *testing.T) {
+	for _, rotated := range []bool{false, true} {
+		name := "another subscription"
+		if rotated {
+			name = "rotated endpoint"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFakePushService(t)
+			h := webPushHub(t, f)
+			mux := h.routes()
+			blockedBrowser := f.browser(t, "/push/blocked")
+			otherBrowser := f.browser(t, "/push/other")
+			subscribe(t, h, mux, "web-one", blockedBrowser, "")
+			blocked, _ := h.push.web.get("web-one")
+			otherDevice := "web-two"
+			if rotated {
+				otherDevice = "web-one"
+			}
+			subscribe(t, h, mux, otherDevice, otherBrowser, "")
+			other, _ := h.push.web.get(otherDevice)
+			hold := f.hold("/push/blocked")
+			outcomes := make(chan int, 2)
+			h.push.web.sent = func(_ string, status int, _ error) { outcomes <- status }
+			message := webpush.Message{TTL: webPushTTL, Topic: webpush.TopicFor("alert:progress")}
+
+			h.push.web.dispatch(blocked, []byte(`{"kind":"alert","id":"progress","title":"old"}`), message)
+			if title := webOpened(t, blockedBrowser, f.next(t))["title"]; title != "old" {
+				t.Fatalf("blocked alert %v", title)
+			}
+			h.push.web.dispatch(other, []byte(`{"kind":"alert","id":"progress","title":"other"}`), message)
+			var r pushedRequest
+			select {
+			case r = <-f.got:
+			case <-time.After(500 * time.Millisecond):
+				close(hold)
+				t.Fatal("an unrelated subscription waited for the blocked one")
+			}
+			close(hold)
+			if r.path != "/push/other" || webOpened(t, otherBrowser, r)["title"] != "other" {
+				t.Fatalf("independent alert %s %v", r.path, r.header)
+			}
+			for range 2 {
+				select {
+				case status := <-outcomes:
+					if status != http.StatusCreated {
+						t.Fatalf("delivery status %d", status)
+					}
+				case <-time.After(5 * time.Second):
+					t.Fatal("a delivery did not finish")
+				}
+			}
+		})
+	}
+}
+
+// FIFO does not coalesce different alerts or give untagged notices a Topic. Every dispatched notice is retained.
+func TestWebPushDispatchRetainsDifferentAndUntaggedAlerts(t *testing.T) {
+	f := newFakePushService(t)
+	h := webPushHub(t, f)
+	mux := h.routes()
+	b := f.browser(t, "/push/retain")
+	subscribe(t, h, mux, "web-retain", b, "")
+	hold := f.hold("/push/retain")
+	outcomes := make(chan int, 3)
+	h.push.web.sent = func(_ string, status int, _ error) { outcomes <- status }
+
+	notifyWebAlert(t, h, mux, "old", "shared")
+	requests := []pushedRequest{f.next(t)}
+	notifyWebAlert(t, h, mux, "different", "different")
+	notifyWebAlert(t, h, mux, "untagged", "")
+	close(hold)
+	for len(requests) < 3 {
+		requests = append(requests, f.next(t))
+	}
+	titles, order, _ := openedWebPushTitles(t, b, requests)
+	if !slices.Equal(titles, []string{"old", "different", "untagged"}) {
+		t.Fatalf("retained alerts %v", order)
+	}
+	for i, tag := range []string{"alert:shared", "alert:different"} {
+		if requests[i].header.Get("Topic") != webpush.TopicFor(tag) {
+			t.Fatalf("alert %q Topic = %q", tag, requests[i].header.Get("Topic"))
+		}
+	}
+	if topic, ok := requests[2].header["Topic"]; ok {
+		t.Fatalf("untagged notice Topic = %q", topic)
+	}
+	for range 3 {
+		select {
+		case status := <-outcomes:
+			if status != http.StatusCreated {
+				t.Fatalf("delivery status %d", status)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("a retained alert was dropped")
+		}
+	}
 	f.none(t)
 }
 
