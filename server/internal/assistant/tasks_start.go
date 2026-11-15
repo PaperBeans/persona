@@ -65,6 +65,7 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if err := s.resolveTaskWorkspace(ctx, &p.Tasks[i]); err != nil {
 			return nil, planInvalid{err}
 		}
+		s.resolveTaskRepo(ctx, &p.Tasks[i]) // where it starts after the card's edits: the kind remember keeps
 	}
 	p.State = planStarted
 	for i := range p.Tasks {

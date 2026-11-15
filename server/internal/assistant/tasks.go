@@ -41,8 +41,13 @@ type PlanTask struct {
 	Prompt  string `json:"prompt"`
 	Machine string `json:"machine"`
 	// MachinePolicy defaults to fixed; only explicit flexible tasks may move to another machine.
-	MachinePolicy     string                 `json:"machine_policy,omitempty"`
-	Cwd               string                 `json:"cwd"`
+	MachinePolicy string `json:"machine_policy,omitempty"`
+	Cwd           string `json:"cwd"`
+	// Repo: the Git repository Cwd is in on Machine, named by its main checkout, so that every worktree of one
+	// repository is one kind the user can let start without asking (trustKey, #8259). "" when Cwd is in no repository
+	// or the machine could not say: the kind is then the exact folder. The hub's (resolveTaskRepo), set when the plan
+	// is made and again at Start; never what a tool call or an edit says.
+	Repo              string                 `json:"repo,omitempty"`
 	Workspace         *TaskWorkspace         `json:"workspace,omitempty"`
 	WorkspaceResolved *TaskWorkspaceResolved `json:"workspace_resolved,omitempty"`
 	// Hub-owned identity for the default branch's preview, before a todo exists.
@@ -126,6 +131,10 @@ type PlanTask struct {
 	inPane    string
 	planID    string
 	planIndex int
+	// cwdStatus: what worktree.status said of cwdStatusOf (machine NUL cwd) in this resolve, kept so that
+	// resolveTaskRepo does not ask the machine twice. Never serialized.
+	cwdStatus   *proto.WorktreeStatus
+	cwdStatusOf string
 	// task_spawn preserves the caller's mode instead of applying a fresh task's Claude-family permission default.
 	preservePermission bool
 	// admissionRelease, once the admission gate passed, releases this start's held machine/direction slot. It is kept
@@ -530,20 +539,76 @@ func (s *Service) planStartsAtOnce(ctx context.Context, tasks []PlanTask) bool {
 	trusted := s.trustedKinds(ctx)
 	requested := s.startRequestedTasks(ctx)
 	for _, t := range tasks {
-		if !t.Readonly && !(requested && t.UserRequested) && !trusted[trustKey(t)] {
+		if !t.Readonly && !(requested && t.UserRequested) && !trustedTask(trusted, t) {
 			return false
 		}
 	}
 	return true
 }
 
-// trustKey names a kind of task the user can let start without asking: a machine's directory, reading or editing.
+// trustKey names a kind of task the user can let start without asking: a machine's repository (Repo, every worktree
+// of it) or, outside one or when the machine could not say, its exact directory; reading or editing (#8259).
 func trustKey(t PlanTask) string {
-	kind := "edit"
-	if t.Readonly {
-		kind = "read"
+	dir := t.Repo
+	if dir == "" {
+		dir = t.Cwd
 	}
-	return t.Machine + "|" + t.Cwd + "|" + kind
+	return t.Machine + "|" + dir + "|" + trustMode(t)
+}
+
+// trustFolderKey is the kind of t's exact directory: what every key was before #8259, and what trustKey is while the
+// repository is unknown.
+func trustFolderKey(t PlanTask) string {
+	return t.Machine + "|" + t.Cwd + "|" + trustMode(t)
+}
+
+func trustMode(t PlanTask) string {
+	if t.Readonly {
+		return "read"
+	}
+	return "edit"
+}
+
+// trustedTask: the user lets t's kind start without asking, by its repository or by its exact directory (a key
+// remembered before #8259, or while the repository was unknown).
+func trustedTask(trusted map[string]bool, t PlanTask) bool {
+	return trusted[trustKey(t)] || trusted[trustFolderKey(t)]
+}
+
+// repoLookup bounds asking a machine which repository a task's directory is in.
+const repoLookup = 5 * time.Second
+
+// resolveTaskRepo sets t.Repo from what t's machine says of t.Cwd (worktree.status, which nodes answer since #6115):
+// the main checkout of the repository, for its main checkout and every linked worktree alike. Whatever it cannot
+// learn (the machine offline, an older or failing node, a folder in no repository) leaves Repo "", so the kind stays
+// the exact folder: never wider than before #8259.
+func (s *Service) resolveTaskRepo(ctx context.Context, t *PlanTask) {
+	t.Repo = ""
+	st := t.cwdStatus
+	if st == nil || t.cwdStatusOf != t.Machine+"\x00"+t.Cwd {
+		ctx, cancel := context.WithTimeout(ctx, repoLookup)
+		defer cancel()
+		var got proto.WorktreeStatus
+		if err := s.call(ctx, t.Machine, "worktree.status", map[string]any{"cwd": t.Cwd}, &got); err != nil {
+			s.logf("tasks: trust: repository of %s on %s: %v", t.Cwd, t.Machine, err)
+			return
+		}
+		st = &got
+	}
+	t.Repo = repoOfStatus(*st)
+}
+
+// repoOfStatus is the repository worktree.status names: the main checkout, which is Root for a linked worktree and
+// the folder's own top level otherwise. "" when it names none.
+func repoOfStatus(st proto.WorktreeStatus) string {
+	dir := st.Path
+	if st.Worktree {
+		dir = st.Root
+	}
+	if dir == "" || !proto.NodeAbs(dir) {
+		return ""
+	}
+	return proto.NodeClean(dir)
 }
 
 // trustedKinds is the kinds the user lets start without asking; none when they cannot be read, so that a plan asks.

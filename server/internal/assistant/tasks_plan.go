@@ -165,6 +165,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		if err := s.resolveTaskWorkspace(ctx, t); err != nil {
 			return "", fmt.Errorf("task %d: %w", i+1, err)
 		}
+		s.resolveTaskRepo(ctx, t) // the kind planStartsAtOnce looks up
 	}
 	for i, t := range a.Tasks {
 		if t.ReuseTodo == "" {

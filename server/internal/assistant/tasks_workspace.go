@@ -119,6 +119,7 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 			if err := s.call(ctx, t.Machine, "worktree.status", map[string]any{"cwd": t.Cwd}, &st); err != nil {
 				return fmt.Errorf("%s: %w", i18n.T(s.lang(ctx), "assistant-tasks_workspace.infer", i18n.Args{"machine": t.Machine}), err)
 			}
+			t.cwdStatus, t.cwdStatusOf = &st, t.Machine+"\x00"+t.Cwd // its repository, for resolveTaskRepo
 			if st.Path != "" {
 				mode = workspaceExisting
 				var source proto.Workspace
