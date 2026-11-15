@@ -96,7 +96,13 @@ type Pusher struct {
 	// when its last sweep ran.
 	sentPending  []pushSent
 	sentPrunedAt time.Time
-	lnWriting    bool // the one saver goroutine is running
+	// The hub.push_sent setting a build from before the table reads (mirrorSent): sentMirrorable once this hub read
+	// both at start, sentMirrorDue while it holds pushes the setting lacks, sentMirroredAt its last write.
+	sentMirrorable bool
+	sentMirrorDue  bool
+	sentMirroredAt time.Time
+	sentMirrorMu   sync.Mutex
+	lnWriting      bool // the one saver goroutine is running
 }
 
 // deviceStoreTimeout: how long a device row write may take before it gives up (the pool has no statement_timeout).

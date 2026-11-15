@@ -483,6 +483,10 @@ func (u *updater) rollback(p update.Pending, reason string) {
 		u.h.logf("update: restore %s: %v", p.Prev, err)
 		return
 	}
+	// The old build reads only the hub.push_sent setting, and an exec skips the stop that writes it (lnmode.go).
+	if err := u.h.push.mirrorSent(context.Background()); err != nil {
+		u.h.logf("update: delivered pushes for %s: %v", p.FromVersion, err)
+	}
 	if err := u.exec(p.RunPath()); err != nil {
 		u.h.logf("update: run %s: %v", p.RunPath(), err)
 	}

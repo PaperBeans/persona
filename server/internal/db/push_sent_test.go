@@ -72,9 +72,10 @@ func TestPushSentAppendReadPrune(t *testing.T) {
 	}
 }
 
-// Upgrade: the old whole-list setting's entries move into the table after its rows and the setting goes, in one
-// transaction; a second call moves nothing; a value that is not a list stays where it is. On the hub's own database
-// (hub_settings) and on one shared with a manager (settings).
+// Upgrade: the old whole-list setting's entries are added to the table after its rows, in one transaction, and the
+// setting stays as it is for a build from before the table; a second call adds nothing; a value that is not a list
+// stays where it is and adds nothing. On the hub's own database (hub_settings) and on one shared with a manager
+// (settings).
 func TestAdoptPushSentSetting(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -105,12 +106,13 @@ func TestAdoptPushSentSetting(t *testing.T) {
 			if err := d.PutSetting(ctx, key, legacy); err != nil {
 				t.Fatal(err)
 			}
-			if n, err := d.AdoptPushSentSetting(ctx, key); err != nil || n != 2 {
-				t.Fatalf("moved %d (%v), want 2", n, err)
+			// behind: the table's own row is not in the setting, which an older build would read.
+			if n, behind, err := d.AdoptPushSentSetting(ctx, key, time.Time{}, 2000); err != nil || n != 2 || !behind {
+				t.Fatalf("added %d, behind %v (%v), want 2 and behind", n, behind, err)
 			}
-			var gone []PushSent
-			if ok, err := d.Setting(ctx, key, &gone); err != nil || ok {
-				t.Fatalf("the setting is still there (%v, %v)", ok, err)
+			var left []PushSent
+			if ok, err := d.Setting(ctx, key, &left); err != nil || !ok || !slices.Equal(sentKeys(left), []string{"legacy-1", ""}) {
+				t.Fatalf("the setting after the upgrade = %q (%v, %v), want it as the old build wrote it", sentKeys(left), ok, err)
 			}
 			rows, err := d.PushSentAfter(ctx, time.Time{}, 100)
 			if err != nil || !slices.Equal(sentKeys(rows), []string{"already", "legacy-1", ""}) {
@@ -119,13 +121,13 @@ func TestAdoptPushSentSetting(t *testing.T) {
 			if !rows[1].At.Equal(now.Add(-3*time.Hour)) || rows[1].Level != "p0" || rows[2].Level != "p2" {
 				t.Fatalf("moved rows = %+v", rows[1:])
 			}
-			if n, err := d.AdoptPushSentSetting(ctx, key); err != nil || n != 0 {
-				t.Fatalf("a second move: %d (%v), want nothing", n, err)
+			if n, behind, err := d.AdoptPushSentSetting(ctx, key, time.Time{}, 2000); err != nil || n != 0 || !behind {
+				t.Fatalf("a second start: added %d, behind %v (%v), want nothing added", n, behind, err)
 			}
 			if err := d.PutSetting(ctx, key, map[string]any{"not": "a list"}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := d.AdoptPushSentSetting(ctx, key); err == nil {
+			if _, _, err := d.AdoptPushSentSetting(ctx, key, time.Time{}, 2000); err == nil {
 				t.Fatal("a value that is not a list was taken")
 			}
 			var kept map[string]any
@@ -189,15 +191,15 @@ func TestAdoptPushSentSettingTwiceAddsOnce(t *testing.T) {
 	if err := d.PutSetting(ctx, key, legacy); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := d.AdoptPushSentSetting(ctx, key); err != nil || n != 3 {
-		t.Fatalf("first import added %d (%v), want 3", n, err)
+	if n, behind, err := d.AdoptPushSentSetting(ctx, key, time.Time{}, 2000); err != nil || n != 3 || behind {
+		t.Fatalf("first import added %d, behind %v (%v), want 3 and the setting complete", n, behind, err)
 	}
 	legacy = append(legacy, map[string]any{"at": now.Add(-time.Hour), "level": "p1", "related_key": "legacy-new", "manager": "manager-b"})
 	if err := d.PutSetting(ctx, key, legacy); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := d.AdoptPushSentSetting(ctx, key); err != nil || n != 1 {
-		t.Fatalf("second import added %d (%v), want only the new entry", n, err)
+	if n, behind, err := d.AdoptPushSentSetting(ctx, key, time.Time{}, 2000); err != nil || n != 1 || behind {
+		t.Fatalf("second import added %d, behind %v (%v), want only the new entry", n, behind, err)
 	}
 	rows, err := d.PushSentAfter(ctx, time.Time{}, 100)
 	if err != nil || !slices.Equal(sentKeys(rows), []string{"legacy-1", "twin", "twin", "legacy-new"}) {
@@ -205,5 +207,96 @@ func TestAdoptPushSentSettingTwiceAddsOnce(t *testing.T) {
 	}
 	if rows[1].ID == rows[2].ID {
 		t.Fatalf("the two equal entries share id %q", rows[1].ID)
+	}
+}
+
+// The setting and the table hold the same pushes under different names: the hub writes its rows back into the setting
+// without their IDs (an older build reads it), with the time as it had it in memory, finer than the table keeps. A
+// start after that adds only what an older build delivered meanwhile, and two equal entries are two pushes.
+func TestMergePushSentSetting(t *testing.T) {
+	at := time.Date(2026, 11, 15, 10, 0, 0, 123456789, time.UTC)
+	row := func(id string, at time.Time, key string) PushSent {
+		return PushSent{ID: id, At: at, Level: "p1", RelatedKey: key, Manager: "manager-a"}
+	}
+	table := []PushSent{
+		row("push-1", at.Truncate(time.Microsecond), "a"), // as Postgres read it back
+		row("push-2", at, "twin"),
+		row("push-3", at, "twin"),
+	}
+	setting := []PushSent{row("", at, "a"), row("", at, "twin"), row("", at, "twin")}
+	if missing, behind := MergePushSentSetting(setting, table, time.Time{}, 2000); len(missing) != 0 || behind {
+		t.Fatalf("the hub's own rows written back: missing %+v, behind %v, want none", missing, behind)
+	}
+	older := append(slices.Clone(setting), row("", at, "twin"), row("", at.Add(time.Minute), "old-build"))
+	missing, behind := MergePushSentSetting(older, table, time.Time{}, 2000)
+	if behind || !slices.Equal(sentKeys(missing), []string{"twin", "old-build"}) {
+		t.Fatalf("after an older build's pushes: missing %q, behind %v, want its two", sentKeys(missing), behind)
+	}
+	if missing[0].ID == "" || missing[0].ID == missing[1].ID {
+		t.Fatalf("ids of the added entries = %q, %q, want one each", missing[0].ID, missing[1].ID)
+	}
+	if missing, behind := MergePushSentSetting(setting[:1], table, time.Time{}, 2000); len(missing) != 0 || !behind {
+		t.Fatalf("a setting short of the table: missing %+v, behind %v, want behind", missing, behind)
+	}
+	if missing, behind := MergePushSentSetting(nil, nil, time.Time{}, 2000); len(missing) != 0 || behind {
+		t.Fatalf("nothing anywhere: missing %+v, behind %v", missing, behind)
+	}
+	// What the sweep would take is not added: an entry past the age limit, and with the table at its count limit one
+	// older than the rows it keeps (a row swept since the setting was written). A row past the age limit that the
+	// setting lacks does not make the setting due a write either.
+	aged := []PushSent{row("", at.Add(-time.Hour), "expired"), row("", at, "a")}
+	if missing, behind := MergePushSentSetting(aged, table[:1], at.Add(-time.Minute), 2000); len(missing) != 0 || behind {
+		t.Fatalf("an expired entry: missing %+v, behind %v, want none", missing, behind)
+	}
+	if missing, behind := MergePushSentSetting(nil, []PushSent{row("push-0", at.Add(-time.Hour), "expired")}, at.Add(-time.Minute), 2000); len(missing) != 0 || behind {
+		t.Fatalf("an expired row: missing %+v, behind %v, want none", missing, behind)
+	}
+	full := []PushSent{row("push-1", at, "kept-1"), row("push-2", at.Add(time.Second), "kept-2")}
+	stale := []PushSent{row("", at.Add(-time.Second), "swept"), row("", at, "kept-1"), row("", at.Add(time.Second), "kept-2"), row("", at.Add(time.Minute), "old-build")}
+	if missing, _ := MergePushSentSetting(stale, full, time.Time{}, 2); !slices.Equal(sentKeys(missing), []string{"old-build"}) {
+		t.Fatalf("a full table: missing %q, want only the entry later than its rows", sentKeys(missing))
+	}
+}
+
+// The same on Postgres, through a switch back and forward: rows appended with their own IDs, written back to the
+// setting by the hub (finer times, no IDs), an older build's pushes added to the list; the next start adds only those.
+// With no setting at all, the table is ahead of it as soon as it has a row.
+func TestAdoptPushSentSettingAfterSwitchBack(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	const key = "hub.push_sent"
+	if n, behind, err := d.AdoptPushSentSetting(ctx, key, time.Time{}, 2000); err != nil || n != 0 || behind {
+		t.Fatalf("an empty hub: added %d, behind %v (%v)", n, behind, err)
+	}
+	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second).Add(123456789 * time.Nanosecond)
+	rows := []PushSent{
+		{ID: "push-1", At: at, Level: "p1", RelatedKey: "a", Manager: "manager-a"},
+		{ID: "push-2", At: at, Level: "p0", RelatedKey: "twin", Manager: ""},
+		{ID: "push-3", At: at, Level: "p0", RelatedKey: "twin", Manager: ""},
+	}
+	if err := d.AddPushSent(ctx, rows); err != nil {
+		t.Fatal(err)
+	}
+	if n, behind, err := d.AdoptPushSentSetting(ctx, key, time.Time{}, 2000); err != nil || n != 0 || !behind {
+		t.Fatalf("rows and no setting: added %d, behind %v (%v), want the setting due a write", n, behind, err)
+	}
+	if err := d.PutSetting(ctx, key, rows); err != nil { // the hub's write-back: PushSent's JSON has no ID
+		t.Fatal(err)
+	}
+	if n, behind, err := d.AdoptPushSentSetting(ctx, key, time.Time{}, 2000); err != nil || n != 0 || behind {
+		t.Fatalf("the hub's own write-back: added %d, behind %v (%v), want nothing", n, behind, err)
+	}
+	older := append(slices.Clone(rows), PushSent{At: at.Add(time.Minute), Level: "p1", RelatedKey: "old-build", Manager: "manager-b"})
+	if err := d.PutSetting(ctx, key, older); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2 { // forward again, then one more start
+		want := 1 - i
+		if n, behind, err := d.AdoptPushSentSetting(ctx, key, time.Time{}, 2000); err != nil || n != want || behind {
+			t.Fatalf("start %d after the older build: added %d, behind %v (%v), want %d", i+1, n, behind, err, want)
+		}
+	}
+	got, err := d.PushSentAfter(ctx, time.Time{}, 100)
+	if err != nil || !slices.Equal(sentKeys(got), []string{"a", "twin", "twin", "old-build"}) {
+		t.Fatalf("rows = %q (%v), want each push once", sentKeys(got), err)
 	}
 }

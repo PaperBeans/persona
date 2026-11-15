@@ -2380,3 +2380,23 @@ tests and its importers passed, and the hub deploy failed on this guard. When co
 run `go test -run TestPlacesThatSealAreKnown ./internal/assistant` (no database needed) and record the file there:
 with `secret.key`, after putting where it keeps the sealed value into `db.sealedTables` or `db.sealedSettings`; with
 any other key, under "other keys" with where the key comes from. Never loosen the guard.
+
+## A setting moved into a table stays readable by the build before it (2026-11-15, #8257)
+
+Moving `hub.push_sent` (one list, rewritten whole by every push) into the `hub_push_sent` table first deleted the
+setting once its entries were in the table. A switch back to the build from before (`personad hub switch`, a
+self-update going back) then started with no delivered history: that build reads only the setting, its daily counts
+began again at zero, and the pushes the new build had recorded were not there for it. The forward tests all passed;
+nothing ran the old build after the new one.
+
+- Keep the old record for the build before, and say when it can go. Write it back off the hot path: where the hub
+  stops (`Hub.closeDatabaseAfterWorkers`, before the database closes) and on the updater's way back before it runs the
+  old binary, since an exec skips the cleanup; while running only at a bounded rate (hourly here), or the move saves
+  nothing. A handoff in `hub switch` alone is not enough: the command, the edge and a watchdog may each be another
+  build, and a killed hub runs none of them.
+- Going forward again merges, never replaces. The old build writes the list back without the table's ids, so match
+  entry and row by content (time to the precision the table keeps, and the other fields), count equal entries as
+  separate pushes, and skip what the table's sweep would remove, or every start adds expired entries again.
+- Do not write the old record from a start that failed to read it: its list may be shorter than what is stored.
+- Test the round trip with the old build's reader: upgrade, deliver, old build (reads only the old record), deliver,
+  upgrade again, the same counts at each step (`TestPushSentSurvivesSwitchBackAndForward`).

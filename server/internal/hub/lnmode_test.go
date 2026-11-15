@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -105,32 +104,20 @@ func (s *lnStore) PrunePushSent(_ context.Context, before time.Time, keep int) (
 	return int64(gone), nil
 }
 
-func (s *lnStore) AdoptPushSentSetting(_ context.Context, key string) (int, error) {
+func (s *lnStore) AdoptPushSentSetting(_ context.Context, key string, after time.Time, keep int) (int, bool, error) {
 	s.mu.Lock()
-	raw, ok := s.vals[key]
-	delete(s.vals, key)
+	raw, ok := s.vals[key] // left where it is, like the database's row
 	s.mu.Unlock()
-	if !ok {
-		return 0, nil
-	}
 	var entries []db.PushSent
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		s.mu.Lock()
-		s.vals[key] = raw // the database's transaction keeps the row too
-		s.mu.Unlock()
-		return 0, err
-	}
-	// IDs from the content and its occurrence, like the database's settingPushSentIDs.
-	seen := map[string]int{}
-	for i := range entries {
-		e := &entries[i]
-		k := fmt.Sprintf("%s|%s|%s|%s", e.At.UTC().Format(time.RFC3339Nano), e.Level, e.RelatedKey, e.Manager)
-		e.ID = fmt.Sprintf("setting:%s:%d", k, seen[k])
-		seen[k]++
+	if ok {
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return 0, false, err
+		}
 	}
 	s.sentMu.Lock()
 	defer s.sentMu.Unlock()
-	return s.addRowsLocked(entries), nil
+	missing, behind := db.MergePushSentSetting(entries, s.sentRows, after, keep)
+	return s.addRowsLocked(missing), behind, nil
 }
 
 // sentTable is a copy of the delivered-push rows.

@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -54,7 +56,8 @@ func statsViews(p *Pusher) map[string][]pushDayStats {
 }
 
 // One delivered push appends one row and writes nothing else: the bytes it hands the store are the same whether the
-// record is empty or holds the full 2,000 entries, and the old whole-list setting is never written (#8257).
+// record is empty or holds the full 2,000 entries, and a push never writes the old whole-list setting (#8257): that
+// is kept for an older build off the push path (push_sent_rollback_test.go).
 func TestPushSentWritesOnlyTheNewRow(t *testing.T) {
 	now := time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)
 	perPush := func(seeded int) (adds, bytes int) {
@@ -137,8 +140,9 @@ func TestPushSentReadersUnchanged(t *testing.T) {
 	}
 }
 
-// Upgrade: the entries of the old whole-list setting move into the table once, at the first start; the expired ones
-// go, the counts equal what the old build read from the setting, and a second start moves nothing again.
+// Upgrade: the entries of the old whole-list setting are added to the table once, at the first start; the expired
+// ones go, the counts equal what the old build read from the setting, and a second start adds nothing again. The
+// setting stays as the old build left it, for a switch back to that build.
 func TestPushSentAdoptsTheOldSetting(t *testing.T) {
 	now := time.Now().UTC()
 	var legacy []pushSent
@@ -166,9 +170,10 @@ func TestPushSentAdoptsTheOldSetting(t *testing.T) {
 	}
 	want := statsViews(old)
 
+	before := slices.Clone(store.vals[pushSentSettingKey])
 	p := sentPusher(t, store, now)
-	if _, left := store.vals[pushSentSettingKey]; left {
-		t.Fatal("the old setting is still there after the move")
+	if after := store.vals[pushSentSettingKey]; !bytes.Equal(after, before) || store.puts != 1 {
+		t.Fatalf("the upgrade changed the old setting (%d puts, %d bytes, was %d)", store.puts, len(after), len(before))
 	}
 	if rows := store.sentTable(); len(rows) != pushSentMax-10 || rows[0].RelatedKey != "k-0" || rows[len(rows)-1].RelatedKey != fmt.Sprintf("k-%d", pushSentMax-11) {
 		t.Fatalf("table after the move: %d rows, want the %d unexpired entries in order", len(rows), pushSentMax-10)

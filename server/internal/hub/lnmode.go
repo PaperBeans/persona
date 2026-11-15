@@ -21,12 +21,14 @@ import (
 // in memory and in hub_settings, behind a read-only API for extensions and the nightly review. With the switch off
 // (the default) every push goes out exactly as before; the filter is a no-op. Every push that goes out is counted in
 // memory and appended to the store's hub_push_sent table (pushSentStore), never by rewriting the whole record (#8257).
+// A build from before that table reads only the whole-list hub.push_sent setting, so the hub keeps the setting for a
+// switch back to one: written when the hub stops and at most hourly (mirrorSent), never per push.
 
 const (
 	lnModeSettingKey       = "hub.ln_mode"
 	lnInterceptsSettingKey = "hub.ln_intercepts"
-	// pushSentSettingKey held the delivered pushes as one list before hub_push_sent; loadSent moves its entries
-	// into the table (AdoptPushSentSetting) and the key is not written any more.
+	// pushSentSettingKey held the delivered pushes as one list before hub_push_sent, and is all a build from before
+	// reads. loadSent adds its entries to the table (AdoptPushSentSetting) and mirrorSent writes the list back to it.
 	pushSentSettingKey = "hub.push_sent"
 
 	// lnDedupWindow: how long the same related key stays quiet after it pushed once.
@@ -44,6 +46,10 @@ const (
 	// pushSentPruneEvery: how often the writer sweeps hub_push_sent down to the age and count limits. Between sweeps
 	// the table may hold a little more than the limits; reading it back applies them (loadSent).
 	pushSentPruneEvery = time.Hour
+	// pushSentMirrorEvery: how often, at most, a running hub writes the delivered pushes whole into the hub.push_sent
+	// setting (mirrorSent). A stopping hub always writes it, so a switch back loses nothing; this bounds what a build
+	// from before misses after a hub that was killed, and the setting's rewrites to 24 a day however many pushes go out.
+	pushSentMirrorEvery = time.Hour
 	// pushStatsDaysMax: how far back the read-only daily stats may go, matching the records' age.
 	pushStatsDaysMax = 14
 	// pushSaveRetryBackoff: how long the one settings writer waits before retrying a failed database write.
@@ -108,7 +114,7 @@ type pushSentStore interface {
 	AddPushSent(ctx context.Context, entries []db.PushSent) error
 	PushSentAfter(ctx context.Context, after time.Time, limit int) ([]db.PushSent, error)
 	PrunePushSent(ctx context.Context, before time.Time, keep int) (int64, error)
-	AdoptPushSentSetting(ctx context.Context, key string) (int, error)
+	AdoptPushSentSetting(ctx context.Context, key string, after time.Time, keep int) (added int, behind bool, err error)
 }
 
 // Asserted here because sentLog finds out at run time: a method gone astray would stop the counts surviving a restart.
@@ -395,6 +401,7 @@ func (p *Pusher) addSentLocked(in pushSent) {
 	if p.sentLog() == nil { // a pusher without the table keeps the counts in memory only
 		return
 	}
+	p.sentMirrorDue = true
 	p.sentPending = append(p.sentPending, in)
 	if len(p.sentPending) > pushSentMax { // a store that keeps failing: the oldest would be past the count limit anyway
 		p.sentPending = slices.Clone(p.sentPending[len(p.sentPending)-pushSentMax:])
@@ -570,10 +577,11 @@ func (p *Pusher) loadLnState() {
 	p.loadSent()
 }
 
-// loadSent reads the delivered pushes back from hub_push_sent at startup: first it moves the entries of the old
-// whole-list setting into the table (once after the upgrade), then sweeps the table to the age and count limits, then
-// reads what is left, the same entries addSentLocked would have kept in memory. A failed step is logged and the
-// counts start from what could be read.
+// loadSent reads the delivered pushes back from hub_push_sent at startup: first it adds the entries of the old
+// whole-list setting the table lacks (all inside the limits after the upgrade; after a switch back to a build from
+// before, the ones that build delivered), then sweeps the table to the age and count limits, then reads what is
+// left, the same entries addSentLocked would have kept in memory. A failed step is logged and the counts start from
+// what could be read; the setting is then left alone (mirrorSent), since what this hub holds may be less than it.
 func (p *Pusher) loadSent() {
 	log := p.sentLog()
 	if log == nil {
@@ -588,15 +596,17 @@ func (p *Pusher) loadSent() {
 		}
 		return true
 	}
-	step("move "+pushSentSettingKey+" into its table", func(ctx context.Context) error {
-		moved, err := log.AdoptPushSentSetting(ctx, pushSentSettingKey)
-		if moved > 0 {
-			p.logf("push grading: moved %d delivered pushes from %s into their table", moved, pushSentSettingKey)
+	now := p.now()
+	cutoff := now.Add(-lnInterceptAge)
+	behind := false
+	adopted := step("add "+pushSentSettingKey+" to its table", func(ctx context.Context) (err error) {
+		var added int
+		added, behind, err = log.AdoptPushSentSetting(ctx, pushSentSettingKey, cutoff, pushSentMax)
+		if added > 0 {
+			p.logf("push grading: added %d delivered pushes from %s to their table", added, pushSentSettingKey)
 		}
 		return err
 	})
-	now := p.now()
-	cutoff := now.Add(-lnInterceptAge)
 	step("sweep delivered pushes", func(ctx context.Context) error {
 		_, err := log.PrunePushSent(ctx, cutoff, pushSentMax)
 		return err
@@ -614,7 +624,64 @@ func (p *Pusher) loadSent() {
 	for _, e := range rows {
 		p.sent = append(p.sent, pushSent{ID: e.ID, At: e.At, Level: e.Level, RelatedKey: e.RelatedKey, Manager: e.Manager})
 	}
+	p.sentMirrorable = adopted
+	p.sentMirrorDue = p.sentMirrorDue || behind
 	p.lnMu.Unlock()
+}
+
+// mirrorSent writes the delivered pushes whole into the hub.push_sent setting when they changed since its last write:
+// the record a build from before hub_push_sent reads, kept so that a switch back to one (personad hub switch, a
+// self-update going back, the old binary put back by hand) finds the history and the daily counts as this hub has
+// them. It is off the push path: a stopping hub calls it (Hub.closeDatabaseAfterWorkers, the updater's rollback) and
+// a running one at most every pushSentMirrorEvery (mirrorSentIfDue). A hub that could not read the table or the
+// setting at start does not write: its list may be short of what the setting holds. A failed write stays due.
+func (p *Pusher) mirrorSent(ctx context.Context) error {
+	if p == nil || p.store == nil {
+		return nil
+	}
+	// One write at a time, so a list taken earlier never lands over a later one.
+	p.sentMirrorMu.Lock()
+	defer p.sentMirrorMu.Unlock()
+	p.lnMu.Lock()
+	if !p.sentMirrorable || !p.sentMirrorDue {
+		p.lnMu.Unlock()
+		return nil
+	}
+	p.sentMirrorDue = false
+	now := p.now()
+	cutoff := now.Add(-lnInterceptAge)
+	list := make([]pushSent, 0, len(p.sent))
+	for _, e := range p.sent {
+		if e.At.After(cutoff) {
+			list = append(list, e)
+		}
+	}
+	p.lnMu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, p.storeTimeout)
+	defer cancel()
+	err := p.store.PutSetting(ctx, pushSentSettingKey, list)
+	p.lnMu.Lock()
+	if err != nil {
+		p.sentMirrorDue = true
+	} else {
+		p.sentMirroredAt = now
+	}
+	p.lnMu.Unlock()
+	return err
+}
+
+// mirrorSentIfDue is mirrorSent for a running hub (maintenanceLoop): no sooner than pushSentMirrorEvery after the
+// last write, so the first pushes after a start reach the setting at the next pass and later ones within the hour.
+func (p *Pusher) mirrorSentIfDue(ctx context.Context) {
+	p.lnMu.Lock()
+	due := p.sentMirrorDue && p.now().Sub(p.sentMirroredAt) >= pushSentMirrorEvery
+	p.lnMu.Unlock()
+	if !due {
+		return
+	}
+	if err := p.mirrorSent(ctx); err != nil {
+		p.logf("push grading: keep %s for an older build: %v", pushSentSettingKey, err)
+	}
 }
 
 // lnInterceptsView returns the held pushes newest first, at most limit (clamped to lnInterceptLimitMax). When manager
