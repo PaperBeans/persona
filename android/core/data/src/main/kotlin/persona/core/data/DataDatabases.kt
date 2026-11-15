@@ -282,7 +282,7 @@ interface ItemsDao {
     suspend fun insert(items: List<ItemRow>)
 }
 
-@Database(entities = [ItemRow::class, SessionCursorRow::class], version = 5,
+@Database(entities = [ItemRow::class, SessionCursorRow::class], version = 6,
     autoMigrations = [AutoMigration(from = 2, to = 3)], exportSchema = true)
 abstract class ItemsDatabase : RoomDatabase() {
     abstract fun items(): ItemsDao
@@ -310,6 +310,17 @@ abstract class ItemsDatabase : RoomDatabase() {
 
         /** Codex commentary cached as thinking must be read again as assistant text; these are only cache rows. */
         val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DELETE FROM `items`")
+                db.execSQL("DELETE FROM `cursors`")
+            }
+        }
+
+        /**
+         * Paseo's input to an agent cached as the user's raw <paseo-system> text must be read again as another
+         * session's message, a subagent's task note or a notice (#8220); these are only cache rows.
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DELETE FROM `items`")
                 db.execSQL("DELETE FROM `cursors`")

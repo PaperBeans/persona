@@ -1,4 +1,4 @@
-import { storedValue, storeValue, removeStoredValue } from "./compatibility";
+import { canonicalStorageKey, storedKeyAlias, storedValue, storeValue, removeStoredValue } from "./compatibility";
 // Changes to a composer's draft from outside it: the message menu's "Quote" / "Edit", a queued message pulled back, an
 // edited image put in for the next message (iOS: ChatView.bindMenu, AppModel.editQueued, ImageViewer's attach).
 // The composer for that draft key listens; with none mounted, text goes to the stored draft (it is read on mount).
@@ -121,7 +121,12 @@ export function parseQuotes(blocks: readonly string[]): DraftQuote[] {
   return blocks.map((b) => (isCommentHead(b.split("\n")[0]) ? parseCommentBlock(b) : null) ?? parseQuote(b)).map((q) => ({ ...q, id: uuid() }));
 }
 
-const quoteKey = (key: string) => `quote:${key}`;
+const DRAFT_PREFIX = "draft:";
+const QUOTE_PREFIX = "quote:";
+const quoteKey = (key: string) => `${QUOTE_PREFIX}${key}`;
+
+/** How many conversations' unsent words and quotes one browser keeps; the oldest unmounted ones are dropped first. */
+export const MAX_STORED_DRAFTS = 50;
 
 function validQuote(q: unknown): q is DraftQuote {
   const x = q as DraftQuote | null;
@@ -139,8 +144,9 @@ export function storedQuotes(key: string): DraftQuote[] {
 }
 
 export function storeQuotes(key: string, list: readonly DraftQuote[]) {
-  if (list.length) localStorage.setItem(quoteKey(key), JSON.stringify(list));
-  else localStorage.removeItem(quoteKey(key));
+  const stored = quoteKey(key);
+  if (list.length) safeDraftWrite(stored, () => localStorage.setItem(stored, JSON.stringify(list)));
+  else safeDraftRemove(stored);
 }
 
 /** What a composer's quote list is right now, and which comment card is being written in. */
@@ -293,20 +299,130 @@ export function draftListenerKeysForTests() {
 }
 
 export function storeDraft(key: string, text: string) {
-  if (text) storeValue(`draft:${key}`, text);
-  else removeStoredValue(`draft:${key}`);
+  const stored = `${DRAFT_PREFIX}${key}`;
+  if (text) safeDraftWrite(stored, () => storeValue(stored, text));
+  else safeDraftRemove(stored);
   tellRows();
 }
 
-/** Words of a composer that belongs to no conversation row (the Agents page's box): kept under a key the sidebar never
- *  asks useLeftDraft for, so a half-written instruction never marks a row, but a reload still restores it. */
+// Storage pressure: a full or blocked localStorage must never break typing or throw out of the save timer. A failed
+// write drops the oldest other conversations' drafts and quotes first — the mounted composers' keys are protected —
+// and is retried; what still cannot be written is swallowed.
+const KEY_PREFIXES = [DRAFT_PREFIX, QUOTE_PREFIX] as const;
+
+function draftStorage(): Storage | null {
+  try {
+    return localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Storage keys of every mounted composer's draft and quote list: eviction never touches the conversation on screen. */
+function protectedDraftKeys(): Set<string> {
+  const keep = new Set<string>();
+  listeners.forEach((_set, key) => KEY_PREFIXES.forEach((prefix) => keep.add(prefix + key)));
+  return keep;
+}
+
+/** The conversation id a stored draft/quote key belongs to; a legacy alias key shares its canonical key's id. */
+function storedConversationId(stored: string): string | null {
+  const key = canonicalStorageKey(stored);
+  const prefix = KEY_PREFIXES.find((p) => key.startsWith(p));
+  return prefix ? key.slice(prefix.length) : null;
+}
+
+/** Conversation ids holding a stored draft or quote, oldest first in storage order; protected ids are skipped. A
+ *  legacy alias pair (draft:persona-new / draft:jarvis-new) is one conversation, so it is never counted twice. */
+function evictableConversations(keep: ReadonlySet<string>): string[] {
+  const store = draftStorage();
+  const ids: string[] = [];
+  if (!store) return ids;
+  try {
+    for (let i = 0; i < store.length; i++) {
+      const stored = store.key(i);
+      if (!stored || keep.has(stored)) continue;
+      // the mounted conversation's canonical key is protected even when this entry is its legacy alias
+      const alias = storedKeyAlias(stored);
+      if (alias && keep.has(alias)) continue;
+      const id = storedConversationId(stored);
+      if (id !== null && !ids.includes(id)) ids.push(id);
+    }
+  } catch {
+    // storage became unreadable: return what was gathered
+  }
+  return ids;
+}
+
+function dropConversation(store: Storage, id: string) {
+  // the legacy alias copy leaves with its canonical key, so no orphaned entry stays behind
+  for (const prefix of KEY_PREFIXES) {
+    const key = prefix + id;
+    for (const k of [key, storedKeyAlias(key)]) {
+      if (!k) continue;
+      try {
+        store.removeItem(k);
+      } catch {
+        // blocked storage: nothing to do
+      }
+    }
+  }
+}
+
+/** Keep the retained drafts of unmounted conversations within MAX_STORED_DRAFTS, oldest first. */
+function enforceDraftBound(store: Storage) {
+  const ids = evictableConversations(protectedDraftKeys());
+  for (let i = 0; i < ids.length - MAX_STORED_DRAFTS; i++) dropConversation(store, ids[i]);
+}
+
+/** Write a draft or quote entry, evicting older unmounted conversations' entries and retrying when storage is full.
+ *  The target key itself and every mounted composer's keys survive; a write that still fails stays quiet. Other draft
+ *  writers (page-level prompt boxes) route their raw localStorage writes through this so a full quota never throws. */
+export function safeDraftWrite(targetKey: string, write: () => void) {
+  const store = draftStorage();
+  if (!store) return;
+  try {
+    write();
+    enforceDraftBound(store);
+    return;
+  } catch {
+    // quota exceeded or storage blocked: make room below and retry
+  }
+  const keep = protectedDraftKeys();
+  keep.add(targetKey);
+  for (const id of evictableConversations(keep)) {
+    dropConversation(store, id);
+    try {
+      write();
+      return;
+    } catch {
+      // still full: drop the next oldest conversation
+    }
+  }
+}
+
+/** Remove a draft or quote entry without throwing when storage is blocked (drafts keep their alias write path). */
+export function safeDraftRemove(storedKey: string) {
+  if (!draftStorage()) return;
+  try {
+    if (storedKey.startsWith(DRAFT_PREFIX)) removeStoredValue(storedKey);
+    else localStorage.removeItem(storedKey);
+  } catch {
+    // the stale entry stays, but typing and sending keep working
+  }
+}
+
+/** Words of a composer that belongs to no conversation row (the Agents page box): kept under a key the sidebar
+ *  never asks useLeftDraft for, so a half-written instruction never marks a row, but a reload still restores it. */
 export function storedPageDraft(key: string): string {
   return storedValue(`draft:${key}`) ?? "";
 }
 
 export function storePageDraft(key: string, text: string) {
-  if (text) storeValue(`draft:${key}`, text);
-  else removeStoredValue(`draft:${key}`);
+  const stored = `draft:${key}`;
+  // route through the quota-safe path so a full localStorage cannot throw inside the composer
+  if (text) safeDraftWrite(stored, () => storeValue(stored, text));
+  else safeDraftRemove(stored);
 }
 
 /** What waits unsent for a conversation whose box is not on screen: its stored words, and whether quotes wait on its

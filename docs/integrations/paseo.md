@@ -119,6 +119,23 @@ and the engine's note under Settings › Machines asks to update it.
     (the manager's after a turn, an App's background sync of its recent chats, which pulls them whenever their `rev` moves) is answered from the bridge's
     last whole read of the Agent while that is still all of the conversation, and otherwise refused with `not_loaded`, asking Paseo nothing. A chat left
     open reads nothing more once Paseo lets its Agent go; the next turn, a message's, is read as it runs.
+  - **What other Agents send an Agent** (#8220): Paseo hands an Agent another Agent's message, a child's notice (finished, errored, waiting for a
+    permission, closed) and a schedule's run as user input in a `<paseo-system>` envelope: XML-escaped, several delivered together separated by blank
+    lines. A schedule's run comes in a bare `<paseo-system>`, as the notices did before Paseo versioned the envelope. Node reads them from the Claude
+    transcript and the Codex rollout (`server/internal/transcript/paseo.go`); the bridge from Paseo's timeline, which projects them into
+    `agent_message` and `heartbeat` tool calls. Each is drawn with what every App already has for Claude Code's cross-session messages and
+    subagent notices, never as the user's words:
+    - Another Agent's message is a message from another session: `from` is the sender's title (the "another session" stand-in when Paseo knows
+      none), the text its words unescaped.
+    - A child's notice is a subagent's task note (`task`, kind `agent`, no `task_id`): finished → `completed`, errored → `failed`, a cancel or a
+      close → `stopped`, a permission → `waiting`. Its detail is what the permission asks for and the child's last answer; Paseo's server line,
+      the request's JSON and its instructions to the model are not shown. Its line (pushes, older Apps) is the node's subagent heading, or
+      `子 Agent 等待批准` for a permission, which the hub gives in the reader's language.
+    - A schedule's run is a notice: `定时任务到点：` and the schedule's name, or its prompt's first line when it has none.
+    - From a transcript, a notice that started a turn is a wake, as a background task's notice is (its turn pushes "done" only as the end of
+      held work), and a message absorbed mid-turn is queued. The timeline does not say which, so the bridge marks neither.
+    - A bare envelope of another kind is a notice of its first line: Paseo shows any bare envelope as its own, and quotes one a person sends as a
+      `user-message`. Text around envelopes, extra space, and an envelope Paseo's own parser would not take stay the user's words, as Paseo leaves them.
 - **Agents running Codex** (#4495): the row names the Codex thread the Agent runs (`codex_thread`). Node finds that thread's rollout on its own as well; named, the chat is
   listed once, as the Paseo Agent, not a second time as a read-only Codex history row, and the thread's own Codex sub-Agents hang off the Paseo Agent's row.
   When another program takes the thread up while the Paseo Agent is not running (the Codex App runs it, a shared app-server has it loaded), that program's row is listed too,

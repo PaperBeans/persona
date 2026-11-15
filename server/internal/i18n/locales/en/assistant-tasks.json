@@ -35,6 +35,7 @@
   "route_no_task": "This chat doesn’t have that task",
   "route_no_agent": "This task has no running agent",
   "route_agents_stopped": "Every agent of this task has stopped, so nothing was sent. A message on the task starts a new agent for it.",
+  "route_starting": "A new agent for this task is still starting, so this message wasn't sent. Send it again in a moment.",
   "route_offline": "That computer is offline",
   "outcome_question": "Outcome",
   "outcome_pitfall": "Pitfall",

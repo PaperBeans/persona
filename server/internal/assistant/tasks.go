@@ -219,8 +219,10 @@ type tasksState struct {
 	// turn only after its own conversation sent it more (closedTurnReopens, #6726). In memory only: after a restart
 	// such a task stays closed until its conversation sends again or the owner reopens it.
 	sentBy map[[2]string]agentSent
-	// retrying: the tasks whose agent is starting again after a failed start (one start at a time, #1396).
-	retrying map[string]bool
+	// retrying: the tasks whose agent is starting (again), one start at a time: a Retry after a failed start (#1396), a
+	// Continue, or a new agent after all of the task's stopped (startTaskSuccessor). A message on the card that would
+	// start another waits for that one and goes to the agent it started (routeAfterStart).
+	retrying map[string]*taskStart
 	// outcomes: the completions whose outcome was recorded (todo_outcome.go, outcomeKey).
 	outcomes map[string]time.Time
 	// reusing: the todos a started plan took over (PlanTask.ReuseTodo) whose agent is not linked yet, so that a second
@@ -248,7 +250,7 @@ type tasksState struct {
 
 func newTasksState() tasksState {
 	return tasksState{recoverBefore: time.Now(), plans: map[string]*TaskPlan{}, feed: map[string][]FeedItem{},
-		working: map[string]time.Time{}, receipted: map[string]time.Time{}, retrying: map[string]bool{},
+		working: map[string]time.Time{}, receipted: map[string]time.Time{}, retrying: map[string]*taskStart{},
 		outcomes: map[string]time.Time{}, reusing: map[string]bool{}, sentBy: map[[2]string]agentSent{},
 		turns: turnsState{again: map[string]bool{}, looked: map[string]turnLook{}, recovering: map[string]bool{}, tries: map[string]int{},
 			retry:   map[string]turnRetry{},

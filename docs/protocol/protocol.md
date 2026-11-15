@@ -1103,11 +1103,11 @@ Provider responses carry only the description and `has_key`, never secrets. Defa
  "wake":true,                                         // a notice or agent tool result started a new turn after Claude was idle
  "injected":{"kind":"task_notice","state":"done",…},   // user text only: this is a message Persona sent to the model (task notification, scheduled task, wake-up…), not written by the user; added by the hub when sending, see "Messages Persona injects"
  "source":{"kind":"conversation|patrol|followup|supervision|meeting","conversation_id":"…","title":"…"}, // optional input provenance, independent of role; id/title optional, see "Message source"
- "from":"peer name",                                  // optional native peer sender; a display name, not necessarily a conversation id
+ "from":"peer name",                                  // optional native peer sender (another Claude session, a teammate, a Paseo Agent); a display name, not necessarily a conversation id
  "compact":{"trigger":"manual|auto","pre_tokens":151467}, // notice only: the context was compacted here (Claude Code's compact_boundary); the App draws a divider and folds the following "已从压缩的上下文继续" ("continued from compacted context") and the idle-compaction note into it
  "task":{"kind":"shell|monitor|agent|workflow|task",     // task notices; also agent tool results associated with their launching call
          "status":"running|completed|failed|killed|stopped|event|ended|waiting","title":"description or the command's first line",
-         "task_id":"…","tool_use_id":"toolu_…","exit_code":0,"output_file":"…", // tool_use_id: the call that started the task, also when the notification names only the task (an earlier one of the task named it)
+         "task_id":"…","tool_use_id":"toolu_…","exit_code":0,"output_file":"…", // tool_use_id: the call that started the task, also when the notification names only the task (an earlier one of the task named it); a Paseo child's notice has neither (docs/integrations/paseo.md "What other Agents send an Agent")
          "detail":"the Monitor event / the subagent's result / the whole command (entities decoded)"},
  "fold":{"items":1294,"tools":647,"thoughts":110,     // kind=fold only (only when the request carries fold_work): a folded stretch of work, see "Folded work"; may carry tasks, images, usage
          "errors":3,"tool_names":["Bash","Read","Edit"],  // failed tool results and the tools called (at most 10); absent from older nodes
