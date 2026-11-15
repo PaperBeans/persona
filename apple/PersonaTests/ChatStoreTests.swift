@@ -52,6 +52,19 @@ struct ChatStoreTests {
         #expect(s.backlogBuilt)
     }
 
+    @Test func everyOlderCacheFolderIsRemovedNotOnlyThePreviousOne() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let older = ["chats", "chats-v2", "chats-v11", "chats-v16"]
+        let others = [ChatCache.folder, "chat-images", "chats-vX", "state"]
+        for name in older + others {
+            try FileManager.default.createDirectory(at: base.appending(path: name), withIntermediateDirectories: true)
+        }
+        ChatCache.removeOlderFolders(in: base)
+        let left = try FileManager.default.contentsOfDirectory(atPath: base.path)
+        #expect(Set(left) == Set(others))
+    }
+
     @Test func duplicateCachedIDsDoNotCrashWhenBacklogRepeatsThem() throws {
         let key = SessionKey(machineID: "test", sessionID: UUID().uuidString)
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

@@ -1,9 +1,1 @@
-{
-  "cmd/password-wasm/main.go": 3,
-  "internal/hubcli/hubcli.go": 6,
-  "internal/manager/join.go": 24,
-  "internal/manager/run.go": 12,
-  "internal/manager/service.go": 42,
-  "internal/node/doctor.go": 94,
-  "internal/node/preflight.go": 48
-}
+{}

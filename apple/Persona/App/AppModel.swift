@@ -455,6 +455,11 @@ final class AppModel {
     /// The main chat's own picker (`?purpose=assistant`, #5033): its eligible launchers, the effective Main chat
     /// default, and what can't run there with why. Separate from `launcherCache`, which serves the agent.new purpose.
     @ObservationIgnored private(set) var assistantLauncherCache: [MachineRef: APIClient.LaunchersResponse] = [:]
+    /// Observed because the cache above is intentionally not observed: a fresh answer must redraw the composer's title.
+    private(set) var assistantLauncherRevision = 0
+    /// Only a settings snapshot should start another picker request. Kept separate from the answer revision so a
+    /// completed request never re-triggers itself, and from the global launcher revision used by New Chat/providers.
+    private(set) var assistantLauncherRequestRevision = 0
 
     /// The hub-level group's client: for pages about the hub (Persona, Inbox, its settings). A session's, a machine's
     /// or an interaction's requests go to its own group (`api(_:)`). The assistant's routes go to the manager the Persona
@@ -1149,7 +1154,17 @@ final class AppModel {
         do {
             let st = try await api.assistant()
             guard showsPage(of: api) else { return } // another group or manager was picked meanwhile
+            let previousMain = assistantMain
             assistantConfig = st
+            if let current = assistantCurrent {
+                assistantCurrent = Self.followingMainRoute(current: current, previous: previousMain, updated: assistantMain,
+                                                           mainID: st.main)
+            }
+            // Assistant snapshots are the settings-level refresh signal. Session.rev is deliberately not used here:
+            // it ticks during transcript streaming and is not published through SessionCell to the composer.
+            // Invalidate only the assistant picker; New Chat and Model Providers use launchersRevision instead.
+            assistantLauncherCache = [:]
+            assistantLauncherRequestRevision += 1
             if sessionLists.lists[api.group]?.paged == true { landSessionSummaries(api.stamp(st.conversations), group: api.group) }
             // Only on the very first launch: after New Chat the key exists but is empty, and the home page stays.
             let neverChosen = UserDefaults.standard.object(forKey: "assistant.current") == nil
@@ -1265,8 +1280,20 @@ final class AppModel {
 
     /// The main conversation (the Persona tab's long-running one), when the hub has one.
     var assistantMain: SessionKey? {
-        guard let st = assistantConfig, let id = st.main, !id.isEmpty else { return nil }
-        return SessionKey(group: hub?.group ?? "", machineID: st.machineID, sessionID: id)
+        assistantConfig?.mainKey(group: hub?.group ?? "")
+    }
+
+    /// Follow a confirmed main-route move only while the user is looking at the main conversation. The persisted
+    /// `assistant.current` may be one route ahead of a throttled on-disk Assistant snapshot, so matching the main
+    /// session ID is enough to recognize that current key. A deliberately opened side conversation stays where it is.
+    static func followingMainRoute(current: SessionKey?, previous: SessionKey?, updated: SessionKey?,
+                                   mainID: String? = nil) -> SessionKey? {
+        guard let mainID, !mainID.isEmpty, let current, let updated, current != updated else { return current }
+        let currentlyMain: Bool
+        if let previous, previous.sessionID == current.sessionID { currentlyMain = true }
+        else if previous == nil, current.sessionID == mainID { currentlyMain = true }
+        else { currentlyMain = false }
+        return currentlyMain ? updated : current
     }
 
     /// Shows a Persona conversation from another page (Scheduled Tasks' Run Now / its own conversation): the Persona tab or the
@@ -2935,7 +2962,8 @@ final class AppModel {
         held.images += photos.prefix(room).map(\.photo)
         // A hub photo has no machine path to leave as text. Keep it visible; `sendNow` still enforces the four-photo cap.
         held.images += overflow.filter { $0.path == nil }.map(\.photo)
-        left += held.videos.restore(draft.files).map(\.xml)
+        left += held.videos.restore(draft.files.filter(\.playable)).map(\.xml)
+        left += held.files.restore(draft.files.filter { !$0.playable }).map(\.xml)
         if !draft.contexts.isEmpty { composerContexts[key] = (composerContexts[key] ?? []) + draft.contexts }
         let words = ([draft.text] + left).filter { !$0.isEmpty }.joined(separator: "\n")
         if !words.isEmpty {
@@ -3499,7 +3527,6 @@ final class AppModel {
 
     /// After a change in Settings › Model: the pickers read the machines' lists again, and the list of launchers reloads.
     func launchersChanged() {
-        launchersRevision += 1
         launcherDefaultsChanged()
     }
 
@@ -3509,6 +3536,10 @@ final class AppModel {
         launcherCache = [:]
         launcherDefaults = [:]
         assistantLauncherCache = [:]
+        // Model Settings changes are launcher changes too: wake the open main-chat composer to re-read the default.
+        launchersRevision += 1
+        assistantLauncherRevision += 1
+        assistantLauncherRequestRevision += 1
     }
 
     /// The list a start picks from (New Agent, Run Agent Here): always read again, and the cache with it. Each launcher's
@@ -3534,6 +3565,7 @@ final class AppModel {
         guard let api = api(machine.group) else { return APIClient.LaunchersResponse(launchers: [], default: nil, unavailable: nil) }
         let r = try await api.launcherList(machine: machine.id, purpose: "assistant")
         assistantLauncherCache[machine] = r
+        assistantLauncherRevision += 1
         return r
     }
 
@@ -3581,6 +3613,11 @@ final class AppModel {
     /// keeps nothing and the app leaves the model row read-only.
     func keepsConversationModelPick(_ group: String) -> Bool {
         features(group).contains("assistant_model_pick")
+    }
+
+    /// Whether this hub remembers typed model IDs (`typed_models`), independently of conversation picks.
+    func offersTypedModels(_ group: String) -> Bool {
+        features(group).contains(ModelID.feature)
     }
 
     /// The main chat picker data already read for `machine` (nil: nothing cached yet; `assistantLaunchers(_:)` reads it).

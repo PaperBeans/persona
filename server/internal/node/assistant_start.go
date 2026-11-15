@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/compat"
+	"github.com/nwverse/persona/server/internal/extension/sandbox"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/osproc"
@@ -232,7 +233,7 @@ func (n *Node) assistantCLICommand(shell, launcher, cwd string, args, env []stri
 	if _, managed := n.managedLauncher(launcher); !managed {
 		base := env
 		argv, env, _ = wrapAgent("assistant", n.home, n.dir, cwd, settingsArgs(args),
-			func() string { return claudeInner(args, base, cwd, n.home, n.claudeConfigDirs()) }, argv, env, n.logger.Printf)
+			func() *sandbox.StatusReason { return claudeInnerReason(args, base, cwd, n.home, n.claudeConfigDirs()) }, argv, env, n.logger.Printf)
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir, cmd.Env = cwd, env

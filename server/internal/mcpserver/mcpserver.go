@@ -62,7 +62,15 @@ func Serve(ctx context.Context, version string, in io.Reader, out io.Writer) err
 		inflight = map[string]context.CancelFunc{}
 		wg       sync.WaitGroup
 		werr     error
+		watching bool
 	)
+	writeNotification := func(n notification) {
+		mu.Lock()
+		defer mu.Unlock()
+		if err := enc.Encode(n); err != nil && werr == nil {
+			werr = err
+		}
+	}
 	for sc.Scan() {
 		var req request
 		if err := json.Unmarshal(sc.Bytes(), &req); err != nil || req.Method == "" {
@@ -101,13 +109,9 @@ func Serve(ctx context.Context, version string, in io.Reader, out io.Writer) err
 			if token != nil {
 				rctx = withMCPWait(rctx)
 			}
-			stopProgress := keepAlive(rctx, token, func(n notification) {
-				mu.Lock()
-				defer mu.Unlock()
-				if err := enc.Encode(n); err != nil && werr == nil {
-					werr = err
-				}
-			})
+			stopProgress := keepAlive(rctx, token, writeNotification)
+			var listed *toolSnapshot
+			rctx = context.WithValue(rctx, toolsListedKey{}, func(snapshot toolSnapshot) { listed = &snapshot })
 			res, rerr := handle(rctx, version, req)
 			stopProgress() // no progress line after the answer
 			mu.Lock()
@@ -122,6 +126,16 @@ func Serve(ctx context.Context, version string, in io.Reader, out io.Writer) err
 			}
 			if err := enc.Encode(response{JSONRPC: "2.0", ID: req.ID, Result: res, Error: rerr}); err != nil && werr == nil {
 				werr = err
+			}
+			// Start only after the first successful list was sent. Older nodes/managers
+			// return no revision and retain their original one-shot behavior.
+			if listed != nil && listed.Revision != "" && !watching && werr == nil {
+				watching = true
+				wg.Add(1)
+				go func(snapshot toolSnapshot) {
+					defer wg.Done()
+					watchTools(ctx, snapshot, writeNotification)
+				}(*listed)
 			}
 		}()
 	}
@@ -278,7 +292,7 @@ func handle(ctx context.Context, version string, req request) (any, *rpcError) {
 		}
 		return map[string]any{
 			"protocolVersion": p.ProtocolVersion,
-			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
+			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": true}},
 			"serverInfo":      map[string]any{"name": "persona", "version": version},
 			"instructions": "Persona tools reach the user's iPhone (phone_* tools: contacts, calendar, reminders, location, health, photos, " +
 				"clipboard, notifications) and email accounts (mail_* tools). phone_* tools need the Persona app to be open on the iPhone. " +
@@ -289,12 +303,14 @@ func handle(ctx context.Context, version string, req request) (any, *rpcError) {
 	case "tools/list":
 		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		tools, err := listTools(ctx)
+		snapshot, err := listTools(ctx)
 		if err != nil {
-			// listChanged is false, so an empty list would stick for the whole conversation: fail with the reason instead.
 			return nil, &rpcError{Code: -32603, Message: "Persona tools are unavailable: " + err.Error()}
 		}
-		return map[string]any{"tools": tools}, nil
+		if listed, ok := ctx.Value(toolsListedKey{}).(func(toolSnapshot)); ok {
+			listed(snapshot)
+		}
+		return map[string]any{"tools": snapshot.Tools}, nil
 	case "tools/call":
 		var p struct {
 			Name      string          `json:"name"`
@@ -400,35 +416,42 @@ func callFailure(ctx context.Context, err error) string {
 var callRedialFor = 15 * time.Second
 
 // listTools asks the local node for the tools until ctx ends: the node may still be starting or reconnecting to the hub.
-func listTools(ctx context.Context) ([]map[string]any, error) {
+func listTools(ctx context.Context) (toolSnapshot, error) {
 	for {
-		tools, err := listToolsOnce(ctx)
+		tools, err := listToolsOnce(ctx, toolSnapshot{})
 		if err == nil {
 			return tools, nil
 		}
 		select {
 		case <-ctx.Done():
-			return nil, err
+			return toolSnapshot{}, err
 		case <-time.After(retryEvery):
 		}
 	}
 }
 
-func listToolsOnce(ctx context.Context) ([]map[string]any, error) {
+func listToolsOnce(ctx context.Context, previous toolSnapshot) (toolSnapshot, error) {
 	line, err := dialNode(ctx, map[string]any{"kind": "mcp.tools", "away_ok": true, "assistant": isAssistant(), "session_id": sessionID(), "guest": isGuest(),
-		"pane": nodeclient.HookPane(os.Getenv)}) // the pane names the agent whose tools these are (a task leader's task_plan)
+		"pane": nodeclient.HookPane(os.Getenv), "input": map[string]string{"revision": previous.Revision, "session": previous.Session}})
 	if err != nil {
-		return nil, fmt.Errorf("Persona node is not reachable: %w", err)
+		return toolSnapshot{}, fmt.Errorf("Persona node is not reachable: %w", err)
 	}
 	var res struct {
-		Tools []proto.Tool `json:"tools"`
-		Error string       `json:"error"`
+		Tools     []proto.Tool `json:"tools"`
+		Error     string       `json:"error"`
+		Revision  string       `json:"revision"`
+		Session   string       `json:"session"`
+		Unchanged bool         `json:"unchanged"`
 	}
 	if err := json.Unmarshal(line, &res); err != nil {
-		return nil, fmt.Errorf("bad response from Persona node: %w", err)
+		return toolSnapshot{}, fmt.Errorf("bad response from Persona node: %w", err)
 	}
 	if res.Error != "" { // the node could not reach the hub (node/hooks.go)
-		return nil, fmt.Errorf("Persona node could not list tools: %s", res.Error)
+		return toolSnapshot{}, fmt.Errorf("Persona node could not list tools: %s", res.Error)
+	}
+	if res.Unchanged {
+		previous.Revision, previous.Session = res.Revision, res.Session
+		return previous, nil
 	}
 	tools := []map[string]any{}
 	for _, t := range res.Tools {
@@ -446,7 +469,7 @@ func listToolsOnce(ctx context.Context) ([]map[string]any, error) {
 		}
 		tools = append(tools, tool)
 	}
-	return tools, nil
+	return toolSnapshot{Tools: tools, Revision: res.Revision, Session: res.Session}, nil
 }
 
 // The assistant's processes start this server with PERSONA_ASSISTANT / PERSONA_SESSION_ID (node/assistant.go): it

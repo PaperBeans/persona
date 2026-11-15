@@ -369,7 +369,7 @@ function ConvRow({ s, main, now, said, fit, onRename, onArchive }: { s: Conversa
               )}
             </span>
             {main && <span className={pill("bg-accent-tint", "text-accent-ink")}>{t("assistant-history.main_chat")}</span>}
-            {builtIn && <span data-testid="built-in" className={pill("bg-field", "text-ink-2")}>{t("assistant-conversations.built_in")}</span>}
+            {builtIn && <span data-testid="built-in" className={pill("bg-field", "text-ink-2")}>{t("assistant-history.built_in")}</span>}
             {origin ? <OriginMark origin={origin} size={16} /> : <ConvChannel ids={s.channels} />}
           </span>
           {said ? (

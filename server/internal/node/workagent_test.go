@@ -402,35 +402,39 @@ func TestWorkAgentStartPromptsThroughHerdr(t *testing.T) {
 
 // A pi whose extension never lists the session is quit and keeps its tab; the first message is not typed into the pane.
 func TestPiStartWithoutExtensionQuitsAgentAndKeepsTheTab(t *testing.T) {
-	n, f, home := herdrNode(t)
-	old := piResumeWait
-	piResumeWait = 300 * time.Millisecond
-	t.Cleanup(func() { piResumeWait = old })
-	withStop(t, 1, time.Millisecond)
-	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
-	f.reply("tab.create", map[string]any{"tab": map[string]any{"tab_id": "w1:t2"}, "root_pane": map[string]any{"pane_id": "w1:p2"}})
-	f.reply("pane.read", map[string]any{"text": ""})
-	const id = "pi-session"
-	running := agentOf(piAgent, id, proto.StatusIdle, "w1:p2", "w1:t2", "w1", home, piAgent)
-	quitsOn(f, "w1:p2", id, nil, shellPane("w1:p2", "w1:t2", "w1", home, id))
-	f.after(func(c herdrCall) {
-		if c.Method == "pane.send_input" && strings.Contains(c.String(), "HERDR_AGENT=pi") {
-			f.reply("session.snapshot", snapshot(nil, nil, []any{running}, nil))
+	t.Run("hi in the temporary path", func(t *testing.T) {
+		n, f, home := herdrNode(t)
+		old := piResumeWait
+		piResumeWait = 300 * time.Millisecond
+		t.Cleanup(func() { piResumeWait = old })
+		withStop(t, 1, time.Millisecond)
+		f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
+		f.reply("tab.create", map[string]any{"tab": map[string]any{"tab_id": "w1:t2"}, "root_pane": map[string]any{"pane_id": "w1:p2"}})
+		f.reply("pane.read", map[string]any{"text": ""})
+		const id = "pi-session"
+		running := agentOf(piAgent, id, proto.StatusIdle, "w1:p2", "w1:t2", "w1", home, piAgent)
+		quitsOn(f, "w1:p2", id, nil, shellPane("w1:p2", "w1:t2", "w1", home, id))
+		f.after(func(c herdrCall) {
+			if c.Method == "pane.send_input" && strings.Contains(c.String(), "HERDR_AGENT=pi") {
+				f.reply("session.snapshot", snapshot(nil, nil, []any{running}, nil))
+			}
+		})
+		// A short message such as "hi" can also occur in the launch command's temporary path.
+		const message = "the first message must stay unsent"
+		_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, piAgent, piAgent, "", message, "w1", "")
+		if err == nil || !strings.Contains(err.Error(), "pi_no_extension") && !strings.Contains(err.Error(), "没有 Persona 扩展") {
+			t.Fatalf("start: %v", err)
+		}
+		assertTrace(t, f.trace("pane.send_keys"), []string{
+			sendKeys("w1:p2", "ctrl+c"), sendKeys("w1:p2", "ctrl+c"),
+		})
+		closesNothing(t, f)
+		for _, c := range f.trace("pane.send_input", "agent.prompt") {
+			if strings.Contains(c, message) {
+				t.Errorf("the message went in: %s", c)
+			}
 		}
 	})
-	_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, piAgent, piAgent, "", "hi", "w1", "")
-	if err == nil || !strings.Contains(err.Error(), "pi_no_extension") && !strings.Contains(err.Error(), "没有 Persona 扩展") {
-		t.Fatalf("start: %v", err)
-	}
-	assertTrace(t, f.trace("pane.send_keys"), []string{
-		sendKeys("w1:p2", "ctrl+c"), sendKeys("w1:p2", "ctrl+c"),
-	})
-	closesNothing(t, f)
-	for _, c := range f.trace("pane.send_input", "agent.prompt") {
-		if strings.Contains(c, "hi") {
-			t.Errorf("the message went in: %s", c)
-		}
-	}
 }
 
 // session.start with launcher pi and a model reaches the work-agent start, not the Claude one.

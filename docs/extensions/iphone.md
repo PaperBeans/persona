@@ -74,6 +74,20 @@ Done, the page holds the consent switch (turning it off here), **Try It** (`POST
 opened, without the model) and **Ask Me Before Every Step** (the extension's `confirm`), the only optional switch. The page asks
 the hub again every two seconds while a step waits on the cable, the phone or a job, and only while it is in front.
 
+### On the web (#8217)
+
+Who it serves: someone setting up from a computer's browser, with the iPhone plugged into that computer. A computer's page has
+**iPhone control** below Browser while the extension is on (`proto.Machine.iphone`), a Mac or a Linux computer
+(`web/src/views/machines/IPhoneSection.tsx`, its states in `web/src/lib/iphone.ts`). It reads the same codes as the guided setup,
+in the same words: the computer's switch; a Linux computer without the developer disk image says it can't operate iPhones yet,
+and why; **Install the iPhone helper** with its progress and Cancel, and why an install failed; a Mac without Xcode says to install
+it, with Check again; each iPhone in one row, with **Pair** for one on the cable (the row says what pairing waits for, and Cancel),
+where to turn on Developer Mode, **Prepare** with what it does and doesn't do (and Details), Locked, Waiting for this iPhone to
+allow it, Ready; Forget in a paired iPhone's menu, after asking. A row shows Pair or Prepare as working the moment it is clicked,
+before the hub answers. The consent is only the iPhone's to give, so the section says where on the iPhone. It asks the hub again
+every 2 s while a job runs and every 5 s while the next step is at the iPhone (the cable, Developer Mode, the lock, the consent),
+only while the tab is shown, and shows whichever of its own read and the machine list's push is newer (`checked`).
+
 ### Which iPhone is this one
 
 The app on an iPhone cannot read its own device id (iOS gives apps no UDID, and the device name is just "iPhone"). So the

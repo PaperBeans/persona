@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { chatLines } from "../../lib/turns";
 import type { Item, Session } from "../../lib/types";
-import { ChatLineView } from "./Lines";
+import { RefusalNotice } from "./RefusalNotice";
 import { ModelFallbackCard } from "./ModelFallbackCard";
 
 const fallback = { subtype: "model_refusal_fallback", original_model: "primary-model", fallback_model: "fallback-model", scope: "session" };
@@ -104,7 +104,7 @@ describe("a refusal notice", () => {
   const legacy = items.map((i) => (i.id === "r1" ? ({ ...i, text: line, model_refusal: { ...refusal, raw: line } } as unknown as Item) : i));
   const render = (its: Item[], assistant = false) => {
     const line = chatLines(its).find((l) => l.kind === "notice")!;
-    return renderToStaticMarkup(<ChatLineView line={line} mid="m" sid="s" expandFold={async () => {}} assistant={assistant} />);
+    return renderToStaticMarkup(<RefusalNotice item={line.item} plain={assistant} />);
   };
   const escaped = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   it("is a line of its own, not folded into the work row", () => {
@@ -158,7 +158,7 @@ describe("a refusal notice with the node's recovery marker (#7824)", () => {
   ];
   const render = (refusal: Record<string, unknown>, assistant = true) => {
     const line = chatLines(item(refusal)).find((l) => l.kind === "notice")!;
-    return renderToStaticMarkup(<ChatLineView line={line} mid="m" sid="s" expandFold={async () => {}} assistant={assistant} />);
+    return renderToStaticMarkup(<RefusalNotice item={line.item} plain={assistant} />);
   };
   it("appends the plain-words cause in the Persona one-sentence mode", () => {
     const html = render({

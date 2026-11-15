@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 /// Settings › hub › Addresses (#4670, docs/operations/network.md "Client-added candidates"): other addresses of one paired
 /// hub, tried after the paired one in the order shown (`HubRoute`). Each may carry its own Cloudflare Access service

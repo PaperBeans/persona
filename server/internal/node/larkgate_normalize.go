@@ -60,6 +60,9 @@ func normalizeLarkCommand(cmd, cwd string, gates []proto.CommandGate) string {
 	// Variables resolve only in a straight sequence: an assignment after && or || may never have happened. A pipe's
 	// commands run apart from the shell: its assignments set nothing for the commands after it.
 	changed, unsafe := false, !piped
+	// moved: a literal cd ran before. It changes nothing an absolute path names, but a relative one, or a bare name with
+	// "." or an empty entry in PATH, is looked up from the new directory: only absolute values resolve after it (#8389).
+	moved := false
 	for _, unit := range units {
 		for _, stmt := range unit {
 			if unsafe {
@@ -115,7 +118,7 @@ func normalizeLarkCommand(cmd, cwd string, gates []proto.CommandGate) string {
 				word := call.Args[index]
 				if len(word.Parts) == 1 {
 					if p, ok := word.Parts[0].(*syntax.ParamExp); ok && p.Param != nil && !p.Excl && !p.Length && !p.Width && p.Index == nil && p.Slice == nil && p.Repl == nil && p.Exp == nil && p.Names == 0 {
-						if value, ok := vars[p.Param.Value]; ok {
+						if value, ok := vars[p.Param.Value]; ok && (!moved || filepath.IsAbs(value)) {
 							word.Parts = []syntax.WordPart{&syntax.Lit{Value: value}}
 							resolvedAbsolute = filepath.IsAbs(value) && (index == 0 || filepath.Base(words[0]) == "timeout")
 							changed = true
@@ -127,6 +130,14 @@ func normalizeLarkCommand(cmd, cwd string, gates []proto.CommandGate) string {
 			// command (zsh runs it in the shell itself); the others run apart.
 			name := words[0]
 			unchanged := resolvedAbsolute || stmt != unit[len(unit)-1] || map[string]bool{"echo": true, ":": true, "true": true, "false": true, "ls": true, "git": true, "go": true, "pwd": true, "date": true, "sleep": true, "cat": true, "tee": true, "head": true, "tail": true, "cut": true, "sort": true, "uniq": true, "tr": true, "wc": true, "grep": true, "jq": true}[name]
+			if name == "cd" && len(unit) == 1 && len(call.Args) <= 2 && len(call.Assigns) == 0 && len(stmt.Redirs) == 0 {
+				literal := true
+				for _, arg := range call.Args {
+					_, dynamic := executionWord(arg)
+					literal = literal && !dynamic && !wordExpandsToMany(arg)
+				}
+				unchanged, moved = literal, moved || literal
+			}
 			if !unchanged {
 				unsafe = true
 				break

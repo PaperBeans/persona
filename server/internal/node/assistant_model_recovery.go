@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -50,7 +50,7 @@ func ModelRecoveryReason(result string) string {
 var (
 	// "an account becomes available again at 15:48 UTC (in 32m)" and the dated form
 	// "... available again at 2026-11-17 04:03 UTC (in 2d3h)". The words are a gateway's, so the match stays narrow.
-	gatewayAvailableRe      = regexp.MustCompile(`(?i)available again at (?:(\d{4})-(\d{2})-(\d{2})\s+)?(\d{2}):(\d{2})\s*UTC`)
+	gatewayAvailableRe      = lazyre.New(`(?i)available again at (?:(\d{4})-(\d{2})-(\d{2})\s+)?(\d{2}):(\d{2})\s*UTC`)
 	modelRecoveryProbeEvery = time.Minute
 )
 

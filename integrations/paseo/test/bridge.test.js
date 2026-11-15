@@ -70,6 +70,9 @@ test("Paseo's agents are the engine's sessions: Claude Code's by its session and
   assert.deepEqual(node.hello.launchers.map((l) => [l.name, l.agent, l.prompt_optional]),
     [['my-claude', 'claude', undefined], ['my-codex', 'codex', true], ['grok', 'paseo', undefined]])
   assert.deepEqual(node.hello.launchers.map((l) => l.auto_accept), [undefined, undefined, true], "Grok's approval is Paseo's Auto Accept (#8141)")
+  // Named as in Paseo; the providers that are not Claude Code's say what a start takes (#8261).
+  assert.deepEqual(node.hello.launchers.map((l) => [l.display_name, l.permission_modes]),
+    [['My Claude', undefined], ['My Codex', ['default', 'bypassPermissions']], ['Grok', ['default', 'bypassPermissions']]])
   assert.deepEqual(node.hello.launchers[0].models, [{ id: 'fable[1m]', name: 'Fable', default: true, efforts: ['low', 'high', 'max'], default_effort: 'max' }])
   const byId = Object.fromEntries(rows().map((r) => [r.session_id, r]))
   assert.deepEqual(Object.keys(byId).sort(), [SID, 'paseo-e1', `paseo-${a.codex.id}`, `paseo-${a.grok.id}`].sort(), 'a Claude agent without a session yet is not listed')
@@ -375,6 +378,21 @@ test('interrupt, rename, permission mode and effort go to the agent', async (t) 
   assert.equal(fake.requestsOf('set_agent_mode_request').at(-1).modeId, 'full-access')
 })
 
+test("a Codex agent leaves Allow all for its provider's own mode: the default Paseo names, else its first short of full access (#8261)", async (t) => {
+  const own = await setup(t, { entries: ENTRIES.map((e) => e.provider === 'my-codex' ? { ...e, defaultModeId: 'auto-review' } : e) })
+  const modeOf = (fake) => fake.requestsOf('set_agent_mode_request').at(-1)?.modeId
+  await call(own.node, 'session.modes', { session_id: `paseo-${own.a.codex.id}`, permission_mode: 'default' })
+  assert.equal(modeOf(own.fake), 'auto-review', "Paseo's default for that provider (its reviewer on)")
+
+  const { fake, node, a, rows } = await setup(t)
+  const sid = `paseo-${a.codex.id}`
+  fake.update(a.codex.id, { currentModeId: 'full-access', availableModes: [{ id: 'auto' }, { id: 'full-access' }] })
+  await until('Allow all', () => rows().find((r) => r.session_id === sid)?.permission_mode === 'bypassPermissions')
+  await call(node, 'session.modes', { session_id: sid, permission_mode: 'default' })
+  assert.equal(modeOf(fake), 'auto', 'no default named: the first of its modes short of full access')
+  assert.deepEqual(rows().find((r) => r.session_id === sid).capabilities.permission_modes, ['default', 'bypassPermissions'])
+})
+
 test("the model goes to the agent first, an effort is the new model's; an unknown model, or an archived agent, changes nothing", async (t) => {
   const { fake, node, a, bridge } = await setup(t)
   fake.entries = ENTRIES.map((e) => e.provider !== 'my-claude' ? e : { ...e, models: [...e.models,
@@ -409,8 +427,11 @@ test("rows say how far a rewind goes: Paseo's provider decides, conversation and
   const caps = (id) => rows().find((r) => r.session_id === id)?.capabilities
   assert.deepEqual(caps(SID), { rewind: true, rewind_code: true })
   await until('codex', () => caps(`paseo-${a.codex.id}`)?.rewind === true)
-  assert.deepEqual(caps(`paseo-${a.codex.id}`), { rewind: true, rewind_code: false }, 'Codex: the conversation only')
-  assert.deepEqual(caps(`paseo-${a.grok.id}`), { rewind: false, rewind_code: false }, 'files and conversation only at once is no rewind of Persona\'s')
+  // (Both also say the permission modes they take, #8261.)
+  const both = ['default', 'bypassPermissions']
+  assert.deepEqual(caps(`paseo-${a.codex.id}`), { rewind: true, rewind_code: false, permission_modes: both }, 'Codex: the conversation only')
+  assert.deepEqual(caps(`paseo-${a.grok.id}`), { rewind: false, rewind_code: false, permission_modes: both },
+    'files and conversation only at once is no rewind of Persona\'s')
   assert.deepEqual(caps('paseo-e1'), { rewind: false, rewind_code: false }, 'a Paseo that does not say')
 })
 

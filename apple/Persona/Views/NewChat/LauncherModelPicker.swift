@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 /// New Agent's model: the launcher's list (`LauncherModels`) and what is picked from it. Picking nothing ("") is the
 /// default — what the launcher runs, or Model Settings › New Agent's model when that applies — and sends no model. An ID

@@ -104,5 +104,6 @@
   "setting_agentMode": "実行モード",
   "setting_agentMode_detail": "auto は安全な操作を自動承認し、必要な場合に確認します。すべての許可はツール権限で設定します。",
   "setting_service_tier": "速度",
-  "setting_service_tier_detail": "Fast は使用量や料金が増えます。対応モデルの新規 Codex 会話に適用します。"
+  "setting_service_tier_detail": "Fast は使用量や料金が増えます。対応モデルの新規 Codex 会話に適用します。",
+  "speed_standard": "標準"
 }

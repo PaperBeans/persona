@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 // What Persona and a task's agent say to each other in the new conversation layout (#1666, `ChatLayout`): Persona's
 // message to the task (feed `routed` with `from` "assistant", #1542) reads "Persona → @task", the agent's report (feed

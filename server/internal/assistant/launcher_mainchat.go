@@ -180,7 +180,7 @@ const (
 // unavailableLauncher is one launcher or provider the main chat can't run on a machine, and why in the user's words.
 type unavailableLauncher struct {
 	Name        string `json:"name"`
-	DisplayName string `json:"display_name,omitempty"` // a Persona-managed provider's own name ("" shows Name)
+	DisplayName string `json:"display_name,omitempty"` // a Persona-managed provider's own name, or a runtime's for its provider ("" shows Name)
 	Kind        string `json:"kind"`                   // launcher | api
 	Agent       string `json:"agent,omitempty"`
 	API         string `json:"api,omitempty"` // a direct API provider's protocol: messages | responses | chat
@@ -219,7 +219,9 @@ func (s *Service) mainChatUnavailable(ctx context.Context, machine string, picke
 			continue
 		}
 		seen[l.Name] = true
-		u := unavailableLauncher{Name: l.Name, Kind: "launcher", Agent: cmp.Or(l.AgentType, l.Agent), Code: unavailableNotMainChat, Reason: notMainChat}
+		// named as the picker names it: a runtime's provider by the runtime's name for it (#8261)
+		u := unavailableLauncher{Name: l.Name, DisplayName: l.DisplayName, Kind: "launcher", Agent: cmp.Or(l.AgentType, l.Agent), Code: unavailableNotMainChat,
+			Reason: notMainChat}
 		if m, ok := managed(l.Name); ok {
 			u.DisplayName = m.DisplayName
 		}
@@ -250,6 +252,29 @@ func (s *Service) mainChatUnavailable(ctx context.Context, machine string, picke
 			continue
 		}
 		out = append(out, u)
+	}
+	return out
+}
+
+// ownServiceSkipped lists what New Agent's picker shows as unavailable on machine, with why in lang (#8109): the
+// Persona-managed providers in the computer's scope that its own-service rule leaves out there, where the node said
+// the harness has a service of its own. A provider added with the defaults (own_service skip) would otherwise just be
+// missing from the picker on a computer where Claude Code is signed in. Those out of scope stay out (the scope is
+// what the user chose for the provider), and so do hidden names, direct API connections (never in this picker) and
+// what the picker lists already (a launcher of the computer's own by the same name).
+func (s *Service) ownServiceSkipped(ctx context.Context, machine string, listed []ConfiguredLauncher, lang i18n.Lang) []unavailableLauncher {
+	hidden := s.hiddenLaunchers(ctx)
+	out := []unavailableLauncher{}
+	for _, l := range s.storedLaunchers(ctx) {
+		if l.Kind == "api" || !l.SkipsOwnService() || slices.Contains(hidden, l.Name) ||
+			slices.ContainsFunc(listed, func(c ConfiguredLauncher) bool { return c.Name == l.Name }) {
+			continue
+		}
+		if s.scopeReason(l, machine) != "" || s.usableOn(ctx, l, machine) {
+			continue
+		}
+		out = append(out, unavailableLauncher{Name: l.Name, DisplayName: l.DisplayName, Kind: "launcher", Agent: l.Agent,
+			Code: proto.CodeLauncherOwnService, Reason: s.ownServiceErr(ctx, lang, l, machine).Error()})
 	}
 	return out
 }

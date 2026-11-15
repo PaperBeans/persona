@@ -223,10 +223,11 @@ type event struct {
 }
 
 type result struct {
-	searchHits map[string]SearchHit
-	events     []event
-	counts     Counts
-	ordered    bool // counts-only views must not be mistaken for an empty ordered list
+	searchHits  map[string]rankedHit
+	searchTerms []string // the terms a page's evidence is built for
+	events      []event
+	counts      Counts
+	ordered     bool // counts-only views must not be mistaken for an empty ordered list
 }
 
 type cacheEntry struct {
@@ -259,7 +260,10 @@ type Index struct {
 	cacheClock     uint64
 	snapshots      map[string]*snapshot
 	snapshotOrder  []string
-	now            func() time.Time // optional clock used by package tests
+	// undecoded counts the current records without a search document: a search with none to decode lists none
+	// (decodeSearchDocuments).
+	undecoded int
+	now       func() time.Time // optional clock used by package tests
 }
 
 func randomToken() string {
@@ -346,9 +350,13 @@ func (i *Index) ReplaceOwned(source, owner string, items []Item) {
 	for id, c := range changes {
 		if c.before != nil {
 			addCount(&i.counts, c.before.item, false, -1)
+			if c.before.searchDocument == nil {
+				i.undecoded--
+			}
 		}
 		if c.after != nil {
 			addCount(&i.counts, c.after.item, false, 1)
+			i.undecoded++ // a new record: its document is decoded by the first search that reads it
 		}
 		if c.after == nil {
 			delete(i.items, id)

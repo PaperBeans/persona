@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 // Several hubs on one device (docs/protocol/multi-hub.md, docs/archive/operations/plan-hub-mesh.md 4). Every hub paired is kept with its own
 // credential; hubs that know each other (the `mesh` of their hello) form a group, reached over one connection; groups

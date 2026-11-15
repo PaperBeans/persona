@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 /// The shared words for an inbox matter's current state and row metadata (spec/fixtures/inbox/now.json and row.json).
 /// The manager sends keys and facts; each client resolves the same localized table instead of deriving its own state.

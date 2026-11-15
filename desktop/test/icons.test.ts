@@ -35,7 +35,7 @@ test("each platform's tray file is there, the menu bar's as a 1x/2x template pai
 test("the app icons electron-builder packs: macOS's 1024 PNG and Windows' .ico up to 256", () => {
   assert.deepEqual(png(join(root, "build", "icon.png")), { width: 1024, height: 1024, alpha: true });
   assert.deepEqual(icoSizes(join(root, "build", "icon.ico")).sort((a, b) => a - b), [16, 24, 32, 48, 64, 128, 256]);
-  const config = readFileSync(join(root, "electron-builder.yml"), "utf8");
+  const config = readFileSync(join(root, "electron-builder.yml"), "utf8").replaceAll("\r\n", "\n");
   assert.match(config, /mac:\n(?:  .*\n)*?  icon: build\/icon\.png\n/);
   assert.match(config, /win:\n  icon: build\/icon\.ico\n/);
 });

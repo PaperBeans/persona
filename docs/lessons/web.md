@@ -1,5 +1,18 @@
 # Lessons: web UI and interactions
 
+## Compact buttons need their touch targets when moved into a dialog (#7446)
+
+The shared `Button` is drawn 32 px tall. Keep `touch-hit` on every dialog, file-picker and Undo action when replacing
+an older `min-h-11` button. Its pseudo-element expands the target without changing the drawn box: browser acceptance
+must check coarse-pointer hit testing and actual edge taps, rather than the button's bounding rectangle alone.
+
+## Drop targets must cancel navigation before filtering drag types or busy states (#7446)
+
+Cancel every `dragover` and `drop` default before filtering for files or a busy state: ignoring a link, text or a
+second file must not let the browser navigate away from the app. Keep the file-type and busy guards on the upload
+and drag highlight. `Skills.test.tsx` checks link/text drags without upload or highlight, and both file events while
+a ZIP preview is pending, including that the first check completes and no second check starts.
+
 ## A paging hub pushes no sessions: a computer's Agents are not in `sessions[mid]` (web audit items 3 and 30)
 
 A connection that asked for `sessions_list` gets no `sessions` / `sessions_delta` pushes (docs/protocol/protocol.md
@@ -57,8 +70,12 @@ tasks on a 4x-throttled phone, none with 74 Agents). Sidebar folds are lazy by d
 folded group's rows (to check they are inert) opens the group first. Two smaller costs hid behind the big DOM: each
 group heading read its height in a layout effect (`getBoundingClientRect`), and one set a custom property on the
 scroller, which restyles everything under it before the next heading's read. Take such heights from a
-`ResizeObserver`: its first report comes after the browser's own layout and before the paint, and `flushSync` applies
-state from it in that frame. Measure with a production build (`vite preview`), CDP CPU throttling and a `longtask`
+`ResizeObserver`: its first report comes after the browser's own layout and before the paint. Do not synchronously flush
+another React layout pass from that delivery: the shared group-heading observer did that and reproduced
+`ResizeObserver loop completed with undelivered notifications` in the desktop smoke. Let React batch those reports, and
+verify the real browser console, not only a jsdom test. A callback's target or timestamp alone does not identify the
+writer; use a before/after control and keep the warning in the verdict (`web/e2e/sidebar-resize-observer.mjs`, #7701).
+Measure with a production build (`vite preview`), CDP CPU throttling and a `longtask`
 observer, against the same mock with fewer sessions (`web/e2e/sidebar-many-agents.mjs`).
 
 Dropping what is not drawn has three costs to pay for. A broadcast to mounted listeners (Collapse all / Expand all)

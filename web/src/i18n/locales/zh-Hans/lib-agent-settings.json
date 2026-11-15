@@ -104,5 +104,6 @@
   "setting_agentMode": "执行模式",
   "setting_agentMode_detail": "auto 自动放行安全操作，需要时仍会询问。全部放行由工具权限控制。",
   "setting_service_tier": "速度",
-  "setting_service_tier_detail": "Fast 会增加用量或费用，对支持该模式的新 Codex 会话生效。"
+  "setting_service_tier_detail": "Fast 会增加用量或费用，对支持该模式的新 Codex 会话生效。",
+  "speed_standard": "标准"
 }

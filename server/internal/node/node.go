@@ -1390,7 +1390,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		// new main chat): sent once, and its transcript item carries the id, as a session.send's (echo.go).
 		var id string
 		err := n.sends.once(opts.ClientMsgID, func() error {
-			return n.sendEchoed(p.NewSessionID, opts.ClientMsgID, p.Text, len(p.Images), 0, func() (err error) {
+			return n.sendEchoed(p.NewSessionID, opts.ClientMsgID, p.Text, len(p.Images), echoAfter{}, func() (err error) {
 				id, err = send()
 				return err
 			})
@@ -1429,7 +1429,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		ctx = context.WithValue(ctx, sendTraceKey{}, opts.ClientMsgID)
 		ctx, waits := withComputerWait(ctx) // claudebg.go: an outside Claude took it behind a dialog
 		err := n.sends.once(opts.ClientMsgID, func() error {
-			var after int
+			var after echoAfter
 			if opts.ClientMsgID != "" {
 				after = n.echoBase(p.SessionID)
 			}
@@ -2124,7 +2124,7 @@ func (n *Node) sessionInfo(ctx context.Context, id string) (map[string]any, erro
 			if c, t, driven := n.codexEffortThread(id); driven {
 				effort = n.codexEffortNow(id, c, t, "")
 			}
-			return map[string]any{"session_id": id, "source_kind": "codex_app_server", "source_thread_id": src.thread, "transcript_path": "", "cwd": "", "model": "", "launcher": "", "git_branch": "", "version": "", "permission_mode": "", "effort": effort, "context_tokens": 0, "output_tokens": 0, "compactions": 0, "turns": 0, "history_unavailable": true}, nil
+			return map[string]any{"session_id": id, "source_kind": "codex_app_server", "source_thread_id": src.thread, "transcript_path": "", "cwd": "", "model": "", "launcher": "", "git_branch": "", "version": "", "permission_mode": "", "effort": effort, "context_tokens": 0, "output_tokens": 0, "compactions": 0, "turns": 0, "history_unavailable": true, "stop_cause": n.stopCause(id)}, nil
 		}
 		return nil, err
 	}
@@ -2152,6 +2152,7 @@ func (n *Node) sessionInfo(ctx context.Context, id string) (map[string]any, erro
 		"git_branch": m.GitBranch, "version": m.Version, "permission_mode": mode, "effort": effort,
 		"context_tokens": m.ContextTokens, "output_tokens": m.OutputTokens, "compactions": m.Compactions,
 		"turns": m.Turns, "started_at": m.StartedAt, "last_activity": m.LastActivity,
+		"stop_cause": st.StopCause,
 	}, nil
 }
 

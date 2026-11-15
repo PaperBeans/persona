@@ -34,6 +34,16 @@ val Session.canAttach: Boolean get() = hasSource && capabilities?.attach == true
 /** A declared modes capability wins; an older hub that omits it keeps the agent-based rule. */
 val Session.canChangeModes: Boolean get() = isLive && canSend && (capabilities?.modes ?: isClaude)
 /**
+ * The permission modes the chat switches it between when they are not Claude Code's (#8261, the node's
+ * `capabilities.permission_modes`: Paseo's Grok, OpenCode or Codex): its own approval (`default`) and Allow everything.
+ * Null with fewer than two, for a Persona conversation, and where Claude Code's modes stand ([canChangeModes]' rule),
+ * as the web's `listedModesOf` and iOS read it.
+ */
+val Session.listedModes: List<String>? get() = capabilities?.permissionModes
+    ?.takeIf { it.size >= 2 && !assistant && capabilities?.modes != true && (capabilities?.modes != null || !isClaude) }
+/** Its [listedModes] can be switched now: it runs and takes messages. */
+val Session.canSwitchListedModes: Boolean get() = isLive && canSend && listedModes != null
+/**
  * Only the effort changes, among the session's own [Session.efforts]: a Codex thread the hub drives through its
  * app-server (the hub lists the levels only then; the iOS `Session.setsEffortOnly`).
  */

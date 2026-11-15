@@ -5,7 +5,6 @@
 // replays nothing; whether the configured model then runs is only known from a newer reply, so nothing here says it was
 // restored, and the same request may be refused again.
 
-import { api, ApiError, errorText, sessionPath } from "./api";
 import { t } from "../i18n";
 import { publicRefusal } from "./refusal-public";
 import { usageLimitClock } from "./usage-limit";
@@ -92,38 +91,6 @@ export function recoveryReturning(s: Pick<Session, "model_fallback"> | undefined
   const f = s?.model_fallback;
   if (!f || f.subtype !== "model_refusal_fallback" || !f.recovery_returning) return undefined;
   return f.original_model || undefined;
-}
-
-/** What session.restore_model answers: what it did and the configured model it read, nothing about which model runs. */
-export interface RestoreModelResult {
-  restore: string;
-  restore_to?: string;
-  /** An idle process was closed (false: none was running; the next start uses the configured model all the same). */
-  closed: boolean;
-}
-
-/** POST …/restore-model, no body: whatever the page could say is not sent. The card waits for the session's next push. */
-export function restoreModel(mid: string, sid: string): Promise<RestoreModelResult> {
-  return api<RestoreModelResult>(`${sessionPath(mid, sid)}/restore-model`, { method: "POST" });
-}
-
-/** A refusal of the restore in the page's language, by its code; the node's own words for anything else. */
-export function restoreErrorText(e: unknown): string {
-  if (e instanceof ApiError) {
-    switch (e.code) {
-      case "restore_busy":
-        return t("chat-modelfallback.err_busy");
-      case "restore_unsupported":
-        return t("chat-modelfallback.err_unsupported");
-      case "restore_nothing":
-        return t("chat-modelfallback.err_nothing");
-      case "restore_unknown":
-        return t("chat-modelfallback.err_unknown");
-      case "node_outdated":
-        return t("chat-modelfallback.err_outdated");
-    }
-  }
-  return errorText(e);
 }
 
 /** A refusal notice's facts in the order they are shown: the public record only (lib/refusal-public.ts), the refusal's

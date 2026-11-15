@@ -14,7 +14,7 @@ import (
 // A side session of the desktop app (spawnedFrom.sessionId names the local_<id> of the session that started it) is
 // drawn under that session (#5935): its row names the parent's transcript in parent_agent_id while both are listed, and
 // stays a row of its own. A parent that is archived, missing or not listed, an entry without the id or of another
-// shape, and a loop link nothing.
+// shape, a loop, and an entry the user moved to the top level (lineageDetached, #8522) link nothing.
 func TestSideSessionsNameTheSessionThatStartedThem(t *testing.T) {
 	const (
 		parent   = "eeeeeeee-0000-4000-8000-000000000001"
@@ -29,6 +29,9 @@ func TestSideSessionsNameTheSessionThatStartedThem(t *testing.T) {
 		loopB    = "eeeeeeee-0000-4000-8000-00000000000a"
 		self     = "eeeeeeee-0000-4000-8000-00000000000b" // started from itself
 		unlisted = "eeeeeeee-0000-4000-8000-00000000000c" // started from parentOff, whose transcript is not on this machine
+		detached = "eeeeeeee-0000-4000-8000-00000000000d" // started from parent, then moved to the top level: still names it
+		kept     = "eeeeeeee-0000-4000-8000-00000000000e" // lineageDetached false: still under parent
+		ofDetach = "eeeeeeee-0000-4000-8000-00000000000f" // a side chat of detached: under detached, which is a top row now
 	)
 	n, home := testNode(t)
 	n.metas, n.bgScans = map[string]quickMeta{}, map[string]*bgScan{}
@@ -36,7 +39,7 @@ func TestSideSessionsNameTheSessionThatStartedThem(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for i, id := range []string{parent, side, grand, orphan, gone, ofGone, noID, odd, loopA, loopB, self, unlisted} {
+	for i, id := range []string{parent, side, grand, orphan, gone, ofGone, noID, odd, loopA, loopB, self, unlisted, detached, kept, ofDetach} {
 		writeEntrypointTranscript(t, dir, id, "claude-desktop", time.Duration(i+1)*time.Minute)
 	}
 	_, third := useDesktopDirs(t)
@@ -57,9 +60,12 @@ func TestSideSessionsNameTheSessionThatStartedThem(t *testing.T) {
 	const parentOff = "ffffffff-0000-4000-8000-000000000002"
 	writeDesktopEntry(t, third, parentOff, parentOff, false, nil, "") // named by the index, no transcript here
 	writeDesktopEntry(t, third, unlisted, unlisted, false, nil, from(parentOff))
+	writeDesktopEntry(t, third, detached, detached, false, nil, from(parent)+`,"lineageDetached":true,"lineageDetachedBy":"user"`)
+	writeDesktopEntry(t, third, kept, kept, false, nil, from(parent)+`,"lineageDetached":false`)
+	writeDesktopEntry(t, third, ofDetach, ofDetach, false, nil, from(detached))
 
 	want := map[string]string{parent: "", side: parent, grand: side, orphan: "", ofGone: "", noID: "", odd: "", loopA: "",
-		loopB: "", self: "", unlisted: ""}
+		loopB: "", self: "", unlisted: "", detached: "", kept: parent, ofDetach: detached}
 	for round := range 2 { // the second list comes from the cached scan: the link is set again, on the row's own copy
 		rows := map[string]proto.Session{}
 		for _, s := range n.sessionList(context.Background(), false) {

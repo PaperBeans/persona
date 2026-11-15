@@ -396,6 +396,9 @@ they draw and never load whole transcripts.
 **Why.** iOS ends a process that grows past its memory limit without a crash report the user sees; extensions get much
 lower limits than the app. A cache with no bound is a leak with extra steps.
 
+The same holds on disk: a cache folder that grows with use has a byte budget (`AttachedVideos.budget`, `CacheBudget` for
+chat pictures, Feishu media and WebKit's disk cache, #8341), and a versioned folder removes all its older versions.
+
 **Do.** Give caches a cost; drop them on `UIApplication.didReceiveMemoryWarningNotification`; release retained stores on
 `onTabVisibility` disappear. Full-size decodes of user pictures run one at a time and let the original go as soon as it
 is downscaled (`MeetingPhotos` prepares a pick's photos in turn, and `MeetingPhotoPipeline.prepare` drops the original
@@ -637,7 +640,7 @@ Grep counts are across `apple/` without tests; they are leads to read, not each 
 - `apple/Shared/Models.swift:2505`: `storageText` creates a `ByteCountFormatter` on each read; 35 callers, many in rows and in a progress label (`apple/Persona/Views/Chat/VideoFileView.swift:145`).
 - `apple/Persona/Views/Session/ReviewPage.swift:267-283`: rebuilds a file's diff rows, scans them for the widest line number and filters the drafts once per line, on every `body`.
 - Counts: 22 `DateFormatter()`, 13 `ISO8601DateFormatter()`.
-- Good: `ChatScratch`'s memoized lines (`apple/Persona/Views/Chat/ChatView.swift:880`), `TextMemo` (`apple/Shared/TextMemo.swift`), `InboxProjectionMemo`.
+- Good: `ChatScratch`'s memoized lines (`apple/Persona/Views/Chat/ChatView.swift:880`), `TextMemo` (`apple/Packages/PersonaWire/Sources/PersonaWire/TextMemo.swift`), `InboxProjectionMemo`.
 
 **P5 / P7: reads and high-frequency updates**
 

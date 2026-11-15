@@ -312,10 +312,10 @@ describe("the list by project, on a hub with the catalog", () => {
     // a row is told the group it is under: the sidebar names the computer on a row of a project that has several
     expect([...app.querySelectorAll<HTMLElement>("[data-row]")].map((el) => `${el.dataset.within}:${el.dataset.group}`)).toEqual(["project:app", "project:app", "project:app"]);
     // its remote, then each directory with its computer and how many of the sessions are there
-    const where = [...app.querySelectorAll(`[aria-label="${t("paged-agents.places")}"] li`)]
+    const where = [...app.querySelectorAll(`[aria-label="${t("agents-groupedsessions.places")}"] li`)]
       .map((li) => [li.querySelector("span[title]")!.textContent, li.querySelector("span[aria-hidden]")?.textContent].filter(Boolean).join(" = "));
     expect(where).toEqual(["git.example.com/team/app", "MacBook · ~/code/app = 2", "Windows PC · C:\\code\\App = 1"]);
-    expect(app.querySelector(`[aria-label="${t("paged-agents.places")}"] span[title="MacBook · /Users/me/code/app"]`)).not.toBeNull(); // the whole path on hover
+    expect(app.querySelector(`[aria-label="${t("agents-groupedsessions.places")}"] span[title="MacBook · /Users/me/code/app"]`)).not.toBeNull(); // the whole path on hover
     const read = reads("page").find((path) => params(path).getAll("place").length === 2)!;
     expect(params(read).getAll("place")).toEqual([listPair("mac", "/Users/me/code/app"), listPair("pc", "C:\\code\\App")]);
     expect(params(read).has("project")).toBe(false);

@@ -1266,6 +1266,14 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "web/src/lib/drafts-storage.test.ts": {
+      "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
+      "tokens": [
+        "jarvis-new"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "web/src/lib/provider-link.test.ts": {
       "reason": "Regression assertion for the historical managed-provider source accepted by the exact compatibility adapter.",
       "tokens": [

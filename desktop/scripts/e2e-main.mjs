@@ -409,7 +409,7 @@ async function finish(error) {
   if (finished) return;
   finished = true;
   clearTimeout(deadline);
-  const ok = !error && steps.length > 0 && steps.every(s => s.ok);
+  const ok = !error && steps.length > 0 && steps.every(s => s.ok) && consoleErrors.length === 0;
   const result = {
     ok, scenario, platform: process.platform, electron: process.versions.electron, hub: prefix ? `prefix ${prefix}` : "root",
     ...(error ? { error: error instanceof Error ? error.message : String(error) } : {}),
@@ -426,7 +426,7 @@ async function finish(error) {
     }
     await writeFile(join(output, "result.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");
   } catch (writeError) { console.error(writeError); }
-  console.log(`desktop e2e ${scenario}: ${ok ? "PASS" : "FAIL"}${error ? ` (${result.error})` : ""}`);
+  console.log(`desktop e2e ${scenario}: ${ok ? "PASS" : "FAIL"}${error ? ` (${result.error})` : consoleErrors.length ? ` (renderer errors: ${consoleErrors.join(" | ")})` : ""}`);
   app.exit(ok ? 0 : 1);
 }
 main().then(() => finish(), error => finish(error));

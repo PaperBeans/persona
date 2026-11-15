@@ -1,13 +1,12 @@
 // Transcript notices, recaps and model errors. Background continuation belongs to the normal execution summary.
-import { memo, useMemo, useState } from "react";
+import { memo, Suspense, useMemo, useState } from "react";
 import { lineItemIds } from "../../lib/chat-search";
 import { useChatContext } from "./chat-context";
 import { useExpanded } from "./expanded";
 import { useReveal } from "./search-reveal";
 import { ago, clock } from "../../lib/format";
 import { retryable, type APIErrorInfo } from "../../lib/api-errors";
-import { recoveryCause, refusalFacts, type RecoveryExhaustedView } from "../../lib/model-fallback";
-import { replyModelName } from "../../lib/model-change";
+import type { RecoveryExhaustedView } from "../../lib/model-fallback";
 import { runAction, turnErrorFix } from "../../lib/readiness";
 import { wakeSummary } from "../../lib/tasks";
 import { type ChatLine, type OpenRecap } from "../../lib/turns";
@@ -21,6 +20,9 @@ import { SegmentView } from "./SegmentView";
 import { CompactDivider } from "./Steps";
 import { t } from "../../i18n";
 import { ScrollFold } from "./fold-scroll";
+import { lazyPage } from "../../lib/lazy-page";
+
+export const RefusalNotice = lazyPage(() => import("./RefusalNotice").then((m) => m.RefusalNotice));
 
 export interface LineProps {
   line: ChatLine;
@@ -124,7 +126,7 @@ function SupervisionLine({ line, ...props }: LineProps & { line: Extract<ChatLin
 /** A notice on a line of its own: a wake opening new work (a centered capsule), "Interrupted", a long local command's output. */
 function LineNotice({ item, assistant }: { item: Item; assistant?: boolean }) {
   const [open, setOpen] = useState(false);
-  if (item.model_refusal) return <RefusalNotice item={item} plain={assistant} />;
+  if (item.model_refusal) return <Suspense fallback={null}><RefusalNotice item={item} plain={assistant} /></Suspense>;
   if (item.wake) {
     const w = wakeSummary(item);
     return (
@@ -151,70 +153,6 @@ function LineNotice({ item, assistant }: { item: Item; assistant?: boolean }) {
       <Icon name="info" size={13} className="mt-[3px] shrink-0 text-ink-3" />
       <span className={cx("min-w-0 text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink-2", !open && "line-clamp-4")}>{text}</span>
     </button>
-  );
-}
-
-/** A Claude Code model_refusal_* record (#2528): the refused model, the one Claude Code switched to, the category and
- *  scope as recorded, and the refusal's own words verbatim (never reworded, never the record's line). `plain`: a Persona
- *  conversation, for everyday people (#5202): one sentence naming the model by its short name, the record under a
- *  closed Details. */
-function RefusalNotice({ item, plain }: { item: Item; plain?: boolean }) {
-  const r = item.model_refusal!;
-  const f = refusalFacts(r);
-  const fallback = r.subtype === "model_refusal_fallback" && f.fallback;
-  // The node's own recovery names one of the five plain-words causes (#7824); a runtime record's category stays in
-  // the folded record with its existing wording.
-  const cause = recoveryCause(f.category);
-  const returning = r.recovery_returning && r.original_model ? replyModelName(r.original_model) : "";
-  const record = (
-    <>
-      {fallback ? (
-        <span className="[overflow-wrap:anywhere]">{t("chat-modelfallback.refusal_fallback", { from: f.original ?? "?", to: f.fallback! })}</span>
-      ) : (
-        <span>{t("chat-modelfallback.refusal_no_switch")}</span>
-      )}
-      {fallback && f.scope === "session" && <span>{t("chat-modelfallback.refusal_session")}</span>}
-      {f.category && <span className="[overflow-wrap:anywhere]">{t("chat-modelfallback.refusal_category", { category: f.category })}</span>}
-      {f.explanation && <span className="whitespace-pre-wrap">{t("chat-modelfallback.refusal_explanation", { text: f.explanation })}</span>}
-      {f.text && (
-        <span className="flex min-w-0 flex-col">
-          <span className="text-ink-3">{t("chat-modelfallback.refusal_text")}</span>
-          <span className="whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="refusal-text">
-            {f.text}
-          </span>
-        </span>
-      )}
-    </>
-  );
-  return (
-    <div role="note" data-testid="refusal-notice" title={clock(item.ts)} className="flex w-full items-start gap-2 rounded-card bg-orange-tint px-3 py-2 text-left shadow-hairline">
-      <Icon name="warning" size={13} className="mt-[3px] shrink-0 text-orange" />
-      <span className="flex min-w-0 flex-col gap-0.5 text-[12.5px] leading-relaxed text-ink-2">
-        {plain ? (
-          <>
-            <span className="font-semibold text-ink">
-              {fallback
-                ? cause
-                  ? t("chat-modelfallback.plain_refused_switched_cause", { model: replyModelName(f.fallback!), cause })
-                  : t("chat-modelfallback.plain_refused_switched", { model: replyModelName(f.fallback!) })
-                : t("chat-modelfallback.refusal_title")}
-            </span>
-            {returning && (
-              <span data-testid="refusal-returning">{t("chat-modelfallback.returning", { model: returning })}</span>
-            )}
-            <details data-testid="refusal-details" className="text-ink-3">
-              <summary className="cursor-pointer select-none">{t("chat-modelfallback.details")}</summary>
-              <span className="mt-1 flex min-w-0 flex-col gap-0.5 text-ink-2">{record}</span>
-            </details>
-          </>
-        ) : (
-          <>
-            <span className="font-semibold text-ink">{t("chat-modelfallback.refusal_title")}</span>
-            {record}
-          </>
-        )}
-      </span>
-    </div>
   );
 }
 

@@ -1,7 +1,6 @@
 // A sidebar group: its heading stays in view while its rows scroll, a section folds under it, and its count says what
 // it counts. Kept apart from the sidebar's own parts so that a list outside the sidebar can draw the same sections.
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { t } from "../i18n";
 import { stateCount } from "../lib/state-labels";
 import { Collapse, cx, sidebarFoldMotion } from "../ui/atoms";
@@ -14,13 +13,16 @@ const GroupHeadingOffset = createContext<{ offset: number; depth: number; pinned
 
 // Every heading's height comes from one observer, after the browser's own layout: a heading's layout effect that read
 // it (getBoundingClientRect) made the browser lay out the whole list there and then, on every list drawn and every
-// group opened. flushSync applies the heights before that frame is painted, as the layout effect did.
+// group opened. React batches the observer's reports, avoiding another synchronous layout pass during delivery.
 const headingReports = new Map<Element, (height: number) => void>();
 let headingSizes: ResizeObserver | null = null;
 function watchHeading(el: Element, report: (height: number) => void): () => void {
-  headingSizes ??= new ResizeObserver((entries) => flushSync(() => {
-    for (const e of entries) headingReports.get(e.target)?.(e.borderBoxSize?.[0]?.blockSize ?? e.target.getBoundingClientRect().height);
-  }));
+  headingSizes ??= new ResizeObserver(entries => {
+    for (const e of entries) {
+      const box = e.borderBoxSize?.[0];
+      headingReports.get(e.target)?.(box ? box.blockSize : e.target.getBoundingClientRect().height);
+    }
+  });
   headingReports.set(el, report);
   headingSizes.observe(el);
   return () => { headingReports.delete(el); headingSizes?.unobserve(el); };

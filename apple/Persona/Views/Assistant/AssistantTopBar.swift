@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 /// The Persona tab's top bar (docs/apple/ios.md「Persona top bar and sidebar」), floating over the conversation with a fog under it
 /// instead of a solid bar: Chat History (the sidebar) on the left, Persona's face and name in the middle, New Chat on the right.

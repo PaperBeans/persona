@@ -124,6 +124,7 @@ struct PersonaApp: App {
                 QuickAction.publish() // the home screen menu with the conversations' titles as they are now (#2191)
                 RecordingDayCatchUp.scheduleIfNeeded() // transcribe and upload the day's backlog while charging
                 #endif
+                CacheBudget.runOnce() // chat pictures, Feishu media and WebKit's cache back under their budgets (#8341)
             }
         }
         #if os(visionOS)

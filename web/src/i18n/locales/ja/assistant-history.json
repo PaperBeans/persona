@@ -26,5 +26,6 @@
   "rename_title": "チャットの名前を変更",
   "title_placeholder": "チャットのタイトル",
   "rename_hint": "設定したタイトルは自動タイトルで上書きされません。",
+  "built_in": "内蔵",
   "display_options": "表示オプション"
 }

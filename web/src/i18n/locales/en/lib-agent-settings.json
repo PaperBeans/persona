@@ -109,5 +109,6 @@
   "setting_agentMode": "Execution mode",
   "setting_agentMode_detail": "Auto approves safe operations and asks when needed. Full bypass is controlled by tool permission.",
   "setting_service_tier": "Speed",
-  "setting_service_tier_detail": "Fast increases usage or cost. Applies to new Codex sessions on supported models."
+  "setting_service_tier_detail": "Fast increases usage or cost. Applies to new Codex sessions on supported models.",
+  "speed_standard": "Standard"
 }

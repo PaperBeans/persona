@@ -135,6 +135,8 @@ type readinessRecord struct {
 	DismissedAt *time.Time `json:"dismissed_at,omitempty"`
 	// Probe is the last probe's result, for the machine and launcher it ran with.
 	Probe *readinessProbe `json:"probe,omitempty"`
+	// Success is completed main-chat evidence, independent of the process remaining online.
+	Success *readinessSuccess `json:"success,omitempty"`
 	// Start is the last coded refusal of a start (claude_missing, launcher_missing), cleared by a start that went.
 	Start *readinessStart `json:"start,omitempty"`
 	// AnsweredAt: the main conversation answered once (first_message stays ok after it).
@@ -493,6 +495,11 @@ func answeredWell(sess proto.Session) bool {
 func (s *Service) readinessModel(ctx context.Context, lang i18n.Lang, d Device, launcher string, rec readinessRecord,
 	main proto.Session, hasMain bool, auth claudeAuth) (ReadinessStep, bool) {
 	var ev []readinessEvidence
+	binding, fingerprint := s.readinessModelScope(ctx, launcher)
+	if success := rec.Success; success != nil && success.Machine == d.ID && success.Launcher == launcher &&
+		fingerprint != "" && success.Fingerprint == fingerprint {
+		ev = append(ev, readinessEvidence{at: success.At, ok: true})
+	}
 	if p := rec.Probe; p != nil && p.Machine == d.ID && p.Launcher == launcher {
 		ev = append(ev, readinessEvidence{at: p.At, ok: p.Check.OK, text: p.Check.Error})
 	}
@@ -500,8 +507,10 @@ func (s *Service) readinessModel(ctx context.Context, lang i18n.Lang, d Device, 
 		switch {
 		case main.TurnError != "":
 			ev = append(ev, readinessEvidence{at: main.UpdatedAt, text: main.TurnError, code: sessionTurnErrorCode(main)})
-		case answeredWell(main):
+		case readinessSucceeded(main, binding, fingerprint, rec.Success):
 			ev = append(ev, readinessEvidence{at: main.UpdatedAt, ok: true})
+			s.keepReadinessSuccess(ctx, readinessSuccess{Machine: d.ID, Launcher: launcher,
+				Fingerprint: fingerprint, At: main.UpdatedAt})
 		}
 	}
 	// A launcher only the terminal cannot run says nothing of the main conversation, which runs in the login shell.
@@ -526,7 +535,7 @@ func (s *Service) readinessModel(ctx context.Context, lang i18n.Lang, d Device, 
 	newestOf := func() *readinessEvidence {
 		var n *readinessEvidence
 		for i := range ev {
-			if n == nil || ev[i].at.After(n.at) {
+			if n == nil || ev[i].at.After(n.at) || ev[i].at.Equal(n.at) && n.ok && !ev[i].ok {
 				n = &ev[i]
 			}
 		}

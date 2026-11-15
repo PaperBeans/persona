@@ -71,6 +71,14 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.startRequestedTasks(ctx)), nil },
 			set: s.setStartRequestedTasks},
+		{Setting: Setting{Key: readonlyModeKey, Title: "Read-only task protection", Actions: getSet,
+			About: "sandbox (the default) keeps current runtime protection: Codex uses a read-only sandbox, while Claude uses " +
+				"bypassPermissions and a first-message read-only instruction. prompt keeps the instruction without forcing plan " +
+				"mode or a read-only sandbox; normal launcher permissions still apply. Instructions are not a security boundary. " +
+				"Applies to new task starts and retries, not running agents. Switch back to sandbox to restore the default",
+			Value: "sandbox or prompt"},
+			get: func(ctx context.Context) (string, error) { return readonlyModeOf(s.settings(ctx)), nil },
+			set: s.setReadonlyMode},
 		{Setting: Setting{Key: "assistant.task_workspace_preference", Title: "Task workspace preference", Actions: getSet,
 			About: "prefer-existing (default): reuse the task directory if free; prefer-new: isolate writable Git tasks. Read-only defaults to none, busy directories to new; explicit task workspace wins. Paths come from the machine engine",
 			Value: "prefer-existing or prefer-new"},
@@ -329,6 +337,7 @@ func orNone(s string) string {
 // settingTitles are the settings' titles for the card the user approves on, in this file's namespace (Title stays
 // what the assistant reads).
 var settingTitles = map[string]string{standingAuthorizationsKey: "title_standing_authorizations", "assistant.notes": "title_notes", "assistant.main_tasks_quiet": "title_main_tasks_quiet",
+	readonlyModeKey:                       "title_readonly_mode",
 	"assistant.task_workspace_preference": "title_task_workspace_preference",
 	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher",
 	"assistant.recording_days": "title_recording_days", "assistant.done_needs_delivery": "title_done_needs_delivery",

@@ -155,6 +155,11 @@ func archiveSnapshot(s proto.Session) proto.Session {
 	if len(preview) > 180 {
 		preview = preview[:180]
 	}
+	caps := &proto.SessionCapabilities{Read: true}
+	if s.Capabilities != nil {
+		caps.StopCause = s.Capabilities.StopCause
+		caps.Terminal = s.Capabilities.Terminal
+	}
 	return proto.Session{
 		MachineID: s.MachineID, SessionID: s.SessionID, Title: s.Title,
 		Cwd: s.Cwd, WorkspaceCwd: s.WorkspaceCwd, RepoRoot: s.RepoRoot, Worktree: s.Worktree, Branch: s.Branch,
@@ -163,7 +168,7 @@ func archiveSnapshot(s proto.Session) proto.Session {
 		ParentThreadID: s.ParentThreadID, ParentSessionID: s.ParentSessionID, RootSessionID: s.RootSessionID, IsSubagent: s.IsSubagent,
 		UpdatedAt: s.UpdatedAt, LastText: string(preview),
 		Status: proto.StatusOffline, State: proto.StateOffline,
-		Capabilities: &proto.SessionCapabilities{Read: true},
+		Capabilities: caps,
 	}
 }
 

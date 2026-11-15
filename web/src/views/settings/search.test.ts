@@ -99,6 +99,7 @@ describe("the settings search's index", () => {
     finds(t("lib-agent-settings.setting_model_reasoning_effort"), "agents", "settings-codex");
     finds(t("settings-modelconfiguration.effort"), "models", "settings-model-config");
     finds(t("settings-assistantsettings.timezone"), "persona", "runs-on");
+    finds(t("settings-assistantsettings.recent_task_chats"), "persona", "recent-task-chats");
     finds(t("settings-assistantsettings.default_permissions"), "persona", "default-permissions");
     finds(t("settings-triagesettings.auto_continue"), "persona", "triage-auto-continue");
     finds(t("settings-notifications.quiet"), "notifications", "notify-quiet");

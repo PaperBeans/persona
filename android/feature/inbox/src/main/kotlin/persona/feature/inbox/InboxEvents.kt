@@ -151,7 +151,7 @@ internal fun chainTarget(entry: InboxChainEntry, record: InboxRecord): ChainTarg
             when {
                 position != null && record.feedId != null -> ChainTarget.Page(LarkRoute(record.feedId, record.item.id, position))
                 !link.url.isNullOrBlank() -> ChainTarget.Url(link.url!!)
-                link.uid != null && record.isMail && record.doc == null -> ChainTarget.Page(MailRoute(record.item.id))
+                link.uid != null && record.isMail && record.doc == null -> ChainTarget.Page(MailRoute(record.item.id, link.uid))
                 else -> ChainTarget.Source
             }
         }

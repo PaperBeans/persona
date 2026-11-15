@@ -348,6 +348,8 @@ func (h *Hub) closeDatabaseAfterWorkers(cancel context.CancelFunc, closeDatabase
 	if h.stopping.Load() {
 		h.shutdown.step(h, "hand over the event log", func(ctx context.Context) error { h.saveEventLog(ctx); return nil })
 	}
+	// Every stop, planned or not: the next process may be a build from before hub_push_sent (lnmode.go mirrorSent).
+	h.shutdown.step(h, "delivered pushes for an older build", h.push.mirrorSent)
 	h.shutdown.step(h, "close database", closeDatabase)
 }
 

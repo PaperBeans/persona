@@ -1,5 +1,6 @@
 import SwiftUI
 import WatchKit
+import PersonaWire
 
 @main
 struct PersonaWatchApp: App {

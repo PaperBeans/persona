@@ -1,4 +1,6 @@
 {
+  "title_readonly_mode": "只读任务保护",
+  "change_readonly_mode": "只读任务保护：{before} -> {after}。sandbox 保持现有保护（Codex 使用只读沙箱，Claude 使用指令约束）；prompt 只靠指令约束，不是安全隔离，仍遵循启动器原有权限。对新启动和重试的任务生效，不改变正在运行的任务。改回 sandbox 可恢复默认行为。",
   "title_task_workspace_preference": "派发任务时优先使用",
   "change_task_workspace_preference": "派发任务时优先使用：{before} → {after}",
   "title_notes": "关于我",

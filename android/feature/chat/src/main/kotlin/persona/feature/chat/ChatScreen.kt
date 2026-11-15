@@ -42,6 +42,7 @@ import persona.core.domain.sort.READ_ONLY
 import persona.core.domain.sort.canApprove
 import persona.core.domain.sort.canChangeEffortOnly
 import persona.core.domain.sort.canChangeModes
+import persona.core.domain.sort.canSwitchListedModes
 import persona.core.domain.sort.canInterrupt
 import persona.core.domain.sort.canSend
 import persona.core.domain.sort.isStoppedAgent
@@ -1079,9 +1080,9 @@ private fun ChatPage(
                                     ChatQueueStrip(session, chrome.actions, composer, { notice = it }, sessions::refresh)
                                 val claudeCommands = session?.canTypeClaudeCommands == true
                                 // Brief and Board's "Mode" sheet: a permission mode, an effort or a model to change (a
-                                // listed model needs the computer's launcher lists).
+                                // listed model needs the computer's launcher lists), or the modes a provider lists (#8261).
                                 val modeSheet = session != null && (session.canChangeModes || session.canChangeEffortOnly ||
-                                    (chrome.worktrees != null && SessionModes.listsModels(session)))
+                                    session.canSwitchListedModes || (chrome.worktrees != null && SessionModes.listsModels(session)))
                                 ChatComposer(key, composer, session?.status == "working", sending || submittedDraft != null,
                                     // /clear and /model type into Claude's pane: Claude in a terminal engine only (positive check).
                                     canClear = clearingPane == null && session?.canTypeClaudeCommands == true,

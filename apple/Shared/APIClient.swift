@@ -1345,6 +1345,9 @@ nonisolated struct APIClient: Sendable {
         var timezonePicked: Bool?
         /// The main conversation's session id (the Persona tab opens it); nil until there is one.
         var main: String?
+        /// The computer the hub actually routes the main conversation to. It can differ from `machine_id`, which is
+        /// only the default for new work; older hubs omit it and use `machine_id`.
+        var mainMachineID: String?
         /// Notify Main-Chat Tasks Only in the Main Chat (#1731): tasks the main conversation starts are quiet (`TodoItem.quiet`). The
         /// value in effect (on by default); nil from a hub without the setting, which hides the switch.
         var mainTasksQuiet: Bool?
@@ -1409,7 +1412,7 @@ nonisolated struct APIClient: Sendable {
         var agentAutoNamingIntervalHours: Int?
         enum CodingKeys: String, CodingKey {
             case launcher, cwd, conversations, timezone, main, leaders, manager
-            case machineID = "machine_id", notes = "notes_effective", mainTasksQuiet = "main_tasks_quiet"
+            case machineID = "machine_id", mainMachineID = "main_machine_id", notes = "notes_effective", mainTasksQuiet = "main_tasks_quiet"
             case mainBackgroundFolded = "main_background_folded", recentTaskChats = "recent_task_chats"
             case meetingAttendanceDefault = "meeting_attendance_default", timezonePicked = "timezone_picked"
             case mainSupervisesOwnTasks = "main_supervises_own_tasks", backgroundSupervisor = "background_supervisor"
@@ -1431,6 +1434,13 @@ nonisolated struct APIClient: Sendable {
 
         /// Whether the main conversation folds its background rounds: on unless the hub says off (an older hub omits it).
         var backgroundFolded: Bool { mainBackgroundFolded ?? true }
+
+        /// The confirmed main conversation on its actual computer, not merely the default computer for new work.
+        func mainKey(group: String = "") -> SessionKey? {
+            guard let main, !main.isEmpty else { return nil }
+            let route = mainMachineID?.isEmpty == false ? mainMachineID : nil
+            return SessionKey(group: group, machineID: route ?? machineID, sessionID: main)
+        }
     }
     /// Decoded off the main actor: it holds every conversation, and the app reads it again each time it comes back to
     /// the front (#8324).

@@ -343,7 +343,6 @@ targets:
       - path: Shared/ExtensionSystemLink.swift
       - path: Shared/ExtensionSurfaceStore.swift
       - path: Shared/ExtensionSurfaceClient.swift
-      - path: Shared/CloudflareAccess.swift
       - path: Shared/RequestClientMetadata.swift
       - path: Shared/ExtensionSurfaceEntities.swift
       - path: Shared/ExtensionSurfaceView.swift
@@ -562,7 +561,6 @@ targets:
       - path: Shared/ExtensionSystemLink.swift
       - path: Shared/ExtensionSurfaceStore.swift
       - path: Shared/ExtensionSurfaceClient.swift
-      - path: Shared/CloudflareAccess.swift
       - path: Shared/RequestClientMetadata.swift
       - path: Shared/ExtensionSurfaceEntities.swift
       - path: Shared/ExtensionSurfaceView.swift
@@ -608,7 +606,6 @@ targets:
       - path: Shared/ExtensionSystemLink.swift
       - path: Shared/ExtensionSurfaceStore.swift
       - path: Shared/ExtensionSurfaceClient.swift
-      - path: Shared/CloudflareAccess.swift
       - path: Shared/RequestClientMetadata.swift
       - path: Shared/ExtensionSurfaceEntities.swift
       - path: Shared/ExtensionSurfaceView.swift

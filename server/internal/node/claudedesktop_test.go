@@ -313,3 +313,45 @@ func TestDesktopSessionsHaveACountOfTheirOwn(t *testing.T) {
 		t.Fatal("another platform's run is listed because the index names it")
 	}
 }
+
+// A session deleted in the app leaves the list at once: Delete writes deleted_<uuid> for the session's own id and for each
+// transcript it ran, so desktopEntryGrace is not waited out, whether or not this node read the entry before. A delete
+// whose markers name no transcript, or an entry removed without any, still waits it out; a transcript an entry names
+// is listed whatever a marker says.
+func TestDesktopSessionDeletedInTheAppLeavesAtOnce(t *testing.T) {
+	const (
+		deleted   = "dddddddd-2222-4000-8000-000000000001" // deleted in the app: markers for its id and its transcripts
+		earlier   = "dddddddd-2222-4000-8000-000000000002" // deleted's earlier transcript
+		localOnly = "dddddddd-2222-4000-8000-000000000003" // deleted, but the only marker names the session's own id
+		removed   = "dddddddd-2222-4000-8000-000000000004" // its entry went without a marker
+		named     = "dddddddd-2222-4000-8000-000000000005" // a marker names it, but so does an entry
+		kept      = "dddddddd-2222-4000-8000-000000000006"
+	)
+	n, home := testNode(t)
+	n.metas, n.bgScans = map[string]quickMeta{}, map[string]*bgScan{}
+	dir := filepath.Join(home, ".claude", "projects", "-src-app")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{deleted, earlier, localOnly, removed, named, kept} {
+		writeEntrypointTranscript(t, dir, id, "claude-desktop-3p", 10*time.Second) // all within desktopEntryGrace
+	}
+	_, third := useDesktopDirs(t)
+	index := filepath.Join(third, "claude-code-sessions", "account", "org")
+	writeDesktopEntry(t, third, "named", named, false, nil, "")
+	writeDesktopEntry(t, third, "kept", kept, false, nil, "")
+	for _, id := range []string{"aaaaaaaa-2222-4000-8000-000000000001", deleted, earlier, "aaaaaaaa-2222-4000-8000-000000000003", named} {
+		if err := os.WriteFile(filepath.Join(index, "deleted_"+id), []byte("1794736695195"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := map[string]bool{}
+	for _, s := range n.scanOffline() {
+		got[s.SessionID] = true
+	}
+	for id, want := range map[string]bool{deleted: false, earlier: false, localOnly: true, removed: true, named: true, kept: true} {
+		if got[id] != want {
+			t.Errorf("%s listed=%v, want %v", id, got[id], want)
+		}
+	}
+}

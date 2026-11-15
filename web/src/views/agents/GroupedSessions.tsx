@@ -96,7 +96,7 @@ function GroupSection<T>({ group, first, startsOpen, dimension, kind, scope, sou
 function GroupPlaces({ group, machineName }: { group: SessionGroup; machineName: (id: string) => string }) {
   if (!group.origin && !group.places.length) return null;
   return (
-    <ul aria-label={t("paged-agents.places")} className="flex flex-col gap-0.5 px-2 pb-1 text-xs text-ink-3">
+    <ul aria-label={t("agents-groupedsessions.places")} className="flex flex-col gap-0.5 px-2 pb-1 text-xs text-ink-3">
       {group.origin && (
         <li className="flex min-w-0 items-center gap-1.5">
           <Icon name="git" size={11} className="shrink-0" />

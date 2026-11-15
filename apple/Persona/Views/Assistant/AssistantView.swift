@@ -1189,34 +1189,29 @@ struct StarterComposer: View {
     private var textBinding: Binding<String> { Binding(get: { text }, set: { text = $0 }) }
     private var imagesBinding: Binding<[(UIImage, ImagePayload)]> { Binding(get: { images }, set: { images = $0 }) }
     private var quotesBinding: Binding<[ContextRef]> { Binding(get: { quotes }, set: { quotes = $0 }) }
-    private var uploads: FileUploads { draft.held.uploads }
+    private var files: FileAttachments { draft.held.files }
     private var videos: VideoAttachments { draft.held.videos }
 
-    /// Files to the assistant's machine, each path into the box once it is there; not into the next message's box
-    /// when this one went first (the draft outlives the page, #2626).
+    /// Files to the assistant's machine, as cards above the box until the first message carries them (#8361).
     private func upload(_ urls: [URL]) {
-        let generation = draft.generation
-        uploads.start(urls, machine: machine, model: model, dest: uploadDest) { path in
-            guard draft.generation == generation else { return }
-            text = PathInsert.edit(path, text: text, selection: $selection, focused: $focused)
-        }
+        files.start(urls, machine: machine, model: model, dest: uploadDest)
     }
 
     private var canSend: Bool {
-        !disabled && !videos.busy
-            && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty || !videos.ready.isEmpty || !quotes.isEmpty)
+        !disabled && !draft.held.busy
+            && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty || !draft.held.ready.isEmpty || !quotes.isEmpty)
     }
 
     private func submit() {
         if let gate { gate.action(); return } // nothing goes and nothing is queued: the draft stays
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let files = videos.ready
+        let ready = draft.held.ready
         // Nothing to send: a second ⏎ on the Mac before the field redraws (#785) would start an empty conversation.
-        guard !videos.busy, !t.isEmpty || !images.isEmpty || !files.isEmpty || !quotes.isEmpty else { return }
+        guard !draft.held.busy, !t.isEmpty || !images.isEmpty || !ready.isEmpty || !quotes.isEmpty else { return }
         // The keyboard goes down with the send: the conversation that takes over has a field of its own, and the keyboard
         // coming back up and going down again on the way moved the first message up and down with it (#1911).
         focused = false
-        send(draft.message(t, files: files), images.map(\.1))
+        send(draft.message(t, files: ready), images.map(\.1))
         draft.sent()
     }
 
@@ -1327,7 +1322,7 @@ struct StarterComposer: View {
 
     var body: some View {
         VStack(spacing: Theme.Space.s) {
-            if !uploads.items.isEmpty { UploadsBar(uploads: uploads) }
+            if !files.items.isEmpty { FileAttachmentsBar(files: files) }
             if !videos.items.isEmpty { VideoAttachmentsBar(videos: videos) }
             #if os(iOS) || os(visionOS)
             PasteImageChip(focused: focused) { add($0) }
@@ -1345,7 +1340,7 @@ struct StarterComposer: View {
             }
             if let shell {
                 ShellComposerBar(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)"), text: textBinding, selection: $selection, focused: $focused,
-                                 canSend: canSend, hasAttachments: !images.isEmpty || !videos.items.isEmpty || !quotes.isEmpty,
+                                 canSend: canSend, hasAttachments: !images.isEmpty || !videos.items.isEmpty || !files.items.isEmpty || !quotes.isEmpty,
                                  modesTitle: StarterModesMenu.title(modes: shell, launchers: launchers, model: model),
                                  quotes: quotesBinding, history: "assistant.new", gate: gate, openAttach: attachOpener, send: submit) {
                     #if os(iOS)
@@ -1458,17 +1453,12 @@ struct BeautifulStarterComposer: View {
     private var textBinding: Binding<String> { Binding(get: { text }, set: { text = $0 }) }
     private var imagesBinding: Binding<[(UIImage, ImagePayload)]> { Binding(get: { images }, set: { images = $0 }) }
     private var quotesBinding: Binding<[ContextRef]> { Binding(get: { quotes }, set: { quotes = $0 }) }
-    private var uploads: FileUploads { draft.held.uploads }
+    private var files: FileAttachments { draft.held.files }
     private var videos: VideoAttachments { draft.held.videos }
 
-    /// Files to the assistant's machine, each path into the box once it is there; not into the next message's box
-    /// when this one went first (the draft outlives the page, #2626).
+    /// Files to the assistant's machine, as cards above the box until the first message carries them (#8361).
     private func upload(_ urls: [URL]) {
-        let generation = draft.generation
-        uploads.start(urls, machine: machine, model: model, dest: uploadDest) { path in
-            guard draft.generation == generation else { return }
-            text = PathInsert.edit(path, text: text, selection: $selection, focused: $focused)
-        }
+        files.start(urls, machine: machine, model: model, dest: uploadDest)
     }
 
     private var launcherMachine: String { uploadDest == Session.healthSpace ? model.healthMachineID : model.assistantConfig?.machineID ?? model.hubMachineID }
@@ -1489,7 +1479,7 @@ struct BeautifulStarterComposer: View {
     var body: some View {
         VStack(spacing: Theme.Space.s) {
             if currentLauncher == nil { StarterLauncherStatus() }
-            if !uploads.items.isEmpty { UploadsBar(uploads: uploads) }
+            if !files.items.isEmpty { FileAttachmentsBar(files: files) }
             if !videos.items.isEmpty { VideoAttachmentsBar(videos: videos) }
             #if os(iOS) || os(visionOS)
             PasteImageChip(focused: focused) { img in
@@ -1506,7 +1496,7 @@ struct BeautifulStarterComposer: View {
             if !images.isEmpty { ComposerImages.editable(draft.held) } // a tap marks it up, as in a conversation
             #endif
             PromptComposer(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)…"), text: textBinding, selection: $selection, focused: $focused,
-                           hasAttachments: !images.isEmpty || !videos.items.isEmpty || !quotes.isEmpty, disabled: disabled,
+                           hasAttachments: !images.isEmpty || !videos.items.isEmpty || !files.items.isEmpty || !quotes.isEmpty, disabled: disabled,
                            attach: PromptItems.attachments(camera: false),
                            mentions: { PromptItems.sessions(model.sessionsNow, except: nil) },
                            models: models,
@@ -1535,12 +1525,12 @@ struct BeautifulStarterComposer: View {
                                    Task { text = typed }
                                    return
                                }
-                               if videos.busy { // nothing goes; the bar clears the box right after this, so it is put back
-                                   model.toast = Toast(String(localized: "The video is still uploading. Send once it's done."))
+                               if draft.held.busy { // nothing goes; the bar clears the box right after this, so it is put back
+                                   model.toast = Toast(draft.held.waitNote)
                                    Task { text = typed }
                                    return
                                }
-                               send(draft.message(t, files: videos.ready), images.map(\.1))
+                               send(draft.message(t, files: draft.held.ready), images.map(\.1))
                                draft.sent()
                            })
         }

@@ -308,6 +308,9 @@
     <string name="chat_modes_model_sonnet_detail">均衡</string>
     <string name="chat_modes_model_haiku_detail">最快</string>
     <string name="chat_modes_unknown_detail">这个版本的 App 还不认识这个模式</string>
+    <string name="chat_modes_launcher_default">跟随启动器</string>
+    <string name="chat_modes_launcher_default_detail">问不问你由它自己的审批设置决定，可能本来就全部放行</string>
+    <string name="chat_modes_bypass_listed_detail">什么都不问直接放行；在对话里可以切回来</string>
     <string name="chat_modes_effort_hint">思考%1$s</string>
     <string name="chat_modes_hint_separator">，</string>
     <string name="chat_modes_button_bypass">模式：全部放行</string>

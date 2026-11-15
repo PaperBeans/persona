@@ -20,7 +20,7 @@ import (
 // desktop app, of runtimes and of engines that run agents themselves (Paseo, Cindy), and a branch nothing has started
 // yet (fork.go), whose first message starts it.
 
-const agentStopped = "agent_stopped"
+const agentStopped = proto.CodeAgentStopped
 
 // stoppedReason is a stopped agent's read_only_reason (the apps show their own words for it).
 const stoppedReason = "Agent 已停止：对话和终端可以看，它不再收消息；要它接着做，在终端页点「恢复」"

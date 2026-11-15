@@ -64,6 +64,9 @@ func (s *Service) listShared(ctx context.Context, src Source) ([]Session, error)
 		if list, ok := s.cache.getSessions(name); ok {
 			return list, nil
 		}
+		if err := s.cache.getTimeout(name); err != nil {
+			return nil, err // it timed out a moment ago: asking again would only wait out its timeout again
+		}
 		gen := s.cache.generation(name)
 		f, lead := s.flights.join(name, gen)
 		if lead {

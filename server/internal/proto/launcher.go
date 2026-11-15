@@ -23,6 +23,12 @@ type Launcher struct {
 	// queues that pane for cleanup when the start fails (#5504; docs/integrations/terminal.md, section 21). Older
 	// nodes leave it out: Run Agent Here offers them Claude Code only.
 	RunHere bool `json:"run_here,omitempty"`
+	// PermissionModes are the permission modes a start on a runtime's launcher takes when its agent is not Claude Code
+	// (whose five the apps know), Persona's ids (#8261): default, the agent's own approval, which the apps send as no
+	// mode, and bypassPermissions where it has an Allow all (Paseo's Auto Accept and Codex's full-access). A list
+	// tells the apps the start takes what the runtime says: the modes listed (a choice only with two or more) and the
+	// efforts its models list. Older nodes and runtimes leave it out; the apps then keep their own rule.
+	PermissionModes PermissionModeSet `json:"permission_modes,omitempty"`
 	// Assistant: a runtime's launcher that may run the Persona assistant (docs/integrations/runtimes.md "Assistant"), whatever its agent.
 	Assistant bool `json:"assistant,omitempty"`
 	// AutoAccept: a runtime's launcher whose agents ask for approval unless a switch is on, which a start in
@@ -30,6 +36,9 @@ type Launcher struct {
 	// docs/integrations/paseo.md). The Agents Persona itself starts on it run with the switch on, as Claude Code's run in
 	// bypassPermissions (#8141). Older nodes and runtimes leave it out.
 	AutoAccept bool `json:"auto_accept,omitempty"`
+	// DisplayName is what the apps call it: a Persona-managed provider's own name (the manager sets it,
+	// launcher_auto_name), or a runtime's name for a provider it runs (Paseo's label, "Grok"; #8261). Empty: Name.
+	DisplayName string `json:"display_name,omitempty"`
 	// Pi: a Persona-managed provider pi can use on this computer too (ManagedLauncher.PiAPI, docs/integrations/pi.md
 	// "Persona's model providers").
 	Pi bool `json:"pi,omitempty"`

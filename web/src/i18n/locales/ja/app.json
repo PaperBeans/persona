@@ -31,5 +31,6 @@
   "title_agent_archives": "アーカイブしたエージェント",
   "title_subscriptions": "購読",
   "new_version": "新しいバージョンがあります",
-  "new_version_reload": "再読み込み"
+  "new_version_reload": "再読み込み",
+  "title_request": "リクエスト"
 }

@@ -50,7 +50,10 @@ afterEach(() => {
 });
 
 const draw = async (text: string) => {
-  await act(async () => root.render(<Markdown text={text} />));
+  await act(async () => {
+    root.render(<Markdown text={text} />);
+    if (text.includes("tracker.example")) await import("./ExternalImageGate");
+  });
   await flush();
 };
 const gate = () => host.querySelector<HTMLButtonElement>("[data-external-image=gate]");

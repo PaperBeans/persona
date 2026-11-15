@@ -2,6 +2,7 @@ import BeautifulUI
 import AuthenticationServices
 import SwiftUI
 import VisionKit
+import PersonaWire
 
 struct SettingsView: View {
     @Environment(\.shell) private var shell

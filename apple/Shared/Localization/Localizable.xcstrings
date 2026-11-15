@@ -5976,6 +5976,41 @@
       },
       "extractionState" : "manual"
     },
+    "%lld More Files" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld More File"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld More Files"
+                }
+              }
+            }
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ほか%1$lld個のファイル"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还有 %1$lld 个文件"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "%lld ms round trip" : {
       "localizations" : {
         "en" : {
@@ -33456,6 +33491,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "改截止时间…"
+          }
+        }
+      }
+    },
+    "Change Model…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change Model…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モデルを変更…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改模型…"
           }
         }
       }
@@ -63209,6 +63267,29 @@
       },
       "extractionState" : "manual"
     },
+    "Failed · Tap to Retry" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed · Tap to Retry"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失敗 · タップして再試行"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失败 · 点按重试"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Faster" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63253,6 +63334,29 @@
           }
         }
       }
+    },
+    "File %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "File %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイル %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件 %1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "FYI" : {
       "localizations" : {
@@ -94313,6 +94417,29 @@
       },
       "extractionState" : "manual"
     },
+    "No longer on the computer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No longer on the computer"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コンピュータにはもうありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已不在电脑上"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "No Matches" : {
       "localizations" : {
         "en" : {
@@ -110300,6 +110427,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "PDF 文档"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Please look at the attached files" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Please look at the attached files"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添付ファイルを見てください"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请看附件"
           }
         }
       },
@@ -147852,6 +148002,29 @@
       },
       "extractionState" : "manual"
     },
+    "Switching from %@ to %@ needs a new conversation" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switching from %@ to %@ needs a new conversation"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ から %2$@ への切り替えには新しい会話が必要です"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从 %1$@ 换到 %2$@ 需要新开对话"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Switching questions…" : {
       "localizations" : {
         "en" : {
@@ -151661,6 +151834,29 @@
           }
         }
       }
+    },
+    "The files are still uploading. Send once they're done." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The files are still uploading. Send once they're done."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルをアップロード中です。完了してから送信してください"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件还在上传，传完再发送"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "The Fullest [Home Widgets]" : {
       "extractionState" : "manual",
@@ -162568,6 +162764,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这个对话正在工作，没有关闭任何东西。等它停下再试。"
+          }
+        }
+      }
+    },
+    "This conversation's launcher is no longer available. Follow the Main Chat default or choose another launcher." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This conversation's launcher is no longer available. Follow the Main Chat default or choose another launcher."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この会話のランチャーは利用できなくなりました。メインチャットのデフォルトに戻すか、別のランチャーを選んでください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话的启动器已不可用。请跟随 Main Chat 默认设置，或另选启动器。"
           }
         }
       }
@@ -173665,6 +173884,41 @@
       },
       "extractionState" : "manual"
     },
+    "Up to %lld files in one message" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Up to %1$lld file in one message"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Up to %1$lld files in one message"
+                }
+              }
+            }
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1件のメッセージに添付できるファイルは%1$lld個までです"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一条消息最多 %1$lld 个文件"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Up to %lld messages at a time" : {
       "localizations" : {
         "en" : {
@@ -180166,29 +180420,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "网页截图"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
-    "Web pages opened in the app (sign-ins not included)" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Web pages opened in the app (sign-ins not included)"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "App内で開いたWebページ（ログイン状態は含みません）"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "App 内打开的网页（不含登录状态）"
           }
         }
       },
@@ -199820,6 +200051,236 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用 %@"
+          }
+        }
+      }
+    },
+    "Pages from links in chats, opened or loaded ahead" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pages from links in chats, opened or loaded ahead"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャット内のリンク先ページ（開いたものと先読みしたもの）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聊天里链接的网页，包括打开过的和提前加载的"
+          }
+        }
+      }
+    },
+    "Chats download again from the hub when you open them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chats download again from the hub when you open them."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャットを開くとハブから再度ダウンロードします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开对话时会重新从中枢下载。"
+          }
+        }
+      }
+    },
+    "Images download again from the hub when you see them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Images download again from the hub when you see them."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画像は表示するときにハブから再度ダウンロードします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "图片显示时会重新从中枢下载。"
+          }
+        }
+      }
+    },
+    "Lark images and files download again when you open them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lark images and files download again when you open them."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Larkの画像とファイルは開くときに再度ダウンロードします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "飞书的图片和文件打开时会重新下载。"
+          }
+        }
+      }
+    },
+    "Lists and Lark chats load again from the hub." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lists and Lark chats load again from the hub."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リストとLarkのチャットはハブから再度読み込みます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "列表和飞书会话会重新从中枢加载。"
+          }
+        }
+      }
+    },
+    "Pages load again from the web when you open them. Sign-ins are kept." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pages load again from the web when you open them. Sign-ins are kept."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ページは開くときに再度読み込みます。ログイン状態は保持されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网页打开时会重新加载，登录状态会保留。"
+          }
+        }
+      }
+    },
+    "Requests go to the network again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Requests go to the network again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リクエストは再度ネットワークから取得します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求会重新走网络。"
+          }
+        }
+      }
+    },
+    "Temporary files are removed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temporary files are removed."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一時ファイルを削除します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "临时文件会被删除。"
+          }
+        }
+      }
+    },
+    "Tap an item to clear it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap an item to clear it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "項目をタップすると消去できます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点按某一项即可清除。"
+          }
+        }
+      }
+    },
+    "Clears it after you confirm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clears it after you confirm"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認後に消去します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "确认后清除"
           }
         }
       }

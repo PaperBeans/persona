@@ -62,7 +62,8 @@ var (
 	errRedial = newTextError("link-errors.manual_reconnect", nil)
 	// errRepaired: link.json was paired again while the link was up; it reconnects at once with the new pairing.
 	errRepaired = newTextError("link-errors.repaired", nil)
-	// errDirectReady: while connected over SSH without Always, a direct hub address answered again.
+	// errDirectReady: while connected over SSH without Always, a direct WebSocket connected and passed validation;
+	// serve transfers that exact candidate together with this cause.
 	errDirectReady = newTextError("link-errors.direct_ready", nil)
 )
 
@@ -141,6 +142,8 @@ type Options struct {
 	DirectRetryEvery time.Duration
 	PairCheck        time.Duration
 	SSHBin           string
+	// directReady observes candidate publication in package tests; production leaves it nil.
+	directReady chan *directHandoff
 	// limiter replaces passive mode's (tests).
 	limiter *authLimiter
 }
@@ -311,12 +314,29 @@ func runActive(ctx context.Context, o Options, rep *reporter) {
 		if err != nil {
 			end = err
 		} else {
-			lastSSH = l.ep.Kind == KindSSH
-			start := time.Now()
-			rep.links++
-			l.gen = rep.links
-			end = l.serve(ctx, c, o, rep)
-			if time.Since(start) > time.Minute {
+			for {
+				lastSSH = l.ep.Kind == KindSSH
+				start := time.Now()
+				rep.links++
+				l.gen = rep.links
+				var handoff *directHandoff
+				handoff, end = l.serve(ctx, c, o, rep)
+				if time.Since(start) > time.Minute {
+					b = backoff{}
+				}
+				if handoff == nil {
+					break
+				}
+				if ctx.Err() != nil {
+					// Direct-ready may have won just before the run itself was cancelled. Ownership has transferred, so
+					// close the accepted candidate rather than leaving it for the next run iteration.
+					handoff.candidate.closeNow()
+					return
+				}
+				// Serve the exact socket the SSH probe connected, under the configuration that validated it. A redial
+				// here would both lose that ownership and reintroduce the gap that dropped working SSH links.
+				l, c = handoff.candidate, handoff.config
+				lastSSH = false
 				b = backoff{}
 			}
 			// The link writes link.json itself (the hub's addresses and names): from here only a new credential or tunnel

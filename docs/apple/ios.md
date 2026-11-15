@@ -197,10 +197,12 @@ Chat page:
   (polling fallback only: list 90 seconds, chat 60); while a Feishu list is in front, changed Inbox chats fetch the newest page into `lark-chat-<id>` cache, and with none in front they are only noted, the newest 20 fetched when one comes back (#4693; a chat opened before that shows its cached page until its own fetch lands); on hub connection catch up latest 20;
   unread chats open from cache if it reaches the first unread message.
 - Settings › Storage (`StorageView`): space used on this phone, size and share bars by category (Agent chats, chat images, Lark images/files, lists/Lark chats, websites,
-  network cache, other, App data); swipe left / long-press clears a category, or Clear all caches (settings and pairing retained; websites clear cache, not login).
+  network cache, other, App data); tapping a category asks to clear it, saying how much it frees and what comes back (#8355; a left swipe and the long press are shortcuts), or Clear all caches (settings and pairing retained; websites clear cache, not login).
   Memory copies clear too; background sync refetches. DEBUG `-tab settings -openStorage YES`.
+  Without the user: the first time the app goes to the background in a process, `CacheBudget` trims `chat-images` and `lark-media`
+  oldest first from over 200 MB to 150 MB and clears WebKit's disk cache over 200 MB (links `WebViewPool` preloads; logins stay), #8341.
 - Lazy images: history pages and pushes omit image bytes (`lazy_images`, reducing pages from MB to hundreds of KB), dimensions only; visible rows fetch through
-  `ImagePayload.ref` (`ChatImageLoader`: one download, NSCache + `Caches/chat-images`, immutable images valid forever),
+  `ImagePayload.ref` (`ChatImageLoader`: one download, NSCache + `Caches/chat-images`, immutable images valid until `CacheBudget` trims them),
   reserving dimensions before arrival to avoid jumps. Thumbnails and full viewer share it; locally sent images retain inline base64.
   A failed load (hub unreachable, download failed) does not spin forever (#182): tool-result and file-page images (`Base64Image`) say
   "Image didn't load. Tap to retry" on the placeholder, and the viewer's page says so with Retry, keeping its bars (and Close) and the
@@ -406,8 +408,8 @@ Chat page:
   and quotes above the text. While typing in `ShellComposerBar`, a Hide Keyboard button (`Theme.Icon.dismissKeyboard`, `shell-composer-dismiss-keyboard`, accessibility label `Hide Keyboard`) appears beside `+` in the card's bottom row (`ComposerRow` also offers `composer-row-dismiss-keyboard` on iOS when focused), committing any active IME marked text and dismissing the software keyboard while keeping the draft intact. It edits the same draft (`text` binding, `model.drafts` still the sole source); pending images and files remain in the composer below and send with the message as usual.
   The page owns its cursor (takes the caller's `selection` on opening, returns it on closing; directly binding to the caller sent every cursor update through it with delayed returns, occasionally losing characters on iPad).
   While open, the composer's own field binds to an idle `parkedSelection`, so it cannot move the caller's cursor underneath the sheet. Focus bindings cannot cross into sheets, so the page has its own `@FocusState`:
-  requests to focus the composer while open (uploaded file paths via `PathInsert.edit`, ⌘I) forward to the page, without showing a keyboard underneath. The composer is not treated as editing then;
-  paths append to the draft, and the page cursor follows them (only when the caller's cursor changed; ⌘I alone does not move it).
+  requests to focus the composer while open (⌘I) forward to the page, without showing a keyboard underneath. The composer is not treated as editing then;
+  the page cursor follows the caller's only when that changed (⌘I alone does not move it).
   Collapsing, swiping down or replacing the page (chat switch, tree replacement) first commits marked input (`TypedText.commitFocused`, #2203); returning to the composer preserves keyboard and cursor positions.
   Sending from the page (toolbar ⌘⏎ shortcut) is identical to composer Send and happens once; the composer's ⌘⏎ is disabled while the page is open, preventing another send underneath. Hidden line measurement lays out at most 4 lines from the first 600 draft characters, counts trailing newlines, and stops while the page is open.
   The button belongs in the button row, not over the input corner: a corner overlay either covers text or rewraps it when appearing. iOS only; Mac unchanged.
@@ -667,6 +669,7 @@ Chat page:
   watch summary leaves them out (`Interaction.showsOnWatch`: an older watch build would fail to decode the whole summary). Not pushed while the app is closed (#2433).
   `ElicitationCardTests` mock `MOCK_ELICITATION=1` / `=unsupported`.
 - Input: above (at most 4 photos, resized 1600px; library videos uploaded as files to computer, message file card, protocol.md ("Sending videos"); / shortcuts; Send becomes red Interrupt while working).
+- Files (#8361, protocol.md "Sending files"): + › Files and a scan's PDF become cards above the box (`FileAttachments`, `FileAttachmentsBar` in `Views/Chat/FileAttach.swift`), never words in the draft. Each is copied out of the picker first (`FileUploads.stage`), up to 10 per message, three uploading at once; ✕ cancels or removes, a failed card stays (tap to try again). They live in `ComposerAttachments.files` beside the videos, so a draft rebuilt (#2626) or a queued message taken back (#3022) keeps them. Sent, each is a `<persona-file kind="file">` tag after the words; the bubble draws it as `AttachedDocumentCard` (`Views/Chat/VideoCards.swift`; videos and recordings keep `AttachedVideoCard`), folding past four, opening the file viewer, dimmed when `FilePresence` says the computer no longer has it.
 - Navigation subtitle: Machine · Model · State.
 
 ## New shell (ChatGPT-style, 2026-11-01)
@@ -2206,7 +2209,7 @@ Files mentioned in chats, tool rows and the chat's Files page all open in `FileV
 **Body paths are links** (#1706, same rules as web #1669, `apple/Packages/PersonaKit/Sources/PersonaKit/PathRefs.swift`, #2095):
 - **Recognized**: `~/…`, absolute paths with at least two segments (`/tmp` does not count), relative paths with a directory and a letter-starting extension (`src/a.ts`; not `deepseek/v4.1`).
   Optional line suffixes: `:12`, `:12:5`, `:12-20` (start line), `#L12`; `stat` receives the path without line numbers.
-  Outside backticks only ASCII is recognized, stopping at Chinese or full-width punctuation (`/tmp/a.md里`, meaning "in /tmp/a.md"); sentence-final `.` is excluded. A whole backticked span counts as one path (may include Chinese and spaces); if it does not exist, check paths within the span and select existing non-overlapping ones, longer first at the same position.
+  Names may be in any script (#8386). Outside backticks a path stops at whitespace, at punctuation other than `_ . @ + -` (full-width punctuation too), and before a non-ASCII word right after an extension (`/tmp/a.md里`, meaning "in /tmp/a.md"); a relative path starts with an ASCII folder; sentence-final `.` is excluded. A whole backticked span counts as one path (may include Chinese and spaces); if it does not exist, check paths within the span and select existing non-overlapping ones, longer first at the same position. Same rules and cases as the web (`web/src/lib/path-refs.test.ts`, `PathRefsTests`).
   URL fragments, `and/or` and version numbers do not count; code blocks, indented code, existing links and formulas in replies remain unchanged.
 - **Rendering**: existing paths in replies (`LinkedMarkdown`) become Markdown links (`persona-path:<path>?line=N`, `PathLinkURL`), colored like other links (`.persona` link color); an entire backticked path's inline code is tappable.
   User bubbles (`PathText`) use underlined links in `Theme.UserBubbleInk.link`: accent on the main conversation's box and in light bubbles, bubble text color in colored bubbles (accent is invisible there).

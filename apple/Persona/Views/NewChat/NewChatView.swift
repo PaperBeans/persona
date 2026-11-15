@@ -1,6 +1,7 @@
 import PersonaKit
 import PhotosUI
 import SwiftUI
+import PersonaWire
 
 /// Start a session inside an existing space (a new herdr tab next to the other agents).
 nonisolated struct SpacePreset {

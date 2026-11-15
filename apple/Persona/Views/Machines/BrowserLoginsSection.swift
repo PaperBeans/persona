@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import PersonaWire
 
 /// Browser Sign-ins on a Mac's page (#1304, docs/plans/plan-ego-browser.md「Importing cookies」; the web's BrowserLogins): the sites whose
 /// sign-ins ego lite keeps (how many cookies, until when, never what), clearing some of them, and importing a cookie

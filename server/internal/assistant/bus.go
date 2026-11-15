@@ -633,6 +633,9 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 	if out, ok, err := s.modelsRequest(ctx, method, params); ok { // the hub's plugins' (models_hub.go)
 		return out, err
 	}
+	if out, ok, err := s.transcriptionRequest(ctx, method, params); ok { // extensions' transcription (extension_transcribe.go)
+		return out, err
+	}
 	if d := b.opts.Devices; d != nil {
 		if out, ok, err := d.Request(ctx, method, params); ok { // devices.* (devices.go)
 			if err == nil && method == devicewire.MethodCall {

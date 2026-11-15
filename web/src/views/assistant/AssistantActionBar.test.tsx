@@ -92,12 +92,30 @@ const entry = (key: string) => host.querySelector<HTMLButtonElement>(`[data-assi
 /** Opens the Needs you rows the tray folds to a line (#5569); a row with its key opens that one. */
 const openRows = (key?: string) => act(async () => host.querySelectorAll<HTMLButtonElement>(`button[data-needs-row${key ? `="${key}"` : ""}][aria-expanded="false"]`).forEach((b) => b.click()));
 
-const label = { needs: t("assistant-tasks.tray_needs_you"), running: t("assistant-tasks.tray_running") };
+const label = { needs: t("assistant-tasks.tray_needs_you"), running: t("assistant-tasks.tray_running"), pr: t("todos.section_pr") };
 // where a click went as a page (set to Full page, #5096); the side panel, the default, says so itself (getPanel)
 const opened = () => location.pathname + location.search;
 const trays = () => host.querySelector("[data-assistant-actionbar]")!.textContent;
 
 describe("Assistant Needs you / In progress trays", () => {
+  it("counts and shows a waiting PR in its own tray with its link and blockers", () => {
+    const pr = "https://github.com/example/demo/pull/42";
+    act(() => putTodo({ ...todo, agents: [], pr_url: pr, delivery: { state: "pr" }, pr_status: { url: pr, state: "open", draft: false, review: "changes_requested", checks: "pending", conflicts: true, checked_at: new Date(now.getTime() - 60_000).toISOString() } }));
+    expect(entry("pr").textContent).toContain(label.pr);
+    expect(entry("pr").textContent).toContain("1");
+    expect(entry("running").textContent).not.toContain("1");
+    act(() => entry("pr").click());
+    const row = host.querySelector<HTMLElement>("[data-pr-waiting-row='tray-task']")!;
+    expect(row.textContent).toContain("Demo task");
+    expect(row.querySelector("a")?.getAttribute("href")).toBe(pr);
+    expect(row.textContent).toContain(t("assistant-tasks.pr_blocker_changes_requested"));
+    expect(row.textContent).toContain(t("assistant-tasks.pr_blocker_checks_pending"));
+    expect(row.textContent).toContain(t("assistant-tasks.pr_blocker_conflicts"));
+    expect(row.querySelector("a")?.classList).toContain("truncate");
+    act(() => row.querySelector<HTMLButtonElement>("[data-pr-task-link]")!.click());
+    expect(getPanel()).toEqual({ kind: "task", todo: "tray-task" });
+  });
+
   it("uses the Working mark and live subtitle for background work, with a clock only after all work ends", () => {
     act(() => entry("running").click());
     const row = host.querySelector("[data-task-slot]")!;
@@ -214,7 +232,7 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(row.querySelector(".status-mark")!.getAttribute("data-state")).not.toBe("working");
   });
 
-  it("keeps two entries in order, collapses by default and replaces conversation cards with the dispatch's hand-off card", () => {
+  it("keeps the two populated entries in order, collapses by default and replaces conversation cards with the dispatch's hand-off card", () => {
     expect(entries().map((button) => button.getAttribute("data-tray-entry"))).toEqual(["needs", "running"]);
     expect(entries().map((button) => button.textContent)).toEqual([label.needs, `${label.running}1`]);
     expect(host.querySelector("section")).toBeNull();
@@ -378,7 +396,7 @@ describe("Assistant Needs you / In progress trays", () => {
     await openRows();
     expect(host.textContent!.split(todo.title).length - 1, "an opened row names its task once").toBe(1);
     const row = host.querySelector('[data-brief-row="accept"]')!;
-    expect([...row.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual([t("assistant-brief.open"), t("assistant-brief.finish"), t("assistant-tasks.later"), t("assistant-tasks.dismiss_draft"), t("assistant-brief.take")]);
+    expect([...row.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual([t("assistant-brief.open"), t("assistant-brief.finish"), t("assistant-task-actions.later"), t("assistant-task-actions.dismiss_draft"), t("assistant-brief.take")]);
     const read = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation(async (url, init) => {
       if (init?.method === "PATCH") {
@@ -438,7 +456,7 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(host.textContent).toContain(t("assistant-tasks.review_needs_user"));
     const draftCard = host.querySelector('[data-testid="message-card"]')!;
     const actions = [...draftCard.querySelectorAll("button")];
-    expect(actions.map((button) => button.textContent)).toEqual([t("assistant-tasks.send"), t("assistant-tasks.later"), t("assistant-tasks.dismiss_draft")]);
+    expect(actions.map((button) => button.textContent)).toEqual([t("assistant-task-actions.send"), t("assistant-task-actions.later"), t("assistant-task-actions.dismiss_draft")]);
     act(() => actions[1].click());
     expect(host.querySelector('[data-testid="message-card"]')).toBeNull();
     expect(entries().map((button) => button.textContent)).toEqual([`${label.needs}1`, label.running]);

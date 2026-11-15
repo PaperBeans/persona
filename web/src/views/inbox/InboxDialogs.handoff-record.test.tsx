@@ -20,9 +20,12 @@ vi.mock("../../lib/router", () => ({ navigate: vi.fn() }));
 vi.mock("../../lib/new-agent", async (orig) => ({ ...(await orig<typeof import("../../lib/new-agent")>()), openNewAgent: vi.fn() }));
 vi.mock("../../ui/atoms", async (orig) => ({ ...(await orig<typeof import("../../ui/atoms")>()), toast: vi.fn() }));
 
+import { setPairedToken, setToken } from "../../lib/api";
 import { reloadInbox, resetInboxForTests, type InboxItem } from "../../lib/inbox";
+import { resetMessageFeedback, settleMessageEcho } from "../../lib/message-send";
 import { openNewAgent, type NewAgentPreset } from "../../lib/new-agent";
 import { resetManagerChoice, setRosterDefault } from "../../lib/manager-choice";
+import { keepFailed, retryOutbox } from "../../lib/outbox";
 import { navigate } from "../../lib/router";
 import type { Session } from "../../lib/types";
 import { HandOffDialog } from "./InboxDialogs";
@@ -47,6 +50,8 @@ const hub = { record: 200 as number, start: 200 as number, startTitle: "Tool set
 beforeEach(() => {
   calls.length = 0;
   localStorage.clear();
+  resetMessageFeedback();
+  setToken("synthetic-handoff-token");
   resetManagerChoice();
   resetInboxForTests();
   setRosterDefault("assistant");
@@ -87,6 +92,8 @@ function answer(status: number, body: unknown) {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
+  setToken("");
+  resetMessageFeedback();
   resetManagerChoice();
   resetInboxForTests();
   vi.unstubAllGlobals();
@@ -104,6 +111,41 @@ const pick = (label: string) => {
 const sendButton = () => [...document.body.querySelectorAll("button")].find((b) => b.textContent?.trim() === "发送") as HTMLButtonElement;
 const sends = () => calls.filter((c) => c.method === "POST" && c.url.endsWith("/handoff"));
 const records = () => sends().filter((c) => !("text" in (c.body ?? {})));
+const messageCalls = () => calls.filter((c) => c.method === "POST" && c.url === "/api/v1/sessions/mac/s1/messages");
+
+/** Starts the real dialog-to-outbox path but leaves each message POST under the test's control. */
+async function sendAgentHeld() {
+  await reloadInbox();
+  const fetcher = vi.mocked(fetch);
+  const answer0 = fetcher.getMockImplementation()!;
+  const pending: { resolve: (r: Response) => void; reject: (e: unknown) => void }[] = [];
+  fetcher.mockImplementation((url, init) => {
+    if (String(url) === "/api/v1/sessions/mac/s1/messages") {
+      calls.push({
+        url: String(url), method: init?.method ?? "GET", header: new Headers(init?.headers).get("X-Persona-Manager"),
+        body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined,
+      });
+      return new Promise<Response>((resolve, reject) => pending.push({ resolve, reject }));
+    }
+    return answer0(url, init);
+  });
+  render();
+  pick("Release check");
+  await act(async () => sendButton().click());
+  await vi.waitFor(() => expect(messageCalls()).toHaveLength(1));
+  const body = messageCalls()[0].body!;
+  return {
+    id: String(body.client_msg_id),
+    text: String(body.text),
+    count: () => pending.length,
+    respond(index: number, status: number, responseBody: unknown = {}) {
+      pending[index].resolve(answer(status, responseBody));
+    },
+    fail(index: number, error: unknown) {
+      pending[index].reject(error);
+    },
+  };
+}
 
 describe("Hand to AI: where the item went", () => {
   it("a new Persona chat records the conversation it started, with no text", async () => {
@@ -262,6 +304,66 @@ describe("Hand to AI: nothing records what did not get there", () => {
     act(() => ([...document.body.querySelectorAll('[role="radio"]')].find((b) => b.textContent?.includes("Release check")) as HTMLButtonElement).click());
     await act(async () => sendButton().click());
     await vi.waitFor(() => expect(calls.some((c) => c.url === "/api/v1/sessions/mac/s1/messages")).toBe(true));
+    await flush();
+    expect(records()).toHaveLength(0);
+  });
+});
+
+describe("Hand to AI: delivery authority", () => {
+  it("records hub acceptance, not the local enqueue", async () => {
+    const held = await sendAgentHeld();
+    await flush();
+    expect(records()).toHaveLength(0);
+
+    held.respond(0, 200);
+    await vi.waitFor(() => expect(records()).toHaveLength(1));
+    expect(records()[0].body!.session).toEqual({ machine_id: "mac", session_id: "s1" });
+  });
+
+  it("records a current flight that already echoed even when its HTTP response later fails", async () => {
+    const held = await sendAgentHeld();
+    settleMessageEcho("mac", "s1", held.id);
+    held.respond(0, 409, { error: "late refusal", delivered: "none" });
+    await vi.waitFor(() => expect(records()).toHaveLength(1));
+  });
+
+  it("does not record a failure after a same-id retry replaced the flight", async () => {
+    const held = await sendAgentHeld();
+    // Another view has exposed Retry for this unconfirmed send. The real retry keeps its id and supersedes its flight.
+    keepFailed("mac", "s1", { id: held.id, text: held.text, images: [], at: Date.now() }, new TypeError("connection lost"));
+    const retried = retryOutbox("mac", "s1", held.id);
+    try {
+      held.respond(0, 409, { error: "superseded refusal", delivered: "none" });
+      await vi.waitFor(() => expect(held.count()).toBe(2));
+      expect(messageCalls()[1].body!.client_msg_id).toBe(held.id);
+      await flush();
+      expect(records()).toHaveLength(0);
+    } finally {
+      if (held.count() > 1) {
+        held.respond(1, 409, { error: "retry refused", delivered: "none" });
+        expect(await retried).toBe(false);
+      }
+    }
+  });
+
+  it("does not record a failure after the login identity changed", async () => {
+    const held = await sendAgentHeld();
+    setPairedToken("synthetic-replacement-token");
+    held.respond(0, 409, { error: "retired refusal", delivered: "none" });
+    await flush();
+    expect(records()).toHaveLength(0);
+  });
+
+  it("does not record a cancelled send", async () => {
+    const held = await sendAgentHeld();
+    held.fail(0, new DOMException("cancelled", "AbortError"));
+    await flush();
+    expect(records()).toHaveLength(0);
+  });
+
+  it("does not record an ordinary send failure", async () => {
+    const held = await sendAgentHeld();
+    held.respond(0, 500, { error: "send failed", delivered: "none" });
     await flush();
     expect(records()).toHaveLength(0);
   });

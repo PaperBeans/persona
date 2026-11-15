@@ -80,7 +80,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		if t.Readonly {
 			asked = ""
 		}
-		t.normalizeReadonlyPermission()
+		t.normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
 		t.TodoID, t.Error, t.ErrorCode, t.ErrorArgs = "", "", "", nil
 		t.WorkspaceResolved, t.ReservedTodoID, t.WorkspaceInferred = nil, "", false
 		t.OwnerStarted = false // the hub's: only the owner's Start on the card sets it (startPlan)

@@ -29,6 +29,5 @@
   "earlier_hint": "{count} 个会话最近一次活跃早于所选时间（{window}）",
   "no_folder": "不在任何目录",
   "no_space": "不在任何项目",
-  "more_groups": "再显示 {count} 个",
-  "places": "所在的目录"
+  "more_groups": "再显示 {count} 个"
 }

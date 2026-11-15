@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -248,4 +249,51 @@ func TestEngineRuntimeWatchesASessionItTookOverWhileOpen(t *testing.T) {
 	// The phone closes the chat: the runtime stops watching too.
 	runtimeSessionCall(t, hub, "session.unwatch", map[string]any{"session_id": sdkSession})
 	waitFor(t, "unwatched in the runtime", func() bool { return len(host.got("session.unwatch")) == 1 })
+}
+
+// The same takeover answered with a row that names no transcript, which a later list of the runtime names: meanwhile
+// the session's items are the runtime's, which ties the message to its own line. Once the session reads its transcript
+// again, the message's line there carries the message's client_msg_id (#8358). It stayed on the runtime's line: the
+// e2e's branch, taken over this way, read back without it about every other run.
+func TestEngineRuntimeTakeoverKeepsTheMessageID(t *testing.T) {
+	n, hub := runtimeNode(t)
+	path := sdkTranscript(t, n, sdkSession, "where we left off")
+	if err := n.useEngine(context.Background(), proto.EnginePaseo); err != nil {
+		t.Fatal(err)
+	}
+	host := dialRuntime(t, n, paseoEngineHello())
+	row := map[string]any{"session_id": sdkSession, "agent": "claude", "status": "working", "cwd": "/w/app"}
+	host.mu.Lock()
+	host.answer = func(method string, params json.RawMessage) (any, error) {
+		switch method {
+		case "session.start":
+			return map[string]any{"session": row}, nil
+		case "session.items": // its own items: the message, on a line the runtime tied itself
+			return map[string]any{"to_seq": 7, "items": []proto.Item{{ID: "7#0", Seq: 7, Role: "user", Kind: proto.KindText,
+				Text: "carry on", ClientMsgID: "m-tk", TS: time.Now()}}}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+	host.mu.Unlock()
+	waitFor(t, "listed offline", func() bool { freshOffline(); return listed(t, n)[sdkSession].Status == proto.StatusOffline })
+	runtimeSessionCall(t, hub, "session.watch", map[string]any{"session_id": sdkSession, "since_seq": 0})
+	if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": sdkSession, "text": "carry on", "client_msg_id": "m-tk"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := pageTags(t, n, sdkSession); got["carry on"] != "m-tk" || len(host.got("session.items")) != 1 {
+		t.Fatalf("the runtime's page: %v (%d asked)", got, len(host.got("session.items")))
+	}
+	// Claude Code writes the message into the transcript, and the runtime's next list names it.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString(userLine("u9", time.Now(), "carry on") + "\n")
+	_ = f.Close()
+	row["transcript"] = sdkSession
+	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{row}})
+	waitFor(t, "its transcript named", func() bool { return n.runtimes.transcriptOf(sdkSession) == sdkSession })
+	if got := pageTags(t, n, sdkSession); got["carry on"] != "m-tk" || len(host.got("session.items")) != 1 {
+		t.Fatalf("the transcript's page: %v (the runtime asked %d times)", got, len(host.got("session.items")))
+	}
 }

@@ -71,6 +71,8 @@ type Settings struct {
 	// (#2559). nil is on (the default).
 	StartRequestedTasks     *bool  `json:"start_requested_tasks,omitempty"`
 	TaskWorkspacePreference string `json:"task_workspace_preference,omitempty"`
+	// ReadonlyMode leaves runtime protection unchanged unless the owner opts into prompt-only task constraints.
+	ReadonlyMode string `json:"readonly_mode,omitempty"`
 	// RecordingDays: how many days the phone's recordings stay in the knowledge base (#3235); nil is 14.
 	RecordingDays *int `json:"recording_days,omitempty"`
 	// MinutesDays: how many days a meeting's minutes stay once its transcript went with RecordingDays (#3780,
@@ -496,6 +498,7 @@ type assistantView struct {
 	// StartRequestedTasks is in effect, like MainTasksQuiet.
 	StartRequestedTasks     bool   `json:"start_requested_tasks"`
 	TaskWorkspacePreference string `json:"task_workspace_preference"`
+	ReadonlyMode            string `json:"readonly_mode"`
 	// RecordingDays and DoneNeedsDelivery are in effect, like MainTasksQuiet.
 	RecordingDays     int  `json:"recording_days"`
 	DoneNeedsDelivery bool `json:"done_needs_delivery"`
@@ -555,6 +558,7 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 		MeetingTranscriptionDefault: meetingTranscriptionDefaultOf(v), MeetingGlossary: meetingGlossaryOf(v),
 		MeetingTranscriptionExtension: meetingTranscriptionExtensionOf(v), MeetingTranscriptionReady: s.transcriptionReadyNow(),
 		TaskWorkspacePreference: s.taskWorkspacePreference(ctx),
+		ReadonlyMode:            readonlyModeOf(v),
 		MainBackgroundFolded:    quietOn(v.MainBackgroundFolded),
 		RecentTaskChats:         v.RecentTaskChats != nil && *v.RecentTaskChats,
 		DoneNeedsDelivery:       v.DoneNeedsDelivery != nil && *v.DoneNeedsDelivery, IdleCloseHours: int(s.idleCloseAfter(ctx) / time.Hour),

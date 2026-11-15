@@ -294,6 +294,16 @@ func (n *Node) resumeOtherWith(ctx context.Context, id string, st sessionState, 
 			return err // Refuse conflicting permissions before creating a workspace, tab or attachment.
 		}
 		argv = codexExecutionArgs(argv, modelExecution{Model: st.Model})
+		if home, thread, ok := n.codexThread(id); ok && codexArchived(home, n.codexPath(id)) {
+			// Restore through Codex itself before its TUI can block the first prompt on an archive confirmation.
+			restored, err := n.codexArchive(ctx, id, home, thread, false)
+			if err != nil {
+				return err
+			}
+			if restored.Native != nativeArchiveDone {
+				return refusal(nativeArchiveFailed, "Codex cannot restore its archived session: "+restored.Reason, nil)
+			}
+		}
 	}
 	paths, err := n.saveImages(images)
 	if err != nil {

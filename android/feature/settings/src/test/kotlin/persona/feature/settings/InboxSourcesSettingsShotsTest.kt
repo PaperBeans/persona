@@ -89,7 +89,7 @@ class InboxSourcesSettingsShotsTest {
         rule.setContent {
             PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
                 Box(Modifier.testTag("shot").width(400.dp).height(2200.dp).background(PersonaTheme.palette.background)) {
-                    SettingsHomePage(services, query, { query = it }, false, sources, null, false, null,
+                    SettingsHomePage(services, query, { query = it }, false, sources, null, false, null, false,
                         ConnectionState.Online, null, null, null, null, {}, { opened = it }, null, null, null, {}, {})
                 }
             }

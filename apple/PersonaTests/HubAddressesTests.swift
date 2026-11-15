@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Persona
+import PersonaWire
 
 /// Answers health probes at addresses.invalid as hub "H" would, and at old.invalid as a server without a hub_id.
 private final class HealthProtocol: URLProtocol, @unchecked Sendable {

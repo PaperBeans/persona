@@ -1,4 +1,5 @@
 import PersonaKit
+import PersonaWire
 
 /// What a turn's API error says, as a person would: the parse (three regexes) is done once per distinct text.
 nonisolated enum TurnErrorReason {

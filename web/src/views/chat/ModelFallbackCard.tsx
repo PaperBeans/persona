@@ -7,7 +7,8 @@
 // A Persona conversation is for everyday people (#5202): one plain sentence naming the model by its short name, the
 // actions, and the model lines, the error and the caveats under a closed Details. A terminal session shows everything.
 import { useState } from "react";
-import { fallbackView, restoreErrorText, restoreModel } from "../../lib/model-fallback";
+import { fallbackView } from "../../lib/model-fallback";
+import { restoreErrorText, restoreModel } from "../../lib/model-restore";
 import { replyModelName } from "../../lib/model-change";
 import type { Session } from "../../lib/types";
 import { Button } from "../../ui/atoms";
@@ -36,11 +37,11 @@ export function ModelFallbackCard({ session, headless, onNewMain }: { session: S
   // The record: the models as recorded, the error since in Claude Code's words, and what going back can't promise.
   const facts = (
     <>
-      {v.original && <span className="[overflow-wrap:anywhere]">{t("chat-modelfallback.original", { model: v.original })}</span>}
-      <span className="[overflow-wrap:anywhere]">{t("chat-modelfallback.fallback", { model: v.fallback })}</span>
-      {v.error && <span className="break-words whitespace-pre-wrap">{t("chat-modelfallback.error_after", { text: v.error })}</span>}
-      {v.pending && <span>{t("chat-modelfallback.unverified")}</span>}
-      {headless && <span>{t("chat-modelfallback.no_promise")}</span>}
+      {v.original && <span className="[overflow-wrap:anywhere]">{t("chat-refusal.original", { model: v.original })}</span>}
+      <span className="[overflow-wrap:anywhere]">{t("chat-refusal.fallback", { model: v.fallback })}</span>
+      {v.error && <span className="break-words whitespace-pre-wrap">{t("chat-refusal.error_after", { text: v.error })}</span>}
+      {v.pending && <span>{t("chat-refusal.unverified")}</span>}
+      {headless && <span>{t("chat-refusal.no_promise")}</span>}
     </>
   );
   return (
@@ -52,27 +53,27 @@ export function ModelFallbackCard({ session, headless, onNewMain }: { session: S
             <>
               <span className="font-semibold text-ink">
                 {v.pending
-                  ? t("chat-modelfallback.pending_title")
+                  ? t("chat-refusal.pending_title")
                   : v.cause
-                    ? t("chat-modelfallback.plain_card_cause", { model: replyModelName(v.fallback), cause: v.cause })
-                    : t("chat-modelfallback.plain_card", { model: replyModelName(v.fallback) })}
+                    ? t("chat-refusal.plain_card_cause", { model: replyModelName(v.fallback), cause: v.cause })
+                    : t("chat-refusal.plain_card", { model: replyModelName(v.fallback) })}
               </span>
-              {v.pending && v.target && <span className="text-ink">{t("chat-modelfallback.pending_target", { model: replyModelName(v.target) })}</span>}
+              {v.pending && v.target && <span className="text-ink">{t("chat-refusal.pending_target", { model: replyModelName(v.target) })}</span>}
               {v.returning && (
                 <span className="text-ink" data-testid="model-fallback-returning">
-                  {t("chat-modelfallback.returning", { model: replyModelName(v.returning) })}
+                  {t("chat-refusal.returning", { model: replyModelName(v.returning) })}
                 </span>
               )}
               <details data-testid="model-fallback-details" className="text-ink-3">
-                <summary className="cursor-pointer select-none">{t("chat-modelfallback.details")}</summary>
+                <summary className="cursor-pointer select-none">{t("chat-refusal.details")}</summary>
                 <div className="mt-1 flex flex-col gap-1">{facts}</div>
               </details>
             </>
           ) : (
             <>
-              <span className="font-semibold text-ink">{v.pending ? t("chat-modelfallback.pending_title") : t("chat-modelfallback.title")}</span>
+              <span className="font-semibold text-ink">{v.pending ? t("chat-refusal.pending_title") : t("chat-refusal.title")}</span>
               {facts}
-              <span className="text-ink-3">{t("chat-modelfallback.terminal_hint")}</span>
+              <span className="text-ink-3">{t("chat-refusal.terminal_hint")}</span>
             </>
           )}
           {error && (
@@ -86,10 +87,10 @@ export function ModelFallbackCard({ session, headless, onNewMain }: { session: S
         <div className="flex flex-wrap gap-2 pl-5">
           {canRestore && (
             <Button tone="primary" busy={busy} disabled={working || busy} onClick={() => void restore()}>
-              {t("chat-modelfallback.restore")}
+              {t("chat-refusal.restore")}
             </Button>
           )}
-          {onNewMain && <Button onClick={onNewMain}>{t("chat-modelfallback.new_main")}</Button>}
+          {onNewMain && <Button onClick={onNewMain}>{t("chat-refusal.new_main")}</Button>}
         </div>
       )}
     </div>

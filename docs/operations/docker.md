@@ -247,7 +247,7 @@ docker compose pull && docker compose up -d
 If `PERSONA_IMAGE` in `.env` is pinned to a version (`…:1.2.0`), `pull` won't fetch anything new: first change the tag to the new version (the App gives the whole line), then run the command above.
 Manually built `edge` and `sha-…` images have a `git describe` version that can't be compared, so only the latest release version is shown.
 If the image is private and `PERSONA_REGISTRY_TOKEN` isn't set, Settings › hub says it can't check and what to set.
-Upgrading from 0.1.1 or earlier, the App won't prompt; switch manually: back then the repo was still called persona and the image was `ghcr.io/<owner>/persona`; from 0.1.2 it's
+Upgrading from 0.1.1 or earlier, the App won't prompt; switch manually: back then the repo was still called jarvis and the image was `ghcr.io/<owner>/jarvis`; from 0.1.2 it's
 `ghcr.io/<owner>/persona`, and the old name won't get new versions. Change `PERSONA_IMAGE` in `.env` to the new name and version, replace `compose.yaml` with the new one
 (it passes `PERSONA_IMAGE` and `PERSONA_REGISTRY_TOKEN` to the hub, which is what lets later versions be announced), then run the command above.
 To set where node builds are fetched from with `PERSONA_NODE_PACKAGES` in `.env` (see "Node builds"), take the new `compose.yaml` as well: an older one does not pass it to the hub (`node_packages` in hub.json works either way).

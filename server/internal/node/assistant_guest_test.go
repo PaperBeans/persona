@@ -707,10 +707,10 @@ func TestANewConversationsFirstMessageIDIsTiedOnceItStarted(t *testing.T) {
 	}
 	line := []proto.Item{{ID: "u1", Seq: 1, Role: "user", Kind: proto.KindText, Text: text, TS: time.Now()},
 		{ID: "u1#1", Seq: 1, Role: "user", Kind: proto.KindImage, TS: time.Now()}}
-	if found := n.echoes.match(id, line); len(found) != 1 || found[0].Line != "u1" {
+	if found := n.echoes.match(id, echoInTranscript, line); len(found) != 1 || found[0].Line != "u1" {
 		t.Fatalf("its first line was not found: %+v", found)
 	}
-	for _, it := range n.echoes.tag(id, line) {
+	for _, it := range n.echoes.tag(id, echoInTranscript, line) {
 		if it.ClientMsgID != "start-x" {
 			t.Fatalf("an item of its first line carries %q", it.ClientMsgID)
 		}

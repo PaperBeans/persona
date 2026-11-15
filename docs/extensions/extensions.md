@@ -442,6 +442,7 @@ To call the hub's HTTP API, an extension lists the scopes it uses in `permission
 | `assistant.read` | Read your Persona chats (your messages and its replies) | No HTTP route: the `assistant.conversations` / `assistant.messages` RPC (see "Assistant conversations"). `assistant.ask` does not include it |
 | `assistant.memory.read` | Read what Persona remembers about you (read-only, never the health space) | No HTTP route: the `assistant.memory` RPC (see "Assistant memory"). Writing and deleting memory stay with full credentials; `assistant.read` does not include it |
 | `models` | Use the model you pick for it in Settings › Model configuration (never the key) | No HTTP route: the `model.complete` RPC (see "Model calls"). Not covered by the legacy `hub_api` full access |
+| `transcription` | Turn its own audio into text with the transcription you chose for meetings (never the key, never other audio) | No HTTP route: the `transcription.*` RPC (see "Transcription for extensions"). Not covered by the legacy `hub_api` full access |
 | `extensions.call:<extension id>` | Call the API of extension "…" | That extension's own HTTP: `/api/v1/extensions/<id>/…` (excluding the hub's `/-/` endpoints) |
 
 Scopes cover what an extension calls with its token. The owner's own answers that a channel extension relays (a button pressed, a reply typed) never go through these routes: they follow the channel's trust model (`docs/extensions/channels.md`, "Responsibilities").
@@ -590,6 +591,38 @@ The schema is `schema/extension/models.schema.json`; the Go SDK has it as `ext.H
 ```json
 {"permissions":{"hub":["kb.read","kb.write","models"]}}
 ```
+
+### Transcription for extensions (#8485)
+
+An extension granted the scope `transcription` turns its own audio into text with the transcription the owner chose for meetings
+(`meeting_transcription_extension`, the built-in voice extension's `gpt-live` by default; "Transcription" below). It never sees a key, and never
+gets anyone else's audio: this is the other direction from meetings, its audio handed to the owner's choice. The schema is
+`schema/extension/transcription.schema.json`; the Go SDK has `ext.Hub.TranscriptionStart` / `TranscriptionAudio` / `TranscriptionFinish` /
+`TranscriptionCancel`, and `ext.Transcribe` does the whole of it.
+
+- **Calls** over the program's connection (the manager checks the scope and hands each to the assistant with the extension's id, which the params cannot set):
+  `transcription.start {language?, label?}` → `{job}`; `transcription.audio {job, data}` (base64 PCM16 little-endian, mono, 16 kHz, contiguous, at most 256 KiB of
+  PCM a call); `transcription.finish {job}` → `{segments: [{from, to, text}], gaps?: [{from, to}], seconds}` (seconds from the start of the audio);
+  `transcription.cancel {job}`. Unknown fields are `invalid_params`.
+- **How it runs**: a job on the contribution's `replay` mode (speed 4), as a meeting's final pass but with no transcript of record to check against: the built-in
+  adapter runs three sessions a window and takes a window's text only when two agree. A window where they do not (noise, music, crosstalk) comes back in
+  `gaps`, never as a guess; its upstream bills about three times the audio's length. `transcription.audio` returns once its audio is sent and no more than
+  60 seconds wait past the contribution's last `ack`, so calling it again as soon as it returns paces the job. `finish` waits for the contribution's `done`,
+  up to 5 minutes without a frame.
+- **Limits**: one job per extension and two across extensions at a time (`busy`), meetings' jobs not counted and not held up; at most 15 minutes of audio a
+  job (`too_long`, the job ended); a job with no call for 60 seconds is cancelled. No budget (the owner's decision, as for model calls): the extension keeps
+  its own limits.
+- **Errors**: `permission_denied` (data `{scope: "transcription"}`), `invalid_params`, `assistant_offline`, `transcription_unavailable` (none chosen, not
+  set up, or no `replay`), `busy`, `too_long`, `timeout` (the contribution stopped answering), `transcription_failed` (its fatal error; data `{code}`).
+- **Privacy**: the audio is never kept: it goes to the contribution as it comes. The text goes back to the calling extension only. The manager logs one
+  line a job (the extension, its label cut to 40 characters, the seconds, the outcome, the upstream's billed seconds), never the text or the audio.
+- An extension that asks for the scope needs a hub that knows it in `engines.persona` (an older hub refuses the manifest).
+
+```json
+{"permissions":{"hub":["transcription"]}}
+```
+
+Code: `extmgr/extension_transcription.go`, `assistant/extension_transcribe.go`, `assistantwire/transcription_rpc.go`.
 
 ### Assistant conversations (#1288)
 
@@ -797,7 +830,7 @@ The hub has an **egress proxy** (`server/internal/extension/egress`), started th
   - Only the proxy knows this name: sandboxed extensions (including ones on machines without a sandbox that only point at the proxy) get through via the proxy; resolving it directly without the proxy fails (DNS has no such name), which is expected.
     Extensions with the sandbox off don't go through the proxy (see above) and still connect to `127.0.0.1` directly.
 - **Who it recognizes**: on the local TCP port, extensions are identified by proxy credentials (`HTTP(S)_PROXY=http://ext:<credential>@127.0.0.1:<port>`, renewed at every start, invalid once disabled or uninstalled); the Linux sandbox also has one unix socket per extension
-  (`~/.persona/extensions/run/<id>/proxy.sock`), and the socket itself says who it is.
+  (`~/.persona/extensions/run/<id>/proxy.sock`), and the socket itself says who it is. A settings check's own credential (`settings.check`'s `proxy`, "Settings the user fills in") is recognized on both, for that extension only.
 - **Hosts the owner allowed** (#5697): in the admin UI (an installed extension's details › Network and isolation), and only there (the admin session; device credentials have no route), the owner can allow a sandboxed extension more hosts than its `permissions.network` lists: a self-hosted RSSHub, Sentry or GitHub Enterprise, a proxy. Each is one specific host, as typed or taken from an http(s) URL: `rss.example.org` (any port, like `permissions.network`) or `rss.example.org:8443` (that port only); no wildcard, path or account. The proxy reaches them the way it reaches a `config:` settings address: no subdomain, https or plain http, the name resolved by the proxy and **every** answer checked on each connection, only checked addresses dialled. Private LAN addresses (10/8, 172.16/12, 192.168/16, fc00::/7) pass, which is the usual case for a service at home; loopback, link-local, unspecified, multicast and metadata addresses refuse the name, so a name that later resolves to loopback (DNS rebinding) is refused. This machine's own services are not allowed here (`127.0.0.1`, `localhost` and the like are refused with the hint to use `host.persona.internal`, which the manifest asks for). Allowing is immediate with no question (the toast offers Undo); revoking closes the extension's open proxy connections. Each change is audited (`egress_allow` / `egress_revoke`, actor `admin UI`). They are stored in the hub setting `extension_egress_allow` by extension, at most 32 each, and dropped when the extension is uninstalled. Endpoints: `POST /api/v1/admin/extensions/{id}/egress/allow` `{"host": "…"}` and `DELETE /api/v1/admin/extensions/{id}/egress/allow?host=…`, both answering with the extension (400 `invalid_host` with the reason). The proxy also keeps, in memory, the last 5 different hosts it refused each extension (`sandbox.egress.recent_denied`: `target`, `count`, `at`), which the admin UI lists with **Allow**.
 - **The hub's own upstream proxy**: when the hub's environment has `HTTPS_PROXY` / `HTTP_PROXY` (`NO_PROXY` honored), the proxy goes out through it (CONNECT); extensions don't need to know.
 - **Several addresses** (#1181): when a name resolves to several addresses, the proxy checks every one first (the rules above), then races only those
@@ -1629,13 +1662,30 @@ manifest can ask for four things. A hub from before them refuses the manifest, s
   - The consent line is 「访问你在设置里填的地址」: the field's title, the address there now (「当前：…」, 未填 before
     install), and whether http is allowed. An upgrade that adds such an entry lists it under the permissions that grew,
     like a new host.
-  - Only with the sandbox on does the proxy hold the extension to it; without the sandbox the extension reaches what it
-    likes, as before.
+  - The proxy holds the extension to these rules only while its sandbox is **enabled** (`sandbox.enabled`, "Sandbox").
+    With the sandbox also **active**, the proxy is its only way out. Enabled but not active (this machine has no
+    sandbox), its environment points it at the proxy: a well-behaved program goes through it, a misbehaving one can go
+    round it ("Egress"). With the sandbox off, the extension reaches what it likes, as before.
 - **`secrets[].hint: "last4"`**: once set, the detail's `secrets[].hint` is the secret's last four characters (none for one
   shorter than 12). The apps show 已设置 · 末 4 位 <hint>. It is read for the detail only, never logged or audited.
 - **`settings_check: true`**: before saving a secret or the configuration, the hub calls the running program's
-  `settings.check {config, secrets}`, with the values as they would be after the change. The answer is `{ok: true}` or
-  `{ok: false, error}`.
+  `settings.check {config, secrets, proxy?}`, with the values as they would be after the change. The answer is
+  `{ok: true}` or `{ok: false, error}` (`SettingsCheckParams` / `SettingsCheckResult` in `schema/extension/protocol.schema.json`).
+  - **The check's own way out** (#8459): a program behind the egress proxy (its sandbox enabled) whose granted
+    `permissions.network` has a `config:` entry also gets `proxy`, the proxy URL with a credential for this check only:
+    `http://ext:<credential>@<address>`, where the address is the one the program reaches the proxy at (the loopback
+    listener, or `127.0.0.1:3128` inside a Linux sandbox).
+    - Requests sent through it are held to the extension's rule, with the addresses the **proposed** configuration names
+      in place of the saved ones, by the rules above. The program's ordinary requests keep the saved addresses, also
+      while the check runs (#1180).
+    - The credential is revoked when the check answers, fails or times out, and stops working by itself 5 seconds after
+      the time limit. The connections opened with it are closed then. The program restarting or stopping ends it too.
+    - It is taken out of a refusal's words like a secret.
+    - An older hub sends no `proxy`, and an older program ignores it: the check goes through the program's ordinary
+      proxy and reaches only the saved addresses, as before.
+    - The Go SDK's `ext.SettingsCheckClient(params)` is an HTTP client through `proxy` (an ordinary one without it); in
+      another language, use `proxy` as the proxy of the check's requests.
+    - Source runtimes get none yet: their fetches go through the runtime's broker (#1180).
   - A refusal saves nothing and is not audited. The route answers 400 `check_failed` with the extension's words.
   - Before the words go back, every secret handed to the check is replaced by `***`: whole, and any prefix or suffix of
     6 characters or more. The words are cut to 300 characters.
@@ -1649,7 +1699,8 @@ manifest can ask for four things. A hub from before them refuses the manifest, s
 - **`open_url: "persona://settings/extensions/<its own id>"`** from an action: the apps open 设置 › 扩展 › that extension
   (the web `/settings?tab=extensions&extension=<id>`). Another extension's id is refused like any non-https link.
 
-Code: `extension/configured.go`, `extension/egress` (`Target`, `dialConfigured`), `extmgr/extension_settings_check.go`;
+Code: `extension/configured.go`, `extension/egress` (`Target`, `dialConfigured`, `Proxy.Check`), `extmgr/extension_settings_check.go`,
+`sdk/go/ext/settings_check.go`;
 the clients `web/src/lib/extensions.ts`, `web/src/views/settings/Extensions.tsx`,
 `apple/Persona/Views/Settings/ExtensionsModel.swift`, `ExtensionUIModel.swift`.
 
@@ -2675,8 +2726,9 @@ Used to connect directly to a personal Agent service (e.g. one with real-time pu
   The hub clears caches and pushes `{"type":"agents","session_ids":[…]}`, and the app refetches immediately. Only this extension's own sources are accepted. The hub also pushes after its own sends, then again at 4 / 15 / 45 seconds;
   every 60 seconds it relists all sources as a fallback.
   The hub keeps each source's list for 20 seconds; reads that miss it at the same time (the Agents page's sections, groups and counts after a change, other open apps) share one `sessions` call, and one that comes after a change does not share a call made before it (#7204).
+  A source whose `sessions` call timed out (its own timeout, not the asker going away) answers the reads after it with that failure at once for up to 60 seconds, instead of each waiting out the 30-second call timeout again; its rows are left out as before. An answer to the fallback poll, an `agentsrc.updated` from it, or the source being added again ends that sooner. Other failures are asked again each time (#8471).
 - Implementation: `server/internal/extmgr/extension_agents.go`; tests `TestExtensionAgentSource` (`extension_agents_test.go`, fake extension exercises the protocol),
-  `agents.TestAddAndRemoveSources`, `agents.TestListsMissingTheCacheTogetherAskTheSourceOnce` (`inflight_test.go`).
+  `agents.TestAddAndRemoveSources`, `agents.TestListsMissingTheCacheTogetherAskTheSourceOnce` (`inflight_test.go`), `agents.TestATimedOutSourceIsNotAskedAgainByEveryRead` (`timeout_memo_test.go`).
 
 ## Events
 
@@ -3110,7 +3162,7 @@ events `{"event","params"}`. Hub-started extensions use stdin / stdout, remote o
 `member` (another hub is primary: group work such as reacting to chat-service events, running /agent and full crawling is handed to the primary). Role changes restart extensions contributing `connectors` or `api`.
 `hub.timezone` is the user's time zone (IANA, as reported by devices), used for displayed times ("today", message timestamps); empty when only the hub's own clock is known, read at each start.
 `hub.locale` is the user's language (`zh-Hans` / `en` / `ja`, `docs/protocol/i18n.md` ("Protocol")); extensions use it for human-facing text (status, sign-in prompts, bot replies), read at each start, defaulting to `zh-Hans` if absent.
-`hub.capabilities` (#1680) lists what this hub can do so extensions can adapt: `inbox_group` (associate batches of new connector messages with Inbox events, `docs/assistant/inbox.md` ("Event grouping")); `inbox_group_state` (a grouping connector may report the events the user read or replied to in the source, and its fallback plan may assign messages to an already handled event, which the hub accepts and reopens; `docs/assistant/inbox.md` ("Following up")).
+`hub.capabilities` (#1680) lists what this hub can do so extensions can adapt: `inbox_group` (associate batches of new connector messages with Inbox events, `docs/assistant/inbox.md` ("Event grouping")); `inbox_group_state` (a grouping connector may report the events the user read or replied to in the source, and its fallback plan may assign messages to an already handled event, which the hub accepts and reopens; `docs/assistant/inbox.md` ("Following up")); `tool_images` (a connector's `tools.call` answer may carry pictures for the model, `docs/protocol/connector-protocol.md` ("Pictures in a tool's answer"), #8484).
 Missing field or entry means the hub does not do it.
 `hub.manager` is the id of the manager running the extension when it is not the built-in one (also `PERSONA_MANAGER` for a program it starts; `docs/assistant/managers.md`, "Extensions and the hub's API"); absent for the built-in manager.
 The program returns `{"protocol": 1, "id", "version", "contributes"?}`: protocol mismatch returns `wrong_protocol`
@@ -3584,6 +3636,8 @@ the program stores nothing. The contract (the job's frames both ways, which cont
 - **Which one transcribes**: the built-in voice extension's `gpt-live`, unless the owner names another in the assistant's `meeting_transcription_extension`
   (`"<extension id>/<contribution id>"`): installing an extension never sends it meeting audio. A contribution is used only while its extension is enabled and running and
   the contribution is not switched off ("Turning contributions on and off"); an extension started by requests is started for `/info`, as for any relayed request.
+- **Extensions' own audio**: besides meetings, the manager runs jobs for extensions granted `transcription` on the same chosen contribution, in `replay`
+  mode ("Transcription for extensions"); the contribution sees a job like any other, and gets no meeting audio through it.
 - **A job is a request**: it holds the program's open request (`host.Proc.BeginHTTP`) until it ends, so an extension started by requests is not stopped mid-meeting.
   The phone's audio socket to the manager, by contrast, does not count in the manager's open requests (`Manager.Serving`): a meeting never holds a redeploy, and the phone sends again from where the hub's audio ends.
 

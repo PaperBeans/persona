@@ -1078,6 +1078,11 @@ export function createPaseoBridge(deps = {}, options = {}) {
     return entries.find((e) => e?.provider === agent?.provider)?.modes ?? []
   }
 
+  /** A Codex agent's own mode, Persona's default there: its provider's default in Paseo, else its first short of full access. */
+  function ownMode(agent) {
+    return entries.find((e) => e?.provider === agent?.provider)?.defaultModeId || modesOf(agent).find((m) => m?.id && m.id !== 'full-access')?.id
+  }
+
   /**
    * A card came back dismissed. Only a person's "Return to computer" leaves the request to Paseo's own app: one that
    * came while the card was up, the hub there since it went up and before its time ran out. With no hub now it goes up
@@ -1709,7 +1714,8 @@ export function createPaseoBridge(deps = {}, options = {}) {
   /**
    * The phone's model, permission mode and effort for a session, in that order (an effort is the new model's): Paseo's
    * set_agent_model / set_agent_mode / set_agent_thinking. Claude Code takes a new model at once, Codex at its next turn.
-   * Where approval is Paseo's Auto Accept (Grok), Allow all and Ask are that switch on and off (set_agent_feature).
+   * Where approval is Paseo's Auto Accept (Grok), Allow all and the launcher's own are that switch on and off
+   * (set_agent_feature); on Codex they are full-access and its provider's own default mode (#8261).
    */
   async function modes(params) {
     const agent = agentFor(params.session_id)
@@ -1729,7 +1735,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
     const mode = params.permission_mode
     if (mode) {
       const root = agentRoot(agent, roots)
-      const modeId = paseoMode(root, mode)
+      const modeId = paseoMode(root, mode) ?? (root === 'codex' && mode === 'default' ? ownMode(agent) : undefined)
       const autoAccept = autoAcceptOf(agent) !== undefined || AUTO_ACCEPT_ROOTS.has(root)
       if (!modeId && autoAccept && (mode === 'bypassPermissions' || mode === 'default')) {
         const res = await paseo.request('set_agent_feature_request', { agentId: agent.id, featureId: AUTO_ACCEPT, value: mode === 'bypassPermissions' })

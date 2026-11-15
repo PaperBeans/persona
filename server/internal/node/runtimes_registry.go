@@ -561,7 +561,8 @@ func (b *runtimeRegistry) launchers() []proto.Launcher {
 
 // formLauncherLocked is h's launcher l as the new-session form lists it. Agent, as for a Codex launcher
 // (proto.Launcher.Agent): what it starts is not Claude Code, so the apps do not offer it where only Claude Code or
-// Codex can run (the Persona assistant). Callers hold h.mu.
+// Codex can run (the Persona assistant). The permission modes it lists only then: Claude Code's are the apps' own
+// five (#8261). Callers hold h.mu.
 func (h *runtimeConn) formLauncherLocked(l runtimeLauncher) proto.Launcher {
 	agent := l.Agent
 	if agent == "" {
@@ -570,11 +571,12 @@ func (h *runtimeConn) formLauncherLocked(l runtimeLauncher) proto.Launcher {
 	if agent == "" {
 		agent = h.hello.Runtime
 	}
+	modes := l.PermissionModes
 	if agent == "claude" {
-		agent = ""
+		agent, modes = "", 0
 	}
 	return proto.Launcher{Name: l.Name, Model: l.Model, Source: h.hello.Runtime, Agent: agent, PromptOptional: l.PromptOptional,
-		Assistant: h.hello.Caps.Assistant && l.Name == h.hello.Launcher, AutoAccept: l.AutoAccept}
+		Assistant: h.hello.Caps.Assistant && l.Name == h.hello.Launcher, AutoAccept: l.AutoAccept, DisplayName: l.DisplayName, PermissionModes: modes}
 }
 
 // launcherRuntime is the runtime offering a launcher name, nil when none does.

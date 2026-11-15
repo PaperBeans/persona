@@ -78,11 +78,13 @@ export interface MachineLaunchers {
   /** The profile the presets come from (they follow its switches). */
   tiers_profile?: { id: string; name: string };
   /** `?purpose=assistant` on a hub with `assistant_model_pick` (#5033): what can't run the main chat on this computer, with
-   *  why in the request's language (shown off, not hidden). */
+   *  why in the request's language (shown off, not hidden). For "New agent" (#8109): the Persona-managed providers its
+   *  own-service rule leaves out on this computer, with why; absent when there are none, or from an older hub. */
   unavailable?: UnavailableLauncher[];
 }
 
-/** One of MachineLaunchers.unavailable: a launcher of the computer or a Model provider that can't run assistant chats here. */
+/** One of MachineLaunchers.unavailable: a launcher of the computer or a Model provider that can't run assistant chats here
+ *  (or, for "New agent", can't start Agents here). */
 export interface UnavailableLauncher {
   name: string;
   display_name?: string;
@@ -200,8 +202,27 @@ export function inlineTextStart(launcher: Launcher | undefined, host: string, te
   return { launcher: launcher.name, host, agentType: "traex", inlinePrompt: true } as const;
 }
 
-/** Claude Code and Antigravity start with a thinking effort and permission mode; Codex and the rest keep their own. */
-export const takesEffort = (agent: string) => agent === "claude" || agent === "agy";
+/** The permission modes a start on `l` takes when they are not Claude Code's (#8261, the node's `permission_modes`): a
+ *  runtime's provider of another agent, Paseo's Grok, OpenCode or Codex. Undefined for Claude Code's launchers, which take
+ *  its five, and for every other launcher, which takes none. New Agent offers them as a choice only with two or more:
+ *  the launcher's own ("Launcher default", sent as no mode) and Full access. */
+export function listedModes(l: Pick<Launcher, "permission_modes"> | undefined): string[] | undefined {
+  return l?.permission_modes?.length ? l.permission_modes : undefined;
+}
+
+/** How a start takes a thinking effort: `any` (Claude Code, Antigravity: its model's levels, all of them while its list
+ *  doesn't say), `listed` (a launcher that lists its permission modes, `listedModes`: only the levels its model lists,
+ *  #8261), `none` (Codex and the rest keep their own). */
+export type EffortRule = "any" | "listed" | "none";
+
+export function effortRule(agent: string, l?: Pick<Launcher, "permission_modes">): EffortRule {
+  if (agent === "claude" || agent === "agy") return "any";
+  return listedModes(l) ? "listed" : "none";
+}
+
+/** Claude Code and Antigravity start with a thinking effort and permission mode, a launcher that lists its modes with
+ *  the effort its model lists (`effortRule`); Codex and the rest keep their own. */
+export const takesEffort = (agent: string, l?: Pick<Launcher, "permission_modes">) => effortRule(agent, l) !== "none";
 
 export function defaultModel(models: AgentModel[]): AgentModel | undefined {
   return models.find((m) => m.default);
@@ -250,13 +271,15 @@ export const ALL_EFFORTS = EFFORTS.map((e) => e.id);
 
 /** The efforts the control offers: the picked model's, with none picked the one that runs ("Model configuration"'s, else the
  *  default entry's). No list to go by (loading, failed, older hub), or "Model configuration"'s model not in it under that id: all
- *  of them. */
-export function effortChoices(list: LauncherModels | null | undefined, model: string, followed: ModelBinding = {}): string[] {
-  if (!list?.models.length) return ALL_EFFORTS;
+ *  of them, or none under the `listed` rule (only what its model lists, #8261). */
+export function effortChoices(list: LauncherModels | null | undefined, model: string, followed: ModelBinding = {}, rule: EffortRule = "any"): string[] {
+  if (rule === "none") return [];
+  const unknown = rule === "listed" ? [] : ALL_EFFORTS;
+  if (!list?.models.length) return unknown;
   const id = model || followed.model;
   const m = list.models.find((x) => x.id === id) ?? (id ? undefined : defaultModel(list.models));
   // a typed ID (listed as typed before, or not at all): what it takes is not known
-  return m && !m.custom ? (m.efforts ?? []) : ALL_EFFORTS;
+  return m && !m.custom ? (m.efforts ?? []) : unknown;
 }
 
 /** The effort kept when the choices change: one they no longer offer goes back to "Launcher default". */
@@ -264,10 +287,11 @@ export function fitEffort(effort: string, choices: string[]): string {
   return choices.includes(effort) ? effort : "";
 }
 
-/** What a start sends: the model only when it is not the default and the launcher lets it through, the effort only to
- *  Claude Code and only one the model takes. An ID the list lacks (typed, #1644) goes as it is to Claude Code and Codex,
- *  also when the list couldn't be read (`undefined`); an older hub's `null` (no picker) sends none. */
-export function startPicks(o: { agent: string; list: LauncherModels | null | undefined; model: string; effort: string; followed?: ModelBinding }): { model?: string; effort?: string } {
+/** What a start sends: the model only when it is not the default and the launcher lets it through, the effort only where
+ *  the start takes one (`effortRule`, by the agent and the launcher that runs) and only one the model takes. An ID the
+ *  list lacks (typed, #1644) goes as it is to Claude Code and Codex, also when the list couldn't be read (`undefined`); an
+ *  older hub's `null` (no picker) sends none. */
+export function startPicks(o: { agent: string; list: LauncherModels | null | undefined; model: string; effort: string; followed?: ModelBinding; launcher?: Pick<Launcher, "permission_modes"> }): { model?: string; effort?: string } {
   const out: { model?: string; effort?: string } = {};
   const m = o.list?.models.find((x) => x.id === o.model);
   if (m) {
@@ -277,14 +301,15 @@ export function startPicks(o: { agent: string; list: LauncherModels | null | und
   } else if (o.model && o.list !== null && typedModelOffered(o.agent, o.list) && validModelId(o.model)) {
     out.model = o.model;
   }
-  if (o.effort && takesEffort(o.agent) && effortChoices(o.list, out.model ?? "", o.followed).includes(o.effort)) out.effort = o.effort;
+  const rule = effortRule(o.agent, o.launcher);
+  if (o.effort && rule !== "none" && effortChoices(o.list, out.model ?? "", o.followed, rule).includes(o.effort)) out.effort = o.effort;
   return out;
 }
 
 /** What of a preset a start with this launcher's list would not pass on: its model when the launcher fixes its own --model
  *  or takes no typed ID, its effort when the model doesn't take it. Empty: all of it (or the list is not in yet). */
-export function tierLeftOut(tier: PickerTier, o: { agent: string; list: LauncherModels | null | undefined; followed?: ModelBinding }): string[] {
-  const picks = startPicks({ agent: o.agent, list: o.list, model: tier.model ?? "", effort: tier.effort ?? "", followed: o.followed });
+export function tierLeftOut(tier: PickerTier, o: { agent: string; list: LauncherModels | null | undefined; followed?: ModelBinding; launcher?: Pick<Launcher, "permission_modes"> }): string[] {
+  const picks = startPicks({ agent: o.agent, list: o.list, model: tier.model ?? "", effort: tier.effort ?? "", followed: o.followed, launcher: o.launcher });
   const out: string[] = [];
   // the list's default is what runs with no model sent (startPicks sends it when the model settings would run another)
   if (tier.model && picks.model !== tier.model && !(o.list?.models.some((m) => m.id === tier.model && m.default) && !o.list?.locked)) out.push(tier.model);

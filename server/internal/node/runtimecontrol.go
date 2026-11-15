@@ -33,24 +33,31 @@ type runtimeLauncher struct {
 	// AutoAccept: its agents' approval is a switch a start in bypassPermissions turns on (Paseo's Auto Accept), passed on
 	// in launchers.list (proto.Launcher.AutoAccept, #8141).
 	AutoAccept bool `json:"auto_accept,omitempty"`
+	// DisplayName and PermissionModes: what the apps call it (Paseo's label for the provider) and, when its agent is
+	// not Claude Code, the permission modes a start takes (proto.Launcher's, #8261).
+	DisplayName     string                  `json:"display_name,omitempty"`
+	PermissionModes proto.PermissionModeSet `json:"permission_modes,omitempty"`
 }
 
-// Bounds on a runtime's launchers.
+// Bounds on a runtime's launchers. A display name is as long as a provider's may be (the manager's maxDisplayName).
 const (
-	maxRuntimeLaunchers = 64
-	maxLauncherModels   = 200
-	maxLauncherText     = 200
+	maxRuntimeLaunchers    = 64
+	maxLauncherModels      = 200
+	maxLauncherText        = 200
+	maxLauncherDisplayName = 64
 )
 
 // cleanLaunchers keeps the launchers a runtime may offer: names a launcher may have (shellcmd.NameRe, the shell's
-// rule), each once, agents that are ids, text clipped, the lists bounded.
+// rule), each once, agents that are ids, text clipped, the lists bounded. Its permission modes are Persona's once read
+// (proto.PermissionModeSet).
 func cleanLaunchers(list []runtimeLauncher) []runtimeLauncher {
-	clip := func(s string) string {
-		if r := []rune(strings.TrimSpace(s)); len(r) > maxLauncherText {
-			return string(r[:maxLauncherText])
+	clipTo := func(s string, n int) string {
+		if r := []rune(strings.TrimSpace(s)); len(r) > n {
+			return string(r[:n])
 		}
 		return strings.TrimSpace(s)
 	}
+	clip := func(s string) string { return clipTo(s, maxLauncherText) }
 	out := make([]runtimeLauncher, 0, len(list))
 	seen := map[string]bool{}
 	for _, l := range list {
@@ -62,6 +69,7 @@ func cleanLaunchers(list []runtimeLauncher) []runtimeLauncher {
 		}
 		seen[l.Name] = true
 		l.Model = clip(l.Model)
+		l.DisplayName = clipTo(l.DisplayName, maxLauncherDisplayName)
 		models := make([]proto.AgentModel, 0, min(len(l.Models), maxLauncherModels))
 		for _, m := range l.Models {
 			if len(models) == maxLauncherModels {
@@ -101,6 +109,7 @@ func (h *runtimeConn) launcherList() []runtimeLauncher {
 				entry.Agent = l.Agent
 				entry.Models = l.Models
 				entry.AutoAccept = l.AutoAccept
+				entry.DisplayName, entry.PermissionModes = l.DisplayName, l.PermissionModes
 				break
 			}
 		}

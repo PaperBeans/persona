@@ -295,6 +295,7 @@
     <string name="agents_new_follow_config">モデル設定に従う</string>
     <string name="agents_new_permission_mode">権限モード</string>
     <string name="agents_new_bypass_warning">すべて許可すると、ファイルの編集やコマンドの実行で確認されなくなります。</string>
+    <string name="agents_new_provider_mode_hint">「すべて許可」を選ばない限り、このエージェントは自身の承認設定に従います。あとからチャットで切り替えることもできます。</string>
     <string name="agents_new_effort">思考の強さ</string>
     <string name="agents_new_no_effort">このモデルは思考の強さを調整できません</string>
     <string name="agents_new_first_message_codex">最初のメッセージ（Codexでは必須）</string>

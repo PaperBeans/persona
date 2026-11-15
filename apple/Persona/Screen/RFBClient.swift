@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import PersonaWire
 
 /// Bytes to and from a Mac's Screen Sharing: the hub's port relay (RFBWebSocket), or a test's.
 nonisolated protocol RFBTransport: AnyObject, Sendable {

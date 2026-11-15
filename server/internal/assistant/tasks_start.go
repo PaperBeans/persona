@@ -41,7 +41,7 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if i < len(edits) {
 			applyPlanEdit(&p.Tasks[i], edits[i])
 		}
-		p.Tasks[i].normalizeReadonlyPermission()
+		p.Tasks[i].normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
 		if err := p.Tasks[i].normalizeMachinePolicy(); err != nil {
 			return nil, planInvalid{err}
 		}
@@ -427,10 +427,6 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 	ctx, cancel := context.WithTimeout(context.Background(), taskStartTimeout)
 	defer cancel()
 	placed, placedWhy, placedPermission := t.Machine, t.Why, t.Permission
-	if t.Role == roleLeader { // its tools are listed once it is linked: a list asked for meanwhile waits (task_leader.go)
-		s.leaderStarts.Add(1)
-		defer s.leaderStarts.Add(-1)
-	}
 	t.Permission = strings.TrimSpace(t.Permission)
 	mid, sid, err := s.startTaskAgent(ctx, &t, retry)
 	var lost startLinkLost
@@ -710,7 +706,7 @@ func (s *Service) retryTask(ctx context.Context, todoID string) (json.RawMessage
 	if err != nil {
 		return nil, err
 	}
-	p.Tasks[i].normalizeReadonlyPermission()
+	p.Tasks[i].normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
 	t := p.Tasks[i]
 	t.Permission = strings.TrimSpace(t.Permission)
 	m, ok := s.machineByName(ctx, t.Machine)

@@ -605,6 +605,8 @@ nonisolated enum Theme {
         static let tabName: CGFloat = 120
         static let box140: CGFloat = 140
         static let box150: CGFloat = 150
+        /// A file's card above the composer (#8361): a name of about 14 characters whole, and the next card showing.
+        static let box160: CGFloat = 160
         static let box180: CGFloat = 180
         static let box200: CGFloat = 200
         static let box240: CGFloat = 240

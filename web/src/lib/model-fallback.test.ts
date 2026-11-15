@@ -15,7 +15,8 @@ vi.mock("./api", async (importOriginal) => ({
   },
 }));
 
-const { fallbackView, recoveryCause, recoveryExhausted, recoveryReturning, refusalFacts, restoreErrorText, restoreModel } = await import("./model-fallback");
+const { fallbackView, recoveryCause, recoveryExhausted, recoveryReturning, refusalFacts } = await import("./model-fallback");
+const { restoreErrorText, restoreModel } = await import("./model-restore");
 const { usageLimitClock } = await import("./usage-limit");
 
 const fallback = {

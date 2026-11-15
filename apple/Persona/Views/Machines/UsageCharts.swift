@@ -1,5 +1,6 @@
 import Charts
 import SwiftUI
+import PersonaWire
 
 /// A machine's token usage on its page (docs/server/machines.md "Token usage", #4973): the range, model and launcher filters,
 /// the range's sums, throughput per minute (all tokens, or the four kinds stacked; a legend entry hides its kind:

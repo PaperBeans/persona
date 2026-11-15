@@ -151,11 +151,14 @@ type PlanTask struct {
 	admissionRelease func()
 }
 
-// Readonly starts conservatively in plan. The launcher fit changes Claude to bypassPermissions while preserving Codex's sandbox.
-// Never let an omitted mode inherit a writable launcher default before that fit.
-func (t *PlanTask) normalizeReadonlyPermission() {
-	if t.Readonly {
+// Keep the default protection unless the owner opted into instructions only. Spawned helpers keep their caller's mode.
+// Launcher fitting still applies the Claude-family and Auto Accept bypassPermissions behavior in either mode.
+func (t *PlanTask) normalizeReadonlyPermission(mode string) {
+	if t.Readonly && !t.preservePermission {
 		t.Permission = "plan"
+		if mode == readonlyPrompt {
+			t.Permission = "default"
+		}
 	}
 }
 

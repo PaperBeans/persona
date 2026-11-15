@@ -29,6 +29,5 @@
   "earlier_hint": "選択した期間（{window}）より前に最後にアクティブだった {count} 件のセッション",
   "no_folder": "フォルダなし",
   "no_space": "プロジェクトなし",
-  "more_groups": "あと {count} 件を表示",
-  "places": "チェックアウト先"
+  "more_groups": "あと {count} 件を表示"
 }

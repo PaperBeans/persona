@@ -14,7 +14,7 @@ import { getPanel, openPanel, togglePanel, usePanel } from "../../lib/panel";
 import { backgroundPanelOf, hasBackgroundWork, isWorkflowsCommand, latestWorkflowRun, openBackgroundPanel, provideBackgroundChat, toggleBackgroundPanel, WORKFLOWS_COMMAND } from "../../lib/background-panel";
 import { machineWithHub } from "../../lib/mesh";
 import { useLayout } from "../../lib/layout";
-import { hasModes, isMuted, toggleMute } from "../../lib/session-actions";
+import { hasModes, isMuted, listedModesOf, toggleMute } from "../../lib/session-actions";
 import { attachLive, flipPin } from "../../lib/agent-actions";
 import { isPinned } from "../../lib/pins";
 import { acknowledgeLaunch } from "../../lib/new-agent";
@@ -134,7 +134,6 @@ import { ChatOnlyNote, FailureCard, ReadinessCard, useReadinessGate, type Readin
 import { codedFailure, knownAction, refreshReadiness, turnErrorFix, type CodedFailure } from "../../lib/readiness";
 import { FALLBACK_UNAVAILABLE, recoveryExhausted } from "../../lib/model-fallback";
 import { BASE } from "../../lib/base";
-import { ModelFallbackCard } from "./ModelFallbackCard";
 import { usageLimitLabel } from "../../lib/usage-limit";
 import { displayLines, getFeedState, loadedFrom, loadFeed, loadToday, sendRouted, startOfDay, useFeed, type FeedItem } from "../../lib/feed";
 import { CardConversation } from "../../ui/AssistantCard";
@@ -164,6 +163,8 @@ const LazyWrapUpChips = lazy(() => import("../assistant/HandoffCard").then((m) =
 const LazyNotFoundNotice = lazy(() => import("./NotFoundNotice").then((m) => ({ default: m.NotFoundNotice })));
 // only in a conversation that moved between Claude Code and Codex (#5054): its earlier sessions, read above the live one
 const EarlierStretches = lazy(() => import("./EarlierStretches"));
+// Recovery cards are rare: their rendering and words load only when the session actually carries a fallback record.
+const ModelFallbackCard = lazy(() => import("./ModelFallbackCard").then((m) => ({ default: m.ModelFallbackCard })));
 
 const NO_FEED: FeedItem[] = [];
 // A worker's card as its own conversation shows it (#5180): without the fold that makes it "From worker" on its lead's page.
@@ -1840,9 +1841,11 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
     [assistant, clears, session, embedded],
   );
   // the permission picker after the + (#5324), where the mode can be switched: a Persona conversation whatever its state
-  // (the hub applies it, #2416), an agent with modes while it runs; Plan mode is the + panel's check row
+  // (the hub applies it, #2416), an agent with modes while it runs; Plan mode is the + panel's check row. An agent that
+  // lists its own modes (#8261) gets the picker with those two, and no Plan mode.
   const modesOn = Boolean(session) && (Boolean(assistant) || (hasModes(session) && stateOf(session!) !== "offline"));
-  const leading = useMemo(() => (session && modesOn ? <PermissionPicker session={session} assistant={assistant} /> : null), [session, modesOn, assistant]);
+  const listedOn = Boolean(session) && !assistant && Boolean(listedModesOf(session)) && stateOf(session!) !== "offline";
+  const leading = useMemo(() => (session && (modesOn || listedOn) ? <PermissionPicker session={session} assistant={assistant} /> : null), [session, modesOn, listedOn, assistant]);
   const planMode = usePlanMode(modesOn ? session : undefined, assistant);
   // the model pill: an Agent's (#5032), a Persona conversation's (#5033, its pick kept for the conversation)
   const trailing = useMemo(() => (session ? assistant ? <AssistantModelPill session={session} /> : <AgentModelPill session={session} /> : null), [session, assistant]);
@@ -2074,7 +2077,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
           </>
         )}
         {pendingCards}
-        {!assistant && session?.model_fallback && <ModelFallbackCard session={session} headless={false} />}
+        {!assistant && session?.model_fallback && <Suspense fallback={null}><ModelFallbackCard session={session} headless={false} /></Suspense>}
         {assistant && session && <CompactionStrip session={session} />}
         {/* the failed bubble above has the one Retry; the card says what to set up first */}
         {failure ? <FailureCard failure={failure} onClose={() => setSendFailure(null)} onHelp={gate.help} onConfirm={gate.confirm} /> : <ReadinessCard gate={gate} />}

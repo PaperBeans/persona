@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync/atomic"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/db"
 )
 
 var fsWatchEpochCounter atomic.Uint64
@@ -80,12 +82,36 @@ func (h *Hub) fsWatchSet(c *client, machineID string, req fsWatchReq) {
 	h.queueFSWatchSync(m)
 }
 
+const fsWatchEpochKey = "hub.fs_watch_epoch"
+
+func (h *Hub) initFSWatchEpoch() {
+	if h.fsWatchEpoch != 0 {
+		return
+	}
+	base := uint64(time.Now().Unix()) + fsWatchEpochCounter.Add(1)
+	h.fsWatchEpoch = base
+	if h.store == nil {
+		return
+	}
+	store, ok := h.store.(*db.DB)
+	if !ok {
+		return
+	}
+	var previous uint64
+	if ok, err := store.Setting(context.Background(), fsWatchEpochKey, &previous); err == nil && ok && previous >= base-1 {
+		h.fsWatchEpoch = previous + 1
+	} else if err != nil {
+		h.logf("fs.watch epoch: %v", err)
+	}
+	if err := store.PutSetting(context.Background(), fsWatchEpochKey, h.fsWatchEpoch); err != nil {
+		h.logf("fs.watch epoch: save: %v", err)
+	}
+}
+
 func (h *Hub) nextFSWatchGeneration(id string) uint64 {
 	h.fsWatchGenMu.Lock()
 	defer h.fsWatchGenMu.Unlock()
-	if h.fsWatchEpoch == 0 {
-		h.fsWatchEpoch = uint64(time.Now().Unix()) + fsWatchEpochCounter.Add(1)
-	}
+	h.initFSWatchEpoch()
 	if h.fsWatchGen == nil {
 		h.fsWatchGen = map[string]uint64{}
 	}

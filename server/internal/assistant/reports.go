@@ -241,11 +241,12 @@ type todoStage struct {
 	Stage    string        `json:"stage"`
 	Kind     string        `json:"stage_kind,omitempty"`
 	PR       string        `json:"pr,omitempty"`
-	PRs      []string      `json:"prs,omitempty"`      // the PRs named before PR, newest last, at most stagePRsKept (#6507)
-	Delivery *TodoDelivery `json:"delivery,omitempty"` // delivery.go
-	Deploy   *deployWatch  `json:"deploy,omitempty"`   // deploy_check.go: held until the running hub has the work
-	Verified bool          `json:"verified,omitempty"` // explicit acceptance outranks delivery and reply keywords
-	Check    *TodoCheck    `json:"check,omitempty"`    // task_check.go
+	PRs      []string      `json:"prs,omitempty"`       // the PRs named before PR, newest last, at most stagePRsKept (#6507)
+	Delivery *TodoDelivery `json:"delivery,omitempty"`  // delivery.go
+	Deploy   *deployWatch  `json:"deploy,omitempty"`    // deploy_check.go: held until the running hub has the work
+	Verified bool          `json:"verified,omitempty"`  // explicit acceptance outranks delivery and reply keywords
+	Check    *TodoCheck    `json:"check,omitempty"`     // task_check.go
+	PRStatus *TodoPRStatus `json:"pr_status,omitempty"` // Observed forge facts, not a task state.
 }
 
 const reportStagesKey = "assistant.todo_stages"
@@ -253,7 +254,7 @@ const reportStagesKey = "assistant.todo_stages"
 // empty: st keeps nothing (its row can go).
 func (st todoStage) empty() bool {
 	return st.Stage == "" && st.Kind == "" && st.PR == "" && len(st.PRs) == 0 && st.Delivery == nil && st.Deploy == nil && !st.Verified &&
-		st.Check == nil
+		st.Check == nil && st.PRStatus == nil
 }
 
 // stagePRsKept bounds a task's earlier PRs (todoStage.PRs).
@@ -367,6 +368,12 @@ func (s *Service) setTaskStage(ctx context.Context, id, stage, pr string) {
 }
 
 func (s *Service) setTaskStageKind(ctx context.Context, id, stage, pr, kind string, verified bool) {
+	s.setTaskStageOn(ctx, id, stage, pr, kind, verified, "")
+}
+
+// setTaskStageOn is setTaskStageKind, and when onPR is set it does nothing unless, under the stage lock, the open to-do
+// and its stage still name that PR: an observation of a PR that was replaced meanwhile moves no stage (#7614 review).
+func (s *Service) setTaskStageOn(ctx context.Context, id, stage, pr, kind string, verified bool, onPR string) {
 	if !verified && stage == "verify" {
 		if t, ok := s.todoNow(id); ok && t.Supervision != nil {
 			v := t.Supervision
@@ -378,6 +385,12 @@ func (s *Service) setTaskStageKind(ctx context.Context, id, stage, pr, kind stri
 	b := &s.reports
 	b.stageWriting.Lock()
 	defer b.stageWriting.Unlock()
+	if onPR != "" {
+		// The to-do's PR changes only under stageWriting (below), so it is read before b.mu, in the usual lock order.
+		if t, ok := s.todoNow(id); !ok || t.DoneAt != nil || t.PRURL != onPR {
+			return
+		}
+	}
 	b.mu.Lock()
 	if !s.loadStagesLocked(ctx) {
 		b.mu.Unlock()
@@ -385,6 +398,10 @@ func (s *Service) setTaskStageKind(ctx context.Context, id, stage, pr, kind stri
 		return
 	}
 	cur := b.stages[id]
+	if onPR != "" && cur.PR != onPR {
+		b.mu.Unlock()
+		return
+	}
 	changed := false
 	if verified && !cur.Verified {
 		cur.Verified, changed = true, true

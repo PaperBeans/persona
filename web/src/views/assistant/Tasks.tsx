@@ -5,6 +5,7 @@
 // side panel.
 import { lazy, memo, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 import { taskMeter, type TaskCardMetadata } from "../../lib/task-cards";
+import { prBlockers } from "../../lib/todo-triage";
 import { assistantEntries, needsYouBySupervisor, type NeedsYouItem } from "../../lib/assistant-entries";
 import { useRestoredTodos } from "../../lib/todo-restore";
 import {
@@ -726,9 +727,9 @@ function dockTasksIn(s: State, conversation: string, plans: Record<string, TaskP
     });
 }
 
-type AssistantTray = "needs" | "running";
+type AssistantTray = "needs" | "running" | "pr";
 /** Each entry's mark: Needs you waits on the user, In progress is work under way. */
-const TRAY_DOT: Record<AssistantTray, string> = { needs: "bg-attention", running: "bg-accent" };
+const TRAY_DOT: Record<AssistantTray, string> = { needs: "bg-attention", running: "bg-accent", pr: "bg-accent" };
 const EMPTY_FEED: FeedItem[] = [];
 const EMPTY_CARDS: TaskCardMetadata[] = [];
 
@@ -826,6 +827,19 @@ function ProgressTaskRow({ card, conversation, activity, countsOpen, supervisorR
       </span>
     </button>
   );
+}
+
+/** A fresh, open PR waiting for its maintainer, shown in its own tray group. */
+function WaitingMergeRow({ todo }: { todo: Todo }) {
+  const blockers = prBlockers(todo);
+  return <div data-pr-waiting-row={todo.id} className="flex items-start gap-2 px-3 py-2.5">
+    <Icon name="pullRequest" size={14} className="mt-0.5 shrink-0 text-accent-ink" />
+    <div className="min-w-0 flex-1">
+      <button type="button" data-pr-task-link={todo.id} onClick={() => openTask(todo.id)} className="block max-w-full truncate text-left text-sm font-medium hover:underline">{todo.title}</button>
+      <a href={todo.pr_url} target="_blank" rel="noreferrer noopener" title={todo.pr_url} className="block max-w-full truncate text-xs text-accent-ink hover:underline">{todo.pr_url}</a>
+      <div className="truncate text-xs text-ink-2">{blockers.map((key) => t(`assistant-tasks.pr_blocker_${key}`)).join(" · ")}</div>
+    </div>
+  </div>;
 }
 
 /** Workflow counts never disappear behind an ellipsized phase, even on a narrow tray or with large text. */
@@ -1154,7 +1168,7 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
   // no to-do — hand-opened Agents, plans waiting for Start, draft cards, the chat's own ask cards — still add one.
   const badgeOf = (items: { kind: string; countsOpen?: boolean }[]) =>
     items.reduce((n, item) => n + (item.kind === "task" ? (item.countsOpen ? 1 : 0) : 1), 0);
-  const counts: Record<AssistantTray, number> = { needs: ownAsks.length + badgeOf(entries.needsYou), running: badgeOf(entries.running) };
+  const counts: Record<AssistantTray, number> = { needs: ownAsks.length + badgeOf(entries.needsYou), running: badgeOf(entries.running), pr: badgeOf(entries.pr) };
   // the card is in the chat already: close the tray onto it and bring it into view
   const openOwn = (id: string) => {
     setTray(null);
@@ -1169,8 +1183,8 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
       window.removeEventListener("persona:task-start", needs);
     };
   }, [conversation]);
-  const labels: Record<AssistantTray, string> = { needs: t("assistant-tasks.tray_needs_you"), running: t("assistant-tasks.tray_running") };
-  const entryKeys: AssistantTray[] = ["needs", "running"];
+  const labels: Record<AssistantTray, string> = { needs: t("assistant-tasks.tray_needs_you"), running: t("assistant-tasks.tray_running"), pr: t("todos.section_pr") };
+  const entryKeys: AssistantTray[] = ["needs", "running", ...(counts.pr > 0 || tray === "pr" ? ["pr" as const] : [])];
   const entryButtons = useRef<Partial<Record<AssistantTray, HTMLButtonElement | null>>>({});
   // Esc closes the open tray from its entry, its header and its rows, and hands the focus back to the entry; it stops
   // there, never on to the window, where the chat's Esc would stop a working turn. Not while a menu or dialog is open
@@ -1215,6 +1229,10 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
               </div>
             )}
             {entries.justFinished.map((item) => item.kind === "task" && <ProgressTaskRow key={item.key} card={item.card} conversation={conversation} countsOpen={false} onOpen={() => seeJustFinished(item.todo)} />)}
+          </div>}
+          {tray === "pr" && <div className="divide-y divide-line">
+            {entries.pr.map((item) => item.kind === "task" && <WaitingMergeRow key={item.key} todo={item.todo} />)}
+            {!entries.pr.length && <p className="px-3 py-3 text-sm text-ink-2">{t("assistant-tasks.tray_empty_pr")}</p>}
           </div>}
           {tray === "needs" && <div className="flex flex-col gap-2 p-2">
             {asking.map((item) => <NeedsYouRow key={item.key} item={item} open={openRows.has(openKey(item))} onToggle={() => toggleRow(openKey(item))} />)}

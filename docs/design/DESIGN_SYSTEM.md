@@ -374,6 +374,13 @@ For every component: use the design-system one, not a lookalike. Counts are appr
   length", and ✕. While the clipboard holds a picture not yet offered, the focused composer offers **Paste** (the accent's
   capsule on iOS, a Secondary button on Android) and ✕ **Don't paste** at its top, once per copy; the field itself pastes
   only text. Android: the video row in every style, the Paste chip on Glass (`ComposerPaste.kt`).
+- Files (iOS `FileAttachmentsBar`, #8361): + › Files never types into the draft. Each file is a card in a row above the
+  field that scrolls sideways like the photos' strip, 6 pt apart: `box56` tall and `box160` wide (a new size: a name of
+  about 14 characters whole, and the next card showing) on `Fill.well` with the card radius,
+  a `well`-sized tile of the file's kind (`FileViewer.symbol`, accent tint; `danger` and the error mark once failed), its
+  name on one line truncated in the middle, and under it how far it got ("1.3 MB / 2.4 MB"), Waiting, its size, or
+  Failed · Tap to Retry, a thin accent bar along the bottom while it waits or uploads, and the photos' ✕ at the top
+  corner (hit through `tapTargetOutset(.all)`). Up to 10, three uploading at once; a tap on a failed card tries again. Send waits for them as for a video.
 - Web bottom row (#5324, cindy's toolbar at the owner's request; cindy wins over this section's earlier rules for it):
   `[+][permission picker] … [model pill][Stop][voice][send / queue / stop]`. The + and the picker are bare 30 px round
   controls that show the model pill's frame (`line-strong` border, `hover` fill) on hover or while open; the action is one
@@ -502,6 +509,12 @@ For every component: use the design-system one, not a lookalike. Counts are appr
   Delete). A failed one with messages sent after it sits before the first of them, at the end of the exchange it was
   written in (`ChatLines.placeFailed`; Android in every style, `placeFailed`). Android draws the bubble so on Glass
   (`OutboxBubble`, #4339 C9) and keeps its status line for a delivery the phone has to check.
+- Files sent with a message (iOS `AttachedFileCards`, #8361; web `FileCards`, Android `FileCards.kt`): above your bubble,
+  right-aligned, one card each, at most `box280` wide: a video or a recording plays (`AttachedVideoCard`), any other file
+  opens the file viewer (`AttachedDocumentCard`: an `avatarL` tile of its kind in the accent's tint, the name in
+  `secondaryMedium` truncated in the middle, its size in `label`; Copy Path on a long press). More than four show three and
+  an "N More Files" row (`tapTarget` tall) in the accent color that opens the rest in place (Show Less folds them). A file the computer no
+  longer has is dimmed to 0.6 with the missing-file mark and "No longer on the computer", and takes no tap.
 - The images a turn's work looked at (iOS `ViewedImagesRow`, docs/protocol/protocol.md "Images viewed this turn"): bare
   thumbnails between the work line and the answer, `box64` tall in a strip that scrolls sideways, one alone `box80`, each
   as wide as its picture (¾ to 1.6 of its height), with a small mark for a screenshot or a web page and nothing written
@@ -679,7 +692,7 @@ sending identity or confirmation behavior.
 - A long list of records on a detail page (a to-do's Decisions, web and iOS, #6447): the first five show, with **Show all N** under them and **Show the first 5** to go back. The header carries the fold-all button with the Agents title row's meaning (the web's chevron icon, corners in to collapse and out to expand, and its name as the tooltip; iOS's Collapse All / Expand All symbols, `Theme.Icon.collapseAll` / `expandAll`): Collapse all while any record is shown folds the list away, Expand all shows it whole. The header's count is unchanged by what is shown. Nothing is stored: each to-do opens at the first five, and recording or revising one shows the whole list so the new one is in view. No button while the list is empty.
 - **Inbox matter detail** (#6611; web `InboxDetail.tsx` and `InboxEvent.tsx`): the title's small line says where and who, then the current state, any suggestion, the background and the timeline. The state sentence keeps the processing-conversation link and offers **Say something** when no suggestion is waiting, or **Try again** after a failure; the instruction field reuses the suggestion editor's input and standard small buttons. The timeline starts with the three newest steps and expands on request. A `reported` step always uses the reported icon and is distinguished from program-confirmed steps by the existing neutral **Tag** ("Assistant says") and secondary text, not a new surface, tint or token. Source and Agent states reuse the existing brand marks and shared state words; missing fields keep the old presentation.
   - On iOS (`InboxEventViews.swift`), the header uses `InboxNow.meta` when `where` exists and the old source line otherwise. `InboxNow.text(for:)` supplies the current sentence for every known state, including done states and states with a suggestion; a state key alone opens the event detail. Row and detail both render `InboxNow.symbol(for:)` through `InboxNowSymbol`: waiting has a still clock, only queued / looking / agent_working spin, Needs-you states use the existing mark (failed is red), and done / FYI / folded have no mark. The same state row carries the instruction action; the input uses the suggestion editor's well and `InboxSuggestionButton`, and a stale answer or error uses `InboxSuggestionModel`'s existing notice and error. The timeline's three-step projection and `via` icon meaning are shared, fixture-checked logic. A source id draws its `BrandMark` when one exists, otherwise its generic `ThemedIcon`; `reported` uses `Theme.Icon.reported`, a neutral compact `Chip` ("Assistant says") and secondary text; the row shows `detail` when present, otherwise `text`, so the server's older-app prefix is not repeated; inline detail is not repeated in an expansion, and detail alone offers no expander. Agent and Agent-stopped rows with a session link read that one session's `AgentState.label` and `tone`; an unlisted session shows no state. Three or fewer entries have no expander.
-- Status sections (web To-dos, #3156): a list grouped by what the user should do next uses folding section titles in a fixed order (what the user has to act on, then the unfinished work, then what just finished; only Shelved and Done start folded, Done last, #5707), one row per piece of work with related items behind an "N related" disclosure, and stale items folded under Shelved with a one-tap Restore instead of being hidden or deleted. A row that is only worth a look (Just finished) has a one-tap **Got it** at the end of its status line, under the time (#6578; Android: the end of its last line; iOS: still under its words, the same secondary button as Restore, and a leading swipe action after the full swipe's own, until #7148), which files it under Done at once with an Undo toast (4.4, reversible rung); opening the item counts as seeing it, without a word. On the web it is a small capsule, never a line of its own: the row is exactly as tall as without it and the title keeps its room. It is drawn 20 px tall with the check and the word in `--ink-2` on `bg-surface` with `shadow-btn` (hover `bg-hover`), hanging over the 18 px line by negative margins, a 44 px finger target through `touch-hit`. Its press stays its own: it never opens the item. Why not under the words: a button line made these rows taller than every other and left the room under the time empty. Rules in `docs/assistant/todo-status-sop.md` ("Seen"). Why not the folder groups: they say where work lives, not who has to act. Why unfinished work above Just finished: what still has to be done should not take a scroll and a tap while finished work sits above it.
+- Status sections (web To-dos, #3156): a list grouped by what the user should do next uses folding section titles in a fixed order (what the user has to act on, then the unfinished work, then what just finished; only Shelved and Done start folded, Done last, #5707), one row per piece of work with related items behind an "N related" disclosure, and stale items folded under Shelved with a one-tap Restore instead of being hidden or deleted. Waiting for merge is a separate open section backed only by fresh matching PR facts; it keeps the linked PR and concise review/check/conflict blockers visible. The conversation tray gives that section its own matching count and rows, outside In progress. A row that is only worth a look (Just finished) has a one-tap **Got it** at the end of its status line, under the time (#6578; Android: the end of its last line; iOS: still under its words, the same secondary button as Restore, and a leading swipe action after the full swipe's own, until #7148), which files it under Done at once with an Undo toast (4.4, reversible rung); opening the item counts as seeing it, without a word. On the web it is a small capsule, never a line of its own: the row is exactly as tall as without it and the title keeps its room. It is drawn 20 px tall with the check and the word in `--ink-2` on `bg-surface` with `shadow-btn` (hover `bg-hover`), hanging over the 18 px line by negative margins, a 44 px finger target through `touch-hit`. Its press stays its own: it never opens the item. Why not under the words: a button line made these rows taller than every other and left the room under the time empty. Rules in `docs/assistant/todo-status-sop.md` ("Seen"). Why not the folder groups: they say where work lives, not who has to act. Why unfinished work above Just finished: what still has to be done should not take a scroll and a tap while finished work sits above it.
   - Section titles are the Agents list's state headers (`SectionHeader`: the name and a `CountBadge` in the state's tone; `FoldButton` for the folding ones), and the count is the items listed under the title. No separate summary line repeats them (#3712).
   - "N related" sits inside the row it belongs to, under its words; opened, the related rows come under it a level in, with a line down their side.
   - A filter and a sort for such a list go in one button's menu next to the view switch (on the web, next to the search field), the active filter also as a chip that clears it ("List controls" below); the sort orders rows inside each section and never moves a section (To-dos on iOS, Android and the web, #3740).
@@ -1020,6 +1033,23 @@ chat (#5033), where the panel only offers models and says plainly which one the 
   The header's mode button moved into the composer beside the pill (decision 11). The divider uses the model mark (no
   arrows-left-right glyph in Android's set yet). Not yet: the other engine's switch and its dialog (#5054), Codex's Fast,
   quota bars and prices, forgetting a typed id.
+- Apple main-chat equivalent (#6542, `AssistantModelSheet`): the composer's existing Model row opens a system sheet with
+  medium and large detents and a visible drag indicator, reusing the assistant-eligible launcher list and the same
+  conversation PUT/DELETE. Only the hub-named main conversation gets it, on the computer named by `main_machine_id` (or
+  `machine_id` on an older hub). If the confirmed route moves, the open conversation follows it only when the user was
+  already viewing that main chat; a deliberately opened side conversation stays put. Siri, Share and CarPlay use that
+  same confirmed key. The composer's current-model entry shows a disclosure chevron; its first menu row is
+  explicitly **Change Model…**, with the effective model as its detail, so the conversation page itself shows how to
+  reach the sheet. The macOS BeautifulUI prompt bar uses the same Change Model… action; other macOS styles use the shell composer.
+  Each launcher's catalog supplies its rows; an empty or older-node 404 catalog falls back to its configured model, a
+  locked launcher keeps only its valid Default choice, and a Default row sends no model ID so it follows later default
+  changes. When Default and a concrete alias resolve to the same model, the concrete alias is ticked; choosing the
+  current row is a no-op, never a new pick that pins the default. Resolved aliases use a lookup built when the catalog
+  loads. A refresh failure keeps the last good rows beside Retry, and a provider removed from both lists is named as
+  unavailable with the follow-default recovery path. An existing Claude/Codex conversation marks the other engine as
+  needing a new conversation instead of offering a pick the hub would refuse. Typed IDs require `typed_models`,
+  independently of `assistant_model_pick`. The sheet refreshes every catalog on pull-to-refresh; the composer's effective label redraws
+  from fresh hub answers and Model Settings/assistant snapshots, never from a per-second transcript-revision poll. No new token, style, component or navigation pattern.
 
 ### 3.9 Empty states
 
@@ -2401,6 +2431,33 @@ effort fields are gone. What the panel gained for it, each part optional and abs
 Reason: one place to choose a model for chats and new Agents (principle 4), the engine visible without a field of its
 own (principle 2), the default as one row that can always be gone back to (principles 1 and 3). The deviations from
 Cindy are listed in `docs/web/web.md` "New Agent's model choice (#5104)"; iOS and Android follow in #5117.
+
+## Permission modes a provider lists (#8261)
+
+Who it serves: people starting and steering coding Agents (the Agents side) on providers other than Claude Code, such as
+Paseo's Grok, OpenCode or Codex. Claude Code's five modes mean nothing there: the bridge refuses Plan, drops the rest,
+and the provider's own settings decide what it asks. One rule on every client (web, Android, iOS), read from the wire
+rather than from provider names:
+
+- **New Agent**, for a launcher that lists `permission_modes` (`docs/protocol/protocol.md`, `launchers.list`): the
+  Permission mode field offers **Launcher default** (the launcher's own approval, sent as no mode) and **Allow all**
+  only where it lists both, in each client's existing words for its follow-the-launcher choice and for bypassPermissions
+  (the web: Launcher default, Full access; Android: Follow launcher, Allow everything; iOS: Use Launcher's, Allow
+  Everything); a launcher with its own approval alone shows no field. The pick is made on the sheet and never
+  remembered, so a mode left from a Claude Code start never reaches such a start. The effort offers only the levels its
+  model lists, none while that is not known. A Claude Code launcher keeps its five modes and remembered choice.
+- **A running chat**, for a session that lists `capabilities.permission_modes` with two: the client's existing mode
+  control (the web's composer permission picker, Android's and iOS's mode menu) with those two rows alone. "Launcher
+  default" carries a neutral mark (the plain shield, never the raised hand of "asks first"), since the provider's own
+  settings may approve everything; no mode reported is Launcher default. Going into Allow all asks first, as it does for
+  Claude Code; leaving it does not, since it can be turned on again. No Plan mode row.
+- **Session info** leaves out counts nobody gives (`usage_unknown`) rather than showing zeros.
+
+Reason: the same start and the same running chat behave the same on every client and entry point (principle 4), the
+default is the launcher's own and nothing is sent unless the user picks it (principle 1), and Allow all stays a
+confirmed, reversible choice (principle 3). It reuses each client's mode field, picker, menu rows, warning text and
+confirmation; it adds no component, token or motion. `capabilities.modes` stays false on these rows, so clients
+older than the list show no Claude Code chips there.
 
 ## Minutes cards (#5026)
 

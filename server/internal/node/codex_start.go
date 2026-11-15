@@ -628,7 +628,7 @@ func codexStartExec(path string, argv, env []string) (string, []string, []string
 	}
 	home, _ := os.UserHomeDir()
 	cwd, _ := os.Getwd()
-	inner := func() string { return codexInner(argv, env, cwd, home) }
+	inner := func() *sandbox.StatusReason { return codexInnerReason(argv, env, cwd, home) }
 	logf := func(format string, a ...any) { codexStartNotef(os.Stderr, format, a...) }
 	wrapped, wenv, st := wrapAgent("codex-start", home, identity.DataDir(home), cwd, nil, inner, append([]string{path}, argv[1:]...), env, logf)
 	if wrapped[0] == path {

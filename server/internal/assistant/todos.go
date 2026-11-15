@@ -76,11 +76,12 @@ type Todo struct {
 	Supervision *Supervision `json:"supervision,omitempty"`
 	// Stage is how far its work got (plan, develop, review, merge, deploy, verify; "" not known) and PRURL the PR it
 	// named, read off its agents' replies (reports.go, #2768); the apps draw the stage bar from them.
-	Stage         string `json:"stage,omitempty"`
-	PRURL         string `json:"pr_url,omitempty"`
-	StageKind     string `json:"stage_kind,omitempty"` // code or general; absent on older hubs
-	stageVerified bool   // explicit acceptance, kept with the stage setting
-	planPending   bool   // a live plan-approval card; never persisted as progress
+	Stage         string        `json:"stage,omitempty"`
+	PRURL         string        `json:"pr_url,omitempty"`
+	PRStatus      *TodoPRStatus `json:"pr_status,omitempty"`
+	StageKind     string        `json:"stage_kind,omitempty"` // code or general; absent on older hubs
+	stageVerified bool          // explicit acceptance, kept with the stage setting
+	planPending   bool          // a live plan-approval card; never persisted as progress
 	// PRs are the earlier PRs its agents named before PRURL, newest last (reports.go todoStage.PRs): the Inbox links
 	// a comment on any of them to the task (inbox_task_links.go, #6507). Not sent to the apps.
 	PRs []string `json:"-"`
@@ -378,6 +379,7 @@ func (s *Service) loadTodosLocked(ctx context.Context) error {
 	for id, st := range s.todoStages(ctx) {
 		if t, ok := tmap[id]; ok {
 			t.Stage, t.PRURL, t.PRs, t.StageKind, t.Delivery, t.stageVerified, t.Check = st.Stage, st.PR, st.PRs, st.Kind, st.Delivery, st.Verified, st.Check
+			t.PRStatus = st.PRStatus
 		}
 	}
 
@@ -455,6 +457,7 @@ func (s *Service) todosPushSoon() {
 // linksChanged: which todo an agent works for changed (or a todo's title, or whether it is done): the hub is told
 // (the snapshot's TodoReport: it pushes the session lists that look different now) and the herdr marks follow.
 func (s *Service) linksChanged(ctx context.Context) {
+	s.mcpChanges.notify()
 	s.taskPlanApproval()
 	s.publish(context.WithoutCancel(ctx))
 	s.syncLinkedTodoTokens()

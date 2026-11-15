@@ -2,8 +2,10 @@
 
 How the To-dos page decides where each to-do shows (#3156). The page's default list is by **status section**; the older
 grouping by folder stays available as a secondary view (List › Status | Folder). The code follows this document:
-`web/src/lib/todo-triage.ts` (`triage`, `triageTodos`), with tests in `web/src/lib/todo-triage.test.ts`, and its
-native copies (see "Clients"). A change to the rules changes all of them in the same PR.
+`web/src/lib/todo-triage.ts` (`triage`, `triageTodos`), with tests in `web/src/lib/todo-triage.test.ts`, and native copies
+(see "Clients"). The hub and web use fresh `pr_status` facts for the Waiting for merge section; native clients retain
+their existing presentation and ignore the added field. Only web adds the separate Waiting for merge group to its
+conversation tray; this does not change the native lifecycle or presentation.
 
 ## Principle: real signals only
 
@@ -13,7 +15,7 @@ work. An agent writing "done" in its reply does not finish anything; its turn en
 | Signal | Where it comes from | Values used |
 | :--- | :--- | :--- |
 | Agent alive and running | The linked, not released agents' sessions (herdr and other engines, via the hub's session list) | asking (`needs_you`), cut off by a model error (`turn_error`), working or starting, finished unseen (`unread`), idle, gone |
-| PR / delivery | `delivery.state` and `pr_url` on the to-do (`docs/assistant/todos.md`, "Delivery") | none, PR open (`pr`, or a `pr_url` with no delivery past it), merged not deployed (`merged`, `off`), deployed (`live`) |
+| PR / delivery | `pr_status` facts and `pr_url` on the to-do, plus delivery lifecycle (`docs/assistant/todos.md`, "Delivery") | fresh matching PR facts (checked within 15 minutes), PR open and non-draft; merged and closed are terminal PR observations |
 | Review verdict | The latest `task_review` in the to-do's supervision (`docs/assistant/unified-entry.md`) | `accepted`, `rework`, `needs_user`, `cancelled`, pending review |
 | Ask | The to-do's `ask` (`docs/assistant/todos.md`, "Waiting for the owner") | a decision, "cannot be done", "done", "please verify" |
 | Last activity | The latest of: the to-do's created, updated, reopened and done times; its supervision's update, last report and last review; its delivery and ask times; each linked agent's session update; a restore from Shelved | a moment |
@@ -27,7 +29,7 @@ then the folded ones, Done last. The same order decides which member leads a mer
 | :--- | :--- | :--- |
 | Waiting on you | open | Something only the owner can move: an answer, an approval, a decision, a retry |
 | Working | open | An agent is running on it now |
-| PR to merge | open | Its work stopped at a pull request that is still open and nothing runs: however old, it stays here, with the PR link and how long since it moved |
+| Waiting for merge | open | Fresh facts match its PR URL; the PR is open and non-draft, no agent is active and no owner decision is pending. Show the PR link and review/check/conflict blockers, or that it awaits a maintainer |
 | Parked (web) | open | An explicitly parked task whose wait has not expired; it is unfinished, even if its last agent turn was seen |
 | Other open | open | Open, recently active, none of the above (an agent stopped and seen, a reminder of the user's own) |
 | Just finished | open | Worth a look: closed, accepted or deployed in the last 24 hours, or a turn nobody has seen / a review not done yet (those stay until seen or reviewed); the owner has not seen it since (see "Seen") |
@@ -50,7 +52,7 @@ The first rule that holds wins.
 | 6 | `accepted` | The latest review accepted it and no review came since, even when the hub reopened it (see "Accepted tasks") | Just finished for 24 hours after the review or until seen, then Done |
 | 7 | `deployed` | `delivery.state` is `live` | Just finished for 24 hours or until seen, then Done |
 | 8 | `finished_unseen` | An agent finished a turn nobody has seen, the review is pending, or its ask says done / please verify; not seen since it last moved | Just finished |
-| 9 | `pr_open` | Its PR is open (rule "PR / delivery" above); a `pr_url` whose stage is Merge or later is a merged PR, never this (#3205) | PR to merge |
+| 9 | `pr_open` | Fresh `pr_status` matches `pr_url`, says open and non-draft; no active agent or owner decision, and not accepted or deployed (rules 6 and 7 keep finished work finished whatever its PR facts say; an open concern, which those rules skip, still waits for merge). Stale, absent or mismatched facts do not imply waiting for merge; merged/closed facts suppress legacy `delivery.state=pr` | Waiting for merge |
 | 9a | `seen` | Rule 8's signals, seen by the owner since it last moved (see "Seen"); not an open concern | Done |
 | 10 | `stale` | Shelvable (see "Shelving") and no activity for 48 hours | Shelved |
 | 11 | `rest` | Anything else | Other open |
@@ -70,7 +72,7 @@ A closed concern (`done_at` set by its report) follows rule 5 like any closed to
 carries one neutral **Concern** tag next to its title, using the client's existing tag component; other rows do not change.
 A client whose older hub does not send `kind` keeps its previous behavior.
 
-On the web, the header's Parked count is the number of to-dos in the Parked section (included in open).
+On the web, the header's Parked count is the number of to-dos in the Parked section (included in open). Waiting for merge is another display section, not a lifecycle state: its to-dos remain open and count toward the existing open total.
 Inactive counts only automatic 48-hour shelving. The Parked section and review badge use the same localized name.
 Apple (`apple/Shared/TodoTriage.swift`) and Android (`TodoTriage.kt` in `android/core/domain`) still need this
 parked rule and naming alignment; #5929 records the parity gap. This web fix does not claim native-client delivery.
@@ -112,7 +114,7 @@ who can unhold it, and the to-do falls under rules 10 and 11.
 
 An open to-do that names a PR and says nothing past it (no delivery, `none` or `pr`; stage before Deploy), whatever
 told it, is looked at the same way by that sweep: its PR merged and in the running hub makes it deployed (`live`:
-Just finished), merged and not in it "merged, not deployed" with the watch above; an open PR stays a PR to merge. Such a
+Just finished), merged and not in it "merged, not deployed" with the watch above; a fresh confirmed open PR with no active work stays in Waiting for merge. Such a
 to-do is asked about again only when the hub's commit changes, or every 10 minutes while its PR is open. It gets no
 "Please verify": no turn said it was deployed.
 
@@ -176,7 +178,7 @@ top of the list (#5707). Now the owner files it:
   5), its accepting review (6), its delivery (7), or its last activity (8). Anything that happens after the mark (a
   reopen, a new close, a new turn, a review) brings it back to Just finished until it is seen again or its 24 hours pass.
 - A finished turn seen (rule 9a) is filed under Done even though the to-do is not closed: the owner has looked, and it
-  no longer counts as open. A PR still waiting on the owner keeps it in PR to merge, an open concern in Other open.
+  no longer counts as open. A confirmed open PR that waits on a maintainer keeps its to-do open in Waiting for merge.
 - Checks: the shared cases (`*_seen*`, `unfinished_before_just_finished_and_seen_in_done`), `server/internal/assistant/todo_seen_test.go`,
   `web/src/views/Todos.seen.test.tsx`, `apple/PersonaTests/TodoTriageTests.swift` and `TodosLogicTests.swift`. In a
   browser and the simulator against the mock hub (`MOCK_TODO_LIST=1`; `MOCK_TODO_SEEN=off` is a hub without it):
@@ -189,7 +191,7 @@ The web's header reads "N open · N parked · N inactive · N done" beside the t
 Android lists have no such line (#3712): it said again what the sections say, so each section's title carries the number of
 to-dos its rows list (a merged row's related ones too), in the section's state color, and the counts follow a search and the
 list's filter (#3740). **Open** counts to-dos that are not closed, not accepted or deployed,
-and not shelved: Waiting on you, Working, PR to merge, Other open, and Just finished rows still open (a finished turn
+and not shelved: Waiting on you, Working, Waiting for merge, Other open, and Just finished rows still open (a finished turn
 is not a closed to-do; only a review or the user closes it; once the owner has seen it, rule 9a, it is in Done and not
 counted). **Parked**, **inactive** and **done** count the to-dos in the Parked, Shelved and Done sections as their titles
 do (a merged row's related to-dos under the row's section), so the header and each section's title say the same number;

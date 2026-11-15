@@ -43,6 +43,18 @@ type link struct {
 	again chan struct{}
 }
 
+// directHandoff transfers ownership of an accepted direct candidate and the reloaded configuration it was validated
+// against. serve returns one only after installing errDirectReady as its context's cause.
+type directHandoff struct {
+	candidate *link
+	config    *Config
+}
+
+type directProbeResult struct {
+	candidate *link
+	err       error
+}
+
 func (l *link) closeNow() {
 	l.conn.CloseNow()
 	l.tunnel.close()
@@ -92,12 +104,30 @@ func dial(ctx context.Context, c *Config) (*link, error) {
 
 var streamID = lazyre.New(`^[A-Za-z0-9_-]{1,64}$`)
 
-// serve runs the link until it ends and says why.
-func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter) error {
+// serve runs the link until it ends and says why. A direct handoff is already connected and owned by the caller;
+// every other return leaves no direct candidate behind.
+func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter) (*directHandoff, error) {
 	l.again = make(chan struct{}, 1)
 	l.setEndpoints(c.Endpoints)
 	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(nil)
+	directReady := o.directReady
+	if directReady == nil {
+		directReady = make(chan *directHandoff, 1)
+	}
+	var heartbeatDone chan struct{}
+	defer func() {
+		// Stop and join the publisher before releasing ownership. A read failure may race with the winning probe; if that
+		// probe publishes after the read loop has chosen a nil handoff, reclaim it here rather than orphaning its socket.
+		cancel(nil)
+		if heartbeatDone != nil {
+			<-heartbeatDone
+		}
+		select {
+		case handoff := <-directReady:
+			handoff.candidate.closeNow()
+		default:
+		}
+	}()
 	defer l.tunnel.close()
 	defer l.conn.CloseNow()
 	defer l.streams.CloseIdleConnections()
@@ -107,7 +137,7 @@ func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter) e
 	}
 	hello := Message{Type: "hello", Machine: c.Machine, Version: o.Version, Address: helloAddr, Features: []string{FeatureAttention}}
 	if err := l.send(ctx, hello); err != nil {
-		return err
+		return nil, err
 	}
 	since := time.Now()
 	rep.set(func(s *Status) {
@@ -129,7 +159,9 @@ func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter) e
 	}
 	// The heartbeat is o's until the hub says another (endpoints); beat hands the pinger the latest, the link stays.
 	beat := make(chan heartbeat, 1)
+	heartbeatDone = make(chan struct{})
 	go func() {
+		defer close(heartbeatDone)
 		hb := heartbeat{every: o.PingEvery, timeout: o.PingTimeout}
 		t := time.NewTicker(hb.every)
 		defer t.Stop()
@@ -153,8 +185,20 @@ func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter) e
 			err   error
 		}
 		pongs := make(chan pong)
-		directProbe := make(chan bool, 1)
+		directProbe := make(chan directProbeResult, 1)
 		var beating, checking, probingDirect bool
+		var directProbeDone chan struct{}
+		defer func() {
+			// The buffered send always completes, including when this loop has already returned. Join the dial and close
+			// a candidate that was too late to be handed off before serve releases its own link.
+			if probingDirect {
+				result := <-directProbe
+				<-directProbeDone
+				if result.candidate != nil {
+					result.candidate.closeNow()
+				}
+			}
+		}()
 		ping := func(check bool, d time.Duration) {
 			go func() {
 				err := l.ping(ctx, d)
@@ -170,13 +214,13 @@ func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter) e
 				return
 			}
 			probingDirect = true
-			probeCfg := Config{FP: c.FP, Trust: c.Trust, Endpoints: eps}
+			directProbeDone = make(chan struct{})
+			probeDone := directProbeDone
+			probeCfg := Config{FP: c.FP, Trust: c.Trust, Token: c.Token, Endpoints: eps}
 			go func() {
-				ok := probeDirect(ctx, &probeCfg)
-				select {
-				case directProbe <- ok:
-				case <-ctx.Done():
-				}
+				defer close(probeDone)
+				candidate, err := dial(ctx, &probeCfg)
+				directProbe <- directProbeResult{candidate: candidate, err: err}
 			}()
 		}
 		for {
@@ -188,13 +232,37 @@ func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter) e
 					drop(l.tunnel.classifyExit(l.tunnel.waitErr))
 				}
 				return
-			case ok := <-directProbe:
+			case result := <-directProbe:
+				<-directProbeDone
+				directProbeDone = nil
 				probingDirect = false
-				if ok && ctx.Err() == nil {
-					o.Logf("link: direct hub reachable again; switching off ssh tunnel")
-					reconnect(errDirectReady)
+				if result.err != nil || ctx.Err() != nil {
+					if result.candidate != nil {
+						result.candidate.closeNow()
+					}
+					continue
+				}
+				candidate := result.candidate
+				if candidate == nil {
+					continue
+				}
+				next := directHandoffConfig(o.Path, c, candidate.ep)
+				if next == nil {
+					candidate.closeNow()
+					reconnect(errRepaired)
 					return
 				}
+				o.Logf("link: direct hub reachable again; switching off ssh tunnel")
+				cancel(errDirectReady)
+				if !errors.Is(context.Cause(ctx), errDirectReady) {
+					// Cancellation won while the configuration was checked or the handoff was logged. The candidate was
+					// never adopted, so it is still this probe's to close.
+					candidate.closeNow()
+					return
+				}
+				directReady <- &directHandoff{candidate: candidate, config: next}
+				_ = l.conn.Close(websocket.StatusNormalClosure, "reconnect")
+				return
 			case <-directC:
 				if !probingDirect {
 					tryDirect()
@@ -258,9 +326,14 @@ func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter) e
 		_, data, err := l.conn.Read(ctx)
 		if err != nil {
 			if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, context.Canceled) {
-				return cause
+				if errors.Is(cause, errDirectReady) {
+					// The heartbeat installs the cause before publishing the candidate, so receiving here cannot redial
+					// or mistake an earlier cancellation for a successful transfer.
+					return <-directReady, cause
+				}
+				return nil, cause
 			}
-			return err
+			return nil, err
 		}
 		var m Message
 		if json.Unmarshal(data, &m) != nil {
@@ -303,6 +376,19 @@ func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter) e
 			}(m.ID)
 		}
 	}
+}
+
+// directHandoffConfig reloads link.json before an accepted candidate may replace SSH. The dial used the old link's
+// current endpoints, credential and TLS checks; a change to any identity or tunnel setting, or to this exact endpoint,
+// makes the candidate stale and returns the run to normal routing instead.
+func directHandoffConfig(path string, current *Config, ep Endpoint) *Config {
+	next, err := Load(path)
+	if err != nil || next.Hub != current.Hub || next.Machine != current.Machine || next.FP != current.FP ||
+		next.Trust != current.Trust || next.Token != current.Token || !next.SSH.Equal(current.SSH) ||
+		!slices.Contains(next.Endpoints, ep) {
+		return nil
+	}
+	return next
 }
 
 // endpoints takes in what the hub says about where it is and who it is: link.json keeps the candidates (the ones added

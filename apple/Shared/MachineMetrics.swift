@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 /// What a machine is (docs/server/machines.md): OS, hardware, since when it runs. From the node's last connection.
 nonisolated struct MachineSystem: Codable, Hashable, Sendable {

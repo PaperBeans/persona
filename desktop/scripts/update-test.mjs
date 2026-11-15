@@ -24,6 +24,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createUpdateTestProcessRegistry, finishUpdateTestCleanup, runUpdateTestOperation, throwIfUpdateTestAborted, UnsafeUpdateTestFinalization, waitForUpdateTest } from "./update-test-lifecycle.mjs";
 import { createCacheIdentity, createRunPaths, nsisGuid, prepareRunPaths, removeOwnedRunPaths, shipItJobLabel, testAppId, updaterCacheName, windowsRegistryKeys } from "./update-test-cache.mjs";
 import { finishUpdateTest, packagedUpdateConfigPath, readPackagedUpdateConfig, readUpdateTestEvents, watchForNsisInstall, watchUpdateTestEvents as watch } from "./update-test-receipts.mjs";
 import { inspectWindowsRegistryKeys, readWindowsInstallLocations, removeOwnedWindowsRegistryKeys as removeWindowsKeys, removeOwnedShipItJob as removeShipItJob } from "./update-test-native.mjs";
@@ -37,39 +38,72 @@ const platform = process.platform;
 const npm = platform === "win32" ? "npm.cmd" : "npm";
 const steps = [];
 const requests = [];
-const owned = new Set();
 let appLog = "";
 let work;
 let server;
 let feed;
 let runPaths;
 let cacheIdentity;
+let mainSignal;
 
-const sleep = milliseconds => new Promise(done => setTimeout(done, milliseconds));
-const step = (name, ok, detail) => { steps.push({ name, ok, ...(detail === undefined ? {} : { detail }) }); console.log(`${ok ? "ok  " : "FAIL"} ${name}${detail === undefined ? "" : ` ${typeof detail === "string" ? detail : JSON.stringify(detail)}`}`); };
+const sleep = milliseconds => waitForUpdateTest(milliseconds, mainSignal);
+function step(name, ok, detail) {
+  throwIfUpdateTestAborted(mainSignal);
+  steps.push({ name, ok, ...(detail === undefined ? {} : { detail }) });
+  console.log(`${ok ? "ok  " : "FAIL"} ${name}${detail === undefined ? "" : ` ${typeof detail === "string" ? detail : JSON.stringify(detail)}`}`);
+}
 function need(name, ok, detail) { step(name, ok, detail); if (!ok) throw new Error(name); }
 
-/** Runs a command to completion with a deadline; the whole process tree goes when it is exceeded. */
-function run(command, args, { seconds, env, cwd = root, quiet = false, verbatim = false, shell = false }) {
-  return new Promise((done, fail) => {
-    const child = spawn(command, args, { cwd, env: env ?? process.env, stdio: ["ignore", "pipe", "pipe"], windowsVerbatimArguments: verbatim, shell, detached: platform !== "win32" });
-    owned.add(child);
-    let text = "";
-    const keep = data => { text = (text + data).slice(-20_000); if (!quiet) process.stdout.write(data); };
-    child.stdout.on("data", keep);
-    child.stderr.on("data", keep);
-    const timer = setTimeout(() => { stop(child); fail(new Error(`${basename(command)} timed out after ${seconds}s`)); }, seconds * 1000);
-    child.once("error", error => { clearTimeout(timer); owned.delete(child); fail(error); });
-    child.once("close", code => { clearTimeout(timer); owned.delete(child); done({ code, text }); });
+/** A command timeout is not complete until its owned child and termination helper close. */
+const processes = createUpdateTestProcessRegistry({
+  spawn,
+  stop(child, trackTermination) {
+    if (platform === "win32") {
+      if (child.pid === undefined) return;
+      const killer = spawn("taskkill", ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore" });
+      const record = trackTermination(killer);
+      record.terminationError = record.close.then(exit => {
+        if (record.error || exit.code !== 0) {
+          const error = record.error ?? new Error(`taskkill exited ${exit.code}`);
+          if (!processes.stopFailures.includes(error.message)) processes.stopFailures.push(error.message);
+          return error;
+        }
+        return undefined;
+      });
+    } else if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+  },
+});
+
+/** Stop-and-drain handles deadlines and abort; ordinary close returns the command's exit code and bounded output. */
+function run(command, args, { seconds, env, cwd = root, quiet = false, verbatim = false, shell = false, signal = mainSignal } = {}) {
+  return processes.run(command, args, {
+    seconds,
+    signal,
+    cwd,
+    env: env ?? process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsVerbatimArguments: verbatim,
+    shell,
+    detached: platform !== "win32",
+    onOutput: data => { if (!quiet) process.stdout.write(data); },
   });
 }
 
-function stop(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    if (platform === "win32") spawn("taskkill", ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore" });
-    else process.kill(-child.pid, "SIGKILL");
-  } catch { /* already gone */ }
+function stop(record) {
+  record?.requestStop();
+}
+
+function stopAll() {
+  for (const record of [...processes.owned]) if (!record.termination) record.requestStop();
+}
+
+/** A bounded wait never discards the registry's underlying close waiter. */
+async function waitForClose(record, milliseconds) {
+  if (record.closed) return true;
+  return Promise.race([
+    record.close.then(() => true),
+    waitForUpdateTest(milliseconds, mainSignal).then(() => false),
+  ]);
 }
 
 const sha512 = file => new Promise((done, fail) => {
@@ -143,7 +177,7 @@ async function build(version, port) {
   const { code, text } = await run(process.execPath, [
     join(root, "node_modules", "electron-builder", "cli.js"), "--config", "electron-builder.update-test.yml", ...target, "--publish", "never",
     `-c.publish.url=http://127.0.0.1:${port}/`, `-c.appId=${testAppId(runPaths.identity)}`, `-c.nsis.guid=${nsisGuid(runPaths.identity)}`,
-    `-c.extraMetadata.version=${version}`, `-c.extraMetadata.name=${cacheIdentity}`, `-c.directories.output=${directory}`,
+    `-c.extraMetadata.version=${version}`, `-c.extraMetadata.name=${runPaths.identity}`, `-c.directories.output=${directory}`,
   ], { seconds: 1500, quiet: true, env: { ...process.env, PERSONA_DESKTOP_APP_ID: "com.example.persona.update-test", CSC_IDENTITY_AUTO_DISCOVERY: "false" } });
   if (code !== 0) console.log(text);
   need(`build ${version}`, code === 0, `exit ${code}`);
@@ -166,28 +200,27 @@ function events(profile) {
   return readUpdateTestEvents(profile);
 }
 
-function launch(executable, profile) {
+function launch(executable, profile, installed) {
+  throwIfUpdateTestAborted(mainSignal);
   // An AppImage unpacks itself where FUSE is missing; keep that inside this test's own directory.
   const env = { ...process.env, ...runPaths.environment, PERSONA_UPDATE_TEST_EXECUTABLE_DIR: installed, ...(platform === "linux" ? { APPIMAGE_EXTRACT_AND_RUN: "1", TMPDIR: join(work, "tmp") } : {}) };
   for (const name of ["PERSONA_HUB_URL", "PERSONA_DESKTOP_DISABLE_UPDATE", "PERSONA_DESKTOP_SMOKE", "ELECTRON_RUN_AS_NODE"]) delete env[name];
   const args = [`--user-data-dir=${profile}`];
+  // The packaged window's persistent cookie store must not wait for a headless runner's Keychain prompt.
+  if (platform === "darwin") args.push("--use-mock-keychain");
   if (platform === "linux") args.push("--no-sandbox", "--disable-gpu");
   const child = spawn(executable, args, { env, stdio: ["ignore", "pipe", "pipe"], detached: platform !== "win32" });
+  const record = processes.track(child);
   appLog += `--- ${basename(executable)}\n`;
   // The AppImage runtime lists every file it unpacks; only the app's own lines are worth keeping.
   const keep = data => { appLog = (appLog + String(data).split("\n").filter(line => !line.includes("appimage_extracted") && !line.startsWith("File exists and file size matches")).join("\n")).slice(-200_000); };
   child.stdout.on("data", keep);
   child.stderr.on("data", keep);
-  owned.add(child);
-  child.once("close", () => owned.delete(child));
-  child.once("error", () => owned.delete(child));
-  return child;
+  return record;
 }
 
-async function exited(child, seconds) {
-  const deadline = Date.now() + seconds * 1000;
-  while (child.exitCode === null && child.signalCode === null && Date.now() < deadline) await sleep(250);
-  return child.exitCode !== null || child.signalCode !== null;
+function exited(child, seconds) {
+  return waitForClose(child, seconds * 1000);
 }
 
 async function windowsVersion(executable) {
@@ -206,16 +239,16 @@ async function windowsRunning(image) {
 }
 
 /** Query, then remove only this run's exact random keys; never enumerate or reset the account's registry. */
-async function removeOwnedWindowsRegistryKeys() {
-  return removeWindowsKeys({ keys: windowsRegistryKeys(runPaths.identity), run });
+async function removeOwnedWindowsRegistryKeys(signal = mainSignal) {
+  return removeWindowsKeys({ keys: windowsRegistryKeys(runPaths.identity), run, signal });
 }
 async function windowsRegistryState() {
   return inspectWindowsRegistryKeys({ keys: windowsRegistryKeys(runPaths.identity), run });
 }
 
 /** ShipIt's launchd registration is separate from its owned files. Query and remove only this run's random label. */
-async function removeOwnedShipItJob() {
-  return removeShipItJob({ label: shipItJobLabel(runPaths.identity), uid: process.getuid(), run });
+async function removeOwnedShipItJob(signal = mainSignal) {
+  return removeShipItJob({ label: shipItJobLabel(runPaths.identity), uid: process.getuid(), run, signal });
 }
 
 async function assertNativeStateAbsent() {
@@ -231,7 +264,9 @@ async function assertNativeStateAbsent() {
 
 const cacheDirectory = () => runPaths.cache;
 
-async function main() {
+async function main(signal) {
+  mainSignal = signal;
+  throwIfUpdateTestAborted(signal);
   await mkdir(output, { recursive: true });
   // The tray is drawn by GTK on Linux, which stops the whole app when there is no display (Xvfb is enough).
   if (platform === "linux") need("a display is available", !!(process.env.DISPLAY || process.env.WAYLAND_DISPLAY), "run under Xvfb on a computer without one");
@@ -286,15 +321,16 @@ async function main() {
   // A saved hub, as on any computer where Persona is already set up; the first-run setup window is not under test here.
   await mkdir(profile, { recursive: true });
   await writeFile(join(profile, "desktop-state.json"), `${JSON.stringify({ hub: `http://127.0.0.1:${port}/` })}\n`, "utf8");
-  const first = launch(executable, profile);
+  const first = launch(executable, profile, installed);
   // "Ready" is the moment the update can be installed. On macOS that is Squirrel.Mac's own verdict on the file,
   // which arrives after electron-updater's download event; a refusal arrives as an error instead.
   const ready = platform === "darwin" ? "native-downloaded" : "downloaded";
-  const settled = await watch(profile, 300, seen => seen.find(entry => entry.event === ready) ?? (seen.some(entry => entry.event === "available") ? seen.find(entry => entry.event === "error") : undefined));
+  const options = { signal };
+  const settled = await watch(profile, 300, seen => seen.find(entry => entry.event === ready) ?? (seen.some(entry => entry.event === "available") ? seen.find(entry => entry.event === "error") : undefined), options);
   const seen = await events(profile);
   need("the packaged old version started", seen[0]?.event === "start" && seen[0].version === OLD && seen[0].packaged === true, seen[0]);
   need("it found the new version in the feed", seen.find(entry => entry.event === "available")?.version === NEW, requests.filter(entry => entry.path.endsWith(".yml")).map(entry => `${entry.path} ${entry.status}`));
-  need("its main window loaded the saved hub address", await watch(profile, 30, () => requests.some(entry => entry.path === "/" && entry.status === 200)), requests.filter(entry => entry.path === "/"));
+  need("its main window loaded the saved hub address", await watch(profile, 30, () => requests.some(entry => entry.path === "/" && entry.status === 200), options), requests.filter(entry => entry.path === "/"));
   need("the feed served the package", requests.some(entry => entry.path === `/${next.path}` && (entry.status === 200 || entry.status === 206)));
 
   if (platform === "darwin") {
@@ -309,7 +345,7 @@ async function main() {
     const downloaded = await sha512(settled.file).catch(() => undefined);
     need("the downloaded package's sha512 matches the feed", downloaded === next.sha512, basename(settled.file));
     if (platform === "win32") {
-      const receipt = await watchForNsisInstall(profile, 180, installed);
+      const receipt = await watchForNsisInstall(profile, 180, installed, options);
       need("the real NSIS updater runs inside this run's temporary directory", receipt.matchesExpectedDirectory && receipt.event.executableInRunDirectory === true, receipt.event ?? { expectedExecutableDirectory: installed });
     }
   }
@@ -358,8 +394,8 @@ async function main() {
     }
     // The reopened app is the new version and finds nothing newer.
     const before = (await events(profile)).length;
-    const second = launch(executable, profile);
-    const again = await watch(profile, 180, all => { const fresh = all.slice(before); return fresh.some(entry => entry.event === "current" || entry.event === "error") ? fresh : undefined; });
+    const second = launch(executable, profile, installed);
+    const again = await watch(profile, 180, all => { const fresh = all.slice(before); return fresh.some(entry => entry.event === "current" || entry.event === "error") ? fresh : undefined; }, options);
     stop(second);
     await exited(second, 30);
     need("the reopened app reports the new version", again?.[0]?.event === "start" && again[0].version === NEW, again?.[0]);
@@ -376,72 +412,87 @@ async function main() {
   return { old: OLD, new: NEW, feed: next, install };
 }
 
-async function cleanup() {
+async function cleanup(signal) {
   const failures = [];
-  for (const child of owned) stop(child);
-  await sleep(owned.size > 0 ? 2000 : 0);
+  const checkpoint = () => throwIfUpdateTestAborted(signal);
+  // No destructive step starts until both main and all current children have actually finished.
+  const drained = await processes.drain(120_000);
+  if (!drained.closed) {
+    failures.push(...drained.failures, "owned process drain failed; uninstall and run-path removal were skipped");
+    step("cleanup of this run's owned temporary files", false, failures.join("; "));
+    return failures;
+  }
   if (server) await new Promise(done => { server.closeAllConnections(); server.close(done); });
+  checkpoint();
   if (!work) return failures;
   if (platform === "win32") {
     const uninstaller = join(work, "app", `Uninstall ${PRODUCT}.exe`);
-    // _?= makes the uninstaller run in place and wait, so the directory can be removed afterwards.
     if (await stat(uninstaller).then(() => true, () => false)) {
-      const result = await run(uninstaller, ["/S", `_?=${join(work, "app")}`], { seconds: 300, verbatim: true, quiet: true }).catch(error => ({ code: -1, error }));
+      checkpoint();
+      // _?= makes the uninstaller run in place and wait, so the directory can be removed afterwards.
+      const result = await run(uninstaller, ["/S", `_?=${join(work, "app")}`], { seconds: 300, verbatim: true, quiet: true, signal }).catch(error => ({ code: -1, error }));
       if (result.code !== 0) failures.push(`uninstall: ${result.error?.message ?? `exit ${result.code}`}`);
     }
-    failures.push(...await removeOwnedWindowsRegistryKeys());
+    checkpoint();
+    failures.push(...await removeOwnedWindowsRegistryKeys(signal));
   }
-  if (platform === "darwin") failures.push(...await removeOwnedShipItJob());
+  checkpoint();
+  if (platform === "darwin") failures.push(...await removeOwnedShipItJob(signal));
+  checkpoint();
   if (runPaths) failures.push(...await removeOwnedRunPaths(runPaths));
   let removed = false;
   for (let attempt = 0; attempt < 5 && !removed; attempt++) {
+    checkpoint();
     try { await rm(work, { recursive: true, force: true }); removed = true; }
-    catch (error) { if (attempt === 4) failures.push(`temporary directory: ${error.message}`); else await sleep(2000); }
+    catch (error) { if (attempt === 4) failures.push(`temporary directory: ${error.message}`); else await waitForUpdateTest(2000, signal); }
   }
   return failures;
 }
 
 let result;
-let rejectTimeout;
-const timedOut = new Promise((_, reject) => { rejectTimeout = reject; });
-const limit = setTimeout(() => {
-  for (const child of owned) stop(child);
-  rejectTimeout(new Error("Desktop update test timed out after 75 minutes"));
-}, 75 * 60 * 1000);
-const verdict = await finishUpdateTest({
-  runMain: () => Promise.race([main(), timedOut]),
-  readEvents: () => work ? events(join(work, "profile")) : [],
-  cleanup: async () => {
-    let timer;
-    try {
-      const failures = await Promise.race([
-        cleanup(),
-        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("cleanup timed out after 5 minutes")), 300_000); }),
-      ]);
-      step("cleanup of this run's owned temporary files", failures.length === 0, failures.join("; ") || undefined);
-      return failures.join("; ") || undefined;
-    } catch (error) {
-      const failure = error instanceof Error ? error.message : String(error);
-      step("cleanup of this run's owned temporary files", false, failure);
-      return failure;
-    } finally { clearTimeout(timer); }
-  },
-  message: error => error instanceof Error ? error.message : String(error),
-  report: async ({ result: update, failure, cleanupFailure, profileEvents }) => {
-    result = update;
-    clearTimeout(limit);
-    // Temporary and home paths are this computer's business, not the report's.
-    let log = appLog;
-    let report = JSON.stringify({ ok: !failure, platform, arch: process.arch, ...(failure ? { failure } : {}), ...(cleanupFailure ? { cleanup: "failed", cleanupFailure } : { cleanup: "succeeded" }), ...result, steps, events: profileEvents, requests }, null, 2);
-    for (const [path, name] of [[work, "<temporary directory>"], [runPaths?.home, "<temporary home>"]]) {
-      if (!path) continue;
-      report = report.replaceAll(JSON.stringify(path).slice(1, -1), name).replaceAll(path, name);
-      log = log.replaceAll(path, name);
-    }
-    await mkdir(output, { recursive: true });
-    await writeFile(join(output, "app.log"), log, "utf8");
-    await writeFile(join(output, "result.json"), `${report}\n`, "utf8");
-  },
-});
-console.log(`Desktop update test (${platform}): ${verdict.failure ? `FAIL (${verdict.failure})` : `PASS (${OLD} -> ${NEW}; ${result.install})`}`);
-process.exit(verdict.ok ? 0 : 1);
+try {
+  const verdict = await finishUpdateTest({
+    runMain: () => runUpdateTestOperation(main, {
+      // Leave enough of the 80-minute hosted job for stop, cleanup, report and artifact upload.
+      timeoutMilliseconds: 70 * 60 * 1000,
+      timeoutMessage: "Desktop update test timed out after 70 minutes",
+      onTimeout: stopAll,
+      onAbort: stopAll,
+      stopFailures: processes.stopFailures,
+    }),
+    readEvents: () => work ? events(join(work, "profile")) : [],
+    cleanup: async () => {
+      try {
+        const failures = await finishUpdateTestCleanup(cleanup);
+        step("cleanup of this run's owned temporary files", failures.length === 0, failures.join("; ") || undefined);
+        return failures.join("; ") || undefined;
+      } catch (error) {
+        if (error?.safeToFinalize === false) throw error;
+        const failure = error instanceof Error ? error.message : String(error);
+        step("cleanup of this run's owned temporary files", false, failure);
+        return failure;
+      }
+    },
+    message: error => error instanceof Error ? error.message : String(error),
+    report: async ({ result: update, failure, cleanupFailure, profileEvents }) => {
+      result = update;
+      // Temporary and home paths are this computer's business, not the report's.
+      let log = appLog;
+      let report = JSON.stringify({ ok: !failure, platform, arch: process.arch, ...(failure ? { failure } : {}), ...(cleanupFailure ? { cleanup: "failed", cleanupFailure } : { cleanup: "succeeded" }), ...result, steps, events: profileEvents, requests }, null, 2);
+      for (const [path, name] of [[work, "<temporary directory>"], [runPaths?.home, "<temporary home>"]]) {
+        if (!path) continue;
+        report = report.replaceAll(JSON.stringify(path).slice(1, -1), name).replaceAll(path, name);
+        log = log.replaceAll(path, name);
+      }
+      await mkdir(output, { recursive: true });
+      await writeFile(join(output, "app.log"), log, "utf8");
+      await writeFile(join(output, "result.json"), `${report}\n`, "utf8");
+    },
+  });
+  console.log(`Desktop update test (${platform}): ${verdict.failure ? `FAIL (${verdict.failure})` : `PASS (${OLD} -> ${NEW}; ${result.install})`}`);
+  process.exit(verdict.ok ? 0 : 1);
+} catch (error) {
+  if (!(error instanceof UnsafeUpdateTestFinalization)) throw error;
+  console.error(`Desktop update test (${platform}): FAIL (${error.message}; run paths preserved)`);
+  process.exit(1);
+}

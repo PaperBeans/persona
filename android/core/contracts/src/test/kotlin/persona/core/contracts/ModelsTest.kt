@@ -2,6 +2,7 @@ package persona.core.contracts
 
 import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -189,6 +190,17 @@ class ModelsTest {
         assertEquals("Claude 在问你", (JsonCodec.decodeFromString<Interaction>("""{"id":"c","kind":"question"}""").headline).zhAny())
     }
 
+    @Test fun questionOptionDecodesDeferActionAndDefaultsForOldHubs() {
+        val marked = JsonCodec.decodeFromString<QuestionOption>(
+            """{"label":"Leave it","description":"Handle it later","action":"defer"}""",
+        )
+        assertEquals("Leave it", marked.label)
+        assertEquals("Handle it later", marked.description)
+        assertEquals("defer", marked.action)
+        assertEquals(marked, JsonCodec.decodeFromString<QuestionOption>(JsonCodec.encodeToString(marked)))
+        assertNull(JsonCodec.decodeFromString<QuestionOption>("""{"label":"Continue"}""").action)
+    }
+
     @Test fun sessionInfoDecodes() {
         val info = JsonCodec.decodeFromString<SessionInfo>(
             """{"session_id":"s1","cwd":"/x","model":"claude-opus","context_tokens":51234,"output_tokens":9,"turns":3,""" +
@@ -201,6 +213,9 @@ class ModelsTest {
         assertEquals(java.time.Instant.parse("2026-11-01T02:00:00Z"), parseTime(info.startedAt))
         assertNull(info.lastActivity)
         assertEquals(SessionInfo(), JsonCodec.decodeFromString<SessionInfo>("{}"))
+        // A runtime's session says nobody gives its counts (#8261): its zeros stand in for older apps.
+        assertTrue(JsonCodec.decodeFromString<SessionInfo>("""{"session_id":"s1","turns":0,"usage_unknown":true}""").usageUnknown)
+        assertFalse(info.usageUnknown)
     }
 
     @Test fun interactionHeadline() {

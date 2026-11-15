@@ -3,11 +3,15 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/db/dbtest"
 )
 
 // fsClient is a connected browser of the test hub.
@@ -159,6 +163,37 @@ func TestFSWatchGenerationAdvancesAcrossHubs(t *testing.T) {
 	first, second := newTestHub(t), newTestHub(t)
 	if got, next := first.nextFSWatchGeneration("m1"), second.nextFSWatchGeneration("m1"); next <= got {
 		t.Fatalf("a new hub restarted generation backwards: %d → %d", got, next)
+	}
+}
+
+func TestFSWatchEpochPersistsAcrossRestart(t *testing.T) {
+	base := os.Getenv(dbtest.Env)
+	if base == "" {
+		t.Skip(dbtest.Env + " not set")
+	}
+	ctx := context.Background()
+	url, done, err := dbtest.Own(ctx, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer done()
+	store, err := db.Open(ctx, url, db.HubSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	first := newTestHub(t)
+	first.store = store
+	before := first.nextFSWatchGeneration("m1")
+	second := newTestHub(t)
+	second.store = store
+	after := second.nextFSWatchGeneration("m1")
+	if after <= before {
+		t.Fatalf("a same-store restart reused generation: %d → %d", before, after)
+	}
+	var saved uint64
+	if ok, err := store.Setting(context.Background(), fsWatchEpochKey, &saved); !ok || err != nil || saved != second.fsWatchEpoch {
+		t.Fatalf("saved epoch = %d (ok %v err %v), want %d", saved, ok, err, second.fsWatchEpoch)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -141,7 +142,11 @@ func (m *Machine) logCutOff(via string, err error, inflight []string) {
 func oneLineErr(err error) string {
 	s := strings.Join(strings.Fields(err.Error()), " ")
 	if len(s) > 300 {
-		s = s[:300] + "…"
+		cut := 300
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut] + "…"
 	}
 	return s
 }

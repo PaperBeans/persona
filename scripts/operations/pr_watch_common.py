@@ -109,8 +109,8 @@ def checked(argv, cwd=None, timeout=120, environ=None, input_text=None):
     return result.stdout
 
 
-def gh_json(argv, timeout=90, environ=None):
-    text = checked(["gh"] + argv, timeout=timeout, environ=environ)
+def gh_json(argv, timeout=90, environ=None, input_text=None):
+    text = checked(["gh"] + argv, timeout=timeout, environ=environ, input_text=input_text)
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:

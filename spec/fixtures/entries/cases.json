@@ -272,6 +272,120 @@
       }
     },
     {
+      "name": "supervisor_review_with_open_pr",
+      "description": "A task whose fresh, open PR waits for a maintainer (the web's Waiting for merge, #7614) and whose supervisor's review is under way: the review is Persona's own work, so it is in In progress saying its supervisor is reviewing it, not Waiting for merge, even after the owner looked at it (seen_at, which the To-dos page files as Waiting for merge). Once the review is overdue it is the owner's: Needs you wins over the PR. Clients without the Waiting for merge group read the same split.",
+      "source": [
+        "web/src/lib/assistant-entries.ts assistantEntries",
+        "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
+        "apple/Persona/Views/Assistant/Tasks/AssistantActionBar.swift AssistantEntries.split",
+        "docs/assistant/unified-entry.md Needs you and In progress"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-10T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-review-pr",
+            "title": "Fix the login redirect",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T06:00:00Z",
+            "updated_at": "2026-11-10T06:00:00Z",
+            "agents": [
+              {
+                "machine_id": "mac",
+                "session_id": "w-review-pr",
+                "linked_at": "2026-11-10T06:00:00Z"
+              }
+            ],
+            "pr_url": "https://example.com/acme/app/pull/101",
+            "pr_status": {
+              "url": "https://example.com/acme/app/pull/101",
+              "state": "open",
+              "draft": false,
+              "review": "required",
+              "checks": "success",
+              "conflicts": false,
+              "checked_at": "2026-11-10T08:55:00Z"
+            },
+            "supervision": {
+              "supervisor": "main-chat",
+              "state": "pending_review",
+              "pending_since": "2026-11-10T08:30:00Z"
+            },
+            "seen_at": "2026-11-10T08:40:00Z"
+          },
+          {
+            "id": "t-overdue-pr",
+            "title": "Update the changelog",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T06:00:00Z",
+            "updated_at": "2026-11-10T06:00:00Z",
+            "agents": [
+              {
+                "machine_id": "mac",
+                "session_id": "w-overdue-pr",
+                "linked_at": "2026-11-10T06:00:00Z"
+              }
+            ],
+            "pr_url": "https://example.com/acme/app/pull/102",
+            "pr_status": {
+              "url": "https://example.com/acme/app/pull/102",
+              "state": "open",
+              "draft": false,
+              "review": "required",
+              "checks": "success",
+              "conflicts": false,
+              "checked_at": "2026-11-10T08:55:00Z"
+            },
+            "supervision": {
+              "supervisor": "main-chat",
+              "state": "pending_review",
+              "pending_since": "2026-11-10T07:00:00Z"
+            }
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "mac",
+            "session_id": "w-review-pr",
+            "title": "w-review-pr",
+            "cwd": "/home/user/project",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          },
+          {
+            "machine_id": "mac",
+            "session_id": "w-overdue-pr",
+            "title": "w-overdue-pr",
+            "cwd": "/home/user/project",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [
+          "task:t-overdue-pr"
+        ],
+        "running": [
+          "task:t-review-pr"
+        ],
+        "shelved": [],
+        "supervisor_review": [
+          "task:t-review-pr"
+        ]
+      }
+    },
+    {
       "name": "overdue_supervisor_review_needs_you",
       "description": "A review still waiting an hour after the task entered pending_review comes to the owner: at the hour exactly and after it the task is in Needs you, as before, so a stalled or missing supervisor never hides a finished task.",
       "source": [

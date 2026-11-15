@@ -472,7 +472,12 @@ func TestRecoveryMarkerOnlyForMainAndLeaders(t *testing.T) {
 			t.Fatalf("%s: not recovered", c.name)
 		}
 		waitRecoverySend(t, sent)
-		time.Sleep(50 * time.Millisecond)
+		n.mu.Lock()
+		done := n.recoveries[id].done
+		n.mu.Unlock()
+		if done != nil {
+			<-done // the recovery is over, with any marker it sets
+		}
 		if got := n.modelRecovery(id) != nil; got != c.want {
 			t.Errorf("%s: marker %v, want %v", c.name, got, c.want)
 		}
@@ -602,13 +607,7 @@ func TestModelProbeStatuses(t *testing.T) {
 
 func waitRecovery(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for !ok() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitWithin(t, 3*time.Second, what, ok)
 }
 
 // When the 30-minute fallback hold expires on its own, the next message asks for the configured model again even if no

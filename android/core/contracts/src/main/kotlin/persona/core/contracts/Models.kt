@@ -250,6 +250,12 @@ data class SessionCapabilities(
     val rewind: Boolean? = null,
     /** A rewind may put the files back too ("Code and conversation"); null from an older node: as its [rewind] rule says. */
     @SerialName("rewind_code") val rewindCode: Boolean? = null,
+    /**
+     * The permission modes it takes when its agent is not Claude Code (#8261, Paseo's Grok, OpenCode or Codex): `default`,
+     * its own approval, and `bypassPermissions` where it has an Allow everything. With two the chat offers a switch
+     * between them (`persona.core.domain.sort.listedModes`); null from an older node and wherever Claude Code's modes stand.
+     */
+    @SerialName("permission_modes") val permissionModes: List<String>? = null,
 )
 
 /**
@@ -938,7 +944,12 @@ object TurnDurationSerializer : WireSerializer<TurnDuration>(TurnDuration.genera
 
 @KeepGeneratedSerializer
 @Serializable(with = QuestionOptionSerializer::class)
-data class QuestionOption(@SerialName("label") val label: String = "", @SerialName("description") val description: String? = null)
+data class QuestionOption(
+    @SerialName("label") val label: String = "",
+    @SerialName("description") val description: String? = null,
+    /** A manager-local answer (`defer`); absent from older hubs and from choices that message the Agent. */
+    @SerialName("action") val action: String? = null,
+)
 
 @KeepGeneratedSerializer
 @Serializable(with = QuestionSerializer::class)
