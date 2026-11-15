@@ -96,6 +96,7 @@ export async function startFakePaseo(t, o = {}) {
     refuse: undefined, // close code for the next hellos
     refuseDelay: 0, // ms before an MCP refusal is answered (a creation slow to fail)
     noMcp: new Set(o.noMcpProviders ?? []), // providers that take no MCP servers (Paseo's requireExternalMcpSupport)
+    creations: new Map(), // idempotency key → { fingerprint, agentId }: the agents made for keyed creations (createAgent)
     // (msg) => what happens while Paseo builds a page of fetch_agents_request / fetch_workspaces_request (a test's):
     // after the page's entries are read, before its reply.
     duringPage: o.duringPage,
@@ -345,14 +346,7 @@ export async function startFakePaseo(t, o = {}) {
           else refuse()
           return
         }
-        // A provider Paseo runs over ACP has the Auto Accept switch, off unless the request turned it on (acp-agent.ts).
-        const acp = f.providers[msg.config.provider]?.extends === 'acp'
-        const agent = agentSnapshot({ id: msg.agentId ?? randomUUID(), provider: msg.config.provider, cwd: msg.config.cwd, labels: msg.labels ?? {},
-          model: msg.config.model ?? null, currentModeId: msg.config.modeId ?? null, thinkingOptionId: msg.config.thinkingOptionId ?? null,
-          status: msg.initialPrompt ? 'running' : 'idle', workspaceId: msg.workspaceId ?? 'wks_new',
-          ...(acp ? { features: [autoAcceptFeature(msg.config.featureValues?.auto_accept === true)] } : {}) })
-        f.upsert(agent, { projectKey: 'prj_1', projectName: 'proj', workspaceName: 'ws', checkout: { cwd: agent.cwd, isGit: false } })
-        return reply(c, 'agent.create.response', { requestId: id, agent, error: null })
+        return reply(c, 'agent.create.response', { requestId: id, ...f.createAgent(msg) })
       }
       case 'import_agent_request': {
         // Paseo 0.14 (import-sessions.ts): a session an agent has is not imported twice; one an archived agent has is
@@ -382,6 +376,35 @@ export async function startFakePaseo(t, o = {}) {
       default:
         return reply(c, 'rpc_error', { requestId: id, requestType: msg.type, error: 'Unknown request', code: 'unknown_schema' })
     }
+  }
+
+  /** What the daemon answers a request with, for a test's handler that answers later (it returned null). */
+  f.answer = (c, msg) => answer(c, msg)
+
+  /**
+   * The agent an agent.create.request makes, as its answer's payload ({agent, error}). One with an idempotency key is
+   * kept under it, as Paseo 0.15's creation service keeps it (creation/index.js): the same request again (its fields
+   * but requestId, type, subscribe) gets the agent made for it, and another request under that key is refused. A
+   * refusal keeps nothing, so asked again it runs again.
+   */
+  f.createAgent = (msg) => {
+    const { requestId: _r, type: _t, subscribe: _s, idempotencyKey: key, ...intent } = msg
+    const fingerprint = key ? JSON.stringify(sortedKeys(intent)) : undefined
+    const prior = key ? f.creations.get(key) : undefined
+    if (prior && prior.fingerprint !== fingerprint) return { agent: null, error: 'agent_request_key_conflict' }
+    if (prior) {
+      const made = f.agents.get(prior.agentId)?.agent
+      return made ? { agent: made, error: null } : { agent: null, error: 'Previously created agent no longer exists' }
+    }
+    // A provider Paseo runs over ACP has the Auto Accept switch, off unless the request turned it on (acp-agent.ts).
+    const acp = f.providers[msg.config.provider]?.extends === 'acp'
+    const agent = agentSnapshot({ id: msg.agentId ?? randomUUID(), provider: msg.config.provider, cwd: msg.config.cwd, labels: msg.labels ?? {},
+      model: msg.config.model ?? null, currentModeId: msg.config.modeId ?? null, thinkingOptionId: msg.config.thinkingOptionId ?? null,
+      status: msg.initialPrompt ? 'running' : 'idle', workspaceId: msg.workspaceId ?? 'wks_new',
+      ...(acp ? { features: [autoAcceptFeature(msg.config.featureValues?.auto_accept === true)] } : {}) })
+    f.upsert(agent, { projectKey: 'prj_1', projectName: 'proj', workspaceName: 'ws', checkout: { cwd: agent.cwd, isGit: false } })
+    if (key) f.creations.set(key, { fingerprint, agentId: agent.id })
+    return { agent, error: null }
   }
 
   /**
@@ -518,6 +541,13 @@ export async function startFakePaseo(t, o = {}) {
     f.conns = []
   }
   return f
+}
+
+/** A value with its objects' keys in order, at every depth: as Paseo's creation service digests a request. */
+function sortedKeys(v) {
+  if (Array.isArray(v)) return v.map(sortedKeys)
+  if (!v || typeof v !== 'object') return v
+  return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortedKeys(v[k])]))
 }
 
 function replyType(type) {

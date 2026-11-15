@@ -733,6 +733,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		Ultracode      *bool           `json:"ultracode"`
 		DismissLost    bool            `json:"dismiss_lost"`
 		ResumeOnly     bool            `json:"resume_only"`
+		OnlyRunning    bool            `json:"only_running"` // assistant.compact: refuse not_running rather than start the process
 		IsMain         bool            `json:"is_main"`
 		Interject      bool            `json:"interject_background"`
 		AtItemID       string          `json:"at_item_id"`     // session.fork: the reply to branch off at
@@ -1232,6 +1233,11 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		}
 		rp := runtimeStartParams{Cwd: p.Cwd, Prompt: p.Prompt, Launcher: p.Launcher, Model: p.Model, PermissionMode: p.PermissionMode,
 			Effort: p.Effort, WorkspaceID: p.WorkspaceID, Resume: p.ResumeSessionID, AgentType: p.AgentType}
+		if p.ResumeSessionID == "" && runtimeIDRe.MatchString(p.SessionID) {
+			// The id the hub named for a new session goes to a runtime too (Paseo gives its session that id, #8130), so
+			// a start whose answer never comes back is found by it there as in a terminal (the start below).
+			rp.SessionID = p.SessionID
+		}
 		if p.SecretTicket != "" { // only a new Claude Code start in a terminal takes one (control.go secretStartProblem)
 			_, onRuntime := engineRuntimes[cmp.Or(p.Host, n.defaultKind())]
 			if h, _ := n.startRuntimeIn(withStartHost(ctx, p.Host), p.Launcher); h != nil || onRuntime || p.ResumeSessionID != "" || isDesktopLauncher(p.Launcher) || isCodexAppLauncher(p.Launcher) {
@@ -1392,8 +1398,8 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		return n.assistantGuestDelete(params)
 	case "session.modes":
 		return ok(n.setModelAndModes(ctx, p.SessionID, p.Model, p.PermissionMode, p.Effort)) // model: model_switch.go
-	case "assistant.compact": // the user compacting an assistant conversation (assistant_compact.go)
-		return ok(n.assistantCompact(ctx, p.SessionID))
+	case "assistant.compact": // the user compacting an assistant conversation, or the hub a meeting's room (assistant_compact.go)
+		return ok(n.assistantCompact(ctx, p.SessionID, p.OnlyRunning))
 	case "assistant.handoff": // what a new main conversation is told about the old one
 		return n.assistantHandoff(p.SessionID)
 	case "assistant.warm":

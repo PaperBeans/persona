@@ -661,16 +661,21 @@ Android don't decode video yet: they keep RFB and show no switcher.
   - **Signals** (the phone's, from the frames): queueing above the 10 s floor of the one-way delay (p50 / p95 over
     0.5 s, rising or falling over 1 s), the rate the link carried while busy (frames queued behind one another: their
     bytes over their arrival gaps, so quiet stretches don't read as a slow link; frames read together all count, #7842),
+    the newest frame's queueing (a backlog now, or one already in),
     bursts of large frames, late frames, decode time and pictures replaced before they showed. A keyframe (one every
     10 s) and the frames queued behind it are left out of the p95 that says whether the link is calm: that queue is the
     keyframe's size, not a slower link, and its burst is the proof of headroom (#7842). The route's round trip, jitter and loss are `LinkStats`'.
   - **Policy**, every 250 ms. A tier fits the link when its floor is at most 80% of what the link carries. Down, fast:
-    a long queue (over 400 ms for a quarter second, or skipped frames) or one the bitrate can't fix (the helper's
-    bitrate within 15% of the band's floor and over 150 ms), with a tier that no longer fits, goes straight to the best
-    tier that does; another step down waits 1 s and a queue that isn't draining, unless the queue runs away. A phone that
+    a long queue (over 400 ms for a quarter second, or skipped frames with the queue over 150 ms) or one the bitrate
+    can't fix (the helper's bitrate within 15% of the band's floor and over 150 ms), with the newest frame still queued
+    and a tier that no longer fits, goes straight to the best tier that does. A backlog that came in all at once after a
+    stall (its newest frame barely waited), or skipped frames the helper reports once the queue is under 150 ms, steps
+    nothing down: the stall is over; another step down waits 1 s and a queue that isn't draining, unless the queue runs away. A phone that
     can't decode or show as fast for 2 s gets a lower frame rate. Up, slow: one tier after a calm window (8 s; 3 s in the
     first 10 s or after a route change) with proof the link carried 1.25× the next floor, or three large frames at 1.5×
-    it; a step up undone within 15 s doubles that tier's window, to 60 s. The start comes from the route, as a step of
+    it. Light content, sending at most half the next floor, never fills the bitrate, and on a fast link its keyframes
+    come in too quickly to measure: it steps up after twice the window without proof. A step up undone within 15 s
+    doubles that tier's window, to 60 s. The start comes from the route, as a step of
     the bias (Auto: 2×60, 1.5×60, 1.5×30): the same network the first, Tailscale (direct IPv6 too) under 30 ms the first
     else the second, the relay the second over Wi-Fi, the third over cellular; the stream starts on the best tier no
     richer in pixels a second than that step on this display, so a display at one pixel per point, where steps merge,

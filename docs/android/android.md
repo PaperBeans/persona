@@ -800,6 +800,19 @@ shrinking stays off (below), and debug builds are not shrunk.
     app/build/outputs/mapping/release
   ```
 
+- **Method size**: ART compiles a method up to 10,000 dex code units (16-bit) and leaves a bigger one interpreted, which
+  is much slower. The same check reads each method's `insns_size` from the dex's `code_item` and fails when a method
+  passes 10,000, naming it with its size; a method between 9,000 and 10,000 only warns, so the split happens before it
+  passes. Every class counts, the libraries' too: R8 merges classes across packages (`mapping.txt` shows a release
+  moving `persona.platform.phonetools.PhoneToolRegistry` into `androidx.compose.animation.TransformScopeImpl`), so the
+  class holding a method says nothing about who wrote it, and a rule that skipped library classes would miss the app's
+  methods that ended up in one. `scripts/release/known_oversized_methods.txt` holds the methods that are already over
+  the limit and may only shrink, one full signature per line (`Class.method(descriptor) size`, with `#` comments), so an
+  overload is judged on its own size: a listed one warns while it is over the limit, fails once it grows past its
+  recorded size, and is only noted (so its line can go) when it drops to at most 10,000 or leaves the dex. Do not add a
+  line to get a release through; split the method, unless it is a library's. It currently holds only zxing's
+  `PDF417Common.<clinit>` (11,178, generated data).
+
 - **Rollback**: `-dontoptimize` in `proguard-rules.pro` goes back to shrinking only (a 33 MB APK; the name rules can
   stay). `isMinifyEnabled = false` in `android/app/build.gradle.kts` turns R8 off. Either way, change the assertion that
   pins it in `scripts/release/test_check_android_shrink.py` in the same commit. The test runs in the scripts CI shard and in the

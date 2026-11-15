@@ -15,6 +15,7 @@
   "launcher_not_on_machine": "{machine} にランチャー {launcher} がないため、何も起動していません。このコンピューターで使えるランチャー：{launchers}",
   "launcher_swapped": "{machine} に {launcher} がないため、{to}（既定のモデル）で実行します",
   "launcher_kind_missing": "{machine} の {engine} には {launcher} も他の {kind} のプロバイダーもないため、何も起動せず、別の種類のエージェントでも実行しません。そこにあるプロバイダー：{launchers}",
+  "readonly_launcher_unsupported": "{machine} の {launcher} が起動する {agent} には読み取り専用モードがないため、この読み取り専用タスクは拒否されました。何も起動しておらず、別のランチャーで代わりに実行することもありません。書き込み可能なタスク（readonly false）として計画するか、このコンピューターの Claude Code または Codex のランチャーで読み取り専用として計画してください：{launchers}",
   "start_identity_conflict": "起動応答で、指定したコンピューター上のセッションを確認できませんでした。",
   "start_interrupted": "このタスクのエージェントの起動中にハブが再起動しました。前のリクエストがまだ完了する可能性があります。エージェントの重複起動を防ぐため、コンピュータの再接続後にセッションを確認してから再試行してください。",
   "failed_start": "開始できませんでした：{reason}",

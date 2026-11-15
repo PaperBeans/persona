@@ -32,7 +32,7 @@ The prototype is the UI and interaction standard; compare screen by screen durin
   | Tier | Examples | Behavior |
   | --- | --- | --- |
   | Instant | Add a reminder, create an event, check weather | Not a task; Persona calls phone / mail tools directly. Render a result card (with Undo) in the chat, without adding it to the dock |
-  | Auto-start | Read-only: research, read code to answer a question | `task_plan` queues dispatch with `permission: bypassPermissions` for Claude and a Paseo provider whose approval is Auto Accept (#8141), `plan` for Codex, and no mode for traex, omp, pi, cursor or agy (#7559). The first prompt carries the read-only constraint. The plan card collapses to "Started N tasks" |
+  | Auto-start | Read-only: research, read code to answer a question | `task_plan` queues dispatch with `permission: bypassPermissions` for Claude and a Paseo provider whose approval is Auto Accept (#8141), `plan` for Codex, and no mode for traex and omp (#7559); pi, cursor and agy have no read-only mode, so `task_plan` refuses the task (#8316). The first prompt carries the read-only constraint. The plan card collapses to "Started N tasks" |
   | Plan first | Change code, start multiple Agents, first start in this project | Show a plan card in the chat, with editable labels for each item; start only after "Start" |
 
 - Tasks you explicitly request in the chat (a direct instruction, "have an Agent do it," "go ahead and start," #2559) also start directly. Persona sets `user_requested: true` for that `task_plan` item, and the card shows progress only.

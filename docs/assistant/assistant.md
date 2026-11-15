@@ -769,6 +769,7 @@ before the next message, Claude Code thinks the window is exceeded and auto-comp
 User selects "Compact context" in main-chat menu: `POST /api/v1/assistant/conversations/{id}/compact` → node `assistant.compact` (`node/assistant_compact.go`).
 
 - Same path as idle compaction: write `/compact` into an existing process, or start with `--resume` (chat's previous launcher / model); Codex uses `thread/compact/start`; runtime chats unsupported.
+  A guest conversation (a meeting's room too, which the manager compacts in long meetings: [meeting-minutes.md](meeting-minutes.md) "Long meetings: lean batches and compaction (#8253)") resumes as on any message, with its guest flags and settings from its record; one whose launcher runs another agent by now is refused, nothing started (#8253). The manager compacting a room sends `only_running: true`: a process that is not running is refused with `not_running` instead of being started only to be compacted (an older node ignores the field).
   Answering or already compacting returns 409, not queued: users can't see when a `/compact` queued behind a turn begins.
 - Progress lives in node session state (hub Postgres), sent with session lists as `compaction`: `running` → `done` on `compact_boundary` (Codex `thread/compacted` / `contextCompaction`);
   if turn `result` arrives first without a boundary, `failed` with Claude Code's original error (e.g. "Not enough messages to compact" for short chats);

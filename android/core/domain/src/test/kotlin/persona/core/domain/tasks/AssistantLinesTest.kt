@@ -65,6 +65,17 @@ class AssistantLinesTest {
         assertEquals(listOf("u1", "wt-1", "quick-use-mcp__persona__phone_reminders_create", "a1"), (out.filterNot { it.startsWith("day-") }).zhAny())
     }
 
+    @Test fun quickResultKeepsAnAndroidCalendarEventsFields() {
+        val call = call("phone_calendar_create_event", """{"id":"E1","title":"Dentist","start":"2026-11-13T15:30:00Z","end":"2026-11-13T16:00:00Z","calendar":"Personal"}""")
+        val result = QuickResult.of(call)
+        assertNotNull(result)
+        assertEquals(false, result!!.reminder)
+        assertEquals("use-phone_calendar_create_event", result.callId)
+        assertEquals("Dentist", result.title)
+        assertEquals("2026-11-13T15:30:00Z", result.time)
+        assertEquals("Personal", result.place)
+    }
+
     @Test fun aTasksStateFollowsItsAgents() {
         val todo = Todo("t", "t")
         assertEquals(TaskState.NotStarted, TaskState.of(todo, emptyList()))

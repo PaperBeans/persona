@@ -204,6 +204,14 @@ func (b *runtimeRegistry) hello(h *runtimeConn, hello runtimeHello, reserved fun
 	return stale, nil
 }
 
+// startedHere: a row of a session the runtime has, not one it lists only while it is starting it or after that start
+// failed (#8130). Only the former is remembered as the runtime's (remember): a Claude session whose takeover failed is
+// this machine's own again once its row leaves the list, so its next message takes it over again and its pages are
+// its transcript's, rather than everything going on to a runtime that has no such session.
+func startedHere(s proto.Session) bool {
+	return !s.Starting && s.StartError == ""
+}
+
 // remember records that id belongs to h's runtime. Callers hold b.mu and h.mu.
 func (b *runtimeRegistry) remember(h *runtimeConn, id string, now time.Time) {
 	label := h.hello.Name
@@ -445,7 +453,9 @@ func (b *runtimeRegistry) setSessions(h *runtimeConn, list []proto.Session) (map
 		if b.owner[s.SessionID] != h {
 			continue // another runtime has it running (recomputeOwners)
 		}
-		b.remember(h, s.SessionID, now)
+		if startedHere(s) {
+			b.remember(h, s.SessionID, now)
+		}
 		if st, ok := b.started[s.SessionID]; ok && st.runtime != h.hello.Runtime && now.Sub(st.at) < drivenFor &&
 			s.Status != proto.StatusOffline && !h.drivenTold[s.SessionID] {
 			if h.drivenTold == nil {
@@ -603,6 +613,16 @@ func (b *runtimeRegistry) unwatch(id string) {
 		delete(h.watched, id)
 		h.mu.Unlock()
 	}
+}
+
+// watchedOn: the hub watches session id, and connection h was asked to watch it (watch, setSessions).
+func (b *runtimeRegistry) watchedOn(h *runtimeConn, id string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, watching := b.watching[id]
+	return watching && h.watched[id]
 }
 
 // watchParent is the connection a transcriptMoved watch must inherit, including when the original watch was runtime-only.

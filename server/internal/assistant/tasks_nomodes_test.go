@@ -3,11 +3,13 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"testing/synctest"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // #7559: the node starts traex and omp with no permission mode and no effort, and refuses a start that names one
@@ -37,8 +39,9 @@ func noModesStart(t *testing.T, start map[string]any) {
 	}
 }
 
+// A read-only task for pi, cursor or agy is refused instead (#8316, TestReadonlyTaskPlanRefusesLaunchersWithoutReadonly).
 func TestReadonlyNonClaudeTaskCarriesTheConstraintNotPlan(t *testing.T) {
-	for _, agent := range []string{"traex", "omp", "pi", "cursor"} {
+	for _, agent := range []string{"traex", "omp"} {
 		t.Run(agent, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				s, f := readonlyTaskService(t)
@@ -127,7 +130,7 @@ func TestWritableNonClaudeTaskGetsNoDefaultModeOrEffort(t *testing.T) {
 // A mode or effort the call names for traex or omp is refused by task_plan, saying why, before a plan is saved or
 // anything starts. A read-only task's permission is replaced by read-only, so it is not one the call asked for. For pi
 // and cursor (work agents, #8151) neither is refused: the plan saves none and the task starts without them, as the node
-// would start it anyway.
+// would start it anyway; a read-only task for them is refused as read-only (#8316), whatever it names.
 func TestNonClaudeTaskRefusesAskedModeOrEffort(t *testing.T) {
 	for _, agent := range []string{"traex", "omp", "pi", "cursor"} {
 		refuses := !proto.IsWorkAgentType(agent)
@@ -149,6 +152,18 @@ func TestNonClaudeTaskRefusesAskedModeOrEffort(t *testing.T) {
 					task.DoneWhen, task.ExpectMinutes = []string{"the login flow is fixed"}, 30
 					_, err := s.toolTaskPlan(context.Background(), "chat", readonlyTaskArgs(t, task))
 					synctest.Wait()
+					if tc.readonly && !refuses {
+						var re *rpc.Error
+						if !errors.As(err, &re) || re.Code != "readonly_unsupported" {
+							t.Fatalf("read-only %s task: error = %v, want readonly_unsupported", agent, err)
+						}
+						f.mu.Lock()
+						defer f.mu.Unlock()
+						if len(f.starts) != 0 {
+							t.Fatalf("a refused task started: %v", f.starts)
+						}
+						return
+					}
 					if tc.want == "" || !refuses {
 						if err != nil {
 							t.Fatalf("task refused: %v", err)

@@ -90,6 +90,50 @@ type MeetingRoom struct {
 	// Started: the room came up (it was ready once): its ids are shown from then on. A start that never got there
 	// keeps them here only, for the deletion.
 	Started bool `json:"started,omitempty"`
+	// Batching is how the room is fed (docs/assistant/meeting-minutes.md "Long meetings: lean batches and compaction
+	// (#8253)"): RoomBatchingLean for a room a manager with lean batches started; 0 for an older room, fed a batch a
+	// minute with the rules and the lists in each until it is deleted. An older manager after a rollback drops it when
+	// it rewrites meeting.json, which makes the room an older one from then on.
+	Batching int `json:"batching,omitempty"`
+	// Lean is a lean room's bookkeeping: the lists' boundaries and its scheduled compaction. The apps never see it, so
+	// its changes raise no revision.
+	Lean MeetingRoomLean `json:"lean,omitzero"`
+}
+
+// RoomBatchingLean marks a room started with lean batches (MeetingRoom.Batching).
+const RoomBatchingLean = 2
+
+// MeetingRoomLean is what the manager keeps of a lean room across a restart (#8253).
+type MeetingRoomLean struct {
+	// ListsAt is when the last batch that showed the topics and highlights so far went; ListsDue: the next batch
+	// shows them (the room's conversation was compacted since).
+	ListsAt  time.Time `json:"lists_at,omitzero"`
+	ListsDue bool      `json:"lists_due,omitempty"`
+	// Tokens is the most context the room's row reported since its conversation was last compacted, as far as the
+	// manager knows: a drop below half of it is Claude Code compacting the room on its own. TokensStale is what the row
+	// reported when the manager saw a compaction end: the context of the reply before it (a compaction writes none),
+	// not read as the room's until the row reports another.
+	Tokens      int32 `json:"tokens,omitempty"`
+	TokensStale int32 `json:"tokens_stale,omitempty"`
+	// SpanAt is the live log's feed position (live.json's fed) when the room started or was last compacted: what the
+	// batches given since cover is read off the live log's lines from there to its feed position now, so a restart
+	// between a batch's two writes loses none of it.
+	SpanAt int `json:"span_at,omitempty"`
+	// CompactedAt is when the last scheduled compaction ended done, Compactions how many did.
+	CompactedAt time.Time `json:"compacted_at,omitzero"`
+	Compactions int       `json:"compactions,omitempty"`
+	// CompactStartedAt: a compaction was asked of the node then and has not ended as far as the manager knows;
+	// CompactFed is the feed position then (the lines given before it are what it compacts).
+	CompactStartedAt time.Time `json:"compact_started_at,omitzero"`
+	CompactFed       int       `json:"compact_fed,omitempty"`
+	// CompactSeen is the start of the latest compaction of the room's session the manager has taken into account (its
+	// own, or one the owner asked for), to tell one that ended since from it.
+	CompactSeen time.Time `json:"compact_seen,omitzero"`
+	// Attempts are the compactions refused or failed for the current span, RetryAt when the next may start; Never:
+	// the node cannot compact the room (too old for it, or it would start the room's process without its restrictions).
+	Attempts int       `json:"attempts,omitempty"`
+	RetryAt  time.Time `json:"retry_at,omitzero"`
+	Never    bool      `json:"never,omitempty"`
 }
 
 // MeetingFollowup is the meeting's follow-up conversation.
@@ -186,7 +230,7 @@ func meetingParts(before, after Meeting) []string {
 		y, _ := json.Marshal(b)
 		return bytes.Equal(x, y)
 	}
-	if !same(before.Room, after.Room) {
+	if !same(roomShown(before.Room), roomShown(after.Room)) {
 		out = append(out, PartRoom)
 	}
 	if !same(before.Private, after.Private) {
@@ -201,8 +245,19 @@ func meetingParts(before, after Meeting) []string {
 	return out
 }
 
+// roomShown is room without what only the manager reads (its batching and a lean room's bookkeeping, #8253), whose
+// changes raise no revision: the apps see nothing new of it.
+func roomShown(room *MeetingRoom) *MeetingRoom {
+	if room == nil {
+		return nil
+	}
+	r := *room
+	r.Batching, r.Lean = 0, MeetingRoomLean{}
+	return &r
+}
+
 // meetingSame: a and b are the same meeting.json (also where no part the apps read differs: the timeline, the final
-// pass's bookkeeping).
+// pass's bookkeeping, a lean room's bookkeeping).
 func meetingSame(a, b Meeting) bool {
 	x, _ := json.Marshal(a)
 	y, _ := json.Marshal(b)

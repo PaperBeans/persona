@@ -1,7 +1,9 @@
 // The browser's quality-tier choice (#6558): PersonaScreenKit's TierPolicy ported line for line, and checked against the
 // timelines it writes (spec/fixtures/screen-tiers/policy). Every 250 ms it reads the stream's signals (./signals), the
 // helper's `timing` and the route, and moves to another tier only when the band no longer fits: down fast, to the best
-// tier whose floor fits 80% of what arrived; up slowly, one tier after a calm window and only with proof of headroom.
+// tier whose floor fits 80% of what arrived, and only while the newest frame still queued (a backlog now, not one that
+// just came in at once); up slowly, one tier after a calm window and only with proof of headroom, or, for light content
+// sending at most half the next tier's floor, after twice the window without it.
 // The helper's `timing` comes once a second while frames flow and not at all on a still screen, so it is used only while
 // fresh: its skipped frames until the next one is due (1.25 s), its bitrate as proof once; a new bias or budget starts
 // from at least the current tier's floor (#7842).
@@ -32,6 +34,11 @@ const UNDO_WITHIN = 15;
 const LONGEST_WINDOW = 60;
 const WINDOW_RESET = 120;
 const BURST_PROOFS = 3;
+/** Light content (#6396, 2026-11-15): a screen sending at most this share of the next tier's floor can step up after
+ *  `LIGHT_WINDOWS` calm windows without proof; it never fills the bitrate, and on a fast link its keyframes come in too
+ *  quickly to measure, so no proof ever comes. */
+const LIGHT_SHARE = 0.5;
+const LIGHT_WINDOWS = 2;
 const HELPER_STALE = 1.25;
 
 const pixelRate = (t: Tier) => t.width * t.height * t.fps;
@@ -69,6 +76,8 @@ export class TierPolicy {
   private motionKbps: number | null = null;
   private bursts = 0;
   private burstKbps: number | null = null;
+  /** The most the helper sent in a second of this calm stretch (fresh `timing` only); null before one came. */
+  private heaviestSent: number | null = null;
   private windows = new Map<number, number>();
   private lastUp: { at: number; into: number } | null = null;
   private tierSince: number;
@@ -115,9 +124,15 @@ export class TierPolicy {
     if (fresh) this.helperAt = now;
     const skipping = this.helperSkipped > 0 && this.helperAt !== null && now - this.helperAt < HELPER_STALE;
     const queue = s.queueP50Ms ?? 0;
+    // A backlog now: the newest frame still waited. Every step down needs one: one that came in all at once after a
+    // stall leaves the p50 high for a moment though it is gone, and the helper has cut to its floor by then.
+    const backlog = (s.queueLastMs ?? queue) > UP_QUEUE_MS;
 
-    // Down, fast: a long queue or skipped frames for a quarter second.
-    if (queue > EMERGENCY_QUEUE_MS || skipping) {
+    // Down, fast: a long queue, or skipped frames while a queue is still there, for a quarter second. The helper skips
+    // until a report shows 150 ms or less, and its `timing` says so up to a second later: once the page sees the queue
+    // under that, the backlog is gone and so is the reason (2026-11-15: a stall that was over stepped a light screen
+    // down to 15 fps).
+    if (backlog && (queue > EMERGENCY_QUEUE_MS || (skipping && queue > DOWN_QUEUE_MS))) {
       const since = this.emergencySince ?? now;
       this.emergencySince = since;
       if (now - since >= EMERGENCY_HOLD && this.outgrown(s.deliveredKbps) && this.canDown(now, s) && this.index < this.ladder.length - 1) {
@@ -129,7 +144,7 @@ export class TierPolicy {
 
     // Down: the bitrate is at the band's floor and the queue still won't drain.
     const target = this.helperTarget;
-    if (queue > DOWN_QUEUE_MS && target !== null && target <= EXHAUSTED * this.tier.minKbps && this.outgrown(s.deliveredKbps) &&
+    if (backlog && queue > DOWN_QUEUE_MS && target !== null && target <= EXHAUSTED * this.tier.minKbps && this.outgrown(s.deliveredKbps) &&
         this.canDown(now, s) && this.index < this.ladder.length - 1) {
       return this.down(this.fitting(s.deliveredKbps), s.deliveredKbps, queue, "link_slowed", now);
     }
@@ -163,6 +178,7 @@ export class TierPolicy {
     if (this.index > 0) {
       const next = this.ladder[this.index - 1];
       const sent = this.helperSent;
+      if (fresh && sent !== null) this.heaviestSent = Math.max(this.heaviestSent ?? 0, sent);
       if (fresh && target !== null && sent !== null && sent >= 0.8 * target && sent >= 1.25 * next.minKbps) {
         this.motionKbps = Math.max(this.motionKbps ?? 0, sent);
       }
@@ -174,10 +190,17 @@ export class TierPolicy {
       }
     }
     if (this.lastUp && this.lastUp.into === this.index && now - this.tierSince >= WINDOW_RESET) this.windows.delete(this.index);
-    if (this.index <= 0 || now - this.calmSince < this.window(this.index - 1, now)) return null;
+    if (this.index <= 0) return null;
+    const wait = this.window(this.index - 1, now);
+    if (now - this.calmSince < wait) return null;
     const proven = Math.max(this.motionKbps ?? 0, this.bursts >= BURST_PROOFS ? (this.burstKbps ?? 0) : 0);
-    if (proven <= 0) return null;
-    return this.up(proven, now);
+    if (proven > 0) return this.up(proven, now);
+    // Light content: a step up adds little, and the down rule and the doubled window cover one that doesn't hold.
+    const next = this.ladder[this.index - 1];
+    if (this.heaviestSent !== null && this.heaviestSent <= LIGHT_SHARE * next.minKbps && now - this.calmSince >= LIGHT_WINDOWS * wait) {
+      return this.up(next.minKbps, now);
+    }
+    return null;
   }
 
   /** The stream moved to another route: a start tier below the current one is taken at once; otherwise the tier stays
@@ -212,6 +235,7 @@ export class TierPolicy {
     this.motionKbps = null;
     this.bursts = 0;
     this.burstKbps = null;
+    this.heaviestSent = null;
   }
 
   private canDown(now: number, s: TierSignals): boolean {
