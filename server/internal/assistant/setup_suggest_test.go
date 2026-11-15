@@ -659,32 +659,35 @@ func TestSetupBlockIsOnTheCardTheItemAndTheFacts(t *testing.T) {
 // conversation open, it is muted, the task pushes only what its runs send); the push itself marks nothing, and a run
 // that failed leaves the block for its retry or the next briefing.
 func TestSetupBlockIsMarkedWhenTheRunEndsNotWhenItIsPushed(t *testing.T) {
-	ctx := context.Background()
-	s, ev := newRuleService(t)
-	now := time.Now()
-	setupDelegateEvidence(ev, now, 3)
-	b := s.setupFor(ctx, now, s.location(ctx), i18n.En, testWeb)
-	if len(setupIDs(b)) != 1 {
-		t.Fatalf("block: %+v", b)
-	}
-	s.brief.bySession = map[string]*briefRun{"sess1": {facts: &briefFacts{At: now, l: i18n.En, loc: s.location(ctx), Setup: b}}}
-	if s.briefPush("sess1", i18n.En, true) == "" {
-		t.Fatal("no push text")
-	}
-	if book := setupBookOf(t, s); book.Week != "" {
-		t.Fatalf("marked by the push: %+v", book)
-	}
-	s.briefReached("other") // a conversation on no run
-	if book := setupBookOf(t, s); book.Week != "" {
-		t.Fatalf("marked by another conversation's turn: %+v", book)
-	}
-	s.briefReached("sess1")
-	if book := setupBookOf(t, s); book.Week != b.Week || book.Shown[setupDelegate].IsZero() {
-		t.Fatalf("not marked when the run ended: %+v", book)
-	}
-	if again := s.setupFor(ctx, now.Add(time.Hour), s.location(ctx), i18n.En, testWeb); again != nil {
-		t.Fatalf("the next briefing of the week carries a block: %+v", again)
-	}
+	// The bubble's fixed clock keeps the next briefing in the same ISO week without expiring the run.
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		s, ev := newRuleService(t)
+		now := time.Now()
+		setupDelegateEvidence(ev, now, 3)
+		b := s.setupFor(ctx, now, s.location(ctx), i18n.En, testWeb)
+		if len(setupIDs(b)) != 1 {
+			t.Fatalf("block: %+v", b)
+		}
+		s.brief.bySession = map[string]*briefRun{"sess1": {facts: &briefFacts{At: now, l: i18n.En, loc: s.location(ctx), Setup: b}}}
+		if s.briefPush("sess1", i18n.En, true) == "" {
+			t.Fatal("no push text")
+		}
+		if book := setupBookOf(t, s); book.Week != "" {
+			t.Fatalf("marked by the push: %+v", book)
+		}
+		s.briefReached("other") // a conversation on no run
+		if book := setupBookOf(t, s); book.Week != "" {
+			t.Fatalf("marked by another conversation's turn: %+v", book)
+		}
+		s.briefReached("sess1")
+		if book := setupBookOf(t, s); book.Week != b.Week || book.Shown[setupDelegate].IsZero() {
+			t.Fatalf("not marked when the run ended: %+v", book)
+		}
+		if again := s.setupFor(ctx, now.Add(time.Hour), s.location(ctx), i18n.En, testWeb); again != nil {
+			t.Fatalf("the next briefing of the week carries a block: %+v", again)
+		}
+	})
 }
 
 // The watcher of a scheduled run tells the block when the run's turn ends normally with no push at all, and not when

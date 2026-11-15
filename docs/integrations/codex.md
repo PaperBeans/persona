@@ -126,8 +126,11 @@ Messages to them already use `turn/start` / `turn/steer`; thinking effort is the
   An explicitly empty list means unsupported: neither show nor accept it. The session includes `efforts` (levels from weakest to strongest) and `effort` (current value); clients show the selector only when `efforts` is nonempty
   (`docs/protocol/protocol.md`, "Codex sources and capabilities"). The node validates levels itself: observed 0.163 `thread/settings/update` accepts any string.
 - **Current value**: the value app-server says is configured for this thread (`reasoningEffort` from `thread/read` every 5 seconds, the join-time `thread/resume` reply,
-  and `thread/settings/updated` notifications). If unset (`null`, as on new threads), use the model's default (`defaultReasoningEffort` in `model/list`);
-  old app-servers without these fields use the last rollout turn's `turn_context`. Changes in the computer TUI update the phone.
+  and `thread/settings/updated` notifications). Otherwise use the latest rollout turn's `turn_context.effort`, including
+  terminal-only and history-only sessions. A model's default (`defaultReasoningEffort` in `model/list`) is only a fallback
+  for a controlled thread with no recorded effort. The computer-wide `config.toml` is not session evidence.
+  The incremental metadata scan retains the latest effort even when long tool output pushes its turn context outside the quick tail.
+  Changes in the computer TUI update the phone. Readback does not grant control: unsupported sessions still offer no effort choices.
 - **Changing it**: after validation, the node sends `thread/settings/update {threadId, effort}`. It applies from the next turn, whether sent from phone or computer; the TUI also receives
   `thread/settings/updated`. It can be changed while the current turn runs, without affecting that turn. In 0.163 this method is experimental (the node already declares `experimentalApi` when connecting).
   Observed: successful call, immediate `thread/settings/updated`, new value read back with `thread/read`.
@@ -142,6 +145,10 @@ Messages to them already use `turn/start` / `turn/steer`; thinking effort is the
   session display follows its next read).
 - **Clients**: web, iOS, and Android show only thinking effort for send-capable sessions with nonempty `efforts`: the chip below the web input, the label above the old iOS input and new shell's "Model · Thinking effort"
   menu, Android's "Mode" button. Options come directly from `efforts` (minimal "Minimal", ultra "Ultra"; unknown values shown as-is). Claude Code and the assistant still have both settings.
+  On the web, the current Codex model row remains actionable for its effort flyout even when changing the model itself is unsupported.
+  The panel preserves recorded effort even if the launcher's catalog omits that level; it never replaces it with the catalog default.
+  Offline, read-only, parent-controlled, terminal-only, and non-adjustable-model states explain why effort cannot change here.
+  Supported changes explain that they apply on the next turn without interrupting the current one.
 - **Tests**: `node/codex_effort_test.go` (synthetic app-server: rejected before joining; after joining accepts only effort; invalid levels; `thread/settings/update` parameters;
   -32601 carries effort on next `turn/start` but not `turn/steer`; other errors / timeout / disconnect report failure, record nothing, and clear previous selections; rejected `turn/start` discards the selection;
   changed connection or unloaded thread invalidates it; model levels and defaults; Codex rejection; model without levels; `thread/settings/updated`; terminal route and internal fork still rejected);

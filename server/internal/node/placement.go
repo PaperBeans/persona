@@ -510,8 +510,10 @@ func (n *Node) setAgentsAt(agents []host.Agent, epoch uint64, heard map[string]b
 			id = n.panes[a.PaneID]
 			n.mu.Unlock()
 		}
-		if named := n.codexByTitle(a, id, m); named != "" {
+		if named, claimed := n.codexByTitle(a, id, m); named != "" {
 			id = named
+		} else if claimed {
+			id = "" // the title names another pane's thread: keeping the stale reported one would misroute this row
 		} else if _, match, ok := codexTitleName(a.Title); ok && (reported == "" ||
 			(!sub && threadTitle(home, id) != "" && !threadFormerlyNamed(home, id, match))) {
 			// An unrecognised current title must not reuse a stale pane binding either, nor a thread the host named

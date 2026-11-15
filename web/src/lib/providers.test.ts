@@ -254,8 +254,15 @@ describe("fallbackTitle", () => {
 });
 
 describe("probes", () => {
+  it("tests the provider draft's effort, including explicitly clearing its saved default", () => {
+    for (const api of ["responses", "messages"] as const) {
+      expect(probeBody(ready({ kind: "api", api, effort: "high" }), "gw", "m1")).toMatchObject({ effort: "high" });
+      expect(probeBody(ready({ kind: "api", api, effort: "" }), "gw", "m1")).toHaveProperty("effort", "");
+    }
+  });
+
   it("by name when editing, the typed key and touched headers over it", () => {
-    expect(probeBody(ready({ api_key: "", auth: "bearer" }), "gw", "m1")).toEqual({ base_url: "https://gw.example.com", auth: "bearer", api: "messages", name: "gw", model: "m1" });
+    expect(probeBody(ready({ api_key: "", auth: "bearer" }), "gw", "m1")).toEqual({ base_url: "https://gw.example.com", auth: "bearer", api: "messages", name: "gw", model: "m1", effort: "" });
     expect(probeBody(ready({ api: "responses", auth: "bearer", headers: "", headers_touched: true }), null)).toEqual({ base_url: "https://gw.example.com", auth: "bearer", api: "responses", api_key: "sk-test-1", headers: "" });
   });
   it("asks the hub to find the method while Automatic, then sends the one the check found (#5329)", () => {

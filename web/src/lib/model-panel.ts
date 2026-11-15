@@ -27,6 +27,9 @@ export interface PanelModel {
   resolved?: string;
   /** Thinking efforts it takes, weakest first (lib/session-actions.ts EFFORTS / CODEX_EFFORTS ids); empty: no effort control. */
   efforts: string[];
+  /** The running session cannot change effort here; keep its actual value visible and explain why. */
+  effortUnavailable?: string;
+  effortNote?: string;
   /** The effort the model runs with when none is set: the slider marks it "Recommended". */
   defaultEffort?: string;
   /** A Fast (priority) speed exists for this model on this engine. */
@@ -192,15 +195,15 @@ function runsNow(provider: Pick<PanelProvider, "id" | "models">, model: Pick<Pan
 const takes = (model: Pick<PanelModel, "efforts">, effort: string | undefined) => (effort && model.efforts.includes(effort) ? effort : undefined);
 
 /**
- * The setup a model's row stands for, and what picking it sends. The model that runs now shows what runs (its effort,
- * then its override's, except for an Agent not started yet, whose form holds the whole setup; its Fast as it runs). Any
+ * The setup a model's row stands for, and what picking it sends. The model that runs now shows what runs, never a
+ * browser override for an unknown session value. An Agent not started yet keeps only supported form values. Any
  * other: its override's effort, else the effort running now when this model takes it, else none (the model's own
  * default); Fast only from its override, and only where the model has it.
  */
 export function rowSetup(provider: Pick<PanelProvider, "id" | "models">, model: PanelModel, state: Pick<PanelState, "current" | "starting">, override?: PanelOverride): PanelConfig {
   const current = state.current;
   const now = runsNow(provider, model, current);
-  const effort = now ? (takes(model, current?.effort) ?? (state.starting ? undefined : takes(model, override?.effort))) : (takes(model, override?.effort) ?? takes(model, current?.effort));
+  const effort = now ? (state.starting ? takes(model, current?.effort) : current?.effort) : (takes(model, override?.effort) ?? takes(model, current?.effort));
   // what runs is what runs: an unset Fast on the running model is Standard, not "unknown, take the override"
   const fast = model.fast ? (now ? current?.fast : override?.fast) : undefined;
   return cleanSetup({ provider: provider.id, model: model.id, effort, fast });

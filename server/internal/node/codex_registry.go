@@ -606,6 +606,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 				}
 				s.Cwd, s.Model, s.LastText, s.UpdatedAt, s.Rev = m.cwd, m.model, snippet(m.lastText), lastUsed(m, st), st.Size()
 				s.AgentSurface = m.surface
+				s.Effort = m.effort
 				m.turnErr.set(&s)
 				setContext(&s, m)
 				s.Title = threadTitle(src.home, src.thread)

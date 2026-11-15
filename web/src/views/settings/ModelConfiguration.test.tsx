@@ -25,9 +25,9 @@ const agents: ModelPurpose = {
 const providers: ModelProvider[] = [
   { id: "launcher.default", name: "Default launcher", kind: "launcher" },
   { id: "launcher.custom", name: "Custom launcher", kind: "launcher" },
-  { id: "api.messages", name: "Messages provider", kind: "api", api: "messages", model: "api-default" },
+  { id: "launcher.messages", name: "Messages provider", kind: "api", api: "messages", model: "api-default" },
   { id: "launcher.codex", name: "Codex", kind: "launcher", agent: "codex" },
-  { id: "api.responses", name: "Responses provider", kind: "api", api: "responses" },
+  { id: "launcher.responses", name: "Responses provider", kind: "api", api: "responses" },
 ];
 // The uses of Agents the hub lets the user set apart; each runs the same editor tests.
 const LARK = { id: "lark.agent", name: "Lark /agent" };
@@ -37,12 +37,12 @@ const child = (override: ModelBinding = {}, revision = 7): ModelPurpose => ({
   id: use.id, name: use.name, group: "Agents", kind: "launcher", launch: "headless", parent: "agent.new", category_id: "agent.new",
   override, effective: { ...agents.effective, ...override }, revision,
   inherited_from: Object.keys(override).length ? undefined : "agent.new",
-  fields: ["provider", "model", "effort"], provider_ids: providers.filter((p) => p.id !== "api.responses").map((p) => p.id),
+  fields: ["provider", "model", "effort"], provider_ids: providers.filter((p) => p.id !== "launcher.responses").map((p) => p.id),
 });
 const triage = (override: ModelBinding = {}, revision = 7): ModelPurpose => ({
   id: "inbox.triage", category_id: "inbox.triage", name: "Information screening", group: "Default models", kind: "api", revision,
-  override, effective: { provider: "api.messages", model: "api-default", ...override },
-  fields: ["provider", "model", "effort"], provider_ids: ["api.messages", "api.responses"],
+  override, effective: { provider: "launcher.messages", model: "api-default", ...override },
+  fields: ["provider", "model", "effort"], provider_ids: ["launcher.messages", "launcher.responses"],
 });
 let current: ModelPurpose;
 let readonly: ModelPurpose;
@@ -68,12 +68,15 @@ const hub = async (input: RequestInfo | URL, init?: RequestInit): Promise<Respon
   if (path.endsWith("/model-config")) return json({ purposes: [
     { ...agents, id: "assistant", name: "主对话", launch: "headless", runtimes: ["cli", "agentsdk"] },
     agents, current, readonly,
-    { ...agents, id: "kb", name: "信息处理", kind: "api", effective: { provider: "api.messages" } },
-    { ...agents, id: "extension.example", name: "Example extension", kind: "api", effective: { provider: "api.responses" } },
+    { ...agents, id: "kb", name: "信息处理", kind: "api", effective: { provider: "launcher.messages" } },
+    { ...agents, id: "extension.example", name: "Example extension", kind: "api", effective: { provider: "launcher.responses" } },
   ], providers });
   if (path.endsWith("/purposes/assistant.supervise")) return json({ error: "not found" }, 404); // a hub without the background supervisor's purpose (#5082)
   if (path.endsWith(`/purposes/${current.id}`)) return json({ purpose: current, providers });
   if (path.endsWith(`/purposes/${readonly.id}`)) return json({ purpose: readonly, providers });
+  if (path.endsWith("/launchers/discover")) return json({ models: [
+    { id: "api-model", efforts: ["off", "low", "high"] },
+  ] });
   if (path.endsWith("/models")) return listFails ? json({ error: "unavailable" }, 404) : json({
     agent: "claude", models: [
       { id: "default-model", name: "Default model", default: true, efforts: ["low", "medium", "high"] },
@@ -185,7 +188,7 @@ describe.each([
     await render();
     await open();
     expect(dialog().querySelector('[data-execution-preview]')?.textContent).toBe("后台进程 · claude -p");
-    expect([...dialog().querySelectorAll("select option")].map((o) => o.getAttribute("value"))).not.toContain("api.responses");
+    expect([...dialog().querySelectorAll("select option")].map((o) => o.getAttribute("value"))).not.toContain("launcher.responses");
     await choose("launcher.codex");
     expect(dialog().querySelector('[data-execution-preview]')?.textContent).toBe("后台进程 · codex app-server");
     await act(async () => button(t("common.save"), dialog()).click());
@@ -236,23 +239,27 @@ describe.each([
   it("allows an agent-capable Messages provider with a model and effort", async () => {
     await render();
     await open();
-    await choose("api.messages");
+    await choose("launcher.messages");
     type(dialog().querySelector<HTMLInputElement>(`input[aria-label="${t("settings-modelconfiguration.specific_model")}"]`)!, "api-model");
     type(effort(), "low");
     await act(async () => button(t("common.save"), dialog()).click());
-    expect(writes[0].body).toEqual({ revision: 7, provider: "api.messages", model: "api-model", effort: "low" });
+    expect(writes[0].body).toEqual({ revision: 7, provider: "launcher.messages", model: "api-model", effort: "low" });
   });
 
   it("allows setting effort on a Messages direct-API purpose", async () => {
-    current = triage({ provider: "api.messages", model: "api-model", effort: "off" });
+    current = triage({ provider: "launcher.messages", model: "api-model", effort: "off" });
     await render();
     await open();
-    expect(effort()).not.toBeNull();
-    expect([...dialog().querySelectorAll<HTMLOptionElement>("datalist#model-efforts option")].map((o) => o.value)).toContain("off");
-    type(effort(), "low");
+    const select = [...dialog().querySelectorAll<HTMLSelectElement>("select")].find((input) => input.closest("label")?.textContent?.includes(t("settings-modelconfiguration.effort")))!;
+    expect(select).not.toBeNull();
+    expect([...select.options].map((option) => option.value)).toContain("off");
+    await act(async () => {
+      select.value = "low";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     await act(async () => button(t("common.save"), dialog()).click());
     expect(writes[0]).toEqual({ path: "/api/v1/model-config/purposes/inbox.triage", method: "PATCH",
-      body: { revision: 7, provider: "api.messages", model: "api-model", effort: "low" } });
+      body: { revision: 7, provider: "launcher.messages", model: "api-model", effort: "low" } });
   });
 
   it("restores following by clearing all three fields using the child's revision", async () => {

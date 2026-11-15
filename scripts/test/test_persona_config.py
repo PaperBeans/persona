@@ -97,12 +97,14 @@ class PersonaConfigTests(unittest.TestCase):
         cases = {
             'carplay_voice': ['com.apple.developer.carplay-voice-based-conversation'],
             'health_background_delivery': ['com.apple.developer.healthkit.background-delivery'],
+            'homekit': ['com.apple.developer.homekit'],
         }
-        cases['both'] = cases['carplay_voice'] + cases['health_background_delivery']
+        cases['all'] = cases['carplay_voice'] + cases['health_background_delivery'] + cases['homekit']
         for name, keys in cases.items():
             with self.subTest(name), tempfile.TemporaryDirectory() as directory:
                 root = self._fake_root(directory)
-                app = {'carplay_voice': True, 'health_background_delivery': True} if name == 'both' else {name: True}
+                app = ({'carplay_voice': True, 'health_background_delivery': True, 'homekit': True} if name == 'all'
+                       else {name: True})
                 with patch.object(config, 'ROOT', str(root)):
                     self.assertEqual(config.app_entitlements({'app': app}), config.OPT_IN_ENTITLEMENTS)
                 with open(root / 'apple' / config.APP_ENTITLEMENTS, 'rb') as f:
@@ -123,6 +125,16 @@ class PersonaConfigTests(unittest.TestCase):
                     config.xcconfig(cfg)
                 text = (root / 'apple' / 'Config.xcconfig').read_text()
                 self.assertIn('PERSONA_HEALTH_BACKGROUND_DELIVERY = %s\n' % flag, text)
+
+    def test_homekit_flag_follows_the_switch(self):
+        for value, flag in ((True, 'YES'), (None, 'NO'), (False, 'NO'), ('true', 'NO')):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
+                root = self._fake_root(directory)
+                cfg = {} if value is None else {'app': {'homekit': value}}
+                with patch.object(config, 'ROOT', str(root)):
+                    config.xcconfig(cfg)
+                text = (root / 'apple' / 'Config.xcconfig').read_text()
+                self.assertIn('PERSONA_HOMEKIT = %s\n' % flag, text)
 
 
 class SigningProfileConfigTests(unittest.TestCase):

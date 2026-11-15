@@ -398,6 +398,10 @@ func (n *Node) mergeNamingMetadata(path string, m *quickMeta) {
 		return
 	}
 	m.outputTokens = sc.meta.OutputTokens
+	if m.codex && sc.meta.EffortAt.After(m.effortAt) {
+		// A long tool result can push the latest turn_context out of the quick tail.
+		m.effort, m.effortAt = sc.meta.Effort, sc.meta.EffortAt
+	}
 	if sc.meta.TitleManual {
 		m.title, m.titleManual, m.titleSource = sc.meta.Title, true, "manual"
 	} else if sc.meta.TitleSource != "" {

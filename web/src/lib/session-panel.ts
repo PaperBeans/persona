@@ -14,7 +14,7 @@ import { ALL_EFFORTS, defaultModel, launcherAgent, modelName, typedModelOffered,
 import { validModelId } from "./model-id";
 import { cleanSetup, type PanelConfig, type PanelModel, type PanelProvider, type PanelState } from "./model-panel";
 import { canSwitchModel, isCurrentModel, modelBusy, sessionLauncher } from "./model-switch";
-import { currentModelRow, engineSwitchable, modelLabel, pendingEngine, sessionEngine, type ModelList } from "./session-models";
+import { currentModelRow, engineSwitchable, modelLabel, pendingEngine, sessionEngine, sessionSwitches, type ModelList } from "./session-models";
 import type { Launcher, Session } from "./types";
 
 const hasFast = (s: Session) => Boolean(s.service_tiers?.some((x) => x.id === "priority"));
@@ -24,6 +24,7 @@ const hasFast = (s: Session) => Boolean(s.service_tiers?.some((x) => x.id === "p
  *  typed by hand into Claude Code takes any, as nobody knows. */
 function rowEfforts(engine: string, m: AgentModel, listed: boolean, current: boolean, s: Session): string[] {
   if (engine === "agy") return [];
+  if (current && !sessionSwitches(s).effort) return [];
   if (current && s.efforts?.length) return s.efforts;
   if (listed && !m.custom) return m.efforts ?? [];
   return engine === "claude" ? ALL_EFFORTS : [];
@@ -34,11 +35,19 @@ function panelModel(m: AgentModel, engine: string, current: boolean, s: Session,
   const out: PanelModel = { id: m.id, name: modelName(m), efforts: rowEfforts(engine, m, listed, current, s) };
   if (m.description) out.description = m.description;
   if (m.resolved) out.resolved = m.resolved;
-  if (m.default_effort) out.defaultEffort = m.default_effort;
+  if (m.default_effort && (!current || s.effort)) out.defaultEffort = m.default_effort;
   if (m.custom) out.custom = true;
   if (m.price) out.price = m.price;
   if (current && engine === "codex" && hasFast(s)) out.fast = true;
   if (current && s.context_window) out.context = s.context_window;
+  if (current && engine === "codex") {
+    if (sessionSwitches(s).effort) out.effortNote = t("chat-modelpanel.effort_next_turn");
+    else if (s.state === "offline" || s.status === "offline") out.effortUnavailable = t("chat-modelpanel.effort_offline");
+    else if (s.parent_thread_id) out.effortUnavailable = t("chat-modelpanel.effort_parent");
+    else if (s.capabilities?.send === false) out.effortUnavailable = t("chat-modelpanel.effort_read_only");
+    else if (s.source_kind === "codex_app_server" || s.space_kind === "codex_app") out.effortUnavailable = t("chat-modelpanel.effort_model_fixed");
+    else out.effortUnavailable = t("chat-modelpanel.effort_terminal");
+  }
   return out;
 }
 

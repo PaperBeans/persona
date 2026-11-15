@@ -45,6 +45,8 @@ export interface Task {
   title: string;
   prompt: string;
   repeat: Repeat;
+  fresh_each_run?: boolean;
+  state_note?: { text: string; revision: number; updated_at: string };
   /** once: when; interval: the next run. */
   at?: string;
   /** daily: "HH:MM" in the user's time zone. */
@@ -328,7 +330,11 @@ export function sameTask(a: Task, b: Task): boolean {
   if ((a.permission_mode ?? "") !== (b.permission_mode ?? "")) return false;
   if ((a.push ?? "") !== (b.push ?? "")) return false;
   if ((a.inbox ?? "") !== (b.inbox ?? "")) return false;
-  if (a.repeat !== "once" && !sameInstant(a.until, b.until)) return false;
+  if (a.repeat !== "once" && (
+    !sameInstant(a.until, b.until) ||
+    Boolean(a.fresh_each_run) !== Boolean(b.fresh_each_run) ||
+    (a.state_note?.text ?? "") !== (b.state_note?.text ?? "")
+  )) return false;
   switch (a.repeat) {
     case "once":
       return parseTime(a.at)?.getTime() === parseTime(b.at)?.getTime();
@@ -359,7 +365,7 @@ function untilBody(d: Task, saved?: Task | null): string | null | undefined {
 
 /** The JSON for POST (no `saved`) or PUT. Models follow Models › Main chat; tasks only configure permissions.
  *  `push` goes only when changed from `saved`. `session_id` "" makes runs use the task's own conversation; `at` is left out when there is none (Go can't read "").
- *  `until` follows untilBody: omit to keep, null to clear. */
+ *  `until` follows untilBody: omit to keep, null to clear. Changed state text includes the revision the editor started with. */
 export function taskBody(d: Task, saved?: Task | null): Record<string, unknown> {
   const body: Record<string, unknown> = {
     title: d.title.trim(),
@@ -381,6 +387,13 @@ export function taskBody(d: Task, saved?: Task | null): Record<string, unknown> 
   // Only when changed: a hub keeps it when left out, and one that does not know it never gets it.
   if ((d.push ?? "") !== (saved?.push ?? "")) body.push = d.push ?? "";
   if ((d.inbox ?? "") !== (saved?.inbox ?? "")) body.inbox = d.inbox ?? "";
+  if (d.repeat !== "once") {
+    if (Boolean(d.fresh_each_run) !== Boolean(saved?.fresh_each_run)) body.fresh_each_run = Boolean(d.fresh_each_run);
+    if ((d.state_note?.text ?? "") !== (saved?.state_note?.text ?? "")) {
+      body.state_text = d.state_note?.text ?? "";
+      if (saved) body.state_revision = saved.state_note?.revision ?? 0;
+    }
+  }
   return body;
 }
 

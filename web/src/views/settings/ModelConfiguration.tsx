@@ -7,7 +7,7 @@ import {
 } from "../../lib/model-config";
 import {
   agentsOverride, catalogLists, chooseProvider, claudeCodeOnly, configDirChoices, configDirLabel, draftFor, effortOffered, executionForm, followedCategory, modelConfiguration, modelPatch, overridden,
-  parentCategory, providersFor, purposeDescription, purposeGroups, purposeLaunch, resetPatch, runtimeChoices, saveModelPurpose, supportsField, withPurposeAfter,
+  ownRecord, parentCategory, providersFor, purposeDescription, purposeGroups, purposeLaunch, resetPatch, runtimeChoices, saveModelPurpose, supportsField, withPurposeAfter,
   withUsesAfterCategories,
 } from "../../lib/model-config-execution";
 import { SUPERVISE_PURPOSE } from "../../lib/background-supervisor";
@@ -21,7 +21,10 @@ import { ModelPicker, type ModelList } from "../../ui/ModelPicker";
 import { Group, Pill, Row } from "./SettingsParts";
 import { MANAGER_HEADER } from "../../lib/manager-choice";
 import { ConfigurationManager } from "./ConfigurationManager";
+import { DirectAPIEditor } from "./DirectAPIEditor";
 import { ModelProfiles } from "./ModelProfiles";
+
+const UNVERIFIED_STATUS = "未验证"; // i18n-ignore: stable wire sentinel, not user-facing text.
 
 function agentsOverrideStatus(binding: ModelBinding): string {
   return overridden(binding)
@@ -107,6 +110,8 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
 function PurposeRow({ purpose: p, providers, sourceName, category, onOpen }: { purpose: ModelPurpose; providers: ModelProvider[]; sourceName: (id?: string) => string | undefined; category?: ModelPurpose; onOpen: () => void }) {
   const machines = useStore((s) => s.machines);
   const form = executionForm(p, providers, machines);
+  const directAPI = p.kind === "api" && !ownRecord(p) && providers.find((v) => v.id === p.effective.provider)?.kind === "api";
+  const status = directAPI && p.status === UNVERIFIED_STATUS ? "" : p.status;
   const [help, setHelp] = useState(false);
   const [pinned, setPinned] = useState(false);
   const row = useRef<HTMLDivElement>(null);
@@ -135,7 +140,7 @@ function PurposeRow({ purpose: p, providers, sourceName, category, onOpen }: { p
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <Pill wrap>{form.label} · {form.backend}</Pill>
             {inheritance && <span className="whitespace-normal">{inheritance}</span>}
-            {p.status && <span>{p.status}</span>}
+            {status && <span>{status}</span>}
           </div>
         </>} />
       </div>
@@ -218,6 +223,10 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
   const follow = followsAgents ? t("settings-modelconfiguration.follow_agents") : category ? t("settings-modelconfiguration.follow_category", { name: category.name }) : "";
   const onlyClaudeID = useId();
   const writable = p && (["provider", "model", "effort"] as const).some((field) => supportsField(p, field));
+  // The Direct API editor (model discovery, efforts by model, draft test: #6887) is for a direct API category's own
+  // binding. A use with a record of its own under a category (ownRecord: Meeting minutes, an extension's purpose) keeps
+  // the shared editor, whose empty draft follows that category's binding and whose effort goes by effortOffered (#7980).
+  const directAPI = !!p && p.kind === "api" && !ownRecord(p) && chosen?.kind === "api" && writable;
   const effectiveProvider = data?.providers.find((v) => v.id === p?.effective?.provider);
   // by the provider the draft runs on, not only by the fields the hub sent for the one in effect
   const effortAllowed = !!p && effortOffered(p, chosen, effectiveProvider, followsAgents);
@@ -297,7 +306,7 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
           <Row label={t("settings-modelconfiguration.model")} mono><span className="max-w-[220px] truncate">{p.effective?.model || t("settings-modelconfiguration.provider_default")}</span></Row>
           {runtimes.length > 0 && <Row label={t("settings-modelconfiguration.runtime")}><span>{runtimeLabel(p.effective?.runtime, effectiveAgent)}</span></Row>}
           {configDirChoices(p, effectiveAgent).length > 0 && <Row label={t("settings-modelconfiguration.config_dir")}><span>{configDirLabel(p.effective?.config_dir)}</span></Row>}
-          {p.status && <Row label={t("settings-modelconfiguration.status")}><Pill>{p.status}</Pill></Row>}
+          {p.status && !(directAPI && p.status === UNVERIFIED_STATUS) && <Row label={t("settings-modelconfiguration.status")}><Pill>{p.status}</Pill></Row>}
         </Group>
         {supportsField(p, "provider") && <div>
           <label className="block">
@@ -312,7 +321,9 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
           {claudeCodeOnly(p) && <span id={onlyClaudeID} data-testid="claude-code-only" className="mt-1 block text-submeta text-ink-3">{t("settings-modelconfiguration.claude_code_only")}</span>}
         </div>}
         {previewForm && <div data-execution-preview><Pill wrap>{previewForm.label} · {previewForm.backend}</Pill></div>}
-        {supportsField(p, "model") && <div className="block">
+        {directAPI && <DirectAPIEditor key={`${manager}:${chosen.id}:${draft.provider}`} manager={manager} purpose={p} provider={chosen} draft={draft}
+          disabled={busy} effortAllowed={effortAllowed} onChange={(patch) => setDraft((value) => ({ ...value, ...patch }))} />}
+        {!directAPI && supportsField(p, "model") && <div className="block">
           <span className="mb-1 block text-[12px] font-medium text-ink-2">{t("settings-modelconfiguration.specific_model")}</span>
           {p.kind === "plugin" ? <select aria-label={t("settings-modelconfiguration.specific_model")} className={inputClass} value={draft.model} disabled={busy || (!!modelsError && models.length === 0)} onChange={(e) => setDraft((d) => ({ ...d, model: e.target.value }))}>
             <option value="">{t("settings-modelconfiguration.follow_extension_default")}</option>
@@ -351,7 +362,7 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
             </span>
           )}
         </div>}
-        {effortAllowed && <label className="block">
+        {!directAPI && effortAllowed && <label className="block">
           <span className="mb-1 block text-[12px] font-medium text-ink-2">{t("settings-modelconfiguration.effort")}</span>
           <input className={inputClass} value={draft.effort} disabled={busy} placeholder={(following && !draft.provider ? parent?.effective?.effort : p.effective?.effort) || t("settings-modelconfiguration.follow_default")} list="model-efforts"
             onChange={(e) => setDraft((d) => ({ ...d, effort: e.target.value }))} />

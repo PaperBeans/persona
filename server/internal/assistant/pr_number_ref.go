@@ -163,11 +163,17 @@ func (s *Service) prFromNumber(ctx context.Context, t Todo, machine, session, te
 }
 
 func (s *Service) numberedPR(ctx context.Context, t Todo, machine, session, text string) (string, error) {
+	return s.numberedPRPreferred(ctx, t, machine, session, text, "")
+}
+
+// numberedPRPreferred resolves a numbered artifact with an optional repository established by its own reply. Ordinary
+// number-only resolution keeps the saved-history order above; ownership-sensitive recovery puts that reply evidence first.
+func (s *Service) numberedPRPreferred(ctx context.Context, t Todo, machine, session, text, preferred string) (string, error) {
 	n := prNumberIn(text)
 	if n == "" {
 		return "", nil
 	}
-	repo := ""
+	repo := preferred
 	if m := ciArtifactRepo.FindStringSubmatch(closeoutPRRef(text)); m != nil {
 		repo = strings.ToLower(m[1])
 	}
@@ -283,11 +289,13 @@ func (s *Service) reportedTaskPR(ctx context.Context, t Todo, current string) (p
 		noPR = false
 		pr = prLink.FindString(ref)
 		if pr == "" {
+			replyRepo := githubRepoIn(text)
 			m, qualified := ciPRURL.FindStringSubmatch(current), ciArtifactRepo.FindStringSubmatch(ref)
-			if m != nil && prNumberIn(text) == m[2] && (qualified == nil || strings.EqualFold(qualified[1], m[1])) {
+			if m != nil && prNumberIn(text) == m[2] && (qualified == nil || strings.EqualFold(qualified[1], m[1])) &&
+				(replyRepo == "" || strings.EqualFold(replyRepo, m[1])) {
 				pr = current // let the existing gate use local deployment proof without an extra forge dependency
 			} else {
-				pr, err = s.numberedPR(ctx, t, a.MachineID, a.SessionID, text)
+				pr, err = s.numberedPRPreferred(ctx, t, a.MachineID, a.SessionID, text, replyRepo)
 				if err != nil {
 					return "", false, fmt.Errorf("the reported delivery PR could not be confirmed: %w", err)
 				}

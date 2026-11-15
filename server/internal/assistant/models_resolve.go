@@ -236,7 +236,7 @@ func (s *Service) apiConfig(ctx context.Context, b ModelBinding) (ai.Config, err
 				if err := checkAPITransport(l.Kind, l.API, l.Proxy, l.NoProxy, l.HeadersSealed != ""); err != nil {
 					return c, err
 				}
-				c = ai.Config{API: l.API, BaseURL: l.BaseURL, Model: l.Model, Bearer: l.BearerAuth(), ViaMachine: l.ViaMachine}
+				c = ai.Config{API: l.API, BaseURL: l.BaseURL, Model: l.Model, ReasoningEffort: l.Effort, Bearer: l.BearerAuth(), ViaMachine: l.ViaMachine}
 				key, err := s.openLauncherKey(ctx, l.KeySealed, l.Name, "")
 				if err != nil {
 					return c, err
@@ -262,11 +262,13 @@ func (s *Service) apiConfig(ctx context.Context, b ModelBinding) (ai.Config, err
 	if b.Model != "" {
 		c.Model = b.Model
 	}
-	c.ReasoningEffort = b.Effort
+	if b.Effort != "" {
+		c.ReasoningEffort = b.Effort
+	}
 	if c.API != "" && c.API != "messages" && c.API != "responses" && c.API != "chat" {
 		return c, i18n.Err("assistant-models.err_api_protocol")
 	}
-	if c.API != "responses" && c.API != "messages" && c.API != "" && b.Effort != "" {
+	if c.API != "responses" && c.API != "messages" && c.API != "" && c.ReasoningEffort != "" {
 		c.ReasoningEffort = ""
 	}
 	return c, nil

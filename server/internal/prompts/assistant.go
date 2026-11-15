@@ -442,6 +442,7 @@ type TaskRun struct {
 	InboxWorthy, InboxEvery bool
 	// Facts: the run's facts Persona worked out (RenderBriefFacts), above the task's prompt; "" for a task without them.
 	Facts string
+	State string // formatted scheduled-task state and update instructions
 }
 
 func RenderTaskRun(t TaskRun) string { return render("assistant/task_run", t) }

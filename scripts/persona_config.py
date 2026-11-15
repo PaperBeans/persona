@@ -144,7 +144,7 @@ def provisioning_profiles(cfg: dict) -> dict[str, str]:
 
 
 # The app's entitlements. The opt-in ones need the capability on the App ID first (CarPlay voice: Apple's approval,
-# docs/apple/carplay.md; HealthKit background delivery, docs/assistant/health.md); the generated copy sits in apple/,
+# docs/apple/carplay.md; HealthKit background delivery, docs/assistant/health.md; HomeKit, docs/apple/phone-tools.md "Home"); the generated copy sits in apple/,
 # outside the Persona/ source folder, so XcodeGen does not pick it up as a resource.
 APP_ENTITLEMENTS = os.path.join("Persona", "Resources", "Persona.entitlements")
 OPT_IN_ENTITLEMENTS = "PersonaOptIn.entitlements"
@@ -152,6 +152,7 @@ OPT_IN_ENTITLEMENTS = "PersonaOptIn.entitlements"
 OPT_IN = {
     "app.carplay_voice": "com.apple.developer.carplay-voice-based-conversation",
     "app.health_background_delivery": "com.apple.developer.healthkit.background-delivery",
+    "app.homekit": "com.apple.developer.homekit",
 }
 
 
@@ -192,6 +193,8 @@ def xcconfig(cfg: dict):
         f.write("PERSONA_APP_ENTITLEMENTS = %s\n" % app_entitlements(cfg))
         # Workout reports right after a workout (Info.plist PersonaHealthBackgroundDelivery, with its entitlement above).
         f.write("PERSONA_HEALTH_BACKGROUND_DELIVERY = %s\n" % ("YES" if opted_in(cfg, "app.health_background_delivery") else "NO"))
+        # Home's tools are offered only when the app signs with HomeKit (Info.plist PersonaHomeKit; docs/apple/phone-tools.md "Home").
+        f.write("PERSONA_HOMEKIT = %s\n" % ("YES" if opted_in(cfg, "app.homekit") else "NO"))
         # "No hub yet?" on the first screen opens this page (docs/operations/getting-started.md published; empty: the row is hidden).
         f.write("PERSONA_GETTING_STARTED_URL = %s\n" % get(cfg, "publish.getting_started_url", "").replace("//", "/$()/"))
         # Meta Wearables (docs/apple/meta-glasses.md): 0 means Developer Mode (no attestation), as Meta's docs say.

@@ -236,6 +236,11 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
   read the input box once; if it's still the just-sent text (strip `[Image #n]` / `[Pasted text #n]`, compare the first few words), press Enter once more. If empty or different, press nothing.
   Use only that post-wait read: the first version read immediately and gave up on a mismatch, which missed the 11-01 case (right after pasting the box may not yet contain this text).
 - Codex app-server integration (2026-11-02): Unix sockets carry WebSocket, not JSON-lines; external stdio has no second attach port. Directory discovery doesn't resume; control goes only to the original loaded owner. Unknown / cancelled requests must not send error / decline, which could consume the desktop approval callback. `serverRequest/resolved` withdraws cards as dismissed without fabricating approval; deduplicate using generation and typed request ID together. Generic server errors after send admission aren't "definitely not sent" and must not auto-retry; old outbox operation ids don't expire after one day (`docs/integrations/codex-app-server.md`).
+- Session effort readback is not an edit capability (#6887): keep Codex rollout effort visible for terminal/history rows,
+  and do not replace a running effort missing from a stale model list with its default. Long tool output can move the
+  latest `turn_context` beyond the quick tail; include those small setting rows in the existing incremental scan.
+  A current row unable to switch models can still open its effort controls, while genuinely unsupported changes need
+  a visible reason. Connection tests must apply the draft effort on the wire, not just echo an ignored input.
 - Codex app-server `thread/loaded/list` isn't all chats (2026-11-05, #2118, 0.166): TUI creates `ephemeral: true` threads for small background tasks in the shared managed daemon
   (`threadSource: "thread_title"`, title generation), without `path` / rollout; they stay loaded and `active` after finishing. Ignoring `ephemeral` produces a row of untitled "Working" Codex entries from the same directory and second on the Agents page.
   Skip `ephemeral` before listing sessions; they also don't support `includeTurns` (returns -32600).

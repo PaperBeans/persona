@@ -152,6 +152,9 @@ export function Flyout({ rowEl, panelEl, row, setup, mode, starred, disabled, fo
           )}
         </div>
       )}
+      {(model.effortUnavailable || model.effortNote) && (
+        <p className="pt-2 text-label leading-[1.4] text-ink-3">{model.effortUnavailable || model.effortNote}</p>
+      )}
       {extra && <div className="pt-2">{extra}</div>}
       <div role="group" aria-label={t("ui-modelpanel.engine")} className="pt-2">
         {engines && engines.length > 1 ? (

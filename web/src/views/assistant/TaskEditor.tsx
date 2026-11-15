@@ -107,7 +107,8 @@ export function TaskEditor({
       ? await api<{ task: Task }>(`/assistant/tasks/${enc(saved.id)}`, { method: "PUT", json: body })
       : await api<{ task: Task }>("/assistant/tasks", { method: "POST", json: body });
     setSaved(r.task);
-    setDraft((d) => ({ ...d, id: r.task.id }));
+    // Run now may fail after saving. Keep the displayed note and its saved revision in sync if the editor stays open.
+    setDraft((d) => ({ ...d, id: r.task.id, state_note: r.task.state_note }));
     onSaved(r.task);
     return r.task;
   };
@@ -200,6 +201,7 @@ export function TaskEditor({
   const next = nextRun(saved ?? draft);
   const last = saved ? lastRunText(saved, now) : null;
   const own = saved?.run_session_id;
+  const freshEachRun = draft.repeat !== "once" && draft.fresh_each_run;
 
   return (
     <Dialog open onClose={close} width={600} title={creating ? t("assistant-taskeditor.new_title") : taskTitle(saved ?? draft)} footer={footer}>
@@ -280,6 +282,31 @@ export function TaskEditor({
 
           <section>
             <SectionTitle>{t("assistant-taskeditor.section_run")}</SectionTitle>
+            {draft.repeat !== "once" && (
+              <details className="mb-3">
+                <summary className="cursor-pointer">{t("assistant-taskeditor.continuity")}</summary>
+                <label className="mt-2 flex min-h-11 items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(draft.fresh_each_run)}
+                    onChange={(e) => set({ fresh_each_run: e.target.checked })}
+                  />
+                  {t("assistant-taskeditor.fresh_each_run")}
+                </label>
+                <Field label={t("assistant-taskeditor.state_note")}>
+                  <textarea
+                    className={textareaClass}
+                    rows={3}
+                    disabled={working}
+                    value={draft.state_note?.text ?? ""}
+                    onChange={(e) => set({
+                      state_note: { revision: draft.state_note?.revision ?? 0, updated_at: draft.state_note?.updated_at ?? "", text: e.target.value },
+                    })}
+                  />
+                </Field>
+                <p className={HINT}>{t("assistant-taskeditor.state_note_hint")}</p>
+              </details>
+            )}
             <div>
               <Field label={t("assistant-taskeditor.permission_label")}>
                 <select
@@ -393,13 +420,16 @@ export function TaskEditor({
           <section>
             <SectionTitle>{t("assistant-taskeditor.section_chat")}</SectionTitle>
             <div className="divide-y divide-line overflow-hidden rounded-card bg-surface shadow-card">
-              {origin && draft.push !== "asked" && (
+              {origin && draft.push !== "asked" && !freshEachRun && (
                 <div className="flex items-center gap-3 px-3.5 py-2.5">
                   <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{t("assistant-taskeditor.resume_chat")}</span>
                   <Switch checked={!!draft.session_id} label={t("assistant-taskeditor.resume_chat")} onChange={(on) => set({ session_id: on ? origin : undefined })} />
                 </div>
               )}
-              {!draft.session_id &&
+              {freshEachRun && own && (
+                <LinkRow icon="chat" label={t("assistant-taskeditor.view_last")} onClick={() => open(own)} />
+              )}
+              {!freshEachRun && !draft.session_id &&
                 (own ? (
                   <>
                     <LinkRow icon="chat" label={t("assistant-taskeditor.same_chat")} onClick={() => open(own)} />
@@ -413,7 +443,9 @@ export function TaskEditor({
                 ))}
             </div>
             <p className={HINT}>
-              {draft.session_id
+              {freshEachRun
+                ? t("assistant-taskeditor.fresh_each_run")
+                : draft.session_id
                 ? t("assistant-taskeditor.chat_hint_resume")
                 : own
                   ? t("assistant-taskeditor.chat_hint_own")

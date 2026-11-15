@@ -277,18 +277,19 @@ type Meta struct {
 	Updated      time.Time
 }
 
-// ObserveNamingMetadata reads only title provenance and generated usage during an existing incremental scan.
+// ObserveNamingMetadata reads title provenance, generated usage and Codex turn settings during an existing incremental scan.
 // It never decodes message content (which can contain large screenshots or tool output).
 func (m *Meta) ObserveNamingMetadata(line []byte) {
 	if !bytes.Contains(line, []byte(`"custom-title"`)) && !bytes.Contains(line, []byte(`"ai-title"`)) &&
-		!bytes.Contains(line, []byte(`"output_tokens"`)) {
+		!bytes.Contains(line, []byte(`"output_tokens"`)) && !bytes.Contains(line, []byte(`"turn_context"`)) {
 		return
 	}
 	var e struct {
-		Type        string `json:"type"`
-		CustomTitle string `json:"customTitle"`
-		AITitle     string `json:"aiTitle"`
-		IsSidechain bool   `json:"isSidechain"`
+		Type        string    `json:"type"`
+		Timestamp   time.Time `json:"timestamp"`
+		CustomTitle string    `json:"customTitle"`
+		AITitle     string    `json:"aiTitle"`
+		IsSidechain bool      `json:"isSidechain"`
 		Message     *struct {
 			ID    string `json:"id"`
 			Usage *struct {
@@ -296,8 +297,9 @@ func (m *Meta) ObserveNamingMetadata(line []byte) {
 			} `json:"usage"`
 		} `json:"message"`
 		Payload struct {
-			Type string `json:"type"`
-			Info *struct {
+			Type   string `json:"type"`
+			Effort string `json:"effort"`
+			Info   *struct {
 				Total struct {
 					OutputTokens int `json:"output_tokens"`
 				} `json:"total_token_usage"`
@@ -308,6 +310,10 @@ func (m *Meta) ObserveNamingMetadata(line []byte) {
 		return
 	}
 	switch e.Type {
+	case "turn_context":
+		if e.Payload.Effort != "" && !e.Timestamp.Before(m.EffortAt) {
+			m.Effort, m.EffortAt = e.Payload.Effort, e.Timestamp
+		}
 	case "custom-title":
 		if e.CustomTitle != "" {
 			m.Title, m.TitleManual, m.TitleSource = e.CustomTitle, true, "manual"

@@ -529,6 +529,7 @@ export function probeBody(f: ProviderForm, stored: string | null, model?: string
   if (f.api_key.trim() && !f.key_by_reference) b.api_key = f.api_key.trim();
   if (!(f.kind === "api" && f.api === "chat") && f.headers_touched) b.headers = f.headers.trim();
   if (model !== undefined) b.model = model;
+  if (model !== undefined && !(f.kind === "api" && f.api === "chat")) b.effort = f.effort.trim();
   if (f.kind === "api") b.via_machine = f.via_machine; // tested from where it will be sent
   return b;
 }

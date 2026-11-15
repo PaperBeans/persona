@@ -213,24 +213,7 @@ func (c *Client) messages(ctx context.Context, hc *http.Client, key string, r Re
 		turns = append(turns, map[string]any{"role": m.Role, "content": m.Content})
 	}
 	bodyMap := map[string]any{"model": c.cfg.Model, "max_tokens": r.MaxTokens, "system": r.System, "messages": turns, "stream": true}
-	if c.cfg.ReasoningEffort != "" {
-		switch strings.ToLower(strings.TrimSpace(c.cfg.ReasoningEffort)) {
-		case "off", "none", "disabled":
-			switch {
-			case strings.Contains(strings.ToLower(c.cfg.Model), "sonnet-5-5"):
-				// Sonnet 5.5 disables up-front thinking with between_tools; low also limits any between-tool work.
-				bodyMap["thinking"] = map[string]any{"type": "between_tools"}
-				bodyMap["output_config"] = map[string]any{"effort": "low"}
-			case messagesThinkingDisabledUnsupported(c.cfg.Model):
-				// These models reject thinking.disabled; the issue's off-or-lowest contract uses low effort instead.
-				bodyMap["output_config"] = map[string]any{"effort": "low"}
-			default:
-				bodyMap["thinking"] = map[string]any{"type": "disabled"}
-			}
-		case "low", "medium", "high", "xhigh", "max":
-			bodyMap["output_config"] = map[string]any{"effort": c.cfg.ReasoningEffort}
-		}
-	}
+	ApplyReasoningEffort(bodyMap, "messages", c.cfg.Model, c.cfg.ReasoningEffort)
 	body, _ := json.Marshal(bodyMap)
 	req, err := http.NewRequestWithContext(ctx, "POST", apiEndpoint(c.cfg.BaseURL, "messages"), bytes.NewReader(body))
 	if err != nil {
@@ -480,6 +463,42 @@ func messagesThinkingDisabledUnsupported(model string) bool {
 	return false
 }
 
+// ApplyReasoningEffort keeps connection probes and runtime calls on the same wire format.
+// False means this protocol cannot express the requested effort; Responses validates model-specific levels upstream.
+func ApplyReasoningEffort(body map[string]any, api, model, effort string) bool {
+	if effort == "" {
+		return true
+	}
+	normalized := strings.ToLower(strings.TrimSpace(effort))
+	switch api {
+	case "chat":
+		return false
+	case "responses":
+		if normalized == "off" || normalized == "none" || normalized == "disabled" {
+			effort = "none"
+		}
+		body["reasoning"] = map[string]any{"effort": effort}
+	default:
+		switch normalized {
+		case "off", "none", "disabled":
+			switch {
+			case strings.Contains(strings.ToLower(model), "sonnet-5-5"):
+				body["thinking"] = map[string]any{"type": "between_tools"}
+				body["output_config"] = map[string]any{"effort": "low"}
+			case messagesThinkingDisabledUnsupported(model):
+				body["output_config"] = map[string]any{"effort": "low"}
+			default:
+				body["thinking"] = map[string]any{"type": "disabled"}
+			}
+		case "low", "medium", "high", "xhigh", "max":
+			body["output_config"] = map[string]any{"effort": effort}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // respond calls the Responses API. It always streams: some compatible endpoints (Codex-backed relays) reject
 // stream=false, and the text is just the concatenated output_text deltas. The system prompt goes in as a developer
 // message rather than `instructions`, which those relays replace with their own. Events are framed as SSE
@@ -494,14 +513,7 @@ func (c *Client) respond(ctx context.Context, hc *http.Client, key string, r Req
 	if r.BoundOutput && r.MaxTokens > 0 {
 		req["max_output_tokens"] = r.MaxTokens
 	}
-	if c.cfg.ReasoningEffort != "" {
-		effort := c.cfg.ReasoningEffort
-		switch strings.ToLower(strings.TrimSpace(effort)) {
-		case "off", "none", "disabled":
-			effort = "none"
-		}
-		req["reasoning"] = map[string]any{"effort": effort}
-	}
+	ApplyReasoningEffort(req, "responses", c.cfg.Model, c.cfg.ReasoningEffort)
 	body, _ := json.Marshal(req)
 	hreq, err := http.NewRequestWithContext(ctx, "POST", apiEndpoint(c.cfg.BaseURL, "responses"), bytes.NewReader(body))
 	if err != nil {

@@ -8,6 +8,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PanelProvider, PanelState } from "../../lib/model-panel";
 import type { LauncherQuotaAnswer } from "../../lib/quota";
+import { effortTitle } from "../../lib/session-actions";
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
@@ -250,12 +251,40 @@ describe("the model panel", () => {
     key(gpt, "Enter");
     await flush();
     expect(onPick).not.toHaveBeenCalled();
-    act(() => gpt.querySelector<HTMLButtonElement>("[data-row-customize]")!.click());
+    expect(flyout()).not.toBeNull();
     const fast = flyout()!.querySelector<HTMLButtonElement>("[data-fast-toggle]")!;
     expect(fast.getAttribute("aria-pressed")).toBe("false");
     act(() => fast.click());
     await flush();
     expect(onApplyCurrent).toHaveBeenCalledWith({ fast: true });
+  });
+
+  it("the current effort-only row is not greyed out and a tap opens its working slider", async () => {
+    const state: PanelState = { current: { provider: "codex", model: "gpt-5.5", effort: "high" }, recommended: [] };
+    const { onApplyCurrent, onPick } = await open({ providers: [codex()], state, onApplyCurrent: async () => true });
+    const gpt = row("GPT");
+    expect(gpt.className).not.toContain("opacity-50");
+    act(() => gpt.click());
+    const slider = flyout()!.querySelector<HTMLElement>('[role="slider"]')!;
+    key(slider, "Home");
+    await flush();
+    expect(onApplyCurrent).toHaveBeenCalledWith({ effort: "low" });
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it("keeps actual effort and a visible reason when the session cannot change it", async () => {
+    const reason = "This session has no shared control connection.";
+    await open({
+      providers: [codex({ models: [{ id: "gpt-5.5", name: "GPT 5.5", efforts: [], effortUnavailable: reason }] })],
+      state: { current: { provider: "codex", model: "gpt-5.5", effort: "max" }, recommended: [] },
+      onApplyCurrent: async () => true,
+    });
+    const gpt = row("GPT");
+    expect(gpt.querySelector("[data-row-setup]")!.textContent).toContain(effortTitle("max"));
+    expect(gpt.textContent).toContain(reason);
+    act(() => gpt.click());
+    expect(flyout()!.textContent).toContain(reason);
+    expect(flyout()!.querySelector('[role="slider"]')).toBeNull();
   });
 
   it("held by a dialog about the pick (#5054): stays open under its backdrop, leaving it the clicks, focus and Escape", async () => {

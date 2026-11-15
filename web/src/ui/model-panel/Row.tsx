@@ -64,7 +64,7 @@ export function Row({ row, second, describes, blocked, customizable, flyoutOpen,
   const name = row.kind === "typed" ? t("ui-modelpanel.use_typed", { id: model.id }) : row.preset ? row.preset.name : model.name;
   // a typed ID's "Use “…”" and a preset (a setup of the profile's, not a copy of one's own) have no star
   const stars = row.kind !== "typed" && row.kind !== "preset";
-  const effort = model.efforts.length ? shownEffort(row.setup, model) : "";
+  const effort = shownEffort(row.setup, model);
   const tier = priceTier(model.price);
   // what the right side says, in words: "Claude Code · High · Fast"
   const setupTitle = [agentName(provider.engine, provider.engineLabel), effort && effortTitle(effort), row.setup.fast && t("ui-modelpanel.fast_short")].filter(Boolean).join(" · ");
@@ -102,7 +102,8 @@ export function Row({ row, second, describes, blocked, customizable, flyoutOpen,
     }
     if (e.key !== "Enter" && e.key !== " ") return;
     e.preventDefault();
-    if (!off) onPick();
+    if (off && row.current && customizable && !frozen) onCustomizeKey(e.currentTarget);
+    else if (!off) onPick();
   };
   return (
     <div
@@ -116,7 +117,10 @@ export function Row({ row, second, describes, blocked, customizable, flyoutOpen,
       data-panel-row={row.key}
       data-current={row.current || undefined}
       data-open={flyoutOpen || undefined}
-      onClick={() => !off && onPick()}
+      onClick={(e) => {
+        if (off && row.current && customizable && !frozen) onCustomize(e.currentTarget, true);
+        else if (!off) onPick();
+      }}
       onContextMenu={(e) => {
         if (!customizable || frozen) return;
         e.preventDefault();
@@ -127,8 +131,8 @@ export function Row({ row, second, describes, blocked, customizable, flyoutOpen,
         "group/row relative z-[1] flex w-full flex-col rounded-control px-3 py-2 text-[14px] leading-[1.43] text-ink outline-none select-none [&+[data-panel-row]]:mt-1",
         "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
         row.current && "bg-hover-2 data-[glide]:bg-transparent",
-        off ? "cursor-not-allowed" : "cursor-pointer",
-        blocked && "opacity-50",
+        ariaOff || frozen ? "cursor-not-allowed" : "cursor-pointer",
+        ariaOff && "opacity-50",
       )}
     >
       <div className="flex min-w-0 items-center gap-2">
@@ -188,6 +192,9 @@ export function Row({ row, second, describes, blocked, customizable, flyoutOpen,
             {model.id}
           </div>
         </div>
+      )}
+      {row.current && model.effortUnavailable && (
+        <div className="min-w-0 pt-1 pl-[26px] text-label leading-[1.4] text-ink-3">{model.effortUnavailable}</div>
       )}
     </div>
   );

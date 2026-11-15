@@ -24,37 +24,37 @@
 
 | 规则 | 来源 | 用例 |
 | --- | --- | --- |
-| 空窗口不生成行，纯问答不补空工作行。 | `ChatView.chatLines` | `empty_session`、`plain_exchange` |
-| 进行中轮即使还没步骤也保留工作行，只有最后一段可以进行中。 | `chatLines(live:)`、`liveTurnID` | `live_empty_work`、`live_reply_stays_after_work`、`live_queued_message_keeps_position` |
+| 空窗口不生成行，纯问答不补空工作行。 | `ChatLines.build`、`flatLines` | `empty_session`、`plain_exchange` |
+| 进行中轮即使还没步骤也保留工作行，只有最后一段可以进行中。 | `ChatLines.flatLines(live:)`、`ChatView.liveTurnID` | `live_empty_work`、`live_reply_stays_after_work`、`live_queued_message_keeps_position` |
 | 普通用户文本开新轮，`queued: true` 文本加入当前轮，窗口首条 queued 文本可以独立开轮。 | `ChatBlock.build` | `ordinary_user_starts_next_turn`、`queued_without_existing_turn` |
-| 完成轮的多条用户文本和进行中一样按消息分段，每条一个消息行，工作和回复挂在各自下面（#2512 起不再合并）。 | `chatLines`、`segments` | `finished_queued_messages_apart`、`open_queued_messages_work`、`three_users_apart_without_steps` |
-| 工作展开只追加独立步骤和收起行，已有消息和工作标题的标识不变。 | `ChatLineTests.workExpansionKeepsExistingIdentities`、`unfoldWork` | `closed_work_identity`、`open_work_identity` |
+| 完成轮的多条用户文本和进行中一样按消息分段，每条一个消息行，工作和回复挂在各自下面（#2512 起不再合并）。 | `ChatLines.flatLines`、`segments` | `finished_queued_messages_apart`、`open_queued_messages_work`、`three_users_apart_without_steps` |
+| 工作展开只追加独立步骤和收起行，已有消息和工作标题的标识不变。 | `ChatLineTests.workExpansionKeepsExistingIdentities`、`ChatLines.unfold` | `closed_work_identity`、`open_work_identity` |
 | 多消息轮里每条消息的菜单归属于它自己那一行。 | `ChatLineTests.messageMenuStillBelongsToItsOriginalRow`、`ChatLine.holds` | `menu_owner_per_message` |
-| 每段最后一条助手文本是回复，之前的助手文本作为工作叙述。 | `chatLines`、`workItems` | `open_queued_messages_work`、`trailing_tool_after_answer` |
-| 非空 thinking 保留为可展开叙述，独立的空白 thinking 不进入工作行。 | `workItems`、`ThinkingRow`；`CLAUDE.md` thinking 经验 | `thinking_narration_preserved`、`standalone_empty_thinking_hidden` |
-| thinking 在工具前形成独立行，在连续工具之间或末尾进入工具组，组内空 thinking 也保留。 | `ChatStore.buildRows`、`workItems` | `thinking_before_between_after_tools`、`empty_thinking_between_tools_is_retained` |
+| 每段最后一条助手文本是回复，之前的助手文本作为工作叙述。 | `ChatLines.flatLines`、`workItems` | `open_queued_messages_work`、`trailing_tool_after_answer` |
+| 非空 thinking 保留为可展开叙述，独立的空白 thinking 不进入工作行。 | `ChatLines.workItems`、`ThinkingRow`；`docs/lessons/transcript.md` thinking 经验 | `thinking_narration_preserved`、`standalone_empty_thinking_hidden` |
+| thinking 在工具前形成独立行，在连续工具之间或末尾进入工具组，组内空 thinking 也保留。 | `ChatStore.buildRows`、`ChatLines.workItems` | `thinking_before_between_after_tools`、`empty_thinking_between_tools_is_retained` |
 | 工具按 `tool_use_id` 在整个窗口配结果，最后一个结果生效，孤立结果不另生成行。 | `buildRows` | `late_result_attaches_to_original_call`、`last_result_for_call_wins`、`orphan_tool_result_is_not_a_row` |
-| 工具缺结果时 `ToolCall.isRunning` 为真，但不会据此把完成轮的工作行改成进行中。 | `ToolCall.isRunning`、`chatLines(live:)` | `missing_tool_result_is_running` |
+| 工具缺结果时 `ToolCall.isRunning` 为真，但不会据此把完成轮的工作行改成进行中。 | `ToolCall.isRunning`、`ChatLines.flatLines(live:)` | `missing_tool_result_is_running` |
 | 工具失败只取结果的 `is_error`，不根据输出文字推断。 | `ToolCall.isError` | `failed_tool_counts_known_failure` |
-| 带 `tool_use_id` 的图片归工具卡，普通及被吸收的用户图片在消息上方显示。 | `buildRows`、`photos`、`chatLines`；`CLAUDE.md` 图片两条路 | `tool_images_belong_to_call`、`regular_user_images`、`absorbed_user_images` |
+| 带 `tool_use_id` 的图片归工具卡，普通及被吸收的用户图片在消息上方显示。 | `buildRows`、`ChatLines.photos`、`flatLines`、`viewed`；`docs/lessons/transcript.md` 图片两条路 | `tool_images_belong_to_call`、`regular_user_images`、`absorbed_user_images` |
 | After background-task wakes the answer is the latest run's last reply, whatever its length (#638; it used to be the longest). These cases were updated from `ChatStoreTests.backgroundWakeEndsOnTheNewestWords` and `wakeAfterARecapStaysInItsExchange`, read against the Swift code rather than run. | `Turn.pickAnswerAcrossWakes` | `multiple_wakes_pick_latest_answer`、`only_last_reply_in_each_wake_is_candidate`、`short_reply_after_wake_is_the_answer`、`wake_after_recap_reopens_turn`、`photos_after_wake_stay_with_message` |
-| 选中回复之前的工作留在主列表，之后的助手内容只放抽屉，抽屉从第一次唤醒开始。 | `pickAnswerAcrossWakes`、`wakeLines` | `short_reply_after_wake_is_the_answer`、`long_answer_after_wake`、`live_tail_runs_behind_chip` |
-| 唤醒后的用户文本和图片仍留在主轮，`tail` 和 `afterWake` 排除这些用户输入。 | `pickAnswerAcrossWakes`、`ChatRow.isUserInput`；`ChatStoreTests.picturesSentAfterAWakeStayWithTheirMessage` | `photos_after_wake_stay_with_message` |
+| 选中回复之前的工作留在主列表，之后的助手内容只放抽屉，抽屉从第一次唤醒开始。 Corpus contract (Android); not current iOS since #2996. | `pickAnswerAcrossWakes`、`Turn.hasPendingWake` | `short_reply_after_wake_is_the_answer`、`long_answer_after_wake`、`live_tail_runs_behind_chip` |
+| 唤醒后的用户文本和图片仍留在主轮，`tail` 和 `afterWake` 排除这些用户输入。 `afterWake` is the corpus contract (Android); current iOS has no such list since #2996. | `pickAnswerAcrossWakes`、`ChatRow.isUserInput`；`ChatStoreTests.picturesSentAfterAWakeStayWithTheirMessage` | `photos_after_wake_stay_with_message` |
 | 回顾独立于轮，回顾后的唤醒能重新打开原轮且不移动回顾。 | `ChatBlock.build`；`ChatStoreTests.wakeAfterARecapStaysInItsExchange` | `recap_separates_turns`、`wake_after_recap_reopens_turn` |
-| 没有唤醒标记的后台通知只算工作过程，没有回复的唤醒轮也保留抽屉入口。 | `ChatBlock.build`、`pickAnswerAcrossWakes` | `notification_without_wake`、`wake_without_any_reply` |
-| 窗口以唤醒通知开头时先显示该通知，后续运行可以由唤醒入口承接。 | `chatLines`、`wakeLines` | `orphan_wake_opens_with_notice`、`live_tail_runs_behind_chip`、`live_answer_after_wake` |
+| 没有唤醒标记的后台通知只算工作过程，没有回复的唤醒轮也保留抽屉入口。 Corpus contract (Android); not current iOS since #2996. | `ChatBlock.build`、`pickAnswerAcrossWakes` | `notification_without_wake`、`wake_without_any_reply` |
+| 窗口以唤醒通知开头时先显示该通知，后续运行可以由唤醒入口承接。 Corpus contract (Android); not current iOS since #2996. | `ChatLines.flatLines`、`Turn.hasPendingWake` | `orphan_wake_opens_with_notice`、`live_tail_runs_behind_chip`、`live_answer_after_wake` |
 | 无任务字段且含“中断”的通知进入轮尾，压缩通知和任务标题里的“中断”仍属工作过程。 | `ChatBlock.build`；`TaskNoteTests.aNoticeAboutAnInterruptIsNotTheInterrupt` | `interrupt_is_trailing_notice`、`compaction_stays_inside_work`、`task_title_containing_interrupt_is_not_interrupt` |
-| fold 按其代表的工具和思考计数，结束时间取 `fold.until`，收起步数按工具数加思考数。 | `ToolStep`、`unfoldWork`；`FoldedWorkTests.aFoldCountsWhatItStandsFor` | `fold_counts_tools_and_thoughts` |
-| fold 替换范围内的工作，重复 fold 幂等，扩大范围替换旧 fold，展开还原原步骤。 | `ChatStore.dropFolded`、`unfold`；`FoldedWorkTests.aFoldReplacesTheStepsItCoversAndOpeningItPutsThemBack` | `fold_replaces_extends_and_unfolds` |
+| fold 按其代表的工具和思考计数，结束时间取 `fold.until`，收起步数按工具数加思考数。 | `ToolStep`、`ChatLines.unfold`；`FoldedWorkTests.aFoldCountsWhatItStandsFor` | `fold_counts_tools_and_thoughts` |
+| fold 替换范围内的工作，重复 fold 幂等，扩大范围替换旧 fold，展开还原原步骤。 | `ChatStore.dropFolded`、`ChatStore.unfold`；`FoldedWorkTests.aFoldReplacesTheStepsItCoversAndOpeningItPutsThemBack` | `fold_replaces_extends_and_unfolds` |
 | fold 范围外的工具仍接收之后到达的结果。 | `buildRows`；`FoldedWorkTests.stepsOutsideAFoldStay` | `outside_fold_tool_keeps_late_result` |
 | 后台通知优先按调用标识关联，再按工具结果公布的任务标识关联。 | `TaskIndex.build`；`TaskNoteTests.noticesFindTheirCalls` | `task_notices_find_calls` |
 | 后台任务主题优先用调用描述，Monitor 事件优先用详情首个非空行，找不到调用时用通知标题。 | `TaskNoteText.subject` | `task_notices_find_calls`、`monitor_event_uses_first_detail_line`、`task_without_loaded_call_uses_title` |
 | 后台结果与徽标按状态和退出码生成，事件只累计事件数，尚无通知时为后台运行中。 | `TaskNoteText.outcome`、`badge` | `task_notices_find_calls`、`background_running_badge`、`task_status_outcomes` |
-| 当前工作行从本段消息或首个步骤算到末条内容，进行中时算到输入的固定时钟，缺起点则隐藏耗时。 | `chatLines`、`WorkLine.duration` | `timed_work_ends_at_answer`、`missing_start_time_hides_duration`、`missing_start_time_uses_first_step`、`trailing_tool_after_answer` |
+| 当前工作行从本段消息或首个步骤算到末条内容，进行中时算到输入的固定时钟，缺起点则隐藏耗时。 | `ChatLines.flatLines`、`workEnd`、`WorkLine.duration` | `timed_work_ends_at_answer`、`missing_start_time_hides_duration`、`missing_start_time_uses_first_step`、`trailing_tool_after_answer` |
 | 冻结按数字块序号截取 item 前缀，保留冻结时的进行中轮，更早历史仍能补入。 | `currentLines`、`prefixCount`、`Frozen`；`ux.md` 3.5 | `frozen_snapshot_excludes_newer_items`、`frozen_uses_numeric_block_order`、`older_page_stays_visible_during_freeze` |
 | 增量重建须等于全量重建，迟到结果、前插历史和整段替换都不能遗留旧行。 | `ChatStore.rebuild`、`scheduleRebuild`；`RebuildTests` | `incremental_with_late_result_and_older_page`、`background_bursts_and_replacement` |
 | 窗口可从助手过程开始，未知类型不生成消息。 | `buildRows`、`ChatBlock.build` | `orphan_assistant`、`unknown_item_is_ignored` |
-| 请求面板按给定顺序排在正文外、输入框上方，不给它伪造 transcript 行。 | `ChatView.mainFooter`、`chatScroll`；`ux.md` 3.2、3.4 | `single_interaction_in_footer`、`multiple_interactions_in_footer` |
+| 请求面板按给定顺序排在正文外、输入框上方，不给它伪造 transcript 行。 | `ChatView.mainFooter`、`pendingCards`、`PendingCards`、`chatScroll`；`ux.md` 3.2、3.4 | `single_interaction_in_footer`、`multiple_interactions_in_footer` |
 
 ## JSON 结构
 
@@ -69,7 +69,7 @@
 | 可选字段 | 含义与默认值 |
 | --- | --- |
 | `live_turn_id` | 当前进行中的 Turn ID，缺省为 `null`，对应 iOS 已从会话状态选出的轮，不根据工具结果自行推断 |
-| `open_work` | 展开的行 ID 集合，缺省为空，既可以有 `w-…`，也可以有抽屉的 `dw-…` |
+| `open_work` | 展开的行 ID 集合，缺省为空，既可以有 `w-…`，也可以有抽屉的 `dw-…`（the drawer is the corpus contract; current iOS has none since #2996） |
 | `now` | 固定比较时钟，缺省为 `2026-01-01T00:01:00Z`，只用于工作行时长投影 |
 | `menu_queries` | 要传给每行 `holds` 的原消息 ID，允许 `null`，结果按查询顺序排列 |
 | `frozen` | `{seq, part, live_turn_id}`，按该位置截取 item 前缀并用冻结时的进行中轮重建 |
@@ -92,7 +92,7 @@
 | `work` | 过程步骤、计数、时间、展开状态和进行中状态，见下文 |
 | `work_step` | `group_id`、`first` 和 `step`，ID 为组 ID 加 `/` 再加步骤 ID |
 | `work_end` | `group_id` 和收起步数 `count`，ID 为组 ID 加 `-end` |
-| `wakes` | `notice_ids`、`live` 及真正的 `drawer_lines`，ID 为 `wk-` 加 Turn ID |
+| `wakes` | `notice_ids`、`live` 及真正的 `drawer_lines`，ID 为 `wk-` 加 Turn ID。Corpus contract (Android): current iOS draws no `wakes` line since #2996. |
 | `task_note` | 原通知内容及 `task_note` 投影，包含标签、主题、结果、失败标记和回配的调用 ID |
 
 `work` 的 `steps` 即折叠内容，展开时每个步骤另有一条 `work_step`，两者不重复计数。步骤类型包括 `tool`、`thinking`、`notice`、`task_note`、`narration`、`fold`。工具步骤保存实际结果 ID、结果文本、`running`、`failed`、图片数和可选的 `background_badge`；任务步骤沿用 `TaskNoteText` 的标签与结果；fold 保存代表计数和加载范围。
@@ -108,7 +108,7 @@
 
 `separator_before` 只描述展开卡片内部的结构：首步骤没有分隔线，后续步骤及收起行有分隔线；不规定颜色、线宽、位置等像素。原始 iOS 代码分别来自 `WorkStepView` 和 `lineView` 的 `.workEnd` 分支。
 
-`turns` 包含用户、过程、回复、轮尾、唤醒、抽屉和到达顺序的 ID 列表，以及 Turn 本身的计数和起止时间；`process_ids` 中的工具组使用 `tools-<首步骤 ID>`。Turn 统计发生在 View 的空思考过滤之前，不能直接拿 `thought_count` 当工作行的 `thoughts`。有任务通知时还输出 `task_index`，包含 `started`、通知到调用的 `calls`、描述、开始时间和按调用归组的状态序列。
+`turns` 包含用户、过程、回复、轮尾、唤醒、抽屉和到达顺序的 ID 列表，以及 Turn 本身的计数和起止时间；`process_ids` 中的工具组使用 `tools-<首步骤 ID>`。Turn 统计发生在 View 的空思考过滤之前，不能直接拿 `thought_count` 当工作行的 `thoughts`。有任务通知时还输出 `task_index`，包含 `started`、通知到调用的 `calls`、描述、开始时间和按调用归组的状态序列。Current iOS has no drawer list (`after_wake_ids`) since #2996: its turns carry `has_pending_wake` instead (`spec/fixtures/lines/ios/differences.json`).
 
 `layout.json` 额外输出 `footer`：请求 ID 顺序、`placement: "above_composer"`、`part_of_transcript: false`；不把请求交互和新的 `StatusLine` 塞进 transcript 行。
 
@@ -121,11 +121,25 @@
 - 总纲第 5 节提到权限卡挂记录末尾，而当前 `mainFooter` 把所有请求面板放在输入区；本夹具采用实际位置，与 UX 3.2/3.4 的当前规则一致。
 - Swift 的 `String.count` 数扩展字素簇，Kotlin 实现取答时须注意复合表情，不能直接用 UTF-16 长度代替。
 
+## Where current iOS differs
+
+The corpus is the shared contract: Android's `LinesFixtureTest` replays every case against its own Kotlin port, which keeps `afterWake` and the wake drawer, and compares complete objects. Current iOS differs from it in three ways. Since #1015, and by transcript entry since #2112, a user picture in an entry of its own is a message of its own that opens the next turn (`regular_user_images`, `tool_images_belong_to_call`). Since #2112 user pictures are a turn's input, not its process (`absorbed_user_images`, `photos_after_wake_stay_with_message`). Since #2996 a wake's continuation stays in the exchange's work line: there is no wake chip or drawer, a turn has no `after_wake_ids` but `has_pending_wake`, and a wake with no reply after it leaves the tail empty (`live_tail_runs_behind_chip`).
+
+`spec/fixtures/lines/ios/differences.json` pins exactly these differences, each with why and the Apple code and test that assert it. `turn_wake_state` drops `after_wake_ids` from every turn and sets `has_pending_wake`, true only for the turns it lists; an entry of `cases` replaces whole keys of a case's `expected` (`replace`) or single fields of one of its turns (`turn_fields`). The file sits in a subdirectory, so neither the replay's fixture loop nor Android's readers, which list only this directory's own `*.json` files, take it for a fixture. The replay fails on an entry that changes nothing, on one the case passes without, and on one that names a case or turn the corpus does not have, so the file can only shrink. Moving the corpus to current iOS is a follow-up once Android's port follows; until then the corpus values stay as they are.
+
 ## 对照和复跑
 
-对照器没有独立文件入库，下面的复跑步骤在 `/tmp` 生成所需临时文件。Python 读取本 README 的 Swift 适配片段，再从 iOS 源码按唯一标记提取类型和方法；`ChatStore.swift`、`JSONValue.swift`、`TextMemo.swift` 直接作为 `swiftc` 输入，原文件不改动。编译使用 Swift 6 模式，并按 `ios/project.yml` 指定默认 `MainActor`，保留 `ChatStore` 的并发语义。`ChatView` 的私有函数体保持逐字一致，只有外部宿主和输出投影是临时适配代码，未重写折叠算法。
+The replay has no file of its own in the repository: the Python block below writes what it needs to a temporary directory under `/tmp`. It takes the Swift adapter from this README and extracts types and functions from the Apple sources by unique start and end markers; `apple/Shared/ChatStore.swift`, `apple/Persona/Views/Chat/ViewedImages.swift` and a few small `apple/Shared` files go to `swiftc` whole, and no source file is changed. `struct ChatLines` (`apple/Persona/Views/Chat/ChatLines.swift`), `ChatLine`, `WorkItem`, `WorkSummary` and `TaskNoteText` are taken verbatim; the adapter only hosts them and projects what they return, it does not reimplement any folding. The packages these sources import, `PersonaWire`, `PersonaKit` and `BeautifulUI` under `apple/Packages/`, are first compiled from their sources into static modules, nonisolated by default as SwiftPM builds them. The app's sources are compiled in Swift 6 mode with the settings `apple/project.yml` gives the app (`SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY: YES`), so `ChatStore` keeps its concurrency. The app's `apple/Shared/Localization/Localizable.xcstrings` is compiled next to the binary, which runs in Simplified Chinese (`-AppleLanguages (zh-Hans)`), as the Apple tests do: the summaries and durations in the fixtures are the zh-Hans words.
 
-适配器只替代了不比较的图标名称函数，不运行 SwiftUI、滚动、点击、图片解码和真实磁盘缓存恢复；临时缓存通过 `CFFIXED_USER_HOME` 限定在临时目录。源码位置用例校验 `InteractionPanel` 在 `mainFooter` 的 `Composer` 之前；它们只证明声明顺序，不宣称界面测试通过。分隔线的输出结合原 `first` 标记与 View 源码核对。
+The lines are built as an Agent's chat in a style without BeautifulUI draws them (`ChatView.lineBuilder` with only `openWork` set): no supervision or background-round folds, no chip runs, no child sessions, no feed. Only what those options or the views need is replaced, and none of it is compared: empty `Session`, `ChildSessions.Place`, `FeedItem`, `QuickResult` and `PlaceMapResult` types, a `ChildSessionLines.insert` and a `ToolRunSummary.diff` that trap if they are ever reached, the icon name `ToolPresentation.symbol`, and an `AppStyle` whose `usesBeautifulUI` is false (the fixtures pin the plain styles; Liquid Glass is the default). SwiftUI, scrolling, taps, image decoding and the real disk cache are not run; `CFFIXED_USER_HOME` keeps the cache in the temporary directory. The `view_source_order` cases check declaration order only and do not claim a UI test passed: `PendingCards(cards: pendingCards, …)` comes before `Composer(key:` in `ChatView.mainFooter`, `pendingCards` is built from `model.interactions(for: key)`, `PendingCards` draws an `InteractionPanel` for each card, and `ChatLines.swift` never reads interactions. The cards keep the given order while they fit; once they scroll, `PendingCards.urgentFirst` puts permissions first (#926), which these two cases do not cover. The separators are checked against the `first` flag and the view source.
+
+The replay's output differs from the projection the fixtures were written against in three ways, each forced by the refactor:
+
+- `Turn.afterWake` is gone: #2996 folded a wake's continuation into the exchange's ordinary work line and removed the wake chip and its drawer. Each turn reports the state that replaced it, `has_pending_wake` (`Turn.hasPendingWake`), where the corpus has `after_wake_ids`; `wakes` lines and their `drawer_lines` no longer occur.
+- The line kinds `ChatLines.build` gained since are projected as `LinesFixtureTest` on Android projects them: `viewed` (`image_ids`), `recaps` (`item_ids`) and `api_error` (`item_id`, `count`, `status`, `reason`); subagents launched one after another share an `agents` line (`group_id`, `call_ids`, `first`, `separator_before`, `alone`). A kind the replay's options cannot produce traps.
+- The Swift runner prints what it built for each case, and the Python block compares that with `expected` and lists every difference instead of stopping at the first mismatching case.
+
+The corpus's expected values are not rewritten to match: the replay compares each case with its `expected` after `spec/fixtures/lines/ios/differences.json` is applied ("Where current iOS differs"), and any difference fails it.
 
 四份指定测试的覆盖情况：
 
@@ -139,11 +153,12 @@
 | `TaskNoteTests` 两个测试 | `tasks.json` 固定调用关联、事件主题、徽标、退出码和时间文案、中断标题的行为 |
 | `FoldedWorkTests` 三个测试 | `folds.json` 实际调用 `merge` 和 `unfold`，逐个检查状态快照和最终步骤 |
 
-在仓库根目录执行下面的 Python 块；需要 macOS、Python 3 和支持源码中 `nonisolated` 声明的 Swift 工具链。编译有超时，每次夹具与性质检查也有超时；失败立即退出。`-disable-sandbox` 只避免 Swift 宏插件再启动一层系统 sandbox，外层执行环境的限制仍然有效。
+Run the Python block from the repository root, for example `` sed -n '/^```python$/,/^```$/{/^```/d;p;}' spec/fixtures/lines/README.md | python3 - ``. It needs macOS with Xcode (Swift 6.2 or later, for `-default-isolation` and the packages' tools version, and `xcstringstool`) and Python 3. Each compile, each fixture file and the property check have a timeout. `-disable-sandbox` only keeps Swift's macro plugins from starting a sandbox of their own; the outer environment's limits still apply.
 
 ```python
 from pathlib import Path
 import subprocess
+import copy
 import os
 import json
 import re
@@ -154,6 +169,7 @@ tmp = Path(tempfile.mkdtemp(prefix='spec-lines-', dir='/tmp'))
 readme = (root / 'spec/fixtures/lines/README.md').read_text()
 (tmp / 'Runner.swift').write_text(readme.split('```swift\n', 1)[1].split('```', 1)[0])
 
+
 def between(path, start, end):
     text = (root / path).read_text()
     assert text.count(start) == 1, start
@@ -161,39 +177,66 @@ def between(path, start, end):
     finish = text.index(end, begin)
     return text[begin:finish]
 
+
+def swiftc(*args):
+    subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '6', '-module-cache-path', str(tmp / 'module-cache'),
+                    '-disable-sandbox', '-I', str(tmp), *args], check=True, timeout=300)
+
+
+# The packages the app's sources import, each a module of its own, nonisolated by default as SwiftPM builds them.
+for package in ['PersonaWire', 'PersonaKit', 'BeautifulUI']:
+    sources = sorted(str(p) for p in (root / 'apple/Packages' / package / 'Sources').rglob('*.swift'))
+    swiftc('-module-name', package, '-emit-module', '-emit-module-path', str(tmp / (package + '.swiftmodule')),
+           '-emit-library', '-static', '-o', str(tmp / ('lib' + package + '.a')), *sources)
+
 model = 'apple/Shared/Models.swift'
 view = 'apple/Persona/Views/Chat/ChatView.swift'
-parts = ['import Foundation\n']
-parts += [between(model, 'nonisolated enum SessionStatus:', 'nonisolated struct Session:'),
+lines = 'apple/Persona/Views/Chat/ChatLines.swift'
+parts = ['import Foundation\nimport PersonaWire\nimport PersonaKit\nimport BeautifulUI\n']
+parts += [between(model, 'nonisolated struct MachineRef:', 'nonisolated struct MachineEngine:'),
+          between(model, 'nonisolated enum SessionStatus:', '/// New sources opt in to every operation;'),
           between(model, 'nonisolated struct SessionKey:', 'nonisolated enum InteractionKind:')]
 parts += [between(view, 'struct ChatLine: Identifiable {', '/// One step of an open work line,'),
-          between(view, 'struct WorkSummary {', 'struct WorkLine: View {')]
-parts += ['struct ChatView {\nvar openWork: Set<String> = []\nstatic let debugOpenAll = false\n']
-for start, end in [
-    ('    static func prefixCount(', '    private func chatLines('),
-    ('    private func chatLines(', '    #if DEBUG'),
-    ('    private func unfoldWork(', '    /// Folds or opens a work line'),
-    ('    private static func photos(', '    @ViewBuilder private func lineView('),
-    ('    private func wakeLines(', '    static let bottomID'),
-]:
-    parts += [between(view, start, end)]
-parts += ['''
-    func lines(_ blocks: [ChatBlock], live: String?) -> [ChatLine] {
-        unfoldWork(chatLines(blocks, live: live))
-    }
-    func drawer(_ turn: Turn, live: Bool) -> [ChatLine] {
-        unfoldWork(wakeLines(turn, live: live))
-    }
-}\nenum WorkLine {\n''']
-parts += [between(view, '    static func duration(from start:', '\n}\n\nprivate struct EditIndex') + '\n}\n']
-parts += [between('apple/Persona/Views/Chat/TaskNoteRow.swift', 'enum TaskNoteText {', '/// A background task reporting back,')]
+          between(view, 'nonisolated struct WorkSummary: Equatable {', 'struct WorkLine: View, Equatable {')]
+parts += [between(lines, 'struct ChatLines {', '/// A file a work line changed'),
+          between(lines, 'nonisolated struct ChangedFile:', 'extension ChatLines {')]
+parts += ['enum ChatView {\n' + between(view, '    static func prefixCount(', '\n    #if DEBUG') + '\n}\n',
+          'enum WorkLine {\n' + between(view, '    static func duration(from start:', '\n}\n\n\n/// What the closeout card') + '\n}\n']
+parts += [between('apple/Persona/Views/Chat/TaskNoteRow.swift', 'enum TaskNoteText {', '/// A background task reporting back,'),
+          'enum SubagentCard {\n' + between('apple/Persona/Views/Chat/SubagentCard.swift', '    nonisolated static func isAgent(', '    @State private var unfold') + '}\n',
+          'enum ToolPresentation {\n' + between('apple/Persona/Views/Chat/ToolViews.swift', '    nonisolated static func baseName(', '    static func symbol(')
+          + '    static func symbol(_ name: String) -> String { "" }\n}\n']
+parts += ['nonisolated struct APIClient {\n' + between('apple/Shared/APIClient.swift', '    enum MessageVia: String, Codable, Sendable {', '    struct SendBody: Encodable {') + '}\n',
+          between('apple/Shared/ChatStore+SendFeedback.swift', 'extension ChatStore {', '    /// Only fresh session changes terminate') + '}\n',
+          between('apple/Shared/HubNaming.swift', 'nonisolated enum HubNaming {', '    static func accepts(scheme:') + '}\n',
+          between('apple/Shared/NativeStateMigration.swift', 'nonisolated enum LegacyNames {', '/// A non-destructive bridge')]
 parts += ['struct RebuildTests {\n' + between('apple/PersonaTests/RebuildTests.swift', '    struct LCG {', '    @Test func incrementalRebuildEqualsAFullOne()') + '\n}\n']
-parts += ['enum ToolPresentation { static func symbol(_ name: String) -> String { "" } }\n']
+parts += ['''
+// Reached only with child sessions, BeautifulUI's chip runs or the assistant's feed, all off here: a call traps.
+struct Session {}
+enum ChildSessions { struct Place {} }
+enum ChildSessionLines {
+    static func insert(_ lines: [ChatLine], places: [ChildSessions.Place], sessions: [String: Session], complete: Bool) -> [ChatLine] {
+        fatalError("child sessions are not part of the lines fixtures")
+    }
+}
+enum ToolRunSummary { static func diff(_ c: ToolCall) -> (adds: Int, dels: Int) { fatalError("chip runs are off") } }
+struct FeedItem { var id: String }
+struct QuickResult { var callID: String }
+struct PlaceMapResult { var callID: String }
+// The fixtures pin the styles without BeautifulUI's components: Liquid Glass, the default, and the others but Beautiful.
+nonisolated enum AppStyle { case glass; static let current = AppStyle.glass; var usesBeautifulUI: Bool { false } }
+''']
 (tmp / 'Extracted.swift').write_text('\n'.join(parts))
-subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '6', '-module-cache-path', str(tmp / 'module-cache'), '-default-isolation', 'MainActor', '-enable-bare-slash-regex', '-disable-sandbox',
-    'apple/Packages/PersonaWire/Sources/PersonaWire/JSONValue.swift', 'apple/Shared/TextMemo.swift', 'apple/Shared/ChatStore.swift',
-    str(tmp / 'Extracted.swift'), str(tmp / 'Runner.swift'), '-o', str(tmp / 'check')],
-    check=True, timeout=120)
+shared = ['ChatStore', 'TextMemo', 'ChatSendFeedback', 'LiveText', 'CommandAsk', 'Injected', 'MessageSource', 'ModelFallback', 'Closeout']
+swiftc('-default-isolation', 'MainActor', '-enable-upcoming-feature', 'NonisolatedNonsendingByDefault',
+       '-enable-upcoming-feature', 'InferIsolatedConformances', '-enable-bare-slash-regex',
+       *['apple/Shared/%s.swift' % name for name in shared], 'apple/Persona/Views/Chat/ViewedImages.swift',
+       str(tmp / 'Extracted.swift'), str(tmp / 'Runner.swift'), '-L', str(tmp),
+       '-lPersonaWire', '-lPersonaKit', '-lBeautifulUI', '-o', str(tmp / 'check'))
+# The app's words, as a phone set to Simplified Chinese reads them.
+subprocess.run(['xcrun', 'xcstringstool', 'compile', 'apple/Shared/Localization/Localizable.xcstrings',
+                '--output-directory', str(tmp)], check=True, timeout=120)
 
 view_source = (root / view).read_text()
 assert '.overlay(alignment: .top) { if !first { WorkCardSlice.separator } }' in view_source
@@ -201,8 +244,47 @@ assert '.overlay(alignment: .top) { WorkCardSlice.separator }' in view_source
 runtime = tmp / 'runtime'
 runtime.mkdir()
 env = dict(os.environ, CFFIXED_USER_HOME=str(runtime))
+zh = ['-AppleLanguages', '(zh-Hans)']
 names = set()
 all_cases = {}
+failed = []
+# Where current iOS differs from the corpus ("Where current iOS differs" above), applied to `expected` before comparing.
+overlay_path = root / 'spec/fixtures/lines/ios/differences.json'
+overlay = json.loads(overlay_path.read_text())
+assert overlay['schema_version'] == 1 and overlay['domain'] == 'lines'
+assert overlay_path.read_text() == json.dumps(overlay, ensure_ascii=False, indent=2) + '\n'
+wake = overlay.get('turn_wake_state')
+pending = {(p['case'], p.get('checkpoint'), p['turn']) for p in (wake['pending'] if wake else [])}
+patches = {entry['name']: entry for entry in overlay['cases']}
+assert len(patches) == len(overlay['cases'])
+seen_pending = set()
+
+
+def ios_expected(case, patched=True):
+    """The case's `expected` as current iOS draws it. An overlay entry that changes nothing is stale and fails."""
+    expected = copy.deepcopy(case['expected'])
+    checkpoints = 'checkpoints' in expected
+    for k, state in enumerate(expected.get('checkpoints', [expected])):
+        for turn in state['turns'] if wake else []:
+            assert wake['drop'] in turn and wake['set'] not in turn, 'stale turn_wake_state: ' + case['name']
+            del turn[wake['drop']]
+            key = (case['name'], k if checkpoints else None, turn['id'])
+            turn[wake['set']] = key in pending
+            seen_pending.add(key)
+    entry = patches.get(case['name']) if patched else None
+    if entry:
+        assert set(entry) <= {'name', 'why', 'source', 'replace', 'turn_fields'} and entry['why'] and entry['source']
+        for key, value in entry.get('replace', {}).items():
+            assert key in expected and expected[key] != value, 'stale replace: %s.%s' % (case['name'], key)
+            expected[key] = value
+        for turn_id, fields in entry.get('turn_fields', {}).items():
+            turns = [t for t in expected.get('turns', []) if t['id'] == turn_id]
+            assert len(turns) == 1, 'no turn %s in %s' % (turn_id, case['name'])
+            for key, value in fields.items():
+                assert key in turns[0] and turns[0][key] != value, 'stale turn_fields: %s[%s].%s' % (case['name'], turn_id, key)
+                turns[0][key] = value
+    return expected
+
 
 def check_lines(lines):
     ids = [line['id'] for line in lines]
@@ -211,6 +293,36 @@ def check_lines(lines):
     for line in lines:
         if 'drawer_lines' in line:
             check_lines(line['drawer_lines'])
+
+
+def diff(path, want, got, out):
+    """Where `got` differs from `want`, exactly (true is not 1)."""
+    if type(want) is not type(got):
+        out.append('%s: expected %s, actual %s' % (path, json.dumps(want, ensure_ascii=False), json.dumps(got, ensure_ascii=False)))
+    elif isinstance(want, dict):
+        for key in sorted(set(want) | set(got)):
+            if key not in got:
+                out.append('%s.%s: missing, expected %s' % (path, key, json.dumps(want[key], ensure_ascii=False)))
+            elif key not in want:
+                out.append('%s.%s: not expected, actual %s' % (path, key, json.dumps(got[key], ensure_ascii=False)))
+            else:
+                diff(path + '.' + key, want[key], got[key], out)
+    elif isinstance(want, list):
+        ids = [[x.get('id') if isinstance(x, dict) else None for x in side] for side in (want, got)]
+        if None in ids[0] + ids[1]:
+            if len(want) != len(got):
+                out.append('%s: expected %s, actual %s' % (path, json.dumps(want, ensure_ascii=False), json.dumps(got, ensure_ascii=False)))
+                return
+            pairs = list(zip(range(len(want)), want, got))
+        else:
+            if ids[0] != ids[1]:
+                out.append('%s: ids expected %s, actual %s' % (path, ids[0], ids[1]))
+            pairs = [(x, want[i], got[ids[1].index(x)]) for i, x in enumerate(ids[0]) if x in ids[1]]
+        for i, w, g in pairs:
+            diff('%s[%s]' % (path, i), w, g, out)
+    elif want != got:
+        out.append('%s: expected %s, actual %s' % (path, json.dumps(want, ensure_ascii=False), json.dumps(got, ensure_ascii=False)))
+
 
 for path in sorted((root / 'spec/fixtures/lines').glob('*.json')):
     data = json.loads(path.read_text())
@@ -225,15 +337,33 @@ for path in sorted((root / 'spec/fixtures/lines').glob('*.json')):
         all_cases[case['name']] = case
         for state in case['expected'].get('checkpoints', [case['expected']]):
             check_lines(state['lines'])
-    subprocess.run([str(tmp / 'check'), str(path)], env=env, check=True, timeout=60)
+    run = subprocess.run([str(tmp / 'check'), str(path), *zh], env=env, check=True, timeout=60, capture_output=True, text=True)
+    actual = [json.loads(line) for line in run.stdout.splitlines()]
+    assert [a['name'] for a in actual] == [case['name'] for case in data['cases']]
+    for case, got in zip(data['cases'], actual):
+        want = ios_expected(case)
+        for state in want.get('checkpoints', [want]) + got['actual'].get('checkpoints', [got['actual']]):
+            check_lines(state['lines'])
+        out = []
+        diff(case['name'], want, got['actual'], out)
+        if out:
+            failed.append(case['name'])
+            print('不匹配：%s/%s\n  %s' % (path.name, case['name'], '\n  '.join(out)))
+            unpatched = []
+            diff(case['name'], ios_expected(case, patched=False), got['actual'], unpatched)
+            if case['name'] in patches and not unpatched:
+                print('  stale: the case passes without its entry in ios/differences.json')
 
 closed = all_cases['closed_work_identity']['expected']['lines']
 opened = all_cases['open_work_identity']['expected']['lines']
 assert [line['id'] for line in closed] == [opened[i]['id'] for i in [0, 1, 4]]
-assert all_cases['menu_owner_in_merged_messages']['expected']['lines'][0]['holds'] == [True, False, False]
+assert all_cases['menu_owner_per_message']['expected']['lines'][0]['holds'] == [True, False, False]
 assert all_cases['fold_counts_tools_and_thoughts']['expected']['turns'][0]['tool_count'] == 3
 assert all_cases['task_notices_find_calls']['expected']['task_index']['calls'] == {'7#0': 'm', '8#0': 'b', '9#0': 'm'}
-subprocess.run([str(tmp / 'check'), '--properties'], env=env, check=True, timeout=60)
+assert pending <= seen_pending, 'turn_wake_state names no turn of the corpus: %s' % sorted(map(str, pending - seen_pending))
+assert set(patches) <= names, 'ios/differences.json names no case of the corpus: %s' % sorted(set(patches) - names)
+subprocess.run([str(tmp / 'check'), '--properties', *zh], env=env, check=True, timeout=60)
+assert not failed, '%d cases do not match: %s' % (len(failed), ', '.join(failed))
 print(f'全部通过：{len(names)} 个夹具；临时对照器：{tmp}')
 ```
 
@@ -241,14 +371,14 @@ print(f'全部通过：{len(names)} 个夹具；临时对照器：{tmp}')
 
 ```swift
 import Foundation
+import PersonaWire
 
 func stamp(_ d: Date?) -> Any { d.map { ISO8601DateFormatter().string(from: $0) } ?? NSNull() }
 func nullable<T>(_ x: T?) -> Any { x.map { $0 as Any } ?? NSNull() }
-func itemID(_ row: ChatRow) -> String { row.id }
 
 struct Projection {
     let index: TaskIndex
-    let view: ChatView
+    let builder: ChatLines
     let now: Date
     let menuIDs: [String?]
 
@@ -306,8 +436,11 @@ struct Projection {
         switch l.content {
         case .row(let r): out.merge(row(r)) { _, new in new }
         case .userImages(_, let items): out["type"] = "user_images"; out["item_ids"] = items.map(\.id)
-        case .mergedUsers(_, let rows): out["type"] = "merged_users"; out["item_ids"] = rows.map(\.id)
-        case .splitHeader(_, let count): out["type"] = "split_header"; out["count"] = count
+        case .recaps(_, let items): out["type"] = "recaps"; out["item_ids"] = items.map(\.id)
+        case .viewed(_, let images): out["type"] = "viewed"; out["image_ids"] = images.map(\.id)
+        case .apiError(let item, let info, let count):
+            out.merge(["type": "api_error", "item_id": item.id, "count": count, "status": nullable(info.status),
+                "reason": info.reason]) { _, new in new }
         case .work(let id, let items, let live, let start, let end):
             let summary = WorkSummary(items)
             let at = live ? now : (end ?? now)
@@ -322,7 +455,7 @@ struct Projection {
                 default: break
                 }
             }
-            out.merge(["type": "work", "live": live, "open": view.openWork.contains(id),
+            out.merge(["type": "work", "live": live, "open": builder.isOpen(id, live: live),
                 "start": stamp(start), "end": stamp(end),
                 "elapsed_seconds": start.map { max(0, Int(at.timeIntervalSince($0))) } as Any? ?? NSNull(),
                 "duration_text": WorkLine.duration(from: start, to: at),
@@ -333,18 +466,20 @@ struct Projection {
         case .workStep(let group, let item, let first):
             out.merge(["type": "work_step", "group_id": group, "first": first,
                 "separator_before": !first, "step": step(item)]) { _, new in new }
-        case .workEnd(let group, let count):
+        case .agents(let group, let calls, let first, let alone):
+            out.merge(["type": "agents", "group_id": group, "call_ids": calls.map(\.id), "first": first,
+                "separator_before": !first, "alone": alone]) { _, new in new }
+        case .workEnd(let group, let count, _):
             out.merge(["type": "work_end", "group_id": group, "count": count, "separator_before": true]) { _, new in new }
-        case .wakes(let t, let live):
-            out.merge(["type": "wakes", "notice_ids": t.wakes.map(\.id), "live": live,
-                "drawer_lines": view.drawer(t, live: live).map(line)]) { _, new in new }
+        case .supervision, .supervisionInput, .agentOut, .toolRun, .feed, .quick, .placeMap, .day, .answerPart:
+            fatalError("ChatLines.build made \(l.id), which needs an option the replay leaves off")
         }
         return out
     }
     func turn(_ t: Turn) -> [String: Any] {
         ["id": t.id, "user_ids": t.users.map(\.id), "process_ids": t.process.map(\.id),
          "answer_id": nullable(t.answer?.id), "trailing_ids": t.trailing.map(\.id),
-         "wake_ids": t.wakes.map(\.id), "after_wake_ids": t.afterWake.map(\.id), "tail_ids": t.tail.map(\.id),
+         "wake_ids": t.wakes.map(\.id), "has_pending_wake": t.hasPendingWake, "tail_ids": t.tail.map(\.id),
          "ordered_ids": t.ordered.map(\.id), "tool_count": t.toolCount, "thought_count": t.thoughtCount,
          "interim_count": t.interimCount, "start": stamp(t.startedAt), "end": stamp(t.endedAt)]
     }
@@ -372,13 +507,13 @@ struct Projection {
                 settled = built.settled
             }
         }
-        var view = ChatView()
-        view.openWork = Set(input["open_work"] as? [String] ?? [])
+        // An Agent's chat in a style without BeautifulUI: nothing folds but work lines (`ChatView.lineBuilder`).
+        let builder = ChatLines(openWork: Set(input["open_work"] as? [String] ?? []))
         let now = JSON.parseDate(input["now"] as? String ?? "2026-01-01T00:01:00Z")!
         let queries = (input["menu_queries"] as? [Any] ?? []).map { $0 as? String }
-        let p = Projection(index: TaskIndex.build(source), view: view, now: now, menuIDs: queries)
+        let p = Projection(index: TaskIndex.build(source), builder: builder, now: now, menuIDs: queries)
         let turns = blocks.compactMap { if case .turn(let t) = $0 { t } else { nil } }
-        var out: [String: Any] = ["lines": view.lines(blocks, live: live).map(p.line), "turns": turns.map(p.turn)]
+        var out: [String: Any] = ["lines": builder.build(blocks, live: live).map(p.line), "turns": turns.map(p.turn)]
         if source.contains(where: { $0.task != nil }) {
             out["task_index"] = ["started": p.index.started.sorted(), "calls": p.index.calls,
                 "descriptions": p.index.descriptions, "started_at": p.index.startedAt.mapValues(stamp),
@@ -421,6 +556,24 @@ struct Projection {
             checkpoints.append(state)
         }
         return ["checkpoints": checkpoints]
+    }
+    /// The pending cards sit in `mainFooter` above the composer, in the order the model lists them while they fit
+    /// (`PendingCards.urgentFirst` reorders them once they scroll); the lines are never built from them.
+    static func footerOrder() throws {
+        func read(_ path: String) throws -> String { try String(contentsOfFile: path, encoding: .utf8) }
+        func body(_ text: String, _ start: String, _ end: String) -> String {
+            precondition(text.components(separatedBy: start).count == 2, start)
+            return String(text.components(separatedBy: start)[1].components(separatedBy: end)[0])
+        }
+        let view = try read("apple/Persona/Views/Chat/ChatView.swift")
+        let footer = body(view, "private var mainFooter: some View {", "private var pendingRecap:")
+        let cards = footer.range(of: "PendingCards(cards: pendingCards, room: footerRoom)")!
+        precondition(cards.lowerBound < footer.range(of: "Composer(key:")!.lowerBound)
+        precondition(body(view, "private var pendingCards: [PendingCards.Card] {", "#if DEBUG").contains("model.interactions(for: key).compactMap"))
+        let panel = body(try read("apple/Persona/Views/Chat/PendingCards.swift"), "ForEach(over ? Self.urgentFirst(cards) : cards) { card in", "}")
+        precondition(panel.contains("InteractionPanel(interaction: card.interaction"))
+        let lines = try read("apple/Persona/Views/Chat/ChatLines.swift")
+        precondition(!lines.contains("InteractionPanel") && !lines.contains("interactions(for:"))
     }
     @MainActor static func main() async throws {
         let args = CommandLine.arguments
@@ -473,29 +626,18 @@ struct Projection {
             print("通过：\(prefixes) 个增量前缀、40 次前插历史、长会话等价和后台替换收敛")
             return
         }
-        let path = args[1]
-        let fixtures = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as! [String: Any]
-        let cases = fixtures["cases"] as! [[String: Any]]
-        for c in cases {
+        let fixtures = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[1]))) as! [String: Any]
+        // One line per case, its name and what the replay drew; the Python entry compares it with `expected`.
+        for c in fixtures["cases"] as! [[String: Any]] {
             var actual = try await run(c["input"] as! [String: Any])
             if c["verification"] as? String == "view_source_order" {
-                let source = try String(contentsOfFile: "apple/Persona/Views/Chat/ChatView.swift", encoding: .utf8)
-                let footer = String(source.components(separatedBy: "private var mainFooter: some View {")[1].components(separatedBy: "private var pendingRecap:")[0])
-                let panel = footer.range(of: "ForEach(model.interactions(for: key)) { ix in InteractionPanel(interaction: ix) }")!
-                precondition(panel.lowerBound < footer.range(of: "Composer(key:")!.lowerBound)
-                let linesBody = source.components(separatedBy: "private func chatLines(")[1].components(separatedBy: "    #if DEBUG")[0]
-                precondition(!linesBody.contains("InteractionPanel"))
+                try footerOrder()
                 let input = c["input"] as! [String: Any]
                 actual["footer"] = ["interaction_ids": input["pending_interaction_ids"]!, "placement": "above_composer", "part_of_transcript": false]
             }
-            let a = try JSONSerialization.data(withJSONObject: actual, options: [.sortedKeys])
-            let e = try JSONSerialization.data(withJSONObject: c["expected"]!, options: [.sortedKeys])
-            guard a == e else {
-                FileHandle.standardError.write(Data("不匹配：\(c["name"]!)\n".utf8))
-                exit(1)
-            }
+            let line = try JSONSerialization.data(withJSONObject: ["name": c["name"]!, "actual": actual], options: [.sortedKeys])
+            print(String(decoding: line, as: UTF8.self))
         }
-        print("通过：\(cases.count) 个用例")
     }
 }
 ```

@@ -423,18 +423,19 @@ func codexTitleName(title string) (name string, match func(string) bool, ok bool
 }
 
 // codexByTitle finds the thread a Codex pane shows by the name in its title (codexTitleName). Of several threads with
-// that name it keeps prefer (what herdr or a start said), else takes the most recently written one not taken. "" when
-// the title carries no name (a new thread) or no thread has it.
-func (n *Node) codexByTitle(a host.Agent, prefer string, taken map[string]host.Agent) string {
+// that name it keeps prefer (what herdr or a start said), else takes the most recently written one not taken. claimed
+// says at least one matching thread already belongs to another pane, so the caller must not keep a stale fallback.
+func (n *Node) codexByTitle(a host.Agent, prefer string, taken map[string]host.Agent) (bestID string, claimed bool) {
 	_, match, ok := codexTitleName(a.Title)
 	if !ok {
-		return ""
+		return "", false
 	}
 	home := n.codexPaneHome(a.PaneID)
 	var best string
 	var bestAt time.Time
 	for _, id := range threadsNamed(home, match) {
 		if _, used := taken[n.codexPublicID(home, id)]; used {
+			claimed = true
 			continue
 		}
 		p := rolloutPath(home, id)
@@ -442,7 +443,7 @@ func (n *Node) codexByTitle(a host.Agent, prefer string, taken map[string]host.A
 			continue // a pane shows its conversation, never a subagent's thread
 		}
 		if id == prefer {
-			return id
+			return id, claimed
 		}
 		if p == "" {
 			continue
@@ -451,7 +452,7 @@ func (n *Node) codexByTitle(a host.Agent, prefer string, taken map[string]host.A
 			best, bestAt = id, st.ModTime()
 		}
 	}
-	return best
+	return best, claimed
 }
 
 // threadTitle is the name the agent gave the thread (<home>/session_index.jsonl, last entry wins); re-read on change.

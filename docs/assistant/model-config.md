@@ -88,6 +88,29 @@ direct API purposes use provider connections/credentials and no terminal or Clau
 plugins use their own environment, configuration and credentials.
 **Unverified** means launcher execution on the target computer has not been confirmed, not that a paid model request succeeded or failed.
 
+### Testing background Direct API drafts on the web
+
+The editors for information processing, information screening, and question delegation fetch the selected connection's
+model list through `POST /api/v1/launchers/discover`, while retaining manual model-ID entry. Reasoning choices follow the
+selected model's metadata; an existing unlisted value remains visible rather than being silently replaced.
+
+**Test connection** sends the draft connection name, model, and effort to `POST /api/v1/launchers/test`. The manager resolves
+the saved connection's encrypted credentials and network route and issues a small request, with the same effort translation
+as real API calls (`off` becomes Responses `none`, for example). A successful result echoes the tested effort and includes
+`ms`, the elapsed provider request/response time in milliseconds. Unsupported effort cannot be reported as verified.
+Authentication, missing-model/endpoint, timeout, and other failures keep actionable details, with credentials redacted.
+
+Omitting effort (or sending `null`) tests the saved connection's default effort, which real API calls also inherit when
+their purpose has no effort override. An explicit string overrides that default; `""` tests clearing it in a provider
+draft. The purpose editor omits effort for **Use default**, while the provider wizard sends its draft value, including
+an explicit clear. Connection tests never inherit an unrelated purpose's effort.
+
+A test never saves the draft or changes purpose/provider defaults. Verification belongs only to that open draft:
+changing the connection, model, or effort invalidates it, including while a request is outstanding. Closing the editor
+discards it. Launcher execution health is a separate status; an API probe does not verify a launcher.
+The iOS and Android purpose editors do not yet provide this draft test; Android also retains its free-text purpose effort
+field. Native parity is tracked in #6887.
+
 ## Sending through a computer (#4775)
 
 API purposes are HTTP requests the manager sends from its own machine. When that machine has no route to the provider

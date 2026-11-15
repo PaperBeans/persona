@@ -6,9 +6,9 @@
       "name": "short_reply_after_wake_is_the_answer",
       "description": "A long reply before a wake does not keep the answer: the shorter reply after the wake is the answer, and the earlier reply and the wake fold into the work line.",
       "source": [
-        "ios/Shared/ChatStore.swift: buildRows / ChatBlock.build",
-        "ios/Persona/Views/Chat/ChatView.swift: chatLines / workItems / unfoldWork",
-        "ios/PersonaTests/ChatStoreTests.swift: backgroundWakeEndsOnTheNewestWords"
+        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build",
+        "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / workItems / unfold",
+        "apple/PersonaTests/ChatStoreTests.swift: backgroundWakeEndsOnTheNewestWords"
       ],
       "input": {
         "items": [
@@ -177,9 +177,9 @@
       "name": "long_answer_after_wake",
       "description": "The reply after the wake is the answer; the earlier reply and the wake fold into the work line.",
       "source": [
-        "ios/Shared/ChatStore.swift: buildRows / ChatBlock.build",
-        "ios/Persona/Views/Chat/ChatView.swift: chatLines / workItems / unfoldWork",
-        "ios/PersonaTests/ChatStoreTests.swift: backgroundWakeEndsOnTheNewestWords"
+        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build",
+        "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / workItems / unfold",
+        "apple/PersonaTests/ChatStoreTests.swift: backgroundWakeEndsOnTheNewestWords"
       ],
       "input": {
         "items": [
@@ -348,9 +348,9 @@
       "name": "notification_without_wake",
       "description": "未唤醒的后台通知只算普通工作过程。",
       "source": [
-        "ios/Shared/ChatStore.swift: buildRows / ChatBlock.build",
-        "ios/Persona/Views/Chat/ChatView.swift: chatLines / workItems / unfoldWork",
-        "ios/PersonaTests/ChatStoreTests.swift: backgroundWakeEndsOnTheNewestWords"
+        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build",
+        "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / workItems / unfold",
+        "apple/PersonaTests/ChatStoreTests.swift: backgroundWakeEndsOnTheNewestWords"
       ],
       "input": {
         "items": [
@@ -469,9 +469,9 @@
       "name": "wake_after_recap_reopens_turn",
       "description": "A wake after a recap stays in its exchange and its reply is the answer; the recap stays where it was.",
       "source": [
-        "ios/Shared/ChatStore.swift: buildRows / ChatBlock.build",
-        "ios/Persona/Views/Chat/ChatView.swift: chatLines / workItems / unfoldWork",
-        "ios/PersonaTests/ChatStoreTests.swift: wakeAfterARecapStaysInItsExchange"
+        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build",
+        "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / workItems / unfold",
+        "apple/PersonaTests/ChatStoreTests.swift: wakeAfterARecapStaysInItsExchange"
       ],
       "input": {
         "items": [
@@ -632,8 +632,8 @@
       "name": "multiple_wakes_pick_latest_answer",
       "description": "Several wakes: the latest run's reply is the answer, the earlier replies and wakes fold into the work line, nothing is left behind the chip.",
       "source": [
-        "ios/Shared/ChatStore.swift: buildRows / ChatBlock.build",
-        "ios/Persona/Views/Chat/ChatView.swift: chatLines / workItems / unfoldWork"
+        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build",
+        "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / workItems / unfold"
       ],
       "input": {
         "items": [
@@ -847,8 +847,8 @@
       "name": "only_last_reply_in_each_wake_is_candidate",
       "description": "Only the last reply of the latest run is the answer; the replies before it are narration in the work line.",
       "source": [
-        "ios/Shared/ChatStore.swift: buildRows / ChatBlock.build",
-        "ios/Persona/Views/Chat/ChatView.swift: chatLines / workItems / unfoldWork"
+        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build",
+        "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / workItems / unfold"
       ],
       "input": {
         "items": [
@@ -989,8 +989,8 @@
       "name": "wake_without_any_reply",
       "description": "没有回复的唤醒轮保留工作过程和抽屉入口。",
       "source": [
-        "ios/Shared/ChatStore.swift: buildRows / ChatBlock.build",
-        "ios/Persona/Views/Chat/ChatView.swift: chatLines / workItems / unfoldWork"
+        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build",
+        "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / workItems / unfold"
       ],
       "input": {
         "items": [
@@ -1122,8 +1122,8 @@
       "name": "orphan_wake_opens_with_notice",
       "description": "窗口从唤醒通知开始时，把通知放在工作行前。",
       "source": [
-        "ios/Shared/ChatStore.swift: buildRows / ChatBlock.build",
-        "ios/Persona/Views/Chat/ChatView.swift: chatLines / workItems / unfoldWork"
+        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build",
+        "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / workItems / unfold"
       ],
       "input": {
         "items": [
@@ -1237,8 +1237,8 @@
       "name": "live_tail_runs_behind_chip",
       "description": "主回复已确定后，后续运行状态由唤醒入口承接。",
       "source": [
-        "ios/Shared/ChatStore.swift: buildRows / ChatBlock.build",
-        "ios/Persona/Views/Chat/ChatView.swift: chatLines / workItems / unfoldWork"
+        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build",
+        "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / workItems / unfold"
       ],
       "input": {
         "items": [
@@ -1373,8 +1373,8 @@
       "name": "live_answer_after_wake",
       "description": "进行中且最长回复在唤醒后时，最后工作段保持进行中。",
       "source": [
-        "ios/Shared/ChatStore.swift: buildRows / ChatBlock.build",
-        "ios/Persona/Views/Chat/ChatView.swift: chatLines / workItems / unfoldWork"
+        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build",
+        "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / workItems / unfold"
       ],
       "input": {
         "items": [
@@ -1523,9 +1523,9 @@
       "name": "photos_after_wake_stay_with_message",
       "description": "Pictures absorbed after a wake stay with their message, never in the tail or the drawer; the latest reply is the answer.",
       "source": [
-        "ios/Shared/ChatStore.swift: buildRows / ChatBlock.build",
-        "ios/Persona/Views/Chat/ChatView.swift: chatLines / workItems / unfoldWork",
-        "ios/PersonaTests/ChatStoreTests.swift: picturesSentAfterAWakeStayWithTheirMessage"
+        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build",
+        "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / workItems / unfold",
+        "apple/PersonaTests/ChatStoreTests.swift: picturesSentAfterAWakeStayWithTheirMessage"
       ],
       "input": {
         "items": [

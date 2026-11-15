@@ -1,4 +1,8 @@
 {
+  "continuity": "実行の引き継ぎ",
+  "fresh_each_run": "実行ごとに新しいチャットを開始",
+  "state_note": "タスクの状態メモ",
+  "state_note_hint": "進捗の目印と報告済みの内容を記録します。最大4,096バイト。",
   "added": "「{title}」を追加しました",
   "saved": "保存しました",
   "run_started": "「{title}」の実行を開始しました",

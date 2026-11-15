@@ -1,4 +1,8 @@
 {
+  "continuity": "跨轮运行",
+  "fresh_each_run": "每次运行都新建对话",
+  "state_note": "任务状态笔记",
+  "state_note_hint": "记录进度指针和已汇报的事项。最多 4,096 字节。",
   "added": "已添加「{title}」",
   "saved": "已保存",
   "run_started": "「{title}」开始运行",

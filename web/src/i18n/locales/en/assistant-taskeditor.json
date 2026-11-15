@@ -1,4 +1,8 @@
 {
+  "continuity": "Run continuity",
+  "fresh_each_run": "Start a new chat for each run",
+  "state_note": "Task state note",
+  "state_note_hint": "Keep cursors and a short record of what the task already reported. Up to 4,096 bytes.",
   "added": "Added \"{title}\"",
   "saved": "Saved",
   "run_started": "\"{title}\" started",
