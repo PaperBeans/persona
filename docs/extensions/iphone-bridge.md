@@ -39,9 +39,10 @@ persona-iphone-bridge serve --udid <udid> --record <path> [--host <address>] [--
 persona-iphone-bridge usb-list --json                     # phones attached over USB (#3448)
 persona-iphone-bridge pair --udid <udid> --out <path>     # pair over trusted USB, write the record (#3448)
 persona-iphone-bridge match --record <path> --identifier <id> --auth-tag <tag>   # is this Bonjour advertisement the record's phone? (#3448)
+persona-iphone-bridge reveal-developer-mode --udid <udid>   # show Developer Mode in the phone's Settings (#8199)
 ```
 
-### One-shot commands (`call`, `usb-list`, `pair`, `match`, `version`)
+### One-shot commands (`call`, `usb-list`, `pair`, `match`, `reveal-developer-mode`, `version`)
 
 | Outcome | stdout | stderr | Exit code |
 | --- | --- | --- | --- |
@@ -299,9 +300,9 @@ lists never answered on iOS 18.7.3, so the bridge doesn't use them.) The app ope
 
 `{ "ddi_dir": "<folder>", "force": false }`, both optional. The developer services behind `screenshot`, input and the app operations are
 listed only while the phone has the personalized developer disk image mounted (`device_info`: `ddi_mounted`, and `ddi_not_mounted` in
-`notes`). This mounts it, **only when asked**: no other operation mounts it on its own, and the node offers it only as a command for the
-phone's owner (`personad iphone mount-ddi <udid> [--ddi-dir <dir>] [--force]`, [iphone-pairing.md](iphone-pairing.md)), never to the
-assistant.
+`notes`). This mounts it, **only when asked**: no other operation mounts it on its own. The node offers it to the phone's owner, never to
+the assistant: the command `personad iphone mount-ddi <udid> [--ddi-dir <dir>] [--force]` ([iphone-pairing.md](iphone-pairing.md)), and
+the app's Prepare, after which the node mounts it again by itself whenever that phone comes back without it (#8199, [iphone-pairing.md](iphone-pairing.md), "Preparing the phone").
 
 1. Already mounted (and not `force`): `{"mounted": true, "already": true}`, nothing else happens.
 2. Developer Mode off: `developer_mode_off`.
@@ -342,6 +343,11 @@ Computer?" prompt answered once); without that, `pair` answers `trust_pending` a
   besides the common ones: `trust_pending`, `locked`, `not_found` (no such phone on USB), `pairing_rejected` (the user declined).
 - The record is the bridge's own format (`record.rs`: the RemotePairing keys plus the host name they were made under, which every later
   connection must send again) and opaque to the node.
+- `reveal-developer-mode --udid <udid>` → `{"udid", "revealed": true}` (#8199): iOS keeps the Developer Mode switch out of Settings ›
+  Privacy & Security until a developer tool asks for it. This asks, through AMFI's lockdown service (`com.apple.amfi.lockdown`) over
+  usbmuxd, so the phone has to be on the cable and trust this computer (else `not_found`, `trust_pending`). It turns nothing on: the
+  phone's user turns it on, the phone restarts, and after the restart asks once more. The node runs it right after a pairing that
+  reported Developer Mode off. A simulator answers `unsupported`.
 - `match --record <path> --identifier <id> --auth-tag <tag>` → `{"match": true}` or `{"match": false}`: whether a `_remotepairing._tcp`
   advertisement (its TXT `identifier` and `authTag`) belongs to the record's phone. The tag is derived from a key inside the record, and the
   identifier is not a stable value to save at pairing, so the node asks the bridge for each advertisement and connects to the first match.
@@ -474,6 +480,7 @@ phone has run against one only where the table says so:
 | `usb-list` | checked on a real iPhone (iPhone13,4, iOS 18.7.3, trusting the computer): it lists the phone with its name |
 | `pair` over USB (consent prompt, `altIRK`) | checked on that iPhone while it already trusted the computer: it answered the pairing request with pairing data straight away, without asking its user, and the record was written (0600). The first try panicked there (exit code 101): the library asked the bridge for the PIN and got an empty one; the bridge now gives iPhone's fixed manual-pairing PIN `000000` and turns any panic into an `internal` error. Not verified: the Trust prompt on a phone that doesn't trust the computer yet, and the path where the phone asks its user to allow the pairing (`awaitingUserConsent`) |
 | `match` against a real advertisement | checked on that iPhone against its `_remotepairing._tcp` advertisement on the USB network interface (port 49152, TXT `identifier`, `authTag`, `ver`, `minVer`, `flags`): it answered `true`. An advertisement over Wi-Fi not verified |
+| `reveal-developer-mode` (AMFI) | **not verified on a real device**: no phone with the switch hidden was at hand |
 | `ax_tree` | `unsupported` |
 | `mount_ddi` (build selection, the phone's ticket or TSS, upload, mount, service directory again) | checked on the iOS 18.7.3 iPhone: mounted in 3.3 s, then `already: true`; `device_info` showed `ddi_mounted: true` and the developer services. The ticket's source (the phone's own or Apple's signing server) was not recorded: no `--force` remount was run. **Not verified on iOS 27**: that phone's image was mounted by Xcode's tools beforehand |
 | Simulator backend: pair, `device_info`, `screenshot`, apps, `ax_tree` (with a system alert), tap, `keys` (ASCII and Chinese), swipe, `button home`, `serve`, runner cleanup after exit and after `kill -9` | checked on an iOS 27.2 simulator (Xcode 27.2) |

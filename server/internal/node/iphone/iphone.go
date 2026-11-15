@@ -33,6 +33,8 @@ import (
 type iphoneHost interface {
 	// Bridge: the device bridge is installed, and its version.
 	Bridge(ctx context.Context) (installed bool, version string)
+	// DDIPresent: this computer has the developer disk image Prepare mounts.
+	DDIPresent() bool
 	// Devices are the paired iPhones and those plugged in over USB.
 	Devices(ctx context.Context) []iphoneLink
 	// Call runs one of the bridge's operations (device_info, screenshot, tap…) on a paired iPhone through its session
@@ -46,6 +48,7 @@ type iphoneHost interface {
 	Pair(device string) error
 	Forget(device string) error
 	Install(src iphone.InstallSource) error
+	Prepare(device string) error
 	Cancel()
 	Job() *iphoneJob
 }
@@ -62,6 +65,8 @@ type iphoneLink struct {
 	Info json.RawMessage
 	// DeveloperMode: what the iPhone last said of it, nil when it never did.
 	DeveloperMode *bool
+	// AutoPrepare: its owner prepared it once, so this computer mounts its developer disk image again by itself.
+	AutoPrepare bool
 }
 
 // iphoneJob is the host's pairing (or install) job; ErrorCode is the bridge's code for why it failed, shown as its
@@ -115,11 +120,13 @@ var (
 type noIPhones struct{}
 
 func (noIPhones) Bridge(context.Context) (bool, string) { return false, "" }
+func (noIPhones) DDIPresent() bool                      { return false }
 func (noIPhones) Devices(context.Context) []iphoneLink  { return nil }
 func (noIPhones) Connect(string) error                  { return errNoIPhoneBridge }
 func (noIPhones) Pair(string) error                     { return errNoIPhoneBridge }
 func (noIPhones) Forget(string) error                   { return errNoIPhoneBridge }
 func (noIPhones) Install(iphone.InstallSource) error    { return errNoIPhoneBridge }
+func (noIPhones) Prepare(string) error                  { return errNoIPhoneBridge }
 func (noIPhones) Cancel()                               {}
 func (noIPhones) Job() *iphoneJob                       { return nil }
 func (noIPhones) Call(context.Context, string, string, json.RawMessage) (json.RawMessage, error) {
@@ -148,6 +155,14 @@ var (
 		"download": "正在下载 iPhone 助手程序",
 		"verify":   "正在校验 iPhone 助手程序",
 		"install":  "正在安装 iPhone 助手程序",
+	}
+	iphonePrepareStep   = "正在准备这台 iPhone，大约一分钟"
+	iphonePrepareErrors = map[string]string{
+		"ddi_missing":            "这台电脑上没有 iPhone 需要的 Apple 开发者文件：先在这台 Mac 上从 App Store 装好 Xcode，再试一次",
+		"ddi_unsupported_device": "这台电脑上的 Apple 开发者文件不支持这台 iPhone 的 iOS 版本",
+		"tss_failed":             "没能从 Apple 拿到这台 iPhone 的签名：检查这台电脑的网络，再试一次",
+		"mount_failed":           "这台 iPhone 没能准备好：解锁后再试",
+		"timeout":                "准备这台 iPhone 超时了：解锁并保持亮屏，再试一次",
 	}
 	iphoneInstallErrors = map[string]string{
 		"download_failed":   "下载 iPhone 助手程序失败：检查这台电脑的网络，再试一次",
@@ -211,6 +226,8 @@ const (
 func Status(ctx context.Context) proto.IPhone {
 	p := proto.IPhone{Devices: []proto.IPhoneDevice{}}
 	p.Installed, p.Version = iphones.Bridge(ctx)
+	present := iphones.DDIPresent()
+	p.DDIPresent = &present
 	if !p.Installed {
 		p.Note, p.Code = iphoneNoteNoBridge, "bridge_missing"
 	} else {
@@ -231,11 +248,16 @@ func Status(ctx context.Context) proto.IPhone {
 	}
 	if j := iphones.Job(); j != nil {
 		p.Job = &proto.ComputerJob{Kind: j.Kind, State: j.State, Step: j.Step, Error: j.Error, Device: j.Device, Started: j.Started}
-		notes := iphoneNotes
-		if j.Kind == "install" {
-			notes = iphoneInstallErrors
+		n, ok := iphoneNotes[j.ErrorCode]
+		switch j.Kind {
+		case "install":
+			n, ok = iphoneInstallErrors[j.ErrorCode]
+		case "prepare":
+			if pn, pok := iphonePrepareErrors[j.ErrorCode]; pok {
+				n, ok = pn, true // else a code the phone's notes word (developer_mode_off, locked, …)
+			}
 		}
-		if n, ok := notes[j.ErrorCode]; ok {
+		if ok {
 			p.Job.Error = n // else the job's own words
 		}
 		// A pairing's step in words the hub translates, and what it waits for at the phone as a code; once failed, why.
@@ -254,6 +276,8 @@ func Status(ctx context.Context) proto.IPhone {
 			if n, ok := iphoneInstallSteps[j.Stage]; ok {
 				p.Job.Step = n
 			}
+		case j.State == "running" && j.Kind == "prepare":
+			p.Job.Step = iphonePrepareStep
 		case j.State == "failed":
 			p.Job.Code = cmp.Or(j.ErrorCode, "failed")
 		}
@@ -282,7 +306,7 @@ var iphoneNeeds = []string{"screenshot", "input"}
 // latest, or (fresh, or when it has none) asked now.
 func iphoneProbeDevice(ctx context.Context, l iphoneLink, fresh bool) proto.IPhoneDevice {
 	d := proto.IPhoneDevice{ID: l.ID, Name: l.Name, ProductType: l.ProductType, IOS: l.IOS, Paired: l.Paired, USB: l.USB,
-		State: l.State, Transport: l.Transport, DeveloperMode: l.DeveloperMode}
+		State: l.State, Transport: l.Transport, DeveloperMode: l.DeveloperMode, AutoPrepare: l.AutoPrepare}
 	switch {
 	case !l.Paired && l.USB:
 		d.Note, d.Code = iphoneNoteUSB, "usb_unpaired"
@@ -547,8 +571,11 @@ func Pair(ctx context.Context, method string, params json.RawMessage) (proto.IPh
 		return proto.IPhone{}, fmt.Errorf("iphone.%s: need a device", method)
 	}
 	start := iphones.Pair
-	if method == "forget" {
+	switch method {
+	case "forget":
 		start = iphones.Forget
+	case "prepare":
+		start = iphones.Prepare
 	}
 	if err := start(p.Device); err != nil {
 		return proto.IPhone{}, err

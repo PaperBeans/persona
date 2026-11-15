@@ -132,11 +132,12 @@ answer on.
 
 ## Interfaces
 
-- `GET /api/v1/machines/{mid}/iphone` → `IPhone` `{enabled, installed, version?, devices: [{id, name, product_type?, ios?, paired, usb?, state?, transport?, connected, locked, capabilities?, ready, note?, code?, developer_mode?, allowed}], note?, code?, checked?, job?}` (fields are block C's, `proto/iphone.go`);
+- `GET /api/v1/machines/{mid}/iphone` → `IPhone` `{enabled, installed, version?, devices: [{id, name, product_type?, ios?, paired, usb?, state?, transport?, connected, locked, capabilities?, ready, note?, code?, developer_mode?, auto_prepare?, allowed}], note?, code?, ddi_present?, checked?, job?}` (fields are block C's, `proto/iphone.go`);
   `PUT` `{"enabled": bool}` is the computer's switch. Extension off, or a computer the bridge doesn't run on → 404.
-- `POST /api/v1/machines/{mid}/iphone/{pair|forget|cancel|install}` `{"device"?}`: pair an iPhone plugged into this computer (progress in `job`),
+- `POST /api/v1/machines/{mid}/iphone/{pair|forget|cancel|install|prepare}` `{"device"?}`: pair an iPhone plugged into this computer (progress in `job`),
   forget one's pairing record, cancel a pairing (no device), install the device bridge from the release (no device;
-  [iphone-bridge.md](iphone-bridge.md), "Releases"). Pairing and installing only once the computer is on (404); forget and cancel
+  [iphone-bridge.md](iphone-bridge.md), "Releases"), prepare an iPhone (its developer disk image, and from then on again by itself:
+  [iphone-pairing.md](iphone-pairing.md), "Preparing the phone"). Pairing, installing and preparing only once the computer is on (404); forget and cancel
   need only the extension on; no device 400; offline or an old node 409; no release build of the bridge for that
   computer 404, the release site away 502. The log never says which iPhone.
 - `GET /api/v1/iphone` → `{on, devices: [{…device, machines: [{id, name, enabled}], consented}]}`, every iPhone the computers reach, each once.
@@ -147,9 +148,9 @@ answer on.
   real iPhone never has one (only the simulator's bridge reads one), so it shows as `capabilities.ax_tree: false` with no
   note, and the core works from the screenshot by points, each input asked on the phone first (#3891);
   `iphone.call` `{device, session, op: status|look|do, args, approved?, timeout_ms?, confirm?, self_apps?, self_names?}` (`proto.IPhoneCall`) → `IPhoneResult`;
-  `iphone.pair` / `iphone.forget` / `iphone.cancel` `{device}` and `iphone.install` `{urls, size, sha256, binary_sha256}` → `IPhone`.
+  `iphone.pair` / `iphone.forget` / `iphone.prepare` / `iphone.cancel` `{device}` and `iphone.install` `{urls, size, sha256, binary_sha256}` → `IPhone`.
   Through `plugin.node.call` to the built-in
-  program `iphone` (methods `status`, `call`, `pair`, `forget`, `cancel`, `install`) on a node that lists it, by these names otherwise.
+  program `iphone` (methods `status`, `call`, `pair`, `forget`, `prepare`, `cancel`, `install`) on a node that lists it, by these names otherwise.
   `op: status` is the node's own answer; `look` and `do` go to block D's package.
   The node passes `confirm` to the core as `Request.Confirm`, and the core's `Response` into `IPhoneResult` as it is:
   `approval_summary` is the core's `Approval` object (`proto.IPhoneApproval` mirrors it field for field) and
@@ -164,13 +165,19 @@ answer on.
 Every note comes with its reason as a `code`, so an app (the iPhone's guided setup) acts on the state without reading
 the words, and an older node that sends none still shows its note:
 
-- The computer's: `bridge_missing` (no device bridge here), `none_paired` (nothing paired with it).
+- The computer's: `bridge_missing` (no device bridge here), `none_paired` (nothing paired with it); and `ddi_present`,
+  whether it has the developer disk image Prepare mounts (Xcode's on a Mac, or `PERSONA_IPHONE_DDI_DIR`): a Mac without
+  Xcode and a Linux computer don't, and the guided setup says so before Prepare.
 - Each iPhone's: `usb_unpaired` (on the cable, not paired), `connecting`, then the bridge's or the session's code
   (`developer_mode_off`, `ddi_not_mounted`, `unsupported` (input below iOS 27), `locked`, `unreachable`, `pairing_rejected`,
   `tunnel_failed`, `timeout`, …), or `failed` when there is no better word. `developer_mode` is what the iPhone last said of
   Developer Mode: at pairing, then whenever it answered (it follows a phone that turned it on after pairing).
 - The install job's (`job.kind` `install`): its `step` the stage in the user's words (download, verify, install); once
   failed, `job.code` `download_failed`, `checksum_mismatch`, `bad_helper`, `install_failed` or `timeout`.
+- The prepare job's (`job.kind` `prepare`, with `job.device`): once failed, `job.code` `ddi_missing` (this computer has no
+  developer disk image), `ddi_unsupported_device`, `tss_failed` (Apple's signing server), `mount_failed`,
+  `developer_mode_off`, `locked` or `timeout`. Each iPhone's `auto_prepare` says its owner prepared it once, so its computer
+  mounts the image again by itself after a restart.
 - The pairing job's (`job.code`, with `job.device`, the iPhone it is for): while it runs, what it waits for from the person
   at the phone (`trust_pending`: tap Trust and enter the passcode; `locked`: unlock it; empty while it waits for nothing),
   its `step` the matching note; once failed, why (`timeout` when nobody tapped Trust in its 3 minutes, `pairing_rejected`,

@@ -118,3 +118,18 @@ func TestInstallPutsTheReleasesBridgeInPlace(t *testing.T) {
 		t.Fatalf("no build: %v", err)
 	}
 }
+
+// TestDDIPresent: the developer disk image is there when its folder holds BuildManifest.plist (#8199).
+func TestDDIPresent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(DDIDirEnv, dir)
+	if DDIPresent() {
+		t.Fatal("an empty folder")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "BuildManifest.plist"), []byte("<plist/>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !DDIPresent() {
+		t.Fatal("a folder with the manifest")
+	}
+}

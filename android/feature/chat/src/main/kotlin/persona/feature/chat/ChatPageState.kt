@@ -51,6 +51,9 @@ import persona.core.domain.sort.canInterrupt
 import persona.core.domain.sort.canSend
 import persona.core.domain.sort.canTerminal
 import persona.core.domain.sort.canTypeClaudeCommands
+import persona.core.domain.sort.fromSide
+import persona.core.domain.sort.isFoldedSide
+import persona.core.domain.sort.sideHome
 import persona.core.domain.sort.shownCloseout
 import persona.feature.chat.media.ChatImageViewer
 import persona.core.domain.rewind.Rewind
@@ -96,7 +99,11 @@ internal fun rememberChatPageRequests(key: SessionKey, chrome: ChatChromeBinding
     val taskAgentSessionsState = (tasks?.agentSessions ?: remember {
         kotlinx.coroutines.flow.MutableStateFlow(emptyMap<SessionKey, Session>())
     }).collectAsStateWithLifecycle()
-    val requests = taps.shown(allRequests).filter { it.homeKey == key || it.homeKey in taskKeys }
+    val features = chrome.connection?.lastHello?.features ?: LocalHubFeatures.current
+    val sideFold = persona.core.domain.sort.SideFold.FEATURE in features
+    val sidePage = sideFold && (sessionList.firstOrNull { it.key == key } ?: chrome.lookupRows.firstOrNull { it.key == key })
+        ?.isFoldedSide == true
+    val requests = chatPageCards(taps.shown(allRequests), key, taskKeys, sideFold, sidePage)
         .sortedBy { if (it.id == chrome.requestId) 0 else 1 }
     // The cards above the composer, as iOS's footer has them. An Agent's chat: the stack holds every card it waits on.
     // Persona's conversation: the oldest question of its tasks is a card of its own above the Needs you / In progress
@@ -137,6 +144,20 @@ internal class ChatPageRequests(
     val messages: List<OutboxMessage>,
     val composerDeliveries: State<Map<String, ComposerDelivery>>,
 )
+
+/**
+ * The cards a chat shows: those whose home is this chat's session ([Interaction.homeKey]) or one of its tasks'. With side
+ * folding ([sideFold], #7944) a side's own card shows in its parent's chat ("From side session · …") and in the side's
+ * own chat ([sidePage]), where it is the side's own card; a card from a row folded through a side ([Interaction.foldedSide])
+ * belongs to that side's chat alone. The parent's page is covered while a side's chat is open, so a card never shows twice.
+ */
+internal fun chatPageCards(cards: List<Interaction>, key: SessionKey, taskKeys: Set<SessionKey>, sideFold: Boolean,
+    sidePage: Boolean): List<Interaction> = when {
+    !sideFold -> cards.filter { it.homeKey == key || it.homeKey in taskKeys }
+    sidePage -> cards.filter { it.sessionKey == key || it.sideHome == key }
+        .map { if (it.sessionKey == key && it.fromSide) it.copy(foldedUnder = null, foldedAs = null) else it }
+    else -> cards.filter { it.homeKey == key && it.foldedSide.isNullOrBlank() || it.homeKey in taskKeys }
+}
 
 /** ChatPage's links and mentions: port links, the @ menu, the cards host, call jumps and tool names (moved as is). */
 @Composable
