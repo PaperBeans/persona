@@ -89,6 +89,7 @@ type fakeHub struct {
 	refuseNotify  error            // notify.request is the hub's refusal (answered) while set
 	notifyResult  NotifyResult     // the held/reason answer notify.request returns once it succeeds
 	events        []string         // the type of each event the apps were sent
+	onBroadcast   func()           // runs once an event is recorded, while Broadcast has not returned yet
 	liveEvents    []map[string]any // the meeting_live events as sent
 	snaps         []Snapshot
 
@@ -679,10 +680,13 @@ func (f *fakeHub) Broadcast(_ context.Context, b Broadcast) {
 		_ = json.Unmarshal(b.Message, &live)
 		f.liveEvents = append(f.liveEvents, live)
 	}
-	receipt := f.readHooks.receipt
+	receipt, during := f.readHooks.receipt, f.onBroadcast
 	f.mu.Unlock()
 	if receipt != nil && ev.Type == "assistant_feed" && ev.Item.Kind == feedReceipt {
 		receipt(ev.Item)
+	}
+	if during != nil {
+		during()
 	}
 }
 
@@ -937,7 +941,7 @@ func (m *memStore) PutSettings(ctx context.Context, values map[string]any) error
 // newTestService is an assistant on f with an in-memory store.
 // testLogf is t.Logf until the test ends, nothing after: the service's goroutines (a run's watcher, a snapshot being
 // published) can still log when the test is over, and t.Logf then panics and fails the whole package.
-func testLogf(t *testing.T) func(string, ...any) {
+func testLogf(t testing.TB) func(string, ...any) {
 	var mu sync.Mutex
 	done := false
 	t.Cleanup(func() {
@@ -1001,17 +1005,23 @@ func kbEng(t *testing.T, s *Service) *kb.Engine {
 // newStorelessService is an assistant on f with no database: its state lives in memory only.
 func newStorelessService(t *testing.T, f *fakeHub) *Service {
 	t.Helper()
+	return storelessService(t, f)
+}
+
+// storelessService is newStorelessService for a benchmark too.
+func storelessService(t testing.TB, f *fakeHub) *Service {
+	t.Helper()
 	return withSettings(t, f, New(Options{Hub: f, Logf: testLogf(t)}))
 }
 
 // newServiceOn is an assistant on f with st as its database.
-func newServiceOn(t *testing.T, f *fakeHub, st Store) *Service {
+func newServiceOn(t testing.TB, f *fakeHub, st Store) *Service {
 	t.Helper()
 	return withSettings(t, f, New(Options{Hub: f, Store: func() Store { return st }, Logf: testLogf(t)}))
 }
 
 // withSettings saves f.settings as s's own (none: s keeps what it has), and gives the hub's hello the fake model.
-func withSettings(t *testing.T, f *fakeHub, s *Service) *Service {
+func withSettings(t testing.TB, f *fakeHub, s *Service) *Service {
 	t.Helper()
 	f.fakeModel(t)
 	// These tests are about what a plan does once it exists; what task_plan requires of a brief is task_brief_test.go's,
@@ -1027,7 +1037,7 @@ func withSettings(t *testing.T, f *fakeHub, s *Service) *Service {
 }
 
 // setSettings changes s's own settings, and the hub is told (the snapshot's profile).
-func setSettings(t *testing.T, s *Service, fn func(*Settings)) {
+func setSettings(t testing.TB, s *Service, fn func(*Settings)) {
 	t.Helper()
 	if _, err := s.updateSettings(context.Background(), func(v *Settings) error { fn(v); return nil }); err != nil {
 		t.Fatal(err)
@@ -1202,7 +1212,7 @@ func launcherAgent(name string) string {
 // itself): a Messages API that answers a tab's name with f.tabReply, the Agents triage with f.triage and the done
 // judge with f.judge (each an error when empty), and the others with f.replies in turn (an error with noModel),
 // keeping what was asked.
-func (f *fakeHub) fakeModel(t *testing.T) {
+func (f *fakeHub) fakeModel(t testing.TB) {
 	t.Helper()
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1335,5 +1345,22 @@ func setModel(t *testing.T, s *Service, purpose string, b ModelBinding) {
 	r := modelRecordOf(t, s, purpose)
 	if err := s.saveModel(context.Background(), purpose, modelRecord{Revision: r.Revision, Binding: b}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// todosTold waits (real time) until no {"type":"todos"} waits for the rest of its write (todosPushSoon): the events
+// the apps were sent so far include every to-do change made so far.
+func todosTold(t testing.TB, s *Service) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(2 * time.Millisecond) { // sleep-ok: waits for the settle timer
+		s.tpush.mu.Lock()
+		n := s.tpush.sending
+		s.tpush.mu.Unlock()
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a todos event still waits after 5 s")
+		}
 	}
 }

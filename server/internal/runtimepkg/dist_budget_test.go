@@ -31,9 +31,12 @@ import (
 // older than what Paseo said meanwhile, the archive read again, live text ended, archived agents' deletions, a
 // keepalive that sleep does not trip (#8129: 463,455 B over main's 461,660 B, with main's 5 B of headroom). Raised by
 // 2,257 B for the Paseo bridge drawing what another agent hands one (a message, a child's notice, a schedule's run) as a
-// message, a task note or a notice (#8220: 465,712 B over main's 463,455 B, with main's 5 B of headroom).
+// message, a task note or a notice (#8220: 465,712 B over main's 463,455 B, with main's 5 B of headroom). Raised by
+// 4,444 B for the Paseo bridge's starts that answer before Paseo is done or lose a connection (#8130: rows kept as
+// starting, late refusals shown and logged, idempotent creation asked again after a reconnect, imports without a hard
+// limit; 470,156 B over main's 465,712 B, with main's 5 B of headroom).
 func TestDistBudget(t *testing.T) {
-	const budget = 465_717
+	const budget = 470_161
 	_, out := generateIntegrations(t)
 	entries, err := os.ReadDir(out)
 	if err != nil {

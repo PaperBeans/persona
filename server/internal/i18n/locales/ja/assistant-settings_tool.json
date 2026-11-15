@@ -46,6 +46,8 @@
   "minutes_applied": "議事録の保存期間を{saved}に設定しました。現在の有効値は{after}です。文字起こしは引き続き録音の保存期間に従います。",
   "title_main_background_folded": "バックグラウンドのラウンドを折りたたむ",
   "change_main_background_folded": "「バックグラウンドのラウンドを折りたたむ」：{before} → {after}",
+  "title_recent_task_chats": "最近の一覧に定期タスクのチャットを表示",
+  "change_recent_task_chats": "「最近の一覧に定期タスクのチャットを表示」：{before} → {after}",
   "title_standing_authorizations": "継続的な承認",
   "title_meeting_transcription_default": "会議の文字起こし",
   "change_meeting_transcription_default": "会議の文字起こし：{before} → {after}。これから開始する会議に適用されます。ハブモードでは会議の音声がハブの文字起こしサービスに送信され、議事録の作成後にハブから削除されます。",

@@ -437,10 +437,19 @@ pane that cannot be identified uses neither a stale pane binding nor directory-b
 
 herdr reports blocked when Codex has an unanswered async question, so `agent prompt` rejects it (`agent_blocked`). Codex messaging handles this by pasting + Enter itself (after confirming the input is empty).
 
+Terminal messaging confirms that the composer is recognized and empty after either the host prompt or the blocked-session
+fallback, waiting up to 12 seconds for consumption. An unchanged or edited draft, a dialog, an unknown screen, a failed
+read, or cancellation cannot confirm delivery: the result is `delivered: "unknown"`, not success. The check only reads;
+it never clears input, pastes again, or retries Enter. The existing client message ID keeps retries from typing twice.
+Even an exact match with earlier assistant text does not authorize submitting a pre-existing draft: text equality alone
+cannot prove ownership or that an earlier message was not already delivered. App-server and Botmux sends retain their
+own receipt paths; Botmux has no readable terminal composer.
+
 ### Tests
 
 - Unit tests: `screen/codex_test.go` (recorded screens, 0.153.4 / 0.163.0, `screen/testdata/codex-*`), `transcript/codexask_test.go` (rollout recognition, both schemas,
   partial answers, direct typing, old desktop replies, internal fork), `node/codexask_test.go` (keys and input for every UI state on fake herdr, no keys on refusal),
+  `node/codex_submit_test.go` (terminal submission confirmation, uncertain outcomes, retry deduplication and matching-draft preservation),
   `hub/codexcards_test.go` (list additions / removals, restoring cards after failed answers, silent reconnect, push titles).
 - Real Codex: `scripts/test/test-codex.sh` (`docs/operations/testing.md`, "Codex integration testing") starts Codex in isolated herdr, asks questions and requests approvals, with one case per UI state and multiple turns each.
 - App: `CodexCardsTests` (mock `MOCK_CODEX=1`), light / dark screenshots.

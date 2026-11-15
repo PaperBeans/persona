@@ -308,7 +308,9 @@ struct LinkSheet: View {
 // MARK: - Web views
 
 /// WKWebViews kept warm: the links of the latest answers load in the background, so opening one shows a finished
-/// page. All share the default (on-disk) website data store, so assets and logins carry over.
+/// page. A link the user opens loads in the default (on-disk) website data store, so its assets and logins carry over.
+/// A preloaded one loads in an in-memory store instead, seeded with the default store's cookies so signed-in sites
+/// still preload signed in: preloads of pages nobody opened had filled WebKit's disk cache (760 MB on one phone, #8352).
 /// On iPhone, iPad and Vision Pro a view serves one opening of its link: once a sheet has shown it, the pool lets it go
 /// (`release`, from `PooledWebView`), so a later tap on the link starts on the link's own page with no back/forward
 /// history, not where the last opening was left (#4074).
@@ -326,6 +328,15 @@ final class WebViewPool {
         #endif
         return c
     }()
+    /// Preloads' store: in memory only, gone with the process.
+    private let preloadConfig: WKWebViewConfiguration = {
+        let c = WKWebViewConfiguration()
+        c.websiteDataStore = .nonPersistent()
+        #if os(iOS) || os(visionOS)
+        c.allowsInlineMediaPlayback = true
+        #endif
+        return c
+    }()
 
     /// A view for this url, already loading (or loaded) if it was preloaded. A machine's dev server (the phone's
     /// loopback) loads again when its view is taken again: its page changes as the agent works, and the old view
@@ -337,7 +348,12 @@ final class WebViewPool {
             if Self.isLoopback(url), !v.isLoading { v.load(Self.request(url)) }
             return v
         }
-        let v = SelectableWebView(frame: .zero, configuration: config)
+        return make(url, configuration: config)
+    }
+
+    private func make(_ url: URL, configuration: WKWebViewConfiguration) -> SelectableWebView {
+        let key = url.absoluteString
+        let v = SelectableWebView(frame: .zero, configuration: configuration)
         #if os(iOS) || os(visionOS)
         v.scrollView.showsVerticalScrollIndicator = false
         v.scrollView.showsHorizontalScrollIndicator = false
@@ -359,6 +375,9 @@ final class WebViewPool {
     func release(_ v: WKWebView, for url: URL) {
         let key = url.absoluteString
         guard views[key] === v else { return }
+        // A sign-in done on a preloaded page is kept: its cookies go to the default store.
+        let store = v.configuration.websiteDataStore
+        if store === preloadConfig.websiteDataStore { Task { await Self.copyCookies(from: store, to: .default()) } }
         views[key] = nil
         order.removeAll { $0 == key }
         if !Self.isLoopback(url) { _ = view(for: url) }
@@ -383,7 +402,17 @@ final class WebViewPool {
     /// Starts loading links that may be opened soon (not the ones a native Feishu view opens).
     func preload(_ urls: [URL]) {
         let lark = AppModel.shared.larkFeatures
-        for u in urls.prefix(3) where views[u.absoluteString] == nil && FeishuLinks.route(u, lark: lark) == nil { _ = view(for: u) }
+        let wanted = urls.prefix(3).filter { views[$0.absoluteString] == nil && FeishuLinks.route($0, lark: lark) == nil }
+        guard !wanted.isEmpty else { return }
+        Task {
+            await Self.copyCookies(from: .default(), to: preloadConfig.websiteDataStore)
+            for u in wanted where views[u.absoluteString] == nil { _ = make(u, configuration: preloadConfig) }
+        }
+    }
+
+    /// Every cookie of one store set in another (an existing cookie of the same name, domain and path is replaced).
+    private static func copyCookies(from: WKWebsiteDataStore, to: WKWebsiteDataStore) async {
+        for c in await from.httpCookieStore.allCookies() { await to.httpCookieStore.setCookie(c) }
     }
 
     private func touch(_ key: String) {

@@ -31,6 +31,18 @@ class ModelsTest {
         assertEquals(0, s.pendingInteractions)
     }
 
+    @Test fun suggestionRiskDecodesAndAnAbsentFieldIsSafeByDefault() {
+        for ((field, expected) in mapOf("\"suggestion_risky\":true" to true,
+            "\"suggestion_risky\":false" to false, "" to false)) {
+            val comma = if (field.isEmpty()) "" else ","
+            val session = JsonCodec.decodeFromString<Session>(
+                """{"session_id":"s","suggestion":"Review the plan"$comma$field}""",
+            )
+            assertEquals(field.ifEmpty { "absent" }, expected, session.suggestionRisky)
+            assertEquals("Review the plan", session.suggestion)
+        }
+    }
+
     @Test fun zeroTimeIsUnset() {
         assertNull(parseTime("0001-01-01T00:00:00Z"))
         assertTrue(parseTime("2026-10-29T15:05:32.42Z") != null)

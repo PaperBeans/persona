@@ -112,6 +112,27 @@ struct AssistantActionBarTests {
         #expect(r.shelved.isEmpty)
     }
 
+    /// Handed-out tasks that finished in the last day and were not opened since are a group under In Progress, newest
+    /// first and not counted (#8237); one seen since, one closed days ago and a to-do made by hand are not in it.
+    @Test func justFinishedTasksAreAnUncountedGroupUnderInProgress() {
+        var older = todo("older", agent: "a", done: true)
+        older.doneAt = now - 3 * 60
+        let newer = todo("newer", agent: "b", done: true)
+        var seen = todo("seen", agent: "c", done: true)
+        seen.seenAt = now
+        var stale = todo("stale", agent: "d", done: true)
+        stale.doneAt = now - 48 * 3600
+        let byHand = todo("byHand", agent: "e", origin: "", done: true)
+        let r = split([older, newer, seen, stale, byHand], ["a", "b", "c", "d", "e"].map { session($0, "idle") })
+        #expect(ids(r.justFinished) == ["task:newer", "task:older"])
+        #expect(r.needsYou.isEmpty && r.running.isEmpty && r.shelved.isEmpty)
+        let content = ActionTrayContent(r)
+        #expect(content.justFinished.map(\.id) == ["task:newer", "task:older"])
+        #expect(content.count(.running) == 0)
+        // another conversation lists only the finished work it handed out
+        #expect(ids(split([newer], [session("b", "idle")], conversation: "side").justFinished).isEmpty)
+    }
+
     private func plan(_ id: String, _ state: TaskPlan.State, tasks: Int, at: Double) -> TaskPlan {
         TaskPlan(id: id, conversation: "main", tasks: (0..<tasks).map { PlanTask(title: "task \($0)", prompt: "p", machine: "mac", cwd: "/demo") },
                  state: state, createdAt: now - at * 60)

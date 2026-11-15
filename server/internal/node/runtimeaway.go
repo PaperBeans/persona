@@ -61,10 +61,12 @@ func (b *runtimeRegistry) leftRows(h *runtimeConn, id string) {
 }
 
 // awayRow is a row of a runtime that left as the node keeps listing it: not running, without the work the runtime
-// said it ran (queued messages, the agents it created), and with none of its controls but reading and sending (a
-// message is refused as away, which says why); a child that waited for the user is under its creator again.
+// said it ran (queued messages, the agents it created) or a takeover it had under way (starting, or failed: the
+// conversation is the transcript's, #8130), and with none of its controls but reading and sending (a message is
+// refused as away, which says why); a child that waited for the user is under its creator again.
 func awayRow(s proto.Session) proto.Session {
 	s.Status, s.Queued, s.Background = proto.StatusOffline, nil, nil
+	s.Starting, s.StartError = false, ""
 	if p := s.AskingParentSessionID(); p != "" {
 		s.SetAskingParentSessionID("")
 		s.IsSubagent, s.ParentSessionID = true, p

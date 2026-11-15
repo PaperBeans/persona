@@ -452,6 +452,7 @@
         "frames" : 15,
         "lateShare" : 1,
         "queueFalling" : false,
+        "queueLastMs" : 351,
         "queueP50Ms" : 288,
         "queueP95Ms" : 342,
         "queueRising" : true,

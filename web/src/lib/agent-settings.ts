@@ -5,7 +5,7 @@ import type { Machine } from "./types";
 
 // ── agent settings ──
 
-export type AgentKind = "claude" | "codex" | "agy" | "omp";
+export type AgentKind = "claude" | "codex" | "agy" | "omp" | "grok";
 
 export type SettingValue = boolean | string | null;
 
@@ -46,6 +46,12 @@ export const AGENT_TEXT: Record<AgentKind, { name: string; path: string; file: s
     path: "omp-settings",
     file: "~/.omp/agent/config.yml",
     footer: t("lib-agent-settings.omp_footer"),
+  },
+  grok: {
+    name: "Grok",
+    path: "grok-settings",
+    file: "~/.grok/config.toml",
+    footer: t("lib-agent-settings.grok_footer"),
   },
 };
 

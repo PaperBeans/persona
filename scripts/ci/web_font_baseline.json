@@ -99,7 +99,7 @@
  "web/src/views/assistant/Readiness.tsx": 15,
  "web/src/views/assistant/Routines.tsx": 18,
  "web/src/views/assistant/Sent.tsx": 2,
- "web/src/views/assistant/Supervision.tsx": 9,
+ "web/src/views/assistant/Supervision.tsx": 5,
  "web/src/views/assistant/TaskBoard.tsx": 5,
  "web/src/views/assistant/TaskBrief.tsx": 23,
  "web/src/views/assistant/TaskEditor.tsx": 21,

@@ -2,7 +2,7 @@ import { backgroundWork, taskBackgroundWork, type BackgroundWork } from "./backg
 import { cardDismissed, cardFiled, cardSent, startFailure, type FeedItem, type TaskPlan } from "./feed";
 import { cardBucket, taskCardSlots, type TaskCardMetadata } from "./task-cards";
 import { reviewState } from "./supervision";
-import { supersededFailedStarts } from "./todo-triage";
+import { supersededFailedStarts, triage } from "./todo-triage";
 import { dockAgents, makeSessionLookup, openAsk, todoRank, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 import { byTime } from "./times";
 import { homeKey } from "./folded-rows";
@@ -39,6 +39,10 @@ export interface AssistantEntries {
   /** Open tasks with no progress for 48 hours and nothing running (the To-dos page's shelved, #3331): folded under
    *  In progress, not counted. */
   shelved: RunningItem[];
+  /** Handed-out tasks that finished in the last 24 hours and that the owner has not opened since (the To-dos page's Just
+   *  finished, todo-triage), newest first: a group under In progress, not counted (#8237). How a task ended is told
+   *  here, not by a card in the chat. */
+  justFinished: RunningItem[];
 }
 
 export interface AssistantEntriesInput {
@@ -122,6 +126,7 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
   const deciding: { item: NeedsYouItem; rank: number; at: string }[] = [];
   const open: { item: RunningItem; rank: number; at: string }[] = [];
   const shelved: { item: RunningItem; at: string }[] = [];
+  const finished: { item: RunningItem; at: number }[] = [];
   const folded = new Set<string>();
   const slots = taskCardSlots(conversation, input.cards ?? [], feed, plans, todos, isMain);
   const activeAgents = (todo: Todo) => (todo.done_at ? [] : (todo.agents ?? []).filter((a) => !a.released_at));
@@ -168,7 +173,12 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     // a parked task waits on purpose (#3804): with the tasks in progress however long it has been still, never folded away
     else if (bucket === "open" || reviewState(todo) === "parked") open.push({ item: { kind: "task", key, card, todo, status, activity: taskBackgroundWork(todo, lookup), countsOpen }, rank: todoRank(todo, status), at: card.at });
     else if (bucket === "shelved") shelved.push({ item: { kind: "task", key, card, todo, status, countsOpen: false }, at: card.at });
-    else continue;
+    else {
+      // finished work a conversation handed out (a failed start a related to-do finished is history, not news)
+      const tr = triage(todo, lookup, now, input.restored?.get(todo.id) ?? 0, superseded.has(todo.id));
+      if (tr.section === "just_done" && status !== "failed" && todo.origin) finished.push({ item: { kind: "task", key, card, todo, status, countsOpen: false }, at: tr.last });
+      continue;
+    }
     for (const agent of active) folded.add(sessionKey(agent.machine_id, agent.session_id));
   }
 
@@ -199,6 +209,7 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     ],
     running: [...open.sort(newest).map((row) => row.item), ...agentsRunning],
     shelved: shelved.sort(newest).map((row) => row.item),
+    justFinished: finished.sort((a, b) => b.at - a.at).map((row) => row.item),
   };
 }
 

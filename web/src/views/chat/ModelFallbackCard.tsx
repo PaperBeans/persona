@@ -50,8 +50,19 @@ export function ModelFallbackCard({ session, headless, onNewMain }: { session: S
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           {headless ? (
             <>
-              <span className="font-semibold text-ink">{v.pending ? t("chat-modelfallback.pending_title") : t("chat-modelfallback.plain_card", { model: replyModelName(v.fallback) })}</span>
+              <span className="font-semibold text-ink">
+                {v.pending
+                  ? t("chat-modelfallback.pending_title")
+                  : v.cause
+                    ? t("chat-modelfallback.plain_card_cause", { model: replyModelName(v.fallback), cause: v.cause })
+                    : t("chat-modelfallback.plain_card", { model: replyModelName(v.fallback) })}
+              </span>
               {v.pending && v.target && <span className="text-ink">{t("chat-modelfallback.pending_target", { model: replyModelName(v.target) })}</span>}
+              {v.returning && (
+                <span className="text-ink" data-testid="model-fallback-returning">
+                  {t("chat-modelfallback.returning", { model: replyModelName(v.returning) })}
+                </span>
+              )}
               <details data-testid="model-fallback-details" className="text-ink-3">
                 <summary className="cursor-pointer select-none">{t("chat-modelfallback.details")}</summary>
                 <div className="mt-1 flex flex-col gap-1">{facts}</div>

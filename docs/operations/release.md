@@ -524,6 +524,21 @@ A private configuration has only these fields, with no secrets:
   `releases/latest/download` never sees a manifest whose files are not there yet.
 - A receipt that carries `android.json` (the Android platform's) must ship the
   APK it names, at its size and sha256, for the tag's version.
+- Windows CLI bundles (`Persona-<version>-windows-<arch>.zip`) also require a
+  native verification report before upload (#8338). On Windows of that
+  architecture, run `python scripts/operations/windows_release.py --archive
+  <archive.zip> --version <version> --build <build>`. It runs the bundled
+  `persona-link version`, `personad version -v`, and `personad node-update-check`
+  with time limits, without installing or starting services. Success writes
+  `<archive-stem>.verification.json` beside the ZIP; failure removes a previous
+  report. Include the ZIP, report and `BUILD.json` or `latest.json` in the
+  private artifact receipt. The coordinator checks the requested version,
+  build, command results, ZIP digest and executable digests before any upload.
+  This report is output from the trusted release pipeline, preventing stale or
+  mismatched verification; it is not a signed attestation against a malicious
+  publisher. Cross-compilation or a matching build number alone does not prove
+  the Windows programs report the intended version. A missing Windows runner
+  is an explicit publication prerequisite, not a passed or skipped check.
 
 For the first release, merge this consumer's PR before pushing `v0.1.0` from
 the merged `main` commit. The public workflow creates the Release and image;
@@ -587,7 +602,11 @@ removes `app/build/outputs/apk/release` and `mapping/release` before the build, 
 signed. After `:app:assembleRelease` and before the APK is copied for signing, it runs `scripts/release/check_android_shrink.py`
 on it and on R8's output in `app/build/outputs/mapping/release`; any class, constructor or method that Android or the app
 reaches only by name and that R8 removed, and any exception, the app's or a library's, that R8 merged into another class,
-fails the build, so nothing is signed or published. It then keeps R8's `mapping.txt` gzipped as
+fails the build, so nothing is signed or published. It also fails when any method grows past 10,000 dex code units,
+which ART would then leave interpreted, the libraries' included because R8 merges classes across packages; a method in
+`scripts/release/known_oversized_methods.txt` (one full signature per line) only warns while it stays at or below the
+size recorded there, and one between 9,000 and 10,000 warns as the next split's deadline
+(docs/android/android.md "Release shrinking"). It then keeps R8's `mapping.txt` gzipped as
 `runs/<source>/mapping-<unsigned sha256>.txt.gz` (about 12 MB), which `retrace` needs for frames from optimized code. Before
 the first shrunk or optimized release, install it on a phone and
 open pairing, a chat with a formula, the Inbox, Settings, a notification action, the home-screen widget and the Quick Settings

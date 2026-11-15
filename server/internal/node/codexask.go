@@ -561,6 +561,27 @@ func (n *Node) codexType(ctx context.Context, pane, text string, shows func(draf
 	return uncertain(n.sendKeys(ctx, pane, "enter"))
 }
 
+// codexSubmitted confirms that a terminal send left the composer, not just that the host accepted Enter.
+// A remaining draft or another view is never cleared, submitted again, or treated as proof of delivery.
+func (n *Node) codexSubmitted(ctx context.Context, pane string) error {
+	ctx, cancel := context.WithTimeout(ctx, codexConfirm)
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			return uncertain(fmt.Errorf("Codex submission was not confirmed; check the computer before sending again: %w", ctx.Err()))
+		case <-time.After(codexStep):
+		}
+		s, err := n.codexScreen(ctx, pane)
+		if err != nil {
+			return uncertain(err)
+		}
+		if s.View == screen.CodexComposer && s.Draft == "" {
+			return nil
+		}
+	}
+}
+
 // pastedRE is how Codex shows a long paste in its box.
 var pastedRE = lazyre.New(`^\[Pasted Content \d+ chars\]$`)
 

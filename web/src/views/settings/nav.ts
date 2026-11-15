@@ -8,7 +8,7 @@ import type { IconName } from "../../ui/icons";
 
 export type Tab = "general" | "persona" | "prompts" | "notifications" | "models" | "agents" | "channels" | "connectors" | "sources" | "extensions" | "shortcuts" | "devices" | "hub" | "managers" | "knowledge" | "avatar";
 export const TABS: Tab[] = ["general", "persona", "prompts", "notifications", "models", "agents", "channels", "connectors", "sources", "extensions", "shortcuts", "devices", "hub", "managers", "knowledge", "avatar"];
-export const AGENT_KINDS = ["claude", "codex", "agy", "omp"] as const;
+export const AGENT_KINDS = ["claude", "codex", "agy", "omp", "grok"] as const;
 export type AgentTab = (typeof AGENT_KINDS)[number];
 export type SettingsSection = "providers" | "model-config" | "translation" | AgentTab;
 // The tab whose page opens one of its items, and the query parameter that names it.
@@ -24,6 +24,7 @@ const LEGACY_TABS: Record<string, { tab: Tab; section: SettingsSection | null }>
   codex: { tab: "agents", section: "codex" },
   agy: { tab: "agents", section: "agy" },
   omp: { tab: "agents", section: "omp" },
+  grok: { tab: "agents", section: "grok" },
   translate: { tab: "general", section: "translation" },
   assistant: { tab: "persona", section: null },
   sent: { tab: "connectors", section: null },

@@ -4,7 +4,7 @@ import {
   AGENT_NOTICE, AUTO_ACCEPT_ROOTS, CANCELED_NOTE, ERROR_LEAD, ERROR_TEXT, FROM_SESSION, SCHEDULE_NOTICE, agentRoot, agentRow, archivedUnderOwnId, asksForTool,
   autoAcceptOf, codexThreadOf, backgroundOf, defaultProvider, effortFor, exitNote, interactionOf, launchersOf, linkedWorktree, modeBeforePlan,
   parentAgentId, paseoMode, promptKey, providerRoots, responseOf, rewindOf, rowStatus, projectSpaces, sameKindProvider, sessionIdOf, slotNameOf, spaceIdOf,
-  strayRecord, timelineItems, toolCall, transcriptOf, workspaceRow, paseoCheckouts,
+  startedByPersona, strayRecord, timelineItems, toolCall, transcriptOf, workspaceRow, paseoCheckouts,
 } from '../lib/map.js'
 import { agentSnapshot, autoAcceptFeature, entry, workspaceDescriptor } from './fake-paseo.js'
 
@@ -172,6 +172,19 @@ test("a row that is not Claude Code's lists the efforts its model takes, among P
   assert.equal(agentRow(grok, { roots }).efforts, undefined, 'Paseo has not said')
   const claude = agentSnapshot({ provider: 'my-claude', cwd: '/w/x', persistence: { sessionId: CLAUDE_SID, metadata: { provider: 'claude' } } })
   assert.equal(agentRow(claude, { roots, thinking: ['low', 'high'] }).efforts, undefined, "Claude Code's are the apps' own")
+})
+
+test("rows of agents Persona started or took over say so; an agent made in Paseo's app does not, nor one whose id the bridge only kept (#8130)", () => {
+  const roots = providerRoots(CONFIG)
+  const claude = (labels) => agentSnapshot({ provider: 'my-claude', cwd: '/w/proj', labels,
+    persistence: { provider: 'my-claude', sessionId: CLAUDE_SID, metadata: { provider: 'claude' } } })
+  const started = claude({ 'persona.session': 'bbbbbbbb-0000-4000-8000-000000000042' })
+  const takenOver = claude({ 'persona.session': CLAUDE_SID })
+  const own = claude({})
+  const kept = claude({ 'persona.session': 'cccccccc-0000-4000-8000-000000000003', 'persona.kept': '1' })
+  assert.deepEqual([started, takenOver, own, kept].map(startedByPersona), [true, true, false, false])
+  assert.deepEqual([started, takenOver, own, kept].map((a) => agentRow(a, { roots }).started_by_persona), [true, true, undefined, undefined])
+  assert.equal(startedByPersona(claude({ 'persona.session': '../x' })), false, 'not a session id the node takes')
 })
 
 test('an archived Codex conversation keeps a Persona-owned id, without changing Paseo-originated agents (#5129)', () => {

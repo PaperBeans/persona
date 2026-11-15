@@ -515,7 +515,7 @@ two sources (`server/internal/assistant/suggest_next.go`):
 Rules for the hub-made one:
 
 - **Switch**: `next_suggestions` in the assistant's settings (`GET/PUT /api/v1/assistant`, Settings › Persona on the web and Settings ›
-  Assistant on iOS/iPadOS), **off by default**. A native client keeps the value nil and hides the row when an older hub omits the field.
+  Assistant on iOS/iPadOS and Android), **off by default**. A native client keeps the value nil and hides the row when an older hub omits the field.
   Default in one sentence: no chat gets a model-made suggestion until you turn it on. Claude Code's own suggestion
   (`promptSuggestionEnabled`) is untouched by it.
 - **When**: once per turn, when a turn ends well (working to done or idle in the node's list) and an app has the chat open at that moment
@@ -529,11 +529,11 @@ Rules for the hub-made one:
 - **Risky suggestions** (either source): one that names a command, a path, a link, a secret-looking string or one of the risky actions
   of the Agents' safety boundary (`riskyWords`: delete, push, deploy, send…) carries `suggestion_risky: true`. The apps fill it in but
   show no one-tap send.
-- **Clients**: the web and iOS/iPadOS show the strip in Agent and assistant conversations, the main Persona conversation included,
+- **Clients**: the web, iOS/iPadOS and Android show the strip in Agent and assistant conversations, the main Persona conversation included,
   through their existing shared composer. A risky one has no one-tap send: iOS/iPadOS retains tap / Fill In and the preview but omits
-  Send Now, the VoiceOver direct-send action and its long-press-send hint; filling never sends, and the ordinary composer Send remains
-  available after review. Non-risky actions are unchanged. Android still shows the strip only where it did and does not read
-  `suggestion_risky` yet (follow-up issue).
+  Send Now, the VoiceOver direct-send action and its long-press-send hint; Android retains tap-to-fill but omits its long-press menu and
+  direct-send accessibility action. Filling never sends, and the ordinary composer Send remains available after review. Non-risky actions
+  are unchanged; Android treats an absent `suggestion_risky` as safe and keeps retained suggestion text and its risk from the same row.
 
 ## Main chat, knowledge base, and context flow
 
@@ -769,6 +769,7 @@ before the next message, Claude Code thinks the window is exceeded and auto-comp
 User selects "Compact context" in main-chat menu: `POST /api/v1/assistant/conversations/{id}/compact` → node `assistant.compact` (`node/assistant_compact.go`).
 
 - Same path as idle compaction: write `/compact` into an existing process, or start with `--resume` (chat's previous launcher / model); Codex uses `thread/compact/start`; runtime chats unsupported.
+  A guest conversation (a meeting's room too, which the manager compacts in long meetings: [meeting-minutes.md](meeting-minutes.md) "Long meetings: lean batches and compaction (#8253)") resumes as on any message, with its guest flags and settings from its record; one whose launcher runs another agent by now is refused, nothing started (#8253). The manager compacting a room sends `only_running: true`: a process that is not running is refused with `not_running` instead of being started only to be compacted (an older node ignores the field).
   Answering or already compacting returns 409, not queued: users can't see when a `/compact` queued behind a turn begins.
 - Progress lives in node session state (hub Postgres), sent with session lists as `compaction`: `running` → `done` on `compact_boundary` (Codex `thread/compacted` / `contextCompaction`);
   if turn `result` arrives first without a boundary, `failed` with Claude Code's original error (e.g. "Not enough messages to compact" for short chats);
@@ -1186,7 +1187,7 @@ the work events are kept.
 | --- | --- | --- |
 | Assistant answers agents' questions (`delegate`, `agents.delegate`) | Question cards a supervisor passed up to the owner with a recommendation (`ask_escalated`) that the owner answered once last week, with exactly that recommendation. Only a leader conversation's supervisor passes a question up, so without leader conversations this is always 0 | `agents.delegate` is off |
 | Standing authorizations (`standing_authorizations`, `assistant.standing_authorizations`) | The owner's go-aheads last week for merge, push or deploy-test (read as "A rule after the same answer three times" reads them) in a directory no grant covers, where they had given the same go-ahead before and never said no to it | Always; a covered directory is not counted |
-| Start directly (`task_trust`, `tasks.trust`) | Plans made last week that the owner started, every file-changing kind of which (same computer and directory) they had started before, never dismissed, and `tasks.trust` does not hold | Always; a trusted kind is not counted |
+| Start directly (`task_trust`, `tasks.trust`) | Plans made last week that the owner started, every file-changing kind of which (same computer and repository, or directory outside one) they had started before, never dismissed, and `tasks.trust` does not hold | Always; a trusted kind is not counted |
 | Triage: card for decisions (`triage_decide`, `agents.triage.decide`) | Stops waiting on the owner that only `decide` being off kept from being a card (not muted, no authorization link), and that went on by hand (`resumed` with `hand` `decide`) | The triage is on and `decide` is off |
 | Triage: continue after errors (`triage_auto_continue`, `agents.triage.auto_continue`) | Stops on a usage limit whose CLI does not go on by itself, which only `auto_continue` being off kept from being continued at the reset, and that went on by hand (`resumed` with `hand` `auto_continue`) | The triage is on and `auto_continue` is off |
 | Triage: wake on schedule (`triage_wake`, `agents.triage.wake`) | Stops waiting on something named (CI, a deploy, another agent) with no risky next step, which only `wake` being off kept from being woken, and that went on by hand (`resumed` with `hand` `wake`) | The triage is on and `wake` is off |

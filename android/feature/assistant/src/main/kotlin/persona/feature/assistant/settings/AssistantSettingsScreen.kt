@@ -140,6 +140,7 @@ private fun AssistantSettingsDetails(
             open = { part = it }, sheet = { sheet = it }, follow = { scope.launch { controller.setFollowPhone(it) } },
             quietTasks = { scope.launch { controller.setMainTasksQuiet(it) } },
             foldBackground = { scope.launch { controller.setMainBackgroundFolded(it) } },
+            nextSuggestions = { scope.launch { controller.setNextSuggestions(it) } },
             superviseOwn = { scope.launch { controller.setMainSupervisesOwnTasks(it) } },
             supervisorModel = onModelConfiguration?.let { open -> { open(BackgroundSupervisor.PURPOSE, owner) } },
             owner = owner, permission = { scope.launch { controller.setDefaultPermission(it) } })
@@ -213,6 +214,7 @@ private fun SettingsHome(
     follow: (Boolean) -> Unit,
     quietTasks: (Boolean) -> Unit = {},
     foldBackground: (Boolean) -> Unit = {},
+    nextSuggestions: (Boolean) -> Unit = {},
     superviseOwn: (Boolean) -> Unit = {},
     /** Opens the background supervisor's model (Settings › Models); null leaves the row out. */
     supervisorModel: (() -> Unit)? = null,
@@ -304,6 +306,14 @@ private fun SettingsHome(
                         leadingIcon = PhIcons.Stack, enabled = !state.busy) },
                 ))
                 item("background-caption") { Caption(stringResource(R.string.assistant_settings_background_folded_caption)) }
+            }
+
+            config.nextSuggestions?.let { suggestions ->
+                rows("next-suggestions", listOf(
+                    { JSwitchRow(stringResource(R.string.assistant_settings_next_suggestions), suggestions, nextSuggestions,
+                        leadingIcon = PersonaIcons.ai, enabled = !state.busy) },
+                ))
+                item("next-suggestions-caption") { Caption(stringResource(R.string.assistant_settings_next_suggestions_caption)) }
             }
 
             // #4927 / #5084: the background supervisor's off switch and its model, shown only by a hub that has it.

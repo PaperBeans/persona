@@ -179,6 +179,7 @@ func TestDirectCompletionEndsDecisionWithoutSending(t *testing.T) {
 						t.Fatal("the completed task is still on the pending board")
 					}
 				}
+				todosTold(t, e.s)
 				if e.todoOf("box", "s1") != "" || !strings.Contains(e.f.eventTypes(), "todos") {
 					t.Fatal("completion did not clear session decoration and notify clients")
 				}
@@ -237,6 +238,7 @@ func TestTodoAskChangesTellTheApps(t *testing.T) {
 	s, f, todo, _, _ := conclusionService(t, false)
 	waitsForReview(t, s, f, todo.ID, "查了，做不了")
 	todosEvents := func() int {
+		todosTold(t, s)
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		n := 0

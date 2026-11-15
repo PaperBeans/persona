@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 )
 
@@ -200,14 +200,14 @@ func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter) e
 					tryDirect()
 				}
 			case p := <-pongs:
-				why := "hub 没有回应心跳"
+				why := "link-errors.heartbeat_timeout"
 				if p.check {
-					checking, why = false, "网络变了以后 hub 没有回应"
+					checking, why = false, "link-errors.heartbeat_after_network_change"
 				} else {
 					beating = false
 				}
 				if p.err != nil && ctx.Err() == nil {
-					drop(fmt.Errorf("%s：%w", why, p.err))
+					drop(newTextError(why, p.err))
 					return
 				}
 			case b := <-beat:
@@ -226,7 +226,7 @@ func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter) e
 				}
 			case <-o.Check:
 				if l.localGone() {
-					drop(errors.New("网络变了，原来的地址已经不在"))
+					drop(newTextError("link-errors.network_address_gone", nil))
 					return
 				}
 				if !checking {
@@ -296,7 +296,7 @@ func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter) e
 					if ctx.Err() != nil { // called off because the link ended: that says nothing about the node
 						return
 					}
-					o.Logf("link: stream %s: %v", id, err)
+					o.Logf("link: stream %s: %s", id, ErrorText(i18n.En, err))
 					_ = l.send(ctx, Message{Type: "open_failed", ID: id, Error: err.Error()})
 					rep.set(func(s *Status) { s.Node, s.NodeError = "offline", err.Error() })
 				}
@@ -511,7 +511,7 @@ func (l *link) forward(ctx context.Context, id, target string) error {
 	ws, resp, err := websocket.Dial(dctx, wsURL(cmp.Or(l.baseURL, l.ep.URL), StreamPath+"?id="+id), &websocket.DialOptions{
 		HTTPClient: l.streams, HTTPHeader: bearer(l.token), CompressionMode: StreamCompression})
 	if err != nil {
-		return fmt.Errorf("开不了流：%w", handshakeError(resp, err))
+		return newTextError("link-errors.stream_open_failed", handshakeError(resp, err))
 	}
 	nc := websocket.NetConn(ctx, ws, websocket.MessageBinary)
 	defer nc.Close()

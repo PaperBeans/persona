@@ -193,6 +193,9 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		if in.MainBackgroundFolded != nil {
 			v.MainBackgroundFolded = in.MainBackgroundFolded
 		}
+		if in.RecentTaskChats != nil {
+			v.RecentTaskChats = in.RecentTaskChats
+		}
 		if in.MeetingAttendanceDefault != nil {
 			v.MeetingAttendanceDefault = in.MeetingAttendanceDefault
 		}

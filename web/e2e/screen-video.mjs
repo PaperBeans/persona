@@ -5,13 +5,14 @@
 //   node web/e2e/screen-video.mjs <web URL> <mock hub URL> [--shots <dir>] [--lang en|zh-Hans|ja] [--executable <chromium>]
 // Checks: after signing in, the video takes the picture (its canvas drawn, noVNC's clear, its update requests held) and
 // a report goes back for its frames; Connection stats shows Video with the segments, the codec and the size; the Mac
-// locking says so and VNC shows until it's back; the stream dropping says video stopped. In a browser with no video
+// locking says so and VNC shows until it's back; the stream dropping says video stopped; a stream the hub refuses
+// because two devices already watch says that (#8320), in light and dark. In a browser with no video
 // decoder, no Picture switcher and the panel says why; a decoder that fails on the stream: the panel says it couldn't
 // start, and video isn't tried again on that page (no switcher, no line promising it). Data use without tiers: a desktop
 // starts at 12 Mbit/s; on mobile data (navigator.connection says cellular) at 4, and Wi-Fi again sends an update for 12.
 // The mobile-data card with tiers: web/e2e/screen-data-use.mjs.
 // No page error. Ends with one line: PASS, FAIL or TIMEOUT.
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { chromium } from "playwright-core";
 
 const args = process.argv.slice(2);
@@ -36,6 +37,7 @@ const fail = (why) => {
   throw new Error(why);
 };
 const mock = async (q = "") => (await fetch(`${hub}/mock/screen-video${q}`)).json();
+const words = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/screen-video.json`, import.meta.url), "utf8"));
 
 const browser = await chromium.launch(executable ? { executablePath: executable } : { channel: "chrome" });
 const errors = [];
@@ -116,6 +118,17 @@ try {
       await page.waitForSelector("[data-testid=screen-fallback]");
       if (shots) await page.screenshot({ path: `${shots}/video-lost-${scheme}.png` });
     }
+
+    // Two devices already watch this Mac (#8320): the hub refuses the stream as busy, and the page says so.
+    await page.close();
+    await mock("?refuse=busy");
+    const busy = await open(c);
+    await busy.waitForSelector("[data-testid=screen-fallback]");
+    const line = (await busy.textContent("[data-testid=screen-fallback]"))?.trim();
+    if (line !== words.fallback_busy) fail(`busy refusal: the line says ${JSON.stringify(line)}, not ${JSON.stringify(words.fallback_busy)}`);
+    await vncDrawn(busy);
+    if (shots) await busy.screenshot({ path: `${shots}/video-busy-${scheme}.png` });
+    await mock("?refuse=0");
     await c.close();
   }
 
@@ -195,7 +208,7 @@ try {
   }
 
   if (errors.length) fail(`page errors: ${errors.join(" | ")}`);
-  console.log("PASS screen video: the picture is video with its stats in light and dark; locked, back, lost; 12 Mbit/s on a desktop, 4 on mobile data and 12 again on Wi-Fi; no decoder, an insecure page and a failing decoder each say why");
+  console.log("PASS screen video: the picture is video with its stats in light and dark; locked, back, lost; busy says two devices watch; 12 Mbit/s on a desktop, 4 on mobile data and 12 again on Wi-Fi; no decoder, an insecure page and a failing decoder each say why");
 } catch (e) {
   console.log(`FAIL screen video: ${e instanceof Error ? e.message : e}`);
   if (shots && current) await current.screenshot({ path: `${shots}/failed.png` }).catch(() => {});

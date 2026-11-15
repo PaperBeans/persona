@@ -1370,6 +1370,12 @@ export async function refreshTodos() {
   }
 }
 
+/** A setting of the assistant's changed from this page (#8324): the copy in `assistant` shows it before the hub answers. */
+export function patchAssistant(patch: Partial<Omit<AssistantInfo, "conversations">>) {
+  const a = state.assistant;
+  if (a) set({ assistant: { ...a, ...patch } });
+}
+
 export async function refreshAssistant() {
   const asked = assistantAsked.ask();
   const from = pageOf();

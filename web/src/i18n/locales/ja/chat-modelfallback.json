@@ -24,5 +24,15 @@
   "refusal_text": "拒否の原文",
   "details": "詳細",
   "plain_refused_switched": "上流がこのリクエストを拒否したため、{model} に切り替えました。",
-  "plain_card": "上流で拒否されたため、この会話は {model} で応答しています。"
+  "plain_card": "上流で拒否されたため、この会話は {model} で応答しています。",
+  "cause_safeguards_refusal": "モデルがリクエストを拒否しました",
+  "cause_quota_exhausted": "利用枠を使い切りました",
+  "cause_rate_limited": "レート制限されました",
+  "cause_server_error": "サービスエラーです",
+  "cause_model_unavailable": "モデルを利用できません",
+  "plain_refused_switched_cause": "上流がこのリクエストを拒否したため、{model} に切り替えました（{cause}）。",
+  "plain_card_cause": "上流で拒否されたため、この会話は {model} で応答しています（{cause}）。",
+  "returning": "{model} が再び利用できるようになりました。次のメッセージで切り替わります",
+  "exhausted_resets": "{time} に再び利用できます",
+  "exhausted_tried": "試したモデル：{models}"
 }

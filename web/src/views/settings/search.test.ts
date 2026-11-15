@@ -99,6 +99,7 @@ describe("the settings search's index", () => {
     finds(t("lib-agent-settings.setting_model_reasoning_effort"), "agents", "settings-codex");
     finds(t("settings-modelconfiguration.effort"), "models", "settings-model-config");
     finds(t("settings-assistantsettings.timezone"), "persona", "runs-on");
+    finds(t("settings-assistantsettings.recent_task_chats"), "persona", "recent-task-chats");
     finds(t("settings-assistantsettings.default_permissions"), "persona", "default-permissions");
     finds(t("settings-triagesettings.auto_continue"), "persona", "triage-auto-continue");
     finds(t("settings-notifications.quiet"), "notifications", "notify-quiet");
@@ -156,7 +157,7 @@ describe("the settings search's index", () => {
     const made: [RegExp, string, (rest: string) => boolean][] = [
       [/^shortcut-(.+)$/, "anchor={`shortcut-${s.id}`}", (id) => [...SHORTCUTS, ...LOCAL_SHORTCUTS].some((s) => s.id === id)],
       [/^knowledge-(.+)$/, "anchor={`knowledge-${kind}`}", (kind) => kind === "messages" || kind === "docs"],
-      [/^settings-(.+)$/, "id={`settings-${id}`}", (id) => ["claude", "codex", "agy", "omp"].includes(id)],
+      [/^settings-(.+)$/, "id={`settings-${id}`}", (id) => ["claude", "codex", "agy", "omp", "grok"].includes(id)],
     ];
     const drawn = (anchor: string) =>
       new RegExp(`\\b(anchor|data-settings-row|data-settings-group|id)="${anchor}"`).test(sources) ||

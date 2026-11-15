@@ -24,5 +24,15 @@
   "refusal_text": "Refusal text",
   "details": "Details",
   "plain_refused_switched": "The upstream refused this request, so it switched to {model}.",
-  "plain_card": "After an upstream refusal, this conversation answers with {model}."
+  "plain_card": "After an upstream refusal, this conversation answers with {model}.",
+  "cause_safeguards_refusal": "the model refused",
+  "cause_quota_exhausted": "quota exhausted",
+  "cause_rate_limited": "rate limited",
+  "cause_server_error": "service error",
+  "cause_model_unavailable": "model unavailable",
+  "plain_refused_switched_cause": "The upstream refused this request, so it switched to {model} ({cause}).",
+  "plain_card_cause": "After an upstream refusal, this conversation answers with {model} ({cause}).",
+  "returning": "{model} is available again; your next message switches back",
+  "exhausted_resets": "Available again {time}",
+  "exhausted_tried": "Models tried: {models}"
 }

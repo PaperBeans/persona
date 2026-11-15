@@ -13,7 +13,9 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/extwire"
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -21,14 +23,16 @@ import (
 type heldFSNode struct {
 	mu        sync.Mutex
 	calls     []fsWatchParam
+	current   fsWatchParam
 	entered   chan fsWatchParam
+	applied   chan fsWatchParam
 	held      chan struct{}
 	once      sync.Once
 	failFirst bool
 }
 
 func newHeldFSNode() *heldFSNode {
-	return &heldFSNode{entered: make(chan fsWatchParam, 16), held: make(chan struct{})}
+	return &heldFSNode{entered: make(chan fsWatchParam, 16), applied: make(chan fsWatchParam, 16), held: make(chan struct{})}
 }
 
 func (n *heldFSNode) handle(ctx context.Context, method string, raw json.RawMessage) (any, error) {
@@ -54,6 +58,10 @@ func (n *heldFSNode) handle(ctx context.Context, method string, raw json.RawMess
 	if call == 0 && n.failFirst {
 		return nil, errors.New("test fs watch failure")
 	}
+	n.mu.Lock()
+	n.current = p
+	n.mu.Unlock()
+	n.applied <- p
 	return map[string]any{"ok": true}, nil
 }
 
@@ -68,6 +76,23 @@ func (n *heldFSNode) next(t *testing.T) fsWatchParam {
 		t.Fatal("the node did not get fs.watch")
 		return fsWatchParam{}
 	}
+}
+
+func (n *heldFSNode) appliedParam(t *testing.T) fsWatchParam {
+	t.Helper()
+	select {
+	case p := <-n.applied:
+		return p
+	case <-time.After(readLoopLimit):
+		t.Fatal("the node did not apply fs.watch")
+		return fsWatchParam{}
+	}
+}
+
+func (n *heldFSNode) currentParam() fsWatchParam {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.current
 }
 
 func (n *heldFSNode) snapshot() []fsWatchParam {
@@ -163,6 +188,97 @@ func TestFSWatchHeldNodeLeavesReadLoopAndCoalesces(t *testing.T) {
 	waitHubWorkers(t, f.hub)
 	if calls := f.node.snapshot(); len(calls) != 2 {
 		t.Fatalf("the node got %d fs.watch calls, want the held one and one coalesced call: %+v", len(calls), calls)
+	}
+}
+
+func TestFSWatchReportRecreationDoesNotLetOldUnionLandLast(t *testing.T) {
+	path := func(p fsWatchParam) string {
+		if len(p.Dirs) == 0 && len(p.Git) == 0 {
+			return ""
+		}
+		return onlyPath(p)
+	}
+	for _, u2 := range []string{"/new", ""} {
+		t.Run("u2="+u2, func(t *testing.T) {
+			f := newFSReadLoopFixture(t)
+			defer f.node.release()
+			old := f.machine
+			old.managed = true
+			f.watch(t, "/old")
+			if got := onlyPath(f.node.next(t)); got != "/old" {
+				t.Fatalf("the old union = %s, want /old", got)
+			}
+			f.hub.applyDeviceStatesFrom(devicesOwner, devicewire.States{})
+			f.hub.applyDeviceStatesFrom(devicesOwner, devicewire.States{Machines: []devicewire.State{{
+				Machine: proto.Machine{ID: "m1", Name: "m1"}, Connected: false,
+			}}})
+			fresh := f.hub.localMachine("m1")
+			if fresh == nil || fresh == old {
+				t.Fatalf("the report did not recreate the machine: old %p new %p", old, fresh)
+			}
+			fresh.peer, fresh.online = old.peer, true
+			if u2 == "" {
+				f.watch(t) // the new union is empty too: the old browser no longer watches anything
+				f.hub.fsWatchReconnected(fresh)
+			} else {
+				f.watch(t, u2)
+			}
+			for {
+				if got := path(f.node.appliedParam(t)); got == u2 {
+					break
+				}
+			}
+			f.node.release()
+			waitHubWorkers(t, f.hub)
+			if got := path(f.node.currentParam()); got != u2 {
+				t.Fatalf("the old union landed last: current %q, want %q", got, u2)
+			}
+		})
+	}
+}
+
+func TestFSWatchRecreationAfterOldCallReturnsRestoresEmptySet(t *testing.T) {
+	f := newFSReadLoopFixture(t)
+	defer f.node.release()
+	old := f.machine
+	old.managed = true
+	f.watch(t, "/old")
+	if got := onlyPath(f.node.next(t)); got != "/old" {
+		t.Fatalf("the old union = %s, want /old", got)
+	}
+	f.hub.applyDeviceStatesFrom(devicesOwner, devicewire.States{})
+	f.hub.applyDeviceStatesFrom(devicesOwner, devicewire.States{Machines: []devicewire.State{{
+		Machine: proto.Machine{ID: "m1", Name: "m1"}, Connected: false,
+	}}})
+	second := f.hub.localMachine("m1")
+	second.peer, second.online = old.peer, true
+	f.watch(t, "/new")
+	for {
+		if got := onlyPath(f.node.appliedParam(t)); got == "/new" {
+			break
+		}
+	}
+	f.hub.applyDeviceStatesFrom(devicesOwner, devicewire.States{})
+	f.node.release()
+	f.hub.applyDeviceStatesFrom(devicesOwner, devicewire.States{Machines: []devicewire.State{{
+		Machine: proto.Machine{ID: "m1", Name: "m1"}, Connected: false,
+	}}})
+	third := f.hub.localMachine("m1")
+	if third == nil || third == second {
+		t.Fatal("the third generation did not replace the second")
+	}
+	third.mu.Lock()
+	third.peer, third.online = old.peer, true
+	third.mu.Unlock()
+	f.watch(t) // C is empty, but the pending force must survive A → removed B → C.
+	f.app.pongWithin(t, "empty-union", "the browser's empty set to be applied")
+	if got := f.hub.fsWatchUnion("m1"); len(got.Dirs) != 0 || len(got.Git) != 0 {
+		t.Fatalf("the browser's empty set was not applied: %+v", got)
+	}
+	f.hub.queueFSWatchSync(third)
+	waitHubWorkers(t, f.hub)
+	if got := f.node.currentParam(); len(got.Dirs) != 0 || len(got.Git) != 0 {
+		t.Fatalf("the oldest union survived a gap and successive recreations: %+v; calls %+v", got, f.node.snapshot())
 	}
 }
 

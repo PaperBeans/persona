@@ -25,5 +25,6 @@
   "renamed": "已重命名",
   "rename_title": "重命名对话",
   "title_placeholder": "对话标题",
-  "rename_hint": "你起的标题不会再被自动标题覆盖。"
+  "rename_hint": "你起的标题不会再被自动标题覆盖。",
+  "display_options": "显示选项"
 }

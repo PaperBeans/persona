@@ -257,6 +257,7 @@ machines.read        GET /api/v1/machines/{id}/usage
 -                    GET /api/v1/machines/{mid}/git/review
 -                    GET /api/v1/machines/{mid}/git/show
 -                    GET /api/v1/machines/{mid}/git/status
+-                    GET /api/v1/machines/{mid}/grok-settings
 -                    GET /api/v1/machines/{mid}/health/reports
 -                    GET /api/v1/machines/{mid}/herdr
 -                    GET /api/v1/machines/{mid}/iphone
@@ -655,6 +656,7 @@ kb.write             PUT /api/v1/kb/{kind}/{id}
 -                    PUT /api/v1/machines/{mid}/computer
 -                    PUT /api/v1/machines/{mid}/engine
 -                    PUT /api/v1/machines/{mid}/file-transfer/settings
+-                    PUT /api/v1/machines/{mid}/grok-settings
 -                    PUT /api/v1/machines/{mid}/herdr
 -                    PUT /api/v1/machines/{mid}/iphone
 -                    PUT /api/v1/machines/{mid}/omp-settings

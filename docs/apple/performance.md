@@ -396,6 +396,9 @@ they draw and never load whole transcripts.
 **Why.** iOS ends a process that grows past its memory limit without a crash report the user sees; extensions get much
 lower limits than the app. A cache with no bound is a leak with extra steps.
 
+The same holds on disk: a cache folder that grows with use has a byte budget (`AttachedVideos.budget`, `CacheBudget` for
+chat pictures, Feishu media and WebKit's disk cache, #8341), and a versioned folder removes all its older versions.
+
 **Do.** Give caches a cost; drop them on `UIApplication.didReceiveMemoryWarningNotification`; release retained stores on
 `onTabVisibility` disappear. Full-size decodes of user pictures run one at a time and let the original go as soon as it
 is downscaled (`MeetingPhotos` prepares a pick's photos in turn, and `MeetingPhotoPipeline.prepare` drops the original

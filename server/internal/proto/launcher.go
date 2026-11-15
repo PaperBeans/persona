@@ -2,6 +2,7 @@ package proto
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -388,3 +389,21 @@ func MessagesBaseURL(base string) string {
 		path = strings.TrimRight(rest, "/")
 	}
 }
+
+// The agents the node starts without Claude Code's permission mode and effort (Codex takes its own sandbox and
+// effort): the hub matches what the node does with one a start names (assistant/launcher_modes.go), and node
+// TestStartModeAgentTypesMatchTheNode keeps these lists and the node's together.
+//
+// WorkAgentTypes are the work agents (docs/integrations/launchers.md "Work agents"): pi, the Cursor CLI and the
+// Antigravity CLI. The node starts them with the two ignored rather than refusing the start (node/control.go, #8151).
+var WorkAgentTypes = []string{"pi", "cursor", "agy"}
+
+// NoModeAgentTypes are the other agents the node starts in a terminal, traex and Oh My Pi: it refuses a start of one
+// that names a permission mode or effort (node/control.go).
+var NoModeAgentTypes = []string{"traex", "omp"}
+
+// IsWorkAgentType: agent is one of WorkAgentTypes.
+func IsWorkAgentType(agent string) bool { return slices.Contains(WorkAgentTypes, agent) }
+
+// IsNoModeAgentType: agent is one of NoModeAgentTypes.
+func IsNoModeAgentType(agent string) bool { return slices.Contains(NoModeAgentTypes, agent) }

@@ -48,6 +48,11 @@ type NodeSession struct {
 	// PendingHandoff: a switch's handoff that waits for the next message to the session (its first one was held back
 	// by a dialog, node/engine_switch.go), opaque here like EngineHistory, kept so a node restart does not lose it.
 	PendingHandoff json.RawMessage `json:"pending_handoff,omitempty"`
+	// ModelRecovery: the node's own model recovery has the conversation on another model or its chain was exhausted
+	// (#7824). Opaque here like PendingSwitch; node-owned state, never a configured-model change.
+	ModelRecovery json.RawMessage `json:"model_recovery,omitempty"`
+	// FollowsSetting: a leader/supervisor conversation follows the main chat model setting (node/session_state.go).
+	FollowsSetting bool `json:"follows_setting,omitempty"`
 }
 
 func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSession) error {
@@ -68,6 +73,7 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 	}
 	// SQL NULL for none: the key holds a JSON null.
 	pendingSwitch, engineHistory, pendingHandoff := jsonOrNil(s.PendingSwitch), jsonOrNil(s.EngineHistory), jsonOrNil(s.PendingHandoff)
+	modelRecovery := jsonOrNil(s.ModelRecovery)
 	_, err = d.pool.Exec(ctx, `WITH saved AS (
 		INSERT INTO node_sessions (machine_id, session_id, pane, launcher, cwd, started_at, tasks, updated_at, creation_id, incarnation)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $15, $16)
@@ -81,17 +87,18 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 			'app_mode', $11::text, 'app_effort', $12::text, 'ultracode_process', $13::jsonb,
 			'started_at_unknown', $14::bool, 'guest', $17::jsonb, 'guest_kind', $18::text, 'config_dir', $19::text,
 			'pending_switch', $20::jsonb, 'engine_history', $21::jsonb, 'pending_handoff', $22::jsonb,
-			'stop_cause', $23::text, 'stop_cause_at', $24::bigint), now() FROM saved
+			'model_recovery', $23::jsonb, 'follows_setting', $24::boolean,
+			'stop_cause', $25::text, 'stop_cause_at', $26::bigint), now() FROM saved
 		ON CONFLICT (key) DO UPDATE SET value = CASE
-			WHEN COALESCE((settings.value->>'stop_cause_at')::bigint, 0) > $24
-				OR (COALESCE((settings.value->>'stop_cause_at')::bigint, 0) = $24
-					AND settings.value->>'stop_cause' = 'user' AND $23 <> 'user')
+			WHEN COALESCE((settings.value->>'stop_cause_at')::bigint, 0) > $26
+				OR (COALESCE((settings.value->>'stop_cause_at')::bigint, 0) = $26
+					AND settings.value->>'stop_cause' = 'user' AND $25 <> 'user')
 			THEN EXCLUDED.value || jsonb_build_object('stop_cause', settings.value->'stop_cause',
 				'stop_cause_at', settings.value->'stop_cause_at')
 			ELSE EXCLUDED.value END, updated_at = now()`,
 		machine, id, s.Pane, s.Launcher, s.Cwd, s.StartedAt, tasks, s.Model, s.ModelFingerprint, s.ModelEffort, s.AppMode, s.AppEffort,
 		s.UltracodeProcess, unknownStart, s.CreationID, s.Incarnation, guest, s.GuestKind, s.ConfigDir, pendingSwitch, engineHistory, pendingHandoff,
-		string(s.StopCause), s.StopCauseAt)
+		modelRecovery, s.FollowsSetting, string(s.StopCause), s.StopCauseAt)
 	return err
 }
 
@@ -122,6 +129,8 @@ type nodeModel struct {
 	PendingSwitch    json.RawMessage `json:"pending_switch"`
 	EngineHistory    json.RawMessage `json:"engine_history"`
 	PendingHandoff   json.RawMessage `json:"pending_handoff"`
+	ModelRecovery    json.RawMessage `json:"model_recovery"`
+	FollowsSetting   bool            `json:"follows_setting"`
 	StopCause        proto.StopCause `json:"stop_cause"`
 	StopCauseAt      int64           `json:"stop_cause_at"`
 }
@@ -154,6 +163,8 @@ func (d *DB) NodeSessions(ctx context.Context, machine string) (map[string]NodeS
 		s.ConfigDir = m.ConfigDir
 		s.UltracodeProcess, s.PendingSwitch, s.EngineHistory = jsonOrNil(m.UltracodeProcess), jsonOrNil(m.PendingSwitch), jsonOrNil(m.EngineHistory)
 		s.PendingHandoff = jsonOrNil(m.PendingHandoff)
+		s.ModelRecovery = jsonOrNil(m.ModelRecovery)
+		s.FollowsSetting = m.FollowsSetting
 		s.StopCause, s.StopCauseAt = m.StopCause, m.StopCauseAt
 		if m.StartedAtUnknown {
 			s.StartedAt = time.Time{}

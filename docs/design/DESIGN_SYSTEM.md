@@ -1568,15 +1568,35 @@ Kinds: questions, plan approvals, tool approvals, secret entry, MCP forms, and w
 
 The task cards follow `docs/design/task-cards.md`, which holds the state tables and the reasons.
 
-- **Conclusion cards.** The chat draws a card for each way a task ended (done, stopped, failed to start, interrupted); reviews and reports stay out of it. A failed card keeps Retry, an interrupted one Continue and View. Failed and interrupted cards sit on `--danger-wash`, and their words are `--ink`, not `--ink-2` / `--ink-3`: the wash over the light canvas is 4.31:1 for `--red` and 4.37:1 for `--ink-2`. The hand-off card of a task whose failed card says why only says it did not start.
+- **One card per task, when it is handed out** (#8237, replacing #5569's conclusion cards): the hand-off card is a task's only card in the chat, and it updates in place: its state word follows the task, and a start that failed or a turn the model service cut off reads as such on it, in the danger color, with why in plain words (a raw error stays in the task's details; one naming no known cause reads "Didn't start. Open it for details."). Receipts (done, stopped, failed to start, interrupted), reviews and reports are not drawn, old ones in the history neither, and nothing in the chat says where progress went. The task's row says it: In Progress and Needs You below. iOS and the web since #8237 (Android: #8312). A failed start's and an interrupted task's Needs you row keeps `--danger-wash` with `--ink` words, as the conclusion cards had (contrast in D10 of `docs/design/task-cards.md`).
+- **Rows that act** (#8237): a failed start's row in Needs You carries Retry and Remove, an interrupted one Continue (so does a usage limit nothing continues by itself, in In Progress), right under its words and aligned with them, as buttons of their own, never inside the row's tap. A tap elsewhere on the row opens the task.
+- **Just Finished** (#8237): under In Progress's rows, a group of the handed-out tasks that finished in the last 24 hours and that the owner has not opened since (the To-dos page's Just Finished): the tray's group header with how many, a row each with the done mark, the title, Done and what it did (its accepting review's note, why it closed, its receipt's summary, else its Agent's last words). Not counted in the entry's number (the counts stay the To-dos page's open work, section 4.8). Opening one counts as seeing it, so it leaves the group.
 - **Accept and decision rows** stack when their container is narrow (a container query, not the viewport): the words take the whole width, the secondary buttons one row, the primary its own full-width line. Never a menu.
-- **Progress rows.** The status word is its own right-aligned column, then a fixed end slot: `›` where the row opens something, a check once finished, an info mark for a usage limit. A task whose Agent is not up says Starting. A usage limit's second line says when it resets.
+- **Progress rows.** The status word is its own right-aligned column, then a fixed end slot: `›` where the row opens something, a check once finished, an info mark for a usage limit. A task whose Agent is not up says Starting. A usage limit's second line says when it resets. A stopped task that is not done says "Stopped, not done yet · <why>" from its completion check (#3180; iOS too since #8237), else its Agent's last words.
 - **Needs you rows with something to answer are folded to one line** (mark, title, what it waits for, the kind) and open in place on a click of the line or its chevron (`aria-expanded`); the card leaves with the answer, and every row is folded again when the tray changes. The conversation's own cards stay in the chat, and their rows close the tray onto them.
 - **Hard-coded font sizes.** `text-[13px]` and its kin may only fall: `scripts/ci/web_font_ratchet.py` (`docs/operations/testing.md`).
 
 ### 4.8.1 Records of interruptions
 
-A chat record of something that went wrong (an interrupted task, #3834) says what became of it once that is known: a grey line with the result ("Cancelled", "Dispatched again", "Resumed", "Accepted", "Done"), never a red card that outlives the problem. Several records with one cause in a short time are one card that counts handled and pending and opens to each item. The danger color is only for what is still pending. The hub works out the result and the grouping; the clients only draw them (principle 4; `docs/assistant/unified-entry.md`, "Interrupted receipts after the fact").
+A record of something that went wrong (an interrupted task, #3834) says what became of it once that is known: a grey line with the result ("Cancelled", "Dispatched again", "Resumed", "Accepted", "Done"), never a red card that outlives the problem. Several records with one cause in a short time are one card that counts handled and pending and opens to each item. The danger color is only for what is still pending. The hub works out the result and the grouping; the clients only draw them (principle 4; `docs/assistant/unified-entry.md`, "Interrupted receipts after the fact"). In an assistant conversation an interrupted task is not a record in the chat any more (#8237, section 4.8.0): its hand-off card says it, and its row in Needs You offers Continue.
+
+### 4.8.2 Guided setups (step by step)
+
+A setup that takes the user through several things, some of them outside the app (a cable, a restart, a computer), goes
+like the iPhone's guided setup (#8199, `IPhoneSetupView`, docs/extensions/iphone.md "Guided setup"), built from the same
+pieces as the computer page's install guides (`.card()`, `.themedButton(prominent:)`, numbered steps):
+
+- **An overview first**: what it does in one sentence, what it needs, each step with its state, the safety rule, one
+  button (Set Up, or Continue once some steps are done).
+- **One screen per step**: a progress bar of the steps, "Step n of N", the step's title and one sentence, a card with its
+  state, and Details folded for the technical words. One primary button at the bottom; a step that waits on the
+  world has none, or a secondary one (Cancel, Check Again).
+- **State words from `StateName`**: Done, Working (`taskWorking`), Needs You, as chips. Every state comes from the hub's
+  answer, never from a tap: a step done elsewhere is skipped, and a screen moves on by itself when its step is done.
+- **Asking again only while waiting**: every two seconds while a step waits on something outside the app, and only while
+  the page is in front (`.tabActiveTask`).
+- **The page the user comes back to** is the same page: its switches (turning it off there), a way to try it, and at
+  most one optional switch.
 
 ### 4.9 Sharing a conversation publicly
 

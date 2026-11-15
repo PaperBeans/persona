@@ -200,10 +200,14 @@ class RepairIntegrationTests(unittest.TestCase):
                     self.fail(result.stdout + result.stderr)
                 return result
             self.assertEqual(Path(argv[0]).name, "bwrap")
+            self.assertEqual(argv[1], "--args-fd")
             self.assertEqual(argv[argv.index("--") + 1], "repair-worker")
             self.assertNotIn("GH_TOKEN", kwargs["environ"])
             self.assertNotIn("origin", self.git("remote", cwd=kwargs["cwd"]))
-            action(Path(kwargs["cwd"]))
+            prompt = kwargs["input_text"]
+            edit_root = Path(next(line.split(": ", 1)[1] for line in prompt.splitlines()
+                                 if line.startswith("Editable copies: ")))
+            action(Path(kwargs["cwd"]), edit_root)
             return subprocess.CompletedProcess(argv, 0, envelope, "")
         return patch.object(pr_watch_repair, "run", side_effect=resolve)
 
@@ -246,9 +250,8 @@ class RepairIntegrationTests(unittest.TestCase):
 
     def test_conflict_worker_rejects_a_permission_denial_even_after_a_correct_edit(self):
         self.conflicting_merge()
-        def resolve(root):
-            (root / "file.txt").write_text("pr\nmain conflict\n")
-            self.git("add", "file.txt", cwd=root)
+        def resolve(root, edits):
+            (edits / "file.txt").write_text("pr\nmain conflict\n")
         with self.conflict_worker(resolve, '{"is_error":false,"permission_denials":[{"tool_name":"Bash"}]}'), \
                 patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
                 patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}):
@@ -259,21 +262,13 @@ class RepairIntegrationTests(unittest.TestCase):
 
     def test_conflict_worker_rejects_a_gitlink_resolution(self):
         self.conflicting_merge()
-        def resolve(root):
-            nested = root / "nested"
+        def resolve(root, edits):
+            (edits / "file.txt").unlink()
+            nested = edits / "file.txt"
             nested.mkdir()
-            subprocess.run(["git", "init", "-q"], cwd=nested, env=self.env, check=True, capture_output=True)
-            subprocess.run(["git", "config", "user.name", "Test"], cwd=nested, env=self.env, check=True)
-            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=nested, env=self.env, check=True)
-            (nested / "x").write_text("x\n")
-            subprocess.run(["git", "add", "."], cwd=nested, env=self.env, check=True)
-            subprocess.run(["git", "commit", "-qm", "nested"], cwd=nested, env=self.env, check=True)
-            (root / "file.txt").unlink()
-            nested.rename(root / "file.txt")
-            self.git("add", "-A", "file.txt", cwd=root)
         with self.conflict_worker(resolve), patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
                 patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}):
-            with self.assertRaisesRegex(pr_watch_repair.WatchError, "regular file"):
+            with self.assertRaisesRegex(pr_watch_repair.WatchError, "unsupported file type"):
                 pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main, {"repair_command": "repair-worker"})
         self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
         self.assertEqual(self.git("status", "--porcelain"), "")
@@ -284,18 +279,52 @@ class RepairIntegrationTests(unittest.TestCase):
             root = Path(directory)
             (root / "conflicted.txt").write_text("conflict\n")
             (root / "other.txt").write_text("keep\n")
+            (root / "home").mkdir()
+            edits = root / "edits"
+            edits.mkdir()
+            (edits / "conflicted.txt").write_text("conflict\n")
             argv = pr_watch_repair.repair_worker_argv(["repair-worker"], root, home=root / "home",
-                                                      writable_paths=["conflicted.txt"])
-            self.assertIn(["--bind", str(root), str(root)], [argv[i:i + 3] for i in range(len(argv) - 2)])
-            self.assertIn(["--ro-bind", str(root / "other.txt"), str(root / "other.txt")],
-                          [argv[i:i + 3] for i in range(len(argv) - 2)])
+                                                      writable_paths=["conflicted.txt"], edit_root=edits)
+            self.assertIn(["--ro-bind", str(root), str(root)], [argv[i:i + 3] for i in range(len(argv) - 2)])
+            self.assertIn(["--bind", str(edits), str(edits)], [argv[i:i + 3] for i in range(len(argv) - 2)])
             self.assertNotIn(["--ro-bind", str(root / "conflicted.txt"), str(root / "conflicted.txt")],
                              [argv[i:i + 3] for i in range(len(argv) - 2)])
+    def test_large_mount_vector_reaches_the_worker_without_execve_overflow(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "conflicted.txt").write_text("conflict\n")
+            for index in range(6000):
+                path = root / ("directory-%04d" % index) / "nested" / "deeper" / ("a-much-longer-file-name-%04d.txt" % index)
+                path.parent.mkdir(parents=True)
+                path.write_text("read only\n")
+            home = root / "home"
+            home.mkdir()
+            edits = root / "edits"
+            edits.mkdir()
+            (edits / "conflicted.txt").write_text("conflict\n")
+            argv = pr_watch_repair.repair_worker_argv(["/usr/bin/python3", "-c", "print('worker reached')"],
+                                                      root, home=home, writable_paths=["conflicted.txt"], edit_root=edits)
+            self.assertEqual(argv[1], "--args-fd")
+            self.assertLess(len(argv), 200)
+            result = pr_watch_repair.run(argv[:-1] + [
+                "from pathlib import Path\n"
+                "Path('" + str(edits) + "/conflicted.txt').write_text('resolved\\n')\n"
+                "try:\n"
+                " Path('directory-0001/nested/deeper/a-much-longer-file-name-0001.txt').write_text('not allowed')\n"
+                "except OSError:\n"
+                " print('unrelated file stays read-only')\n"
+                "print('worker reached')"], cwd=root, timeout=90,
+                environ={key: value for key, value in os.environ.items() if key in ("PATH", "LANG")})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("worker reached", result.stdout)
+            self.assertIn("unrelated file stays read-only", result.stdout)
+            self.assertEqual((edits / "conflicted.txt").read_text(), "resolved\n")
+            self.assertEqual((root / "conflicted.txt").read_text(), "conflict\n")
+
     def test_committed_conflict_repair_never_calls_merge_abort(self):
         self.conflicting_merge()
-        def resolve(root):
-            (root / "file.txt").write_text("pr\nmain conflict\n")
-            self.git("add", "file.txt", cwd=root)
+        def resolve(root, edits):
+            (edits / "file.txt").write_text("pr\nmain conflict\n")
         with self.conflict_worker(resolve), \
                 patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
                 patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}):
@@ -306,9 +335,8 @@ class RepairIntegrationTests(unittest.TestCase):
 
     def test_conflict_worker_resolves_only_conflict_and_preserves_merge_parents(self):
         self.conflicting_merge()
-        def resolve(root):
-            (root / "file.txt").write_text("pr\nmain conflict\n")
-            self.git("add", "file.txt", cwd=root)
+        def resolve(root, edits):
+            (edits / "file.txt").write_text("pr\nmain conflict\n")
         with self.conflict_worker(resolve), \
                 patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
                 patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}):
@@ -319,15 +347,14 @@ class RepairIntegrationTests(unittest.TestCase):
         self.assertEqual(self.git("ls-remote", "origin", "refs/heads/fix/example").split()[0], self.head)
         self.assertEqual(self.git("status", "--porcelain"), "")
 
-    def test_conflict_worker_cannot_change_an_unconflicted_path(self):
+    def test_conflict_worker_cannot_create_an_unconflicted_workspace_file(self):
         self.conflicting_merge()
-        def resolve(root):
-            (root / "file.txt").write_text("resolved\n")
-            (root / "main.txt").write_text("overwritten main\n")
-            self.git("add", "-A", cwd=root)
+        def resolve(root, edits):
+            (edits / "main.txt").write_text("overwritten main\n")
+            (edits / "file.txt").write_text("resolved\n")
         with self.conflict_worker(resolve), patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
                 patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}):
-            with self.assertRaisesRegex(pr_watch_repair.WatchError, "outside the merge conflicts"):
+            with self.assertRaisesRegex(pr_watch_repair.WatchError, "outside the conflict paths"):
                 pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main, {"repair_command": "repair-worker"})
         self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
         self.assertEqual(self.git("status", "--porcelain"), "")
@@ -335,7 +362,8 @@ class RepairIntegrationTests(unittest.TestCase):
 
     def test_conflict_worker_must_resolve_every_conflict(self):
         self.conflicting_merge()
-        with self.conflict_worker(lambda root: None), patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr):
+        with self.conflict_worker(lambda root, edits: None), patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
+                patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}):
             with self.assertRaisesRegex(pr_watch_repair.WatchError, "unresolved"):
                 pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main, {"repair_command": "repair-worker"})
         self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
@@ -343,9 +371,8 @@ class RepairIntegrationTests(unittest.TestCase):
 
     def test_conflict_worker_refuses_a_moved_pr_head(self):
         self.conflicting_merge()
-        def resolve(root):
-            (root / "file.txt").write_text("resolved\n")
-            self.git("add", "file.txt", cwd=root)
+        def resolve(root, edits):
+            (edits / "file.txt").write_text("resolved\n")
         with self.conflict_worker(resolve), \
                 patch.object(pr_watch_repair, "pr_snapshot", return_value=dict(self.pr, headRefOid="d" * 40)):
             with self.assertRaisesRegex(pr_watch_repair.WatchError, "head moved"):
@@ -363,14 +390,17 @@ class RepairIntegrationTests(unittest.TestCase):
             home = root / "home"
             home.mkdir()
             script = nested / "write.py"
-            script.write_text("from pathlib import Path\nPath('src/deep/file.txt').write_text('resolved\\n')\n")
-            argv = pr_watch_repair.repair_worker_argv(["/usr/bin/python3", str(script)], root,
-                                                      home=home, writable_paths=["src/deep/file.txt"])
+            script.write_text("from pathlib import Path\nimport sys\nroot = Path(sys.argv[1])\npath = root / 'file.txt'\ntemporary = root / '.file.tmp'\ntemporary.write_text('resolved\\n')\ntemporary.replace(path)\n")
+            edits = root / "edits" / "src" / "deep"
+            edits.mkdir(parents=True)
+            (edits / "file.txt").write_text("base\n")
+            argv = pr_watch_repair.repair_worker_argv(["/usr/bin/python3", str(script), str(root / "edits" / "src" / "deep")], root,
+                                                      home=home, writable_paths=["src/deep/file.txt"], edit_root=root / "edits")
             result = pr_watch_repair.run(argv, cwd=root, timeout=45,
                                          environ={key: value for key, value in os.environ.items() if key in ("PATH", "LANG")})
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual((nested / "file.txt").read_text(), "resolved\n")
-            self.assertEqual((root / "other.txt").read_text(), "keep\n")
+            self.assertEqual((edits / "file.txt").read_text(), "resolved\n")
+            self.assertEqual((nested / "file.txt").read_text(), "base\n")
 
     def test_pr_symlink_cannot_mount_an_external_sentinel_into_the_worker(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -382,8 +412,10 @@ class RepairIntegrationTests(unittest.TestCase):
             sentinel.write_text("must not be mounted\n")
             (repo / "link.txt").symlink_to(sentinel)
             (root / "home").mkdir()
+            (root / "edits").mkdir()
+            (root / "edits" / "file.txt").write_text("conflict\n")
             argv = pr_watch_repair.repair_worker_argv(["repair-worker"], repo, home=root / "home",
-                                                      writable_paths=["file.txt"])
+                                                      writable_paths=["file.txt"], edit_root=root / "edits")
             triples = [argv[i:i + 3] for i in range(len(argv) - 2)]
             self.assertNotIn(["--ro-bind", str(repo / "link.txt"), str(repo / "link.txt")], triples)
             self.assertNotIn(["--ro-bind", str(sentinel), str(sentinel)], triples)
@@ -396,8 +428,8 @@ class RepairIntegrationTests(unittest.TestCase):
 
     def test_conflict_worker_can_resolve_a_deletion(self):
         self.conflicting_merge()
-        def resolve(root):
-            (root / "file.txt").unlink()
+        def resolve(root, edits):
+            (edits / "file.txt").unlink()
             # The real edit-only worker cannot stage through its read-only
             # index. Leave the conflict in the index for the outer stager.
         with self.conflict_worker(resolve), patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
@@ -406,6 +438,20 @@ class RepairIntegrationTests(unittest.TestCase):
         self.assertFalse((self.repo / "file.txt").exists())
         self.assertEqual(self.git("show", "-s", "--format=%P", updated).split(), [self.head, self.main])
         self.assertEqual(self.git("status", "--porcelain"), "")
+    def test_conflict_worker_can_resolve_a_missing_source_with_a_deletion(self):
+        self.conflicting_merge()
+        self.git("rm", "-q", "file.txt")
+        self.git("commit", "-qm", "delete conflicted file")
+        head = self.git("rev-parse", "HEAD")
+        self.pr["headRefOid"] = head
+        self.head = head
+        with self.conflict_worker(lambda root, edits: None), \
+                patch.object(pr_watch_repair, "pr_snapshot", return_value=self.pr), \
+                patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}):
+            updated = pr_watch_repair.update_branch_with_main("example/one", self.pr, str(self.repo), self.main,
+                                                              {"repair_command": "repair-worker"})
+        self.assertTrue((self.repo / "file.txt").exists())
+        self.assertEqual(self.git("show", "-s", "--format=%P", updated).split(), [head, self.main])
 
 
 if __name__ == "__main__":

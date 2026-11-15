@@ -392,7 +392,8 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 	s.handOverUnreviewed(ctx, now) // a review a side conversation left waiting goes to the main one's follow-up (side_handover.go)
 	routed := s.routedSessions()
 	s.pruneTurns(ctx) // the turns' ledger: read before the first signal (what was told before a restart is not told again), closed tasks off it
-	tasks := s.todosOf(ctx, "*")
+	// Only the open tasks: everything below passes the finished ones by, and there can be thousands of them.
+	tasks := s.todosWhere(ctx, "*", func(t *Todo) bool { return t.DoneAt == nil })
 	lists := machineSessions{}   // each machine listed once for all the supervised tasks (#3029)
 	s.backfillBriefs(ctx, tasks) // tasks from before briefs get one from what they still have (task_brief.go)
 	for _, t := range tasks {

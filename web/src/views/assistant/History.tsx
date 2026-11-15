@@ -25,6 +25,8 @@ import { backgroundSupervisorTitle, isBackgroundSupervisor } from "../../lib/bac
 import { t } from "../../i18n";
 import { ASSISTANT_SEARCH_FEATURE, markParts, mergeSearch, useAssistantSearch, type AssistantSearchHit } from "../../lib/assistant-search";
 import { PHONE, useMedia } from "../../lib/viewport";
+import { saveRecentTaskChats } from "../../lib/recent-task-chats";
+import { RECENT_COUNTS, setRecentCount, useRecentCount } from "../../lib/sidebar-recent";
 
 const NONE: Session[] = [];
 // A row's line under its title: the matching words of a search, or else its last message.
@@ -149,6 +151,23 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
   };
 
   const loading = fetched === null && !error;
+  const options = useMenu();
+  const recentCount = useRecentCount();
+  // The sidebar's Recent, from here (#8324): "Show scheduled task chats" (the hub's, for all devices; only from a hub
+  // that has it) and how many it lists (this browser's), the same settings as Settings has.
+  const recentTaskChats = assistant?.recent_task_chats;
+  const optionItems: MenuItem[] = [
+    ...(typeof recentTaskChats === "boolean"
+      ? [{
+          key: "task-chats", label: t("settings-assistantsettings.recent_task_chats"), checked: recentTaskChats,
+          onSelect: () => void saveRecentTaskChats(!recentTaskChats).catch((e) => toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error")),
+        }]
+      : []),
+    {
+      key: "count", label: t("ui-look.recent_chats"), hint: String(recentCount), onSelect: () => {},
+      children: RECENT_COUNTS.map((n) => ({ key: `count-${n}`, label: String(n), radio: true, checked: n === recentCount, onSelect: () => setRecentCount(n) })),
+    },
+  ];
 
   return (
     <div className="flex h-full flex-col">
@@ -159,6 +178,8 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
           {total > 0 && <span className="ml-2 text-[12px] font-normal text-ink-3 tabular-nums">{total}</span>}
         </h1>
         <IconButton icon="retry" label={t("assistant-history.refresh")} onClick={() => void after()} />
+        <IconButton icon="more" label={t("assistant-history.display_options")} onClick={options.open} active={!!options.anchor} />
+        {options.anchor && <Menu anchor={options.anchor} onClose={options.close} align="right" header={t("settings-assistantsettings.recent_task_chats_title")} items={optionItems} />}
         <Button tone="primary" icon="plus" onClick={() => navigate({ name: "persona-new" })}>{t("assistant-history.new_chat")}</Button>
       </header>
 

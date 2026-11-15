@@ -132,7 +132,7 @@ import { VoiceBar } from "./voice/VoiceBar";
 import { useVoiceEntry, VoiceEnded, VoiceTail } from "./voice/VoiceParts";
 import { ChatOnlyNote, FailureCard, ReadinessCard, useReadinessGate, type ReadinessGate } from "../assistant/Readiness";
 import { codedFailure, knownAction, refreshReadiness, turnErrorFix, type CodedFailure } from "../../lib/readiness";
-import { FALLBACK_UNAVAILABLE } from "../../lib/model-fallback";
+import { FALLBACK_UNAVAILABLE, recoveryExhausted } from "../../lib/model-fallback";
 import { BASE } from "../../lib/base";
 import { ModelFallbackCard } from "./ModelFallbackCard";
 import { usageLimitLabel } from "../../lib/usage-limit";
@@ -1668,6 +1668,10 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   // main conversation's setup gate would only open its missing step, as it does for every send while it holds (`deliver`)
   const canRetry =
     lastLine?.kind === "apiError" && state !== "working" && !outgoing && sessionCan(session, "send") && session?.turn_error_code !== FALLBACK_UNAVAILABLE && !gate.blocked;
+  // An exhausted recovery chain (#7824): the last error card names the cause and reset time, and Retry stays offered
+  // even for a safeguards-class error the parser calls non-transient. The marker is session-level, so only the last
+  // API error line carries it; whether Retry is enabled at all still follows canRetry (idle and able to send).
+  const exhausted = lastLine?.kind === "apiError" ? recoveryExhausted(session) : null;
   // The model error the chat stopped on (cindy's ErrorBanner, #5313): its last line, over the composer with Retry and ✕,
   // and left out of the chat meanwhile. Not once it is dismissed (remembered in this browser), Retry was pressed on it
   // (gone at once, before "continue" reaches the transcript), something is on its way or being worked on, or the host's
@@ -1980,6 +1984,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
                         expandFold={tr.expandFold}
                         fix={d.line.id === lastLine?.id ? turnFix : undefined}
                         limit={d.line.kind === "apiError" && d.line.id === limitOn ? limitLine : undefined}
+                        exhausted={d.line.kind === "apiError" && d.line.id === lastLine?.id ? exhausted : undefined}
                         assistant={assistant}
                         offscreen={offscreen(d.line)}
                         busy={d.line.id === busySegment || undefined}
@@ -2000,6 +2005,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
                   streaming={(row.line.kind === "segment" || row.line.kind === "supervision") && row.line.live ? tr.streaming || undefined : undefined}
                   expandFold={tr.expandFold}
                   limit={row.line.kind === "apiError" && row.line.id === limitOn ? limitLine : undefined}
+                  exhausted={row.line.kind === "apiError" && row.line.id === lastLine?.id ? exhausted : undefined}
                   assistant={assistant}
                   offscreen={offscreen(row.line)}
                   busy={row.line.id === busySegment || undefined}
@@ -2101,6 +2107,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
             line={bannerError}
             assistant={assistant}
             limit={bannerError.id === limitOn ? limitLine : undefined}
+            exhausted={exhausted}
             fix={turnFix}
             onRetry={canRetry ? () => void retryError() : undefined}
             onEditLastMessage={onEditLastMessage}

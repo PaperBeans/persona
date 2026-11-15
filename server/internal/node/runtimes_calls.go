@@ -238,9 +238,9 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 		_ = json.Unmarshal(params, &opts)
 		var said json.RawMessage // what the runtime answered: it may say the message only queued behind the turn
 		err := n.sends.once(opts.ClientMsgID, func() error {
-			var after int
+			var after echoAfter
 			if opts.ClientMsgID != "" {
-				after = n.runtimes.lastPushed(p.SessionID)
+				after = echoAfter{seq: n.runtimes.lastPushed(p.SessionID), in: echoInRuntime}
 				if n.runtimeTranscript(p.SessionID) != "" { // its items are the transcript's: its copy comes after its end
 					after = n.echoBase(p.SessionID)
 				}

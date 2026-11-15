@@ -8,6 +8,7 @@
 import { api, ApiError, errorText, sessionPath } from "./api";
 import { t } from "../i18n";
 import { publicRefusal } from "./refusal-public";
+import { usageLimitClock } from "./usage-limit";
 import type { ModelRefusal, Session } from "./types";
 
 /** The turn_error_code of a turn that failed on the missing fallback model: the user's to act on, never "Continue". */
@@ -24,6 +25,11 @@ export interface FallbackView {
   pending: boolean;
   /** The configured model the node read when it closed the process; "" none pending. */
   target: string;
+  /** Why the node's own recovery switched, in plain words (#7824); undefined for a runtime-written record or an
+   *  unknown category, whose wording stays exactly as before. */
+  cause?: string;
+  /** The configured model when it answered a probe: the next request runs on it again; undefined otherwise. */
+  returning?: string;
 }
 
 /** What the card shows for a session, or null when it has no active refusal fallback. */
@@ -37,7 +43,55 @@ export function fallbackView(s: Pick<Session, "model_fallback" | "model_restore"
     error: s.turn_error ?? "",
     pending,
     target: pending ? (s.model_restore?.to ?? "") : "",
+    cause: recoveryCause(f.category),
+    returning: f.recovery_returning ? (f.original_model ?? "") : undefined,
   };
+}
+
+/** The node's bounded-recovery categories (#7824, server proto.ModelRecoveryReason*) mapped to plain words in the
+ *  page's language. A runtime-written refusal record carries none of these values, so anything else returns undefined
+ *  and the record keeps its existing wording. */
+const RECOVERY_CAUSE_KEYS: Record<string, string> = {
+  safeguards_refusal: "chat-modelfallback.cause_safeguards_refusal",
+  quota_exhausted: "chat-modelfallback.cause_quota_exhausted",
+  rate_limited: "chat-modelfallback.cause_rate_limited",
+  server_error: "chat-modelfallback.cause_server_error",
+  model_unavailable: "chat-modelfallback.cause_model_unavailable",
+};
+
+/** Plain-words cause for a recovery category; undefined when the category is not one the node's recovery writes. */
+export function recoveryCause(category?: string): string | undefined {
+  const key = category ? RECOVERY_CAUSE_KEYS[category] : undefined;
+  return key ? t(key) : undefined;
+}
+
+/** What the failure card shows for an exhausted recovery chain (#7824); null when the session's fallback is not one. */
+export interface RecoveryExhaustedView {
+  /** The cause in plain words; "" when the category is not one of the known values. */
+  cause: string;
+  /** When the configured model is available again, in the user's time zone; "" when the upstream gave no time. */
+  reset: string;
+  /** Every model the chain tried, in the node's order; "" when the record names none. Only the folded details show it. */
+  tried: string;
+}
+
+/** Read an exhausted-chain marker from a session. The reset time reuses the usage-limit clock so both surfaces format
+ *  a recovery moment the same way, in the user's time zone. */
+export function recoveryExhausted(s: Pick<Session, "model_fallback"> | undefined, now = Date.now()): RecoveryExhaustedView | null {
+  const f = s?.model_fallback;
+  if (!f || f.subtype !== "model_refusal_fallback" || !f.recovery_exhausted) return null;
+  return {
+    cause: recoveryCause(f.category) ?? "",
+    reset: f.recovery_reset ? usageLimitClock(f.recovery_reset, now) : "",
+    tried: typeof f.recovery_tried === "string" ? f.recovery_tried : "",
+  };
+}
+
+/** The configured model once it answered a probe (#7824): the next request runs on it again; undefined otherwise. */
+export function recoveryReturning(s: Pick<Session, "model_fallback"> | undefined): string | undefined {
+  const f = s?.model_fallback;
+  if (!f || f.subtype !== "model_refusal_fallback" || !f.recovery_returning) return undefined;
+  return f.original_model || undefined;
 }
 
 /** What session.restore_model answers: what it did and the configured model it read, nothing about which model runs. */

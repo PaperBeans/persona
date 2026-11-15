@@ -1021,7 +1021,7 @@ struct ChatView: View {
         let items = store.items
         // Frozen: the items up to the snapshot (they are in transcript order); what comes after waits.
         let cut = frozen.map { f in Self.prefixCount(items) { ($0.seq, $0.part) <= (f.seq, f.part) } } ?? items.count
-        let feed = style == .assistant ? TasksStore.shared.feed(shownKey.sessionID) : []
+        let feed = style == .assistant ? ChatLines.drawnFeed(TasksStore.shared.feed(shownKey.sessionID)) : []
         let kids = model.childRows(shownKey)
         scratch.childRows = kids
         let childStamp = kids.map { "\($0.sessionID):\($0.rev ?? 0):\($0.state.rawValue):\($0.updatedAt?.timeIntervalSince1970 ?? 0)" }.joined(separator: "|")
@@ -1510,10 +1510,15 @@ struct ChatView: View {
             turnErrorCard(line, raw: info.raw)
         case .apiError(let item, let info, let count):
             // Retry only when the error is the last thing, the agent is not working (someone may have retried already) and
-            // trying again can help (not a login or a bad request).
+            // trying again can help (not a login or a bad request). An exhausted model recovery chain that can send
+            // qualifies too (#7824): Retry runs the request again, on the configured model once it is back, even after a
+            // refusal the error text alone calls final.
             // Not when the fallback model is missing (#4489): Continue would go to the same model.
+            // The exhausted chain's words go on the last error only; an earlier error in the chat is not what they explain.
             APIErrorCard(info: info, count: count, at: item.ts,
-                         retry: info.transient != false && !status.isActive && currentLines().last?.id == line.id
+                         recovery: ModelFallbackText.exhaustedRecovery(session).flatMap { r in currentLines().last?.id == line.id ? r : nil },
+                         retry: ModelFallbackText.offersRetry(transient: info.transient, session: session)
+                             && !status.isActive && currentLines().last?.id == line.id
                              && model.session(key)?.turnErrorCode != ModelFallbackText.unavailableCode
                              ? { model.sendNow(key, text: "继续") } : nil) // i18n-ignore
         case .userImages(_, let items):

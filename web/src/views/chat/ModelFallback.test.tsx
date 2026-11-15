@@ -68,6 +68,25 @@ describe("ModelFallbackCard", () => {
   it("nothing without an active fallback", () => {
     expect(card({ model_fallback: undefined })).toBe("");
   });
+  it("appends the node's recovery cause to the plain sentence without changing a runtime record's wording", () => {
+    const caused = card({ model_fallback: { ...fallback, category: "rate_limited" } });
+    expect(caused).toContain("上游拒绝了一次请求，这个对话现在用 fallback-model 回复（被限流）。");
+    expect(caused).not.toContain("上游拒绝了一次请求，这个对话现在用 fallback-model 回复。");
+    // no recovery fields, like every runtime-written record: the original sentence and nothing more
+    const runtime = card();
+    expect(runtime).toContain("上游拒绝了一次请求，这个对话现在用 fallback-model 回复。");
+    expect(runtime).not.toContain("（");
+  });
+  it("shows the returning line with the configured model once a probe was answered", () => {
+    const html = card({ model_fallback: { ...fallback, original_model: "primary-model", recovery_returning: true } });
+    expect(html).toContain("primary-model 已恢复，下一条消息会切回");
+    expect(html).toMatch(/data-testid="model-fallback-returning"/);
+    // without the flag the line is absent
+    expect(card()).not.toContain("已恢复");
+  });
+  it("hides the card for an exhausted chain, whose failure card carries the recovery instead", () => {
+    expect(card({ model_fallback: { ...fallback, fallback_model: "", recovery_exhausted: true } })).toBe("");
+  });
 });
 
 describe("a refusal notice", () => {
@@ -128,5 +147,40 @@ describe("a refusal notice", () => {
     expect(html).toContain("记录里没有说改用了其他模型");
     expect(html).not.toContain("自动改用");
     expect(html).toContain("future words");
+  });
+});
+
+describe("a refusal notice with the node's recovery marker (#7824)", () => {
+  const words = "Upstream refused";
+  const item = (refusal: Record<string, unknown>): Item[] => [
+    { id: "u1", seq: 1, role: "user", kind: "text", text: "hi" } as Item,
+    { id: "r1", seq: 2, role: "system", kind: "notice", text: words, model_refusal: refusal } as unknown as Item,
+  ];
+  const render = (refusal: Record<string, unknown>, assistant = true) => {
+    const line = chatLines(item(refusal)).find((l) => l.kind === "notice")!;
+    return renderToStaticMarkup(<ChatLineView line={line} mid="m" sid="s" expandFold={async () => {}} assistant={assistant} />);
+  };
+  it("appends the plain-words cause in the Persona one-sentence mode", () => {
+    const html = render({
+      subtype: "model_refusal_fallback", original_model: "claude-opus-5-5", fallback_model: "claude-sonnet-5-5",
+      category: "quota_exhausted", scope: "session",
+    });
+    expect(html).toContain("上游拒绝了这次请求，已改用 Sonnet 5.5（额度用尽）。");
+  });
+  it("shows the returning line with the configured model's short name", () => {
+    const html = render({
+      subtype: "model_refusal_fallback", original_model: "claude-opus-5-5", fallback_model: "claude-sonnet-5-5",
+      recovery_returning: true,
+    });
+    expect(html).toMatch(/data-testid="refusal-returning"/);
+    expect(html).toContain("Opus 5.5 已恢复，下一条消息会切回");
+  });
+  it("keeps the existing one-sentence wording for a runtime-written record without the new fields", () => {
+    const html = render({
+      subtype: "model_refusal_fallback", original_model: "claude-opus-5-5", fallback_model: "claude-sonnet-5-5",
+      category: "cat-z", scope: "session", text: words,
+    });
+    expect(html).toContain("上游拒绝了这次请求，已改用 Sonnet 5.5。");
+    expect(html).not.toContain("已恢复");
   });
 });

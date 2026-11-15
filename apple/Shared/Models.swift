@@ -529,12 +529,16 @@ nonisolated struct ComputerApp: Codable, Hashable, Sendable, Identifiable {
 }
 
 nonisolated struct ComputerJob: Codable, Hashable, Sendable {
-    /// install | grant
+    /// install | grant (Cua, ego); pair | forget | install | prepare (an iPhone's, #8199)
     var kind: String
     /// running | done | failed | cancelled
     var state: String
     var step: String? = nil
     var error: String? = nil
+    /// An iPhone job's code: while it runs, what it waits for at the phone (trust_pending, locked); once failed, why.
+    var code: String? = nil
+    /// An iPhone job's iPhone.
+    var device: String? = nil
 
     var running: Bool { state == "running" }
 }

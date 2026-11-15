@@ -103,6 +103,12 @@ describe("the sidebar's Recent (#4873, #5195)", () => {
     expect(recentConversations(list, "main", ["lead"]).map((c) => c.session_id)).not.toContain("bg");
   });
 
+  it("brings the background supervisor and the tasks' chats back by time when the user shows them (#8324)", () => {
+    expect(recentConversations(list, "main", ["lead"], "bg", true).map((c) => c.session_id)).toEqual(["bg", "inbox", "a", "lark", "b", "wx", "task", "e1", "e2", "never"]);
+    // still never the main one, a leader or an archived one
+    expect(recentConversations(list, "main", ["lead"], "bg", true).map((c) => c.session_id)).not.toContain("gone");
+  });
+
   it("takes an ended leader back and is empty when nothing else is left", () => {
     expect(recentConversations(list, "main", [], "bg").map((c) => c.session_id).slice(0, 3)).toEqual(["inbox", "lead", "a"]);
     expect(recentConversations(list.slice(0, 3), "main", ["lead"], "bg")).toEqual([]);

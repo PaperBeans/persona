@@ -190,6 +190,7 @@ const LINES: Record<Fallback, () => string> = {
   lost: () => t("screen-video.fallback_lost"),
   locked: () => t("screen-video.fallback_locked"),
   notAllowed: () => t("screen-video.fallback_not_allowed"),
+  busy: () => t("screen-video.fallback_busy"),
 };
 
 /** The line that says why VNC shows while video was chosen; for `notAllowed`, with "How to turn it on": one sentence,

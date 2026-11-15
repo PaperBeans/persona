@@ -36,7 +36,9 @@ test("native preflight queries only this run's GUID keys and reads NSIS's Instal
   const script = calls[0].args.at(-1);
   assert.ok(script.includes(guid));
   assert.ok(script.includes("InstallLocation"));
-  for (const key of keys) assert.ok(script.includes(JSON.stringify(key)));
+  const quotedKeys = keys.map(key => `'${key.replaceAll("'", "''")}'`).join(",");
+  assert.ok(script.startsWith(`$ErrorActionPreference='Stop'; @(${quotedKeys}) | ForEach-Object`), script);
+  for (const key of keys) assert.ok(script.includes(`'${key.replaceAll("'", "''")}'`));
 });
 
 test("native preflight accepts one-key PowerShell output and rejects nonzero exits", async () => {
@@ -103,6 +105,22 @@ test("registry access denial is never mistaken for absence", async () => {
   assert.equal(failures.length, 2);
   assert.match(failures.join("\n"), /query failed[\s\S]*Access is denied[\s\S]*verification failed[\s\S]*Access is denied/);
   assert.equal(cleanup.calls.filter(call => call.args[0] === "delete").length, 0);
+});
+
+test("cleanup cancellation reaches native commands and prevents later registry mutations", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const run = async (command, args, options) => {
+    calls++;
+    assert.equal(options.signal, controller.signal);
+    if (calls === 1) controller.abort(new Error("cleanup deadline"));
+    return { code: 0, text: "" };
+  };
+  await assert.rejects(removeOwnedWindowsRegistryKeys({ keys, run, signal: controller.signal }), /cleanup deadline/);
+  assert.equal(calls, 1, "no delete or recheck may start after cancellation");
+  const shipIt = [];
+  await assert.rejects(removeOwnedShipItJob({ label, uid: 12345, signal: controller.signal, run: async (...args) => { shipIt.push(args); return { code: 0 }; } }), /cleanup deadline/);
+  assert.equal(shipIt.length, 0, "an already-aborted cleanup must not start launchctl");
 });
 
 test("ShipIt cleanup handles absence, removal, and failed recheck with only its run label", async () => {

@@ -519,6 +519,15 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			a.Effort, _ = run["effort"].(string)
 			tier, runs = "", "" // the tier's launcher is not what runs
 		}
+		// traex, omp…: no effort (launcher_modes.go). One this call names is refused before the user is asked, rather
+		// than by the computer after they said yes; one a tier filled in is dropped. pi, cursor, agy: dropped either way.
+		if !startTakesModes(fit.agent) {
+			launcher, _ := run["launcher"].(string)
+			if err := startModesRefused(launcher, fit.agent, "", own.effort); err != nil {
+				return "", fmt.Errorf("%w; no agent was started", err)
+			}
+			a.Effort = ""
+		}
 		// The admission gate refuses a too-busy computer before the user is asked to approve anything.
 		if err := s.checkAgentStart(ctx, am.ID); err != nil {
 			return "", fmt.Errorf("%w; no agent was started", err)
@@ -582,6 +591,12 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		// Allow all for Claude Code and for a provider whose approval is an Auto Accept switch (startAgent.allowAll, #8141).
 		if fit.allowAll() {
 			params["permission_mode"] = "bypassPermissions"
+		}
+		if !startTakesModes(fit.agent) { // the machine a health detour landed on may run another agent under this name
+			if err := startModesRefused(picked, fit.agent, "", own.effort); err != nil {
+				return "", fmt.Errorf("%w; no agent was started", err)
+			}
+			delete(params, "effort") // Model configuration's, not this call's
 		}
 		if note != "" {
 			note = " Note: " + note + "."

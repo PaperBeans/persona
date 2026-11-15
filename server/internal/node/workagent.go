@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
@@ -17,8 +18,9 @@ import (
 // (session.send); cursor-agent's and agy's go through herdr's agent.prompt, which only reaches an agent herdr detects.
 
 const (
-	cursorAgent = "cursor"
-	agyAgent    = "agy"
+	cursorAgent             = "cursor"
+	agyAgent                = "agy"
+	workAgentPaneLockPrefix = "run-agent-in-pane:"
 )
 
 // workAgent is one such agent: its herdr name, and the program a start types when the launcher is the agent itself.
@@ -73,7 +75,8 @@ func workAgentResume(kind, cmd, id string) string {
 
 // startWorkAgent opens a tab in ws and runs the work agent there, then delivers the first message: to pi through the
 // extension that lists the session (finishPiStart), to cursor-agent and agy through herdr's agent.prompt once herdr
-// reports the agent. A pi whose extension never lists the session is closed: typing the message into pi is refused.
+// reports the agent. A pi whose extension never lists the session is quit; its tab stays at the shell, and typing the
+// message into pi is refused.
 func (n *Node) startWorkAgent(ctx context.Context, launch host.Launcher, cwd, launcher, kind, model, prompt, ws, tabName string) (*proto.Session, error) {
 	herdrName, program, ok := workAgent(kind)
 	if !ok {
@@ -84,24 +87,47 @@ func (n *Node) startWorkAgent(ctx context.Context, launch host.Launcher, cwd, la
 		return nil, err
 	}
 	pane := created.Pane.String()
+	if adoptedPane(ctx) == nil {
+		// Keep another start from taking this pane while its command or cleanup is still in flight. The adopted caller
+		// holds the same lock (runAgentInPane); acquiring it again here would deadlock.
+		unlock := n.typing.lock(workAgentPaneLockPrefix + pane)
+		defer unlock()
+		// The tab may have been claimed or adopted before the lock was acquired. Recheck instead of typing over its agent,
+		// using only this pane's host: a successful answer from another host cannot prove this pane is empty.
+		h := n.hosts.Get(host.ParsePane(pane).Kind)
+		if h == nil {
+			return nil, fmt.Errorf("host %s is unavailable", host.ParsePane(pane).Kind)
+		}
+		if err := n.refreshHosts(ctx, h); err != nil {
+			return nil, err
+		}
+		if id := n.sessionOfPane(pane); id != "" {
+			return nil, fmt.Errorf("pane %s already runs agent session %s", pane, id)
+		}
+	}
 	if err := n.settleShell(ctx, pane); err != nil { // the fresh shell at rest first (shellsettle.go, #2570)
-		return nil, n.abandonStart(ctx, launch, created, ws, err)
+		return nil, err
 	}
 	shells := paneShells(ctx, created)
 	cmd := withHerdrAgent(typedHerdrAgent(launch, herdrName, shells...), workAgentCommand(launcher, program, model))
 	// The command goes through the start file, so a line break in it cannot meet a shell that runs each line on its
 	// own (typedstart.go).
-	done, err := n.runAgentCommand(ctx, launch, created, ws, "", n.agentCommand(cmd, shellQuote, shells...), shells...)
+	done, err := n.runWorkAgentCommand(ctx, launch, created, ws, "", n.agentCommand(cmd, shellQuote, shells...), shells...)
 	if err != nil {
-		return nil, err
+		if done == nil {
+			return nil, err
+		}
+		done()
+		return nil, n.abandonStart(ctx, created, kind, err)
 	}
 	defer done()
 	if kind == piAgent {
-		return n.finishPiStart(ctx, launch, created, cwd, launcher, model, prompt)
+		return n.finishPiStart(ctx, launch, created, cwd, launcher, model, prompt, done)
 	}
 	id, agent, err := n.waitWorkAgent(ctx, pane, herdrName)
 	if err != nil {
-		return nil, n.abandonStart(ctx, launch, created, ws, err)
+		done()
+		return nil, n.abandonStart(ctx, created, kind, err)
 	}
 	n.noteWorkAgent(ctx, launch, pane, id, cwd, launcher, kind, model)
 	if prompt != "" {
@@ -115,8 +141,8 @@ func (n *Node) startWorkAgent(ctx context.Context, launch host.Launcher, cwd, la
 }
 
 // finishPiStart waits for the extension in the pi just started to list its session, then sends the first message
-// through it. The tab is closed when the extension never lists it: the message is not typed into pi.
-func (n *Node) finishPiStart(ctx context.Context, launch host.Launcher, created *host.Created, cwd, launcher, model, prompt string) (*proto.Session, error) {
+// through it. The agent is quit and its tab is kept when the extension never lists it: the message is not typed into pi.
+func (n *Node) finishPiStart(ctx context.Context, launch host.Launcher, created *host.Created, cwd, launcher, model, prompt string, done func()) (*proto.Session, error) {
 	pane := created.Pane.String()
 	deadline := time.Now().Add(piResumeWait)
 	for {
@@ -142,11 +168,11 @@ func (n *Node) finishPiStart(ctx context.Context, launch host.Launcher, created 
 			screen, _ := n.readPane(ctx, pane, "recent-unwrapped", 30)
 			err := refusal("pi_no_extension", fmt.Sprintf("pi 起来了，但 %d 秒内没有 Persona 扩展报这个会话，首条消息没有发送。装上扩展（pi install）再开。\n%s",
 				int(piResumeWait.Seconds()), lastLines(screen, 12)), nil)
-			return nil, n.abandonStart(ctx, launch, created, created.SpaceID, err)
+			return nil, n.abandonStartAfterDone(ctx, created, piAgent, done, err)
 		}
 		select {
 		case <-ctx.Done():
-			return nil, n.abandonStart(ctx, launch, created, created.SpaceID, ctx.Err())
+			return nil, n.abandonStartAfterDone(ctx, created, piAgent, done, ctx.Err())
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
@@ -205,12 +231,114 @@ func (n *Node) waitWorkAgent(ctx context.Context, pane, herdrName string) (strin
 	}
 }
 
-// abandonStart closes the tab a start opened and returns err. A pane the user picked is left open.
-func (n *Node) abandonStart(ctx context.Context, launch host.Launcher, created *host.Created, ws string, err error) error {
-	if created != nil {
-		n.closeNewTab(ctx, launch, created, ws) // the one way a start that never ran closes its tab (terminal_guard_test.go)
+// abandonStartWait is how long each cleanup discovery window waits for herdr to report a slow-starting agent.
+// It is a variable so tests can shorten the no-agent path.
+var abandonStartWait = time.Second
+
+func (n *Node) abandonStartAfterDone(ctx context.Context, created *host.Created, kind string, done func(), err error) error {
+	if done != nil {
+		done()
 	}
-	return err
+	return n.abandonStart(ctx, created, kind, err)
+}
+
+// abandonStart gives a slow-starting agent a bounded chance to appear and quits its reported session through quitAgent,
+// keeping the terminal for the user. A user-picked pane is left untouched because pane and kind do not prove which
+// start owns its foreground process. Discovery failure or ambiguity never sends keys. After each quit, fresh discovery
+// runs again so a pi that moved from its pane-derived fallback ID to its real session ID is not mistaken for an exit.
+func (n *Node) abandonStart(ctx context.Context, created *host.Created, kind string, err error) error {
+	if created == nil || adoptedPane(ctx) != nil {
+		return err
+	}
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	pane := created.Pane.String()
+	for {
+		id, ambiguous, discoverErr := n.waitForAbandonedWorkAgent(cctx, pane, kind)
+		if discoverErr != nil {
+			log.Printf("abandon start in pane %s: discover %s: %v", pane, kind, discoverErr)
+			return err
+		}
+		if ambiguous {
+			log.Printf("abandon start in pane %s: more than one %s agent is reported; leaving them for the user", pane, kind)
+			return err
+		}
+		if id == "" {
+			return err
+		}
+		h := n.hosts.Get(host.ParsePane(pane).Kind)
+		if h == nil {
+			return err
+		}
+		stopped, quitErr := n.quitAgentRound(cctx, id, pane, h, true)
+		if quitErr != nil {
+			log.Printf("abandon start in pane %s: quit %s: %v", pane, kind, quitErr)
+			return err
+		}
+		if !stopped {
+			// The agent is still present. Only another fresh discovery may authorize another Ctrl+C pair.
+			continue
+		}
+	}
+}
+
+// waitForAbandonedWorkAgent polls fresh host snapshots for one unambiguous work agent in pane. A stale in-memory row
+// is never used as proof: only a successful refresh lets reportedWorkAgent inspect n.agents.
+func (n *Node) waitForAbandonedWorkAgent(ctx context.Context, pane, kind string) (id string, ambiguous bool, refreshErr error) {
+	hostKind := host.ParsePane(pane).Kind
+	h := n.hosts.Get(hostKind)
+	if h == nil {
+		return "", false, fmt.Errorf("host %s is unavailable", hostKind)
+	}
+	deadline := time.Now().Add(abandonStartWait)
+	for {
+		if err := n.refreshHosts(ctx, h); err != nil {
+			refreshErr = err
+		} else {
+			refreshErr = nil
+			if id, ambiguous = n.reportedWorkAgent(pane, kind); id != "" || ambiguous {
+				return id, ambiguous, nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return "", false, refreshErr
+		}
+		select {
+		case <-ctx.Done():
+			return "", false, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
+// reportedWorkAgent returns the only matching n.agents key. It first counts the raw rows from the latest answered
+// host snapshot: duplicate Cursor/agy rows collapse into one n.agents entry, so checking only the merged map would hide
+// an unsafe ambiguity. A stale in-memory row alone is never used as proof.
+func (n *Node) reportedWorkAgent(pane, kind string) (id string, ambiguous bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	raw := 0
+	for _, a := range n.hostAgents[host.ParsePane(pane).Kind] {
+		if a.PaneID == pane && a.Agent == kind {
+			raw++
+		}
+	}
+	if raw > 1 {
+		return "", true
+	}
+	if raw == 0 {
+		return "", false
+	}
+	for candidate, a := range n.agents {
+		if a.PaneID != pane || a.Agent != kind {
+			continue
+		}
+		if id != "" {
+			return "", true
+		}
+		id = candidate
+	}
+	return id, false
 }
 
 // workAgentCalls serves a hub call for a cursor or agy session herdr runs. A message goes through herdr's

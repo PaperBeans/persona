@@ -38,6 +38,17 @@ The first version of the fix still failed an independent review, on what the hub
   another account and back does not bring the first inbox back. That is a limit, written down in `docs/assistant/inbox.md`, not a bug to
   work around by moving a thing's time.
 
+## A new connection reports nothing the hub keeps for it until the hub has handed it over (2026-11-15, #8275)
+
+Every node connection is a new `Node` with empty state, and the hub hands back what it keeps for the computer (the
+Codex inventory: homes, app-servers, joined threads) only in the `node.configure` that follows `devices.connected`.
+The engine is settled earlier (`engine.use` is the first call of the handshake), and the manager passes a node's events
+on before it calls `devices.connected`, so a report made "once the engine is ready" reached the hub first and the hub
+stored the empty registry over what it kept. A node's report of state the hub keeps waits for the hub's part of the
+connection (`codexHanded`); the hub keeps such a report only from a connection it has done that part for
+(`codexInventoryHanded`: `hookedAt` equal to the manager's `ConnectedAt`), which also covers older nodes. Write a test
+of the sequence, not only of each side's storage.
+
 ## An empty list sent as null means "no change" to an optional field (2026-11-14)
 
 The node reads node.configure's `claude_dirs_blocked` as `*[]string`: absent or `null` leaves its patterns as they are.
@@ -575,6 +586,13 @@ Don't add a `pending.json` field for it: older edges and watchdogs read the same
 ## Test a staged node before stopping the resident one (#5097)
 
 A completed gzip stream and `chmod 755` prove that bytes arrived, not that the target machine can execute them. The SSH deploy therefore runs the staged binary's `version` command before the atomic rename and before `pkill`: an `exec format error` or another failed self-test removes `.new`, preserves the installed binary, and leaves the working node running. Package selection still validates GOOS / GOARCH through Go build info; the remote self-test is the final target-side guard, not a duplicate package check. Exercise this boundary through the real login-shell deploy script with an isolated HOME and a fake `pkill`, never by replacing or stopping a development machine's resident node.
+
+## A release archive's checksum does not verify its version (#8338)
+
+A correctly hashed Windows ZIP can contain programs reporting another version while sharing the manifest's build number.
+Run the bundled version and node self-check commands on the target architecture, before installation or publication.
+Bind the successful results to both the ZIP and executable hashes, and reject missing or stale verification at the upload boundary.
+Cross-platform build metadata and a version-shaped string somewhere in a binary are not substitutes for those command results.
 
 ## Migrating a long-poll channel without duplicate consumers (#2020)
 
@@ -2231,6 +2249,15 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
   minute is then the same machine for all of them, and the head's CPU time over the base's in the same minute came
   out at 0.943 with every one of the 20 minutes below 1, the unchanged hub's at 0.983 (`pairedCPU`). Measure a noisy
   quantity against a reference that sees the same noise at the same moment.
+- The largest share was not in the event path at all: `liveLoop` builds the fleet again up to ten times a second
+  while it changes, and each round took a new copy of every machine's list to decorate, 54% of what the manager
+  allocated. A loop that reads the same lists again and again keeps its arrays: `Devices.AppendSessions` copies a
+  machine's rows over the list the last round kept (`fleetInputsInto`), 78 KB a round where new copies were 886 KB.
+  What makes that safe is stated in the code and pinned by tests: every row is overwritten whole before it is
+  decorated, so no decoration carries over; rows a shorter list leaves behind are cleared; one goroutine owns the
+  arrays; and nothing built from a round keeps a row (`TestLiveRoundsOverKeptListsAreFreshRounds` runs every round
+  both ways and marshals each round's results again after the arrays were rewritten). Give the arrays back on the
+  slow tick, or a fleet gone quiet holds a second copy of its lists for good.
 
 ## The manager read its own session lists through their JSON (2026-11-13, #3197)
 

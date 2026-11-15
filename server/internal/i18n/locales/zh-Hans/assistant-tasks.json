@@ -15,6 +15,7 @@
   "launcher_not_on_machine": "{machine} 上没有启动器 {launcher}，没有启动任何 Agent。这台电脑能用的启动器：{launchers}",
   "launcher_swapped": "{launcher} 不在 {machine} 上，改用 {to}（它的默认模型）",
   "launcher_kind_missing": "{machine} 的 {engine} 里没有 {launcher}，也没有别的 {kind} provider，没有启动，也不会改用别类 Agent。它在那里的 provider：{launchers}",
+  "readonly_launcher_unsupported": "{machine} 上的 {launcher} 启动的是 {agent}，它没有只读模式，所以这个只读任务被拒绝：没有启动任何 Agent，也不会改用别的启动器。可以把它规划成可写任务（readonly false），或用这台电脑上 Claude Code 或 Codex 的启动器以只读方式规划：{launchers}",
   "start_identity_conflict": "启动响应未确认所请求电脑上的会话身份。",
   "start_interrupted": "Hub 在此任务的 Agent 启动途中重启了，之前的请求仍可能完成。请等电脑重新连接后检查会话，再决定是否重试，以免重复启动 Agent。",
   "failed_start": "没开起来：{reason}",

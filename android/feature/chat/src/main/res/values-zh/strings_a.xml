@@ -335,7 +335,6 @@
     <string name="chat_tasks_interrupt_all_handled">→ 都处理了</string>
     <string name="chat_tasks_quick_reminder">已加提醒</string>
     <string name="chat_tasks_quick_calendar">已加到日历</string>
-    <string name="chat_tasks_quick_on_iphone">在 iPhone 上</string>
     <string name="chat_today_done_one">做完了：%1$s</string>
     <plurals name="chat_today_done_many">
         <item quantity="other">做完了 %1$d 个任务</item>

@@ -249,6 +249,16 @@ export function codexThreadOf(agent, roots = {}) {
 }
 
 /**
+ * Whether Persona started the agent, or took its session over (#8130): its id is on Persona's label, put there by the
+ * start (bridge.js start, takeOver), and not one the bridge only kept for an agent made in Paseo's own app (KEPT_LABEL).
+ * Paseo keeps the label with the agent, so this holds after a restart of the node, the bridge or Paseo.
+ */
+export function startedByPersona(agent) {
+  const label = agent?.labels?.[SESSION_LABEL]
+  return typeof label === 'string' && SESSION_ID.test(label) && !agent.labels[KEPT_LABEL]
+}
+
+/**
  * The agent that created this one, by its Paseo id: a delegated agent (Paseo's create_agent, as an orchestrator's
  * reviewers). Undefined for an agent the user started, and once Paseo detached it from its creator.
  */
@@ -445,6 +455,9 @@ export function agentRow(agent, o = {}) {
     agent: appAgent(root),
     launcher: agent.provider,
   }
+  // Persona started it (or took it over): the manager finds a start whose answer it lost by this, among the sessions
+  // of the same launcher and folder (#8130).
+  if (startedByPersona(agent)) row.started_by_persona = true
   // When it was created: a delegated agent's card in its creator's chat counts its running time from it (#5120).
   const created = Date.parse(agent.createdAt)
   if (created) row.started_at = new Date(created).toISOString()

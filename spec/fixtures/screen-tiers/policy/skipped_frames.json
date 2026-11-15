@@ -1,5 +1,5 @@
 {
-  "description" : "Frames the helper skipped count as a long queue; no rate: one down.",
+  "description" : "Frames the helper skipped, with a queue still over 150 ms, count as a long queue; no rate: one down.",
   "init" : {
     "bias" : "auto",
     "capKbps" : 12000,
@@ -41,9 +41,9 @@
   "steps" : [
     {
       "helper" : {
-        "kbps" : 7000,
+        "kbps" : 12000,
         "skipped" : 4,
-        "targetKbps" : 7000
+        "targetKbps" : 12000
       }
     },
     {
@@ -59,8 +59,9 @@
           "frames" : 30,
           "lateShare" : null,
           "queueFalling" : false,
-          "queueP50Ms" : 100,
-          "queueP95Ms" : 100,
+          "queueLastMs" : 200,
+          "queueP50Ms" : 200,
+          "queueP95Ms" : 200,
           "queueRising" : false,
           "replacedShare" : 0
         }
@@ -90,8 +91,9 @@
           "frames" : 30,
           "lateShare" : null,
           "queueFalling" : false,
-          "queueP50Ms" : 100,
-          "queueP95Ms" : 100,
+          "queueLastMs" : 200,
+          "queueP50Ms" : 200,
+          "queueP95Ms" : 200,
           "queueRising" : false,
           "replacedShare" : 0
         }

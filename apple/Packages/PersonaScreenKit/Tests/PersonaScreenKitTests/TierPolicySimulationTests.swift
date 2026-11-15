@@ -137,4 +137,29 @@ final class TierPolicySimulationTests: XCTestCase {
         XCTAssertEqual(r.changes.first { $0.reason == .linkSlowed }?.to, "1x15")
         XCTAssertEqual(r.changes.last?.to, "2x60", "and back: \(r.changes)")
     }
+
+    /// The browser on a fast hub path (2026-11-15): a light screen whose keyframes, near the encoder's low target, come
+    /// in too quickly to measure as bursts. A stall that is over doesn't step it down; a step down from a real squeeze
+    /// climbs back once the link is calm, though the screen never fills the bitrate.
+    func testALightScreenOnAFastLinkKeepsAndRegainsItsTier() {
+        func sim() -> LinkSimulation {
+            var s = lightScreen(batched: false)
+            s.keyframeSeconds = 0.3
+            return s
+        }
+        for stall in [0.8, 1.5] {
+            let link = LinkSimulation.Link(kbps: { $0 >= 20 && $0 < 20 + stall ? 0 : 200_000 }, rttMs: 6, jitterMs: 2,
+                                           stats: LinkStats(kind: .relay, via: .wifi))
+            let r = sim().run(link, seconds: 90)
+            report("fast relay, light content, small keyframes, nothing carried for \(stall) s at 20 s", r, [("all", 0, 90)])
+            XCTAssertTrue(r.changes.isEmpty, "\(r.changes)")
+        }
+        let squeezed = LinkSimulation.Link(kbps: { $0 >= 20 && $0 < 26 ? 1_000 : 200_000 }, rttMs: 6, jitterMs: 2,
+                                           stats: LinkStats(kind: .relay, via: .wifi))
+        let r = sim().run(squeezed, seconds: 120)
+        report("fast relay, light content, small keyframes, 1 Mbit/s for 6 s at 20 s", r, [("all", 0, 120)])
+        XCTAssertEqual(r.changes.first?.reason, .linkSlowed)
+        XCTAssertEqual(r.changes.last?.to, "2x60", "back to the best tier: \(r.changes)")
+        XCTAssertLessThan(r.changes.last?.at ?? .infinity, 26 + 60, "within a minute of the squeeze")
+    }
 }

@@ -290,7 +290,7 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
   const directions = leaders.map((id) => assistant?.conversations.find((c) => c.session_id === id)).filter((c): c is Session => !!c);
   const recentCount = useRecentCount();
   const recentMore = useRecentMore();
-  const ownChats = recentConversations(assistant?.conversations ?? [], assistant?.main, leaders, assistant?.background_supervisor);
+  const ownChats = recentConversations(assistant?.conversations ?? [], assistant?.main, leaders, assistant?.background_supervisor, assistant?.recent_task_chats === true);
   const recent = ownChats.slice(0, recentCount * (1 + recentMore));
   const recentLeft = ownChats.length - recent.length;
   const recentLess = recentMore > 0 && ownChats.length > recentCount;
