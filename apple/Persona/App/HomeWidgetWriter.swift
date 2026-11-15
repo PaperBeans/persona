@@ -16,7 +16,7 @@ import WidgetKit
 final class HomeWidgetWriter {
     static let shared = HomeWidgetWriter()
     static let pause: Duration = .seconds(5)
-    static let heartbeat: TimeInterval = 20 * 60
+    nonisolated static let heartbeat: TimeInterval = 20 * 60
 
     /// What to write: the app's state (`AppModel.homeSnapshot()`); DEBUG `-showHomeWidgetSample` writes the sample.
     var source: () -> HomeSnapshot? = { nil }
@@ -38,11 +38,12 @@ final class HomeWidgetWriter {
     #endif
 
     private var pending: Task<Void, Never>?
-    private var written: (body: Data, parts: [HomeKind: Data], at: Date)?
-    private let store: HomeSnapshotStore
+    /// The last write handed to `output`: the next one waits for it, so writes land in the order they were made.
+    private var writing: Task<Void, Never>?
+    private let output: Output
 
     init(store: HomeSnapshotStore = .shared) {
-        self.store = store
+        output = Output(store: store)
     }
 
     /// Whether the hub knows this device has the widgets (nil: not told since launch).
@@ -104,26 +105,45 @@ final class HomeWidgetWriter {
         #endif
         guard var snapshot = made else { return }
         snapshot.recording = recording ?? snapshot.recording
-        snapshot.at = 0
-        guard let body = Self.encode(snapshot) else { return }
-        if let written, written.body == body, now.timeIntervalSince(written.at) < Self.heartbeat { return }
-        let parts = Self.parts(snapshot)
-        let changed = HomeKind.allCases.filter { written?.parts[$0] != parts[$0] }
-        let kinds = written?.body == body ? HomeKind.allCases : changed
-        snapshot.at = now.timeIntervalSince1970
-        guard let data = Self.encode(snapshot) else { return }
-        self.written = (body, parts, now)
-        let store = store
-        Task.detached(priority: .utility) {
+        // Encoding, comparing and writing happen off the main actor: a snapshot of a busy hub took 28 ms of JSON
+        // encoding on the main thread each time, every few seconds while Agents worked (#8412).
+        let output = output, previous = writing
+        writing = Task.detached(priority: .utility) {
+            await previous?.value
+            guard let kinds = await output.write(snapshot, now: now) else { return }
+            await MainActor.run {
+                for kind in kinds { WidgetCenter.shared.reloadTimelines(ofKind: kind.widgetKind) }
+            }
+        }
+    }
+
+    /// The snapshot's file, and what was last written to it.
+    private actor Output {
+        private let store: HomeSnapshotStore
+        private var written: (body: Data, parts: [HomeKind: Data], at: Date)?
+
+        init(store: HomeSnapshotStore) { self.store = store }
+
+        /// Writes `snapshot` unless the same content was written within `heartbeat`; returns the kinds whose widgets
+        /// should reload (nil: nothing written).
+        func write(_ snapshot: HomeSnapshot, now: Date) -> [HomeKind]? {
+            var snapshot = snapshot
+            snapshot.at = 0
+            guard let body = HomeWidgetWriter.encode(snapshot) else { return nil }
+            if let written, written.body == body, now.timeIntervalSince(written.at) < HomeWidgetWriter.heartbeat { return nil }
+            let parts = HomeWidgetWriter.parts(snapshot)
+            let changed = HomeKind.allCases.filter { written?.parts[$0] != parts[$0] }
+            let kinds = written?.body == body ? HomeKind.allCases : changed
+            snapshot.at = now.timeIntervalSince1970
+            guard let data = HomeWidgetWriter.encode(snapshot) else { return nil }
+            written = (body, parts, now)
             do {
                 try store.write(data)
             } catch {
                 HomeSnapshotStore.log.error("widget snapshot not written: \(error.localizedDescription, privacy: .public)")
-                return
+                return nil
             }
-            await MainActor.run {
-                for kind in kinds { WidgetCenter.shared.reloadTimelines(ofKind: kind.widgetKind) }
-            }
+            return kinds
         }
     }
 

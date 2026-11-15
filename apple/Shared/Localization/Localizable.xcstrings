@@ -180149,29 +180149,6 @@
       },
       "extractionState" : "manual"
     },
-    "Web pages opened in the app (sign-ins not included)" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Web pages opened in the app (sign-ins not included)"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "App内で開いたWebページ（ログイン状態は含みません）"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "App 内打开的网页（不含登录状态）"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
     "Web sign-in QR code" : {
       "localizations" : {
         "en" : {
@@ -199798,6 +199775,236 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用 %@"
+          }
+        }
+      }
+    },
+    "Pages from links in chats, opened or loaded ahead" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pages from links in chats, opened or loaded ahead"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャット内のリンク先ページ（開いたものと先読みしたもの）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聊天里链接的网页，包括打开过的和提前加载的"
+          }
+        }
+      }
+    },
+    "Chats download again from the hub when you open them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chats download again from the hub when you open them."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャットを開くとハブから再度ダウンロードします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开对话时会重新从中枢下载。"
+          }
+        }
+      }
+    },
+    "Images download again from the hub when you see them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Images download again from the hub when you see them."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画像は表示するときにハブから再度ダウンロードします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "图片显示时会重新从中枢下载。"
+          }
+        }
+      }
+    },
+    "Lark images and files download again when you open them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lark images and files download again when you open them."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Larkの画像とファイルは開くときに再度ダウンロードします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "飞书的图片和文件打开时会重新下载。"
+          }
+        }
+      }
+    },
+    "Lists and Lark chats load again from the hub." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lists and Lark chats load again from the hub."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リストとLarkのチャットはハブから再度読み込みます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "列表和飞书会话会重新从中枢加载。"
+          }
+        }
+      }
+    },
+    "Pages load again from the web when you open them. Sign-ins are kept." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pages load again from the web when you open them. Sign-ins are kept."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ページは開くときに再度読み込みます。ログイン状態は保持されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网页打开时会重新加载，登录状态会保留。"
+          }
+        }
+      }
+    },
+    "Requests go to the network again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Requests go to the network again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リクエストは再度ネットワークから取得します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求会重新走网络。"
+          }
+        }
+      }
+    },
+    "Temporary files are removed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temporary files are removed."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一時ファイルを削除します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "临时文件会被删除。"
+          }
+        }
+      }
+    },
+    "Tap an item to clear it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap an item to clear it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "項目をタップすると消去できます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点按某一项即可清除。"
+          }
+        }
+      }
+    },
+    "Clears it after you confirm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clears it after you confirm"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認後に消去します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "确认后清除"
           }
         }
       }

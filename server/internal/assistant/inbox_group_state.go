@@ -13,10 +13,11 @@ import (
 // carries only what the owner did in the source; all item content and rules in it are ignored. Normal batches are
 // returned untouched for relateBatches.
 //
-// Reports repeat until the event takes new messages. A reply is therefore recorded once per Last position, and a read
-// only while Read is false; group.append clears Read when new messages arrive. A read caused by Persona's own reply,
-// or following a reply already recorded at that position, only sets Read. With the AI twin off, these changes are
-// still recorded. With the twin off, an existing conversation gets no note or wake and is not moved to Looking.
+// Reports repeat until the event takes new messages. A reply is therefore recorded once per Last position (RepliedOf,
+// which outlives the chain's cap), and a read only while Read is false; group.append clears Read when new messages
+// arrive. A read caused by Persona's own reply, or following a reply already recorded at that position, only sets Read.
+// With the AI twin off, these changes are still recorded. With the twin off, an existing conversation gets no note or
+// wake and is not moved to Looking.
 func (s *Service) applyGroupStates(ctx context.Context, src assistantwire.InboxSource, things []connector.InboxThing) ([]connector.InboxThing, []*InboxItem) {
 	rest := things[:0:0]
 	var states []connector.InboxThing
@@ -68,6 +69,7 @@ func (s *Service) applyGroupStates(ctx context.Context, src assistantwire.InboxS
 			entry.Via = it.Source
 			entry.Link.Type = LinkSource
 			entry.Link.Position = t.Last
+			it.RepliedOf = t.Last
 			if hasConversation {
 				follow := defaultInboxFollow(now)
 				if it.Follow != nil {
@@ -124,10 +126,14 @@ func (s *Service) applyGroupStates(ctx context.Context, src assistantwire.InboxS
 	return rest, changed
 }
 
-// groupStateHasSelfReply says whether this position already has the reply's idempotency marker.
+// groupStateHasSelfReply says whether this position already has the reply's idempotency marker: RepliedOf, or the
+// self_replied entry at it, which is all an item recorded before RepliedOf has (while the chain still keeps it).
 func groupStateHasSelfReply(it *InboxItem, last string) bool {
 	if positionAfter(it.SettledOf, "-1") && !positionAfter(last, it.SettledOf) { // a conversation position, not mail: / todo:
 		return true // the manager filed it on evidence up to there (inbox_settle.go): reopened since, it stays open
+	}
+	if it.RepliedOf != "" && it.RepliedOf == last {
+		return true
 	}
 	for _, e := range it.Chain {
 		if e.Kind == ChainSelfReplied && e.Link != nil && e.Link.Position == last {

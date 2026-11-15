@@ -148,6 +148,10 @@ type InboxItem struct {
 	// position it read for a conversation, "mail:<uid>" for an answered mail, "todo:<id>" for a finished to-do. Reopened
 	// by hand, the same evidence never files it again.
 	SettledOf string `json:"settled_of,omitempty"`
+	// RepliedOf is Last when a connector's state report recorded the owner's reply in the source (inbox_group_state.go).
+	// The report repeats until new messages come, and the self_replied entry that says so can fall out of the newest
+	// chainMax kept: this is what keeps the same report from counting as another reply (#8424).
+	RepliedOf string `json:"replied_of,omitempty"`
 	// ArrivedAt is the clock here when the item first held Last (ArrivedOf), as listed or saved: a bulk "Done" over a
 	// filter leaves what arrived after the list it acted on (inbox_bulk.go). Rows stored before have UpdatedAt.
 	ArrivedOf string    `json:"arrived_of,omitempty"`
@@ -226,7 +230,7 @@ func conversationOf(it *InboxItem) *wire.MessagingConversationRef {
 func (it *InboxItem) listed() InboxItem {
 	c := *it
 	c.Context, c.Last, c.TriagedAt, c.BodyOf, c.JudgedAt, c.Rules, c.ArrivedOf, c.FolderOf = "", "", "", "", "", "", "", ""
-	c.TriageRev, c.SettledOf, c.RuleOf = 0, "", ""
+	c.TriageRev, c.SettledOf, c.RuleOf, c.RepliedOf = 0, "", "", ""
 	c.ArrivedAt = time.Time{}
 	c.Meta, c.Group = nil, nil
 	c.ChainSeq, c.SuggestSeq = 0, 0

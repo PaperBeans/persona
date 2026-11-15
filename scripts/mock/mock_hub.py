@@ -21,6 +21,9 @@ if os.environ.get("MOCK_CHILD_SESSIONS"):
 # MOCK_PASEO_PROVIDERS=1 (#8142) builds on it too: two of its providers the apps have no id for (Grok, Cursor).
 if os.environ.get("MOCK_PASEO_PROVIDERS"):
     os.environ.setdefault("MOCK_PASEO", "1")
+# MOCK_PASEO_NOT_LOADED=1 (#8321) as well: a Grok agent Paseo let go, read only once its chat is watched.
+if os.environ.get("MOCK_PASEO_NOT_LOADED"):
+    os.environ.setdefault("MOCK_PASEO", "1")
 # MOCK_TEAM=1 (#5180) builds on MOCK_TAB_PANES's tab of three: it adds a worker's request, a third worker and a stopped pane.
 MOCK_TEAM = bool(os.environ.get("MOCK_TEAM"))
 if MOCK_TEAM:
@@ -1270,6 +1273,18 @@ if PASEO_PROVIDERS:
                "Moved the toggles into one group.", agent="paseo", agent_label="Cursor", launcher="cursor", model="auto",
                capabilities=_provider_caps),
     ]
+# MOCK_PASEO_NOT_LOADED=1 (#8321, on the Paseo computer): a Grok agent Paseo let go (closed after an hour idle, listed
+# offline). As its bridge does since #8132, every read of its chat is refused as not_loaded until a subscribe watches
+# it: then "Paseo" loads it, which takes MOCK_PASEO_LOAD_SECONDS (default 3), and the backlog brings its history.
+# GET /mock/paseo-unload lets it go again.
+PASEO_CLOSED = "paseo-9a5e0000-0000-4000-8000-000000000012"
+PASEO_LOADED = {"on": False}
+if os.environ.get("MOCK_PASEO_NOT_LOADED"):
+    SESSIONS.append(_paseo(PASEO_CLOSED, "Sort the holiday photos", "Triage", None, "main", "offline", "offline", 90,
+                           "Done: 212 photos in 9 albums, one per town.", agent="paseo", agent_label="Grok", launcher="grok",
+                           model="grok-4", capabilities={"read": True, "send": True, "interrupt": True, "approve": True,
+                                                         "terminal": False, "attach": False, "close": True, "rename": True,
+                                                         "model": True}))
 # MOCK_CHILD_SESSIONS=1 (#5120): the Paseo agent that created two agents created two more, both finished (one of them
 # failed), and an agent whose creator is not listed stays a row of its own. With the hub's folding (fold_hierarchy) the
 # web lists none of the children: the lead's row needs you (its waiting child) and its chat draws a card for each.
@@ -7606,6 +7621,11 @@ if os.environ.get("MOCK_CHILD_SESSIONS"):  # #5120: the lead's two exchanges, an
     ITEMS[PASEO_GRANDCHILD] = (
         [it("user", "text", 2, text="Trace why a refresh after a retry returns 401.")]
         + [it("assistant", "text", 0.2, text="Following the 401 through the retry.")])
+if os.environ.get("MOCK_PASEO_NOT_LOADED"):  # #8321: what the closed Grok agent did before Paseo let it go
+    ITEMS[PASEO_CLOSED] = (
+        [it("user", "text", 95, text="Sort the holiday photos by place, one album per town.")]
+        + tool("Bash", {"command": "exiftool -GPSPosition -csv ~/Pictures/Holiday"}, "212 photos, 9 places", 94)
+        + [it("assistant", "text", 90, text="Done: 212 photos in 9 albums, one per town.")])
 if os.environ.get("MOCK_ORCA_CHILDREN"):
     ITEMS["c2073000-0000-4000-8000-000000000006"] = [
         it("user", "text", 61, text="Review the prior work in this workspace."),
@@ -20696,7 +20716,8 @@ def net_control(path, q):
 # MOCK_HUB_UPDATE=available|waiting|notice|held|docker|docker-pinned: the hub's version and its updating itself
 # (docs/operations/hub-update.md): a newer release to install (auto-update off), an update waiting for two busy agents, "Automatic updates enabled"
 # told for the first time, a newer release auto-update holds back (its code does not contain the hub's commit, with
-# the held line in the history), or a Docker hub with a newer image (on :latest, or on a pinned version tag). Unset:
+# the held line in the history), or a Docker hub with a newer image (on :latest, or on a pinned version tag). behind
+# (#8108): up to date against a build-time source whose newest release is older than the hub (source_behind). Unset:
 # GET /api/v1/hub/update is 404 (a hub from before), no line anywhere.
 HUB_UPDATE_MODE = os.environ.get("MOCK_HUB_UPDATE", "")
 HUB_UPDATE = {}
@@ -20719,6 +20740,10 @@ def hub_update_state():
         elif HUB_UPDATE_MODE == "notice":
             HUB_UPDATE.update(state="idle", auto=True, auto_notice=True)
             HUB_UPDATE["latest"] = dict(latest, version=HUB_UPDATE["version"], build=HUB_UPDATE["build"], newer=False)
+        elif HUB_UPDATE_MODE == "behind":
+            HUB_UPDATE.update(state="idle", auto=True, update_url="https://site.example.com/dl", update_url_from="build", source_behind=True)
+            HUB_UPDATE["latest"] = {"version": "v0.1.17-177-g563f7fde5b-202611071005", "build": 202611071005,
+                                    "released": "2026-11-07T10:05:00Z", "newer": False, "bad": False}
         elif HUB_UPDATE_MODE in ("docker", "docker-pinned"):
             pinned = HUB_UPDATE_MODE == "docker-pinned"
             HUB_UPDATE.update(version="0.3.0", build=0, channel="docker", can_update=False, auto=False,
@@ -25713,6 +25738,10 @@ class H(BaseHTTPRequestHandler):
             return self.send_json({"settings": CODEX_SETTINGS.setdefault(p.split("/")[4], _codex_settings())})
         if p.startswith("/api/v1/sessions/") and p.endswith("/items"):
             sid = unquote(p.split("/")[5])  # a subagent's is "<session>@<agent>" (the web app sends %40)
+            if sid == PASEO_CLOSED and not PASEO_LOADED["on"]:  # MOCK_PASEO_NOT_LOADED: no watch has loaded it yet
+                LOG.write("  items %s refused: not_loaded\n" % sid); LOG.flush()
+                return self.send_json({"error": "This agent isn’t running in Paseo. Its conversation loads while its chat is open.",
+                                       "code": "not_loaded"}, 409)
             items = find_items(sid)
             last = items[-1]["seq"] if items else 0
             if "after_seq" in q:
@@ -25736,6 +25765,9 @@ class H(BaseHTTPRequestHandler):
             served(sid, "page", out)
             live_step_page_sent(sid)
             return self.send_json(out)
+        if p == "/mock/paseo-unload":  # MOCK_PASEO_NOT_LOADED: Paseo lets the Grok agent go again
+            PASEO_LOADED["on"] = False
+            return self.send_json({"ok": True})
         if p == "/mock/images":  # MOCK_IMAGES_FAIL: ?ok=1 lets lazy images through, ?asked=1 reads, anything else fails them again
             q = parse_qs(urlparse(self.path).query)
             if q.get("asked") != ["1"]: IMAGES_FAIL["on"] = q.get("ok", [""])[0] != "1"
@@ -28079,7 +28111,17 @@ class H(BaseHTTPRequestHandler):
                                         except Exception:
                                             pass
                         threading.Thread(target=stream, daemon=True).start()
-                    if since:
+                    if sid == PASEO_CLOSED and not PASEO_LOADED["on"]:
+                        # MOCK_PASEO_NOT_LOADED: the watch loads the agent, and the hub's backlog read waits for it
+                        def load(sid=sid, mid=mid, fold=bool(msg.get("fold_work"))):
+                            time.sleep(float(os.environ.get("MOCK_PASEO_LOAD_SECONDS", "3")))
+                            PASEO_LOADED["on"] = True
+                            history = find_items(sid)
+                            page, more = last_turns(history, 2) if PAGING["on"] else (history, False)
+                            send({"type": "items", "machine_id": mid, "session_id": sid, "backlog": True, "has_more": more, **span(history),
+                                  "items": lazy_images(fold_work(page) if fold else page)})
+                        threading.Thread(target=load, daemon=True).start()
+                    elif since:
                         newer = [x for x in items if x["seq"] > since]
                         send({"type": "items", "machine_id": mid, "session_id": sid, "items": lazy_images(newer), "backlog": True,
                               **span(items, since, max(since, items[-1]["seq"] if items else 0))})

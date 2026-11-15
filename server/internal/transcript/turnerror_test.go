@@ -394,6 +394,7 @@ func TestTailSettleKeepsSessionModelFallback(t *testing.T) {
 	var m Meta
 	m.ModelFallback = &proto.ModelRefusal{OriginalModel: "primary-model", FallbackModel: "fallback-model", Scope: "session"}
 	var tail Tail
+	tail.PriorModelFallback(m.ModelFallback)
 	fallbackReplyA := strings.Replace(strings.Replace(replyLine, `"uuid":"r"`, `"uuid":"a1"`, 1), `"model":"claude-opus-5-5"`, `"model":"fallback-model"`, 1)
 	fallbackReplyB := strings.Replace(strings.Replace(replyLine, `"uuid":"r"`, `"uuid":"b1"`, 1), `"model":"claude-opus-5-5"`, `"model":"fallback-model"`, 1)
 	for i, line := range []string{prompt("u1", "A"), fallbackReplyA, turnEndLine} {

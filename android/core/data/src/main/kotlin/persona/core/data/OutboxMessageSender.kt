@@ -464,8 +464,10 @@ class OutboxMessageSender(
         if (items.none(MessageEcho::candidate)) return
         lifecycle.withLock {
             check(job.isActive) { "Pairing scope is closed" }
-            val pending = store.entries.first().filter { it.session == session && it.state in reconcilable }
-                .sortedBy { it.createdAt }.toMutableList()
+            val pending = store.entries.first().filter { it.session == session && it.state in catchUpStates }
+                // An untagged copy still belongs to the oldest unsettled message; Shown is only the fallback.
+                .sortedWith(compareBy<OutboxEntry> { it.state == OutboxState.Shown }.thenBy { it.createdAt })
+                .toMutableList()
             for (item in items) {
                 if (pending.isEmpty()) break
                 if (!MessageEcho.candidate(item) || (session to item.id) in claimed) continue
@@ -473,7 +475,9 @@ class OutboxMessageSender(
                     it.opId?.let { op -> MessageEcho.carries(item, op) } == true }
                     ?: pending.firstOrNull { MessageEcho.arrived(it.text, it.createdAt, item) } ?: continue
                 pending.remove(entry)
-                if (store.transition(entry.clientMessageId, reconcilable, OutboxState.Shown)) {
+                val moved = store.transition(entry.clientMessageId, reconcilable, OutboxState.Shown)
+                // A restored Shown row is only display state; this newly observed transcript item is fresh evidence.
+                if (moved || entry.state == OutboxState.Shown) {
                     claimed += session to item.id
                     publishAuthoritative(entry)
                     wake.trySend(Unit)
@@ -613,8 +617,15 @@ class OutboxMessageSender(
                 // Recording metadata must never change an already authoritative message result.
                 entry.copyForDelivery(agentHandOff = entry.agentHandOff?.copy(delivered = true))
             }
-            val originCommitted = (storeCommitted || recovering) && store.agentHandOffOriginCommitted(persisted)
-            AuthoritativeMessageDeliveries.publish(persisted.delivery(originCommitted))
+            // Recovery means the store outcome is unknown, not that its origin committed. Publish repairs it idempotently.
+            val originCommitted = storeCommitted && store.agentHandOffOriginCommitted(persisted)
+            // Reconciliation has a short timeout. Once fresh evidence retries an interrupted commit, finish that small
+            // durable repair and its publication rather than cancelling between the journal write and the event.
+            if (recovering) withContext(NonCancellable) {
+                AuthoritativeMessageDeliveries.publish(persisted.delivery(originCommitted))
+            } else {
+                AuthoritativeMessageDeliveries.publish(persisted.delivery(originCommitted))
+            }
             published = true
         } finally {
             // Cancellation or another publication failure must not consume the only later chance to recover.

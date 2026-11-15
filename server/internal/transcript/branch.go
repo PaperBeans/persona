@@ -337,12 +337,17 @@ func (tl treeLine) rec(items []proto.Item) treeRec {
 // transcript's end), so that the agent's last words it ends up with are not ones on an abandoned branch: a turn gone back
 // over that ended in an API error would otherwise stay the session's last words, and its error the session's.
 type Tail struct {
-	tree    branchTree
-	words   []treeLine      // the lines that said something, in order
-	gone    map[string]bool // Rewound's lines still left out
-	rewound []string        // Rewound's lines as it was told them
-	revoked bool
+	tree          branchTree
+	words         []treeLine      // the lines that said something, in order
+	gone          map[string]bool // Rewound's lines still left out
+	rewound       []string        // Rewound's lines as it was told them
+	modelFallback *proto.ModelRefusal
+	revoked       bool
 }
+
+// PriorModelFallback supplies the session's fallback from before the quick tail. Settle starts visible-record replay
+// from it, not from meta after records on an abandoned branch may have cleared or replaced it.
+func (t *Tail) PriorModelFallback(fallback *proto.ModelRefusal) { t.modelFallback = fallback }
 
 // Rewound tells the tail about lines the node itself rewound over (File.RewoundLines): Claude writes nothing for that,
 // so they and what grows from them are left out too. All of them, not only where the branch starts: that may be
@@ -509,8 +514,8 @@ func (t *Tail) Settle(meta *Meta) bool {
 	}
 	// Replay the raw records that remain visible, not the parser state that an abandoned turn left behind. ParseLine
 	// supplies the real prompt/wake/local/close and error transitions, including idempotent starts and resume state.
-	fallback := meta.ModelFallback
-	var replay Meta
+	// The pre-tail fallback is replay's initial state; meta may instead describe an abandoned branch's last reply.
+	replay := Meta{ModelFallback: t.modelFallback}
 	for _, rec := range t.tree.recs {
 		if t.tree.hidden[rec.uuid] || !rec.hasOutcome || len(rec.raw) == 0 || rec.errorLine != "" && t.tree.hidden[rec.errorLine] {
 			continue
@@ -525,9 +530,6 @@ func (t *Tail) Settle(meta *Meta) bool {
 	meta.TurnOpen, meta.TurnClosed = replay.TurnOpen, replay.TurnClosed
 	meta.localTurn, meta.beforeLocal = replay.localTurn, replay.beforeLocal
 	meta.LastTurnWake, meta.ModelFallback = replay.LastTurnWake, replay.ModelFallback
-	if meta.ModelFallback == nil && fallback != nil && fallback.Scope == "session" {
-		meta.ModelFallback = fallback // a pre-tail session fallback is not recreated by parsing a short visible tail
-	}
 	meta.turnWorked, meta.turnSucceeded = replay.turnWorked, replay.turnSucceeded
 	meta.TurnError, meta.TurnErrorKind, meta.TurnErrorCode = replay.TurnError, replay.TurnErrorKind, replay.TurnErrorCode
 	meta.TurnErrorResetsAt, meta.TurnErrorResumes, meta.TurnErrorAfterWork = replay.TurnErrorResetsAt, replay.TurnErrorResumes, replay.TurnErrorAfterWork

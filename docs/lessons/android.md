@@ -121,6 +121,17 @@ unmerged tree, not by dropping the visual assertion. With a frozen Compose clock
 can keep waiting for a choreographer frame and fill the trace-recording heap; keep the requested rows visible in a
 bounded real-page fixture and test state transitions on the same row instead of hiding the failure with more heap.
 
+## A chat's loading means the hub has not answered, not that the cache was read (#8321)
+
+`HubChatRepository.publish` set `loading = false` on every publish, and the first publish is the disk cache's. An uncached chat
+was therefore an empty one ("No messages yet") for as long as its first page took, and a page refused until a watch loads it
+(Paseo's `not_loaded`) showed the error instead of the skeleton. Loading is a fact about the hub: nothing shown and no answer for
+the chat yet (a page, items, the hub's error). Keep it on the entry and derive the snapshot's `loading` from it in `publish`,
+since every metadata event publishes again. The same goes for an error that must outlive those publishes: `state.update` errors
+(the existing `ChatSyncFailed`) are gone at the next session-list event, so a wait's own failure goes in `eventError`, which
+only items clear. In tests, let the repository's collectors settle before opening the chat: a list publish that lands after
+the open's first read hides what that read published.
+
 ## Snapshot subscriptions are not page visibility
 
 The shell, badges and floating capsule can collect a repository snapshot without its page being visible. Do not use subscriber

@@ -283,11 +283,11 @@ class HubDataStore(
         val replies = InboxReplyJournal(
             File(context.noBackupFilesDir, "hub-data/${storage.path}/inbox-replies"), storage.path)
         val handOffs = replies.read(storage.path).agentHandOffs
-        if (!file.exists()) return@withLock UnsentData(emptyList(), emptyList(), handOffs)
+        if (!file.exists()) return@withLock UnsentData(emptyList(), emptyList(), handOffs, storage.path)
         val database = Room.databaseBuilder(context, PersistentDatabase::class.java, file.absolutePath).build()
         try {
             val dao = database.records()
-            unsentOf(dao.outbox(storage.path), dao.drafts(storage.path), handOffs)
+            unsentOf(dao.outbox(storage.path), dao.drafts(storage.path), handOffs, storage.path)
         } finally { database.close() }
     } }
 
