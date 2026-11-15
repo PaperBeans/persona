@@ -466,10 +466,10 @@ func (ps *extensions) nodeSnapshotCurrent(all []*extension.Extension) bool {
 }
 
 // syncExtensionNodes makes m run what it should of plugins' programs, and nothing else.
-func (h *Manager) syncExtensionNodes(ctx context.Context, m *Machine) {
+func (h *Manager) syncExtensionNodes(ctx context.Context, m *Machine) error {
 	ps := h.extensions
 	if ps == nil || ps.reg == nil {
-		return
+		return nil
 	}
 	l := ps.nodes.lock(m.cfg.ID)
 	l.Lock()
@@ -484,7 +484,7 @@ func (h *Manager) syncExtensionNodes(ctx context.Context, m *Machine) {
 	var capability proto.PluginNodeIdentityReply
 	if online {
 		if err := m.call(ctx, "plugin.node.identity", proto.PluginNodeIdentityRequest{}, &capability); err != nil && !nodeOutdated(err) {
-			return
+			return nil
 		}
 	}
 	identityAware := capability.Supported
@@ -506,7 +506,7 @@ func (h *Manager) syncExtensionNodes(ctx context.Context, m *Machine) {
 		}
 	}
 	if !ps.nodeSnapshotCurrent(all) {
-		return
+		return nil
 	}
 	if online && len(slots) > 0 {
 		if err := commitNodeIdentities(ctx, m, slots); err != nil {
@@ -515,7 +515,7 @@ func (h *Manager) syncExtensionNodes(ctx context.Context, m *Machine) {
 					ps.keepNodeState(p.Record.ID, p.Record.Version, m.cfg.ID, proto.PluginNodeState{ID: p.Record.ID, Version: p.Record.Version, Revision: extensionNodeRevision(p), State: extensionNodeOutdated, Error: i18n.T(h.contextLang(ctx), "extension-identity.node_required")})
 				}
 			}
-			return // Never send a destructive old-node sync or create a second data directory.
+			return nil // Never send a destructive old-node sync or create a second data directory.
 		}
 	}
 	for _, p := range all {
@@ -527,19 +527,21 @@ func (h *Manager) syncExtensionNodes(ctx context.Context, m *Machine) {
 		}
 	}
 	if !online {
-		return
+		return nil
 	}
 	if programs == nil {
 		programs = []proto.PluginNodeProgram{}
 	}
 	if !ps.nodeSnapshotCurrent(all) {
-		return
+		return nil
 	}
 	var states proto.PluginNodeStates
 	if err := m.call(ctx, "plugin.node.sync", proto.PluginNodeSync{Revision: syncRevision, Programs: programs, Installed: installed, InstalledSlots: slots, Identity: identityAware}, &states); err != nil &&
 		!nodeOutdated(err) {
 		h.logf("[%s] plugins' programs: %v", m.cfg.ID, err)
+		return err
 	}
+	return nil
 }
 
 // syncExtensionNode brings plugin p's program on m in line with p as the sync read it from the registry, and records

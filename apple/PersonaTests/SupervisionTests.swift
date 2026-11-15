@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import Testing
 @testable import Persona
+import PersonaWire
 
 /// Supervised tasks (#3124, docs/assistant/unified-entry.md ("Supervision")) and their agents' reports (#5112): `supervision` decodes
 /// leniently, the chip, the checklist and the lines say what the web says (web/src/lib/supervision.test.ts). Tests run
@@ -387,7 +388,7 @@ struct ChatSupervisionTests {
         folded.fold?.supervisionUser = nil
         folded.supervisionUser = nil
         #expect(!visible([input(1), folded]))
-        #expect(ChatCache.folder == "chats-v18")
+        #expect(ChatCache.folder == "chats-v19")
     }
 
     @Test func queuedSupervisionAndTheNextGenuineQueuedInputAreSeparateTurns() {

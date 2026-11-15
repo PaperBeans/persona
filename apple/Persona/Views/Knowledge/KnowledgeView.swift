@@ -2,6 +2,7 @@ import BeautifulUI
 import MarkdownUI
 import PersonaKit
 import SwiftUI
+import PersonaWire
 
 /// What Persona knows (the hub's ~/.persona/data, docs/assistant/knowledge.md): projects first, then chats, people, docs, meetings and
 /// events, most important and most relevant first. Not a browser of Feishu: every row is Persona' own digest, and the
@@ -11,6 +12,7 @@ import SwiftUI
 /// chip row, projects grouped into Focus / Active / Done / Not a Project, and search hits that open their entry.
 struct KnowledgeView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.shell) private var shell
     @State private var kind: KBKind = .projects
     @State private var tag: String?
     @State private var lists: [KBKind: KBList] = [:]
@@ -109,12 +111,22 @@ struct KnowledgeView: View {
             #if os(macOS)
             MacToolbarMiddle() // the menu by the search field, clear of the title row's Knowledge (#830)
             #endif
-            ToolbarItem(placement: .topBarTrailing) { if !(kind == .recordings && localRecordings) { tagMenu } }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showMap = true } label: { ThemedIcon(Theme.Icon.knowledgeMap) }
-                    .accessibilityLabel("Knowledge Map")
-                    .accessibilityIdentifier("kb.map")
+            #if os(iOS)
+            if shell != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if !(kind == .recordings && localRecordings) { tagChoices }
+                        Button { showMap = true } label: { Label("Knowledge Map", systemImage: Theme.Icon.knowledgeMap) }
+                            .accessibilityIdentifier("kb.map")
+                    } label: { ThemedIcon(Theme.Icon.moreMenu) }
+                        .accessibilityLabel("More")
+                }
+            } else {
+                legacyToolbar
             }
+            #else
+            legacyToolbar
+            #endif
         }
         .navigationDestination(isPresented: $showMap) { KnowledgeMapView() }
         // Always shown: the drawer that hides on scroll folded away as soon as results replaced the list (the chips
@@ -352,18 +364,31 @@ struct KnowledgeView: View {
 
     // MARK: Tags
 
-    private var tagMenu: some View {
-        Menu {
-            Button { tag = nil } label: {
-                if tag == nil { Label("All", systemImage: Theme.Icon.done) } else { Text("All") }
-            }
-            Section("Frequent Tags") {
-                ForEach(list?.tags ?? [], id: \.self) { t in
-                    Button { Haptics.tap(); tag = t } label: {
-                        if tag == t { Label("#" + t, systemImage: Theme.Icon.done) } else { Text("#" + t) }
-                    }
+    @ToolbarContentBuilder private var legacyToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) { if !(kind == .recordings && localRecordings) { tagMenu } }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { showMap = true } label: { ThemedIcon(Theme.Icon.knowledgeMap) }
+                .accessibilityLabel("Knowledge Map")
+                .accessibilityIdentifier("kb.map")
+        }
+    }
+
+    @ViewBuilder private var tagChoices: some View {
+        Button { tag = nil } label: {
+            if tag == nil { Label("All", systemImage: Theme.Icon.done) } else { Text("All") }
+        }
+        Section("Frequent Tags") {
+            ForEach(list?.tags ?? [], id: \.self) { t in
+                Button { Haptics.tap(); tag = t } label: {
+                    if tag == t { Label("#" + t, systemImage: Theme.Icon.done) } else { Text("#" + t) }
                 }
             }
+        }
+    }
+
+    private var tagMenu: some View {
+        Menu {
+            tagChoices
         } label: {
             ThemedIcon(tag == nil ? Theme.Icon.filter : Theme.Icon.filterActive)
         }

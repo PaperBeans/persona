@@ -99,6 +99,11 @@ fun ChatScreen(
     historySession: Session? = null,
 ) {
     PersonaTheme(darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f) {
+        LaunchedEffect(sessionKey, chrome.childSessionId) {
+            chrome.childSessionId?.let {
+                persona.core.navigation.MessageJumps.request(sessionKey.machineId, sessionKey.sessionId, persona.core.domain.lines.ChildSessionCards.call(it))
+            }
+        }
         val storage = repository as? ChatLocalStorage
         val local by (storage?.localStorage ?: remember { kotlinx.coroutines.flow.MutableStateFlow<ChatStorageSnapshot?>(null) })
             .collectAsStateWithLifecycle()
@@ -335,8 +340,9 @@ private fun ChatPage(
     }).collectAsStateWithLifecycle()
     var backgroundOpen by rememberSaveable(key.path) { mutableStateOf(false) }
     // The message a hub link named (`?at=`, #2194) while it is being landed on: like a search hit, its drawer opens.
+    val childCards = rememberChatChildren(key, session, sessionList, chrome, repository)
     val pageLines = rememberChatPageLines(key, renderStyle, snapshot, session, foldsBackground, tasks, taskTodos, search,
-        openWork, projection, feed, taskPlans, taskCardProjection)
+        openWork, projection, feed, taskPlans, taskCardProjection, childCards.rows.values.toList())
     var jumpItem by pageLines.jumpItem
     val assistantPresentation = pageLines.assistantPresentation
     val subagentCards = pageLines.subagentCards
@@ -575,6 +581,9 @@ private fun ChatPage(
     val pageSubagents = rememberChatPageSubagents(key, chrome, readOnly, session)
     val subagentLinks = pageSubagents.subagentLinks
     val subagentFolds = pageSubagents.subagentFolds
+    LaunchedEffect(chrome.childSessionId, subagentFolds) {
+        chrome.childSessionId?.let { subagentFolds.open(persona.core.domain.lines.ChildSessionCards.call(it)) }
+    }
     val workflowCards = pageSubagents.workflowCards
     var viewer by remember { mutableStateOf<ViewerRequest?>(null) }
     val photos = remember(chrome.files, key, session?.cwd) { chrome.files?.let { AttachedPhotos(it, key.machineId, session?.cwd.orEmpty()) } }
@@ -828,10 +837,18 @@ private fun ChatPage(
     val callJumps = pageLinks.callJumps
     val toolNames = pageLinks.toolNames
     val linkManager = pageLinks.linkManager
+    // The live turn's reply says nothing about cost until the turn stops, unless it is waiting on you (its reply is in).
+    val liveAnswerId = if (live && !waitingOnYou) projection.liveTurnId?.let { id ->
+        projection.turns.firstOrNull { it.id == id }?.answer?.item?.id
+    } else null
+    val replyUsage = rememberReplyUsage(snapshot.items, projection.lines,
+        persona = renderStyle == ChatRenderStyle.Assistant, hideAnswerId = liveAnswerId, catalog = actionsService)
     CompositionLocalProvider(LocalChatMarkdownCache provides markdownCache, LocalChatRowActions provides rowActions,
         LocalContentColor provides PersonaTheme.palette.ink, LocalChatPorts provides chatPorts,
         persona.core.designsystem.LocalAssistantCards provides cardsHost, LocalChatSubagents provides subagentLinks, LocalSubagentFolds provides subagentFolds, LocalChatWorkflows provides workflowCards,
-        LocalChatTaskIndex provides projection.tasks, LocalChatJumpToCall provides callJumps::jump, LocalToolNames provides toolNames) {
+        LocalChatTaskIndex provides projection.tasks, LocalChatJumpToCall provides callJumps::jump, LocalToolNames provides toolNames,
+        LocalReplyUsage provides replyUsage, LocalChatChildren provides childCards,
+        LocalSubagentHarness provides session?.let { subagentHarness(it, res) }) {
         // Under the files pane or the terminal's cover: hidden from screen readers too.
         ChatLinkHost(Modifier.fillMaxSize().background(PersonaTheme.palette.background)
             .then(if (embedded) Modifier else Modifier.imePadding())
@@ -939,7 +956,8 @@ private fun ChatPage(
                                         onSearch = { search.open(chatList) { timeline.freeze(currentItems); timelineVersion++ } },
                                         onTerminal = agentTerminal, onTerminalHelp = if (hasTerminal && terminal == null) ({ terminalHelp = true }) else null,
                                         onResumeInTerminal = resumeInTerminal,
-                                        turnStart = runningSince)
+                                        turnStart = runningSince,
+                                        sides = childCards.sides, sideRollup = childCards.sideRollup, onOpenSide = chrome.onOpenSide)
                                     // The space's other tabs under the title (iOS SiblingTabs); not for the assistant's conversation.
                                     if (tabs && session != null && onOpenSibling != null) {
                                         ChatSiblingTabs(session, siblingSessions, onOpenSibling, trailing = activityPill)
@@ -1053,14 +1071,20 @@ private fun ChatPage(
                                 if (assistantChat) pendingCards(stackCards, false, keyboard)
                                 // Persona's queue: its own messages, then those relayed from elsewhere, under its entries and right
                                 // above the composer, as iOS's footer has it (every style: it is behaviour; each draws its own strip, #4339 C6).
-                                if (renderStyle == ChatRenderStyle.Assistant && SlashCommand.suggestions(composer.value.text, clear = true).isEmpty())
+                                if (renderStyle == ChatRenderStyle.Assistant && SlashCommand.mainSuggestions(composer.value.text,
+                                        clear = canSend && LocalMainChatClear.current != null, resources = res).isEmpty())
                                     ChatQueueStrip(session, chrome.actions, composer, { notice = it }, sessions::refresh)
                                 val claudeCommands = session?.canTypeClaudeCommands == true
+                                // Brief and Board's "Mode" sheet: a permission mode, an effort or a model to change (a
+                                // listed model needs the computer's launcher lists).
+                                val modeSheet = session != null && (session.canChangeModes || session.canChangeEffortOnly ||
+                                    (chrome.worktrees != null && SessionModes.listsModels(session)))
                                 ChatComposer(key, composer, session?.status == "working", sending || submittedDraft != null,
                                     // /clear and /model type into Claude's pane: Claude in a terminal engine only (positive check).
                                     canClear = clearingPane == null && session?.canTypeClaudeCommands == true,
                                     service = composerService, onSend = { send() }, onCommand = { send(it) }, onNotice = { notice = it },
                                     extraContent = linkContexts.isNotEmpty(),
+                                    assistantChat = assistantChat,
                                     enabled = canSend, placeholder = when {
                                         !canSend -> READ_ONLY.text()
                                         // "Ask Persona…", as the assistant's blank page and iOS say (#4339 C18).
@@ -1075,14 +1099,16 @@ private fun ChatPage(
                                         glass -> if (session != null && SessionModes.showsInComposer(session)) ({
                                             HeaderModeButton(session, controls, connection == null || connection == ConnectionState.Online) { modeOverlay = it }
                                         }) else null
-                                        session?.canChangeModes == true || session?.canChangeEffortOnly == true -> ({
+                                        // Brief and Board: also an agent whose model the node switches itself (a Paseo
+                                        // provider's), its launcher's models listed in the sheet (#8143).
+                                        modeSheet -> ({
                                             ChatModeBar(session, controls, connection == null || connection == ConnectionState.Online,
                                                 onOverlay = { modeOverlay = it }, onPickModel = { model -> send("/model $model") },
-                                                openRequested = openModes, onOpenHandled = { openModes = false })
+                                                openRequested = openModes, onOpenHandled = { openModes = false }, creation = chrome.worktrees)
                                         })
                                         else -> null
                                     },
-                                    modeHint = if (glass) null else chatModeHint(session, includeModes = session?.canChangeModes == true || session?.canChangeEffortOnly == true),
+                                    modeHint = if (glass) null else chatModeHint(session, includeModes = modeSheet),
                                     // The model pill (#5055, the web's ModelPill): Glass's, in an Agent's chat and a Persona chat.
                                     modelPill = if (!glass || switchSession == null) null else ({ width ->
                                         val online = connection == null || connection == ConnectionState.Online

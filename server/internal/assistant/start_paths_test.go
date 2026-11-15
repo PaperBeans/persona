@@ -39,6 +39,8 @@ var supervisedStarts = map[string]string{
 	"taskSpawn":           "taskSpawn",           // joins the caller's verified task and keeps its existing ledger
 	// a task whose agents all stopped goes on with a new agent on the same task, its ledger kept (#4754)
 	"startTaskSuccessor": "startTaskSuccessor",
+	// agent_send's resume of a stopped agent: on an open task of the caller's, or the task the send made (#8099)
+	"resumeAndSend": "resumeAndSend",
 }
 
 // startOptOuts are the start paths that stay unsupervised on purpose, with why. Each is the user's own conversation or

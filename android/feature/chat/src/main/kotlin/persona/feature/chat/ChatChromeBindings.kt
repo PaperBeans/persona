@@ -13,6 +13,8 @@ import dagger.hilt.components.SingletonComponent
 data class ChatChromeBindings(
     val covered: Boolean = false,
     val requestId: String? = null,
+    /** A child link opens its parent's work summary and this card. */
+    val childSessionId: String? = null,
     val onFiles: (() -> Unit)? = null,
     val onGit: (() -> Unit)? = null,
     val gitLabel: String = "Git",
@@ -21,6 +23,11 @@ data class ChatChromeBindings(
     /** Worktree status and removal for Close Agent / Delete Chat (#4532), by the group's own machine ids; null: none offered. */
     val worktrees: (() -> persona.core.contracts.api.AgentCreationService?)? = null,
     val onOpenSession: ((SessionKey) -> Unit)? = null,
+    /**
+     * Opens a side session's own chat over this one (#7944, `ChatRoute.side`): from the header's Side sessions, and
+     * when a link to a side landed on its parent. Null: sides are not offered.
+     */
+    val onOpenSide: ((SessionKey) -> Unit)? = null,
     /** The waiting pane became a thread: replace this page's route, preserving its Back destination. */
     val onFollowSession: ((SessionKey) -> Unit)? = null,
     /**
@@ -63,6 +70,8 @@ data class ChatChromeBindings(
      * rounds fold like the main conversation's. Empty from an older hub or a non-assistant surface.
      */
     val leaderConversations: Set<String> = emptySet(),
+    /** Parent/child rows resolved for a cold link outside the root page; not list membership. */
+    val lookupRows: List<persona.core.contracts.Session> = emptyList(),
 )
 
 /** Where a branch made by "Branch to new chat" opens: an assistant's branch is an assistant conversation, an agent's an agent chat. */

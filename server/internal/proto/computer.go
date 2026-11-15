@@ -153,8 +153,13 @@ type ComputerJob struct {
 	Kind  string `json:"kind"`  // install | grant | open
 	State string `json:"state"` // running | done | failed | cancelled
 	// Step: what it does now, in Chinese for the app; Error: why it failed (the installer's last lines).
-	Step    string    `json:"step,omitempty"`
-	Error   string    `json:"error,omitempty"`
+	Step  string `json:"step,omitempty"`
+	Error string `json:"error,omitempty"`
+	// Code and Device are an iPhone job's (#8199). Code: while it runs, what it waits for from the person at the phone
+	// (trust_pending: tap Trust and enter the passcode; locked: unlock it); once failed, why (trust_pending,
+	// pairing_rejected, timeout, …). Device: the iPhone it is for.
+	Code    string    `json:"code,omitempty"`
+	Device  string    `json:"device,omitempty"`
 	Started time.Time `json:"started"`
 }
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import OSLog
+import PersonaWire
 
 /// Message positions are decimal strings that can outgrow Int64 in theory; compare them as numbers.
 nonisolated enum LarkPosition {
@@ -57,6 +58,7 @@ extension AppModel {
 /// Jump to Latest / You Were Mentioned jumps.
 struct LarkChatView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.shell) private var shell
     @Environment(\.pushInboxChat) private var pushChat
     /// Polled and reported only while its page is in front: a hidden chat reports nothing to Feishu (TabActivity.swift).
     @Environment(\.tabIsActive) private var tabActive
@@ -242,12 +244,24 @@ struct LarkChatView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .hidesTabBarWhenShown()
         .pageToolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(action: openPins) { Label("Pinned Messages", systemImage: Theme.Icon.pin) }
-                    .accessibilityIdentifier("lark.pins.open")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { Task { await askPersona() } } label: { Label("Summarize with Persona", systemImage: Theme.Icon.ai) }
+            if shell != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button(action: openPins) { Label("Pinned Messages", systemImage: Theme.Icon.pin) }
+                            .accessibilityIdentifier("lark.pins.open")
+                        Button { Task { await askPersona() } } label: { Label("Summarize with Persona", systemImage: Theme.Icon.ai) }
+                    } label: { ThemedIcon(Theme.Icon.moreMenu) }
+                        .accessibilityLabel("More")
+                        .accessibilityIdentifier("lark.chat.more")
+                }
+            } else {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: openPins) { Label("Pinned Messages", systemImage: Theme.Icon.pin) }
+                        .accessibilityIdentifier("lark.pins.open")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { Task { await askPersona() } } label: { Label("Summarize with Persona", systemImage: Theme.Icon.ai) }
+                }
             }
         }
         .task {

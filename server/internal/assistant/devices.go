@@ -104,6 +104,8 @@ func (s *Service) NodeAnswer(ctx context.Context, machine, method string, params
 	case NodeLaunchersPull: // a provider's secrets for this computer (models_launchers_scope.go): the connection's machine decides
 		out, err := s.pullLauncher(ctx, machine, params)
 		return out, true, err
+	case NodeAgentsDefault: // what pi starts a new session on (models_launchers_scope.go agentsDefault)
+		return s.agentsDefault(ctx, machine), true, nil
 	case "assistant.model":
 		_ = json.Unmarshal(params, &p)
 		if !s.assistantCaller(ctx, machine, p.SessionID) {

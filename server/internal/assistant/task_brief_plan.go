@@ -79,25 +79,22 @@ func errContinued(prev string, succ Todo) error {
 		"(agent_send)", prev, succ.ID, succ.Title, succ.ID)
 }
 
-// takeOver settles where a task that continues another runs (#6427), before its todo_id is checked: an earlier to-do
-// still open whose agents all stopped is carried on in itself (todo_id), not in a new to-do; one another open to-do
-// already carries on is refused (that one is where the work goes on). An earlier to-do that is closed, one whose agent
-// may still run (a retry elsewhere while its computer is offline), or one this conversation may not take, gets a new
-// to-do with its brief as before.
+// takeOver binds a continuation to its original to-do, without stopping Agents or reopening it before Start.
+// An unsafe or unauthorized handoff is refused, never replaced with a second to-do.
 func (s *Service) takeOver(ctx context.Context, conversation string, t *PlanTask) error {
-	if t.Continues == "" || t.ReuseTodo != "" {
+	if t.Continues == "" {
 		return nil
+	}
+	if t.ReuseTodo != "" && t.ReuseTodo != t.Continues {
+		return fmt.Errorf("continues and todo_id must name the same to-do")
 	}
 	if succ, ok := s.openSuccessor(t.Continues); ok {
 		return errContinued(t.Continues, succ)
 	}
-	prev, ok := s.todoNow(t.Continues)
-	if !ok || prev.DoneAt != nil || prev.Cancelled() {
-		return nil
+	if _, err := s.taskTodoForConversation(conversation, t.Continues); err != nil {
+		return err
 	}
-	if _, err := s.reusableTodo(ctx, conversation, prev.ID, false); err == nil {
-		t.ReuseTodo = prev.ID
-	}
+	t.ReuseTodo = t.Continues
 	return nil
 }
 

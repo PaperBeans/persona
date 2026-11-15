@@ -125,6 +125,8 @@ type directionTreeBook struct {
 	digest [sha256.Size]byte
 	after  func(d time.Duration, f func()) // tests: a fake clock
 	run    sync.Mutex                      // one build and compare at a time
+	timer  *time.Timer                     // a real-clock comparison not yet run (tests can stop it during teardown)
+	runs   sync.WaitGroup                  // scheduled real-clock comparisons; fixtures wait before closing their store
 }
 
 // directionTreeRoutes: GET /api/v1/assistant/directions/tree is the tree as it is now.
@@ -144,19 +146,26 @@ func (s *Service) directionTreeRoutes() {
 func (s *Service) directionTreeSoon() {
 	b := &s.dtree
 	b.mu.Lock()
-	if b.armed {
+	if b.armed || s.runCtx().Err() != nil {
 		b.mu.Unlock()
 		return
 	}
 	b.armed = true
 	after := b.after
-	b.mu.Unlock()
-	f := func() { s.directionTreeSync(context.Background()) }
 	if after != nil {
-		after(directionTreeSettle, f)
+		b.mu.Unlock()
+		after(directionTreeSettle, func() { s.directionTreeSync(context.Background()) })
 		return
 	}
-	time.AfterFunc(directionTreeSettle, f)
+	b.runs.Add(1)
+	b.timer = time.AfterFunc(directionTreeSettle, func() {
+		defer b.runs.Done()
+		b.mu.Lock()
+		b.timer = nil
+		b.mu.Unlock()
+		s.directionTreeSync(context.Background())
+	})
+	b.mu.Unlock()
 }
 
 // directionTreeSessions: the sessions of machine d changed; the tree is built again when an open task's Agent is there.

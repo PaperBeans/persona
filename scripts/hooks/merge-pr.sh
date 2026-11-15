@@ -4,6 +4,8 @@
 # Reads the PR once, scans its commits on top of its base and the squash commit's message (`<title> (#N)` and the body)
 # with this machine's private values (docs/operations/testing.md "Privacy scan"), then squash-merges exactly the head
 # and the message it scanned and deletes the branch. CI cannot do this: it does not have the values.
+# It also refuses a merge that would leave the fixed-sleep or web font ratchet failing on main for a file the PR changes
+# (scripts/ci/changed_ratchets.py, #7977): CI runs those on main only on a schedule.
 set -euo pipefail
 expect_head="${PR_WATCH_EXPECT_HEAD:-}"
 expect_base="${PR_WATCH_EXPECT_BASE:-}"
@@ -87,6 +89,9 @@ git -C "$root" fetch -q origin "pull/$pr/head"
 [ "$(git -C "$root" rev-parse FETCH_HEAD)" = "$head" ] || { echo "merge-pr: the PR moved while fetching; run it again" >&2; exit 1; }
 python3 "$root/scripts/privacy_check.py" --range "$base_sha..$head" --message "$tmp/message" \
   || { echo "merge-pr: #$pr not merged: fix the hits above in the PR first" >&2; exit 1; }
+# Only the files the PR changes, as the merge leaves them: a file main already fails is left to its own fix.
+python3 "$root/scripts/ci/changed_ratchets.py" --root "$root" --base "$base_sha" --head "$head" \
+  || { echo "merge-pr: #$pr not merged: fix the ratchet failures above in the PR first" >&2; exit 1; }
 # From outside the repository, by name: gh then only merges on GitHub. (--delete-branch inside a worktree also checks
 # out the base branch locally and fails when another worktree holds it; and it fails when GitHub already deleted the
 # branch on merge.) The branch is deleted here instead, if it is still there.

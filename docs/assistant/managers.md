@@ -75,6 +75,14 @@ manager selector or fetches source. Their descriptions and the existing `task_pl
 resolution: explicit user URLs/paths win, references grant no authorization, and machine/cwd must never be inferred.
 There is no forced lookup preflight, injected list, new prompt or launcher-dependent behavior.
 
+Assistant-only MCP `repository_add(url, provider?, name?, aliases?, purpose?)` adds a reference through the same
+`saveRepository` service, including normalization, anonymous existence checks, uniqueness, limits and CAS. The
+permission card shows the canonical repository URL and proposed details; only the user's own approval saves it.
+It neither clones nor grants access. The saved ID and verification time are returned and immediately visible to
+Settings and the existing retrieval tools. On a lost/uncertain response, list/get before retrying; duplicates are
+refused. Remove the binding in Settings to reverse the addition. No manager, machine, credential or verification
+selector is accepted from the model.
+
 ## Steps
 
 1. **Roster and identity** (below): the roster, each manager's own token, install codes, `/api/v1/managers`. Behavior unchanged.

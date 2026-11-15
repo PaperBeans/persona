@@ -135,6 +135,31 @@ func TestTaskSpawnDoesNotElevatePermissions(t *testing.T) {
 	}
 }
 
+func TestTaskSpawnAmbiguousContinuationAssignmentStaysReadOnly(t *testing.T) {
+	s, f, todo := spawnFixture(t, "codex", "")
+	ctx := context.Background()
+	if err := s.patchPlanTask(ctx, todo.PlanID, 0, func(task *PlanTask) { task.TodoID = "" }); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"continuation-a", "continuation-b"} {
+		plan := &TaskPlan{ID: id, Conversation: todo.Origin, State: planStarted,
+			Tasks: []PlanTask{{TodoID: todo.ID, Machine: "box", Permission: "bypassPermissions"}}}
+		if err := s.savePlan(ctx, plan); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := s.mcpCall(ctx, "box", "s1", "task_spawn", json.RawMessage(spawnArgs), false)
+	if res.IsError {
+		t.Fatal(res.Content)
+	}
+	if got := f.starts[len(f.starts)-1]["permission_mode"]; got != "plan" {
+		t.Fatalf("ambiguous current assignments elevated the child to %v", got)
+	}
+	if _, _, _, err := s.remedyOf(ctx, todo.ID); !errors.Is(err, errTaskNotInPlan) {
+		t.Fatalf("ambiguous current assignments did not fail retry/remedy closed: %v", err)
+	}
+}
+
 func TestTaskSpawnDoesNotWidenWorkTrustTools(t *testing.T) {
 	s, f, _ := spawnFixture(t, "codex", "plan")
 	delegationMachineTrust(t, s, "box", "work")

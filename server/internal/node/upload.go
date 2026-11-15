@@ -557,7 +557,7 @@ func (n *Node) uploadCall(method string, params json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("bad params: %w", err)
 	}
 	switch method {
-	case "file.upload.begin":
+	case methodFileUploadBegin:
 		var id string
 		var err error
 		switch p.Dest {
@@ -593,20 +593,20 @@ func (n *Node) uploadCall(method string, params json.RawMessage) (any, error) {
 			res["health_dir"] = p.HealthDir // the same for another manager's health space
 		}
 		return res, nil
-	case "file.upload.chunk":
+	case methodFileUploadChunk:
 		got, err := n.ups.chunk(p.UploadID, p.Offset, p.Data)
 		if err != nil {
 			return nil, err
 		}
 		return map[string]any{"received": got}, nil
-	case "file.upload.end":
+	case methodFileUploadEnd:
 		path, size, err := n.ups.end(p.UploadID, time.Now())
 		if err != nil {
 			return nil, err
 		}
 		n.logger.Printf("file from the phone: %s (%d bytes)", path, size)
 		return proto.UploadedFile{Path: path, Name: filepath.Base(path), Size: size}, nil
-	case "file.upload.abort":
+	case methodFileUploadAbort:
 		n.ups.abort(p.UploadID)
 		return map[string]any{"ok": true}, nil
 	}

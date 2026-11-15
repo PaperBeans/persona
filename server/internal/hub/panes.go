@@ -197,7 +197,8 @@ var nodeActions = map[string]nodeAction{
 	// user says so (the node refuses uncommitted work and unmerged branches unless force, which the user confirms).
 	"worktree/add":    {method: "worktree.add", timeout: 150 * time.Second, required: []string{"cwd"}, optional: []string{"branch", "name_hint", "kind", "locale"}},
 	"worktree/status": {method: "worktree.status", timeout: 30 * time.Second, required: []string{"cwd"}, optional: []string{"kind"}},
-	"worktree/remove": {method: "worktree.remove", timeout: 90 * time.Second, required: []string{"path"}, optional: []string{"kind"}, flags: []string{"delete_branch", "force"}},
+	// remove on a runtime engine waits for its archive (node runtimeRemoveDeadline, 145 s), as delete does.
+	"worktree/remove": {method: "worktree.remove", timeout: 150 * time.Second, required: []string{"path"}, optional: []string{"kind"}, flags: []string{"delete_branch", "force"}},
 }
 
 // paneRoutes are the terminal browser's (panes, tabs) and the "New worktree…" dialog's.

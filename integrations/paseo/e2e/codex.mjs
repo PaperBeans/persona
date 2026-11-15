@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { checks, startNode, until } from '../../runtime-sdk/testing/node-harness.mjs'
 import { daemonTarget } from '../lib/discover.js'
@@ -66,7 +67,7 @@ async function cleanup() {
 const deadline = setTimeout(() => { console.error('FAIL overall timeout'); cleanup().finally(() => process.exit(1)) }, 240_000)
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => cleanup().finally(() => process.exit(1)))
 try {
-  root = mkdtempSync('/tmp/persona-paseo-codex-')
+  root = mkdtempSync(join(tmpdir(), 'persona-paseo-codex-'))
   root = realpathSync(root)
   home = join(root, 'home')
   state = join(root, 'state')
@@ -128,7 +129,9 @@ try {
   const agentId = sid.slice('paseo-'.length)
   const agent = async (id = agentId) => (await paseo.request('fetch_agent_request', { agentId: id })).agent
   const row = () => node.sessions().find((s) => s.session_id === sid)
-  const items = async () => (await node.call('session.items', { session_id: sid, limit: 200 })).items ?? []
+  // A read of the agent while Paseo has it stored is refused (not_loaded, #8132): nothing read yet.
+  const items = async () => (await node.call('session.items', { session_id: sid, limit: 200 })
+    .catch((e) => { if (e.code === 'not_loaded') return {}; throw e })).items ?? []
   const answered = async (marker) => (await items()).some((i) => i.role === 'assistant' && i.text?.includes(`Scripted answer: ${marker}`))
   await until('real Codex completes first response', () => answered('E2E_CODEX_FIRST'), 60_000)
   await until('first turn idle', async () => (await agent())?.status === 'idle', 15_000)
@@ -145,7 +148,16 @@ try {
   // codex_thread is private to the runtime protocol; the hub sees its effect as one row despite the real rollout.
   check('archived conversation has exactly one row, never a rollout row', node.sessions().filter((s) => s.cwd === work).length === 1 && node.sessions().some((s) => s.session_id === sid), JSON.stringify(node.sessions().map((s) => s.session_id)))
   if (!retained) throw new Error('archive identity regression reproduced; stopping before resume under a missing id')
-  check('archived conversation remains readable', await answered('E2E_CODEX_FIRST'))
+  // A read no chat asked for (the manager's after a turn, an app's background sync) must not have Paseo load the archived
+  // agent, which would start Codex again for nothing (#8132): refused. Opening its chat (a watch) reads it.
+  const launches = () => existsSync(childrenFile) ? readFileSync(childrenFile, 'utf8').trim().split('\n').filter(Boolean).length : 0
+  const launched = launches()
+  const background = await node.call('session.items', { session_id: sid, limit: 200 }).then(() => 'answered', (e) => e.code ?? e.message)
+  check('a background read of the archived agent is refused and starts no Codex', background === 'not_loaded' && launches() === launched,
+    `${background}, ${launches() - launched} Codex started`)
+  await node.call('session.watch', { session_id: sid, since_seq: 0 })
+  check('archived conversation remains readable once its chat is opened', await answered('E2E_CODEX_FIRST'))
+  await node.call('session.unwatch', { session_id: sid })
   await node.call('session.send', { session_id: sid, text: 'E2E_CODEX_SECOND', client_msg_id: 'codex-e2e-second' }, 60_000)
   await until('reply after archive', () => answered('E2E_CODEX_SECOND'), 45_000)
   const restored = await agent()

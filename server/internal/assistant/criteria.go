@@ -29,6 +29,43 @@ func (v *Supervision) applyChecks(checks []ReviewCheck, at time.Time, by string)
 	}
 }
 
+// completeReviewCriteriaError refuses an ordinary acceptance whose checks do not prove every current criterion.
+// Callers use it only for accepted/done reviews: cannot, cancelled, criteria-free tasks and the judge keep their rules.
+func completeReviewCriteriaError(doneWhen []string, checks []ReviewCheck) error {
+	if len(doneWhen) == 0 {
+		return nil
+	}
+	matched := make([]int, len(doneWhen))
+	for i, check := range checks {
+		criterion := clip(oneLine(check.Criterion), 200)
+		at, matches := -1, 0
+		for j, current := range doneWhen {
+			if sameCriterion(criterion, current) {
+				at, matches = j, matches+1
+			}
+		}
+		switch {
+		case matches == 0:
+			return fmt.Errorf("accepted: check %d names unknown current done_when %q; use the current criteria and exactly one met check with non-empty evidence for each; nothing was written", i+1, criterion)
+		case matches > 1:
+			return fmt.Errorf("accepted: check %d criterion %q matches more than one current done_when entry; nothing was written", i+1, criterion)
+		case matched[at] != 0:
+			return fmt.Errorf("accepted: current done_when %q has duplicate checks; supply exactly one met check with non-empty evidence for every criterion; nothing was written", doneWhen[at])
+		case !check.Met:
+			return fmt.Errorf("accepted: current done_when %q is not met; use rework for what is missing; nothing was written", doneWhen[at])
+		case strings.TrimSpace(check.Evidence) == "":
+			return fmt.Errorf("accepted: current done_when %q needs non-empty evidence; nothing was written", doneWhen[at])
+		}
+		matched[at] = i + 1
+	}
+	for i, current := range doneWhen {
+		if matched[i] == 0 {
+			return fmt.Errorf("accepted: current done_when %q has no check; supply exactly one met check with non-empty evidence for every criterion; nothing was written", current)
+		}
+	}
+	return nil
+}
+
 // criterionReport uses the one-based position the agent saw in done_when. Text
 // matching remains the persisted identity, so later reordering cannot move evidence.
 type criterionReport struct {

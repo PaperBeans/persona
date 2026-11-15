@@ -63,8 +63,7 @@ func TestTaskPlanTodoIDSupervisorTakesOverAStoppedAgent(t *testing.T) {
 	}
 }
 
-// An agent that still runs keeps its to-do: the supervisor's todo_id is refused, and a continues gets a to-do of its
-// own as before (a retry elsewhere while the first computer is out of reach).
+// Plain todo_id still refuses a live Agent; continues explicitly hands it over on the same to-do.
 func TestTakeOverOfAWorkingAgent(t *testing.T) {
 	e := newThreadEnv(t, nil) // agent01 is listed as running
 	putTodo(e.s, Todo{ID: "todo_x", Title: "发版", Origin: "m1", Supervision: &Supervision{Supervisor: "m1"},
@@ -75,9 +74,11 @@ func TestTakeOverOfAWorkingAgent(t *testing.T) {
 	if _, err := e.s.toolTaskPlan(context.Background(), "m1", continuesArgs("todo_x")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the continuation's own to-do", func() bool { return todoCount(e.s) == 2 })
-	if got := todoNow(e.s, "todo_x"); len(got.Agents) != 1 || got.Agents[0].ReleasedAt != nil {
-		t.Fatalf("the working agent was touched: %+v", got.Agents)
+	if old := newAgentOn(t, e, "todo_x"); old.ReleasedAt == nil {
+		t.Fatalf("the previous Agent was not released: %+v", old)
+	}
+	if todoCount(e.s) != 1 || len(e.f.stopped) != 1 || e.f.stopped[0] != "agent01" {
+		t.Fatalf("continuation split the task or did not stop the previous Agent: todos=%d, stopped=%v", todoCount(e.s), e.f.stopped)
 	}
 }
 

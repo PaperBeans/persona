@@ -12,6 +12,7 @@ import { readWorkSessionCounts, WorkSessionList, workSessionCountsPath, workSess
 import { SESSIONS_LIST_FEATURE } from "../../lib/session-list";
 import { STATE_LABEL } from "../../lib/state-labels";
 import { onHubEvent, useStore } from "../../lib/store";
+import { SESSIONS_SIDE_FOLD_FEATURE } from "../../lib/side-fold";
 import type { AgentState, Machine } from "../../lib/types";
 import { WORK_DIMENSIONS, WORK_SESSION_DIMENSIONS_FEATURE, WORK_SORTS, workSessionItems, type WorkDimension, type WorkFacet, type WorkSession, type WorkSessionDirection, type WorkSessionSort } from "../../lib/work-session-data";
 import { defaultWorkSessionView, readWorkSessionView, writeWorkSessionView, type WorkSessionView } from "../../lib/work-session-preferences";
@@ -220,9 +221,11 @@ export function WorkSessionBrowser(props: WorkSessionBrowserProps) {
 function LegacyBrowser({ activeSession, machines, onSelect }: WorkSessionBrowserProps & { machines: Machine[] }) {
   const now = useNow();
   const catalog = useStore((s) => s.features.includes(SESSIONS_CATALOG_FEATURE));
+  // a hub that folds side sessions (#7944) leaves them out: nothing to nest under a parent
+  const sideFold = useStore((s) => s.features.includes(SESSIONS_SIDE_FOLD_FEATURE));
   return <div className="@container/work-sessions">
     <p className="px-2 pt-2 text-xs text-ink-3">{copy("legacy")}</p>
-    <PagedSessionList root={runtimeSessions} path="/sessions" identity={runtimeIdentity} compare={runtimeOrder} removeIdentity={runtimeRemoval} parentOf={runtimeParentIdentity}
+    <PagedSessionList root={runtimeSessions} path="/sessions" identity={runtimeIdentity} compare={runtimeOrder} removeIdentity={runtimeRemoval} parentOf={sideFold ? undefined : runtimeParentIdentity}
       event="sessions_list" catalog={catalog} placeOf={runtimePlace} label={(dimension, id) => dimension === "machine" ? machineWithHub(id, machines) : id}
       renderRow={(session) => <WorkSessionRow session={session} name={machineWithHub(session.machine_id, machines)}
         active={activeSession?.machineId === session.machine_id && activeSession.sessionId === session.session_id}

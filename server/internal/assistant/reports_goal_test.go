@@ -128,7 +128,8 @@ func TestConclusionCardSaysGoalNowEvidence(t *testing.T) {
 	s, f, todo, posts, _ := conclusionService(t, true)
 	waitsForReview(t, s, f, todo.ID, "查完了，见 https://docs.example.com/plan")
 	s.setTaskStage(context.Background(), todo.ID, "verify", "")
-	reviewTask(t, s, todo.ID, map[string]any{"verdict": "accepted", "reason": "登录不再崩溃", "link": "https://hub.example.com/s/box/s1"})
+	reviewTask(t, s, todo.ID, map[string]any{"verdict": "accepted", "reason": "登录不再崩溃", "link": "https://hub.example.com/s/box/s1",
+		"checks": completeReviewChecks(todoNow(s, todo.ID))})
 	waitFor(t, "the conclusion card", func() bool { return len(cardsWith(posts(), "结论：")) == 1 })
 	card := cardsWith(posts(), "结论：")[0]
 	for _, want := range []string{"**🎯 目标**：修登录崩溃", "**现在**：✅ 做完了：登录不再崩溃 · 已上线并实测", "**证据**：[https://hub.example.com/s/box/s1]"} {

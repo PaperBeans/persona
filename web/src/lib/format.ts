@@ -1,5 +1,6 @@
 import type { AgentState, Interaction, Session, SessionCapabilities } from "./types";
 import { formatDate, formatRelative, t } from "../i18n";
+import { sessionAgentName } from "./agent-kind";
 import { usageLimitLabel } from "./usage-limit";
 import { workLine } from "./work";
 import { closeoutLine, closeoutSuffix, shownCloseout } from "./closeout";
@@ -49,13 +50,19 @@ export function sourceSubtitle(s?: Session): string {
     // Claude outside Persona's terminals (docs/integrations/claude-integration.md "Claude outside Persona's terminals")
     : s.source_kind === "claude_desktop" ? t("lib-format.source_claude_desktop")
     : s.source_kind === "claude_cli" ? t("lib-format.source_claude_terminal")
-    : s.source_kind === "runtime" ? s.agent_label || s.agent || "runtime" // an agent runtime's session (docs/integrations/runtimes.md): its own name
+    // an agent runtime's session (docs/integrations/runtimes.md): its own name, else its agent's ("Claude Code", a Paseo
+    // provider's), never a raw id (#8142)
+    : s.source_kind === "runtime" ? s.agent_label || sessionAgentName(s)
     : s.source_kind;
   const detail = s.source_kind !== "identity_conflict" && s.agent_name ? ` · ${s.agent_name}` : "";
   return sessionCan(s, "send") ? label + detail : t("lib-format.read_only", { source: label + detail, reason: s.read_only_reason || t("lib-format.read_only_default_reason") });
 }
 
+/** The command that resumes the session in a terminal; none ("") for a runtime's session, which its runtime keeps: a
+ *  Paseo provider such as Grok has no such command, an id of the runtime's making (`paseo-…`) is no Claude session's,
+ *  and a Claude Code conversation Paseo runs would get a second writer (#8142). */
 export function resumeCommand(s: Session): string {
+  if (s.source_kind === "runtime") return "";
   const codex = s.agent === "codex" || s.source_kind === "codex_app_server" || s.source_kind === "codex_history";
   const command = codex ? "codex resume" : s.agent === "traex" ? "traex resume" : "claude --resume";
   const resume = `${command} ${s.source_thread_id || s.session_id}`;
