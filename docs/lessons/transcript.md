@@ -149,8 +149,11 @@ On one machine's real transcripts: 1 of 124 was in that state when scanned, and 
 
 - The head and the tail each get a `Meta` of their own. Only what belongs to the start crosses over: the first prompt, the starting directory, and what a Codex rollout says once on its first line (directory, version, client).
   One `Meta` fed from two places leaks every field by default, including the ones added later; a fresh one leaks none.
-- What the tail does not say stands as it stood before it, for every "last X" the quick read reports (words, last exchange, last prompt, turn, mode): the last read's when nothing written since is out of the tail,
-  else what the lines further back say (`lookBack`), starting with the line the window's start cuts. No exchange known at all leaves the file's time (`lastUsed`), never the first prompt's.
+- What the tail does not say stands as it stood before it, for every "last X" the quick read reports (words, last exchange, last prompt, turn, mode): the last read's when nothing written since is out of the tail
+  and no turn in it was gone back over (after a rewind all of that read's state may be the abandoned turn's, not only its words), else what the lines further back say (`lookBack`), starting with the line
+  the window's start cuts. No exchange known at all leaves the file's time (`lastUsed`), never the first prompt's.
+- Reading back, parse one stretch ending at the boundary into one `Meta`, a longer one each time (as `transcripttail.LastWordsBefore` does), and take every field from it. A fresh `Meta` per window,
+  each field kept from the nearest window that set it, mixes turns, and a window that starts mid-way misreads context: a local command whose output is in a newer window than the command left an ended session working.
 - The leak also hid a gap: a long turn's prompt leaves the tail after 384 KB, and the turn only read as open because the first prompt's did. Removing a wrong source of a value means supplying the right one
   (the turn seen starting stays open until the tail ends it), and testing the case the wrong one happened to cover.
 - Check such a change against real transcripts, not only fixtures: compare the quick read with a read of the whole file, per field, and print ids and counts only.

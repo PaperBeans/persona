@@ -265,29 +265,26 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 	}
 	rewound := tail.Settle(&tm)
 	// before: the transcript as it stood before the tail's lines, for what they do not say. Only its last words and
-	// their time, last exchange, last prompt, Claude turn and mode are read.
+	// their time, last exchange, last prompt, Claude turn and mode are read. The last read's stand when nothing written
+	// since is out of the tail and no turn in it was gone back over: after a rewind, what that read knew may all be the
+	// turn gone back over (its words, its turn left working, its prompt and mode), so it is read again from the lines
+	// before the tail, which the rewound turn's lines in the tail are not part of.
 	var before quickMeta
-	if covered {
+	if covered && !rewound {
 		before = prev
-	}
-	// words: the tail has no words of the agent's, and the last read's do not stand (none covers what was written since,
-	// or a turn in the tail was gone back over: they may be that turn's), so they are read from before the tail.
-	words := off > 0 && tm.LastText == "" && (!covered || rewound)
-	if off > 0 {
-		exchange := !covered && tm.LastActivity.IsZero()
-		turn := !covered && !tm.Codex && !tm.TurnOpen && !tm.TurnClosed
+	} else if off > 0 {
+		// words: the tail has no words of the agent's (none, or only the rewound turn's).
+		words := tm.LastText == ""
+		exchange := tm.LastActivity.IsZero()
+		turn := !tm.Codex && !tm.TurnOpen && !tm.TurnClosed
 		// Claude Code names the mode on every prompt, so it is at most a turn back. A rollout names it once a turn and
 		// its turns outgrow the reach: its mode is taken when the lines read on the way say it, not looked for.
-		mode := !covered && !tm.Codex && tm.PermissionMode == ""
+		mode := !tm.Codex && tm.PermissionMode == ""
 		if words || exchange || turn || mode {
-			back := lookBack(f, whole, tm.Codex, words, exchange, turn, mode)
-			if covered {
-				before.lastText, before.answer, before.lastTextAt = back.lastText, "", back.lastTextAt
-			} else {
-				before = back
-			}
+			before = lookBack(f, whole, tm.Codex, words, exchange, turn, mode)
 		}
 	}
+	words := off > 0 && tm.LastText == "" && (!covered || rewound) // the words that stand come from before the tail
 	m.title, m.cwd, m.model, m.lastText, m.first, m.activity, m.queue = tm.Title, tm.Cwd, tm.Model, tm.LastText, head.FirstUser, tm.LastActivity, tm.Queue
 	if m.activity.IsZero() {
 		// No exchange in the tail (a tool result or a request bigger than it, then only a recap, a title, a hook's
@@ -484,29 +481,27 @@ func quickLine(line []byte, tm *transcript.Meta, tail *transcript.Tail) {
 }
 
 // lookBackReach: how far before the tail lookBack reads.
-const lookBackReach = 8 << 20
+const lookBackReach = transcripttail.Reach
 
 // lookBack reads how the transcript stood before end, where a tail read's whole lines begin: the line the tail's
-// start cuts is read whole here (a tool result or a prompt bigger than the tail is the last exchange). It goes back
-// a chunk at a time (each twice the last) up to lookBackReach, until it has what is asked for: the agent's last words,
-// the last exchange, how a Claude turn stands, the mode. Each is the nearest before end, as is the last prompt's time
-// (and the mode when not asked for) when the lines read on the way say it. Only those fields are set; what is not
-// found stays zero.
+// start cuts is read whole here (a tool result or a prompt bigger than the tail is the last exchange). It reads one
+// stretch of lines ending at end into one Meta, a longer one each time (twice the last, re-reading the newer lines, as
+// transcripttail.LastWordsBefore does) up to lookBackReach, until that has what is asked for: the agent's last words,
+// the last exchange, how a Claude turn stands, the mode. Every field is then that Meta's, where the transcript stood at
+// end: one window's turn, words or prompt is not kept beside another's, and a line read on its own does not stand for
+// what the lines before it say (a local command ends the turn it starts only where the state before it is known).
+// Only those fields and the last prompt's time are set; what is not found stays zero.
 func lookBack(f *os.File, end int64, codex, words, exchange, turn, mode bool) quickMeta {
 	var b quickMeta
-	said := false // a chunk said how the turn stands
-	for chunk, read := int64(quickTail), int64(0); end > 0 && read < lookBackReach; chunk *= 2 {
+	for chunk := int64(quickTail); end > 0; chunk = min(chunk*2, lookBackReach) {
 		start := max(end-chunk, 0)
 		buf := make([]byte, end-start)
 		if n, err := f.ReadAt(buf, start); err != nil && n < len(buf) {
 			break
 		}
-		read += end - start
 		lines := bytes.Split(buf, []byte("\n"))
-		next := start
 		if start > 0 && len(lines) > 0 {
-			next += int64(len(lines[0])) // a partial line: whole in the next chunk
-			lines = lines[1:]
+			lines = lines[1:] // a partial line: whole in the next, longer stretch
 		}
 		tm := transcript.Meta{Codex: codex}
 		for _, line := range lines {
@@ -514,29 +509,12 @@ func lookBack(f *os.File, end int64, codex, words, exchange, turn, mode bool) qu
 				quickLine(line, &tm, nil)
 			}
 		}
-		// An earlier chunk adds only what the later ones did not say.
-		if b.lastText == "" {
-			b.lastText = tm.LastText
-		}
-		if b.lastTextAt.IsZero() {
-			b.lastTextAt = tm.LastTextAt
-		}
-		if b.activity.IsZero() {
-			b.activity = tm.LastActivity
-		}
-		if b.lastPromptAt.IsZero() {
-			b.lastPromptAt = tm.LastPromptAt
-		}
-		if !said && (tm.TurnOpen || tm.TurnClosed) {
-			said, b.claudeTurn, b.turnClosed = true, tm.TurnOpen, tm.TurnClosed
-		}
-		if b.mode == "" && b.sandbox == "" {
-			b.mode, b.modeAt, b.sandbox = tm.PermissionMode, tm.ModeAt, tm.CodexSandbox
-		}
-		if (!words || b.lastText != "") && (!exchange || !b.activity.IsZero()) && (!turn || said) && (!mode || b.mode != "") {
+		b = quickMeta{lastText: tm.LastText, lastTextAt: tm.LastTextAt, activity: tm.LastActivity, lastPromptAt: tm.LastPromptAt,
+			claudeTurn: tm.TurnOpen, turnClosed: tm.TurnClosed, mode: tm.PermissionMode, modeAt: tm.ModeAt, sandbox: tm.CodexSandbox}
+		if (!words || b.lastText != "") && (!exchange || !b.activity.IsZero()) && (!turn || b.claudeTurn || b.turnClosed) &&
+			(!mode || b.mode != "") || start == 0 || chunk == lookBackReach {
 			break
 		}
-		end = next
 	}
 	return b
 }

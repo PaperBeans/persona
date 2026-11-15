@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -237,6 +238,139 @@ func TestQuickMetaRolloutLongerThanTheTail(t *testing.T) {
 		}
 		if m.mode != "never" || m.sandbox != "danger-full-access" {
 			t.Errorf("%s: mode %q, sandbox %q, want the second turn's", name, m.mode, m.sandbox)
+		}
+	}
+}
+
+// placeBoundary writes lines, a pad and tail so that the first window read back from the tail's whole lines (lookBack's
+// first, quickTail long) starts at at: what is read back is then cut there.
+func placeBoundary(t *testing.T, path string, lines, tail []string, at int64) os.FileInfo {
+	t.Helper()
+	pad := func(n int64) string {
+		return `{"type":"system","subtype":"async_hook_response","content":"` + strings.Repeat("p", int(n)) + `"}`
+	}
+	boundary := func(n int64) int64 {
+		st := writeLines(t, path, append(append(lines[:len(lines):len(lines)], pad(n)), tail...))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		off := st.Size() - quickTail
+		return off + int64(bytes.IndexByte(data[off:], '\n')) - quickTail
+	}
+	n := 2 * int64(quickTail)
+	n += at - boundary(n)
+	if n < 0 || boundary(n) != at {
+		t.Fatalf("cannot place the boundary at %d", at)
+	}
+	st, _ := os.Stat(path)
+	return st
+}
+
+// boundaries are the places lookBack's windows can cut lines: the start and the middle of each of lines from the
+// first'th on.
+func boundaries(lines []string, first int) []int64 {
+	var at []int64
+	pos := int64(0)
+	for i, l := range lines {
+		if i >= first {
+			at = append(at, pos, pos+int64(len(l))/2)
+		}
+		pos += int64(len(l)) + 1
+	}
+	return at
+}
+
+// hooks are lines that are no exchange, say nothing of a turn and fill a tail: the tail reads nothing of where the
+// session stands, and lookBack reads all of it.
+func hooks(from time.Time) []string {
+	var out []string
+	for i := range 7 {
+		out = append(out, fmt.Sprintf(`{"type":"system","subtype":"async_hook_response","uuid":"h%d","timestamp":%q,"content":"%s"}`, i,
+			from.Add(time.Duration(i+1)*time.Minute).Format(time.RFC3339), strings.Repeat("y", 60<<10)))
+	}
+	return out
+}
+
+// errorTurn is a turn that ended on an API error.
+var errorTurn = []string{
+	`{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-11-01T08:00:00Z","cwd":"/src/app","permissionMode":"plan","message":{"role":"user","content":"first question"}}`,
+	`{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-11-01T08:00:05Z","isApiErrorMessage":true,"error":"server_error","message":{"id":"m1","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"API Error: 500 Internal server error"}]}}`,
+	`{"type":"system","subtype":"turn_duration","uuid":"d1","parentUuid":"a1","timestamp":"2026-11-01T08:00:06Z","durationMs":6000}`,
+}
+
+// lookBack reads where the session stood before the tail as one stretch of lines, whatever window cuts them: it does not
+// take each "last X" from a window of its own. A long turn after one that ended on an API error has said nothing yet:
+// it is open, in its own prompt's mode and time, and the error's words are the last ones. A local command after the
+// error turn ends where it started: the turn stays ended, wherever a window parts the command from its output.
+func TestQuickMetaLookBackKeepsTheNearestTurnWholeAcrossWindows(t *testing.T) {
+	work := time.Date(2026, 11, 4, 1, 0, 0, 0, time.UTC)
+	long := append(errorTurn[:3:3],
+		`{"type":"user","uuid":"u2","parentUuid":"d1","timestamp":"2026-11-04T01:00:00Z","permissionMode":"acceptEdits","message":{"role":"user","content":"read every file"}}`)
+	last := work
+	for i := range 6 {
+		at := work.Add(time.Duration(i+1) * time.Minute)
+		last = at.Add(time.Second)
+		long = append(long,
+			fmt.Sprintf(`{"type":"assistant","uuid":"a%d","timestamp":%q,"message":{"id":"t%d","role":"assistant","content":[{"type":"tool_use","id":"c%d","name":"Read","input":{"file_path":"/src/app/f%d.go"}}]}}`, 10+i, at.Format(time.RFC3339), i, i, i),
+			fmt.Sprintf(`{"type":"user","uuid":"r%d","timestamp":%q,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"c%d","content":"%s"}]}}`, 10+i, last.Format(time.RFC3339), i, strings.Repeat("x", 4<<10)))
+	}
+	command := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+	local := append(errorTurn[:3:3],
+		`{"type":"user","uuid":"c1","parentUuid":"d1","timestamp":"2026-11-01T09:00:00Z","message":{"role":"user","content":"<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>"}}`,
+		`{"type":"user","uuid":"c2","parentUuid":"c1","timestamp":"2026-11-01T09:00:01Z","message":{"role":"user","content":"<local-command-stdout>Set model to opus</local-command-stdout>"}}`)
+
+	for _, c := range []struct {
+		name     string
+		lines    []string
+		open     bool
+		activity time.Time
+		prompt   time.Time
+		mode     string
+		tail     time.Time
+	}{
+		{"a long turn after an error turn", long, true, last, work, "acceptEdits", last},
+		{"a local command after an error turn", local, false, command, firstPrompt, "plan", command},
+	} {
+		for _, at := range boundaries(c.lines, 1) {
+			path := filepath.Join(t.TempDir(), "s.jsonl")
+			m := readQuickMeta(path, placeBoundary(t, path, c.lines, hooks(c.tail), at))
+			if m.claudeTurn != c.open || m.turnClosed == c.open {
+				t.Errorf("%s, cut at %d: turn open %v, closed %v", c.name, at, m.claudeTurn, m.turnClosed)
+			}
+			if m.lastText != "API Error: 500 Internal server error" || !m.lastTextAt.Equal(time.Date(2026, 11, 1, 8, 0, 5, 0, time.UTC)) {
+				t.Errorf("%s, cut at %d: last text %q at %v, want the error turn's", c.name, at, m.lastText, m.lastTextAt)
+			}
+			if !m.activity.Equal(c.activity) || !m.lastPromptAt.Equal(c.prompt) || m.mode != c.mode {
+				t.Errorf("%s, cut at %d: last exchange %v (want %v), last prompt %v (want %v), mode %q (want %q)", c.name, at,
+					m.activity, c.activity, m.lastPromptAt, c.prompt, m.mode, c.mode)
+			}
+		}
+	}
+}
+
+// A turn the user went back over while it was still in the tail (a rewind in the terminal, then a recap beside its
+// prompt): what the last read knew came from that turn, and none of it stands. The session is as the turn before it
+// left it, ended, with its words; not working, as the last read saw the rewound turn.
+func TestQuickMetaRewoundTurnInTheTailThenARecap(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	lines := append(twoTurns[:3:3], `{"type":"system","subtype":"async_hook_response","content":"`+strings.Repeat("p", quickTail)+`"}`,
+		`{"type":"user","uuid":"u2","parentUuid":"d1","timestamp":"2026-11-04T01:00:00Z","permissionMode":"acceptEdits","message":{"role":"user","content":"rewrite everything"}}`,
+		`{"type":"assistant","uuid":"a2","parentUuid":"u2","timestamp":"2026-11-04T01:00:05Z","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"Rewriting it all now."}]}}`)
+	prev := readQuickMeta(path, writeLines(t, path, lines)) // the rewound turn, working
+	if !prev.claudeTurn || prev.lastText != "Rewriting it all now." {
+		t.Fatalf("the last read: turn open %v, last text %q", prev.claudeTurn, prev.lastText)
+	}
+	lines = append(lines,
+		`{"type":"system","subtype":"turn_duration","uuid":"d2","parentUuid":"a2","timestamp":"2026-11-04T01:00:06Z","durationMs":6000}`,
+		`{"type":"system","subtype":"away_summary","uuid":"s1","parentUuid":"d1","timestamp":"2026-11-04T03:00:00Z","content":"You went back to before the rewrite."}`)
+	st := writeLines(t, path, lines)
+	for name, m := range map[string]quickMeta{"read again": readQuickMetaSince(path, st, prev), "first read": readQuickMeta(path, st)} {
+		if m.claudeTurn || !m.turnClosed {
+			t.Errorf("%s: turn open %v, closed %v: the turn gone back over is not the session's", name, m.claudeTurn, m.turnClosed)
+		}
+		if m.lastText != "first answer" || !m.lastTextAt.Equal(time.Date(2026, 11, 1, 8, 0, 5, 0, time.UTC)) {
+			t.Errorf("%s: last text %q at %v, want the first answer", name, m.lastText, m.lastTextAt)
 		}
 	}
 }
