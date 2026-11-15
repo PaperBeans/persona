@@ -1,9 +1,15 @@
 package hub
 
 import (
+	"context"
+	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -214,5 +220,94 @@ func TestPushSentPrunesByAgeAndCount(t *testing.T) {
 	recordAndSave(t, p, "manager-a", "p1", "fifteen-days-on", later)
 	if rows := store.sentTable(); len(rows) != 1 || rows[0].RelatedKey != "fifteen-days-on" {
 		t.Fatalf("after the hourly sweep: %d rows, want only the new push", len(rows))
+	}
+}
+
+// A write the store committed but reported as failed (a timeout, a dropped connection) is retried with the same push
+// IDs, so it adds no second row: the table and the counts after a restart hold that push once. A push after it takes
+// the normal path and adds its own row.
+func TestPushSentRetryAfterLandedWriteAddsNoRow(t *testing.T) {
+	now := time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)
+	store := newLnStore()
+	store.landThenFail = 1
+	p := sentPusher(t, store, now)
+	recordAndSave(t, p, "manager-a", "p1", "session:landed", now)
+	if store.sentAdds != 2 {
+		t.Fatalf("%d writes, want the failed one and its retry", store.sentAdds)
+	}
+	rows := store.sentTable()
+	if len(rows) != 1 || rows[0].RelatedKey != "session:landed" || rows[0].ID == "" {
+		t.Fatalf("table after the retry = %+v, want the push once, with its id", rows)
+	}
+	recordAndSave(t, p, "manager-a", "p1", "session:normal", now)
+	rows = store.sentTable()
+	if len(rows) != 2 || rows[1].RelatedKey != "session:normal" || rows[1].ID == rows[0].ID {
+		t.Fatalf("table after a normal push = %+v, want a second row with its own id", rows)
+	}
+	again := sentPusher(t, store, now)
+	if got := again.pushDailyStats(now.Add(-time.Hour), "manager-a"); len(got) != 1 || got[0].Sent != 2 {
+		t.Fatalf("counts after a restart = %+v, want 2 sent", got)
+	}
+}
+
+// landedThenFailed is the real database with its first AddPushSent calls committing and then reporting an error.
+type landedThenFailed struct {
+	*db.DB
+	fail atomic.Int32
+}
+
+func (s *landedThenFailed) AddPushSent(ctx context.Context, entries []db.PushSent) error {
+	if err := s.DB.AddPushSent(ctx, entries); err != nil {
+		return err
+	}
+	if s.fail.Add(-1) >= 0 {
+		return errors.New("timeout after commit")
+	}
+	return nil
+}
+
+// The same on Postgres: the retry's INSERT … ON CONFLICT (push_id) DO NOTHING adds nothing for the push that landed.
+func TestPushSentRetryAfterLandedWriteOnPostgres(t *testing.T) {
+	dsn := os.Getenv("PERSONA_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("PERSONA_TEST_DATABASE_URL not set")
+	}
+	ctx := t.Context()
+	d, err := db.Open(ctx, dsn, db.HubSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	store := &landedThenFailed{DB: d}
+	store.fail.Store(1)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	tag := t.Name() + "-" + rand.Text()
+	mine := func() []db.PushSent {
+		all, err := d.PushSentAfter(ctx, now.Add(-time.Hour), pushSentMax)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []db.PushSent
+		for _, e := range all {
+			if strings.HasPrefix(e.RelatedKey, tag) {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+	p := newPusher(t.TempDir(), nil, t.Logf)
+	p.now = func() time.Time { return now }
+	p.store = store
+	p.loadSent()
+	recordAndSave(t, p, "manager-a", "p1", tag+"/landed", now)
+	if store.fail.Load() >= 0 {
+		t.Fatal("the landed write was not retried")
+	}
+	if rows := mine(); len(rows) != 1 || rows[0].RelatedKey != tag+"/landed" {
+		t.Fatalf("rows after the retry = %+v, want the push once", rows)
+	}
+	recordAndSave(t, p, "manager-a", "p1", tag+"/normal", now)
+	if rows := mine(); len(rows) != 2 || rows[1].RelatedKey != tag+"/normal" {
+		t.Fatalf("rows after a normal push = %+v, want two", rows)
 	}
 }

@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"net/http"
@@ -91,6 +92,9 @@ type pushIntercept struct {
 // actually received it (the same rule a held push is one intercept by). It backs the read-only daily delivery counts
 // and is kept with the switch off as well as on, so the counts describe every push that reached the phone.
 type pushSent struct {
+	// ID names this push in the store (hub_push_sent.push_id), set once when it is recorded and kept when a failed
+	// write is retried, so a write that landed but reported an error is not added again.
+	ID         string    `json:"-"`
 	At         time.Time `json:"at"`
 	Level      string    `json:"level"`
 	RelatedKey string    `json:"related_key,omitempty"`
@@ -119,7 +123,7 @@ func (p *Pusher) sentLog() pushSentStore {
 func sentRows(in []pushSent) []db.PushSent {
 	out := make([]db.PushSent, len(in))
 	for i, e := range in {
-		out[i] = db.PushSent{At: e.At, Level: e.Level, RelatedKey: e.RelatedKey, Manager: e.Manager}
+		out[i] = db.PushSent{ID: e.ID, At: e.At, Level: e.Level, RelatedKey: e.RelatedKey, Manager: e.Manager}
 	}
 	return out
 }
@@ -371,6 +375,9 @@ func (p *Pusher) recordIntercept(in pushIntercept) {
 // addSentLocked remembers one delivered push for the daily counts, dropping entries past the age and count limits, and
 // queues it for the writer, which appends only the new rows to the store (never the whole list). lnMu is held.
 func (p *Pusher) addSentLocked(in pushSent) {
+	if in.ID == "" {
+		in.ID = rand.Text()
+	}
 	cutoff := p.now().Add(-lnInterceptAge)
 	kept := p.sent[:0]
 	for _, e := range p.sent {
@@ -605,7 +612,7 @@ func (p *Pusher) loadSent() {
 	p.sentPrunedAt = now
 	p.sent = p.sent[:0]
 	for _, e := range rows {
-		p.sent = append(p.sent, pushSent{At: e.At, Level: e.Level, RelatedKey: e.RelatedKey, Manager: e.Manager})
+		p.sent = append(p.sent, pushSent{ID: e.ID, At: e.At, Level: e.Level, RelatedKey: e.RelatedKey, Manager: e.Manager})
 	}
 	p.lnMu.Unlock()
 }

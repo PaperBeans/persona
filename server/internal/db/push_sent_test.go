@@ -23,13 +23,13 @@ func TestPushSentAppendReadPrune(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	var batch []PushSent
 	for i := range 5 {
-		batch = append(batch, PushSent{At: now.Add(time.Duration(i-5) * time.Hour), Level: "p1", RelatedKey: fmt.Sprintf("k-%d", i), Manager: "manager-a"})
+		batch = append(batch, PushSent{ID: fmt.Sprintf("push-%d", i), At: now.Add(time.Duration(i-5) * time.Hour), Level: "p1", RelatedKey: fmt.Sprintf("k-%d", i), Manager: "manager-a"})
 	}
 	if err := d.AddPushSent(ctx, batch); err != nil {
 		t.Fatal(err)
 	}
 	// An older push appended later still reads after the earlier rows: the record keeps the order pushes were added.
-	if err := d.AddPushSent(ctx, []PushSent{{At: now.Add(-10 * time.Hour), Level: "p0", Manager: ""}}); err != nil {
+	if err := d.AddPushSent(ctx, []PushSent{{ID: "push-p0", At: now.Add(-10 * time.Hour), Level: "p0", Manager: ""}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.AddPushSent(ctx, nil); err != nil {
@@ -94,7 +94,7 @@ func TestAdoptPushSentSetting(t *testing.T) {
 			d, ctx := tc.open(t), context.Background()
 			const key = "hub.push_sent"
 			now := time.Now().UTC().Truncate(time.Microsecond)
-			if err := d.AddPushSent(ctx, []PushSent{{At: now.Add(-time.Hour), Level: "p1", RelatedKey: "already", Manager: "manager-a"}}); err != nil {
+			if err := d.AddPushSent(ctx, []PushSent{{ID: "push-already", At: now.Add(-time.Hour), Level: "p1", RelatedKey: "already", Manager: "manager-a"}}); err != nil {
 				t.Fatal(err)
 			}
 			// The setting as the hub wrote it: its pushSent JSON, related_key left out when empty.
@@ -136,5 +136,74 @@ func TestAdoptPushSentSetting(t *testing.T) {
 				t.Fatalf("a failed move changed the table: %d rows", len(rows))
 			}
 		})
+	}
+}
+
+// A push is one row however often it is written: the batch retried after a write that committed but reported an error
+// adds nothing for the rows already there, a new entry in the same retry still lands, and an entry without an ID is
+// refused rather than written without the guard.
+func TestPushSentRetriedBatchAddsOnce(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	batch := []PushSent{
+		{ID: "push-a", At: now.Add(-2 * time.Minute), Level: "p1", RelatedKey: "a", Manager: "manager-a"},
+		{ID: "push-b", At: now.Add(-time.Minute), Level: "p0", RelatedKey: "b", Manager: "manager-a"},
+	}
+	if err := d.AddPushSent(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	retry := append(slices.Clone(batch), PushSent{ID: "push-c", At: now, Level: "p1", RelatedKey: "c", Manager: "manager-b"})
+	if err := d.AddPushSent(ctx, retry); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.AddPushSent(ctx, retry); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := d.PushSentAfter(ctx, time.Time{}, 100)
+	if err != nil || !slices.Equal(sentKeys(rows), []string{"a", "b", "c"}) {
+		t.Fatalf("rows = %q (%v), want each push once, in order", sentKeys(rows), err)
+	}
+	if rows[0].ID != "push-a" || rows[2].ID != "push-c" {
+		t.Fatalf("ids read back = %q, %q", rows[0].ID, rows[2].ID)
+	}
+	if err := d.AddPushSent(ctx, []PushSent{{At: now, Level: "p1"}}); err == nil {
+		t.Fatal("an entry without an id was written")
+	}
+	if rows, _ := d.PushSentAfter(ctx, time.Time{}, 100); len(rows) != 3 {
+		t.Fatalf("the refused entry changed the table: %d rows", len(rows))
+	}
+}
+
+// The upgrade import adds each of the setting's entries once: run again over the same entries (a build from before
+// switched back to that wrote the setting anew) it adds only the ones not imported yet, and two equal entries in one
+// list stay two rows.
+func TestAdoptPushSentSettingTwiceAddsOnce(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	const key = "hub.push_sent"
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	twin := map[string]any{"at": now.Add(-2 * time.Hour), "level": "p2", "related_key": "twin", "manager": ""}
+	legacy := []map[string]any{
+		{"at": now.Add(-3 * time.Hour), "level": "p0", "related_key": "legacy-1", "manager": "manager-a"},
+		twin, twin,
+	}
+	if err := d.PutSetting(ctx, key, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := d.AdoptPushSentSetting(ctx, key); err != nil || n != 3 {
+		t.Fatalf("first import added %d (%v), want 3", n, err)
+	}
+	legacy = append(legacy, map[string]any{"at": now.Add(-time.Hour), "level": "p1", "related_key": "legacy-new", "manager": "manager-b"})
+	if err := d.PutSetting(ctx, key, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := d.AdoptPushSentSetting(ctx, key); err != nil || n != 1 {
+		t.Fatalf("second import added %d (%v), want only the new entry", n, err)
+	}
+	rows, err := d.PushSentAfter(ctx, time.Time{}, 100)
+	if err != nil || !slices.Equal(sentKeys(rows), []string{"legacy-1", "twin", "twin", "legacy-new"}) {
+		t.Fatalf("rows = %q (%v), want one row per entry", sentKeys(rows), err)
+	}
+	if rows[1].ID == rows[2].ID {
+		t.Fatalf("the two equal entries share id %q", rows[1].ID)
 	}
 }

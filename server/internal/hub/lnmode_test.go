@@ -6,6 +6,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -30,6 +32,9 @@ type lnStore struct {
 	// sentAdds counts AddPushSent calls and sentAddBytes the JSON size of the rows they carried: what one push writes.
 	sentAdds     int
 	sentAddBytes int
+	// landThenFail makes that many AddPushSent calls keep their rows and still return an error, as a write the
+	// database committed reports a timeout or a dropped connection.
+	landThenFail int
 }
 
 func newLnStore() *lnStore { return &lnStore{settingsStore: settingsStore{vals: map[string][]byte{}}} }
@@ -41,10 +46,35 @@ func (s *lnStore) AddPushSent(_ context.Context, entries []db.PushSent) error {
 	}
 	s.sentMu.Lock()
 	defer s.sentMu.Unlock()
-	s.sentRows = append(s.sentRows, entries...)
+	s.addRowsLocked(entries)
 	s.sentAdds++
 	s.sentAddBytes += len(b)
+	if s.landThenFail > 0 {
+		s.landThenFail--
+		return errors.New("timeout after commit")
+	}
 	return nil
+}
+
+// addRowsLocked appends the entries whose ID is not there yet, as the table's UNIQUE push_id with ON CONFLICT DO
+// NOTHING does, and returns how many it added. sentMu is held.
+func (s *lnStore) addRowsLocked(entries []db.PushSent) int {
+	have := map[string]bool{}
+	for _, e := range s.sentRows {
+		have[e.ID] = true
+	}
+	added := 0
+	for _, e := range entries {
+		if e.ID == "" {
+			panic("push sent entry without an id")
+		}
+		if !have[e.ID] {
+			have[e.ID] = true
+			s.sentRows = append(s.sentRows, e)
+			added++
+		}
+	}
+	return added
 }
 
 func (s *lnStore) PushSentAfter(_ context.Context, after time.Time, limit int) ([]db.PushSent, error) {
@@ -90,10 +120,17 @@ func (s *lnStore) AdoptPushSentSetting(_ context.Context, key string) (int, erro
 		s.mu.Unlock()
 		return 0, err
 	}
+	// IDs from the content and its occurrence, like the database's settingPushSentIDs.
+	seen := map[string]int{}
+	for i := range entries {
+		e := &entries[i]
+		k := fmt.Sprintf("%s|%s|%s|%s", e.At.UTC().Format(time.RFC3339Nano), e.Level, e.RelatedKey, e.Manager)
+		e.ID = fmt.Sprintf("setting:%s:%d", k, seen[k])
+		seen[k]++
+	}
 	s.sentMu.Lock()
 	defer s.sentMu.Unlock()
-	s.sentRows = append(s.sentRows, entries...)
-	return len(entries), nil
+	return s.addRowsLocked(entries), nil
 }
 
 // sentTable is a copy of the delivered-push rows.
