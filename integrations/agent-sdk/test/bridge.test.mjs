@@ -78,6 +78,18 @@ test('guest: an empty upstream tool directory fails instead of starting unarmed'
   assert.equal(await b.exited, 1)
 })
 
+test('guest: a child exit during initialize fails startup instead of hanging', async () => {
+  const b = bridge()
+  b.send(start({ guestMcpServers: { persona: {
+    command: process.execPath,
+    args: [fileURLToPath(new URL('./guest-mcp-exit.mjs', import.meta.url))],
+  } } }))
+  const failure = await b.until((m) => m.event === 'error')
+  assert.match(failure.error, /guest MCP: Persona MCP exited \(code 0\)/)
+  assert.equal(await b.exited, 1)
+  assert.equal(b.msgs.some((m) => m.event === 'ready'), false)
+})
+
 test('settings reach query() as a private file, removed at exit', async () => {
   for (const how of ['stdin', 'SIGTERM']) {
     const b = bridge()

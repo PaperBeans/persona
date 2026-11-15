@@ -68,7 +68,7 @@ func codexProjectRoot(cwd string, cache map[string]string) string {
 }
 
 func (n *Node) decorateCodexSession(s *proto.Session, src codexSource, legacy string, projects map[string]string) {
-	origin := readCodexOrigin(src.path)
+	origin := codexThreadOrigin(src) // a rollout's first line, else the App's database row (#8191)
 	s.ParentThreadID = firstNonEmpty(s.ParentThreadID, origin.parent)
 	s.IsSubagent = origin.sub || s.ParentThreadID != ""
 	if s.ParentThreadID != "" {

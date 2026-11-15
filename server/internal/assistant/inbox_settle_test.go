@@ -32,7 +32,9 @@ func TestInboxRetriagesStaleNeedsYouOnce(t *testing.T) {
 		if change != nil {
 			change(it)
 		}
+		h.inbox.mu.Lock() // inboxReady's needs-you count reads the items from its own goroutine
 		h.inbox.items[id] = it
+		h.inbox.mu.Unlock()
 		return it
 	}
 	stale := add("a", nil)

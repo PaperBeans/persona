@@ -228,17 +228,17 @@ func TestTaskPlanTodoIDIsCheckedAgainOnStart(t *testing.T) {
 func TestTodoTakenByAStartedPlanIsNotTakenTwice(t *testing.T) {
 	e := newThreadEnv(t, nil)
 	todo := e.openedTodo()
-	if _, err := e.s.takeTodoForTask(context.Background(), "new-plan", "m1", todo.ID); err != nil {
+	if _, err := e.s.takeTodoForTask(context.Background(), "new-plan", "m1", PlanTask{ReuseTodo: todo.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.s.takeTodoForTask(context.Background(), "new-plan", "m1", todo.ID); err == nil || !strings.Contains(err.Error(), "another plan is starting an agent on it") {
+	if _, err := e.s.takeTodoForTask(context.Background(), "new-plan", "m1", PlanTask{ReuseTodo: todo.ID}); err == nil || !strings.Contains(err.Error(), "another plan is starting an agent on it") {
 		t.Fatalf("a second take: %v", err)
 	}
 	if _, err := e.s.toolTaskPlan(context.Background(), "m1", reuseArgs(true, todo.ID)); err == nil || !strings.Contains(err.Error(), "another plan is starting") {
 		t.Fatalf("a plan made in the gap: %v", err)
 	}
 	e.s.releaseTakenTodo(todo.ID)
-	if _, err := e.s.takeTodoForTask(context.Background(), "new-plan", "m1", todo.ID); err != nil {
+	if _, err := e.s.takeTodoForTask(context.Background(), "new-plan", "m1", PlanTask{ReuseTodo: todo.ID}); err != nil {
 		t.Fatalf("after it was let go: %v", err)
 	}
 }

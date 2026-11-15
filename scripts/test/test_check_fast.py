@@ -415,6 +415,23 @@ class CheckFastScriptsTests(unittest.TestCase):
         self.assertIn("FAIL     scripts/release/test_check_bundle_privacy.py", out)
         self.assertIn("FAIL     scripts/test/test_merge_pr_sh.py", out)
 
+    def test_a_ratchet_change_also_runs_the_suites_that_load_it(self):
+        # test_changed_ratchets.py imports the two ratchets; test_merge_pr_sh.py copies them and changed_ratchets.py
+        # into its temp repositories, where merge-pr.sh runs them (#7977).
+        scripts = ("changed_ratchets.py", "sleep_ratchet.py", "web_font_ratchet.py")
+        for name in scripts:
+            self.commit_on_top("scripts/ci/" + name, "print('clean')\n", "base")
+        self.commit_on_top("scripts/ci/test_changed_ratchets.py", FAILING, "base")
+        self.break_suite("test_merge_pr_sh.py")
+        for name in scripts:
+            with self.subTest(name):
+                self.git("checkout", "-q", "--", ".")
+                self.write("scripts/ci/" + name, "print('clean')\n# changed\n")
+                code, out = self.check_fast()
+                self.assertEqual(1, code, out)
+                self.assertIn("FAIL     scripts/ci/test_changed_ratchets.py", out)
+                self.assertIn("FAIL     scripts/test/test_merge_pr_sh.py", out)
+
     def test_a_migration_edit_runs_the_freeze_check(self):
         self.write("scripts/ci/migration_freeze.py", "print('freeze-ran')\n")
         self.write("server/internal/db/migrations/hub/0001_init.sql", "CREATE TABLE t (id int);\n")
@@ -449,7 +466,7 @@ class CheckFastScriptsTests(unittest.TestCase):
         code, out = self.check_fast(path=self.toolchain_without_node_and_go())
         self.assertEqual(0, code, out)
         self.assertIn("PASS     frozen migrations", out)
-        self.assertNotIn("server go test", out)  # the destination is outside server/, and --name-only drops the old path
+        self.assertIn("SKIP  server go tests (internal/db): go not found", out)  # --no-renames retains the source path
 
     def test_all_runs_the_freeze_check_when_the_script_exists(self):
         self.write("scripts/ci/migration_freeze.py", "print('freeze-ran')\n")
@@ -877,6 +894,19 @@ class CheckFastWebInputsTests(unittest.TestCase):
         out, npm_calls = self.check_fast()
         self.assertNotIn("queued: web\n", out)
         self.assertEqual([], npm_calls, out)
+
+    def test_rename_out_of_web_still_queues_web(self):
+        self.write("web/src/old.ts", "export const old = 1;\n")
+        self.write("web/src/consumer.ts", "import { old } from './old';\nconsole.log(old);\n")
+        self.git("add", "web/src/old.ts", "web/src/consumer.ts")
+        self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "web source base")
+        self.git("tag", "-f", "base")
+        self.git("config", "diff.renames", "true")
+        self.git("mv", "web/src/old.ts", "docs/old.ts")
+
+        out, npm_calls = self.check_fast()
+        self.assertIn("queued: web\n", out)
+        self.assertEqual(["web|run check:deps", "web|run typecheck", "web|test"], npm_calls, out)
 
     def test_a_doc_change_does_not_run_web(self):
         self.write("docs/guide.md", "guide changed\n")

@@ -41,6 +41,26 @@ nonisolated enum AppStyle: String, CaseIterable, Identifiable, Sendable {
 
 nonisolated enum Theme {
     #if os(iOS)
+    /// A split's list column slid by a finger (#4206, `SplitColumnControl`).
+    enum Split {
+        /// How much of the blur over the pictures a drag reaches (a fraction of `.systemUltraThinMaterial`'s).
+        static let dragBlur: CGFloat = 0.8
+        /// How far the finger goes, in points, before the blur is at its most: none as it lands.
+        static let blurReach: CGFloat = 80
+        /// Faster than this, in points a second, the fling decides where the column settles, not how far it went.
+        static let fling: CGFloat = 500
+        /// How long the line takes to settle out or away after the finger lets go.
+        static let settle: TimeInterval = 0.28
+        /// How long the pictures take to fade once the line has settled, the split under them as it ends.
+        static let fade: TimeInterval = 0.2
+        /// The guide line on the line between the column and the page while a finger moves it, in the theme color (as
+        /// Feishu's; measured there at about 3 pt).
+        static let guide: CGFloat = 3
+        /// How dark the system lays a page under the column over it (measured: the page at 0.8 of its light); the drag's
+        /// page picture is taken without it and darkens as the column comes out.
+        static let overDim: CGFloat = 0.2
+    }
+
     /// By Repository's tree on iOS (#2531): a card per repository, its worktrees and their agents a level in each, every
     /// line's mark in one column per level; the agents in the display's rows (#3753).
     enum Tree {
@@ -54,21 +74,6 @@ nonisolated enum Theme {
         static let selected = Palette.systemBlue.opacity(0.1)
     }
     #endif
-
-    /// The handle on the line between a split's list and its page (#2624, `SplitDividerHandle`).
-    enum Split {
-        static let handle = Color.secondary.opacity(0.45)
-        static let handleHeld = Color.secondary.opacity(0.8)
-        /// Its touch area: narrow (what it takes from the list's and the page's edges), tall.
-        static let handleWidth: CGFloat = 28
-        static let handleHeight: CGFloat = 88
-        /// How far it moves before it is a drag; past the least width, how far until letting go closes the list; from
-        /// the page's edge, how far to the right brings the list back; a step of VoiceOver's adjust.
-        static let slop: CGFloat = 6
-        static let closesPast: CGFloat = 80
-        static let opensPast: CGFloat = 40
-        static let step: CGFloat = 40
-    }
 
     /// Orca-compatible workspace cards. Scoped to repository browsing, including nested selection surfaces.
     enum WorkspaceSidebar {
@@ -620,13 +625,19 @@ nonisolated enum Theme {
         static let headerTitle: CGFloat = 480
         /// The list column of a split on iPad: wide enough for the agents' cards and the inbox rows.
         static let sidebarMin: CGFloat = 340
-        /// The least an iPhone Duo's list column is dragged to (#2624): its open display is narrower than an iPad.
-        static let sidebarMinPhone: CGFloat = 200
-        /// What a split's page keeps beside its list column when the list is dragged wider (#2624).
-        static let splitDetailMin: CGFloat = 300
+        /// The open iPhone Duo's list column, its one width (#4206), upright over the page and on its side beside it: as
+        /// wide as ChatGPT's sidebar on the open Duo (320 of its 669 pt upright, leaving the page most of its 951 pt on its
+        /// side). The system's own was about 199 pt upright and 239 on its side, too narrow for the sidebar's rows.
+        static let sidebarPhone: CGFloat = 320
+        /// The narrowest a split's page gets beside its list column (iOS, `SplitPageMin`), no narrower than a large phone's
+        /// screen: where the column would leave the page less, it lies over the page instead (the open iPhone Duo and an
+        /// iPad mini, upright). At 349 pt beside the Duo's 320 pt column the split could not settle whether the page fit,
+        /// put the column away and back on every frame, and the scene ran out of its 10 seconds (#4206).
+        static let splitPageMin: CGFloat = 400
         /// The knowledge map's outline and detail column side by side from this width (#7251): any iPad in landscape,
         /// a 13-inch one upright beside its sidebar, a large iPhone turned; narrower, the outline alone.
         static let knowledgeMapTwoColumns: CGFloat = 540
+        /// The iPad's list column, its one width (#4206).
         static let sidebar: CGFloat = 400
         static let sidebarMax: CGFloat = 480
         /// The narrowest column of a card grid (Machines' cards): two side by side in an iPad's detail column.

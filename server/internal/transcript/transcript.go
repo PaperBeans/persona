@@ -408,6 +408,20 @@ const (
 // is tied to it (node/echo.go).
 const CompactNotice = "压缩上下文"
 
+// What the runtime bridges write themselves (integrations/paseo, opencode and pi lib/map.js), in Chinese as the node
+// writes its own lines: a failure's notice, and a runtime session's last words when its agent stopped on one
+// (RuntimeErrorLead, then the cause; RuntimeError alone when nothing was said of it); after a failed command's output,
+// its exit code (RuntimeExitHead, the code, RuntimeExitTail); a tool call cancelled before it gave anything back
+// (RuntimeCanceled). The hub rewrites them in the reader's language (hub/transcript_text.go, assistant/fleet_text.go).
+// The bridges write them word for word: change both sides together.
+const (
+	RuntimeError     = "出错了"
+	RuntimeErrorLead = "出错了："
+	RuntimeExitHead  = "（退出码 "
+	RuntimeExitTail  = "）"
+	RuntimeCanceled  = "（已取消）"
+)
+
 // ParseLine converts one JSONL line (1-based seq) into items, updating meta.
 func ParseLine(seq int, line []byte, meta *Meta) []proto.Item {
 	var items []proto.Item

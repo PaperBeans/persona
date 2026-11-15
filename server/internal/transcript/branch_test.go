@@ -716,8 +716,13 @@ func TestTailSkippedLineIsTheSameInTheTree(t *testing.T) {
 		var m Meta
 		whole.Line(&m, ParseLine(0, []byte(c.line), &m))
 		skipped.Skipped([]byte(c.line))
-		if len(skipped.tree.recs) != 1 || skipped.tree.recs[0] != whole.tree.recs[0] || whole.tree.recs[0].prompt != c.prompt {
-			t.Fatalf("%.80s…: skipped %+v, whole %+v", c.line, skipped.tree.recs, whole.tree.recs)
+		if len(skipped.tree.recs) != 1 {
+			t.Fatalf("%.80s…: skipped %+v, want one record", c.line, skipped.tree.recs)
+		}
+		got, want := skipped.tree.recs[0], whole.tree.recs[0]
+		if got.uuid != want.uuid || got.parent != want.parent || got.prompt != want.prompt || got.reply != want.reply ||
+			got.system != want.system || got.turnEnd != want.turnEnd || got.prompt != c.prompt || got.outcomeChanged {
+			t.Fatalf("%.80s…: skipped %+v, whole %+v; a skipped line must keep only the tree shape, not new outcome evidence", c.line, got, want)
 		}
 	}
 }

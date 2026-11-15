@@ -72,8 +72,8 @@ type PlanTask struct {
 	DoneWhen      []string `json:"done_when,omitempty"`
 	ExpectMinutes int      `json:"expect_minutes,omitempty"`
 	// The brief (#3822, task_brief.go): Goal is the work in one sentence (the title when left out), OutOfBounds what
-	// the agent must not do. Continues: the to-do this task takes over from (a retry on another computer, a rework
-	// round, a task split off it), for ContinuesWhy: it then works for that to-do's brief instead of a new one. Brief is
+	// the agent must not do. Continues: the to-do this task carries on in (a retry on another computer or a rework
+	// round), for ContinuesWhy: it keeps that to-do and its brief instead of creating another. Brief is
 	// the hub's: the brief as it will be kept, shown on the plan card so that "Start" confirms it; never what the tool
 	// call or a card's edit says.
 	Goal         string   `json:"goal,omitempty"`

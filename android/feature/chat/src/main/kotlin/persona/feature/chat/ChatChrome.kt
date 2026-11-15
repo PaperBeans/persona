@@ -301,7 +301,7 @@ internal fun ChatActionsSheet(actions: List<JAction>, onDismiss: () -> Unit, tit
         LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp.dense)) {
             items(actions) { action ->
                 JRow(action.label, leadingIcon = action.icon, enabled = action.enabled, destructive = action.destructive,
-                    subtitle = action.subtitle,
+                    subtitle = action.subtitle, titleLines = 2,
                     leading = if (action.icon == null && iconColumn) ({ Spacer(Modifier.width(24.dp.dense)) }) else null,
                     chevron = false, onClick = if (action.enabled) ({ onDismiss(); action.onClick() }) else null)
             }

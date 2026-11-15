@@ -18,13 +18,13 @@ func normalizeLarkCommand(cmd, cwd string) string {
 	if err != nil {
 		return cmd
 	}
-	// Restrict these transformations to a straight sequence: an assignment in a
-	// conditional, loop or background job may never have happened.
-	for _, stmt := range tree.Stmts {
-		call, ok := stmt.Cmd.(*syntax.CallExpr)
-		if !ok || stmt.Background || stmt.Negated || stmt.Coprocess {
-			return cmd
-		}
+	// Only `;`, `&&` and `||` lists of simple commands take part.
+	stmts, ok := larkFlatStmts(tree.Stmts)
+	if !ok {
+		return cmd
+	}
+	for _, stmt := range stmts {
+		call := stmt.Cmd.(*syntax.CallExpr)
 		for _, a := range call.Assigns {
 			if a.Name == nil || a.Append || a.Index != nil || a.Array != nil || a.Value == nil {
 				return cmd
@@ -38,8 +38,12 @@ func normalizeLarkCommand(cmd, cwd string) string {
 		}
 	}
 	vars := map[string]string{}
-	changed, unsafe := false, false
+	// Variables resolve only in a straight sequence: an assignment after && or || may never have happened.
+	changed, unsafe := false, len(stmts) != len(tree.Stmts)
 	for _, stmt := range tree.Stmts {
+		if unsafe {
+			break
+		}
 		call := stmt.Cmd.(*syntax.CallExpr)
 		if len(call.Args) == 0 {
 			for _, a := range call.Assigns {
@@ -102,15 +106,19 @@ func normalizeLarkCommand(cmd, cwd string) string {
 			clear(vars)
 		}
 	}
-	if unsafe {
-		return cmd
+	if unsafe && changed {
+		// Drop the resolutions; here-documents below are judged on their own.
+		tree, _ = syntax.NewParser().Parse(strings.NewReader(cmd), "")
+		stmts, _ = larkFlatStmts(tree.Stmts)
+		changed = false
 	}
 
 	// A heredoc fed only to a file writer is data, except when a later command
 	// could execute it or its unquoted body contains an executable substitution.
 	hasHeredoc, safe, goTest := false, true, false
 	var bodies []*syntax.Word
-	for _, stmt := range tree.Stmts {
+	dir := cwd // a literal cd moves where later relative targets are
+	for _, stmt := range stmts {
 		call := stmt.Cmd.(*syntax.CallExpr)
 		if len(call.Args) == 0 {
 			if len(stmt.Redirs) != 0 {
@@ -120,6 +128,17 @@ func normalizeLarkCommand(cmd, cwd string) string {
 		}
 		name, dynamic := executionWord(call.Args[0])
 		base := filepath.Base(name)
+		if name == "cd" && !dynamic && len(call.Args) == 2 && len(call.Assigns) == 0 && len(stmt.Redirs) == 0 {
+			to, expanded := executionWord(call.Args[1])
+			if to = larkHomePath(to); !filepath.IsAbs(to) && filepath.IsAbs(dir) {
+				to = filepath.Join(dir, to)
+			}
+			if info, err := os.Stat(to); expanded || err != nil || !info.IsDir() || !filepath.IsAbs(to) {
+				safe = false
+			}
+			dir = to
+			continue
+		}
 		// Do not infer safety from an interpreter denylist: build tools and
 		// arbitrary programs can execute the file as well. Only these ordinary
 		// file/inspection commands and the specified test invocation are inert.
@@ -140,7 +159,7 @@ func normalizeLarkCommand(cmd, cwd string) string {
 		}
 		for _, redir := range stmt.Redirs {
 			if redir.Hdoc == nil {
-				if (redir.Op != syntax.RdrOut && redir.Op != syntax.AppOut) || redir.Word == nil || !safeHeredocTarget(redir.Word.Lit(), cwd) {
+				if (redir.Op != syntax.RdrOut && redir.Op != syntax.AppOut) || redir.Word == nil || !safeHeredocTarget(redir.Word.Lit(), dir) {
 					safe = false
 				}
 				continue
@@ -154,7 +173,7 @@ func normalizeLarkCommand(cmd, cwd string) string {
 			if base == "cat" {
 				output := false
 				for _, other := range stmt.Redirs {
-					if (other.Op == syntax.RdrOut || other.Op == syntax.AppOut) && other.Word != nil && safeHeredocTarget(other.Word.Lit(), cwd) {
+					if (other.Op == syntax.RdrOut || other.Op == syntax.AppOut) && other.Word != nil && safeHeredocTarget(other.Word.Lit(), dir) {
 						output = true
 					}
 				}
@@ -168,7 +187,7 @@ func normalizeLarkCommand(cmd, cwd string) string {
 					if value == "-a" || value == "--append" {
 						continue
 					}
-					if value == "" || strings.HasPrefix(value, "-") || !safeHeredocTarget(value, cwd) {
+					if value == "" || strings.HasPrefix(value, "-") || !safeHeredocTarget(value, dir) {
 						safe = false
 					}
 					files++
@@ -194,7 +213,7 @@ func normalizeLarkCommand(cmd, cwd string) string {
 		}
 	}
 	if hasHeredoc && safe {
-		for _, stmt := range tree.Stmts {
+		for _, stmt := range stmts {
 			redirs := stmt.Redirs[:0]
 			for _, r := range stmt.Redirs {
 				if r.Hdoc == nil {
@@ -218,7 +237,7 @@ func normalizeLarkCommand(cmd, cwd string) string {
 // Special files, symlinks and virtual filesystems can forward the heredoc to
 // a running process. An unknown target is not proof of an ordinary file.
 func safeHeredocTarget(name, cwd string) bool {
-	if !safeLiteralCommand(name) {
+	if name = larkHomePath(name); !safeLiteralCommand(name) {
 		return false
 	}
 	if !filepath.IsAbs(name) {
@@ -293,4 +312,40 @@ func safeLiteralCommand(value string) bool {
 		return false
 	}
 	return true
+}
+
+// larkHomePath is a path with a leading ~ (the shell's own home) expanded.
+func larkHomePath(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home + p[1:]
+		}
+	}
+	return p
+}
+
+// larkFlatStmts lists the simple commands of a `;`, `&&` and `||` list, in order; false for anything else (pipes,
+// loops, subshells, background jobs).
+func larkFlatStmts(in []*syntax.Stmt) ([]*syntax.Stmt, bool) {
+	var out []*syntax.Stmt
+	var add func(*syntax.Stmt) bool
+	add = func(s *syntax.Stmt) bool {
+		if s.Background || s.Negated || s.Coprocess {
+			return false
+		}
+		switch c := s.Cmd.(type) {
+		case *syntax.CallExpr:
+			out = append(out, s)
+			return true
+		case *syntax.BinaryCmd:
+			return (c.Op == syntax.AndStmt || c.Op == syntax.OrStmt) && len(s.Redirs) == 0 && add(c.X) && add(c.Y)
+		}
+		return false
+	}
+	for _, s := range in {
+		if !add(s) {
+			return nil, false
+		}
+	}
+	return out, true
 }

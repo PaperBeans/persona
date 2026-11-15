@@ -319,6 +319,24 @@ data class SessionTodo(
     val title: String = "",
 )
 
+/**
+ * What Paseo's bridge calls every agent but Claude Code and Codex (integrations/paseo/lib/map.js `appAgent`): its
+ * engine's id, never the agent's name. Such a session names its provider by `agent_label` (Paseo's label for it,
+ * "Grok") and `launcher` (the provider's id, "grok"); the app never names it after the engine (#8143).
+ */
+const val PaseoAgent = "paseo"
+
+/**
+ * The name of an agent the app does not know by its id ([agent]): what the hub calls it ([label], a runtime's own name,
+ * "DSH"), else the id. Paseo's [PaseoAgent] is its engine, not the agent: there it is the provider's label, else its
+ * launcher (the provider's id), and the engine's name only while neither is known (#8143).
+ */
+fun unknownAgentName(agent: String?, label: String?, launcher: String?): String {
+    val said = label?.trim()?.takeIf(String::isNotEmpty)
+    if (agent != PaseoAgent) return said ?: agent.orEmpty()
+    return said?.takeUnless { it.equals(PaseoAgent, ignoreCase = true) } ?: launcher?.trim()?.takeIf(String::isNotEmpty) ?: said ?: agent
+}
+
 @KeepGeneratedSerializer
 @Serializable(with = SessionSerializer::class)
 data class Session(
@@ -576,12 +594,15 @@ data class Session(
     val isCodex: Boolean get() = agent == "codex" || sourceKind == "codex_app_server" || sourceKind == "codex_history"
     /** Claude Code, or an older hub that does not name the agent: what Claude-only controls (modes, /model, /clear) need. */
     val isClaude: Boolean get() = !isCodex && (agent.isNullOrEmpty() || agent == "claude")
-    /** Who the user talks to: Claude, Codex, a compatible CLI, or what the hub calls a runtime's agent ("DSH"). */
+    /**
+     * Who the user talks to: Claude, Codex, a compatible CLI, what the hub calls a runtime's agent ("DSH"), or a Paseo
+     * provider by its own name ("Grok", [unknownAgentName]), never the engine's.
+     */
     val agentLabel: String get() = when {
         isCodex -> "Codex"
         agent == "traex" -> "TRAEX"
         isClaude -> "Claude"
-        else -> agentLabelHint?.takeIf(String::isNotBlank) ?: agent.orEmpty()
+        else -> unknownAgentName(agent, agentLabelHint, launcher)
     }
     val isLive: Boolean get() = status != "offline"
     /** [failureReason] without the warning sign botmux starts it with (the app draws its own); null when there is none. */
@@ -991,12 +1012,20 @@ data class Interaction(
     /** The page that answers it; resolution still uses this interaction's own id and session. */
     val homeKey: SessionKey get() = SessionKey(machineId, foldedUnder?.takeIf(String::isNotBlank) ?: sessionId)
 
-    /** The agent's name on a card not from Claude Code ("Codex", "a compatible CLI", "DSH"); null for Claude's. */
+    /** Asked by an agent other than Claude Code (Codex, a compatible CLI, a runtime's): the card is that agent's, never Claude's. */
+    val fromOtherAgent: Boolean get() = !agent.isNullOrEmpty() && agent != "claude"
+
+    /**
+     * The agent's name on a card not from Claude Code ("Codex", "a compatible CLI", "DSH", a Paseo provider's "Grok");
+     * null for Claude's, and for one that names only Paseo, its engine (a node before #8142 labels every card of Paseo's
+     * other providers so): that card reads as one whose agent can't be named (#8143). [fromOtherAgent] says whose card it is.
+     */
     val agentDisplayName: String?
         get() = when (agent) {
             "codex" -> "Codex"
             "traex" -> "TRAEX"
             null, "", "claude" -> null
+            PaseoAgent -> agentLabelHint?.trim()?.takeUnless { it.isEmpty() || it.equals(PaseoAgent, ignoreCase = true) }
             else -> agentLabelHint?.takeIf(String::isNotBlank) ?: agent
         }
 
@@ -1021,7 +1050,10 @@ data class Interaction(
     /** One line for a notification or a list row. */
     val headline: CoreText
         get() = when (kind) {
-            "question" -> questions?.firstOrNull()?.question?.let(CoreText::plain) ?: CoreText.of(Key.HeadlineQuestion, agentDisplayName ?: "Claude")
+            // Another agent's card that can't name it says only that it asks (DESIGN_SYSTEM.md 5.6), never "Claude".
+            "question" -> questions?.firstOrNull()?.question?.let(CoreText::plain)
+                ?: agentDisplayName?.let { CoreText.of(Key.HeadlineQuestion, it) }
+                ?: if (fromOtherAgent) CoreText.of(Key.AskQuestion) else CoreText.of(Key.HeadlineQuestion, "Claude")
             "elicitation" -> CoreText.of(Key.HeadlineElicitation)
             "plan" -> CoreText.of(Key.FleetPlanWaiting)
             // A password card names the computer it runs on; its commands are in the card.

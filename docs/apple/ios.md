@@ -744,13 +744,12 @@ Apps built with older Xcode do not extend under the status bar and camera on Duo
   - Settings entry points all use values (`SettingsPage`); view-based `NavigationLink { page }` pushes the left column's own stack and opens in the narrow column.
 - **Persona**: in regular width, the sidebar is `NavigationSplitView`'s left column (the shell's places and Settings at its foot), with the top-left button showing / hiding it; on iPhone Duo open the
   column's own button at its top hides it and the top-left one only brings it back (#2623, below); compact still uses a drawer.
-- **The line between the list and the page** (#2624, `SplitDividerHandle`, Persona's history and the Agents list; iPad and open Duo), as Feishu's:
-  - A short handle on the line drags the list column wider or narrower. The bounds are iPad 340–480 pt and Duo from 200 pt, and the page keeps at least 300 pt; the page takes the rest.
-  - Dragged more than 80 pt past the least, the list closes and the handle waits at the page's leading edge; dragged right from there, the list comes back.
-  - Width and closing are remembered per list: `agents.list.width` / `.closed`, `assistant.list.width` / `.closed`. Until dragged, the column is the system's.
-  - The column's own button closes and opens it too, remembered the same. A double tap on the handle gives the column back to the system.
-  - VoiceOver: adjusting the handle resizes the list by 40 pt, Hide List / Show List close and open it.
-  - `SplitDividerTests` (`-openSplitFresh YES` starts both lists at the system's width).
+- **The list column beside the page** (#2624, then #4206; iPad and open Duo; `SidebarWidth`, `SplitListMemory`): Persona's history (`assistant.list`), the Agents list (`agents.list`) and the Sidebar layout's column (`sidebar.list`):
+  - **One width, slide only.** The column has one width: the iPad's `Theme.Size.sidebar` (400 pt), the open Duo's `Theme.Size.sidebarPhone` (320 pt, which leaves the page most of the 951 pt on its side). Hidden and shown, it only slides in and out, as Feishu's and ChatGPT's do; the page takes its new width once. Until 2026-11-14 a handle on the line (`SplitDividerHandle`) dragged the column wider or narrower (340–480 pt on the iPad, from 200 pt on the Duo); the column followed the finger, every row was laid out again on every frame and the drag felt slow, so the handle is gone (the owner, #4206). A width it kept (`<list>.width`) is no longer read.
+  - **Beside the page or over it, by width alone** (`SplitPageMin`, `SplitColumns.fitsBeside`). The page beside the column is never narrower than `Theme.Size.splitPageMin` (400 pt, a large phone's screen): where the column would leave it less (the open Duo upright, 669 − 320 pt; an iPad mini upright, 744 − 400 pt) the column lies over the page (#4852), elsewhere beside it (the Duo on its side, every iPad on its side, an 11-inch iPad upright). It is said to SwiftUI as the detail column's least width (`navigationSplitViewColumnWidth`), which sets the split's `minimumSecondaryColumnWidth` itself. Turned to over, a column that was out goes away (as an iPad's sidebar does in portrait); turned back, it comes back as it was left beside the page. Over the page, a pick that changes the page slides it away (#4852; an Agent, a place, through the split's path, `SplitShowList.hideOverlay`), and so does a Sidebar layout pick that leaves the page as it was (the conversation while it is shown); a filter or a grouping leaves it. Nothing here sets the split from UIKit: SwiftUI sets `preferredSplitBehavior` and `minimumSecondaryColumnWidth` back on every update, and a value set from UIKit and taken back each time laid the split out again and again (`docs/lessons/ios.md`, "A split's posture belongs to SwiftUI").
+  - **Slid by a finger** (`SplitColumnControl`, as Feishu's): from the window's leading edge while the column is away, from the line beside it while it shows. Drawn from pictures of the screen taken as the finger lands, the top and side bars in them: the column's (the window's leading edge to the line) and the page's (the line to the trailing edge; the whole window where the column lies over the page, which stays where it is and darkens as the column comes out, `Theme.Split.overDim`, the system's 0.2 measured). Each is stretched or squeezed between the line and its edge as the line follows the finger; both blur from nothing as the finger lands to their most at 80 pt (`Theme.Split.blurReach`), and a 3 pt guide line in the theme color (`Theme.accent`, `Theme.Split.guide`, as Feishu's) marks the line. Let go, a flick (500 pt/s) or past halfway settles it out or away, else it snaps back; the line springs there (`Theme.Split.settle`) and the pictures fade (`Theme.Split.fade`). The split itself changes at most once, under the pictures: coming out, as the finger lands (the column's picture is then of the column as it is); going away, as the finger lets go (where the column lies over the page, as it lands, for the page's picture without it). Nothing is laid out while the finger moves and the split's behavior is never set (an earlier drag laid the column over the page for the drag, and the Agents tab's split took its column away: the column slid on as an empty space, black in dark). The split's own edge swipe (`presentsWithGesture`) is off where this one is on: it laid the column over the page and left its state unkept (SwiftUI sets it back on its updates; set again, it lays nothing out). SwiftUI leaves out the system's Show / Hide Sidebar button with that swipe: the Separate layout's Agents list has its own Hide Sidebar where the system's was (`SplitHideListButton`), and with the list away the page's Show List and the chat's ‹ bring it back. Where the page can go back, its swipe back keeps the edge (the column comes from its button); the list's scroll, its rows' swipes and the page's drags wait for the drag to fail, which it does at once anywhere but on the line or the edge, or moving up and down.
+  - **Shown or hidden is remembered** per list (`<list>.closed`; `SplitListMemory`): the column's own buttons and a finger's slide hide and show it, and the split starts as it was left (`SplitListMemory.startsClosed`). Only a person's choice beside the page is kept: not over the page (its going away there is a pick's or a tap on the page), not a turn's (beside by both SwiftUI's geometry and the split's own size, `SplitColumnState`: as a turn lays the split out either can have the new size first), not in a tab not shown (the Separate layout: it is turned too, its size not read until it shows), not a drag's moves (its end sets it), not in the background (the app switcher's snapshots lay the app out in the other orientation).
+  - `SplitListTests` (the Sidebar layout on its side; `-openSplitFresh YES` starts the lists shown): one width, hidden and shown kept across launches, a finger's slide out of the way and back.
 - **Readable width**: chats and the Persona home page are at most 760pt wide (`ChatView.readableWidth`), centered when wider; the top bar still spans the full width.
 - **No screen dimensions**: the screens have different sizes and ratios; never use `UIScreen.main`. The long-press message action bar stays within the chat area (`MessageMenu.area`
   coordinate space); interaction forms have a maximum height of 55% of their container (`containerRelativeFrame`) and never more than lets the card fit the cards' area, so a lone card never scrolls there too (#6605), except a lone question card above the composer that grows past half the page (`docs/design/DESIGN_SYSTEM.md` 4.8, #6277); question, permission, plan and terminal dialog forms keep their answers outside their one scroll area (`CardForm`); image scaling uses the view's `traitCollection.displayScale`.
@@ -777,11 +776,13 @@ Apps built with older Xcode do not extend under the status bar and camera on Duo
   (`AssistantTopBar.room`, Agents' list `room`, Messages' top inset), so the content starts at the top. Menus (tapping the chosen segment), the badge and the drawer work as before; horizontal bars
   (ordinary iPhone, inner portrait) are unchanged. The rail measures the column as the page's width with the side's safe area less its width without: a `GeometryReader` that
   ignores the safe area reports no inset of its own on that edge.
-- **The inner screen's tabs** (#2623, 2026-11-10, the user, after ChatGPT's open layout): on a phone at regular width (iPhone Duo open, either way up; the iPhone app is upright only) `RootTabs`
+- **The inner screen's tabs** (#2623, 2026-11-10, the user, after ChatGPT's open layout; replaced on 2026-11-14 by the
+  Separate layout's new look, #4206, "Sidebar layout (#6332)": the system's tab bar, the one sidebar's column. What follows is
+  the history): on a phone at regular width (iPhone Duo open, either way up; the iPhone app is upright only) `RootTabs`
   hides the system tab bar, which iOS drew down the side with the switch at its foot, and the pages draw `ShellSwitch` at their top (`pageTabSwitch`): Assistant in its floating bar in the face's place
   (tapping the chosen Assistant opens the face's menu, as in the shell; the link's state and a copy's confirmation show under it), Agents and Messages as a row over the page column
   (`PageTabSwitchRow`; Agents' list options stay on the list's ⋯). Assistant's sidebar column has the button that folds it at its top trailing corner, where Search was (`collapse`); the page's
-  Chat History button only shows while it is folded, to bring it back. Search moves to the foot's row beside Persona's name and where it runs, and opens over the whole window as ChatGPT's (#3705, `AssistantFullSearch`): the field at the foot over the keyboard, × beside it, the conversations above, the latest first, narrowed as you type; a row opens its conversation. Both searches (this one and the sidebar's own) also find a chat by what was said in it (#6284, `AssistantChatSearch.swift`): when the hub lists `assistant_search`, the current assistant's `GET /api/v1/assistant/search` is asked 200 ms after the last key, each query cancelling the one before (`docs/protocol/protocol.md` ("Assistant chat search (#6282)")); the local matches (title, last message, a direction's name) show at once and the manager's results come first once they arrive, archived chats included. A row found by a message shows that sentence under its title with the match in bold (`SearchSaidLine`), starting a few characters before the match, fewer as the text grows (8, then 5 above Large, 2 from xxxLarge: `AssistantSearchMerge.lead(for:)`), so the match stays on the line; VoiceOver reads the sentence in the last message's place. Opening it lands on that message through the hub link landing (`MessageJump`, paging back as a link's `?at=` does, opening a folded turn that holds it): it comes to the middle under the quote's accent band, held `Theme.Quote.landingHold` (1.6 s, a quote's tap holds 0.7 s) and then faded, as the web rings its hit (#6446); a row found by its title opens as usual. While the manager's index is still reading older chats a line under the heading says so; offline, without the feature or on a 404 (an older manager) the local matches are the whole answer. The main conversation's
+  Chat History button only shows while it is folded, to bring it back. Search moves to the foot's row beside Persona's name and where it runs, and opens over the whole window as ChatGPT's (#3705, `AssistantFullSearch`): the field at the foot over the keyboard, × beside it, the conversations above, the latest first, narrowed as you type; a row opens its conversation. Its Chats | Agents scopes at the top look through the Agents too (#4206, "Sidebar layout (#6332)", Search). Both searches (this one and the sidebar's own) also find a chat by what was said in it (#6284, `AssistantChatSearch.swift`): when the hub lists `assistant_search`, the current assistant's `GET /api/v1/assistant/search` is asked 200 ms after the last key, each query cancelling the one before (`docs/protocol/protocol.md` ("Assistant chat search (#6282)")); the local matches (title, last message, a direction's name) show at once and the manager's results come first once they arrive, archived chats included. A row found by a message shows that sentence under its title with the match in bold (`SearchSaidLine`), starting a few characters before the match, fewer as the text grows (8, then 5 above Large, 2 from xxxLarge: `AssistantSearchMerge.lead(for:)`), so the match stays on the line; VoiceOver reads the sentence in the last message's place. Opening it lands on that message through the hub link landing (`MessageJump`, paging back as a link's `?at=` does, opening a folded turn that holds it): it comes to the middle under the quote's accent band, held `Theme.Quote.landingHold` (1.6 s, a quote's tap holds 0.7 s) and then faded, as the web rings its hit (#6446); a row found by its title opens as usual. While the manager's index is still reading older chats a line under the heading says so; offline, without the feature or on a 404 (an older manager) the local matches are the whole answer. The main conversation's
   long press holds the face's long-press items: whose Persona (several hubs), Knowledge, Details, Copy Directory, Copy Info (`MainChatPlaceItems`); the switch's Assistant, tapped while chosen, keeps the
   whole menu, as in the shell. Persona's badge rides on the switch's Assistant; the link's state shows beside the switch, a copy's confirmation as a toast. Pushed pages of Persona's column
   have no switch: Back goes to it (Agents' and Messages' rows stay over their pushed chats). On Agents the empty page has the row as an inset of the column's stack, and each
@@ -835,27 +836,56 @@ One App for iPhone and iPad (`TARGETED_DEVICE_FAMILY` 1,2). Previously only 1, g
 
 ## Sidebar layout (#6332)
 
-Settings › Appearance › Navigation chooses how the app lays out Persona and the Agents (`NavigationLayout`, this device's
-own UserDefaults key `app.navigation`, applied at once, Settings staying on its page): **Separate**, the default and
-everything above unchanged (the Assistant | Agents switch on an iPhone, the Persona | Agents tabs on an iPad), or
-**Sidebar**, the web sidebar's structure in one column. The owner asked for it on 2026-11-13. On an iPhone (and at any
+Settings › Appearance › Sidebar chooses how the app lays out Persona and the Agents (`NavigationLayout`, this device's
+own UserDefaults key `app.navigation`, applied at once, Settings staying on its page): **Merged**, the web sidebar's
+structure in one column, or **Separate**, everything above unchanged (the Assistant | Agents switch on an iPhone, the
+Persona | Agents tabs on an iPad). The owner asked for it on 2026-11-13 (#6332, then named Navigation: Separate /
+Sidebar). With nothing picked (#4206; the owner's delegate picked "Merged where wide", 2026-11-14) it is Merged at
+regular width (the iPad, the open iPhone Duo) and Separate at compact width (an iPhone, the folded Duo), so folding the
+Duo goes from the column to the shell; a pick holds at every width (`NavigationLayout.effective`), and the page checks the
+one in effect. UI tests launch in Separate unless they name a layout (`launchPersona`). On an iPhone (and at any
 compact width: iPhone Duo closed, an iPad's narrow split) the column is the drawer that slides in from the left; at
 regular width it stays beside the page. The Mac (frozen) and Apple Vision Pro keep their own navigation.
 
 - **The column** (`UnifiedSidebarColumn`, `Persona/Views/Shell/UnifiedSidebar.swift`), in the web's order: the assistant
-  (its switcher) and Search; the main conversation held at the top while the rest scrolls (as the web's, #5581); one
+  (its switcher); the main conversation held at the top while the rest scrolls (as the web's, #5581); one
   list, the Agents list (`AgentsList`, `sidebarRows`) with the Persona sidebar's rows over its own
   (`AssistantSidebar(part: .rows)`): **Pages** (Recordings, Inbox, To-dos, Scheduled Tasks, Knowledge, Health, Machines,
-  Messages when it is on, the extensions' pages) and **Persona Chats** (✎ New Chat on the heading, Pinned, Recent, All
-  Chats), each heading folding its section (remembered, `sidebar.fold.places` / `sidebar.fold.chats`; folded Pages keeps
+  Messages when it is on, the extensions' pages) and **Persona Chats** (Pinned, Recent, All Chats), each heading folding
+  its section (remembered, `sidebar.fold.places` / `sidebar.fold.chats`; folded Pages keeps
   the Inbox and To-dos counts); then the Agents' heading with the list's ⋯, Personal Agents and New Session, the quick
   filters and the grouping, Needs You and the groups, the same rows as the Agents page. At the foot: "N need you ↓"
   (`SidebarNeedsJump`, the count the Separate layout's switch and tabs show, `agentsWaiting`) in a band of its own above
   the usage, so it never covers a row; a tap scrolls the list to the Agents' Needs You, the arrow says which way it is.
-  Then the two fullest subscription accounts (`SidebarUsageStrip`, `UsageWindows.top`; a tap opens Machines), New Chat
-  and Settings. The parts share their search and dialogs through `AssistantSidebarUI`, presented around the column
-  (`AssistantSidebarPresenters`): a sheet on a list row went with the row as it scrolled away. Search's words filter
-  Persona's chats and the Agents under them.
+  Then the two fullest subscription accounts (`SidebarUsageStrip`, `UsageWindows.top`; a tap opens Machines), New Chat,
+  and Search and Settings in one capsule (#4206, the owner). That New Chat is the only one wherever the sidebar has it at its foot beside the page (#4206, the owner):
+  the page's top bar keeps its place empty, so the face stays in the middle (`AssistantTopBar.newChatInSidebar`; the
+  iPad's Persona column in the Separate layout too), and the Persona Chats heading has none. A phone keeps the top bar's.
+  The parts share their dialogs through `AssistantSidebarUI`, presented around the column (`AssistantSidebarPresenters`):
+  a sheet on a list row went with the row as it scrolled away. The head's face, the main conversation's mark and the places' symbols stand on
+  one vertical line, their names on another (#4206): the head and the main conversation (held over the list) start where
+  the list's rows do, measured on the Pages heading (`AssistantSidebarUI.rowsLeading`; the list's own margin differs by
+  device), the head's face moved by what centres it on the symbols' column and its name brought to the titles' line
+  (`AssistantSwitcherHeader.faceGap`). The column does not make way for the keyboard (`ignoresSafeArea(.keyboard)`, #4206, the
+  owner): typing in the page beside it, its foot stays where it is instead of riding up and squeezing the list.
+- **Search** (#4206, the owner; it replaced #6332's field in the head, which filtered the column in place): the foot's
+  Search opens the whole-window search (`AssistantFullSearch`, the open Duo's from #3705) at every width, with two
+  scopes over the results: **Chats**, Persona's, as #3705's and #7123's (titles, last messages, and what was said, from
+  the manager's index, opened at the message found), and **Agents** (every Agent's chat but sub-agents' and archived
+  ones, matched as the Agents list's search matches, `Session.matchesScope(.all)`, with where the words were found under
+  the title, else its state and computer; the latest 50). It starts on the Agents while an Agent's chat is in front
+  (`AppModel.selectedTabNow`, which follows what is in front in this layout), else on the chats. A chat found opens as
+  the column's rows do; an Agent found opens beside the sidebar (`AppModel.open`) once the search has gone. There is no
+  "All" scope yet.
+- **Its color** (`UnifiedSidebar.columnColor`, #4206, #4855): one neutral near-white / near-black down the whole column,
+  as ChatGPT's (`Theme.Shell.drawer`, the shell drawer's), in every style and at every width: behind the head, the list
+  (`AgentsListPage(column:)`) and the foot, in the strip over the column on the iPad (`SidebarTopFill(color:)`) and
+  behind the phone's drawer. The system sidebar's grey-blue it had stayed under the head and the foot only, in the
+  styles whose list paints the page's own color: three bands down the column.
+- **Under side bars** (the open iPhone Duo on its side, `SidebarRoot` reading `readsVerticalBarEdge` into
+  `\.splitSideBars`): nothing is above the columns there, so the column's head and the page's top bar sat at the
+  display's edge, the mark under its rounded corner (#4853). Both columns start `Theme.Space.l` lower, or as low as the
+  lower of their own tops (`SplitNavigation.topPad`), as ChatGPT's open Duo: the head and the page's top stay on one line.
 - **The page beside it**: the Agents page's split (`ChatsView` under `\.unifiedSidebar`, `SidebarRoot` in `RootView`),
   whose detail starts at the Persona conversation: `AssistantView` without a stack of its own (`embedded`), pushing on
   the split's one path (`\.unifiedPath`). A pick in the sidebar replaces what is over the conversation, as the web's
@@ -874,8 +904,8 @@ regular width it stays beside the page. The Mac (frozen) and Apple Vision Pro ke
   yields to a second page's back swipe, `DrawerPan.firstPages`). A pick closes the drawer. Choosing Agents by itself
   opens the drawer at the Agents. While the drawer is in, the Agents list holds its updates as a covered list does, and
   the Persona rows keep the list they last showed (`SidebarFeed`). The conversation is the iPhone's (`shellChat`, the
-  shell's new-conversation page). Behind the drawer is the Agents list's own page color (`Theme.groupedPage`), so its
-  head, list and foot are one surface in dark mode too. Settings is the sheet the shell shows it in (`PadRoutes`: the
+  shell's new-conversation page). Behind the drawer is the column's color, so its head, list and foot are one surface in
+  dark mode too. Settings is the sheet the shell shows it in (`PadRoutes`: the
   whole window only at a phone's regular width), so it opens and closes the same way in both layouts.
 - **Routes** (`PadRouter(unified: true)`): notifications, links, Live Activities, widgets, quick actions and Siri /
   Shortcuts set `AppModel.selectedTab` and `openChat` as in the Separate layout and land on the same chat or page: an
@@ -884,11 +914,21 @@ regular width it stays beside the page. The Mac (frozen) and Apple Vision Pro ke
   noted); `.feishu` opens Messages; `.settings` is the sheet over what is in front. Choosing Agents by itself
   (`agentsListReveal`) scrolls the sidebar to the Agents' heading and leaves the page beside it. `selectedTab` follows
   what is in front, so a relaunch goes back to the Agent's chat that was open.
-- The Separate layout's views take the same code with the Sidebar layout's parts off: the whole `AssistantSidebar`,
-  `RootTabs` and the shell are drawn as before (pixel comparisons in #6332's PR).
+- **The Separate layout at regular width** (#4206, the owner's new look; it replaced #6332's pixel-for-pixel tabs and
+  #2623's switch drawn on the open Duo's pages): the system's tab bar (at the top on the iPad, down the side on the open
+  Duo on its side), each tab the same column with its part of the one sidebar (`UnifiedSidebar.Part`), its own selection
+  and its own page: Persona's tab the head, the main conversation, the pages and Persona's chats (in a list of their own,
+  `personaList`), Persona's page beside it; the Agents tab the head and the Agents list, the "Choose an Agent" page beside
+  it. Both feet are the Sidebar layout's (New Chat, Search, Settings); the Agents tab's New Chat and places open on
+  Persona's tab. Each tab's column is kept as before (`assistant.list`, `agents.list`); an Agent asked for from outside
+  opens on the Agents tab only. At compact width the shell is drawn as before.
+- **The head's fold** (both layouts, beside a page; #4206 as the earlier one sidebar had it): the column's head ends in
+  the button that folds it (`sidebar-fold-column`, `AssistantSidebar.foldColumn`); the page's sidebar button only shows
+  while the column is away, to bring it back, its place kept empty meanwhile so the face stays in the middle. In the
+  phone's drawer the face opens it, as before.
 - Tests: `SidebarLayoutRoutingTests` (the router), `SidebarLayoutTests` (iPad UI: the column, a pick replacing the
   page, the routes), `SidebarLayoutPhoneTests` (iPhone UI: the drawer, a pick replacing the page, the face where a back
-  would be, the setting switching both ways at once). DEBUG: `-app.navigation sidebar` launches in the Sidebar layout; `-openAppearance navigation` opens
+  would be, the setting switching both ways at once, nothing picked: Separate). DEBUG: `-app.navigation sidebar` launches in the Sidebar layout, `-app.navigation ""` with nothing picked; `-openAppearance navigation` opens
   the setting's page.
 
 ## Home-screen quick actions (#3199)
@@ -2261,6 +2301,10 @@ iPhone, iPad and Mac crashes go to the hub's `error_reports` (format and rules: 
 - **New Chat check** (#2189): New Chat taken from a Persona conversation watches for the new-conversation page (`NewChatCheck`, Release too). When it has not appeared 1.5 s later, a report of kind `log`, level `warning` goes into the queue with one line of labels only: `new_chat_check from=<main|other> current_early=… current_late=<main|other|none> drawn_late=<chat|home>` (no text, no ids). The latest line, with its time, is also kept in UserDefaults `diag.newChat` and shown at the foot of Settings › About ("Last New Chat Check"), which has no such row until one was written: a hub without an `error_reports` extension drops the queue.
 - **Not yet** (#5621 phase 2): signal crashes, MetricKit crash and hang diagnostics, the Mac's main-thread exceptions (`NSApplicationCrashOnExceptions`, or reporting what AppKit catches), breadcrumbs, the watch (through the phone) and visionOS.
 
+## Extension pack switches (#1830)
+
+On iOS and visionOS, an extension pack's Enabled switch explains when members follow or will be restored (or, on an older hub, that only the pack changes), asks before disabling enabled members, and then uses the existing dependent confirmation if the hub requires one.
+
 ## Extensions and connectors of several managers (#1827)
 
 [managers.md](../assistant/managers.md) ("Grouping"): with more than one installed manager, the hub's merged lists stamp each item with
@@ -2617,7 +2661,9 @@ After successful QR-code or manual pairing, first choose an engine for the hub m
 
 Both mock hub and demo mode support selection and machine pushes. For screenshots, first open the pairing page with `-openWelcome YES`, then open a `persona://pair` link to the mock hub to enter the real post-pairing flow; settings details keep using `-tab settings -openMachines YES -openMachineDetail server`. No new DEBUG arguments.
 
-The To-dos page (iOS / Mac) and the assistant's tasks share `TodoItem` / `TaskState` in `apple/Shared/Tasks.swift`. The To-dos page uses the state labels, sorting and colors specified in `docs/assistant/todos.md`.
+The To-dos page (iOS / visionOS) and the assistant's tasks share `TodoItem` / `TaskState` in `apple/Shared/Tasks.swift`. The To-dos page uses the state labels, sorting and colors specified in `docs/assistant/todos.md`, and its sections and related rows follow `docs/assistant/todo-status-sop.md`.
+
+For a to-do whose optional `kind` is exactly `concern`, iOS adds one compact neutral **Concern** chip on open and closed rows, beside a short title or directly below a title that needs its existing two lines. It never replaces the row's state word, counts or actions. An accepted open concern keeps its open status words, tone and checkbox rather than Accepted / Done presentation, and the list omits its Accepted review chip while its report remains open. Open concerns never merge with related to-dos or one another, including transitively; closed concerns group normally. A missing or unknown `kind` is an ordinary to-do, so older hubs and cached items keep their previous behavior (#3582).
 
 
 ### Orca workspace containers in Agents (#1399)

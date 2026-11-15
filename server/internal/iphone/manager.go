@@ -159,6 +159,8 @@ type Device struct {
 	Transport string `json:"transport,omitempty"`
 	// Locked is the phone's lock state from its last device_info; nil when unknown.
 	Locked *bool `json:"locked,omitempty"`
+	// DeveloperMode is what the phone last said of it (at pairing, then in each device_info); nil when it never did.
+	DeveloperMode *bool `json:"developer_mode,omitempty"`
 	// Address and Port are where the session is connected, AddressSource how that was found (manual / bonjour /
 	// last). Local to this computer: the phone's network address isn't sent to the hub.
 	Address       string `json:"address,omitempty"`
@@ -187,7 +189,7 @@ func (m *Manager) Devices(ctx context.Context) []Device {
 	out := make([]Device, 0, len(recs)+len(usb))
 	for _, r := range recs {
 		d := Device{UDID: r.UDID, Name: r.Name, ProductType: r.ProductType, OSVersion: r.OSVersion, Paired: true, State: StateIdle,
-			Transport: cmp.Or(r.Transport, TransportNetwork), ManualAddress: r.Address, PairedAt: r.PairedAt}
+			Transport: cmp.Or(r.Transport, TransportNetwork), ManualAddress: r.Address, PairedAt: r.PairedAt, DeveloperMode: r.DeveloperMode}
 		_, d.USB = usb[r.UDID]
 		delete(usb, r.UDID)
 		m.mu.Lock()
@@ -324,6 +326,12 @@ func (m *Manager) remember(udid string, ep Endpoint, info json.RawMessage) {
 		rec.Name = cmp.Or(di.Name, rec.Name)
 		rec.ProductType = cmp.Or(di.ProductType, rec.ProductType)
 		rec.OSVersion = cmp.Or(di.OSVersion, rec.OSVersion)
+		// Turned on after pairing (the phone restarted for it): the record stops saying off, so a phone that can't be
+		// reached later reads unreachable, not developer_mode_off (session.go).
+		if di.DeveloperMode != nil && (rec.DeveloperMode == nil || *rec.DeveloperMode != *di.DeveloperMode) {
+			on := *di.DeveloperMode
+			rec.DeveloperMode = &on
+		}
 	}
 	if rec == was {
 		return
@@ -333,12 +341,35 @@ func (m *Manager) remember(udid string, ep Endpoint, info json.RawMessage) {
 	}
 }
 
+// PairProgress is what a pairing says while it runs: the step in words (English, for the command line and logs) and,
+// while it waits on the person at the phone, the reason as a code (CodeTrustPending: tap Trust and enter the
+// passcode; CodeLocked: unlock it), "" otherwise. Said again only when one of them changes.
+type PairProgress func(step, waiting string)
+
+// The bridge's answers to pair that only the person at the phone can change: the phone doesn't trust this computer
+// yet, or is locked. Pair waits them out (#8199).
+const (
+	CodeTrustPending = "trust_pending"
+	CodeLocked       = "locked"
+)
+
+// pairRetry is how often Pair asks the bridge again while the phone waits for its user.
+var pairRetry = 2 * time.Second
+
 // Pair pairs the phone udid, plugged in over USB, with this computer: the bridge's trusted pairing, the record kept
-// here. The phone asks its user to trust this computer (and for its passcode) meanwhile; ctx bounds the wait. A
-// manual address set before is kept.
-func (m *Manager) Pair(ctx context.Context, udid string, step func(string)) (Record, error) {
-	if step == nil {
-		step = func(string) {}
+// here. The phone asks its user to trust this computer (and for its passcode) meanwhile: while the bridge answers
+// that the phone doesn't trust this computer yet, or is locked, Pair asks again every pairRetry until ctx ends (it
+// then returns ctx's error). A manual address set before is kept.
+func (m *Manager) Pair(ctx context.Context, udid string, progress PairProgress) (Record, error) {
+	if progress == nil {
+		progress = func(string, string) {}
+	}
+	said := [2]string{"\x00", ""}
+	step := func(text, waiting string) {
+		if said != [2]string{text, waiting} {
+			said = [2]string{text, waiting}
+			progress(text, waiting)
+		}
 	}
 	b, err := m.bridge()
 	if err != nil {
@@ -357,13 +388,33 @@ func (m *Manager) Pair(ctx context.Context, udid string, step func(string)) (Rec
 	tmp := filepath.Join(dir, "."+RecordFile+".new")
 	_ = os.Remove(tmp)
 	defer os.Remove(tmp)
-	step("waiting for the phone: unlock it and tap Trust, then enter its passcode")
-	info, err := b.Pair(ctx, udid, tmp)
+	step("waiting for the phone: unlock it and tap Trust, then enter its passcode", "")
+	var info PairInfo
+	for {
+		info, err = b.Pair(ctx, udid, tmp)
+		code := Code(err)
+		if err == nil || (code != CodeTrustPending && code != CodeLocked) {
+			break
+		}
+		if code == CodeLocked {
+			step("waiting for the phone to be unlocked", code)
+		} else {
+			step("waiting for the phone: tap Trust on it, then enter its passcode", code)
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(pairRetry):
+		}
+		if ctx.Err() != nil { // the wait ran out (or was cancelled) with the phone still waiting for its user
+			err = ctx.Err()
+			break
+		}
+	}
 	if err != nil {
 		cleanup()
 		return Record{}, err
 	}
-	step("saving the pairing record")
+	step("saving the pairing record", "")
 	if err := os.Chmod(tmp, 0o600); err != nil {
 		cleanup()
 		return Record{}, err

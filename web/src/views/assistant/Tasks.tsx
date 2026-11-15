@@ -414,6 +414,12 @@ function BackgroundReviewLine({ item, title, known }: { item: FeedItem; title: s
   );
 }
 
+/** The plan a `plan` item carries in its body (the hub writes it there with the item), when it is one of this item's. */
+function itemPlan(item: FeedItem): TaskPlan | undefined {
+  const p = item.body?.plan as TaskPlan | undefined;
+  return p && typeof p === "object" && p.id === item.ref && Array.isArray(p.tasks) ? p : undefined;
+}
+
 // Memoized: the chat re-renders on every streamed item and session push, while an item keeps its identity until its body
 // changes (mergeInto); the plan, todo and "Later" it shows come through its own selectors.
 export const FeedLineView = memo(function FeedLineView({ item, simplified = false }: { item: FeedItem; simplified?: boolean }) {
@@ -428,7 +434,13 @@ export const FeedLineView = memo(function FeedLineView({ item, simplified = fals
   if (simplified) {
     // the Agents a dispatch handed work to, a card each that opens its page (#5096, cindy's hand-off card); never the
     // whole In progress tray (#3700)
-    if (item.kind === "plan") return plan?.state === "started" ? <PlanHandoffs plan={plan} /> : null;
+    // a plan not started yet is its card where it was made, Start / Edit / Dismiss included, as on iOS (FeedLine,
+    // #8193); it is in the Needs you tray as well. The item's own body draws it when the store has none (a missed event).
+    if (item.kind === "plan") {
+      const shown = plan ?? itemPlan(item);
+      if (!shown) return null;
+      return shown.state === "started" ? <PlanHandoffs plan={shown} /> : <PlanCard plan={shown} />;
+    }
     if (item.kind === "task") return planned ? null : <TaskHandoffs item={item} />;
     // a task's conclusion, a card for each of done / stopped / failed / interrupted (#5569); an interrupted one the hub worked
     // out stays as its record (#3834): one card for a batch, a grey line once handled

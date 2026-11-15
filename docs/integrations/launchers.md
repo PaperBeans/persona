@@ -122,6 +122,25 @@ Supported since herdr 0.7.1 (Linux) / 0.7.5 (macOS); ignored by older herdr and 
 - Wrappers that exec claude with argv[0] still `claude` were already recognized by herdr; the prefix changes nothing.
 - If recognition still fails, see `docs/lessons/agents.md`, “claude did not become ready…,” for node's error.
 
+## Work agents: pi, the Cursor CLI, the Antigravity CLI
+
+pi, the Cursor CLI (`cursor-agent`) and the Antigravity CLI (`agy`) are agents the user works with, started in a herdr pane the way Claude and Codex are (`server/internal/node/workagent.go`). A machine lists each as a launcher when its program is on the login shell's PATH (`pi`, `cursor-agent`, `agy`), so New Agent and `task_plan` / `agent_start` offer it there and nowhere else. `launcher` is the agent's name (`pi`, `cursor`, `agy`); `model` is passed as `--model` (a provider and model, such as `ag-chat/cursor/grok-4.7` for pi). They take no permission mode and no ultracode, and an effort picked for Claude is ignored rather than refusing the start.
+
+The first message is never typed into the pane:
+
+- **pi**: through the Persona extension in that pi process (`session.send`, `docs/integrations/pi.md`). A pi whose extension does not list the session within 30 seconds is closed and the message is not sent (`pi_no_extension`), so a start never falls back to typing into pi's input.
+- **cursor and agy**: through herdr's `agent.prompt`, once herdr reports the agent. herdr 0.9.5 detects both (its integrations `cursor` and `antigravity-cli`) and reads `HERDR_AGENT` for a wrapper that execs them under another name. Persona does not read their conversations: the phone shows the terminal and can send and interrupt.
+
+Neither cursor nor agy names a session Persona can resume, so a herdr restart starts them again without one; pi's resume names its session (`pi --session`). Resuming one of these sessions from the phone with `session.start` is refused (`work_agent_resume`): a stopped pi resumes in its own herdr tab when the phone sends it a message (`docs/integrations/pi.md`), and the others are resumed on the computer.
+
+**The Cursor CLI on a Mac over SSH.** `cursor-agent` keeps its sign-in in the macOS keychain. A pane opened inside an SSH session (or by a launchd job that is not the GUI user's) finds the keychain locked and asks for it, so the agent never becomes ready and the start fails. Run it in the GUI session: herdr itself started there (the node service of a logged-in user), not `ssh mac cursor-agent`. The same applies to anything else the CLI reads from the keychain.
+
+What these agents do not do here, and why:
+
+- No conversation in the app for cursor and agy. herdr drives the pane; reading their transcripts would be a runtime of their own (agy's `agy acp` is the candidate, `docs/plans/plan-antigravity.md`), which this change does not add.
+- No phone approval cards for cursor and agy. pi's come from its extension; the other two have no Persona hook, so their own dialogs stay on the terminal.
+- Supervision (`report_to_supervisor`, done checks) reaches an agent Persona can send to. pi qualifies once its extension is in; cursor and agy qualify for a message through herdr, and nothing more.
+
 ## Running Persona-managed launchers
 
 - Stored in settings `launchers.managed`; the manager AES-GCM encrypts API keys with its own `secret.key` (the built-in manager's `~/.persona/managers/assistant/secret.key`, the same key used for email credentials, `server/internal/secretkey`). **The API never returns keys**.
@@ -209,6 +228,7 @@ A key bought for one computer (an isolated container the assistant runs on) shou
   - Antigravity, Oh My Pi: not detected; they always count as having none.
   Unknown (an old node, a timeout) counts as none: the rule is a convenience, the scope is the boundary.
 - **Pull**: the node asks the manager with `launchers.pull {name, own_service?}` before it uses a provider whose catalog entry is `withheld`: a `session.start` / `assistant.send` / `assistant.warm` / `session.send`, the availability test, model listing, sign-in status, and `personad launch` (typed in a terminal or herdr's `resume_argv`). It reports its own service for that harness only when the provider says `skip`. The manager checks the connection's machine (never a field in params) against the scope, picks that computer's key, and answers the full `ManagedLauncher` (a key that is a reference resolved for that computer); otherwise it answers `launcher_out_of_scope`, `launcher_own_service`, or `launcher_key_unresolved` when the key's reference did not resolve, in the user's language. A `push` provider is pulled in the background right after each catalog.
+- **pi** (#8194): pi uses the providers in its computer's scope too, without a `models.json`. pi's Persona extension asks the node (node.sock `launcher.pi`, gated by the launch key exactly like `launcher.env` above); the node pulls each provider pi can use (`proto.ManagedLauncher.PiAPI`: a Messages provider for Claude Code or Oh My Pi, a Codex provider; not Antigravity, a Responses or Chat Completions API connection, or a provider with a proxy of its own, which pi would not go through) the same way a start does, own-service rule included, and answers with the keys. The default model comes from the manager (`launchers.agents_default`: Model Settings › Agents when it names such a provider in this computer's scope; names only). Reads mark these providers `pi: true` (`GET /api/v1/launchers`, `GET /api/v1/machines/{mid}/launchers`), shown as "pi too" in the web list and "pi can use it too" in New Agent's model panel. Details: `docs/integrations/pi.md` ("Persona's model providers").
 - **Cache**: what a node pulled stays in its memory until the next catalog says the provider changed (`rev`) or left its scope, or the node restarts. Nothing is written to disk beyond the per-start settings files above.
 - **What degrades when the manager is unreachable** (the node's link to its manager is down: hub machine restarting, network): a provider this node already pulled since it started, or any `push` provider, still launches (`personad launch` by hand, herdr's `resume_argv` after a herdr restart). An `on_demand` provider not used since the node started fails with “cannot reach the hub to fetch the settings”; a node restarted while the manager is away has nothing, as before. Choose `push` for providers that must survive that.
 - **Rolling upgrade**: a node without `launchers.catalog` (it answers `unknown method`) gets `launchers.managed` as before, but only with the providers in its scope, keys included, so on-demand and the own-service rule apply only once it is updated. An old manager keeps pushing `launchers.managed` to new nodes, which still take it (every entry there is full).
@@ -260,7 +280,7 @@ subshell exports, several Codex forms, and `--settings` env (`withSettingsEnv`).
 ## Testing availability (`node/launchercheck.go`)
 
 “Test availability” on the detail page actually sends a request requiring a one-word answer on every online computer with this launcher (for Persona-managed launchers, on the hub machine, chosen by the manager)
-(`claude -p … --output-format json --max-turns 1`, `codex exec` for Codex). It runs in an empty directory, with a 150-second timeout and no hooks (`disableAllHooks` in `--settings`, still merged with managed-launcher env and the alias's own `--settings`: on some computers, Persona hooks stalled it until timeout, #3412). It displays ✓ / ✗, elapsed time, the answering model,
+(`claude -p … --output-format json --max-turns 1`, `codex exec` for Codex and its variants only, `pi -p … --no-session` for pi, `-p` alone for the other agents; until #8194 every agent but Claude, Antigravity and Oh My Pi got Codex's flags, so a pi launcher failed with `Unknown option '--skip-git-repo-check'` and the health check called its CLI outdated). It runs in an empty directory, with a 150-second timeout and no hooks (`disableAllHooks` in `--settings`, still merged with managed-launcher env and the alias's own `--settings`: on some computers, Persona hooks stalled it until timeout, #3412). It displays ✓ / ✗, elapsed time, the answering model,
 and the redacted failure reason. This costs a few tokens. `POST /api/v1/launchers/{name}/check?machine=`.
 hub also uses this to check every launcher on every computer periodically, avoiding broken ones when dispatching work and automatically fixing what it can; see `docs/server/launcher-health.md`.
 

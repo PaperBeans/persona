@@ -689,6 +689,9 @@ func (s *session) status(d *Device) {
 			if di.OSVersion != "" {
 				d.OSVersion = di.OSVersion
 			}
+			if di.DeveloperMode != nil {
+				d.DeveloperMode = di.DeveloperMode
+			}
 		}
 	}
 }
@@ -705,10 +708,11 @@ func (s *session) stop() {
 
 // deviceInfo is what the node reads of the bridge's device_info.
 type deviceInfo struct {
-	Name        string `json:"name"`
-	ProductType string `json:"product_type"`
-	OSVersion   string `json:"os_version"`
-	Locked      *bool  `json:"locked"`
+	Name          string `json:"name"`
+	ProductType   string `json:"product_type"`
+	OSVersion     string `json:"os_version"`
+	Locked        *bool  `json:"locked"`
+	DeveloperMode *bool  `json:"developer_mode"`
 }
 
 func newID() string {

@@ -587,24 +587,56 @@ func (s *Service) saveWork(e db.SessionWork) {
 	}
 }
 
-func (s *Service) workEvent(machine, session, kind string, detail map[string]any) {
-	e := db.WorkEvent{At: time.Now().UTC(), MachineID: machine, SessionID: session, Kind: kind, Detail: detail}
-	st := s.workDB()
-	if st == nil {
-		s.work.mu.Lock()
-		s.work.testEvents = append(s.work.testEvents, e)
+// startWorkEventWrite serializes new event writes with fixture teardown. A stopped service starts no new write; every
+// write already counted finishes normally, including its original error logging.
+func (s *Service) startWorkEventWrite(write func()) {
+	s.work.mu.Lock()
+	if s.runCtx().Err() != nil {
 		s.work.mu.Unlock()
 		return
 	}
 	s.work.eventWrites.Add(1)
+	s.work.mu.Unlock()
 	go func() {
 		defer s.work.eventWrites.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := st.AddWorkEvent(ctx, e); err != nil {
-			s.logf("work: event: %v", err)
-		}
+		write()
 	}()
+}
+
+func (s *Service) workEvent(machine, session, kind string, detail map[string]any) {
+	e := db.WorkEvent{At: time.Now().UTC(), MachineID: machine, SessionID: session, Kind: kind, Detail: detail}
+	st := s.workDB()
+	if st == nil {
+		s.rememberWorkEvent(e)
+		return
+	}
+	s.startWorkEventWrite(func() { s.writeWorkEvent(st, e) })
+}
+
+// workEventNow writes on the caller's stack: a synchronous hub report is already bounded by its caller, while an
+// asynchronous operation must first be accepted by startWorkEventWrite and keep its final write in that counted unit.
+func (s *Service) workEventNow(machine, session, kind string, detail map[string]any) {
+	e := db.WorkEvent{At: time.Now().UTC(), MachineID: machine, SessionID: session, Kind: kind, Detail: detail}
+	st := s.workDB()
+	if st == nil {
+		s.rememberWorkEvent(e)
+		return
+	}
+	s.writeWorkEvent(st, e)
+}
+
+func (s *Service) rememberWorkEvent(e db.WorkEvent) {
+	s.work.mu.Lock()
+	s.work.testEvents = append(s.work.testEvents, e)
+	s.work.mu.Unlock()
+}
+
+func (s *Service) writeWorkEvent(st workStore, e db.WorkEvent) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := st.AddWorkEvent(ctx, e); err != nil {
+		s.logf("work: event: %v", err)
+	}
 }
 
 // workEntry is a copy of a session's stored work state.

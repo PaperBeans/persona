@@ -324,8 +324,11 @@ func (m *Machine) establishViaOnce(ctx context.Context, p *nodePath, via string,
 func (m *Machine) serve(ctx context.Context, c *nodeConn) error {
 	p := c.path
 	m.d.pathConnected(p)
+	listed := make(chan struct{})
 	m.mu.Lock()
 	m.peer, m.info, m.online, m.err, m.lastSeen = c.peer, c.info, true, "", time.Now().UTC()
+	m.sessionsListed = false
+	m.sessionsReady = listed
 	m.reloadUntil = time.Time{}
 	m.connectedAt = m.lastSeen
 	m.forgetOpenedLocked()     // a new connection has nothing of the hub's open yet
@@ -402,16 +405,16 @@ func (m *Machine) serve(ctx context.Context, c *nodeConn) error {
 		var list struct {
 			Sessions []proto.Session `json:"sessions"`
 		}
-		revision := m.sessionsRevision()
+		snapshot := &sessionSnapshot{peer: c.peer, revision: m.sessionsRevision()}
 		if err := c.peer.Call(ctx, "sessions.list", map[string]any{}, &list); err == nil {
-			m.setInitialSessions(c.peer, revision, list.Sessions)
-			m.d.forward(m.cfg.ID, "sessions.changed", map[string]any{"sessions": m.sessionList()})
+			m.acceptSessionsList(snapshot, list.Sessions, true)
 			updates = true
 		}
 	} else {
 		rewatch = nil
 		updates = true // node.update.* stays available so this node can become compatible again
 	}
+	close(listed)
 	m.firstTried() // configured and listed: the calls that waited for it go now
 	if updates {
 		// A queued update goes on, and a node back on another build is given the one it should run (deploy_rpc.go,
@@ -775,19 +778,26 @@ func (m *Machine) unavailableWhy() string {
 }
 
 // claudeVersionRetry is how long the hub waits before asking a node again for its Claude version while node.info came
-// back without one; the last wait repeats until the connection ends.
-var claudeVersionRetry = []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 30 * time.Minute, time.Hour}
+// back without one; the last wait repeats until the connection ends. Atomic: a test shortens it while another
+// test's connection may still be waiting.
+var claudeVersionRetry = func() *atomic.Pointer[[]time.Duration] {
+	var p atomic.Pointer[[]time.Duration]
+	waits := []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 30 * time.Minute, time.Hour}
+	p.Store(&waits)
+	return &p
+}()
 
 // retryClaudeVersion asks the node for node.info again until it reports a Claude version, then shows it (#542). The
 // node finds the version by running `claude --version` in a login shell, which fails now and then on connecting (the
 // machine just woke, a slow ~/.zshrc, Claude updating itself); asked only then, the machine showed no version until it
 // reconnected. A machine without Claude is asked again every hour while it stays connected.
 func (m *Machine) retryClaudeVersion(ctx context.Context, peer *rpc.Peer) {
+	waits := *claudeVersionRetry.Load()
 	for i := 0; ; i++ {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(claudeVersionRetry[min(i, len(claudeVersionRetry)-1)]):
+		case <-time.After(waits[min(i, len(waits)-1)]):
 		}
 		var info proto.NodeInfo
 		cctx, cancel := context.WithTimeout(ctx, 40*time.Second)

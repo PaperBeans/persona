@@ -71,6 +71,12 @@ type SessionHierarchy struct {
 	// A session may be named more than once (switched back to and away again), each time for another stretch. Set by
 	// the node.
 	EngineHistory []EngineLeg `json:"engine_history,omitempty"`
+	// Aliases are the other session ids its machine knows this row's conversation by, none of which it lists beside it
+	// (one conversation, one row): the Claude session holding the conversation of a runtime's session listed under an
+	// id of its own, and the sessions that one was forked from, newest first (docs/integrations/paseo.md "Session
+	// IDs", #8131). The manager shows no archive record under one of them: the conversation was listed under it once,
+	// and its archived row repeated the row listed now. Set by the node.
+	Aliases []string `json:"aliases,omitempty"`
 }
 
 // EngineLeg is one earlier stretch of a conversation (SessionHierarchy.EngineHistory): the session that ran it, its
@@ -116,7 +122,7 @@ type SessionChildren struct {
 func (h *SessionHierarchy) empty() bool {
 	return h.ParentAgentID == "" && h.StartedAt.IsZero() && h.AskingParentSessionID == "" && h.FoldedUnder == "" && h.FoldedAs == "" &&
 		h.FoldedSide == "" &&
-		h.Children == nil && len(h.EngineHistory) == 0 && h.CompletedTodo == nil
+		h.Children == nil && len(h.EngineHistory) == 0 && h.CompletedTodo == nil && len(h.Aliases) == 0
 }
 
 // CompletedTodo is the last completed association for navigation, never active work.
@@ -148,6 +154,7 @@ func (s *Session) hierarchy() SessionHierarchy {
 		h.Children = &c
 	}
 	h.EngineHistory = slices.Clone(h.EngineHistory)
+	h.Aliases = slices.Clone(h.Aliases)
 	return h
 }
 
@@ -245,6 +252,26 @@ func (s *Session) SetEngineHistory(legs []EngineLeg) {
 	}
 	h := s.hierarchy()
 	h.EngineHistory = slices.Clone(legs)
+	s.setHierarchy(h)
+}
+
+// Aliases are the other session ids the row's conversation is known by on its machine (SessionHierarchy.Aliases);
+// nil when none. Shared with the row's other copies: not to be changed.
+func (s *Session) Aliases() []string {
+	if s.Hierarchy == nil {
+		return nil
+	}
+	return s.Hierarchy.Aliases
+}
+
+// SetAliases sets the other ids the row's conversation is known by (nil: none), with no new hierarchy when it already
+// has them.
+func (s *Session) SetAliases(ids []string) {
+	if slices.Equal(s.Aliases(), ids) {
+		return
+	}
+	h := s.hierarchy()
+	h.Aliases = slices.Clone(ids)
 	s.setHierarchy(h)
 }
 

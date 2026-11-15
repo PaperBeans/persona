@@ -213,6 +213,8 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		case a.Agent == opencodeAgent:
 			s.Title = opencodeTitle(a.Title)
 			n.mergeOpencodeRow(&s) // its conversation is the plugin's (opencode.go)
+		case a.Agent == cursorAgent || a.Agent == agyAgent:
+			// herdr drives the pane (agent.prompt, the keys); Persona does not read the conversation (workagent.go).
 		case otherAgent(a):
 			s.ReadOnlyReason = otherNoReader(a.Agent)
 		}
@@ -242,6 +244,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 	}
 	peak := len(out)
 	j := from
+	var rowIDs map[string]bool // the runtimes' rows, where the line of a fork stops (aliasesOf)
 	for i := from; i < len(out); i++ {
 		s := &out[i]
 		if seen[s.SessionID] {
@@ -253,9 +256,23 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 				s.PermissionMode = m
 			}
 		}
-		// A conversation in a Claude transcript here (runtimetranscript.go): what it says, and its own row goes.
+		// A conversation in a Claude transcript here (runtimetranscript.go): what it says, and its own row goes. Under
+		// an id of its own, the ids it went by go too, named on the row for the manager's archive (runtimealiases.go).
 		if t := n.mergeRuntimeTranscript(s); t != "" {
 			seen[t] = true
+			if t != s.SessionID {
+				if rowIDs == nil {
+					rowIDs = make(map[string]bool, len(out)-from)
+					for k := from; k < len(out); k++ {
+						rowIDs[out[k].SessionID] = true
+					}
+				}
+				aliases := n.aliasesOf(s.SessionID, t, func(id string) bool { return rowIDs[id] })
+				for _, a := range aliases {
+					seen[a] = true
+				}
+				s.SetAliases(aliases)
+			}
 		}
 		seen[s.SessionID] = true
 		if j != i {

@@ -284,7 +284,7 @@ func TestSupervisedTaskRound(t *testing.T) {
 	if v := todoNow(s, todo.ID).Supervision; v.State != reviewNeedsUser || v.Round != maxReworkRounds || len(sentToAgent(f)) != maxReworkRounds {
 		t.Fatalf("after the third: %+v, sent %d", v, len(sentToAgent(f)))
 	}
-	if res := review("accepted", "用户看过截图，可以"); !strings.Contains(res, "accepted and closed") {
+	if res := review("accepted", "用户看过截图，可以", completeReviewChecks(todoNow(s, todo.ID))...); !strings.Contains(res, "accepted and closed") {
 		t.Fatalf("accepted: %s", res)
 	}
 	done := todoNow(s, todo.ID)
@@ -440,7 +440,7 @@ func TestSupervisedTaskNewMainConversationCanReview(t *testing.T) {
 	setSettings(t, s, func(v *Settings) { v.Main = "conv2" })
 
 	// conv3 is neither origin, nor supervisor, nor main -> refused.
-	raw, _ := json.Marshal(map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "验收通过"})
+	raw, _ := json.Marshal(map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "验收通过", "checks": completeReviewChecks(todoNow(s, todo.ID))})
 	if _, err := s.runTool(ctx, "server", "conv3", "task_review", raw); err == nil {
 		t.Fatal("conv3 should not be allowed to review")
 	}

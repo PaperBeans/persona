@@ -26,6 +26,8 @@ type assistantCompaction struct {
 	// and the user's settings reach the agent as they are, so nothing is written over them.
 	pin         bool
 	ownSettings string
+	// profile: the conversation's Claude config directory as the policy resolves it, "" for none (assistantUserSetup).
+	profile string
 }
 
 // codexLimit is the model_auto_compact_token_limit a Codex start passes: a managed launcher's declared window, else none
@@ -178,6 +180,7 @@ func (n *Node) assistantCompactionPolicy(launcher, cwd, settings string, executi
 			}
 		}
 	}
+	c.profile = configDir
 	if isCodex {
 		if codexHome == "" {
 			codexHome = n.codexHome()
@@ -314,6 +317,7 @@ func (n *Node) assistantCompactionSettings(id, cwd, settings string, c assistant
 		overrides[name] = "off"
 	}
 	s["skillOverrides"] = overrides
+	n.assistantUserSetup(s, cwd, c.profile) // a private profile: ~/.claude's instructions out, the user's skill switches in
 
 	b, err := json.Marshal(s)
 	if err != nil {

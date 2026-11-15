@@ -6,7 +6,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -514,6 +516,27 @@ func TestRuntimeAgentWorktreeRemoveFails(t *testing.T) {
 
 	archive(func() (any, error) { return map[string]any{"archived_at": "2026-11-12T00:00:00.000Z"}, nil }) // the folder left
 	remove("folder kept", "archived the workspace but kept its folder")
+}
+
+// A closed Agent's worktree.remove waits for the runtime's archive at least as long as the Paseo bridge waits for
+// Paseo's (its ARCHIVE_WAIT), as a confirmed delete does (#8135): a node that gave up first answered "no answer" while
+// Paseo went on to remove the folder, and the branch it was asked to delete stayed.
+func TestRuntimeRemoveWaitsAsLongAsTheBridge(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "integrations", "paseo", "lib", "bridge.js"))
+	if err != nil {
+		t.Skipf("no integrations checkout beside server/: %v", err)
+	}
+	m := regexp.MustCompile(`const ARCHIVE_WAIT = ([0-9_]+) // ms`).FindSubmatch(src)
+	if m == nil {
+		t.Fatal("ARCHIVE_WAIT not found in bridge.js")
+	}
+	ms, err := strconv.Atoi(strings.ReplaceAll(string(m[1]), "_", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wait := time.Duration(ms) * time.Millisecond; runtimeRemoveDeadline < wait || runtimeRemoveDeadline != runtimeWorktreeDeadline {
+		t.Fatalf("worktree.remove gives the runtime %s, the bridge waits %s for the archive (a delete: %s)", runtimeRemoveDeadline, wait, runtimeWorktreeDeadline)
+	}
 }
 
 // Paseo refusing the archive is an error, and the worktree is still there: present, not removed.

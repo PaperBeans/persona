@@ -187,7 +187,10 @@ func TestConclusionFindsItsLink(t *testing.T) {
 	s, f, todo, posts, _ := conclusionService(t, false)
 	waitsForReview(t, s, f, todo.ID, "做完了")
 	reviewTask(t, s, todo.ID, map[string]any{"verdict": "accepted", "note": "做完了",
-		"checks": []ReviewCheck{{Criterion: "PR 合并到 master", Met: true, Evidence: "https://github.com/o/r/pull/7 merged"}}})
+		"checks": []ReviewCheck{
+			{Criterion: "PR 合并到 master", Met: true, Evidence: "https://github.com/o/r/pull/7 merged"},
+			{Criterion: "浅色 / 深色截图贴进 PR", Met: true, Evidence: "both screenshots verified"},
+		}})
 	cards := cardsWith(posts(), "结论：")
 	if len(cards) != 1 || !strings.Contains(cards[0], "https://github.com/o/r/pull/7") || !strings.Contains(cards[0], "✅ 做完了：做完了") {
 		t.Fatalf("cards %q", cards)
@@ -212,7 +215,7 @@ func TestDeployedWorkKeepsPleaseVerifyWithTheVerdictOnTop(t *testing.T) {
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, deployedReply, 0)
 	waitFor(t, "the review", func() bool { return todoNow(s, todo.ID).Supervision.State == reviewPending })
-	reviewTask(t, s, todo.ID, map[string]any{"verdict": "accepted", "note": "上线了"})
+	reviewTask(t, s, todo.ID, map[string]any{"verdict": "accepted", "note": "上线了", "checks": completeReviewChecks(todoNow(s, todo.ID))})
 	time.Sleep(6 * testReportDelay)
 	if n := len(cardsWith(posts(), "结论：")); n != 0 {
 		t.Fatalf("%d conclusion cards for deployed work", n)
@@ -314,7 +317,8 @@ func TestOnlyConclusionsPushesNoProgress(t *testing.T) {
 	if p := posts(); len(p) != 0 {
 		t.Fatalf("pushed before the conclusion:\n%s", strings.Join(p, "\n---\n"))
 	}
-	reviewTask(t, s, todo.ID, map[string]any{"verdict": "accepted", "reason": "能做，方案已写好", "link": "https://docs.example.com/plan"})
+	reviewTask(t, s, todo.ID, map[string]any{"verdict": "accepted", "reason": "能做，方案已写好", "link": "https://docs.example.com/plan",
+		"checks": completeReviewChecks(todoNow(s, todo.ID))})
 	time.Sleep(6 * testReportDelay)
 	if p := posts(); len(p) != 1 || !strings.Contains(p[0], "✅ 做完了：能做，方案已写好") {
 		t.Fatalf("posts:\n%s", strings.Join(p, "\n---\n"))

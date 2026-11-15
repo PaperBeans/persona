@@ -618,7 +618,7 @@ func (h *Hub) lnRoutes(api *http.ServeMux) {
 		writeJSON(w, map[string]any{"intercepts": view})
 	})
 	api.HandleFunc("GET /api/v1/push/stats/daily", func(w http.ResponseWriter, r *http.Request) {
-		now := h.push.now()
+		now := h.push.now().UTC()
 		since := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 		q := r.URL.Query()
 		if raw := q.Get("since"); raw != "" {

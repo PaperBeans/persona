@@ -15,7 +15,7 @@ export interface LiveTranscript {
   loading: boolean;
   loadingEarlier: boolean;
   loadEarlier: () => Promise<void>;
-  expandFold: (fold: Item) => Promise<void>;
+  expandFold: (fold: Item) => Promise<boolean | void>;
 }
 
 /** One earlier stretch as the chat draws it: its session's items in it, and how its folds open. */
@@ -27,7 +27,7 @@ export interface EarlierStretch {
   /** Its engine ("claude" / "codex"), as the row's history says. */
   agent?: string;
   items: Item[];
-  expandFold: (fold: Item) => Promise<void>;
+  expandFold: (fold: Item) => Promise<boolean | void>;
 }
 
 /** What the stretches' module tells the chat, each time it changes. */

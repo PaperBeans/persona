@@ -149,7 +149,8 @@ export function customModel(models: AgentModel[], query: string): string {
 
 /** The agent takes a model ID typed by hand (#1644): Claude Code's `--model` / `/model` and Codex's `--model` take any
  *  string; the hub remembers typed IDs for these two only. Other agents' lists are empty (no model row). */
-export const takesTypedModel = (agent: string) => agent === "claude" || agent === "codex";
+export const takesTypedModel = (agent: string) =>
+  agent === "claude" || agent === "codex" || agent === "pi" || agent === "cursor" || agent === "agy";
 
 /** A typed ID can reach the agent: Claude Code or Codex, and the launcher doesn't pass its own --model. */
 export const typedModelOffered = (agent: string, list: LauncherModels | null | undefined) => takesTypedModel(agent) && !list?.locked;

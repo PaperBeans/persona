@@ -71,11 +71,14 @@ func (e *routeEnv) announced(id string) bool {
 	return e.s.chans.announced[id]
 }
 
-// With the switch on, a tool permission card of a supervised task never reaches the owner on a timeout: it climbs
-// leader → main conversation, then goes back to the leader once (the owner gets a P1 notice the hub holds for the
-// briefing, never the card's push), then stays with the main conversation. Turning the switch off lets it climb on.
+// With the switch on, a tool permission card of a supervised task stays off the owner's phone before its absolute
+// deadline: it climbs leader → main conversation, then goes back to the leader once (the owner gets a P1 notice the
+// hub holds for the briefing, never the card's push), then stays with the leader. Its absolute deadline is covered below.
 func TestQuietPermissionCardStaysWithItsSupervisor(t *testing.T) {
 	e := newRouteEnv(t, nil, true)
+	oldHold := askHoldFor
+	askHoldFor = 2 * time.Minute
+	t.Cleanup(func() { askHoldFor = oldHold })
 	pushQuietFor(t, e.s, true)
 	e.raise(askPermission("ix1", "worker-1"))
 	e.noticeWith("lead1", "interaction_id=ix1")
@@ -96,7 +99,7 @@ func TestQuietPermissionCardStaysWithItsSupervisor(t *testing.T) {
 		t.Fatalf("held notice %+v", n)
 	}
 	e.s.askTick(time.Now().Add(6 * askHoldFor)) // its hold with the leader runs out again: it stays there
-	e.s.askTick(time.Now().Add(20 * askHoldFor))
+	e.s.askTick(time.Now().Add(7 * askHoldFor)) // still parked just before the absolute 15-minute deadline
 	e.settle()
 	if got := e.f.noticesTo("conv1"); len(got) != 1 {
 		t.Fatalf("the main conversation was given the card again after the reminder: %d messages", len(got))
@@ -124,9 +127,108 @@ func TestQuietPermissionCardStaysWithItsSupervisor(t *testing.T) {
 	}
 }
 
+// Low-distraction mode may remind and park an owner-only card before its deadline, but cannot keep it past that
+// deadline, even when its supervisor is also busy. The held reminder is not repeated when the owner gets the card.
+func TestQuietOwnerOnlyDeadlineWinsOverParked(t *testing.T) {
+	e := newRouteEnv(t, nil, true)
+	oldHold := askHoldFor
+	askHoldFor = 2 * time.Minute
+	t.Cleanup(func() { askHoldFor = oldHold })
+	pushQuietFor(t, e.s, true)
+	e.raise(askPermission("ix1", "worker-1"))
+	e.noticeWith("lead1", "interaction_id=ix1")
+	start := time.Now()
+
+	e.s.askTick(start.Add(2 * askHoldFor)) // leader → main conversation
+	e.s.askTick(start.Add(4 * askHoldFor)) // main conversation → leader's one quiet reminder
+	e.s.askTick(start.Add(6 * askHoldFor)) // the reminder's hold expires: parked with the leader
+	waitFor(t, "the held notice", func() bool { return len(e.heldNotices(e.todo.ID)) == 1 })
+	e.supervisorState(proto.StatusIdle, proto.StatusWorking)
+	e.s.askTick(start.Add(7 * askHoldFor)) // quiet and parked before the deadline
+	e.settle()
+	if got := e.cardPushes("ix1"); len(got) != 0 {
+		t.Fatalf("the owner was pushed before the absolute deadline: %v", got)
+	}
+	if todo, ok := e.s.routedTo("ix1", "lead1", false); !ok || todo != e.todo.ID {
+		t.Fatal("the card is not parked with its leader before the deadline")
+	}
+
+	e.s.askTick(start.Add(askOwnerOnlyDeadline))
+	waitFor(t, "the owner told at the absolute deadline", func() bool { return len(e.cardPushes("ix1")) == 1 })
+	if e.lastShown("ix1").Delegating {
+		t.Fatal("the card is still shown as the supervisor's after its absolute deadline")
+	}
+	e.s.askTick(start.Add(2 * askOwnerOnlyDeadline))
+	e.settle()
+	if got := e.cardPushes("ix1"); len(got) != 1 {
+		t.Fatalf("the owner was pushed %d times: %v", len(got), got)
+	}
+	if got := len(e.heldNotices(e.todo.ID)); got != 1 {
+		t.Fatalf("the quiet reminder was sent %d times", got)
+	}
+}
+
+// Ordinary questions have no owner-only deadline: low-distraction mode still keeps one with its supervisor after the
+// same elapsed time, with one held reminder and no owner push.
+func TestQuietQuestionHasNoAbsoluteDeadline(t *testing.T) {
+	e := newRouteEnv(t, nil, true)
+	oldHold := askHoldFor
+	askHoldFor = 2 * time.Minute
+	t.Cleanup(func() { askHoldFor = oldHold })
+	pushQuietFor(t, e.s, true)
+	e.raise(askQuestion("ix1", "worker-1"))
+	e.noticeWith("lead1", "interaction_id=ix1")
+	start := time.Now()
+
+	e.s.askTick(start.Add(2 * askHoldFor))
+	e.s.askTick(start.Add(4 * askHoldFor))
+	e.s.askTick(start.Add(6 * askHoldFor))
+	e.s.askTick(start.Add(2 * askOwnerOnlyDeadline))
+	e.settle()
+	if got := e.cardPushes("ix1"); len(got) != 0 {
+		t.Fatalf("the ordinary question reached the owner at the owner-only deadline: %v", got)
+	}
+	if got := len(e.heldNotices(e.todo.ID)); got != 1 {
+		t.Fatalf("the question had %d quiet reminders, want one", got)
+	}
+	if !e.lastShown("ix1").Delegating {
+		t.Fatal("the ordinary question left its supervisors")
+	}
+	if todo, ok := e.s.routedTo("ix1", "lead1", false); !ok || todo != e.todo.ID {
+		t.Fatal("the ordinary question is not parked with its leader")
+	}
+}
+
+// A supervisor that needs the owner hands an owner-only card on even in low-distraction mode: at the last rung the
+// next routing tick gives it to the owner instead of turning it into a quiet reminder.
+func TestQuietOwnerOnlyNeedsYouReleaseReachesOwner(t *testing.T) {
+	e := newRouteEnv(t, nil, true)
+	pushQuietFor(t, e.s, true)
+	e.raise(askPermission("ix1", "worker-1"))
+	e.noticeWith("lead1", "interaction_id=ix1")
+	start := time.Now()
+	e.supervisorState(proto.StatusIdle, proto.StatusBlocked)
+	e.s.askTick(start)
+	e.noticeWith("conv1", "interaction_id=ix1")
+	if got := e.cardPushes("ix1"); len(got) != 0 {
+		t.Fatalf("the owner was pushed before the main conversation needed them: %v", got)
+	}
+
+	e.supervisorState(proto.StatusBlocked, proto.StatusIdle)
+	e.s.askTick(start.Add(superviseTick))
+	waitFor(t, "the owner told after the needs_you routing tick", func() bool { return len(e.cardPushes("ix1")) == 1 })
+	e.settle()
+	if got := len(e.heldNotices(e.todo.ID)); got != 0 {
+		t.Fatalf("a needs_you release became %d quiet reminders", got)
+	}
+}
+
 // A card parked by the switch climbs to the owner as before once the switch is off.
 func TestQuietParkedCardClimbsOnceTheSwitchIsOff(t *testing.T) {
 	e := newRouteEnv(t, nil, true)
+	oldHold := askHoldFor
+	askHoldFor = time.Minute
+	t.Cleanup(func() { askHoldFor = oldHold })
 	on := true
 	e.s.setQuietForTest(&on)
 	t.Cleanup(func() { e.s.setQuietForTest(nil) })
@@ -142,7 +244,7 @@ func TestQuietParkedCardClimbsOnceTheSwitchIsOff(t *testing.T) {
 	off := false
 	e.s.setQuietForTest(&off)
 	e.s.askTick(time.Now().Add(12 * askHoldFor)) // leader → main conversation
-	e.s.askTick(time.Now().Add(16 * askHoldFor)) // → the owner
+	e.s.askTick(time.Now().Add(14 * askHoldFor)) // → the owner before the absolute deadline
 	waitFor(t, "the push", func() bool { return e.pushesOf("ix1") == 1 })
 	if got := e.cardPushes("ix1"); got[0] != "" {
 		t.Fatalf("a timeout's push names level %q, want the hub's own", got[0])
@@ -153,6 +255,9 @@ func TestQuietParkedCardClimbsOnceTheSwitchIsOff(t *testing.T) {
 // level of its own (the hub derives P0), and nothing is held.
 func TestQuietOffPermissionCardReachesTheOwnerAsBefore(t *testing.T) {
 	e := newRouteEnv(t, nil, true)
+	oldHold := askHoldFor
+	askHoldFor = 2 * time.Minute
+	t.Cleanup(func() { askHoldFor = oldHold })
 	pushQuietFor(t, e.s, false)
 	e.raise(askPermission("ix1", "worker-1"))
 	e.noticeWith("lead1", "interaction_id=ix1")
@@ -329,6 +434,8 @@ func TestHeldEscalationIsNotReEscalatable(t *testing.T) {
 	if err != nil || !strings.Contains(res, "without a push") {
 		t.Fatalf("first escalation: %s %v", res, err)
 	}
+	// notifyInteractionAt sends the held card's push on a goroutine of its own: count from there.
+	waitFor(t, "the held card's push", func() bool { return len(e.cardPushes("ix1")) == 1 })
 	for _, args := range []map[string]any{
 		{"todo_id": e.todo.ID, "reason": "now urgent", "p0": true},
 		{"todo_id": e.todo.ID, "reason": "now urgent", "why_owner": "irreversible"},
@@ -338,8 +445,10 @@ func TestHeldEscalationIsNotReEscalatable(t *testing.T) {
 			t.Fatalf("re-escalation %v: %v", args, err)
 		}
 	}
+	// The rejected re-escalations above add no second push; settle the service before the final count.
+	e.settle()
 	// The held escalation's P1 push is handed to the hub on deliver()'s own goroutine, so wait for it to land
-	// before reading the pushes; the two rejected re-escalations above add none.
+	// before reading the pushes.
 	waitFor(t, "the held escalation's P1 push", func() bool { return len(e.cardPushes("ix1")) == 1 })
 	if got := e.cardPushes("ix1"); len(got) != 1 || got[0] != assistantwire.LevelP1 {
 		t.Fatalf("the rejected re-escalation pushed: %v", got)

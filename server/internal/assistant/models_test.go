@@ -803,7 +803,7 @@ func TestLaunchersListHideRestoreDelete(t *testing.T) {
 	}
 	picker, _ := s.machineLaunchers(ctx, "laptop")
 	if fmt.Sprint(picker) != fmt.Sprint([]proto.Launcher{{Name: "work", Source: "zshrc"}, {Name: "claude-demo", BaseURL: "https://gw2.example.com", Source: "path"},
-		{Name: "mine", BaseURL: "https://gw.example.com", Model: "m", Source: "persona"}}) {
+		{Name: "mine", BaseURL: "https://gw.example.com", Model: "m", Source: "persona", Pi: true}}) {
 		t.Fatalf("picker: %+v", picker)
 	}
 	if rec := request(s, "POST", "/api/v1/launchers/alpha/restore", ""); rec.Code != 200 || slicesContain(s.hiddenLaunchers(ctx), "alpha") {

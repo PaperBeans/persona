@@ -230,7 +230,10 @@ var rpcFailureKeys = map[string]string{
 	"assistant_service_tier_unsupported": "rpc-errors.assistant_service_tier_unsupported",
 	"assistant_service_tier_refused":     "rpc-errors.assistant_service_tier_refused",
 	"readonly_unsupported":               "rpc-errors.readonly_unsupported",
-	"assistant_in_doubt":                 "rpc-errors.in_doubt",
+	// a start whose engine runs only its own launchers and has none of the launcher's kind (#8140); the engine's own
+	// words, naming the launcher, stay in detail
+	proto.CodeLauncherKindMissing: "rpc-errors.launcher_kind_missing",
+	"assistant_in_doubt":          "rpc-errors.in_doubt",
 	// queued messages sent now (#6088)
 	"nothing_queued":        "rpc-errors.nothing_queued",
 	"send_now_unsupported":  "rpc-errors.send_now_unsupported",

@@ -28,11 +28,16 @@ when the phone has no ticket for the image ([iphone-bridge.md](iphone-bridge.md)
 1. Plug the phone in with a cable and unlock it.
 2. `personad iphone pair` asks the bridge (`persona-iphone-bridge pair --udid <udid> --out <path>`) for the trusted
    pairing. The phone asks its user to **Trust** this computer and for its passcode; the command waits up to 3 minutes.
+   While the bridge answers that the phone doesn't trust this computer yet (`trust_pending`) or is locked (`locked`), it
+   asks again every 2 seconds and says once what it waits for (`PairProgress`), so plugging in, unlocking and tapping
+   Trust can happen in any order after the pairing started (#8199). Any other refusal (`pairing_rejected`: the user
+   declined) ends it at once.
 3. The bridge writes the pairing record; the node keeps it, and next to it what the bridge reported: the phone's
    name, product type (model identifier such as `iPhone16,2`) and iOS version.
 
 The app can start the same pairing as a background job on the machine (`StartPair`, one job at a time, its state in
-the machine's iPhone status like the computer extension's install job). Someone still has to be at the phone to tap Trust.
+the machine's iPhone status like the computer extension's install job). Someone still has to be at the phone to tap Trust;
+while the job waits for that, the status says so (`job.code` `trust_pending` or `locked`, [iphone.md](iphone.md), "Codes for apps").
 
 Pairing again replaces the record and keeps a manual address. `personad iphone forget <udid>` removes the pairing from
 this computer only; the phone keeps listing the computer as trusted until its user resets that on the phone (Settings
@@ -156,7 +161,7 @@ one `iphonectl.Controller` for the node process, [iphone-control.md](iphone-cont
 
 | Method | Params → result | What it does |
 | --- | --- | --- |
-| `status` | `{}` → `IPhone` | The bridge (installed, version, kept 30 s), the paired phones and those on USB with their session's state, and for a connected one its latest `device_info`: `connected`, `locked`, `capabilities`, `ready` (connected, unlocked, screenshot, accessibility tree and input available) and `note`. An idle paired phone's session is started. `enabled` and `allowed` are the manager's to fill |
+| `status` | `{}` → `IPhone` | The bridge (installed, version, kept 30 s), the paired phones and those on USB with their session's state, and for a connected one its latest `device_info`: `connected`, `locked`, `capabilities`, `ready` (connected, unlocked, screenshot, accessibility tree and input available), `note` and its `code`, and `developer_mode`. An idle paired phone's session is started. `enabled` and `allowed` are the manager's to fill |
 | `call` | `IPhoneCall {device?, session?, op, args?, approved?, confirm?, self_apps?, self_names?, timeout_ms?}` → `IPhoneResult {output?, text?, image?, needs_approval?, approval_summary?, approval_id?}` | `op` is `status` (answered here, with a fresh `device_info`), `look` or `do` (the core's, with the bridge's operations on that phone; `approved`, `confirm`, `self_apps` and `self_names` go to it as they came, and a resume is `do` with only `approved`). `device` empty is the only paired phone. The wait is clamped to 1–120 s (30 s by default). A screenshot the core wrote into the call's temporary directory (or answered inline, then written there) becomes `image`; the directory is removed after the call. `approval_summary` is the core's approval as data (`proto.IPhoneApproval`, [iphone-control.md](iphone-control.md), "Approval"), passed on for the manager to word; the node never phrases it |
 | `pair` / `forget` | `{device}` → `IPhone` | Start the pairing job above, or forget a phone; its state is `job` |
 | `cancel` | `{}` → `IPhone` | Stop the job |

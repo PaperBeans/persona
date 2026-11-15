@@ -252,6 +252,7 @@ internal class CatalogExtensionModel(
     val owner = ExtensionOwners.of(manager)
     private val mutable = MutableStateFlow(CatalogExtensionState())
     val state = mutable.asStateFlow()
+    private var generation = 0
     /** Says an operation ended well (set by [watch]). */
     private var onDone: (String) -> Unit = {}
     /** Opens the installed extension's sign-in (an operation that succeeded with `next: auth`, #4507). */
@@ -386,20 +387,20 @@ internal class CatalogExtensionModel(
     }
 
     suspend fun load() {
-        if (state.value.loading) return
+        val mine = ++generation
         mutable.update { it.copy(loading = true) }
         try {
             val catalog = OfficialMarket.named(res, api.catalog(market = market))
             // A link from before a rename names the old ID; the market lists the extension under its new one (#2511).
             val extension = catalog.extensions.firstOrNull { it.market == market && it.id == id }
                 ?: catalog.extensions.firstOrNull { it.market == market && it.replaces == id }
-            mutable.update {
+            if (mine == generation) mutable.update {
                 it.copy(extension = extension ?: it.extension, missing = extension == null, error = null,
                     marketName = catalog.markets.firstOrNull { m -> m.id == market }?.label ?: extension?.marketName)
             }
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { mutable.update { it.copy(error = res.getString(R.string.settings_ext_load_failed, failureReasonText(error).resolve(res))) } }
-        finally { mutable.update { it.copy(loading = false) } }
+        catch (error: Exception) { if (mine == generation) mutable.update { it.copy(error = res.getString(R.string.settings_ext_load_failed, failureReasonText(error).resolve(res))) } }
+        finally { if (mine == generation) mutable.update { it.copy(loading = false) } }
     }
 
     /** Downloads and checks the package; the page then shows what it may do and waits for a yes. */

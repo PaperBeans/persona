@@ -24,7 +24,26 @@ type Launcher struct {
 	RunHere bool `json:"run_here,omitempty"`
 	// Assistant: a runtime's launcher that may run the Persona assistant (docs/integrations/runtimes.md "Assistant"), whatever its agent.
 	Assistant bool `json:"assistant,omitempty"`
+	// Pi: a Persona-managed provider pi can use on this computer too (ManagedLauncher.PiAPI, docs/integrations/pi.md
+	// "Persona's model providers").
+	Pi bool `json:"pi,omitempty"`
 }
+
+// StartInstead is what a new session's start asked for and does not run with, as an engine runtime that runs only its
+// own launchers answers session.start (caps.same_kind, Paseo; docs/integrations/paseo.md "A launcher Paseo does not
+// have"): the launcher it has no usable provider of (one of the same kind of agent runs instead: the session's
+// launcher), the model that one does not offer (it runs its own default), the effort the model does not offer (the
+// session's effort is the one it runs at; none: the model's default). Each empty field ran as asked. The node passes it
+// on with the session (session.start's instead); the hub and the manager say it where the start was asked for.
+type StartInstead struct {
+	Launcher string `json:"launcher,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Effort   string `json:"effort,omitempty"`
+}
+
+// CodeLauncherKindMissing: such an engine has no usable provider of the kind of agent a start's launcher starts, so
+// nothing was started and no other kind of agent runs in its place (#8140).
+const CodeLauncherKindMissing = "launcher_kind_missing"
 
 // LauncherDetail is what a ~/.zshrc launcher really sets (the node runs it with the agent stubbed out,
 // node/launcherprobe.go): every field the page shows; secrets are never in it.
@@ -292,6 +311,30 @@ func (l ManagedLauncher) AgentType() string {
 		return l.Agent
 	}
 	return "claude"
+}
+
+// PiAPI is the pi API (pi's registerProvider "api") a provider speaks when pi can use it too (docs/integrations/pi.md
+// "Persona's model providers"): "anthropic-messages" for a Messages provider that runs Claude Code (or Oh My Pi, which
+// takes the same gateway), "openai-responses" for a Codex one; "" for the rest (Antigravity, a direct API connection
+// that speaks Responses or Chat Completions, which the node is never sent), and for a provider with a proxy of its
+// own: pi sends straight to the gateway, and one reachable only through that proxy would fail every turn.
+func (l ManagedLauncher) PiAPI() string {
+	if l.Proxy != "" {
+		return ""
+	}
+	if l.Kind == "api" {
+		if l.API == "" || l.API == "messages" {
+			return "anthropic-messages"
+		}
+		return ""
+	}
+	switch l.AgentType() {
+	case "claude", "omp":
+		return "anthropic-messages"
+	case "codex":
+		return "openai-responses"
+	}
+	return ""
 }
 
 // MessagesBase: the provider's Base URL reaches its agent as ANTHROPIC_BASE_URL (node managedEnv), which gets
