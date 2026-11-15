@@ -51,24 +51,33 @@ func (n *Node) holdFallback(id, launcher string, from, to modelExecution) {
 // heldFallback is the execution conversation id's message runs on: its fallback while the hold lasts and the message
 // asks for the model the switch moved away from, else what it asks for. Another model asked for ends the hold.
 func (n *Node) heldFallback(id, launcher string, asked modelExecution) modelExecution {
+	execution, _ := n.heldFallbackWithExpiry(id, launcher, asked)
+	return execution
+}
+
+// heldFallbackWithExpiry also reports whether an existing hold for this exact request expired naturally. A missing
+// hold after a restart is not expiry, and another model choice is not expiry either.
+func (n *Node) heldFallbackWithExpiry(id, launcher string, asked modelExecution) (modelExecution, bool) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	f := n.fallbacks[id]
 	if f == nil {
-		return asked
+		return asked, false
 	}
 	now := time.Now()
 	if now.Sub(f.at) >= assistantRefusalSticky {
 		delete(n.fallbacks, id)
-		return asked
+		return asked, false
 	}
 	if !now.Before(f.until) || f.launcher != launcher || !sameModelChoice(asked, f.from) {
+		expired := !now.Before(f.until) && f.launcher == launcher && sameModelChoice(asked, f.from)
 		f.until = time.Time{} // over; a refusal soon after still skips the same-model retry
-		return asked
+		return asked, expired
 	}
 	out := f.to
 	out.IsMain, out.Interject, out.Ultracode = asked.IsMain, asked.Interject, asked.Ultracode // the message's own
-	return out
+	out.SupervisionInstructions = asked.SupervisionInstructions
+	return out, false
 }
 
 // recentFallback: conversation id's last fallback answered within assistantRefusalSticky, and what the conversation

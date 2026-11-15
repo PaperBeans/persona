@@ -190,12 +190,14 @@ export function bytesBin(v: number | undefined): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
   let x = Math.max(0, v),
     i = 0;
-  while (x >= 1024 && i < units.length - 1) {
+  // The unit and the decimals follow the number as it is shown, after rounding (apple MachineMetrics.bytes): 1023.6 KB is
+  // "1.00 MB", not "1024 KB"; 99.97 MB is "100 MB", not "100.0 MB".
+  while (x >= 1023.5 && i < units.length - 1) {
     x /= 1024;
     i++;
   }
   if (i === 0) return `${Math.round(x)} B`;
-  return `${x >= 100 ? x.toFixed(0) : x >= 10 ? x.toFixed(1) : x.toFixed(2)} ${units[i]}`;
+  return `${x >= 99.95 ? x.toFixed(0) : x >= 9.995 ? x.toFixed(1) : x.toFixed(2)} ${units[i]}`;
 }
 
 /** Used of total for a tile's narrow sub line: one unit when both share it ("56.5 / 64.0 GB"), else both

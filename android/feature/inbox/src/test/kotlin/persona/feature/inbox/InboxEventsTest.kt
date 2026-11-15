@@ -95,11 +95,11 @@ class InboxEventsTest {
         assertEquals("改过的", confirmText(s("reply"), "改过的 "))
     }
 
-    @Test fun anEventOpensItsPageAndAnOlderItemItsSourceAsBefore() {
+    @Test fun eventAndNonEventChatRowsOpenTheCollapsedItemPage() {
         val pages = InboxItemPages()
         assertEquals(InboxEventRoute("lark:oc_demo1:100"), inboxRowPage(record("lark:oc_demo1:100"), pages))
         val old = record("lark:oc_demo1:100").copy(event = persona.core.contracts.InboxEventFields.None)
-        assertEquals(LarkRoute("oc_demo1", "lark:oc_demo1:100", 100), inboxRowPage(old, pages))
+        assertEquals(InboxEventRoute("lark:oc_demo1:100"), inboxRowPage(old, pages))
         assertEquals(true, isInboxItemSelected(InboxEventRoute("x"), "x", null))
     }
 
@@ -112,7 +112,7 @@ class InboxEventsTest {
         assertEquals(ChainTarget.Inline, chainTarget(byId.getValue("c4"), chat))
         assertEquals(ChainTarget.Page(LarkRoute("oc_demo3", "lark:oc_demo3:300", 305)), chainTarget(byId.getValue("c5"), chat))
         val mail = record("mail:a1:ci:77")
-        assertEquals(ChainTarget.Page(MailRoute("mail:a1:ci:77")), chainTarget(mail.event.chain.first(), mail))
+        assertEquals(ChainTarget.Page(MailRoute("mail:a1:ci:77", 77)), chainTarget(mail.event.chain.first(), mail))
         assertEquals(ChainTarget.Page(ChatRoute("m1", "s-demo4", source = RouteSource.InboxItem("mail:a1:ci:77"))), chainTarget(mail.event.chain.last(), mail))
         fun entry(link: InboxChainLink?, detail: String? = null) = InboxChainEntry("x", kind = "sent", link = link, detail = detail)
         assertEquals(ChainTarget.Url("https://example.com/pr/1"), chainTarget(entry(InboxChainLink("source", url = "https://example.com/pr/1")), chat))
@@ -124,6 +124,23 @@ class InboxEventsTest {
         // A position on an item with no chat (a connector's) opens its source page.
         assertEquals(ChainTarget.Source, chainTarget(entry(InboxChainLink("source", position = JsonPrimitive("3"))), mail))
         assertEquals(persona.core.designsystem.icons.PhIcons.Info, chainIcon("from_the_future", chat))
+    }
+
+    @Test fun aMailChainRouteKeepsTheUidItNames() {
+        val mail = record("mail:a1:ci:77")
+        val entry = InboxChainEntry("older", kind = "received", link = InboxChainLink("source", uid = 3))
+        val target = chainTarget(entry, mail) as ChainTarget.Page
+        val encoded = JsonCodec.encodeToJsonElement(MailRoute.serializer(), target.key as MailRoute).jsonObject
+        assertEquals(JsonPrimitive(3L), encoded["uid"])
+    }
+
+    @Test fun aSavedMailRouteWithoutUidStillOpensTheItem() {
+        val route = JsonCodec.decodeFromString(MailRoute.serializer(), """{"itemId":"mail:a1:ci:77"}""")
+        assertEquals(MailRoute("mail:a1:ci:77"), route)
+        assertNull(route.uid)
+        assertEquals("persona.feature.inbox.MailRoute", MailRoute.serializer().descriptor.serialName)
+        assertEquals(JsonObject(mapOf("itemId" to JsonPrimitive("mail:a1:ci:77"))),
+            JsonCodec.encodeToJsonElement(MailRoute.serializer(), route))
     }
 
     @Test fun theChainFoldsToItsThreeNewestEntries() {

@@ -46,7 +46,7 @@ const Usage = `  personad hook             Claude Code hook entry (reads hook JS
                            one (the office skill): personad office --help
   personad codex-start <file>
                            run the Codex launcher in file (written by the node, removed once read) with the first
-                           message as its last argument, no shell in between (docs/integrations/codex.md「Starting from the phone」)
+                           message as its last argument, no shell in between (docs/integrations/codex.md "Starting from the phone")
 ` + iphone.Usage
 
 // SysmonUsage is `sysmon`'s line in the usage text.
@@ -54,7 +54,7 @@ const SysmonUsage = `  personad sysmon [n]       print this machine's system inf
                            every 10 s), with what they cost`
 
 // LaunchUsage is `launch`'s line in the usage text.
-const LaunchUsage = `  personad launch <name> …   run claude with a launcher kept in 设置 › 模型 (from the local node)`
+const LaunchUsage = `  personad launch <name> …   run claude with a launcher kept in Settings › Models (from the local node)`
 
 // Run runs args (args[0] is the command) when it is a device command, and says whether it was. stop undoes the caller's
 // signal handling (launch execs claude and leaves signals as they came). A command that has an exit code of its own

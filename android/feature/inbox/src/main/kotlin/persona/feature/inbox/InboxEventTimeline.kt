@@ -3,6 +3,7 @@ package persona.feature.inbox
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
@@ -10,10 +11,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import persona.core.contracts.GroupKeys
@@ -155,35 +158,75 @@ private fun ChainRow(
     go: (ChainTarget) -> Unit,
 ) {
     val palette = PersonaTheme.palette
-    val target = chainRowTarget(entry, record)
-    var open by rememberSaveable(record.item.id, entry.id) { mutableStateOf(false) }
+    val reported = entry.kind == "reported"
+    val words = chainEntryText(entry).ifBlank { entry.kind }
+    val baseTarget = chainRowTarget(entry, record)
+    var open by rememberSaveable(
+        record.item.id,
+        entry.id,
+        if (reported) words else null,
+        if (reported) entry.messages else null,
+    ) { mutableStateOf(false) }
+    var clipped by remember(record.item.id, entry.id, words) { mutableStateOf(false) }
+    val target = when {
+        reported && baseTarget == ChainTarget.None ->
+            if (open || clipped || entry.messages.isNotEmpty()) ChainTarget.Inline else ChainTarget.None
+        else -> baseTarget
+    }
     val clock = LocalInboxClock.current
     val zone = LocalInboxZone.current
     val time = chainTime(entry.at, currentLocale, clock(), zone)
-    val reported = entry.kind == "reported"
     val agent = chainAgentSession(entry, sessions)
     val agentState = if (showsAgentState(record.event.chain, entry, sessions)) agent?.let { it.stateWord(mutes.mutes(it)).text() } else null
+    val stackReportedBody = reported && open && LocalDensity.current.fontScale >= ReportedLargeTextScale
+    val body: @Composable (Modifier) -> Unit = { modifier ->
+        Text(words, modifier, style = PersonaTheme.type.callout,
+            color = if (reported) palette.ink2 else palette.ink, maxLines = if (open) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis,
+            onTextLayout = { layout ->
+                if (reported && !open) {
+                    val nowClipped = layout.lineCount > 0 &&
+                        layout.getLineEnd(layout.lineCount - 1, visibleEnd = true) < words.trimEnd().length
+                    if (clipped != nowClipped) clipped = nowClipped
+                }
+            })
+    }
     JRow(onClick = when (target) {
         ChainTarget.None -> null
         ChainTarget.Inline -> ({ open = !open })
         else -> ({ go(target) })
     }, chevron = target !is ChainTarget.None && target !is ChainTarget.Inline) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+        if (stackReportedBody) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                    if (time.isNotEmpty()) Text(time, style = PersonaTheme.type.micro, color = palette.ink3, maxLines = 1)
+                    ChainIcon(entry, record)
+                    JTag(stringResource(R.string.inbox_event_assistant_says))
+                    Spacer(Modifier.weight(1f))
+                    agentState?.let { Text(it, style = PersonaTheme.type.micro, color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    if (target == ChainTarget.Inline) JIcon(PersonaIcons.collapse, null,
+                        size = Tokens.Space.l, tint = palette.ink3, decorative = true)
+                }
+                body(Modifier.fillMaxWidth())
+            }
+        } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             if (time.isNotEmpty()) Text(time, style = PersonaTheme.type.micro, color = palette.ink3, maxLines = 1)
             ChainIcon(entry, record)
             if (reported) JTag(stringResource(R.string.inbox_event_assistant_says))
-            Text(chainEntryText(entry).ifBlank { entry.kind }, Modifier.weight(1f, fill = false), style = PersonaTheme.type.callout,
-                color = if (reported) palette.ink2 else palette.ink, maxLines = if (open) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
+            body(Modifier.weight(1f, fill = false))
             agentState?.let { Text(it, style = PersonaTheme.type.micro, color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             if (target == ChainTarget.Inline) JIcon(if (open) PersonaIcons.collapse else PersonaIcons.expand, null,
                 size = Tokens.Space.l, tint = palette.ink3, decorative = true)
         }
     }
-    if (open && target == ChainTarget.Inline) Column(Modifier.fillMaxWidth().padding(start = rowPadding, end = rowPadding, bottom = Tokens.Space.m),
+    if (open && target == ChainTarget.Inline && (!reported || entry.messages.isNotEmpty())) Column(Modifier.fillMaxWidth().padding(start = rowPadding, end = rowPadding, bottom = Tokens.Space.m),
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-        entry.detail?.takeIf { it.isNotBlank() }?.let { Text(it, style = PersonaTheme.type.callout, color = palette.ink2) }
+        if (!reported) entry.detail?.takeIf { it.isNotBlank() }?.let { Text(it, style = PersonaTheme.type.callout, color = palette.ink2) }
         entry.messages.forEach { message ->
             Text(stringResource(R.string.inbox_suggestion_row, message.sender, message.text), style = PersonaTheme.type.callout, color = palette.ink2)
         }
     }
 }
+
+/** The scale at which an expanded reported original needs its own full-width line. */
+private const val ReportedLargeTextScale = 1.5f

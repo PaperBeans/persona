@@ -3,6 +3,7 @@ package persona.feature.agents
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import persona.core.contracts.Machine
+import persona.core.contracts.PaseoAgent
 import persona.core.contracts.Session
 import persona.core.contracts.api.*
 import persona.core.designsystem.UiText
@@ -85,6 +86,14 @@ internal data class NewAgentState(
     val focusPrompt: Int = 0,
     /** Claude Code's ultracode for this start (#582, iOS NewChatView): off each time the form opens, never saved. */
     val ultracode: Boolean = false,
+    /**
+     * The permission mode picked for a launcher that lists its own ([providerModes], #8261): "" its own approval, or one
+     * it lists (Allow everything). Picked on this form and never remembered, so a mode left from a Claude Code start
+     * never reaches such a start; back to "" each time the form opens.
+     */
+    val providerMode: String = "",
+    /** The thinking effort picked for such a launcher, one its model lists ([providerEfforts]); "" its own. Never remembered. */
+    val providerEffort: String = "",
     /** What `worktree/status` says of the folder picked (#4532); null while asking or when the computer can't say. */
     val repo: WorktreeStatus? = null,
     /** Start it in a worktree of its own, on [worktreeBranch] (empty: the node's pick). */
@@ -108,10 +117,12 @@ internal data class NewAgentState(
 ) {
     val locked get() = !initialized || starting || pending != null || created != null
     /**
-     * A Claude start takes attachments: its first message goes as an ordinary message. Codex and other CLIs take theirs
-     * with the start as text, and take none (iOS `FirstMessage.hold`, web `launcher_no_attachments`).
+     * Its first message goes as an ordinary message once the start is answered, so it takes attachments: Claude Code, and
+     * Paseo's other providers ([PaseoAgent], #8143) as iOS and the web send theirs. Codex and other CLIs take theirs with
+     * the start as text, and take none (iOS `FirstMessage.hold`, web `launcher_no_attachments`).
      */
-    val takesAttachments: Boolean get() = agentType == "claude"
+    val firstMessageAfterStart: Boolean get() = agentType == "claude" || agentType == PaseoAgent
+    val takesAttachments: Boolean get() = firstMessageAfterStart
     /** What the attachments hold Start back for, said under it (iOS `FirstMessage.hold`); null: nothing. */
     val attachmentsHold: AgentText? get() = when {
         attachments.isEmpty() -> null
@@ -134,6 +145,19 @@ internal data class NewAgentState(
         else launchers.firstOrNull { it.name == selection.launcher }?.agentType ?: "claude"
     /** The launcher that will run, whose models the "Model" row lists: the one picked, or the configuration's. */
     val modelLauncher: String get() = if (following) configuredLauncher?.name.orEmpty() else selection.launcher
+    /** [modelLauncher] as this computer lists it; null before its launchers are read or when it lists no such one. */
+    val runningLauncher: AgentLauncher? get() = launchers.firstOrNull { it.name == modelLauncher }
+    /** What people call [modelLauncher]: its display name (Paseo's label for its provider, #8261), else its name. */
+    val modelLauncherTitle: String get() = runningLauncher?.title ?: modelLauncher
+    /**
+     * The permission modes a start on [runningLauncher] takes when they are not Claude Code's (#8261, the node's
+     * `permission_modes`: Paseo's Grok, OpenCode or Codex): the form offers its own approval and, where it lists that too,
+     * Allow everything ([providerMode]), and the efforts its model lists ([providerEfforts]). Null for Claude Code's
+     * launchers and for every other one, which takes neither.
+     */
+    val providerModes: List<String>? get() = runningLauncher?.permissionModes?.takeIf { it.isNotEmpty() }
+    /** Claude Code's five modes, its efforts and ultracode, remembered per computer: a Claude Code launcher's start. */
+    val claudeModes: Boolean get() = agentType == "claude" && providerModes == null
     /** Older computers still require Codex's first message, including when following model configuration. */
     val promptRequired: Boolean get() = agentType == "codex" &&
         launchers.firstOrNull { it.name == modelLauncher }?.promptOptional != true
@@ -157,6 +181,8 @@ internal data class NewAgentState(
             else list.models.firstOrNull { it.id == configuredModel }
         return running?.efforts
     }
+    /** The efforts a start on a launcher that lists its modes takes (#8261): only those its model lists, none while not known. */
+    val providerEfforts: List<String> get() = if (providerModes == null) emptyList() else modelEfforts.orEmpty()
 }
 
 /**
@@ -171,6 +197,7 @@ private fun NewAgentState.settled(): NewAgentState {
     if (efforts != null && next.selection.effort.isNotEmpty() && next.selection.effort !in efforts) {
         next = next.copy(selection = next.selection.copy(effort = ""))
     }
+    if (next.providerEffort.isNotEmpty() && next.providerEffort !in next.providerEfforts) next = next.copy(providerEffort = "")
     return next
 }
 
@@ -217,8 +244,13 @@ internal class NewAgentViewModel(
                 val recents = recentSetups()
                 if (pending != null) {
                     val r = pending.request
+                    // Another agent's mode and effort are its launcher's own picks (#8261), never Claude Code's.
+                    val claude = r.agentType == null
+                    val mode = r.permissionMode.orEmpty()
+                    val effort = r.effort.orEmpty()
                     mutable.value = NewAgentState(initialized = true, machineId = r.machineId,
-                        selection = AgentDefaults(r.cwd, r.launcher, r.permissionMode.orEmpty(), r.effort.orEmpty()), model = r.model.orEmpty(),
+                        selection = AgentDefaults(r.cwd, r.launcher, if (claude) mode else "", if (claude) effort else ""),
+                        providerMode = if (claude) "" else mode, providerEffort = if (claude) "" else effort, model = r.model.orEmpty(),
                         prompt = pending.firstMessage ?: r.prompt.orEmpty(), pending = pending, error = AgentText(R.string.agents_new_error_pending),
                         recentSetups = recents)
                 } else {
@@ -247,7 +279,10 @@ internal class NewAgentViewModel(
     /** Opens the form for a new session, or for a new tab in [space]; an unconfirmed start keeps its own form. */
     fun startIn(space: AgentSpacePreset?) {
         val current = state.value
-        if (current.pending != null || current.created != null || current.starting || current.space == space) return
+        if (current.pending != null || current.created != null || current.starting) return
+        // A provider's mode and effort are picked each time the form opens (#8261), never kept from the last one.
+        mutable.update { it.copy(providerMode = "", providerEffort = "") }
+        if (current.space == space) return
         machineJob?.cancel()
         browseJob?.cancel()
         workspacesJob?.cancel()
@@ -268,7 +303,7 @@ internal class NewAgentViewModel(
         modelsJob?.cancel()
         mutable.update { it.copy(machineId = id, selection = AgentDefaults(), launchers = emptyList(), recent = emptyList(),
             browser = null, browsing = false, loading = true, error = null, models = NewAgentModels(), model = "", pickedSetup = null,
-            workspaces = emptyList(), workspace = null, folderBeforeWorkspace = "") }
+            workspaces = emptyList(), workspace = null, folderBeforeWorkspace = "", providerMode = "", providerEffort = "") }
         loadWorkspaces(id)
         machineJob = viewModelScope.launch {
             try {
@@ -388,10 +423,15 @@ internal class NewAgentViewModel(
     /** The cards are a shortcut: when they can't be read, the form works without them. */
     private suspend fun recentSetups(): List<RecentSetup> = try { store.recentSetups(service.scope) }
         catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
-    /** Keeps a start of this form in the recent setups; failing to write them never hides the session it started. */
+    /**
+     * Keeps a start of this form in the recent setups; failing to write them never hides the session it started. Mode
+     * and effort only for Claude Code, as on the web: another agent's are picked each time (#8261).
+     */
     private suspend fun recordRecent(request: AgentStartRequest) {
+        val claude = request.agentType == null
         val setup = RecentSetup(request.machineId, request.cwd, request.launcher, request.model.orEmpty(), request.agentType ?: "claude",
-            request.permissionMode.orEmpty(), request.effort.orEmpty(), now().truncatedTo(ChronoUnit.SECONDS).toString())
+            if (claude) request.permissionMode.orEmpty() else "", if (claude) request.effort.orEmpty() else "",
+            now().truncatedTo(ChronoUnit.SECONDS).toString())
         try {
             val kept = store.updateRecentSetups(service.scope) { RecentSetups.record(it, setup) }
             mutable.update { it.copy(recentSetups = kept) }
@@ -426,6 +466,14 @@ internal class NewAgentViewModel(
     }
     fun prompt(value: String) { if (!state.value.locked) mutable.update { it.copy(prompt = value) } }
     fun ultracode(on: Boolean) { if (!state.value.locked && state.value.ultracode != on) mutable.update { it.copy(ultracode = on, error = null) } }
+    /** The permission mode for a launcher that lists its own (#8261): "" its own approval, or one it lists. */
+    fun providerMode(value: String) {
+        if (!state.value.locked && !state.value.loading) mutable.update { it.copy(providerMode = value, error = null, pickedSetup = null) }
+    }
+    /** The thinking effort for such a launcher: "" its own, or one its model lists. */
+    fun providerEffort(value: String) {
+        if (!state.value.locked && !state.value.loading) mutable.update { it.copy(providerEffort = value, error = null, pickedSetup = null).settled() }
+    }
     fun inWorktree(on: Boolean) { if (!state.value.locked) mutable.update { it.copy(inWorktree = on, error = null) } }
     fun worktreeBranch(value: String) { if (!state.value.locked) mutable.update { it.copy(worktreeBranch = value) } }
     fun browse(path: String = state.value.selection.cwd) {
@@ -517,25 +565,32 @@ internal class NewAgentViewModel(
     /**
      * Claude starts in the background (docs/protocol/protocol.md "New session"): the hub answers with a starting session, which
      * opens at once, and the first message goes as an ordinary message (on screen at once, sent once Claude is ready),
-     * its id kept with the operation so it is sent once whatever happens to this process. Codex takes its first message
-     * with the start, and so does any start without a sender.
+     * its id kept with the operation so it is sent once whatever happens to this process. A Paseo provider's first
+     * message goes the same way once the hub answers ([NewAgentState.firstMessageAfterStart], iOS and the web). Codex
+     * takes its first message with the start, and so does any start without a sender.
      */
     private fun newOperation(current: NewAgentState, agentType: String, worktree: String? = null): AgentStartOperation {
         val typed = current.prompt.trim().takeIf { it.isNotEmpty() }
+        val async = sender != null && current.firstMessageAfterStart
         // The photos and the uploaded files go with the first message as the composer writes them (#2321); the tab is
         // named from what was typed, as on iOS.
-        val first = if (sender != null && agentType == "claude" && current.attachments.isNotEmpty())
+        val first = if (async && current.attachments.isNotEmpty())
             NewAgentAttachments.firstMessage(typed.orEmpty(), current.attachments, uploads?.photosOnly?.invoke().orEmpty()).takeIf { it.isNotEmpty() }
         else typed
-        val async = sender != null && agentType == "claude"
         val efforts = current.modelEfforts
         // A catalog workspace picked (#7259): the start goes into it, by its engine's id, in its folder.
         val workspace = current.workspace?.takeIf { current.space == null }
+        // Claude Code's mode and effort (its effort only one the model that will run takes); a launcher that lists its own
+        // modes (#8261) takes one of those picked here, its own approval going as none, and an effort its model lists;
+        // Codex and the rest take neither.
+        val claude = current.claudeModes
+        val mode = if (claude) current.selection.mode.takeIf { it.isNotEmpty() }
+            else current.providerMode.takeIf { it != "default" && current.providerModes?.contains(it) == true }
+        val effort = if (claude) current.selection.effort.takeIf { it.isNotEmpty() && (efforts == null || it in efforts) }
+            else current.providerEffort.takeIf { it.isNotEmpty() && it in current.providerEfforts }
         val request = AgentStartRequest(
             current.machineId, worktree ?: workspace?.cwd ?: current.selection.cwd, current.selection.launcher,
-            typed.takeUnless { async }, current.selection.mode.takeIf { it.isNotEmpty() && agentType == "claude" },
-            // Codex starts take no effort; Claude's only one the model that will run takes.
-            current.selection.effort.takeIf { it.isNotEmpty() && agentType == "claude" && (efforts == null || it in efforts) },
+            typed.takeUnless { async }, mode, effort,
             current.space?.workspaceId ?: workspace?.sourceId, agentType.takeIf { it != "claude" }, async = true.takeIf { async },
             nameHint = typed.takeIf { async }, model = current.sentModel,
             ultracode = true.takeIf { current.ultracode && agentType == "claude" },
@@ -576,11 +631,13 @@ internal class NewAgentViewModel(
                 if (request.resumeSessionId == null) recordRecent(request)
                 // A tab in an existing space must not replace the machine's remembered directory.
                 if (request.workspaceId == null && request.resumeSessionId == null) {
-                    // A Codex (or any non-Claude) start sends no mode or effort: the machine keeps the ones its next
-                    // Claude Code starts with, as on iOS and the web (#1898).
-                    val kept = if (request.agentType != null) store.defaults(service.scope, request.machineId) else null
+                    // A Codex (or any non-Claude) start keeps its mode and effort to itself (a provider's are picked each
+                    // time, #8261): the machine keeps the ones its next Claude Code starts with, as on iOS and the web (#1898).
+                    val claude = request.agentType == null
+                    val kept = if (!claude) store.defaults(service.scope, request.machineId) else null
                     store.saveDefaults(service.scope, request.machineId, AgentDefaults(request.cwd, request.launcher,
-                        kept?.mode ?: request.permissionMode.orEmpty(), kept?.effort ?: request.effort.orEmpty()))
+                        if (claude) request.permissionMode.orEmpty() else kept?.mode.orEmpty(),
+                        if (claude) request.effort.orEmpty() else kept?.effort.orEmpty()))
                 }
                 // Keep the receipt until navigation is acknowledged, including across process death.
                 mutable.update { it.copy(created = session) }
@@ -707,7 +764,7 @@ internal class NewAgentViewModel(
     suspend fun acknowledge() {
         try {
             store.pending(service.scope, null)
-            mutable.update { it.copy(pending = null, created = null, prompt = "") }
+            mutable.update { it.copy(pending = null, created = null, prompt = "", providerMode = "", providerEffort = "") }
             clearAttachments()
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) { mutable.update { it.copy(error = AgentText(R.string.agents_new_error_cleanup)) } }

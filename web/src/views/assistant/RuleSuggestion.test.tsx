@@ -209,7 +209,8 @@ describe("the line under a card", () => {
     await press("Always");
     expect(line()).not.toBeNull();
     expect(result()).toBeNull();
-    expect(toast.mock.calls[0][0]).toContain("The hub is busy.");
+    // the hub's sentence inside the note's parentheses, without a second full stop (#6822)
+    expect(toast.mock.calls[0][0]).toContain("(HTTP 503: The hub is busy)");
     expect(toast.mock.calls[0][1]).toBe("error");
     expect(button("Always").disabled).toBe(false);
   });

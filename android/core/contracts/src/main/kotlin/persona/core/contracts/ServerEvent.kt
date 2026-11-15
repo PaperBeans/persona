@@ -244,6 +244,11 @@ data class SubscriptionEvent(val id: String, val connector: String? = null, val 
 @Serializable(with = HubUpdateEventSerializer::class)
 data class HubUpdateEvent(val update: persona.core.contracts.api.HubUpdateStatus) : ServerEvent
 
+/** A manager's knowledge-selection document was saved; its editor reads the whole document again. */
+@KeepGeneratedSerializer
+@Serializable(with = KnowledgeSelectionEventSerializer::class)
+data class KnowledgeSelectionEvent(val manager: String? = null) : ServerEvent
+
 /**
  * An extension's install, upgrade or uninstall moved on (docs/protocol/protocol.md "Extension install, upgrade and uninstall progress"): only to a client
  * that says `extension_operations`, and not replayed after a reconnect (the page lists them again).
@@ -319,6 +324,7 @@ object ServerEventSerializer : KSerializer<ServerEvent> {
             }
             "extension_ui_stream" -> ExtensionUiStreamEvent(NativeStreamSchema.parse(obj.toString(), "UIStreamServerEnvelope"))
             "hub_update" -> input.json.decodeFromJsonElement<HubUpdateEvent>(obj)
+            "kb_selection" -> input.json.decodeFromJsonElement<KnowledgeSelectionEvent>(obj)
             "managers" -> ManagersEvent
             "subscription" -> input.json.decodeFromJsonElement<SubscriptionEvent>(obj)
             "extension_operation" -> input.json.decodeFromJsonElement<ExtensionOperationEvent>(obj).also {
@@ -382,6 +388,7 @@ object ServerEventSerializer : KSerializer<ServerEvent> {
             is ExtensionUiStreamEvent -> "extension_ui_stream" to value.raw
             is ExtensionUiEvent -> "extension_ui" to output.json.encodeToJsonElement(value)
             is HubUpdateEvent -> "hub_update" to output.json.encodeToJsonElement(value)
+            is KnowledgeSelectionEvent -> "kb_selection" to output.json.encodeToJsonElement(value)
             ManagersEvent -> "managers" to JsonObject(emptyMap())
             is SubscriptionEvent -> "subscription" to output.json.encodeToJsonElement(value)
             is ExtensionOperationEvent -> "extension_operation" to output.json.encodeToJsonElement(value)
@@ -430,6 +437,7 @@ object PongSerializer : WireSerializer<Pong>(Pong.generatedSerializer())
 object NotifyEventSerializer : WireSerializer<NotifyEvent>(NotifyEvent.generatedSerializer())
 object ExtensionUiEventSerializer : WireSerializer<ExtensionUiEvent>(ExtensionUiEvent.generatedSerializer())
 object HubUpdateEventSerializer : WireSerializer<HubUpdateEvent>(HubUpdateEvent.generatedSerializer())
+object KnowledgeSelectionEventSerializer : WireSerializer<KnowledgeSelectionEvent>(KnowledgeSelectionEvent.generatedSerializer())
 object SubscriptionEventSerializer : WireSerializer<SubscriptionEvent>(SubscriptionEvent.generatedSerializer())
 object ExtensionOperationEventSerializer : WireSerializer<ExtensionOperationEvent>(ExtensionOperationEvent.generatedSerializer())
 object ExtensionAuthEventSerializer : WireSerializer<ExtensionAuthEvent>(ExtensionAuthEvent.generatedSerializer())

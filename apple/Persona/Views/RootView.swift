@@ -53,15 +53,17 @@ struct RootView: View {
     #endif
 
     #if os(iOS)
-    /// Settings › Appearance › Navigation (#6332): Separate (the default) or Sidebar.
-    @StoredValue(NavigationLayout.key) private var navigation: NavigationLayout = .separate
+    /// Settings › Appearance › Sidebar (#6332, #4206): Merged or Separate; empty, nothing picked (`NavigationLayout.effective`).
+    @StoredValue(NavigationLayout.key) private var navigation = ""
     #endif
 
     /// The Sidebar layout instead of the shell or the tabs (#6332): one root at every width, the drawer on a phone's
     /// width and the column beside the page at regular width (`ChatsView` under `\.unifiedSidebar`).
     private var usesSidebar: Bool {
         #if os(iOS)
-        navigation == .sidebar && NavigationLayout.offered
+        // Nothing picked: Merged where wide, the shell at compact width (#4206).
+        NavigationLayout.offered
+            && NavigationLayout.effective(picked: navigation, regular: !((heldWidthClass ?? widthClass) == .compact || flipped)) == .sidebar
         #else
         false
         #endif
@@ -298,6 +300,12 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     #if os(iOS)
     @State private var pad = PadRouter()
+    /// The Separate layout's tabs in the new look (#4206): each its own part of the one sidebar's column, its own
+    /// selection, beside its own page.
+    @State private var personaPart = UnifiedSidebar(part: .persona)
+    @State private var agentsPart = UnifiedSidebar(part: .agents)
+    /// Where the system puts its bars down the side (the open iPhone Duo on its side): the columns' top margin there.
+    @State private var barEdge: HorizontalEdge?
     #endif
 
     var body: some View {
@@ -305,8 +313,13 @@ struct RootView: View {
         let _ = PerfTrace.body("RootTabs")
         #endif
         TabView(selection: Binding(get: { model.selectedTab }, set: { model.selectHomeTab($0) })) {
+            #if os(iOS)
+            AssistantRootTab(part: personaPart)
+            AgentsRootTab(part: agentsPart)
+            #else
             AssistantRootTab()
             AgentsRootTab()
+            #endif
             #if os(iOS) || os(visionOS)
             if LarkHomePreference.shared.shows { FeishuRootTab() }
             #endif
@@ -316,6 +329,8 @@ struct RootView: View {
             #endif
         }
         #if os(iOS)
+        .environment(\.splitSideBars, barEdge != nil) // the columns' top margin under side bars (#4853)
+        .readsVerticalBarEdge($barEdge)
         .modifier(PadRoutes(router: pad))
         #endif
     }
@@ -329,6 +344,8 @@ struct RootView: View {
 @MainActor private struct SidebarRoot: View {
     @State private var pad = PadRouter(unified: true)
     @State private var unified = UnifiedSidebar()
+    /// Where the system puts its bars down the side (the open iPhone Duo on its side); nil across the top.
+    @State private var barEdge: HorizontalEdge?
 
     var body: some View {
         #if DEBUG || PERF_SIGNPOST
@@ -336,6 +353,8 @@ struct RootView: View {
         #endif
         ChatsView()
             .environment(\.unifiedSidebar, unified)
+            .environment(\.splitSideBars, barEdge != nil) // the columns' top margin there (#4853)
+            .readsVerticalBarEdge($barEdge)
             .modifier(PadRoutes(router: pad))
     }
 }
@@ -441,51 +460,6 @@ extension EnvironmentValues {
     @Entry var padRouter: PadRouter?
 }
 
-/// The Assistant | Agents switch as a row of its own over a page of a phone's tabs (`pageTabSwitch`): Agents' page
-/// column and Messages, over the chats opened there too. Assistant has it in its floating bar (`AssistantTopBar`), at the
-/// same height. Agents' list options stay on the list's own ⋯ beside it.
-struct PageTabSwitchRow: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        @Bindable var model = model
-        ViewThatFits(in: .horizontal) {
-            ShellSwitch(tab: $model.selectedTab) { EmptyView() } workMenu: { EmptyView() }
-                .dynamicTypeSize(...Theme.Shell.topBarLargestTypeSize)
-            ShellSwitch(tab: $model.selectedTab) { EmptyView() } workMenu: { EmptyView() }
-                .dynamicTypeSize(...Theme.Shell.compactSwitchLargestTypeSize)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, AssistantTopBar.topInset)
-        .padding(.bottom, Theme.Space.xs)
-        .background(Theme.pageBackground)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("page-tab-switch")
-    }
-}
-
-/// The switch as a row over a page opened in Agents' split column on a phone's tabs. The column's stack has it as an
-/// inset (`SplitNavigation`), and that reached only its root page: an opened page covers the whole column, so the switch
-/// went as soon as an agent was opened, and nothing led back to Assistant (#3680). Only where it shows: everywhere else
-/// the page is left exactly as it was.
-struct PageTabSwitchInset: ViewModifier {
-    var shown: Bool
-
-    func body(content: Content) -> some View {
-        if shown { content.safeAreaInset(edge: .top, spacing: 0) { PageTabSwitchRow() } } else { content }
-    }
-}
-
-/// A phone's tabs (`pageTabSwitch`): no tab bar; the pages draw the switch.
-private struct PageTabSwitch: ViewModifier {
-    func body(content: Content) -> some View {
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            content.toolbarVisibility(.hidden, for: .tabBar).environment(\.pageTabSwitch, true)
-        } else {
-            content
-        }
-    }
-}
 #endif
 
 /// One tree RootView builds: the shell or the tabs, built again by a fold or an unfold, and by a new look.
@@ -520,10 +494,6 @@ extension EnvironmentValues {
     /// The Agents page's New Session sheet, presented by RootView on iOS (it outlives the tree a fold or an unfold builds
     /// again, #2836); nil, the page presents its own.
     @Entry var newAgentShown: Binding<Bool>? = nil
-    /// The Assistant | Agents switch is the pages' own, at their top, ChatGPT's Chat | Work, and the system's tab bar is
-    /// hidden: a phone's tabs, at regular width (iPhone Duo open, where iOS draws the tab bar down the side of the screen,
-    /// at its foot; #2623). The iPad keeps its tab bar along the top; false elsewhere.
-    @Entry var pageTabSwitch = false
 }
 
 /// A tab's page, drawn again only by what it reads itself. Each tab's badge (the agents waiting, the inbox's Needs You) is read
@@ -541,6 +511,10 @@ private struct TabPage<Page: View>: View, Equatable {
 
 @MainActor private struct AssistantRootTab: TabContent {
     @Environment(AppModel.self) private var model
+    #if os(iOS)
+    /// The Persona tab's part of the one sidebar (#4206).
+    let part: UnifiedSidebar
+    #endif
 
     var body: some TabContent<AppTab> {
         #if DEBUG || PERF_SIGNPOST
@@ -548,10 +522,15 @@ private struct TabPage<Page: View>: View, Equatable {
         #endif
         Tab("Persona", systemImage: Theme.Icon.ai, value: AppTab.assistant) {
             TabPage {
+                #if os(iOS)
+                // The Separate layout in the new look (#4206): the one sidebar's column with Persona's part, Persona's
+                // page beside it (the Agents page's split, as the Sidebar layout's), the system's tab bar kept.
+                ChatsView()
+                    .environment(\.unifiedSidebar, part)
+                    .modifier(TabActivityScope(tab: .assistant))
+                #else
                 AssistantView()
                     .modifier(TabActivityScope(tab: .assistant))
-                #if os(iOS)
-                    .modifier(PageTabSwitch())
                 #endif
                 #if PERF_SIGNPOST
                     .modifier(PerfTabMount("assistant"))
@@ -565,6 +544,10 @@ private struct TabPage<Page: View>: View, Equatable {
 
 @MainActor private struct AgentsRootTab: TabContent {
     @Environment(AppModel.self) private var model
+    #if os(iOS)
+    /// The Agents tab's part of the one sidebar (#4206).
+    let part: UnifiedSidebar
+    #endif
 
     var body: some TabContent<AppTab> {
         #if DEBUG || PERF_SIGNPOST
@@ -573,10 +556,11 @@ private struct TabPage<Page: View>: View, Equatable {
         Tab("Agents", systemImage: Theme.Icon.agents, value: AppTab.chats) {
             TabPage {
                 ChatsView()
-                    .modifier(TabActivityScope(tab: .chats))
                 #if os(iOS)
-                    .modifier(PageTabSwitch())
+                    // The Separate layout in the new look (#4206): the one sidebar's column with the Agents' part.
+                    .environment(\.unifiedSidebar, part)
                 #endif
+                    .modifier(TabActivityScope(tab: .chats))
                 #if PERF_SIGNPOST
                     .modifier(PerfTabMount("agents"))
                 #endif
@@ -649,10 +633,9 @@ nonisolated struct ConnectionShown: Encodable, Equatable {
     var body: some TabContent<AppTab> {
         Tab(String(localized: "Messages [Quote Views 4da199]"), systemImage: Theme.Icon.feishuChats, value: AppTab.feishu) {
             TabPage {
+                // The system's tab bar on every tab, the open iPhone Duo's too (#4206): no Assistant | Agents switch drawn
+                // on the pages.
                 LarkConversationsView().modifier(TabActivityScope(tab: .feishu))
-                #if os(iOS)
-                    .modifier(PageTabSwitch())
-                #endif
             }
             .equatable()
         }

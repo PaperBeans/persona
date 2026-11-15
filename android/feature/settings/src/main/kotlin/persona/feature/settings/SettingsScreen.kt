@@ -71,25 +71,42 @@ private fun SettingsContent(
     onNavigate: ((androidx.navigation3.runtime.NavKey) -> Unit)?,
     onClose: (() -> Unit)?,
 ) {
-    var page by rememberSaveable(initialPage) { mutableStateOf(settingsPageFromInitialPage(initialPage)?.toInitialPage() ?: initialPage) }
-    var searchQuery by rememberSaveable { mutableStateOf("") }
+    val pageState = rememberSaveable(initialPage) { mutableStateOf(settingsPageFromInitialPage(initialPage)?.toInitialPage() ?: initialPage) }
+    var page by pageState
+    val searchQueryState = rememberSaveable { mutableStateOf("") }
     var parents by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    var purposeManager by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
-    var purpose by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
-    var extension by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
-    var extensionManager by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
-    var connectorManager by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
-    var channel by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
-    var manager by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
+    val purposeManagerState = rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
+    var purposeManager by purposeManagerState
+    val purposeState = rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
+    var purpose by purposeState
+    val extensionState = rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
+    var extension by extensionState
+    val extensionManagerState = rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
+    var extensionManager by extensionManagerState
+    val connectorManagerState = rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
+    var connectorManager by connectorManagerState
+    val channelState = rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
+    var channel by channelState
+    val managerState = rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
+    var manager by managerState
     /** `ssh:<hub id>` or `proxy:<hub id>`: a hub's tunnel page under Settings › Hubs. */
-    var tunnelPage by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
-    var pairingDiagnostics by rememberSaveable(initialPage) { mutableStateOf(false) }
+    val tunnelPageState = rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
+    var tunnelPage by tunnelPageState
+    val pairingDiagnosticsState = rememberSaveable(initialPage) { mutableStateOf(false) }
+    var pairingDiagnostics by pairingDiagnosticsState
     // Model providers's own steps when they open in place: one provider, adding one, importing from ~/.zshrc.
-    var provider by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
-    var providerStep by rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
+    val providerState = rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
+    var provider by providerState
+    val providerStepState = rememberSaveable(initialPage) { mutableStateOf<String?>(null) }
+    var providerStep by providerStepState
     // The first group's pages read and write the current assistant's settings alone (docs/assistant/managers.md "Clients").
     val assistant = currentAssistant()
     val mine = services.forCurrentAssistant()
+    val knowledgeSelection = mine.knowledgeSelection.takeUnless { services.demo }
+    val knowledgeAvailability = remember(knowledgeSelection, assistant.id, services.hubAddress) {
+        knowledgeSelection?.let { KnowledgeSelectionAvailability(it) }
+    }
+    val knowledgeSelectionAvailable = knowledgeAvailability?.state?.collectAsState()?.value == true
     // The assistant the first group's pages are of, for the pages they open (null: a hub without a roster, the default's).
     val owner = assistant.takeIf { it.roster != null }?.id
     // A switch while one of its pages is open here goes back to the list: no page shows one assistant's settings once
@@ -109,17 +126,24 @@ private fun SettingsContent(
     val appStyleStore = LocalAppStyleStore.current
     val scope = rememberCoroutineScope()
     val connection by services.connection.state.collectAsState()
-    val machines by services.sessions.machines.collectAsState()
-    val paired by services.pairing.isPaired.collectAsState()
+    LaunchedEffect(knowledgeAvailability, page, connection, assistant.id) {
+        if (knowledgeAvailability != null && page == "settings" && connection == ConnectionState.Online) knowledgeAvailability.probe()
+    }
+    val machinesState = services.sessions.machines.collectAsState()
+    val pairedState = services.pairing.isPaired.collectAsState()
+    val paired by pairedState
     val deviceController = remember(services) { DeviceSettingsState(services.deviceSettings, services.disconnect) }
-    val deviceState by deviceController.state.collectAsState()
+    val deviceStateState = deviceController.state.collectAsState()
+    val deviceState by deviceStateState
     // The signed-in Mac's row says "Mute phone" when it is on: read this device's preferences once a desktop shows.
     LaunchedEffect(desktops.isNotEmpty(), page) {
         if (desktops.isNotEmpty() && page == "settings" && paired && services.deviceSettings != null && deviceState.preferences == null) deviceController.loadPreferences()
     }
-    var confirmDisconnect by remember { mutableStateOf(false) }
+    val confirmDisconnectState = remember { mutableStateOf(false) }
+    var confirmDisconnect by confirmDisconnectState
     val updateController = rememberAppUpdateState(services)
-    val updateStatus by updateController.state.collectAsState()
+    val updateStatusState = updateController.state.collectAsState()
+    val updateStatus by updateStatusState
     val update = updateStatus.latest
     val updateMessage = updateStatus.message
     val updateNow by produceState(java.time.Instant.now(), page, updateStatus.lastChecked) {
@@ -140,14 +164,15 @@ private fun SettingsContent(
     }
     val busy = updateStatus.checking
     val installing = updateStatus.installing
-    fun checkUpdate() { scope.launch { updateController.check(manual = true) } }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         if (!services.demo) scope.launch { updateController.check() }
     }
     val extensionService = mine.extensions.takeUnless { services.demo }
     val extensionsAvailable by remember(extensionService) { extensionService?.available ?: kotlinx.coroutines.flow.flowOf(false) }.collectAsState(false)
+    val inboxSources by remember(extensionService) { extensionService?.inboxSourcesAvailable ?: kotlinx.coroutines.flow.flowOf(false) }.collectAsState(false)
     // Each assistant's own: a switch never shows the last one's count, not even while the new one's is read (or fails).
-    var extensionSummary by remember(assistant.id) { mutableStateOf<String?>(null) }
+    val extensionSummaryState = remember(assistant.id) { mutableStateOf<String?>(null) }
+    var extensionSummary by extensionSummaryState
     val connectorsService = mine.connectors.takeUnless { services.demo }
     var mailAccounts by remember(assistant.id) { mutableStateOf<List<MailAccount>?>(null) }
     var larkStatus by remember(assistant.id) { mutableStateOf<LarkStatus?>(null) }
@@ -183,7 +208,8 @@ private fun SettingsContent(
     }
     val channelService = mine.channels.takeUnless { services.demo }
     val channelsAvailable by remember(channelService) { channelService?.available ?: kotlinx.coroutines.flow.flowOf(false) }.collectAsState(false)
-    var channelList by remember(assistant.id) { mutableStateOf<List<HubChannel>?>(null) }
+    val channelListState = remember(assistant.id) { mutableStateOf<List<HubChannel>?>(null) }
+    var channelList by channelListState
     // Like "Extensions"': read again whenever the settings list is shown or the hub reconnects.
     LaunchedEffect(channelService, channelsAvailable, page, connection, assistant.id) {
         if (channelService == null || !channelsAvailable || page != "settings" || connection != ConnectionState.Online) return@LaunchedEffect
@@ -192,7 +218,8 @@ private fun SettingsContent(
     }
     // Settings › Hub version's row value (iOS `hubSummary`): read when the list shows or the hub reconnects, then each push.
     val hubUpdates = services.hubUpdates.takeUnless { services.demo }
-    var hubUpdateStatus by remember(hubUpdates) { mutableStateOf<persona.core.contracts.api.HubUpdateStatus?>(null) }
+    val hubUpdateStatusState = remember(hubUpdates) { mutableStateOf<persona.core.contracts.api.HubUpdateStatus?>(null) }
+    var hubUpdateStatus by hubUpdateStatusState
     LaunchedEffect(hubUpdates, page, connection) {
         if (hubUpdates == null || page != "settings" || connection != ConnectionState.Online) return@LaunchedEffect
         hubUpdateStatus = try { hubUpdates.status() }
@@ -305,6 +332,133 @@ private fun SettingsContent(
             }
         }
     }
+    SettingsPageContent(
+        services = services, mine = mine, assistant = assistant, owner = owner,
+        pageState = pageState, searchQueryState = searchQueryState,
+        purposeManagerState = purposeManagerState, purposeState = purposeState,
+        extensionState = extensionState, extensionManagerState = extensionManagerState,
+        connectorManagerState = connectorManagerState, channelState = channelState,
+        managerState = managerState, tunnelPageState = tunnelPageState,
+        pairingDiagnosticsState = pairingDiagnosticsState, providerState = providerState,
+        providerStepState = providerStepState, confirmDisconnectState = confirmDisconnectState,
+        machinesState = machinesState, pairedState = pairedState, connection = connection, context = context, desktops = desktops,
+        deviceController = deviceController, deviceStateState = deviceStateState,
+        updateController = updateController, updateStatusState = updateStatusState,
+        update = update, updateMessage = updateMessage, updateSubtitle = updateSubtitle,
+        updateIncompatibility = updateIncompatibility, busy = busy, installing = installing, scope = scope,
+        extensionSummaryState = extensionSummaryState, extensionsAvailable = extensionsAvailable,
+        inboxSources = inboxSources, channelsAvailable = channelsAvailable, channelListState = channelListState,
+        knowledgeSelection = knowledgeSelection, knowledgeSelectionAvailable = knowledgeSelectionAvailable,
+        translationValue = translationValue, hubUpdateStatusState = hubUpdateStatusState,
+        slotsState = slotsState, slotCards = slotCards, detailKey = detailKey,
+        back = back, openPage = ::open, deviceFeedback = deviceFeedback, connectorItems = connectorItems,
+        onNavigate = onNavigate, onClose = onClose, onDemo = onDemo, onExitDemo = onExitDemo,
+    )
+    // Routed Back leaves a page in one step. Pairing handles its own steps before returning to Settings or Hubs.
+    if (onBack != null) BackHandler(page != "settings" && page != "pair" && page != "hubs-add", onBack = onBack)
+    // An AI use opened inside "Model configuration" (no navigation host) closes before the page does.
+    BackHandler(page == "models" && purpose != null) { purpose = null }
+    BackHandler(page == "plugins" && extension != null) { extension = null }
+    BackHandler(page == "channels" && channel != null) { channel = null }
+    BackHandler(page == "managers" && manager != null) { manager = null }
+    BackHandler(page == "providers" && (provider != null || providerStep != null)) { if (providerStep != null) providerStep = null else provider = null }
+    BackHandler(page == "hubs" && tunnelPage != null) { tunnelPage = null }
+    if (pairingDiagnostics && (page == "pair" || page == "hubs-add")) {
+        val close = { pairingDiagnostics = false }
+        JFullScreen(onDismiss = close) { DiagnosticsScreen(services, onBack = close, footer = deviceFeedback) }
+    }
+    if (confirmDisconnect) JDialog(
+        onDismiss = { confirmDisconnect = false }, title = stringResource(R.string.settings_disconnect_title),
+        text = stringResource(R.string.settings_disconnect_text),
+        destructive = true, confirmEnabled = !deviceState.busy,
+        confirm = stringResource(R.string.settings_disconnect) to { confirmDisconnect = false; scope.launch { deviceController.disconnect() }; Unit },
+    )
+}
+
+/* A non-Unit return keeps these page reads in SettingsContent's recomposition scope. */
+@Composable
+private fun SettingsPageContent(
+    services: SettingsServices,
+    mine: SettingsServices,
+    assistant: CurrentAssistant,
+    owner: String?,
+    pageState: MutableState<String>,
+    searchQueryState: MutableState<String>,
+    purposeManagerState: MutableState<String?>,
+    purposeState: MutableState<String?>,
+    extensionState: MutableState<String?>,
+    extensionManagerState: MutableState<String?>,
+    connectorManagerState: MutableState<String?>,
+    channelState: MutableState<String?>,
+    managerState: MutableState<String?>,
+    tunnelPageState: MutableState<String?>,
+    pairingDiagnosticsState: MutableState<Boolean>,
+    providerState: MutableState<String?>,
+    providerStepState: MutableState<String?>,
+    confirmDisconnectState: MutableState<Boolean>,
+    machinesState: State<List<persona.core.contracts.Machine>>,
+    pairedState: State<Boolean>,
+    connection: ConnectionState,
+    context: android.content.Context,
+    desktops: List<persona.core.contracts.HubDesktop>,
+    deviceController: DeviceSettingsState,
+    deviceStateState: State<DeviceSettingsUiState>,
+    updateController: AppUpdateState,
+    updateStatusState: State<AppUpdateState.State>,
+    update: AppUpdate?,
+    updateMessage: Int?,
+    updateSubtitle: String?,
+    updateIncompatibility: Int?,
+    busy: Boolean,
+    installing: Boolean,
+    scope: kotlinx.coroutines.CoroutineScope,
+    extensionSummaryState: MutableState<String?>,
+    extensionsAvailable: Boolean,
+    inboxSources: Boolean,
+    channelsAvailable: Boolean,
+    channelListState: MutableState<List<HubChannel>?>,
+    knowledgeSelection: persona.core.contracts.api.KnowledgeSelection?,
+    knowledgeSelectionAvailable: Boolean,
+    translationValue: String?,
+    hubUpdateStatusState: MutableState<HubUpdateStatus?>,
+    slotsState: ExtensionSlotsState,
+    slotCards: List<ExtensionCardSlot>,
+    detailKey: androidx.navigation3.runtime.NavKey?,
+    back: () -> Unit,
+    openPage: (SettingsPage) -> Unit,
+    deviceFeedback: @Composable () -> Unit,
+    connectorItems: LazyListScope.() -> Unit,
+    onNavigate: ((androidx.navigation3.runtime.NavKey) -> Unit)?,
+    onClose: (() -> Unit)?,
+    onDemo: (() -> Unit)?,
+    onExitDemo: (() -> Unit)?,
+): String {
+    var page by pageState
+    var searchQuery by searchQueryState
+    var purposeManager by purposeManagerState
+    var purpose by purposeState
+    var extension by extensionState
+    var extensionManager by extensionManagerState
+    var connectorManager by connectorManagerState
+    var channel by channelState
+    var manager by managerState
+    var tunnelPage by tunnelPageState
+    var pairingDiagnostics by pairingDiagnosticsState
+    var provider by providerState
+    var providerStep by providerStepState
+    var confirmDisconnect by confirmDisconnectState
+    val machines by machinesState
+    val paired by pairedState
+    val deviceState by deviceStateState
+    val updateStatus by updateStatusState
+    var extensionSummary by extensionSummaryState
+    var channelList by channelListState
+    var hubUpdateStatus by hubUpdateStatusState
+    val channelService = mine.channels.takeUnless { services.demo }
+    val connectorsService = mine.connectors.takeUnless { services.demo }
+    val hubUpdates = services.hubUpdates.takeUnless { services.demo }
+    fun checkUpdate() { scope.launch { updateController.check(manual = true) } }
+    fun open(destination: SettingsPage) = openPage(destination)
     // The first group's pages while the current assistant is offline (several assistants): what it has can't be read or
     // changed now, so they say so, as its inbox and to-dos do, rather than look empty or failed (docs/assistant/managers.md).
     if (assistant.offline != null && isAssistantSettingsPage(page)) AssistantOfflinePage(page, assistant, back) else when (page) {
@@ -315,6 +469,7 @@ private fun SettingsContent(
             machines = services.machines.takeUnless { services.demo }, attempts = services.pairingAttempts,
             mainReadiness = services.readiness.takeUnless { services.demo }, skipWelcome = true)
         "capsule" -> CapsuleSettingsPage(services.capsule, back)
+        "knowledge-selection" -> KnowledgeSelectionPage(knowledgeSelection, connectorsService, back)
         // The current assistant's computers alone: their Claude Code / Codex settings.
         "claude" -> ClaudeSettingsPage(services.sessions, services.machines.takeUnless { services.demo }, back, owns = { assistant.ownsOn(it.id, it.manager) })
         "codex" -> ClaudeSettingsPage(services.sessions, services.machines.takeUnless { services.demo }, back, AgentSettingsKind.Codex,
@@ -460,8 +615,8 @@ private fun SettingsContent(
         } else if (page.startsWith("connector/")) {
             HubConnectorPage(connectorsService, connectorId = page.removePrefix("connector/"), onBack = back, manager = connectorManager)
         } else SettingsHomePage(
-            services, searchQuery, { searchQuery = it }, extensionsAvailable, extensionSummary, channelsAvailable, channelList,
-            connection, translationValue, hubUpdateStatus,
+            services, searchQuery, { searchQuery = it }, extensionsAvailable, inboxSources, extensionSummary, channelsAvailable, channelList,
+            knowledgeSelectionAvailable, connection, translationValue, hubUpdateStatus,
             when {
                 busy -> stringResource(R.string.settings_update_checking)
                 installing -> stringResource(R.string.settings_update_installing)
@@ -479,25 +634,7 @@ private fun SettingsContent(
             },
         )
     }
-    // Routed Back leaves a page in one step. Pairing handles its own steps before returning to Settings or Hubs.
-    if (onBack != null) BackHandler(page != "settings" && page != "pair" && page != "hubs-add", onBack = onBack)
-    // An AI use opened inside "Model configuration" (no navigation host) closes before the page does.
-    BackHandler(page == "models" && purpose != null) { purpose = null }
-    BackHandler(page == "plugins" && extension != null) { extension = null }
-    BackHandler(page == "channels" && channel != null) { channel = null }
-    BackHandler(page == "managers" && manager != null) { manager = null }
-    BackHandler(page == "providers" && (provider != null || providerStep != null)) { if (providerStep != null) providerStep = null else provider = null }
-    BackHandler(page == "hubs" && tunnelPage != null) { tunnelPage = null }
-    if (pairingDiagnostics && (page == "pair" || page == "hubs-add")) {
-        val close = { pairingDiagnostics = false }
-        JFullScreen(onDismiss = close) { DiagnosticsScreen(services, onBack = close, footer = deviceFeedback) }
-    }
-    if (confirmDisconnect) JDialog(
-        onDismiss = { confirmDisconnect = false }, title = stringResource(R.string.settings_disconnect_title),
-        text = stringResource(R.string.settings_disconnect_text),
-        destructive = true, confirmEnabled = !deviceState.busy,
-        confirm = stringResource(R.string.settings_disconnect) to { confirmDisconnect = false; scope.launch { deviceController.disconnect() }; Unit },
-    )
+    return page
 }
 
 @Composable
@@ -768,6 +905,7 @@ private fun AssistantOfflinePage(page: String, assistant: persona.core.contracts
         SettingsPage.Feishu -> R.string.settings_src_lark_title
         SettingsPage.FeishuBot -> R.string.settings_feishu_bot_title
         SettingsPage.Sent -> R.string.settings_sent_title
+        SettingsPage.KnowledgeSelection -> R.string.settings_knowledge_selection_title
         else -> R.string.settings_section_connectors
     }
     JListPage(title = stringResource(title), onBack = onBack) { item("offline") { JAssistantOffline(assistant) } }

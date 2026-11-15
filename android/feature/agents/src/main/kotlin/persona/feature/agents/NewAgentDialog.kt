@@ -22,6 +22,8 @@ import android.content.res.Resources
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import persona.core.contracts.Machine
+import persona.core.contracts.PaseoAgent
+import persona.core.contracts.api.AgentLauncher
 import persona.core.designsystem.*
 import persona.core.designsystem.dense
 import persona.feature.chat.UltracodeQuotaLines
@@ -242,7 +244,7 @@ private fun LazyListScope.newAgentItems(
     val selectedType = state.agentType.takeIf { state.following || state.selection.launcher.isNotEmpty() }
     itemsIndexed(types, key = { _, type -> "type:$type" }) { index, type ->
         JGroupItem(GroupPosition.of(index, types.size)) {
-            JRow(type.agentLabel(), leading = { JRadio(selectedType == type, null, enabled = editable) }, enabled = editable,
+            JRow(agentTypeTitle(type), leading = { JRadio(selectedType == type, null, enabled = editable) }, enabled = editable,
                 // The type the configuration already starts keeps following it; another type picks its first launcher.
                 onClick = { if (!(state.following && state.agentType == type))
                     model.selection(state.selection.copy(launcher = initialLauncher(null, state.launchers.filter { it.agentType == type }))) },
@@ -255,8 +257,8 @@ private fun LazyListScope.newAgentItems(
         if (!state.loading && state.launchers.isEmpty()) Text(stringResource(R.string.agents_new_no_launchers), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
     }
     val launchers = state.launchers.filter { launcher ->
-        launcher.agentType == (selectedType ?: "claude") &&
-            (query.isBlank() || launcher.name.contains(query, true) || launcher.model.orEmpty().contains(query, true))
+        launcher.agentType == (selectedType ?: "claude") && (query.isBlank() || launcher.name.contains(query, true) ||
+            launcher.title.contains(query, true) || launcher.model.orEmpty().contains(query, true))
     }
     // Models are configured by use (Settings › Model configuration): a new agent follows it unless a launcher is picked for this start.
     val follow = state.follow
@@ -274,8 +276,9 @@ private fun LazyListScope.newAgentItems(
         val block = launcher.block
         val reason = block?.let { stringResource(it.reason) }
         JGroupItem(GroupPosition.of(index + rows - launchers.size, rows)) {
-            JRow(launcher.name, Modifier.alpha(if (block != null && state.selection.launcher != launcher.name) 0.5f else 1f),
-                subtitle = listOfNotNull(reason, launcher.agentType.agentLabel(), launcher.model, host).joinToString("\n"),
+            // By its own name where it has one (a runtime's provider, Paseo's "Grok", #8261), as the web's pickers name it.
+            JRow(launcher.title, Modifier.alpha(if (block != null && state.selection.launcher != launcher.name) 0.5f else 1f),
+                subtitle = listOfNotNull(reason, launcherAgentLine(launcher), launcher.model, host).joinToString("\n"),
                 subtitleLines = 4, leading = { JRadio(state.selection.launcher == launcher.name, null, enabled = editable) },
                 enabled = editable, onClick = {
                     if (block != null && state.selection.launcher != launcher.name) onBlocked(launcher)
@@ -284,7 +287,21 @@ private fun LazyListScope.newAgentItems(
         }
     }
     newAgentModelItems(state, editable, onModels, model::reloadModels)
-    if (state.agentType == "claude") item("claude-options") {
+    // A launcher that lists its own permission modes (#8261, Paseo's Grok, OpenCode or Codex): its own approval, or Allow
+    // everything where it lists that too, and only the efforts its model lists; never Claude Code's five modes or the
+    // choice remembered for them. One with its own approval alone shows no mode, one whose model lists none no effort.
+    state.providerModes?.let { listed -> item("provider-options") {
+        val choices = listOf("" to R.string.agents_mode_follow) + permissionModes.filter { (id, _) -> id.isNotEmpty() && id != "default" && id in listed }
+        if (choices.size > 1) {
+            val bypass = state.providerMode == "bypassPermissions"
+            ChoiceMenu(stringResource(R.string.agents_new_permission_mode), state.providerMode.takeIf { it in listed }.orEmpty(), choices, editable, model::providerMode)
+            Text(stringResource(if (bypass) R.string.agents_new_bypass_warning else R.string.agents_new_provider_mode_hint),
+                color = if (bypass) PersonaTheme.palette.cautionText else PersonaTheme.palette.ink2, style = PersonaTheme.type.caption)
+        }
+        val efforts = state.providerEfforts
+        if (efforts.isNotEmpty()) ChoiceMenu(stringResource(R.string.agents_new_effort), state.providerEffort, effortChoices(efforts), editable, model::providerEffort)
+    } }
+    if (state.claudeModes) item("claude-options") {
         ChoiceMenu(stringResource(R.string.agents_new_permission_mode), state.selection.mode, permissionModes, editable) { model.selection(state.selection.copy(mode = it)) }
         if (state.selection.mode == "bypassPermissions") Text(stringResource(R.string.agents_new_bypass_warning), color = PersonaTheme.palette.cautionText, style = PersonaTheme.type.caption)
         // Only the levels the model that will run takes; none: it has no effort setting.
@@ -359,6 +376,17 @@ internal fun startable(state: NewAgentState, machines: List<Machine>): Boolean =
         state.attachmentsHold == null
 
 internal fun String.agentLabel() = when (this) { "claude" -> "Claude Code"; "codex" -> "Codex"; "traex" -> "TRAEX"; else -> this }
+
+/**
+ * What the "Agent type" list calls a launcher's agent type ([agentLabel]): Paseo's providers other than Claude Code and
+ * Codex ([PaseoAgent], each listed under it by its own name) together as "Other agents", never the engine's id (#8143).
+ */
+@Composable
+internal fun agentTypeTitle(type: String): String =
+    if (type == PaseoAgent) stringResource(R.string.agents_new_type_other) else type.agentLabel()
+
+/** A launcher row's line naming what it runs; none for a Paseo provider ([PaseoAgent]), whose own name says it (#8143). */
+internal fun launcherAgentLine(launcher: AgentLauncher): String? = launcher.agentType.takeUnless { it == PaseoAgent }?.agentLabel()
 internal val permissionModes = listOf("" to R.string.agents_mode_follow, "default" to R.string.agents_mode_default,
     "acceptEdits" to R.string.agents_mode_accept_edits, "plan" to R.string.agents_mode_plan, "auto" to R.string.agents_mode_auto,
     "bypassPermissions" to R.string.agents_mode_bypass)

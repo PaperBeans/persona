@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Persona
+import PersonaWire
 
 /// docs/design/task-cards.md (#5569): the usage limit's reading, a decision round's Later / Don't handle, a plan task's
 /// brief, the receipt's actions and the hand-off card's wake.
@@ -221,20 +222,7 @@ struct TaskCardsFusionTests {
         #expect(brief(["goal": "More"]).hasMore(title: "Same"))
     }
 
-    // MARK: Receipt, hand-off
-
-    @Test func receiptActionsFollowTheOutcome() {
-        typealias R = ReceiptCard
-        #expect(R.action(.failed, todoFailed: true, stillInterrupted: false, limitContinues: false) == .retry)
-        #expect(R.action(.failed, todoFailed: false, stillInterrupted: false, limitContinues: false) == nil)
-        #expect(R.action(.interrupted(reason: nil), todoFailed: false, stillInterrupted: true, limitContinues: false) == .continueWork)
-        #expect(R.action(.interrupted(reason: nil), todoFailed: false, stillInterrupted: true, limitContinues: true) == nil)
-        #expect(R.action(.interrupted(reason: nil), todoFailed: false, stillInterrupted: false, limitContinues: false) == nil)
-        #expect(R.action(.done, todoFailed: true, stillInterrupted: true, limitContinues: false) == nil)
-        #expect(R.action(.stopped, todoFailed: false, stillInterrupted: false, limitContinues: false) == nil)
-        #expect(R.shareText(heading: "T is done", detail: "All good") == "T is done\n\nAll good")
-        #expect(R.shareText(heading: "T is done", detail: nil) == "T is done")
-    }
+    // MARK: Hand-off
 
     @Test func aTaskItemCarriesItsWakeToItsHandoff() throws {
         func item(_ wake: String?) -> FeedItem {

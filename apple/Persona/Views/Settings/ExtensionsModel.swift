@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PersonaWire
 
 // Settings › Extensions (docs/extensions/extensions.md「The hub's API」): the hub's plugins, each one's switch, its configuration as a form drawn
 // from its schema (`form.fields`), its secrets, write-only, and the pages it draws (`ui`, ExtensionUIModel). Installing,
@@ -37,6 +38,9 @@ nonisolated struct HubExtension: Codable, Hashable, Sendable, Identifiable {
     var upgradeNote: ExtensionUpgradeNote?
     /// An extension with a program on computers: how that program is on each machine it is switched on for.
     var nodes: [ExtensionNodeState]?
+    /// How that program is across all its machines, aggregated by the hub; the status follows it while the hub's own
+    /// process is idle, so a node-only extension does not say "stopped" while it runs on every machine.
+    var nodeStatus: NodeStatusSummary?
     /// Its sign-in (a hub with extension_auth, #4507): the hub's last word on it.
     var auth: ExtensionAuth?
     /// The command-line programs this version runs with.
@@ -53,7 +57,7 @@ nonisolated struct HubExtension: Codable, Hashable, Sendable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, kind, status, error, version, source, enabled, description, contributes, warnings, market, upgrade, nodes, auth, tools, manager, attached, sandbox, downloads
-        case iconURL = "icon_url", downloadsUpdatedAt = "downloads_updated_at"
+        case iconURL = "icon_url", downloadsUpdatedAt = "downloads_updated_at", nodeStatus = "node_status"
         case needsSetup = "needs_setup", autoUpgrade = "auto_upgrade", autoUpgradePaused = "auto_upgrade_paused", upgradeNote = "upgrade_note"
     }
 
@@ -79,6 +83,16 @@ nonisolated struct ExtensionSandbox: Codable, Hashable, Sendable {
     var detail: String?
     var trusted: Bool?
     var egress: [String: JSONValue]
+}
+
+/// The hub's aggregate of an extension's node program across its machines (Go ExtensionNodeStatusView).
+nonisolated struct NodeStatusSummary: Codable, Hashable, Sendable {
+    var total: Int
+    var running: Int
+    var starting: Int
+    var stopped: Int
+    var offline: Int
+    var abnormal: Int
 }
 
 /// An extension's program on one machine (docs/extensions/extensions.md「Programs running on computers」).
@@ -300,6 +314,17 @@ nonisolated struct ExtensionPermission: Codable, Hashable, Sendable, Identifiabl
     var id: String { key }
 }
 
+/// An installed, enabled pack member that switching the pack off would switch off too.
+nonisolated struct ExtensionPackEnabledMember: Decodable, Hashable, Sendable {
+    var id: String
+    var name: String?
+
+    var displayName: String {
+        if let name, !name.isEmpty { return name }
+        return id
+    }
+}
+
 /// GET /api/v1/plugins/{id}/-/: the plugin with its form, settings, secrets and permissions.
 nonisolated struct HubExtensionDetail: Decodable, Hashable, Sendable {
     var plugin: HubExtension
@@ -320,6 +345,10 @@ nonisolated struct HubExtensionDetail: Decodable, Hashable, Sendable {
     var contributions: [ExtensionContributionSwitch]?
     var depends: [ExtensionDependencyStatus]?
     var extensionPack: [ExtensionPackMember]?
+    /// New hubs switch installed members with the pack; absent means an older hub switches only the pack.
+    var packMembersFollow: Bool?
+    var packOn: [ExtensionPackEnabledMember]?
+    var packOff: [String]?
     /// A secret provider's: the settings that hold its references, and its Always rules for hand-offs.
     var secretUsers: [ExtensionSecretUser]
     var handoffRules: [HandoffRule]
@@ -327,7 +356,8 @@ nonisolated struct HubExtensionDetail: Decodable, Hashable, Sendable {
     private struct Form: Decodable { var fields: [ExtensionField]? }
     private enum CodingKeys: String, CodingKey {
         case publisher, homepage, origin, form, config, secrets, permissions, ui, contributions, depends
-        case extensionPack = "extension_pack", secretUsers = "secret_users", handoffRules = "handoff_rules"
+        case extensionPack = "extension_pack", packMembersFollow = "pack_members_follow", packOn = "pack_on", packOff = "pack_off"
+        case secretUsers = "secret_users", handoffRules = "handoff_rules"
         case previousVersion = "previous_version", readOnly = "read_only", nodeMachines = "node_machines"
     }
 
@@ -348,6 +378,9 @@ nonisolated struct HubExtensionDetail: Decodable, Hashable, Sendable {
         contributions = try c.decodeIfPresent([ExtensionContributionSwitch].self, forKey: .contributions)
         depends = try c.decodeIfPresent([ExtensionDependencyStatus].self, forKey: .depends)
         extensionPack = try c.decodeIfPresent([ExtensionPackMember].self, forKey: .extensionPack)
+        packMembersFollow = try c.decodeIfPresent(Bool.self, forKey: .packMembersFollow)
+        packOn = try c.decodeIfPresent([ExtensionPackEnabledMember].self, forKey: .packOn)
+        packOff = try c.decodeIfPresent([String].self, forKey: .packOff)
         secretUsers = try c.decodeIfPresent([ExtensionSecretUser].self, forKey: .secretUsers) ?? []
         handoffRules = try c.decodeIfPresent([HandoffRule].self, forKey: .handoffRules) ?? []
     }
@@ -419,6 +452,28 @@ extension APIClient {
     }
 }
 
+/// What the Enabled switch does, decided apart from the view so every hub/version case can be tested.
+enum ExtensionEnabledReason: Equatable {
+    case ordinary
+    case packAlone
+    case packFollows
+    case packRestores([String])
+
+    var text: String {
+        switch self {
+        case .ordinary:
+            return String(localized: "When off, this extension’s capabilities are unavailable. Your configuration is kept.")
+        case .packAlone:
+            return String(localized: "Turning the pack off turns off only the pack itself. Turn each member on or off on its own page.")
+        case .packFollows:
+            return String(localized: "Turning the pack off turns off its members too, and they stop running. Turning it back on turns on the members it turned off; a member you turn on or off yourself stays as you set it.")
+        case .packRestores(let names):
+            let names = ExtensionText.list(names)
+            return String(localized: "Turning the pack back on turns on \(names) again. A member you turn on or off yourself stays as you set it.")
+        }
+    }
+}
+
 /// What a plugin is called and says in the settings.
 enum ExtensionText {
     /// Names in a row, with the language's list separator (「、」 in Chinese): a, b.
@@ -426,11 +481,25 @@ enum ExtensionText {
         items.joined(separator: String(localized: "、", comment: "Separator between list items"))
     }
 
+    /// The same precedence as the web: an off pack with no recorded members keeps the general follow explanation.
+    static func enabledReason(for detail: HubExtensionDetail, memberNames: [String: String]) -> ExtensionEnabledReason {
+        guard detail.extensionPack?.isEmpty == false else { return .ordinary }
+        guard detail.packMembersFollow == true else { return .packAlone }
+        if detail.plugin.enabled == false, let packOff = detail.packOff, !packOff.isEmpty {
+            let names = packOff.map { id in
+                memberNames[id].flatMap { $0.isEmpty ? nil : $0 } ?? id
+            }
+            return .packRestores(names)
+        }
+        return .packFollows
+    }
+
     /// To the user a plugin is on or off (#1684, as the web and Android since #1670): an idle one starts by itself when
     /// it is used, so running and idle are both On; whether it runs right now is the detail page's small print
     /// (`runNote`). hub's `status` values are unchanged.
     static func state(_ p: HubExtension) -> String {
-        switch p.status {
+        if let note = nodeStatusNote(p) { return note }
+        return switch p.status {
         case "running", "stopped": String(localized: "On [Herdr Notice 56410f]", comment: "Extension state: on")
         case "starting": String(localized: "Starting [Session Modes 087739]")
         case "needs_setup": String(localized: "Needs Setup")
@@ -438,6 +507,31 @@ enum ExtensionText {
         case "incompatible": String(localized: "Not available on this hub")
         case "error": String(localized: "Something Went Wrong")
         default: String(localized: "Unknown [Connectors Views 93e474]")
+        }
+    }
+
+    /// One line for an extension whose work happens on computers, from the hub's aggregate: "Running on 2 machines",
+    /// with the abnormal or offline count when there is one. Nil without a node summary, so the hub-process wording stands.
+    /// The hub ships nodeStatus only while the aggregate drives status, so each headline count is non-zero.
+    static func nodeStatusNote(_ p: HubExtension) -> String? {
+        guard let s = p.nodeStatus, s.total > 0 else { return nil }
+        let offline = s.offline > 0 ? " · " + String(localized: "\(s.offline) machines offline") : ""
+        switch p.status {
+        case "running":
+            var line = String(localized: "Running on \(s.running) machines", comment: "Node extension: machines running it")
+            if s.abnormal > 0 { line += " · " + String(localized: "\(s.abnormal) machines have an issue") }
+            return line + offline
+        case "error":
+            let main = String(localized: "\(s.abnormal) machines have an issue")
+            return s.offline > 0 ? main + " · " + String(localized: "\(s.offline) machines offline") : main
+        case "starting":
+            return String(localized: "Starting on \(s.starting) machines") + offline
+        case "stopped":
+            // All offline: no machine is merely stopped, so the offline count is the headline rather than "Stopped on 0".
+            if s.stopped == 0 && s.offline > 0 { return String(localized: "\(s.offline) machines offline") }
+            return String(localized: "Stopped on \(s.stopped) machines") + offline
+        default:
+            return nil
         }
     }
 
@@ -461,7 +555,8 @@ enum ExtensionText {
 
     /// Whether an enabled plugin's program runs right now, under its description; nil for any other state.
     static func runNote(_ p: HubExtension) -> String? {
-        switch p.status {
+        if p.nodeStatus != nil { return nil } // the node status line already says where it runs
+        return switch p.status {
         case "running": String(localized: "Running [Extensions Model 9273b8]")
         case "stopped": String(localized: "Not running; starts when needed")
         default: nil
@@ -675,6 +770,14 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
     private(set) var changingEnabled = false
     private(set) var changingAutoUpgrade = false
     var disableConfirmation: ExtensionDisableConfirmation?
+    /// Kept during dismissal so the dialog's title, actions and member list cannot change or go blank.
+    private(set) var disableDialog: ExtensionDisableDialog?
+    private(set) var disableDialogPresented = false
+    private(set) var disableDialogGeneration = 0
+    var packDisablePresented: Bool {
+        guard disableDialogPresented, case .pack? = disableDialog else { return false }
+        return true
+    }
     /// A pack's members by the names they're installed under (#4122), read only for a pack; a member not installed keeps its id.
     private(set) var memberNames: [String: String] = [:]
     /// The hub's word on a field it refused, by its dotted path ("proxy.host").
@@ -742,6 +845,34 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
         launchers = try? await api.allLaunchers()
     }
 
+    /// A pack with enabled members asks first; the detail-backed Toggle stays on until the answer is confirmed.
+    func requestEnabled(_ on: Bool) async {
+        if !on, let detail, detail.extensionPack?.isEmpty == false, detail.packMembersFollow == true,
+           let packOn = detail.packOn, !packOn.isEmpty {
+            guard !packDisablePresented, disableConfirmation == nil, !changingEnabled,
+                  changingContribution == nil, !saving, !detail.readOnly else { return }
+            let confirmation = ExtensionPackDisableConfirmation(packName: detail.plugin.name, members: packOn.map(\.displayName))
+            disableDialog = .pack(confirmation)
+            disableDialogGeneration += 1
+            disableDialogPresented = true
+            return
+        }
+        await setEnabled(on)
+    }
+
+    func dismissDisableConfirmation(generation: Int? = nil) {
+        // A dismissing sheet's callback can arrive after its replacement is already up; it must not dismiss that one.
+        guard generation == nil || generation == disableDialogGeneration else { return }
+        disableDialogPresented = false
+        disableConfirmation = nil
+    }
+
+    func confirmPackDisable() async {
+        // confirmationDialog can close before running the button: do not gate the write on its presentation state.
+        disableDialogPresented = false
+        await setEnabled(false)
+    }
+
     func setEnabled(_ on: Bool, cascade: Bool = false) async {
         guard !changingEnabled, changingContribution == nil, !saving, detail?.readOnly == false else { return }
         changingEnabled = true
@@ -751,16 +882,23 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
             detail = try await api.setExtension(id, enabled: on, cascade: cascade)
             error = nil
             disableConfirmation = nil
+            disableDialogPresented = false
         } catch let e as APIError where !on && !cascade && e.code == "has_dependents" {
-            disableConfirmation = ExtensionDisableConfirmation(error: e)
+            let confirmation = ExtensionDisableConfirmation(error: e)
+            disableConfirmation = confirmation
+            disableDialog = .dependents(confirmation)
+            disableDialogGeneration += 1
+            disableDialogPresented = true
             error = nil
         } catch {
+            disableDialogPresented = false
             self.error = error.localizedDescription
         }
     }
 
     func confirmDisable() async {
         disableConfirmation = nil
+        disableDialogPresented = false
         await setEnabled(false, cascade: true)
     }
 

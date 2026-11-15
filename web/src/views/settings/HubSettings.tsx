@@ -6,7 +6,7 @@ import { ApiError, errorText } from "../../lib/api";
 import { ago } from "../../lib/format";
 import { t } from "../../i18n";
 import {
-  channelTitle, checkHubUpdate, dockerSteps, hubUpdate, hubUpdateHistory, latestWarning, recordTitle, recordTone, setHubUpdateSettings, startHubUpdate,
+  channelTitle, checkHubUpdate, dockerSteps, hubUpdate, hubUpdateHistory, latestWarning, recordTitle, recordTone, setHubUpdateSettings, sourceBehindWarning, startHubUpdate,
   updateFinished, updateStateTitle, updateView, updateWorking, type HubUpdateRecord, type HubUpdateStatus,
 } from "../../lib/hub-update";
 import { navigate } from "../../lib/router";
@@ -113,6 +113,7 @@ function HubUpdates() {
   const working = updateWorking(status);
   const view = updateView(status);
   const warning = latestWarning(status);
+  const behind = sourceBehindWarning(status);
 
   return (
     <>
@@ -131,7 +132,7 @@ function HubUpdates() {
         <Row label={t("settings-hubsettings.version")} mono>
           <span className="max-w-[320px] truncate" title={status.version}>{status.version}</span>
         </Row>
-        <Row label={t("settings-hubsettings.channel")}>{channelTitle(status.channel)}</Row>
+        <Row label={t("settings-hubsettings.channel")} anchor="hub-channel">{channelTitle(status.channel)}</Row>
         {status.last_check && <Row label={t("settings-hubsettings.last_check")}>{ago(status.last_check)}</Row>}
         <div className="flex justify-end px-4 py-2.5">
           <Button icon="retry" busy={checking} disabled={checking || working} onClick={() => void check()}>
@@ -170,17 +171,22 @@ function HubUpdates() {
           </>
         )}
         {view.kind === "working" && <Progress s={status} onNow={() => setConfirmNow(true)} />}
-        {view.kind === "current" && (
+        {view.kind === "current" && (behind ? (
+          <p className="flex items-start gap-1.5 px-4 py-3 text-meta leading-snug break-words text-orange">
+            <Icon name="info" size={13} className="mt-0.5 shrink-0" />
+            <span className="min-w-0">{behind}</span>
+          </p>
+        ) : (
           <div className="flex items-center gap-2 px-4 py-3 text-[13px] text-green">
             <Icon name="check" size={14} stroke={2.4} />
             {t("settings-hubsettings.up_to_date")}
           </div>
-        )}
+        ))}
         {status.error && !working && <p className={cx("px-4 py-2.5 text-[12px] break-words", status.state === "rolled_back" ? "text-orange" : "text-red")}>{status.error}</p>}
       </Group>
 
       {status.can_update && (
-        <Group footer={t("settings-hubsettings.auto_footer")}>
+        <Group footer={t("settings-hubsettings.auto_footer")} anchor="hub-auto-update">
           <Row label={t("settings-hubsettings.auto_update")}>
             <Switch on={status.auto} onChange={(on) => void setAuto(on)} label={t("settings-hubsettings.auto_update")} />
           </Row>

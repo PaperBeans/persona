@@ -5,7 +5,11 @@ import {
   providerAgent, providerName, modelPurpose, modelSummary, runtimeLabel,
   type ModelBinding, type ModelConfigurationBody, type ModelDraft, type ModelProvider, type ModelPurpose, type ModelPurposeBody,
 } from "../../lib/model-config";
-import { agentsOverride, catalogLists, chooseProvider, draftFor, executionForm, modelConfiguration, providersFor, purposeDescription, purposeGroups, purposeLaunch, runtimeChoices, saveModelPurpose, supportsField, withPurposeAfter } from "../../lib/model-config-execution";
+import {
+  agentsOverride, catalogLists, chooseProvider, claudeCodeOnly, configDirChoices, configDirLabel, draftFor, effortOffered, executionForm, followedCategory, modelConfiguration, modelPatch, overridden,
+  parentCategory, providersFor, purposeDescription, purposeGroups, purposeLaunch, resetPatch, runtimeChoices, saveModelPurpose, supportsField, withPurposeAfter,
+  withUsesAfterCategories,
+} from "../../lib/model-config-execution";
 import { SUPERVISE_PURPOSE } from "../../lib/background-supervisor";
 import { effortChoices, providerModels, takesEffort } from "../../lib/launcher-models";
 import { useStore } from "../../lib/store";
@@ -20,9 +24,17 @@ import { ConfigurationManager } from "./ConfigurationManager";
 import { ModelProfiles } from "./ModelProfiles";
 
 function agentsOverrideStatus(binding: ModelBinding): string {
-  return binding.provider || binding.model || binding.effort
+  return overridden(binding)
     ? t("settings-modelconfiguration.separately_configured")
     : t("settings-modelconfiguration.follow_agents");
+}
+
+/** A use set apart from its category (#7980): **Separately configured** with anything of its own, else **Follows <the
+ *  category>**, the words the background supervisor's row has, with the category's name from the catalog. */
+function categoryStatus(binding: ModelBinding, category: ModelPurpose): string {
+  return overridden(binding)
+    ? t("settings-modelconfiguration.separately_configured")
+    : t("settings-modelconfiguration.follows", { name: category.name });
 }
 
 export function ModelConfiguration({ open, onOpen, onProviders }: { open: string | null; onOpen: (id: string | null) => void; onProviders: () => void }) {
@@ -33,7 +45,11 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
   const [data, setData] = useState<ModelConfigurationBody | null>(null);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
+  // Each load's number: only the latest one's answer is shown, so an older GET still on its way (the first one, a
+  // Refresh) cannot put back what a save's reload has just replaced.
+  const loads = useRef(0);
   const load = async () => {
+    const at = ++loads.current;
     try {
       // the background supervisor's purpose is listed right after Main chat (#5082). A hub since #5806 has it in the
       // catalog; one before that answers it by its own id only, so only then is it asked for. There, only a hub that
@@ -41,15 +57,20 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
       const absent = (e: unknown) => { if (e instanceof ApiError && e.status === 404) return undefined; throw e; };
       const catalog = await modelConfiguration(manager);
       const supervise = catalogLists(catalog, SUPERVISE_PURPOSE) ? undefined : await modelPurpose(SUPERVISE_PURPOSE, manager).catch(absent);
-      setData(withPurposeAfter(catalog, SUPERVISE_PURPOSE, "assistant", supervise?.purpose));
+      if (at !== loads.current) return;
+      // each use set apart from a category right after it (#7980): the In-meeting conversation after the supervisor,
+      // Meeting minutes after Information processing
+      setData(withUsesAfterCategories(withPurposeAfter(catalog, SUPERVISE_PURPOSE, "assistant", supervise?.purpose)));
       setError("");
     } catch (e) {
+      if (at !== loads.current) return;
       setError(e instanceof ApiError && e.status === 404 ? t("settings-modelconfiguration.unsupported") : errorText(e));
     }
   };
   useEffect(() => { void load(); }, []);
   const groups = useMemo(() => purposeGroups(data?.purposes ?? [], query, data?.providers), [data, query]);
   const sourceName = (id?: string) => data?.purposes.find((p) => p.id === id)?.name ?? id;
+  const categoryOf = (p: ModelPurpose) => data ? followedCategory(p, data.purposes) : undefined;
 
   return (
     <>
@@ -71,19 +92,19 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
       {groups.map(([group, purposes]) => (
         <Group key={group} title={group} footer={purposes.some((p) => p.id === "assistant") ? t("settings-modelconfiguration.schedule_default") : undefined}>
           {purposes.map((p) => (
-            <PurposeRow key={p.id} purpose={p} providers={data?.providers ?? []} sourceName={sourceName} onOpen={() => onOpen(p.id)} />
+            <PurposeRow key={p.id} purpose={p} providers={data?.providers ?? []} sourceName={sourceName} category={categoryOf(p)} onOpen={() => onOpen(p.id)} />
           ))}
         </Group>
       ))}
       <Button tone="quiet" onClick={onProviders}>{t("settings-modelconfiguration.manage_providers")}</Button>
-      <PurposeEditor manager={manager} key={open} id={open} sourceName={sourceName} onClose={() => onOpen(null)} onSaved={() => void load()} />
+      <PurposeEditor manager={manager} key={open} id={open} sourceName={sourceName} catalog={data?.purposes} onClose={() => onOpen(null)} onSaved={() => void load()} />
     </>
   );
 }
 
 /** A sibling help button keeps the editing row a single, unnested button.
  * Details expand inside the card so they stay reachable on narrow screens and at larger text sizes. */
-function PurposeRow({ purpose: p, providers, sourceName, onOpen }: { purpose: ModelPurpose; providers: ModelProvider[]; sourceName: (id?: string) => string | undefined; onOpen: () => void }) {
+function PurposeRow({ purpose: p, providers, sourceName, category, onOpen }: { purpose: ModelPurpose; providers: ModelProvider[]; sourceName: (id?: string) => string | undefined; category?: ModelPurpose; onOpen: () => void }) {
   const machines = useStore((s) => s.machines);
   const form = executionForm(p, providers, machines);
   const [help, setHelp] = useState(false);
@@ -98,7 +119,8 @@ function PurposeRow({ purpose: p, providers, sourceName, onOpen }: { purpose: Mo
     document.addEventListener("pointerdown", close);
     return () => document.removeEventListener("pointerdown", close);
   }, [help]);
-  const inheritance = agentsOverride(p) ? (p.override.provider || p.override.model || p.override.effort ? agentsOverrideStatus(p.override) : t("settings-modelconfiguration.lark_headless_inheritance"))
+  const inheritance = agentsOverride(p) ? (overridden(p.override) ? agentsOverrideStatus(p.override) : t("settings-modelconfiguration.lark_headless_inheritance"))
+    : category ? categoryStatus(p.override, category)
     : p.inherited_from ? t("settings-modelconfiguration.follows", { name: sourceName(p.inherited_from) ?? "" })
     : !p.status ? t("settings-modelconfiguration.custom") : "";
   const description = purposeDescription(p);
@@ -136,7 +158,11 @@ function PurposeRow({ purpose: p, providers, sourceName, onOpen }: { purpose: Mo
 
 const inputClass = "h-9 w-full rounded-control bg-field px-3 text-[13px] text-ink shadow-inset-field outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--accent)] disabled:opacity-60";
 
-function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager: string; id: string | null; sourceName: (id?: string) => string | undefined; onClose: () => void; onSaved: () => void }) {
+function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
+  manager: string; id: string | null; sourceName: (id?: string) => string | undefined;
+  /** The page's catalog, when it loaded: the category a use follows, its name and its binding. */
+  catalog?: ModelPurpose[]; onClose: () => void; onSaved: () => void;
+}) {
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const [data, setData] = useState<ModelPurposeBody | null>(null);
@@ -179,10 +205,22 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
 
   const p = data?.purpose;
   const candidates = p ? providersFor(p, data.providers) : [];
-  const chosen = data?.providers.find((v) => v.id === (draft.provider || p?.effective?.provider));
+  // The draft names no provider of its own: once saved it runs on what it follows. While nothing is overridden that is
+  // what is in effect; with an override, the binding of the category a use with a record of its own follows (from the
+  // page's catalog), as the reset makes it (#7980). Without that, what is in effect, as before.
+  const parent = p && catalog ? parentCategory(p, catalog) : undefined;
+  const following = !!p && overridden(p.override) && !!parent;
+  const runsOn = draft.provider || (following ? parent?.effective?.provider : p?.effective?.provider);
+  const chosen = data?.providers.find((v) => v.id === runsOn);
   const followsAgents = !!p && agentsOverride(p);
+  // a use set apart from its category (#7980): follows it by name, and goes back to it
+  const category = p && !followsAgents && catalog ? followedCategory(p, catalog) : undefined;
+  const follow = followsAgents ? t("settings-modelconfiguration.follow_agents") : category ? t("settings-modelconfiguration.follow_category", { name: category.name }) : "";
+  const onlyClaudeID = useId();
   const writable = p && (["provider", "model", "effort"] as const).some((field) => supportsField(p, field));
-  const effortAllowed = p && supportsField(p, "effort") && (followsAgents || chosen?.kind !== "api" || chosen.api === "responses" || chosen.api === "messages" || !chosen.api);
+  const effectiveProvider = data?.providers.find((v) => v.id === p?.effective?.provider);
+  // by the provider the draft runs on, not only by the fields the hub sent for the one in effect
+  const effortAllowed = !!p && effortOffered(p, chosen, effectiveProvider, followsAgents);
   const listProvider = p?.kind !== "plugin" && chosen?.kind === "launcher" && supportsField(p!, "model") ? chosen.id : "";
   useEffect(() => {
     const refresh = refreshNext.current;
@@ -200,23 +238,28 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
   const reloadList = () => { refreshNext.current = true; setReload((n) => n + 1); };
   // The picker while there is a list (or one coming); the plain field without one: an older hub, a failure.
   const picker = launcherList.status === "loading" || (launcherList.status === "ready" && !!launcherList.list?.models.length);
-  // Left empty, the model is inherited while the provider is too (what runs now when nothing here is set); with a
-  // provider picked here it is that provider's default (the list's "Default").
-  const inherited: ModelBinding = !draft.provider && !p?.override?.model && p?.effective?.model ? { model: p.effective.model } : {};
+  // Left empty, the model is inherited while the provider is too (what runs now when nothing here is set; with an
+  // override, the category's); with a provider picked here it is that provider's default (the list's "Default").
+  const inheritedModel = draft.provider ? undefined : following ? parent?.effective?.model : !p?.override?.model ? p?.effective?.model : undefined;
+  const inherited: ModelBinding = inheritedModel ? { model: inheritedModel } : {};
   const listedEfforts = launcherList.status === "ready" && launcherList.list && takesEffort(launcherList.list.agent)
     ? effortChoices(launcherList.list, draft.model, inherited) : (p?.id === "inbox.triage" || p?.kind === "api" ? ["off", "low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high", "xhigh", "max"]);
-  const effectiveProvider = data?.providers.find((v) => v.id === p?.effective?.provider);
   const effectiveAgent = providerAgent(effectiveProvider, p?.effective?.provider);
-  const chosenAgent = (launcherList.provider === listProvider && launcherList.list?.agent) || providerAgent(chosen, draft.provider || p?.effective?.provider);
+  const chosenAgent = (launcherList.provider === listProvider && launcherList.list?.agent) || providerAgent(chosen, runsOn);
   const runtimes = p ? runtimeChoices(p, chosenAgent) : [];
-  const previewForm = p ? executionForm({ ...p, effective: { ...p.effective, provider: draft.provider || p.effective?.provider, runtime: draft.runtime || p.effective?.runtime } }, data?.providers, machines) : undefined;
+  const configDirs = p ? configDirChoices(p, chosenAgent) : [];
+  const previewForm = p ? executionForm({ ...p, effective: { ...p.effective, provider: runsOn, runtime: draft.runtime || p.effective?.runtime } }, data?.providers, machines) : undefined;
   const listMachine = machines.find((m) => m.id === launcherList.machine)?.name ?? launcherList.machine;
   const save = async (restore = false) => {
     if (!p || !writable || busy || conflict) return;
     setBusy(true);
     setError("");
     try {
-      const r = await saveModelPurpose(p, restore ? { provider: "", model: "", effort: "", runtime: draft.runtime } : draft, manager);
+      // one patch: the reset's, keeping the runtime and the profile (a use with a record of its own clears all three
+      // whatever this page grouped it under),
+      // else the draft's fields, effort with them where the provider it runs on takes one
+      const patch = restore ? resetPatch(p, draft.runtime, draft.config_dir) : modelPatch(p, draft, supportsField(p, "effort") || effortAllowed);
+      const r = await saveModelPurpose(p, patch, manager);
       if (!alive.current) return;
       setData(r);
       setDraft(draftFor(r.purpose));
@@ -232,32 +275,42 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
     }
   };
 
+  const reset = <Button tone="quiet" disabled={busy || !writable || conflict} onClick={() => void save(true)}>{follow || t("settings-modelconfiguration.restore")}</Button>;
+  const actions = <>
+    <Button tone="quiet" disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
+    <Button tone="primary" busy={busy} disabled={!writable || conflict} onClick={() => void save()}>{t("common.save")}</Button>
+  </>;
   return (
     <Dialog open={id !== null} onClose={() => { if (!busy) onClose(); }} width={480} title={p?.name ?? t("settings-modelconfiguration.dialog_title")}
-      footer={<>
-        <Button tone="quiet" disabled={busy || !writable || conflict} onClick={() => void save(true)}>{followsAgents ? t("settings-modelconfiguration.follow_agents") : t("settings-modelconfiguration.restore")}</Button>
-        <span className="flex-1" />
-        <Button tone="quiet" disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
-        <Button tone="primary" busy={busy} disabled={!writable || conflict} onClick={() => void save()}>{t("common.save")}</Button>
-      </>}
+      footer={category
+        // "Follow Information processing" (#7980) is longer than "Inherit": where the three do not fit on one line (a
+        // phone, Large text) the reset takes a line of its own above Cancel and Save, its words whole (labels never wrap)
+        ? <div data-editor-footer className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{reset}<div className="ml-auto flex gap-2">{actions}</div></div>
+        : <>{reset}<span className="flex-1" />{actions}</>}
     >
       {!p && !error && <Loading />}
       {p && <div className="flex flex-col gap-4">
         {followsAgents && <p className="text-[12px] text-ink-3">{agentsOverrideStatus(p.override)}</p>}
+        {category && <p className="text-label text-ink-3">{categoryStatus(p.override, category)}</p>}
         <Group title={t("settings-modelconfiguration.effective")} footer={p.inherited_from ? t("settings-modelconfiguration.inherited_from", { name: sourceName(p.inherited_from) ?? "" }) : t("settings-modelconfiguration.effective_footer")}>
           <Row label={t("settings-modelconfiguration.provider")} mono><span className="max-w-[220px] truncate">{providerName(p.effective?.provider, data?.providers) ?? t("settings-modelconfiguration.not_configured")}</span></Row>
           <Row label={t("settings-modelconfiguration.model")} mono><span className="max-w-[220px] truncate">{p.effective?.model || t("settings-modelconfiguration.provider_default")}</span></Row>
           {runtimes.length > 0 && <Row label={t("settings-modelconfiguration.runtime")}><span>{runtimeLabel(p.effective?.runtime, effectiveAgent)}</span></Row>}
+          {configDirChoices(p, effectiveAgent).length > 0 && <Row label={t("settings-modelconfiguration.config_dir")}><span>{configDirLabel(p.effective?.config_dir)}</span></Row>}
           {p.status && <Row label={t("settings-modelconfiguration.status")}><Pill>{p.status}</Pill></Row>}
         </Group>
-        {supportsField(p, "provider") && <label className="block">
-          <span className="mb-1 block text-[12px] font-medium text-ink-2">{t("settings-modelconfiguration.model_provider")}</span>
-          <select className={inputClass} value={draft.provider} disabled={busy} onChange={(e) => setDraft((d) => chooseProvider(d, e.target.value))}>
-            <option value="">{followsAgents ? t("settings-modelconfiguration.follow_agents") : t("settings-modelconfiguration.follow_default")}</option>
-            {draft.provider && !candidates.some((v) => v.id === draft.provider) && <option value={draft.provider}>{draft.provider.startsWith("legacy.") ? t("settings-modelconfiguration.not_configured") : t("settings-modelconfiguration.provider_unavailable", { id: providerName(draft.provider, data?.providers) ?? draft.provider })}</option>}
-            {candidates.map((v) => <option key={v.id} value={v.id}>{v.hidden ? t("settings-modelconfiguration.provider_hidden", { name: v.name }) : v.name}</option>)}
-          </select>
-        </label>}
+        {supportsField(p, "provider") && <div>
+          <label className="block">
+            <span className="mb-1 block text-[12px] font-medium text-ink-2">{t("settings-modelconfiguration.model_provider")}</span>
+            <select className={inputClass} value={draft.provider} disabled={busy} onChange={(e) => setDraft((d) => chooseProvider(d, e.target.value))} aria-describedby={claudeCodeOnly(p) ? onlyClaudeID : undefined}>
+              <option value="">{follow || t("settings-modelconfiguration.follow_default")}</option>
+              {draft.provider && !candidates.some((v) => v.id === draft.provider) && <option value={draft.provider}>{draft.provider.startsWith("legacy.") ? t("settings-modelconfiguration.not_configured") : t("settings-modelconfiguration.provider_unavailable", { id: providerName(draft.provider, data?.providers) ?? draft.provider })}</option>}
+              {candidates.map((v) => <option key={v.id} value={v.id}>{v.hidden ? t("settings-modelconfiguration.provider_hidden", { name: v.name }) : v.name}</option>)}
+            </select>
+          </label>
+          {/* the In-meeting conversation: why only these providers are offered (#7980) */}
+          {claudeCodeOnly(p) && <span id={onlyClaudeID} data-testid="claude-code-only" className="mt-1 block text-submeta text-ink-3">{t("settings-modelconfiguration.claude_code_only")}</span>}
+        </div>}
         {previewForm && <div data-execution-preview><Pill wrap>{previewForm.label} · {previewForm.backend}</Pill></div>}
         {supportsField(p, "model") && <div className="block">
           <span className="mb-1 block text-[12px] font-medium text-ink-2">{t("settings-modelconfiguration.specific_model")}</span>
@@ -265,7 +318,7 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
             <option value="">{t("settings-modelconfiguration.follow_extension_default")}</option>
             {draft.model && !models.some((m) => m.id === draft.model) && <option value={draft.model}>{t("settings-modelconfiguration.model_current", { id: draft.model })}</option>}
             {models.map((m) => <option key={m.id} value={m.id}>{m.name || m.id}</option>)}
-          </select> : picker ? <ModelPicker
+          </select> : picker ? <div inert={busy}><ModelPicker
             models={launcherList}
             model={draft.model}
             followed={inherited}
@@ -282,7 +335,8 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
             onReload={reloadList}
             custom
             failedNote={t("settings-modelconfiguration.list_failed")}
-          /> : <input aria-label={t("settings-modelconfiguration.specific_model")} className={`${inputClass} font-mono`} value={draft.model} disabled={busy} placeholder={chosen?.model || p.effective?.model || t("settings-modelconfiguration.follow_default")}
+          /></div> : <input aria-label={t("settings-modelconfiguration.specific_model")} className={`${inputClass} font-mono`} value={draft.model} disabled={busy}
+            placeholder={(following && inherited.model) || chosen?.model || p.effective?.model || t("settings-modelconfiguration.follow_default")}
             spellCheck={false} autoComplete="off" onChange={(e) => setDraft((d) => ({ ...d, model: e.target.value }))} />}
           <span className="mt-1 block text-[11px] text-ink-3">
             {!picker ? t("settings-modelconfiguration.field_hint")
@@ -299,7 +353,7 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
         </div>}
         {effortAllowed && <label className="block">
           <span className="mb-1 block text-[12px] font-medium text-ink-2">{t("settings-modelconfiguration.effort")}</span>
-          <input className={inputClass} value={draft.effort} disabled={busy} placeholder={p.effective?.effort || t("settings-modelconfiguration.follow_default")} list="model-efforts"
+          <input className={inputClass} value={draft.effort} disabled={busy} placeholder={(following && !draft.provider ? parent?.effective?.effort : p.effective?.effort) || t("settings-modelconfiguration.follow_default")} list="model-efforts"
             onChange={(e) => setDraft((d) => ({ ...d, effort: e.target.value }))} />
           <datalist id="model-efforts">{listedEfforts.map((v) => <option key={v} value={v} />)}</datalist>
         </label>}
@@ -308,6 +362,12 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
           <Segmented label={t("settings-modelconfiguration.runtime")} value={chosenAgent === "claude" ? draft.runtime : "cli"} options={runtimes.map((r) => ({ v: r.id, label: r.label }))}
             onChange={(runtime) => { if (!busy && chosenAgent === "claude") setDraft((d) => ({ ...d, runtime })); }} />
           {chosenAgent === "claude" && <span className="mt-1 block text-[11px] text-ink-3">{t("settings-modelconfiguration.runtime_hint")}</span>}
+        </div>}
+        {configDirs.length > 0 && <div className="block">
+          <span className="mb-1 block text-label font-medium text-ink-2">{t("settings-modelconfiguration.config_dir")}</span>
+          <Segmented label={t("settings-modelconfiguration.config_dir")} value={draft.config_dir ?? "private"} options={configDirs.map((c) => ({ v: c.id, label: c.label }))}
+            onChange={(config_dir) => { if (!busy) setDraft((d) => ({ ...d, config_dir })); }} />
+          <span className="mt-1 block text-submeta text-ink-3">{t("settings-modelconfiguration.config_dir_hint")}</span>
         </div>}
         <p className="text-[11.5px] leading-relaxed text-ink-3">{p.kind === "plugin" ? t("settings-modelconfiguration.save_note_plugin") : t("settings-modelconfiguration.save_note")}</p>
       </div>}

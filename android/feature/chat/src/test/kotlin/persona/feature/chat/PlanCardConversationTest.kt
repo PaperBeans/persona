@@ -151,7 +151,7 @@ class PlanCardConversationTest {
             rule.onNodeWithText("It only touches the docs folder").assertIsDisplayed()
             // the choice, then the three actions in iOS's order
             rule.onNodeWithTag("plan-directly").assertIsDisplayed().assertIsOff()
-            rule.onNodeWithText("Start these directly").assertIsDisplayed()
+            rule.onNodeWithText("Start directly here and in subfolders").assertIsDisplayed()
             rule.onNodeWithTag("plan-start-plan").assertTextEquals("Start 2 tasks").assertIsEnabled()
             rule.onNodeWithTag("plan-edit-plan").assertTextEquals("Edit")
             rule.onNodeWithTag("plan-dismiss-plan").assertTextEquals("Don't start")
@@ -307,8 +307,8 @@ class PlanCardConversationTest {
     }
 
     @Config(qualifiers = "zh-w400dp-h1200dp-xhdpi")
-    @Test fun simplifiedChinese() = words("zh", "拆成 2 件事，这样开", "开始 2 个任务", "改一下", "不开", "这类以后直接开")
+    @Test fun simplifiedChinese() = words("zh", "拆成 2 件事，这样开", "开始 2 个任务", "改一下", "不开", "这些目录及子目录以后直接开")
 
     @Config(qualifiers = "ja-w400dp-h1200dp-xhdpi")
-    @Test fun japanese() = words("ja", "2件に分けて、この内容で開始", "2件のタスクを開始", "編集", "開始しない", "今後はすぐに開始")
+    @Test fun japanese() = words("ja", "2件に分けて、この内容で開始", "2件のタスクを開始", "編集", "開始しない", "今後このフォルダ以下はすぐに開始")
 }

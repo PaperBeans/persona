@@ -3,6 +3,18 @@ import type { MenuItem } from "../ui/menu-model";
 import { canChangeHost, canRenameIn, gitOutcomeText, machineNode, nodeActions, sessionNode, termPaneNode, termSpaceNode, termTabNode, type MenuNode, type NodeActionDeps } from "./node-actions";
 import { buildTerminalTree, shellsOnly, type PanesResponse } from "./terminals";
 import type { Session } from "./types";
+import zhNode from "../i18n/locales/zh-Hans/lib-node-actions.json";
+import enNode from "../i18n/locales/en/lib-node-actions.json";
+import jaNode from "../i18n/locales/ja/lib-node-actions.json";
+import zhWorktree from "../i18n/locales/zh-Hans/worktree-actions.json";
+import enWorktree from "../i18n/locales/en/worktree-actions.json";
+import jaWorktree from "../i18n/locales/ja/worktree-actions.json";
+import zhAgent from "../i18n/locales/zh-Hans/agentmenus.json";
+import enAgent from "../i18n/locales/en/agentmenus.json";
+import jaAgent from "../i18n/locales/ja/agentmenus.json";
+import zhChat from "../i18n/locales/zh-Hans/chat-chatview.json";
+import enChat from "../i18n/locales/en/chat-chatview.json";
+import jaChat from "../i18n/locales/ja/chat-chatview.json";
 
 function deps(over: Partial<NodeActionDeps> = {}): NodeActionDeps {
   return {
@@ -236,6 +248,33 @@ describe("read-only items", () => {
     }
     (by(items, "node-git").children as MenuItem[]).find((i) => i.key === "node-copy-branch")!.onSelect();
     expect(d.copy).toHaveBeenLastCalledWith("feat/x");
+  });
+  it("says one verb and ID, and names the id by what it is, never by the engine (herdr) behind it", () => {
+    const d = deps();
+    const space: MenuNode = { kind: "workspace", mid: "m1", host: "herdr", label: "proj", workspaceId: "w1", cwd: "/home/me/proj" };
+    const labels = (node: MenuNode) => nodeActions(node, d).filter((i) => i.icon === "copy").map((i) => i.label);
+    expect(labels(pane)).toEqual(["复制目录路径", "复制会话 ID", "复制窗格 ID"]);
+    expect(labels(tab)).toEqual(["复制目录路径", "复制标签页 ID"]);
+    expect(labels(space)).toEqual(["复制目录路径", "复制空间 ID"]);
+    expect(labels({ kind: "machine", mid: "m1" })).toEqual(["复制机器 ID"]);
+    // the same values as before: only the words changed
+    by(nodeActions(tab, d), "node-copy-id").onSelect();
+    expect(d.copy).toHaveBeenLastCalledWith("w1:t2");
+    by(nodeActions(space, d), "node-copy-id").onSelect();
+    expect(d.copy).toHaveBeenLastCalledWith("w1");
+    for (const node of [pane, tab, space]) for (const label of labels(node)) expect(label).not.toMatch(/herdr|拷贝|\bid\b/);
+  });
+  it("copies a folder's path in the same words in every menu of the Agents list and a chat, in every language", () => {
+    const languages = [
+      { node: zhNode, worktree: zhWorktree, agent: zhAgent, chat: zhChat },
+      { node: enNode, worktree: enWorktree, agent: enAgent, chat: enChat },
+      { node: jaNode, worktree: jaWorktree, agent: jaAgent, chat: jaChat },
+    ];
+    for (const { node, worktree, agent, chat } of languages) {
+      expect(new Set([node.copy_path, worktree.copy_path, agent.copy_folder, chat.copy_folder]).size).toBe(1);
+    }
+    // the By repository grouping's worktree menu, beside the node menus, says their verb
+    expect([zhWorktree.copy_name, zhWorktree.copy_path, zhNode.copy_path]).toEqual(["复制工作树名称", "复制目录路径", "复制目录路径"]);
   });
   it("leaves out what is not known", () => {
     const k = keys(nodeActions({ kind: "pane", mid: "m1", paneId: "w1:p3", agent: "" }, deps()));

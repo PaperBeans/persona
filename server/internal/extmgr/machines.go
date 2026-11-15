@@ -13,6 +13,7 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/devices"
 	"github.com/nwverse/persona/server/internal/devicewire"
+	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/streams"
 )
@@ -67,7 +68,8 @@ type Machine struct {
 	// tellCursor). Each tell reads the setting and then waits for the node, and the plugin's changes start them
 	// concurrently; without the lock, a tell that read the old setting could reach the node after a newer one and
 	// leave it held awake (for up to the node's 30 minutes) or with the wrong cursor.
-	noLockMu, cursorMu sync.Mutex
+	noLockMu, cursorMu  sync.Mutex
+	nodePackageFailures map[proto.PluginNodeProgram]nodePackageFailure
 }
 
 // config is the computer's configuration as the devices list it now.
@@ -103,6 +105,14 @@ func (m *Machine) isOnline() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.online
+}
+
+// mcpWaitCapable is the target node's authenticated handshake promise to preserve call_id through a nested elicitation.
+// Protocol 0 and an omitted capability are deliberately incapable, so an older target yields the unknown fallback.
+func (m *Machine) mcpWaitCapable() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.info.Protocol > 0 && slices.Contains(m.info.Capabilities, nodeproto.MCPWait)
 }
 
 // devicesPeer is a computer's node through the devices in this process.

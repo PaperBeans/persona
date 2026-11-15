@@ -3,6 +3,8 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
@@ -128,8 +131,14 @@ func negatedBefore(pre string) bool {
 // stageOf is how far a reply says the work got (at least develop: the agent worked), and the PR it names.
 func stageOf(text string) (stage, pr string) {
 	stage = "develop"
-	if prs := prLink.FindAllString(text, -1); len(prs) > 0 {
-		pr = prs[len(prs)-1]
+	if ref := closeoutPRRef(text); ref != "" {
+		pr = prLink.FindString(ref)
+	} else if deliveryCloseout(text) == "" {
+		if prs := prLink.FindAllString(text, -1); len(prs) > 0 {
+			pr = prs[len(prs)-1]
+		}
+	}
+	if pr != "" {
 		stage = "review"
 		if said(mergedWords, text) {
 			stage = "merge"
@@ -168,8 +177,22 @@ var generalTaskWords = lazyre.New(`(?i)\b(research|investigate|report|plan|triag
 
 // advanceTaskReply handles progress and final answers identically, including the running-hub deploy check.
 func (s *Service) advanceTaskReply(ctx context.Context, t Todo, machine, session, text string) bool {
+	urls := taskRepositoryReportLinks(text)
+	if len(urls) > 0 {
+		if err := s.importTodoRepositoryLinks(ctx, t.ID, urls, "report"); err != nil {
+			s.logf("task %s: repository links not saved: %v", t.ID, err)
+		}
+	}
 	stage, pr := stageOf(text)
 	d, marked := deliveryMark(text)
+	if pr != "" {
+		s.learnRepoRoot(ctx, machine, session, pr)
+	} else if pr = s.prFromNumber(ctx, t, machine, session, text); pr != "" && stage == "develop" && !marked {
+		stage = "review" // as stageOf has it for a linked PR (#7921)
+		if said(mergedWords, text) {
+			stage = "merge"
+		}
+	}
 	if !marked && stageIndex(stage) < stageIndex("merge") && pr == "" && t.PRURL != "" && said(mergedWords, text) {
 		stage = "merge" // later replies need not repeat the link already kept on the task
 	}
@@ -227,11 +250,12 @@ type todoStage struct {
 	Stage    string        `json:"stage"`
 	Kind     string        `json:"stage_kind,omitempty"`
 	PR       string        `json:"pr,omitempty"`
-	PRs      []string      `json:"prs,omitempty"`      // the PRs named before PR, newest last, at most stagePRsKept (#6507)
-	Delivery *TodoDelivery `json:"delivery,omitempty"` // delivery.go
-	Deploy   *deployWatch  `json:"deploy,omitempty"`   // deploy_check.go: held until the running hub has the work
-	Verified bool          `json:"verified,omitempty"` // explicit acceptance outranks delivery and reply keywords
-	Check    *TodoCheck    `json:"check,omitempty"`    // task_check.go
+	PRs      []string      `json:"prs,omitempty"`       // the PRs named before PR, newest last, at most stagePRsKept (#6507)
+	Delivery *TodoDelivery `json:"delivery,omitempty"`  // delivery.go
+	Deploy   *deployWatch  `json:"deploy,omitempty"`    // deploy_check.go: held until the running hub has the work
+	Verified bool          `json:"verified,omitempty"`  // explicit acceptance outranks delivery and reply keywords
+	Check    *TodoCheck    `json:"check,omitempty"`     // task_check.go
+	PRStatus *TodoPRStatus `json:"pr_status,omitempty"` // Observed forge facts, not a task state.
 }
 
 const reportStagesKey = "assistant.todo_stages"
@@ -239,7 +263,7 @@ const reportStagesKey = "assistant.todo_stages"
 // empty: st keeps nothing (its row can go).
 func (st todoStage) empty() bool {
 	return st.Stage == "" && st.Kind == "" && st.PR == "" && len(st.PRs) == 0 && st.Delivery == nil && st.Deploy == nil && !st.Verified &&
-		st.Check == nil
+		st.Check == nil && st.PRStatus == nil
 }
 
 // stagePRsKept bounds a task's earlier PRs (todoStage.PRs).
@@ -249,6 +273,71 @@ const stagePRsKept = 20
 func keptPRs(prs []string, pr string) []string {
 	out := append(slices.DeleteFunc(slices.Clone(prs), func(p string) bool { return p == pr }), pr)
 	return out[max(0, len(out)-stagePRsKept):]
+}
+
+// forgetTaskPR removes a non-delivery record and installs only an explicitly recovered delivery, never an
+// unproven historical reference. A confirmed no-PR result also discards that reference history and its hold.
+func (s *Service) forgetTaskPR(ctx context.Context, id, pr, replacement string) error {
+	b := &s.reports
+	b.stageWriting.Lock()
+	defer b.stageWriting.Unlock()
+	b.mu.Lock()
+	if !s.loadStagesLocked(ctx) {
+		b.mu.Unlock()
+		return fmt.Errorf("task %s: stages could not be read", id)
+	}
+	cur := b.stages[id]
+	removed := cur.PR == pr
+	history := slices.DeleteFunc(slices.Clone(cur.PRs), func(p string) bool { return p == pr })
+	changed := removed || len(history) != len(cur.PRs)
+	cur.PRs = history
+	if removed {
+		cur.PR = replacement
+		if replacement != "" {
+			cur.PRs = slices.DeleteFunc(cur.PRs, func(p string) bool { return p == replacement })
+		}
+		if cur.PR == "" {
+			cur.PRs = nil
+		}
+		if cur.PRStatus != nil && (cur.PR == "" || cur.PRStatus.URL == pr) {
+			cur.PRStatus = nil
+		}
+		if cur.PR == "" && !cur.Verified && (cur.Stage == "review" || cur.Stage == "merge") {
+			cur.Stage = "develop"
+		}
+	}
+	removedWatch := cur.Deploy != nil && (cur.Deploy.PR == pr || removed && cur.PR == "")
+	if removedWatch {
+		cur.Deploy, changed = nil, true
+	}
+	if (removed || removedWatch) && cur.Delivery != nil &&
+		(cur.Delivery.State == deliveryPR || cur.Delivery.State == deliveryMerged) {
+		cur.Delivery = nil
+	}
+	if !changed {
+		b.mu.Unlock()
+		return nil
+	}
+	stages := maps.Clone(b.stages)
+	stages[id] = cur
+	if st := s.store(); st != nil {
+		if err := st.PutSetting(ctx, reportStagesKey, stages); err != nil {
+			b.mu.Unlock()
+			return fmt.Errorf("task %s: remove non-PR: %w", id, err)
+		}
+	}
+	b.stages = stages
+	b.mu.Unlock()
+	s.todos.mu.Lock()
+	if t := s.todos.todos[id]; t != nil {
+		t.Stage, t.PRURL, t.PRs, t.Delivery, t.PRStatus = cur.Stage, cur.PR, cur.PRs, cur.Delivery, cur.PRStatus
+	}
+	s.todos.mu.Unlock()
+	s.deploy.mu.Lock()
+	delete(s.deploy.seen, id)
+	s.deploy.mu.Unlock()
+	s.todosChanged(ctx)
+	return nil
 }
 
 // taskReport notes a change of task t for the next card. ix: what it asks (needs).
@@ -291,6 +380,17 @@ func (s *Service) setTaskStage(ctx context.Context, id, stage, pr string) {
 }
 
 func (s *Service) setTaskStageKind(ctx context.Context, id, stage, pr, kind string, verified bool) {
+	if _, link, err := repository.ParseTaskLink(pr); err == nil {
+		if err = s.importTodoRepositoryLinks(ctx, id, []string{link.CanonicalURL}, "report"); err != nil {
+			s.logf("task %s: repository link not saved: %v", id, err)
+		}
+	}
+	s.setTaskStageOn(ctx, id, stage, pr, kind, verified, "")
+}
+
+// setTaskStageOn is setTaskStageKind, and when onPR is set it does nothing unless, under the stage lock, the open to-do
+// and its stage still name that PR: an observation of a PR that was replaced meanwhile moves no stage (#7614 review).
+func (s *Service) setTaskStageOn(ctx context.Context, id, stage, pr, kind string, verified bool, onPR string) {
 	if !verified && stage == "verify" {
 		if t, ok := s.todoNow(id); ok && t.Supervision != nil {
 			v := t.Supervision
@@ -302,6 +402,12 @@ func (s *Service) setTaskStageKind(ctx context.Context, id, stage, pr, kind stri
 	b := &s.reports
 	b.stageWriting.Lock()
 	defer b.stageWriting.Unlock()
+	if onPR != "" {
+		// The to-do's PR changes only under stageWriting (below), so it is read before b.mu, in the usual lock order.
+		if t, ok := s.todoNow(id); !ok || t.DoneAt != nil || t.PRURL != onPR {
+			return
+		}
+	}
 	b.mu.Lock()
 	if !s.loadStagesLocked(ctx) {
 		b.mu.Unlock()
@@ -309,6 +415,10 @@ func (s *Service) setTaskStageKind(ctx context.Context, id, stage, pr, kind stri
 		return
 	}
 	cur := b.stages[id]
+	if onPR != "" && cur.PR != onPR {
+		b.mu.Unlock()
+		return
+	}
 	changed := false
 	if verified && !cur.Verified {
 		cur.Verified, changed = true, true
@@ -427,6 +537,7 @@ func (s *Service) sendReports() {
 		return
 	}
 	var keep, asks []*reportItem // asks: decisions whose own card goes out without a line in the report (only_conclusions)
+	quiet := s.quietModeOn(ctx)
 	for _, it := range items {
 		t, ok := s.todoNow(it.todo)
 		if !ok {
@@ -440,6 +551,14 @@ func (s *Service) sendReports() {
 		}
 		if t.Quiet && f.Sync && it.state != reportClosed {
 			continue // told in the main conversation, whose turns the chat mirrors (sync); closing is not told there
+		}
+		if quiet {
+			// Low-distraction mode (push_quiet.go): no progress, stuck or conclusion lines in the chat; the briefing and the
+			// board have them. A decision still gets its own answerable card.
+			if it.state == reportNeeds && it.ix != nil {
+				asks = append(asks, it)
+			}
+			continue
 		}
 		if !f.ReportSteps {
 			if it.state == reportNeeds && it.ix != nil {

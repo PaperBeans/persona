@@ -84,6 +84,8 @@ data class SettingsServices(
     val desktops: kotlinx.coroutines.flow.StateFlow<List<persona.core.contracts.HubDesktop>>? = null,
     /** Settings › Storage's deleting of cache files, keeping the ones the data layer has open; null deletes them directly. */
     val clearCacheFiles: ((List<java.io.File>) -> Unit)? = null,
+    /** Settings › Knowledge selection on the paired hub; null in demo mode. */
+    val knowledgeSelection: KnowledgeSelection? = null,
     /** How the Agents list draws its agents (Settings › Interface style, Glass), kept with the list's other settings; null without a list. */
     val agentsDisplay: persona.core.domain.sort.AgentListDisplaySettings? = null,
 )
@@ -126,6 +128,7 @@ internal fun SettingsServices.forAssistant(assistant: persona.core.contracts.api
         providers = providers?.forManager(id),
         models = models?.forManager(id),
         triage = triage?.forManager(id),
+        knowledgeSelection = knowledgeSelection?.forManager(id),
         connectors = connectors?.forManager(id),
         channels = channels?.forManager(id),
         feishuBot = feishuBot?.forManager(id),

@@ -8,7 +8,7 @@ import { t } from "../../i18n";
 import { shortPath } from "../../lib/format";
 import { filterQuery, PAGE_SIZE, SessionList, type ListFilters } from "../../lib/session-list";
 import { groupMachines, holdsPlace, type GroupDimension, type SessionGroup, type SessionPlace } from "../../lib/session-groups";
-import { onHubEvent } from "../../lib/store";
+import { onShownHint } from "../../lib/shown-hints";
 import { useFolded } from "../../lib/use-folded";
 import { nestUnderParents } from "../../lib/side-sessions";
 import { Button } from "../../ui/atoms";
@@ -96,7 +96,7 @@ function GroupSection<T>({ group, first, startsOpen, dimension, kind, scope, sou
 function GroupPlaces({ group, machineName }: { group: SessionGroup; machineName: (id: string) => string }) {
   if (!group.origin && !group.places.length) return null;
   return (
-    <ul aria-label={t("paged-agents.places")} className="flex flex-col gap-0.5 px-2 pb-1 text-xs text-ink-3">
+    <ul aria-label={t("agents-groupedsessions.places")} className="flex flex-col gap-0.5 px-2 pb-1 text-xs text-ink-3">
       {group.origin && (
         <li className="flex min-w-0 items-center gap-1.5">
           <Icon name="git" size={11} className="shrink-0" />
@@ -131,7 +131,7 @@ function GroupRows<T>({ group, dimension, scope, source, renderRow }: {
   const page = useSyncExternalStore(list.subscribe, list.getSnapshot, list.getSnapshot);
   useEffect(() => {
     void list.setFilters(filters).catch(() => {});
-    const off = onHubEvent(event, () => list.invalidate());
+    const off = onShownHint(event, () => list.invalidate());
     return () => { off(); list.reset(); };
   }, [list, filters, event]);
   // the newest few first, so several open sections fit a screen; "Load more" shows what is read, then reads on

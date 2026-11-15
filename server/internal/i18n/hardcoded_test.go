@@ -213,6 +213,8 @@ var terminalSources = []string{
 	"internal/manager/join.go",
 	"internal/manager/run.go",
 	"internal/manager/service.go",
+	"internal/scriptcli",
+	"internal/nodecmd",
 }
 
 // hardcodedCounts are the CJK string literals per file under sources (directories or files, relative to server/),

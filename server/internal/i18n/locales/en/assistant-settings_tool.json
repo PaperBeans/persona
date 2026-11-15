@@ -1,4 +1,6 @@
 {
+  "title_readonly_mode": "Read-only task protection",
+  "change_readonly_mode": "Read-only task protection: {before} -> {after}. sandbox keeps existing runtime protection (Codex uses a read-only sandbox; Claude uses instructions). prompt uses instructions only, not a security boundary; normal runtime permissions still apply. Applies to new task starts and retries, not running agents. Switch back to sandbox to restore the default.",
   "title_task_workspace_preference": "Task workspace preference",
   "change_task_workspace_preference": "Task workspace preference: {before} → {after}",
   "title_notes": "About me",
@@ -46,6 +48,8 @@
   "minutes_applied": "Meeting minutes retention is saved as {saved}; {after} is in effect. Transcripts still follow the recording retention.",
   "title_main_background_folded": "Fold background rounds",
   "change_main_background_folded": "“Fold background rounds”: {before} → {after}",
+  "title_recent_task_chats": "Show scheduled task chats in Recent",
+  "change_recent_task_chats": "“Show scheduled task chats in Recent”: {before} → {after}",
   "title_standing_authorizations": "Standing authorizations",
   "title_meeting_transcription_default": "Meeting transcription",
   "change_meeting_transcription_default": "Meeting transcription: {before} → {after}, for meetings started from now on. In hub mode, the meeting’s audio is sent to the hub’s transcription service. The hub deletes the audio once the minutes are written.",
@@ -56,5 +60,10 @@
   "meeting_transcription_unchanged": "The meeting transcription default is unchanged.",
   "meeting_transcription_applied": "Meeting transcription is set to {mode} for meetings started from now on.",
   "title_admission": "Execution Agent admission gate",
-  "change_admission": "Execution Agent admission gate: {before} → {after}"
+  "change_admission": "Execution Agent admission gate: {before} → {after}",
+  "title_task_trust": "Tasks that start without asking",
+  "change_task_trust_add_edit": "From now on, tasks that change files on {machine} in {directory} and its subfolders start right away, without a plan card",
+  "change_task_trust_add_read": "From now on, tasks that only read files on {machine} in {directory} and its subfolders start right away, without a plan card",
+  "change_task_trust_remove_edit": "Tasks that change files on {machine} in {directory} wait for Start on a plan card again",
+  "change_task_trust_remove_read": "Tasks that only read files on {machine} in {directory} are no longer remembered (read-only tasks still start right away)"
 }

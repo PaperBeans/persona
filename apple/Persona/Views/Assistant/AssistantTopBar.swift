@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 /// The Persona tab's top bar (docs/apple/ios.md「Persona top bar and sidebar」), floating over the conversation with a fog under it
 /// instead of a solid bar: Chat History (the sidebar) on the left, Persona's face and name in the middle, New Chat on the right.
@@ -24,8 +25,10 @@ struct AssistantTopBar: View {
     /// The Sidebar layout on a phone (#6332): the face opens the drawer, the conversation's name is the middle
     /// (`drawerRow`); off elsewhere.
     var drawerTitle = false
-    /// A phone's tabs (iPhone Duo open): the Assistant | Agents switch in the face's place (#2623).
-    @Environment(\.pageTabSwitch) private var pageTabSwitch
+    /// The sidebar beside the page has New Chat at its foot (the Sidebar layout's column on the iPad and the open iPhone
+    /// Duo, the iPad's Persona column): its one entry (#4206, the owner), so the page has none, the column out or away.
+    /// A phone keeps this one.
+    var newChatInSidebar = false
     var openSidebar: () -> Void
     var newConversation: () -> Void
     var openKnowledge: () -> Void
@@ -274,11 +277,16 @@ struct AssistantTopBar: View {
     }
 
     private var classicBar: some View {
-        // On a phone's tabs the column's own button folds it, at its top: this one only brings it back, and is not there
-        // while the column is out. Left out, not faded: a glass button made see-through (or slid away) while the split
-        // moved its columns left the page taking no touches at all on iPhone Duo open (2026-11-10).
-        let sidebarButtonShown = !(pageTabSwitch && sidebarIsColumn && sidebarShown)
+        // Beside the one sidebar's column (#4206) the column's own button folds it, at its top: this one only brings it
+        // back, and is not there while the column is out. Left out, not faded: a glass button made see-through (or slid
+        // away) while the split moved its columns left the page taking no touches at all on iPhone Duo open
+        // (2026-11-10).
+        let sidebarButtonShown = !(sidebarCounts && sidebarIsColumn && sidebarShown)
         return HStack(alignment: .top) {
+            if !sidebarButtonShown && newChatInSidebar {
+                // Its room kept, empty, as New Chat's on the other side: the face stays in the middle.
+                Color.clear.scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget).accessibilityHidden(true)
+            }
             if sidebarButtonShown {
                 GlassEffectContainer {
                     Self.circle(sidebarIsColumn ? Theme.Icon.sidebar : Theme.Icon.sidebarMenu, label: String(localized: "Chat History [Shell Components 60636b]"), id: "assistant-sidebar-button") {
@@ -290,14 +298,19 @@ struct AssistantTopBar: View {
                 .transition(.identity)
             }
             Spacer(minLength: 8)
-            if !pageTabSwitch { face }
+            face
             Spacer(minLength: 8)
-            GlassEffectContainer {
-                Self.circle(Theme.Icon.compose, label: String(localized: "New Chat [Quick Actions ea4b29]"), id: "assistant-new") {
-                    Haptics.tap()
-                    newConversation()
+            if newChatInSidebar {
+                // Its room kept, empty, so the face stays in the middle.
+                Color.clear.scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget).accessibilityHidden(true)
+            } else {
+                GlassEffectContainer {
+                    Self.circle(Theme.Icon.compose, label: String(localized: "New Chat [Quick Actions ea4b29]"), id: "assistant-new") {
+                        Haptics.tap()
+                        newConversation()
+                    }
+                    .disabled(key == nil)
                 }
-                .disabled(key == nil)
             }
         }
         .padding(.horizontal, Theme.Space.l)
@@ -307,12 +320,6 @@ struct AssistantTopBar: View {
         .padding(.leading, max(0, titleRowLeading - Theme.Space.l))
         #endif
         .padding(.top, Self.topInset)
-        #if os(iOS)
-        // Clear of the round buttons on both sides, whichever are there: over New Chat it took its taps in a narrow column.
-        .overlay(alignment: .top) {
-            if pageTabSwitch { pageSwitch.padding(.top, Self.topInset).padding(.horizontal, Self.sideRoom) }
-        }
-        #endif
         .frame(height: Self.height, alignment: .top)
         .background(alignment: .top) {
             // Solid down to the bar's bottom edge, fading out below it (fading under the pill let the messages show
@@ -320,31 +327,6 @@ struct AssistantTopBar: View {
             BarFog(solid: Self.fogSolid, fade: Self.fade)
         }
     }
-
-    #if os(iOS)
-    /// What the switch leaves free on each side of the bar: a round button and the bar's margin.
-    private static let sideRoom: CGFloat = Theme.Size.tapTarget + Theme.Space.l + Theme.Space.s
-
-    /// ChatGPT's Chat | Work at the top of the page, in the face's place, centered whatever the buttons beside it
-    /// (#2623): tapping Assistant while it is selected opens the face's menu, as in the shell. Beside it, what the face's
-    /// pill said while the hub is out of reach (under it, several managers' switcher covered it); a copy's confirmation
-    /// is a toast here (`copy`).
-    private var pageSwitch: some View {
-        @Bindable var model = model
-        let link = model.connection.shown
-        return HStack(spacing: Theme.Space.s) {
-            ViewThatFits(in: .horizontal) {
-                ShellSwitch(tab: $model.selectedTab) { menuItems(link) }
-                    .dynamicTypeSize(...Theme.Shell.topBarLargestTypeSize)
-                ShellSwitch(tab: $model.selectedTab) { menuItems(link) }
-                    .dynamicTypeSize(...Theme.Shell.compactSwitchLargestTypeSize)
-            }
-            if link != .online { ShellLinkPill(phase: link).transition(.opacity) }
-        }
-        .animation(Theme.Motion.standard, value: link)
-        .connectionDetails($showLink)
-    }
-    #endif
 
     /// The bar's round icon button; also the sidebar header's search button when the sidebar is the split's column.
     static func circle(_ symbol: String, label: String, id: String, action: @escaping () -> Void) -> some View {
@@ -565,8 +547,8 @@ struct AssistantTopBar: View {
                 Button { copy(ChatTrace.shared.text(key), String(localized: "Diagnostics copied")) } label: { Label(String(localized: "Copy Diagnostics"), systemImage: Theme.Icon.diagnostics) }
             }
         }
-        if model.canCompact(key) || model.canStartNewMain(key) {
-            Section { MainConversationMenu(key: key) } // Compact context, New Main Chat… (#1762)
+        if model.canCompact(key) || model.canClearMain(key) || model.canStartNewMain(key) {
+            Section { MainConversationMenu(key: key) } // Compact context, Clear context, New Main Chat… (#1762, #5100)
         }
         if let key {
             Section {
@@ -603,9 +585,8 @@ struct AssistantTopBar: View {
                                 }
                             } label: {
                                 let title = [l.name, Fmt.model(l.model)].compactMap { $0 }.joined(separator: " · ")
-                                if l.name == launcher, model.assistantLaunchers[key] != nil {
-                                    Label { Text(title); Text("Just Once") } icon: { ThemedIcon(Theme.Icon.done) }
-                                } else if l.name == launcher { Label(title, systemImage: Theme.Icon.done) } else { Text(title) }
+                                // No "Just Once": the pick stays with this chat, from the next message on (#7513).
+                                if l.name == launcher { Label(title, systemImage: Theme.Icon.done) } else { Text(title) }
                             }
                             // A nested menu keeps the items it was first built with: the list read after the bar
                             // came up, an ID typed or forgotten since, or another pick builds it again.
@@ -645,9 +626,7 @@ struct AssistantTopBar: View {
     private func copy(_ text: String, _ done: String) {
         UIPasteboard.general.string = text
         Haptics.success()
-        // The face's pill is not there on a phone's tabs (the switch has its place): a toast says it, as the main
-        // conversation's row does.
-        if pageTabSwitch { model.toast = Toast(done, style: .success) } else { hint = done }
+        hint = done
         AccessibilityNotification.Announcement(done).post()
     }
 }

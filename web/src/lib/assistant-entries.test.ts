@@ -16,6 +16,9 @@ describe("the Assistant's Needs you and In progress entries (spec/fixtures/entri
       expect(got.needsYou.map((item) => item.key)).toEqual(c.expected.needs_you);
       expect(got.running.map((item) => item.key)).toEqual(c.expected.running);
       expect(got.shelved.map((item) => item.key)).toEqual(c.expected.shelved);
+      // the In progress rows that say their supervisor is reviewing them
+      expect(got.running.filter((item) => item.kind === "task" && item.supervisorReview).map((item) => item.key))
+        .toEqual((c.expected as { supervisor_review?: string[] }).supervisor_review ?? []);
       const activity = (c.expected as { activity?: Record<string, unknown> }).activity;
       for (const [key, expected] of Object.entries(activity ?? {})) {
         const work = got.running.find((row) => row.key === key)?.activity;
@@ -164,5 +167,64 @@ describe("the entries' open-to-do count follows the To-dos page's rule", () => {
     expect(chipOpen).toBe(2); // Working and unexpired parked; inactivity alone does not end an explicit wait.
     expect(got.needsYou.some((i) => i.kind === "plan")).toBe(true);
     expect(got.running.some((i) => i.kind === "agent")).toBe(true);
+  });
+});
+
+// One home per request (docs/design/DESIGN_SYSTEM.md 4.8): an Agent that several to-dos list asks under one of them, so
+// one approval is one Needs you row and is counted once, not once for every to-do that lists the Agent.
+describe("an Agent several to-dos list", () => {
+  const at = "2026-11-10T08:00:00Z";
+  const agent = { machine_id: "box", session_id: "tests", linked_at: at };
+  const todo = (id: string, patch: Partial<Todo> = {}): Todo => ({ id, title: id, origin: "main", created_at: at, updated_at: at, agents: [agent], ...patch }) as Todo;
+  const asking: Session = { machine_id: "box", session_id: "tests", title: "Network tests", cwd: "/w", state: "needs_you", status: "blocked", updated_at: at } as Session;
+  const approval = { id: "perm", machine_id: "box", session_id: "tests", kind: "permission", tool_name: "Bash", created_at: at } as Interaction;
+  const run = (todos: Todo[], session = asking) => assistantEntries({ conversation: "main", main: "main", todos, sessions: [session], interactions: [approval], plans: {}, feed: [], now: Date.parse(at) });
+  const withAsks = (got: ReturnType<typeof assistantEntries>) => got.needsYou.filter((i) => (i.kind === "task" || i.kind === "agent") && i.asks.length).map((i) => i.key);
+
+  it("asks under the to-do the hub ties its session to; the others are in progress", () => {
+    const got = run([todo("cache"), todo("release"), todo("tests")], { ...asking, todo: { id: "release", title: "release" } });
+    expect(withAsks(got)).toEqual(["task:release"]);
+    expect(got.needsYou.map((i) => i.key)).toEqual(["task:release"]);
+    expect(got.running.map((i) => i.key).sort()).toEqual(["task:cache", "task:tests"]);
+  });
+
+  it("asks under the first to-do that lists it when the hub ties it to none of them", () => {
+    const got = run([todo("cache"), todo("tests")]);
+    expect(withAsks(got)).toEqual(["task:cache"]);
+    expect(got.running.map((i) => i.key)).toEqual(["task:tests"]);
+  });
+
+  it("keeps another to-do's own decision in Needs you, without the Agent's card", () => {
+    const decide = todo("tests", { ask: { asked_at: at, outcome: "decide", verdict: "needs_user", question: "Which framework?" } });
+    const got = run([todo("release"), decide], { ...asking, todo: { id: "release", title: "release" } });
+    expect(got.needsYou.map((i) => i.key).sort()).toEqual(["task:release", "task:tests"]);
+    expect(got.needsYou.find((i) => i.key === "task:tests")).toMatchObject({ asks: [] });
+  });
+});
+
+// How a task ended is told in In progress, not by a card in the chat (#8237): the handed-out tasks that finished in the
+// last day and were not opened since are a group of their own, newest first and not counted.
+describe("Just finished in the Assistant's entries", () => {
+  const now = Date.parse("2026-11-10T09:00:00Z");
+  const done = (id: string, doneAt: string, extra: Partial<Todo> = {}): Todo => ({
+    id, title: id, origin: "main", created_at: "2026-11-10T07:00:00Z", updated_at: doneAt, done_at: doneAt, agents: [], ...extra,
+  } as unknown as Todo);
+  const run = (todos: Todo[], conversation = "main") => assistantEntries({ conversation, main: "main", todos, sessions: [], interactions: [], plans: {}, feed: [], now });
+
+  it("lists what just finished, newest first, and counts none of it", () => {
+    const got = run([
+      done("older", "2026-11-10T08:00:00Z"),
+      done("newer", "2026-11-10T08:30:00Z"),
+      done("seen", "2026-11-10T08:10:00Z", { seen_at: "2026-11-10T08:20:00Z" }),
+      done("stale", "2026-11-08T08:00:00Z"),
+      done("byHand", "2026-11-10T08:40:00Z", { origin: "" }),
+    ]);
+    expect(got.justFinished.map((i) => i.key)).toEqual(["task:newer", "task:older"]);
+    expect(got.justFinished.every((i) => i.kind === "task" && !i.countsOpen)).toBe(true);
+    expect([...got.needsYou, ...got.running, ...got.shelved]).toEqual([]);
+  });
+
+  it("leaves another conversation's finished work to it", () => {
+    expect(run([done("newer", "2026-11-10T08:30:00Z")], "side").justFinished).toEqual([]);
   });
 });

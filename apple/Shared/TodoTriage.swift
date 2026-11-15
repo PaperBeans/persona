@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 // The To-dos page's sections (#3206, docs/assistant/todo-status-sop.md): each to-do's place comes from real signals only —
 // its agents' sessions (alive, running, asking), its PR / delivery state, the latest task_review verdict and when it last
@@ -148,8 +149,9 @@ nonisolated enum TodoTriageLogic {
     }
 
     /// A task (an agent was linked, or a conversation handed it out) with no due date ahead. The user's own to-dos
-    /// without agents — reminders, errands — never shelve themselves.
+    /// without agents — reminders, errands — never shelve themselves. An open concern never shelves (#3582).
     static func shelvable(_ todo: TodoItem, now: Date, calendar: Calendar = .current) -> Bool {
+        if todo.isConcern { return false }
         if let due = TodosLogic.dueBy(todo, calendar: calendar), due >= now { return false }
         return !todo.agents.isEmpty || !(todo.origin ?? "").isEmpty
     }
@@ -187,12 +189,15 @@ nonisolated enum TodoTriageLogic {
         let fresh = { (at: Date) in now.timeIntervalSince(at) < justDone && !seen(at) }
         let ask = openAsk(todo)
         let review = todo.reviewState
+        // An open concern closes only with its report: nothing else files it with the finished ones (#3582).
+        let concern = todo.isConcern && todo.doneAt == nil
         func at(_ s: TodoSection, _ r: TodoTriageRule) -> TodoTriage { TodoTriage(section: s, rule: r, last: last) }
 
         if status == .failed {
             // the same piece of work finished in a related to-do (`supersededFailedStarts`): history, nothing to retry
             if superseded { return at(fresh(todo.doneAt ?? last) ? .justDone : .done, .superseded) }
-            return at(now.timeIntervalSince(last) < shelveAfter ? .waiting : .done, .failedStart)
+            if now.timeIntervalSince(last) < shelveAfter { return at(.waiting, .failedStart) }
+            return concern ? at(.other, .rest) : at(.done, .failedStart)
         }
         if status == .needsYou || status == .interrupted { return at(.waiting, .agentAsks) }
         if todo.doneAt == nil, review == .needsUser || ask?.outcome == "decide" || ask?.outcome == "cannot" {
@@ -200,16 +205,18 @@ nonisolated enum TodoTriageLogic {
         }
         if status == .working { return at(.working, .agentRunning) }
         if let done = todo.doneAt { return at(fresh(done) ? .justDone : .done, .closed) }
-        if todo.acceptanceStands {
+        if !concern, todo.acceptanceStands {
             return at(fresh(todo.supervision?.latestReview?.at ?? .distantPast) ? .justDone : .done, .accepted)
         }
-        if todo.delivery?.state == "live" { return at(fresh(todo.delivery?.at ?? last) ? .justDone : .done, .deployed) }
+        if !concern, todo.delivery?.state == "live" {
+            return at(fresh(todo.delivery?.at ?? last) ? .justDone : .done, .deployed)
+        }
         let finished = status == .unread || review == .pendingReview || (ask != nil && (ask?.outcome ?? "").isEmpty)
             || ask?.outcome == "done"
         if finished, !seen(last) { return at(.justDone, .finishedUnseen) }
         if openPR(todo) { return at(.pr, .prOpen) }
-        // seen since it last moved, and no PR waits on the owner
-        if finished { return at(.done, .seen) }
+        // seen since it last moved, and no PR waits on the owner; a concern is never Done while open
+        if finished, !concern { return at(.done, .seen) }
         if shelvable(todo, now: now, calendar: calendar), now.timeIntervalSince(last) >= shelveAfter { return at(.shelved, .stale) }
         return at(.other, .rest)
     }
@@ -248,7 +255,11 @@ nonisolated enum TodoTriageLogic {
     /// Progress entry read this one rule, so the two numbers agree (the web's `todoBucket`).
     static func bucket(_ todo: TodoItem, lookup: TodosLogic.SessionLookup?, now: Date, restoredAt: Date? = nil,
                        superseded: Bool = false) -> TodoBucket {
-        let t = triage(todo, lookup: lookup, now: now, restoredAt: restoredAt, superseded: superseded)
+        bucket(todo, triage(todo, lookup: lookup, now: now, restoredAt: restoredAt, superseded: superseded))
+    }
+
+    /// `bucket` from a triage already worked out (the assistant's trays need its section too: Just Finished, #8237).
+    static func bucket(_ todo: TodoItem, _ t: TodoTriage) -> TodoBucket {
         if countsAsOpen(todo, t) { return .open }
         return t.section == .shelved ? .shelved : .closed
     }
@@ -307,6 +318,8 @@ nonisolated enum TodoTriageLogic {
         }
         var owner: [String: String] = [:]
         for td in list {
+            // An open concern has its own row and cannot join, directly or through another to-do (#3582).
+            if td.isConcern && td.doneAt == nil { continue }
             let side = td.doneAt != nil ? "c" : "o"
             for k in relatedKeys(td) {
                 let key = side + "|" + k

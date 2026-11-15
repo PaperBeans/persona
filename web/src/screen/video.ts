@@ -6,9 +6,9 @@
 // are kept per Mac in this browser, as the display choice is (./displays), and as the iOS app keeps them on the device.
 //
 // What the overlay shows comes from the same instrumentation that would measure the stream, so what is shown equals what
-// was measured; a number that is not measured is left out (undefined), never guessed. Today the web picture is always
-// RFB and the browser measures none of these, so the live overlay shows only mode and path until the video path (and its
-// measurements) land; `path` (#6398) and `tier` (#6396) are the interfaces those follow-ups fill.
+// was measured; a number that is not measured is left out (undefined), never guessed. The overlay (StatsOverlay, #6558)
+// shows RFB's bitrate and frame rate and the round trip to the hub (./meter, ./probes), and while video is the picture
+// its own numbers, segments and quality tier (./video-link). `path` (#6398) is the interface the web's own routes fill.
 
 /** Which picture channel a Mac's live screen uses: the hardware **video** channel (smoother, far less bandwidth) or
  *  **VNC/RFB** (always available). Null until the user picks one, so the page can default to video when the computer
@@ -40,6 +40,9 @@ export interface ScreenStats {
   totalMs?: number;
   // VNC mode: what the client can measure.
   roundTripMs?: number;
+  /** The browser's HTTP round trip to the hub (#6558, ./probes): not the hub's way on to the Mac, so the overlay names it
+   *  and never shows it as the picture's latency. */
+  hubRoundTripMs?: number;
 }
 
 /** The latency segments present, in pipeline order, for the overlay's "capture · encode · network · decode" line. `key`
@@ -76,6 +79,24 @@ const write = (key: string, value: string | null): void => {
     // not kept: this page still uses it, the next one starts from the default
   }
 };
+
+/** Whether this page plays the video channel (#6558). On since it was checked on a real Mac in Chrome, Edge, Safari
+ *  (HEVC) and Firefox (H.264). Where a browser can't play it (no WebCodecs on a plain-http page, no decoder, one that
+ *  fails on the stream) the page keeps RFB on its own and the stats panel says why. False turns the web's video off
+ *  for everyone (the page keeps RFB and offers no Picture switcher), the one line to change if it ever has to go.
+ *  An object so tests can turn it off. */
+export const webVideo = { plays: true };
+
+/** Whether this page's side of the quality tiers drives the stream (#6396, #6558): the page picks the tier
+ *  (./video-tiers), and Quality, the mobile-data card and its choice (./data-use) are offered, only when the helper's
+ *  `hello` lists `tiers` too, as the iPhone's ScreenTiers. On: the page drives them. An object so tests can turn it off
+ *  (a helper with tiers meeting a page without them). Like everything of the video, users see it once webVideo.plays. */
+export const webTiers = { supported: true };
+
+/** Whether the page offers the picture switcher: this browser plays video and the Mac advertises it. */
+export function videoOffered(screenVideo: unknown): boolean {
+  return webVideo.plays && videoAdvertised(screenVideo);
+}
 
 /** Whether a computer / browser status advertises the hardware video channel (#3954): `screen_video` present with a
  *  protocol version > 0. The Picture / Quality switcher appears only then, so no Mac shows a control it can't use — the

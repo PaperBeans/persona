@@ -9,6 +9,7 @@ import dagger.hilt.components.SingletonComponent
 import persona.core.contracts.GroupKeys
 import persona.core.contracts.HubUpdateEvent
 import persona.core.contracts.ManagersEvent
+import persona.core.contracts.KnowledgeSelectionEvent
 import persona.core.contracts.ExtensionUiEvent
 import persona.core.contracts.ExtensionOperationEvent
 import persona.core.contracts.ExtensionAuthEvent
@@ -23,6 +24,7 @@ import persona.core.hub.HttpHubManagers
 import persona.core.hub.HttpHubSent
 import persona.core.hub.HttpMachineManagement
 import persona.core.hub.HttpAgentTriage
+import persona.core.hub.HttpKnowledgeSelection
 import persona.core.hub.HttpModelConfiguration
 import persona.core.hub.HttpExtensionManagement
 import persona.core.hub.HttpProviderSetup
@@ -76,6 +78,26 @@ object MachineManagementModule {
     @Provides @Singleton fun triage(runtime: ConnectionRuntime): AgentTriage = object : AgentTriage {
         override suspend fun switches() = HttpAgentTriage(runtime.connection()).switches()
         override suspend fun put(value: TriageSwitches) = HttpAgentTriage(runtime.connection()).put(value)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Provides @Singleton fun knowledgeSelection(runtime: ConnectionRuntime, application: Application): KnowledgeSelection = object : KnowledgeSelection {
+        private fun api() = HttpKnowledgeSelection(runtime.connection())
+        override val changes: Flow<KnowledgeSelectionChange> = (application as PersonaApp).hub
+            .flatMapLatest { hub ->
+                val events = hub?.connection?.events ?: emptyFlow()
+                AssistantManagerChoice.current.flatMapLatest { choice ->
+                    events.filterIsInstance<KnowledgeSelectionEvent>().filter { choice.owns(it.manager) }
+                        .map { KnowledgeSelectionChange(it.manager) }
+                }
+            }
+        override suspend fun selection() = api().selection()
+        override suspend fun put(document: JsonObject) = api().put(document)
+        override suspend fun <T> withPinnedConnection(block: suspend KnowledgeSelection.() -> T): T =
+            HttpKnowledgeSelection(runtime.connection()).block()
+        override suspend fun candidates(source: String) = api().candidates(source)
+        override suspend fun documents() = api().documents()
+        override suspend fun document(id: String) = api().document(id)
     }
 
     @Provides @Singleton fun models(runtime: ConnectionRuntime): ModelConfiguration = object : ModelConfiguration {
@@ -192,6 +214,7 @@ object MachineManagementModule {
             }
         // Source subscriptions (#2041): entry rows once the hub says they deliver.
         override val subscriptionsAvailable: Flow<Boolean> = features.map { "source_subscriptions" in it }.distinctUntilChanged()
+        override val inboxSourcesAvailable: Flow<Boolean> = features.map { "inbox_sources" in it }.distinctUntilChanged()
         override suspend fun subscriptionSummary() = api().subscriptionSummary()
         // A hub without the `extensions` feature (before #1844, or no hello yet) answers under /api/v1/plugins only;
         // a newer one under both.

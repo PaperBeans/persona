@@ -51,17 +51,93 @@ nonisolated enum AssistantModelChoice {
     }
 
     /// The model id ticked for `launcher` in the sheet: nil when the setup runs on another launcher, "" on its Default
-    /// row, else the picked model's id.
-    static func selectedModel(_ e: Effective, launcher: String) -> String? {
+    /// row, else the picked model's id. A hub-resolved model also ticks its alias row.
+    static func selectedModel(_ e: Effective, launcher: String, aliases: [String: String] = [:],
+                              configuredModel: String? = nil) -> String? {
         guard e.launcher == launcher else { return nil }
-        return e.model?.emptyAsNil ?? ""
+        let model = e.model?.emptyAsNil
+        guard let model else { return configuredModel?.emptyAsNil ?? "" }
+        return aliases[model.lowercased()] ?? model
+    }
+
+    /// Resolved-ID → row-ID lookup, built once when a catalog lands rather than searched in a view's body.
+    static func selectionAliases(_ list: LauncherModels?) -> [String: String] {
+        var out: [String: String] = [:]
+        for model in list?.models ?? [] {
+            let row = model.isDefault ? "" : model.id
+            let key = model.id.lowercased()
+            if out[key] == nil { out[key] = row }
+            if let resolved = model.resolved {
+                // Default and its concrete alias often resolve to the same ID: the concrete alias wins, as on the web.
+                let resolvedKey = resolved.lowercased()
+                if out[resolvedKey] == nil || !model.isDefault { out[resolvedKey] = row }
+            }
+        }
+        return out
+    }
+
+    /// The engine the existing conversation actually runs on, including Codex threads identified by their source.
+    static func sessionEngine(_ session: Session?) -> String? {
+        session?.isCodex == true ? "codex" : session?.agent
+    }
+
+    /// An existing Claude/Codex conversation keeps its engine, matching the hub and web. Unknown runtimes stay
+    /// selectable because refusing them would be a guess; the hub remains authoritative.
+    static func isOtherEngine(sessionAgent: String?, launcherAgent: String?) -> Bool {
+        guard let session = engine(sessionAgent), let launcher = engine(launcherAgent, nilIsClaude: true) else { return false }
+        return session != launcher
+    }
+
+    /// A locked launcher keeps only its default entry, as on the web. Its lock explains why concrete model IDs are absent;
+    /// choosing no model remains valid and the hub accepts it.
+    static func visibleModels(_ list: LauncherModels?) -> [AgentModel] {
+        (list?.models ?? []).filter { list?.locked == nil || $0.isDefault }
+    }
+
+    /// The configured-model row for an empty catalog. A locked launcher's configured model is sent as Default (nil),
+    /// because the hub accepts the launcher's own fixed model only without an overriding model ID.
+    struct ConfiguredFallback: Equatable {
+        var id: String
+        var sendsDefault: Bool
+    }
+
+    /// The configured-model row for a launcher with no readable catalog or no models of its own.
+    static func configuredFallback(_ launcher: Launcher, models: [AgentModel], locked: String?) -> ConfiguredFallback? {
+        guard models.isEmpty, let id = launcher.model?.emptyAsNil else { return nil }
+        return ConfiguredFallback(id: id, sendsDefault: locked != nil)
+    }
+
+    /// The user-facing destination in the cross-engine warning, normalized from `codex-cli` / case variants.
+    static func otherEngineName(_ runtimeAgent: String?) -> String {
+        engine(runtimeAgent, nilIsClaude: true) == "codex" ? "Codex" : "Claude Code"
+    }
+
+    private static func engine(_ raw: String?, nilIsClaude: Bool = false) -> String? {
+        guard let normalized = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+            return nilIsClaude ? "claude" : nil
+        }
+        switch normalized {
+        case "", "claude", "claude-code", "claudecode": return "claude"
+        case "codex", "codex-cli": return "codex"
+        default: return nil
+        }
     }
 
     /// The pick a row keeps: nil for the setup already in force (the hub would store a no-op). A Default row sends no
-    /// model; `effort` carries the setup's current effort so the pick keeps it.
-    static func pick(launcher: String, model: String?, effort: String?, current: Effective) -> ModelPick? {
+    /// model; `effort` carries the setup's current effort so the pick keeps it. Resolved aliases and a configured
+    /// fallback are compared by what runs, not just by their spelling, so tapping the current row never pins a default.
+    static func pick(launcher: String, model: String?, effort: String?, current: Effective,
+                     aliases: [String: String] = [:], configuredModel: String? = nil,
+                     configuredIsDefault: Bool = false) -> ModelPick? {
         let sentModel = model?.emptyAsNil
-        if current.launcher == launcher, (current.model?.emptyAsNil ?? nil) == sentModel { return nil }
+        if current.launcher == launcher {
+            let selected = selectedModel(current, launcher: launcher, aliases: aliases, configuredModel: configuredModel)
+            if selected == (sentModel ?? "") { return nil }
+            // No catalog: the configured model is what this launcher's default already runs.
+            if let sentModel, current.model?.emptyAsNil == nil, sentModel == configuredModel?.emptyAsNil { return nil }
+            // A locked configured row is the same Default choice, not an override with a concrete ID.
+            if configuredIsDefault, sentModel == nil, selected == configuredModel?.emptyAsNil { return nil }
+        }
         return ModelPick(launcher: launcher, model: sentModel, effort: effort?.emptyAsNil)
     }
 
@@ -85,13 +161,13 @@ private extension String {
 final class AssistantModelPanelModel {
     struct Deps {
         var launchers: (_ machine: MachineRef, _ refresh: Bool) async throws -> APIClient.LaunchersResponse
-        var models: (_ machine: MachineRef, _ launcher: String) async throws -> LauncherModels
+        var models: (_ machine: MachineRef, _ launcher: String, _ refresh: Bool) async throws -> LauncherModels
         var keep: (_ key: SessionKey, _ pick: ModelPick) async -> Bool
         var drop: (_ key: SessionKey) async -> Bool
         static var live: Deps {
             Deps(
                 launchers: { try await AppModel.shared.assistantLaunchers($0, refresh: $1) },
-                models: { try await AppModel.shared.api($0.group)?.launcherModels(machine: $0.id, launcher: $1)
+                models: { try await AppModel.shared.api($0.group)?.launcherModels(machine: $0.id, launcher: $1, refresh: $2)
                     ?? LauncherModels(agent: "", models: [], locked: nil, machine: nil) },
                 keep: { await AppModel.shared.keepConversationModel($0, pick: $1) },
                 drop: { await AppModel.shared.dropConversationModel($0) })
@@ -101,8 +177,13 @@ final class AssistantModelPanelModel {
     let key: SessionKey
     let machine: MachineRef
     private(set) var response: APIClient.LaunchersResponse?
+    private(set) var offeredLauncherNames: Set<String> = []
+    private(set) var unavailableLauncherNames: Set<String> = []
     /// Each launcher's `/model` list, by launcher name.
     private(set) var lists: [String: LauncherModels] = [:]
+    /// Rows the sheet may offer and resolved-model → row-ID aliases, derived once per answer (P4: not in `body`).
+    private(set) var visibleLists: [String: [AgentModel]] = [:]
+    private(set) var resolvedAliases: [String: [String: String]] = [:]
     /// Why one launcher's list could not be read (a 404 from an older hub/node leaves it empty, not an error).
     private(set) var listErrors: [String: String] = [:]
     private(set) var loading = false
@@ -118,6 +199,12 @@ final class AssistantModelPanelModel {
     }
 
     func list(_ launcher: String) -> LauncherModels? { lists[launcher] }
+    func models(_ launcher: String) -> [AgentModel] { visibleLists[launcher] ?? [] }
+    func selectionAliases(_ launcher: String) -> [String: String] { resolvedAliases[launcher] ?? [:] }
+    /// A current provider absent from both lists needs its own explanation and recovery row.
+    func isMissing(_ launcher: String) -> Bool {
+        response != nil && !offeredLauncherNames.contains(launcher) && !unavailableLauncherNames.contains(launcher)
+    }
     func error(_ launcher: String) -> String? { listErrors[launcher] }
     var unavailable: [UnavailableLauncher] { response?.unavailable ?? [] }
 
@@ -131,24 +218,38 @@ final class AssistantModelPanelModel {
         do {
             let r = try await deps.launchers(machine, refresh)
             response = r
+            offeredLauncherNames = Set(r.launchers.map(\.name))
+            unavailableLauncherNames = Set((r.unavailable ?? []).map(\.name))
         } catch {
             guard !error.isCancellation else { return }
             loadError = error.shown
             return
         }
         for launcher in response?.launchers ?? [] {
-            await readList(launcher.name)
+            await readList(launcher, refresh: refresh)
         }
     }
 
-    private func readList(_ name: String, refresh: Bool = false) async {
+    private func readList(_ launcher: Launcher, refresh: Bool = false) async {
+        let name = launcher.name
         do {
-            let answer = try await deps.models(machine, name)
+            let answer = try await deps.models(machine, name, refresh)
             lists[name] = answer
+            visibleLists[name] = AssistantModelChoice.visibleModels(answer)
+            resolvedAliases[name] = AssistantModelChoice.selectionAliases(answer)
             listErrors[name] = nil
         } catch {
-            if let e = error as? APIError, e.status == 404 { return } // older hub/node: no list, the launcher row stands alone
+            if let e = error as? APIError, e.status == 404 {
+                // Older hub/node: no catalog, but the launcher's configured model is still a concrete choice.
+                lists[name] = LauncherModels(agent: launcher.runtimeAgent ?? "claude",
+                                             models: [], locked: nil, machine: nil)
+                visibleLists[name] = []
+                resolvedAliases[name] = [:]
+                listErrors[name] = nil
+                return
+            }
             guard !error.isCancellation else { return }
+            // Keep the last good rows selectable; the section shows the refresh failure and Retry beside them.
             listErrors[name] = error.shown
         }
     }
@@ -156,7 +257,13 @@ final class AssistantModelPanelModel {
     /// Keeps `model` (nil: its default) for `launcher`; returns whether the hub took it.
     func choose(launcher: String, model: String?, session: Session?) async -> Bool {
         let current = AssistantModelChoice.effective(session: session, response: response)
-        guard let pick = AssistantModelChoice.pick(launcher: launcher, model: model, effort: current.effort, current: current) else { return true }
+        let launcherInfo = response?.launchers.first { $0.name == launcher }
+        let fallback = launcherInfo.flatMap {
+            AssistantModelChoice.configuredFallback($0, models: models(launcher), locked: list(launcher)?.locked)
+        }
+        guard let pick = AssistantModelChoice.pick(launcher: launcher, model: model, effort: current.effort, current: current,
+                                                   aliases: selectionAliases(launcher), configuredModel: fallback?.id,
+                                                   configuredIsDefault: fallback?.sendsDefault == true) else { return true }
         busyLauncher = launcher
         defer { busyLauncher = nil }
         return await deps.keep(key, pick)
@@ -187,9 +294,9 @@ struct AssistantModelSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                if panel.loadError != nil, panel.response == nil {
+                if let problem = panel.loadError {
                     Section {
-                        Label(panel.loadError ?? "", systemImage: Theme.Icon.error)
+                        Label(problem, systemImage: Theme.Icon.error)
                             .font(Theme.Font.secondary).foregroundStyle(Theme.cautionText)
                         Button { Task { await panel.load(refresh: true) } } label: {
                             Label(String(localized: "Retry"), systemImage: Theme.Icon.error)
@@ -211,21 +318,28 @@ struct AssistantModelSheet: View {
                         Text(String(localized: "This conversation has its own model. Following the default makes its next messages use Model configuration › Main chat again."))
                     }
                 }
+                if panel.isMissing(effective.launcher) {
+                    Section {
+                        VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                            Text(effective.launcher).font(Theme.Font.heading).foregroundStyle(.secondary)
+                            if let model = effective.model {
+                                Text(SessionModes.modelName(model) ?? model)
+                                    .font(Theme.Font.label).foregroundStyle(.secondary)
+                            }
+                            Text("This conversation's launcher is no longer available. Follow the Main Chat default or choose another launcher.")
+                                .font(Theme.Font.label).foregroundStyle(.secondary)
+                        }
+                        .accessibilityIdentifier("assistantModel.missing.\(effective.launcher)")
+                    }
+                }
                 ForEach(panel.response?.launchers ?? []) { launcher in
                     section(launcher)
                 }
                 if !panel.unavailable.isEmpty {
                     Section(String(localized: "Unavailable here")) {
                         ForEach(panel.unavailable) { item in
-                            HStack(alignment: .top, spacing: Theme.Space.m) {
-                                ThemedIcon(Theme.Icon.locked).foregroundStyle(.secondary)
-                                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                                    Text(item.displayName?.isEmpty == false ? item.displayName! : item.name)
-                                        .font(Theme.Font.heading).foregroundStyle(.secondary).lineLimit(1)
-                                    Text(item.reason).font(Theme.Font.label).foregroundStyle(.tertiary)
-                                }
-                            }
-                            .accessibilityIdentifier("assistantModel.unavailable.\(item.name)")
+                            UnavailableLauncherRow(item: item)
+                                .accessibilityIdentifier("assistantModel.unavailable.\(item.name)")
                         }
                     }
                 }
@@ -252,43 +366,79 @@ struct AssistantModelSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
     @ViewBuilder
     private func section(_ launcher: Launcher) -> some View {
-        let selected = AssistantModelChoice.selectedModel(effective, launcher: launcher.name)
+        let list = panel.list(launcher.name)
+        let locked = list?.locked
+        let models = panel.models(launcher.name)
+        let configured = AssistantModelChoice.configuredFallback(launcher, models: models, locked: locked)
+        let selected = AssistantModelChoice.selectedModel(
+            effective, launcher: launcher.name, aliases: panel.selectionAliases(launcher.name), configuredModel: configured?.id)
+        let otherEngine = effective.launcher != launcher.name && AssistantModelChoice.isOtherEngine(
+            sessionAgent: AssistantModelChoice.sessionEngine(session), launcherAgent: launcher.runtimeAgent)
         Section {
-            if selected != nil {
-                row(launcher: launcher.name, modelID: "", title: String(localized: "Default [Prompt Composer 844b8c]"),
-                    detail: launcher.model, ticked: selected == "", locked: panel.list(launcher.name)?.locked)
-            }
-            if let locked = panel.list(launcher.name)?.locked {
-                Label(locked, systemImage: Theme.Icon.locked)
+            if otherEngine {
+                let to = AssistantModelChoice.otherEngineName(launcher.runtimeAgent)
+                Label(String(localized: "Switching from \(session?.agentLabel ?? "Claude Code") to \(to) needs a new conversation"),
+                      systemImage: Theme.Icon.locked)
                     .font(Theme.Font.secondary).foregroundStyle(.secondary)
-                    .accessibilityIdentifier("assistantModel.locked.\(launcher.name)")
-            } else if let list = panel.list(launcher.name) {
-                ForEach(list.models) { m in
-                    row(launcher: launcher.name, modelID: m.id, title: m.displayName, detail: m.detail,
-                        ticked: selected == m.id, locked: nil, custom: m.custom)
-                }
-                if list.takesTypedModel, model.keepsConversationModelPick(panel.key.group) {
-                    Button { typingFor = launcher.name } label: {
-                        Label(String(localized: "Other Model…"), systemImage: Theme.Icon.keyboard).lineLimit(1)
-                    }
-                    .accessibilityIdentifier("assistantModel.other.\(launcher.name)")
-                }
-            } else if panel.error(launcher.name) != nil {
-                Button { Task { await panel.load(refresh: true) } } label: {
-                    Label(String(localized: "Retry"), systemImage: Theme.Icon.error).lineLimit(1)
-                }
+                    .accessibilityIdentifier("assistantModel.otherEngine.\(launcher.name)")
             } else {
-                HStack(spacing: Theme.Space.s) {
-                    ProgressView().controlSize(.small)
-                    Text(String(localized: "Reading models…")).font(Theme.Font.secondary).foregroundStyle(.secondary)
+                // A real Default row comes from the catalog. Add one only when the current setup has no such row.
+                if selected != nil, configured == nil, !models.contains(where: { $0.isDefault }) {
+                    row(launcher: launcher.name, modelID: "", title: String(localized: "Default [Prompt Composer 844b8c]"),
+                        detail: launcher.model, ticked: selected == "", locked: nil)
+                }
+                if let locked {
+                    Label(locked, systemImage: Theme.Icon.locked)
+                        .font(Theme.Font.secondary).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("assistantModel.locked.\(launcher.name)")
+                }
+                if let problem = panel.error(launcher.name), list != nil {
+                    HStack(spacing: Theme.Space.s) {
+                        Label(problem, systemImage: Theme.Icon.error)
+                            .font(Theme.Font.secondary).foregroundStyle(Theme.cautionText)
+                        Spacer(minLength: Theme.Space.s)
+                        Button(String(localized: "Retry")) { Task { await panel.load(refresh: true) } }
+                            .lineLimit(1)
+                    }
+                }
+                if let list {
+                    if let configured {
+                        // No catalog (a direct API or an older node): its configured model is still a concrete choice.
+                        // A locked launcher sends Default (nil), never an overriding concrete model ID.
+                        row(launcher: launcher.name, modelID: configured.sendsDefault ? "" : configured.id,
+                            title: SessionModes.modelName(configured.id) ?? configured.id,
+                            detail: nil, ticked: selected == configured.id || (configured.sendsDefault && selected == ""), locked: nil)
+                    } else {
+                        ForEach(models) { m in
+                            row(launcher: launcher.name, modelID: m.isDefault ? "" : m.id,
+                                title: m.displayName, detail: m.detail,
+                                ticked: selected == (m.isDefault ? "" : m.id), locked: nil, custom: m.custom)
+                        }
+                    }
+                    if list.takesTypedModel, model.offersTypedModels(panel.key.group) {
+                        Button { typingFor = launcher.name } label: {
+                            Label(String(localized: "Other Model…"), systemImage: Theme.Icon.keyboard).lineLimit(1)
+                        }
+                        .accessibilityIdentifier("assistantModel.other.\(launcher.name)")
+                    }
+                } else if panel.error(launcher.name) != nil {
+                    Button { Task { await panel.load(refresh: true) } } label: {
+                        Label(String(localized: "Retry"), systemImage: Theme.Icon.error).lineLimit(1)
+                    }
+                } else {
+                    HStack(spacing: Theme.Space.s) {
+                        ProgressView().controlSize(.small)
+                        Text(String(localized: "Reading models…")).font(Theme.Font.secondary).foregroundStyle(.secondary)
+                    }
                 }
             }
         } header: {
-            Text(launcher.name)
+            Text(launcher.displayName?.emptyAsNil ?? launcher.name)
         }
     }
 

@@ -344,19 +344,65 @@ environment/credential changes, strict server-derived targeting and the confirma
 and a temporary directory; unrelated routes use `scripts/mock/mock_hub.py`. It is UI integration evidence, not a
 production or live-model test. Its header documents loopback ports and shutdown; run with `SKILL_IMPORT_QA=1`.
 
+The Skills group keeps only the list in its card; where the skills live, who shares them and when changes apply are
+its one footer line. The upload dialog reuses existing web patterns: LookUpload's drop zone (choose or drop a ZIP, the
+check's progress in its place), ProviderImport's preview card and Cancel/primary footer, and `ErrorNotice` for a refused
+package.
+
 Curated synthetic captures, actually inspected in a browser (not production assets):
 
-| Preview | Light | Dark |
+| Capture | Light | Dark |
 | --- | --- | --- |
 | Desktop, standard text | [Light](../web/screenshots/skill-zip/preview-light.png) | [Dark, keyboard focus](../web/screenshots/skill-zip/preview-dark.png) |
 | 390 px, largest supported text setting | [Light](../web/screenshots/skill-zip/narrow-light-large.png) | [Dark, keyboard focus](../web/screenshots/skill-zip/narrow-dark-large.png) |
-| Localized narrow layout | [Simplified Chinese](../web/screenshots/skill-zip/zh-preview.png) | [Japanese](../web/screenshots/skill-zip/ja-preview.png) |
+| 390 px, Simplified Chinese | [Light](../web/screenshots/skill-zip/zh-preview.png) | [Dark](../web/screenshots/skill-zip/zh-preview-dark.png) |
+| 390 px, Japanese | [Light](../web/screenshots/skill-zip/ja-preview.png) | [Dark](../web/screenshots/skill-zip/ja-preview-dark.png) |
+| Skills group, Simplified Chinese | [Light](../web/screenshots/skill-zip/zh-group-light.png) | [Dark](../web/screenshots/skill-zip/zh-group-dark.png) |
+| Choosing a ZIP | [Light](../web/screenshots/skill-zip/zh-choose-light.png) | [Dark, a file dragged over](../web/screenshots/skill-zip/zh-drop-dark.png) |
+| Checking the ZIP | [Light](../web/screenshots/skill-zip/zh-checking-light.png) | [Dark](../web/screenshots/skill-zip/zh-checking-dark.png) |
+| Refused package | [Light](../web/screenshots/skill-zip/zh-refused-light.png) | [Dark](../web/screenshots/skill-zip/zh-refused-dark.png) |
+| Installed | [Light](../web/screenshots/skill-zip/zh-installed-light.png) | [Dark](../web/screenshots/skill-zip/zh-installed-dark.png) |
+| Undone, recovery retained | [Light](../web/screenshots/skill-zip/zh-undone-light.png) | [Dark](../web/screenshots/skill-zip/zh-undone-dark.png) |
+| Post-install Undo row, 390 px Large | [Light](../web/screenshots/skill-zip/zh-undo-row-light.png) | [Dark](../web/screenshots/skill-zip/zh-undo-row-dark.png) |
+
+The 2026-11-15 capture run uses `web/e2e/skill-zip-visual.py` through Browser Use against the opt-in Go fixture above
+and Vite. Its 22 captures were opened and visually inspected by Codex: text and status marks remain readable in both
+appearances, the long install and recovery paths wrap, localized buttons stay on one line, and the dark preview has a
+visible keyboard focus ring. `docs/web/screenshots/skill-zip/verification.json` records the source commit, source and
+PNG hashes, viewport checks and inspection observations. The evidence commit changes no application source.
+
+All Skills actions use `touch-hit`: the drawn buttons remain 32 px tall while their targets expand to at least
+44 x 44 px on coarse-pointer devices. The browser run measures the pseudo-element's target bounds and hit-tests
+points across that area, including the separate post-install Undo row. Native touch events below the painted button
+activate Upload ZIP, Choose ZIP, Cancel, Install, Close and both Undo actions. The file input's click is intercepted
+to keep the operating-system picker out of the automated run; CDP supplies the real ZIP afterwards.
+
+To reproduce, start an exclusively owned mock on `<mock port>`, run the fixture from `server/` with
+`SKILL_IMPORT_QA=1 SKILL_IMPORT_QA_ADDR=127.0.0.1:<manager port> SKILL_IMPORT_QA_MOCK=http://127.0.0.1:<mock port>
+go test ./internal/assistant -run '^TestSkillImportBrowserHarness$' -count=1 -v -timeout=30m`, and start Vite with
+`PERSONA_HUB_URL=http://127.0.0.1:<manager port>`. Then, from the repository root:
+
+```sh
+PERSONA_SKILL_ZIP_ORIGIN=http://127.0.0.1:<web port> \
+PERSONA_SKILL_ZIP_SHOTS=<evidence directory> \
+PERSONA_SKILL_ZIP_WORK=<scratch directory> \
+browser-use < web/e2e/skill-zip-visual.py
+```
+
+After inspecting the PNGs, record the observations in `verification.json`; the capture script initially marks visual
+inspection pending. POST `/_qa/stop` to the manager fixture, then stop the owned Vite and mock processes. The browser
+check delays one real preview response to exercise the busy state; native CDP file drag events must still cancel the
+browser defaults without another preview request. The real importer supplies all validation, install and Undo replies.
+Native link and plain-text drags also cancel `dragover` and `drop` without navigating, highlighting the zone or
+starting an upload; only file drags can highlight it.
+The screenshot report is evidence for review, not an automated-review credential: the maintainer's watcher still needs
+its trusted `ui_evidence_command` adapter (`docs/operations/pr-review-automation.md`, "Configure").
 
 Browser observations: Cancel initially owns preview focus; Tab reaches Install with a visible ring; Escape closes
-and restores Upload ZIP focus. No horizontal overflow at 390 px, including Large. A missing-string description
-shows an actionable validation error; a duplicate name shows conflict with no overwrite action. Installation adds
-`example-review` to the real fixture store/list, and Undo removes only the new `example-cancel` while retaining its
-resources in the reported recovery sibling. These are local fixture results, not live Claude/Codex discovery.
+and restores Upload ZIP focus. No horizontal overflow at 390 px, including Large. An empty description shows an
+actionable validation error. Installation creates `example-visual` in the real fixture store/list; Undo removes its
+list entry and retains its resources in the reported recovery sibling. These are local fixture results, not live
+Claude/Codex discovery.
 
 ## 2. Build channels
 
@@ -415,6 +461,8 @@ The binary gets three more `-X` variables (`cmd/personad`):
 
 - `nodes`: the other programs a node can run, published with personad (`update.NodePrograms`: `persona-node`, the device's own): `{"persona-node": {"linux-amd64": {name, size, sha256, binary_sha256}, …}}`.
   `node_protocol`, `node_protocol_min`, `node_capabilities`: what the release's nodes announce in `node.info` (`docs/protocol/protocol.md` ("Node handshake")), so a manager of another build sends one only when it drives it (`docs/operations/node-update.md` ("Node packages")). Old hubs ignore all three.
+- `helpers`: native programs a node installs on demand, by name then platform (`persona-iphone-bridge`: `{"persona-iphone-bridge": {"darwin-arm64": {name, size, sha256, binary_sha256}, …}}`, [iphone-bridge.md](../extensions/iphone-bridge.md) "Releases"). Each has its own version, so no build number is checked in it; a platform the release could not build is left out. Hub and manager updates never swap them. Old hubs ignore this field.
+- `links`: independently installed persona-link downloads: `{"linux-amd64": {name, size, sha256, binary_sha256}, …}`. Windows names keep `.exe` before `.gz`, for example `persona-link-windows-amd64.exe.gz`. The publisher verifies these downloads like the others, but hub and manager updates never install or swap them. Old hubs ignore this field.
 - Every release is also kept at `dl/<version>/` (its node builds, `personad-*` and `persona-node-*`, and this manifest as `manifest.json`; also `dl/X.Y.Z/` for the tag `vX.Y.Z`), where managers fetch the node build of their hub's version; `dl/latest.json` and `dl/*.gz` stay the newest release.
 - A downloaded file must match both `sha256` (archive) and `binary_sha256` (decompressed), and the new binary's `version -v` must report the version and build number in the manifest.
   `SHA256SUMS` stays for install.sh.
@@ -525,12 +573,14 @@ Where a release hub reads `latest.json` and downloads from (#4522). v0.2.1's bin
 - **Which source**: `hub.json`'s `update.url` when set (`docs/operations/config.md`), else the URL the build was made with (`main.updateURL`). The value is the directory `latest.json` is in. A GitHub repository's release base works as it is:
   `https://github.com/<owner>/<repo>/releases/latest/download` redirects `latest.json` and `personad-<os>-<arch>.gz` to the newest release's assets, and the client follows the redirects. A release build made without an update URL updates itself once `update.url` gives one.
 - **What follows it**: everything the hub fetches as "the release": its checks, downloads and node binaries for every platform; the node builds the manager fetches when `node_packages.url` is empty; the manager install script's download address (its sha256s come from the same `latest.json`); and the `install.sh` line for a new computer (the source without its `/dl`).
-  GitHub's base has no `<version>/manifest.json`, so a manager there gets the newest release's node builds when it drives them (`docs/operations/node-update.md` ("Node packages")).
+  GitHub's base has no `<version>/manifest.json` or `<version>/` builds, so a manager there takes the node builds `latest.json` lists, from beside it: the hub's own version's when the newest release is the hub's, else the newest release's when it drives them (`docs/operations/node-update.md` ("Node packages")).
 - **What it may be**: `https://`, `http://` only to this machine (nothing is signed, "Security"), or `file:///<directory>` (a private publisher's copy), with no user, password, query or fragment, and not `latest.json` itself. One that does not read leaves the hub with no source rather than the build's: Settings › hub says why (`why_not`), and the log says so at the start. The error never shows the address.
 - **Proxy**: `update.proxy` (`http://[user:pass@]host:port`, `internal/netproxy`) carries these requests alone (manifest, downloads and a Docker hub's registry checks). It is also the node builds' proxy when they come from the update source and `node_packages.proxy` is empty. Everything else the hub talks to goes as before: a proxy in the service's environment (`HTTPS_PROXY`) would carry all of it.
   Without `update.proxy`, these requests use the environment's proxies, as before. One that does not read fails every check with the reason rather than going around it. The log, `GET /api/v1/hub/update` and the errors show the proxy as `http://host:port`, never its user and password.
 - **Seeing it**: `GET /api/v1/hub/update` carries `update_url` (the source in effect), `update_url_from` (`hub.json` or `build`) and `update_proxy`. hub.json is read at the hub's start: a change takes effect at the next start or update.
-- **The default of official builds** is the maintainers' decision. It is either the publish site's `dl/`, kept in step with each GitHub Release, or the GitHub Releases base through `publish.update_url`. Either way `update.url` lets a hub choose another without a new build.
+- **A source that stopped** (#8108): when the newest release a check reads is older than the hub's own build and older than the release its code contains (the `vX.Y.Z` its version starts with: `git describe` names a build after the newest tag in it), the source no longer takes releases, and the hub would otherwise find itself up to date at every check while its phones get no newer Android app. `GET /api/v1/hub/update` then carries `source_behind: true` (`latest` is the source's newest release), Settings › hub says so in place of "Up to date", naming the source and `update.url`, and the log says it once per source and release, not at every check. A source as new as the hub, newer, or holding the release the hub's code starts from (GitHub Releases for a hub deployed from `main` after that release) reports nothing. A version that names no release (`dev-…`, `master-<commit>-…`) cannot tell a stopped source from a quiet one, and reports nothing either.
+- **A hub deployed with `deploy.sh`** carries the config's `publish.update_url`, else `<publish.site_url>/dl`: a config with only `site_url` pointing at the publish site gets the frozen `dl/` below, so the hub never sees a newer release or offers its phones the Android app. `deploy.sh` prints which source the hub will carry when `publish.update_url` is not set; set it (for example to the GitHub Releases base) before deploying, or `update.url` in the hub's `hub.json` afterwards.
+- **The default of official builds** is the GitHub Releases base (`https://github.com/nwverse/persona/releases/latest/download`, through `publish.update_url`), the same base the Release's `install.sh` downloads from; v0.5.2 and later carry it. Releases up to v0.4.0 were built with the publish site's `dl/`, which has stayed on the 2026-11-07 build since the repository history was rewritten (the rollback guard refuses to publish over it), so those hubs never see a newer release: set `update.url` to the GitHub base, or upgrade once by hand. The getting-started guide and the website's install command point new installs at the Release's `install.sh` for the same reason. `update.url` still lets a hub choose another source without a new build.
 
 ### The Android app
 
@@ -571,6 +621,7 @@ Download → Verify → Prepare → Wait for idle → Replace → Restart → Co
      Update history and bad versions still go into Postgres.
 4. **Wait for idle** (check every 30 seconds; also do not restart while redeploying a machine): automatic and manual are the same: **restart only when the assistant and every Agent are idle**, with no time-of-day restriction (user, 2026-11-02).
    - Idle = no session working or waiting for the user's answer (both assistant chats and Agents in herdr count). If they never become idle, never install; keep the download ready.
+   - A chat that waits only on the assistant's `ask_user` cards asked without waiting (`wait: false`, or a question that let go of its turn) is idle for this: no turn waits on them and they outlive a restart, so a card that is up for two hours does not hold the update (`hub/selfupdate_install.go` `updateBusy`, #7392; `docs/assistant/assistant.md`, "Asking without holding the turn"). A running turn, a blocked terminal, any other card of that chat, or a card the hub was not shown still holds it.
    - For a manual update, the App shows "what is still busy" (which chats, on which machine), and offers **Update Now** in a second confirmation:
      the confirmation states, "This interrupts anything waiting on the hub (the assistant's current turn, uploads in progress, terminal connections). Agents in herdr aren't affected and reconnect on their own."
      After confirmation, skip waiting for idle; all other steps (verification, rollback) stay the same.
@@ -677,7 +728,7 @@ Download → Verify → Prepare → Wait for idle → Replace → Restart → Co
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/api/v1/hub/update` | `{version, build, channel, can_update, latest?{version, build, released, notes, bad}, state, progress, busy[]{machine, session, title}, error, auto, auto_update_nodes, auto_notice, last_check, update_url?, update_url_from?, update_proxy?}` (the last three: "Update source") |
+| GET | `/api/v1/hub/update` | `{version, build, channel, can_update, latest?{version, build, released, notes, bad}, state, progress, busy[]{machine, session, title}, error, auto, auto_update_nodes, auto_notice, last_check, update_url?, update_url_from?, update_proxy?, source_behind?}` (the last four: "Update source"; `source_behind` only when true) |
 | POST | `/api/v1/hub/update/check` | Check immediately |
 | POST | `/api/v1/hub/update` | Start update (409 with a reason for non-release builds); `{"now": true}` is **Update Now** after the second confirmation, skipping the idle wait |
 | PUT | `/api/v1/hub/update/settings` | `{auto}`; `{auto_notice_seen: true}`; `{auto_update_nodes: true\|false}` |

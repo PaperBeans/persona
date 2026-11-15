@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/extension/host"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -174,6 +175,54 @@ type ExtensionNodeView struct {
 	Error     string `json:"error,omitempty"`
 }
 
+// ExtensionNodeStatusView summarizes a node program's state across the machines it runs on, so the apps can show one
+// aggregated line ("Running on 2 machines") without re-deriving the rule from the per-machine rows. Abnormal counts
+// the states that need the user's attention: error, missing, lease_expired and outdated (an unknown state counts too).
+type ExtensionNodeStatusView struct {
+	Total    int `json:"total"`
+	Running  int `json:"running"`
+	Starting int `json:"starting"`
+	Stopped  int `json:"stopped"`
+	Offline  int `json:"offline"`
+	Abnormal int `json:"abnormal"`
+}
+
+// nodeStatus aggregates how the plugin's program is across its machines. Its status follows the same vocabulary as
+// ExtensionView.Status: running while at least one machine runs it, error when none run and one is abnormal, starting
+// when one is starting, stopped otherwise. ok is false without a machine row, in which case the hub's own process
+// status stands.
+func nodeStatus(nodes []ExtensionNodeView) (status string, summary ExtensionNodeStatusView, ok bool) {
+	if len(nodes) == 0 {
+		return "", ExtensionNodeStatusView{}, false
+	}
+	summary.Total = len(nodes)
+	for _, n := range nodes {
+		switch n.State {
+		case "running":
+			summary.Running++
+		case "starting":
+			summary.Starting++
+		case "stopped":
+			summary.Stopped++
+		case extensionNodeOffline:
+			summary.Offline++
+		default: // error, missing, lease_expired, outdated and anything newer this build does not know
+			summary.Abnormal++
+		}
+	}
+	switch {
+	case summary.Running > 0:
+		status = host.StateRunning
+	case summary.Abnormal > 0:
+		status = host.StateError
+	case summary.Starting > 0:
+		status = host.StateStarting
+	default:
+		status = host.StateStopped
+	}
+	return status, summary, true
+}
+
 // views are plugin id's programs on machines, by machine id.
 func (pn *extensionNodes) views(pluginID string) []ExtensionNodeView {
 	pn.mu.Lock()
@@ -250,27 +299,73 @@ func (ps *extensions) nodePackage(p *extension.Extension, platform string) (node
 	return pkg, nil
 }
 
+const nodePackageChunkBytes = 32 << 10
+
+type nodePackageFailure struct {
+	retryAt time.Time
+	err     error
+}
+
+func (m *Machine) nodePackageRetryDue() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	due := false
+	for prog, failure := range m.nodePackageFailures {
+		if !time.Now().Before(failure.retryAt) {
+			delete(m.nodePackageFailures, prog)
+			due = true
+		}
+	}
+	return due
+}
+
 // putNodePackage sends pkg to m unless it has it.
-func putNodePackage(ctx context.Context, m *Machine, prog proto.PluginNodeProgram, pkg nodePackage) error {
+func putNodePackage(ctx context.Context, m *Machine, prog proto.PluginNodeProgram, pkg nodePackage) (retErr error) {
 	var have proto.PluginNodeHave
 	if err := m.call(ctx, "plugin.node.have", prog, &have); err != nil {
 		return err
 	}
 	if have.Have {
+		m.mu.Lock()
+		delete(m.nodePackageFailures, prog)
+		m.mu.Unlock()
 		return nil
+	}
+	m.mu.Lock()
+	for key, failure := range m.nodePackageFailures {
+		if !time.Now().Before(failure.retryAt) {
+			delete(m.nodePackageFailures, key)
+		}
+	}
+	failure, delayed := m.nodePackageFailures[prog]
+	m.mu.Unlock()
+	if delayed {
+		return failure.err
 	}
 	f, err := os.Open(pkg.file)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	defer func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if retErr == nil {
+			delete(m.nodePackageFailures, prog)
+			return
+		}
+		if m.nodePackageFailures == nil {
+			m.nodePackageFailures = make(map[proto.PluginNodeProgram]nodePackageFailure)
+		}
+		m.nodePackageFailures[prog] = nodePackageFailure{retryAt: time.Now().Add(extensionLeaseEvery), err: retErr}
+	}()
 	var begun struct {
 		UploadID string `json:"upload_id"`
 	}
 	if err := m.call(ctx, "plugin.node.put.begin", proto.PluginNodePutBegin{PluginNodeProgram: prog, Size: pkg.size}, &begun); err != nil {
 		return err
 	}
-	buf := make([]byte, proto.UploadChunkBytes)
+	buf := make([]byte, nodePackageChunkBytes)
 	var off int64
 	for {
 		n, rerr := f.Read(buf)
@@ -417,10 +512,10 @@ func (ps *extensions) nodeSnapshotCurrent(all []*extension.Extension) bool {
 }
 
 // syncExtensionNodes makes m run what it should of plugins' programs, and nothing else.
-func (h *Manager) syncExtensionNodes(ctx context.Context, m *Machine) {
+func (h *Manager) syncExtensionNodes(ctx context.Context, m *Machine) error {
 	ps := h.extensions
 	if ps == nil || ps.reg == nil {
-		return
+		return nil
 	}
 	l := ps.nodes.lock(m.cfg.ID)
 	l.Lock()
@@ -435,7 +530,7 @@ func (h *Manager) syncExtensionNodes(ctx context.Context, m *Machine) {
 	var capability proto.PluginNodeIdentityReply
 	if online {
 		if err := m.call(ctx, "plugin.node.identity", proto.PluginNodeIdentityRequest{}, &capability); err != nil && !nodeOutdated(err) {
-			return
+			return nil
 		}
 	}
 	identityAware := capability.Supported
@@ -457,7 +552,7 @@ func (h *Manager) syncExtensionNodes(ctx context.Context, m *Machine) {
 		}
 	}
 	if !ps.nodeSnapshotCurrent(all) {
-		return
+		return nil
 	}
 	if online && len(slots) > 0 {
 		if err := commitNodeIdentities(ctx, m, slots); err != nil {
@@ -466,7 +561,7 @@ func (h *Manager) syncExtensionNodes(ctx context.Context, m *Machine) {
 					ps.keepNodeState(p.Record.ID, p.Record.Version, m.cfg.ID, proto.PluginNodeState{ID: p.Record.ID, Version: p.Record.Version, Revision: extensionNodeRevision(p), State: extensionNodeOutdated, Error: i18n.T(h.contextLang(ctx), "extension-identity.node_required")})
 				}
 			}
-			return // Never send a destructive old-node sync or create a second data directory.
+			return nil // Never send a destructive old-node sync or create a second data directory.
 		}
 	}
 	for _, p := range all {
@@ -478,19 +573,21 @@ func (h *Manager) syncExtensionNodes(ctx context.Context, m *Machine) {
 		}
 	}
 	if !online {
-		return
+		return nil
 	}
 	if programs == nil {
 		programs = []proto.PluginNodeProgram{}
 	}
 	if !ps.nodeSnapshotCurrent(all) {
-		return
+		return nil
 	}
 	var states proto.PluginNodeStates
 	if err := m.call(ctx, "plugin.node.sync", proto.PluginNodeSync{Revision: syncRevision, Programs: programs, Installed: installed, InstalledSlots: slots, Identity: identityAware}, &states); err != nil &&
 		!nodeOutdated(err) {
 		h.logf("[%s] plugins' programs: %v", m.cfg.ID, err)
+		return err
 	}
+	return nil
 }
 
 // syncExtensionNode brings plugin p's program on m in line with p as the sync read it from the registry, and records
@@ -618,6 +715,9 @@ func (h *Manager) extensionLeaseLoop(ctx context.Context) {
 				h.logf("[%s] plugins' leases: %v", m.cfg.ID, err)
 			}
 			cancel()
+			if m.nodePackageRetryDue() {
+				go h.syncExtensionNodes(ctx, m)
+			}
 		}
 	}
 }

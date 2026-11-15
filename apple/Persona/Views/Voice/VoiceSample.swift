@@ -279,3 +279,4 @@ enum VoiceSample: String, CaseIterable {
     }
 }
 #endif
+import PersonaWire

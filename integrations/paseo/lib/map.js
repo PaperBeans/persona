@@ -44,6 +44,58 @@ export function personaMode(root, mode) {
   if (root === 'codex') return Object.keys(CODEX_MODES).find((ours) => CODEX_MODES[ours] === mode)
   return undefined
 }
+
+/** Paseo's feature that answers every permission prompt of an agent with allow: Persona's bypassPermissions there. */
+export const AUTO_ACCEPT = 'auto_accept'
+/**
+ * The built-in providers whose approval is Paseo's Auto Accept (AUTO_ACCEPT), a switch, rather than a mode: the ones it
+ * runs over ACP (`acp`, which a custom provider such as Grok's `grok agent stdio` extends, Copilot, Cursor) and OpenCode.
+ * Grok has no permission modes at all.
+ */
+export const AUTO_ACCEPT_ROOTS = new Set(['acp', 'copilot', 'cursor', 'opencode'])
+
+/** Whether an agent's Auto Accept is on; undefined when Paseo lists no such switch for it (another provider, not loaded). */
+export function autoAcceptOf(agent) {
+  const f = (agent?.features ?? []).find((x) => x?.id === AUTO_ACCEPT && x.type === 'toggle')
+  return f ? f.value === true : undefined
+}
+
+/**
+ * The permission modes of a provider that is not Claude Code's, in Persona's words (a launcher's and a row's
+ * permission_modes, #8261): its own approval (default, which a start sends as no mode), and Allow all
+ * (bypassPermissions) where Paseo has one for it: Auto Accept (autoAccept: the agent lists that switch) or Codex's
+ * full-access. Undefined for Claude Code's, whose five modes the apps know.
+ */
+export function permissionModesOf(root, autoAccept) {
+  if (root === 'claude') return undefined
+  return autoAccept || AUTO_ACCEPT_ROOTS.has(root) || root === 'codex' ? ['default', 'bypassPermissions'] : ['default']
+}
+/**
+ * The bridge's own words in items and in a row's last words. Like the node's own lines they are Chinese, since neither
+ * knows the reader's language, and the hub rewrites each of them, word for word, in the reader's: in items
+ * (hub/transcript_text.go) and in a runtime row's last words (assistant/fleet_text.go). The Go side names them
+ * transcript.RuntimeError… (docs/protocol/i18n.md, "Follow-up work"): change both sides together.
+ */
+export const ERROR_TEXT = '出错了' // a failure Paseo says nothing more of
+export const ERROR_LEAD = '出错了：' // a failure, then what Paseo says of it
+export const CANCELED_NOTE = '（已取消）' // a tool call cancelled before it gave anything back
+/** After a failed command's output: its exit code. */
+export const exitNote = (code) => `（退出码 ${code}）`
+/**
+ * Where the context was compacted: the node's notice for it (transcript.CompactedNotice), which stays Chinese because
+ * the apps find their compaction divider by it, and draw the divider in their own language.
+ */
+export const COMPACTED_NOTICE = '上下文已压缩'
+/**
+ * What another agent hands this one (agentMessageItem), in the node's words for the same lines read from a transcript
+ * (server/internal/transcript/paseo.go): the sender of a message whose agent has no title (transcript.FromSession), a
+ * child's notice by how it went (the node's noteText for a subagent, transcript.PaseoPermissionNotice), a schedule's
+ * run (transcript.PaseoScheduleNotice). The hub rewrites each in the reader's language: change both sides together.
+ */
+export const FROM_SESSION = '另一个会话'
+export const AGENT_NOTICE = { completed: '子 Agent 完成', failed: '子 Agent 失败', stopped: '子 Agent 已停止', waiting: '子 Agent 等待批准' }
+export const SCHEDULE_NOTICE = '定时任务到点'
+
 /** A launcher name (the node's nameRe: what a shell function may be called). */
 export const LAUNCHER_NAME = /^[A-Za-z_][A-Za-z0-9_-]*$/
 /** A session id the node takes (runtimeIDRe). */
@@ -103,7 +155,10 @@ export function formModel(m) {
 
 /**
  * The new-session form's launchers: one per provider that can start an agent (enabled, not failing, named like a
- * launcher), with the agent it starts and its models.
+ * launcher), with the agent it starts, its models, its name in Paseo (display_name) and, for a provider that is not
+ * Claude Code's, the permission modes a start takes (#8261); `auto_accept` when its approval is Auto Accept (#8141). A
+ * Codex provider's says it starts with no first message too (prompt_optional): Paseo creates an agent without one,
+ * where a Codex in a terminal used to need it.
  */
 export function launchersOf(entries = [], roots = {}) {
   const out = []
@@ -111,21 +166,52 @@ export function launchersOf(entries = [], roots = {}) {
     if (!e?.enabled || e.status === 'unavailable' || e.status === 'error' || !LAUNCHER_NAME.test(e.provider ?? '')) continue
     const models = (e.models ?? []).filter((m) => m && m.id && m.isSelectable !== false).map(formModel)
     const def = models.find((m) => m.default) ?? models[0]
-    const l = { name: e.provider, agent: appAgent(roots[e.provider] ?? e.provider), models }
+    const root = roots[e.provider] ?? e.provider
+    const l = { name: e.provider, agent: appAgent(root), models }
     const model = def?.name ?? e.label
     if (model) l.model = String(model)
+    if (l.agent === 'codex') l.prompt_optional = true
+    if (AUTO_ACCEPT_ROOTS.has(root)) l.auto_accept = true
+    const label = typeof e.label === 'string' ? e.label.trim() : ''
+    if (label && label !== e.provider) l.display_name = label
+    const modes = permissionModesOf(root)
+    if (modes) l.permission_modes = modes
     out.push(l)
   }
   return out
 }
 
 /**
- * The provider a new session runs on when the form named none Paseo has (a launcher of the login shell's): Claude
- * Code's own if it is on, else the first one running Claude Code, else the first one there is.
+ * The effort a model runs a start at, given the one asked for and the model's thinking options (Paseo's ids): the one
+ * asked when the model offers it, else the nearest lower one of Persona's it offers (xhigh → high), else the lowest
+ * one it offers; undefined when it offers none of Persona's (its own default applies). Persona's order is EFFORTS.
+ */
+export function effortFor(asked, options = []) {
+  const offered = EFFORTS.filter((e) => options.includes(e))
+  if (offered.includes(asked)) return asked
+  const rank = EFFORTS.indexOf(asked)
+  return offered.filter((e) => EFFORTS.indexOf(e) < rank).at(-1) ?? offered[0]
+}
+
+/**
+ * The provider a new session runs on when the form named no launcher: Claude Code's own if it is on, else the first
+ * one running Claude Code, else the first one there is. Also the form's first choice (Paseo's default).
  */
 export function defaultProvider(entries = [], roots = {}) {
   const usable = (entries ?? []).filter((e) => e?.enabled && e.status !== 'unavailable' && e.status !== 'error')
   return (usable.find((e) => e.provider === 'claude') ?? usable.find((e) => roots[e.provider] === 'claude') ?? usable[0])?.provider
+}
+
+/**
+ * The provider that stands in for a launcher of agent kind `kind` (a Paseo root: claude, codex, omp…) that Paseo has
+ * no usable provider of: among launchers (its usable providers, its default first) those of that kind that accept
+ * takes, Paseo's own provider of that kind first (its built-in claude or codex, when it is on), else the first one.
+ * undefined when it has none of that kind: a start never runs another kind of agent in its place.
+ */
+export function sameKindProvider(launchers = [], roots = {}, kind = '', accept = () => true) {
+  if (!kind) return undefined
+  const fits = (launchers ?? []).filter((l) => (roots[l.name] ?? l.name) === kind && accept(l.name))
+  return (fits.find((l) => l.name === kind) ?? fits[0])?.name
 }
 
 // ---- sessions ----
@@ -176,6 +262,16 @@ export function codexThreadOf(agent, roots = {}) {
     if (typeof id === 'string' && CODEX_THREAD.test(id)) return id
   }
   return undefined
+}
+
+/**
+ * Whether Persona started the agent, or took its session over (#8130): its id is on Persona's label, put there by the
+ * start (bridge.js start, takeOver), and not one the bridge only kept for an agent made in Paseo's own app (KEPT_LABEL).
+ * Paseo keeps the label with the agent, so this holds after a restart of the node, the bridge or Paseo.
+ */
+export function startedByPersona(agent) {
+  const label = agent?.labels?.[SESSION_LABEL]
+  return typeof label === 'string' && SESSION_ID.test(label) && !agent.labels[KEPT_LABEL]
 }
 
 /**
@@ -231,7 +327,9 @@ export function promptKey(text) {
  * A session row's status for an agent: needing you while a request waits, working, "Offline" when closed. Stopped (idle,
  * or a turn that failed): done while Paseo says it waits for you to look at it (requiresAttention, cleared once you
  * open it in Paseo), idle — seen — once it does not (#2831), as herdr's done / idle carry herdr's own seen state.
- * A Paseo without that flag: done once it has run a turn.
+ * A Paseo without that flag: done once it has run a turn. Closed with the flag still on is done too (#8133): Paseo lets
+ * an idle agent's process go after a while and keeps its mark, so a finished agent nobody looked at stays Unread, from
+ * when it finished, rather than turning into "Offline" until something loads it again.
  * @param {object} agent
  * @param {{ quiet?: boolean, fleet?: boolean }} [o]
  *   quiet: an agent another agent created, in that agent's workspace (#4494). It never waits to be looked at: Paseo
@@ -247,7 +345,8 @@ export function rowStatus(agent, o = {}) {
     case 'initializing':
       return 'working'
     case 'closed':
-      return o.fleet ? 'idle' : 'offline'
+      if (o.fleet) return 'idle'
+      return !o.quiet && agent.requiresAttention === true ? 'done' : 'offline'
   }
   if (o.quiet) return 'idle'
   if (typeof agent?.requiresAttention === 'boolean') return agent.requiresAttention ? 'done' : 'idle'
@@ -343,13 +442,14 @@ export function projectSpaces(placed, canon = (p) => p) {
  * @param {object} agent - an AgentSnapshotPayload
  * @param {{ project?: object, roots?: Record<string, string>, labels?: Record<string, string>, lastText?: string,
  *   spaceId?: string, spaceName?: string, parent?: string, quiet?: boolean, fleet?: object[],
- *   canon?: (path: string) => string, archived?: boolean }} [o]
+ *   canon?: (path: string) => string, archived?: boolean, thinking?: string[] }} [o]
  *   project: its ProjectPlacement; labels: provider id → its label (the name of a provider the apps do not know);
  *   spaceId, spaceName: its project space and that space's name (projectSpaces); parent: the session of the agent that
  *   created it, when that one is listed beside it; quiet: Paseo shows what it did on no workspace (rowStatus); fleet:
  *   the agents it created that have not finished (the bridge knows all three); canon: a path as its physical
  *   directory (the bridge resolves symbolic links); archived: an agent archived in Paseo that is listed all the same
- *   (archivedUnderOwnId): not running, whatever its record says. Without it an archived agent has no row.
+ *   (archivedUnderOwnId): not running, whatever its record says. Without it an archived agent has no row. thinking:
+ *   the thinking options of the model it runs, as Paseo's providers list them.
  */
 export function agentRow(agent, o = {}) {
   const roots = o.roots ?? {}
@@ -371,6 +471,9 @@ export function agentRow(agent, o = {}) {
     agent: appAgent(root),
     launcher: agent.provider,
   }
+  // Persona started it (or took it over): the manager finds a start whose answer it lost by this, among the sessions
+  // of the same launcher and folder (#8130).
+  if (startedByPersona(agent)) row.started_by_persona = true
   // When it was created: a delegated agent's card in its creator's chat counts its running time from it (#5120).
   const created = Date.parse(agent.createdAt)
   if (created) row.started_at = new Date(created).toISOString()
@@ -390,18 +493,33 @@ export function agentRow(agent, o = {}) {
   if (row.agent === RUNTIME && o.labels?.[agent.provider]) row.agent_label = o.labels[agent.provider]
   const model = agent.model ?? agent.runtimeInfo?.model
   if (typeof model === 'string' && model) row.model = model
-  const mode = personaMode(root, agent.currentModeId)
+  // Auto Accept on is Allow all; off says nothing, since the agent's own settings may still approve everything (Grok's
+  // can): the apps read no mode as its own where the row lists its permission_modes (below).
+  const mode = personaMode(root, agent.currentModeId) ?? (autoAcceptOf(agent) ? 'bypassPermissions' : undefined)
   if (mode) row.permission_mode = mode
   const effort = agent.effectiveThinkingOptionId ?? agent.thinkingOptionId
   if (EFFORTS.includes(effort)) row.effort = effort
-  // How far a rewind goes here: the node offers it, and the files with it, only where Paseo's provider can.
+  // The efforts an agent that is not Claude Code's can be switched between (the apps know Claude Code's own): its
+  // model's thinking options that are Persona's levels, as the bridge's modes takes them. iOS offers the effort alone on
+  // such a row, as on a Codex thread the node drives (#8133).
+  if (row.agent !== 'claude' && !o.archived) {
+    const efforts = EFFORTS.filter((e) => o.thinking?.includes(e))
+    if (efforts.length) row.efforts = efforts
+  }
+  // How far a rewind goes here: the node offers it, and the files with it, only where Paseo's provider can. Paseo
+  // changes nothing of an agent it keeps archived (a rewind, a mode, an effort, a model: the bridge refuses them), so
+  // that row takes all of them away, whatever the record it was archived with says (#8133); the node narrows them.
+  // The permission modes modes takes for an agent that is not Claude Code's: the apps' two-state switch (#8261).
   const rewind = rewindOf(agent)
-  row.capabilities = { rewind: rewind.conversation, rewind_code: rewind.code }
+  row.capabilities = o.archived ? { rewind: false, rewind_code: false, modes: false, model: false }
+    : { rewind: rewind.conversation, rewind_code: rewind.code }
+  const modes = !o.archived && permissionModesOf(root, autoAcceptOf(agent) !== undefined)
+  if (modes) row.capabilities.permission_modes = modes
   const t = transcriptOf(agent, roots)
   if (t) row.transcript = t
   const thread = codexThreadOf(agent, roots)
   if (thread) row.codex_thread = thread
-  const last = agent.status === 'error' && agent.lastError ? `出错了：${agent.lastError}` : o.lastText
+  const last = agent.status === 'error' && agent.lastError ? ERROR_LEAD + agent.lastError : o.lastText
   if (last) row.last_text = snippet(last)
   // A delegated agent is its creator's subtask, as a Codex subagent is its chat's (#4494): the apps fold it under
   // that session, and the hub pushes no "done" for it and holds its creator's until the fleet has reported back.
@@ -505,9 +623,65 @@ export function toolCall(name, detail) {
       return { name: appToolName(name || d.label || 'tool'), input: clipInput(dropEmpty({ text: d.text, label: d.label })) }
     default: {
       const input = d.input && typeof d.input === 'object' && !Array.isArray(d.input) ? d.input : d.input === undefined || d.input === null ? {} : { input: d.input }
+      if (typeof input.variant === 'string' && input.variant) return variantCall(input)
       return { name: appToolName(name || 'tool'), input: clipInput(input) }
     }
   }
+}
+
+/**
+ * A tool Grok CLI names in its ACP input (`variant`), which Paseo passes on as an unknown detail named `other` or after
+ * the ACP title (``List `/w` ``): drawn as the apps' tool for it, else under its own name without that argument. A
+ * listing is LS; a background task's output and its stop are Claude Code's TaskOutput and TaskStop (Monitor is Claude
+ * Code's name already); an MCP call (UseTool, `<server>__<tool>`) is the tool itself, as Claude Code names it.
+ */
+function variantCall({ variant, ...input }) {
+  switch (variant) {
+    case 'ListDir':
+      return { name: 'LS', input: dropEmpty({ path: input.target_directory }) }
+    case 'TaskOutput': {
+      const ids = Array.isArray(input.task_ids) ? input.task_ids.filter((x) => typeof x === 'string' && x) : []
+      return { name: 'TaskOutput', input: dropEmpty({ task_id: ids.join(', ') || input.task_id }) }
+    }
+    case 'KillTask':
+      return { name: 'TaskStop', input: dropEmpty({ task_id: input.task_id }) }
+    case 'UseTool': {
+      const args = input.tool_input && typeof input.tool_input === 'object' && !Array.isArray(input.tool_input) ? input.tool_input : {}
+      if (typeof input.tool_name === 'string' && input.tool_name) return { name: `mcp__${input.tool_name}`, input: clipInput(args) }
+      break
+    }
+  }
+  return { name: appToolName(variant), input: clipInput(input) }
+}
+
+/**
+ * What a tool Grok CLI names (variantCall) gave back, as text: a listing's tree, a background task's output with its
+ * exit code after it as a command's, a stop's message, an MCP tool's text; otherwise its fields, a `key: value` line each.
+ */
+function variantOutput(o) {
+  if (o === undefined || o === null) return ''
+  if (typeof o !== 'object') return String(o)
+  if (typeof o.Content?.content === 'string') return o.Content.content
+  if (typeof o.output === 'string') return o.output
+  const r = o.Result
+  if (r && typeof r === 'object' && !Array.isArray(r)) {
+    if (typeof r.output === 'string') return r.output + exitLine(r.exit_code, r.output)
+    return typeof r.message === 'string' ? r.message : fieldLines(r)
+  }
+  // An MCP tool's answer holds one text under the outcome's name ({ OkayOutput: '…' }).
+  const texts = o.output && typeof o.output === 'object' ? Object.values(o.output).filter((v) => typeof v === 'string') : []
+  return texts.length === 1 ? texts[0] : fieldLines(o)
+}
+
+/** An object's fields but its `type`, a `key: value` line each (a nested one as JSON). */
+function fieldLines(o) {
+  return Object.entries(o).filter(([k, v]) => k !== 'type' && v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n')
+}
+
+/** A command's exit code after its output, on a line of its own, when it failed. */
+function exitLine(code, out) {
+  return typeof code === 'number' && code !== 0 ? `${out ? '\n' : ''}${exitNote(code)}` : ''
 }
 
 /** What a finished tool call gave back, as the text of its result. */
@@ -517,7 +691,7 @@ export function toolOutput(item) {
   switch (d.type) {
     case 'shell':
       out = d.output ?? ''
-      if (typeof d.exitCode === 'number' && d.exitCode !== 0) out += `${out ? '\n' : ''}（退出码 ${d.exitCode}）`
+      out += exitLine(d.exitCode, out)
       break
     case 'read':
     case 'write':
@@ -546,18 +720,120 @@ export function toolOutput(item) {
       out = ''
       break
     default:
-      out = d.output === undefined || d.output === null ? '' : typeof d.output === 'string' ? d.output : JSON.stringify(d.output, null, 2)
+      if (typeof d.input?.variant === 'string' && d.input.variant) out = variantOutput(d.output)
+      else out = d.output === undefined || d.output === null ? '' : typeof d.output === 'string' ? d.output : JSON.stringify(d.output, null, 2)
   }
   if (item?.status === 'failed' && item.error) {
     const e = typeof item.error === 'string' ? item.error : item.error?.message ?? JSON.stringify(item.error)
     out = out ? `${out}\n${e}` : e
-  } else if (item?.status === 'canceled' && !out) out = '（已取消）'
+  } else if (item?.status === 'canceled' && !out) out = CANCELED_NOTE
   return String(out)
 }
 
 /** Whether a finished tool call failed. */
 function toolFailed(item) {
   return item?.status === 'failed' || (item?.detail?.type === 'shell' && typeof item.detail.exitCode === 'number' && item.detail.exitCode !== 0)
+}
+
+// A child's notice's first line (Paseo's formatFinishNotificationBody), a schedule's run (buildScheduleFireBody) and
+// Paseo's note to the model that it cut a child's answer, as the node reads them (server/internal/transcript/paseo.go).
+const PASEO_STATUS = /^Agent (\S+) \((.*)\) (finished|errored|needs permission|was closed|is unavailable|was canceled)\.$/
+const PASEO_SCHEDULE = /^Schedule (?:"(.*)" )?fired \(id=[^,)]*, run=[^)]*\)\.$/
+const PASEO_CUT = /\n\[truncated \d+ chars; use get_agent_activity for the full response\]$/
+const PASEO_EVENTS = { finished: 'finished', errored: 'errored', 'needs permission': 'permission-required', 'was closed': 'closed', 'is unavailable': 'closed', 'was canceled': 'errored' }
+
+/** The first non-blank line of s, at most n characters (the node's oneLine). */
+function oneLine(s, n = 100) {
+  const line = String(s ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? ''
+  const chars = [...line]
+  return chars.length > n ? chars.slice(0, n - 1).join('') + '…' : line
+}
+
+/** What is between <tag> and </tag> in s, trimmed; '' when s has no such pair (the node's firstTag). */
+function tagged(s, tag) {
+  const i = s.indexOf(`<${tag}>`)
+  if (i < 0) return ''
+  const j = s.indexOf(`</${tag}>`, i)
+  return j < 0 ? '' : s.slice(i + tag.length + 2, j).trim()
+}
+
+/**
+ * Another agent's message, a child's notice or a schedule's run, which Paseo hands an agent in a <paseo-system>
+ * envelope and its timeline projects into a tool call (`agentMessage`; a bare envelope's into `heartbeat`, whatever it
+ * says). Its items as the node draws the same input read from a transcript: a message from another session, a
+ * subagent's task note, a notice, none for an empty message; null for any other call. The timeline does not say whether
+ * one started a run, so none is a wake.
+ */
+export function agentMessageItems(it) {
+  const am = it?.agentMessage
+  if (am && typeof am === 'object') {
+    const text = typeof am.text === 'string' ? am.text : ''
+    let title = oneLine(am.sender?.title)
+    if (title === String(am.sender?.id ?? '').trim()) title = '' // Paseo names an untitled agent by its id
+    if (am.event === 'message') {
+      const words = text.trim()
+      return words ? [{ role: 'user', kind: 'text', text: words, from: title || FROM_SESSION }] : []
+    }
+    return ['finished', 'errored', 'permission-required', 'closed'].includes(am.event) ? [childNotice(am.event, title, text)] : null
+  }
+  if (it?.name !== 'heartbeat' || !String(it.callId ?? '').startsWith('paseo-system:')) return null
+  const body = String(it.detail?.text ?? '')
+  const [first, ...rest] = body.split('\n')
+  const status = PASEO_STATUS.exec(first)
+  if (status) return [childNotice(PASEO_EVENTS[status[3]], oneLine(status[2]) === status[1] ? '' : oneLine(status[2]), body)]
+  const schedule = PASEO_SCHEDULE.exec(first)
+  if (!schedule) { // Paseo's words of another kind: a notice of its first line
+    const line = snippetLine(body, 200)
+    return line ? [{ role: 'system', kind: 'notice', text: line }] : []
+  }
+  const what = snippetLine(schedule[1], 80) || snippetLine(rest.join('\n'), 80)
+  return [{ role: 'system', kind: 'notice', text: what ? `${SCHEDULE_NOTICE}：${what}` : SCHEDULE_NOTICE }]
+}
+
+/** The first line of s, at most n characters and an ellipsis (the node's snippetLine). */
+function snippetLine(s, n) {
+  const chars = [...String(s ?? '').trim().split('\n', 1)[0].trim()]
+  return chars.length > n ? chars.slice(0, n).join('') + '…' : chars.join('')
+}
+
+/**
+ * A child's notice as a subagent's task note: how it went (by its first line, which tells a cancel from an error, else
+ * by the event), its title, and as the detail what a permission asks for and the child's last answer. The server it
+ * runs on, the request's JSON and how to answer it are for the model.
+ */
+function childNotice(event, title, body) {
+  const reason = PASEO_STATUS.exec(body.split('\n', 1)[0])?.[3] ?? ''
+  const status = reason === 'finished' || (!reason && event === 'finished') ? 'completed'
+    : reason === 'needs permission' || (!reason && event === 'permission-required') ? 'waiting'
+      : ['was canceled', 'was closed', 'is unavailable'].includes(reason) || (!reason && event === 'closed') ? 'stopped'
+        : 'failed'
+  const detail = [status === 'waiting' ? permissionAsk(tagged(body, 'permission-request')) : '', childAnswer(body)].filter(Boolean).join('\n\n')
+  const task = { kind: 'agent', status, title, ...(detail ? { detail } : {}) }
+  return { role: 'system', kind: 'notice', text: title ? `${AGENT_NOTICE[status]} · ${title}` : AGENT_NOTICE[status], task }
+}
+
+/** A child's last answer, the notice's last section (<agent-response>), without Paseo's note that it was cut. */
+function childAnswer(body) {
+  const open = '<agent-response>\n', close = '\n</agent-response>'
+  const i = body.indexOf(open)
+  if (i < 0 || !body.endsWith(close) || i + open.length > body.length - close.length) return ''
+  let answer = body.slice(i + open.length, body.length - close.length)
+  const cut = PASEO_CUT.exec(answer)
+  if (cut) answer = answer.slice(0, cut.index).trimEnd() + '…'
+  return answer.trim()
+}
+
+/** What a child's permission request asks for, in a line: its title, else the tool and the call's description or command. */
+function permissionAsk(raw) {
+  let request
+  try { request = JSON.parse(raw)?.request } catch { return '' }
+  if (!request || typeof request !== 'object') return ''
+  const title = oneLine(request.title)
+  if (title) return title
+  const input = request.input && typeof request.input === 'object' ? request.input : {}
+  const what = oneLine(input.description) || oneLine(input.command)
+  const name = String(request.name ?? '').trim()
+  return name && what ? `${name}: ${what}` : name || what
 }
 
 /**
@@ -589,6 +865,11 @@ export function entryItems(entry, echoes) {
       if (it.text) add(s, { role: 'assistant', kind: 'thinking', text: it.text })
       break
     case 'tool_call': {
+      const said = agentMessageItems(it)
+      if (said) {
+        for (const x of said) add(s, x)
+        break
+      }
       const call = toolCall(it.name, it.detail)
       const useId = it.callId || `paseo-${s}`
       add(s, { role: 'assistant', kind: 'tool_use', tool_name: call.name, tool_use_id: useId, tool_input: call.input })
@@ -600,16 +881,19 @@ export function entryItems(entry, echoes) {
       add(s, { role: 'assistant', kind: 'tool_use', tool_name: 'TodoWrite', tool_use_id: `paseo-todo-${s}`, tool_input: { todos } })
       break
     }
-    case 'error':
-      add(s, { role: 'system', kind: 'notice', text: `出错了：${snippet(it.message ?? '')}` })
+    case 'error': {
+      const said = typeof it.message === 'string' ? it.message.trim() : ''
+      add(s, { role: 'system', kind: 'notice', text: said ? ERROR_LEAD + snippet(said) : ERROR_TEXT })
       break
+    }
     case 'notification':
       if (it.message) add(s, { role: 'system', kind: 'notice', text: snippet(it.message) })
       break
     case 'compaction':
+      // The node's own notice for a compaction, always with compact: every app draws it as its divider, worded in the
+      // app's language (#8133), as for Claude Code's compact_boundary (transcript.CompactedNotice).
       if (it.status === 'completed') {
-        const compact = dropEmpty({ trigger: it.trigger, pre_tokens: it.preTokens })
-        add(s, { role: 'system', kind: 'notice', text: '已压缩上下文', ...(Object.keys(compact).length ? { compact } : {}) })
+        add(s, { role: 'system', kind: 'notice', text: COMPACTED_NOTICE, compact: dropEmpty({ trigger: it.trigger, pre_tokens: it.preTokens }) })
       }
       break
     // plugin items: a Paseo plugin's own rendering, nothing the apps can show
@@ -677,6 +961,33 @@ function alwaysLabel(suggestions) {
   return snippet(`${where}不再问：${rules}`)
 }
 
+/** Codex 0.167's MCP approval: `Allow the <server> MCP server to run tool "<tool>"?`. */
+const CODEX_MCP_TOOL = / to run tool "([^"\n]+)"\?/
+
+/**
+ * Whether a permission request asks for MCP tool `name` (`mcp__<server>__<tool>`), whichever provider asks (#8141):
+ * Claude Code by that name, OpenCode as `<server>_<tool>`, Codex in an approval of the server naming the tool, any
+ * other by the call its card shows (Grok's UseTool).
+ */
+export function asksForTool(request, name) {
+  const r = request ?? {}
+  const m = /^mcp__(.+?)__(.+)$/.exec(name ?? '')
+  if (!m || typeof r.name !== 'string') return false
+  const [, server, tool] = m
+  switch (r.provider) {
+    case 'claude':
+      return r.name === name
+    case 'opencode': {
+      const safe = (s) => s.replace(/[^a-zA-Z0-9_-]/g, '_')
+      return r.name === `${safe(server)}_${safe(tool)}`
+    }
+    case 'codex':
+      return r.name === 'CodexMcpElicitation' && r.metadata?.serverName === server && CODEX_MCP_TOOL.exec(r.description ?? '')?.[1] === tool
+  }
+  const input = r.input && typeof r.input === 'object' ? r.input : {}
+  return toolCall(r.name, r.detail ?? { type: 'unknown', input }).name === name
+}
+
 /**
  * The interaction a pending request becomes on the phone (docs/protocol/protocol.md Interaction): a question, a plan, or a
  * permission. The id is stable (interactionId), so a restart hangs the same request on the card already shown.
@@ -718,12 +1029,29 @@ export function interactionOf(sessionId, request) {
 }
 
 /**
+ * The mode a Claude Code agent had before it planned, as its plan request says: Paseo offers implement_resume only to
+ * go back to that mode (bypassPermissions or auto), labelled "Implement with <the mode's label>". modes: the agent's,
+ * with their labels. Undefined when the request does not say (no such action, or a label none of the modes has).
+ */
+export function modeBeforePlan(request, modes) {
+  const label = (request?.actions ?? []).find((a) => a?.id === 'implement_resume')?.label
+  if (typeof label !== 'string') return undefined
+  let found
+  for (const m of modes ?? []) {
+    const name = typeof m?.label === 'string' ? m.label.trim() : ''
+    if (m?.id && name && label.trim().endsWith(` ${name}`) && name.length > (found?.name.length ?? 0)) found = { id: m.id, name }
+  }
+  return found?.id
+}
+
+/**
  * The answer to send for a request (agent_permission_response's response), undefined when the phone handed it back
  * (Paseo's own app answers it). mode: for an approved plan, the mode the phone chose; the response picks the plan's
- * action, and setMode is what is left to set after it (Paseo's implement switches to acceptEdits).
+ * action, and setMode is what is left to set after it (Paseo's implement switches to acceptEdits). modes: the agent's,
+ * with their labels (modeBeforePlan).
  * @returns {{ response: object, setMode?: string } | undefined}
  */
-export function responseOf(request, res, root) {
+export function responseOf(request, res, root, modes) {
   if (!res || res.dismiss) return undefined
   const r = request ?? {}
   if (r.kind === 'question' && res.answers && typeof res.answers === 'object') {
@@ -745,7 +1073,9 @@ export function responseOf(request, res, root) {
       return { response: { behavior: 'deny', message: msg, ...(ids.has('reject') ? { selectedActionId: 'reject' } : {}) } }
     }
     const mode = MODES.includes(res.mode) ? res.mode : 'bypassPermissions'
-    if (ids.has('implement_resume') && (mode === 'bypassPermissions' || mode === 'auto')) {
+    // implement_resume puts the agent back in the mode it had before it planned, not in the one chosen on the phone:
+    // only when the two are the same. Otherwise implement, then switch to the phone's.
+    if (ids.has('implement_resume') && mode === modeBeforePlan(r, modes)) {
       return { response: { behavior: 'allow', selectedActionId: 'implement_resume' } }
     }
     if (ids.has('implement')) return { response: { behavior: 'allow', selectedActionId: 'implement' }, ...(mode !== 'acceptEdits' ? { setMode: mode } : {}) }

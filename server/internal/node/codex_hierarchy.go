@@ -68,7 +68,7 @@ func codexProjectRoot(cwd string, cache map[string]string) string {
 }
 
 func (n *Node) decorateCodexSession(s *proto.Session, src codexSource, legacy string, projects map[string]string) {
-	origin := readCodexOrigin(src.path)
+	origin := codexThreadOrigin(src) // a rollout's first line, else the App's database row (#8191)
 	s.ParentThreadID = firstNonEmpty(s.ParentThreadID, origin.parent)
 	s.IsSubagent = origin.sub || s.ParentThreadID != ""
 	if s.ParentThreadID != "" {
@@ -112,12 +112,18 @@ func (n *Node) decorateCodexSession(s *proto.Session, src codexSource, legacy st
 		chat = firstNonEmpty(origin.root, s.ParentThreadID, chat)
 	}
 	if s.RepoRoot != "" && !app.inNoProject(chat) {
-		s.SpaceID, s.SpaceName = "codex-project:"+s.RepoRoot, firstNonEmpty(app.folderName(s.RepoRoot), filepath.Base(s.RepoRoot))
+		s.SpaceID, s.SpaceName = projectSpace+s.RepoRoot, firstNonEmpty(app.folderName(s.RepoRoot), filepath.Base(s.RepoRoot))
 		s.SpaceIndex = app.folderPlace(s.RepoRoot)
 	} else {
 		s.SpaceID, s.SpaceName = "codex-chats:"+src.home, "Codex 对话"
 	}
 }
+
+// projectSpace prefixes the space of a repository's desktop-app sessions on a computer, the root following it: the Codex
+// App's chats in a project (decorateCodexSession) and the Claude desktop app's sessions (placeClaudeDesktop) alike, so
+// both apps' sessions of a repository are one project. The name is the Codex App's from before Claude's were placed:
+// pins and clients' remembered sections name spaces by it.
+const projectSpace = "codex-project:"
 
 // Public IDs isolate Codex homes. Missing parents remain explicit; cycles terminate.
 func resolveCodexHierarchy(sessions []proto.Session) {

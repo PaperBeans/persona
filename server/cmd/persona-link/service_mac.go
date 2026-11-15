@@ -81,7 +81,7 @@ func installMac(e *env, withNode bool, personad string, nodeBinAny bool, invite 
 	}
 	domain := e.linkLaunchdDomain()
 	_, _ = e.command("launchctl", "bootout", domain+"/"+linkLabel)
-	if out, err := e.command("launchctl", "bootstrap", domain, file); err != nil {
+	if out, err := e.bootstrapLaunchd(domain, file); err != nil {
 		return fmt.Errorf("%s", text("link-service.bootstrap_failed", i18n.Args{"detail": orErr(out, err)}))
 	}
 	fmt.Fprintln(e.stdout, text("link-service.installed", i18n.Args{"label": linkLabel, "path": file}))

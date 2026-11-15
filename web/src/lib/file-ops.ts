@@ -53,8 +53,34 @@ export function uploadToDir(
   file: File,
   opts: { dir: string; cwd?: string; conflict?: Conflict; credential?: UploadCredential; signal?: AbortSignal; onProgress?: (sent: number, total: number) => void },
 ): Promise<Uploaded> {
-  const credential = opts.credential ?? { owner: credentialOwner(), token: getToken() };
   const q = `name=${enc(file.name)}&dest=dir&dir=${enc(opts.dir)}${opts.cwd ? `&cwd=${enc(opts.cwd)}` : ""}${opts.conflict ? `&conflict=${opts.conflict}` : ""}`;
+  return uploadWithProgress(mid, file, q, opts);
+}
+
+/** The hub feature for `dest=attachment`: a file sent with a chat message, kept on the computer (#8361). */
+export const UPLOAD_ATTACHMENT_FEATURE = "upload_attachment";
+
+/**
+ * Sends `file` with a chat message to machine `mid` (docs/protocol/protocol.md "Sending files", #8361), reporting the
+ * bytes sent: `dest` "attachment" keeps it beside the chat's pictures, "health" in the health space's reports, none in
+ * the temp directory. Rejects as `uploadToDir` does.
+ */
+export function uploadAttachment(
+  mid: string,
+  file: File,
+  opts: { name?: string; dest?: string; signal?: AbortSignal; onProgress?: (sent: number, total: number) => void } = {},
+): Promise<Uploaded> {
+  return uploadWithProgress(mid, file, `name=${enc(opts.name ?? file.name)}${opts.dest ? `&dest=${enc(opts.dest)}` : ""}`, opts);
+}
+
+/** POST /machines/{mid}/files?<query> over XHR, the bytes sent reported as they go. */
+function uploadWithProgress(
+  mid: string,
+  file: File,
+  q: string,
+  opts: { credential?: UploadCredential; signal?: AbortSignal; onProgress?: (sent: number, total: number) => void },
+): Promise<Uploaded> {
+  const credential = opts.credential ?? { owner: credentialOwner(), token: getToken() };
   return new Promise((resolve, reject) => {
     // XHR, not fetch: only it reports an upload's progress
     const xhr = new XMLHttpRequest();

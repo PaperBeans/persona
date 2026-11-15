@@ -3,6 +3,7 @@ import SwiftUI
 #if canImport(UIKit)
 import UIKit
 #endif
+import PersonaWire
 
 /// How wide each column of a Markdown table is drawn. MarkdownUI lays a table out as a Grid, every column as wide as
 /// its widest cell; in a reply that ran a long Chinese column off the screen with nothing saying it scrolls. Columns

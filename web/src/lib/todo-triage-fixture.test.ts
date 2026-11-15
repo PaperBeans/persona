@@ -6,8 +6,7 @@ import type { Session } from "./types";
 import { makeSessionLookup, type Todo } from "./todos";
 import { relatedKeys, TRIAGE_SECTIONS, triage, triageTodos } from "./todo-triage";
 
-// The hub's copy of the SOP (server/internal/assistant/todo_triage.go, docs/assistant/todo-status-sop.md "Clients") reads
-// the same cases: on the same to-dos and sessions it places each in the same section by the same rule.
+// The hub's copy of the SOP reads these same cases: on the same to-dos and sessions it places each in the same section.
 describe("the To-dos SOP's shared cases (spec/fixtures/triage)", () => {
   for (const c of triageFixture.cases) {
     it(`triage: ${c.name}`, () => {

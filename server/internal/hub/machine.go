@@ -74,12 +74,17 @@ type Machine struct {
 	// session is neither subscribed nor watched on the node (dropWatchSlot).
 	watchMu   map[string]*watchSlot
 	nodeWatch map[string]nodeWatchState
-	// The web panels' open folders on this machine (fswatch.go): fswMu orders the fs.watch calls, fswSent says the
-	// node was given a non-empty set, fswWarned that a failure was logged (a node without fs.watch).
-	fswMu     sync.Mutex
-	fswSent   bool
-	fswWarned bool
-	lastSeq   map[string]int // session id -> highest item seq seen
+	// The web panels' open folders on this machine (fswatch.go): fswMu guards the fields below. One worker syncs the
+	// node at a time, with fswPending coalescing changes made while it is out; fswForce resends even an empty set on a
+	// new connection. fswSent says an empty set must still be sent (the node has a non-empty one, or a forced one
+	// failed), fswWarned that a failure was logged.
+	fswMu      sync.Mutex
+	fswSent    bool
+	fswWarned  bool
+	fswRunning bool
+	fswPending bool
+	fswForce   bool
+	lastSeq    map[string]int // session id -> highest item seq seen
 	// derived: a computer only a member hub has in hub.json; the center reaches it through that hub.
 	derived bool
 
@@ -723,6 +728,10 @@ func (m *Machine) onEvent(event string, params json.RawMessage) {
 			m.hub.toSubscribers(m.cfg.ID, p.SessionID, deltaPush{Type: "delta", MachineID: m.cfg.ID, SessionID: p.SessionID, Text: p.Text})
 		}
 	case "codex.inventory":
+		if !m.codexInventoryHanded() {
+			m.hub.logf("[%s] Codex inventory from a connection the hub has not handed its own yet: not kept", m.cfg.ID)
+			return
+		}
 		m.rememberCodexInventory(params)
 	case "session.echo":
 		m.recordEcho(params)

@@ -3,9 +3,11 @@ import XCTest
 /// The assistant sidebar finds a chat by what was said in it and opens it at that message (#6284), against
 /// scripts/mock/mock_hub.py with `MOCK_CHAT_SEARCH=1` (`TEST_RUNNER_PERSONA_MOCK_HUB`): the user's words in a result row,
 /// tapping it lands on that message; Persona's reply is found as well (one inside a folded turn opens it); an early one
-/// is paged back for; a thought is never found.
+/// is paged back for; a thought is never found. On an iPhone (the drawer) and an iPad (Search at the open column's foot, #7650, #4206);
+/// `TEST_RUNNER_PERSONA_ORIENTATION=landscape` runs it on its side.
 final class AssistantChatSearchUITests: XCTestCase {
     private var hub: String!
+    private var landscape: Bool { ProcessInfo.processInfo.environment["PERSONA_ORIENTATION"] == "landscape" }
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -13,6 +15,12 @@ final class AssistantChatSearchUITests: XCTestCase {
             throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_CHAT_SEARCH=1 (PERSONA_MOCK_HUB)")
         }
         hub = value
+        if landscape { XCUIDevice.shared.orientation = .landscapeLeft }
+    }
+
+    override func tearDown() {
+        if landscape { XCUIDevice.shared.orientation = .portrait }
+        super.tearDown()
     }
 
     @MainActor private func launch() -> XCUIApplication {
@@ -24,12 +32,19 @@ final class AssistantChatSearchUITests: XCTestCase {
     }
 
     @MainActor private func search(_ app: XCUIApplication, _ words: String) {
+        // An iPad starts with the sidebar column open, Search at its foot, and no sidebar button in the page's bar while
+        // the column is out (#4206); an iPhone's drawer opens with that button, its search behind 「搜索对话」 in the drawer.
         let open = app.buttons["assistant-sidebar-button"].firstMatch
-        XCTAssertTrue(open.waitForExistence(timeout: 20), "no sidebar button:\n\(app.debugDescription)")
-        open.tap()
-        // the drawer's search sits behind its button (a split's list column has it open already)
-        let reveal = app.buttons["搜索对话"].firstMatch
-        if reveal.waitForExistence(timeout: 5), reveal.isHittable { reveal.tap() }
+        let footSearch = app.buttons["sidebar-search"].firstMatch
+        let either = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in open.exists || footSearch.exists }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [either], timeout: 20), .completed, "no sidebar button or Search:\n\(app.debugDescription)")
+        if footSearch.exists, footSearch.isHittable {
+            footSearch.tap()
+        } else {
+            open.tap()
+            let reveal = app.buttons["搜索对话"].firstMatch
+            if reveal.waitForExistence(timeout: 5), reveal.isHittable { reveal.tap() }
+        }
         let field = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@", "搜索对话", "搜索对话")).firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5), "no search field:\n\(app.debugDescription)")
         field.tap()

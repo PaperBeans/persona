@@ -65,7 +65,12 @@ type MachineConfig struct {
 // connection to its resident node, a stream on the Persona Link it keeps to the hub (kind link, link.go), a
 // connector's stream (kind service), or a stream through a member hub (a derived machine).
 type Machine struct {
-	cfg MachineConfig
+	callCount atomic.Uint64 // calls that worked, for sampling their log lines (calllog.go)
+	// callLogMu guards offlineLogged (when an offline call was last logged) and offlineSkipped (how many since were not).
+	callLogMu      sync.Mutex
+	offlineLogged  time.Time
+	offlineSkipped int
+	cfg            MachineConfig
 	// named is what the computer is called now: cfg.Name until the hub renames it, which changes nothing else of the
 	// running machine (startMachines); read through name().
 	named atomic.Pointer[string]
@@ -79,6 +84,10 @@ type Machine struct {
 	mu   sync.Mutex
 	peer *rpc.Peer
 	info proto.NodeInfo
+	// pingPeer is the connection measureNodes' last ping went on, pingMisses how many pings in a row it left
+	// unanswered there (paths_view.go).
+	pingPeer   *rpc.Peer
+	pingMisses int
 	// online: shown online (its node answered on the current connection, or warm); connectedAt: when the node's
 	// current connection began.
 	online      bool
@@ -92,11 +101,15 @@ type Machine struct {
 	dialErrAt       time.Time
 	lastSeen        time.Time
 	sessions        []proto.Session
+	sessionsListed  bool                     // the current connection has really supplied a snapshot, successful empty ones included
+	sessionsReady   chan struct{}            // closed once the current connection's first sessions.list has been handled
 	lists           proto.SessionListDecoder // decodes the node's lists, only the sessions whose bytes changed (onEvent)
-	sessionRevision uint64                   // local ordering of session snapshots, independent of node transcript revisions
-	watched         map[string]bool          // sessions the hub watches (session.watch): watched again on a new connection
-	followed        map[string]bool          // sessions the manager itself follows (Follow: a channel's turn): watched as well
-	lastSeq         map[string]int           // session id -> highest item seq seen
+	sessionRevision uint64                   // advanced by sessions.changed, independent of node transcript revisions
+	// sessionsEventMu serializes sessions.list response and sessions.changed cache application and forwarding.
+	sessionsEventMu sync.Mutex
+	watched         map[string]bool // sessions the hub watches (session.watch): watched again on a new connection
+	followed        map[string]bool // sessions the manager itself follows (Follow: a channel's turn): watched as well
+	lastSeq         map[string]int  // session id -> highest item seq seen
 	// unsettled: sessions whose last Follow the node did not take (the next Follow asks it again; a new connection
 	// settles them).
 	unsettled map[string]bool
@@ -116,9 +129,11 @@ type Machine struct {
 	reloadUntil                time.Time     // a resident announced exec; never extends display/reconnect grace
 	storeWait                  time.Duration // how long a node event waits on the store (nodeStoreWait; tests: shorter)
 	engineMu                   sync.Mutex
-	link                       *mgrLink      // kind link: the link Persona Link keeps open, nil while there is none
-	linkDown                   error         // why the last link went away
-	linkUp                     chan struct{} // a link arrived
+	// eventRetire admits an ordinary event callback or retires its connection; never lets a retired event follow the replacement.
+	eventRetire sync.Mutex
+	link        *mgrLink      // kind link: the link Persona Link keeps open, nil while there is none
+	linkDown    error         // why the last link went away
+	linkUp      chan struct{} // a link arrived
 	// presence: what its Persona Link last said about the user (presence.go).
 	presence *presence
 	// herdrAsked: when the node last said whether herdr's server answers (herdr.go, its row).
@@ -482,7 +497,7 @@ func (m *Machine) open(ctx context.Context, via string) (*nodePipe, error) {
 	}, nil
 }
 
-func (m *Machine) callOnce(ctx context.Context, method string, params any, out any) error {
+func (m *Machine) callOnce(ctx context.Context, method string, params any, out any, snapshot *sessionSnapshot) error {
 	m.mu.Lock()
 	p := m.peer
 	info := m.info
@@ -551,6 +566,16 @@ func (m *Machine) callOnce(ctx context.Context, method string, params any, out a
 			return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_assistant_config_dir")}
 		}
 	}
+	if !nodeHas(info, nodeproto.AssistantSupervisionInstructions) && (method == "assistant.send" || method == "assistant.warm" || method == "session.send") {
+		raw, _ := json.Marshal(params)
+		var fields struct {
+			Instructions string `json:"supervision_instructions"`
+		}
+		_ = json.Unmarshal(raw, &fields)
+		if fields.Instructions != "" {
+			return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "rpc-errors.assistant_supervision_node_outdated")}
+		}
+	}
 	if method == "assistant.send" && !nodeHas(info, nodeproto.AssistantServiceTier) {
 		raw, _ := json.Marshal(params)
 		var fields struct {
@@ -606,6 +631,11 @@ func (m *Machine) callOnce(ctx context.Context, method string, params any, out a
 	}
 	if method == "node.configure" {
 		params = m.withClaudeDirs(ctx, params)
+	}
+	if snapshot != nil {
+		m.mu.Lock()
+		snapshot.peer, snapshot.revision = p, m.sessionRevision
+		m.mu.Unlock()
 	}
 	return p.Call(ctx, method, params, out)
 }
@@ -697,6 +727,7 @@ func (m *Machine) setSessions(list []proto.Session) {
 	}
 	m.mu.Lock()
 	m.sessions = list
+	m.sessionsListed = true
 	m.sessionRevision++
 	m.lastSeen = time.Now().UTC()
 	m.mu.Unlock()
@@ -706,6 +737,13 @@ func (m *Machine) sessionList() []proto.Session {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return slices.Clone(m.sessions)
+}
+
+// appendSessions appends the machine's sessions to dst (Devices.AppendSessions).
+func (m *Machine) appendSessions(dst []proto.Session) []proto.Session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append(dst, m.sessions...)
 }
 
 // sessionsWhere copies out the sessions keep accepts (Devices.SessionsWhere).
@@ -756,6 +794,8 @@ func (m *Machine) onEvent(event string, params json.RawMessage) {
 	m.noteClosed(event, params)
 	switch event {
 	case "sessions.changed":
+		m.sessionsEventMu.Lock()
+		defer m.sessionsEventMu.Unlock() // held through OnEvent and forward below
 		if list, ok := m.decodeSessions(params); ok {
 			m.setSessions(list)
 		}

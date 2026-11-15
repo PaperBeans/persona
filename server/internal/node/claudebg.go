@@ -135,7 +135,7 @@ func (n *Node) outsideSource(c claudeProc) string {
 
 // claudeSessions lists the live claudes outside Persona's panes that are not in seen and have a transcript: the
 // background ones, the desktop app's, the ones in other terminals.
-func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool) []proto.Session {
+func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePanes map[string]bool) []proto.Session {
 	var out []proto.Session
 	listed := map[string]bool{}
 	var desktop *claudeDesktopIndex // read once, when a desktop session rests
@@ -185,18 +185,24 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool) []proto.
 				s.Capabilities = &proto.SessionCapabilities{Read: true}
 			}
 			s.Capabilities.Terminal = true
+			livePanes[pane] = true // its dialog read is kept while the claude lives (forgetDialogs)
 			// Its own status file says waiting when a dialog has the keyboard, but a build that does not: a resting
 			// claude's screen is read, as for a pane (dialogstatus.go).
 			if status == proto.StatusIdle || status == proto.StatusDone || status == proto.StatusUnknown {
 				if head := n.dialogOn(id, pane); head != "" {
 					s.Status, s.AttentionReason = proto.StatusBlocked, head
 				}
+			} else if status == proto.StatusBlocked {
+				// The phone answers the dialog on the pane's screen: the row names it once it is read (#5965).
+				s.AttentionReason = n.dialogOn(id, pane)
 			}
 		}
-		if status == proto.StatusBlocked {
-			s.AttentionReason = proto.AttentionClaudeComputer
+		if status == proto.StatusBlocked && s.AttentionReason == "" {
+			s.AttentionReason = proto.AttentionClaudeComputer // no dialog read from a pane (yet)
 			if s.Capabilities != nil && s.Capabilities.Send && s.PaneID == "" && asking(c, m) {
 				s.AttentionReason = proto.AttentionClaudeAnswer // a message answers it (sendOutside)
+				// Its question is a card the apps answer (claudeoutside_ask.go): the answer goes as that message.
+				s.Capabilities.Approve = true
 			}
 		}
 		if s.Cwd == "" {
@@ -289,6 +295,12 @@ func (n *Node) outsideClaude(id string) (claudeProc, bool) {
 // not take in time — held for the person at the computer, dropped as a duplicate — is reported as not confirmed
 // (delivered unknown), so the app neither shows it as sent nor resends it by itself.
 func (n *Node) sendOutside(ctx context.Context, id, text string, images []proto.Image) (handled bool, err error) {
+	return n.sendOutsidePriority(ctx, id, text, images, "")
+}
+
+// sendOutsidePriority is sendOutside with a priority the caller has already established from the transcript's full
+// items. An empty priority uses the quick-metadata question check below.
+func (n *Node) sendOutsidePriority(ctx context.Context, id, text string, images []proto.Image, forced string) (handled bool, err error) {
 	c, ok := n.outsideClaude(id)
 	if !ok {
 		return false, nil
@@ -314,11 +326,14 @@ func (n *Node) sendOutside(ctx context.Context, id, text string, images []proto.
 	// answered it on the computer. One waiting on a permission prompt or another dialog gets it queued as before: at
 	// now it would decline the prompt, which is the computer's to approve.
 	var offset int64
-	priority := peerNext
+	priority := forced
+	if priority == "" {
+		priority = peerNext
+	}
 	if path := n.transcriptPath(id); path != "" {
 		if st, err := os.Stat(path); err == nil {
 			offset = st.Size()
-			if asking(c, n.metaNow(path, st)) {
+			if forced == "" && asking(c, n.metaNow(path, st)) {
 				priority = peerNow
 			}
 		}

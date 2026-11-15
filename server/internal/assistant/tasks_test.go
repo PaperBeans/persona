@@ -34,13 +34,13 @@ func newTaskService(t *testing.T) (*Service, *fakeHub) {
 }
 
 // newTaskServiceOn is newTaskService with st as its database (nil: none).
-func newTaskServiceOn(t *testing.T, st Store) (*Service, *fakeHub) {
+func newTaskServiceOn(t testing.TB, st Store) (*Service, *fakeHub) {
 	t.Helper()
 	f := newFakeHub()
 	f.sessions["box"] = nil
 	f.settings = &Settings{Timezone: "Asia/Shanghai"}
 	if st == nil {
-		return newStorelessService(t, f), f
+		return storelessService(t, f), f
 	}
 	return newServiceOn(t, f, st), f
 }
@@ -57,7 +57,7 @@ func planArgs(readonly bool) json.RawMessage {
 	return raw
 }
 
-func waitFor(t *testing.T, what string, ok func() bool) {
+func waitFor(t testing.TB, what string, ok func() bool) {
 	t.Helper()
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		if ok() {
@@ -1450,6 +1450,9 @@ func TestSideConversationTaskFailedToStartPushes(t *testing.T) {
 	}
 	if pushed[0].Title != "「修登录崩溃」没开起来" {
 		t.Fatalf("Title = %q", pushed[0].Title)
+	}
+	if pushed[0].Level == "P0" {
+		t.Fatal("a task failure is P1 (held for the briefing with push tiering on), not P0")
 	}
 	if !strings.Contains(pushed[0].Body, "Failed to authenticate") || !strings.Contains(pushed[0].Body, "打开对话点『重试』，或换一台电脑再派") {
 		t.Fatalf("Body = %q", pushed[0].Body)

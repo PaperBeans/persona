@@ -8,7 +8,7 @@ Each computer's OS, current load and curves for the past 24 hours. The node coll
 | Node sending | `server/internal/node/metrics.go` |
 | Manager storage, downsampling, cleanup, API (hub forwards `devicewire.MetricsRoutes`) | `server/internal/devices/metrics.go`, `server/internal/db/metrics.go`, migration `0051_machine_metrics.sql` |
 | Token usage: node metering, manager storage, API (see "Token usage" below) | `server/internal/node/usage.go`, `server/internal/devices/usage.go`, `server/internal/db/usage.go`, migration `manager/0421_machine_usage.sql` |
-| App | `apple/Persona/Views/Machines/` (`MachinesView`, `MachineDetailView`, `MetricCharts`, `OSBadge`), model `apple/Shared/MachineMetrics.swift` |
+| App | `apple/Persona/Views/Machines/` (`MachinesView`, `MachineDetailView`, `MetricCharts`, `OSBadge`), model `apple/Packages/PersonaWire/Sources/PersonaWire/MachineMetrics.swift` |
 | Inspect local samples / overhead | `personad sysmon [n]`: prints system info and n+1 samples (one every 10 seconds, n ≤ 8640, one day); final line gives actual sample count, collection duration and personad CPU (Ctrl-C stops immediately) |
 
 ## Who connects to computers
@@ -301,7 +301,7 @@ Follow dataviz rules:
 - **States**: an older hub (404) says to deploy a newer one; a range or filter with no usage says so in the chart (with **Clear Filters**).
 - **Colors** (`UsageColor`, `apple/Shared/Design`): input blue, output orange, cache write violet, cache read teal, light and dark steps of the categorical palette, validated in the stacking order
   (adjacent pairs ΔE ≥ 24.7 light / 17.3 dark for color-blind readers). Light teal is under 3:1 on a light card, so the legend always writes the numbers.
-- **Numbers** use `TokenFormat` (`apple/Shared/TokenUsage.swift`): K / M / B, three significant digits, no trailing zeros, under 1,000 as is, a rounding to 1,000 moves up a unit (999,500 → 1M). The web uses the same rules.
+- **Numbers** use `TokenFormat` (`apple/Packages/PersonaWire/Sources/PersonaWire/TokenUsage.swift`): K / M / B, three significant digits, no trailing zeros, under 1,000 as is, a rounding to 1,000 moves up a unit (999,500 → 1M). The web uses the same rules.
 - **Web** (`web/src/views/machines/UsageSection.tsx`, `web/src/lib/tokens.ts`): the same section on a machine's page, before Monitoring (the engine and the self-check moved after it),
   with the chart and the numbers on the left and **By Model** / **By Launcher** on the right on a wide screen; hovering a chart or ← → on it holds a moment in both, Esc lets go.
   The Machines list has **Today's tokens** across the top and a **Tokens** cell on each card, and uses up to three columns on a wide screen (it used to stop at 1000px).
@@ -315,6 +315,7 @@ iOS / Mac machine detail (#3018, `apple/Persona/Views/Machines/NodeHealthSection
 The retired native Mac app showed this section through the shared iOS view and received no Mac-only changes for it ([mac.md](../archive/apple/mac.md)).
 
 - **Fetch**: hub routes `GET /api/v1/machines/{mid}/doctor` (read-only) and `POST …/doctor/fix` (rewrite Persona-generated files, recheck and return a new report) are **`full` devices only** (reports contain paths and user hook commands; fix writes files). Node RPC: `node.doctor` (read-only unless `{"fix":true}`), `node.doctor.fix` (`node/doctor_rpc.go`); checks run in node with CLI `RunDoctor`, same `DoctorReport` JSON. Hub GET never passes `fix` to node.
+- **Report language**: current clients send `Accept-Language`, which the hub forwards as the RPC's optional `locale`; a new node then words `detail`, `hint` and human `items` in the page's language without changing the report shape or grouping fields. A header-less request and the assistant's direct readiness call keep canonical zh-Hans. A new node with an old hub therefore keeps today's report, and an old node with a new hub ignores `locale` and has its Chinese report relayed unchanged. The command's human text instead uses `i18n.Terminal`; its `--json` always retains canonical zh-Hans bytes.
 - **Group by feature** (`FEATURES` in `web/src/lib/node-health.ts`): phone approval cards (`node.sock`, claude / assistant settings and hooks, `command-paths`), state and notifications (`node.sock`, `command-paths`), terminal and engine (`herdr`), MCP tools (`node.sock`, `mcp.json`, `command-paths`), skills (`agent-plugin`, `claude-version`), runtime integrations (`runtime.sock`).
   Each feature takes its worst check: any `fail` → **Has issues**, any `warn` → **Partly available**, all normal → **Ready**. Terminal/engine and runtime integration are optional: warn-only means **Not enabled** (in **Not set up: …**, not counted as needing attention),
   except when this computer uses herdr (including herdr + Herdr App, and no selection defaults to herdr), unreachable herdr means **Has issues**. Unmapped extra checks reported by node go to **Other checks** if abnormal, never hidden.
@@ -327,6 +328,67 @@ The retired native Mac app showed this section through the shared iOS view and r
   unrecognized text adds nothing, no guessing. Planned restarts during deployment don't count.
 - Mock-hub screenshots: `MOCK_DOCTOR=healthy|stale|broken|mixed|old|error|slow`, `MOCK_DOCTOR_OLD=<machine id,…>` (`scripts/mock/mock_hub.py`).
 - Tests: `node/doctor_rpc_test.go` (temporary directories; no writes without fix, fix only generated files and never user settings.json, check names match web grouping), `hub/node_doctor_test.go` (permissions), `web/src/lib/node-health.test.ts` (grouping, summary, fixing, old node, connection classification), `apple/PersonaTests/NodeHealthTests.swift` (same grouping table, decoding, old node / hub, model check/fix).
+
+## Diagnosis and cleanup (#8037)
+
+An alert on a machine card says what is wrong; the sheet it opens also says why and offers the action that fixes it. For memory, CPU and disk the "why" comes from the computer
+itself: the manager routes `GET /api/v1/machines/{mid}/diagnosis` and `POST /api/v1/machines/{mid}/cleanup` (`devices/diagnosis.go`, `full` devices only) call the node's
+`machine.diagnose` and `machine.cleanup` (`node/machdiag/`, capability `machine_diagnose`). The wire is in [protocol.md](../protocol/protocol.md) ("Data types").
+
+The diagnosis is a description, not a tunnel: it answers a fixed, bounded question, and nothing in a request names a path or a command. Sections and cache ids are closed
+lists (`proto.DiagnoseSections`, `proto.CacheIDs`); the manager refuses anything else with 400 before the node is asked, and the node checks again.
+
+| Section | What is read | Bounds |
+| --- | --- | --- |
+| `processes` | Linux: `/proc/<pid>/stat` of every process (name, CPU ticks, resident pages), read twice half a second apart for CPU; no process started. macOS: one `ps -axo pid=,rss=,pcpu=,comm=` (only the executable's last path element is kept). Grouped by executable name, tagged `agent` (claude, codex, opencode, pi, gemini), `engine` (the engines and tmux), `persona` (personad, persona-node, persona-link) or `other`; node processes cannot be attributed by name and stay `other` | The 15 largest groups by memory plus the 5 busiest by CPU. Names only: never arguments, command lines or environment, which may hold secrets |
+| `disk` | The volumes the metrics add up (`sysmon.Volumes`), the folders directly in the home directory and the cache catalog, sized by allocated blocks | One filesystem (a mount under a folder is skipped), symbolic links never followed, hard links counted once, 4 walks at a time, 20 s in all: what is cut short is marked `partial`. At most 12 folders; paths leave the node as `~/…` |
+| `tools` | The tool catalog, each found with `exec.LookPath` on the node's PATH and asked its version | 2 s a tool, 6 at a time, 8 s in all; the result is kept for 10 minutes. On macOS the `/usr/bin` stand-ins (`git`, `python3`, `swift`, `xcodebuild`, `java`) run only when the developer tools (`xcode-select -p`) or a Java runtime (`java_home`) exist, since running one otherwise opens an install dialog |
+
+Windows answers `tools` only; the processes and disk sections are left out, and the web says the computer cannot show them.
+
+**Cleanup** accepts ids from the cache catalog only. For each the node resolves the folder itself, every time, and empties it only when all of these hold: it is inside the
+home directory and not the home directory itself; it is a real folder, reached through no symbolic link (its real path is the home directory's real path joined with the
+same relative path); and no process of its toolchain runs (`in_use`; when processes cannot be read, every cache counts as in use). It removes the folder's contents and keeps
+the folder; a link inside is removed as a link. Go's module cache is read-only on purpose, so a folder that refuses is made writable by its owner and tried again.
+A cache that is not there or is empty is `missing`. What it freed is measured with `statfs` on the home volume before and after, never below 0. The built-in cleaner never touches
+container data, projects, sessions or anything outside the catalog; deeper cleanup belongs to a storage extension (`machine_section`).
+
+| Cache id | Linux | macOS | In use while running |
+| --- | --- | --- | --- |
+| `go-build` | `$GOCACHE`, else `~/.cache/go-build` | `$GOCACHE`, else `~/Library/Caches/go-build` | go, gopls, compile |
+| `go-mod` | `$GOMODCACHE`, else `$GOPATH/pkg/mod`, else `~/go/pkg/mod` | same | go, gopls |
+| `npm-cache` | `$npm_config_cache/_cacache`, else `~/.npm/_cacache` (not npm's logs or npx's installs) | same | npm, npx, node |
+| `pip-cache` | `$PIP_CACHE_DIR`, else `~/.cache/pip` | `$PIP_CACHE_DIR`, else `~/Library/Caches/pip` | pip, python (any version) |
+| `uv-cache` | `$UV_CACHE_DIR`, else `~/.cache/uv` | same | uv, uvx |
+| `yarn-cache` | `$YARN_CACHE_FOLDER`, else `~/.cache/yarn` | `$YARN_CACHE_FOLDER`, else `~/Library/Caches/Yarn` | yarn |
+| `homebrew-cache` | `$HOMEBREW_CACHE`, else `~/.cache/Homebrew` | `$HOMEBREW_CACHE`, else `~/Library/Caches/Homebrew` | brew |
+| `xcode-derived-data` | none | `~/Library/Developer/Xcode/DerivedData` | xcodebuild, Xcode, XCBBuildService, SWBBuildService |
+| `gradle-cache` | `$GRADLE_USER_HOME/caches`, else `~/.gradle/caches` | same | gradle, java |
+| `cargo-registry` | `$CARGO_HOME/registry`, else `~/.cargo/registry` | same | cargo, rustc, rust-analyzer |
+
+`~/.cache` is `$XDG_CACHE_HOME` when that is set. The variables are the node process's own; one that points outside the home directory takes its cache out of the catalog.
+pnpm's store is left out: its files are hard-linked into projects, so emptying it frees little.
+
+| Tool id | Command (first found) | Tool id | Command (first found) |
+| --- | --- | --- | --- |
+| `xcode` | `xcodebuild -version` (macOS only; a failure means no Xcode) | `gh` | `gh --version` |
+| `docker` | `docker --version` (the client: the daemon is not asked) | `brew` | `brew --version` |
+| `podman` | `podman --version` | `bun` | `bun --version` |
+| `go` | `go version` | `pnpm` | `pnpm --version` |
+| `node` | `node --version` | `uv` | `uv --version` |
+| `python` | `python3 --version`, `python --version` | `tmux` | `tmux -V` |
+| `rust` | `rustc --version` | `claude` | `claude --version` |
+| `java` | `java -version` | `codex` | `codex --version` |
+| `swift` | `swift --version` | `opencode` | `opencode --version` |
+| `git` | `git --version` | `gemini` | `gemini --version` |
+
+The manager waits 30 s for a diagnosis and 120 s for a cleanup. Errors are `{error, code}` with `error` in the reader's language (`devices-diagnosis`): unknown machine 404 `not_found`,
+a bad section or id 400 `bad_request`, offline 503 `machine_offline`, a node without the capability 409 `node_outdated`, out of time 504 `deadline`, anything else 502 `diagnosis_failed`
+(the node's own words are logged, not shown). A hub from before these routes answers 404 without a code, which the web reads as "update the hub".
+
+Tests: `node/machdiag` (stat and ps fixtures, grouping and the top-N union, the walker's links, hard links, other filesystems and deadline, the catalog per OS and its variables,
+in-use matching, the cleanup's guard rails on temporary home directories, the tool probe with fake commands), `node/diagnose_rpc_test.go` (dispatch),
+`devices/diagnosis_test.go` (pass-through, capability, offline, bad input, roles, node errors), `hub/diagnosis_routes_test.go` (answer-only devices and extension tokens).
 
 ## Renaming a computer
 

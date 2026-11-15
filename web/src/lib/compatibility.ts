@@ -9,6 +9,20 @@ const STORAGE_ALIASES: Record<string, string> = Object.assign(Object.create(null
   "persona.files.view": "jarvis.files.view",
   "draft:persona-new": "draft:jarvis-new",
 });
+const REVERSE_STORAGE_ALIASES: Record<string, string> = Object.assign(
+  Object.create(null),
+  Object.fromEntries(Object.entries(STORAGE_ALIASES).map(([canonical, legacy]) => [legacy, canonical])),
+);
+
+/** The other key an aliased storage pair is mirrored to, or null for keys without a legacy alias. */
+export function storedKeyAlias(key: string): string | null {
+  return STORAGE_ALIASES[key] ?? REVERSE_STORAGE_ALIASES[key] ?? null;
+}
+
+/** The current name of an aliased pair: a legacy key resolves to its canonical key, anything else maps to itself. */
+export function canonicalStorageKey(key: string): string {
+  return REVERSE_STORAGE_ALIASES[key] ?? key;
+}
 
 /** The browser's token and the id of its device token at the hub. "persona.tokenId" is where this browser keeps that id,
  *  to revoke it on signing out and to have it replaced when it signs in again. */
@@ -38,7 +52,13 @@ export function storedValue(key: string, store: Storage = localStorage): string 
   const current = store.getItem(key);
   if (current !== null || !STORAGE_ALIASES[key]) return current;
   const old = store.getItem(STORAGE_ALIASES[key]);
-  if (old !== null) store.setItem(key, old);
+  if (old !== null) {
+    try {
+      store.setItem(key, old);
+    } catch {
+      // storage is full or blocked: keep serving the legacy value and never throw into the caller's render
+    }
+  }
   return old;
 }
 
@@ -70,6 +90,7 @@ export function storeCredentials(token: string, tokenId?: string, store: Storage
 // Baseline: 39a706a338; the naming-only migration did not bump the protocol major.
 export const LEGACY_SCHEME = "jarvis";
 export const APP_SCHEMES = new Set(["persona", LEGACY_SCHEME]);
+export const isPersonaStateDir = (name: string): boolean => name === ".persona" || name === ".jarvis";
 export const canonicalAppURL = (url: string): string => url.replace(/^jarvis:\/\//i, "persona://");
 export const isAppLink = (url: string): boolean => APP_SCHEMES.has(/^([a-z]+):\/\//i.exec(url)?.[1]?.toLowerCase() ?? "");
 export const PERSONA_SERVERS = new Set(["persona", "jarvis"]);

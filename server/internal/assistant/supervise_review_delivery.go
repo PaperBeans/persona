@@ -23,6 +23,24 @@ func (s *Service) acceptedDeliveryError(ctx context.Context, t Todo, link, outco
 	pr := t.PRURL
 	if ciPRURL.MatchString(link) {
 		pr = link
+	} else {
+		replacement, noPR, err := s.reportedTaskPR(ctx, t, pr)
+		if err != nil {
+			return err
+		}
+		if noPR || replacement != "" && replacement != pr {
+			if err := s.forgetTaskPR(ctx, t.ID, pr, replacement); err != nil {
+				return err
+			}
+			current, ok := s.todoNow(t.ID)
+			if !ok {
+				return fmt.Errorf("task %s no longer exists", t.ID)
+			}
+			if current.PRURL != replacement {
+				return fmt.Errorf("task %s: its delivery record changed during verification; retry the review", t.ID)
+			}
+			t, pr = current, current.PRURL
+		}
 	}
 	m := ciPRURL.FindStringSubmatch(pr)
 	if m == nil {
@@ -42,6 +60,32 @@ func (s *Service) acceptedDeliveryError(ctx context.Context, t Todo, link, outco
 			r = deployResult{State: deployUnmerged}
 		default:
 			return nil
+		}
+	}
+	if r.Err != nil {
+		number, _ := strconv.Atoi(m[2])
+		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		isPR, err := s.forge().IsPR(cctx, m[1], number)
+		cancel()
+		if err == nil && !isPR {
+			for _, previous := range t.PRs {
+				if previous != pr {
+					return fmt.Errorf("task %s: earlier PR references have no delivery ownership evidence; "+
+						"report this task's explicit delivery artifact or completed non-PR closeout before accepting", t.ID)
+				}
+			}
+			if err := s.forgetTaskPR(ctx, t.ID, pr, ""); err != nil {
+				return err
+			}
+			current, ok := s.todoNow(t.ID)
+			if !ok {
+				return fmt.Errorf("task %s no longer exists", t.ID)
+			}
+			if current.PRURL == pr {
+				return fmt.Errorf("task %s: its non-PR record changed during verification; retry the review", t.ID)
+			}
+			// A concurrent, genuine delivery still has to pass the gate; reference history is not ownership proof.
+			return s.acceptedDeliveryError(ctx, current, "", outcome)
 		}
 	}
 	if !r.held() {

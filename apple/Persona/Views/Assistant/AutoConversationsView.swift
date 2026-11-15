@@ -67,6 +67,9 @@ struct AutoConversationsView: View {
             .macSheetDone { dismiss() }
             #else
             .toolbar {
+                if let on = model.assistantConfig?.recentTaskChats {
+                    ToolbarItem(placement: .topBarLeading) { recentMenu(on) }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done [Extension System Presentation c0b3fb]") { dismiss() }.lineLimit(1)
                 }
@@ -76,6 +79,21 @@ struct AutoConversationsView: View {
         #if os(macOS)
         .macSheet()
         #endif
+    }
+
+    /// The sidebar's Show Scheduled Task Chats (#8324) at the top left, opposite Done: the same setting as Assistant
+    /// Profile's, a check in a menu that applies at once. Only with a hub that keeps the setting.
+    private func recentMenu(_ on: Bool) -> some View {
+        Menu {
+            Section(AssistantProfileView.recentHeading) {
+                Toggle(AssistantProfileView.recentTitle, isOn: Binding(get: { on }, set: { v in Task { await model.setRecentTaskChats(v) } }))
+                    .accessibilityIdentifier("auto-recent-task-chats")
+            }
+        } label: {
+            ThemedIcon(Theme.Icon.more)
+        }
+        .accessibilityLabel(String(localized: "Display Options"))
+        .accessibilityIdentifier("auto-display-options")
     }
 
     private static func list(_ filter: Filter, all: [Session], mine: [Session], groups: [AutoConversations.Group]) -> [Session] {

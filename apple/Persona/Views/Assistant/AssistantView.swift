@@ -68,12 +68,20 @@ struct AssistantView: View {
     @State private var showRecordings = false
     /// The sidebar (Chat History, or a drag to the right anywhere on the page): docs/apple/ios.md「Persona top bar and sidebar」.
     @State private var drawer = AssistantDrawer()
-    /// Regular width (iPhone Duo open): the sidebar is a column beside the conversation; Chat History shows or hides it.
+    #if os(iOS)
+    /// Regular width (iPad, iPhone Duo open; the Separate layout): the sidebar is a column beside the conversation; Chat
+    /// History shows or hides it. As it was last left (`SplitListMemory`, #2624, #4206).
+    @State private var columns = SplitListMemory.startsClosed(Self.listKey) ? .detailOnly : SplitColumns.shown
+    /// Where the history column's shown state is kept.
+    private static let listKey = "assistant.list"
+    /// The history column as UIKit has it (`SplitColumnControl`).
+    @State private var columnState = SplitColumnState()
+    #else
+    /// Regular width: the sidebar is a column beside the conversation; Chat History shows or hides it.
     @State private var columns = SplitColumns.shown
+    #endif
     /// iPhone Duo's bars down the side: the top bar is the side rail, and the page's top is free.
     @Environment(\.shellRailEdge) private var railEdge
-    /// A phone's tabs (iPhone Duo open): the column's own button folds it, at its top (#2623).
-    @Environment(\.pageTabSwitch) private var pageTabSwitch
     /// The conversation's lifted message, drawn over the top bar (`MessageLiftHost`, #3188).
     @State private var liftHost = MessageLiftHost()
     #if DEBUG
@@ -126,17 +134,31 @@ struct AssistantView: View {
             }
             #else
             NavigationSplitView(columnVisibility: $columns) {
-                // The system sizes the column on iPhone Duo (and moves the divide onto the fold); iPad, as the other tabs.
+                // One width, the other splits' (`SidebarWidth`, #4206).
                 sidebar(column: true)
                     .toolbarVisibility(.hidden, for: .navigationBar)
                     .modifier(SidebarWidth())
             } detail: {
                 stack
+                    #if os(iOS)
+                    // Slid by a finger, as the other splits' lists (`SplitColumnControl`, #4206).
+                    .background {
+                        SplitColumnControl(drags: true, state: columnState) { shown in
+                            var t = Transaction()
+                            t.disablesAnimations = true
+                            withTransaction(t) { columns = shown ? SplitColumns.shown : .detailOnly }
+                            SplitListMemory.keep(Self.listKey, shown: shown, state: columnState)
+                        }
+                    }
+                    .modifier(SplitPageMin())
+                    #endif
             }
             .modifier(SidebarTopFill(shown: columns != .detailOnly))
             .navigationSplitViewStyle(.balanced)
-            // The line beside the history: dragged wider, narrower or closed, remembered (#2624).
-            .modifier(SplitDividerHandle(columns: $columns, key: "assistant.list"))
+            #if os(iOS)
+            // Shown or not, remembered; beside the page or over it by the width (#2624, #4206).
+            .modifier(SplitListMemory(columns: $columns, key: Self.listKey, state: columnState))
+            #endif
             #endif
         } else {
             // The sidebar takes the whole height, like ChatGPT's: the tab bar fades away as it comes out
@@ -170,8 +192,7 @@ struct AssistantView: View {
                                 onMachines: places ? { show(.machines) } : nil,
                                 onOpenExtension: places ? { show(.extensionPage($0)) } : { r in drawer.close(); openedExtension = r },
                                 openHealth: places ? { show(.health) } : { drawer.close(); enterHealth() },
-                                openRecordingsPage: Self.recordingsPage(places ? { show(.recordings) } : { drawer.close(); showRecordings = true }),
-                                collapse: column && pageTabSwitch ? { toggleSidebar() } : nil)
+                                openRecordingsPage: Self.recordingsPage(places ? { show(.recordings) } : { drawer.close(); showRecordings = true }))
     }
 
     /// The sidebar's Recordings: `open`s the page, which shows the recording running, else Record to start one.
@@ -210,6 +231,15 @@ struct AssistantView: View {
         }
     }
 
+    /// A phone's page (the iPhone, the open iPhone Duo): the iPhone's new conversation (`ShellHome`), not the iPad's.
+    private var phonePage: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        false
+        #endif
+    }
+
     /// Nothing pushed on the page: the sidebar's drag only works here (pushed pages have their own back swipe).
     private var atRoot: Bool {
         var pushed = showProfile || showKnowledge || showRoutines || showTodos || openedExtension != nil || showHealth || showRecordings
@@ -235,7 +265,7 @@ struct AssistantView: View {
             #if DEBUG
             let _ = ShellTrace.shared.note("assistant page \(NewChatCheck.name(current, main: model.assistantMain)) pending=\(pending != nil)")
             #endif
-            if let key = current, pending == nil {
+            if let key = current, pending == nil, !showsClearedMain {
                 // Another assistant's conversation not listed yet: read through the manager it was opened for.
                 ChatView(key: key, style: .assistant, itemManager: model.assistantItemManagers[key])
                     .id(key)
@@ -245,10 +275,10 @@ struct AssistantView: View {
                     // The iPad draws the shell's composer too (`ChatComposerKind.padCard`): the assistant's, as on the iPhone.
                     // The Sidebar layout's phone page too: the iPhone's conversation, as in the shell (#6332).
                     .environment(\.shellChat, shell != nil || ChatComposerKind.padCard || drawerPage)
-            } else if shell != nil || pageTabSwitch || drawerPage {
-                // A phone's tabs too (iPhone Duo open, #3680): the iPhone's new conversation, with what needs the user
-                // over the composer. The iPad keeps `AssistantHome`.
-                ShellHome(pending: shownStart, error: shownFailure?.reason, launcher: $starterLauncher, mode: $starterMode,
+            } else if shell != nil || drawerPage || phonePage {
+                // A phone's page at regular width too (iPhone Duo open, either layout; #3680, #3641): the iPhone's new
+                // conversation, with what needs the user over the composer. The iPad keeps `AssistantHome`.
+                ShellHome(pending: shownStart, error: shownFailure?.reason, cleared: showsClearedMain, launcher: $starterLauncher, mode: $starterMode,
                           effort: $starterEffort, openInbox: { navPath.wrappedValue.append($0) }, resend: resend, delete: deleteFailed) { text, images in
                     Task { await start(text, images) }
                 }
@@ -259,7 +289,7 @@ struct AssistantView: View {
                     #endif
                 }
             } else {
-                AssistantHome(pending: shownStart, error: shownFailure?.reason, launcher: $starterLauncher, mode: $starterMode,
+                AssistantHome(pending: shownStart, error: shownFailure?.reason, cleared: showsClearedMain, launcher: $starterLauncher, mode: $starterMode,
                               effort: $starterEffort, resend: resend, delete: deleteFailed) { text, images in
                     Task { await start(text, images) }
                 }
@@ -282,6 +312,7 @@ struct AssistantView: View {
                             sidebarShown: sidebarColumnShown,
                             sidebarCounts: embedded,
                             drawerTitle: drawerPage,
+                            newChatInSidebar: embedded && widthClass == .regular || padPlaces,
                             openSidebar: toggleSidebar,
                             // In a health conversation New opens Health's new conversation page, whose list has the
                             // space's past ones (#4329); elsewhere the assistant's.
@@ -380,6 +411,7 @@ struct AssistantView: View {
                 leavePlace()
             }
             .onChange(of: model.hub?.group) { old, new in
+                if old != new { model.forgetMainClear() }
                 // A pushed inbox and its items belong to the old hub. Initial pairing (nil → a group) and reconnects stay.
                 if AssistantCurrentNavigation.clearsPushedPages(oldHub: old, newHub: new) {
                     places.forget()
@@ -388,6 +420,7 @@ struct AssistantView: View {
             }
             .onChange(of: model.assistantManagerID) {
                 starterLauncher = nil // a launcher of the assistant shown before
+                model.forgetMainClear() // the empty page belongs to the manager that was cleared
                 // A first message still spinning up is the other assistant's: its conversation is listed there when it
                 // starts (`start`), and this page shows the one switched to.
                 pending = nil
@@ -460,6 +493,16 @@ struct AssistantView: View {
             .task { // `-showNewMain YES`: the question up, for screenshots
                 if UserDefaults.standard.bool(forKey: "showNewMain") { try? await Task.sleep(for: .seconds(3)); model.newMainAsked = true }
             }
+            .task { // `-showClearedMain YES`: clear the main conversation once the hub offers it, for screenshots
+                guard UserDefaults.standard.bool(forKey: "showClearedMain") else { return }
+                let group = { model.hub?.group ?? "" }
+                for _ in 0..<40 where model.assistantMain == nil
+                    || !model.features(group()).contains(MainConversationActions.clearFeature) {
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
+                guard model.assistantMain != nil else { return }
+                _ = await model.clearMainContext()
+            }
             #endif
     }
 
@@ -490,7 +533,7 @@ struct AssistantView: View {
         #endif
         let kept = placesByValue ? places.enter(page, from: navPath.wrappedValue) : nil
         #if DEBUG
-        ShellTrace.shared.note("place \(page) \(kept == nil ? "root" : "kept") drawer=\(activeDrawer.isOut)")
+        ShellTrace.shared.note("place \(page) \(kept == nil ? "root" : "kept") drawer=\(activeDrawer.isOut) path=\(navPath.wrappedValue.count) kept=\(kept?.count ?? 0)")
         #endif
         underDrawer {
             backToRoot()
@@ -603,6 +646,9 @@ struct AssistantView: View {
             NewChatCheck.shared.watch(from: from, current: { [model] in NewChatCheck.name(model.assistantCurrent, main: model.assistantMain) },
                                       miss: { [model] line in Self.newChatMissed(line, model: model) })
         }
+        // From an open conversation, New chat is the welcome page. The empty page after Clear context stays only
+        // when New chat is tapped from that page (nothing is open) (#5100).
+        model.forgetMainClearForNewChat(from: current)
         withAnimation(Theme.Motion.standard) {
             model.assistantCurrent = nil
             pending = nil
@@ -618,6 +664,13 @@ struct AssistantView: View {
             model.flushErrorReports(group)
         }
         #endif
+    }
+
+    /// Clear context left this manager with no main conversation (#5100): an empty middle, the same top bar and composer.
+    /// A different main, another manager, or a conversation that is open shows the ordinary page.
+    private var showsClearedMain: Bool {
+        model.mainClear.showsPage(group: model.hub?.group ?? "", manager: model.assistantManagerID ?? "",
+                                  currentEmpty: current == nil, mainSessionID: model.assistantMain?.sessionID)
     }
 
     /// The first message the page shows: the one spinning up, else one whose start failed (#1368).
@@ -764,6 +817,8 @@ struct AssistantHome: View {
     @Environment(AppModel.self) private var model
     var pending: PendingStart?
     var error: String?
+    /// Clear context (#5100): the same composer, an empty middle. Not the centered new-chat page.
+    var cleared = false
     @Binding var launcher: String?
     @Binding var mode: String
     @Binding var effort: String
@@ -785,6 +840,10 @@ struct AssistantHome: View {
                     // The page's height inside its margins, the message at its bottom (a long one runs up out of it, as the
                     // chat shows its newest end).
                     .containerRelativeFrame(.vertical, alignment: .bottom)
+            } else if cleared {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("main-cleared")
             } else {
                 VStack(alignment: .leading, spacing: Theme.Space.xl) {
                     AssistantWelcome(send: send, openHelp: { route = .help($0, machine: nil) })
@@ -819,7 +878,7 @@ struct AssistantHome: View {
                 if ChatComposerKind.padCard {
                     // The iPad: the iPhone's composer, the launcher, mode and effort in its model menu (#2779).
                     StarterComposer(disabled: blocked, shell: StarterComposer.ShellModes(launcher: $launcher, mode: $mode, effort: $effort),
-                                    gate: model.readinessGate(route: $route), send: send)
+                                    gate: model.readinessGate(route: $route), offersClear: cleared && pending == nil, send: send)
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: Theme.Space.s) {
@@ -830,9 +889,10 @@ struct AssistantHome: View {
                         .padding(.horizontal, Theme.Space.xs)
                     }
                     if AppStyle.current.usesBeautifulUI {
-                        BeautifulStarterComposer(disabled: blocked, launcher: $launcher, gate: model.readinessGate(route: $route), send: send)
+                        BeautifulStarterComposer(disabled: blocked, launcher: $launcher, gate: model.readinessGate(route: $route),
+                                                  offersClear: cleared && pending == nil, send: send)
                     } else {
-                        StarterComposer(disabled: blocked, gate: model.readinessGate(route: $route), send: send)
+                        StarterComposer(disabled: blocked, gate: model.readinessGate(route: $route), offersClear: cleared && pending == nil, send: send)
                     }
                 }
             }
@@ -1106,6 +1166,8 @@ struct StarterComposer: View {
     var uploadDest: String? = nil
     /// The main conversation cannot answer yet (docs/assistant/onboarding.md 4.4): send goes to what is missing, the draft stays.
     var gate: SendGate? = nil
+    /// The cleared main conversation (#5100): `/clear` is listed and does nothing. It never starts the new chat.
+    var offersClear = false
     var send: (String, [ImagePayload]) -> Void
 
     struct ShellModes {
@@ -1155,34 +1217,38 @@ struct StarterComposer: View {
     private var textBinding: Binding<String> { Binding(get: { text }, set: { text = $0 }) }
     private var imagesBinding: Binding<[(UIImage, ImagePayload)]> { Binding(get: { images }, set: { images = $0 }) }
     private var quotesBinding: Binding<[ContextRef]> { Binding(get: { quotes }, set: { quotes = $0 }) }
-    private var uploads: FileUploads { draft.held.uploads }
+    private var files: FileAttachments { draft.held.files }
     private var videos: VideoAttachments { draft.held.videos }
 
-    /// Files to the assistant's machine, each path into the box once it is there; not into the next message's box
-    /// when this one went first (the draft outlives the page, #2626).
+    /// Files to the assistant's machine, as cards above the box until the first message carries them (#8361).
     private func upload(_ urls: [URL]) {
-        let generation = draft.generation
-        uploads.start(urls, machine: machine, model: model, dest: uploadDest) { path in
-            guard draft.generation == generation else { return }
-            text = PathInsert.edit(path, text: text, selection: $selection, focused: $focused)
-        }
+        files.start(urls, machine: machine, model: model, dest: uploadDest)
     }
 
     private var canSend: Bool {
-        !disabled && !videos.busy
-            && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty || !videos.ready.isEmpty || !quotes.isEmpty)
+        !disabled && !draft.held.busy
+            && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty || !draft.held.ready.isEmpty || !quotes.isEmpty)
+    }
+
+    /// Photos, files, videos and quotes riding along: `/clear` with any of them is a message.
+    private var attachedCount: Int {
+        images.count + draft.held.ready.count + videos.items.count + quotes.count
     }
 
     private func submit() {
-        if let gate { gate.action(); return } // nothing goes and nothing is queued: the draft stays
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let files = videos.ready
+        if offersClear, MainClearCommand.isCommand(t, attachments: attachedCount) {
+            text = ""
+            return
+        }
+        if let gate { gate.action(); return } // nothing goes and nothing is queued: the draft stays
+        let ready = draft.held.ready
         // Nothing to send: a second ⏎ on the Mac before the field redraws (#785) would start an empty conversation.
-        guard !videos.busy, !t.isEmpty || !images.isEmpty || !files.isEmpty || !quotes.isEmpty else { return }
+        guard !draft.held.busy, !t.isEmpty || !images.isEmpty || !ready.isEmpty || !quotes.isEmpty else { return }
         // The keyboard goes down with the send: the conversation that takes over has a field of its own, and the keyboard
         // coming back up and going down again on the way moved the first message up and down with it (#1911).
         focused = false
-        send(draft.message(t, files: files), images.map(\.1))
+        send(draft.message(t, files: ready), images.map(\.1))
         draft.sent()
     }
 
@@ -1210,7 +1276,17 @@ struct StarterComposer: View {
         }) {
             sections.append(prompts)
         }
+        if offersClear { sections.append(mainClearSection) }
         return sections
+    }
+
+    /// The main conversation's only command, on the cleared page: picking it does nothing.
+    private var mainClearSection: AttachMoreSection {
+        AttachMoreSection(id: "main-clear", title: String(localized: "Quick Commands [Chat View c813e6]"), rows: [
+            AttachMoreRow(id: "attach-main-clear", title: String(localized: "Clear Context /clear"), symbol: Theme.Icon.clearContext, word: "/clear") {
+                text = ""
+            },
+        ], symbol: Theme.Icon.quickCommands)
     }
     #endif
 
@@ -1293,7 +1369,7 @@ struct StarterComposer: View {
 
     var body: some View {
         VStack(spacing: Theme.Space.s) {
-            if !uploads.items.isEmpty { UploadsBar(uploads: uploads) }
+            if !files.items.isEmpty { FileAttachmentsBar(files: files) }
             if !videos.items.isEmpty { VideoAttachmentsBar(videos: videos) }
             #if os(iOS) || os(visionOS)
             PasteImageChip(focused: focused) { add($0) }
@@ -1309,9 +1385,16 @@ struct StarterComposer: View {
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            if offersClear {
+                let rows = SlashMenuRow.matching(text, in: [.clear])
+                if !rows.isEmpty {
+                    SlashMenu(rows: rows) { _ in text = "" }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
             if let shell {
                 ShellComposerBar(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)"), text: textBinding, selection: $selection, focused: $focused,
-                                 canSend: canSend, hasAttachments: !images.isEmpty || !videos.items.isEmpty || !quotes.isEmpty,
+                                 canSend: canSend, hasAttachments: !images.isEmpty || !videos.items.isEmpty || !files.items.isEmpty || !quotes.isEmpty,
                                  modesTitle: StarterModesMenu.title(modes: shell, launchers: launchers, model: model),
                                  quotes: quotesBinding, history: "assistant.new", gate: gate, openAttach: attachOpener, send: submit) {
                     #if os(iOS)
@@ -1398,6 +1481,8 @@ struct BeautifulStarterComposer: View {
     var uploadDest: String? = nil
     /// The main conversation cannot answer yet: send goes to what is missing, the draft stays (the card says what).
     var gate: SendGate? = nil
+    /// The cleared main conversation (#5100): `/clear` is listed and does nothing.
+    var offersClear = false
     var send: (String, [ImagePayload]) -> Void
     @State private var picks: [PhotosPickerItem] = []
     @State private var launchers: [Launcher] = []
@@ -1424,17 +1509,12 @@ struct BeautifulStarterComposer: View {
     private var textBinding: Binding<String> { Binding(get: { text }, set: { text = $0 }) }
     private var imagesBinding: Binding<[(UIImage, ImagePayload)]> { Binding(get: { images }, set: { images = $0 }) }
     private var quotesBinding: Binding<[ContextRef]> { Binding(get: { quotes }, set: { quotes = $0 }) }
-    private var uploads: FileUploads { draft.held.uploads }
+    private var files: FileAttachments { draft.held.files }
     private var videos: VideoAttachments { draft.held.videos }
 
-    /// Files to the assistant's machine, each path into the box once it is there; not into the next message's box
-    /// when this one went first (the draft outlives the page, #2626).
+    /// Files to the assistant's machine, as cards above the box until the first message carries them (#8361).
     private func upload(_ urls: [URL]) {
-        let generation = draft.generation
-        uploads.start(urls, machine: machine, model: model, dest: uploadDest) { path in
-            guard draft.generation == generation else { return }
-            text = PathInsert.edit(path, text: text, selection: $selection, focused: $focused)
-        }
+        files.start(urls, machine: machine, model: model, dest: uploadDest)
     }
 
     private var launcherMachine: String { uploadDest == Session.healthSpace ? model.healthMachineID : model.assistantConfig?.machineID ?? model.hubMachineID }
@@ -1455,7 +1535,7 @@ struct BeautifulStarterComposer: View {
     var body: some View {
         VStack(spacing: Theme.Space.s) {
             if currentLauncher == nil { StarterLauncherStatus() }
-            if !uploads.items.isEmpty { UploadsBar(uploads: uploads) }
+            if !files.items.isEmpty { FileAttachmentsBar(files: files) }
             if !videos.items.isEmpty { VideoAttachmentsBar(videos: videos) }
             #if os(iOS) || os(visionOS)
             PasteImageChip(focused: focused) { img in
@@ -1472,9 +1552,10 @@ struct BeautifulStarterComposer: View {
             if !images.isEmpty { ComposerImages.editable(draft.held) } // a tap marks it up, as in a conversation
             #endif
             PromptComposer(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)…"), text: textBinding, selection: $selection, focused: $focused,
-                           hasAttachments: !images.isEmpty || !videos.items.isEmpty || !quotes.isEmpty, disabled: disabled,
+                           hasAttachments: !images.isEmpty || !videos.items.isEmpty || !files.items.isEmpty || !quotes.isEmpty, disabled: disabled,
                            attach: PromptItems.attachments(camera: false),
                            mentions: { PromptItems.sessions(model.sessionsNow, except: nil) },
+                           commands: offersClear ? [PromptCommand("/clear", detail: String(localized: "Clear the chat and start over"))] : [],
                            models: models,
                            modelID: currentLauncher ?? "",
                            pickModel: { id in
@@ -1492,21 +1573,31 @@ struct BeautifulStarterComposer: View {
                                quotes.append(ref)
                                return true
                            },
+                           onCommand: { command in
+                               guard offersClear, command.name == MainClearCommand.word else { return false }
+                               text = ""
+                               return true
+                           },
                            quotes: quotesBinding,
                            send: {
                                let typed = text
                                let t = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+                               let attached = images.count + draft.held.ready.count + videos.items.count + quotes.count
+                               if offersClear, MainClearCommand.isCommand(t, attachments: attached) {
+                                   text = ""
+                                   return
+                               }
                                if let gate { // the bar clears the box right after this: put the draft back
                                    gate.action()
                                    Task { text = typed }
                                    return
                                }
-                               if videos.busy { // nothing goes; the bar clears the box right after this, so it is put back
-                                   model.toast = Toast(String(localized: "The video is still uploading. Send once it's done."))
+                               if draft.held.busy { // nothing goes; the bar clears the box right after this, so it is put back
+                                   model.toast = Toast(draft.held.waitNote)
                                    Task { text = typed }
                                    return
                                }
-                               send(draft.message(t, files: videos.ready), images.map(\.1))
+                               send(draft.message(t, files: draft.held.ready), images.map(\.1))
                                draft.sent()
                            })
         }

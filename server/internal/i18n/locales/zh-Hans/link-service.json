@@ -1,6 +1,5 @@
 {
   "systemd_user_unavailable": "连不上你的 systemd 用户实例",
-  "running_before_purge": "还有一个 persona-link 在运行（不是这个服务起的，或者你自己跑的）：先停掉它，再 --purge",
   "node_install_failed": "常驻 node 没装好：{error}",
   "binary_install_failed": "放不进 {path}：{error}",
   "binary_installed": "装好了 {path}。",

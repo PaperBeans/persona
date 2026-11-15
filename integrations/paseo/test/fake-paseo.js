@@ -18,6 +18,12 @@ export function agentSnapshot(fields = {}) {
   }
 }
 
+/** Paseo's Auto Accept switch as an ACP agent lists it (acp-agent.ts buildACPAutoAcceptFeature). */
+export function autoAcceptFeature(value = false) {
+  return { type: 'toggle', id: 'auto_accept', label: 'Auto Accept', description: 'Automatically approves ACP permission prompts.',
+    tooltip: 'Auto accept permission prompts', icon: 'shield-check', value }
+}
+
 /**
  * A workspace descriptor (messages.ts WorkspaceDescriptorPayload) with what the bridge reads; fields override. A git
  * one's project placement is its own unless given (project: null for none, as Paseo's answer to workspace.create).
@@ -65,7 +71,8 @@ export function mcpServersError(servers) {
 
 /**
  * @param {import('node:test').TestContext} t
- * @param {{ version?: string, providers?: object, entries?: object[], agents?: {agent: object, project?: object}[] }} [o]
+ * @param {{ version?: string, providers?: object, entries?: object[], agents?: {agent: object, project?: object}[],
+ *   handlers?: object, duringPage?: (msg: object) => void }} [o]
  */
 export async function startFakePaseo(t, o = {}) {
   const f = {
@@ -80,14 +87,19 @@ export async function startFakePaseo(t, o = {}) {
     archivedWorkspaces: [], // ids archive_workspace_request archived
     onArchiveWorkspace: undefined, // (descriptor) => the disk part of an archive (a test's; a throw is Paseo's error)
     timelines: new Map(), // agent id → { epoch, entries }
+    loads: [], // ids of the agents a timeline request loaded from storage (closed or archived ones), in order
     conns: [],
     requests: [], // every session request, in order
     hellos: [],
-    subs: new Map(), // subscriptionId → { conn, kind, events?, agentIds? }
-    handlers: {}, // a test's own answers: type → (msg) => payload | undefined
+    subs: new Map(), // subscriptionId → { conn, kind, events?, agentIds?, held? (while its first page is built: flush) }
+    handlers: { ...o.handlers }, // a test's own answers: type → (msg) => payload | undefined
     refuse: undefined, // close code for the next hellos
     refuseDelay: 0, // ms before an MCP refusal is answered (a creation slow to fail)
     noMcp: new Set(o.noMcpProviders ?? []), // providers that take no MCP servers (Paseo's requireExternalMcpSupport)
+    creations: new Map(), // idempotency key → { fingerprint, agentId }: the agents made for keyed creations (createAgent)
+    // (msg) => what happens while Paseo builds a page of fetch_agents_request / fetch_workspaces_request (a test's):
+    // after the page's entries are read, before its reply.
+    duringPage: o.duringPage,
   }
   let n = 0
   const http = createServer()
@@ -113,6 +125,7 @@ export async function startFakePaseo(t, o = {}) {
   const reply = (c, type, payload) => send(c, { type, payload })
 
   function onMessage(c, line) {
+    if (c.hung) return
     const m = JSON.parse(line)
     if (m.type === 'hello') {
       f.hellos.push(m)
@@ -152,6 +165,8 @@ export async function startFakePaseo(t, o = {}) {
         return reply(c, 'session.events.set_subscription.response', { requestId: id, subscriptionId: sub('events', { events: msg.events }) })
       case 'fetch_agents_request': {
         // Archived agents only when asked for, and then among the others; in the order asked for, a page at a time.
+        // A new subscription's updates are held while its page is built (duringPage) and sent right after its reply.
+        const sid = msg.subscribe ? sub('agents', { held: new Map() }) : null
         const list = [...f.agents.values()].filter((e) => msg.filter?.includeArchived || !e.agent.archivedAt)
         const by = msg.sort?.[0]
         if (by?.key === 'updated_at') {
@@ -161,20 +176,31 @@ export async function startFakePaseo(t, o = {}) {
         const from = Number(msg.page?.cursor) || 0
         const limit = msg.page?.limit ?? list.length
         const more = from + limit < list.length
-        return reply(c, 'fetch_agents_response', {
-          requestId: id, subscriptionId: msg.subscribe ? sub('agents') : null, entries: list.slice(from, from + limit),
-          pageInfo: { nextCursor: more ? String(from + limit) : null, prevCursor: null, hasMore: more },
+        const entries = list.slice(from, from + limit).map((e) => ({ ...e })) // as they are now (an archive replaces e.agent)
+        f.duringPage?.(msg)
+        return together(c, () => {
+          reply(c, 'fetch_agents_response', {
+            requestId: id, subscriptionId: sid, entries, pageInfo: { nextCursor: more ? String(from + limit) : null, prevCursor: null, hasMore: more },
+          })
+          if (sid) flush(sid, new Map(entries.map((e) => [e.agent.id, Date.parse(e.agent.updatedAt)])))
         })
       }
       case 'fetch_workspaces_request': {
-        // Background workspaces only when asked (Paseo's matchesFilter); a page at a time.
+        // Background workspaces only when asked (Paseo's matchesFilter); a page at a time. A new subscription's updates
+        // are held while its page is built, as for the agents.
+        const sid = msg.subscribe ? sub('workspaces', { held: new Map() }) : null
         const list = [...f.workspaces.values()].filter((d) => msg.includeBackground || msg.filter?.includeBackground || !d.background)
         const from = Number(msg.page?.cursor) || 0
         const limit = msg.page?.limit ?? list.length
         const more = from + limit < list.length
-        return reply(c, 'fetch_workspaces_response', {
-          requestId: id, subscriptionId: msg.subscribe ? sub('workspaces') : null, entries: list.slice(from, from + limit), emptyProjects: [],
-          pageInfo: { nextCursor: more ? String(from + limit) : null, prevCursor: null, hasMore: more },
+        const entries = list.slice(from, from + limit)
+        f.duringPage?.(msg)
+        return together(c, () => {
+          reply(c, 'fetch_workspaces_response', {
+            requestId: id, subscriptionId: sid, entries, emptyProjects: [],
+            pageInfo: { nextCursor: more ? String(from + limit) : null, prevCursor: null, hasMore: more },
+          })
+          if (sid) flush(sid)
         })
       }
       case 'workspace.create.request': {
@@ -243,6 +269,14 @@ export async function startFakePaseo(t, o = {}) {
         f.subs.delete(msg.subscriptionId)
         return reply(c, 'subscription.release.response', { requestId: id, subscriptionId: msg.subscriptionId })
       case 'fetch_agent_timeline_request': {
+        // Paseo loads an agent it let go before it reads the timeline (0.15.4 ensureAgentLoaded): its provider runs
+        // again, and the lists see it loaded, its updatedAt as it was (a restore keeps it). An archived one is loaded
+        // as history, still archived and listed nowhere.
+        const stored = f.agents.get(msg.agentId)?.agent
+        if (stored?.status === 'closed' || stored?.archivedAt) {
+          f.loads.push(msg.agentId)
+          if (!stored.archivedAt) f.upsert({ ...stored, status: 'idle' })
+        }
         const a = f.agents.get(msg.agentId)
         const tl = f.timelines.get(msg.agentId) ?? { epoch: 'ep1', entries: [] }
         let list = tl.entries
@@ -286,6 +320,17 @@ export async function startFakePaseo(t, o = {}) {
         }
         return reply(c, replyType(msg.type), { requestId: id, agentId: msg.agentId, accepted: true, error: null })
       }
+      case 'set_agent_feature_request': {
+        // Paseo loads the agent first (ensureLoaded: a closed ACP agent lists its switch again) and refuses a feature its
+        // provider lacks; the new value reaches the lists.
+        const e = f.agents.get(msg.agentId)
+        const features = e?.agent.features ?? (f.providers[e?.agent.provider]?.extends === 'acp' ? [autoAcceptFeature()] : [])
+        if (!e || e.agent.archivedAt || !features.some((x) => x.id === msg.featureId)) {
+          return reply(c, replyType(msg.type), { requestId: id, agentId: msg.agentId, accepted: false, error: `Unknown ${e?.agent.provider} feature: ${msg.featureId}` })
+        }
+        f.update(msg.agentId, { features: features.map((x) => (x.id === msg.featureId ? { ...x, value: msg.value } : x)) })
+        return reply(c, replyType(msg.type), { requestId: id, agentId: msg.agentId, accepted: true, error: null })
+      }
       case 'archive_agent_request': {
         const at = new Date().toISOString()
         reply(c, 'agent_archived', { requestId: id, agentId: msg.agentId, archivedAt: at })
@@ -301,11 +346,7 @@ export async function startFakePaseo(t, o = {}) {
           else refuse()
           return
         }
-        const agent = agentSnapshot({ id: msg.agentId ?? randomUUID(), provider: msg.config.provider, cwd: msg.config.cwd, labels: msg.labels ?? {},
-          model: msg.config.model ?? null, currentModeId: msg.config.modeId ?? null, thinkingOptionId: msg.config.thinkingOptionId ?? null,
-          status: msg.initialPrompt ? 'running' : 'idle', workspaceId: msg.workspaceId ?? 'wks_new' })
-        f.upsert(agent, { projectKey: 'prj_1', projectName: 'proj', workspaceName: 'ws', checkout: { cwd: agent.cwd, isGit: false } })
-        return reply(c, 'agent.create.response', { requestId: id, agent, error: null })
+        return reply(c, 'agent.create.response', { requestId: id, ...f.createAgent(msg) })
       }
       case 'import_agent_request': {
         // Paseo 0.14 (import-sessions.ts): a session an agent has is not imported twice; one an archived agent has is
@@ -337,12 +378,79 @@ export async function startFakePaseo(t, o = {}) {
     }
   }
 
-  /** Send a message to every subscription of a kind (only those whose filter takes it). */
+  /** What the daemon answers a request with, for a test's handler that answers later (it returned null). */
+  f.answer = (c, msg) => answer(c, msg)
+
+  /**
+   * The agent an agent.create.request makes, as its answer's payload ({agent, error}). One with an idempotency key is
+   * kept under it, as Paseo 0.15's creation service keeps it (creation/index.js): the same request again (its fields
+   * but requestId, type, subscribe) gets the agent made for it, and another request under that key is refused. A
+   * refusal keeps nothing, so asked again it runs again.
+   */
+  f.createAgent = (msg) => {
+    const { requestId: _r, type: _t, subscribe: _s, idempotencyKey: key, ...intent } = msg
+    const fingerprint = key ? JSON.stringify(sortedKeys(intent)) : undefined
+    const prior = key ? f.creations.get(key) : undefined
+    if (prior && prior.fingerprint !== fingerprint) return { agent: null, error: 'agent_request_key_conflict' }
+    if (prior) {
+      const made = f.agents.get(prior.agentId)?.agent
+      return made ? { agent: made, error: null } : { agent: null, error: 'Previously created agent no longer exists' }
+    }
+    // A provider Paseo runs over ACP has the Auto Accept switch, off unless the request turned it on (acp-agent.ts).
+    const acp = f.providers[msg.config.provider]?.extends === 'acp'
+    const agent = agentSnapshot({ id: msg.agentId ?? randomUUID(), provider: msg.config.provider, cwd: msg.config.cwd, labels: msg.labels ?? {},
+      model: msg.config.model ?? null, currentModeId: msg.config.modeId ?? null, thinkingOptionId: msg.config.thinkingOptionId ?? null,
+      status: msg.initialPrompt ? 'running' : 'idle', workspaceId: msg.workspaceId ?? 'wks_new',
+      ...(acp ? { features: [autoAcceptFeature(msg.config.featureValues?.auto_accept === true)] } : {}) })
+    f.upsert(agent, { projectKey: 'prj_1', projectName: 'proj', workspaceName: 'ws', checkout: { cwd: agent.cwd, isGit: false } })
+    if (key) f.creations.set(key, { fingerprint, agentId: agent.id })
+    return { agent, error: null }
+  }
+
+  /**
+   * Send a message to every subscription of a kind (only those whose filter takes it). One whose first page is being
+   * built holds it instead, the latest per agent or workspace (flush).
+   */
   f.emit = (kind, inner, filter = () => true) => {
     for (const [sid, s] of f.subs) {
       if (s.kind !== kind || !filter(s)) continue
-      s.conn.write(JSON.stringify({ type: 'session', message: { ...inner, payload: { ...inner.payload, subscriptionId: sid } } }))
+      const message = { ...inner, payload: { ...inner.payload, subscriptionId: sid } }
+      const p = inner.payload ?? {}
+      if (s.held) s.held.set(p.agentId ?? p.agent?.id ?? p.id ?? p.workspace?.id, message)
+      else s.conn.write(JSON.stringify({ type: 'session', message }))
     }
+  }
+
+  /**
+   * What a subscription held while its first page was built, sent right after the page's reply (Paseo 0.15
+   * handleFetchAgents, agent-updates-service flushBootstrapped): an agent's update older than the page's copy of it
+   * (pageAt: agent id → its updatedAt there) is left out, one as old is sent.
+   */
+  function flush(sid, pageAt = new Map()) {
+    const s = f.subs.get(sid)
+    if (!s?.held) return
+    const held = [...s.held.values()]
+    delete s.held
+    for (const message of held) {
+      const a = message.payload.kind === 'upsert' ? message.payload.agent : undefined
+      if (a && Date.parse(a.updatedAt) < pageAt.get(a.id)) continue
+      s.conn.write(JSON.stringify({ type: 'session', message }))
+    }
+  }
+
+  /** What fn writes to c goes out in one write: the bridge reads it at once, as it often reads Paseo's reply and what follows. */
+  function together(c, fn) {
+    c.socket.cork()
+    try {
+      fn()
+    } finally {
+      process.nextTick(() => c.socket.uncork())
+    }
+  }
+
+  /** The daemon stops answering on the connections it has (hung), and keeps them open; a new one is answered. */
+  f.hang = () => {
+    for (const c of f.conns) c.hung = true
   }
   /** A workspace appears or changes (the workspace directory's update; background ones are told nobody here). */
   f.upsertWorkspace = (d) => {
@@ -380,10 +488,11 @@ export async function startFakePaseo(t, o = {}) {
     }
   }
   /**
-   * An agent is deleted in another client (Paseo's own app, its command line): nothing of it is left. Paseo tells
+   * An agent is deleted in another client (Paseo's own app, its command line): nothing of it is left. Paseo 0.14 tells
    * the removal only to the lists of the client that deleted it (session.ts handleDeleteAgentRequest): every other
    * one sees the agent closed when it ran (its last state), and nothing when it did not. told: the lists are told
-   * of the removal, as that client's are. after: ms from closing the agent to its record being gone.
+   * of the removal, as Paseo 0.15 tells every client's (agent-manager notifyAgentRemoved), an archived agent's too.
+   * after: ms from closing the agent to its record being gone.
    */
   f.delete = (agentId, { told = false, after = 0 } = {}) => {
     const e = f.agents.get(agentId)
@@ -406,12 +515,17 @@ export async function startFakePaseo(t, o = {}) {
     f.update(agentId, { pendingPermissions: [...e.agent.pendingPermissions, request] })
     f.emit('events', { type: 'agent_permission_request', payload: { agentId, request } }, (s) => s.events.includes('agent_permission_request'))
   }
-  /** It is answered (by the bridge's response, or in Paseo's own app when c is undefined). */
+  /**
+   * It is answered (by the bridge's response on c, or in Paseo's own app when c is undefined), in Paseo 0.15's order
+   * (agent-manager respondToPermission, session handleAgentPermissionResponse): the agent's update without it, the
+   * subscriptions' agent_permission_resolved, under the permission's id, which is also the response's requestId, then
+   * the response's own reply.
+   */
   f.resolvePermission = (agentId, requestId, resolution, c) => {
     const e = f.agents.get(agentId)
     f.update(agentId, { pendingPermissions: e.agent.pendingPermissions.filter((r) => r.id !== requestId) })
-    if (c) c.write(JSON.stringify({ type: 'session', message: { type: 'agent_permission_resolved', payload: { agentId, requestId, resolution } } }))
     f.emit('events', { type: 'agent_permission_resolved', payload: { agentId, requestId, resolution } }, (s) => s.events.includes('agent_permission_resolved'))
+    if (c) c.write(JSON.stringify({ type: 'session', message: { type: 'agent_permission_resolved', payload: { agentId, requestId, resolution } } }))
   }
   /** An agent's timeline (projected entries) and its epoch. */
   f.setTimeline = (agentId, entries, epoch = 'ep1') => f.timelines.set(agentId, { epoch, entries })
@@ -427,6 +541,13 @@ export async function startFakePaseo(t, o = {}) {
     f.conns = []
   }
   return f
+}
+
+/** A value with its objects' keys in order, at every depth: as Paseo's creation service digests a request. */
+function sortedKeys(v) {
+  if (Array.isArray(v)) return v.map(sortedKeys)
+  if (!v || typeof v !== 'object') return v
+  return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortedKeys(v[k])]))
 }
 
 function replyType(type) {

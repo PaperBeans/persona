@@ -63,7 +63,7 @@ struct GitBranchesSheet: View {
             }
             .listStyle(.insetGrouped)
             .themedPage()
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: Text("Find or name a branch"))
+            .pageSearchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: String(localized: "Find or name a branch"))
             .autocorrectionDisabled()
             .textInputAutocapitalization(.never)
             .navigationTitle(Text("Branches"))
@@ -158,7 +158,7 @@ struct GitBranchesSheet: View {
 
     private func load() async {
         failure = nil
-        do { branches = try await deps.branches(machineID, cwd) } catch {
+        do { branches = try await deps.branches(machineID, cwd).branches } catch {
             if !error.isCancellation { failure = GitRefusal(error).detail }
         }
     }

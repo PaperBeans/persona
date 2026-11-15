@@ -189,6 +189,8 @@ data class Todo(
     /** Nobody is working on it (#3618): every agent of this open to-do is gone and nothing brings one back; null otherwise
      *  and from an older hub. */
     val orphaned: TodoOrphaned? = null,
+    /** Empty for an ordinary to-do or task; "concern" for one of the owner's concerns. Unknown values stay ordinary. */
+    val kind: String = "",
 ) {
     val isDone: Boolean get() = doneAt != null
     val activeAgents get() = agents.filter { it.releasedAt == null }
@@ -333,6 +335,8 @@ data class Supervision(
     val round: Int = 0,
     val reviews: List<TaskReview> = emptyList(),
     @WireTime @SerialName("updated_at") val updatedAt: String? = null,
+    /** When the task entered `pending_review`; null in every other state, and from an older hub. */
+    @WireTime @SerialName("pending_since") val pendingSince: String? = null,
     /** The agent's explicit report; missing counts never imply a percentage. */
     val progress: TaskProgress? = null,
 )

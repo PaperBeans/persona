@@ -46,11 +46,25 @@ func (n *Node) transcriptPathIn(id string, pass *codexListPass) string {
 	return p
 }
 
+// ownTranscriptPath is transcriptPath of session id's own file: never the transcript a runtime names for a session it
+// lists under that id (a fork's line names Claude sessions by their own ids, runtimealiases.go).
+func (n *Node) ownTranscriptPath(id string) string {
+	p := n.findOwnTranscriptPath(id, nil)
+	if !n.scopedTranscriptAllows(p) {
+		return ""
+	}
+	return p
+}
+
 func (n *Node) findTranscriptPath(id string, pass *codexListPass) string {
 	// A runtime's session whose conversation is a Claude transcript (runtimetranscript.go): that one's file.
 	if t := n.runtimes.transcriptOf(id); t != "" {
 		id = t
 	}
+	return n.findOwnTranscriptPath(id, pass)
+}
+
+func (n *Node) findOwnTranscriptPath(id string, pass *codexListPass) string {
 	if n.codexBlocked(id) {
 		return ""
 	}
@@ -85,14 +99,15 @@ func (n *Node) findTranscriptPath(id string, pass *codexListPass) string {
 		}
 		return ""
 	}
-	// Looking again is for a Claude transcript's newer copy in another projects directory. A rollout found before has
-	// none: it stays the thread's file while it exists (a moved one is looked up afresh below).
-	if known && !isClaudeTranscript(p, id) {
+	// Looking again is for a Claude transcript's newer copy in another projects directory. A cached non-Claude path
+	// with no live rollout agent is returned directly. A live rollout instead rechecks its continuation segments.
+	kind := n.rolloutAgent(id)
+	if known && !isClaudeTranscript(p, id) && kind == "" {
 		n.setPath(id, p)
 		return p
 	}
 	// A live Codex or compatible-CLI agent's conversation is its rollout: the projects directories have nothing of it.
-	if kind := n.rolloutAgent(id); kind != "" {
+	if kind != "" {
 		found := ""
 		if kind == traexAgent {
 			found = n.traexPath(id)

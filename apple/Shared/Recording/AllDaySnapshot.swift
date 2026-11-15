@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 /// What the watch app last knew about all-day recording (docs/assistant/day-recap.md), for the All-Day Recording
 /// complication (`AllDayRecordingComplication`). The app writes it into the watch App Group on every change of state

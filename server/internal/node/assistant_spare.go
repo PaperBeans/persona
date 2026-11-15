@@ -2,9 +2,11 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/shellcmd"
 )
@@ -35,7 +37,9 @@ func (n *Node) adoptSpare(cwd, launcher string, options ...modelExecution) *assi
 		(launcher != "" && p.launcher != launcher) || (cwd != "" && p.cwd != cwd) || p.fingerprint != n.executionFingerprint(p.launcher, executionOption(options)) {
 		return nil
 	}
-	if selected := executionOption(options).ConfigDir; selected != "" && !sameAssistantProfile(p.model.ConfigDir, selected) {
+	// A Claude start names the profile it resolved (assistantProfileSelection), Persona's own included; a spare warmed in
+	// another one, as before the main chat's profile choice changed, is not it. A Codex one has no profile.
+	if p.agent == "claude" && !sameAssistantProfile(p.model.ConfigDir, executionOption(options).ConfigDir) {
 		return nil
 	}
 	n.spare = nil
@@ -46,8 +50,11 @@ func (n *Node) adoptSpare(cwd, launcher string, options ...modelExecution) *assi
 // assistantWarm makes sure a fresh spare process is waiting for the next new conversation.
 func (n *Node) assistantWarm(cwd, launcher string, options ...modelExecution) error {
 	if n.assistantRuntime(launcher) != nil { // a runtime is running already: nothing to start ahead
+		if executionOption(options).SupervisionInstructions != "" {
+			return supervisionRuntimeRefusal(context.Background())
+		}
 		if executionOption(options).ConfigDir != "" {
-			return fmt.Errorf("config_dir is only supported for Claude assistant conversations")
+			return errors.New(assistantwire.ConfigDirClaudeOnly)
 		}
 		return nil
 	}
@@ -69,7 +76,7 @@ func (n *Node) assistantWarm(cwd, launcher string, options ...modelExecution) er
 			return err
 		}
 	} else if execution.ConfigDir != "" {
-		return fmt.Errorf("config_dir is only supported for Claude assistant conversations")
+		return errors.New(assistantwire.ConfigDirClaudeOnly)
 	}
 	n.mu.Lock()
 	old := n.spare

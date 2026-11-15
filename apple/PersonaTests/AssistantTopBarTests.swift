@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Persona
+import PersonaWire
 
 struct AssistantTopBarTests {
     /// The chat chip's launcher submenus (#1644): the IDs typed before come marked, and "Other Model…" is offered for
@@ -14,6 +15,9 @@ struct AssistantTopBarTests {
         #expect(options.map { $0.custom == true } == [false, false, true])
         #expect(AssistantTopBar.takesTypedModel(Launcher(name: "claude")))
         #expect(AssistantTopBar.takesTypedModel(Launcher(name: "cx", agent: "codex")))
+        #expect(AssistantTopBar.takesTypedModel(Launcher(name: "pi", agent: "pi")))
+        #expect(AssistantTopBar.takesTypedModel(Launcher(name: "cursor", agent: "cursor")))
+        #expect(AssistantTopBar.takesTypedModel(Launcher(name: "agy", agent: "agy")))
         #expect(!AssistantTopBar.takesTypedModel(Launcher(name: "traex", baseURL: "(traex)")))
         #expect(!AssistantTopBar.takesTypedModel(Launcher(name: "rt", agent: "dsh")))
     }
@@ -203,6 +207,10 @@ struct AssistantTopBarTests {
         #expect(AssistantSidebarGroups.recent(all, leaders: [], main: main, background: "bg").map(\.sessionID) == ["inbox", "lead", "a", "lark", "wx"])
         #expect(AssistantSidebarGroups.recent(all, leaders: ["lead"], main: main, background: nil).map(\.sessionID).first == "inbox")
         #expect(AssistantSidebarGroups.recent(Array(all.prefix(3)), leaders: ["lead"], main: main, background: "bg").isEmpty)
+        // Show Scheduled Task Chats (#8324): the background supervisor and the task's chat come back by time, still five,
+        // and the main chat and the direction still stay out.
+        #expect(AssistantSidebarGroups.recent(all, leaders: ["lead"], main: main, background: "bg", withTasks: true).map(\.sessionID)
+                == ["bg", "inbox", "task", "a", "lark"])
     }
 
     /// A scheduled task's chat the hub does not mark with an origin yet is still known from the tasks and runs
@@ -222,8 +230,27 @@ struct AssistantTopBarTests {
         task.runSessionID = "taskrun"
         let known = AssistantTaskChats(tasks: [task], runs: [])
         #expect(AssistantSidebarGroups.recent(all, leaders: [], main: main, background: nil, tasks: known).map(\.sessionID) == ["mine"])
+        // with Show Scheduled Task Chats on (#8324) it is back, by time
+        #expect(AssistantSidebarGroups.recent(all, leaders: [], main: main, background: nil, tasks: known, withTasks: true).map(\.sessionID)
+                == ["taskrun", "mine"])
         // without the tasks knowledge, an unmarked chat lists as any other (older hubs behave as before)
         #expect(AssistantSidebarGroups.recent(all, leaders: [], main: main, background: nil).map(\.sessionID) == ["taskrun", "mine"])
+    }
+
+    /// Show Scheduled Task Chats (#8324) is the hub's: off until it says on, nil (no switch) from a hub without it, and a
+    /// write sends only that field.
+    @Test func recentTaskChatsSettingDecodesAndWritesAlone() throws {
+        func decode(_ json: String) throws -> APIClient.AssistantState {
+            try JSON.decoder.decode(APIClient.AssistantState.self, from: Data(json.utf8))
+        }
+        let old = try decode(#"{"machine_id":"box","launcher":"claude","cwd":"/a","conversations":[]}"#)
+        #expect(old.recentTaskChats == nil)
+        let on = try decode(#"{"machine_id":"box","launcher":"claude","cwd":"/a","conversations":[],"recent_task_chats":true}"#)
+        #expect(on.recentTaskChats == true)
+        let body = try JSONSerialization.jsonObject(with: JSONEncoder().encode(APIClient.AssistantConfigBody(recentTaskChats: true))) as? [String: Any]
+        #expect(body?.count == 1 && body?["recent_task_chats"] as? Bool == true)
+        let other = try JSONSerialization.jsonObject(with: JSONEncoder().encode(APIClient.AssistantConfigBody(timezone: "UTC"))) as? [String: Any]
+        #expect(other?["recent_task_chats"] == nil)
     }
 
     /// A direction's name comes from GET /api/v1/assistant/leaders: current ones with a name only.

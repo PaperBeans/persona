@@ -28,6 +28,11 @@ type codexRegistry struct {
 	remotes      map[string]*codexRemote
 	retries      map[string]codexRetry // server id -> attempts that did not connect (codex_backoff.go)
 	report       func(proto.CodexConfig)
+	// handed: the hub handed this connection the inventory it keeps for the computer (node.configure's codex, every
+	// connection: devices.connected). Until then the registry is a new Node's, without the threads the user joined, the
+	// homes and the app-servers the hub kept, and the hub would store it over what it kept: reports wait for it
+	// (rememberCodex), and held says one did.
+	handed, held bool
 	kick         chan struct{}
 	scan         func() []codexProcess
 	// checked lists the processes as scan does, and says whether it could (scanCodexProcessesChecked); nil: scan's
@@ -139,16 +144,39 @@ func (n *Node) codexInventory() proto.CodexConfig {
 	return cloneCodexConfig(n.codices.config)
 }
 
+// rememberCodex reports the inventory for the hub to keep, once the hub handed this connection what it kept
+// (codexHanded); before that it only notes that a report waits.
 func (n *Node) rememberCodex() {
 	r := n.codices
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
+	if !r.handed {
+		r.held = true
+		r.mu.Unlock()
+		return
+	}
 	cfg, report := cloneCodexConfig(r.config), r.report
 	r.mu.Unlock()
 	if report != nil {
 		report(cfg)
+	}
+}
+
+// codexHanded: node.configure handed the inventory the hub keeps (configureCodex merged it). A report that waited for
+// it goes now, with what the node found meanwhile added to the hub's.
+func (n *Node) codexHanded() {
+	r := n.codices
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	held := r.held && !r.handed
+	r.handed, r.held = true, false
+	r.mu.Unlock()
+	if held {
+		n.rememberCodex()
 	}
 }
 
@@ -554,7 +582,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 		if n.programRun(id, src, pass) {
 			continue
 		}
-		if src.path != "" && readCodexOrigin(src.path).guardian { // an approval review of a tool call, not an Agent (#5486)
+		if codexThreadOrigin(src).guardian { // an approval review of a tool call, not an Agent (#5486), its rollout gone too (#8191)
 			continue
 		}
 		if n.agentFiltered("codex", src.path) && !n.keptSessions()[id] { // another platform's runs (agentfilters.go)
@@ -643,7 +671,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			s.ReadOnlyReason = ""
 			n.placeCodexDesktop(&s, src, src.thread, false)
 			n.codexDesktopEffortRow(&s, src, m) // codex_desktop_effort.go
-		} else if o := readCodexOrigin(src.path); o.desktop {
+		} else if o := codexThreadOrigin(src); o.desktop { // a subagent whose rollout is gone too: its database row (#8191)
 			switch {
 			case o.parent != "":
 				s.AgentName, s.ParentThreadID, s.AgentSurface = "Codex App", o.parent, transcript.SurfaceDesktop
@@ -669,7 +697,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 		}
 		n.decorateCodexSession(&s, src, cfg.LegacyHome, projects)
 		if s.IsSubagent && pass != nil && len(pass.runtimes) > 0 {
-			if root := readCodexOrigin(src.path).root; pass.runtimeOf(s.ParentThreadID).session != "" || pass.runtimeOf(root).session != "" {
+			if root := codexThreadOrigin(src).root; pass.runtimeOf(s.ParentThreadID).session != "" || pass.runtimeOf(root).session != "" {
 				adopted = append(adopted, adoption{len(out), s.ParentThreadID, root})
 			}
 		}
@@ -678,6 +706,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			// brings it back in a new tab (session.start, codex_resume.go).
 			s.Capabilities.Terminal = true
 			s.ReadOnlyReason = stoppedReason
+			s.Capabilities.StopCause = n.stopCause(id)
 		}
 		if s.SourceKind == "codex_history" && !s.Capabilities.Send && !s.IsSubagent && !n.codexBlocked(id) {
 			s.Capabilities.Takeover = n.codexTakeoverRow(id, src, m, liveRollouts[id] != "")

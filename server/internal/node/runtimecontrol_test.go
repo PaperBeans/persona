@@ -88,6 +88,90 @@ func TestRuntimeLaunchers(t *testing.T) {
 	})
 }
 
+// A runtime's launcher carries the name the runtime gives its provider and, when its agent is not Claude Code, the
+// permission modes a start on it takes (#8261): Persona's own, whatever else the runtime sent. A Claude Code launcher's
+// are the apps' own five; an older runtime's launcher says neither.
+func TestRuntimeLauncherNamesAndPermissionModes(t *testing.T) {
+	n, _ := runtimeNode(t)
+	h := paseoEngineHello()
+	h["launchers"] = []map[string]any{
+		{"name": "my-claude", "agent": "claude", "display_name": "My Claude", "permission_modes": []string{"default", "bypassPermissions"}},
+		{"name": "grok", "agent": "paseo", "display_name": "  Grok  ", "permission_modes": []string{"bypassPermissions", "yolo", "default"}},
+		{"name": "kimi", "agent": "paseo", "display_name": strings.Repeat("π", 80), "permission_modes": []string{"default"}},
+		{"name": "older", "agent": "paseo"},
+	}
+	dialRuntime(t, n, h)
+	enablePaseo(n)
+	raw, err := nodeCall(t, n, "launchers.list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Launchers []proto.Launcher `json:"launchers"`
+	}
+	_ = json.Unmarshal(raw, &res)
+	got := map[string]proto.Launcher{}
+	for _, l := range res.Launchers {
+		if l.Source == "paseo" {
+			got[l.Name] = l
+		}
+	}
+	both := proto.PermissionModeSetOf("default", "bypassPermissions")
+	for name, want := range map[string]struct {
+		display string
+		modes   proto.PermissionModeSet
+	}{
+		"my-claude": {"My Claude", 0},
+		"grok":      {"Grok", both},
+		"kimi":      {strings.Repeat("π", 64), proto.PermissionModeSetOf("default")},
+		"older":     {"", 0},
+	} {
+		if l := got[name]; l.DisplayName != want.display || l.PermissionModes != want.modes {
+			t.Errorf("%s: %q %v, want %q %v", name, l.DisplayName, l.PermissionModes.List(), want.display, want.modes.List())
+		}
+	}
+}
+
+// A launcher whose agents' approval is a switch Allow all turns on (Paseo's Auto Accept) says so in launchers.list, the
+// runtime's own launcher too: the manager starts its own Agents there with Allow all (#8141). One the runtime does not
+// say it of has no such field, and runtime.launchers carries it as hello does.
+func TestRuntimeLauncherAutoAccept(t *testing.T) {
+	n, _ := runtimeNode(t)
+	h := paseoEngineHello()
+	h["launcher"] = "paseo-grok"
+	h["launchers"] = []map[string]any{
+		{"name": "paseo-claude", "agent": "claude"},
+		{"name": "paseo-grok", "agent": "paseo", "auto_accept": true},
+		{"name": "paseo-pi", "agent": "paseo"},
+	}
+	host := dialRuntime(t, n, h)
+	enablePaseo(n)
+	autoAccept := func() map[string]bool {
+		raw, err := nodeCall(t, n, "launchers.list", map[string]any{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var res struct {
+			Launchers []proto.Launcher `json:"launchers"`
+		}
+		_ = json.Unmarshal(raw, &res)
+		got := map[string]bool{}
+		for _, l := range res.Launchers {
+			if l.Source == "paseo" {
+				got[l.Name] = l.AutoAccept
+			}
+		}
+		return got
+	}
+	if got := autoAccept(); len(got) != 3 || !got["paseo-grok"] || got["paseo-claude"] || got["paseo-pi"] {
+		t.Fatalf("auto_accept by launcher: %v", got)
+	}
+	_ = host.peer.Notify("runtime.launchers", map[string]any{"launchers": []map[string]any{
+		{"name": "paseo-grok", "agent": "paseo"}, {"name": "paseo-pi", "agent": "paseo", "auto_accept": true},
+	}})
+	waitFor(t, "the new launchers", func() bool { got := autoAccept(); return got["paseo-pi"] && !got["paseo-grok"] })
+}
+
 // The phone's permission mode and effort reach a runtime that takes them; one that does not refuses them.
 func TestRuntimeModes(t *testing.T) {
 	n, _ := runtimeNode(t)
@@ -347,7 +431,7 @@ func TestRuntimeLauncherAvailabilityCheck(t *testing.T) {
 func TestRuntimeAvailabilityCheckRequiresOptIn(t *testing.T) {
 	n, _ := runtimeNode(t)
 	host := dialRuntime(t, n, paseoEngineHello())
-	if _, handled := n.runtimeLauncherCheck(context.Background(), "paseo-claude", t.TempDir(), "probe"); handled {
+	if _, handled := n.runtimeLauncherCheck(context.Background(), n.runtimes.launcherRuntime("paseo-claude"), "paseo-claude", t.TempDir(), "probe"); handled {
 		t.Fatal("older runtime intercepted the shell check")
 	}
 	if len(host.got("launchers.check")) != 0 {

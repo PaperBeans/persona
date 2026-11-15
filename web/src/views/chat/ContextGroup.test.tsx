@@ -1,6 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ContextGroup, contextSummary } from "./ContextGroup";
+
+// The disclosure behavior is under test, not how quickly its real lazy chunk arrives.
+vi.mock("./ContextDetails", async (importOriginal) => {
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  return await importOriginal<typeof import("./ContextDetails")>();
+});
 
 const cs = [
   { kind: "instructions", title: "给 Agent 的说明", text: "## 怎么做" },
@@ -9,6 +15,11 @@ const cs = [
 ];
 
 describe("ContextGroup", () => {
+  beforeAll(async () => {
+    // Load before any component mounts, so chunk completion cannot escape an act scope.
+    await import("./ContextDetails");
+  }, 60_000);
+
   it("summarizes one context by its title and several by their count", () => {
     expect(contextSummary(cs)).toBe("上下文 · 3 项");
     expect(contextSummary([cs[1]])).toBe("上下文 · 前面的聊天");

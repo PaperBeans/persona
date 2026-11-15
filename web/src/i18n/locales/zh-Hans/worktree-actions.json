@@ -7,7 +7,7 @@
   "new_child": "新建子工作树…",
   "rename": "重命名工作树…",
   "copy_name": "复制工作树名称",
-  "copy_path": "复制路径",
+  "copy_path": "复制目录路径",
   "open_parent": "打开父工作树",
   "delete": "删除工作树…",
   "delete_title": "删除工作树",

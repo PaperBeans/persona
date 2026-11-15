@@ -1,7 +1,7 @@
 // Machine details (/machines/<id>, docs/server/machines.md "App", iOS MachineDetailView): one page, the most used on top — how the
 // computer is (online, system, which hub when there are several), its agents by herdr space (a row opens the chat),
 // its values now, CPU / memory / network / load over 1, 6 or 24 hours (hover a chart to read a moment, all follow) and
-// each core now (Linux), the system, the launchers. Its engine (which one the agents come from) follows the agents. A Mac the hub's extension cua is on for gets "Computer control" after that, and "Browser" (ego lite) while ego is on.
+// each core now (Linux), the system, the launchers. Its engine (which one the agents come from) follows the agents. A Mac the hub's extension cua is on for gets "Computer control" after that, and "Browser" (ego lite) while ego is on; then "iPhone control" while the extension iphone is on (a Mac or a Linux computer).
 // A Mac whose live screen can be shown (showsScreen) gets "View screen" in the top bar, the page's one way to it: it stays in view
 // while the page scrolls, and does not wait for Cua Driver, which the screen does not use.
 import { MoveToManager } from "../ManagerParts";
@@ -38,11 +38,12 @@ import { hubLabel, routeText } from "../../lib/mesh";
 import { machineDeployment } from "../../lib/machine-deploy";
 import { classifyConnection } from "../../lib/node-health";
 import { screenPath, showsScreen } from "../../lib/computer";
+import { osFamily } from "../../lib/machine-capabilities";
 import { openPanel } from "../../lib/panel";
 import { href, onLinkClick } from "../../lib/router";
 import { getState, refresh, useStore } from "../../lib/store";
-import { foldRows } from "../../lib/folded-rows";
-import type { Launcher, Session } from "../../lib/types";
+import { useFullAgentSessions } from "../../lib/sessions";
+import type { Launcher } from "../../lib/types";
 import { Button, cx, EASE, IconButton, Loading, toast } from "../../ui/atoms";
 import { AgentRow } from "./AgentRow";
 import { Icon } from "../../ui/icons";
@@ -51,6 +52,7 @@ import { MetricChart, type ChartSeries } from "./MetricChart";
 import { MachineDeploy } from "./MachineDeploy";
 import { BrowserSection } from "./BrowserSection";
 import { ComputerSection } from "./ComputerSection";
+import { IPhoneSection } from "./IPhoneSection";
 import { EngineSection } from "./EngineSection";
 import { openEngineSection } from "./engine-anchor";
 import { BotmuxSwitch } from "./BotmuxSwitch";
@@ -106,8 +108,6 @@ function RenameMachine({ m, onDone }: { m: DetailMachine; onDone: () => void }) 
 
 type MachineLauncher = Pick<Launcher, "name" | "display_name" | "model" | "agent" | "agent_type">;
 
-const NO_SESSIONS: Session[] = [];
-
 function initialRange(): MetricRange {
   const r = new URLSearchParams(location.search).get("range");
   return RANGE_KEYS.includes(r as MetricRange) ? (r as MetricRange) : "1h";
@@ -116,8 +116,10 @@ function initialRange(): MetricRange {
 export function MachineDetail({ mid, onToggleSidebar }: { mid: string; onToggleSidebar: () => void }) {
   const machines = useStore((s) => s.machines) as DetailMachine[];
   const loaded = useStore((s) => s.loaded);
-  // a child session folds into its parent (#5120): never an agent of the computer of its own
-  const sessions = useStore((s) => foldRows(s.sessions[mid] ?? NO_SESSIONS));
+  // Its agents, read as the Agents list reads them: a hub that pages that list pushes no sessions, so the store has none
+  // of this computer's. A child session folds into its parent (#5120): never an agent of the computer of its own.
+  const full = useFullAgentSessions();
+  const sessions = useMemo(() => full.sessions.filter((s) => s.machine_id === mid), [full.sessions, mid]);
   const m = machines.find((x) => x.id === mid);
   const online = m?.online ?? false;
   const expectedDisconnect = m ? machineDeployment(m).expectedDisconnect : false;
@@ -331,9 +333,12 @@ export function MachineDetail({ mid, onToggleSidebar }: { mid: string; onToggleS
 
       {/* agents */}
       <section>
-        <Heading title="Agent" count={online ? agentCount : undefined} />
+        {/* until its agents are read, how many there are is unknown: no count, and no "No agents running" */}
+        <Heading title="Agent" count={online && full.loaded ? agentCount : undefined} />
         {groups.length === 0 ? (
-          <p className="rounded-card bg-surface px-4 py-3 text-[12.5px] text-ink-3 shadow-card">{online ? t("machines-machinedetail.no_agents") : t("machines-machinedetail.agents_offline")}</p>
+          <p className="rounded-card bg-surface px-4 py-3 text-[12.5px] text-ink-3 shadow-card" data-agents={online ? (full.loaded ? "yes" : full.error ? "failed" : "loading") : undefined}>
+            {!online ? t("machines-machinedetail.agents_offline") : full.loaded ? t("machines-machinedetail.no_agents") : full.error ? t("machines-machinedetail.agents_failed_detail") : t("machines-machinedetail.agents_loading")}
+          </p>
         ) : (
           <div className="flex flex-col gap-2.5">
             {groups.map((g, gi) => (
@@ -421,6 +426,7 @@ export function MachineDetail({ mid, onToggleSidebar }: { mid: string; onToggleS
 
       {m.computer && <ComputerSection mid={mid} computer={m.computer} online={online} manager={m.manager} />}
       {m.browser && <BrowserSection mid={mid} browser={m.browser} online={online} />}
+      {m.iphone && <IPhoneSection mid={mid} iphone={m.iphone} online={online} mac={osFamily(m) === "macos"} />}
 
       {/* system */}
       <section>

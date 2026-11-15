@@ -166,7 +166,7 @@ final class InboxHandOffModel {
                     main = model.assistantMain
                 } else {
                     let st = try await client.assistant()
-                    main = st.main.flatMap { $0.isEmpty ? nil : SessionKey(group: client.group, machineID: st.machineID, sessionID: $0) }
+                    main = st.mainKey(group: client.group)
                 }
                 if let main, model.session(main)?.canSend == true {
                     model.sendNow(main, text: text) // a failure shows in the conversation, with Retry

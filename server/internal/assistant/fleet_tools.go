@@ -57,9 +57,9 @@ type keptPhoneTools struct {
 	ok    bool
 }
 
-// phoneTools are the phone's tools for a tool list, as the hub lists them now. A conversation lists its tools once
-// (personad mcp says listChanged false), so one that starts while the hub can't answer (restarting, its link coming
-// back) would have none of the phone's for its whole life, and the model would tell the user the phone can't (#6422):
+// phoneTools are the phone's tools for a tool list, as the hub lists them now. Tool refresh is driven by task links,
+// not phone connectivity, and older MCP clients list only once. A list made while the hub can't answer (restarting,
+// its link coming back) must not leave the model thinking the phone has no tools (#6422):
 // the hub is asked again briefly, then the list it last gave is used. A call is still the phone's to refuse (a source
 // turned off since). Only a manager the hub never answered lists none, as before.
 func (s *Service) phoneTools(ctx context.Context) []proto.Tool {
@@ -103,37 +103,51 @@ func (s *Service) phoneTools(ctx context.Context) []proto.Tool {
 // sessionMCPTools are machine's conversation session's tools: a guest conversation's only its own (guest.go; the
 // node saying it is one, the hub not knowing it or not able to tell: none), any other's mcpTools.
 func (s *Service) sessionMCPTools(ctx context.Context, machine, session string, assistant, guestHint bool) []proto.Tool {
-	assistant = assistant && s.assistantDiscovery(ctx, machine, session)
-	allowed, guest, err := s.guestOf(ctx, machine, session)
+	tools, err := s.sessionMCPToolsChecked(ctx, machine, session, assistant, guestHint)
 	if err != nil {
 		s.logf("mcp tools: %v", err)
 		return []proto.Tool{}
 	}
+	return tools
+}
+
+// Discovery with a cursor must distinguish a denied/empty list from a failed
+// state read. Otherwise the failed list is cached until an unrelated link changes.
+func (s *Service) sessionMCPToolsChecked(ctx context.Context, machine, session string, assistant, guestHint bool) ([]proto.Tool, error) {
+	assistant = assistant && s.assistantDiscovery(ctx, machine, session)
+	allowed, guest, err := s.guestOf(ctx, machine, session)
+	if err != nil {
+		return nil, err
+	}
 	if _, room, err := s.roomOf(ctx, machine, session); guest && err == nil && room {
 		if s.isWorkMachine(machine) {
-			return []proto.Tool{}
+			return []proto.Tool{}, nil
 		}
-		// A meeting's room: its meeting tools only (meeting_room_tools.go), those it started with.
-		return guestTools(meetingRoomTools(), allowed)
+		return guestTools(meetingRoomTools(), allowed), nil
 	}
 	if !guest {
 		if guestHint {
-			return []proto.Tool{}
+			return []proto.Tool{}, nil
 		}
 		if s.isWorkMachine(machine) {
-			return s.AgentTools()
+			return s.AgentTools(), nil
+		}
+		if !assistant && session != "" {
+			if err := s.ensureTodosLoaded(ctx); err != nil {
+				return nil, err
+			}
 		}
 		tools := s.mcpTools(ctx, assistant)
 		if !assistant {
-			tools = append(tools, s.leaderTools(ctx, machine, session)...) // a task leader's task_plan (task_leader.go)
+			tools = append(tools, s.leaderTools(ctx, machine, session)...)
 			tools = append(tools, s.spawnTools(ctx, machine, session)...)
 		}
-		return tools
+		return tools, nil
 	}
 	if s.isWorkMachine(machine) {
-		return []proto.Tool{}
+		return []proto.Tool{}, nil
 	}
-	return guestTools(s.mcpTools(ctx, assistant), allowed)
+	return guestTools(s.mcpTools(ctx, assistant), allowed), nil
 }
 
 // guestRefuses refuses a guest conversation's call of a tool it was not given (and any call of one the hub cannot
@@ -215,7 +229,9 @@ func (s *Service) mcpCall(ctx context.Context, machine, session, name string, ar
 			}
 		}
 		var res proto.ToolResult
-		if err := s.appCall(ctx, assistantwire.AppPhone, assistantwire.PhoneCall, map[string]any{"name": name, "args": args}, &res); err != nil {
+		params := map[string]any{"name": name, "args": args}
+		mcpWaitParams(ctx, params)
+		if err := s.appCall(ctx, assistantwire.AppPhone, assistantwire.PhoneCall, params, &res); err != nil {
 			return proto.TextResult(err.Error(), true)
 		}
 		return res

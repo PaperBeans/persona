@@ -136,7 +136,7 @@ func (s *Service) tellApps(ix proto.Interaction) proto.Interaction {
 	s.taskPlanApproval()
 	ix = s.withTask(ix)
 	s.markTold(ix)
-	s.hub.Tell(assistantwire.EventFleetInteraction, assistantwire.FleetInteraction{Interaction: ix})
+	s.tellCard(ix)
 	s.publishSessions(ix.MachineID)
 	s.liveChanged(false) // whether it is told counts for Persona Link's summary, not for the list
 	return ix
@@ -158,9 +158,32 @@ func (s *Service) tellUser(ix proto.Interaction, push bool) {
 // user's (pending.told): only tell does.
 func (s *Service) show(ix proto.Interaction) {
 	s.taskPlanApproval()
-	s.hub.Tell(assistantwire.EventFleetInteraction, assistantwire.FleetInteraction{Interaction: s.withTask(ix)})
+	s.tellCard(s.withTask(ix))
 	s.publishSessions(ix.MachineID)
 	s.liveChanged(false) // the card, and whether the assistant decides on it, count for Persona Link's summary
+}
+
+// tellCard gives the hub card ix (fleet.interaction), as tellApps and show do. A card can end while it is on its way:
+// its node withdraws it at once (interaction.cancel: OpenCode's TUI in auto accept answers a permission the moment it
+// is asked, and the plugin cancels the card it was raising), or it ends between a caller's check and this tell
+// (escalate, ringAsks). finished() then told the hub its end before the card itself reached it, and the hub would keep
+// it pending for good ("needs you", and 410 when answered). So once the hub has the card, a card no longer held under
+// its id is told ended again, after it. One that ends after the check is told ended by finished(), which then comes
+// after the card too. A newer card held under the id (another CreatedAt) is left alone: its own tell settles it, and
+// ending the id would take it off the hub. cardTell keeps a newer card's tell from coming between the check and the
+// end told here; it is not fleet.mu, since a tell is a write on the hub's connection.
+func (s *Service) tellCard(ix proto.Interaction) {
+	s.fleet.cardTell.Lock()
+	defer s.fleet.cardTell.Unlock()
+	if err := s.hub.Tell(assistantwire.EventFleetInteraction, assistantwire.FleetInteraction{Interaction: ix}); err != nil {
+		return // the hub did not get it: nothing of it to take back (its handshake gets the pending cards again)
+	}
+	s.fleet.mu.Lock()
+	_, held := s.fleet.interactions[ix.ID]
+	s.fleet.mu.Unlock()
+	if !held {
+		s.hub.Tell(assistantwire.EventFleetResolved, assistantwire.FleetResolved{ID: ix.ID})
+	}
 }
 
 // markTold notes that pending card ix is the user's: tell is ringing it (pending.told). Only that card: a newer one
@@ -261,6 +284,8 @@ func (s *Service) waitInteraction(ctx context.Context, ix proto.Interaction) (pr
 			if ix.Kind == proto.IxElicitation && !s.elicitationReachable(ix) {
 				_ = s.resolve(ix.ID, proto.Resolution{Dismiss: true})
 			}
+			// Resumable node cards reconnect through reporter-less interaction.create requests; MCP elicitation cards
+			// are not resumable, so this branch never has a wait reporter to restore.
 			return s.await(ctx, p)
 		}
 		s.fleet.mu.Unlock()
@@ -303,6 +328,8 @@ func (s *Service) waitInteraction(ctx context.Context, ix proto.Interaction) (pr
 		s.record(ix)
 		s.announce(ix)
 	}
+	resume := pushMCPInteraction(ctx, ix)
+	defer resume()
 	return s.await(ctx, p)
 }
 
@@ -1134,7 +1161,7 @@ func (s *Service) restoreRoute(ctx context.Context, ix proto.Interaction) bool {
 	// A question may have rung the user before the restart: its timeout only puts it back on the apps. An approval is
 	// not quiet: only the user can answer it, so its timeout rings (ringAsks) instead of leaving the agent blocked
 	// with nobody told.
-	p.route = &askRoute{todo: todo, machine: home, ladder: ladder, since: now, held: now, maybeTold: ix.Kind == proto.IxQuestion}
+	p.route = &askRoute{todo: todo, machine: home, ladder: ladder, routedAt: now, since: now, held: now, maybeTold: ix.Kind == proto.IxQuestion}
 	p.ix.Delegating = true
 	shown := p.ix
 	s.fleet.mu.Unlock()

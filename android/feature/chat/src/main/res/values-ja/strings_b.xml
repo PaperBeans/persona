@@ -308,6 +308,9 @@
     <string name="chat_modes_model_sonnet_detail">バランス型</string>
     <string name="chat_modes_model_haiku_detail">最速</string>
     <string name="chat_modes_unknown_detail">このバージョンのアプリはこのモードにまだ対応していません</string>
+    <string name="chat_modes_launcher_default">ランチャーに従う</string>
+    <string name="chat_modes_launcher_default_detail">何を確認するかは自身の承認設定で決まります。すでにすべて許可している場合もあります</string>
+    <string name="chat_modes_bypass_listed_detail">確認なしですべて許可します。チャットで元に戻せます</string>
     <string name="chat_modes_effort_hint">思考：%1$s</string>
     <string name="chat_modes_hint_separator">、</string>
     <string name="chat_modes_button_bypass">モード：すべて許可</string>
@@ -350,7 +353,6 @@
     <string name="chat_queue_move_up">上へ移動</string>
     <string name="chat_queue_move_down">下へ移動</string>
     <string name="chat_queue_send_now">今すぐ送信</string>
-    <string name="chat_queue_send_now_title">送信待ちのメッセージを今すぐ送りますか？</string>
     <string name="chat_queue_send_now_message">送信待ちのメッセージを今すぐエージェントに送ります。実行中のコマンドはバックグラウンドで続き、書いている途中の返信はあなたのメッセージを含めてやり直します。</string>
     <string name="chat_queue_send_now_message_persona">%1$s は次のステップを待たずにすぐ受け取ります。今の作業は止まるか、できるものはバックグラウンドで続き、あなたのメッセージを含めてやり直します。</string>
     <string name="chat_queue_relayed_note">この会話が空いたら届きます</string>
@@ -407,8 +409,10 @@
     <string name="chat_search_at_start">最初の記録に到達しました</string>
     <string name="chat_search_enter">キーワードを入力</string>
     <string name="chat_search_no_match">一致する記録はありません</string>
-    <string name="chat_search_scope">本文、思考、ツール名、ツールの入出力、システムイベントを検索できます。</string>
-    <string name="chat_search_note">読み込んだ内容のみを検索します。展開していない作業記録と省略された全文は対象外です。</string>
+    <string name="chat_search_scope">本文、引用、思考、ツール名、ツールの入力と出力、システムイベントを検索できます。</string>
+    <string name="chat_search_note">読み込み済みの内容のみを検索します（折りたたまれた作業記録を含む）。省略された全文は対象外です。</string>
+    <string name="chat_search_folds_loading">折りたたまれた作業記録を検索中…</string>
+    <string name="chat_search_folds_partial">一部の折りたたまれた作業記録は検索できませんでした。</string>
     <string name="chat_search_return">検索前の位置に戻る</string>
     <string name="chat_search_unlocatable">この記録は現在見つけられません。検索前の位置に戻れます</string>
     <string name="chat_search_origin_changed">元の記録が変わりました。現在の記録をそのままご覧ください</string>
@@ -430,6 +434,7 @@
     <string name="chat_slash_report_text">これまでの進捗と残りの作業を簡潔に報告してください</string>
     <string name="chat_slash_clear_title">コンテキストをクリア（/clear）</string>
     <string name="chat_slash_clear_detail">コンテキストをクリアして新しいセッションを開始</string>
+    <string name="chat_slash_clear_main_detail">チャットをクリアして最初から</string>
     <string name="chat_tasks_origin_gone">元の記録は現在のリストにありません</string>
     <string name="chat_tasks_load_failed">関連する記録を読み込めませんでした。作業の過程を展開してもう一度お試しください</string>
     <string name="chat_tasks_record_gone">関連する記録は現在のリストにありません</string>

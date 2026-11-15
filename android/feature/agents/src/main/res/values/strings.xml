@@ -303,6 +303,8 @@
     <string name="agents_new_prefill_offline">“%1$s” is offline, so another one is picked; switch back once it connects</string>
     <string name="agents_new_reload">Reload options</string>
     <string name="agents_new_agent_type">Agent type</string>
+    <!-- The agent type of Paseo's providers other than Claude Code and Codex, each listed by its own name under it (#8143). -->
+    <string name="agents_new_type_other">Other agents</string>
     <string name="agents_new_launcher_this_time">Launcher (this time only)</string>
     <string name="agents_new_launcher">Launcher</string>
     <string name="agents_new_search_launcher">Search launchers or models</string>
@@ -310,6 +312,7 @@
     <string name="agents_new_follow_config">Follow model settings</string>
     <string name="agents_new_permission_mode">Permission mode</string>
     <string name="agents_new_bypass_warning">With everything allowed, editing files and running commands won\'t ask you again.</string>
+    <string name="agents_new_provider_mode_hint">This agent uses its own approval settings unless you pick Allow everything. You can switch in the chat later.</string>
     <string name="agents_new_effort">Thinking effort</string>
     <string name="agents_new_no_effort">This model has no thinking effort setting</string>
     <string name="agents_new_first_message_codex">First message (required for Codex)</string>
@@ -345,6 +348,8 @@
     <string name="agents_model_failed_detail">%1$s\nYou can still start; the default model is used</string>
     <string name="agents_model_retry">Retry</string>
     <string name="agents_model_sheet_note">%2$s models in “%1$s”, the same as typing /model in the terminal. Only for this start.</string>
+    <!-- The model list of a Paseo provider other than Claude Code and Codex, which has no terminal (#8143). -->
+    <string name="agents_model_sheet_note_provider">The models “%1$s” offers. Only for this start.</string>
     <string name="agents_model_configured">Model settings: %1$s</string>
     <string name="agents_new_error_pending">The last start isn\'t confirmed yet. Check the result.</string>
     <string name="agents_new_error_record">Couldn\'t read the start record. Close and try again.</string>
@@ -390,6 +395,7 @@
     <string name="agents_todos_done">Done</string>
     <string name="agents_todo_reopen_failed">Couldn\'t reopen the to-do: %1$s</string>
     <string name="agents_todo_auto_done">Auto-completed</string>
+    <string name="agents_todo_concern">Concern</string>
     <string name="agents_todo_state_needs_you">Needs you</string>
     <string name="agents_todo_state_unread">To review</string>
     <string name="agents_todo_state_working">In progress</string>

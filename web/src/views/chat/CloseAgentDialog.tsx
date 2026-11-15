@@ -49,27 +49,27 @@ export function CloseAgentDialog({ open, onClose, onClosed, session, machineName
         onClose();
       } else {
         await api(`${sessionPath(session.machine_id, session.session_id)}/close`, { method: "POST" });
-        toast(t("chat-chatview.closed"), "ok");
+        toast(t("close-agent.closed"), "ok");
         onClose();
         if (onClosed) onClosed();
         else if (showsSession(parse(stripBase(location.pathname), location.search), session.machine_id, session.session_id)) navigate({ name: "home" });
       }
       await runCleanup(session.machine_id, wt, cleanup, session.host);
     } catch (e) {
-      toast(t("chat-chatview.close_failed", { error: errorText(e) }), "error");
+      toast(t("close-agent.close_failed", { error: errorText(e) }), "error");
     } finally {
       setPending(false);
     }
   };
   const row = live ?? session;
   const detail = shown.offer === "archive"
-    ? t("chat-sessiondialogs.archive_close_detail", { title: sessionTitle(row), machine: machineName })
-    : t(row.source_kind === "runtime" ? "chat-chatview.close_runtime_detail" : "chat-chatview.close_agent_detail", { machine: machineName, title: sessionTitle(row), where: [row.space_name, tabLabel(row)].filter(Boolean).join(" › ") || sessionTitle(row) });
+    ? t("close-agent.archive_close_detail", { title: sessionTitle(row), machine: machineName })
+    : t(row.source_kind === "runtime" ? "close-agent.close_runtime_detail" : "close-agent.close_agent_detail", { machine: machineName, title: sessionTitle(row), where: [row.space_name, tabLabel(row)].filter(Boolean).join(" › ") || sessionTitle(row) });
   return (
     <Dialog
       open={open}
       onClose={onClose}
-      title={t("chat-chatview.close_agent_title")}
+      title={t("close-agent.close_agent_title")}
       footer={
         <>
           <Button tone="quiet" onClick={onClose}>
@@ -77,7 +77,7 @@ export function CloseAgentDialog({ open, onClose, onClosed, session, machineName
           </Button>
           {shown.offer !== "busy" && (
             <Button tone="danger" busy={pending} disabled={!cleanupReady(wt, cleanup)} onClick={go}>
-              {shown.why ? t("close-agent.close_anyway") : shown.offer === "archive" ? t("chat-sessiondialogs.archive_close") : t("chat-chatview.close_agent")}
+              {shown.why ? t("close-agent.close_anyway") : shown.offer === "archive" ? t("close-agent.archive_close") : t("close-agent.close_agent")}
             </Button>
           )}
         </>

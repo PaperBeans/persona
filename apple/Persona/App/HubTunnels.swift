@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 /// A way through to a paired hub when its own addresses do not answer: its SSH tunnel
 /// (docs/operations/network.md「Connecting to hub through SSH」), its local SOCKS5 proxy ("Connecting to hub through a local SOCKS5

@@ -1,4 +1,5 @@
 """The private tag consumer never broadens signing credentials or public refs."""
+import io
 import json
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -229,6 +231,15 @@ class TagReleaseTests(unittest.TestCase):
             files[plat] = {"name": name, "size": len(data), "sha256": tag_release.hashlib.sha256(data).hexdigest(),
                            "binary_sha256": tag_release.hashlib.sha256(body).hexdigest()}
         (directory / "latest.json").write_text(json.dumps({"version": "0.2.1", "build": build, "files": files}))
+        name = "persona-link-windows-amd64.exe.gz"
+        body = ("\x00main.build\x00%d\x00the Windows connector" % binary_builds.get(name, build)).encode()
+        (directory / name).write_bytes(gzip.compress(body, mtime=0))
+        data = (directory / name).read_bytes()
+        index = json.loads((directory / "latest.json").read_text())
+        index["links"] = {"windows-amd64": {"name": name, "size": len(data),
+                          "sha256": tag_release.hashlib.sha256(data).hexdigest(),
+                          "binary_sha256": tag_release.hashlib.sha256(body).hexdigest()}}
+        (directory / "latest.json").write_text(json.dumps(index))
         return [{"path": str(path), "name": path.name} for path in sorted(directory.iterdir())]
 
     def test_release_manifest_must_be_its_binaries_build(self):
@@ -237,9 +248,13 @@ class TagReleaseTests(unittest.TestCase):
         here = "personad-%s.gz" % tag_release.host_platform()
         with self.assertRaisesRegex(tag_release.ConfigError, "says .*another build"):
             tag_release.check_release_manifest(self.release_receipt(binary_builds={here: 202611110745}))
-        other = next(item["name"] for item in self.release_receipt() if item["name"] not in (here, "latest.json"))
+        other = next(item["name"] for item in self.release_receipt() if item["name"] not in (here, "latest.json")
+                     and not item["name"].startswith("persona-link-"))
         with self.assertRaisesRegex(tag_release.ConfigError, "is not build 202611110749"):
             tag_release.check_release_manifest(self.release_receipt(binary_builds={other: 202611110745}))
+        with self.assertRaisesRegex(tag_release.ConfigError, "is not build 202611110749"):
+            tag_release.check_release_manifest(self.release_receipt(binary_builds={
+                "persona-link-windows-amd64.exe.gz": 202611110745}))
         assets = self.release_receipt()
         Path(next(item["path"] for item in assets if item["name"] == other)).write_bytes(b"replaced")
         with self.assertRaisesRegex(tag_release.ConfigError, "size or sha256"):
@@ -248,6 +263,40 @@ class TagReleaseTests(unittest.TestCase):
             tag_release.check_release_manifest([item for item in self.release_receipt() if item["name"] != other])
         # Another platform's receipt, without latest.json, is not a release manifest to check.
         tag_release.check_release_manifest([item for item in self.release_receipt() if item["name"] != "latest.json"])
+
+    def test_helpers_are_checked_without_a_build_number(self):
+        # persona-iphone-bridge (#8199): its own version, no build number; its bytes still have to be the receipt's.
+        import gzip
+        assets = self.release_receipt()
+        directory = Path(assets[0]["path"]).parent
+        body = b"\x7fELF\x00a helper with no build number"
+        name = "persona-iphone-bridge-linux-arm64.gz"
+        (directory / name).write_bytes(gzip.compress(body, mtime=0))
+        data = (directory / name).read_bytes()
+        index = json.loads((directory / "latest.json").read_text())
+        index["helpers"] = {"persona-iphone-bridge": {"linux-arm64": {
+            "name": name, "size": len(data), "sha256": tag_release.hashlib.sha256(data).hexdigest(),
+            "binary_sha256": tag_release.hashlib.sha256(body).hexdigest()}}}
+        (directory / "latest.json").write_text(json.dumps(index))
+        assets = [{"path": str(path), "name": path.name} for path in sorted(directory.iterdir())]
+        tag_release.check_release_manifest(assets)
+        with self.assertRaisesRegex(tag_release.ConfigError, "not in the receipt"):
+            tag_release.check_release_manifest([item for item in assets if item["name"] != name])
+        # A receipt from an upload command that doesn't carry the helper yet goes up without it, never refused.
+        self.assertEqual(tag_release.drop_missing_helpers(assets, self.root / "state"), assets)
+        without = [item for item in assets if item["name"] != name]
+        with patch.object(tag_release.sys, "stderr", new_callable=io.StringIO) as err:
+            kept = tag_release.drop_missing_helpers(without, self.root / "state")
+        self.assertIn(name, err.getvalue())
+        latest = next(item for item in kept if item["name"] == "latest.json")
+        self.assertEqual(Path(latest["path"]).parent, self.root / "state")
+        self.assertNotIn("helpers", json.loads(Path(latest["path"]).read_text()))
+        self.assertEqual(json.loads(Path(latest["path"]).read_text())["files"], index["files"])
+        tag_release.check_release_manifest(kept)
+        self.assertEqual(sorted(item["name"] for item in kept), sorted(item["name"] for item in without))
+        (directory / name).write_bytes(gzip.compress(b"another build", mtime=0))
+        with self.assertRaisesRegex(tag_release.ConfigError, "size or sha256"):
+            tag_release.check_release_manifest(assets)
 
     def test_build_number_stands_alone_wherever_the_stream_is_cut(self):
         import gzip
@@ -366,6 +415,41 @@ class TagReleaseTests(unittest.TestCase):
         state = json.loads((config["state_dir"] / "state.json").read_text())
         self.assertEqual(state["phase"], "publishing")
         self.assertNotIn("complete", state.values())
+
+    def windows_receipt(self, config):
+        directory = config["state_dir"]
+        directory.mkdir(parents=True, exist_ok=True)
+        archive = directory / "Persona-0.5.3-windows-amd64.zip"
+        with zipfile.ZipFile(archive, "w") as output:
+            for program in ("persona-link.exe", "personad.exe"):
+                output.writestr(archive.stem + "/" + program, b"unverified executable")
+        metadata = directory / "BUILD.json"
+        metadata.write_text(json.dumps({"version": "0.5.3", "build": 202611140822}))
+        assets = [{"path": str(path), "name": path.name} for path in (archive, metadata)]
+        Path(config["receipt"]).write_text(json.dumps({"commit": self.commit, "assets": assets}))
+        return assets
+
+    def test_unverified_windows_archive_is_never_uploaded(self):
+        config = self.config()
+        self.windows_receipt(config)
+        with patch.object(tag_release, "prepare_worktree", side_effect=lambda config, commit: config["worktree"].mkdir()), \
+                patch.object(tag_release, "upload") as upload:
+            with self.assertRaises(tag_release.ConfigError):
+                tag_release.publish_once(config, "v0.5.3", self.commit)
+            upload.assert_not_called()
+        state = json.loads((config["state_dir"] / "state.json").read_text())
+        self.assertEqual(state["phase"], "publishing")
+
+    def test_windows_verification_precedes_upload_and_receives_the_requested_version(self):
+        config = self.config()
+        assets = self.windows_receipt(config)
+        events = []
+        with patch.object(tag_release, "prepare_worktree", side_effect=lambda config, commit: config["worktree"].mkdir()), \
+                patch.object(tag_release, "check_windows_archives", side_effect=lambda *args: events.append("verified")) as verify, \
+                patch.object(tag_release, "upload", side_effect=lambda *args: events.append("uploaded")):
+            tag_release.publish_once(config, "v0.5.3", self.commit)
+        verify.assert_called_once_with(assets, "0.5.3")
+        self.assertEqual(events, ["verified", "uploaded"])
 
     def test_complete_same_tag_is_not_published_twice(self):
         config = self.config()

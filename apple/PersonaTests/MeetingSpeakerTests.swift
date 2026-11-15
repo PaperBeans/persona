@@ -366,3 +366,4 @@ import Testing
     }
 }
 #endif
+import PersonaWire

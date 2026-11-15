@@ -1,5 +1,25 @@
 # Lessons: assistant (headless Claude / Codex)
 
+- A terminal review covers its criteria, not every later scope (#6880). Explicitly replacing criteria on an open, previously accepted or cancelled task must invalidate its terminal supervision state; otherwise unfinished or unjudged follow-up work is silently suppressed. Keep review history and unchanged criteria's evidence. Metadata-only changes and ordinary follow-up conversation do not invalidate the review, and existing stale records still need a real supervisor review rather than an automatic migration.
+
+- Process lifetime is not model-health evidence (#8480). Keep an observed completed answer and its original timestamp independently of the live session row. Otherwise releasing an idle process drops the only recovery evidence while an older failed probe remains, reviving an already repaired authentication error. Capture completed-turn evidence without requiring a client poll, scope it to the model binding, retire superseded probes and let newer failures win. Failed persistence must remain retryable.
+- A retry that puts a failed send back for the next digest must first ask whether the next try can succeed (#8518).
+  The task leader path picked "resume and escalate" from the listed status (`StatusOffline`), but a stopped, read-only
+  agent is also listed `interrupted` when a restart cut it off, and the node refuses every send to it
+  (`agent_stopped`). Put back as an ordinary failure, that became a node round trip every 30 seconds that nobody above
+  the leader heard of. Classify by the node's refusal code, not by status or its words: a refusal that holds until
+  someone acts goes the escalation path once, with a growing retry; transient failures keep the digest retry.
+
+- A finite startup wait cannot make a one-shot MCP tool list reliable (#8470). Registering a task leader and resolving
+  its pane can both happen after discovery. Capture a change cursor before building the list, wake it from persisted
+  task-link changes, and refresh only when the tool definitions actually differ. Re-resolve identity on heartbeat,
+  invalidate cursors across manager restarts, back off on outages, and exclude discovery watches from idle accounting.
+  Leadership is the active `todo_agents.source`, set from the new plan even for `continues`; there is no to-do role
+  column to update. A sharing `node_receipt=identity_missing` instead concerns creation/incarnation receipts, not MCP
+  pane identity, and is not evidence of the latter's failure.
+
+- A GitHub number or a saved PR reference is not proof of this task's delivery (#8248). Confirm numbered references through issue metadata, then distinguish an explicit task-owned final closeout PR artifact from ordinary links, documents, quotes and earlier turns. Never promote unproven reference history after removing an issue-as-PR record: a related, unmerged PR can create the same acceptance deadlock without returning 404. A completed non-PR closeout must explicitly say merge/deploy are not applicable before clearing a contaminated delivery; genuine explicit PRs still pass the merge/deployment gate. Do not treat missing evidence or a masked permission 404 as proof of absence. Persist correction before publishing it, and keep item-level misses out of unrelated PR checks' outage cooldown.
+
 - A presence window is not an owner-turn guarantee (#6394). The two-minute `ownerPresentFor` hold and the
   five-minute `relayDecisionMax` cap let queued relayed/decision messages start new rounds behind the owner's back
   once the window expires, even while the owner is still waiting on their own round. Keep the ranked queue and the
@@ -15,6 +35,11 @@
   automatic naming but does not hide a chat, and `titleFixed` still gives it the item's subject. Apply default
   archiving in the common session snapshot, not only after starting or finishing: restored chats and follow-up
   instructions must stay hidden too. Preserve item-chain links and the main conversation.
+
+- An owner's bot handoff is not a third-party task update (#8351). Exclude it in the shared task-link policy, not by
+  asking the judge to pick no task. Apply that policy when admitting supervisor signals and following task
+  continuations too: a persisted association can outlive the router that created it. A link-only correction must
+  preserve ordinary human messages and the handoff's handling, suggestions and history.
 
 - Count repeated conditional instructions at the runtime-send boundary, not just in a prompt golden (#5665).
   Two adjacent decision blocks repeated the same handling rules, but the newer one also required recording the choice.
@@ -78,6 +103,8 @@
 
 - A to-do's `origin` is what makes it a task, for the hub and every app (#1852, #1909). The hub tests `origin != ""` in some 70 places (receipts, the done judgment, reopening on a new turn, retiring a finished task's Agents, retitling, outcome records, Today, MCP tool text), and web, iOS and Android pick a conversation's tasks by it. A to-do that only relates to a conversation, such as a question nobody answered, keeps that conversation in its own record, not in `origin`: an `isAskTodo` skip in `todosOf` hid it from the snapshot alone, while the apps showed it as a task whose Agent was starting and a hand-off got it closed by the judge. Before giving a new kind of to-do an origin, read every `t.Origin` use and the apps' task filters.
 
+- A remembered "kind" has to repeat in how the owner really works (#8259). "Start These Directly" keyed a kind by the task's exact folder, and the owner's work on one repository happens in a new worktree per branch, so the next task was always a new kind: ticked again and again, it never skipped a card. The kind is now the repository (its main checkout, from the node's `worktree.status`), resolved by the hub, not taken from the tool call; whatever the node cannot say leaves the exact folder, so a lookup failure can only ask more, never less. Before keying a preference on a path, check whether the next occurrence would have the same path. And key it on the path that actually runs: a task's workspace (an existing one picked on the card, or a checkout the engine makes) can be in another repository than the folder the plan was made from, so the repository is resolved again at admission and remembered from there, not from the plan's cwd or a status answer cached for it.
+
 - A read-modify-write of shared assistant state needs a lock and a read that can fail (#2192). `ensureToday` looked for the day's card and then appended one, and `assistant_feed` has no unique key, so concurrent opens of a chat each made a card. A plan's tasks are one blob that `movePlan` writes whole, so tasks whose starts failed together wrote back each other's old errors. `trustKinds` read `tasks.trust` through a read that answered an empty map on error and wrote that back over every kind remembered before. Serialize the writers of one key (`cardLocks`, `patchPlanTask`, `trustMu`), read again under the lock instead of writing back a copy read earlier, skip the write when the read failed, and answer from the rows that were saved (`saveWrites`), not from memory. Where DST starts at midnight, `time.Date(y, m, d, 0, 0, 0, 0, loc)` is 23:00 the day before: take the date from `now` and the day's start from `dayStart`.
 
 - A disconnected start caller does not prove the Agent was never created (#3251). A runtime bridge can finish `agent.start` after the hub loses its reply; directory and title are not unique operation identities. Recover an interrupted task from its persisted plan, to-do and agent links, and fail visibly when no durable start key or session identity can make replay safe. Do not invent a kept pane to enter start remedying. Read all candidate plans before recording failures: patching one task advances the whole plan's update time and can otherwise hide its siblings from a startup time window.
@@ -117,6 +144,7 @@
 - Schedule admission must be durable before dispatch (#1287). Save a separate candidate task list while holding the schedule lock, then publish it and broadcast only after success. A failed user edit or due-run marker leaves the prior tasks recoverable. Results and conversation ownership from work already sent are different: keep them in memory when persistence fails, preserve their history IDs so watchers can still update them, and retry the current lists on later saves. A late result still belongs only to its run; it must neither overwrite a newer run's status nor recreate a deleted task.
 
 - A list bounded by a retention window is not bounded (2026-11-12, #5549). `GET /api/v1/inbox` listed every item done within three days, so one Clean up all of a few thousand items made it about 10,000 items and 21 MB: every app downloaded it again on each `inbox` push, and Android's bounded reader (4 MiB, 100,000 structural tokens) turned it down. Cap the done side by count on a deterministic key (`done_at`, then id, the history's order: a just-filed item is always kept, and the same items give the same bytes for the merged validator), let the delta report what falls past the cut as `removed`, keep it reachable by id and through the history, and test with more items than the cap. Clients that took the window as complete without a page (iOS `listDoneSpan`, the web's former `LIST_DONE_MS`) under-show until they page it too.
+- A capped display list is not an idempotency record (2026-11-15, #8424). A connector's `replied` state report repeats until new messages come, and its dedupe looked for a `self_replied` chain entry at the report's `last`; the chain keeps the newest 50 entries for display, so a conversation's later steps at the same position could push that entry out and the same report counted as another owner reply: another entry, note and wake, and a reset follow-up, suggestion and draft. Keep the key a dedupe needs in a field of its own (`InboxItem.RepliedOf`), read the old marker only for rows stored before it, and test by evicting the marker before replaying the report.
 - A one-at-a-time background pass guarded by `TryLock` must not drop the calls made while it runs (2026-11-07, #64). `handInbox` returned when a pass was running, and every caller is an event: a group event that told an event's conversation of the other side's answer called it while a pass was past its delivery step, so the note waited for the next unrelated event (and `TestInboxSuggestionConfirmReply` failed most runs under `-race`). Mark the request, let the goroutine holding the lock run passes while the mark is set, and check the mark again after unlocking.
 
 - Keep task receipts ahead of completion judgment (#4893). Moving `autoFinishTask` before the receipt adds a model call to its latency and sends supervision signals before the receipt. The review hint names who follows up next, not a `pending_review` verdict: `superviseJudged` signals Persona for finished work (`sigReview`) or unfinished work (`sigIdle`); a task already in `needs_user` is waiting on the user. Read the latest to-do at receipt time and include the hint for an open supervised task unless `Supervision.state` is `needs_user`. That helper treats reopened accepted/cancelled tasks as ongoing. Test that the receipt precedes judgment, including zero criteria, and that ordinary, completed, failed and interrupted tasks do not get the hint.
@@ -126,6 +154,8 @@
 Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; index `docs/lessons/README.md`). Add lessons to relevant sections, or a new section if none fits.
 
 - Push delivery is per destination, not just per conversation (#1896). A shared `notify_user` mark lets one successful channel suppress another channel's failed delivery, while an unmarked extension push duplicates its turn-end mirror. Key delivery by channel, machine and session, record only confirmed sends, and apply the same check to main-chat mirrors, scheduled-task mirrors and Lark mirror retries. Test mixed successes and failures, including text split across several sends.
+
+- A copy sent beside a filtered push must follow the filter's answer, and the answer about it must count the copy (#8268). `notify_user` copied every notice to the Feishu bot and the channels after `notify.request`, without reading `held`, so low-distraction mode held nothing for an owner who reads Persona through the bot; and with that owner's phone pushes off the tool answered "the user was not alerted" for a notice whose Feishu copy had landed, and the conversation sent it again. Gate the copy on the hub's answer for the same push (not on the assistant's own reading of the switch: the hub levels by conversation and related key), and say in the tool's answer which copies went out, failed or are not confirmed yet.
 
 - A one-shot send that forgets its record on failure loses what it was for (2026-11-07, #7). The "Please verify" card is asked once, when a task's deploying turn ends; a failed or timed-out send used to drop the claim, and nothing asked the owner again. Keep the record (the ask, without a message id) and retry from a sweep, under a key per round (`uuid`) so a timeout that did land is not a second card, and only within the hour Feishu remembers a key (`acceptPostWindow`, as the nudge's `nudgeRetryWindow`); past it, fall back to the card-less path the briefing and board already show. Whatever a sweep or a load reads back may hold a claim saved mid-flight (no time) or a null entry: clean the map that was read, before it becomes the book, and never dereference an entry unchecked.
 
@@ -152,7 +182,7 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
 - Preserve encoded paths over HTTP bus (2026-11-05, #2019). Body-card keys contain /, item IDs often #. Clients encoded correctly, but forwarding `r.URL.Path` made assistant treat them as separators / fragments, actions all 404. Use `EscapedPath()`, test real hub→assistant relay; Service routes alone miss this layer.
 
 - AskUserQuestion unavailable in headless `claude -p`, tool disabled rather than disconnected hook. Phone questions need blocking MCP `ask_user` (`docs/assistant/assistant.md`). Model may call it alongside other tools; side-effecting tools require their own hub approval.
-- Claude Code ends a stdio MCP tool call silent for 30 minutes (`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`, Claude Code 2.1.3xx; remote servers 5 minutes), whatever the server's own deadline (#1498, 2026-11-08). A wait as long as that limit races it: the phone confirmation's 30 minutes lost 2 of 3 times, and the model got "sent no response or progress for 1800s; aborting" instead of the hub's "check before calling again". `notifications/progress` for the call's `_meta.progressToken` restarts the clock (`personad mcp` `keepAlive`); the per-server `timeout` / `MCP_TOOL_TIMEOUT` is a separate hard cap progress does not extend (default 1e8 ms). Also check `personad mcp`'s own `CallTimeout` when a wait grows: it was 40 minutes under ask_user's 2 hours. Tested end to end with a fake node socket: without progress the call ended at the idle limit, with it the 150-second answer came through.
+- Claude Code ends a stdio MCP tool call silent for 30 minutes (`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`, Claude Code 2.1.3xx; remote servers 5 minutes), whatever the server's own deadline (#1498, 2026-11-08). A wait as long as that limit races it: the phone confirmation's 30 minutes lost 2 of 3 times, and the model got "sent no response or progress for 1800s; aborting" instead of the hub's "check before calling again". `notifications/progress` for the call's `_meta.progressToken` restarts the clock (`personad mcp` `keepAlive`); the per-server `timeout` / `MCP_TOOL_TIMEOUT` is a separate hard cap progress does not extend (default 1e8 ms). Also check `personad mcp`'s own `CallTimeout` when a wait grows: it was 40 minutes under ask_user's 2 hours. Tested end to end with a fake node socket: without progress the call ended at the idle limit, with it the 150-second answer came through. Live wait kinds (#6253) must stay explicitly opt-in: the local socket historically had one response line, so only a token-bearing new client may receive interim `wait_kind` lines; no capability or an unknown enum keeps `Still waiting`, and the final response must exclude all later updates. Map the actual interaction kind at every shared ask entry point (a direct permission is not an `ask_user` question), and carry only the opaque call correlator across nested RPCs such as hub-owned settings and LCU elicitations: their fresh RPC contexts otherwise silently lose the outer wait state. Negotiate that correlation at every delegated hop, not just on the upstream connection: a target without `mcp_wait_v1` gets no id and yields `unknown` for that RPC, then restores the previous state. Presentation and semantics also differ—a native permission with four choices is still `approval`, while a genuine enum question is `answer`. Finally, namespace selection is an assistant-startup snapshot but wait opt-in is a live per-call hub-feature read; conflating them breaks upgrades and rollbacks in a running assistant.
 - Default-mode headless assistant even needs phone approval for Persona MCP notify_user / `schedule_followup`, stalling nighttime follow-ups / Monitor (tested 2026-10-30). Pass `--allowedTools mcp__persona`; hub asks separately for acting-on-user-behalf tools (`docs/assistant/assistant.md`).
 - A tray's Waiting status describes the parent turn, not whether its background work is idle (#3591, 2026-11-10). Reuse the header's activity data for a Working spinner and phase/progress or running counts; reserve the clock for no background activity. A lightweight `DockAgent` projection must carry that data too: otherwise a same-state workflow update leaves manual-Agent rows stale. Aggregate all linked task agents, deduplicate session references and compatibility workflow markers, and keep progress digits outside truncated phase text.
 - Background tasks / Monitor are Claude child processes; idle recycling or systemd personad restart killing cgroup kills them, leaving chat waiting forever. Node reads `stream-json` `system/background_tasks_changed`, does not recycle with active tasks, persists task list continuously, tells chat what was lost after restart.
@@ -383,6 +413,17 @@ its task decision together before sending it to a hook. A plan approval must sel
 mode can fall back to bypass permissions on the node. Count confirmation dispatch at `tellUser`, not interaction
 creation or app presentation; quiet tasks and supervisor routing also show cards without ringing the user.
 
+## The supervision fingerprint only sees the agent's words (#6027)
+
+`digestFingerprint` (`supervise_dedup.go`) folds a signal into the one told in the last 30 minutes when its agent's
+last words are unchanged, because a new turn or a periodic sweep is not news. Some signals carry news that is not in the
+agent's words: the owner's answer to a decision's round, a recheck or undecidable review of a new round, a start
+attempt's failure or start. They were dropped: the owner's "You decide" after "Tell me the background first" ended the
+card but never reached the supervisor, and a retry that failed with the first try's error was never told although
+`task_retry` promised it. Such kinds now hash their key too (`keyIsNews`), and a failed start's key names its attempt.
+A new signal kind whose key names one event, rather than moving with every turn, belongs in `keyIsNews`; test it with
+the agent's words unchanged, which is the case that hides the drop (the task's agent is usually stopped while it waits).
+
 ## A card the chat waits on must be in the chat (#4883)
 
 A Persona conversation's first Bash waited three and a half minutes for approval while its card was only inside the
@@ -395,6 +436,18 @@ the only line between tool calls was English to a Chinese owner. The node now al
 user's language in process text too.
 
 - Match Inbox PR/issue comments by full task URLs before the AI twin gate (#5578). A to-do may record its link only in `pr_url`, its title or its notes. Keep host, repository and PR/issue kind in the identity, leave ambiguous matches to the judge, and use a separate per-message signal cursor: the twin's `Of` cursor tracks handling, which does not run while it is off. Persist associations before forwarding them, and retain the existing supervision opt-in and exclusions. A URL-only Agent must still obey the age limit before its first automatic handling; creating its task association is not permission to process old backlog. On load, seed previously linked items' signal cursors from the stored snapshot so a restart is not paid-for news; count only batches observed after that snapshot.
+
+## One `todos` event per write, and nothing that copies every finished task on a timer (#5995)
+
+Every `{"type":"todos"}` makes every app read the whole `GET /api/v1/todos` (about 1 MB at ~500 to-dos), and one step of
+a task writes its to-do from several places milliseconds apart (the to-do, its report, its check, its supervision, its
+leader): one supervised task sent 16 events. The event now goes through `todosPushSoon` and waits `todosSettle` (100 ms)
+for the rest of the write, so each step sends one. Two traps: `askChanged` and the orphan pass broadcast `todos` on
+their own and kept a step at two until they used the same path, so never call `s.event` with `todos` directly; and tests
+that count events right after a write must wait with `todosTold` first. A pass that runs on a timer and looks only at
+open tasks takes them with `todosWhere`, not `todosOf(ctx, "*")`, which deep-copies every finished one too (27 MB per
+30 s at 4,000). The direction tree is not such a pass: a finished task decides whether a failed start in its row
+still counts, so it reads them all.
 
 ## Disable ToolSearch per server, not for the whole assistant process (#5838)
 
@@ -541,3 +594,37 @@ keyed to the event that told of the turn, not to the turn.
 ## Reconciling a lost start needs an exact id, not a shape match (2026-11-13, #6908)
 
 When `session.start` never answers, the hub lists the machine and adopts the session its start probably created. The first version guessed from shape: not in the pre-start snapshot, `StartedByPersona`, same launcher and cwd, a fresh sign of life, newest wins. Three rows are indistinguishable by shape: a session the owner started by hand also carries `StartedByPersona` (the app's start path stamps it), and two workspace-none tasks run in the same directory with no workspace claim between them, so each could adopt the other's session — and nothing excluded a session already linked to another open todo. A heuristic over mutable, shared signals (`UpdatedAt`, cwd) cannot identify one specific start. The fix carries the identity instead: the hub generates a v4 UUID and sends it on the existing `session.start` `session_id`, the node starts Claude with `--session-id <id>` on every Claude path (the sync terminal path had been passing an empty id), and adoption matches that exact id first with no other condition. The heuristic is only the fallback for a node too old to honor the field, and even then it skips every session in `todos.activeBySession` and fails closed when the todo book cannot load. Lesson: when an action's result can be lost, make the request carry a unique correlation token and match on that; keep a heuristic only as a version-compatibility fallback, and have it exclude resources already claimed elsewhere rather than merely rank candidates.
+
+## A hidden effective cadence overrides the interval the user configured (#7619)
+
+#3811 gave interval follow-ups in leader conversations a hidden 10-minute cadence while an open supervised todo had an active agent: `nextWithLeaderCadence` derived extra runs from `LastRun` while leaving the stored `At` / `EveryMinutes` on the original rule, and the run copy's `cadenceEvery` made `taskPrompt` print "每 10 分钟". The stored task still showed 30 minutes / 1 hour in `list_followups`, so nothing visible explained why a patrol the user asked for every 30 minutes fired every 10 minutes from its first run, and it became the main chat's biggest token sink. Lesson: a scheduler may have exactly one effective cadence, and it must be the one stored on the task and shown in every view and run prompt; an "accelerate while busy" rule that is invisible to both storage and UI is indistinguishable from a bug. If such a rule is ever wanted again, it must be an explicit, user-visible setting with its own stored field, not a second rule derived inside the scheduler. Keep interval advancement in one place (`runDue` advancing `At` by `EveryMinutes`); tests assert the prompt text states the configured interval even while supervised work is open.
+
+## A stopped leader's own To-do does not list its workers (#8400)
+
+Workers planned by a task leader have separate To-dos: their `todo_agents.source` is `worker` and `via` is the leader's
+To-do ID. A one-To-do scan can mistake a leader waiting on an active worker for a stopped group, or miss workers waiting
+on each other. Join the persisted links in both directions, require every current member to be observed, and reuse
+`supersededAgents` before checking inactivity. A background label is not evidence of recent activity; use timestamps and
+state the start-time approximation when a shell has no activity field. Include the resulting group key in semantic
+deduplication so identical last words do not erase a later, genuinely new period of inactivity. The short semantic
+fingerprint window cannot guarantee once per stopped group across restarts: keep only the latest group key until the
+task closes. A failed state read must remain retryable, not become a moot signal marked sent. Runtime children need the
+same starting and queued-input guards as their parent, even when their row says idle. Missing background activity times
+must not grant an indefinite exemption: the launching Agent's stop time bounds the age, including summary-only flags.
+
+## A signal told once needs somewhere to go when its reader never acts (#8043)
+
+A side conversation supervises the tasks it hands out, and "waits for review" is told once per review. A side conversation that had stopped, or whose turn ended without `task_review`, left its task awaiting review for good: the send-time fallback to the main conversation covers only a conversation that is gone, the orphan check leaves out a task waiting for review on purpose, and the stuck-queue remedy covers only the background supervisor. When a signal is told once to a reader that may never act, give it a bounded wait and a second home (`handOverUnreviewed`, `server/internal/assistant/side_handover.go`), and record the move where a restart finds it (here the ledger's `supervisor`), so it happens once.
+
+Telling the same review to another conversation is not a new signal to the deduplication window (`superviseDedupWindow`): its fingerprint is the task, the kind and the agent's last words, not who was told. A hand-over inside the window is dropped as "said the same" unless its fingerprint is forgotten first (`forgetSupervision`, as a gone background supervisor's queue does). Check "is this conversation in a turn" against the machine's list the way `backgroundThere` does: a manager that has just started has an empty list, which says nothing about a conversation being gone.
+
+## A lark-cli risk lookup can fail quietly, and then every read is a write (#8389)
+
+The node asks `lark-cli <command> --help` for each command's risk. When the hub config has no `lark.cli.bin`, the binary
+comes from an interactive login shell, and that can be a user's wrapper script that looks for the real lark-cli on `PATH`.
+The lookup runs with the node's own `PATH`, which may not contain the real lark-cli. The wrapper then exits without a
+`Risk:` line, the failure is not cached, and every shortcut, plain chat reads included, goes to the phone as an
+unknown-risk write. Stable read shortcuts are listed in `larkCLIKnownReads`, which is consulted only when the lookup gives
+nothing, so lark-cli's own answer still wins. When a card names a read as a write, check the lookup in the node's
+environment first, before changing the classifier. A literal `cd` before a command variable (`cd /tmp; L=/abs/lark-cli; $L …`)
+now resolves only absolute values: a relative one is looked up from the new directory.

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
@@ -170,30 +172,30 @@ func todoPriority(p string) (string, error) {
 
 // createPlainTodo makes a todo of the user's (no conversation, no plan of tasks) with plan's due date, reminder and
 // priority, and tells the apps.
-func (s *Service) createPlainTodo(ctx context.Context, title, notes string, plan db.TodoEdit) (Todo, error) {
-	return s.createTodoFrom(ctx, title, notes, "", plan)
+func (s *Service) createPlainTodo(ctx context.Context, title, notes string, plan db.TodoEdit, bindings ...*repository.CreateBindings) (Todo, error) {
+	return s.createTodoFrom(ctx, title, notes, "", plan, bindings...)
 }
 
 // createTodoFrom is createPlainTodo for a to-do made from an Inbox row (#6480): inboxItem is that row's id, "" for none.
-func (s *Service) createTodoFrom(ctx context.Context, title, notes, inboxItem string, plan db.TodoEdit) (Todo, error) {
+func (s *Service) createTodoFrom(ctx context.Context, title, notes, inboxItem string, plan db.TodoEdit, bindings ...*repository.CreateBindings) (Todo, error) {
 	now := time.Now().UTC()
 	row := db.TodoRow{ID: "todo_" + randomHex(8), Title: title, Notes: notes, CreatedAt: now, UpdatedAt: now, InboxItem: inboxItem}
 	plan.Title, plan.Notes, plan.Done = nil, nil, nil
 	plan.Apply(&row, now)
-	return s.insertTodo(ctx, row)
+	return s.insertTodo(ctx, row, bindings...)
 }
 
 // createDirectionTodo makes a piece of leader's direction (#5846): a todo with plan's due date, reminder, priority and
 // project, opened by the leader and supervised by it, with no agent and no done_when, as a Lark topic opens one
 // (feishu_thread_open.go). So the direction tree lists it under that direction (as not started until an agent works on
 // it, direction_tree.go), and task_plan's todo_id can run an agent on it later instead of opening a second todo.
-func (s *Service) createDirectionTodo(ctx context.Context, leader, title, notes string, plan db.TodoEdit) (Todo, error) {
+func (s *Service) createDirectionTodo(ctx context.Context, leader, title, notes string, plan db.TodoEdit, bindings ...*repository.CreateBindings) (Todo, error) {
 	now := time.Now().UTC()
 	row := db.TodoRow{ID: "todo_" + randomHex(8), Title: title, Notes: notes, CreatedAt: now, UpdatedAt: now,
 		Origin: leader, Quiet: s.quietTask(ctx, leader)}
 	plan.Title, plan.Notes, plan.Done = nil, nil, nil
 	plan.Apply(&row, now)
-	t, err := s.insertTodo(ctx, row)
+	t, err := s.insertTodo(ctx, row, bindings...)
 	if err != nil {
 		return Todo{}, err
 	}
@@ -360,8 +362,11 @@ func (s *Service) remind(ctx context.Context, id string, at, now time.Time) {
 	}
 	title, body := s.reminderText(ctx, todo, at, now)
 	set := s.settings(ctx)
+	// A reminder the owner set for themself: theirs to act on, so P0 even in the hub's low-distraction mode, keyed by
+	// to-do and due time (each due time rings once).
 	s.push(ctx, Notification{Subtitle: i18n.T(s.lang(ctx), "assistant-todos.remind_subtitle"), DeviceID: set.MachineID,
-		SessionID: set.Main, Title: title, Body: body})
+		SessionID: set.Main, Title: title, Body: body, Level: assistantwire.LevelP0,
+		RelatedKey: "todo-remind:" + id + "@" + at.UTC().Format(time.RFC3339)})
 	s.channelsPushed(set.MachineID, set.Main, title, body) // the Feishu bot and the channels with pushes on, as notify_user
 	s.logf("todo %s: reminded (due %s)", id, at.Format(time.RFC3339))
 }

@@ -124,7 +124,19 @@ func (n *Node) closePane(ctx context.Context, pane string) error {
 		return err
 	}
 	if id := n.sessionOfPane(pane); id != "" {
+		release := n.recovery.lock(id)
+		defer release()
+		unlock := n.typing.lock(id)
+		defer unlock()
 		return n.close(ctx, id)
+	}
+	if id := p.Tokens[personaTabToken]; validID(id) {
+		release := n.recovery.lock(id)
+		defer release()
+		if err := n.saveStopCause(ctx, id, proto.StopUser); err != nil {
+			return err
+		}
+		defer n.state.stopped(id, proto.StopUser)
 	}
 	org, ref, err := paneCap[host.Organizer](n, pane)
 	if err != nil {
@@ -228,6 +240,14 @@ func (n *Node) runAgentInPane(ctx context.Context, pane, launcher string) (*prot
 		return nil, err
 	}
 	p, err := n.listedPane(ctx, pane)
+	if err != nil {
+		return nil, err
+	}
+	// Serialize the whole start with any other work-agent start or abandoned-start cleanup for this pane. The first
+	// listedPane was only a cheap lookup; read it again after the wait before trusting the occupancy checks below.
+	unlock := n.typing.lock(workAgentPaneLockPrefix + p.PaneID)
+	defer unlock()
+	p, err = n.listedPane(ctx, pane)
 	if err != nil {
 		return nil, err
 	}

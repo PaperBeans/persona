@@ -99,7 +99,7 @@ Time Profiler (main thread, "Hide system libraries" off) or `sample <pid>` durin
 
 **Rule.** Keychain reads (`SecItemCopyMatching`) happen once per launch or change, off the main thread or before the first
 frame is needed, and the result is cached in memory. Values that change often (scroll positions, drafts, split frames,
-counters) never go into UserDefaults: use `StateCache` (`apple/Shared/StateCache.swift`). Heavy views read settings
+counters) never go into UserDefaults: use `StateCache` (`apple/Packages/PersonaWire/Sources/PersonaWire/StateCache.swift`). Heavy views read settings
 through `@StoredValue` (`apple/Persona/App/StoredValue.swift`), not `@AppStorage`. Never call `synchronize()`.
 
 **Why.** A keychain read is IPC to `securityd` and can take tens of milliseconds, more while the device is locking or
@@ -111,7 +111,7 @@ unlocking. Every UserDefaults write, for any key, makes every `@AppStorage` view
 - Fixed before: `AgentSync` wrote UserDefaults on every chat fetch (`docs/apple/ios-state.md`, "Current data flow").
 - `apple/Persona/App/AppModel.swift:277`: writes UserDefaults on every set of the current conversation, changed or not.
 
-**Do.** One reader, `Keychain` (`apple/Shared/Keychain.swift`), called from the code that loads credentials at launch or
+**Do.** One reader, `Keychain` (`apple/Packages/PersonaWire/Sources/PersonaWire/Keychain.swift`), called from the code that loads credentials at launch or
 pairing; keep the value in the model and pass it down. For new persisted state pick `StateCache` first.
 
 **Check.** The isolation lint counts `SecItemCopyMatching` on the main actor and the ratchet counts `synchronize()`; `AppStorageRatchetTests` keeps the list of files
@@ -396,6 +396,9 @@ they draw and never load whole transcripts.
 **Why.** iOS ends a process that grows past its memory limit without a crash report the user sees; extensions get much
 lower limits than the app. A cache with no bound is a leak with extra steps.
 
+The same holds on disk: a cache folder that grows with use has a byte budget (`AttachedVideos.budget`, `CacheBudget` for
+chat pictures, Feishu media and WebKit's disk cache, #8341), and a versioned folder removes all its older versions.
+
 **Do.** Give caches a cost; drop them on `UIApplication.didReceiveMemoryWarningNotification`; release retained stores on
 `onTabVisibility` disappear. Full-size decodes of user pictures run one at a time and let the original go as soon as it
 is downscaled (`MeetingPhotos` prepares a pick's photos in turn, and `MeetingPhotoPipeline.prepare` drops the original
@@ -436,6 +439,10 @@ Start from a reproduction, measure the base, change one thing, measure again.
    - Instruments: Time Profiler (attach to the simulator app's PID); Hangs (reports main-thread blocks over the
      threshold you set, 250 ms by default; set it lower to find 100 ms blocks); SwiftUI (Xcode 26: view body updates,
      their causes and long updates); App Launch; Allocations and Leaks. Animation Hitches needs a device.
+   - A trace attached after launch misses what the launch builds: for that, `xcrun xctrace record --device <udid>
+     --template 'Time Profiler' --launch -- <Persona.app> <launch arguments>`. Count the main thread's samples under the
+     views in question and when the page asked for starts, not only the longest frame: a launch onto a chat built the
+     Agents list under it in a frame of its own, ~150 ms that the longest frame (the chat's) never showed (#8467).
    - Signposts: `PerfTrace.event("Name", detail)` (`apple/Persona/App/PerfSignpost.swift`, subsystem `Persona.Performance`,
      Points of Interest) marks moments. For a span, use an `OSSignposter` interval in the same subsystem, compiled under
      `#if DEBUG || PERF_SIGNPOST`. The launch marks are `Snapshot restored`, `First frame (root appeared)` and `Connected`;
@@ -457,7 +464,8 @@ Start from a reproduction, measure the base, change one thing, measure again.
    numbers to a file (`-showAutoScroll YES` → `Documents/frames.json` from `FrameStats`; `-showPagePerf YES` →
    `frames-page-*.json`); a script launches the app, drives the mock hub (`/mock/churn`, `/mock/say?stream=1`, or
    `/mock/say?trace=markdown|prose&node=lead|trail` for a recorded model stream at the node's cadence), waits with a
-   timeout, reads the file and ends with a one-line verdict. Screen probes (`-probes YES`, `docs/apple/ios-state.md`,
+   timeout, reads the file and ends with a one-line verdict. Each frame's interval and the main thread's time before it
+   are in the report too (`deltas_ms`, `busies_ms`): line them up with the cues to see which frames of an animation grew. Screen probes (`-probes YES`, `docs/apple/ios-state.md`,
    "Probes and assertions") expose state for UI tests. The suites in `scripts/app/perf-test.sh` (`PerfAgentsTests`,
    `PerfAssistantTests`, `PerfComposerTests`, …) do this with `XCTHitchMetric` and report through
    `scripts/app/perf_report.py`.
@@ -475,7 +483,8 @@ Start from a reproduction, measure the base, change one thing, measure again.
    the app, and `waitForExistence` takes one per poll, all on the app's main thread: 55–70 ms each with the `assistant`
    suite's data, about three quarters of the main thread's busy time during `testTabSwitchAssistantAgents` (#5438). A
    test that taps and waits inside `measure` reports XCTest's hitches with the app's. For an animation, give the app a
-   cue (a Darwin notification handled by `FrameProbe`, as `com.persona.perf.shell.switch`) and let the test only sleep
+   cue (a Darwin notification handled by `FrameProbe`, as `com.persona.perf.shell.switch`, or
+   `com.persona.perf.sidebar.toggle` for the Sidebar layout's column, `PerfSidebarTests`) and let the test only sleep
    while frames are recorded (`testTabSwitchAssistantAgentsByCue`; the list glides run inside the app the same way, `FrameProbe.runGlide`). To see the split,
    `PERF_SAMPLE=<test>` samples the app during a test: XCTest's share is everything under `__XCTPerformOnMainRunLoop`.
 8. **In the field.** TestFlight builds report hangs, launch time and memory to Xcode Organizer. MetricKit is not wired yet
@@ -635,7 +644,7 @@ Grep counts are across `apple/` without tests; they are leads to read, not each 
 - `apple/Shared/Models.swift:2505`: `storageText` creates a `ByteCountFormatter` on each read; 35 callers, many in rows and in a progress label (`apple/Persona/Views/Chat/VideoFileView.swift:145`).
 - `apple/Persona/Views/Session/ReviewPage.swift:267-283`: rebuilds a file's diff rows, scans them for the widest line number and filters the drafts once per line, on every `body`.
 - Counts: 22 `DateFormatter()`, 13 `ISO8601DateFormatter()`.
-- Good: `ChatScratch`'s memoized lines (`apple/Persona/Views/Chat/ChatView.swift:880`), `TextMemo` (`apple/Shared/TextMemo.swift`), `InboxProjectionMemo`.
+- Good: `ChatScratch`'s memoized lines (`apple/Persona/Views/Chat/ChatView.swift:880`), `TextMemo` (`apple/Packages/PersonaWire/Sources/PersonaWire/TextMemo.swift`), `InboxProjectionMemo`.
 
 **P5 / P7: reads and high-frequency updates**
 

@@ -3,6 +3,7 @@ import CryptoKit
 import ImageIO
 import QuickLook
 import SwiftUI
+import PersonaWire
 #if canImport(UIKit)
 import UIKit
 #endif

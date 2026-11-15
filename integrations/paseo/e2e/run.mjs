@@ -1,20 +1,25 @@
 // End-to-end check of Paseo as a machine's engine (docs/integrations/paseo.md "Verification"): a real Paseo daemon (its own home and port,
 // a Claude Code provider whose model is the scripted one in model.mjs), a real `personad node --stdio` started by the
 // runtime SDK's harness (it plays the hub), and the bridge the node itself writes out and runs once the engine is set
-// to Paseo. It starts a session from the "phone", watches it, sends to it, answers a permission, a question and a
+// to Paseo. It starts a session from the "phone" (one with no first message too, whose first message keeps its id once
+// Claude Code has written the transcript, #8358), watches it, sends to it, answers a permission, a question and a
 // plan, switches the mode, interrupts, renames, switches the model, rewinds, has a card answered in Paseo's own app, lives through Paseo
 // restarting, closes the session (archived in Paseo, it stays listed under its id) and sends to it again, archives it
-// once more across a restart of the bridge and continues it, and checks agents started or archived in Paseo itself, then
+// once more across a restart of the bridge (still listed and read while the bridge is away) and continues it, and checks
+// agents started or archived in Paseo itself (an archived one read from its transcript and taken back by a message), then
 // Paseo's workspaces: one with no agents in the catalog, a worktree Paseo makes from it, a session in it, renaming the
 // worktree and its project, deleting the worktree (refused while its Agent is at work), and a new Agent's own worktree
-// Paseo makes, removed through Paseo once the Agent is closed (#6295, #6297).
+// Paseo makes, removed through Paseo once the Agent is closed (#6295, #6297); and a start under the id the hub named,
+// with Paseo's creation keyed by its idempotency key (#8130).
 //
 //   PERSONAD=<personad binary, built after go generate> CLAUDE_BIN=<a Claude Code binary> [PASEO_BIN=paseo] \
 //     node integrations/paseo/e2e/run.mjs
 //
-// Nothing outside a fresh temp directory is touched: the daemon's home, the node's HOME (which is also the HOME Claude
+// Nothing outside a fresh temp directory is written: the daemon's home, the node's HOME (which is also the HOME Claude
 // Code runs with, so its transcripts and its own config live there) and the workspace. The daemon listens on a free
-// port; the bridge reaches it only through its home's paseo.pid.
+// port; the bridge reaches it only through its home's paseo.pid. The node still reads the config directory each of the
+// machine's other running claudes names (CLAUDE_CONFIG_DIR), as every node does (server/internal/node/claudedirs.go),
+// so its list can hold their transcripts too: the checks pick out this run's own sessions, by id, folder or engine.
 
 import { execFileSync, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -118,6 +123,10 @@ const tryCall = (method, params, ms) => node.call(method, params, ms).catch((e) 
   console.log(`  (${method}: ${e.message})`)
   return undefined
 })
+// Whether the bridge is connected to the node: node.info has Paseo's version only from the bridge's hello.
+const bridgeUp = async () => Boolean(((await node.call('node.info', {})).engines ?? []).find((x) => x.id === 'paseo')?.version)
+// A row the bridge lists now: one the node keeps listing while the bridge is away offers no rename (#8131).
+const bridgeRow = (s) => s?.capabilities?.rename === true
 const launchers = (await node.call('launchers.list', {})).launchers ?? []
 const launcher = launchers.find((l) => l.name === 'e2e-claude')
 check('the new-session form offers Paseo\'s provider, as Claude Code', launcher?.agent_type === 'claude' || launcher?.agent === 'claude', JSON.stringify(launcher))
@@ -144,6 +153,49 @@ check('nothing of the test is left in Paseo, nor in the list', probes.length ===
   !projectsAfter.some((p) => /persona-check-/.test(p.projectRootPath ?? '')) && !node.sessions().some((s) => /persona-check-/.test(s.cwd ?? '')),
   `${probes.length} probes, ${projectsBefore} → ${projectsAfter.length} projects`)
 look.stop()
+
+// ---- what a start in Paseo can run (#8140) ----
+
+// The list for the Paseo host is its providers alone. A launcher Paseo does not have (Claude Code's built-in provider
+// is off here) starts on its provider of the same kind, an effort its model does not offer goes down to one it does,
+// and the answer says both; the start is in a folder of its own, so the checks on `work` below are not disturbed.
+const hostList = await tryCall('launchers.list', { host: 'paseo' })
+check("the list for Paseo's host is its providers alone", hostList?.host_runtime === true && (hostList.launchers ?? []).length > 0 &&
+  hostList.launchers.every((l) => l.source === 'paseo') && hostList.launchers.some((l) => l.name === 'e2e-claude'), JSON.stringify(hostList).slice(0, 300))
+const kindDir = join(root, 'kind')
+mkdirSync(kindDir, { recursive: true })
+// A model of the provider and an effort it lacks with a lower one it has, when there is one (Paseo lowers it), else the
+// default model at xhigh (as asked when it has xhigh).
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+let pick
+for (const m of models.models ?? []) {
+  const has = m.efforts ?? []
+  const effort = EFFORTS.find((e, i) => !has.includes(e) && has.some((x) => EFFORTS.indexOf(x) < i))
+  if (effort) {
+    pick = { model: m.id, effort, offered: has }
+    break
+  }
+}
+pick ??= { effort: 'xhigh', offered: (models.models ?? []).find((m) => m.default)?.efforts ?? [] }
+const stood = await tryCall('session.start', { cwd: kindDir, prompt: '', launcher: 'claude', agent_type: 'claude', model: pick.model, effort: pick.effort }, 60_000)
+const lowered = pick.offered.includes(pick.effort) ? !stood?.instead?.effort
+  : stood?.instead?.effort === pick.effort && (!stood?.session?.effort || pick.offered.includes(stood.session.effort))
+check('a launcher Paseo lacks runs on its provider of the same kind, an effort its model lacks lowered, both said',
+  stood?.session?.launcher === 'e2e-claude' && stood?.instead?.launcher === 'claude' && lowered,
+  JSON.stringify({ pick, instead: stood?.instead, launcher: stood?.session?.launcher, model: stood?.session?.model, effort: stood?.session?.effort }))
+// Its first message, sent before Claude Code has written a transcript: the session reads the bridge's items until its
+// row names the transcript, then the transcript, where the message's line still carries its client_msg_id (#8358).
+const kindSid = stood?.session?.session_id
+await tryCall('session.watch', { session_id: kindSid, since_seq: 0 })
+await tryCall('session.send', { session_id: kindSid, text: 'First E2E_HELLO', client_msg_id: 'cm-e2e-first' }, 60_000)
+const kindItems = async () => (await tryCall('session.items', { session_id: kindSid, limit: 50 }))?.items ?? []
+const firstLine = async () => (await kindItems()).find((i) => i.role === 'user' && i.kind === 'text' && i.text === 'First E2E_HELLO')
+const kindRead = async () => Boolean((await tryCall('session.info', { session_id: kindSid }))?.transcript_path)
+await until('its first message answered, in its transcript', async () => (await kindRead()) &&
+  (await kindItems()).some((i) => i.text === 'Hello from the mock model, step by step.') && Boolean(await firstLine()), 60_000).catch(() => {})
+check('a first message sent before its transcript was written: its line there carries its client_msg_id', Boolean(kindSid) &&
+  (await kindRead()) && (await firstLine())?.client_msg_id === 'cm-e2e-first', JSON.stringify(await firstLine()))
+if (kindSid) await tryCall('session.close', { session_id: kindSid })
 
 // ---- a session from the phone ----
 
@@ -281,8 +333,12 @@ const underTranscript = (from = closedAt) => node.events.slice(from)
 const agentNow = async () => (await paseo.request('fetch_agent_request', { agentId })).agent
 await tryCall('session.close', { session_id: sid })
 await until('not running', () => listed()?.status === 'offline', 30_000).catch(() => {})
-check('closed from the phone: archived in Paseo, and still listed under the same id, not running',
-  claudeSid && (await agentNow())?.archivedAt && listed()?.status === 'offline' && listed()?.title === 'E2E 改名', JSON.stringify(listed()))
+// Paseo changes nothing of an archived agent: its row offers no rewind, mode, effort or model (#8133).
+const archivedCaps = listed()?.capabilities
+check('closed from the phone: archived in Paseo, and still listed under the same id, not running, offering nothing Paseo refuses for it',
+  claudeSid && (await agentNow())?.archivedAt && listed()?.status === 'offline' && listed()?.title === 'E2E 改名' &&
+  archivedCaps?.rewind === false && archivedCaps?.rewind_code === false && archivedCaps?.modes === false && archivedCaps?.model === false,
+  JSON.stringify(listed()))
 check('its conversation still reads under that id', await hasText('Hello from the mock model, step by step.') &&
   (await texts()).some((i) => i.client_msg_id === 'cm-e2e-7'))
 await tryCall('session.send', { session_id: sid, text: 'Back again E2E_HELLO', client_msg_id: 'cm-e2e-8' }, 60_000)
@@ -299,12 +355,20 @@ await until('done again', () => ['done', 'idle'].includes(listed()?.status), 60_
 await tryCall('session.close', { session_id: sid })
 await until('not running again', () => listed()?.status === 'offline', 30_000).catch(() => {})
 await node.call('engine.use', { engine: 'herdr' })
-await until('the bridge gone', () => !listed(), 30_000).catch(() => {})
+await until('the bridge gone', async () => !(await bridgeUp()), 30_000).catch(() => {})
+// The node pushes the list without the bridge a moment after it is gone: the checks read that one, not the last the
+// bridge was in (#8358).
+await until('listed as away', () => listed()?.status === 'offline' && !bridgeRow(listed()), 30_000).catch(() => {})
+// Meanwhile it is still the session, under its id, not running, read from its transcript; a message waits for Paseo (#8131).
+const awayErr = await node.call('session.send', { session_id: sid, text: 'While away E2E_HELLO', client_msg_id: 'cm-e2e-away' }).catch((e) => e)
+check('the bridge gone: still listed under its id, not running, its conversation read; a message refused, nothing sent',
+  listed()?.status === 'offline' && !bridgeRow(listed()) && (await hasText('Back again E2E_HELLO')) && awayErr?.code === 'runtime_away',
+  `${JSON.stringify(listed()?.capabilities)} ${awayErr?.code} ${awayErr?.message}`)
 const restartedAt = node.events.length
 await node.call('engine.use', { engine: 'paseo' })
-await until('listed again', () => listed()?.status === 'offline', 60_000).catch(() => {})
-check('the bridge restarted: the archived session is listed under its id again', listed()?.status === 'offline' && !underTranscript(restartedAt),
-  JSON.stringify(listed()))
+await until('listed again', () => listed()?.status === 'offline' && bridgeRow(listed()), 60_000).catch(() => {})
+check('the bridge restarted: the archived session is listed under its id again', listed()?.status === 'offline' && bridgeRow(listed()) &&
+  !underTranscript(restartedAt), JSON.stringify(listed()))
 const resumed = await tryCall('session.start', { cwd: work, resume_session_id: sid }, 60_000)
 await until('back from the archive', async () => !(await agentNow())?.archivedAt, 30_000).catch(() => {})
 check('resumed (session.start): the same agent, under the same id', resumed?.session?.session_id === sid &&
@@ -317,6 +381,8 @@ await until('idle for the branch', () => ['done', 'idle'].includes(listed()?.sta
 check('the session can be branched', listed()?.can_fork === true, JSON.stringify(listed()?.can_fork))
 const branch = (await tryCall('session.fork', { session_id: sid, at_item_id: '' }, 30_000))?.session_id
 await until('the branch listed', () => node.sessions().some((s) => s.session_id === branch), 30_000).catch(() => {})
+// Open on the phone while Paseo takes it over: its live text comes from the bridge from then on (#8130).
+await tryCall('session.watch', { session_id: branch, since_seq: 0 })
 await tryCall('session.send', { session_id: branch, text: 'Branch E2E_HELLO', client_msg_id: 'cm-e2e-fork' }, 90_000)
 await until('the branch answered', async () => (await texts(branch)).some((i) => i.client_msg_id === 'cm-e2e-fork') &&
   (await texts(branch)).filter((i) => i.text === 'Hello from the mock model, step by step.').length >= 2, 90_000).catch(() => {})
@@ -325,6 +391,8 @@ const branchSaid = (await texts(branch)).filter((i) => i.role === 'user' && i.ki
 check('the branch goes on in Paseo under its own id, the original as it was', Boolean(branch) && branch !== sid && branchRow?.source_kind === 'runtime' &&
   branchSaid.some(([t, cm]) => t === 'Branch E2E_HELLO' && cm === 'cm-e2e-fork') && branchSaid.some(([t]) => t === 'Back again E2E_HELLO') &&
   !(await texts()).some((i) => i.text === 'Branch E2E_HELLO') && Boolean(listed()), `${branch} ${branchRow?.source_kind} ${JSON.stringify(branchSaid)}`)
+check('the branch, open on the phone while Paseo took it over: its live text', node.deltas(branch).length > 0 &&
+  node.deltas(branch).some((t) => t.includes('mock model')), JSON.stringify(node.deltas(branch).slice(0, 4)))
 
 // ---- agents started in Paseo itself, never driven from the phone ----
 
@@ -354,6 +422,17 @@ check('archived in Paseo\'s own app: its transcript is a session not running (�
 await until('the deleted one off the list', () => !row(gone, true), 30_000).catch(() => {})
 check('deleted in Paseo: gone from the list, and its transcript is not listed', gone && !node.sessions().some((s) => s.session_id === gone.claude),
   JSON.stringify(node.sessions().filter((s) => s.session_id === gone?.claude).map((s) => [s.source_kind, s.status])))
+// The archived one is the node's then, though Paseo listed it under that id before: its conversation reads from the
+// transcript, and a message has Paseo take that same agent back, with no node restart in between (#8131).
+const answers = async (a) => (await texts(a?.claude)).filter((i) => i.text === 'Hello from the mock model, step by step.').length
+const readArchived = await answers(kept)
+await tryCall('session.send', { session_id: kept?.claude, text: 'Back E2E_HELLO', client_msg_id: 'cm-e2e-kept' }, 90_000)
+await until('the archived agent answered', async () => (await answers(kept)) >= 2, 90_000).catch(() => {})
+const onKept = ((await paseo.request('fetch_agents_request', { filter: { includeArchived: true }, page: { limit: 200 } })).entries ?? [])
+  .filter((e) => e.agent?.persistence?.sessionId === kept?.claude)
+check('…its transcript reads, and a message has Paseo take that agent back under the same id, no second one', readArchived === 1 &&
+  (await answers(kept)) >= 2 && onKept.length === 1 && onKept[0].agent.id === kept?.id && !onKept[0].agent.archivedAt && row(kept, true),
+  `${readArchived} ${JSON.stringify(onKept.map((e) => [e.agent.id === kept?.id, e.agent.provider, e.agent.archivedAt]))}`)
 
 // A rewind of an agent Paseo started, listed under its Claude session id: Claude Code forks the session, and Persona's
 // session stays the same (the bridge keeps the id on the agent's label first).
@@ -498,19 +577,59 @@ check("Paseo's own fork of an agent started there: the same session in Persona, 
   !node.sessions().some((s) => s.session_id === seenFork.persistence.sessionId), JSON.stringify(seenNow?.labels))
 const unseen = await twoTurns()
 await node.call('engine.use', { engine: 'herdr' })
-await until('the bridge gone', () => !row(unseen, true), 30_000).catch(() => {})
+await until('the bridge gone', async () => !(await bridgeUp()), 30_000).catch(() => {})
 const unseenFork = await paseoRewind(unseen)
 await node.call('engine.use', { engine: 'paseo' })
-await until('listed again', () => row(unseen, true), 60_000).catch(() => {})
-check('a fork the bridge did not see: listed under the first session of its line, never under the fork', Boolean(unseenFork) && row(unseen, true) &&
-  !node.sessions().some((s) => s.session_id === unseenFork.persistence.sessionId) && row(seen, true),
+await until('listed again', () => bridgeRow(row(unseen, true)), 60_000).catch(() => {})
+// A row names the forks it went by once the node has found their transcripts, which can be a list after the row is
+// back (#8358).
+await until('their forks named', () => row(unseen, true)?.aliases?.[0] === unseenFork?.persistence?.sessionId &&
+  row(seen, true)?.aliases?.[0] === seenFork?.persistence?.sessionId, 60_000).catch(() => {})
+check('a fork the bridge did not see: listed under the first session of its line, never under the fork', Boolean(unseenFork) && bridgeRow(row(unseen, true)) &&
+  !node.sessions().some((s) => s.session_id === unseenFork.persistence.sessionId) && row(seen, true) &&
+  // Both rows name the fork their conversation is in now, for the manager's archive (aliases, #8131).
+  row(unseen, true)?.aliases?.[0] === unseenFork.persistence.sessionId && row(seen, true)?.aliases?.[0] === seenFork?.persistence?.sessionId,
   `${unseen?.claude} → ${unseenFork?.persistence?.sessionId}: ${node.sessions().filter((s) => s.cwd === work).map((s) => s.session_id).join(',')}`)
 
-// ---- the engine changed: the bridge stops ----
+// ---- starts the hub can find again (#8130) ----
+
+// The session id the hub names for a start is the session's in Paseo: the manager finds a start whose answer it lost
+// by it, and its row says Persona started it. In a folder of its own: the checks above count the rows in theirs.
+const namedDir = join(root, 'named')
+mkdirSync(namedDir)
+const namedId = randomUUID()
+const namedStart = await tryCall('session.start', { cwd: namedDir, prompt: 'Please E2E_HELLO', launcher: 'e2e-claude', session_id: namedId }, 60_000)
+const namedRow = () => node.sessions().find((s) => s.session_id === namedId)
+await until('listed under the named id', () => namedRow(), 30_000).catch(() => {})
+const namedAgent = ((await paseo.request('fetch_agents_request', { page: { limit: 200 } })).entries ?? []).find((e) => e.agent?.labels?.['persona.session'] === namedId)?.agent
+check("a start under the id the hub named: the session's id in Paseo, its row says Persona started it", namedStart?.session?.session_id === namedId &&
+  namedRow()?.started_by_persona === true && Boolean(namedAgent), JSON.stringify({ start: namedStart?.session?.session_id, row: namedRow()?.started_by_persona, agent: namedAgent?.id }))
+// What the bridge counts on when a connection drops during a start: Paseo's creation keeps a request by its idempotency
+// key, so asking again with the same request makes no second agent, and another request under that key is refused.
+const keyed = { agentId: randomUUID(), idempotencyKey: `e2e-${randomUUID()}`, config: { provider: 'e2e-claude', cwd: namedDir }, labels: { 'e2e.keyed': '1' } }
+const askKeyed = (req) => paseo.request('agent.create.request', req, { timeoutMs: 60_000 }).catch((e) => ({ error: e.message }))
+const keyedFirst = await askKeyed(keyed)
+const keyedAgain = await askKeyed(keyed)
+const keyedOther = await askKeyed({ ...keyed, agentId: randomUUID() })
+const keyedMade = ((await paseo.request('fetch_agents_request', { page: { limit: 200 } })).entries ?? []).filter((e) => e.agent?.labels?.['e2e.keyed'])
+check("Paseo's creation asked again with the same idempotency key: the same agent, no second; another request under the key refused",
+  keyedFirst?.agent?.id === keyed.agentId && keyedAgain?.agent?.id === keyed.agentId && keyedMade.length === 1 && !keyedOther?.agent &&
+  /key_conflict/.test(keyedOther?.error ?? ''), JSON.stringify({ first: keyedFirst?.agent?.id, again: keyedAgain?.agent?.id, other: keyedOther?.error, made: keyedMade.length }))
+await paseo.request('delete_agent_request', { agentId: keyed.agentId }).catch(() => {})
+
+// ---- the engine changed: the bridge stops; Paseo's Claude Code sessions stay, not running (#8131) ----
 
 await node.call('engine.use', { engine: 'herdr' })
-await until('the bridge gone', () => !node.sessions().some((s) => s.source_kind === 'runtime' && s.space_kind === 'paseo'), 30_000).catch(() => {})
-check('another engine: Paseo\'s sessions leave with the bridge', !node.sessions().some((s) => s.space_kind === 'paseo'))
+await until('the bridge gone', async () => !(await bridgeUp()), 30_000).catch(() => {})
+// As above: the list the node pushes once the bridge is gone, not the last one the bridge was in (#8358).
+const paseoRows = () => node.sessions().filter((s) => s.space_kind === 'paseo')
+await until('its rows away', () => paseoRows().length > 0 && paseoRows().every((s) => s.status === 'offline' && !bridgeRow(s)) &&
+  Boolean(row(kept, true)), 30_000).catch(() => {})
+const leftBehind = paseoRows()
+const sentAway = await node.call('session.send', { session_id: kept?.claude, text: 'Elsewhere E2E_HELLO', client_msg_id: 'cm-e2e-elsewhere' }).catch((e) => e)
+check("another engine: Paseo's Claude Code sessions stay, not running, read from their transcripts; a message says Paseo is away",
+  leftBehind.length > 0 && leftBehind.every((s) => s.status === 'offline' && !bridgeRow(s)) && Boolean(row(kept, true)) && (await answers(kept)) >= 2 &&
+  sentAway?.code === 'runtime_away', `${leftBehind.map((s) => `${s.session_id}:${s.status}`).join(',')} ${sentAway?.code}`)
 check('the model was only the scripted one', model.requests.length > 0, `${model.requests.length} requests`)
 
 const failed = summary()

@@ -40,6 +40,10 @@ func (n *Node) paneFor(ctx context.Context, id string) (string, error) {
 }
 
 func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, opts sendOpts) error {
+	if exitCommand(text) {
+		release := n.recovery.lock(id)
+		defer release()
+	}
 	// Two sends at once (quick taps, two phones) would both find the box empty and type into each other, or the second
 	// would see the first still in the box and be refused as a draft: one at a time, in the order they came.
 	unlock, err := n.inputTurn(ctx, id)
@@ -237,6 +241,11 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 		return r
 	}
 	if err == nil {
+		if (kind == "codex" || kind == traexAgent) && host.ParsePane(pane).Kind != host.Botmux {
+			if err := n.codexSubmitted(ctx, pane); err != nil {
+				return err
+			}
+		}
 		n.typing.typed(pane, text)
 		n.lostFirst.clear(id) // the message the start could not deliver went in now, or another one
 		if kind == "claude" {

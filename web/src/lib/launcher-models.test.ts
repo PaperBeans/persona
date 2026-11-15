@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  customModel, defaultDetail, defaultLabel, effortChoices, fitEffort, followedBinding, forgetCustomModel, launcherAgent, launcherModels, modelDetail, modelName, modelRows,
-  pickerLauncher, machineLaunchers, oneOff, providerModels, startPicks, takesTypedModel, tierLeftOut, typedModelOffered, withoutCustom, type AgentModel, type LauncherModels,
+  customModel, defaultDetail, defaultLabel, effortChoices, effortRule, fitEffort, followedBinding, forgetCustomModel, launcherAgent, launcherModels, listedModes, modelDetail,
+  modelName, modelRows, pickerLauncher, machineLaunchers, providerModels, startPicks, takesEffort, takesTypedModel, tierLeftOut, typedModelOffered, withoutCustom,
+  type AgentModel, type LauncherModels,
 } from "./launcher-models";
 
 const all = ["low", "medium", "high", "xhigh", "max"];
@@ -175,6 +176,25 @@ describe("思考强度", () => {
     expect(fitEffort("high", effortChoices(claude, "gateway/glm-5.3"))).toBe("high");
     expect(fitEffort("", all)).toBe("");
   });
+
+  // A launcher that lists its own permission modes (#8261, Paseo's other providers) takes the efforts its model lists and
+  // nothing else: no list, or a model it doesn't list, offers none rather than Claude Code's five.
+  it("a launcher that lists its permission modes takes only the efforts its model lists", () => {
+    const grok = { name: "grok", agent: "paseo", source: "paseo", permission_modes: ["default", "bypassPermissions"] };
+    const list: LauncherModels = { agent: "paseo", models: [{ id: "grok-4", name: "Grok 4", default: true, efforts: ["low", "high"] }, { id: "grok-mini", name: "Grok mini" }] };
+    expect([effortRule("claude"), effortRule("agy"), effortRule("paseo", grok), effortRule("codex", grok), effortRule("paseo"), effortRule("codex")])
+      .toEqual(["any", "any", "listed", "listed", "none", "none"]);
+    expect([listedModes(grok), listedModes({ permission_modes: [] }), listedModes(undefined)]).toEqual([["default", "bypassPermissions"], undefined, undefined]);
+    expect([takesEffort("paseo", grok), takesEffort("paseo"), takesEffort("claude")]).toEqual([true, false, true]);
+    expect(effortChoices(list, "", {}, "listed")).toEqual(["low", "high"]);
+    expect(effortChoices(list, "grok-mini", {}, "listed")).toEqual([]);
+    expect(effortChoices(list, "typed-id", {}, "listed")).toEqual([]);
+    expect(effortChoices(null, "", {}, "listed")).toEqual([]);
+    expect(effortChoices(list, "", {}, "none")).toEqual([]);
+    expect(startPicks({ agent: "paseo", list, model: "", effort: "high", launcher: grok })).toEqual({ effort: "high" });
+    expect(startPicks({ agent: "paseo", list, model: "", effort: "max", launcher: grok })).toEqual({});
+    expect(startPicks({ agent: "paseo", list, model: "", effort: "high" }), "an older computer's launcher: no effort, as before").toEqual({});
+  });
 });
 
 describe("启动时发什么", () => {
@@ -201,7 +221,6 @@ describe("启动器的默认值 (#2455)", () => {
     expect(defaultLabel({ provider: "kcc", model: "" })).toBe("默认：kcc");
     expect(defaultLabel(null, "claude")).toBe("默认：claude");
     expect(defaultLabel(undefined)).toBe("默认");
-    expect(oneOff()).toBe("仅这一次");
   });
   it("titles the default's provider by its display name (#5029)", () => {
     const names = [{ name: "relay-example-com", display_name: "我的中转 站" }, { name: "kcc" }];
@@ -239,7 +258,8 @@ describe("手动输入的模型 ID（#1644）", () => {
 
   it("Claude Code and Codex take one, unless the launcher fixes its own --model", () => {
     expect(takesTypedModel("claude") && takesTypedModel("codex")).toBe(true);
-    expect(takesTypedModel("traex") || takesTypedModel("agy")).toBe(false);
+    expect(takesTypedModel("pi") && takesTypedModel("cursor") && takesTypedModel("agy")).toBe(true);
+    expect(takesTypedModel("traex") || takesTypedModel("dsh")).toBe(false);
     expect(typedModelOffered("claude", claude)).toBe(true);
     expect(typedModelOffered("claude", undefined)).toBe(true); // the list couldn't be read
     expect(typedModelOffered("claude", { ...claude, locked: "固定了模型" })).toBe(false);

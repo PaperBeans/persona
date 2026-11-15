@@ -206,6 +206,7 @@ var rpcFailureKeys = map[string]string{
 	"rewind_mismatch":    "rpc-errors.rewind_mismatch",
 	"rewind_nothing":     "rpc-errors.rewind_nothing",
 	"rewind_failed":      "rpc-errors.rewind_failed",
+	proto.CodeNotLoaded:  "rpc-errors.not_loaded", // a read that would start an agent its engine let go (Paseo, #8132)
 	"skill_unavailable":  "rpc-errors.skill_unavailable",
 	"timeout":            "rpc-errors.timeout",
 	"node_unreachable":   "rpc-errors.unreachable",
@@ -230,7 +231,10 @@ var rpcFailureKeys = map[string]string{
 	"assistant_service_tier_unsupported": "rpc-errors.assistant_service_tier_unsupported",
 	"assistant_service_tier_refused":     "rpc-errors.assistant_service_tier_refused",
 	"readonly_unsupported":               "rpc-errors.readonly_unsupported",
-	"assistant_in_doubt":                 "rpc-errors.in_doubt",
+	// a start whose engine runs only its own launchers and has none of the launcher's kind (#8140); the engine's own
+	// words, naming the launcher, stay in detail
+	proto.CodeLauncherKindMissing: "rpc-errors.launcher_kind_missing",
+	"assistant_in_doubt":          "rpc-errors.in_doubt",
 	// queued messages sent now (#6088)
 	"nothing_queued":        "rpc-errors.nothing_queued",
 	"send_now_unsupported":  "rpc-errors.send_now_unsupported",
@@ -268,7 +272,9 @@ var rpcFailureKeys = map[string]string{
 	proto.CodeModesOnComputer: "rpc-errors.modes_on_computer",
 	proto.CodeModesNotRunning: "rpc-errors.modes_not_running",
 	// a message to a stopped agent: read-only, its terminal page's Resume brings it back (node stopped.go, #4754)
-	"agent_stopped": "rpc-errors.agent_stopped",
+	"agent_stopped":      "rpc-errors.agent_stopped",
+	"resume_not_allowed": "rpc-errors.resume_not_allowed",
+	"stop_not_saved":     "rpc-errors.stop_not_saved",
 	// a start in a directory whose name can't be typed into a terminal (node/hostorca_launch.go)
 	proto.CodeDirectoryUntypable: "rpc-errors.directory_untypable",
 	// a running Agent's switch to another launcher, picked and carried out by the next message (node/launcher_switch.go)
@@ -364,6 +370,9 @@ func OnMachine(err error, name string) error {
 	data := map[string]any{}
 	if len(re.Data) > 0 && json.Unmarshal(re.Data, &data) != nil {
 		return err
+	}
+	if data == nil {
+		data = map[string]any{}
 	}
 	if n, _ := data["machine_name"].(string); n != "" {
 		return err

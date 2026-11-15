@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -22,7 +23,7 @@ const (
 	admissionQueueMaxAttempts = 10
 	// admissionQueueMaxWait bounds the total time a task may spend queued before its start fails for good.
 	admissionQueueMaxWait = 30 * time.Minute
-	// admissionQueueLookback bounds the plan scan on a database-backed hub: a queued task is at most maxWait old.
+	// admissionQueueLookback bounds the recent-update side of the database scan; a serialized queue survives downtime.
 	admissionQueueLookback = time.Hour
 )
 
@@ -39,11 +40,15 @@ type TaskQueue struct {
 	QueuedAt time.Time `json:"queued_at"`
 	// NextAt is when the queue loop may start the task again.
 	NextAt time.Time `json:"next_at"`
+	// Retry: the start this record holds was itself a retry (the owner's Retry of a failed start, or task_retry), so
+	// its first failure was told already. The queue loop starts it again as the same kind of start; a first start
+	// that waited here and then fails is told as a first start's failure would be.
+	Retry bool `json:"retry,omitempty"`
 }
 
 // queueAdmissionRefusal parks a task the admission gate refused instead of failing it. The claim held by the start
 // is released in runPlanTaskStart's defer, so a queued task holds no machine or direction slot while it waits.
-func (s *Service) queueAdmissionRefusal(planID string, i int, t PlanTask, err error) {
+func (s *Service) queueAdmissionRefusal(planID string, i int, t PlanTask, err error, retry bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), taskFailTimeout)
 	defer cancel()
 	var denied *admissionDeniedError
@@ -57,10 +62,11 @@ func (s *Service) queueAdmissionRefusal(planID string, i int, t PlanTask, err er
 		key = denied.reason.Key
 	}
 	if perr := s.patchPlanTask(ctx, planID, i, func(pt *PlanTask) {
-		q := &TaskQueue{Reason: reason, Key: key, Attempt: 1, QueuedAt: now, NextAt: now.Add(admissionQueueInterval)}
+		q := &TaskQueue{Reason: reason, Key: key, Attempt: 1, QueuedAt: now, NextAt: now.Add(admissionQueueInterval), Retry: retry}
 		if pt.Queue != nil { // refused again after a queued retry: keep the first QueuedAt and count on
 			q.QueuedAt = pt.Queue.QueuedAt
 			q.Attempt = pt.Queue.Attempt + 1
+			q.Retry = pt.Queue.Retry
 		}
 		pt.Queue = q
 		pt.Error = ""
@@ -142,50 +148,67 @@ func (s *Service) retryQueuedStart(ctx context.Context, p *TaskPlan, i int, pt P
 		return
 	}
 	s.logf("task %s: admission queue: retrying start on %s", pt.TodoID, pt.Machine)
-	s.startPlanTaskAsync(p.ID, p.Conversation, i, pt, true, nil)
+	// The same kind of start the gate refused: a first start that now fails past the gate is told as one (#8092).
+	s.startPlanTaskAsync(p.ID, p.Conversation, i, pt, pt.Queue != nil && pt.Queue.Retry, nil)
 }
 
-// clearAdmissionQueue drops a task's queue marker once a retry has started its agent for good.
+// clearAdmissionQueue drops a task's queue marker once a retry got past the gate: its agent started for good, or its
+// start failed for another reason.
 func (s *Service) clearAdmissionQueue(ctx context.Context, planID string, i int, todoID string) {
 	if err := s.patchPlanTask(ctx, planID, i, func(t *PlanTask) {
 		if t.Queue != nil {
 			t.Queue = nil
 		}
 	}); err != nil {
-		s.logf("task %s: admission queue: clear after start: %v", todoID, err)
+		s.logf("task %s: admission queue: clear past the gate: %v", todoID, err)
 	}
 }
 
 // failQueuedStart ends a task that waited past the queue bounds: the todo fails and the ordinary failure receipt goes
-// out once, naming the last gate reason so the owner knows what was full.
+// out once, naming the last gate reason so the owner knows what was full. A task_retry that waited here is given up
+// as the other failed starts give it up: its start reads failed, so a later task_retry reopens the task in a new tab.
 func (s *Service) failQueuedStart(ctx context.Context, p *TaskPlan, i int, pt PlanTask, q *TaskQueue) {
 	reason := i18n.T(s.lang(ctx), "assistant-tasks.admission_queue_timeout", i18n.Args{
 		"limit": admissionQueueMaxWait.Round(time.Minute).String(), "reason": q.Reason})
+	remedied := pt.Start != nil && pt.Start.State == remedying
 	if err := s.failTodo(ctx, pt.TodoID, reason); err != nil {
 		s.logf("task %s: admission queue: fail: %v", pt.TodoID, err)
 	}
 	if err := s.patchPlanTask(ctx, p.ID, i, func(t *PlanTask) {
 		t.Queue = nil
 		t.Error = reason
+		if remedied && t.Start != nil {
+			t.Start.State, t.Start.Pane, t.Start.At = remedyFailed, "", time.Now().UTC()
+		}
 	}); err != nil {
 		s.logf("plan %s: task %d's queue timeout: %v", p.ID, i, err)
 	}
 	s.tasks.mu.Lock()
 	s.tasks.receipted[pt.TodoID] = time.Now()
 	s.tasks.mu.Unlock()
+	if remedied {
+		s.remedyStep(ctx, p.Conversation, pt.TodoID, startRemedyBody{Action: "gave_up", By: "hub", Attempt: pt.Start.Attempt, Reason: reason})
+	}
 	if _, err := s.appendFeed(ctx, p.Conversation, feedReceipt, pt.TodoID, receiptBody{Title: pt.Title, State: "failed",
 		Summary: i18n.T(s.lang(ctx), "assistant-tasks.failed_start", i18n.Args{"reason": reason})}); err != nil {
 		s.logf("task %s: admission queue: receipt: %v", pt.TodoID, err)
 	}
 	if todo, ok := s.todoNow(pt.TodoID); ok {
-		s.taskNotice(ctx, todo, pt.Machine, "failed", "", reason)
+		s.taskStartFailed(ctx, todo, pt.Machine, pt.Start, reason) // a retry's timeout is news even with the same reason (#6027)
 		s.taskReport(todo, reportFailed, pt.Machine, [2]string{}, reason, nil)
 	}
 	s.logf("task %s: admission queue: gave up after %d attempt(s)", pt.TodoID, q.Attempt)
 }
 
-// queueCandidatePlans returns recently made started plans, from the database or the in-memory store, without scanning
-// historical plans.
+// taskQueueStore lists recently updated or durably queued plans whose task blobs may hold admission queue records.
+type taskQueueStore interface {
+	TaskPlansQueued(ctx context.Context, since time.Time) ([]db.TaskPlanRow, error)
+}
+
+var _ taskQueueStore = (*db.DB)(nil)
+
+// queueCandidatePlans returns recently updated or durably queued started plans, from the database or the in-memory
+// store, without returning unrelated historical plans. Queue writes refresh updated_at; created_at may be older.
 func (s *Service) queueCandidatePlans(ctx context.Context) []*TaskPlan {
 	st := s.store()
 	if st == nil {
@@ -199,13 +222,11 @@ func (s *Service) queueCandidatePlans(ctx context.Context) []*TaskPlan {
 		s.tasks.mu.Unlock()
 		return out
 	}
-	// The Store interface itself lists plans per conversation; the since-listing lives on the database behind the same
-	// narrow interface ruleEvidence already uses (rule_suggest.go).
-	ev, ok := st.(ruleEvidenceStore)
+	ev, ok := st.(taskQueueStore)
 	if !ok {
 		return nil
 	}
-	rows, err := ev.TaskPlansMadeSince(ctx, time.Now().Add(-admissionQueueLookback))
+	rows, err := ev.TaskPlansQueued(ctx, time.Now().Add(-admissionQueueLookback))
 	if err != nil {
 		s.logf("admission queue: list plans: %v", err)
 		return nil

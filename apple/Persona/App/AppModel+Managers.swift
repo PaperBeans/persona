@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 // Several managers on one hub (docs/assistant/managers.md "Clients"), as the app reads them outside Settings › Assistants:
 // each group's roster, read when its hub says hello and on each of its `managers` pushes. Pages that group a list read

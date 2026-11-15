@@ -390,6 +390,7 @@ func (u *extensionUpgrades) candidateIn(p *extension.Extension, l i18n.Lang) (up
 			}
 		}
 	}
+	saved := u.h.extensions.reg.SavedConfig(p) // kept by the upgrade: the address an added config: entry names (#8570)
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	s := u.settings
@@ -412,7 +413,7 @@ func (u *extensionUpgrades) candidateIn(p *extension.Extension, l i18n.Lang) (up
 	case up.RenameFrom != "":
 		up.State, up.Detail = upgradeNeedsConsent, i18n.T(l, "extension-identity.confirmation", i18n.Args{"from": up.RenameFrom, "to": up.RenameTo})
 	case extension.MorePermissions(p, m) || extension.Digest(m) != granted(p):
-		up.State, up.AddedPermissions = upgradeNeedsConsent, extension.AddedIn(l, p.Manifest, m)
+		up.State, up.AddedPermissions = upgradeNeedsConsent, extension.AddedWith(l, p.Manifest, m, saved)
 	case bundleConsent:
 		up.State, up.Detail = upgradeNeedsConsent, i18n.T(l, "hub-extension_autoupgrade.bundle_confirmation")
 	case s.autoOff(id):

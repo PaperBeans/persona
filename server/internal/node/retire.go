@@ -45,8 +45,10 @@ var (
 // user's "Archive and close"); done false (and no error) when it was not running.
 func (n *Node) retire(ctx context.Context, id string, closeTerminal bool) (done bool, err error) {
 	if !closeTerminal {
-		return n.stop(ctx, id, true)
+		return n.stopWithCause(ctx, id, true, proto.StopUnknown)
 	}
+	release := n.recovery.lock(id)
+	defer release()
 	unlock, _, ok, err := n.stoppable(id, true)
 	if err != nil || !ok {
 		return false, err
@@ -61,12 +63,31 @@ func (n *Node) retire(ctx context.Context, id string, closeTerminal bool) (done 
 // stop quits session id's agent and keeps its pane (retire: only one that is still); stopped false (and no error)
 // when it was not running.
 func (n *Node) stop(ctx context.Context, id string, retire bool) (stopped bool, err error) {
+	return n.stopWithCause(ctx, id, retire, proto.StopUser)
+}
+
+func (n *Node) stopWithCause(ctx context.Context, id string, retire bool, cause proto.StopCause) (stopped bool, err error) {
+	release := n.recovery.lock(id)
+	defer release()
+	if cause == proto.StopUser {
+		if err := n.saveStopCause(ctx, id, proto.StopUser); err != nil {
+			return false, err
+		}
+		defer n.state.stopped(id, cause)
+	}
 	unlock, a, ok, err := n.stoppable(id, retire)
 	if err != nil || !ok {
 		return false, err
 	}
 	defer unlock()
-	return n.quitAgent(ctx, id, a.PaneID)
+	if cause != proto.StopUser {
+		n.state.stopped(id, proto.StopUnknown) // An unconfirmed/failed automatic stop never grants recovery.
+	}
+	stopped, err = n.quitAgent(ctx, id, a.PaneID)
+	if stopped && err == nil {
+		n.state.stopped(id, cause)
+	}
+	return stopped, err
 }
 
 // stoppable checks that session id's agent may be stopped now (retire: only a still one) and holds its typing lock
@@ -128,27 +149,59 @@ func (n *Node) stoppable(id string, retire bool) (unlock func(), a host.Agent, o
 // closes the pane: the shell the agent ran in stays. An agent that does not quit is refused as not_stopped.
 func (n *Node) quitAgent(ctx context.Context, id, pane string) (bool, error) {
 	for range stopRounds {
-		_ = n.sendKeys(ctx, pane, "ctrl+c")
-		time.Sleep(200 * time.Millisecond)
-		if err := n.sendKeys(ctx, pane, "ctrl+c"); err != nil {
+		stopped, err := n.quitAgentRound(ctx, id, pane, nil, false)
+		if err != nil {
 			return false, err
 		}
-		for deadline := time.Now().Add(stopWait); ; {
-			if err := ctx.Err(); err != nil {
-				return false, err
-			}
-			if err := n.refreshHosts(ctx); err == nil {
-				if a, ok := n.agent(id); !ok || a.PaneID != pane {
-					return true, nil
-				}
-			}
-			if time.Now().After(deadline) {
-				break
-			}
-			time.Sleep(250 * time.Millisecond)
+		if stopped {
+			return true, nil
 		}
 	}
 	return false, refusal(notStopped, "the agent did not quit", nil)
+}
+
+// quitAgentRound is one quitAgent attempt: two Ctrl+C presses, then a bounded wait for the session to leave pane.
+// With only and requireFresh, an abandoned start uses the same primitive but every verification refresh must succeed
+// for that pane's host; the ordinary quitAgent keeps its tolerant multi-round refresh behavior.
+func (n *Node) quitAgentRound(ctx context.Context, id, pane string, only host.Host, requireFresh bool) (bool, error) {
+	if requireFresh {
+		// Do not let a successful discovery followed by an outage turn the first Ctrl+C pair into an unverified interrupt,
+		// and do not send it to a shell after the agent has already left.
+		if err := n.refreshHosts(ctx, only); err != nil {
+			return false, err
+		}
+		if a, ok := n.agent(id); !ok || a.PaneID != pane {
+			return true, nil
+		}
+	}
+	_ = n.sendKeys(ctx, pane, "ctrl+c")
+	time.Sleep(200 * time.Millisecond)
+	if err := n.sendKeys(ctx, pane, "ctrl+c"); err != nil {
+		return false, err
+	}
+	for deadline := time.Now().Add(stopWait); ; {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		var err error
+		if only != nil {
+			err = n.refreshHosts(ctx, only)
+		} else {
+			err = n.refreshHosts(ctx)
+		}
+		if err == nil {
+			if a, ok := n.agent(id); !ok || a.PaneID != pane {
+				return true, nil
+			}
+		} else if requireFresh {
+			return false, err
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return false, nil
 }
 
 // resumed is what a Claude session that is not running is resumed with: the directory, launcher and model it was
@@ -241,6 +294,16 @@ func (n *Node) resumeOtherWith(ctx context.Context, id string, st sessionState, 
 			return err // Refuse conflicting permissions before creating a workspace, tab or attachment.
 		}
 		argv = codexExecutionArgs(argv, modelExecution{Model: st.Model})
+		if home, thread, ok := n.codexThread(id); ok && codexArchived(home, n.codexPath(id)) {
+			// Restore through Codex itself before its TUI can block the first prompt on an archive confirmation.
+			restored, err := n.codexArchive(ctx, id, home, thread, false)
+			if err != nil {
+				return err
+			}
+			if restored.Native != nativeArchiveDone {
+				return refusal(nativeArchiveFailed, "Codex cannot restore its archived session: "+restored.Reason, nil)
+			}
+		}
 	}
 	paths, err := n.saveImages(images)
 	if err != nil {

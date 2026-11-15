@@ -18,6 +18,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/acceptloop"
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/nodeclient"
 	"github.com/nwverse/persona/server/internal/prompts"
@@ -158,6 +159,8 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 	}
 
 	var resp any
+	var waitID string
+	var wait *pendingMCPWait
 	switch req.Kind {
 	case "hook":
 		out, err := n.handleHook(ctx, req)
@@ -185,19 +188,19 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 			resp = inventory
 		}
 	case "preflight": // personad node doctor's path-access check, read with this node's permissions (preflight.go)
-		resp = n.preflight(ctx)
+		resp = n.preflightIn(ctx, i18n.Resolve(req.Locale).Or(i18n.Default))
 	case "ask": // personad ask (scriptcli.go)
 		resp = n.handleAsk(ctx, req)
 	case "notify": // personad notify (scriptcli.go)
 		resp = n.handleNotify(ctx, req)
 	case "launcher.env": // personad launch <name>
 		resp = n.launcherEnvFor(req)
+	case "launcher.pi": // pi's Persona extension: the providers pi can use here (pi_providers.go)
+		resp = n.piProvidersFor(ctx, req)
 	case "secret.env": // personad launch --ticket (secretenv.go)
 		resp = n.secretEnvFor(req)
 	case "mcp.tools":
-		var res struct {
-			Tools []proto.Tool `json:"tools"`
-		}
+		var res map[string]any
 		// The assistant's only when the node says so too (clicall.go mcpSession).
 		session, assistant := n.mcpSession(c, req)
 		if session == "" && !assistant {
@@ -205,9 +208,14 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 		}
 		// A guest's (its MCP server says so, or this node knows it is one): the hub gives it only its own tools.
 		guest := req.Guest || n.guestOf(session) != nil
-		if err := n.peer.Call(ctx, "mcp.tools", map[string]any{"assistant": assistant, "session_id": session, "guest": guest}, &res); err != nil {
+		params := mcpToolsParams(req.Input, session, assistant, guest)
+		if err := n.peer.Call(ctx, "mcp.tools", params, &res); err != nil {
 			resp = map[string]any{"tools": []proto.Tool{}, "error": err.Error()}
 		} else {
+			if res == nil {
+				res = map[string]any{}
+			}
+			res["session"] = session
 			resp = res
 		}
 	case "cli.call": // personad tg: the node, not the caller, says whether it is the assistant (clicall.go)
@@ -220,13 +228,24 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 			resp = n.saveMailAttachment(ctx, req.Args, sid, assistant, req.Guest || n.guestOf(sid) != nil)
 			break
 		}
-		if err := n.peer.Call(ctx, "mcp.call", map[string]any{"name": req.Name, "args": req.Args, "session_id": sid,
-			"assistant": assistant, "guest": req.Guest || n.guestOf(sid) != nil}, &res); err != nil {
+		params := map[string]any{"name": req.Name, "args": req.Args, "session_id": sid,
+			"assistant": assistant, "guest": req.Guest || n.guestOf(sid) != nil}
+		if req.WaitUpdates {
+			waitID, wait = n.beginMCPWait(c)
+			if wait != nil {
+				params["wait_updates"], params["call_id"] = true, waitID
+			}
+		}
+		if err := n.peer.Call(ctx, "mcp.call", params, &res); err != nil {
 			res = proto.TextResult("Persona hub error: "+err.Error(), true)
 		}
 		resp = res
 	default:
 		resp = map[string]any{"error": "unknown kind"}
+	}
+	if wait != nil {
+		n.finishMCPWait(waitID, wait, resp)
+		return
 	}
 	b, _ := json.Marshal(resp)
 	_, _ = c.Write(append(b, '\n'))
@@ -364,6 +383,12 @@ func (n *Node) handleHook(ctx context.Context, req sockRequest) (any, error) {
 	n.rememberTranscript(in)
 	if !req.Resume { // the event was reported on the first attempt
 		n.notifyHookEvent(in, stopSig, false)
+	}
+	// Every Bash call of every agent waits on this hook. Only the assistant's go to larkGate, and another agent's
+	// needs only the cua-driver check below: one that does not name cua-driver goes on here, before the card's
+	// title is looked up (a re-read of the transcript's tail) and its claude is watched (#2474).
+	if in.HookEventName == "PreToolUse" && in.ToolName == "Bash" && !bashNamesCua(in.ToolInput) && !n.isAssistantSession(in.SessionID) {
+		return nil, nil
 	}
 
 	ix := proto.Interaction{
@@ -707,6 +732,15 @@ var agentWatch = 2 * time.Second
 var agentGone = procGone
 
 // asksPhone: the hook events that may wait on the phone (the cases of handleHook that call ask).
+// bashNamesCua is whether a Bash call's input may hold a cua-driver call for cuaBashVerdict to check: its command
+// names cua-driver (cuaCalls finds none otherwise). An input not read as a command is not checked there either.
+func bashNamesCua(input json.RawMessage) bool {
+	var c struct {
+		Command string `json:"command"`
+	}
+	return json.Unmarshal(input, &c) == nil && strings.Contains(c.Command, "cua-driver")
+}
+
 func asksPhone(in hookInput) bool {
 	switch in.HookEventName {
 	case "Elicitation":

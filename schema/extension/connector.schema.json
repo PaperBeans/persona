@@ -467,8 +467,19 @@
       "type": "object",
       "properties": {
         "text": {"type": "string"},
+        "images": {"type": "array", "items": {"$ref": "#/$defs/ConnectorToolImage"}, "description": "tools.call only (actions.do and catalog.call ignore it): pictures for the model after the text, on a hub whose initialize lists the capability tool_images (an older hub ignores them; the text must stand on its own). At most 16, each a whole JPEG, PNG or WebP of at most 1 MiB and 2000 pixels a side, together at most 4 MiB and 8 million pixels; the hub leaves out any over a limit and says so after the text."},
         "message_ref": {"type": "string", "description": "actions.do only (tools.call ignores it): the id, on the other side, of the message the write made, when the service gave one (a comment's id, a mail's Message-ID, a chat message's id). The hub trims it and keeps it as the sent-as-user ledger row's message_ref; one longer than 200 characters is dropped (the row has none), not cut. Leave it out when there is none."}
       }
+    },
+    "ConnectorToolImage": {
+      "description": "One picture of a tools.call answer (ConnectorCallResult.images).",
+      "type": "object",
+      "properties": {
+        "mime": {"type": "string", "description": "image/jpeg, image/png or image/webp: a hint, the hub reads the type from the bytes."},
+        "data": {"type": "string", "description": "The bytes, base64 (standard, with padding)."},
+        "caption": {"type": "string", "description": "One short line for the model and for people, shown before the picture (a time in a video, a picture's place in a post); the hub keeps the first 200 characters of its first line."}
+      },
+      "required": ["data"]
     },
     "ConnectorAction": {
       "description": "A write as the card names it: visible says who will see it.",

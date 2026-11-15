@@ -229,7 +229,7 @@ describe("message context interaction paths", () => {
       await settle();
     };
     // the reply bar is always in the page, hidden by CSS on touch screens; the touch row comes only there
-    const copies = () => host.querySelectorAll('button[aria-label="拷贝回复"]').length;
+    const copies = () => host.querySelectorAll('button[aria-label="复制回复"]').length;
     await render(false);
     expect(host.querySelectorAll('button[aria-label="复制消息"]')).toHaveLength(1);
     expect(copies()).toBe(0);
@@ -270,7 +270,7 @@ describe("message context interaction paths", () => {
     act(() => host.querySelector<HTMLButtonElement>('button[aria-label="更多"]')!.click());
     const menu = document.querySelector('[role="menu"]')!;
     expect([...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim())).toEqual([
-      "转发", "作为上下文", "回退到这里",
+      "转发", "作为上下文", "回退到这里", "存为常用提示词…",
     ]);
     expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(1);
   });

@@ -130,12 +130,17 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 		}
 		seen[s.SessionID] = true
 		s.MachineID, s.State, s.PendingInteractions = "", "", 0 // the hub's to fill
-		s.StartedByPersona, s.Assistant = false, false
+		// Started from Persona is the runtime's word for a session the hub started through it (Paseo keeps it on the
+		// agent's label, #8130): it outlives a node restart in the middle of a start, which the manager then adopts
+		// rather than starting a second agent (assistant/session_adopt.go). A daemon's sessions are another machine's
+		// or another user's: never. The node's own record of a start says so too (decorateState).
+		s.StartedByPersona = s.StartedByPersona && !daemon
+		s.Assistant = false
 		// Of the hierarchy (docs/protocol/protocol.md "Session hierarchy") the runtime says when the session began
 		// (started_at); what it folds under and the rollup are the manager's, the parent a blocked child asks for the
 		// node's (below), from what a daemon's own node named (daemons.go) when the row names no other.
 		asking := s.AskingParentSessionID()
-		s.SetFold("", "", nil)
+		s.SetFold("", "", "", nil)
 		s.SetAskingParentSessionID("")
 		if s.Agent == "" {
 			s.Agent = agent
@@ -160,14 +165,35 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 		// Rename and rewind (#6294) are for the runtime's own top-level sessions, not a sub-Agent's row: a "<session>@<id>"
 		// is an agent inside a session, not one the runtime lists, and a session another one started folds under it.
 		sub := s.IsSubagent || strings.Contains(s.SessionID, subagentSep)
-		// A row may narrow the runtime's rewind for its own session, and only a row may offer to restore the files with it
-		// (what the agent behind it can do: Paseo's providers differ).
-		rewind := caps.Rewind && !sub && (s.Capabilities == nil || s.Capabilities.Rewind == nil || *s.Capabilities.Rewind)
-		rewindCode := rewind && s.Capabilities != nil && s.Capabilities.RewindCode != nil && *s.Capabilities.RewindCode
+		// A row may narrow what the runtime declared for its own session: its rewind, its modes and its model (what the
+		// agent behind it can do: Paseo's providers differ, and Paseo changes nothing of an agent it keeps archived,
+		// #8133). Only a row may offer to restore the files with a rewind. A row that says nothing keeps what the runtime
+		// declared (an older bridge's rows).
+		var own proto.SessionCapabilities
+		if s.Capabilities != nil {
+			own = *s.Capabilities
+		}
+		keeps := func(c *bool) bool { return c == nil || *c }
+		rewind := caps.Rewind && !sub && keeps(own.Rewind)
+		rewindCode := rewind && own.RewindCode != nil && *own.RewindCode
+		// The efforts a row lists are what session.modes takes for it (Session.Efforts): none where the node refuses
+		// session.modes (runtimes_calls.go) or the row takes its modes away.
+		modes := caps.Modes && keeps(own.Modes) && !strings.Contains(s.SessionID, subagentSep)
+		if !modes {
+			s.Efforts = nil
+		}
+		// The permission modes it lists for an agent that is not Claude Code (#8261) go with its modes too, and only where
+		// the apps' Claude Code chips do not stand (claudeModes): the apps switch between those instead.
+		claudeModes := modes && runtimeModes(caps.Modes, rt, s)
+		permissionModes := own.PermissionModes
+		if !modes || claudeModes {
+			permissionModes = 0
+		}
 		s.Capabilities = &proto.SessionCapabilities{Read: true, Send: caps.Send, Interrupt: caps.Interrupt, Approve: true,
-			Close: &caps.Close, Rename: proto.CanModes(caps.Rename && !sub), Modes: proto.CanModes(runtimeModes(caps.Modes, rt, s)),
+			Close: &caps.Close, Rename: proto.CanModes(caps.Rename && !sub), Modes: proto.CanModes(claudeModes),
 			Rewind: proto.CanModes(rewind), RewindCode: proto.CanModes(rewindCode),
-			Model: proto.CanModes(caps.Modes && caps.Model && !strings.Contains(s.SessionID, subagentSep))}
+			Model:           proto.CanModes(caps.Modes && caps.Model && keeps(own.Model) && !strings.Contains(s.SessionID, subagentSep)),
+			PermissionModes: permissionModes}
 		s.ReadOnlyReason, s.Attached, s.CodexRoute, s.CodexRouteNote = readOnly, false, "", ""
 		// The pane is the engine's to show (pi.go joins it with the engine's pane), not part of the runtime's row.
 		if s.PaneID != "" && validPane(s.PaneID) {
@@ -223,8 +249,9 @@ func (n *Node) runtimeWatch(h *runtimeConn, id string, since int) {
 }
 
 // runtimeAsk forwards a runtime's question / plan / permission to the phone and returns the answer; {dismiss: true}
-// when nobody answered (expired, handed back to the computer, no hub). A node going away under a resumable
-// interaction answers with code node_gone: the runtime asks the next node with the same id.
+// when nobody answered (expired, handed back to the computer, no hub). A hub link that drops under a resumable
+// interaction (one with an id the runtime chose or a tool call id) answers with code node_gone: the runtime asks the
+// next node with the same id.
 func (n *Node) runtimeAsk(ctx context.Context, h *runtimeConn, params json.RawMessage) (any, error) {
 	var p struct {
 		Interaction proto.Interaction `json:"interaction"`
@@ -244,7 +271,10 @@ func (n *Node) runtimeAsk(ctx context.Context, h *runtimeConn, params json.RawMe
 		return nil, fmt.Errorf("session %s is not listed by this runtime", ix.SessionID)
 	}
 	rt := h.id()
-	if ix.ID == "" || !runtimeIDRe.MatchString(ix.ID) {
+	// An id the runtime chose is the same when it asks again: the runtime SDK asks the next node with the same card
+	// after a hub link drop or a node restart (its interactionId helper derives it from the tool call).
+	ownID := ix.ID != "" && runtimeIDRe.MatchString(ix.ID)
+	if !ownID {
 		key := ix.ToolUseID
 		if key == "" {
 			key = newUUID()
@@ -265,9 +295,13 @@ func (n *Node) runtimeAsk(ctx context.Context, h *runtimeConn, params json.RawMe
 		label = rt
 	}
 	// A runtime running several agents (Paseo: Claude Code and others) says which one each session runs: the card is
-	// that agent's.
-	if s, ok := h.row(ix.SessionID); ok && s.Agent != "" && s.Agent != agent {
-		agent = s.Agent
+	// that agent's, and called by the name its row gives it whenever it gives one. Paseo's other providers (Grok, Kimi,
+	// Cursor…) all run under Paseo's own id, each named by its provider's label: the card and its push say "Grok", not
+	// the runtime's "Paseo" (#8142).
+	if s, ok := h.row(ix.SessionID); ok {
+		if s.Agent != "" && s.Agent != agent {
+			agent = s.Agent
+		}
 		if s.AgentLabel != "" {
 			label = s.AgentLabel
 		}
@@ -298,7 +332,11 @@ func (n *Node) runtimeAsk(ctx context.Context, h *runtimeConn, params json.RawMe
 		timeout = time.Duration(p.TimeoutSeconds) * time.Second
 	}
 	ix.ExpiresAt = now.Add(timeout)
-	ix.Resumable = ix.ToolUseID != "" // its id is the same when the runtime asks again through the next node
+	// Its id is the same when the runtime asks again through the next node: one the runtime chose, or one made from
+	// its tool call. The hub then keeps the card through a hub link drop, and the drop answers node_gone (askOnce), not
+	// a dismiss: a dismiss reached the runtime before it heard the hub was gone (detach), and the Paseo bridge took a
+	// Codex or ACP card, which has no tool call id, for one the user handed back (#8128).
+	ix.Resumable = ownID || ix.ToolUseID != ""
 	for _, s := range h.sessionsCopy() {
 		if s.SessionID == ix.SessionID {
 			if ix.SessionTitle == "" {
@@ -333,11 +371,13 @@ func runtimeHealth(h *runtimeConn, ix proto.Interaction) bool {
 	return ok && (s.Space == identity.SpaceHealth || identity.InHealthSpace(s.Cwd))
 }
 
-// runtimeModes is a runtime row's modes capability: the runtime declared caps.modes (the node refuses session.modes
-// otherwise, runtimes_calls.go), the row is not a subagent's, and its agent takes Claude Code's modes (claude: Orca,
-// Paseo's Claude providers) or is the runtime's own (agy). Paseo has no agent of its own: its bridge calls every agent
-// other than Claude Code and Codex "paseo" (integrations/paseo/lib/map.js appAgent), and refuses a permission mode for
-// any of them that is not Claude (bridge.js modes). So a Paseo row running Codex, opencode or any other agent gets none.
+// runtimeModes is a runtime row's modes capability, the apps' Claude Code chips: the runtime declared caps.modes (the
+// node refuses session.modes otherwise, runtimes_calls.go), the row is not a subagent's, and its agent takes Claude
+// Code's modes (claude: Orca, Paseo's Claude providers) or is the runtime's own (agy). Paseo has no agent of its own:
+// its bridge calls every agent other than Claude Code and Codex "paseo" (integrations/paseo/lib/map.js appAgent), and
+// takes only its own approval and Allow all for those and for Codex (bridge.js modes). So a Paseo row running Codex,
+// opencode or any other agent gets none, and older apps show no chips there; its row lists the modes it takes instead
+// (capabilities.permission_modes, #8261).
 func runtimeModes(declared bool, rt string, s proto.Session) bool {
 	own := s.Agent == rt && rt != paseoRuntimeID
 	return declared && !strings.Contains(s.SessionID, subagentSep) && (s.Agent == "claude" || own)

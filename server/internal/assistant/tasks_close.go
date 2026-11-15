@@ -197,7 +197,11 @@ func (s *Service) retireAgent(ctx context.Context, refused taskCloseRefused, who
 		Stopped bool `json:"stopped"`
 	}
 	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	err := s.call(cctx, machine, deviceSessionStop, map[string]any{"session_id": c.SessionID, "retire": true}, &res)
+	cause := proto.StopTaskCompleted
+	if who == "idle" {
+		cause = proto.StopIdle
+	}
+	err := s.call(cctx, machine, deviceSessionStop, map[string]any{"session_id": c.SessionID, "retire": true, "stop_cause": cause}, &res)
 	cancel()
 	var re *rpc.Error
 	switch {

@@ -22,8 +22,10 @@ import (
 
 const assistantCompactTimeout = 10 * time.Minute
 
-// assistantCompact starts compacting conversation id, resuming its process when it is not running.
-func (n *Node) assistantCompact(ctx context.Context, id string) error {
+// assistantCompact starts compacting conversation id, resuming its process when it is not running; with onlyRunning
+// (the hub compacting a meeting's room, #8253) it refuses not_running instead: a process that exited since the hub saw it
+// running is never started only to be compacted.
+func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool) error {
 	if id == "" || !validID(id) {
 		return errors.New("invalid session id")
 	}
@@ -45,6 +47,9 @@ func (n *Node) assistantCompact(ctx context.Context, id string) error {
 			return refusal("busy", "正在回答，等这一轮结束再压缩", nil)
 		}
 	} else {
+		if onlyRunning {
+			return refusal("not_running", "这个对话的进程没有在运行，不为压缩启动它", nil)
+		}
 		if n.transcriptPath(id) == "" {
 			return refusal("gone", "这个对话的记录已经不在了", nil)
 		}
@@ -61,9 +66,19 @@ func (n *Node) assistantCompact(ctx context.Context, id string) error {
 		}
 		n.stopAssistant(id)
 		var err error
-		execution := modelExecution{Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, Runtime: st.Runtime, IsMain: st.IsMain}
+		// A guest (a meeting's room too) starts as on any resume: spawnClaude reads its tools and kind from its record
+		// (no built-in tools, strict MCP config, project setting sources, its own settings and profile), and
+		// spawnAssistant refuses one whose launcher runs another agent by now.
+		execution := modelExecution{Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, Runtime: st.Runtime, IsMain: st.IsMain, ConfigDir: st.ConfigDir, SupervisionInstructions: st.SupervisionInstructions}
+		if _, current := n.assistantModel(ctx, id); current.SupervisionResolved {
+			execution.SupervisionInstructions = current.SupervisionInstructions
+		}
 		if p, err = n.spawnAssistant(id, cwd, launcher, true, false, execution); err != nil {
 			return err
+		}
+		if st.SupervisionInstructions != execution.SupervisionInstructions {
+			st.SupervisionInstructions = execution.SupervisionInstructions
+			n.state.put(id, st)
 		}
 	}
 	p.mu.Lock()

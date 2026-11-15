@@ -97,7 +97,12 @@ internal fun NotificationPreferences(
     val state by controller.state.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    LaunchedEffect(controller) { if (available) controller.loadPreferences() }
+    LaunchedEffect(controller) {
+        if (available) {
+            controller.loadPreferences()
+            controller.loadLowDistraction()
+        }
+    }
     // The system's switch for the whole app (iOS: "Notifications are off" first): read again whenever the page comes back.
     var systemOff by remember { mutableStateOf(false) }
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
@@ -158,6 +163,17 @@ internal fun NotificationPreferences(
         else if (desktops.isNotEmpty() && onDesktops != null) item("desktops-presence") {
             // Older hubs still expose signed-in computers even when phone muting preferences are unavailable.
             DesktopPresenceRow(desktops, muted = false, selected = false, position = GroupPosition.Single, onClick = onDesktops)
+        }
+        // The hub's switch, for every device (#8157): after this phone's own rows.
+        val lowDistraction = state.lowDistraction?.takeIf { available }
+        if (lowDistraction != null) item("low-distraction") {
+            Column(Modifier.padding(top = Tokens.Space.m)) {
+                JGroupItem(GroupPosition.Single) {
+                    JSwitchRow(stringResource(R.string.settings_notify_low_distraction), lowDistraction, { scope.launch { controller.saveLowDistraction(it) } },
+                        subtitle = stringResource(R.string.settings_notify_low_distraction_subtitle), enabled = enabled)
+                }
+                SettingsCaption(stringResource(R.string.settings_notify_low_distraction_footer), Modifier.padding(horizontal = Tokens.Space.xs, vertical = Tokens.Space.s))
+            }
         }
         if (available && state.preferences == null) item {
             Action(stringResource(if (state.busy) R.string.settings_reading else R.string.settings_retry_read), enabled = !state.busy) { scope.launch { controller.loadPreferences() } }

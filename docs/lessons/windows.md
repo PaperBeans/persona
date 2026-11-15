@@ -9,6 +9,7 @@ Read this before changing the Windows node (#1090), or developing or testing `pe
 - **Unix socket paths must not exceed 108 bytes**: Go supports AF_UNIX on Windows, but a long path makes `bind` return `invalid argument` (not “unsupported”).
   Paths such as `~/.persona/node-attach.sock` are fine; do not put test sockets deep inside temporary directories (Claude Code's scratchpad exceeded the limit).
 - **`/tmp` is not the temporary directory**: On Windows, `os.MkdirTemp("/tmp", …)` means `\tmp` on the current drive, which usually does not exist. Tests that need short paths should use platform-specific files (`listen_*.go` in `orcarttest`).
+- **Windows Python has no `fcntl`**: a repository script that locks with `fcntl.flock` fails with `ModuleNotFoundError` under Git Bash. One that must run on a Windows dev machine locks with `msvcrt.locking` there (`LK_NBLCK` on the first byte, trying again while it raises `PermissionError`), as `scripts/hooks/merge-pr.sh` and `scripts/operations/pr_watch_merge.py` do; two programs sharing a lock file must lock the same byte (seek to 0 first: `open("a+")` starts at the end). Its `subprocess.run(["bash", …])` also searches System32 before PATH, where `bash.exe` is WSL's: take `shutil.which("bash")`.
 
 ## Processes and shells
 
@@ -32,6 +33,9 @@ Read this before changing the Windows node (#1090), or developing or testing `pe
 
 - **A Windows node's paths reach a hub that may not be Windows**: the node reports directories as `C:\Users\…`, and on a Linux or macOS hub `filepath` splits only at `/`, so `filepath.Base` returns the whole path. `identity`'s directory checks (`IsAssistantDir`, `IsAssistantDirOf`, `SpaceOf`, `InHealthSpace`) missed the computer's assistant and health directories, and its main chat conversations never reached the Persona tab (#6419). `filepath.ToSlash` does not help there: it converts nothing off Windows.
   Code on the hub or a manager that takes apart a directory a node sent reads it through `identity.NodePath` first: a path with a drive letter or a `\\server\` prefix gets forward slashes on a hub that is not Windows, and anything else stays as it is. Test such code with Windows paths and run the test on Linux, not only on the computer you develop on.
+- **`path` is not a node's syntax either**: it knows only `/` on every system, Windows included. Task workspaces checked the node's answers with `path.IsAbs`, so a Windows computer's `C:\…` was never absolute, and every writable task in a Git directory there failed with "Workspace C:\… is not an available absolute directory" (#7106).
+  A path that is checked or joined and then sent back to its node goes through `proto.NodeAbs`, `proto.NodeClean` and `proto.NodeJoin`. They keep the node's own syntax (backslashes, an upper-case drive letter, a root of `C:\` or `\\server\share` that `..` cannot climb out of), so the node reads the result as its own path.
+  Two of a node's paths compare by `proto.NodeKey`, which also ignores case for a Windows path: `C:\Code\App` and `c:\code\app` are one directory there. Keys are for comparing only; never send one to the node.
 
 ## Scheduled tasks (automatic startup)
 
@@ -50,6 +54,19 @@ Read this before changing the Windows node (#1090), or developing or testing `pe
 - **Ending a task kills only the daemon itself**: Its children survive. The daemon puts itself in a Job with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (subsequent children automatically join it),
   so when it disappears (`/End`, a crash, or a kill), its children disappear too.
 - A running `.exe` cannot be overwritten or deleted. Before reinstalling, `/End` the task and wait for persona-link to release the run lock; during uninstall, the daemon file may take a moment to become deletable.
+
+## Updating a running program (node updates)
+
+`server/internal/nodeupdate`; see [windows.md](../operations/windows.md) ("Updates through the hub"). Found on a physical Windows 11 machine on 2026-11-12:
+
+- **A running program's file cannot be replaced, but can be renamed**: `os.Rename(new, running.exe)` fails with access denied, while renaming `running.exe` away works. Move the old file aside, then put the new one in place; delete the aside file once its process is gone (deleting it earlier fails the same way).
+- **Go's `os.Open` does not share delete**: a rename over a file this process (or any other) holds open fails with access denied. Close the file before renaming over it.
+- **Only files ending in `.exe` start**: `exec.Command` on a staged `.node-update-stage-123` reports "executable file not found". Anything that is run (the staged build's self-check, the watchdog's backup copy) needs the suffix.
+- **`FlushFileBuffers` needs a handle that may write**: `f.Sync()` on a file opened with `os.Open`, or on a directory, returns access denied. Open the file read-write to flush it; a directory cannot be flushed: use `MoveFileEx` with `MOVEFILE_WRITE_THROUGH` for a durable rename instead.
+- **No inherited descriptors**: `exec.Cmd.ExtraFiles` is not supported, so a child cannot report readiness on fd 3. Report through a file both sides read.
+- **A program runs from the file a process has open**: the watchdog runs from the backup it may restore, so the backup can only be moved aside, not deleted, until the watchdog exits.
+- **A restart is a new process**: with exec the new program keeps the pid the rollback watchdog recorded; on Windows it does not, so a target build that never records itself (one from before Windows updates) kept running after a rollback put the old file back (found 2026-11-13 updating a node to a release without this support). Record the supervisor and find its children.
+- **The image path follows a rename**: `QueryFullProcessImageName` returns where the program's file is now (the moved-aside name), while `Get-Process` / `Win32_Process.ExecutablePath` show the path it was started from. Match both.
 
 ## Claude Code's peer inbox (desktop app, other terminals)
 

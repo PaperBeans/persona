@@ -19,9 +19,11 @@ const (
 	sigUnjudged    = "unjudged"    // its agents stopped, and the judge could not say whether the work is finished
 	sigNeedsYou    = "needs_you"   // an agent waits for an answer
 	sigStalled     = "stalled"     // working, but nothing moved for long
+	sigAllStopped  = "all_stopped" // every current participant stopped with nothing scheduled to resume it
 	sigInterrupted = "interrupted" // the model service cut its turn off
 	sigFailed      = "failed"      // its agent did not start
 	sigStarted     = "started"     // its agent started after the supervisor's retry (start_remedy.go)
+	sigPRConflict  = "pr_conflict" // the task's current open PR has merge conflicts at this head
 	sigReport      = "report"      // its agent reported to the supervisor (report_to_supervisor, agent_control.go)
 	sigEscalated   = "escalated"   // its leader conversation judged it needs the user (supervise_leader.go): told the main one
 	sigOrphaned    = "orphaned"    // nobody works on it: its agents are closed or offline and nothing brings one back (tasks_orphan.go)
@@ -38,6 +40,9 @@ var (
 	// superviseEvery is the least time between two supervision messages; superviseUrgentEvery when one waits on a decision.
 	superviseEvery       = 10 * time.Minute
 	superviseUrgentEvery = 2 * time.Minute
+	// superviseNoMainLogEvery is how often a digest that still finds no main conversation says so in the log: the
+	// watch's every pass (superviseTick) tries again, and each said it once before.
+	superviseNoMainLogEvery = time.Hour
 	// superviseNeedsAfter is how long an agent waits for an answer before the supervisor hears of it (the user was
 	// pushed; a quiet task's at once: the user was not).
 	superviseNeedsAfter = 3 * time.Minute
@@ -105,14 +110,18 @@ func (g superviseSignal) id() string {
 	if g.Kind == sigEscalated && len(g.Cards) > 0 { // a leader's escalated cards, apart from its needs_user
 		return g.Todo + "|" + g.Kind + ":cards"
 	}
+	if g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "sent" {
+		return g.Todo + "|" + g.Kind + ":agent_copy" // delivered copies never absorb an earlier failed delivery
+	}
 	return g.Todo + "|" + g.Kind
 }
 
 // urgent: a signal that waits on a decision goes out sooner than the rest.
 func (g superviseSignal) urgent() bool {
 	switch g.Kind {
-	case sigNeedsYou, sigIdle, sigUnjudged, sigFailed, sigInterrupted, sigStarted, sigEscalated, sigAsk, sigOrphaned, sigDecide, // started: the user waits to hear it
-		sigRecheck, sigUndecidable, sigOwnerCannot: // the owner waits on a decision they cannot answer as it is
+	case sigNeedsYou, sigIdle, sigUnjudged, sigAllStopped, sigFailed, sigInterrupted, sigStarted, sigPRConflict, sigEscalated, sigAsk, sigOrphaned, sigDecide, // started: the user waits to hear it
+		sigRecheck, sigUndecidable, sigOwnerCannot, // the owner waits on a decision they cannot answer as it is
+		sigParkDecided: // the owner answered: what they said is acted on soon
 		return true
 	case sigReport:
 		return g.Report != upReportProgress
@@ -137,8 +146,11 @@ type superviseBook struct {
 	queued  map[string][]superviseSignal // conversation → the signals of the message still waiting in its queue
 	timer   *time.Timer
 	timerAt time.Time
-	hold    map[string]time.Time // conversation → when a supervision message went in: its turn's finish is not pushed
-	visible map[string]bool      // an explicit user action makes the current triage turn visible
+	// noMainSince is when digests started finding no main conversation (zero: the last one found it), noMainLogged
+	// when that was last logged (sendDigest).
+	noMainSince, noMainLogged time.Time
+	hold                      map[string]time.Time // conversation → when a supervision message went in: its turn's finish is not pushed
+	visible                   map[string]bool      // an explicit user action makes the current triage turn visible
 	// failSeen: tasks whose failed start a supervision message carried, when, and for which conversation
 	// (start_remedy.go remedyTurnEnded)
 	failSeen map[string]failSeen
@@ -295,7 +307,7 @@ func (s *Service) retryDigestLocked(d time.Duration) {
 // task waiting for review or for the user, only that its time came for a parked one, and nothing for one done or not
 // supervised. A task nobody works on any more
 // is told from what the minute pass found (orphanSignal, tasks_orphan.go), since that asks whether its computers answer.
-func watchSignals(t Todo, agents []proto.Session, now time.Time) []superviseSignal {
+func watchSignals(t Todo, agents []proto.Session, now time.Time, groups ...superviseGroup) []superviseSignal {
 	v := t.Supervision
 	if v == nil || t.DoneAt != nil {
 		return nil
@@ -303,12 +315,20 @@ func watchSignals(t Todo, agents []proto.Session, now time.Time) []superviseSign
 	switch v.state(t) {
 	case reviewPending:
 		return []superviseSignal{{Todo: t.ID, Kind: sigReview, Key: reviewKey(v)}}
-	case reviewNeedsUser:
-		return nil
 	case reviewParked: // nothing until its time, then that it came (parked.go)
 		if g, ok := parkedDueSignal(t, now); ok {
 			return []superviseSignal{g}
 		}
+		return nil
+	}
+	group := superviseGroup{tasks: []Todo{t}, sessions: agents}
+	if len(groups) > 0 {
+		group = groups[0]
+	}
+	if g, ok := allStoppedSignal(t, group.tasks, group.sessions, now); ok && !group.unknown {
+		return []superviseSignal{g} // one group diagnosis, not another silent signal for each member
+	}
+	if v.state(t) == reviewNeedsUser {
 		return nil
 	}
 	var out []superviseSignal
@@ -380,28 +400,41 @@ func (s *Service) superviseLoop(ctx context.Context) {
 	}
 }
 
-// superviseWatch records what the supervised tasks' agents show now (watchSignals), and lets go of a hold on the
+// superviseWatch records what the supervised tasks' agents show now (watchSignals), hands a review a side
+// conversation left waiting to the main conversation's follow-up (handOverUnreviewed), and lets go of a hold on the
 // main conversation's pushes that outlived superviseHoldMax.
 func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 	s.autoReviewTick(ctx, now)
-	s.askTick(now) // cards held past their time go up a rung (ask_route.go)
+	s.askTick(now)                 // cards held past their time go up a rung (ask_route.go)
+	s.handOverUnreviewed(ctx, now) // a review a side conversation left waiting goes to the main one's follow-up (side_handover.go)
 	routed := s.routedSessions()
 	s.pruneTurns(ctx) // the turns' ledger: read before the first signal (what was told before a restart is not told again), closed tasks off it
-	tasks := s.todosOf(ctx, "*")
+	// Only the open tasks: everything below passes the finished ones by, and there can be thousands of them.
+	tasks := s.todosWhere(ctx, "*", func(t *Todo) bool { return t.DoneAt == nil })
+	s.pruneAllStoppedDedup(ctx)
+	lists := machineSessions{}   // each machine listed once for all the supervised tasks (#3029)
 	s.backfillBriefs(ctx, tasks) // tasks from before briefs get one from what they still have (task_brief.go)
+	groups := allStoppedTaskGroups(tasks)
 	for _, t := range tasks {
 		if t.Supervision == nil || t.DoneAt != nil {
 			continue
 		}
 		s.remedyWatch(ctx, t, now) // a failed start's kept tab expired (start_remedy.go)
-		agents := s.taskAgents(ctx, t)
-		for _, g := range watchSignals(t, agents, now) {
+		agents := s.taskAgentsIn(ctx, t, lists)
+		group := s.allStoppedGroup(ctx, t, groups[t.ID], lists)
+		allStopped := false
+		for _, g := range watchSignals(t, agents, now, group) {
+			allStopped = allStopped || g.Kind == sigAllStopped
 			if g.Kind == sigNeedsYou && routed[[2]string{g.Machine, g.Session}] {
 				continue // its card is with the supervisor as an ask already
 			}
 			s.signal(g)
 		}
-		if g, ok := s.orphanSignal(t); ok { // nobody works on it, as the minute pass found (tasks_orphan.go)
+		if g, ok := s.orphanSignal(t); ok && !allStopped { // a fresh complete group outranks the minute pass's orphan snapshot
+			s.signal(g)
+		}
+		s.parkDecidedRetry(ctx, t)             // a stored decision ends its parking when the ledger write missed it then (parked.go)
+		if g, ok := parkDecidedSignal(t); ok { // a decision ended its parking, and no message carried that yet (parked.go)
 			s.signal(g)
 		}
 		if g, ok := s.undecidableSignal(ctx, t, now); ok { // waits for the owner with nothing to answer (decision.go)

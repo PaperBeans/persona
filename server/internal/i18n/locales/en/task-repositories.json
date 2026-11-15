@@ -1,0 +1,13 @@
+{
+  "invalid": "Couldn't read these repository details. Check the directory name, source ref and issue/PR links; your input is kept.",
+  "limit": "Use at most 20 repositories and 50 links per repository.",
+  "readonly": "This device can only view repository links.",
+  "not_found": "This to-do or repository is unavailable in this assistant.",
+  "store_unavailable": "Couldn't confirm repository links were read or saved. Reload before retrying; a change may have taken effect.",
+  "revision_conflict": "The repository links changed elsewhere. Reload and reconcile your edits.",
+  "catalog_conflict": "The saved repository list changed. Reload it before saving.",
+  "duplicate_repo": "Choose each repository once.",
+  "duplicate_alias": "Choose a different directory name for each repository.",
+  "duplicate_link": "This issue or pull request is already linked.",
+  "link_repository_mismatch": "Use an issue or pull request link from this repository."
+}

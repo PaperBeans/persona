@@ -54,6 +54,8 @@ func (r deployResult) held() bool {
 
 // prForge answers what a deploy check asks of where the PR lives.
 type prForge interface {
+	// IsPR distinguishes a pull request from an issue or a confirmed missing item.
+	IsPR(ctx context.Context, repo string, number int) (bool, error)
 	// PRMerge: whether PR number of repo (owner/name) is merged, and its merge commit.
 	PRMerge(ctx context.Context, repo string, number int) (merged bool, sha string, err error)
 	// Contains: whether head contains base in repo; found false when either is not a commit of repo.
@@ -86,6 +88,8 @@ type deployProbe struct {
 type prSeen struct {
 	hub, state string
 	at         time.Time
+	statusPR   string
+	statusAt   time.Time
 }
 
 type deployCached struct {
@@ -208,7 +212,7 @@ func (s *Service) compareGitHub(ctx context.Context, repo string, number int, hu
 		return deployResult{State: deployUnknown, Hub: hub, Err: errors.New("GitHub did not answer a moment ago")}
 	}
 	r := s.compareGitHubNow(ctx, repo, number, hub)
-	if r.State == deployUnknown {
+	if r.State == deployUnknown && !errors.Is(r.Err, errForgeNotFound) && !errors.Is(r.Err, errForgeUnprocessable) {
 		p.mu.Lock()
 		p.githubDown = time.Now().Add(githubPause)
 		p.mu.Unlock()
@@ -362,6 +366,16 @@ func (s *Service) saveStagesLocked(ctx context.Context, id string) {
 	}
 }
 
+// prStatusPassMost bounds one pass of PR observations (sweepPRStatusesBounded), apart from the deploy checks' time.
+var prStatusPassMost = time.Minute
+
+// sweepPRStatusesBounded is sweepPRStatuses with its own deadline (prStatusPassMost).
+func (s *Service) sweepPRStatusesBounded(now time.Time) {
+	ctx, cancel := context.WithTimeout(context.Background(), prStatusPassMost)
+	defer cancel()
+	s.sweepPRStatuses(ctx, now)
+}
+
 // sweepDeploys looks again at the held tasks: once the running hub contains the work, the task is deployed (its
 // delivery live, its stage deploy) and asked to be verified; a task gone or watched too long is let go.
 func (s *Service) sweepDeploys(now time.Time) {
@@ -380,6 +394,10 @@ func (s *Service) sweepDeploys(now time.Time) {
 		}
 	}
 	b.mu.Unlock()
+	// The PR facts come after the deploy checks, with a time of their own: slow or hanging forge reads for many PRs
+	// never use up this pass's time before the hub's commit, sweepPRs and the watches have run. They run even when the
+	// hub's health cannot be read (they do not need it).
+	defer s.sweepPRStatusesBounded(now)
 	hub, err := s.runningHubCommit(ctx)
 	if err != nil {
 		s.logf("deploys: the hub's health: %v", err)
@@ -458,7 +476,9 @@ func (s *Service) sweepPRs(ctx context.Context, now time.Time, hub string, watch
 		if p.seen == nil || len(p.seen) > 2000 {
 			p.seen = map[string]prSeen{}
 		}
-		p.seen[t.ID] = prSeen{hub: hub, state: r.State, at: now}
+		seen := p.seen[t.ID]
+		seen.hub, seen.state, seen.at = hub, r.State, now
+		p.seen[t.ID] = seen
 		p.mu.Unlock()
 		switch r.State {
 		case deployIn:
@@ -512,7 +532,10 @@ func (s *Service) forge() prForge {
 	return g
 }
 
-var errForgeNotFound = errors.New("not found")
+var (
+	errForgeNotFound      = errors.New("not found")
+	errForgeUnprocessable = errors.New("unprocessable entity")
+)
 
 // connectorNotFound: the connector's error for a 404 or 422 ("GitHub GET <path>: 404 …").
 var connectorNotFound = lazyre.New(`: (404|422)\b`)
@@ -520,8 +543,13 @@ var connectorNotFound = lazyre.New(`: (404|422)\b`)
 func (g githubForge) get(ctx context.Context, path string, out any) error {
 	if g.via != nil {
 		if ok, err := g.via(ctx, path, out); ok {
-			if err != nil && connectorNotFound.MatchString(err.Error()) {
-				return errForgeNotFound
+			if err != nil {
+				if m := connectorNotFound.FindStringSubmatch(err.Error()); m != nil {
+					if m[1] == "422" {
+						return errForgeUnprocessable
+					}
+					return errForgeNotFound
+				}
 			}
 			return err
 		}
@@ -544,12 +572,49 @@ func (g githubForge) get(ctx context.Context, path string, out any) error {
 	}
 	defer resp.Body.Close()
 	switch {
-	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusUnprocessableEntity:
-		return errForgeNotFound // compare answers 404 (or 422) for a commit the repository does not have
+	case resp.StatusCode == http.StatusNotFound:
+		return errForgeNotFound
+	case resp.StatusCode == http.StatusUnprocessableEntity:
+		return errForgeUnprocessable
 	case resp.StatusCode != http.StatusOK:
 		return fmt.Errorf("GitHub answered %d", resp.StatusCode)
 	}
 	return json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(out)
+}
+
+func (g githubForge) IsPR(ctx context.Context, repo string, number int) (bool, error) {
+	var issue struct {
+		PR *struct{} `json:"pull_request"`
+	}
+	err := g.get(ctx, fmt.Sprintf("/repos/%s/issues/%d", repo, number), &issue)
+	if errors.Is(err, errForgeNotFound) {
+		// Issue access and PR access can differ. A readable repository alone does not establish PR permissions.
+		var pr struct {
+			Number int `json:"number"`
+		}
+		err := g.get(ctx, fmt.Sprintf("/repos/%s/pulls/%d", repo, number), &pr)
+		if err == nil {
+			if pr.Number != number {
+				return false, fmt.Errorf("PR identity could not be confirmed for %s#%d", repo, number)
+			}
+			return true, nil
+		}
+		if !errors.Is(err, errForgeNotFound) {
+			return false, err
+		}
+		var prs []struct{}
+		if err := g.get(ctx, "/repos/"+repo+"/pulls?state=all&per_page=1", &prs); err != nil {
+			return false, err
+		}
+		if prs == nil {
+			return false, fmt.Errorf("PR access could not be confirmed for %s", repo)
+		}
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return issue.PR != nil, nil
 }
 
 func (g githubForge) PRMerge(ctx context.Context, repo string, number int) (bool, string, error) {
@@ -569,7 +634,7 @@ func (g githubForge) Contains(ctx context.Context, repo, base, head string) (boo
 	}
 	// per_page=1: only the status is read, not the commits and files between them
 	err := g.get(ctx, fmt.Sprintf("/repos/%s/compare/%s...%s?per_page=1", repo, base, head), &c)
-	if errors.Is(err, errForgeNotFound) {
+	if errors.Is(err, errForgeNotFound) || errors.Is(err, errForgeUnprocessable) {
 		return false, false, nil
 	}
 	if err != nil {

@@ -19,6 +19,11 @@ const (
 // change the node protocol floor or become a required capability.
 const PersonaContracts = "persona_contracts_v1"
 
+// MCPWait is the additive enum-only wait-update contract. As a hub feature it gates local MCP opt-in; as a manager
+// capability it gates hub-mediated relays; as a node capability it promises to preserve call_id across computer.call
+// and its nested computer.elicit. An old peer on any hop keeps the conservative unknown fallback.
+const MCPWait = "mcp_wait_v1"
+
 // ManagerUpdateInventory is the optional read-only local update.inventory
 // contract. A legacy peer remains compatible, but cannot produce idle evidence.
 const ManagerUpdateInventory = "manager_update_inventory_v1"
@@ -47,6 +52,9 @@ const (
 	// AssistantConfigDir: assistant.send / assistant.warm / session.send honor an explicit
 	// config_dir and preserve the selected Claude profile when resuming a conversation.
 	AssistantConfigDir = "assistant_config_dir"
+	// AssistantSupervisionInstructions: per-conversation system policy, including explicit
+	// removal, is applied on startup/resume and isolated by the process fingerprint.
+	AssistantSupervisionInstructions = "assistant_supervision_instructions"
 	// SessionSkills: session.skills and validated explicit skill selections on ordinary session.send.
 	SessionSkills = "session_skills_v1"
 	// AssistantServiceTier: assistant.send takes service_tier for a new Codex conversation and acknowledges it before
@@ -118,6 +126,10 @@ const (
 	// (docs/operations/node-update.md "Usage"). sessions.list answers update_busy, that check, and the hub waits on it;
 	// for a node without it (or a list without the field) it waits on the old rule, every Agent idle.
 	NodeUpdateIdle = "node_update_idle"
+	// MachineDiagnose: machine.diagnose and machine.cleanup, a computer's bounded self-description (largest process
+	// groups, folders, rebuildable caches, tools) and the emptying of caches from its own catalog
+	// (docs/server/machines.md "Diagnosis and cleanup"). Without it the manager answers node_outdated.
+	MachineDiagnose = "machine_diagnose"
 )
 
 // Error codes in the manager's answers to a resident node's replayed notifications (a notify with spool_id,
@@ -141,8 +153,13 @@ const (
 	ProgramPersonaNode = "persona-node"
 )
 
+// RestartExitCode is how a resident node on Windows, which has no exec, asks its supervisor to start the installed
+// program again at once: it exits with this code after an update or a rollback put another file in place
+// (nodeupdate.Restart), and persona-link's scheduled-task supervisor restarts it without its usual delay.
+const RestartExitCode = 75
+
 // Announced is what a node built from this code announces.
-var Announced = []string{SessionSkills, ShareProjection, CreationReceipt, PersonaContracts, ManagerUpdateInventory, Sessions, ModelConfiguration, AssistantConfigDir, AssistantServiceTier, NodeUpdate, Engines, MachineUID, HerdrServer, PluginNodeCall, Ultracode, HealthSpaces, Preview, SecretRun, Clipboard, SecretEnv, LauncherSwitch, ModelHTTP, EngineSwitch, ModelRun, LauncherSwitchNow, LauncherSwitchIdle, PaneCwd, NodeUpdateIdle, PaneNewSpace}
+var Announced = []string{SessionSkills, ShareProjection, CreationReceipt, PersonaContracts, ManagerUpdateInventory, MCPWait, Sessions, ModelConfiguration, AssistantConfigDir, AssistantSupervisionInstructions, AssistantServiceTier, NodeUpdate, Engines, MachineUID, HerdrServer, PluginNodeCall, Ultracode, HealthSpaces, Preview, SecretRun, Clipboard, SecretEnv, LauncherSwitch, ModelHTTP, EngineSwitch, ModelRun, LauncherSwitchNow, LauncherSwitchIdle, PaneCwd, NodeUpdateIdle, PaneNewSpace, MachineDiagnose}
 
 // ShareProjection is the bounded complete-source sharing projection, not light Items.
 const ShareProjection = "share_projection.v1"

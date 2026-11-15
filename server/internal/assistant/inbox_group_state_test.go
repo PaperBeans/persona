@@ -211,6 +211,79 @@ func TestInboxGroupStateHandledRepliedNotifiesOnce(t *testing.T) {
 	assertInboxGroupStateContent(t, before, it)
 }
 
+// The reply's position outlives the chain's cap (#8424): once chainMax later steps at the same Last push its
+// self_replied entry out of the chain, the same report repeated is still not another reply. It adds no entry, note or
+// wake, and leaves the follow-up, the suggestion and the draft the conversation has since as they are.
+func TestInboxGroupStateRepliedOnceAfterChainEviction(t *testing.T) {
+	ctx := context.Background()
+	h := inboxGroupStateTestHub(t, true)
+	setSettings(t, h.Service, func(v *Settings) { v.Timezone = "UTC" })
+	it := inboxGroupStateTestItem(h, "event-replied-evicted", true)
+	report := inboxGroupStateReport(it, false, connector.DoneReplied)
+
+	rest, changed := h.applyGroupStates(ctx, inboxGroupStateTestSource(), []connector.InboxThing{report})
+	requireInboxGroupStateChange(t, rest, changed, it)
+	requireInboxGroupStatePending(t, it, prompts.NoteSelfReplied, "2026-11-13 06:30")
+	h.deliverPending(ctx)
+	if _, _, err := h.suggest(ctx, "session-1", suggestIn{Recap: "Synthetic recap after the source reply"}); err != nil {
+		t.Fatal(err)
+	}
+	if notes := notesOf(h.f, "session-1"); len(notes) != 1 {
+		t.Fatalf("delivered notes = %q, want one", notes)
+	}
+
+	// The conversation goes on at the same position: a check made and due, a suggestion with its old-App draft, and
+	// chainMax steps of its own, which push the reply's entry out of the chain.
+	h.inbox.mu.Lock()
+	checkAt := time.Now().UTC().Add(3 * time.Hour).Truncate(time.Second)
+	it.Follow = &InboxFollow{Who: "Example teammate", Next: "Wait for the synthetic answer", CheckAt: &checkAt, Checks: 2, Due: true}
+	it.SuggestSeq++
+	it.Suggestion = &InboxSuggestion{Version: it.SuggestSeq, Kind: SuggestReply, Text: "Later synthetic reply", At: time.Now().UTC()}
+	it.Agent.State, it.Agent.Draft = AgentDrafted, "Later synthetic reply"
+	for i := range chainMax {
+		h.inbox.chainAdd(it, InboxChainEntry{Kind: ChainReported, Via: ViaAssistant, Text: "Synthetic step " + strconv.Itoa(i)})
+	}
+	evicted, last := len(inboxGroupStateSelfReplies(it)) == 0, it.Last
+	pending, wake, deferred := len(it.Agent.Pending), it.Agent.Wake, it.Agent.DeferredAt
+	handling := it.Handling.State
+	before := string(rawJSON(it))
+	h.inbox.mu.Unlock()
+	if !evicted || last != inboxGroupStateLast {
+		t.Fatalf("setup: the reply's entry is still in the chain, or Last moved to %q: %+v", last, it.Chain)
+	}
+
+	rest, changed = h.applyGroupStates(ctx, inboxGroupStateTestSource(), []connector.InboxThing{report})
+	h.inbox.mu.Lock()
+	after := string(rawJSON(it))
+	replies := len(inboxGroupStateSelfReplies(it))
+	pendingAfter, wakeAfter, deferredAfter := len(it.Agent.Pending), it.Agent.Wake, it.Agent.DeferredAt
+	handlingAfter := it.Handling.State
+	follow := *it.Follow
+	suggestion, draft, agentState := currentSuggestion(it), it.Agent.Draft, it.Agent.State
+	h.inbox.mu.Unlock()
+	if replies != 0 {
+		t.Errorf("the repeated report recorded another self_replied step: %d", replies)
+	}
+	if pendingAfter != pending || wakeAfter != wake || (deferredAfter == nil) != (deferred == nil) || handlingAfter != handling {
+		t.Errorf("the repeated report woke the conversation: pending %d -> %d, wake %v -> %v, deferred %v -> %v, handling %q -> %q",
+			pending, pendingAfter, wake, wakeAfter, deferred, deferredAfter, handling, handlingAfter)
+	}
+	if follow.CheckAt == nil || !follow.CheckAt.Equal(checkAt) || follow.Checks != 2 || !follow.Due {
+		t.Errorf("the repeated report reset the follow-up: %+v, want check_at %v, two checks and due", follow, checkAt)
+	}
+	if suggestion == nil || suggestion.Text != "Later synthetic reply" || draft != "Later synthetic reply" || agentState != AgentDrafted {
+		t.Errorf("the repeated report cleared the suggestion or draft: suggestion=%+v draft=%q state=%q", suggestion, draft, agentState)
+	}
+	if after != before {
+		t.Errorf("the repeated report changed the item:\nbefore: %s\nafter:  %s", before, after)
+	}
+	requireInboxGroupStateIgnored(t, rest, changed)
+	h.deliverPending(ctx)
+	if notes := notesOf(h.f, "session-1"); len(notes) != 1 {
+		t.Fatalf("delivered notes = %q, want still one", notes)
+	}
+}
+
 // A confirmed reply sent by Persona is not the owner answering elsewhere: the event keeps waiting for the other side.
 func TestInboxGroupStateOwnConfirmedReplyKeepsWaiting(t *testing.T) {
 	h := inboxGroupStateTestHub(t, true)
@@ -507,7 +580,7 @@ func TestInboxGroupStateProcessesReportWithRules(t *testing.T) {
 	assertInboxGroupStateContent(t, before, it)
 }
 
-// With the twin off, a reply is only a chain record and a read only a flag: no note, wake or forced Looking state.
+// With the twin off, a reply records and waits without a wake, and a read only sets its flag; neither forces Looking.
 func TestInboxGroupStateTwinDisabledOnlyRecords(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -637,7 +710,27 @@ func TestInboxGroupStateRoundSavesChange(t *testing.T) {
 	if len(entries) != 1 || entries[0].Via != saved.Source || entries[0].Link == nil || entries[0].Link.Position != inboxGroupStateLast {
 		t.Fatalf("saved self_replied entries = %+v", entries)
 	}
+	if saved.RepliedOf != inboxGroupStateLast {
+		t.Fatalf("saved replied_of = %q, want %s", saved.RepliedOf, inboxGroupStateLast)
+	}
 	assertInboxGroupStateContent(t, before, &saved)
+}
+
+// A row stored before replied_of has only its self_replied entry, which still marks the position while the chain keeps
+// it; replied_of marks only its own position.
+func TestGroupStateHasSelfReplyReadsRepliedOf(t *testing.T) {
+	var older InboxItem
+	raw := `{"id":"event-older","last":"m10","chain":[{"id":"c1","kind":"self_replied","link":{"type":"source","position":"m10"}}]}`
+	if err := json.Unmarshal([]byte(raw), &older); err != nil {
+		t.Fatal(err)
+	}
+	if older.RepliedOf != "" || !groupStateHasSelfReply(&older, "m10") || groupStateHasSelfReply(&older, "m11") {
+		t.Fatalf("an older row's self_replied entry: replied_of %q", older.RepliedOf)
+	}
+	it := &InboxItem{RepliedOf: "m10"}
+	if !groupStateHasSelfReply(it, "m10") || groupStateHasSelfReply(it, "m11") || groupStateHasSelfReply(&InboxItem{}, "") {
+		t.Fatal("replied_of")
+	}
 }
 
 func TestGoldenInboxGroupStateNotes(t *testing.T) {

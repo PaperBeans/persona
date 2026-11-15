@@ -55,7 +55,7 @@
 
 The hub sends its feature list in `devices.connected`, matching the capabilities advertised in `hello.features`.
 The devices manager forwards it as `node.configure.hub_features`; the node snapshots that list when starting an
-assistant process. A new Claude, Codex app-server, Agent SDK or guest assistant registers the built-in MCP
+assistant process to choose its MCP namespace. A new Claude, Codex app-server, Agent SDK or guest assistant registers the built-in MCP
 handler only as `persona` when the hub announces
 `persona_contracts_v1`. Its automatic tool permissions use the same namespace selection, so each built-in tool is
 offered once and only one built-in MCP process is needed. An old hub, an absent feature list or a connection that has
@@ -67,12 +67,21 @@ The manager handshake does not wait for capability resets or disconnect nodes ov
 is not changed halfway through its startup. An unused warm process whose namespace policy
 no longer matches is replaced before reuse. No user configuration is required.
 
+MCP wait correlation deliberately does not inherit that startup snapshot. The node reads the connection-local
+`mcp_wait_v1` flag afresh for every local `mcp.call`, so the next call follows a hub upgrade or rollback while the
+assistant keeps running. A call that started without the feature is not registered retroactively, and one already
+registered keeps its own lifecycle through its final response.
+
 With a capable hub, resumed assistant sessions also register only `persona`, including idle recycling and scheduled-task
 resumes. Claude Code 2.1.322 was driven through a real two-turn check: the first turn called
 `mcp__jarvis__todo_decisions`; resuming that transcript with only `persona` configured completed the next request without
 a provider or transcript error. Historical recognition remains independent of registration, so readers and read-only
 worker supervision accept both `mcp__persona__report_to_supervisor` and its legacy name. Generated assistant instructions
 tell the model to translate old `mcp__jarvis__X` references in stored routines to `mcp__persona__X`.
+
+The Antigravity companion registers only `persona` whatever the hub: `agy` names the tools after its own label for the
+server and `personad mcp` sends the hub bare tool names, so a second namespace would only count every tool twice against
+`agy`'s tool budget (#7333).
 
 Only `persona_settings` is listed in the assistant's tool schemas. `jarvis_settings` remains accepted by the call path
 and normalized to `persona_settings`, so an old direct call still runs without publishing a second identical schema.
@@ -85,6 +94,34 @@ optimization therefore applies to the per-process Claude, Codex app-server, Agen
 Registration and historical recognition are separate: transcript readers, task completion and supervision folding
 continue accepting `mcp__persona__*` and `mcp__jarvis__*` forever. Extension namespaces and their permission rules are
 unchanged. Guest allow lists remain restricted to their configured tools; namespace selection grants no extra tools.
+
+### MCP progress wait kinds
+
+`mcp_wait_v1` is additive and does not raise the node protocol floor. Only an MCP process that has a progress token
+sends `wait_updates:true`; only a node whose authenticated hub currently announces the feature generates a `call_id`
+and forwards the opt-in for that call. An old MCP process sends neither field, and an old node or hub returns one final
+local-socket line as before. An old manager ignores the optional fields and publishes no updates, so a new MCP process
+keeps `Still waiting`. An actually old MCP binary retains its historical lowercase `still waiting`. A new node never
+sends an interim line to a client that did not opt in.
+
+Live updates use the existing `devices.notify` event `mcp.wait {call_id, kind}` and local interim lines
+`{"wait_kind":kind}`. Managers that accept hub-mediated approval relays declare `mcp_wait_v1` in `manager.hello`; the hub
+checks the current connection before each such relay. The optional UUID `call_id` on `computer.call` and `computer.elicit`
+correlates a nested LCU interaction without another connection. A target node advertises the same capability in
+`node.info` to promise that it preserves the id through that pair. The manager sends the id only to such a target. Its
+in-memory registry binds that id to the originating machine and live wait state, so a nested card joins the same reporter
+without any machine-routing field. Unknown, malformed, oversized or completed ids get no reporter and never fail the
+underlying tool call. Old upstream peers omit or ignore the id and publish no nested update. For an old target on an
+otherwise new path, the manager instead publishes `unknown` while that target owns the delegated `computer.call`, then
+restores the preceding live state; a silent target must not leave the terminal saying `Waiting for the computer` while
+an uncorrelated approval is open. A native permission with both session and always scopes reports `approval` even when
+its four choices use question-card presentation; a genuine enum question reports `answer`.
+
+No peer is required to understand a new event: absent updates mean `unknown`, and every receiver normalizes an
+unrecognized enum to `unknown`. The four terminal messages are a presentation mapping only;
+`unknown | approval | answer | computer` is the entire wire state. Nothing is persisted, and removing the pending call
+before its final socket write prevents late updates after the answer. The peer-combination table and terminal messages
+are in [protocol.md](protocol.md) ("MCP tools (`personad mcp`)").
 
 ## 配置、目录、服务与升级渠道
 
@@ -109,6 +146,21 @@ unchanged. Guest allow lists remain restricted to their configured tools; namesp
 | Android 分栏偏好 | `jarvis-panes`, `split.jarvis` | `persona-panes`, `split.persona` | canonical preference／值存在时优先，否则读旧；普通 pane key 不改 | 保存当前键，不清空旧 AppData |
 | Android 已排队确认 | `jarvis.phone.confirm` | `persona.phone.confirm` | receiver 双读 action，既有 data scheme 不加限制 | 保持 live callback 和锁屏授权限制；不自动批准 |
 | Android 更新缓存 | `jarvis-update-*.apk` | `persona-update-*.apk` | 两类都视为更新包 | 清理不当成普通 AppData；不改变 package／签名身份 |
+
+## Side-session fold (`sessions_side_fold`, #7944)
+
+The manager folds a Claude desktop app's side sessions under their parent (`folded_as: "side"`, `folded_side`, the
+`children` sides keys; `docs/protocol/protocol.md` "Session hierarchy") and names `sessions_side_fold` in its bus
+hello; the hub lists the feature only while every manager that carries Agents names it.
+
+| Pair | What it sees |
+| --- | --- |
+| New hub and managers, new client | Sides fold into their parent's chat; lists and counts show the parent once. |
+| A manager without the capability beside a new one | The hub does not list the feature; new clients keep sides as rows. The new manager's rows still carry the fold, so a `roots=1` page leaves its sides out of the rows, as it does any folded row. |
+| Old manager, new hub | No fold and no feature: clients keep today's behaviour. |
+| New hub and managers, an older web bundle | Until it reloads it folds by `folded_under` alone: a side is drawn as a child card in its parent's chat and left out of the rows; its parent shows the side's working or needs-you state, not its unseen result (`sides_unread`). |
+| New hub and managers, an older Android app | The same: it folds rows by `folded_under`, so a side is one of its parent's child sessions until the app is updated. |
+| New hub and managers, an older iOS app | From #8010 on it folds rows by `folded_under` too, so a side is one of its parent's child sessions until the app is updated; an app from before #8010 folds by its own child fields, which a side lacks (no `parent_session_id`), and the side stays a plain row of its own. |
 
 ## Apple 端交接
 

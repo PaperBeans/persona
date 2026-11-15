@@ -166,14 +166,35 @@ func (f *fakeAPNs) calls(t *testing.T, n int) []apnsCall {
 // Real transaction/row-lock behavior is covered by db.TestLiveActivityStartBudget.
 type fleetStartStore struct {
 	Store
-	mu   sync.Mutex
-	rows map[string]db.LiveActivity
-	due  map[string]time.Time
-	fail bool
+	mu      sync.Mutex
+	rows    map[string]db.LiveActivity
+	due     map[string]time.Time
+	claimed map[string]time.Time
+	fail    bool
 }
 
 func newFleetStartStore() *fleetStartStore {
-	return &fleetStartStore{rows: map[string]db.LiveActivity{}, due: map[string]time.Time{}}
+	return &fleetStartStore{rows: map[string]db.LiveActivity{}, due: map[string]time.Time{}, claimed: map[string]time.Time{}}
+}
+
+// HoldLiveActivityStart is the store's: only a start claimed up to asOf, and changed only when the deadline moved.
+func (s *fleetStartStore) HoldLiveActivityStart(_ context.Context, device string, asOf time.Time, hold time.Duration) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fail {
+		return false, fmt.Errorf("injected hold persistence failure")
+	}
+	at, ok := s.claimed[device]
+	if !ok || at.After(asOf) || s.due[device].Equal(at.Add(hold)) {
+		return false, nil
+	}
+	s.due[device] = at.Add(hold)
+	return true, nil
+}
+
+// A phone registering over its socket saves its tools: nothing these tests read.
+func (s *fleetStartStore) ReplacePhoneTools(context.Context, db.PhoneToolRegistration) error {
+	return nil
 }
 
 func (s *fleetStartStore) SaveLiveActivity(_ context.Context, v db.LiveActivity) error {
@@ -206,7 +227,7 @@ func (s *fleetStartStore) ClaimLiveActivityStart(_ context.Context, device, toke
 	if due := s.due[device]; at.Before(due) {
 		return due, false, nil
 	}
-	s.due[device] = at.Add(cooldown)
+	s.claimed[device], s.due[device] = at, at.Add(cooldown)
 	return s.due[device], true, nil
 }
 
@@ -288,6 +309,9 @@ func TestFleetStartAcrossFiveEpisodes(t *testing.T) {
 		if got := sink.count("phone", "liveactivity", "start"); got != 1 {
 			t.Fatalf("after: five episodes produced %d starts, want 1", got)
 		}
+		// The phone answers that start (its app connected): the next waits for the rolling cooldown alone. Unanswered,
+		// it would wait for fleetMaxAge (#7641, TestFleetUnansweredStartHoldsTheNext).
+		h.live.phoneAnswered(context.Background(), "phone")
 		// The timer reads the newest active state, not any of the five old ones.
 		h.live = newLiveActivities(h)
 		reportLive(t, h, FleetState{Phase: "working", Working: 9}, FleetStats{})
@@ -330,6 +354,8 @@ func TestFleetDeferredStartCancellation(t *testing.T) {
 				reportLive(t, h, FleetState{Phase: "working", Working: 1}, FleetStats{})
 				time.Sleep(fleetCoalesce)
 				synctest.Wait()
+				// Answered: the next round's start is the one the cooldown defers, not one held for fleetMaxAge (#7641).
+				h.live.phoneAnswered(context.Background(), "phone")
 				reportLive(t, h, FleetState{Phase: "done"}, FleetStats{})
 				time.Sleep(fleetCoalesce)
 				synctest.Wait()
@@ -379,6 +405,9 @@ func TestFleetStartRestartAndConcurrentInstances(t *testing.T) {
 		if got := sink.count("phone", "liveactivity", "start"); got != 1 {
 			t.Fatalf("concurrent instances started %d times", got)
 		}
+		// Answered, so that what follows is the rolling cooldown: unanswered, a start holds the next for fleetMaxAge
+		// across a restart too (#7641, TestFleetUnansweredStartHoldsTheNext).
+		h.live.phoneAnswered(context.Background(), "phone")
 		// Reconstruct all ephemeral state and run with no further fleet changes:
 		// startup must recover the due time from Postgres and eventually flush.
 		h.live = newLiveActivities(h)
@@ -600,6 +629,8 @@ func TestPrefsChangeResends(t *testing.T) {
 type fleetPushSink struct {
 	mu  sync.Mutex
 	got []fleetPushCall
+	// answer, when set, answers a call instead of 200: a status (and body) the relay returns, or an error for no answer.
+	answer func(fleetPushCall) (status int, body string, err error)
 }
 
 type fleetPushCall struct {
@@ -620,8 +651,16 @@ func (s *fleetPushSink) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	s.mu.Lock()
 	s.got = append(s.got, call)
+	answer := s.answer
 	s.mu.Unlock()
-	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"ok":true}`)), Request: r}, nil
+	status, body := http.StatusOK, `{"ok":true}`
+	if answer != nil {
+		var err error
+		if status, body, err = answer(call); err != nil {
+			return nil, err
+		}
+	}
+	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 }
 
 func (s *fleetPushSink) count(device, kind, event string) int {

@@ -207,7 +207,8 @@ func rulePlanRuns(plans []*TaskPlan) (runs map[string]int, task map[string]PlanT
 				runs[k] = 0
 			case p.State == planStarted && t.OwnerStarted:
 				runs[k]++
-				task[k] = PlanTask{Machine: t.Machine, Cwd: t.Cwd}
+				// The repository's folder when it is the kind (#8259): what the suggestion names and tasks.trust keeps.
+				task[k] = PlanTask{Machine: t.Machine, Cwd: firstNonEmpty(t.Repo, t.Cwd), Repo: t.Repo}
 			}
 		}
 	}
@@ -402,8 +403,9 @@ func (s *Service) ruleCount(ctx context.Context, now time.Time) (map[string]*rul
 	if err != nil {
 		return nil, err
 	}
+	homes := s.trustHomes(ctx)
 	for k, n := range starts {
-		if n >= ruleSuggestAfter && !trusted[k] {
+		if n >= ruleSuggestAfter && !trustCovers(trusted, homes, k) { // a kind a remembered directory holds starts already
 			out[ruleSuggestionID(ruleKindPlanStart, k)] = &ruleCandidate{id: ruleSuggestionID(ruleKindPlanStart, k),
 				kind: ruleKindPlanStart, count: n, task: task[k]}
 		}

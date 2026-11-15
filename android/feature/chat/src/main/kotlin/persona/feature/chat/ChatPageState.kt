@@ -51,6 +51,9 @@ import persona.core.domain.sort.canInterrupt
 import persona.core.domain.sort.canSend
 import persona.core.domain.sort.canTerminal
 import persona.core.domain.sort.canTypeClaudeCommands
+import persona.core.domain.sort.fromSide
+import persona.core.domain.sort.isFoldedSide
+import persona.core.domain.sort.sideHome
 import persona.core.domain.sort.shownCloseout
 import persona.feature.chat.media.ChatImageViewer
 import persona.core.domain.rewind.Rewind
@@ -67,6 +70,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -95,7 +99,11 @@ internal fun rememberChatPageRequests(key: SessionKey, chrome: ChatChromeBinding
     val taskAgentSessionsState = (tasks?.agentSessions ?: remember {
         kotlinx.coroutines.flow.MutableStateFlow(emptyMap<SessionKey, Session>())
     }).collectAsStateWithLifecycle()
-    val requests = taps.shown(allRequests).filter { it.sessionKey == key || it.sessionKey in taskKeys }
+    val features = chrome.connection?.lastHello?.features ?: LocalHubFeatures.current
+    val sideFold = persona.core.domain.sort.SideFold.FEATURE in features
+    val sidePage = sideFold && (sessionList.firstOrNull { it.key == key } ?: chrome.lookupRows.firstOrNull { it.key == key })
+        ?.isFoldedSide == true
+    val requests = chatPageCards(taps.shown(allRequests), key, taskKeys, sideFold, sidePage)
         .sortedBy { if (it.id == chrome.requestId) 0 else 1 }
     // The cards above the composer, as iOS's footer has them. An Agent's chat: the stack holds every card it waits on.
     // Persona's conversation: the oldest question of its tasks is a card of its own above the Needs you / In progress
@@ -108,7 +116,7 @@ internal fun rememberChatPageRequests(key: SessionKey, chrome: ChatChromeBinding
             ?: card.taskTitle?.takeIf(String::isNotBlank) ?: card.sessionTitle?.takeIf(String::isNotBlank)
             ?: sessionList.firstOrNull { it.key == card.sessionKey }?.displayTitle
     }
-    val stackCards = if (assistantChat) requests.filter { it.sessionKey == key } else requests
+    val stackCards = if (assistantChat) requests.filter { it.homeKey == key } else requests
     val messages = chatBubbles(allMessages, key, snapshot.items)
     val composerDeliveriesState = (composerService?.deliveries ?: remember {
         kotlinx.coroutines.flow.MutableStateFlow(emptyMap<String, ComposerDelivery>())
@@ -136,6 +144,20 @@ internal class ChatPageRequests(
     val messages: List<OutboxMessage>,
     val composerDeliveries: State<Map<String, ComposerDelivery>>,
 )
+
+/**
+ * The cards a chat shows: those whose home is this chat's session ([Interaction.homeKey]) or one of its tasks'. With side
+ * folding ([sideFold], #7944) a side's own card shows in its parent's chat ("From side session · …") and in the side's
+ * own chat ([sidePage]), where it is the side's own card; a card from a row folded through a side ([Interaction.foldedSide])
+ * belongs to that side's chat alone. The parent's page is covered while a side's chat is open, so a card never shows twice.
+ */
+internal fun chatPageCards(cards: List<Interaction>, key: SessionKey, taskKeys: Set<SessionKey>, sideFold: Boolean,
+    sidePage: Boolean): List<Interaction> = when {
+    !sideFold -> cards.filter { it.homeKey == key || it.homeKey in taskKeys }
+    sidePage -> cards.filter { it.sessionKey == key || it.sideHome == key }
+        .map { if (it.sessionKey == key && it.fromSide) it.copy(foldedUnder = null, foldedAs = null) else it }
+    else -> cards.filter { it.homeKey == key && it.foldedSide.isNullOrBlank() || it.homeKey in taskKeys }
+}
 
 /** ChatPage's links and mentions: port links, the @ menu, the cards host, call jumps and tool names (moved as is). */
 @Composable
@@ -306,7 +328,8 @@ internal fun rememberChatPageLines(key: SessionKey, renderStyle: ChatRenderStyle
     snapshot: persona.core.contracts.api.ChatSnapshot, session: Session?, foldsBackground: Boolean,
     tasks: persona.core.domain.tasks.TasksStore?, taskTodos: List<persona.core.contracts.Todo>, search: ChatSearchState,
     openWork: Set<String>, projection: persona.core.domain.lines.ChatSnapshot, feed: List<persona.core.contracts.FeedItem>,
-    taskPlans: Map<String, TaskPlan>, taskCardProjection: Map<String, List<AssistantTaskCard>>): ChatPageLines {
+    taskPlans: Map<String, TaskPlan>, taskCardProjection: Map<String, List<AssistantTaskCard>>,
+    children: List<Session> = emptyList()): ChatPageLines {
     val jumpItemState = remember { mutableStateOf<String?>(null) }
     var jumpItem by jumpItemState
     // Glass draws the hub's task records among the lines, as iOS does (#4339 C13), and folds a supervision round into one
@@ -330,7 +353,9 @@ internal fun rememberChatPageLines(key: SessionKey, renderStyle: ChatRenderStyle
     val viewedStrips = PersonaTheme.style == AppStyle.Glass
     // Where the replies' model changes, a divider (#5055, the web's ModelChangeDivider): Glass's, as its model pill.
     val modelChanges = PersonaTheme.style == AppStyle.Glass
-    val lines = remember(assistantPresentation, search.selected, jumpItem, feed, tasks, taskPlans, taskTodos, taskCardProjection, renderStyle, inlineRecords, nestedSubagents, viewedStrips, modelChanges) {
+    val childPlaces = remember(key) { persona.core.domain.lines.ChildSessionPlaces() }
+    val places = remember(children) { childPlaces.places(children) }
+    val lines = remember(assistantPresentation, search.selected, jumpItem, feed, tasks, taskPlans, taskTodos, taskCardProjection, renderStyle, inlineRecords, nestedSubagents, viewedStrips, modelChanges, places, snapshot.hasOlder, openWork) {
         searchVisibleLines(assistantPresentation.foreground, search.selected?.itemId ?: jumpItem)
             .let {
                 when {
@@ -341,6 +366,7 @@ internal fun rememberChatPageLines(key: SessionKey, renderStyle: ChatRenderStyle
                         persona.core.domain.tasks.SentToAgents.shown(feed))
                 }
             }.let { persona.core.domain.lines.Subagents.withNested(it, nestedSubagents) }
+            .let { persona.core.domain.lines.ChildSessionCards.lines(it, places, !snapshot.hasOlder, openWork) }
             // The strip of what a turn's work looked at is Glass's, as iOS draws it (#4339 C9); Brief and Board keep their lines.
             .let { if (viewedStrips) it else it.filterNot { line -> line is ChatLine.Viewed } }
             .let { if (modelChanges) persona.core.domain.lines.ModelChanges.mark(it) else it }.asReversed()
@@ -653,9 +679,19 @@ internal fun rememberChatPageSources(key: SessionKey, repository: ChatRepository
             EntryPointAccessors.fromApplication(application, ChatRenameServices::class.java).sessionRenamer()
         else null
     }
-    val sessionSource = remember(renamer, sessions) { renamer?.project(sessions.sessions) ?: sessions.sessions }
+    // Only the page's own row joins metadata. Looked-up children remain fallback cards, so bounded lists still refresh them.
+    val lookupRows = chrome.lookupRows.filter { it.key == key }
+    val sessionSource = remember(renamer, sessions, lookupRows) {
+        val source = renamer?.project(sessions.sessions) ?: sessions.sessions
+        if (lookupRows.isEmpty()) source else source.map { rows ->
+            val missing = lookupRows.filter { found -> rows.none { it.key == found.key } }
+            if (missing.isEmpty()) rows else rows + missing
+        }
+    }
     // Read once per source, not on every recomposition: only the first value seeds the collected state.
-    val initialSessions = remember(sessionSource) { sessions.sessions.value }
+    val initialSessions = remember(sessionSource) {
+        if (lookupRows.isEmpty()) sessions.sessions.value else (sessions.sessions.value + lookupRows).distinctBy { it.key }
+    }
     val sessionListState = sessionSource.collectAsStateWithLifecycle(initialSessions)
     val managerChoiceState = AssistantManagerChoice.current.collectAsStateWithLifecycle()
     val machinesState = sessions.machines.collectAsStateWithLifecycle()

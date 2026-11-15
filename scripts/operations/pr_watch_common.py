@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -43,9 +44,35 @@ def run(argv, cwd=None, timeout=120, environ=None, input_text=None):
     """Run an argv command with a bounded lifetime, including its process group."""
     if not isinstance(argv, (list, tuple)) or not argv or not all(isinstance(x, str) for x in argv):
         raise WatchError("a command must be a non-empty argv list")
+    arguments = list(argv)
+    pass_fds = ()
+    if len(arguments) > 1 and arguments[1] == "--args-fd":
+        # bwrap accepts its NUL-separated options from a file descriptor. A
+        # full-tree conflict can otherwise exceed execve's per-argument limit.
+        # The options remain the same mounts and environment built by the
+        # trusted caller; this changes transport, never sandbox permissions.
+        with tempfile.TemporaryFile(prefix="pr-watch-bwrap-args-", buffering=0) as options:
+            if "--" not in arguments[2:]:
+                raise WatchError("bwrap FD arguments need a command after --")
+            # --args FD replaces bwrap's option parser input, including its
+            # final --. The worker command and its arguments stay in argv.
+            command = arguments.index("--", 2)
+            for argument in arguments[2:command]:
+                if "\0" in argument:
+                    raise WatchError("bwrap arguments must not contain NUL")
+                options.write(argument.encode() + b"\0")
+            options.flush()
+            options.seek(0)
+            arguments = [arguments[0], "--args", str(options.fileno()), *arguments[command + 1:]]
+            pass_fds = (options.fileno(),)
+            return _run_process(arguments, cwd, timeout, environ, input_text, pass_fds)
+    return _run_process(arguments, cwd, timeout, environ, input_text, pass_fds)
+
+
+def _run_process(argv, cwd, timeout, environ, input_text, pass_fds):
     proc = subprocess.Popen(
         argv, cwd=cwd, env=clean_env(environ), stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True, pass_fds=pass_fds,
     )
     try:
         stdout, stderr = proc.communicate(input=input_text, timeout=timeout)
@@ -82,8 +109,8 @@ def checked(argv, cwd=None, timeout=120, environ=None, input_text=None):
     return result.stdout
 
 
-def gh_json(argv, timeout=90, environ=None):
-    text = checked(["gh"] + argv, timeout=timeout, environ=environ)
+def gh_json(argv, timeout=90, environ=None, input_text=None):
+    text = checked(["gh"] + argv, timeout=timeout, environ=environ, input_text=input_text)
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:
@@ -111,6 +138,32 @@ def pr_snapshot(repo, number, timeout=90, environ=None):
     if not isinstance(data.get("isDraft"), bool) or not isinstance(data.get("isCrossRepository"), bool):
         raise WatchError("PR snapshot has invalid flags")
     return data
+
+
+class VerificationError(WatchError):
+    """A completed failed check with enough information for a base comparison."""
+    def __init__(self, message, command=None, output="", failures=None, checks=None):
+        super().__init__(message)
+        self.command = command
+        self.output = output
+        self.failures = failures or []
+        self.checks = checks or []
+
+
+def test_or_fix(pr, names):
+    """Maintainer policy: test/fix titles and test-only changes need no screenshots."""
+    if re.match(r"^(?:test|fix)(?:\([^)]*\))?:\s+", pr.get("title", ""), re.I):
+        return True
+    TEST_PARTS = {"test", "tests", "testdata", "fixtures", "__tests__", "e2e"}
+    def test_file(name):
+        path = Path(name)
+        parts = path.parts
+        if len(parts) > 1 and parts[1] in ("PersonaTests", "PersonaUITests"):
+            return True
+        if path.name.endswith(("_test.go", "_test.py", ".test.ts", ".test.tsx", ".test.js", ".test.mjs")):
+            return True
+        return any(part.lower() in TEST_PARTS and "test" in path.name.lower() for part in parts)
+    return bool(names) and all(test_file(name) for name in names)
 
 
 def verification_env():

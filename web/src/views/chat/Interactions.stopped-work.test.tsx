@@ -72,8 +72,6 @@ describe("a stopped Agent's manager work card", () => {
     act(() => button("Handled, continue").click());
     expect(calls).toEqual([]);
     act(() => button("Leave it").click());
-    expect(locked(button(t("chat-interactions.send_answer")))).toBe(false);
-    act(() => button(t("chat-interactions.send_answer")).click());
     await flush();
     expect(calls).toEqual([{ path: "/interactions/work_1/resolve", body: { answers: { [question]: "Leave it" } } }]);
     expect(host.querySelector("[data-card]")).toBeNull();

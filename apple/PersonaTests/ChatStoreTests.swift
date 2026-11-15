@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Persona
+import PersonaWire
 
 @MainActor
 struct ChatStoreTests {
@@ -49,6 +50,19 @@ struct ChatStoreTests {
         for _ in 0..<50 where s.rows.count < 2 { try await Task.sleep(for: .milliseconds(20)) }
         s.merge(items, backlog: true, hasMore: false) // the hub's page holds what the cache had: no rebuild comes
         #expect(s.backlogBuilt)
+    }
+
+    @Test func everyOlderCacheFolderIsRemovedNotOnlyThePreviousOne() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let older = ["chats", "chats-v2", "chats-v11", "chats-v16"]
+        let others = [ChatCache.folder, "chat-images", "chats-vX", "state"]
+        for name in older + others {
+            try FileManager.default.createDirectory(at: base.appending(path: name), withIntermediateDirectories: true)
+        }
+        ChatCache.removeOlderFolders(in: base)
+        let left = try FileManager.default.contentsOfDirectory(atPath: base.path)
+        #expect(Set(left) == Set(others))
     }
 
     @Test func duplicateCachedIDsDoNotCrashWhenBacklogRepeatsThem() throws {

@@ -152,6 +152,21 @@ describe("ActionRow", () => {
     expect(html).toContain("[@media(pointer:coarse)]:min-h-10");
     expect(html).toContain("text-[length:var(--chat-secondary)]");
   });
+
+  it("shows a real multi-second span as a quiet suffix, and nothing for a sub-second or unfinished call (#8163)", () => {
+    const span = (id: string, startS: number, endS?: number): ToolStep => {
+      const u = use(id, "Bash", { command: "npm test" }, startS);
+      const r = endS === undefined ? undefined : res(id, "ok", endS);
+      return { kind: "tool", id: u.id, use: u, ...(r ? { result: r } : {}), images: [] };
+    };
+    const done = renderToStaticMarkup(<ActionRow step={span("t1", 0, 4)} mid="m" sid="s" />);
+    expect(done).toContain('data-tool-duration');
+    expect(done).toMatch(/data-tool-duration[^>]*>4s</);
+    // tabular, quiet and hidden only on compact layouts; the diff-stats layout is untouched
+    expect(done).toContain("max-lg:hidden shrink-0 font-mono text-label text-tool-ink tabular-nums");
+    expect(renderToStaticMarkup(<ActionRow step={span("t2", 0, 0.4)} mid="m" sid="s" />)).not.toContain("data-tool-duration");
+    expect(renderToStaticMarkup(<ActionRow step={span("t3", 0)} running mid="m" sid="s" />)).not.toContain("data-tool-duration");
+  });
 });
 
 describe("thought rows (cindy's ThinkingActivityRow, #5155)", () => {
@@ -240,7 +255,8 @@ describe("the user's bubble and the answer", () => {
     expect(html).toContain("max-h-[10lh] overflow-y-auto");
     expect(html).toContain(">展开<");
     expect(html).toContain("opacity-60");
-    expect(html).toContain(">发送中…<");
+    // Sending is the chat's status line under the last message (ChatView), not a second line under the bubble
+    expect(html).not.toContain(">发送中…<");
   });
 
   it("leaves 12% on its left like a merged bubble, so it never runs the whole width (#1996)", () => {

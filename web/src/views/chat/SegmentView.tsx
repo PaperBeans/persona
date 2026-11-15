@@ -128,7 +128,9 @@ export function UserBubble({ msg, mid, sid, pending, sendState, starting, onDele
           </MessageActions>
         ))}
       {pinned && <span className="text-[11px] text-ink-3 tabular-nums" data-latest-time>{clock(msg.ts)}</span>}
-      {(pending || starting || msg.queued) && feedback !== "" && <span className="text-[11px] text-ink-3 whitespace-nowrap">{feedback === "processing" ? t("chat-segmentview.processing") : feedback === "unknown" ? t("lib-outbox.delivery_unknown") : pending || starting ? t("chat-segmentview.sending") : t("chat-segmentview.queued")}</span>}
+      {/* a message waiting its turn says so under it; one on its way (Sending, Processing, delivery unknown) is said once,
+          by the chat's status line under the last message (ChatView's data-message-feedback), not here as well */}
+      {msg.queued && !pending && !starting && feedback !== "" && <span className="text-[11px] text-ink-3 whitespace-nowrap">{t("chat-segmentview.queued")}</span>}
       {!pending && !starting && <ChannelSource clientMsgId={msg.client_msg_id} openedBy={openedBy} />}
     </div>
   );
@@ -309,7 +311,7 @@ export const SegmentView = memo(function SegmentView({
    *  of lines at a time, and still while a tool runs. The live work row stays under them; the headless assistant's
    *  words stream as they are written and stand for it. */
   batchedWords?: boolean;
-  expandFold: (f: Item) => Promise<void>;
+  expandFold: (f: Item) => Promise<boolean | void>;
   /** Drawn between the work and the agent's last words (the wakes chip, #3783); above the work while it is live. */
   beforeWords?: ReactNode;
   /** An opened supervision round shows its original input instead of the injected hint. */

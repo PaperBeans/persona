@@ -862,11 +862,37 @@ export interface AuthPrompt {
   expires_at?: string;
 }
 
+/**
+ * settings.check (manifest settings_check): the configuration and secrets as a change would leave them, before the
+ * hub saves it. The program answers whether they work (SettingsCheckResult) within 10 seconds.
+ */
+export interface SettingsCheckParams {
+  /** The whole configuration as it would be saved, the schema's defaults filled in. */
+  config: unknown;
+  secrets: Record<string, string>;
+  /**
+   * The egress proxy URL for this check only, when the program runs behind the proxy and a config: entry of
+   * permissions.network names an address: requests sent through it reach the addresses this configuration names, its
+   * ordinary requests only the saved ones. It stops working once the check answers. Absent: use the program's
+   * ordinary proxy (an older hub sends none).
+   */
+  proxy?: string;
+}
+
+/**
+ * settings.check's answer: ok, or why not in one sentence for the owner (the hub takes every secret out of it and
+ * cuts it to 300 characters).
+ */
+export interface SettingsCheckResult {
+  ok: boolean;
+  error?: string;
+}
+
 export type HubRole = "center" | "member" | (string & {});
 export const HUB_ROLES = ["center", "member"] as const;
 
-export type HubCapability = "inbox_group" | "inbox_group_state" | (string & {});
-export const HUB_CAPABILITIES = ["inbox_group", "inbox_group_state"] as const;
+export type HubCapability = "inbox_group" | "inbox_group_state" | "tool_images" | (string & {});
+export const HUB_CAPABILITIES = ["inbox_group", "inbox_group_state", "tool_images"] as const;
 
 /**
  * What the hub sends first. The extension is under extension; hubs before the rename (#1844) send it as plugin, newer
@@ -3476,12 +3502,34 @@ export interface ConnectorCallParams {
 export interface ConnectorCallResult {
   text?: string;
   /**
+   * tools.call only (actions.do and catalog.call ignore it): pictures for the model after the text, on a hub whose
+   * initialize lists the capability tool_images (an older hub ignores them; the text must stand on its own). At most
+   * 16, each a whole JPEG, PNG or WebP of at most 1 MiB and 2000 pixels a side, together at most 4 MiB and 8 million
+   * pixels; the hub leaves out any over a limit and says so after the text.
+   */
+  images?: ConnectorToolImage[];
+  /**
    * actions.do only (tools.call ignores it): the id, on the other side, of the message the write made, when the
    * service gave one (a comment's id, a mail's Message-ID, a chat message's id). The hub trims it and keeps it as the
    * sent-as-user ledger row's message_ref; one longer than 200 characters is dropped (the row has none), not cut.
    * Leave it out when there is none.
    */
   message_ref?: string;
+}
+
+/**
+ * One picture of a tools.call answer (ConnectorCallResult.images).
+ */
+export interface ConnectorToolImage {
+  /** image/jpeg, image/png or image/webp: a hint, the hub reads the type from the bytes. */
+  mime?: string;
+  /** The bytes, base64 (standard, with padding). */
+  data: string;
+  /**
+   * One short line for the model and for people, shown before the picture (a time in a video, a picture's place in a
+   * post); the hub keeps the first 200 characters of its first line.
+   */
+  caption?: string;
 }
 
 /**
@@ -5164,6 +5212,11 @@ export interface LeaderReportEvent {
   doing?: string;
   needs_you?: string;
   links?: string[];
+  /**
+   * set only while the hub's push tiering (low-distraction switch) is on: P1 for progress, reached and stuck (keep it
+   * in the log and the briefing, alert nobody), P0 for a decision
+   */
+  level?: string;
 }
 
 /**
@@ -5965,6 +6018,77 @@ export interface UIPageSnapshot {
   view: View;
 }
 
+/**
+ * error.code of the transcription calls besides permission_denied (data {scope: "transcription"}): invalid_params (a
+ * field missing or wrong, audio that is not base64 PCM16 or over 256 KiB a call, a job that is not this extension's
+ * or no longer runs); assistant_offline (the manager is away: try again); transcription_unavailable (no transcription
+ * is chosen, ready or able to replay: the owner sets it up in Settings › Meetings); busy (this extension has a job
+ * running, or two extensions have); too_long (more than 15 minutes of audio: the job is ended); timeout (the
+ * transcription stopped answering: the job is ended); transcription_failed (the transcription failed the job; data
+ * {code}: its error code).
+ */
+export type TranscriptionErrorCode = "invalid_params" | "assistant_offline" | "transcription_unavailable" | "busy" | "too_long" | "timeout" | "transcription_failed" | (string & {});
+export const TRANSCRIPTION_ERROR_CODES = ["invalid_params", "assistant_offline", "transcription_unavailable", "busy", "too_long", "timeout", "transcription_failed"] as const;
+
+/**
+ * transcription.start: a job for one piece of audio.
+ */
+export interface TranscriptionStartParams {
+  /**
+   * A BCP 47 hint (zh-CN, en-US); the transcription still follows the speech. Empty: the transcription's own guess.
+   */
+  language?: string;
+  /** A short name of what this is, for the manager's log (its first 40 characters); never what is said. */
+  label?: string;
+}
+
+export interface TranscriptionStartResult {
+  /** The job's id, for the calls after; it is this extension's only. */
+  job: string;
+}
+
+/**
+ * transcription.audio: the next piece of the audio, contiguous with the last: PCM16 little-endian, mono, 16 kHz,
+ * base64 (standard, with padding), at most 256 KiB of PCM (8 seconds) a call. The call returns once the audio is with
+ * the transcription and no more than 60 seconds wait ahead of it, so sending as fast as it returns paces the job.
+ */
+export interface TranscriptionAudioParams {
+  job: string;
+  data: string;
+}
+
+/**
+ * transcription.finish (every piece is sent: wait for the text) and transcription.cancel (drop the job and its text).
+ */
+export interface TranscriptionJobParams {
+  job: string;
+}
+
+/**
+ * One sentence, from and to in seconds from the start of the audio.
+ */
+export interface TranscriptionSegment {
+  from: number;
+  to: number;
+  text: string;
+}
+
+/**
+ * A span the transcription did not trust any text for (its sessions did not agree: noise, music, crosstalk): say so,
+ * never guess.
+ */
+export interface TranscriptionGap {
+  from: number;
+  to: number;
+}
+
+export interface TranscriptionFinishResult {
+  segments: TranscriptionSegment[];
+  gaps?: TranscriptionGap[];
+  /** How much audio the job took. */
+  seconds: number;
+}
+
 /** One call or event of an extension point's protocol: who sends it, and the definitions its params and
  * its answer hold to (no result: any JSON; an event has no answer). */
 export interface Call {
@@ -6059,4 +6183,8 @@ export const CALLS: Record<string, Call> = {
   "storage.blob.finish": { from: "program", params: "StorageBlobMutateParams", result: "StorageBlobFinishResult" },
   "storage.blob.delete": { from: "program", params: "StorageBlobMutateParams", result: "StorageDeleteResult" },
   "storage.blob.read": { from: "program", params: "StorageBlobReadParams", result: "StorageBlobReadResult" },
+  "transcription.start": { from: "program", params: "TranscriptionStartParams", result: "TranscriptionStartResult" },
+  "transcription.audio": { from: "program", params: "TranscriptionAudioParams", result: "Empty" },
+  "transcription.finish": { from: "program", params: "TranscriptionJobParams", result: "TranscriptionFinishResult" },
+  "transcription.cancel": { from: "program", params: "TranscriptionJobParams", result: "Empty" },
 };

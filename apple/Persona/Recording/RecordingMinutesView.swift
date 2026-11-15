@@ -478,3 +478,4 @@ struct MinutesPhoto: View {
 }
 #endif
 #endif
+import PersonaWire

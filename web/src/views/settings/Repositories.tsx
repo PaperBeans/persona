@@ -4,10 +4,10 @@ import { t } from "../../i18n";
 import { api, credentialOwner, errorText, getToken, HubTimeoutError, pastHub } from "../../lib/api";
 import { parseRepository, type RepositoryIdentity as Identity } from "../../lib/repository-identity";
 import { MANAGER_HEADER } from "../../lib/manager-choice";
+import type { RepositoryBinding as Binding } from "../../lib/task-repositories";
 import { Button, Dialog, Loading, toast } from "../../ui/atoms";
 import { Group, Row, settingsInputClass } from "./SettingsParts";
 
-type Binding = Identity & { id: string; name?: string; aliases?: string[]; purpose?: string; verified_at: string };
 type Draft = { id?: string; url: string; provider: string; name: string; aliases: string; purpose: string };
 type Reply = { manager: string; repositories?: Binding[]; repository?: Binding; identity?: Identity; receipt?: string };
 const blank = (): Draft => ({ url: "", provider: "", name: "", aliases: "", purpose: "" });

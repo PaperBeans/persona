@@ -35,11 +35,46 @@ struct PathRefsTests {
         #expect(slice(t, PathRefs.find(in: t)[0]) == "/tmp/out/report.md")
     }
 
+    @Test func takesNamesInAnyScriptOutsideBackticks() {
+        // a Chinese file name, Chinese folders, with and without an extension, a folder
+        #expect(paths("已保存到 /home/me/.persona/assistant/report/报表_2026H2.xlsx") == ["/home/me/.persona/assistant/report/报表_2026H2.xlsx"])
+        #expect(paths("在 ~/文档/项目/notes.md 里") == ["~/文档/项目/notes.md"])
+        #expect(paths("合同在 /home/me/资料/合同 和 /var/log/归档/") == ["/home/me/资料/合同", "/var/log/归档/"])
+        // Japanese, Korean, accents (a combining one too), mixed scripts
+        #expect(paths("~/ドキュメント/会議メモ.txt と /Users/me/デスクトップ/レポート.pdf") == ["~/ドキュメント/会議メモ.txt", "/Users/me/デスクトップ/レポート.pdf"])
+        #expect(paths("~/문서/보고서.hwp, ~/Café/menu\u{301}.txt") == ["~/문서/보고서.hwp", "~/Café/menu\u{301}.txt"])
+        #expect(paths("/srv/data/2026年/sales-売上_v2.csv") == ["/srv/data/2026年/sales-売上_v2.csv"])
+        // the line, with a Chinese word after it
+        #expect(paths("见 /tmp/报告/main.go:12行 和 ~/项目/说明.md#L3") == ["/tmp/报告/main.go:12", "~/项目/说明.md:3"])
+        // a relative one has an ASCII first folder in text, so the words before it stay out
+        #expect(paths("请看docs/设计/说明.md") == ["docs/设计/说明.md"])
+        #expect(paths("请看文档/报告.md").isEmpty)
+        // where it is: UTF-16, past a character outside the BMP
+        let t = "𠀋 /tmp/𠀋/报告.md"
+        #expect(slice(t, PathRefs.find(in: t)[0]) == "/tmp/𠀋/报告.md")
+    }
+
+    @Test func endsAPathAtChineseAndJapanesePunctuationNotAtTheNames() {
+        #expect(paths("已写入 /tmp/报告/第四季度.docx。") == ["/tmp/报告/第四季度.docx"])
+        #expect(paths("先看 /tmp/报告.md，再看 /tmp/数据.csv、/tmp/图表.png；") == ["/tmp/报告.md", "/tmp/数据.csv", "/tmp/图表.png"])
+        #expect(paths("（/tmp/资料/a.txt）「~/笔记/待办.md」『~/メモ/買い物.txt』") == ["/tmp/资料/a.txt", "~/笔记/待办.md", "~/メモ/買い物.txt"])
+        #expect(paths("见：/tmp/报告.md！") == ["/tmp/报告.md"])
+    }
+
+    @Test func endsANameBeforeAChineseOrJapaneseWordRightAfterItsExtension() {
+        #expect(paths("写到 /tmp/报告.md里了") == ["/tmp/报告.md"])
+        #expect(paths("~/ドキュメント/メモ.txtを開いて") == ["~/ドキュメント/メモ.txt"])
+        // two paths joined by the Chinese word for "and"
+        #expect(paths("/tmp/报告.md和/tmp/数据.csv") == ["/tmp/报告.md", "/tmp/数据.csv"])
+    }
+
     @Test func leavesURLsWordsWithASlashVersionsAndRootsAlone() {
         #expect(paths("https://example.com/a/b.md and //cdn/x/y.js").isEmpty)
         #expect(paths("model deepseek/v4.1-flash, and/or, /tmp alone, 1/2").isEmpty)
         #expect(paths("a ~ b / c").isEmpty)
         #expect(paths("网址 https://example.com/a/b 不算").isEmpty)
+        // a path right after a URL and its punctuation
+        #expect(paths("链接 https://example.com/a，文件在/tmp/报告/a.md") == ["/tmp/报告/a.md"])
     }
 
     @Test func takesAPathInBackticksWhole() {
@@ -61,6 +96,9 @@ struct PathRefsTests {
         let r = PathRefs.codePathRef(" /tmp/x/y.md ")
         #expect(r?.path == "/tmp/x/y.md" && r?.range == NSRange(location: 1, length: 11))
         #expect(PathRefs.codePathRef("~/报告/第四季度.docx")?.path == "~/报告/第四季度.docx")
+        let rel = PathRefs.codePathRef("docs/设计/说明.md:7")
+        #expect(rel?.path == "docs/设计/说明.md" && rel?.line == 7 && rel?.whole == true)
+        #expect(PathRefs.codePathRef("和/或") == nil)
         #expect(PathRefs.codePathRef("ls /tmp/x/y.md") == nil)
         #expect(PathRefs.codePathRef("/tmp") == nil)
         #expect(PathRefs.codePathRef("https://example.com/a/b") == nil)
@@ -128,6 +166,16 @@ struct PathMarkdownTests {
         let out = p.linked(plainCode: true) { _ in true }.markdown
         #expect(out == "见 [src/\\_\\_init\\_\\_.py:3](\(link("src/__init__.py", 3))) 和 [\\~/notes/a\\[1\\].md](\(link("~/notes/a[1].md")))。")
         #expect(p.linked { _ in true }.markdown.contains("[`src/__init__.py:3`]"))
+    }
+
+    @Test func linksAPathWhoseNamesAreNotASCIIWholeAndLeavesTheWordsGluedToItOut() {
+        let md = "已保存到 /home/me/report/报表_2026H2.xlsx，摘要在 ~/ドキュメント/メモ.txtにあります。"
+        let there: Set = ["/home/me/report/", "/home/me/report/报表_2026H2.xlsx", "~/ドキュメント/メモ.txt"]
+        let p = PathMarkdown(md)
+        #expect(p.paths == ["/home/me/report/报表_2026H2.xlsx", "~/ドキュメント/メモ.txt"])
+        let out = p.linked { there.contains($0) }
+        #expect(out.markdown == "已保存到 [/home/me/report/报表_2026H2.xlsx](\(link("/home/me/report/报表_2026H2.xlsx")))，"
+                + "摘要在 [~/ドキュメント/メモ.txt](\(link("~/ドキュメント/メモ.txt")))にあります。")
     }
 
     @Test func aWholeSpanWithChineseAndSpaces() {

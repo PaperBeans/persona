@@ -100,7 +100,7 @@ beforeAll(() => loadPages(), 60_000);
 
 describe("the sidebar's paged Agents by to-do", () => {
   it("draws each open to-do as an open section of its Agents, then Not on a to-do folded, under the complete list's bar", async () => {
-    const fetch = await render(["sessions_list", "sessions_lookup", "sessions_todo"]);
+    const fetch = await render(["sessions_list", "sessions_lookup", "sessions_agents_only", "sessions_todo"]);
     expect(host.querySelector("[data-paged-sessions]")).not.toBeNull();
     expect(segments()).toEqual(["待办", "机器", "仓库", "项目", "状态"]);
     expect(bar()!.querySelector('[aria-checked="true"]')!.textContent).toBe("待办");
@@ -119,7 +119,7 @@ describe("the sidebar's paged Agents by to-do", () => {
   });
 
   it("reads the complete list for By to-do on a hub that cannot list sessions by to-do, with the same bar", async () => {
-    const fetch = await render(["sessions_list", "sessions_lookup"]);
+    const fetch = await render(["sessions_list", "sessions_lookup", "sessions_agents_only"]);
     expect(host.querySelector("[data-paged-sessions]")).toBeNull();
     expect(segments()).toEqual(["待办", "机器", "仓库", "项目", "状态"]);
     expect(paths(fetch).some((u) => u.searchParams.get("summary") === "0" || !u.search)).toBe(true);
@@ -128,7 +128,7 @@ describe("the sidebar's paged Agents by to-do", () => {
 
   it("shows the complete list's quick filters where the hub selects them, and reads each chip as the complete list matches it", async () => {
     localStorage.setItem("persona.agentFilter", "working");
-    const fetch = await render(["sessions_list", "sessions_lookup", "sessions_todo", "sessions_quick_filters"]);
+    const fetch = await render(["sessions_list", "sessions_lookup", "sessions_agents_only", "sessions_todo", "sessions_quick_filters"]);
     const chips = () => [...host.querySelectorAll<HTMLButtonElement>('[role="radiogroup"][aria-label="快速筛选"] button')];
     expect(chips().map((b) => b.getAttribute("aria-label"))).toEqual(["全部", "需要你 1", "工作中 1", "后台等待中 1", "飞书群 1", "终端 5"]);
     // the choice the complete list keeps: Working, without the one waiting in the background
@@ -152,14 +152,14 @@ describe("the sidebar's paged Agents by to-do", () => {
   });
 
   it("keeps the paged list's own state chips on a hub that cannot select the quick filters", async () => {
-    await render(["sessions_list", "sessions_lookup", "sessions_todo"]);
+    await render(["sessions_list", "sessions_lookup", "sessions_agents_only", "sessions_todo"]);
     const chips = [...host.querySelectorAll('[role="radiogroup"][aria-label="快速筛选"] button')].map((b) => b.textContent);
     expect(chips).toContain("全部");
     expect(chips.some((c) => c!.startsWith("已看"))).toBe(true);
   });
 
   it("has the complete list's title row: fold all acts on the paged sections, the ⋯ holds its sorts and the archived Agents", async () => {
-    await render(["sessions_list", "sessions_lookup", "sessions_todo", "agent_session_archives"]);
+    await render(["sessions_list", "sessions_lookup", "sessions_agents_only", "sessions_todo", "agent_session_archives"]);
     const foldAll = () => host.querySelector<HTMLButtonElement>("[data-testid=agents-fold-all]")!;
     const open = () => sections().map((s) => heading(s).getAttribute("aria-expanded"));
     expect(open()).toEqual(["true", "true", "false"]);
@@ -181,7 +181,7 @@ describe("the sidebar's paged Agents by to-do", () => {
 
   it("orders the computers by their newest Agent under Recently updated, and offers no sort By status, as the complete list", async () => {
     rowsNow = [row("Nightly build", 10, undefined, "idle", { machine_id: "linux" }), ...ROWS];
-    await render(["sessions_list", "sessions_lookup", "sessions_todo", "agent_session_archives"]);
+    await render(["sessions_list", "sessions_lookup", "sessions_agents_only", "sessions_todo", "agent_session_archives"]);
     const choose = async (label: string) => {
       await act(async () => [...bar()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!.click());
       await flush();

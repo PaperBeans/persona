@@ -22,7 +22,8 @@ private data class HomeEntry(val key: NavKey, val title: Int, val icon: PhIcon, 
 @Composable
 internal fun SettingsHomePage(
     services: SettingsServices, query: String, onQuery: (String) -> Unit,
-    extensionsAvailable: Boolean, extensionSummary: String?, channelsAvailable: Boolean, channelList: List<HubChannel>?,
+    extensionsAvailable: Boolean, inboxSources: Boolean, extensionSummary: String?, channelsAvailable: Boolean, channelList: List<HubChannel>?,
+    knowledgeSelectionAvailable: Boolean,
     connection: ConnectionState, translationValue: String?, hubUpdateStatus: HubUpdateStatus?, updateValue: String?,
     selected: NavKey?, onOpen: (SettingsPage) -> Unit, onNavigate: ((NavKey) -> Unit)?, onClose: (() -> Unit)?,
     onDemo: (() -> Unit)?, onExitDemo: (() -> Unit)?, slots: LazyListScope.() -> Unit,
@@ -37,7 +38,14 @@ internal fun SettingsHomePage(
         entry(SettingsPage.ModelConfig, R.string.settings_home_models, PersonaIcons.memory, R.string.settings_home_models_detail, R.string.settings_search_models_aliases),
         onNavigate?.let { HomeEntry(AssistantSettingsRoute, R.string.settings_row_assistant, PersonaIcons.ai, R.string.settings_row_assistant_subtitle) },
         entry(SettingsPage.Connectors, R.string.settings_section_connectors, PersonaIcons.link, R.string.settings_home_connectors_detail, R.string.settings_search_connectors_aliases),
+        // Inbox Sources (#5308): the same pages as the Inbox menu, every source, once the hub reports inbox_sources.
+        if (!inboxSources) null else HomeEntry(
+            ExtensionUiRoute(SUBSCRIPTIONS_UI, "pages", stringResource(R.string.settings_inbox_sources)),
+            R.string.settings_inbox_sources, PersonaIcons.inProgress, R.string.settings_inbox_sources_detail,
+            R.string.settings_search_inbox_sources_aliases),
         if (!extensionsAvailable) null else entry(SettingsPage.Extensions, R.string.settings_section_extensions, PersonaIcons.skills, R.string.settings_home_extensions_detail, R.string.settings_search_extensions_aliases, extensionSummary),
+        if (!knowledgeSelectionAvailable) null else entry(SettingsPage.KnowledgeSelection, R.string.settings_knowledge_selection_title, PersonaIcons.knowledge,
+            R.string.settings_knowledge_selection_subtitle, R.string.settings_knowledge_selection_search_aliases),
         if (!channelsAvailable) null else entry(SettingsPage.Channels, R.string.settings_src_channels_title, PersonaIcons.channels, R.string.settings_home_channels_detail),
         entry(SettingsPage.AgentSettings, R.string.settings_home_agents, PersonaIcons.agents, R.string.settings_home_agents_detail, R.string.settings_search_agents_aliases),
     )
