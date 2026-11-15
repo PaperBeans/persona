@@ -70,25 +70,25 @@ func (n *Node) gitWrite(ctx context.Context, method string, params json.RawMessa
 		return nil, err
 	}
 	switch method {
-	case "git.stage":
+	case methodGitStage:
 		return n.gitStage(ctx, p.Cwd, p.Paths, p.Unstage)
-	case "git.commit":
+	case methodGitCommit:
 		return n.gitCommit(ctx, p.Cwd, p.Message)
-	case "git.push":
+	case methodGitPush:
 		return n.gitPush(ctx, p.Cwd, p.SetUpstream)
-	case "git.branches":
+	case methodGitBranches:
 		return n.gitBranches(ctx, p.Cwd)
-	case "git.switch":
+	case methodGitSwitch:
 		return n.gitSwitch(ctx, p.Cwd, p.Branch, p.Create, p.From)
-	case "git.stash":
+	case methodGitStash:
 		index := -1
 		if p.Index != nil {
 			index = *p.Index
 		}
 		return n.gitStash(ctx, p.Cwd, p.Op, index, p.Message, p.Untracked, p.OID)
-	case "git.pr":
+	case methodGitPR:
 		return n.gitPR(ctx, p.Cwd)
-	case "git.pr_create":
+	case methodGitPRCreate:
 		return n.gitPRCreate(ctx, p.Cwd, p.Title, p.Body, p.Base, p.Draft)
 	default: // git.pr_merge
 		return n.gitPRMerge(ctx, p.Cwd, p.Number, p.Method, p.Auto, p.AutoOff)

@@ -15,6 +15,23 @@ Claude CLI and Agent SDK assistant starts explicitly select a config directory p
 
 Coverage: `TestAssistantProfileCompatibility` runs CLI and SDK fixture processes for old service/home/machine/discovered/missing/recorded sessions, new defaults and explicit/legacy selections, including a changed service default after a process restart. `TestAssistantProfileSelectionBoundaries` covers wrappers, scoped nodes and warm spares; `TestAssistantProfileCannotMoveExistingConversation` refuses relocation; `TestAssistantProfileRollbackKeepsTheOriginalTranscript` exercises the old env-only lookup. `TestNodeConfigDirIsPersisted` verifies the real Postgres metadata round trip; `TestMachineCallGatesAssistantConfigDir` verifies old-node refusal. These fixtures do not claim credentialed live-model or deployed downgrade verification.
 
+**What a private profile takes of `~/.claude` (#7318).** A conversation in a profile Persona created (below
+`<data dir>/profiles`, where new conversations start) reads that profile's settings and instructions, not the user's.
+Its directory below the home still makes Claude Code read `~/.claude/CLAUDE.md` and every `~/.claude/rules` file as
+the home's project instructions, which are written for coding Agents, so its start settings exclude both
+(`claudeMdExcludes`, for the home as written and as its symlinks resolve, merged with any excludes already there). The
+assistant's own `CLAUDE.md` and the profile's are kept. Instructions from the global file that the assistant still
+needs belong in Settings › Assistant › About me, which its instructions carry. The skills the user turned off in their
+own `settings.json` (`skillOverrides` set to `"off"`) stay off; their own is the profile plain `claude` starts in on
+that machine (`machines[].claude_start_dir`, else the node's `CLAUDE_CONFIG_DIR`, else `~/.claude`). A name the
+conversation's own settings set keeps its value, and nothing else of that file (env, hooks, permissions, plugins) comes
+along. The skill picker reads the same list. Every other profile is one the user or a launcher set up (`~/.claude`,
+the node's `CLAUDE_CONFIG_DIR`, `claude_start_dir`, a wrapper's `CLAUDE_CONFIG_DIR`, an explicit `config_dir`
+elsewhere) and nothing changes there; choosing `default` or `legacy` for a new conversation keeps the global file.
+Guests keep their own isolation (`node/assistant_user_setup.go`; `TestPrivateProfileExcludesTheHomeClaudeInstructions`,
+`TestPrivateProfileCarriesTheUserSkillSwitchesOff`, `TestClaudeStartDirIsTheUserProfile`,
+`TestSkillCatalogMatchesThePrivateProfileSettings`, `TestGuestSettingsIgnoreThePrivateProfileAdditions`).
+
 ## Work computers and personal context
 
 Set `machines[].trust` to `"work"` in `hub.json` to keep personal assistant data off that computer (see [config.md](../operations/config.md)).

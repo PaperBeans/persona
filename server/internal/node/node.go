@@ -437,7 +437,7 @@ func (n *Node) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 			n.onTerminalEvent(event, params)
 		}
 	}
-	n.fsw.start(ctx, func(c fsChanged) { _ = n.peer.Notify("fs.changed", c) })
+	n.fsw.start(ctx, func(c fsChanged) { _ = n.peer.Notify(methodFsChanged, c) })
 	defer n.fsw.close()
 	n.cdirs.report = func(dirs []string) { _ = n.peer.Notify("claude.dirs", map[string]any{"dirs": dirs}) }
 	n.codices.report = func(cfg proto.CodexConfig) { _ = n.peer.Notify("codex.inventory", cfg) }
@@ -668,15 +668,10 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 	}
 	var p struct {
 		Path             string        `json:"path"`
-		Paths            []string      `json:"paths"`
-		Offset           int64         `json:"offset"`
-		Stream           bool          `json:"stream"`
-		Detail           bool          `json:"detail"` // fs.stat: the Info sheet's fields (files_info.go)
 		SessionID        string        `json:"session_id"`
 		CreationID       string        `json:"creation_id"`
 		Incarnation      string        `json:"incarnation"`
 		Cwd              string        `json:"cwd"`
-		IdentityOnly     bool          `json:"identity_only"`
 		Launcher         string        `json:"launcher"`
 		AgentType        string        `json:"agent_type"`
 		Model            string        `json:"model"`
@@ -700,9 +695,6 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		SinceSeq         int           `json:"since_seq"`
 		Source           string        `json:"source"`
 		Format           string        `json:"format"`
-		Staged           bool          `json:"staged"`
-		Hash             string        `json:"hash"`
-		Skip             int           `json:"skip"`
 		Turns            int           `json:"turns"`
 		LazyImages       bool          `json:"lazy_images"`
 		UserInputs       bool          `json:"user_inputs"`
@@ -1765,40 +1757,44 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		}
 		list, err := n.getClaudeSettings(i18n.Resolve(a.Locale))
 		return map[string]any{"settings": list}, err
-	case "file.upload.begin", "file.upload.chunk", "file.upload.end", "file.upload.abort":
+	case methodFileUploadBegin, methodFileUploadChunk, methodFileUploadEnd, methodFileUploadAbort:
 		return n.uploadCall(method, params)
-	case "file.rename", "file.move", "file.trash", "file.restore":
+	case methodFileRename, methodFileMove, methodFileTrash, methodFileRestore:
 		return n.fileEditCall(method, params)
-	case "file.mkdir", "file.write", "file.zip", "file.copy", "file.chmod", "file.operation": // new folders, text files, zips, copies, permissions and their progress (filemake.go, filecopy.go)
+	case methodFileMkdir, methodFileWrite, methodFileZip, methodFileCopy, methodFileChmod, methodFileOperation: // new folders, text files, zips, copies, permissions and their progress (filemake.go, filecopy.go)
 		return n.fileMake(ctx, method, params)
 	case "health.reports.list", "health.reports.delete":
 		return n.healthReportsCall(method, params)
-	case "file.chunk":
+	case methodFileChunk:
 		var chunk proto.FileChunkRequest
 		if err := json.Unmarshal(params, &chunk); err != nil {
 			return nil, err
 		}
 		return n.readFileChunk(chunk)
-	case "git.blob":
+	case methodGitBlob:
 		var b proto.GitBlobRequest
 		if err := json.Unmarshal(params, &b); err != nil {
 			return nil, err
 		}
 		return n.gitBlob(ctx, b)
-	case "file.convert":
+	case methodFileConvert:
 		var c proto.FileConvertRequest
 		if err := json.Unmarshal(params, &c); err != nil {
 			return nil, err
 		}
 		return n.convertFile(ctx, c)
-	case "file.thumb":
+	case methodFileThumb:
 		var t proto.FileThumbRequest
 		if err := json.Unmarshal(params, &t); err != nil {
 			return nil, err
 		}
 		return n.fileThumb(ctx, t)
-	case "file.read":
-		return n.readFile(p.Path, p.Cwd, p.Offset, p.Stream)
+	case methodFileRead:
+		var in fileReadParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.readFile(in.Path, in.Cwd, in.Offset, in.Stream)
 	case "port.dial":
 		return n.portDial(ctx, params)
 	case "screen.dial": // live-screen video channel (#3954): start the capture helper for a signed-in pair (screen.go)
@@ -1817,8 +1813,12 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		"browser.status", "browser.install", "browser.open", "browser.cancel", "browser.call",
 		"browser.cookies.list", "browser.cookies.import", "browser.cookies.clear":
 		return legacyBuiltinCall(ctx, method, params, n.lcuComputerCall)
-	case "fs.stat": // detail: the Info sheet (files_info.go)
-		return map[string]any{"stats": n.statPaths(p.Paths, p.Cwd, p.Detail)}, nil
+	case methodFsStat: // detail: the Info sheet (files_info.go)
+		var in fsStatParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return map[string]any{"stats": n.statPaths(in.Paths, in.Cwd, in.Detail)}, nil
 	case "space.rename":
 		name, err := n.renameSpace(ctx, p.WorkspaceID, p.Name)
 		if err != nil {
@@ -1837,33 +1837,61 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			return nil, err
 		}
 		return ok(n.syncTodoTokens(ctx, in.Tokens))
-	case "fs.list":
-		return n.listDir(p.Path, p.Cwd)
-	case "fs.find": // every file under cwd, for the web palette's file search (files_find.go)
-		return n.findFiles(ctx, p.Cwd, p.Limit)
-	case "fs.watch": // the folders and Git directories the web panels have open (fswatch.go)
-		return n.fsWatch(params)
-	case "git.status":
-		if p.IdentityOnly {
-			return n.gitIdentity(ctx, p.Cwd)
+	case methodFsList:
+		var in fsListParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
 		}
-		return n.gitStatus(ctx, p.Cwd)
-	case "git.pull":
-		return n.gitPull(ctx, p.Cwd)
-	case "git.diff":
-		return n.gitDiff(ctx, p.Cwd, p.Path, p.Staged)
-	case "git.show":
-		return n.gitShow(ctx, p.Cwd, p.Hash)
-	case "git.review": // every file a scope changed, with its hunks, for the web's Review panel (gitreview.go)
+		return n.listDir(in.Path, in.Cwd)
+	case methodFsFind: // every file under cwd, for the web palette's file search (files_find.go)
+		var in fsFindParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.findFiles(ctx, in.Cwd, in.Limit)
+	case methodFsWatch: // the folders and Git directories the web panels have open (fswatch.go)
+		return n.fsWatch(params)
+	case methodGitStatus:
+		var in gitStatusParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		if in.IdentityOnly {
+			return n.gitIdentity(ctx, in.Cwd)
+		}
+		return n.gitStatus(ctx, in.Cwd)
+	case methodGitPull:
+		var in gitCwdParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.gitPull(ctx, in.Cwd)
+	case methodGitDiff:
+		var in gitDiffParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.gitDiff(ctx, in.Cwd, in.Path, in.Staged)
+	case methodGitShow:
+		var in gitShowParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.gitShow(ctx, in.Cwd, in.Hash)
+	case methodGitReview: // every file a scope changed, with its hunks, for the web's Review panel (gitreview.go)
 		var rv proto.GitReviewRequest
 		if err := json.Unmarshal(params, &rv); err != nil {
 			return nil, err
 		}
 		return n.gitReview(ctx, rv)
-	case "git.log":
-		list, err := n.gitLog(ctx, p.Cwd, p.Skip, p.Limit)
+	case methodGitLog:
+		var in gitLogParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		list, err := n.gitLog(ctx, in.Cwd, in.Skip, in.Limit)
 		return map[string]any{"commits": list}, err
-	case "git.stage", "git.commit", "git.push", "git.branches", "git.switch", "git.stash", "git.pr", "git.pr_create", "git.pr_merge":
+	case methodGitStage, methodGitCommit, methodGitPush, methodGitBranches, methodGitSwitch, methodGitStash, methodGitPR, methodGitPRCreate, methodGitPRMerge:
 		return n.gitWrite(ctx, method, params) // the Git panel's writes and pull request (gitwrite.go, gitpr.go)
 	case "skills.import":
 		return n.importSkill(ctx, params)

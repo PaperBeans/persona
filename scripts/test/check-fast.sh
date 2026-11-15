@@ -598,9 +598,9 @@ else
   MB=$(git merge-base HEAD "$BASE_REF" 2>/dev/null) || { echo "check-fast: no merge-base with $BASE_REF" >&2; exit 2; }
   # Committed since the merge-base, plus staged/unstaged/untracked work, so the script works before a commit too.
   CHANGED=$({
-    git diff --name-only -z "$MB" HEAD
-    git diff --name-only -z HEAD
-    git diff --cached --name-only -z
+    git diff --name-only --no-renames -z "$MB" HEAD
+    git diff --name-only --no-renames -z HEAD
+    git diff --cached --name-only --no-renames -z
     git ls-files --others --exclude-standard -z
   } | tr '\0' '\n' | sed '/^$/d' | sort -u)
   if [ -z "$CHANGED" ]; then

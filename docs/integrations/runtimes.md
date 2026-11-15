@@ -113,15 +113,26 @@ Not in the SDK (used by only one runtime, or the two read different things): eac
 - **Tool names match Claude's**: the App draws commands, diffs and files for `Bash`, `Read`, `Edit`, `Write`, `Grep`, `Glob`, `WebFetch`, `WebSearch`, `TodoWrite`,
   and parameter names are Claude's too (`command`, `file_path`, `old_string` / `new_string`, `pattern`). Unrecognized names are shown as is.
 - **Length**: in a page, at most 24 KB of text per item and 4 KB of tool output, cut with the SDK's `light(item)` (with the "truncated" note the App recognizes and `full_size`); the full text goes via `item`.
-  Tool input objects use `clipInput`, which clips long strings at any depth, including arrays such as MultiEdit's `edits[]`,
-  while preserving keys and structure. For inputs over 24 KB it follows the hub's `clipJSON`: first keep at most 12 KB per string, then, if the
-  input still exceeds the 24 KB budget, share the remaining budget among strings longer than 256 bytes, accounting for
-  JSON escapes and the truncation note. Cuts respect UTF-8 boundaries and the second pass only cuts when the string becomes
-  strictly shorter as JSON. A plain ASCII tail of at most the note's encoded size stays whole (37 bytes for a three-digit
-  original length); a longer or more heavily escaped tail may be cut. Each implementation measures its own wire encoding:
-  both leave `<>&` raw, but `JSON.stringify` also leaves U+2028/U+2029 raw while the hub's Go encoder escapes them, so their shares can differ.
-  Top-level arrays and other non-object inputs stay unchanged. This is still **not a total input size limit**: many short
-  values, large keys, or enough strings at the 256-byte floor can exceed 24 KB. Bounding those inputs remains open in #2907.
+  Tool input objects use `clipInput`, which follows the hub's `clipJSON` in three passes. First keep at most 12 KB per string at any
+  depth, including arrays such as MultiEdit's `edits[]`; if the input still exceeds 24 KB, share the remaining budget among strings
+  longer than 256 bytes, accounting for JSON escapes and the truncation note. Cuts respect UTF-8 boundaries and the second pass only
+  cuts when the string becomes strictly shorter as JSON. A plain ASCII tail of at most the note's encoded size stays whole (37 bytes
+  for a three-digit original length); a longer or more heavily escaped tail may be cut.
+  If the result is still over budget, a third pass drops tail items from the currently longest arrays (the most retained items,
+  preorder breaking ties), then trailing fields from the currently widest objects the same way. Object children use Unicode
+  code-point order for removal and preorder ties, matching the hub's UTF-8 byte-wise sort rather than JavaScript's UTF-16 or
+  integer-first enumeration order. Surviving array items keep their order; surviving object fields keep each implementation's
+  own output order and value types. For every top-level object accepted by the JSON decoder, the final encoded input is at
+  most **24,576 bytes**, including the marker: one collision-safe top-level field named `zz_persona_clipped` (suffixed `_2`,
+  `_3`, … if needed), whose value is an object of the form `{"note":"Omitted X array items and Y object fields.\n…（已截断，共 N 字节）"}`.
+  The note counts direct removals and ends with the usual cut note and the original whole-input byte size. The object wrapper
+  is deliberate: old and new clients' "first string argument" subject and summary fallbacks cannot mistake the marker for the
+  call's subject. Typed tool projections ignore the unknown root field; generic argument and Raw Input views show it.
+  Inputs at or under budget are untouched. Each implementation measures its own wire encoding: both leave `<>&` raw, but
+  `JSON.stringify` also leaves U+2028/U+2029 raw while the hub's Go encoder escapes them, so their shares and output bytes can differ.
+  Malformed input, trailing JSON and nesting the decoder rejects (deeper than 10,000 levels) pass through unchanged as before.
+  A valid number outside float64 range, such as `1e1000`, is retried with `UseNumber` so its object is still clipped. Top-level
+  arrays and other non-object inputs stay unchanged.
 - **Only what people need to see**: context injected for the model (time, skill list, system instructions) and internal scheduling events don't become items.
 
 ## Interactions

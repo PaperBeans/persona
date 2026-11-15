@@ -32,7 +32,7 @@ var toolNames = []string{"ask_user", "notify_user", "supervision_finish", "sched
 	"cancel_followup", "list_places", "save_place", "machines_list", "agents_list", "agent_read", "agent_send", "agent_switch", "agents_switch", "agent_interrupt", "agent_start", "agent_supervise", "agent_archive", "agent_unarchive", "agent_autoname", "agent_autoname_receipt", "interaction_answer", "ask_escalate", "inbox_suggest", "inbox_draft",
 	"inbox_folders", "inbox_move", "inbox_post", "kb_search", "kb_list", "kb_get", "kb_update", "kb_history_plan", "kb_history_status", "kb_history_stop", "kb_history_resume", "persona_settings", "secret_run",
 	"model_profiles_list", "model_profile_get", "model_profile_switch", "model_profile_rollback",
-	"repositories_list", "repository_get", "view_show", "view_update", "view_get",
+	"repositories_list", "repository_get", "repository_add", "view_show", "view_update", "view_get",
 	"conversations_list", "conversation_read", "conversation_rename", "conversation_archive", "conversation_unarchive",
 	"conversation_new", "conversation_send", "task_plan", "task_plan_withdraw", "task_review", "task_scope", "task_decided", "task_start_screen", "task_start_keys", "task_retry",
 	"todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete", "concern_report",
@@ -118,6 +118,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		}
 	}
 	switch name {
+	case "repository_add":
+		return s.toolRepositoryAdd(ctx, machine, self, args)
 	case "repositories_list", "repository_get":
 		return s.toolRepositories(ctx, name, args)
 	case "supervision_finish":
@@ -164,7 +166,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 	case "kb_search", "kb_list", "kb_get", "kb_update":
 		return s.toolKB(ctx, name, args)
 	case "kb_history_plan", "kb_history_status", "kb_history_stop", "kb_history_resume":
-		return s.toolKBHistory(ctx, name, args) // kb_history_tools.go
+		return s.historyTools().Call(ctx, name, args) // kbhistory/tools.go
 	case "interaction_answer":
 		return s.toolInteractionAnswer(ctx, self, args)
 	case "ask_escalate":
