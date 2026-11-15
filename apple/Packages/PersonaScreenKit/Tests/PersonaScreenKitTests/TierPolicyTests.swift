@@ -33,6 +33,19 @@ final class TierPolicyTests: XCTestCase {
 
     // MARK: Start
 
+    /// On a display at one pixel per point the steps merge, so the ladder is shorter; the route still starts on its
+    /// step's picture: the relay at 60 fps as on a Retina Mac, not a tier lower (the browser, 2026-11-15).
+    func testAOnePixelPerPointDisplayStartsOnItsRoutesStep() {
+        let plain = TierPolicy.Display(points: [1920, 1080], pixels: [1920, 1080], maxSize: 2868)
+        func start(_ link: LinkStats) -> Int {
+            let p = TierPolicy(display: plain, bias: .auto, capKbps: 12_000, maxFps: 60, link: link, now: 0)
+            return p.tier.fps
+        }
+        XCTAssertEqual(start(LinkStats(kind: .lan, via: .wifi)), 60)
+        XCTAssertEqual(start(LinkStats(kind: .relay, via: .wifi)), 60, "1.5×60 is 2×60's picture here")
+        XCTAssertEqual(start(LinkStats(kind: .relay, via: .cellular)), 30, "1.5×30")
+    }
+
     func testTheRouteSetsTheStart() {
         XCTAssertEqual(policy(LinkStats(kind: .lan, via: .wifi)).index, 0, "the same network: the best tier")
         XCTAssertEqual(policy(LinkStats(kind: .tailscale, via: .wifi, minRttMs: 18)).index, 0)

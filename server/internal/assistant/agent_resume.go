@@ -16,14 +16,13 @@ import (
 // that agent's context (it has just found the cause and should now fix it, rework, the user asked for "the one with
 // the context"): agent_send with resume true and resume_why. The resume is
 //
-//   - the same node call as the user's Resume: session.start with resume_session_id and nothing else of the start
+//   - the same node call as the user's Resume: session.start with resume_session_id and a node-side recovery guard
 //     (node node.go fillResume: the session's own launcher, directory, model and permission mode; the shell it left
 //     when that is still there, else a new tab), the text as its first message;
 //   - never unsupervised: the agent is on an open task of this conversation already, or the call gives task (main
 //     conversation), which makes it one as agent_send with a task does, the card marked resumed (wakeResumed);
 //   - visible: the phone's confirmation and the task's card say which agent was resumed and why (resume_note);
-//   - refused with its reason and "start a new agent" when it cannot work: the computer is offline, the agent's context
-//     is nearly full, or the node refuses (no session record, launcher unavailable, open elsewhere).
+//   - refused for user/unknown stops, offline computers, nearly full context, or the node's own start refusals.
 
 // resumeContextFull is the share of its model's window an agent's context may fill for the assistant to resume it:
 // above it the resumed agent would compact or run out at once, so a new agent with a summary goes on instead.
@@ -49,6 +48,14 @@ func stoppedRefusal(c proto.Session) error {
 // resumeAllowed checks a resume before anything is asked or started: a reason, the computer reachable, room left in
 // the agent's context, and a task of self's it will be on (one it is on, or task, which the send's checks go on with).
 func (s *Service) resumeAllowed(ctx context.Context, self string, am Device, c proto.Session, why string, task *sendTask) error {
+	cause := proto.StopUnknown
+	if c.Capabilities != nil {
+		cause = c.Capabilities.StopCause
+	}
+	if !cause.AllowsSupervisorResume() {
+		return fmt.Errorf("%s cannot be resumed by the assistant: stop cause is %s. User stops and unknown causes require "+
+			"the user's Resume on its terminal page. Nothing was started or sent", agentLabel(c), cause)
+	}
 	if why == "" {
 		return fmt.Errorf("resume_why is required: say why this agent's own context is needed (the user sees it). Nothing was started or sent")
 	}
@@ -88,9 +95,9 @@ func resumeFailed(c proto.Session, am Device, err error) error {
 }
 
 // resumeParams are the node's session.start params for resuming c with text as its first message: the user's Resume
-// (resume_session_id only, so the node fills in what the session ran with) plus the prompt.
+// (the node fills in what the session ran with) plus the prompt and an eligibility recheck on that node.
 func resumeParams(c proto.Session, text string) map[string]any {
-	return map[string]any{"resume_session_id": c.SessionID, "prompt": text}
+	return map[string]any{"resume_session_id": c.SessionID, "prompt": text, "resume_automatic": true}
 }
 
 // resumeAndSend resumes stopped agent c of am with params' text as its first message (resumeParams) and says so in

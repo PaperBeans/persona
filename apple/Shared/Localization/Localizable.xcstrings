@@ -160910,6 +160910,29 @@
       },
       "extractionState" : "manual"
     },
+    "This agent uses its own approval settings unless you choose Allow Everything." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This agent uses its own approval settings unless you choose Allow Everything."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「すべて許可」を選ばない限り、このエージェントは自身の承認設定で動作します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "除非选「全部放行」，这个 Agent 按它自己的审批设置运行。"
+          }
+        }
+      }
+    },
     "This agent wasn't started with Allow Everything, so it can't be switched back to it from here." : {
       "localizations" : {
         "en" : {
@@ -180526,6 +180549,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "What should the agent do? (Optional)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What should the agent do? (Optional)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェントに何をさせますか？（空欄でも可）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "想让 Agent 做什么？（可以留空）"
+          }
+        }
+      }
     },
     "What the assistant found" : {
       "localizations" : {

@@ -1144,7 +1144,7 @@ struct AssistantSidebarPresenters: ViewModifier {
             AssistantFullSearch(scope: ui.searchScope) { key in
                 ui.picked = key
                 ui.fullSearch = false
-            } openAgent: { key in
+            } onOpenAgent: { key in
                 ui.pickedAgent = key
                 ui.fullSearch = false
             }

@@ -14,7 +14,9 @@ struct AssistantFullSearch: View {
 
     var open: (SessionKey) -> Void
     /// Opens an Agent's chat; nil: Persona's chats only, no scopes.
-    var openAgent: ((SessionKey) -> Void)? = nil
+    /// Not `openAgent`: a stored property's name stays in the Release binary, and that is a DEBUG launch switch
+    /// (scripts/test/test_apple_release_switch_names.py, #8306).
+    var onOpenAgent: ((SessionKey) -> Void)? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
@@ -25,10 +27,10 @@ struct AssistantFullSearch: View {
     /// What was said in the chats, found by the manager (#6284): merged into the title / last-message matches.
     @State private var chatSearch: AssistantChatSearch? // made on the first query (P3: no work in the initial value)
 
-    init(scope: Scope = .chats, open: @escaping (SessionKey) -> Void, openAgent: ((SessionKey) -> Void)? = nil) {
+    init(scope: Scope = .chats, open: @escaping (SessionKey) -> Void, onOpenAgent: ((SessionKey) -> Void)? = nil) {
         self.open = open
-        self.openAgent = openAgent
-        _scope = State(initialValue: openAgent == nil ? .chats : scope)
+        self.onOpenAgent = onOpenAgent
+        _scope = State(initialValue: onOpenAgent == nil ? .chats : scope)
     }
 
     /// The sidebar's conversations (the latest first), read here: the sidebar under the cover is off the window, and what
@@ -88,7 +90,7 @@ struct AssistantFullSearch: View {
             }
         }
         // Which to look through, at the top (#4206); only where Agents can be opened from here.
-        .safeAreaInset(edge: .top, spacing: 0) { if openAgent != nil { scopes } }
+        .safeAreaInset(edge: .top, spacing: 0) { if onOpenAgent != nil { scopes } }
         .readsVerticalBarEdge($barEdge)
         // At the foot, over the keyboard (the inset rides on it), as ChatGPT's.
         .safeAreaInset(edge: .bottom, spacing: 0) { bar }
@@ -164,7 +166,7 @@ struct AssistantFullSearch: View {
         let machine = model.machine(s.machineRef)
         let title = s.title.isEmpty ? URL(fileURLWithPath: s.cwd).lastPathComponent : s.title
         return Button {
-            openAgent?(s.key)
+            onOpenAgent?(s.key)
         } label: {
             HStack(spacing: Theme.Space.m) {
                 SessionAvatar(machine: machine, state: s.countedState, size: Theme.Size.tapTarget)

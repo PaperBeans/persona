@@ -127,7 +127,7 @@ final class SidebarLayoutTests: XCTestCase {
         search.tap()
         let field = element("full-search-field")
         XCTAssertTrue(field.waitForExistence(timeout: 5), "Search opened no page:\n\(app.debugDescription)")
-        // The scope's segments: Chats (对话 in Chinese) and Agents.
+        // The scope's segments: Chats (「对话」 in Chinese) and Agents.
         let scope = element("full-search-scope")
         XCTAssertTrue(scope.waitForExistence(timeout: 5), "no scopes:\n\(app.debugDescription)")
         let chats = scope.buttons.matching(NSPredicate(format: "label IN %@", ["Chats", "对话"])).firstMatch

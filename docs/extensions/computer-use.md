@@ -670,9 +670,11 @@ Android don't decode video yet: they keep RFB and show no switcher.
     tier that does; another step down waits 1 s and a queue that isn't draining, unless the queue runs away. A phone that
     can't decode or show as fast for 2 s gets a lower frame rate. Up, slow: one tier after a calm window (8 s; 3 s in the
     first 10 s or after a route change) with proof the link carried 1.25× the next floor, or three large frames at 1.5×
-    it; a step up undone within 15 s doubles that tier's window, to 60 s. The start comes from the route: the same
-    network the best tier, Tailscale (direct IPv6 too) under 30 ms the best else the second, the relay the second over
-    Wi-Fi, the third over cellular. A slower route steps down at once; a new bias or cap takes the tier the rate fits,
+    it; a step up undone within 15 s doubles that tier's window, to 60 s. The start comes from the route, as a step of
+    the bias (Auto: 2×60, 1.5×60, 1.5×30): the same network the first, Tailscale (direct IPv6 too) under 30 ms the first
+    else the second, the relay the second over Wi-Fi, the third over cellular; the stream starts on the best tier no
+    richer in pixels a second than that step on this display, so a display at one pixel per point, where steps merge,
+    starts as high as a Retina one (the relay at 60 fps, not 30). A slower route steps down at once; a new bias or cap takes the tier the rate fits,
     the rate at least the current tier's floor, which the link carries. The helper's `timing` comes once a second only
     while frames flow, so its skipped frames count until the next is due (1.25 s) and its bitrate proves headroom once:
     a still screen never steps down or up on an old second's numbers (#7842).
@@ -903,9 +905,10 @@ On a direct route (same network or Tailscale), the live screen's video can ride 
 connection, so a lost packet delays only the frame it belongs to, usually by no round trip, and never slows the stream
 by itself ([#7873](https://github.com/nwverse/persona/issues/7873) has the design and the shaped-link numbers it rests
 on). The node's end is `internal/screenlink` (`udp.go`, `udp_wire.go`, `rs.go`); the shared cases are
-`spec/fixtures/screen-udp`. In place: the node's side, offered in `paths` as `"udp": 1`, and the iPhone's, off in
-release builds until the check on real devices (`ScreenRoutes.udpReleaseEnabled`; a DEBUG build launched with
--showScreenUDP has it). No setting of its own: the Settings switch for direct routes covers it.
+`spec/fixtures/screen-udp`. In place: the node's side, offered in `paths` as `"udp": 1`, and the iPhone's, on in
+release builds since the live check against a real Mac (`ScreenRoutes.udpReleaseEnabled` turns it off again; a DEBUG
+build launched with -showScreenUDP has it either way). No setting of its own: the Settings switch for direct routes
+covers it.
 
 - **What rides it**: only the video channel's bytes from the node to the phone, plus the phone's acknowledgements,
   requests to send again, give-ups and pings for it. RFB, the phone's video messages (`start`, `report`, `keyframe`,

@@ -430,6 +430,8 @@ class InboxHandOffRepositoryTest {
         val sent = mutableListOf<Triple<SessionKey, String, String>>()
         override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?) {
             sent += Triple(session, text, clientMessageId)
+            // These recording tests accept at the fake hub; delivery evidence, not send() or a Sent row, releases the record.
+            AuthoritativeMessageDeliveries.publish(AuthoritativeMessageDelivery("hub/generation", clientMessageId, session, text))
         }
     }
 
