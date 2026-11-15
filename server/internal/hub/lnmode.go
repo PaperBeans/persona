@@ -11,18 +11,22 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/db"
 )
 
 // Low-distraction ("ln") mode: when its switch is on, the hub delivers pushes by urgency instead of pushing
 // everything. P0 still interrupts, P1 is held for the "Needs you" list / briefings, P2 stays silent, and the same
 // related key may interrupt at most once in 12 hours. Every push the switch holds back is recorded with its reason,
 // in memory and in hub_settings, behind a read-only API for extensions and the nightly review. With the switch off
-// (the default) every push goes out exactly as before; the filter is a no-op.
+// (the default) every push goes out exactly as before; the filter is a no-op. Every push that goes out is counted in
+// memory and appended to the store's hub_push_sent table (pushSentStore), never by rewriting the whole record (#8257).
 
 const (
 	lnModeSettingKey       = "hub.ln_mode"
 	lnInterceptsSettingKey = "hub.ln_intercepts"
-	pushSentSettingKey     = "hub.push_sent"
+	// pushSentSettingKey held the delivered pushes as one list before hub_push_sent; loadSent moves its entries
+	// into the table (AdoptPushSentSetting) and the key is not written any more.
+	pushSentSettingKey = "hub.push_sent"
 
 	// lnDedupWindow: how long the same related key stays quiet after it pushed once.
 	lnDedupWindow = 12 * time.Hour
@@ -36,6 +40,9 @@ const (
 	// pushSentMax bounds how many delivered pushes the daily counts remember; the oldest go first. Counts read this
 	// full record, so they stay exact on a busy day where the 200-entry intercepts view would truncate.
 	pushSentMax = 2000
+	// pushSentPruneEvery: how often the writer sweeps hub_push_sent down to the age and count limits. Between sweeps
+	// the table may hold a little more than the limits; reading it back applies them (loadSent).
+	pushSentPruneEvery = time.Hour
 	// pushStatsDaysMax: how far back the read-only daily stats may go, matching the records' age.
 	pushStatsDaysMax = 14
 	// pushSaveRetryBackoff: how long the one settings writer waits before retrying a failed database write.
@@ -85,6 +92,33 @@ type pushSent struct {
 	Level      string    `json:"level"`
 	RelatedKey string    `json:"related_key,omitempty"`
 	Manager    string    `json:"manager"`
+}
+
+// pushSentStore is where delivered pushes are appended (internal/db/push_sent.go, migration 0522). Optional like
+// peerStore: a pusher whose store lacks it keeps the counts in memory only, and the many test stores need not implement
+// it.
+type pushSentStore interface {
+	AddPushSent(ctx context.Context, entries []db.PushSent) error
+	PushSentAfter(ctx context.Context, after time.Time, limit int) ([]db.PushSent, error)
+	PrunePushSent(ctx context.Context, before time.Time, keep int) (int64, error)
+	AdoptPushSentSetting(ctx context.Context, key string) (int, error)
+}
+
+// Asserted here because sentLog finds out at run time: a method gone astray would stop the counts surviving a restart.
+var _ pushSentStore = (*db.DB)(nil)
+
+// sentLog is the store's delivered-push table, or nil.
+func (p *Pusher) sentLog() pushSentStore {
+	log, _ := p.store.(pushSentStore)
+	return log
+}
+
+func sentRows(in []pushSent) []db.PushSent {
+	out := make([]db.PushSent, len(in))
+	for i, e := range in {
+		out[i] = db.PushSent{At: e.At, Level: e.Level, RelatedKey: e.RelatedKey, Manager: e.Manager}
+	}
+	return out
 }
 
 // pushPolicy says how urgent one alert push is and what it belongs to. The zero value is P1 with no related key.
@@ -295,8 +329,8 @@ func (p *Pusher) recordIntercept(in pushIntercept) {
 	p.lnMu.Unlock()
 }
 
-// addSentLocked remembers one delivered push for the daily counts, dropping entries past the age and count limits.
-// lnMu is held.
+// addSentLocked remembers one delivered push for the daily counts, dropping entries past the age and count limits, and
+// queues it for the writer, which appends only the new rows to the store (never the whole list). lnMu is held.
 func (p *Pusher) addSentLocked(in pushSent) {
 	cutoff := p.now().Add(-lnInterceptAge)
 	kept := p.sent[:0]
@@ -306,13 +340,19 @@ func (p *Pusher) addSentLocked(in pushSent) {
 		}
 	}
 	p.sent = append(kept, in)
-	if len(p.sent) > pushSentMax {
-		p.sent = slices.Clone(p.sent[len(p.sent)-pushSentMax:])
+	if over := len(p.sent) - pushSentMax; over > 0 {
+		// Dropped in place: a full record would otherwise copy all 2,000 entries into a new array on every push.
+		n := copy(p.sent, p.sent[over:])
+		clear(p.sent[n:])
+		p.sent = p.sent[:n]
 	}
-	if p.store == nil { // a pusher without a settings store keeps the counts in memory only
+	if p.sentLog() == nil { // a pusher without the table keeps the counts in memory only
 		return
 	}
-	p.sentDirty = true
+	p.sentPending = append(p.sentPending, in)
+	if len(p.sentPending) > pushSentMax { // a store that keeps failing: the oldest would be past the count limit anyway
+		p.sentPending = slices.Clone(p.sentPending[len(p.sentPending)-pushSentMax:])
+	}
 	if !p.lnWriting {
 		p.lnWriting = true
 		go p.saveIntercepts()
@@ -347,17 +387,26 @@ func (p *Pusher) scheduleSaveLocked() {
 func (p *Pusher) saveIntercepts() {
 	for {
 		p.lnMu.Lock()
-		if !p.lnDirty && !p.sentDirty {
+		if !p.lnDirty && len(p.sentPending) == 0 {
 			p.lnWriting = false
 			p.lnMu.Unlock()
 			return
 		}
 		saveIntercepts := p.lnDirty
 		p.lnDirty = false
-		saveSent := p.sentDirty
-		p.sentDirty = false
-		list := cloneIntercepts(p.intercepts)
-		sent := slices.Clone(p.sent)
+		var list []pushIntercept
+		if saveIntercepts {
+			list = cloneIntercepts(p.intercepts)
+		}
+		// The delivered pushes since the last save: appended as rows, a burst in one statement.
+		sent := p.sentPending
+		p.sentPending = nil
+		log := p.sentLog()
+		now := p.now()
+		prune := len(sent) > 0 && now.Sub(p.sentPrunedAt) >= pushSentPruneEvery
+		if prune {
+			p.sentPrunedAt = now // a failed sweep waits for the next one
+		}
 		p.lnMu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), p.storeTimeout)
 		failedIntercepts, failedSent := false, false
@@ -367,24 +416,32 @@ func (p *Pusher) saveIntercepts() {
 				failedIntercepts = true
 			}
 		}
-		if saveSent {
-			if err := p.store.PutSetting(ctx, pushSentSettingKey, sent); err != nil {
+		if len(sent) > 0 && log != nil {
+			if err := log.AddPushSent(ctx, sentRows(sent)); err != nil {
 				p.logf("push grading: save delivered pushes: %v", err)
 				failedSent = true
+			} else if prune {
+				if _, err := log.PrunePushSent(ctx, now.Add(-lnInterceptAge), pushSentMax); err != nil {
+					p.logf("push grading: sweep delivered pushes: %v", err)
+				}
 			}
 		}
 		cancel()
 		if !failedIntercepts && !failedSent {
 			continue
 		}
-		// A failed write marks only its own list dirty again and the writer retries after a backoff instead of
-		// hammering a failing database or rewriting the key that already landed. waitInterceptsSaved waits it out.
+		// A failed write marks only its own part pending again and the writer retries after a backoff instead of
+		// hammering a failing database or rewriting what already landed. waitInterceptsSaved waits it out.
 		p.lnMu.Lock()
 		if failedIntercepts {
 			p.lnDirty = true
 		}
 		if failedSent {
-			p.sentDirty = true
+			// Ahead of what was added meanwhile, so the rows keep the order the pushes went out in.
+			p.sentPending = append(sent, p.sentPending...)
+			if len(p.sentPending) > pushSentMax {
+				p.sentPending = slices.Clone(p.sentPending[len(p.sentPending)-pushSentMax:])
+			}
 		}
 		p.lnMu.Unlock()
 		time.Sleep(pushSaveRetryBackoff)
@@ -396,7 +453,7 @@ func (p *Pusher) waitInterceptsSaved(d time.Duration) bool {
 	deadline := time.Now().Add(d)
 	for {
 		p.lnMu.Lock()
-		idle := !p.lnWriting && !p.lnDirty && !p.sentDirty
+		idle := !p.lnWriting && !p.lnDirty && len(p.sentPending) == 0
 		p.lnMu.Unlock()
 		if idle {
 			return true
@@ -464,18 +521,54 @@ func (p *Pusher) loadLnState() {
 		p.lnMu.Unlock()
 	}
 
-	var delivered []pushSent
-	if load(pushSentSettingKey, &delivered) {
-		cutoff := p.now().Add(-lnInterceptAge)
-		p.lnMu.Lock()
-		p.sent = p.sent[:0]
-		for _, e := range delivered {
-			if e.At.After(cutoff) {
-				p.sent = append(p.sent, e)
-			}
-		}
-		p.lnMu.Unlock()
+	p.loadSent()
+}
+
+// loadSent reads the delivered pushes back from hub_push_sent at startup: first it moves the entries of the old
+// whole-list setting into the table (once after the upgrade), then sweeps the table to the age and count limits, then
+// reads what is left, the same entries addSentLocked would have kept in memory. A failed step is logged and the
+// counts start from what could be read.
+func (p *Pusher) loadSent() {
+	log := p.sentLog()
+	if log == nil {
+		return
 	}
+	step := func(what string, f func(ctx context.Context) error) bool {
+		ctx, cancel := context.WithTimeout(context.Background(), p.storeTimeout)
+		defer cancel()
+		if err := f(ctx); err != nil {
+			p.logf("push grading: %s: %v", what, err)
+			return false
+		}
+		return true
+	}
+	step("move "+pushSentSettingKey+" into its table", func(ctx context.Context) error {
+		moved, err := log.AdoptPushSentSetting(ctx, pushSentSettingKey)
+		if moved > 0 {
+			p.logf("push grading: moved %d delivered pushes from %s into their table", moved, pushSentSettingKey)
+		}
+		return err
+	})
+	now := p.now()
+	cutoff := now.Add(-lnInterceptAge)
+	step("sweep delivered pushes", func(ctx context.Context) error {
+		_, err := log.PrunePushSent(ctx, cutoff, pushSentMax)
+		return err
+	})
+	var rows []db.PushSent
+	if !step("read delivered pushes", func(ctx context.Context) (err error) {
+		rows, err = log.PushSentAfter(ctx, cutoff, pushSentMax)
+		return err
+	}) {
+		return
+	}
+	p.lnMu.Lock()
+	p.sentPrunedAt = now
+	p.sent = p.sent[:0]
+	for _, e := range rows {
+		p.sent = append(p.sent, pushSent{At: e.At, Level: e.Level, RelatedKey: e.RelatedKey, Manager: e.Manager})
+	}
+	p.lnMu.Unlock()
 }
 
 // lnInterceptsView returns the held pushes newest first, at most limit (clamped to lnInterceptLimitMax). When manager

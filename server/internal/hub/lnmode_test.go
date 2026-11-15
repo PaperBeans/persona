@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,9 +21,86 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
-// lnStore is the in-memory settings store plus the device-table methods newPusher and setPrefs touch.
+// lnStore is the in-memory settings store plus the device-table methods newPusher and setPrefs touch, and the
+// delivered-push table (pushSentStore) kept as a slice with the same rules as internal/db/push_sent.go.
 type lnStore struct {
 	settingsStore
+	sentMu   sync.Mutex
+	sentRows []db.PushSent
+	// sentAdds counts AddPushSent calls and sentAddBytes the JSON size of the rows they carried: what one push writes.
+	sentAdds     int
+	sentAddBytes int
+}
+
+func newLnStore() *lnStore { return &lnStore{settingsStore: settingsStore{vals: map[string][]byte{}}} }
+
+func (s *lnStore) AddPushSent(_ context.Context, entries []db.PushSent) error {
+	b, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+	s.sentMu.Lock()
+	defer s.sentMu.Unlock()
+	s.sentRows = append(s.sentRows, entries...)
+	s.sentAdds++
+	s.sentAddBytes += len(b)
+	return nil
+}
+
+func (s *lnStore) PushSentAfter(_ context.Context, after time.Time, limit int) ([]db.PushSent, error) {
+	s.sentMu.Lock()
+	defer s.sentMu.Unlock()
+	out := []db.PushSent{}
+	for i := len(s.sentRows) - 1; i >= 0 && len(out) < limit; i-- {
+		if s.sentRows[i].At.After(after) {
+			out = append(out, s.sentRows[i])
+		}
+	}
+	slices.Reverse(out)
+	return out, nil
+}
+
+func (s *lnStore) PrunePushSent(_ context.Context, before time.Time, keep int) (int64, error) {
+	s.sentMu.Lock()
+	defer s.sentMu.Unlock()
+	first := max(len(s.sentRows)-keep, 0)
+	kept := []db.PushSent{}
+	for i, e := range s.sentRows {
+		if i >= first && e.At.After(before) {
+			kept = append(kept, e)
+		}
+	}
+	gone := len(s.sentRows) - len(kept)
+	s.sentRows = kept
+	return int64(gone), nil
+}
+
+func (s *lnStore) AdoptPushSentSetting(_ context.Context, key string) (int, error) {
+	s.mu.Lock()
+	raw, ok := s.vals[key]
+	delete(s.vals, key)
+	s.mu.Unlock()
+	if !ok {
+		return 0, nil
+	}
+	var entries []db.PushSent
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		s.mu.Lock()
+		s.vals[key] = raw // the database's transaction keeps the row too
+		s.mu.Unlock()
+		return 0, err
+	}
+	s.sentMu.Lock()
+	defer s.sentMu.Unlock()
+	s.sentRows = append(s.sentRows, entries...)
+	return len(entries), nil
+}
+
+// sentTable is a copy of the delivered-push rows.
+func (s *lnStore) sentTable() []db.PushSent {
+	s.sentMu.Lock()
+	defer s.sentMu.Unlock()
+	return slices.Clone(s.sentRows)
 }
 
 func (s *lnStore) ReconcilePushDevices(context.Context, time.Time, time.Duration) (ret []db.PushDeviceRetirement, err error) {
@@ -53,7 +131,7 @@ func lnHub(t *testing.T) (*Hub, *fakeAPNs) {
 	f := &fakeAPNs{gone: map[string]bool{}}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
-	store := &lnStore{settingsStore{vals: map[string][]byte{}}}
+	store := newLnStore()
 	p := newPusher(t.TempDir(), nil, t.Logf)
 	p.store = store
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

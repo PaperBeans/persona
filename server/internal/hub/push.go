@@ -92,7 +92,10 @@ type Pusher struct {
 	intercepts   []pushIntercept
 	sent         []pushSent
 	lnDirty      bool // the held-push list changed since the last save
-	sentDirty    bool // the delivered-push list changed since the last save
+	// sentPending are the delivered pushes not yet appended to the store's record (pushSentStore); sentPrunedAt is
+	// when its last sweep ran.
+	sentPending  []pushSent
+	sentPrunedAt time.Time
 	lnWriting    bool // the one saver goroutine is running
 }
 
