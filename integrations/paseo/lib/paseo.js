@@ -189,28 +189,30 @@ export class PaseoClient extends EventEmitter {
     this.subs.clear()
   }
 
-  /** A session message from the daemon: a reply to a request, a subscription's event, or nothing the bridge waits for. */
+  /**
+   * A session message from the daemon: a reply to a request, a subscription's event, both, or nothing the bridge
+   * waits for. Both: Paseo tells a permission's resolution to the subscriptions under the permission's own id, which
+   * the bridge answers it under, so that event settles the answer and reaches its subscription too.
+   */
   route(inner) {
     const p = inner.payload
     const id = p?.requestId
     const w = typeof id === 'string' ? this.pending.get(id) : undefined
-    // A reply first: a subscription's own reply carries its subscriptionId too.
+    // Read before a reply settles: a subscription's own reply carries its new subscriptionId, and is no event of it.
+    const on = p && typeof p.subscriptionId === 'string' ? this.subs.get(p.subscriptionId) : undefined
     if (w) {
       if (inner.type === 'rpc_error') return this.settle(id, w, new PaseoError(p.error || 'Paseo 出错了', p.code))
       if (inner.type === 'status' && p.status === 'agent_create_failed') {
         return this.settle(id, w, new PaseoError(p.error || 'Paseo 没能建出这个 Agent', p.errorCode ?? 'create_failed'))
       }
       const type = inner.type === 'status' ? `status:${p.status}` : inner.type
-      if (!w.expect || w.expect === type) return this.settle(id, w, undefined, p)
+      if (!w.expect || w.expect === type) this.settle(id, w, undefined, p)
     }
-    if (p && typeof p.subscriptionId === 'string') {
-      const on = this.subs.get(p.subscriptionId)
-      if (!on) return
-      try {
-        on(inner)
-      } catch (err) {
-        this.log(`paseo: ${inner.type}: ${err.stack ?? err.message}`)
-      }
+    if (!on) return
+    try {
+      on(inner)
+    } catch (err) {
+      this.log(`paseo: ${inner.type}: ${err.stack ?? err.message}`)
     }
   }
 

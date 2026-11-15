@@ -43,6 +43,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import persona.core.contracts.Session
 import persona.core.contracts.Subagent
 import persona.core.designsystem.JIcon
 import persona.core.designsystem.JSpinner
@@ -68,6 +69,16 @@ internal class SubagentFolds {
 
 internal val LocalSubagentFolds = staticCompositionLocalOf<SubagentFolds?> { null }
 
+/**
+ * What runs the subagents of the chat open ([subagentHarness], #8143): its own agent, a Paseo provider by its own name;
+ * null outside an Agent's chat, where a task card says Claude Code as before.
+ */
+internal val LocalSubagentHarness = staticCompositionLocalOf<String?> { null }
+
+/** What a task card says ran [session]'s subagents: Claude Code for Claude's, else the agent by its name ([Session.agentLabel]). */
+internal fun subagentHarness(session: Session, res: Resources): String =
+    if (session.isClaude) res.getString(R.string.chat_subagent_harness_claude) else session.agentLabel
+
 /** A task card's words (the web's `taskStatusWord` and `subagentMeta`). */
 internal object SubagentCardText {
     /** The status word, the same four on every task card. */
@@ -79,12 +90,12 @@ internal object SubagentCardText {
     })
 
     /**
-     * The second line's pieces, in order: what ran it (Claude Code; none in a Persona conversation, whose reader does not
-     * work with the tool), the model chip (empty: none), its tokens, its tool uses and how long it took ([took], none while
-     * it runs: "Running for …" counts there instead).
+     * The second line's pieces, in order: what ran it ([harness], the chat's agent; Claude Code when not known; none in
+     * a Persona conversation, whose reader does not work with the tool), the model chip (empty: none), its tokens, its
+     * tool uses and how long it took ([took], none while it runs: "Running for …" counts there instead).
      */
-    fun meta(res: Resources, agent: Subagent?, took: Long?, assistant: Boolean): Meta = Meta(
-        harness = if (assistant) null else res.getString(R.string.chat_subagent_harness_claude),
+    fun meta(res: Resources, agent: Subagent?, took: Long?, assistant: Boolean, harness: String? = null): Meta = Meta(
+        harness = if (assistant) null else harness?.takeIf(String::isNotBlank) ?: res.getString(R.string.chat_subagent_harness_claude),
         model = persona.core.domain.modelShortName(agent?.model).ifEmpty { null },
         tokens = agent?.tokens?.takeIf { it > 0 }?.let { res.getString(R.string.chat_subagent_tokens, Subagents.tokens(it)) },
         uses = agent?.steps?.takeIf { it > 0 }?.let { res.getQuantityString(R.plurals.chat_subagent_tool_uses, it, it) },
@@ -116,7 +127,7 @@ internal fun SubagentCard(call: ToolCall, live: Boolean, assistant: Boolean, mod
     var openHere by rememberSaveable(call.id) { mutableStateOf(false) }
     val open = folds?.isOpen(call.id) ?: openHere
     val title = Subagents.title(call, agent) ?: stringResource(R.string.chat_subagent_untitled)
-    val meta = metaOverride ?: SubagentCardText.meta(res, agent, Subagents.took(call, agent, status), assistant)
+    val meta = metaOverride ?: SubagentCardText.meta(res, agent, Subagents.took(call, agent, status), assistant, LocalSubagentHarness.current)
     val started = Subagents.started(call, agent)
     val now by rememberNow(1_000, enabled = running && started != null)
     val runningFor = if (running && started != null)

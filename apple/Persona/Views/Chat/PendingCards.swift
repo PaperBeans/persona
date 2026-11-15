@@ -45,6 +45,8 @@ struct PendingCards: View {
         var interaction: Interaction
         /// Answerable from here (the session lets the phone approve); debug samples always are.
         var enabled: Bool
+        /// Whose card it is when it is not the chat's own session's (a side session's, #7944): a line under its title.
+        var from: String? = nil
         var id: String { interaction.id }
     }
 
@@ -91,7 +93,7 @@ struct PendingCards: View {
             ScrollView {
                 VStack(spacing: Theme.Space.m) {
                     ForEach(over ? Self.urgentFirst(cards) : cards) { card in
-                        InteractionPanel(interaction: card.interaction).disabled(!card.enabled)
+                        InteractionPanel(interaction: card.interaction, from: card.from).disabled(!card.enabled)
                             .chatMark("chat.card." + card.interaction.id)
                     }
                 }

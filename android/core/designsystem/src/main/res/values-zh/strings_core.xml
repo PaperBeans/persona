@@ -52,6 +52,7 @@
         <item quantity="other">%1$d 天后过期</item>
     </plurals>
     <string name="designsystem_core_request_from_subagent">来自子 Agent · %1$s</string>
+    <string name="designsystem_core_request_from_side">来自分支会话 · %1$s</string>
     <string name="designsystem_core_request_from_mcp">来自 MCP 服务器 %1$s</string>
     <string name="designsystem_core_request_from_mcp_configured">来自 MCP 服务器 %1$s（配置来源：%2$s）</string>
     <string name="designsystem_core_request_from_terminal">这个请求来自终端：请不要同时在电脑上处理</string>

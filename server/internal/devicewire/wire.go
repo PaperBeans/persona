@@ -399,6 +399,9 @@ var Routes = []string{
 	"GET /api/v1/machines/{mid}/health/reports",
 	"DELETE /api/v1/machines/{mid}/health/reports/{name}",
 	"POST /api/v1/machines/{mid}/deploy",
+	// A computer's diagnosis and cache cleanup (#8037, internal/devices diagnosis.go).
+	"GET /api/v1/machines/{mid}/diagnosis",
+	"POST /api/v1/machines/{mid}/cleanup",
 	"GET /api/v1/machines/{mid}/claude-dirs",
 	"PUT /api/v1/machines/{mid}/claude-dirs/blocked",
 	"GET /api/v1/machines/{mid}/claude-live-replies",

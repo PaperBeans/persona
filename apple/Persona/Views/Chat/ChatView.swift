@@ -59,6 +59,9 @@ struct ChatView: View {
     @State private var showActivity = false
     /// "All subagents" opened, from the header's status line or ⋯ (`SubagentTreeSheet`).
     @State private var showSubagents = false
+    /// Its side sessions' sheet and the side shown over it (#7944, `SideSessionsPresentation`): one reference, so the
+    /// page's value stays as small as it was (`MainPagesStackTests`).
+    @State private var sideUI: SideSessionsUI
     #if os(iOS)
     /// The review page of this session's changes (#151).
     @State private var reviewRequest: ReviewRequest?
@@ -225,13 +228,22 @@ struct ChatView: View {
     /// Offered once this chat's pending card was answered and another conversation needs you (#4348); nil until then.
     @State private var offeredNext: SessionKey?
 
-    init(key: SessionKey, style: ChatStyle = .dev, itemManager: String? = nil) {
+    /// `sidePage`: the page is a side session's own (`SideSessionPage`), which shows that side; any other Agents page given
+    /// a folded side (a Needs You card, a link, a restored chat) opens its parent with the side shown over it (#7944).
+    init(key: SessionKey, style: ChatStyle = .dev, itemManager: String? = nil, sidePage: Bool = false) {
         // Built again for the same path (a tree swap): the agent its header switched to, not the one it opened with.
         #if os(iOS)
-        _key = State(initialValue: style == .dev ? AppModel.shared.chatSwitched[key] ?? key : key)
+        var start = style == .dev ? AppModel.shared.chatSwitched[key] ?? key : key
         #else
-        _key = State(initialValue: key)
+        var start = key
         #endif
+        var landing: SessionKey?
+        if style == .dev, !sidePage, let parent = AppModel.shared.sideParent(of: start) {
+            landing = start
+            start = parent
+        }
+        _sideUI = State(initialValue: SideSessionsUI(shown: landing))
+        _key = State(initialValue: start)
         opened = key
         self.style = style
         self.itemManager = itemManager
@@ -265,6 +277,9 @@ struct ChatView: View {
         ComputerActivity.latest(in: store.items, chat: shownKey.machineRef, machines: model.namedMachines)
     }
     private var session: Session? { model.session(key) }
+    /// This chat's side sessions (#7944, `AppModel.sides(of:)`): an Agents chat of its own only, never a hosted one (a
+    /// task's sheet, a side's own page).
+    private var sides: SideSessions { style == .dev && host == nil ? model.sides(of: key) : SideSessions() }
     /// The pane of a Codex opened with no first message (Session.awaitingFirstMessage): once its first message goes in,
     /// from here or its terminal, its row goes and the thread's comes in that pane, and the page follows it there.
     @State private var codexWaitingPane: String?
@@ -2632,7 +2647,16 @@ struct ChatView: View {
 
     /// The agent's pending cards, and in DEBUG the sample ones the screenshot switches add (`-showSampleQuestion YES`…).
     private var pendingCards: [PendingCards.Card] {
-        var cards = model.interactions(for: key).map { PendingCards.Card(interaction: $0, enabled: model.canAnswer($0)) }
+        let parentPage = style == .dev && host == nil
+        var cards = model.interactions(for: key).compactMap { ix -> PendingCards.Card? in
+            // A side session's card (#7944), here by its `folded_under` as every folded child's: "From Side Session ·
+            // <title>", and not while that side's own page is the one shown, which has it.
+            if parentPage, ix.sessionKey != key, let side = model.sideChat(of: ix) {
+                guard side != sideUI.shown else { return nil }
+                return PendingCards.Card(interaction: ix, enabled: model.canAnswer(ix), from: Self.sideCardSource(side, ix, model))
+            }
+            return PendingCards.Card(interaction: ix, enabled: model.canAnswer(ix))
+        }
         // A card answered in a terminal dialog of several questions stays, greyed, until the next one comes (#2970).
         if let move = model.screenMoves[key], !cards.contains(where: { $0.interaction.kind == .screen }) {
             cards.append(PendingCards.Card(interaction: move.card, enabled: false))
@@ -2648,8 +2672,23 @@ struct ChatView: View {
         }
         // `-showVoiceSample asking|approval|plan_feedback`: the card the voice asks about or points to.
         cards += VoiceSample.cards(key).map { PendingCards.Card(interaction: $0, enabled: true) }
+        // `-showSideSessions …`: the sample side's question, in its own chat and in its parent's.
+        if let parent = model.sideParent(of: key), let ix = SideSessionSamples.card(for: key, parent: parent) {
+            cards.append(PendingCards.Card(interaction: ix, enabled: true))
+        }
+        for row in sides.rows where row.key != sideUI.shown {
+            if let ix = SideSessionSamples.card(for: row.key, parent: key) {
+                cards.append(PendingCards.Card(interaction: ix, enabled: true, from: Self.sideCardSource(row.key, ix, model)))
+            }
+        }
         #endif
         return cards
+    }
+
+    /// "From Side Session · <its title>": the line a side session's card carries in its parent's chat (#7944).
+    static func sideCardSource(_ side: SessionKey, _ ix: Interaction, _ model: AppModel) -> String {
+        let title = model.session(side)?.displayTitle ?? ix.sessionTitle ?? ""
+        return String(localized: "From Side Session · \(title)")
     }
 
     /// The conversation the post-resolution entry points at: another one, still needing you, not muted or quiet (#4348).
@@ -3486,6 +3525,14 @@ struct ChatView: View {
                     }
                 }
                 #endif
+                // Its side sessions (#7944), as the header's chip opens them.
+                let sides = self.sides
+                if !sides.isEmpty {
+                    Button { sideUI.showList = true } label: {
+                        Label(SideSessionsSheet.menuTitle(sides.count), systemImage: Theme.Icon.sideSessions).lineLimit(1)
+                    }
+                    .accessibilityIdentifier("side-sessions-menu")
+                }
             }
             if session?.canAttach == true {
                 Button { Task { await model.attach(key) } } label: { Label("Attach Live", systemImage: Theme.Icon.link).lineLimit(1) }
@@ -3703,7 +3750,7 @@ struct ChatView: View {
     /// The Agents header: back, title (with the state), the terminal and ⋯; under them, when there are any, the other
     /// agents of the space (a menu) and a /loop or background work. It folds into a slim bar as the list scrolls (not on the Mac: `ChatChrome.folds`).
     private var devChrome: some View {
-        ChromeHeader(chrome: chrome, touched: { scratch.lastActivity = .now }) {
+        let header = ChromeHeader(chrome: chrome, touched: { scratch.lastActivity = .now }) {
             VStack(spacing: 0) {
                 // One container for the row's glass (back, the terminal, ⋯): drawn together instead of as separate glasses.
                 GlassEffectContainer(spacing: 8) {
@@ -3734,8 +3781,9 @@ struct ChatView: View {
                 let hasActivity = host == nil && (session?.loop != nil || !(session?.background ?? []).isEmpty)
                 let tabs = host == nil && session?.spaceKey != nil
                 let mode = headerModeSession
-                if tabs || hasActivity || mode != nil {
-                    contextRow(tabs: tabs, activity: hasActivity, mode: mode)
+                let sides = self.sides
+                if tabs || hasActivity || mode != nil || !sides.isEmpty {
+                    contextRow(tabs: tabs, activity: hasActivity, mode: mode, sides: sides)
                         .padding(.horizontal, Theme.Space.l)
                         .padding(.bottom, Theme.Space.s)
                 }
@@ -3785,6 +3833,10 @@ struct ChatView: View {
                 if let out = t.outputFile { file = FileRef(group: key.group, machineID: key.machineID, path: out, cwd: session?.cwd) }
             }
         }
+        // Its side sessions' sheet, a side's page over it, and a landing that names a side (#7944). On the chain behind
+        // AnyView: one more modifier on it would hold a second copy of the whole header on the page's stack, which an
+        // unoptimized build lays out by value (`MainPagesStackTests`).
+        return AnyView(header).modifier(SideSessionsPresentation(parent: key, on: host == nil, ui: sideUI))
     }
 
     /// Back: out of files / Git to the chat first, then off the page.
@@ -3863,7 +3915,7 @@ struct ChatView: View {
     /// (2026-11-04). The system's title over the content says which session it is then (it is removed while the
     /// header shows its own).
     private var sideHeader: some View {
-        VStack(spacing: Theme.Space.sm) {
+        let header = VStack(spacing: Theme.Space.sm) {
             if !composerTyping { sideHeaderRows }
         }
         .padding(.horizontal, Theme.Space.l)
@@ -3890,6 +3942,10 @@ struct ChatView: View {
                 if let out = t.outputFile { file = FileRef(group: key.group, machineID: key.machineID, path: out, cwd: session?.cwd) }
             }
         }
+        // Its side sessions' sheet, a side's page over it, and a landing that names a side (#7944). On the chain behind
+        // AnyView: one more modifier on it would hold a second copy of the whole header on the page's stack, which an
+        // unoptimized build lays out by value (`MainPagesStackTests`).
+        return AnyView(header).modifier(SideSessionsPresentation(parent: key, on: host == nil, ui: sideUI))
     }
 
     @ViewBuilder private var sideHeaderRows: some View {
@@ -3897,7 +3953,8 @@ struct ChatView: View {
         let hasActivity = session?.loop != nil || !(session?.background ?? []).isEmpty
         let tabs = host == nil && session?.spaceKey != nil
         let mode = headerModeSession
-        if tabs || hasActivity || mode != nil { contextRow(tabs: tabs, activity: hasActivity, mode: mode) }
+        let sides = self.sides
+        if tabs || hasActivity || mode != nil || !sides.isEmpty { contextRow(tabs: tabs, activity: hasActivity, mode: mode, sides: sides) }
         if let goal = session?.goal { GoalBar(goal: goal) }
         workflowBar
         closeoutCard
@@ -3913,8 +3970,8 @@ struct ChatView: View {
 
     /// The header's second row: the space's other agents on the left, taking the width there is, and this agent's /loop
     /// and background work as one pill held at the trailing end (there too without tabs), so neither moves when the
-    /// other comes or goes.
-    private func contextRow(tabs: Bool, activity: Bool, mode: Session?) -> some View {
+    /// other comes or goes. Its side sessions' chip leads the trailing group while it has any (#7944).
+    private func contextRow(tabs: Bool, activity: Bool, mode: Session?, sides: SideSessions = SideSessions()) -> some View {
         HStack(spacing: Theme.Space.m) {
             if tabs {
                 SiblingTabs(current: key, select: switchTo, closed: closedAgent).frame(maxWidth: .infinity, alignment: .leading)
@@ -3923,8 +3980,9 @@ struct ChatView: View {
             }
             // This agent's own: its /loop and background work, then its permission mode at the very end (under ⋯, #3719),
             // which stays put as the work comes and goes.
-            if activity || mode != nil {
+            if activity || mode != nil || !sides.isEmpty {
                 HStack(spacing: Theme.Space.s) {
+                    if !sides.isEmpty { SideSessionsChip(sides: sides) { sideUI.showList = true } }
                     if activity {
                         ActivityChips(loop: session?.loop, background: session?.background ?? []) { showActivity = true }
                     }

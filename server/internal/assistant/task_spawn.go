@@ -53,12 +53,10 @@ func (s *Service) taskSpawn(ctx context.Context, machine, session string, args j
 				assigned = true
 			}
 		}
-		if p, err := s.loadPlan(ctx, t.PlanID); assigned && err == nil {
-			for _, task := range p.Tasks {
-				if task.TodoID == t.ID && task.Machine == machine && task.Permission != "" {
-					mode = task.Permission
-					break
-				}
+		if p, i, err := s.currentPlanAssignment(ctx, t); assigned && err == nil {
+			task := p.Tasks[i]
+			if task.Machine == machine && task.Permission != "" {
+				mode = task.Permission
 			}
 		}
 	}

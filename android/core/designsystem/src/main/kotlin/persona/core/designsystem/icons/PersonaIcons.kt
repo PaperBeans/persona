@@ -304,6 +304,8 @@ object PersonaIcons {
     val settings: PhIcon get() = PhIcons.Gear
     /** SF Symbol `square.and.arrow.up`. */
     val share: PhIcon get() = PhIcons.ShareNetwork
+    /** SF Symbol `rectangle.portrait.on.rectangle.portrait`. */
+    val sideSessions: PhIcon get() = PhIcons.Stack
     /** SF Symbol `sidebar.left`. */
     val sidebar: PhIcon get() = PhIcons.SidebarSimple
     /** SF Symbol `puzzlepiece.extension`. */

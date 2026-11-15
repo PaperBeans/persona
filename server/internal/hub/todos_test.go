@@ -498,8 +498,7 @@ func capturingNode(t *testing.T, h *Hub, id string, answer func(method string, p
 	return m
 }
 
-// A message to a done task whose agent was closed (the assistant's tasks_close.go) goes to that agent through the
-// hub (the node resumes it before typing).
+// A task-card message with an unknown stopped agent starts a successor through the existing route.
 func TestRouteToClosedTaskAgent(t *testing.T) {
 	h, tn := newTaskHub(t)
 	todo := startedTask(t, h)
@@ -512,8 +511,12 @@ func TestRouteToClosedTaskAgent(t *testing.T) {
 	if w := hubCall(h, "POST", "/api/v1/assistant/conversations/conv1/route", string(body)); w.Code != http.StatusOK {
 		t.Fatalf("route: %d %s", w.Code, w.Body)
 	}
-	_, sends := tn.calls()
-	if len(sends) != 1 || sends[0]["session_id"] != "s1" || sends[0]["text"] != "再补一个测试" {
-		t.Fatalf("sends = %v", sends)
+	starts, sends := tn.calls()
+	if len(sends) != 0 || len(starts) != 2 {
+		t.Fatalf("unknown stop resumed or lost the user's message: starts=%v, sends=%v", starts, sends)
+	}
+	prompt, _ := starts[1]["prompt"].(string)
+	if starts[1]["resume_session_id"] != nil || !strings.HasSuffix(prompt, "再补一个测试") {
+		t.Fatalf("unknown stop resumed or lost the user's message: starts=%v, sends=%v", starts, sends)
 	}
 }

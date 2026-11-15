@@ -298,6 +298,17 @@ export function storeDraft(key: string, text: string) {
   tellRows();
 }
 
+/** Words of a composer that belongs to no conversation row (the Agents page's box): kept under a key the sidebar never
+ *  asks useLeftDraft for, so a half-written instruction never marks a row, but a reload still restores it. */
+export function storedPageDraft(key: string): string {
+  return storedValue(`draft:${key}`) ?? "";
+}
+
+export function storePageDraft(key: string, text: string) {
+  if (text) storeValue(`draft:${key}`, text);
+  else removeStoredValue(`draft:${key}`);
+}
+
 /** What waits unsent for a conversation whose box is not on screen: its stored words, and whether quotes wait on its
  *  bar. Nothing while its box is mounted (you are in it; typing there does not re-render the list), or for `null`. */
 export function useLeftDraft(key: string | null): { text: string; quoted: boolean } {

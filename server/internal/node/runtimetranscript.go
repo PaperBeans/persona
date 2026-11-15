@@ -75,8 +75,9 @@ func (h *runtimeConn) setTranscripts(m map[string]string) (changed []string) {
 	return changed
 }
 
-// transcriptOf is the Claude session holding the conversation of session id, as the runtime answering for it lists it;
-// "" for any other session. A subagent of such a session ("<session>@<agent>") is not one: callers split it.
+// transcriptOf is the Claude session holding the conversation of session id, as the runtime answering for it lists it,
+// or as a runtime that left listed it last (runtimeaway.go); "" for any other session. A subagent of such a session
+// ("<session>@<agent>") is not one: callers split it.
 func (b *runtimeRegistry) transcriptOf(id string) string {
 	if b == nil || id == "" {
 		return ""
@@ -85,7 +86,7 @@ func (b *runtimeRegistry) transcriptOf(id string) string {
 	defer b.mu.Unlock()
 	h := b.owner[id]
 	if h == nil {
-		return ""
+		return b.awayTranscript(id)
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()

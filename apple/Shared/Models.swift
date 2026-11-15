@@ -674,8 +674,11 @@ nonisolated struct LauncherModels: Codable, Hashable, Sendable {
     var machine: String? = nil
 
     /// The agent takes a model ID typed by hand (#1644): Claude Code's `--model` / `/model` and Codex's `--model` take any
-    /// string; the hub remembers typed IDs for these two only. Other agents' lists are empty (no model row).
-    static func takesTypedModel(agent: String) -> Bool { agent == "claude" || agent == "codex" }
+    /// string, and so does a work agent started in herdr (`pi`, the Cursor CLI, the Antigravity CLI: `workagent.go`).
+    /// The hub remembers typed IDs for these. Other agents' lists are empty (no model row).
+    static func takesTypedModel(agent: String) -> Bool {
+        agent == "claude" || agent == "codex" || agent == "pi" || agent == "cursor" || agent == "agy"
+    }
 
     /// A typed ID can reach the agent: one of those two, and the launcher does not pass its own --model.
     var takesTypedModel: Bool { locked == nil && Self.takesTypedModel(agent: agent) }
@@ -839,25 +842,43 @@ nonisolated struct SessionChildren: Codable, Hashable, Sendable {
     var working: Int = 0
     var needsYou: Int = 0
     var workers: Int = 0
+    /// Of them, the side sessions (`folded_as: "side"`, #7944) by their own states: how many, working, needing the user
+    /// and with a result not looked at yet. Omitted from a hub without side folding, and when 0 (`SideFold`).
+    var sides: Int = 0
+    var sidesWorking: Int = 0
+    var sidesNeedsYou: Int = 0
+    var sidesUnread: Int = 0
 
     enum CodingKeys: String, CodingKey {
-        case total, working, workers
+        case total, working, workers, sides
         case needsYou = "needs_you"
+        case sidesWorking = "sides_working", sidesNeedsYou = "sides_needs_you", sidesUnread = "sides_unread"
     }
 
-    init(total: Int = 0, working: Int = 0, needsYou: Int = 0, workers: Int = 0) {
+    init(total: Int = 0, working: Int = 0, needsYou: Int = 0, workers: Int = 0,
+         sides: Int = 0, sidesWorking: Int = 0, sidesNeedsYou: Int = 0, sidesUnread: Int = 0) {
         self.total = total
         self.working = working
         self.needsYou = needsYou
         self.workers = workers
+        self.sides = sides
+        self.sidesWorking = sidesWorking
+        self.sidesNeedsYou = sidesNeedsYou
+        self.sidesUnread = sidesUnread
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        total = try c.decodeIfPresent(Int.self, forKey: .total) ?? 0
-        working = try c.decodeIfPresent(Int.self, forKey: .working) ?? 0
-        needsYou = try c.decodeIfPresent(Int.self, forKey: .needsYou) ?? 0
-        workers = try c.decodeIfPresent(Int.self, forKey: .workers) ?? 0
+        // An odd count reads as 0, never dropping the rollup.
+        func count(_ key: CodingKeys) -> Int { (try? c.decodeIfPresent(Int.self, forKey: key)).flatMap { $0 } ?? 0 }
+        total = count(.total)
+        working = count(.working)
+        needsYou = count(.needsYou)
+        workers = count(.workers)
+        sides = count(.sides)
+        sidesWorking = count(.sidesWorking)
+        sidesNeedsYou = count(.sidesNeedsYou)
+        sidesUnread = count(.sidesUnread)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -866,6 +887,11 @@ nonisolated struct SessionChildren: Codable, Hashable, Sendable {
         try c.encode(working, forKey: .working)
         try c.encode(needsYou, forKey: .needsYou)
         try c.encode(workers, forKey: .workers)
+        // The side keys only when there are sides, as the hub sends them.
+        if sides > 0 { try c.encode(sides, forKey: .sides) }
+        if sidesWorking > 0 { try c.encode(sidesWorking, forKey: .sidesWorking) }
+        if sidesNeedsYou > 0 { try c.encode(sidesNeedsYou, forKey: .sidesNeedsYou) }
+        if sidesUnread > 0 { try c.encode(sidesUnread, forKey: .sidesUnread) }
     }
 }
 
@@ -898,8 +924,15 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     /// The parent this row folds under (`folded_under`), when the hub computed one. Empty from a hub without
     /// `sessions_hierarchy`, and for an orphan or a cycle. The row's own `state` is never replaced by the fold.
     var foldedUnder: String? = nil
-    /// How it folds (`folded_as`), "worker" for a tab worker. Absent otherwise.
+    /// How it folds (`folded_as`): "worker" for a tab worker, "side" for a Claude desktop app's side session (#7944).
+    /// Absent otherwise.
     var foldedAs: String? = nil
+    /// The side session whose chat a folded row belongs to when it folds through one and is not the side itself
+    /// (`folded_side`: a side's own children and workers, #7944, `SideFold`). Absent otherwise.
+    var foldedSide: String? = nil
+    /// The session on the same machine this one was started from while staying a session of its own (`parent_agent_id`,
+    /// #5935): a Claude desktop app's side chat, /btw question or spawned session. Nil from older nodes, and when empty.
+    var parentAgentID: String? = nil
     /// Folded children of this row (`children`). Omitted when there are none. Counts use folded state; this stays.
     var children: SessionChildren? = nil
     /// When the child started (`started_at`). A card is placed by this, not by a later `updated_at`.
@@ -1291,7 +1324,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
              parentThreadID = "parent_thread_id", readOnlyReason = "read_only_reason"
         case isSubagent = "is_subagent", parentSessionID = "parent_session_id", rootSessionID = "root_session_id"
         case askingParentSessionID = "asking_parent_session_id", foldedUnder = "folded_under", foldedAs = "folded_as"
-        case children, startedAt = "started_at"
+        case children, startedAt = "started_at", foldedSide = "folded_side", parentAgentID = "parent_agent_id"
         case codexRoute = "codex_route", codexRouteNote = "codex_route_note"
         case agentLabelHint = "agent_label"
         case agentSurface = "agent_surface"
@@ -1338,11 +1371,14 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         parentSessionID = try c.decodeIfPresent(String.self, forKey: .parentSessionID)
         rootSessionID = try c.decodeIfPresent(String.self, forKey: .rootSessionID)
         askingParentSessionID = try c.decodeIfPresent(String.self, forKey: .askingParentSessionID)
-        foldedUnder = try c.decodeIfPresent(String.self, forKey: .foldedUnder).flatMap { $0.isEmpty ? nil : $0 }
-        foldedAs = try c.decodeIfPresent(String.self, forKey: .foldedAs).flatMap { $0.isEmpty ? nil : $0 }
+        // The hierarchy's keys: an odd one never drops the session; an empty one names nothing (#7944).
+        foldedUnder = Self.lenientText(c, .foldedUnder)
+        foldedAs = Self.lenientText(c, .foldedAs)
+        foldedSide = Self.lenientText(c, .foldedSide)
+        parentAgentID = Self.lenientText(c, .parentAgentID)
         // An odd rollup never drops the session. Omitted is none.
         children = (try? c.decodeIfPresent(SessionChildren.self, forKey: .children)).flatMap { $0 }
-        startedAt = (try? c.decodeIfPresent(Date.self, forKey: .startedAt)).flatMap { $0 }
+        startedAt = (try? c.decodeIfPresent(Date.self, forKey: .startedAt)).flatMap { $0 }.flatMap { $0.isMeaningful ? $0 : nil }
         readOnlyReason = try c.decodeIfPresent(String.self, forKey: .readOnlyReason)
         capabilities = try c.decodeIfPresent(SessionCapabilities.self, forKey: .capabilities)
         attached = try c.decodeIfPresent(Bool.self, forKey: .attached)
@@ -1435,6 +1471,27 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         compaction = try? c.decodeIfPresent(CompactionRun.self, forKey: .compaction) // an odd one never drops the session
         work = try? c.decodeIfPresent(WorkState.self, forKey: .work) // an odd one never drops the session
         hubGroup = try c.decodeIfPresent(String.self, forKey: .hubGroup)
+    }
+
+    /// A text key a newer hub added: another type reads as none, and so does an empty one.
+    private static func lenientText(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> String? {
+        (try? c.decodeIfPresent(String.self, forKey: key)).flatMap { $0 }.flatMap { $0.isEmpty ? nil : $0 }
+    }
+}
+
+/// A text key a newer hub added to a card: another type, or an empty string, reads as none and never drops the card.
+nonisolated struct LenientText: Codable, Hashable, Sendable {
+    var value: String?
+
+    init(_ value: String?) { self.value = value }
+
+    init(from decoder: Decoder) throws {
+        value = (try? decoder.singleValueContainer().decode(String.self)).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        if let value { try c.encode(value) } else { try c.encodeNil() }
     }
 }
 
@@ -2487,9 +2544,24 @@ nonisolated struct Interaction: Codable, Identifiable, Hashable, Sendable {
     var agentType: String?
     /// The asking session's `folded_under` (`Interaction.folded_under`). The card is shown on that parent. Absent from
     /// a hub without `sessions_hierarchy`, and on a card whose session is not folded.
-    var foldedUnder: String? = nil
-    /// How the asking session folds (`folded_as`).
-    var foldedAs: String? = nil
+    var foldedUnder: String? {
+        get { foldedUnderText?.value }
+        set { foldedUnderText = newValue.map(LenientText.init) }
+    }
+    /// How the asking session folds (`folded_as`): "worker", "side" (#7944).
+    var foldedAs: String? {
+        get { foldedAsText?.value }
+        set { foldedAsText = newValue.map(LenientText.init) }
+    }
+    /// The side session whose chat shows the card when its session folds through one (`folded_side`, #7944, `SideFold`).
+    var foldedSide: String? {
+        get { foldedSideText?.value }
+        set { foldedSideText = newValue.map(LenientText.init) }
+    }
+    /// What the three are stored as: a value of another type, or an empty one, reads as none and never drops the card.
+    var foldedUnderText: LenientText? = nil
+    var foldedAsText: LenientText? = nil
+    var foldedSideText: LenientText? = nil
 
     var sessionKey: SessionKey { SessionKey(group: group, machineID: machineID, sessionID: sessionID) }
     /// The session the card is shown on. Answering still uses `id` and `sessionID`.
@@ -2517,7 +2589,8 @@ nonisolated struct Interaction: Codable, Identifiable, Hashable, Sendable {
              toolInput = "tool_input", alwaysLabel = "always_label", alwaysKeys = "always_keys", alwaysHonored = "always_honored",
              toolTitle = "tool_title", agentLabelHint = "agent_label", hubGroup = "app_hub_group",
              mutedFlag = "muted", elicitation, mcpServerName = "mcp_server_name", mcpConfigSource = "mcp_config_source",
-             agentID = "agent_id", agentType = "agent_type", foldedUnder = "folded_under", foldedAs = "folded_as"
+             agentID = "agent_id", agentType = "agent_type", foldedUnderText = "folded_under", foldedAsText = "folded_as",
+             foldedSideText = "folded_side"
     }
 }
 

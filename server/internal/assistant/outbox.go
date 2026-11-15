@@ -150,7 +150,7 @@ func (b *BusHub) keep(ctx context.Context, id, kind string, body []byte) bool {
 func (b *BusHub) queued() bool { return b.out.waiting.Load() > 0 || !b.Connected() }
 
 // sendPush is notify.request, kept in the outbox while the hub is away (or while older ones wait there), and when the
-// call may not have reached it: the hub takes each notification id once.
+// call may not have reached it: the hub takes each notification id once. A kept push answers Queued.
 func (b *BusHub) sendPush(ctx context.Context, p NotifyRequest) (NotifyResult, error) {
 	o, id := b.out, p.Notification.ID
 	var raw []byte
@@ -158,12 +158,12 @@ func (b *BusHub) sendPush(ctx context.Context, p NotifyRequest) (NotifyResult, e
 		raw, _ = json.Marshal(p.Notification)
 	}
 	if raw != nil && b.queued() && b.keep(ctx, id, outboxPush, raw) {
-		return NotifyResult{}, nil
+		return NotifyResult{OK: true, Queued: true}, nil
 	}
 	var res NotifyResult
 	err := busError(b.client.Call(ctx, assistantwire.MethodNotify, p, &res))
 	if err != nil && !answered(err) && raw != nil && b.keep(ctx, id, outboxPush, raw) {
-		return NotifyResult{}, nil
+		return NotifyResult{OK: true, Queued: true}, nil
 	}
 	return res, err
 }

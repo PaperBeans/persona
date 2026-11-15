@@ -36,7 +36,7 @@
   "trust_title": "Remembered auto-start rules",
   "trust_manage": "Manage",
   "trust_hide": "Hide",
-  "trust_intro": "Remembered rules can start matching tasks directly. To remember a rule again, choose “Start these right away from now on” on a matching plan.",
+  "trust_intro": "Remembered rules start matching tasks directly: a rule covers its folder and the folders under it, on its computer. To remember a rule again, tick the line above Start on a matching plan.",
   "trust_empty": "No remembered rules were returned.",
   "trust_refresh": "Refresh rules",
   "trust_machine": "Computer",

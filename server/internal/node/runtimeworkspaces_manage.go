@@ -25,9 +25,11 @@ import (
 var workspaceRenameTimeout = 15 * time.Second
 
 // runtimeRemoveDeadline bounds a closed Agent's worktree.remove on a runtime engine, the checks and the runtime's
-// archive together, inside the 90 s the hub gives worktree/remove. A confirmed worktree.delete has
-// runtimeWorktreeDeadline, inside its 150 s.
-var runtimeRemoveDeadline = 85 * time.Second
+// archive together: at least as long as the runtime waits for the archive itself (the Paseo bridge gives Paseo 135 s,
+// integrations/paseo/lib/bridge.js ARCHIVE_WAIT, for a worktree removal of up to 2 minutes), inside the 150 s the hub
+// gives worktree/remove, as runtimeWorktreeDeadline is for a confirmed worktree.delete. A node that gave up first said
+// "no answer" while Paseo went on to remove the folder, and the branch stayed (#8135).
+var runtimeRemoveDeadline = 145 * time.Second
 
 // dropWorkspace takes a workspace the runtime archived off its list at once: its next push says the same.
 func (h *runtimeConn) dropWorkspace(id string) {

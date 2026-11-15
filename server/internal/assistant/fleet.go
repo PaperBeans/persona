@@ -60,6 +60,7 @@ type fleetBook struct {
 	// shorten them on their own Service before any session list comes, so an upgrade loop another test left running
 	// never reads what this one writes (#4554).
 	upgradeEvery, upgradeFor time.Duration
+	upgrades                 sync.WaitGroup // active screen-upgrade loops; database-backed fixtures wait during teardown
 	// hooked: Persona's hooks run in the session (a hook event came since the manager started).
 	hooked map[[2]string]bool
 	// stopSig: the signature of the reply each session's latest Stop ended its turn with; pushedSig: the one a

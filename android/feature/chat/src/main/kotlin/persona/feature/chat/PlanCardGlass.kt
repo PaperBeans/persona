@@ -158,7 +158,7 @@ private fun GlassPlanTask(number: Int, task: PlanTask, numbered: Boolean, host: 
 
 /**
  * "Start these directly" (iOS's label button): a ring that becomes a check in the accent once chosen, with the words in the
- * accent too, one line. Such tasks (the same computer and folder, read or edit alike) then start without asking again.
+ * accent too, one line. Such tasks (the same computer, in that folder or one under it, read or edit alike; #8095) then start without asking again.
  */
 @Composable
 private fun StartDirectly(on: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {

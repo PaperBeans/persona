@@ -91,6 +91,21 @@ describe("session metadata extractors & facet building", () => {
     ]);
   });
 
+  it("keys Paseo's providers by provider, each under its own label, never one 'paseo' (#8142)", () => {
+    const paseo = (id: string, launcher: string, agent_label: string) => mkSession(id, { agent: "paseo", source_kind: "runtime", source_instance_id: "paseo", launcher, agent_label });
+    const list = [paseo("g1", "grok", "Grok"), paseo("k1", "kimi", "Kimi"), paseo("g2", "grok", "Grok"), paseo("c1", "cursor", "Cursor"), mkSession("cc", { agent: "claude", source_kind: "runtime", launcher: "my-claude" })];
+    const facets = buildAgentFacets(list, machines, baseCtx.pins);
+    expect(facets.harnesses.map((h) => [h.id, h.label, h.count])).toEqual([
+      ["grok", "Grok", 2],
+      ["claude", "Claude Code", 1],
+      ["cursor", "Cursor", 1],
+      ["kimi", "Kimi", 1],
+    ]);
+    const only = (harnesses: string[]) => applyDimensionFilters(list, { ...DEFAULT_DIMENSION_FILTERS, harnesses }, baseCtx).sessions.map((s) => s.session_id);
+    expect(only(["grok"])).toEqual(["g1", "g2"]);
+    expect(only(["kimi"])).toEqual(["k1"]);
+  });
+
   it("toggles facet values with Orca All/multi-select collapse semantics", () => {
     const all = ["claude", "codex"];
     const step1 = toggleFacetValue([], "claude", all);

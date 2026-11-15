@@ -119,7 +119,11 @@ func TestTaskReviewClosesAFailedStart(t *testing.T) {
 				textsBefore := len(f.appParams(AppFeishu, FeishuText))
 				pushesBefore := len(f.pushed())
 
-				if _, err := reviewErr(s, todo.ID, map[string]any{"verdict": tc.verdict, "note": "review the failed start"}); err != nil {
+				args := map[string]any{"verdict": tc.verdict, "note": "review the failed start"}
+				if tc.verdict == reviewAccepted {
+					args["checks"] = completeReviewChecks(todoNow(s, todo.ID))
+				}
+				if _, err := reviewErr(s, todo.ID, args); err != nil {
 					t.Fatal(err)
 				}
 				s.tasks.outcomeRuns.Wait()
@@ -239,7 +243,8 @@ func TestReviewedFailedStartAndLateAgentWork(t *testing.T) {
 		if err := s.failTodo(context.Background(), todo.ID, "synthetic start failure"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := reviewErr(s, todo.ID, map[string]any{"verdict": reviewAccepted, "note": "accept the recorded outcome"}); err != nil {
+		if _, err := reviewErr(s, todo.ID, map[string]any{"verdict": reviewAccepted, "note": "accept the recorded outcome",
+			"checks": completeReviewChecks(todoNow(s, todo.ID))}); err != nil {
 			t.Fatal(err)
 		}
 		got := todoNow(s, todo.ID)
@@ -263,7 +268,8 @@ func TestReviewedFailedStartAndLateAgentWork(t *testing.T) {
 		if got.DoneAt != nil || got.Supervision.State != reviewPending {
 			t.Fatalf("the new turn did not wait for review: %+v", got)
 		}
-		if _, err := reviewErr(s, todo.ID, map[string]any{"verdict": reviewAccepted, "note": "accept the new turn"}); err != nil {
+		if _, err := reviewErr(s, todo.ID, map[string]any{"verdict": reviewAccepted, "note": "accept the new turn",
+			"checks": completeReviewChecks(todoNow(s, todo.ID))}); err != nil {
 			t.Fatal(err)
 		}
 		if got = todoNow(s, todo.ID); got.DoneAt == nil || got.DoneBy != db.DoneByReview || got.StartError != "" {

@@ -18,7 +18,8 @@ import (
 
 // errTaskAgentsStopped: every agent of the task has stopped; nothing was sent.
 var errTaskAgentsStopped = errors.New("every agent of this task has stopped and is read-only: nothing was sent. " +
-	"A message on the task's card starts a new agent for it; the user can also resume one from its terminal page")
+	"A message on the task's card starts a new agent for it; to go on with a stopped agent's own context, resume it on " +
+	"purpose with agent_send (resume true, resume_why), or the user can with Resume on its terminal page")
 
 // liveTaskAgents are the task's agents that have not stopped; last is the latest of all when none is left.
 func liveTaskAgents(agents []proto.Session) (live []proto.Session, last proto.Session) {
@@ -43,6 +44,7 @@ func (s *Service) startTaskSuccessor(ctx context.Context, t Todo, last proto.Ses
 	defer cancel()
 	prompt := prompts.RenderTaskSuccessor(prompts.TaskSuccessor{Previous: agentLabel(last), PreviousID: last.SessionID,
 		LastReply: clip(last.LastText, 2000), Text: text})
+	prompt = s.withTodoDecisions(sctx, t.ID, prompt)
 	params := map[string]any{"cwd": last.Cwd, "launcher": last.Launcher, "model": "", "effort": "", "tab_name": t.Title,
 		"prompt": prompt}
 	if last.PermissionMode != "" {

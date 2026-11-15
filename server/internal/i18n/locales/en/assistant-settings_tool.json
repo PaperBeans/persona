@@ -56,5 +56,10 @@
   "meeting_transcription_unchanged": "The meeting transcription default is unchanged.",
   "meeting_transcription_applied": "Meeting transcription is set to {mode} for meetings started from now on.",
   "title_admission": "Execution Agent admission gate",
-  "change_admission": "Execution Agent admission gate: {before} → {after}"
+  "change_admission": "Execution Agent admission gate: {before} → {after}",
+  "title_task_trust": "Tasks that start without asking",
+  "change_task_trust_add_edit": "From now on, tasks that change files on {machine} in {directory} and its subfolders start right away, without a plan card",
+  "change_task_trust_add_read": "From now on, tasks that only read files on {machine} in {directory} and its subfolders start right away, without a plan card",
+  "change_task_trust_remove_edit": "Tasks that change files on {machine} in {directory} wait for Start on a plan card again",
+  "change_task_trust_remove_read": "Tasks that only read files on {machine} in {directory} are no longer remembered (read-only tasks still start right away)"
 }

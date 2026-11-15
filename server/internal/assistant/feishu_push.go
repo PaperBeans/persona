@@ -28,15 +28,25 @@ func (s *Service) feishuPush(machine, session, title, body string) {
 // while the hub is away, a card Feishu did not take for now), nil when it went or has nowhere to go (no bot, the
 // pushes switch off, a card Feishu refuses however often it is sent).
 func (s *Service) feishuPushKeyed(ctx context.Context, machine, session, title, body, key string) error {
+	return s.feishuPushTold(ctx, machine, session, title, body, key, nil)
+}
+
+// feishuPushTold is feishuPushKeyed telling r whether the push goes to the bot at all and, when it does, whether its
+// first card landed (notify_user's answer, channels_copies.go).
+func (s *Service) feishuPushTold(ctx context.Context, machine, session, title, body, key string, r *copyReport) error {
 	st, err := s.feishuStatus(ctx)
 	ready := err == nil && st.Ready
 	s.workbenchOn(st.Features, ready) // as feishuFeatures
 	if err != nil && !answered(err) {
+		r.going()
 		return err
 	}
 	if !ready || !st.Features.Pushes {
+		r.going()
 		return nil
 	}
+	r.going(pushCopy{channel: channel.Feishu})
+	defer r.went(channel.Feishu, errNoCopy) // nothing landed when it returns without saying so
 	// The body laid out like the bot's answers (answerCards: sections, tables, link buttons, more cards when long, at
 	// most botAnswerCards); the push's title heads the first card, the open button goes under the last.
 	l := s.botLang(ctx)
@@ -54,6 +64,7 @@ func (s *Service) feishuPushKeyed(ctx context.Context, machine, session, title, 
 	}
 	if s.divertAnswer(ctx, "push", cards) { // a notifications companion takes it (feishu_companions.go)
 		s.markPushed(channel.Feishu, machine, session)
+		r.went(channel.Feishu, nil)
 		return nil
 	}
 	var missing []int // the pieces that did not get out (1-based): said at the end
@@ -70,6 +81,7 @@ func (s *Service) feishuPushKeyed(ctx context.Context, machine, session, title, 
 				again = err
 			}
 			if i == 0 {
+				r.went(channel.Feishu, err)
 				return again // nothing went out: do not mark pushed, so the turn-end mirror delivers the turn
 			}
 			missing = append(missing, i+1)
@@ -77,6 +89,7 @@ func (s *Service) feishuPushKeyed(ctx context.Context, machine, session, title, 
 		}
 		if i == 0 {
 			s.markPushed(channel.Feishu, machine, session) // only after the first card lands: a failed push must not suppress the mirror
+			r.went(channel.Feishu, nil)
 		}
 		if session != "" {
 			s.rememberBotThread(mid, botTarget{Kind: targetPersona, MachineID: machine, SessionID: session}, title)

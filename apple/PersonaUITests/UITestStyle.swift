@@ -17,14 +17,19 @@ enum UITestStyle {
 }
 
 extension XCUIApplication {
-    /// Launches in the run's style (or the one the test passes) without overriding the app's navigation defaults.
-    func launchPinned() {
+    /// Launches in the run's style (or the one the test passes) without overriding the app's navigation defaults, and
+    /// in the Separate layout unless the test names one (`-app.navigation`): with nothing picked an iPad starts in the
+    /// Merged sidebar (#4206), and the tests written for the tabs and the shell would find another app. `navigation:
+    /// false` leaves the layout to the app (a test of the setting itself, which a launch argument would pin).
+    func launchPinned(navigation: Bool = true) {
         launchArguments = UITestStyle.pinned(launchArguments)
-        launchPersona()
+        launchPersona(navigation: navigation)
     }
 
-    /// Demo launches start clean so a pairing left by an earlier test cannot override Demo Mode.
-    func launchPersona() {
+    /// Demo launches start clean so a pairing left by an earlier test cannot override Demo Mode. The layout is pinned as
+    /// `launchPinned`'s, for the tests that name their own style.
+    func launchPersona(navigation: Bool = true) {
+        if navigation, !launchArguments.contains("-app.navigation") { launchArguments += ["-app.navigation", "separate"] }
         if Self.wantsDemo(launchArguments) { launchArguments += ["-openWelcome", "YES"] }
         launch()
     }

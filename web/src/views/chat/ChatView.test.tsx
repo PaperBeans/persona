@@ -1,9 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Outgoing } from "./Composer";
 import type { MentionSource } from "./ComposerPanel";
 import type { Item, Session } from "../../lib/types";
 import { getFeedState, setRoute } from "../../lib/feed";
+import { loadPages } from "../../lib/lazy-page";
 import { outboxKey, type OutboxEntry } from "../../lib/outbox";
 import { toast } from "../../ui/atoms";
 import { t } from "../../i18n";
@@ -328,6 +329,37 @@ describe("ChatView opening line over an empty chat (#2450)", () => {
       expect(html).not.toContain(opening);
     } finally {
       captured.noDetails = "";
+    }
+  });
+});
+
+describe("closeout command evidence wiring", () => {
+  // the evidence row is a chunk of its own (CloseoutEvidence, #8118); a static render draws only a loaded one
+  beforeAll(() => loadPages(), 60_000);
+
+  it("uses only the closeout's own last exchange, never an earlier run", () => {
+    const was = captured.session;
+    captured.session = {
+      ...was, status: "done", state: "idle",
+      work: { phase: "done", closeout: { status: "done", verified: "`npm test`" } },
+    };
+    const call = (seq: number, id: string, command: string): Item[] => [
+      { id: `u${seq}#0`, seq, role: "assistant", kind: "tool_use", tool_use_id: id, tool_name: "Bash", tool_input: { command } },
+      { id: `r${seq}#0`, seq: seq + 1, role: "user", kind: "tool_result", tool_use_id: id, text: "ok", is_error: false, outcome: { status: "ok", exit_code: 0 } },
+    ];
+    captured.items = [
+      { id: "q1#0", seq: 1, role: "user", kind: "text", text: "First" },
+      ...call(2, "earlier", "npm test"),
+      { id: "q2#0", seq: 4, role: "user", kind: "text", text: "Second" },
+      ...call(5, "later", "npm run build"),
+      { id: "a7#0", seq: 7, role: "assistant", kind: "text", text: '<closeout status="done">\nverified: `npm test`\n</closeout>' },
+    ];
+    try {
+      expect(renderToStaticMarkup(<ChatView mid="hub" sid="c1" />)).toContain('data-closeout-command-evidence="not_found"');
+      captured.items = captured.items.map((entry) => entry.tool_use_id === "later" && entry.kind === "tool_use" ? { ...entry, tool_input: { command: "npm test" } } : entry);
+      expect(renderToStaticMarkup(<ChatView mid="hub" sid="c1" />)).toContain('data-closeout-command-evidence="exit"');
+    } finally {
+      captured.session = was;
     }
   });
 });

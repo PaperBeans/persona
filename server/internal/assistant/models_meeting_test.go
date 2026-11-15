@@ -218,14 +218,43 @@ func TestMeetingPurposesOutsideProfilesAndAssignment(t *testing.T) {
 	}
 }
 
-// The room runs on Claude Code's CLI only: it offers and accepts a Claude Code launcher on the assistant's computer and
-// a Messages API connection, refuses Codex (a ~/.zshrc alias or a managed one) and a Responses connection with the
-// localized reason before anything is stored, and refuses a runtime. Its effective binding carries no runtime even
-// while the main chat runs on the Agent SDK; following a main chat on Codex, its status says rooms can't start, until a
-// Claude Code launcher is picked here while the main chat stays on Codex.
+func TestMeetingPurposeSameProviderKeepsInheritedFields(t *testing.T) {
+	for _, c := range []struct{ id, parent, provider string }{{purposeMeetingRoom, "assistant", "launcher.claude"}, {purposeMeetingMinutes, "kb", "legacy.ai"}} {
+		t.Run(c.id, func(t *testing.T) {
+			s, f, _ := modelService(t)
+			f.hello.Models.AI.API = "messages"
+			f.hello.Models.AI.BaseURL = "https://api.example.com"
+			f.hello.Models.AI.Model = "legacy-model"
+			f.hello.Models.AI.ReasoningEffort = "low"
+			setModel(t, s, c.parent, ModelBinding{Provider: c.provider, Model: "parent-model", Effort: "high"})
+			w := modelRequest(s, http.MethodPatch, c.id, fmt.Sprintf(`{"revision":0,"provider":%q,"model":null,"effort":null}`, c.provider))
+			if w.Code != http.StatusOK {
+				t.Fatalf("same-provider sparse override: %d %s", w.Code, w.Body.String())
+			}
+			p := purposeOf(t, s, c.id)
+			want := ModelBinding{Provider: c.provider}
+			if p.Revision != 1 || p.Override != want || p.Effective.Provider != want.Provider || p.Effective.Model != "parent-model" || p.Effective.Effort != "high" {
+				t.Fatalf("same-provider override lost inherited fields: %+v", p)
+			}
+			if r := modelRecordOf(t, s, c.id); r.Revision != 1 || r.Binding != want {
+				t.Fatalf("the sparse override was not preserved: %+v", r)
+			}
+		})
+	}
+}
+
+// The room runs on Claude Code's CLI only: it offers and accepts a Claude Code launcher on the assistant's computer,
+// including one backed by a Messages API connection. It refuses Codex, a Responses connection, and a hub.json Messages
+// connection (which is not a launcher) with the localized reason before anything is stored, and refuses a runtime. Its
+// effective binding carries no runtime even while the main chat runs on the Agent SDK; following a main chat on Codex,
+// its status says rooms can't start, until a Claude Code launcher is picked here while the main chat stays on Codex.
 func TestMeetingRoomRunsOnlyOnClaudeCode(t *testing.T) {
 	s, f, _ := modelService(t)
 	ctx := context.Background()
+	f.hello.Models.AI.API = "messages"
+	f.hello.Models.AI.BaseURL = "https://api.example.com"
+	f.hello.Models.AI.Model = "legacy-model"
+	f.hello.Models.AI.ReasoningEffort = "low"
 	f.mu.Lock()
 	f.zshrc = map[string][]proto.Launcher{"server": {{Name: "cc-wrapper", Source: "zshrc"}, {Name: "cx", Agent: "codex", Source: "zshrc"}}}
 	f.mu.Unlock()
@@ -240,7 +269,7 @@ func TestMeetingRoomRunsOnlyOnClaudeCode(t *testing.T) {
 			t.Fatalf("%s not offered: %v", id, p.ProviderIDs)
 		}
 	}
-	for _, id := range []string{"launcher.cx", "launcher.codex-gw", "launcher.resp"} {
+	for _, id := range []string{"launcher.cx", "launcher.codex-gw", "launcher.resp", "legacy.ai"} {
 		if slices.Contains(p.ProviderIDs, id) {
 			t.Fatalf("%s offered: %v", id, p.ProviderIDs)
 		}
@@ -248,7 +277,7 @@ func TestMeetingRoomRunsOnlyOnClaudeCode(t *testing.T) {
 	if main := purposeOf(t, s, "assistant"); !slices.Contains(main.ProviderIDs, "launcher.cx") {
 		t.Fatalf("the main chat does not offer the Codex alias, so this proves nothing: %v", main.ProviderIDs)
 	}
-	for _, provider := range []string{"launcher.cx", "launcher.codex-gw", "launcher.resp"} {
+	for _, provider := range []string{"launcher.cx", "launcher.codex-gw", "launcher.resp", "legacy.ai"} {
 		for _, method := range []string{http.MethodPut, http.MethodPatch} {
 			w := modelRequest(s, method, purposeMeetingRoom, fmt.Sprintf(`{"revision":0,"provider":%q}`, provider))
 			if w.Code != http.StatusBadRequest || errorOf(t, w.Body.Bytes()) != claudeOnly {

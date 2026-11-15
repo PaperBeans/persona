@@ -522,6 +522,7 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
                       <div aria-hidden className="truncate px-2.5 pt-2 pb-1 text-[12px] leading-[1.33] font-medium text-ink-2">
                         {label(s)}
                         {s.kind === "provider" && s.provider?.idNote && <span className="ml-1.5 font-mono text-[11px] font-normal text-ink-3">{s.provider.idNote}</span>}
+                        {s.kind === "provider" && s.provider?.alsoNote && <span className="ml-1.5 text-submeta font-normal text-ink-3">{s.provider.alsoNote}</span>}
                       </div>
                       {s.kind === "provider" && s.provider && <GroupNotes provider={s.provider} onReload={onReload} onHelp={onHelp} />}
                       {s.loading && (

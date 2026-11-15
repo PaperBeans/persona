@@ -103,7 +103,7 @@ func TestAcceptedTaskFollowUpIsNotStoppedShort(t *testing.T) {
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, fullReport, 0)
 	waitFor(t, "the review message", func() bool { return len(f.notices()) == 1 })
-	raw, _ := json.Marshal(map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "可以"})
+	raw, _ := json.Marshal(map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "可以", "checks": completeReviewChecks(todoNow(s, todo.ID))})
 	if _, err := s.runTool(ctx, "server", "conv1", "task_review", raw); err != nil {
 		t.Fatal(err)
 	}
