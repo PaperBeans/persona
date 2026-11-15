@@ -114,7 +114,9 @@ class MeetingLiveViewMockTests(conversation.Conversation, unittest.TestCase):
         # "[", which the apps read as a line of the meeting), then the room calls meeting_topics_set and writes nothing.
         items = self.items(room["session_id"])
         batch = next(x for x in reversed(items) if x["kind"] == "text")
-        self.assertIn("update the topics with meeting_topics_set", batch["text"])
+        self.assertIn("update the topics", batch["text"])
+        self.assertIn("as your rules say; then write nothing in reply.", batch["text"])
+        self.assertNotIn("meeting_topics_set", batch["text"])
         self.assertIn("[14:00] Ada: Today we look at the export flow.\n\nTopics so far: none yet.\n", block(batch["text"], "Design review · live"))
         self.assertEqual(batch["text"].count("<persona-context kind=\"context\""), 1)
         self.assertTrue(batch["text"].rstrip().endswith("</persona-context>"))  # not the end batch, which has words after its block
@@ -134,9 +136,7 @@ class MeetingLiveViewMockTests(conversation.Conversation, unittest.TestCase):
                          [("Today we look at the export flow", "done"), ("Who owns the regression test", "current"), ("Next steps", "open")])
         self.assertEqual(moved["revs"], {"topics": 2})
         second = self.last_text(room["session_id"])
-        topics = block(second["text"], "Design review · live").split("Topics so far:\n")[1]
-        self.assertTrue(topics.startswith("- current: Today we look at the export flow (from 0:05 into the meeting): Raised by Ada at 0:05.\n"
-                                          "- open: Next steps\n"), topics)
+        self.assertEqual(block(second["text"], "Design review · live"), "[14:30] Bo: Who owns the regression test?\n")
         # It did not: the same topic again changes nothing.
         self.post_lines(rid, 2, [{"start": 1830, "end": 1833, "text": "Bo: Who owns the regression test?"}])
         self.assertEqual(self.live(rid)["revs"]["topics"], 2)

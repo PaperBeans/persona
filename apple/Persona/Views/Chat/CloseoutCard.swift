@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 /// A stopped agent's closeout, in the chat's header above its transcript (#3612, docs/assistant/agent-work.md "Closeout";
 /// the web's views/chat/CloseoutCard.tsx): whether it says the work is done, what changed, what it produced, whether it

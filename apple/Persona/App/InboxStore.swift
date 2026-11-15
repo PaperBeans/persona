@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PersonaWire
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)

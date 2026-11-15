@@ -245,7 +245,7 @@ describe("a decision in the Needs you tray", () => {
   it("defers only this decision round without writing or completing the task", async () => {
     await mount();
     const actions = row().querySelector("[data-decision-actions]")!;
-    expect([...actions.querySelectorAll("button")].map((b) => b.textContent)).toEqual([t("assistant-tasks.later"), t("assistant-tasks.dismiss_draft")]);
+    expect([...actions.querySelectorAll("button")].map((b) => b.textContent)).toEqual([t("assistant-task-actions.later"), t("assistant-task-actions.dismiss_draft")]);
     act(() => actions.querySelector<HTMLButtonElement>("button")!.click());
     expect(row()).toBeNull();
     expect(posts).toEqual([]);

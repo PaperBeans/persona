@@ -1314,6 +1314,7 @@ func (s *Service) Run(ctx context.Context) {
 	go s.channelLoop(ctx)        // the channels' runs that lost their watcher (channels.go)
 	go s.kbLoop(ctx)             // the knowledge base (kb.go)
 	go s.kbHistoryLoop(ctx)      // importing chats' older history into it, off by default (kbhistory/history.go)
+	go s.memoryDreamLoop(ctx)    // consolidating assistant memory, off by default
 	go s.viewActionLoop(ctx)     // durable card reply outbox
 	go s.acceptLoop(ctx)         // "Please verify" cards that did not go out, and reminders each morning (acceptance.go)
 	go s.admissionQueueLoop(ctx) // plan tasks the admission gate parked: timed retries until they start or time out (task_queue.go)

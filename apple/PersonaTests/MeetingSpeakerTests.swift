@@ -2,7 +2,6 @@
 import AVFoundation
 import Foundation
 import Testing
-import PersonaWire
 @testable import Persona
 
 /// Spoken meeting answers (#5004, docs/apple/recording.md「Persona in meetings」): said in the hub's realtime voice when it
@@ -367,3 +366,4 @@ import PersonaWire
     }
 }
 #endif
+import PersonaWire

@@ -99,6 +99,27 @@ class HttpSettingsParityWireTest {
         }
     }
 
+    @Test fun nextSuggestionsIsOptionalAndIsTheOnlyFieldWritten() = runBlocking {
+        MockWebServer().use { server ->
+            val api = HttpAssistantManagement(server.url("/").toString(), "test-token", OkHttpClient())
+            for (value in listOf(true, false)) {
+                server.enqueue(MockResponse().setBody("""{"next_suggestions":$value}"""))
+                val saved = api.updateConfig(AssistantConfigUpdate(nextSuggestions = value))
+                val request = server.takeRequest()
+                assertEquals("PUT", request.method)
+                assertEquals("/api/v1/assistant", request.path)
+                assertEquals("""{"next_suggestions":$value}""", request.body.readUtf8())
+                assertEquals(value, saved.nextSuggestions)
+            }
+            server.enqueue(MockResponse().setBody("{}"))
+            assertNull(api.config().nextSuggestions)
+            server.takeRequest()
+            server.enqueue(MockResponse().setBody("{}"))
+            api.updateConfig(AssistantConfigUpdate(timezone = "Europe/Paris"))
+            assertEquals("""{"timezone":"Europe/Paris"}""", server.takeRequest().body.readUtf8())
+        }
+    }
+
     /**
      * #5084: "The main chat supervises its own tasks" goes out alone when set; the background supervisor's conversation
      * is read, never written; an older hub sends none of it.

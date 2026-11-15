@@ -94,7 +94,7 @@ func (s *Service) digestTo(cfg Settings, g superviseSignal) string {
 	if lead == "" || lead == cfg.Main {
 		return own
 	}
-	if t.Supervision.state(t) == reviewNeedsUser {
+	if t.Supervision.state(t) == reviewNeedsUser && g.Kind != sigAllStopped {
 		return cfg.Main
 	}
 	return lead

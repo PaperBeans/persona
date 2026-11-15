@@ -1,5 +1,6 @@
 import EventKit
 import Foundation
+import PersonaWire
 
 /// Reminders imported as to-dos, one way (#4009, docs/assistant/todos.md "Imported from Reminders"): the incomplete
 /// reminders of the lists the user picked go to the hub, which makes a to-do of each new one and follows changes of

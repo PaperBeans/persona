@@ -44,11 +44,43 @@ takes only `plan` from it (`assistant/tasks_permission.go`). None of this reache
 Auto Accept (their launcher says `auto_accept`; Grok and Paseo's other ACP providers, OpenCode): they start with it on,
 as the owner decided (#8141, `docs/integrations/paseo.md` "Agents Persona starts"). A read-only task's first message adds
 `本任务只读：不改项目文件、不提交、不对外写入` after its own prompt, without changing the saved prompt or duplicating the
-constraint on retries. Codex read-only tasks keep `permission: plan` and the hard read-only sandbox. Planning, card edits,
+constraint on retries. With the default `assistant.readonly_mode: sandbox`, Codex read-only tasks keep `permission: plan`
+and the hard read-only sandbox. traex and omp take no permission mode or effort, so their tasks start with neither
+and a read-only one has only the first-message constraint (#7559); one the call names is refused. pi, cursor and agy
+start a writable task the same way, but one the call names is dropped rather than refused, as the node ignores it for
+them (#8151); a read-only task for them is refused (below). Planning, card edits,
 legacy plans, retries, and the final dispatch all resolve the launcher before applying this rule; a permission change is
 saved with the resolved launcher and model.
 
-Ordinary plan-mode starts keep their existing behavior. For Codex read-only tasks, the node must honor `plan` or refuse
+A read-only task whose launcher starts pi, the Cursor CLI or the Antigravity CLI in a terminal is refused when it is
+planned (#8316, `assistant/tasks_placement.go` `readonlyLauncherRefusal`): these agents have no read-only mode, so
+`task_plan` answers `readonly_unsupported` with the launchers on that computer that do take a read-only task (Claude
+Code's and Codex's), and nothing is saved or started. The model may plan the task writable or on one of those; no other
+launcher is put in its place. The same check runs again before a start (a card edited to one of them, a plan saved
+before this). A launcher whose agent the computer's list does not say keeps the selected protection mode, as above, and the
+node refuses a plan-mode start it cannot hold read-only (below); a start an engine runtime runs is the runtime's to refuse.
+
+Advanced users can choose **Settings > Assistant > Read-only task protection > Instructions only**, or use
+`persona_settings` with key `assistant.readonly_mode` and value `prompt`. Agent-initiated changes require the owner's
+confirmation on the phone. The confirmation explains the scope and rollback; denial, dismissal or an Agent answering
+for the owner saves nothing. `sandbox` is the default and restores the existing behavior.
+
+`prompt` keeps `readonly: true` and the first-message constraint, but starts Codex with `permission: default` rather than
+forcing `plan`. The node leaves the launcher's permission arguments and Codex configuration alone; it does not add
+`--sandbox read-only` or a bypass flag. Claude-family tasks and Auto Accept providers retain their existing
+`bypassPermissions` behavior.
+**Instructions only is not a security boundary**: the runtime's normal permissions still apply, including any sandbox
+the owner configured there. The setting is per assistant, independent of the model, and is rechecked on new starts and
+retries (including waiting or older saved plans). It does not restart or change running Agents. Ordinary explicit plan
+starts and helpers preserving their caller's permissions are unchanged.
+
+`persona_settings` list/get/set exposes the effective value. `GET /api/v1/assistant` returns `readonly_mode` as `sandbox`
+or `prompt`, including the default when unset; `PUT /api/v1/assistant` accepts the same values. Writes require a full-role
+caller and an explicit matching manager header or query parameter, as for `default_permission_mode`; other values and
+`null` are rejected without changing settings. The existing Web Settings selection is a direct owner edit. Switch back
+to `sandbox` in Settings or through an owner-confirmed `persona_settings` change to restore the default for future starts.
+
+Ordinary plan-mode starts keep their existing behavior. In `sandbox` mode, for Codex read-only tasks the node must honor `plan` or refuse
 the start. Terminal starts and supported terminal resumes use `--sandbox read-only
 --ask-for-approval never`: no approval can escalate past the sandbox. The node retains that constraint for later
 resumes, including a message that reopens the session. The terminal policy uses `never` because Codex 0.167 no
@@ -59,7 +91,7 @@ A Codex launcher with its own `-s` / `--sandbox`, `-a` / `--ask-for-approval`, `
 of guessing which permission wins. Managed launcher arguments are checked too. A launcher argument separator
 that would turn the added flags into prompt text is also refused. Non-plan launches retain their original arguments.
 An already running Codex cannot receive new CLI flags, so it cannot be adopted by a read-only start.
-pi, the Cursor CLI and the Antigravity CLI have no such mapping either, so a read-only task for them is refused the same way, before a pane opens (`docs/integrations/launchers.md`, "Work agents"). The read-only line still goes into the first message, but the start never reaches it.
+pi, the Cursor CLI and the Antigravity CLI have no such mapping either: a read-only task for one of them is refused when it is planned (above), and the node refuses a plan-mode start of theirs that still reaches it, before a pane opens (`docs/integrations/launchers.md`, "Work agents").
 
 External runtime starts fail closed unless the runtime declares `caps.readonly` (`docs/integrations/runtimes.md`):
 without it a runtime may ignore the mode or fall back to a different provider at dispatch. The Paseo bridge declares it
@@ -71,7 +103,8 @@ change by the user.
 
 Health-space plans and mixed plans still wait for Start. Clients show the Read-only requested label on a waiting plan and
 collapse a started plan to "Started N tasks". The saved task's `permission` is the actual launch mode:
-`bypassPermissions` for Claude and an Auto Accept provider, and `plan` for Codex read-only tasks.
+`bypassPermissions` for Claude and an Auto Accept provider, and, by default, `plan` for Codex read-only tasks
+(`default` in `prompt` mode).
 
 ## Data model
 
@@ -95,11 +128,13 @@ Server state is stored in the hub's Postgres database (read/written by the assis
 - `inbox_item` (text, NOT NULL, DEFAULT ''): the Inbox row it was made from (#6480, `docs/assistant/inbox.md` "Merge rows and Add to to-dos"), `''` for any other to-do. Migration `0512` (manager side). The to-do's page opens the row from it; the row links back through its chain.
 - `project` (text, NOT NULL, DEFAULT ''): the slug of the knowledge-base project the to-do belongs to, `''` for none. Migration `0461` (manager side, #2581, "Project" below). Not a foreign key: projects live in the knowledge base's files.
 - `kind` (text, NOT NULL, DEFAULT ''): `''` for a to-do or a task, `concern` for one of the owner's concerns (#3561, "Concerns" below). Set when it is made, never changed. Migration `0487` (manager side). `done_by` gains `reported` for a concern closed by its report.
-- (Not in the table) `stage`, `stage_kind`, `pr_url`, `delivery`: stage strip, task kind, change link and delivery-card location, stored in settings `assistant.todo_stages`, merged when reading to-dos ("Delivery"). `pr_url` comes from the full PR or merge request link in an Agent's reply; a PR named by number alone ("PR #7350", or "#7350" in a reply that speaks of a PR) becomes a full GitHub URL when its repository is known without guessing: the task's own PRs, the one repository the reply or the to-do's title or notes link, or the repository earlier full links from the same repository root on that computer showed (settings `assistant.repo_roots`, `assistant/pr_number_ref.go`, #7921). Anything ambiguous records nothing.
+- (Not in the table) `stage`, `stage_kind`, `pr_url`, `pr_status`, `delivery`: stage strip, task kind, change link, observed PR facts and delivery-card location, stored in settings `assistant.todo_stages`, merged when reading to-dos ("Delivery"). `pr_url` comes from the full PR or merge request link in an Agent's reply; a PR named by number alone ("PR #7350", or "#7350" in a reply that speaks of a PR) becomes a full GitHub URL when its repository is known without guessing: the task's own PRs, the one repository the reply or the to-do's title or notes link, or the repository earlier full links from the same repository root on that computer showed (settings `assistant.repo_roots`, `assistant/pr_number_ref.go`, #7921). Anything ambiguous records nothing.
   Number-only references are recorded only after GitHub confirms a pull request, normally through the issue response's non-null `pull_request` field (#8248). An issue URL alone is not a delivery PR. If acceptance encounters a stale PR record and verification fails, it removes that record only after confirming an ordinary issue or a missing item with readable PR access; remaining PRs still pass the same delivery gate. A 404 from an inaccessible repository, permission failures, rate limits and transient errors do not discard the record. Item-level 404/422 responses do not pause unrelated PR checks.
+  A complete final closeout's explicit `artifact: pr` outranks incidental PR numbers or URL artifacts elsewhere in that reply; full PR links, `#N`, `N` and `owner/repo#N` are supported. The reference must be the artifact itself, not a URL embedded in an annotation, quote, fenced example, document or ordinary reference. A closeout without a PR artifact does not fall back to incidental PR prose. Before accepting, the hub reads only the active linked agents' latest full turns, rejects peer, side-conversation, injected and unrelated-request evidence, and applies the normal merge/deployment gate to a recovered explicit PR even when the stored link is a different, valid PR. It never promotes an unproven link from saved reference history. If every active agent's own final record says `status="done"`, `merged="n/a"` and `deployed="n/a"` with a non-PR artifact, the task has no PR delivery: remove the contaminated current/history links and stale delivery hold, then check the original task criteria. Missing or duplicate applicability fields, unreadable or unrelated turns, malformed artifacts, and conflicting explicit deliveries cannot establish that exception. Legacy progress without a closeout keeps its existing link detection; normal polling still never fetches a transcript for a clipped preview. A recognizable full PR URL in `task_review.link` is checked ahead of the stored link and remains subject to the gate; an issue URL or number alone is not a PR override.
   `stage_kind` is `code` or `general` (#3380): read-only tasks are general (plan permission alone is not: code tasks start in plan mode to get a plan approved). Otherwise, only nonempty `done_when` with research, investigation, report, plan, triage, cleanup, summary, analysis or doc-review wording and no code wording is general; missing or ambiguous criteria default to code. Code wording includes PR, MR, merge, deploy, release, fix, bug, implement, code, test, commit, build, feature and refactor, with Chinese equivalents. A linked GitHub PR or an HTTPS merge request on any host overrides general. Older clients ignore the new field; the web omits the strip for general tasks and retains its existing task status.
   Mid-task replies (session lists, full followed items and supervisor progress reports) and final handoffs update the same forward-only progress. List snippets ending in an ellipsis and followed items marked with `FullSize` are skipped, without fetching transcripts from the session-list handler. GitHub `/pull/N` and any host's `/merge_requests/N` or `/-/merge_requests/N` links count; bare `MR !N` does not. Web links use `PR #N` or `MR !N` respectively.
   A pending `IxPlan` approval temporarily shows `plan` before review; answering it restores the stored stage, without recording a backwards progress change. Agent-link changes recompute pending plans for both the old and new task. Other permissions and questions never imply plan approval.
+  `pr_status` is additive forge evidence, not another task state: `url`, `head_oid` (the PR head commit), `state` (`open`, `merged`, `closed`), `draft`, `review`, `checks`, `conflicts`, and `checked_at`. The existing minute deployment pass reads GitHub PRs at most once per ten minutes per open to-do, independently of whether the running hub reports its commit, after its deploy checks and on a deadline of its own (one minute), so slow forge reads never delay a deploy. Failed reads never refresh old facts. After the current task/stage PR facts are saved, an open PR with merge conflicts and a known head emits an urgent, actionable `pr_conflict` supervision event, even with no running Agent. Pending conflict signals recheck the task/stage URL, head, open state and conflict before being rendered, so a resolved or replaced conflict is dropped. A digest containing a conflict stays in the existing pending-signal queue while its supervisor is busy or dispatch fails; it is never folded into a rendered relay, which cannot refresh the facts before draining. Other entries batched with that conflict wait with it until dispatch can revalidate the batch. The existing `assistant.supervision_dedup` setting keeps one permanent fingerprint per task/PR URL/head, independent of Agent text and the ordinary thirty-minute expiry; a new head can notify once, but returning to an already-told head cannot. Deferred or failed dispatch releases the existing reservation. Web uses matching facts no older than fifteen minutes and no active Agent or owner decision to show **Waiting for merge**, outside **In progress** but still open, with the existing PR link and blocker labels. A known open PR becoming merged or closed returns an external-event/someone-else hold to the same supervisor's `pending_review`; merging alone never accepts or closes it. Only that hold wakes: a to-do at work, in rework or under review keeps its state; the park must wait on this PR, its `reason` naming the PR by link or as `#N` (`parkWaitsOnPR`; `task_review` asks a supervisor parking on a PR to include its link), so a park for anything else stays until its own time even while the PR is open; it must be the one in place when the PR was read, and the stage's PR is checked under the stage lock first, so a PR replaced while it was read changes neither the facts nor the supervision. A merged observation moves the stage to merge only while the open to-do and its stage still name that PR, checked under the stage lock (`setTaskStageOn`). A personal priority/date hold or an unrelated post-deployment hold is not disturbed. Older clients ignore these facts.
 
 ### 2. todo_spaces table
 Records project workspaces (herdr workspaces) linked as a whole to a to-do:
@@ -156,6 +191,7 @@ Ledger for tasks supervised by the main chat (#3124, `docs/assistant/unified-ent
 - `done_when` (jsonb, NOT NULL, DEFAULT '[]'): acceptance criteria (string array); `expect_minutes` (integer, NOT NULL, DEFAULT 0): expected minutes.
 - `state` (text, NOT NULL, DEFAULT ''): `''` in progress, `pending_review`, `rework`, `needs_user`, `accepted`, `cancelled`; `round` (integer): rework round.
 - `reviews` (jsonb, NOT NULL, DEFAULT '[]'): each review (`verdict`, per-item `checks`, `note`), at most 20 kept; `updated_at` (timestamptz).
+- `pending_since` (timestamptz, NULL): when the task entered `pending_review`; kept by every write while the review waits, NULL in every other state. The apps read it to tell a supervisor's review under way from one that is overdue (`docs/assistant/unified-entry.md` "Needs you and In progress: each thing once (#3387)"). Rows already waiting when the column was added started from `updated_at`.
 
 ### 6. task_briefs and task_brief_todos tables
 A task's brief (#3822, `docs/assistant/unified-entry.md`, "Briefs"): what was asked when the work was handed out.
@@ -225,7 +261,7 @@ Only present when the session is currently associated (`released_at` and `dismis
 The internal `spawn_from` field carried in session reports is stripped before hub pushes to clients.
 
 ### Live WebSocket pushes
-- `{"type":"todos"}`: broadcast on to-do creation, edit, deletion, whole-project link/unlink, Agent association changes, a change of its chat thread, or when its `ask` comes up, is taken or ends ("Waiting for the owner"); clients refetch `GET /api/v1/todos`. The hub sends one per write, so they come in bursts: the App (`TodoStore`) and the web (`todosPushed` in `web/src/lib/store.ts`) keep one such read out at a time, and a push that lands while it is out asks for a single read after it.
+- `{"type":"todos"}`: broadcast on to-do creation, edit, deletion, whole-project link/unlink, Agent association changes, a change of its chat thread, or when its `ask` comes up, is taken or ends ("Waiting for the owner"); clients refetch `GET /api/v1/todos`. The manager sends one per write: the changes made within 100 ms of the first (`todosSettle`; one step of a task writes its to-do from several places) go out as one event, and a change made after it went out sends another, so the last read of every change starts after it (#5995). Separate writes still come in bursts: the App (`TodoStore`) and the web (`todosPushed` in `web/src/lib/store.ts`) keep one such read out at a time, and a push that lands while it is out asks for a single read after it.
 - Session-change push: when to-do/association changes affect sessions, assistant reports a new snapshot; hub compares which computer's sessions changed and re-pushes that computer's `sessions` event.
 
 ### Status codes and roles
@@ -506,7 +542,7 @@ Agents linked to no task (user-created, `agent_start`, inspection sessions such 
 
 It uses the archive the apps use ("Agent session archives" in `docs/protocol/protocol.md`): the session moves under Archived, nothing is deleted, the tool that owns it is asked to archive it too where it can, and new activity (the user's Resume) restores it for good. At most 20 sessions are archived per pass, so a long backlog clears over a few passes.
 
-Never archived by this pass: a session still in a host (a pane or an engine host), including one whose state the host cannot tell (`unknown`); one working, starting, or with background commands, subagents, workflows, a `/loop` or a server running; one with a card waiting for the user or queued input; one the manager is to wake or continue, or that waits on something the manager follows (`work.phase` `blocked`, or `work.wake_at` set); one linked to an open to-do; an assistant conversation; a review's reviewer; a subagent's row; a session another tool owns (`source_kind` set: archiving it would also move it in that tool); with no to-do, one whose last reply asks the user something nobody answered (`awaits_reply`). Computers that are not connected are skipped, and nothing runs until the to-dos are loaded, since they say which sessions open tasks count on. Each candidate is looked at again just before its archive is written.
+Never archived by this pass: a session still in a host (a pane or an engine host), including one whose state the host cannot tell (`unknown`); one working, starting, or with background commands, subagents, workflows, a `/loop` or a server running; one with a card waiting for the user or queued input; one the manager is to wake or continue, or that waits on something the manager follows (`work.phase` `blocked`, or `work.wake_at` set); one linked to an open to-do; an assistant conversation; a review's reviewer; a subagent's row; a session another tool owns (`source_kind` set: archiving it would also move it in that tool); a desktop app's session (`agent_surface` `desktop`): the node lists the Claude desktop app's sessions as its sidebar does, whatever their age (#3304), but sets `source_kind` only while the app has one open, so only an archive in the app or the user's Archive here takes one off; with no to-do, one whose last reply asks the user something nobody answered (`awaits_reply`). Computers that are not connected are skipped, and nothing runs until the to-dos are loaded, since they say which sessions open tasks count on. Each candidate is looked at again just before its archive is written.
 
 ## Nobody is working on this
 
@@ -616,6 +652,7 @@ Something the owner raises in the main conversation and wants an answer to is a 
   - Counted: each is a work event `owner_cannot_answer` and `GET /api/v1/agents/work/stats` sums them per supervisor conversation (`docs/assistant/agent-work.md`, "Evaluation").
 - **Choosing an option**: `POST /api/v1/todos/{id}/accept {"asked_at", "option"}` with the recommended label is the plain OK; another option goes to the task's Agent as the owner's choice with what it leads to, is recorded in the to-do's decisions and ends the decision. The Lark card has a button per option and one per fixed answer. The `decide` push's `todo` also carries `options` (the labels, the recommended first) and `responses`, so an app can offer them from the notification; its body lists the background, the options and the cost of waiting.
 - **Answered in the chat** (#6470, `assistant/task_decided.go`): the owner often answers in their own words in the main chat instead of on the card. The main conversation, or the task's supervisor, records that answer with the assistant tool `task_decided` (`todo_id`, `option`: one of the waiting decision's labels, `said`: the owner's words, `told_agent`). Without `told_agent` the option is taken exactly as the accept route takes it (sent to the task's Agent, then recorded). With `told_agent: true` (the answer already went to the Agent with `agent_send`) nothing is sent again. Either way the decision ends as a card answer ends it: the ask is answered and leaves Needs you, its deadline default and daily raise stop, the supervision leaves `needs_user`, the to-do's decisions get a `manual` row with the conversation as its source and the owner's words as its reason, and an `owner_decided` event is written. An option that is none of the decision's, a conversation that is neither the main one nor the supervisor, and a decision no longer waiting are refused. Relaying the answer with `agent_send` alone used to leave the decision waiting.
+- **Answered in words on Lark, not delivered** (#7911, `assistant/acceptance_reply.go`): a reply in words to a decision's Lark card is recorded in the to-do's decisions and then relayed to the task's Agent. When the relay fails (a dialog open in the Agent's terminal, its computer away), the decision is still made: the supervision leaves `needs_user`, the ask is answered, and the task's supervisor gets an `idle` signal naming the owner's answer and why it did not reach the Agent, to pass it on itself. The hub never resends it, so the Agent cannot get the same answer twice; the reply tells the owner it is recorded and will be passed on. "OK" on a recommendation is unchanged: nothing is taken until it reaches the Agent.
 - **A decision is not replaced by "Please verify"**: while a decision waits, a turn of the task's Agent that says "deployed" (or a held deploy landing) no longer starts a "Please verify" round in its place; and a review that arrives while such a round is still being written keeps its decision, the round giving way. Before, either order left a `needs_user` task with no `ask`, passed by the supervising assistant as if it were a deployed task.
 - **iOS** (`DecisionRow`, `docs/apple/ios.md` "Closeout, orphaned tasks and answerable decisions (#3612, #3618, #3804)"): the same row as the web's in the Needs You tray and on the task board, answered through the accept route with `option` or `response`; an option of an `irreversible` or `visible_to_others` decision takes two taps. The `TODO_DECIDE` push's OK and its `options` / `responses` are not actions in the app yet.
 - Not done here: offering the options from the decision push on Android (its notification opens the conversation) and on iOS. A task that only waits is parked: "Parked tasks" below.
@@ -642,11 +679,12 @@ Something the owner raises in the main conversation and wants an answer to is a 
 
 - **The verdict**: `task_review` with `parked` is refused unless it carries `reason` (one sentence: what the task waits for) and `waiting_on` (`owner_priority`: the owner has to say whether to do it or what comes first; `someone_else`; `external_event`; `date`). `until` is a duration (`3d`, `36h`, `2d12h`, `90m`) or an RFC 3339 time, 1 minute to 30 days ahead, 24 hours when left out. The refusal names everything missing at once. Only the task's supervisor parks it, as for the other verdicts; a done task, an unsupervised one and a task leader Agent's worker are refused.
 - **What parked means**: the to-do stays open with `supervision.state: "parked"` and `supervision.parked: {reason, until, waiting_on, count}`. It is not the owner's to answer: no `ask`, no push, no conclusion card (a decision that was waiting ends), and it is never filed under Waiting on you for being parked. While it is parked its supervisor gets no `stalled`, `idle`, `unjudged`, `orphaned`, `overdue` or `undecidable` signal for it, and the manager sends its Agent nothing on its own (continue, wake, CI follow-up; `workGuard`), since any turn of its Agent ends the parking.
-- **At `until`**: one supervision signal `parked_due` with what it waited for: decide, park it again with a new reason, or close it. The time is read off the ledger on every look, so a restart before the supervision message went out loses nothing; once a message carried it (sent, or queued), that is kept on the review (`due_at`) and a restarted manager does not tell it again. The task stays parked until its supervisor acts.
+- **At `until`**: one supervision signal `parked_due` with what it waited for and the decisions recorded on the to-do (so an answer that came meanwhile is in front of the supervisor before it parks again): decide, park it again with a new reason, or close it. The time is read off the ledger on every look, so a restart before the supervision message went out loses nothing; once a message carried it (sent, or queued), that is kept on the review (`due_at`) and a restarted manager does not tell it again. The task stays parked until its supervisor acts.
 - **Leaving**: one of its Agents starting a turn (the owner or the supervisor sent it something) ends the parking: the state goes back to in progress (or `rework` when rounds were used), `parked` is gone, a `parked_due` still waiting is dropped, and the task is supervised as before. Any other review ends it too. A closed to-do is not parked.
-- **Not a place to forget things**: `count` is how many times in a row the task was parked with no Agent turn in between (1 when first parked). Three re-parks are taken; the fourth is refused with the count, and the supervisor is told to close the task or state the real decision for the owner (`needs_user`). An Agent turn starts the count again.
+- **Leaving on the owner's decision** (#8044): a task parked with `waiting_on` `owner_priority` or `someone_else` waits for an answer, so a decision of the owner's recorded on its to-do ends the parking too, whether or not an Agent turn follows: their answer to a question card of its Agent (`card`), a decision they write or choose in the apps (`manual`), or their reply in its Lark topic (`thread`). The state goes back as above, a `parked_due` still waiting is dropped, and the supervisor gets one `park_decided` signal with what the task waited for and the to-do's decisions, to send the Agent on, review the task or close it; a decision that did not answer what it waited for is a reason to park it again. The review keeps which decision ended it (`decided`) and when a supervision message carried that (`decided_told`), so a restart before the message went out raises it again from the ledger and one after it does not. The decision is stored before the ledger is touched, so a ledger write that fails then never fails the request that recorded it: it is logged, and the supervision watch ends the parking from the stored decision on a later look (every 30 seconds; the latest owner's decision in effect recorded after the park). A review that follows before the message goes out, parking the task again included, does not drop it: the supervisor still gets `park_decided`, saying the task was parked again and what for, and a decision from before the new park does not end it. Only a review that closes the task (`accepted`, `cancelled`) drops it. Rows that are not the owner's own call do not end a parking: an Agent's note (`todo_decision_add`), a supervisor's answer to a routed card and the hub's default at a deadline (`agent`), and outcomes (`outcome`, `reported`). A task parked for `external_event` or `date` is left parked by any decision: it does not wait for one. Every writer of decisions passes one place (`insertDecision`), where this is checked.
+- **Not a place to forget things**: `count` is how many times in a row the task was parked with no Agent turn in between (1 when first parked). Three re-parks are taken; the fourth is refused with the count, and the supervisor is told to close the task or state the real decision for the owner (`needs_user`). An Agent turn starts the count again, and so does a decision that ended the parking.
 - **The owner hears of one kind only**: a task parked with `waiting_on: owner_priority` is listed in the daily digest's briefs (`docs/assistant/unified-entry.md`, "Briefs") as parked, waiting for their priority call, with its reason. No other parked task is mentioned to them.
-- **Kept on the review**: the ledger's `reviews[]` entry of a `parked` review carries `reason`, `until`, `waiting_on`, `parks` (the count) and `due_at`; `supervision.parked` is read off the latest review while the state is `parked`, so there is no new column. The `review` feed item of a parked review has `verdict: "parked"`, the reason as its `note` when the review gave none, `until` and `waiting_on`.
+- **Kept on the review**: the ledger's `reviews[]` entry of a `parked` review carries `reason`, `until`, `waiting_on`, `parks` (the count), `due_at`, and `decided` / `decided_told` once a decision ended it; `supervision.parked` is read off the latest review while the state is `parked`, so there is no new column. The `review` feed item of a parked review has `verdict: "parked"`, the reason as its `note` when the review gave none, `until` and `waiting_on`.
 - **Clients**: the web shows "Parked until <time> · <reason>" on the task's In progress row, its To-dos row and its page, and lists it In progress however long it has been still (`docs/web/web.md`). The To-dos page's sections (`docs/assistant/todo-status-sop.md`) are unchanged: a parked task is filed by its other facts. iOS and Android do not know the state yet and show the task as supervised and in progress.
 
 ## Decision deadlines
@@ -739,7 +777,7 @@ Step 3 of the three-loop process (#2820): Agent conclusions automatically settle
 - **Extract**: read last-turn replies from all still-linked Agents (fallback session-list `last_text`; ignore model-service-interrupted turns), use model (`kb.project`, prompts `server/internal/prompts/todo/outcome.md`, `outcome_input.md`) to extract one-sentence conclusion (at most 120 characters), PR/deploy links (at most 3), decisions and lessons (at most 5 each); invent nothing not in replies. Reply reads get at most 1 minute, model 90 seconds, decision/timeline writes another 45 seconds, so a slow model does not delay writes.
   Without model (unconfigured, quota, unparsable reply), conclusion falls back to receipt text (latest Agent reply compressed to one line, at most 120 characters), links only GitHub PRs from replies, no extracted decisions/lessons.
 - **Decision section**: record conclusion ("Completion conclusion" + conclusion/links), each decision (question/choice/reason), each lesson ("Lessons learned") separately, `source = "outcome"`, provenance latest Agent (`source_machine` / `source_session`).
-  Once per completion: `source_message` is `outcome:<to-do id>:<completion time>#<index>`; duplicate triggers (two paths together, again after hub restart) check database first. Write conclusion first; only successful writer proceeds with decisions, lessons and timeline (one wins with two assistants sharing database); deleted to-do gets no writes. Reopen then complete is a new occurrence. Web provenance says "Recorded when Agent finished"; handoff includes these in established decisions, marked "Recorded when Agent finished, not decided by user".
+  Once per completion: `source_message` is `outcome:<to-do id>:<completion time>#<index>`; duplicate triggers (two paths together, again after hub restart) check database first. Write conclusion first; only successful writer proceeds with decisions, lessons and timeline (one wins with two assistants sharing database); deleted to-do gets no writes. Reopen then complete is a new occurrence. The Decisions view labels a previous completion summary “Earlier phase outcome”; the tools distinguish it from the current completion using the time in the recorded key, even if its write arrived late. The result and its source session stay in the record. Web provenance says "Recorded when Agent finished"; handoff includes these in established decisions, marked "Recorded when Agent finished, not decided by user".
 - **Knowledge base**: the to-do's own project when it has one ("Project" below); otherwise (or when that project is gone) the project for each Agent working directory (`kb.Engine.ProjectsForWork`: first registered code `dirs`; if none match, match directory name to projects with no registered code dirs by name/slug/alias, never name-match projects with registered dirs),
   append `结论：<conclusion> <at most two links>` ("Conclusion: …") to `log.md` (at most 200 characters per line: keep links whole, truncate conclusion to remaining space), source `待办 · <title>` ("To-do · <title>", remove ` · ` from title, at most 60 characters), one line per project. Not limited by `kb.agent_turn`'s one-per-Agent-per-30-minutes rule. If knowledge base not open, retry once after 30 seconds; otherwise only record decisions.
 - **Project context at dispatch**: for a new Agent, resolve project by target directory as above, prepend project summary and latest 5 `待办 ·` conclusions (newest first; only source beginning `待办 · ` and body beginning `结论：`, not same-named group-chat records) as `<persona-context kind="context" title="项目 · <name> · 背景">` ("Project · <name> · Background", prompt `server/internal/prompts/todo/project.md`); at most two projects per directory. Extensions with a `project_context` contribution add their `<project slug>.md` after the conclusions, under "扩展「<name>」为这个项目整理的背景" (#5771, `docs/extensions/extensions.md` "Assistant content from the data directory"); that alone is enough for a block. Send unchanged without project, nothing to say (summary, conclusions and extension text all absent), or knowledge base closed.
@@ -891,3 +929,104 @@ a new to-do. Existing historical successor chains are still guarded against dupl
 3. **Empty-workspace rename does not migrate**: when renaming through hub with no active sessions, hub cannot resolve old workspace name; `todo_spaces` does not automatically migrate, like pin/mute.
 4. **`/clear` recreates session**: Agent `/clear` creates a new session uuid underneath; new session does not auto-link to old to-do, and original session row stays listed.
 5. **Assistant disconnected**: to-do APIs and create/send with `todo_id` return 503; workspace renames through hub do not migrate and answered cards are not recorded as decisions ("Who owns what").
+
+## Repository associations
+
+Repository associations are optional metadata for ordinary to-dos and existing
+single-repository tasks. They do not create or remove directories, change the
+workspace mode, or advance task progress. Legacy `new` / `existing` / `none`,
+Engine-created workspaces, reused directories and cleanup retain their existing
+behavior. The existing `pr_url` and delivery judgment stay independent: multiple
+linked PRs never imply that a task is complete.
+
+The Web to-do creation dialog and detail use the optional **Repositories and
+work** group. The detail is read-only by default: it draws the saved
+repositories as rows with their issues and pull requests as links, so the
+associations the agent maintains are visible without opening an editor. Each
+repository row carries its provider's own mark and its project address on one
+line; a link shows its retained full title as the hyperlink, falling back to the
+localized type and number when no title is known. The association store holds no
+physical workspace path, so a row shows no filesystem path; directory aliases
+are not paths, and physical paths belong to the workspace preparation service.
+Opening the editor holds the draft and the revision it began from: a to-do
+version change while it is open never replaces them, and the newest store is
+read again when the dialog closes. Source options are disclosed per repository.
+No alias or base branch is required: an empty alias means no directory override
+and a missing ref means the remote default branch. This feature does no Git or
+remote issue lookup.
+An issue/PR URL must belong to the saved provider, instance and target repository;
+links retain numeric string IDs, including IDs beyond JavaScript's integer range.
+
+| Method | Route | Contract |
+| --- | --- | --- |
+| GET | `/api/v1/todos/{id}/repositories` | Returns `schema_version`, `manager`, `todo_id`, `revision` and `repositories` |
+| PUT | `/api/v1/todos/{id}/repositories` | `{expected_revision, expected_catalog_revision, repositories}` replaces business associations atomically; `[]` clears them |
+| PUT | `/api/v1/todos/{id}/repositories/{repo_id}/links` | `{expected_revision, links}` replaces one repository's links; `[]` clears them |
+
+`POST /api/v1/todos` also accepts optional `repository_bindings` containing
+`catalog_revision` and `repositories`. The Todo and associations commit in one
+transaction. Older requests omitting it retain existing behavior; ordinary PATCH
+operations never touch association storage. The catalog response and
+`repositories_list` include `catalog_revision`. Writes require exact revisions;
+conflicts preserve the client draft and require reconciliation. Read failures
+never masquerade as an empty set.
+
+`todo_repositories_get`, `todo_repositories_set`, `todo_repository_links_set` and
+`todo_repository_links_add` expose the same manager-owned store. `todo_get` includes
+its canonical associations. The additive tool accepts `{id, links: [{url, title}]}`
+with full source titles, or legacy `{id, urls}` (one to 50 exact issue/PR URLs in
+total), infers repository groups offline and needs no preconfigured catalog.
+Titles are optional plain text, limited to 1,024 UTF-8 bytes after trimming; control
+characters are rejected. The tool schemas describe this byte limit explicitly;
+their `maxLength` is only a character ceiling, not a UTF-8 byte validator.
+A nonempty title updates a retained link and increments
+the association revision. Omitted or empty titles in URL-only reports or older
+editors preserve known titles; removing a link removes its title. Agents obtain
+titles from the related work and maintain them through the same tool. The app
+shows a localized type and number until a title is available; it never guesses
+titles or performs a remote metadata request when opening a to-do.
+It preserves source snapshots, aliases and requested refs. Assistant conversations
+can manage their manager's to-dos; task Agents can read or edit only their actively
+linked open to-do, with its ID available through `todo_decisions`. Empty ordinary
+to-dos need no catalog read. `todo_create` accepts the optional creation object; a matching
+existing Todo with supplied bindings is explicitly refused so callers can read
+and edit that Todo without silently discarding associations. Writes retain the
+existing outbound confirmation rule for health conversations.
+
+Existing `pr_url` / `prs` references are imported once before the first interactive
+association read or edit. During a meeting turn, `todo_get` and
+`todo_repositories_get` read only saved associations: they never import links or
+write association data, revisions or receipts. An ordinary user turn retains the
+historical import behavior. New Agent reports append every supported PR URL to this same store,
+including self-hosted instances; old stage and delivery fields retain their existing
+judgment semantics. A stored receipt prevents historical imports and repeated reports
+from restoring links removed by the user. An explicit additive call can restore them.
+Imports and interactive edits lock the same Todo and commit atomically; changes
+broadcast the existing `todos` event even when stage and legacy PR stay unchanged.
+Metadata import errors are logged without blocking the legacy progress path; explicit
+tool and HTTP failures remain errors. Link-derived repositories absent from the
+catalog have `catalog_state: "unlisted"`; recording a URL performs no repository
+verification, remote lookup or catalog mutation.
+
+Shared Go types and validators: `server/internal/assistant/repository/task.go`.
+Web types/helpers: `web/src/lib/task-repositories.ts`. Fixed consumer fixture:
+`spec/fixtures/task-repositories/contract.json`. Directory aliases use one ASCII
+rule, case-insensitive uniqueness, reserved-device-name rejection and an optional
+empty override. Explicit `root` layout maps one selected repository to `.`;
+`container` layout uses a validated nonempty effective directory name. This
+opt-in mapping never changes legacy cwd inference.
+
+Each association saves identity and credential-free transport by value. Catalog
+names are independent. A removed or identity-changed catalog entry is reported
+without replacing the saved source. Catalog clients omitting `clone_url` preserve
+its previous value when identity is unchanged; a changed identity gets its own
+canonical fallback. Adopting a new source requires removing and reselecting the
+association in separate saves.
+
+Preparation consumers use `db.ReadTodoRepositoriesTx` with the expected revision,
+select repository IDs through `repository.Snapshot`, and persist that value with
+their operation in the same transaction. The reader locks the Todo, including an
+empty set. Digests exclude links and association revision. Consumers retain the
+operation's snapshot for retries; no permanent business-association seal or
+legacy-start hook exists. Physical records, paths, resolved commits and cleanup
+belong to the workspace preparation service.

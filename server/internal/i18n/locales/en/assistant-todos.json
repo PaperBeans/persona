@@ -6,5 +6,7 @@
   "remind_late": "Meant for {when}",
   "delete_card": "Delete the to-do “{title}”",
   "complete_card": "Mark the task “{title}” done (its agents are closed once they are idle)",
-  "reopen_card": "Reopen the task “{title}”"
+  "reopen_card": "Reopen the task “{title}”",
+  "supervision_waits_upstream": "Waiting for upstream review or merge: {url}",
+  "supervision_needs_deployment": "Merged; deployment and live verification still required"
 }

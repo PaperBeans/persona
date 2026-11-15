@@ -6,8 +6,10 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,9 +22,109 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
-// lnStore is the in-memory settings store plus the device-table methods newPusher and setPrefs touch.
+// lnStore is the in-memory settings store plus the device-table methods newPusher and setPrefs touch, and the
+// delivered-push table (pushSentStore) kept as a slice with the same rules as internal/db/push_sent.go.
 type lnStore struct {
 	settingsStore
+	sentMu   sync.Mutex
+	sentRows []db.PushSent
+	// sentAdds counts AddPushSent calls and sentAddBytes the JSON size of the rows they carried: what one push writes.
+	sentAdds     int
+	sentAddBytes int
+	// landThenFail makes that many AddPushSent calls keep their rows and still return an error, as a write the
+	// database committed reports a timeout or a dropped connection.
+	landThenFail int
+}
+
+func newLnStore() *lnStore { return &lnStore{settingsStore: settingsStore{vals: map[string][]byte{}}} }
+
+func (s *lnStore) AddPushSent(_ context.Context, entries []db.PushSent) error {
+	b, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+	s.sentMu.Lock()
+	defer s.sentMu.Unlock()
+	s.addRowsLocked(entries)
+	s.sentAdds++
+	s.sentAddBytes += len(b)
+	if s.landThenFail > 0 {
+		s.landThenFail--
+		return errors.New("timeout after commit")
+	}
+	return nil
+}
+
+// addRowsLocked appends the entries whose ID is not there yet, as the table's UNIQUE push_id with ON CONFLICT DO
+// NOTHING does, and returns how many it added. sentMu is held.
+func (s *lnStore) addRowsLocked(entries []db.PushSent) int {
+	have := map[string]bool{}
+	for _, e := range s.sentRows {
+		have[e.ID] = true
+	}
+	added := 0
+	for _, e := range entries {
+		if e.ID == "" {
+			panic("push sent entry without an id")
+		}
+		if !have[e.ID] {
+			have[e.ID] = true
+			s.sentRows = append(s.sentRows, e)
+			added++
+		}
+	}
+	return added
+}
+
+func (s *lnStore) PushSentAfter(_ context.Context, after time.Time, limit int) ([]db.PushSent, error) {
+	s.sentMu.Lock()
+	defer s.sentMu.Unlock()
+	out := []db.PushSent{}
+	for i := len(s.sentRows) - 1; i >= 0 && len(out) < limit; i-- {
+		if s.sentRows[i].At.After(after) {
+			out = append(out, s.sentRows[i])
+		}
+	}
+	slices.Reverse(out)
+	return out, nil
+}
+
+func (s *lnStore) PrunePushSent(_ context.Context, before time.Time, keep int) (int64, error) {
+	s.sentMu.Lock()
+	defer s.sentMu.Unlock()
+	first := max(len(s.sentRows)-keep, 0)
+	kept := []db.PushSent{}
+	for i, e := range s.sentRows {
+		if i >= first && e.At.After(before) {
+			kept = append(kept, e)
+		}
+	}
+	gone := len(s.sentRows) - len(kept)
+	s.sentRows = kept
+	return int64(gone), nil
+}
+
+func (s *lnStore) AdoptPushSentSetting(_ context.Context, key string, after time.Time, keep int) (int, bool, error) {
+	s.mu.Lock()
+	raw, ok := s.vals[key] // left where it is, like the database's row
+	s.mu.Unlock()
+	var entries []db.PushSent
+	if ok {
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return 0, false, err
+		}
+	}
+	s.sentMu.Lock()
+	defer s.sentMu.Unlock()
+	missing, behind := db.MergePushSentSetting(entries, s.sentRows, after, keep)
+	return s.addRowsLocked(missing), behind, nil
+}
+
+// sentTable is a copy of the delivered-push rows.
+func (s *lnStore) sentTable() []db.PushSent {
+	s.sentMu.Lock()
+	defer s.sentMu.Unlock()
+	return slices.Clone(s.sentRows)
 }
 
 func (s *lnStore) ReconcilePushDevices(context.Context, time.Time, time.Duration) (ret []db.PushDeviceRetirement, err error) {
@@ -53,8 +155,9 @@ func lnHub(t *testing.T) (*Hub, *fakeAPNs) {
 	f := &fakeAPNs{gone: map[string]bool{}}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
-	store := &lnStore{settingsStore{vals: map[string][]byte{}}}
+	store := newLnStore()
 	p := newPusher(t.TempDir(), nil, t.Logf)
+	t.Cleanup(p.sends.Wait) // before srv.Close (cleanups run last first): a post still on its way logs to this test
 	p.store = store
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	p.direct = apns.NewWithKey(apnsConfig{KeyID: "K", TeamID: "T", Topic: "app.example"}, key)

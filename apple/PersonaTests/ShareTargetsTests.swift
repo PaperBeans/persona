@@ -57,6 +57,15 @@ import PersonaWire
         #expect(l.agents.first?.folder == "a-idle-repo")
     }
 
+    @Test func mainTargetUsesTheConfirmedMainMachine() throws {
+        let routed = Self.assistantJSON.replacingOccurrences(
+            of: #"{"machine_id":"hub","launcher""#,
+            with: #"{"machine_id":"hub","main_machine_id":"route-box","launcher""#)
+        let a = try JSON.decoder.decode(APIClient.AssistantState.self, from: Data(routed.utf8))
+        let l = ShareTargets.listed(assistant: a, sessions: [], machines: [])
+        #expect(l.main?.key == SessionKey(machineID: "route-box", sessionID: "main"))
+    }
+
     @Test func aHubWithoutAMainConversationStartsOnANewChat() throws {
         var l = try listed()
         l.main = nil

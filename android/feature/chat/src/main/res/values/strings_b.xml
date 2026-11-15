@@ -315,6 +315,9 @@
     <string name="chat_modes_model_sonnet_detail">Balanced</string>
     <string name="chat_modes_model_haiku_detail">Fastest</string>
     <string name="chat_modes_unknown_detail">This version of the app doesn\'t know this mode yet</string>
+    <string name="chat_modes_launcher_default">Follow launcher</string>
+    <string name="chat_modes_launcher_default_detail">Its own approval settings decide what it asks, and may already allow everything</string>
+    <string name="chat_modes_bypass_listed_detail">Approves everything without asking; can be switched back in the chat</string>
     <string name="chat_modes_effort_hint">Thinking: %1$s</string>
     <string name="chat_modes_hint_separator">", "</string>
     <string name="chat_modes_button_bypass">Mode: allow everything</string>

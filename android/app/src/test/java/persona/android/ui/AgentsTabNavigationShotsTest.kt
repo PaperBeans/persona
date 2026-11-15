@@ -163,7 +163,9 @@ class AgentsTabNavigationShotsTest {
             capture("direct-detail", style, dark, large)
             rule.runOnIdle { navigator.selectTab(AppTab.Persona) }
             awaitText("Agents")
-            rule.onNodeWithText("Agents", useUnmergedTree = true).performClick()
+            rule.onAllNodesWithText("Agents", useUnmergedTree = true)
+                .filter(SemanticsMatcher("placed in the top bar") { it.boundsInRoot.top > 0f })
+                .onFirst().performClick()
             frames()
             capture("after-tab", style, dark, large)
             rule.runOnIdle {

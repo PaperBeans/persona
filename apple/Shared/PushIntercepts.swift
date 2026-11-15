@@ -29,6 +29,8 @@ nonisolated struct PushIntercept: Codable, Equatable, Sendable {
 }
 
 nonisolated struct LnModeResponse: Decodable, Sendable { var enabled: Bool }
+/// PUT /api/v1/push/ln-mode's body: Settings › Notifications › Low-Distraction Mode (#8157).
+nonisolated struct LnModePut: Encodable, Sendable { var enabled: Bool }
 nonisolated struct PushInterceptsResponse: Decodable, Sendable {
     var intercepts: [PushIntercept]
     enum CodingKeys: String, CodingKey { case intercepts }
@@ -112,6 +114,11 @@ nonisolated enum PushInterceptsLogic {
 extension APIClient {
     func pushLnMode() async throws -> LnModeResponse {
         try await getDecodedOffMain("/api/v1/push/ln-mode")
+    }
+
+    /// Turns the hub's switch on or off, for every device of the owner (Settings › Notifications, #8157); the hub's answer.
+    func setPushLnMode(_ enabled: Bool) async throws -> LnModeResponse {
+        try JSON.decoder.decode(LnModeResponse.self, from: try await request("PUT", "/api/v1/push/ln-mode", body: LnModePut(enabled: enabled)))
     }
 
     func pushIntercepts() async throws -> PushInterceptsResponse {

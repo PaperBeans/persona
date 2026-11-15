@@ -163,7 +163,7 @@ describe("ActionRow", () => {
     expect(done).toContain('data-tool-duration');
     expect(done).toMatch(/data-tool-duration[^>]*>4s</);
     // tabular, quiet and hidden only on compact layouts; the diff-stats layout is untouched
-    expect(done).toContain("max-lg:hidden shrink-0 font-mono text-[12px] text-tool-ink tabular-nums");
+    expect(done).toContain("max-lg:hidden shrink-0 font-mono text-label text-tool-ink tabular-nums");
     expect(renderToStaticMarkup(<ActionRow step={span("t2", 0, 0.4)} mid="m" sid="s" />)).not.toContain("data-tool-duration");
     expect(renderToStaticMarkup(<ActionRow step={span("t3", 0)} running mid="m" sid="s" />)).not.toContain("data-tool-duration");
   });

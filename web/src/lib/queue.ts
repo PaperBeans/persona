@@ -113,7 +113,8 @@ function isStandIn(text: string): boolean {
   return STAND_INS.includes(s) || s === t("lib-links.see_images") || s === t("lib-links.see_context");
 }
 
-/** What a pulled-back message puts in the box: its words, then each file's path, as this composer sends a file. */
+/** What a pulled-back message puts in the box: its words, then the path of each file that did not go back to its tile
+ *  (lib/composer-files.ts restoreFiles). */
 export function queuedDraft(p: Pick<QueuedParts, "text" | "files">): string {
   return [p.text, ...p.files.map((f) => quotePath(f.path))].filter(Boolean).join(" ");
 }

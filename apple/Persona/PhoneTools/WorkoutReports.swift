@@ -3,7 +3,6 @@ import Foundation
 import HealthKit
 import Observation
 import os
-import PersonaWire
 
 /// Consent and the HealthKit cursor are committed together. Failed uploads leave the cursor in place for retry.
 /// A report the hub rejects as invalid is dropped instead: the same data gets the same answer.
@@ -195,3 +194,4 @@ final class WorkoutReports {
     }
 }
 #endif
+import PersonaWire

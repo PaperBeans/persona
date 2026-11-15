@@ -126,6 +126,16 @@ struct PushInterceptsTests {
         #expect(failedModel.enabled && failedModel.failed)
     }
 
+    // Settings › Notifications › Low-Distraction Mode (#8157): the switch sends the choice and shows what the hub answered.
+    @Test func settingsSwitchPutsTheChoiceAndReadsTheHubsAnswer() async throws {
+        let hub = FakeHub()
+        hub.on("PUT", "/api/v1/push/ln-mode", json: #"{"enabled":true}"#)
+        let saved = try await hub.client.setPushLnMode(true)
+        #expect(saved.enabled)
+        let body = try JSONSerialization.jsonObject(with: try #require(hub.sent("PUT", "/api/v1/push/ln-mode").last?.body)) as? [String: Any]
+        #expect(body?["enabled"] as? Bool == true)
+    }
+
     @Test func olderHubHidesTheEntry() async {
         let hub = FakeHub()
         let model = PushInterceptsModel(api: hub.client)

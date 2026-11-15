@@ -224,9 +224,29 @@ data class InboxRecord(
     /** A hub connector's item (not Feishu's, not mail): it opens as its connector's thread. */
     val isConnector: Boolean get() = connector != null && !isLark && !isMail && moment == null
 
+    /** A conversation the assistant itself put into the Inbox. */
+    val isAssistantRow: Boolean get() = source == "assistant"
+
+    /** Its preview already starts with the summary, so the row draws that text once. */
+    val repeatsSummary: Boolean get() {
+        if (!isAssistantRow) return false
+        val summary = item.summary?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        val preview = item.preview.trim()
+        return preview.isNotEmpty() && preview.startsWith(summary)
+    }
+
     val isLark: Boolean get() = feedId != null || source == "lark"
     /** A mail item: only these open the mail page; the kind says it too in records cached without their source. */
     val isMail: Boolean get() = mail != null || source == "mail" || (source.isEmpty() && item.kind == "mail")
+
+    /** The assistant's text adds nothing beyond the title and summary already on its page. */
+    fun onlyTitleAndSummary(context: String?): Boolean {
+        if (!isAssistantRow) return false
+        val summary = item.summary?.takeIf { it.isNotBlank() } ?: return false
+        fun flat(text: String) = text.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+        val text = flat(context ?: item.preview)
+        return text.isEmpty() || text == flat("${item.title} $summary") || text == flat(summary)
+    }
 
     /** The item's id on the hub (its requests name it there; [InboxItemKey]). */
     val hubItemId: String get() = InboxItemKey.hubId(item.id)
@@ -271,6 +291,8 @@ data class InboxConnectorRef(
     val label: String? = null,
     val canReply: Boolean = false,
     val replyTo: String? = null,
+    /** The source page; for the assistant's own row, its conversation in the web app. */
+    val url: String? = null,
 )
 
 /** A Moments post reference on an inbox item. */

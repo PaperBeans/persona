@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PersonaWire
 
 /// One setup that started an Agent from New Agent (#2134): the ids its fields held, never a message. Kept on this device
 /// only; the rules every client follows are in spec/fixtures/recents/README.md.

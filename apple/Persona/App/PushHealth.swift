@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PersonaWire
 
 /// Whether this device gets background pushes, and if not why (#5998). A relay that refused this app, moved or could
 /// not be reached used to leave one log line; on a hub without its own APNs key nothing came, and nothing said so.

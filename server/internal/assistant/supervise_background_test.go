@@ -102,7 +102,7 @@ func TestBackgroundSupervisorFollowsUpTheMainConversationsTasks(t *testing.T) {
 	listBackground(t, s, f, bg)
 	waitFor(t, "the background supervisor's message", func() bool { return len(f.noticesTo(bg)) == 1 })
 	n := f.noticesTo(bg)[0]
-	for _, want := range []string{"📋 督办：你派出去的任务有 1 个要你处理", "这是 Persona 的督办消息", "你是后台督办对话", "hub 判断做完了，等你验收", "pull/7"} {
+	for _, want := range []string{"📋 督办：你派出去的任务有 1 个要你处理", "这是 Persona 的督办消息", "你是后台督办对话", "signal=review", "hub 判断做完了，等你验收", "pull/7"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("the background supervisor's message lacks %q:\n%s", want, n)
 		}
@@ -200,7 +200,7 @@ func TestBackgroundSupervisorEscalatesAndStaysBuiltIn(t *testing.T) {
 	}
 	waitFor(t, "the main conversation's message", func() bool { return len(f.noticesTo("conv1")) == 1 })
 	n := f.noticesTo("conv1")[0]
-	for _, want := range []string{"跟进它的后台督办对话判断要用户决定", "要不要顺手改 iPhone 横屏", "后台督办对话推荐：先只修 iPad", "后台督办对话或 leader 升级上来的"} {
+	for _, want := range []string{"signal=escalated", "跟进它的后台督办对话判断要用户决定", "要不要顺手改 iPhone 横屏", "后台督办对话推荐：先只修 iPad"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("the main conversation's message lacks %q:\n%s", want, n)
 		}
@@ -210,10 +210,10 @@ func TestBackgroundSupervisorEscalatesAndStaysBuiltIn(t *testing.T) {
 			t.Errorf("the main conversation's message names a leader (%q):\n%s", not, n)
 		}
 	}
+
 	if strings.Contains(n, "你是后台督办对话") {
 		t.Fatalf("the main conversation is told it is the background supervisor:\n%s", n)
 	}
-
 	if _, err := s.setArchived(ctx, "server", bg, true, titleByUser); !errors.Is(err, errArchiveBackground) {
 		t.Fatalf("archiving the background supervisor: %v", err)
 	}
@@ -514,7 +514,7 @@ func TestAsksOfUnledTasksGoToTheBackgroundSupervisor(t *testing.T) {
 
 	e.raise(askPermission("ix1", "worker-1"))
 	n := e.noticeWith("bg1", "interaction_id=ix1")
-	for _, want := range []string{"你是后台督办对话", "先交给你处理，用户还没收到", "主对话也会知道", "自动上交给用户"} {
+	for _, want := range []string{"signal=ask", "interaction_id=ix1", "machine=Mac", "session_id=worker-1"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("the background supervisor's message lacks %q:\n%s", want, n)
 		}
@@ -751,11 +751,10 @@ func TestGoldenBackgroundSupervisor(t *testing.T) {
 	s.noBackground = false
 	on := s.claudeMD(context.Background(), "server", false)
 	golden(t, "assistant_claude_md.background", on)
-	if !strings.Contains(off, "主对话派出去的任务由你督办") || strings.Contains(off, "后台督办") {
-		t.Fatal("with the background supervisor off the CLAUDE.md changed")
-	}
-	if strings.Contains(on, "主对话派出去的任务由你督办") || !strings.Contains(on, "主对话派出去的任务由后台督办对话跟进") {
-		t.Fatal("with the background supervisor on the CLAUDE.md still says the main conversation reviews its tasks")
+	for _, common := range []string{off, on} {
+		if strings.Contains(common, "cost_of_waiting") || strings.Contains(common, "visibility: \"silent\"") {
+			t.Fatal("shared CLAUDE.md still contains detailed supervision handling")
+		}
 	}
 	yes := true
 	setSettings(t, s, func(v *Settings) { v.MainSupervisesOwnTasks = &yes })

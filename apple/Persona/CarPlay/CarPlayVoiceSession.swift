@@ -95,10 +95,10 @@ struct CarPlayMicPermission: MicPermission {
     private static func resolve() async throws -> (SessionKey, String) {
         let api: APIClient
         let key: SessionKey
-        if let existing = AppModel.shared.assistantCurrent ?? AppModel.shared.assistantMain,
-           let client = AppModel.shared.api(existing.group) {
+        if let main = AppModel.shared.assistantMain,
+           let client = AppModel.shared.api(main.group) {
             api = client
-            key = existing
+            key = main
         } else {
             do {
                 api = try IntentSupport.client()
@@ -106,8 +106,8 @@ struct CarPlayMicPermission: MicPermission {
                 throw CarPlayVoiceStartError.noHub
             }
             let st = try await api.assistant()
-            guard let main = st.main, !main.isEmpty else { throw CarPlayVoiceStartError.noMain }
-            key = SessionKey(group: api.group, machineID: st.machineID, sessionID: main)
+            guard let confirmed = st.mainKey(group: api.group) else { throw CarPlayVoiceStartError.noMain }
+            key = confirmed
         }
         let list = try await api.pluginList()
         guard let voice = VoiceAvailability.pick(list.plugins) else { throw CarPlayVoiceStartError.noExtension }

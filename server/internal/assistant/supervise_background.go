@@ -274,6 +274,7 @@ func (s *Service) backgroundFresh(cfg Settings, id string) bool {
 func (s *Service) startBackground(ctx context.Context) (string, error) {
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 100*time.Second)
 	defer cancel()
+	sctx = context.WithValue(sctx, supervisionStartup{}, true)
 	c, err := s.startConversation(sctx, startParams{Text: prompts.RenderSupervisorStart(prompts.SupervisorStart{Owner: s.owner(ctx)}),
 		Purpose: purposeSupervise, Origin: OriginTask, Source: &proto.MessageSource{Kind: proto.SourceSupervision}})
 	if err != nil {

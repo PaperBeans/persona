@@ -76,7 +76,11 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 	modes := map[string]string{} // each computer's Claude Code default mode, read once for this plan
 	for i := range a.Tasks {
 		t := &a.Tasks[i]
-		t.normalizeReadonlyPermission()
+		asked := strings.TrimSpace(t.Permission) // the caller's own, before read-only replaces it
+		if t.Readonly {
+			asked = ""
+		}
+		t.normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
 		t.TodoID, t.Error, t.ErrorCode, t.ErrorArgs = "", "", "", nil
 		t.WorkspaceResolved, t.ReservedTodoID, t.WorkspaceInferred = nil, "", false
 		t.OwnerStarted = false // the hub's: only the owner's Start on the card sets it (startPlan)
@@ -144,6 +148,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		t.Reroute = preview.Reroute
 		// What it runs on the computer it lands on (#2640): a default that computer lacks is swapped now, so the card
 		// names the launcher that will run and its why says so; a launcher this plan names that it lacks is refused.
+		takesModes := true
 		if m, ok := s.machineByName(ctx, t.Machine); ok {
 			params := map[string]any{"launcher": t.Launcher, "model": t.Model, "effort": t.Effort, "tier": t.Tier}
 			own, err := s.resolveStart(ctx, params)
@@ -151,21 +156,35 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 				return "", fmt.Errorf("task %d: %w", i+1, err)
 			}
 			// The card shows the mode that runs: Allow all for Claude Code and an Auto Accept provider (#8141).
-			allowAll, err := s.fitTaskLauncher(ctx, t, m, own, params)
+			fit, err := s.fitTaskLauncher(ctx, t, m, own, params)
 			if err != nil {
 				return "", fmt.Errorf("task %d: %w", i+1, err)
 			}
-			if allowAll {
+			if fit.allowAll() {
 				t.Permission = "bypassPermissions"
 			}
+			// traex, omp…: no mode, no effort (launcher_modes.go). One the call names is refused now, rather than by
+			// the computer once the task starts; one a tier filled in is dropped. pi, cursor, agy: dropped either way.
+			if takesModes = startTakesModes(fit.agent); !takesModes {
+				launcher, _ := params["launcher"].(string)
+				if err := startModesRefused(launcher, fit.agent, asked, own.effort); err != nil {
+					return "", fmt.Errorf("task %d: %w", i+1, err)
+				}
+				t.Effort = ""
+				if asked != "" { // a work agent's, not refused: the card shows none, as none will run
+					t.Permission = ""
+				}
+			}
 		}
-		// Unset: settled on the computer it lands on, so the card shows what will run (tasks_permission.go).
-		if t.Permission == "" {
+		// Unset: settled on the computer it lands on, so the card shows what will run (tasks_permission.go). An agent
+		// that takes no mode gets none: a read-only task keeps its plan, which only says it is read-only.
+		if t.Permission == "" && takesModes {
 			t.Permission = s.taskPermission(ctx, t.Machine, modes)
 		}
 		if err := s.resolveTaskWorkspace(ctx, t); err != nil {
 			return "", fmt.Errorf("task %d: %w", i+1, err)
 		}
+		s.resolveTaskRepo(ctx, t) // the kind planStartsAtOnce looks up
 	}
 	for i, t := range a.Tasks {
 		if t.ReuseTodo == "" {

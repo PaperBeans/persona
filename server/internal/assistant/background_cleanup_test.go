@@ -48,6 +48,18 @@ func drainFleetBackground(t *testing.T, s *Service, cancel context.CancelFunc) {
 	waitFleetBackground(t, "work events", &s.work.eventWrites)
 }
 
+// newRestartedService is a second manager on a test's store, as after a hub restart. Its background work (work events,
+// screen upgrades) is drained before the database fixture closes, as newFleetTestOn does for the first one: otherwise
+// it logs through the ended test, a data race under -race and a "Log in goroutine after ... has completed" panic.
+func newRestartedService(t *testing.T, o Options) *Service {
+	t.Helper()
+	s := New(o)
+	runCtx, cancel := context.WithCancel(context.Background())
+	s.running.Store(&runCtx)
+	t.Cleanup(func() { drainFleetBackground(t, s, cancel) })
+	return s
+}
+
 func waitFleetBackground(t *testing.T, name string, wg *sync.WaitGroup) {
 	t.Helper()
 	done := make(chan struct{})

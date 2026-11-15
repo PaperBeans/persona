@@ -228,10 +228,28 @@ function lookup(language: Lang, key: string, vars?: Vars): string | undefined {
   return catalog[key];
 }
 
-/** Fills `{name}` placeholders; a missing value leaves the placeholder visible so the gap is obvious. */
+/** Fills `{name}` placeholders; a missing value leaves the placeholder visible so the gap is obvious. A value that ends a
+ *  sentence, filled in right before the text's own punctuation ("（{reason}），", "{error}。"), loses its full stop, so
+ *  the text never reads "。），" or "。。" (#6822). The hub's fill does the same (server/internal/i18n/i18n.go). */
 export function interpolate(text: string, vars?: Vars): string {
   if (!vars) return text;
-  return text.replace(/\{(\w+)\}/g, (m, name: string) => (name in vars ? String(vars[name]) : m));
+  return text.replace(/\{(\w+)\}/g, (m, name: string, at: number) => {
+    if (!(name in vars)) return m;
+    const value = String(vars[name]);
+    return MARK_AFTER.has(text.charAt(at + m.length)) ? withoutFullStop(value) : value;
+  });
+}
+
+/** Punctuation that, right after a placeholder, makes the value's own full stop a second one. */
+const MARK_AFTER = new Set(["）", ")", "，", ",", "。", "．", ".", "：", ":", "；", ";", "、"]);
+const FULL_STOPS = "。．.";
+
+/** value without the full stop it ends with (and space after it); an ellipsis ("...", "。。") keeps its dots. */
+function withoutFullStop(value: string): string {
+  const v = value.trimEnd();
+  const last = v.charAt(v.length - 1);
+  if (!last || !FULL_STOPS.includes(last) || (v.length > 1 && FULL_STOPS.includes(v.charAt(v.length - 2)))) return value;
+  return v.slice(0, -1);
 }
 
 /**

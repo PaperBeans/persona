@@ -53,8 +53,13 @@ type Supervision struct {
 	// Waits: the done judge found the latest stretch of work stopped on a decision only the owner can make (verdict
 	// needs_user, #1277). While it holds, task_review accepted is refused: closing the task would lose the decision.
 	// Its agent working again, or any review, clears it. nil when the last judgment said otherwise.
-	Waits     *OwnerWait `json:"waits,omitempty"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	Waits *OwnerWait `json:"waits,omitempty"`
+	// PendingSince: when the task entered pending_review (updateSupervision keeps it: set on the way in, kept while the
+	// review waits, gone on the way out). The apps list a review younger than an hour with the tasks in progress, as
+	// its supervisor's to do, and an older one under Needs you (docs/assistant/unified-entry.md "Needs you and In
+	// progress"). nil in every other state, and for a task that waited for review before the hub kept the time.
+	PendingSince *time.Time `json:"pending_since,omitempty"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 	// Progress: what its agent last reported to the supervisor (report_to_supervisor, agent_control.go). A live
 	// reading kept in memory only (the next report brings it back after a restart), and apart from UpdatedAt, which
 	// names the review a task waits for.
@@ -107,6 +112,10 @@ type TaskReview struct {
 	WaitingOn string    `json:"waiting_on,omitempty"`
 	Parks     int       `json:"parks,omitempty"`
 	DueAt     time.Time `json:"due_at,omitzero"`
+	// Decided: the owner's decision (its id) that ended this park before its time (parkDecided, parked.go), and
+	// DecidedTold: when a supervision message carried that to the supervisor.
+	Decided     string    `json:"decided,omitempty"`
+	DecidedTold time.Time `json:"decided_told,omitzero"`
 	// RestateAt: when the hub handed this needs_user back to its supervisor because the owner could not answer it
 	// (undecidable, or owner_cannot_answer): told once.
 	RestateAt time.Time `json:"restate_at,omitzero"`
@@ -159,6 +168,10 @@ func (v *Supervision) clone() *Supervision {
 		w := *v.Waits
 		out.Waits = &w
 	}
+	if v.PendingSince != nil {
+		at := *v.PendingSince
+		out.PendingSince = &at
+	}
 	out.Parked = out.parked()
 	return &out
 }
@@ -195,7 +208,7 @@ func (s *Service) supervisionDB() supervisionStore {
 
 func supervisionFromRow(r db.TodoSupervisionRow) *Supervision {
 	v := &Supervision{Supervisor: r.Supervisor, DoneWhen: r.DoneWhen, Criteria: r.Criteria, ExpectMinutes: r.ExpectMinutes, State: r.State, Round: r.Round,
-		UpdatedAt: r.UpdatedAt}
+		PendingSince: r.PendingSince, UpdatedAt: r.UpdatedAt}
 	_ = json.Unmarshal(r.Reviews, &v.Reviews)
 	if len(r.AutoReview) > 0 {
 		var a AutoReview
@@ -222,7 +235,7 @@ func (v *Supervision) row(todoID string) db.TodoSupervisionRow {
 		waits, _ = json.Marshal(v.Waits)
 	}
 	return db.TodoSupervisionRow{TodoID: todoID, Supervisor: v.Supervisor, DoneWhen: v.DoneWhen, Criteria: v.Criteria, ExpectMinutes: v.ExpectMinutes,
-		State: v.State, Round: v.Round, Reviews: raw, AutoReview: auto, Waits: waits, UpdatedAt: v.UpdatedAt}
+		State: v.State, Round: v.Round, Reviews: raw, AutoReview: auto, Waits: waits, PendingSince: v.PendingSince, UpdatedAt: v.UpdatedAt}
 }
 
 // cleanDoneWhen is a task's criteria as kept: trimmed, no empty or repeated ones, at most 6 of at most 200 characters.
@@ -248,6 +261,20 @@ func (s *Service) superviseTodo(ctx context.Context, id, supervisor string, done
 	}
 }
 
+// pendingSince is a ledger's PendingSince after a write at now that took its stored state from before to after, given
+// the one it held (since): now on the way into pending_review, unchanged while the review waits (whatever else the write
+// changed: a criterion's report, a new supervisor), nil in every other state. A review that already waited with no
+// time recorded gets none: the apps then keep it under Needs you, where it was.
+func pendingSince(before, after string, since *time.Time, now time.Time) *time.Time {
+	switch {
+	case after != reviewPending:
+		return nil
+	case before != reviewPending:
+		return &now
+	}
+	return since
+}
+
 // updateSupervision changes todo id's ledger (a new one when it has none) with change, which says whether it changed
 // anything; the ledger as it is then. Writes are one at a time.
 func (s *Service) updateSupervision(ctx context.Context, id string, change func(*Supervision) bool) (Supervision, bool, error) {
@@ -262,11 +289,13 @@ func (s *Service) updateSupervision(ctx context.Context, id string, change func(
 	if v == nil {
 		v = (&Supervision{}).clone()
 	}
+	before := v.State
 	if !change(v) {
 		return *v, false, nil
 	}
 	v.Criteria = db.AlignTodoCriteria(v.DoneWhen, v.Criteria)
 	v.UpdatedAt = time.Now().UTC()
+	v.PendingSince = pendingSince(before, v.State, v.PendingSince, v.UpdatedAt)
 	if st := s.supervisionDB(); st != nil && s.todoDB() != nil {
 		if err := st.PutTodoSupervision(ctx, v.row(id)); err != nil {
 			return Supervision{}, false, err

@@ -66,6 +66,9 @@ struct LinkSimulation {
     var keyframeEvery: Double?
     /// A keyframe's bits per pixel (screen text, #7842: about 1).
     var keyframeBits = 0.33
+    /// At most this many seconds of the target bitrate in one keyframe (the encoder's rate control keeps keyframes near
+    /// its target: a light screen's at a low target is small, 2026-11-15); nil, no limit.
+    var keyframeSeconds: Double?
     /// The phone takes what arrived every this many seconds, all of it at once (a busy phone, a link that delivers in
     /// bursts, #7842); nil: each frame as it arrives.
     var readEvery: Double?
@@ -169,7 +172,8 @@ struct LinkSimulation {
             if let every = keyframeEvery, t - keyframeAt >= every { keyframe = true }
             let budget = Double(rate.kbps) * 1000 * interval
             let pixels = Double(running.width * running.height)
-            let bits = keyframe ? pixels * keyframeBits : min(0.9 * budget, content.map { $0 * pixels } ?? .infinity)
+            let keyBits = min(pixels * keyframeBits, keyframeSeconds.map { $0 * Double(rate.kbps) * 1000 } ?? .infinity)
+            let bits = keyframe ? keyBits : min(0.9 * budget, content.map { $0 * pixels } ?? .infinity)
             if !keyframe, debt > Double(rate.kbps) * 1000 * 0.5 { continue } // the encoder drops it
             let isKeyframe = keyframe
             if keyframe { keyframeAt = t }

@@ -484,9 +484,12 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
     var decisionReview: DecisionReview?
     /// The knowledge-base project it belongs to (#2581, docs/assistant/todos.md "Project"): its slug; nil for none.
     var project: String?
+    /// The hub's completion check of its last stretch of work (#3180, docs/assistant/todos.md "Automatic completion"):
+    /// why a stopped task is still open (`stoppedReason`). Nil before the first check, and from older hubs.
+    var check: TodoCheck?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, origin, kind, agents, spaces, quiet, stage, supervision, priority, ask, delivery, manager, orphaned, project
+        case id, title, notes, origin, kind, agents, spaces, quiet, stage, supervision, priority, ask, delivery, manager, orphaned, project, check
         case decisionReview = "decision_review"
         case doneAt = "done_at", createdAt = "created_at", updatedAt = "updated_at", reopenedAt = "reopened_at", seenAt = "seen_at", planID = "plan_id", startError = "start_error",
              doneBy = "done_by", doneReason = "done_reason", prURL = "pr_url", dueAt = "due_at", dueDate = "due_date",
@@ -499,7 +502,7 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
          supervision: TaskSupervision? = nil, dueAt: Date? = nil, dueDate: String? = nil, remindAt: Date? = nil,
          remindedAt: Date? = nil, priority: String? = nil, ask: TodoAsk? = nil, reopenedAt: Date? = nil,
          delivery: TodoDelivery? = nil, manager: String? = nil, seenAt: Date? = nil, decisionReview: DecisionReview? = nil,
-         orphaned: TodoOrphaned? = nil, project: String? = nil, kind: String? = nil) {
+         orphaned: TodoOrphaned? = nil, project: String? = nil, kind: String? = nil, check: TodoCheck? = nil) {
         self.id = id
         self.title = title
         self.notes = notes
@@ -531,6 +534,7 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
         self.orphaned = orphaned
         self.project = project
         self.kind = kind
+        self.check = check
     }
 
     init(from decoder: Decoder) throws {
@@ -575,6 +579,8 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
         project = ((try? c.decodeIfPresent(String.self, forKey: .project)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
         // New (#3582): absent on older hubs and caches; an unknown value is an ordinary to-do, never a decode failure.
         kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? nil
+        // New (#3180): absent before the first check and from older hubs; one that does not decode is as if there were none.
+        check = (try? c.decodeIfPresent(TodoCheck.self, forKey: .check)) ?? nil
     }
 
     /// An ended task cannot keep an old decision card alive.
@@ -589,6 +595,39 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
     var isConcern: Bool { kind == "concern" }
     /// The hub marked it done because its task's work was judged finished; reopening undoes it.
     var autoDone: Bool { doneAt != nil && doneBy == "auto" }
+
+    /// Why a stopped task is still open (#3180; the web's `stoppedReason`): the judge's reason ("" when it gave none)
+    /// while the task is neither working nor done and its check, newer than its latest reopen, found it not done; nil
+    /// with no check, or one that says done or unsure. `working`: whether the task's row says it works.
+    func stoppedReason(working: Bool) -> String? {
+        guard let check, !check.verdict.isEmpty, doneAt == nil, !working else { return nil }
+        if check.verdict == "done" || check.verdict == "unsure" { return nil }
+        if let reopenedAt, !((check.at ?? .distantPast) >= reopenedAt) { return nil }
+        return (check.reason ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// A completion check (`check`, #3180): `verdict` is `done`, `not_done`, `waiting`, `needs_user`, `undelivered` or
+/// `unsure` (others may come), `reason` the judge's line in the user's language, `at` when it judged.
+nonisolated struct TodoCheck: Codable, Hashable, Sendable {
+    var verdict: String
+    var reason: String?
+    var at: Date?
+
+    enum CodingKeys: String, CodingKey { case verdict, reason, at }
+
+    init(verdict: String, reason: String? = nil, at: Date? = nil) {
+        self.verdict = verdict
+        self.reason = reason
+        self.at = at
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        verdict = (try? c.decodeIfPresent(String.self, forKey: .verdict)) ?? ""
+        reason = (try? c.decodeIfPresent(String.self, forKey: .reason)) ?? nil
+        at = (try? c.decodeIfPresent(Date.self, forKey: .at)) ?? nil
+    }
 }
 
 /// Why nobody works on an open to-do (`orphaned`, #3618): `error` (its agent closed after a model error nothing

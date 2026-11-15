@@ -324,7 +324,7 @@ var (
 	larkPythonImport = lazyre.New(`(?m)(?:^|;)[ \t]*(?:(import)[ \t]+([\w., \t]+)|(from)[ \t]+([\w.]+)[ \t]+import\b)`)
 	// larkPythonReach: names that reach a process, other code or the interpreter's internals, as words of the code.
 	larkPythonReach = lazyre.New(`\b(?:os|posix|nt|modules|subprocess|system|popen\w*|spawn\w*|exec\w*|fork\w*|eval|` +
-		`compile|getattr|setattr|delattr|vars|globals|locals|breakpoint|help|pty|ctypes|importlib|runpy|pickle|marshal)\b|` +
+		`compile|getattr|setattr|delattr|attrgetter|itemgetter|methodcaller|vars|globals|locals|breakpoint|help|pty|ctypes|importlib|runpy|pickle|marshal)\b|` +
 		`(?:^|[^\w])_+[A-Za-z]`)
 	// larkPythonCall: a call by bare name (not a method), and what code defines: `def f`, `class C`, `f = lambda`.
 	larkPythonCall       = lazyre.New(`(?:^|[^.\w])([A-Za-z_]\w*)\s*\(`)

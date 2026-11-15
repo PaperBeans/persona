@@ -3,7 +3,5 @@
   "copy": "Copy",
   "copy_table": "Copy table",
   "quote_more": "Show all",
-  "quote_less": "Show less",
-  "image_load": "Load image from {host}",
-  "image_retry": "Retry image from {host}"
+  "quote_less": "Show less"
 }

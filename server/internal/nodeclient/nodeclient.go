@@ -50,7 +50,10 @@ var ErrNoNode = errors.New("no persona node")
 
 // Request is one line a client sends on the node socket; the node answers with one line.
 type Request struct {
-	Kind      string          `json:"kind"`
+	Kind string `json:"kind"`
+	// Locale is an optional display language for reports such as kind=preflight. Older nodes ignore it; absent keeps
+	// their legacy zh-Hans wording. Machine protocol fields never use it.
+	Locale    string          `json:"locale,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
 	Pane      string          `json:"pane,omitempty"`
 	Name      string          `json:"name,omitempty"`

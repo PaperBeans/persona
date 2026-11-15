@@ -110,26 +110,31 @@ internal fun FullTextButton(item: Item, onLoaded: (String) -> Unit) {
 
 /**
  * The next message Claude suggests (X1, grey in its own input box): a chip over the empty composer of an idle session;
- * a tap puts it in the composer to edit or send. With [onSend], a long press (iOS SuggestionPill's menu) offers "Send now"
- * and "Fill in composer", and "Send now" is an accessibility action too.
+ * a tap puts it in the composer to edit or send. A safe suggestion with [onSend] also offers "Send now" in a long-press
+ * menu and as an accessibility action; a risky one only fills.
  */
 @Composable
 internal fun ComposerSuggestion(session: Session?, composer: ChatComposerState, onSend: ((String) -> Unit)? = null) {
     val suggestion = suggestionFor(session, composer.hasContent) ?: return
+    val directSend = suggestionDirectSend(session, onSend)
     var menu by remember(suggestion) { mutableStateOf(false) }
     val fill: () -> Unit = { composer.editMessage(suggestion); composer.focusRequest++ }
     val sendLabel = stringResource(R.string.chat_suggestion_send)
     val fillLabel = stringResource(R.string.chat_suggestion_fill)
     Box {
-        JChip(suggestion, Modifier.then(if (onSend == null) Modifier else Modifier.semantics {
-            customActions = listOf(CustomAccessibilityAction(sendLabel) { onSend(suggestion); true })
-        }), onClick = fill, icon = PhIcons.Sparkle, onLongClick = onSend?.let { { menu = true } })
-        if (onSend != null) JMenu(menu, { menu = false }, listOf(
-            JAction(sendLabel, PhIcons.PaperPlaneRight) { onSend(suggestion) },
+        JChip(suggestion, Modifier.then(if (directSend == null) Modifier else Modifier.semantics {
+            customActions = listOf(CustomAccessibilityAction(sendLabel) { directSend(suggestion); true })
+        }), onClick = fill, icon = PhIcons.Sparkle, onLongClick = directSend?.let { { menu = true } })
+        if (directSend != null) JMenu(menu, { menu = false }, listOf(
+            JAction(sendLabel, PhIcons.PaperPlaneRight) { directSend(suggestion) },
             JAction(fillLabel, PhIcons.PencilSimple, onClick = fill),
         ))
     }
 }
+
+/** Only a safe, present suggestion can have a direct sender; filling the composer is always still available. */
+internal fun suggestionDirectSend(session: Session?, onSend: ((String) -> Unit)?): ((String) -> Unit)? =
+    if (session == null || session.suggestionRisky) null else onSend
 
 /** The suggestion to offer: the session's, while it is idle and nothing is typed yet. */
 internal fun suggestionFor(session: Session?, typed: Boolean): String? =

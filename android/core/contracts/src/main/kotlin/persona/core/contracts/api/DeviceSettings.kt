@@ -95,6 +95,15 @@ interface DeviceSettings {
      * is now.
      */
     suspend fun saveQuietHours(quiet: QuietHours): QuietHours = throw UnsupportedOperationException("quiet")
+
+    /**
+     * 设置 › 通知 › 低打扰模式 (#8157): the hub's push grading switch, `GET /api/v1/push/ln-mode`, for every device of the
+     * owner, not this one alone; null from a hub without it (404 / 405), which shows no row.
+     */
+    suspend fun lowDistraction(): Boolean? = null
+
+    /** `PUT /api/v1/push/ln-mode {"enabled": on}`; the hub's switch as it is now. */
+    suspend fun saveLowDistraction(on: Boolean): Boolean = throw UnsupportedOperationException("ln-mode")
 }
 
 /** A QR code the hub drew: [rows] of `0` / `1`, no quiet zone. */

@@ -4,12 +4,16 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // CodeMirror needs layout jsdom does not have: a plain text area stands in for it, with the same props.
 const typed: { value: string | null } = vi.hoisted(() => ({ value: null }));
-vi.mock("./CodeEditor", () => ({
-  default: ({ text, onChange, bind }: { text: string; onChange: () => void; bind: (r: () => string) => void }) => {
-    bind(() => typed.value ?? text);
-    return <textarea data-testid="code-editor" defaultValue={text} onChange={(e) => { typed.value = e.target.value; onChange(); }} />;
-  },
-}));
+// A lazy chunk can take a later task even when the editor itself is mocked.
+vi.mock("./CodeEditor", async () => {
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  return {
+    default: ({ text, onChange, bind }: { text: string; onChange: () => void; bind: (r: () => string) => void }) => {
+      bind(() => typed.value ?? text);
+      return <textarea data-testid="code-editor" defaultValue={text} onChange={(e) => { typed.value = e.target.value; onChange(); }} />;
+    },
+  };
+});
 import { setToken } from "../../../lib/api";
 import { t } from "../../../i18n";
 import type { FileContent } from "../../../lib/files";
@@ -66,20 +70,24 @@ async function type(text: string) {
   await flush();
 }
 
-beforeEach(async () => {
-  setToken("synthetic-A"); sent = []; answers = []; done = []; typed.value = null;
-  vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body ?? "{}"));
-    sent.push(body);
-    const answer = answers.shift();
-    return answer ? answer(body) : Response.json({ path: body.path, size: 1, revision: "r2" });
-  }));
-  host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  await act(async () => root.render(<FileEdit mid="m1" cwd="/w" file={file()} text={"a\r\nb\r\n"} onDone={(c) => done.push(c)} />)); await flush();
-});
-afterEach(() => { act(() => root.unmount()); host.remove(); document.body.innerHTML = ""; setToken(""); vi.unstubAllGlobals(); });
-
 describe("FileEdit", () => {
+  beforeEach(async () => {
+    setToken("synthetic-A"); sent = []; answers = []; done = []; typed.value = null;
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      sent.push(body);
+      const answer = answers.shift();
+      return answer ? answer(body) : Response.json({ path: body.path, size: 1, revision: "r2" });
+    }));
+    host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+    await act(async () => {
+      root.render(<FileEdit mid="m1" cwd="/w" file={file()} text={"a\r\nb\r\n"} onDone={(c) => done.push(c)} />);
+      await import("./CodeEditor");
+    });
+    await appears(() => host.querySelector('[data-testid="code-editor"]'));
+  });
+  afterEach(() => { act(() => root.unmount()); host.remove(); document.body.innerHTML = ""; setToken(""); vi.unstubAllGlobals(); });
+
   it("saves over the version opened, with the file's line endings", async () => {
     expect(button(t("files-editor.save"))!.disabled).toBe(true);
     await type("a\nb\nc\n");

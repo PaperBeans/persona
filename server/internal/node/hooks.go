@@ -18,6 +18,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/acceptloop"
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/nodeclient"
 	"github.com/nwverse/persona/server/internal/prompts"
@@ -187,7 +188,7 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 			resp = inventory
 		}
 	case "preflight": // personad node doctor's path-access check, read with this node's permissions (preflight.go)
-		resp = n.preflight(ctx)
+		resp = n.preflightIn(ctx, i18n.Resolve(req.Locale).Or(i18n.Default))
 	case "ask": // personad ask (scriptcli.go)
 		resp = n.handleAsk(ctx, req)
 	case "notify": // personad notify (scriptcli.go)
@@ -199,9 +200,7 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 	case "secret.env": // personad launch --ticket (secretenv.go)
 		resp = n.secretEnvFor(req)
 	case "mcp.tools":
-		var res struct {
-			Tools []proto.Tool `json:"tools"`
-		}
+		var res map[string]any
 		// The assistant's only when the node says so too (clicall.go mcpSession).
 		session, assistant := n.mcpSession(c, req)
 		if session == "" && !assistant {
@@ -209,9 +208,14 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 		}
 		// A guest's (its MCP server says so, or this node knows it is one): the hub gives it only its own tools.
 		guest := req.Guest || n.guestOf(session) != nil
-		if err := n.peer.Call(ctx, "mcp.tools", map[string]any{"assistant": assistant, "session_id": session, "guest": guest}, &res); err != nil {
+		params := mcpToolsParams(req.Input, session, assistant, guest)
+		if err := n.peer.Call(ctx, "mcp.tools", params, &res); err != nil {
 			resp = map[string]any{"tools": []proto.Tool{}, "error": err.Error()}
 		} else {
+			if res == nil {
+				res = map[string]any{}
+			}
+			res["session"] = session
 			resp = res
 		}
 	case "cli.call": // personad tg: the node, not the caller, says whether it is the assistant (clicall.go)

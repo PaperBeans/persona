@@ -20,7 +20,7 @@ func TestUsageMistakesNameTheProgram(t *testing.T) {
 	run := func(name string, args ...string) (string, int) {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestUsageMistakesNameTheProgram$")
 		cmd.Env = append(os.Environ(), "PERSONAD_TEST_USAGE_ARGS="+strings.Join(args, "\x1f"), "PERSONAD_TEST_USAGE_NAME="+name,
-			"HOME="+home, "PERSONA_HOME="+filepath.Join(home, ".persona"))
+			"HOME="+home, "PERSONA_HOME="+filepath.Join(home, ".persona"), "PERSONA_LANG=zh-Hans")
 		out, err := cmd.CombinedOutput()
 		code := 0
 		if ee, ok := err.(*exec.ExitError); ok {

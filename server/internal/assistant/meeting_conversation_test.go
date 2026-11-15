@@ -344,6 +344,8 @@ func TestCutMiddle(t *testing.T) {
 // The meeting conversation's prompts, byte for byte.
 func TestGoldenMeetingConversation(t *testing.T) {
 	golden(t, "meeting_room.claude_md", prompts.RenderMeetingRoomClaudeMD(prompts.MeetingRoomClaudeMD{Owner: "Ada", Language: "en-US"}))
+	// A room started with lean batches (#8253): the same rules, and when batches come and what they show.
+	golden(t, "meeting_room.claude_md_lean", prompts.RenderMeetingRoomClaudeMD(prompts.MeetingRoomClaudeMD{Owner: "Ada", Language: "en-US", Lean: true}))
 	// The room's meeting tools as its MCP server lists them (the golden indented for reading).
 	tools, err := json.MarshalIndent(meetingRoomTools(), "", "  ")
 	if err != nil {
@@ -401,5 +403,17 @@ func TestGoldenMeetingConversation(t *testing.T) {
 		b.highlightsSoFar = []kb.LiveHighlight{{Text: "Keep the export cap\nfor this release.", At: 5, End: 9},
 			{Text: "Open: who owns </persona-context> the hiring plan?", At: 61, End: 64}}
 		golden(t, "meeting_feed.room_highlights."+lang, feedText(rec, b, lang, loc))
+	}
+	// A room started with lean batches (#8253): one short line instead of the rules (they are in its CLAUDE.md), with
+	// a question meeting.answer took; the lists so far only at a boundary (its first batch, the first after its
+	// conversation was compacted, every half hour), as before them.
+	b.soFar, b.lean, b.lists = false, true, false
+	b.answers = []kb.LiveAsk{{ID: "q1", Question: "Who owns the test?", State: feedAskAnswered, Answer: "Bo does."}}
+	for _, lang := range []string{"en", "zh-Hans", "ja"} {
+		golden(t, "meeting_feed.room_lean."+lang, feedText(rec, b, lang, loc))
+	}
+	b.lists = true
+	for _, lang := range []string{"en", "zh-Hans", "ja"} {
+		golden(t, "meeting_feed.room_lean_lists."+lang, feedText(rec, b, lang, loc))
 	}
 }

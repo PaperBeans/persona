@@ -74,7 +74,7 @@ function groupKey(p: ModelPurpose): string {
 
 export function purposeGroups(purposes: ModelPurpose[], query: string, providers: ModelProvider[] = []): [string, ModelPurpose[]][] {
   const q = query.trim().toLocaleLowerCase();
-  return [[t("sidebar.persona_chats"), "headless"], [t("shellswitch.agents"), "engine"], [t("settings-modelconfiguration.processing"), "api"], ["", "plugin"]].map(([name, key]): [string, ModelPurpose[]] => {
+  return [[t("sidebar.persona_chats"), "headless"], [t("settings-modelconfiguration.agents"), "engine"], [t("settings-modelconfiguration.processing"), "api"], ["", "plugin"]].map(([name, key]): [string, ModelPurpose[]] => {
     const group = [name, executionLabel(key)].filter(Boolean).join(" · ");
     return [group, purposes.filter((p) =>
       groupKey(p) === key
@@ -140,17 +140,34 @@ export function runtimeChoices(p: ModelPurpose, agent?: string): { id: string; l
   return RUNTIMES.filter((r) => p.runtimes?.includes(r.id));
 }
 
+/** The profiles a main chat's new conversations can start in (#4633), in the order the choice offers them. */
+const CONFIG_DIRS = ["private", "legacy"] as const;
+
+/** "New chats' Claude profile"'s options: the ones the hub offers (and this client knows), for Claude Code only. */
+export function configDirChoices(p: ModelPurpose, agent?: string): { id: string; label: string }[] {
+  if (!p.config_dirs?.length || (agent && agent !== "claude")) return [];
+  return CONFIG_DIRS.filter((id) => p.config_dirs?.includes(id)).map((id) => ({ id, label: configDirLabel(id) }));
+}
+
+export function configDirLabel(id: string | undefined): string {
+  return id === "legacy" ? t("settings-modelconfiguration.config_dir_legacy") : t("settings-modelconfiguration.config_dir_private");
+}
+
 export const modelConfiguration = (manager?: string) => api<ModelConfigurationBody>("/model-config", { headers: manager ? { [MANAGER_HEADER]: manager } : undefined });
 export function draftFor(p: ModelPurpose): ModelDraft {
   const runtime = runtimeChoices(p).length ? p.override?.runtime || p.effective?.runtime || "cli" : "";
-  return { provider: p.override?.provider ?? "", model: p.override?.model ?? "", effort: p.override?.effort ?? "", runtime };
+  const draft: ModelDraft = { provider: p.override?.provider ?? "", model: p.override?.model ?? "", effort: p.override?.effort ?? "", runtime };
+  // Asked without the agent on purpose: seeded whatever the purpose runs on, so an editor opened on one without profiles
+  // (Codex), which hides the choice, keeps the saved one for Claude Code and for its save (#4633).
+  if (configDirChoices(p).length) draft.config_dir = p.override?.config_dir || p.effective?.config_dir || "private";
+  return draft;
 }
 
 export function chooseProvider(draft: ModelDraft, provider: string): ModelDraft {
-  return draft.provider === provider ? draft : { provider, model: "", effort: "", runtime: draft.runtime };
+  return draft.provider === provider ? draft : { ...draft, provider, model: "", effort: "" };
 }
 
-export function supportsField(p: ModelPurpose, field: Exclude<keyof ModelDraft, "runtime">): boolean {
+export function supportsField(p: ModelPurpose, field: Exclude<keyof ModelDraft, "runtime" | "config_dir">): boolean {
   return (p.fields ?? ["provider", "model"]).includes(field);
 }
 
@@ -204,15 +221,16 @@ export function modelPatch(p: ModelPurpose, draft: ModelDraft, effort = supports
     if (field === "effort" ? effort : supportsField(p, field)) patch[field] = draft[field].trim() || null;
   }
   if (runtimeChoices(p).length && draft.runtime) patch.runtime = draft.runtime;
+  if (configDirChoices(p).length && draft.config_dir) patch.config_dir = draft.config_dir;
   return patch;
 }
 
 /** What the editor's reset sends (Inherit, Follow Agents, Follow <the category>): the revision, `null` for each field
- *  the purpose takes, and the runtime it keeps. A use with a record of its own (`ownRecord`) goes back to following its
- *  category with explicit nulls for all three, whatever fields the provider in effect takes now (#7980), so an effort
- *  saved on an earlier provider goes too. */
-export function resetPatch(p: ModelPurpose, runtime = ""): Record<string, string | number | null> {
-  const patch = modelPatch(p, { provider: "", model: "", effort: "", runtime });
+ *  the purpose takes, and the runtime and the main chat's profile it keeps (#4633). A use with a record of its own
+ *  (`ownRecord`) goes back to following its category with explicit nulls for all three, whatever fields the provider
+ *  in effect takes now (#7980), so an effort saved on an earlier provider goes too. */
+export function resetPatch(p: ModelPurpose, runtime = "", configDir?: string): Record<string, string | number | null> {
+  const patch = modelPatch(p, { provider: "", model: "", effort: "", runtime, config_dir: configDir });
   return ownRecord(p) ? { ...patch, provider: null, model: null, effort: null } : patch;
 }
 

@@ -257,9 +257,13 @@ func (p *Peer) Serve(ctx context.Context, r io.Reader) error {
 	for sc.Scan() {
 		readAt := p.lastReadTime()
 		var m message
-		if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
-			p.lastActivity.Store(readAt.UnixNano())
-			continue
+		// A line in a buffer of its own keeps its params or result where they are (ownedline.go); any other is in the
+		// reader's buffer, which the next line overwrites, so they are copied out of it.
+		if !sc.Owned() || !unmarshalOwned(sc.Bytes(), &m) {
+			if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
+				p.lastActivity.Store(readAt.UnixNano())
+				continue
+			}
 		}
 		if deadlineMessage(m) {
 			// Classify the rest of this raw read before waking the caller. Otherwise a deadline followed by an ordinary

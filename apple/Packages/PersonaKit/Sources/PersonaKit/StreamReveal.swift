@@ -72,10 +72,10 @@ public nonisolated struct StreamReveal: Sendable, Equatable {
 
     /// The frame at time `t`: moves the shown part on. True when what is shown changed.
     @discardableResult
-    public mutating func advance(to t: TimeInterval) -> Bool {
+    public mutating func advance(to t: TimeInterval, maxStep: TimeInterval = StreamReveal.maxStep) -> Bool {
         defer { lastFrame = t }
         guard !caughtUp else { budget = 0; return false }
-        let dt = min(Self.maxStep, max(0, t - (lastFrame ?? t)))
+        let dt = min(maxStep, max(0, t - (lastFrame ?? t)))
         let end = shownEnd
         let waiting = text[end...].count
         let pace = firstArrival.map { t - $0 > Self.averageAfter ? Double(arrived) / (t - $0) * Self.paceShare : 0 } ?? 0

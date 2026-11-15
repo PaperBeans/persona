@@ -69,6 +69,8 @@ For passive mode, use `persona-link pair --listen` and paste the printed link in
 
 ## Everyday commands
 
+Human-readable command output follows the terminal locale (`PERSONA_LANG`, then `LC_ALL`, `LC_MESSAGES` and `LANG`), with English as the fallback and `en`, `zh-Hans` and `ja` shipped together. JSON, saved status and peer messages keep their canonical form. The Electron setup window and `scripts/deploy/install.sh` do not currently forward their independently selected interface language as `PERSONA_LANG`; set it explicitly on a Link invocation when its output needs a particular language.
+
 | Command | Purpose |
 | --- | --- |
 | `persona-link status [--json]` | Connector and service state; no credential contents |

@@ -58,6 +58,10 @@ import UIKit
     @Test(arguments: Page.allCases) func thePageFitsAPhonesMainThreadStack(_ page: Page) throws {
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let model = AppModel(stateFolder: FileManager.default.temporaryDirectory.appending(path: "stack-\(page)-" + UUID().uuidString))
+        // The Agents page with its list: a chat the simulator's last run left open (`dev.openChat`) would be opened
+        // over it, and the list is not built under a chat on its way (#8467).
+        model.openChat = nil
+        model.openPersonalAgent = nil
         let root = page.ownsNavigation ? AnyView(page.view) : AnyView(NavigationStack { page.view })
         let (bytes, window) = StackPeak.render(root.environment(model), in: scene)
         defer { window.isHidden = true }

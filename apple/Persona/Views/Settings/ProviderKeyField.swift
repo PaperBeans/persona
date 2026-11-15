@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 /// A model provider's key, or a secret provider's reference in its place (docs/extensions/secret-providers.md "Launcher
 /// keys"): "Use a Reference" where the hub takes references (`references`), the reference in plain text, and what a stored

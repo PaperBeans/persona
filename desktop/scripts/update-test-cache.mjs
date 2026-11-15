@@ -1,7 +1,7 @@
 // Paths belonging to one update-test run. Every removable path is below the run's own root.
 import { randomUUID } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
-import { join, sep } from "node:path";
+import { mkdir, rm, stat } from "node:fs/promises";
+import { dirname, join, sep } from "node:path";
 
 export const createCacheIdentity = () => {
   const identity = `persona-desktop-update-test-${randomUUID()}`;
@@ -80,7 +80,15 @@ export async function removeOwnedRunPaths(paths) {
       failures.push(`${name} is outside the owned HOME`);
       continue;
     }
-    try { await rm(directory, { recursive: true, force: true }); }
+    try {
+      // Windows can accept a recursive forced removal below a file as a no-op; reject that invalid parent explicitly.
+      const parent = await stat(dirname(directory)).catch(error => {
+        if (error?.code === "ENOENT") return null;
+        throw error;
+      });
+      if (parent && !parent.isDirectory()) throw new Error("parent is not a directory");
+      await rm(directory, { recursive: true, force: true });
+    }
     catch (error) { failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`); }
   }
   return failures;

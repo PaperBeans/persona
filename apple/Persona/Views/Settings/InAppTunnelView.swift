@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 #if !os(macOS)
 import UIKit
 import WebKit

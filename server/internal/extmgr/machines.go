@@ -68,7 +68,8 @@ type Machine struct {
 	// tellCursor). Each tell reads the setting and then waits for the node, and the plugin's changes start them
 	// concurrently; without the lock, a tell that read the old setting could reach the node after a newer one and
 	// leave it held awake (for up to the node's 30 minutes) or with the wrong cursor.
-	noLockMu, cursorMu sync.Mutex
+	noLockMu, cursorMu  sync.Mutex
+	nodePackageFailures map[proto.PluginNodeProgram]nodePackageFailure
 }
 
 // config is the computer's configuration as the devices list it now.

@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 // A connector's inbox thread as a conversation (GET /api/v1/connectors/{id}/thread, docs/protocol/protocol.md「Connector API」):
 // a page of messages at a time, newest page first, their pictures through the hub, a reply through the connector's

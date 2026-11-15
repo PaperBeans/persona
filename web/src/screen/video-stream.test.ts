@@ -1,7 +1,7 @@
 // One video stream in the browser (#6558), against the mock's real HEVC fixture: start out, hello / format / frames in,
 // a report for every frame, the newest picture of a burst handed on, and the ways it ends, as the iPhone's stream.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ScreenVideoStream, type StreamEvent } from "./video-stream";
+import { ScreenVideoStream, videoSocket, type StreamEvent } from "./video-stream";
 import { fakeDecoders, fixture, framed, prefix, scripted, tick } from "./video-test-helpers";
 import { ScreenVideoTiers } from "./video-tiers";
 import { decode, encode, VideoParser, type Hello } from "./video-wire";
@@ -95,6 +95,23 @@ describe("ScreenVideoStream", () => {
     t.end();
     expect(events.map((e) => e.type)).toEqual(["timing", "encoding", "ended"]);
     expect(events.at(-1)).toEqual({ type: "ended", why: "closed" });
+  });
+
+  it("ends busy when the hub refused it because the Mac already sends video to two others (#8320); another refusal is closed", () => {
+    const why = (refused: string | undefined) => {
+      const t = scripted(), events: StreamEvent[] = [];
+      new ScreenVideoStream(t, start, (e) => events.push(e), { makeDecoder: fakeDecoders().make });
+      t.end(refused);
+      return events.at(-1);
+    };
+    expect([why("busy"), why("not_signed_in"), why(undefined)]).toEqual([
+      { type: "ended", why: "busy" },
+      { type: "ended", why: "closed" },
+      { type: "ended", why: "closed" },
+    ]);
+    expect(videoSocket({ protocol: "https:", host: "hub.example" }, "m 1", "t&k", "p1")).toBe(
+      "wss://hub.example/api/v1/machines/m%201/screen/video/connect?token=t%26k&pair=p1&refusals=close",
+    );
   });
 
   it("sends updates while open, nothing after", () => {

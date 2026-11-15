@@ -213,13 +213,13 @@ describe("the original-source controls show their literal English labels", { tim
     expect(host.querySelector('[data-mid="m102"]')).not.toBeNull();
   });
 
-  it("alternates a non-embedded event between View original and Handling", async () => {
+  it("alternates a non-embedded event between View original and View handling", async () => {
     await draw(chatItem({ lark: undefined }));
     expect(host.querySelector("[data-event-body]")).not.toBeNull();
     expect(originalToggle("inbox-original-toggle").textContent).toBe("View original");
 
     await pressOriginal("inbox-original-toggle");
-    expect(originalToggle("inbox-original-toggle").textContent).toBe("Handling");
+    expect(originalToggle("inbox-original-toggle").textContent).toBe("View handling");
     expect(host.querySelector("[data-event-body]")).toBeNull();
 
     await pressOriginal("inbox-original-toggle");

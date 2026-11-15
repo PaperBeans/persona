@@ -162,6 +162,22 @@ func TestCodexExecutionArgsBeforePromptSeparator(t *testing.T) {
 	}
 }
 
+func TestCodexPromptOnlyTaskKeepsLauncherPermissions(t *testing.T) {
+	args := []string{"codex", "-c", `sandbox_mode="danger-full-access"`, "--ask-for-approval", "on-request"}
+	withCodexLaunchers(t, map[string][]string{"task-codex": args})
+	n, _, _, _ := codexStartHerdr(t, 0)
+	_, err := request(t, n, "session.start", map[string]any{
+		"cwd": "~/proj", "launcher": "task-codex", "permission_mode": "default",
+		"prompt": "Inspect the project. Do not edit files, commit, or make external changes.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(ran, args) {
+		t.Fatalf("prompt-only launch changed runtime permissions: %q, want %q", ran, args)
+	}
+}
+
 func TestCodexStartPermissionModes(t *testing.T) {
 	for _, tc := range []struct {
 		name, mode string

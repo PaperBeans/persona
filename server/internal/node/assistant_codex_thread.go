@@ -46,7 +46,7 @@ func (c *codexConn) start(ctx context.Context, id, cwd string, resume bool, star
 		params["model"] = c.p.model.Model
 	}
 	// The same on every start of the thread, apart from the memory index: the live snapshot goes with each message.
-	params["developerInstructions"] = prompts.RenderCodexInstructions(codexMemoryPrompt(c.memDir))
+	params["developerInstructions"] = prompts.RenderCodexInstructions(codexMemoryPrompt(c.memDir), c.p.model.SupervisionInstructions)
 	var res struct {
 		Model       string          `json:"model"`
 		ServiceTier json.RawMessage `json:"serviceTier"`

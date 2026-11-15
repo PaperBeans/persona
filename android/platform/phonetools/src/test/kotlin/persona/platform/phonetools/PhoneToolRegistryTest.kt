@@ -33,9 +33,11 @@ class PhoneToolRegistryTest {
         var executions = 0
         val registry = PhoneToolRegistry({ sources }, { online }, { foreground }, { _, _ -> permission },
             { error("Reads must not ask for confirmation") }, { _, _ -> executions++; PhoneToolResult.text("ok") })
-        assertEquals(12, registry.enabledSpecs().size)
+        assertEquals(14, registry.enabledSpecs().size)
         assertFalse(registry.all.any { it.name.startsWith("phone_reminders_") || it.name == "phone_health_write_sample" })
         assertTrue(registry.all.any { it.name == "phone_health_summary" })
+        assertTrue(registry.all.any { it.name == "phone_workouts_recent" })
+        assertTrue(registry.all.any { it.name == "phone_workout_detail" })
         assertTrue(registry.all.all { it.inputSchema["type"]?.jsonPrimitive?.content == "object" })
         foreground = false
         assertFalse(registry.enabledSpecs().any { it.name == "phone_clipboard_get" || it.name == "phone_location_current" })

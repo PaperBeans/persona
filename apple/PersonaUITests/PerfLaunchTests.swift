@@ -1,4 +1,5 @@
 import XCTest
+import PersonaWire
 
 /// Cold and warm application launches against the launch lane's large mock data (#4266).
 /// Unlike the other performance suites, these tests never enable `FrameProbe` or read `FrameStats`.

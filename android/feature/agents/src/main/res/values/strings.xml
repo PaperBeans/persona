@@ -312,6 +312,7 @@
     <string name="agents_new_follow_config">Follow model settings</string>
     <string name="agents_new_permission_mode">Permission mode</string>
     <string name="agents_new_bypass_warning">With everything allowed, editing files and running commands won\'t ask you again.</string>
+    <string name="agents_new_provider_mode_hint">This agent uses its own approval settings unless you pick Allow everything. You can switch in the chat later.</string>
     <string name="agents_new_effort">Thinking effort</string>
     <string name="agents_new_no_effort">This model has no thinking effort setting</string>
     <string name="agents_new_first_message_codex">First message (required for Codex)</string>

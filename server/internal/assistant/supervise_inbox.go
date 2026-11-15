@@ -137,7 +137,7 @@ func (s *Service) followContinuations(ctx context.Context, items []*InboxItem) {
 	b.mu.Lock()
 	linkedTo := map[*InboxItem]string{}
 	for _, it := range items {
-		if it.Agent != nil && it.Agent.TodoID != "" {
+		if it.Agent != nil && it.Agent.TodoID != "" && inboxTaskLinkEligible(it) {
 			linkedTo[it] = it.Agent.TodoID
 		}
 	}
@@ -160,7 +160,7 @@ func (s *Service) followContinuations(ctx context.Context, items []*InboxItem) {
 	var writes []*inboxWrite
 	b.mu.Lock()
 	for it, to := range moves {
-		if b.items[it.ID] != it || it.Agent == nil || it.Agent.TodoID != linkedTo[it] {
+		if b.items[it.ID] != it || it.Agent == nil || it.Agent.TodoID != linkedTo[it] || !inboxTaskLinkEligible(it) {
 			continue // moved or relinked meanwhile
 		}
 		w := beginWrite(it)
@@ -229,7 +229,8 @@ func (s *Service) inboxSignalHolds(t Todo) bool {
 // signal it gave (receivedSince), and remembers that count. Under b.mu.
 func inboxSignalOf(it *InboxItem, linked bool) (superviseSignal, bool) {
 	a := it.Agent
-	if a == nil || a.TodoID == "" || !it.open() || it.Kind == KindBot || a.SentOf != "" && a.SentOf == it.Last ||
+	if a == nil || a.TodoID == "" || !it.open() || it.Kind == KindBot || !inboxTaskLinkEligible(it) ||
+		a.SentOf != "" && a.SentOf == it.Last ||
 		a.signaledOf != "" && a.signaledOf == it.Last {
 		return superviseSignal{}, false
 	}

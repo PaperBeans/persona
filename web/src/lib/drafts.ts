@@ -333,7 +333,7 @@ function storedConversationId(stored: string): string | null {
 }
 
 /** Conversation ids holding a stored draft or quote, oldest first in storage order; protected ids are skipped. A
- *  legacy alias pair (draft:persona-new / draft:jarvis-new) is one conversation, so it is never counted twice. */
+ *  key and its legacy alias (compatibility.ts) are one conversation, so it is never counted twice. */
 function evictableConversations(keep: ReadonlySet<string>): string[] {
   const store = draftStorage();
   const ids: string[] = [];

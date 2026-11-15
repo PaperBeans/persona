@@ -230,6 +230,9 @@ func (s *Service) sessionsOf(ctx context.Context, src Source, fresh bool) ([]Ses
 func (s *Service) listNow(ctx context.Context, src Source, gen int) ([]Session, error) {
 	list, err := src.Sessions(ctx)
 	if err != nil {
+		if ctx.Err() == nil && timedOut(err) { // the source's own timeout, not the asker's going away
+			s.cache.putTimeout(src.Name(), gen, err)
+		}
 		s.noteListing(src, err)
 		return nil, err
 	}
@@ -542,6 +545,9 @@ func (s *Service) PollOnce(ctx context.Context) {
 		gen := s.cache.generation(n)
 		list, err := src.Sessions(ctx)
 		if err != nil {
+			if ctx.Err() == nil && timedOut(err) {
+				s.cache.putTimeout(n, gen, err)
+			}
 			s.noteListing(src, err)
 			continue // the next tick tries again; the routes report errors themselves
 		}

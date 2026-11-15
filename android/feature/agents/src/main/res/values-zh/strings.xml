@@ -295,6 +295,7 @@
     <string name="agents_new_follow_config">跟随模型配置</string>
     <string name="agents_new_permission_mode">权限模式</string>
     <string name="agents_new_bypass_warning">全部放行后，改文件和执行命令都不会再询问你。</string>
+    <string name="agents_new_provider_mode_hint">不选全部放行时，这个 Agent 按它自己的审批设置来。之后也能在对话里切换。</string>
     <string name="agents_new_effort">思考强度</string>
     <string name="agents_new_no_effort">这个模型不能调思考强度</string>
     <string name="agents_new_first_message_codex">第一条消息（Codex 必填）</string>

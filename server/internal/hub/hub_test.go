@@ -214,6 +214,7 @@ func TestPairURLRoundTrips(t *testing.T) {
 
 // The Mac has no camera to scan with: `personad hub pair` prints the link too, to paste into "Connect hub".
 func TestPairPrintsTheLinkForTheMac(t *testing.T) {
+	setPairLanguage(t, "en")
 	cfg := &Config{PublicURL: "http://hub.example.com:18660", Token: "tok"}
 	var b strings.Builder
 	writePair(&b, cfg)

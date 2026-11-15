@@ -308,6 +308,9 @@
     <string name="chat_modes_model_sonnet_detail">バランス型</string>
     <string name="chat_modes_model_haiku_detail">最速</string>
     <string name="chat_modes_unknown_detail">このバージョンのアプリはこのモードにまだ対応していません</string>
+    <string name="chat_modes_launcher_default">ランチャーに従う</string>
+    <string name="chat_modes_launcher_default_detail">何を確認するかは自身の承認設定で決まります。すでにすべて許可している場合もあります</string>
+    <string name="chat_modes_bypass_listed_detail">確認なしですべて許可します。チャットで元に戻せます</string>
     <string name="chat_modes_effort_hint">思考：%1$s</string>
     <string name="chat_modes_hint_separator">、</string>
     <string name="chat_modes_button_bypass">モード：すべて許可</string>

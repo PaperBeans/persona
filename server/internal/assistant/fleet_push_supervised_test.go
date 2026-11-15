@@ -114,6 +114,35 @@ func (e *supervisedEnv) agentDoneCards() []map[string]any {
 	return out
 }
 
+// holdDone puts the finished turn's delay out of the test's reach (an hour), so finishNow decides it instead.
+func (e *supervisedEnv) holdDone() {
+	e.f.mu.Lock()
+	e.f.hello.Notify.DoneDelayMS = 3_600_000
+	e.f.mu.Unlock()
+}
+
+// finishNow runs the delayed decision on supAgent's latest turn end now (notifyFinishedNow), as its timer would, so the
+// check that follows does not depend on the delay's timer firing in time.
+func (e *supervisedEnv) finishNow() {
+	e.t.Helper()
+	book := e.s.turnsBook()
+	gen := 0
+	waitFor(e.t, "the turn's end tracked", func() bool {
+		book.mu.Lock()
+		defer book.mu.Unlock()
+		tr := book.turns["mac/"+supAgent]
+		if tr == nil {
+			return false
+		}
+		gen = tr.gen
+		return true
+	})
+	e.s.notifyFinishedNow("mac", supAgent, gen, e.s.notifyTimings())
+	// A push and a Feishu card the decision made go out on goroutines of their own (deliver, feishuAgentDone), and
+	// nothing marks one that was never started: give them a moment to land before a check that none did.
+	time.Sleep(100 * time.Millisecond) // sleep-ok: a negative check, no event marks a push or card that was not sent
+}
+
 // donePushes are the phone's "finished" pushes for the Agent supAgent.
 func (e *supervisedEnv) donePushes() []Notification {
 	var out []Notification
@@ -173,11 +202,12 @@ func TestSupervisedAgentFinishIsNotPushed(t *testing.T) {
 			if e.s.quietSession("mac", supAgent) {
 				t.Fatal("the Agent is quiet: the test would not show supervision keeps the push")
 			}
+			e.holdDone()
 			for _, last := range []string{"改好了", "又改了一处"} { // every turn, not only the first
 				sess := supAgentSession()
 				sess.LastText = last
 				driveAgentDone(e.fleetTest, sess)
-				time.Sleep(400 * time.Millisecond) // the finished delay is 50 ms; a card would have landed by now
+				e.finishNow()
 			}
 			if got := e.agentDoneCards(); len(got) != 0 {
 				t.Fatalf("posted %d finished cards, want none: %+v", len(got), got)
@@ -225,9 +255,7 @@ func TestSupervisedTaskClosedWhileThePushWaits(t *testing.T) {
 	for _, accepted := range []bool{true, false} {
 		t.Run(fmt.Sprintf("accepted=%v", accepted), func(t *testing.T) {
 			e := newSupervisedEnv(t, true)
-			e.f.mu.Lock()
-			e.f.hello.Notify.DoneDelayMS = 300
-			e.f.mu.Unlock()
+			e.holdDone() // the turn's push waits; the task is closed meanwhile, then the wait ends (finishNow)
 			todo := e.task("conv1", "conv1")
 			driveAgentDone(e.fleetTest, supAgentSession())
 			if ok, err := e.s.reviewDoneTodo(context.Background(), todo.ID, "验收通过", accepted); err != nil || !ok {
@@ -236,7 +264,7 @@ func TestSupervisedTaskClosedWhileThePushWaits(t *testing.T) {
 			if e.s.activeTodoOf("mac", supAgent) != "" {
 				t.Fatal("the Agent still works on an open to-do")
 			}
-			time.Sleep(700 * time.Millisecond)
+			e.finishNow()
 			if got := e.agentDoneCards(); len(got) != 0 {
 				t.Fatalf("posted %d finished cards, want none: %+v", len(got), got)
 			}
@@ -246,6 +274,7 @@ func TestSupervisedTaskClosedWhileThePushWaits(t *testing.T) {
 			if accepted {
 				return // an accepted task reopens when its Agent works again (closedTaskOf): its next turn is supervised
 			}
+			fastDone(e.fleetTest)
 			sess := supAgentSession()
 			sess.LastText = "后来又问了它一句"
 			driveAgentDone(e.fleetTest, sess)
@@ -262,8 +291,9 @@ func TestSupervisedTaskClosedWhileThePushWaits(t *testing.T) {
 func TestSupervisorNotifyUserStillCopiedToLark(t *testing.T) {
 	e := newSupervisedEnv(t, true)
 	e.task("conv1", "conv1")
+	e.holdDone()
 	driveAgentDone(e.fleetTest, supAgentSession())
-	time.Sleep(400 * time.Millisecond)
+	e.finishNow() // the Agent's turn ends unpushed before the supervisor's notice
 	raw, _ := json.Marshal(map[string]any{"title": "登录修好了", "body": "PR 已合并，等你看一眼。"})
 	if _, err := e.s.runTool(context.Background(), "server", "conv1", "notify_user", raw); err != nil {
 		t.Fatal(err)

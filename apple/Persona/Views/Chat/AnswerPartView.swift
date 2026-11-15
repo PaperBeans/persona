@@ -1,6 +1,7 @@
 import MarkdownUI
 import PersonaKit
 import SwiftUI
+import PersonaWire
 
 /// A long finished answer's parts (#4970, `AnswerParts`), worked out once per text: the chat's lines ask on every
 /// rebuild, and the rows' memos are prewarmed with them off the main thread (`RowMemo.prewarm`).

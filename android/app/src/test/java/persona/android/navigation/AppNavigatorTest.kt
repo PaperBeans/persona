@@ -622,7 +622,7 @@ class AppNavigatorTest {
             InboxEventRoute("second"),
             InboxItemRoute("second"),
             InboxItemUiRoute("second", "extension", "item"),
-            MailRoute("second"),
+            MailRoute("second", 3),
             InboxItemDetailRoute("second"),
             ConnectorThreadRoute("second"),
             LarkRoute("feed", "second"),
@@ -995,6 +995,55 @@ class AppNavigatorTest {
     )
 
     private fun agentsOwnAgentChats() = AppNavigator(stacks, { selected }, { selected = it }, chatTab = { AppTab.Agents })
+
+    @Test fun mailChainEntriesKeepDistinctTargetsWithoutPilingUpPages() {
+        selected = AppTab.Persona
+        val event = InboxEventRoute("item")
+        stacks.getValue(AppTab.Persona).addAll(listOf(InboxRoute, event))
+        val older = MailRoute("item", 3)
+        val newer = MailRoute("item", 5)
+        assertFalse("A UID is a destination position, like LarkRoute.startPosition", older == newer)
+
+        navigator.navigate(older)
+        val firstOpen = stacks.getValue(AppTab.Persona).toList()
+        assertEquals(listOf(AssistantRoute, InboxRoute, event, older), firstOpen)
+        navigator.navigate(older)
+        assertEquals("Repeating the same visible target is idempotent", firstOpen, stacks.getValue(AppTab.Persona))
+
+        // Chain entries live on the event page, so the next chain tap follows Back; it does not push over the old mail.
+        navigator.back()
+        navigator.navigate(newer)
+        assertEquals(listOf(AssistantRoute, InboxRoute, event, newer), stacks.getValue(AppTab.Persona))
+    }
+
+    @Test fun aDifferentUidReplacesTheVisibleMailPage() {
+        selected = AppTab.Persona
+        val event = InboxEventRoute("item")
+        stacks.getValue(AppTab.Persona).addAll(listOf(InboxRoute, event))
+
+        navigator.navigate(MailRoute("item", 3))
+        navigator.navigate(MailRoute("item", 5))
+
+        assertEquals(listOf(AssistantRoute, InboxRoute, event, MailRoute("item", 5)),
+            stacks.getValue(AppTab.Persona))
+        navigator.back()
+        assertEquals(event, stacks.getValue(AppTab.Persona).last())
+    }
+
+    @Test fun reopeningAnItemEventDoesNotBuryItsMailPage() {
+        selected = AppTab.Persona
+        val event = InboxEventRoute("item")
+        val stack = stacks.getValue(AppTab.Persona)
+        stack.addAll(listOf(InboxRoute, event))
+        navigator.navigate(MailRoute("item", 3))
+
+        // On a wide Inbox the list stays visible and can reopen the event above the mail.
+        navigator.navigate(event)
+        assertEquals(listOf(AssistantRoute, InboxRoute, event), stack)
+
+        navigator.navigate(MailRoute("item", 5))
+        assertEquals(listOf(AssistantRoute, InboxRoute, event, MailRoute("item", 5)), stack)
+    }
 
     @Test fun backFromAnAgentChatOpenedInThePersonaHomeReturnsToTheHome() {
         val router = agentsOwnAgentChats()

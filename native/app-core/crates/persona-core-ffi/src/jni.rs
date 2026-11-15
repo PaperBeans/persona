@@ -215,9 +215,9 @@ pub extern "system" fn Java_persona_core_rustcore_NativeBridge_projectSort<'a>(
     }))
     .ok()
     .flatten()
+    .or_else(|| env.new_string("").ok())
     .unwrap_or_default()
 }
-
 #[cfg(any(target_os = "android", feature = "test-support"))]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_persona_core_rustcore_NativeDiagnostics_enableDiagnostics(

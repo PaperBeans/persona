@@ -259,7 +259,7 @@ private fun AdaptiveEventStateLine(
     action: (@Composable () -> Unit)? = null,
 ) {
     if (action == null) {
-        JInlineStatus(text, modifier, tone = tone, icon = icon)
+        JInlineStatus(text, modifier, tone = tone, icon = icon, maxLines = Int.MAX_VALUE)
         return
     }
     val textMeasurer = rememberTextMeasurer()

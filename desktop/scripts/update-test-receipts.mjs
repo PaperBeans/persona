@@ -1,9 +1,9 @@
 // Filesystem and event-receipt helpers for the test-only desktop update harness.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { throwIfUpdateTestAborted, waitForUpdateTest } from "./update-test-lifecycle.mjs";
 
 const PRODUCT = "Persona Update Test";
-const sleep = milliseconds => new Promise(done => setTimeout(done, milliseconds));
 
 /** electron-builder writes app-update.yml directly to the platform's resources directory. */
 export function packagedUpdateConfigPath(buildDirectory, platform, architecture = process.arch) {
@@ -29,26 +29,39 @@ export async function readUpdateTestEvents(profile) {
   return lines.filter(Boolean).map(line => JSON.parse(line));
 }
 
-/** Poll the app's real event file until the predicate returns a value or the deadline passes. */
-export async function watchUpdateTestEvents(profile, seconds, predicate, { pollMilliseconds = 500 } = {}) {
+/** Poll until the predicate returns a value, its deadline passes, or the run is actually cancelled. */
+export async function watchUpdateTestEvents(profile, seconds, predicate, { pollMilliseconds = 500, signal } = {}) {
   const deadline = Date.now() + seconds * 1000;
   for (;;) {
-    const found = predicate(await readUpdateTestEvents(profile));
+    throwIfUpdateTestAborted(signal);
+    const events = await readUpdateTestEvents(profile);
+    throwIfUpdateTestAborted(signal);
+    const found = predicate(events);
     if (found) return found;
     if (Date.now() > deadline) return undefined;
-    await sleep(pollMilliseconds);
+    await waitForUpdateTest(pollMilliseconds, signal);
   }
 }
 
 export async function finishUpdateTest({ runMain, readEvents, cleanup, report, message }) {
   let result;
   let failure;
-  try { result = await runMain(); } catch (error) { failure = message(error); }
+  try { result = await runMain(); }
+  catch (error) {
+    // A still-live main must bypass every snapshot, destructive cleanup and result write.
+    if (error?.safeToFinalize === false) throw error;
+    failure = message(error);
+  }
   let profileEvents = [];
   let receiptFailure;
   try { profileEvents = await readEvents(); } catch (error) { receiptFailure = `could not read update-test event receipt: ${message(error)}`; }
   let cleanupFailure;
-  try { cleanupFailure = await cleanup(); } catch (error) { cleanupFailure = `cleanup failed: ${message(error)}`; }
+  try { cleanupFailure = await cleanup(); }
+  catch (error) {
+    // An uncancellable cleanup survivor must not race a final result report.
+    if (error?.safeToFinalize === false) throw error;
+    cleanupFailure = `cleanup failed: ${message(error)}`;
+  }
   const finalFailure = [failure, receiptFailure, cleanupFailure].filter(Boolean).join("; ");
   try {
     await report({ result, failure: finalFailure || undefined, cleanupFailure: cleanupFailure || undefined, profileEvents });
