@@ -122,6 +122,14 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "android/feature/settings/src/test/kotlin/persona/feature/settings/ExtensionUiStateTest.kt": {
+      "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
+      "tokens": [
+        "jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "android/feature/settings/src/test/kotlin/persona/feature/settings/ProtocolCompatibilityStorageTest.kt": {
       "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
       "tokens": [
@@ -562,6 +570,14 @@
         "jarvis-runtime.v1",
         "jarvis.json",
         "jarvisd"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "scripts/app/android_baseline_profile.py": {
+      "reason": "The Android application id the store and installed apps keep; renaming it would ship a different app.",
+      "tokens": [
+        "com.lyinsun.jarvis"
       ],
       "path_tokens": [],
       "external_refs": []

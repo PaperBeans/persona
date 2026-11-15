@@ -136,8 +136,7 @@ func TestInboxGitHubCIItemStaysWithTheSupervisor(t *testing.T) {
 	}
 }
 
-// A closed agent is resumed and the send waited for: the copy is marked only once it reached the agent, and a failed
-// resume or send leaves the supervisor's entry unmarked, so the comment is not lost to both.
+// An unknown stopped agent is not resumed by an Inbox comment, and the undelivered comment is not marked as a copy.
 func TestInboxGitHubCommentToAClosedAgent(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		s, f := newQuietService(t)
@@ -145,6 +144,7 @@ func TestInboxGitHubCommentToAClosedAgent(t *testing.T) {
 		todo := agentTask(t, s, f)
 		f.setSessions("box", proto.Session{SessionID: "sec00001", MachineID: "box", Cwd: "/code/desk", Agent: "claude", Title: "秘书",
 			Status: proto.StatusOffline, State: proto.StateOffline, UpdatedAt: time.Now()})
+		before := len(sentToAgent(f))
 		if fail {
 			f.mu.Lock()
 			f.failSend = errors.New("resume failed")
@@ -153,8 +153,53 @@ func TestInboxGitHubCommentToAClosedAgent(t *testing.T) {
 		it := linkedPRItem(s, todo.ID, "c1", "Please merge current main")
 		s.superviseInbox(context.Background(), []*InboxItem{it}, map[*InboxItem]bool{it: true})
 		waitFor(t, "the signal", func() bool { return len(f.notices()) == 1 })
-		if marked := strings.Contains(f.notices()[0], "这里是副本"); marked == fail {
-			t.Fatalf("send failed=%v, copy marked=%v:\n%s", fail, marked, f.notices()[0])
+		if marked := strings.Contains(f.notices()[0], "这里是副本"); marked || len(sentToAgent(f)) != before {
+			t.Fatalf("unknown stop was sent to or marked as delivered (send failure=%v)", fail)
 		}
+	}
+}
+
+func TestInboxGroupedCopyDoesNotHideFailedAgentDelivery(t *testing.T) {
+	s, f := newQuietService(t)
+	turnInboxSignalsOn(t, s)
+	s.superviseTimes.gather = time.Hour
+	todo := agentTask(t, s, f)
+	f.mu.Lock()
+	f.failSend = errors.New("send failed")
+	f.mu.Unlock()
+	first := linkedPRItem(s, todo.ID, "c1", "the first comment was not delivered")
+	s.superviseInbox(context.Background(), []*InboxItem{first}, map[*InboxItem]bool{first: true})
+	waitFor(t, "the failed comment to remain unmarked", func() bool {
+		s.supervise.mu.Lock()
+		defer s.supervise.mu.Unlock()
+		g, ok := s.supervise.pending[todo.ID+"|inbox"]
+		return ok && g.Inbox.ToAgent == "" && g.Inbox.Item == "github:pr12"
+	})
+	f.mu.Lock()
+	f.failSend = nil
+	f.mu.Unlock()
+	second := linkedPRItem(s, todo.ID, "c2", "the second comment was delivered")
+	second.ID = "github:pr12:comment2"
+	before := len(sentToAgent(f))
+	s.superviseInbox(context.Background(), []*InboxItem{second}, map[*InboxItem]bool{second: true})
+	waitFor(t, "the successful copy to be marked", func() bool {
+		s.supervise.mu.Lock()
+		defer s.supervise.mu.Unlock()
+		g, ok := s.supervise.pending[todo.ID+"|inbox:agent_copy"]
+		return ok && g.Inbox.ToAgent == "sent" && g.Inbox.Item == "github:pr12:comment2"
+	})
+
+	s.supervise.mu.Lock()
+	failed := s.supervise.pending[todo.ID+"|inbox"]
+	sent := s.supervise.pending[todo.ID+"|inbox:agent_copy"]
+	s.supervise.mu.Unlock()
+	if failed.Inbox == nil || failed.Inbox.ToAgent != "" || failed.Inbox.Item != "github:pr12" {
+		t.Fatalf("the failed comment lost its unmarked supervisor entry: %+v", failed.Inbox)
+	}
+	if sent.Inbox == nil || sent.Inbox.ToAgent != "sent" || sent.Inbox.Count != 1 || sent.Inbox.Item != "github:pr12:comment2" {
+		t.Fatalf("the successful copy is wrong: %+v", sent.Inbox)
+	}
+	if got := sentToAgent(f)[before:]; len(got) != 1 || !strings.Contains(got[0], "the second comment was delivered") || strings.Contains(got[0], "the first comment was not delivered") {
+		t.Fatalf("only the second comment should reach the agent: %q", got)
 	}
 }

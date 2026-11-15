@@ -457,7 +457,8 @@ Start from a reproduction, measure the base, change one thing, measure again.
    numbers to a file (`-showAutoScroll YES` → `Documents/frames.json` from `FrameStats`; `-showPagePerf YES` →
    `frames-page-*.json`); a script launches the app, drives the mock hub (`/mock/churn`, `/mock/say?stream=1`, or
    `/mock/say?trace=markdown|prose&node=lead|trail` for a recorded model stream at the node's cadence), waits with a
-   timeout, reads the file and ends with a one-line verdict. Screen probes (`-probes YES`, `docs/apple/ios-state.md`,
+   timeout, reads the file and ends with a one-line verdict. Each frame's interval and the main thread's time before it
+   are in the report too (`deltas_ms`, `busies_ms`): line them up with the cues to see which frames of an animation grew. Screen probes (`-probes YES`, `docs/apple/ios-state.md`,
    "Probes and assertions") expose state for UI tests. The suites in `scripts/app/perf-test.sh` (`PerfAgentsTests`,
    `PerfAssistantTests`, `PerfComposerTests`, …) do this with `XCTHitchMetric` and report through
    `scripts/app/perf_report.py`.
@@ -475,7 +476,8 @@ Start from a reproduction, measure the base, change one thing, measure again.
    the app, and `waitForExistence` takes one per poll, all on the app's main thread: 55–70 ms each with the `assistant`
    suite's data, about three quarters of the main thread's busy time during `testTabSwitchAssistantAgents` (#5438). A
    test that taps and waits inside `measure` reports XCTest's hitches with the app's. For an animation, give the app a
-   cue (a Darwin notification handled by `FrameProbe`, as `com.persona.perf.shell.switch`) and let the test only sleep
+   cue (a Darwin notification handled by `FrameProbe`, as `com.persona.perf.shell.switch`, or
+   `com.persona.perf.sidebar.toggle` for the Sidebar layout's column, `PerfSidebarTests`) and let the test only sleep
    while frames are recorded (`testTabSwitchAssistantAgentsByCue`; the list glides run inside the app the same way, `FrameProbe.runGlide`). To see the split,
    `PERF_SAMPLE=<test>` samples the app during a test: XCTest's share is everything under `__XCTPerformOnMainRunLoop`.
 8. **In the field.** TestFlight builds report hangs, launch time and memory to Xcode Organizer. MetricKit is not wired yet

@@ -431,6 +431,7 @@
     <string name="chat_slash_report_text">これまでの進捗と残りの作業を簡潔に報告してください</string>
     <string name="chat_slash_clear_title">コンテキストをクリア（/clear）</string>
     <string name="chat_slash_clear_detail">コンテキストをクリアして新しいセッションを開始</string>
+    <string name="chat_slash_clear_main_detail">チャットをクリアして最初から</string>
     <string name="chat_tasks_origin_gone">元の記録は現在のリストにありません</string>
     <string name="chat_tasks_load_failed">関連する記録を読み込めませんでした。作業の過程を展開してもう一度お試しください</string>
     <string name="chat_tasks_record_gone">関連する記録は現在のリストにありません</string>

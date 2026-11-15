@@ -126,6 +126,7 @@ var snapshotOmits = []func(*prompts.SnapshotOmit){
 	func(o *prompts.SnapshotOmit) { o.KB = true },
 	func(o *prompts.SnapshotOmit) { o.Asked = true },
 	func(o *prompts.SnapshotOmit) { o.Unaccepted = true },
+	func(o *prompts.SnapshotOmit) { o.OpenTodos = true },
 	func(o *prompts.SnapshotOmit) { o.Tasks = true },
 	func(o *prompts.SnapshotOmit) { o.Unread = true },
 	func(o *prompts.SnapshotOmit) { o.Approvals = true },
@@ -183,6 +184,8 @@ func (s *Service) takeSnapshot(done chan struct{}) {
 	web := s.webBase(ctx) // the agents' and tasks' links (#2194)
 	snap.Needs, snap.Unread, snap.Awaiting, snap.Waiting, snap.Done, snap.Muted, snap.Working, snap.Workflows = s.snapshotAgents(ctx, devices, web)
 	snap.Tasks = s.snapshotTasks(ctx, web)
+	snap.OpenTodos, snap.OpenTodosTotal = s.snapshotOpenTodos(ctx, web)
+	snap.OpenTodosLoaded = snap.OpenTodos != nil
 	snap.Approvals = s.snapshotApprovals(ctx, web)
 	snap.Unaccepted, snap.UnacceptedTotal = s.snapshotUnaccepted(ctx, loc)
 	snap.Plans, snap.PlansTotal = s.snapshotPlans(ctx, loc, now)

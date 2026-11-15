@@ -226,8 +226,8 @@ func TestTheOutboxKeepsWhatTheHubMissed(t *testing.T) {
 	out := &memOutbox{}
 	b := startOutboxManager(t, h, out)
 	ctx := context.Background()
-	if _, err := b.NotifyRequest(ctx, push("ntf_1")); err != nil {
-		t.Fatalf("a push while the hub is away: %v", err)
+	if res, err := b.NotifyRequest(ctx, push("ntf_1")); err != nil || !res.Queued || res.Devices != nil {
+		t.Fatalf("a push while the hub is away: %+v %v (want it kept, answered Queued)", res, err)
 	}
 	b.Broadcast(ctx, live("todos"))
 	if _, err := b.NotifyRequest(ctx, push("ntf_2")); err != nil {

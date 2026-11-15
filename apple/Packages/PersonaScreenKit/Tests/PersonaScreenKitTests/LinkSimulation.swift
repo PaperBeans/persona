@@ -75,6 +75,18 @@ struct LinkSimulation {
         return "\(s)x\(t.fps)"
     }
 
+    /// When `bits` sent from `from` are through: the link's rate taken millisecond by millisecond, so a frame sent into
+    /// a stall goes once the stall ends rather than at the stall's rate throughout.
+    static func finish(_ link: Link, bits: Double, from: Double) -> Double {
+        var t = from, left = bits
+        while true {
+            let perMs = max(link.kbps(t), 1) // kbit/s is bits per ms
+            if perMs * 0.001 * 1000 >= left { return t + left / (perMs * 1000) }
+            left -= perMs
+            t += 0.001
+        }
+    }
+
     func run(_ link: Link, seconds: Double) -> Result {
         var result = Result()
         var policy = TierPolicy(display: display, bias: bias, capKbps: capKbps, maxFps: maxFps, link: link.stats, now: 0)
@@ -167,8 +179,7 @@ struct LinkSimulation {
             let bytes = Int(bits / 8)
             sentBytes += bytes
             let start = max(t + 0.006, linkFree) // ~6 ms to encode
-            let capacity = max(link.kbps(start), 1) * 1000
-            linkFree = start + bits / capacity
+            linkFree = Self.finish(link, bits: bits, from: start)
             var arrival = max(linkFree + (oneWay + jitter()) / 1000, lastArrival)
             var firstByte = min(start + (oneWay + jitter()) / 1000, arrival)
             if let every = readEvery { // read at the next read after it came, as are its first bytes

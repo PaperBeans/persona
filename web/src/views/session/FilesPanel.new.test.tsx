@@ -15,7 +15,7 @@ window.matchMedia = ((media: string) => ({ matches: media.includes("max-width"),
 HTMLElement.prototype.scrollTo ??= () => {};
 HTMLElement.prototype.scrollIntoView ??= () => {};
 let host: HTMLDivElement, root: Root, sent: { path: string; body: Record<string, unknown> }[], clicked: string[];
-const original = { features: getState().features, machines: getState().machines };
+const original = { features: getState().features, machines: getState().machines, sessions: getState().sessions };
 const flush = async () => { for (let i = 0; i < 10; i++) await act(async () => { await Promise.resolve(); }); };
 const button = (label: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label);
 async function click(label: string) { const found = button(label); expect(found, label).toBeTruthy(); await act(async () => found!.click()); await flush(); }
@@ -97,5 +97,18 @@ describe("FilesPanel New and zip (#5828)", () => {
     await act(async () => item(t("files-nav.open_terminal"))!.click()); await flush();
     expect(sent.at(-1)).toEqual({ path: "/api/v1/machines/m1/panes", body: { cwd: "/home/me/app" } });
     expect(location.pathname).toContain("pane");
+  });
+
+  // A Paseo Agent's workspace has no terminal, but it goes with the folder: the node opens the tab in the terminal
+  // engine's workspace that holds the folder, not in the computer's first one (#8135); a terminal session's as before.
+  it.each([
+    ["a Paseo Agent's", { workspace_id: "wks_example", host: "paseo", space_kind: "paseo", capabilities: { read: true, send: true } }],
+    ["a terminal Agent's", { workspace_id: "w2", host: "herdr", capabilities: { read: true, send: true, terminal: true } }],
+  ])("opens a terminal in %s workspace", async (_, row) => {
+    Object.assign(getState(), { sessions: { m1: [{ machine_id: "m1", session_id: "s1", cwd: "/home/me/app", status: "idle", ...row }] } });
+    await act(async () => root.render(<FilesPanel key="agent" mid="m1" sid="s1" cwd="/home/me/app" onClose={() => {}} />)); await flush();
+    await click(t("session-filespanel.more"));
+    await act(async () => item(t("files-nav.open_terminal"))!.click()); await flush();
+    expect(sent.at(-1)).toEqual({ path: "/api/v1/machines/m1/panes", body: { cwd: "/home/me/app", workspace_id: row.workspace_id } });
   });
 });

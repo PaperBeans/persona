@@ -57,6 +57,30 @@ func TestLocalizeSession(t *testing.T) {
 	}
 }
 
+// A runtime session's last words, when its agent stopped on a failure, are the bridge's own (transcript.RuntimeError…,
+// Paseo's): they read in the user's language (#8133). Any other session's last words are its agent's and stay as they
+// are, Chinese included, and so do a runtime agent's words that only look like the bridge's.
+func TestLocalizeRuntimeFailureLastText(t *testing.T) {
+	row := func(source, text string) proto.Session { return proto.Session{SourceKind: source, LastText: text} }
+	for _, c := range []struct {
+		s      proto.Session
+		en, ja string
+	}{
+		{row(proto.SourceRuntime, "出错了：Provider crashed"), "Error: Provider crashed", "エラー：Provider crashed"},
+		{row(proto.SourceRuntime, "出错了"), "Something went wrong", "エラーが発生しました"},
+		{row(proto.SourceRuntime, "出错了吗？再看看"), "出错了吗？再看看", "出错了吗？再看看"},
+		{row("", "出错了：编译没过"), "出错了：编译没过", "出错了：编译没过"}, // a terminal agent's own words
+	} {
+		for l, want := range map[i18n.Lang]string{i18n.ZhHans: c.s.LastText, i18n.En: c.en, i18n.Ja: c.ja} {
+			s := c.s
+			localizeSession(l, &s)
+			if s.LastText != want {
+				t.Errorf("%s %q: %q, want %q", l, c.s.LastText, s.LastText, want)
+			}
+		}
+	}
+}
+
 // What a workflow agent's latest tool call does is the node's Chinese activity line: the apps get it in their
 // language (#5511), the node's workflows untouched.
 func TestLocalizeWorkflowAgentTools(t *testing.T) {

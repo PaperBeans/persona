@@ -155,6 +155,10 @@ func TestFitSnapshotCoversEverySection(t *testing.T) {
 		omit(&one)
 		s := full
 		s.Omit = one
+		if one.OpenTodos {
+			s.OpenTodos = []prompts.SnapshotOpenTodo{{ID: "todo_fixture", Title: "fixture"}}
+			s.OpenTodosTotal = 1
+		}
 		if prompts.RenderSnapshot(s) == prompts.RenderSnapshot(full) {
 			t.Errorf("the template ignores %+v (or the fixture does not reach its section)", one)
 		}
@@ -210,6 +214,23 @@ func TestFitSnapshotCutsWhatCannotBeLeftOut(t *testing.T) {
 		if !strings.Contains(got, "session_id=s1") {
 			t.Errorf("%s: the agent waiting for the user was cut:\n%s", name, got)
 		}
+	}
+}
+
+func TestFitSnapshotHardCutKeepsOpenTodoCountAndEntrance(t *testing.T) {
+	s := prompts.Snapshot{
+		Now: fitNow, Zone: "UTC", OpenTodosLoaded: true, OpenTodosTotal: 26,
+		Needs: []prompts.SnapshotAgent{{Label: "waiting agent", Machine: "m", Session: "s1", Line: strings.Repeat("urgent detail ", 1000)}},
+	}
+	got := fitSnapshot(s)
+	if n := runes(got); n > snapshotBudget {
+		t.Fatalf("snapshot has %d characters, budget is %d", n, snapshotBudget)
+	}
+	if !strings.HasSuffix(got, "\n"+prompts.SnapshotCut()) {
+		t.Fatalf("fixture did not exercise the hard cut:\n%s", got)
+	}
+	if !strings.Contains(got, "开放待办：共 26 件（完整列表用 todo_list）") {
+		t.Fatalf("the hard cut lost the protected open-todo summary:\n%s", got)
 	}
 }
 

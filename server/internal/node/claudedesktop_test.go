@@ -76,7 +76,9 @@ func TestDesktopDataDirs(t *testing.T) {
 }
 
 // The offline list shows the desktop app's sessions as its sidebar does (#3304): not archived sessions, not a session's
-// earlier transcript once its current one is listed. Anything no entry names is listed as before.
+// earlier transcript once its current one is listed, and not a deleted session's (#8314): a transcript the desktop app
+// ran that no entry names, unless it was written in the last desktopEntryGrace. An entry that cannot be read keeps the
+// ids it mentions, another client's transcript is never judged by the index, and without an index all are listed.
 func TestOfflineListFollowsTheDesktopSidebar(t *testing.T) {
 	const (
 		main      = "dddddddd-0000-4000-8000-000000000001"
@@ -88,7 +90,8 @@ func TestOfflineListFollowsTheDesktopSidebar(t *testing.T) {
 		missing   = "dddddddd-0000-4000-8000-000000000007"
 		both      = "dddddddd-0000-4000-8000-000000000008" // named by an archived entry and by an unarchived one
 		firstApp  = "dddddddd-0000-4000-8000-000000000009" // archived in the first-party app
-		unnamed   = "dddddddd-0000-4000-8000-00000000000a" // a desktop transcript no entry names
+		unnamed   = "dddddddd-0000-4000-8000-00000000000a" // a desktop transcript no entry names: its session was deleted
+		fresh     = "dddddddd-0000-4000-8000-000000000015" // the same, written within desktopEntryGrace: the entry may follow
 		fork      = "dddddddd-0000-4000-8000-00000000000b" // Persona's "Branch to New Chat" copy, archived in the app
 		kept      = "dddddddd-0000-4000-8000-00000000000c" // kept, archived in the app
 		corrupted = "dddddddd-0000-4000-8000-00000000000d" // its entry cannot be read
@@ -116,6 +119,7 @@ func TestOfflineListFollowsTheDesktopSidebar(t *testing.T) {
 			writeEntrypointTranscript(t, dir, id, "claude-desktop-3p", time.Duration(i+1)*time.Minute)
 		}
 		writeEntrypointTranscript(t, dir, cli, "cli", time.Hour)
+		writeEntrypointTranscript(t, dir, fresh, "claude-desktop-3p", 30*time.Second)
 		first, third := useDesktopDirs(t)
 		if withIndex {
 			writeDesktopEntry(t, third, "main", main, false, []string{earlier, shared}, "")
@@ -147,7 +151,7 @@ func TestOfflineListFollowsTheDesktopSidebar(t *testing.T) {
 
 	got := listed(t, true)
 	want := map[string]bool{
-		main: true, btwOpen: true, gap: true, both: true, bothFirst: true, unnamed: true, fork: true, kept: true, cli: true,
+		main: true, btwOpen: true, gap: true, both: true, bothFirst: true, unnamed: false, fresh: true, fork: true, kept: true, cli: true,
 		corrupted: true, current2: true, newerOld: true, newerNow: true, oversized: true,
 		archived: false, btwDone: false, earlier: false, firstApp: false, oldOfDone: false, shared: false,
 	}
@@ -158,7 +162,7 @@ func TestOfflineListFollowsTheDesktopSidebar(t *testing.T) {
 	}
 	// Without the app's index every transcript is listed, as before.
 	got = listed(t, false)
-	for _, id := range append(transcripts, cli) {
+	for _, id := range append(transcripts, cli, fresh) {
 		if !got[id] {
 			t.Errorf("without an index %s is missing", id)
 		}

@@ -55,6 +55,27 @@ nonisolated struct ExtensionDisableConfirmation {
     }
 }
 
+/// A pack's own confirmation, before the hub can ask separately about dependents outside the pack.
+struct ExtensionPackDisableConfirmation: Equatable {
+    var packName: String
+    var members: [String]
+
+    var title: String {
+        String(localized: "Turn Off “\(packName)” and Its Members?")
+    }
+
+    var message: String {
+        let names = ExtensionText.list(members)
+        return String(localized: "Its members are turned off too: \(names). They're only turned off, not removed; settings and data are kept. Turning the pack back on turns them on again.")
+    }
+}
+
+/// The captured content of the page's one disable dialog. It outlives presentation so dismissal cannot change or blank it.
+enum ExtensionDisableDialog {
+    case pack(ExtensionPackDisableConfirmation)
+    case dependents(ExtensionDisableConfirmation)
+}
+
 /// A pack's uninstall with its members that stopped part way (409 `partial_uninstall`, #4072): the pack is still
 /// installed, the members already uninstalled stay uninstalled, nothing was put back, and it can be tried again. Only
 /// the synchronous answer has the lists; an async uninstall's operation carries just the hub's sentence.

@@ -14,6 +14,7 @@ import { api, ApiError, enc, errorText, getToken } from "./api";
 import { BASE } from "./base";
 import type { AgentMutes } from "./agent-groups";
 import type { ContextRef } from "./links";
+import { agentName } from "./agent-kind";
 import { connectorOpenTitle } from "./connectors";
 import { contextBody } from "./context-body";
 import { larkPath } from "./lark-accounts";
@@ -567,10 +568,11 @@ export function interactionMuted(ix: Interaction, sessions: Record<string, Sessi
   return Boolean(space && mutes.spaces.includes(`${ix.machine_id}/${space}`));
 }
 
-/** What it waits for: "Claude is asking you", "Plan waiting for your approval"…; Persona's ask_user and other agents by name. */
+/** What it waits for: "Claude is asking you", "Plan waiting for your approval"…; Persona's ask_user and other agents by
+ *  name: the card's own name for an agent the app doesn't know (a Paseo provider's label, "Grok", #8142), never its id. */
 export function interactionTitle(ix: Interaction): string {
   if (ix.tool_name === "ask_user") return t("lib-inbox.ix_persona_asks");
-  const name = ix.agent === "codex" ? "Codex" : ix.agent === "traex" ? "TRAEX" : ix.agent && ix.agent !== "claude" ? ix.agent : "";
+  const name = ix.agent && ix.agent !== "claude" ? agentName(ix.agent, ix.agent_label) : "";
   if (name && ix.kind === "question") return t("lib-inbox.ix_named_asks", { name });
   if (name && ix.kind === "permission") return t("lib-inbox.ix_named_permission", { name });
   if (ix.kind === "elicitation") return ix.elicitation?.mode === "url" ? t("lib-inbox.ix_elicitation_url") : t("lib-inbox.ix_elicitation_form");

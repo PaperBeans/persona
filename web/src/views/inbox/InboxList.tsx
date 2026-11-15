@@ -912,8 +912,9 @@ const IX_GLYPH: Record<Interaction["kind"], GlyphName | "list" | "terminal"> = {
  * only when one of those changed.
  */
 const AgentRow = memo(function AgentRow({ ix, off = false }: { ix: Interaction; off?: boolean }) {
-  // a child session's card opens its parent's page, where it is answered (#5120)
-  const to = useStore((s) => ix.session_id === "" ? requestRoute(ix) : conversationRoute(ix.machine_id, requestHome(ix), s.sessions, s.assistant));
+  // a child session's card opens its parent's page, where it is answered (#5120); a side session's its parent's page
+  // with the side shown (#7944, requestRoute)
+  const to = useStore((s) => ix.session_id === "" || ix.folded_as === "side" || ix.folded_side ? requestRoute(ix) : conversationRoute(ix.machine_id, requestHome(ix), s.sessions, s.assistant));
   const persona = to.name === "persona";
   const where = useStore((s) => (persona ? "Persona" : machineWithHub(ix.machine_id, s.machines)));
   const ask = interactionAsk(ix);

@@ -638,3 +638,41 @@ func TestDoctorListsWebPushBrowsers(t *testing.T) {
 		t.Fatalf("a line without browsers:\n%s", text)
 	}
 }
+
+// Notices that replace nothing (no tag: notify_user, a to-do reminder, a failed scheduled run, a notify API alert
+// without an id) go out without a Topic. A shared Topic would have the push service keep only the last of them while
+// the browser is away (RFC 8030 section 5.4); a tagged push keeps its own (TestWebPushDeliversNotifyEventsToASubscribedBrowser).
+func TestWebPushUntaggedNoticesHaveNoTopic(t *testing.T) {
+	f := newFakePushService(t)
+	h := webPushHub(t, f)
+	mux := h.routes()
+	b := f.browser(t, "/push/one")
+	subscribe(t, h, mux, "web-one", b, "")
+
+	notice := func(title, body string) pushedRequest {
+		t.Helper()
+		// What notify_user asks the hub for: a NotifyPush about a conversation of the assistant's, with no to-do and no
+		// caller id.
+		n := assistantwire.Notification{ID: "ntf_" + randomHex(8), Kind: assistantwire.NotifyPush, Subtitle: "Persona", Title: title, Body: body}
+		if _, err := h.deliverPushFrom(assistantwire.AssistantID, n); err != nil {
+			t.Fatal(err)
+		}
+		r := f.next(t)
+		msg := webOpened(t, b, r)
+		if msg["kind"] != "assistant" || msg["title"] != title {
+			t.Fatalf("push %v, want the assistant notice %q", msg, title)
+		}
+		if tag := webPushTag(msg); tag != "" {
+			t.Fatalf("tag %q, want none: this notice replaces nothing", tag)
+		}
+		return r
+	}
+	for _, r := range []pushedRequest{
+		notice("Deploy failed", "The 14:00 deploy failed on step 3"),
+		notice("Reminder", "Stand-up starts in five minutes"),
+	} {
+		if topic, ok := r.header["Topic"]; ok {
+			t.Fatalf("a notice that replaces nothing went out with Topic %q: a later untagged notice would replace it at the push service", topic)
+		}
+	}
+}

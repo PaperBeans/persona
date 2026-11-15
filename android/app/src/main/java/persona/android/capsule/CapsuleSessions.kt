@@ -24,6 +24,7 @@ import persona.core.domain.sort.canSend
 import persona.core.domain.sort.foldedSubtasks
 import persona.core.domain.sort.foldRows
 import persona.core.domain.sort.isNestedSubtask
+import persona.core.domain.sort.isFoldedSide
 import persona.core.navigation.RequestRef
 import persona.feature.agents.AgentsPreferencesSnapshot
 import persona.feature.agents.listSession
@@ -341,8 +342,13 @@ internal class CapsuleSessions(
         val eligibleKeys = unreadSessions(event.sessions, preferences).mapTo(HashSet()) { it.key }
         fun eligible(target: Session) = !target.interrupted && target.key in eligibleKeys
         val changed = noticeMemory.observe(event).filter(::eligible)
-        val notices = completed.filter(::eligible).map { it to CapsuleNoticeKind.Completed } +
-            changed.filter { target -> completed.none { it.key == target.key } }.map { it to CapsuleNoticeKind.NewMessage }
+        // A side session that finished (#7944) is no row of its own: its parent's row, unread with it, says so.
+        val byKey = event.sessions.associateBy { it.key }
+        val finished = completed.map { done ->
+            done.foldedUnder?.takeIf { done.isFoldedSide }?.let { byKey[SessionKey(done.machineId, it)] } ?: done
+        }.distinctBy { it.key }
+        val notices = finished.filter(::eligible).map { it to CapsuleNoticeKind.Completed } +
+            changed.filter { target -> finished.none { it.key == target.key } }.map { it to CapsuleNoticeKind.NewMessage }
         val prior = noticeMemory.pending
         if (prior != null && event.sessions.any { capsuleId(it.key) == prior.targetId }) {
             val target = event.sessions.first { capsuleId(it.key) == prior.targetId }

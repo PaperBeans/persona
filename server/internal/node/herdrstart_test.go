@@ -503,7 +503,7 @@ func TestClaudeResumeArgv(t *testing.T) {
 	for _, tc := range []struct{ kind, launcher, want string }{
 		{"codex", "cx", "HERDR_AGENT=codex cx resume " + startID},
 		{traexAgent, "tx", "tx resume " + startID},
-		{piAgent, "pi", "pi resume " + startID},
+		{piAgent, "pi", "HERDR_AGENT=pi pi --session " + startID},
 	} {
 		if argv, ok := n.agentResumeArgv(agentLaunch{Agent: tc.kind, Launcher: tc.launcher}, startID); !ok || argv[1] != inAgentEnv(n.dir, tc.want, dquote) {
 			t.Errorf("%s: argv %q, want eval %q", tc.kind, argv, tc.want)

@@ -263,3 +263,50 @@ set `max-parallel`, and measure normal-load PRs separately from peak queues.
   `main`, look at what landed since your branch (`git log HEAD..origin/main -- <your files>`), and merge it into your
   branch. If someone fixed it already, close yours. A lane that a pre-commit hook or a failing check sends to a fix
   should look for an open PR with that fix before writing one.
+
+## A check that runs only on `main` keeps `main` red (2026-11-15, #7977)
+
+- The fixed-sleep and web font ratchets ran in scheduled CI on `main` and in the optional `scripts/test/check-fast.sh`, never
+  on the way in: `scripts/hooks/merge-pr.sh` ran only the privacy scan. Of the 3,040 commits merged from the sleep ratchet's
+  arrival (#1745) to 2026-11-14, 106 added a failure (79 to the sleep ratchet, 29 to the font one, 2 to both), and about 57
+  issues were filed for them. `main` failed the sleep ratchet at 48% of those commits and the font ratchet at 57% of the
+  commits since its own arrival; every PR verified against those guards meanwhile failed for a reason that wasn't its own.
+- Check at merge time what the merge adds, not the whole tree: a whole-tree check blocks every merge while `main` is red, and
+  one that takes seconds gets skipped. `scripts/ci/changed_ratchets.py` reads only the changed files from Git objects (0.14 s
+  per merge, median, over those commits) and leaves a file `main` already fails to its own fix.
+
+## Make work visible early so it doesn't collide (2026-11-15, #8186)
+
+- Push the branch and open a draft PR on the day you claim an issue, with the plan in its body. Work kept only on a local
+  branch is invisible to everyone else's duplicate search, so the same change can be built twice and found out only at merge.
+- Start every working day with `git fetch`, then merge `origin/main` into your branch (never rebase). Then search issues and
+  PRs by keyword and by the file paths you touch for new work in the same area. If something overlaps, stop and raise it
+  with the person you work for before going on.
+
+## Keep the change-and-verify loop short (2026-11-15, #8186)
+
+For every platform:
+
+- While iterating, run only the one relevant test: `go test ./internal/<package> -run '^TestName$'` in `server/`,
+  `npx vitest run <file>` in `web/`, `./gradlew :<module>:testDebugUnitTest --tests '<Class>.<method>'` in `android/`,
+  `-only-testing:Target/Class/method` with Xcode. Run the area's whole suite (UI tests included) once, before pushing.
+- Reuse one checkout and its build caches; don't open a new worktree per experiment. Every new one starts its builds
+  and dependency installs from nothing.
+- While a build or test runs, do the work that doesn't depend on its result (docs, the PR body, reading the next piece of
+  code). Run it as a background task with a completion notification; never a long foreground `sleep` / `until` poll.
+- Run independent test lanes in parallel (two simulators or emulators, the server and the web), not one after another.
+- Performance problems: first confirm from measurements which step got slower (per-frame data for UI). Then put each
+  suspected change behind its own temporary switch, split as finely as possible, and compare them all in one round
+  before changing anything. Don't commit a fix on a guess. When measuring, stop unrelated load (minimize simulator or
+  emulator windows you aren't using, for example) and alternate runs between `main` and the branch.
+
+Apple builds, where a cold build costs the most:
+
+- Each worktree uses fixed DerivedData folders: one for Debug simulator builds, plus one for an optimized build and one
+  for a device build when needed. Every new folder or worktree costs a 15–35 minute cold build.
+- Run UI tests on different simulators in parallel (one iPad, one iPhone Duo).
+- An optimized build takes 35–45 minutes, so put the temporary performance switches in as DEBUG launch arguments in one
+  optimized build: every round saved is close to an hour.
+- After merging `main`, `cannot find 'persona_core_…'` means the Rust core's XCFramework is stale: run
+  `native/app-core/scripts/build-apple.sh` first. If `ContinuityFixture` reports a wrong `fold_id` argument, delete the old
+  `PersonaCore*.swiftmodule` at the root of `Build/Products/<config>/` in DerivedData.

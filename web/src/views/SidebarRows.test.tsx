@@ -1,6 +1,7 @@
 // The open conversation's row in the sidebar (#2283): marked for assistive tech, its own fill, its actions without hover.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { t } from "../i18n";
 import type { AgentSession } from "../lib/agents";
 import type { Session } from "../lib/types";
 import { setAgentDetails, setContextAsUsed } from "../lib/context-usage";
@@ -197,5 +198,50 @@ describe("a 常驻 lead row (#6214 keepTrailing)", () => {
     const html = renderToStaticMarkup(<SessionRow {...rowProps} active={false} />);
     expect(more(html)).toMatch(/class="[^"]*\bhidden\b/);
     expect(more(html)).toContain("absolute");
+  });
+});
+
+describe("a session's associated tab name (#7595)", () => {
+  const named: Session = { ...session, slot_id: "w1:t2", slot_name: "Release Review", pane_id: "w1:p1", updated_at: "2026-11-14T09:00:00Z" };
+  const render = (patch: Partial<Session>, extra = {}) => renderToStaticMarkup(<SessionRow {...rowProps} s={{ ...session, ...patch }} hint="Project" active={false} {...extra} />);
+  const tabName = (label: string) => t("sidebar.tab_named", { label });
+
+  it("stays visible beside an aged terminal row and follows a rename", () => {
+    const first = render(named);
+    expect(first).toContain(tabName("Release Review"));
+    expect(first).toContain("Project");
+
+    const renamed = render({ ...named, slot_name: "Triage" });
+    expect(renamed).toContain(tabName("Triage"));
+    expect(renamed).not.toContain(tabName("Release Review"));
+  });
+
+  it("keeps the session title and the existing fallbacks", () => {
+    const numeric = render({ ...named, slot_name: "2" });
+    expect(numeric).toContain("整理文档");
+    expect(numeric).toContain(tabName("#2"));
+
+    const missing = render({ ...named, slot_id: undefined, slot_name: undefined, pane_id: undefined });
+    expect(missing).not.toContain(tabName("Release Review"));
+    expect(missing).toContain("整理文档");
+
+    const unassociated = render({ ...named, slot_id: undefined, tab_id: undefined, slot_name: "Workspace name" });
+    expect(unassociated).not.toContain(tabName("Workspace name"));
+    expect(unassociated).toContain("整理文档");
+
+    expect(render(named, { endRoom: true })).toContain(tabName("Release Review"));
+    expect(render({ ...named, status: "offline", state: "offline" })).toContain(tabName("Release Review"));
+  });
+
+  it("keeps the index-only fallback with a real association", () => {
+    const indexOnly = render({ ...named, slot_name: undefined, slot_index: 2 });
+    expect(indexOnly).toContain(tabName("#2"));
+    expect(indexOnly).toContain("整理文档");
+  });
+
+  it("does not mint a localized identity from an unassociated structural fallback", () => {
+    const html = render({ ...named, slot_id: undefined, tab_id: undefined, slot_name: "Workspace name", updated_at: undefined }, { tab: true, hint: undefined });
+    expect(html).toContain("Workspace name");
+    expect(html).not.toContain(tabName("Workspace name"));
   });
 });

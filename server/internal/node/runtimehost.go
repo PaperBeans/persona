@@ -374,7 +374,12 @@ func (rh *RuntimeHost) event(h *runtimeConn, event string, params json.RawMessag
 		if cap(list) > 2*len(list)+8 { // the list shrank: keep no array of the old size
 			list = append(make([]proto.Session, 0, len(list)), list...)
 		}
-		rewatch := rh.reg.setSessions(h, list)
+		rewatch, driven := rh.reg.setSessions(h, list)
+		for _, id := range driven { // started for the hub by another runtime: its cards go to the phone first here too
+			if h.peer != nil {
+				_ = h.peer.Notify("runtime.driven", map[string]any{"session_id": id})
+			}
+		}
 		if n == nil {
 			return
 		}

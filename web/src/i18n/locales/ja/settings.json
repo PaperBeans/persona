@@ -155,5 +155,7 @@
   "search_no_results": "一致する設定がありません",
   "search_placeholder_settings": "設定を検索",
   "search_key_words": "API キー、シークレットキー",
-  "device_tokens": "デバイスのトークン"
+  "device_tokens": "デバイスのトークン",
+  "pi_too": "pi でも使用可",
+  "pi_too_title": "対象のコンピュータの pi も models.json なしでこのプロバイダを使えます"
 }

@@ -286,9 +286,11 @@ func archiveRow(rec agentArchive) proto.Session {
 }
 
 // overlayAgentArchives puts the archive's marks on list's rows and, rest, appends the rows of the machine's records
-// list does not have.
+// list does not have. Not a record under an id a row's conversation went by (proto.Session.Aliases, #8131): Paseo's
+// conversations were listed under their transcripts once, and an archive record kept then repeated the row listed
+// under its own id now; the record stays, and is shown again if no row names its id any more.
 func overlayAgentArchives(machine string, list []proto.Session, records map[string]agentArchive, pending map[string]bool, mark uint64, rest bool) []proto.Session {
-	var seen map[string]bool // the keys list has, when the rest are appended
+	var seen map[string]bool // the keys list has, and the ids its rows' conversations went by, when the rest are appended
 	if rest {
 		seen = make(map[string]bool, len(list))
 	}
@@ -296,6 +298,9 @@ func overlayAgentArchives(machine string, list []proto.Session, records map[stri
 		key := runtimeListID(machine, list[i].SessionID)
 		if rest {
 			seen[key] = true
+			for _, alias := range list[i].Aliases() {
+				seen[runtimeListID(machine, alias)] = true
+			}
 		}
 		if rec, ok := records[key]; ok && !list[i].Assistant {
 			// A storage timeout must neither reveal unrelated archived rows nor hide

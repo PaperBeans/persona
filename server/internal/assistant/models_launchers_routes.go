@@ -454,11 +454,19 @@ func (s *Service) machineLauncherRoutes() {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 		mid := r.PathValue("mid")
-		if _, ok := s.device(ctx, mid); !ok {
+		d, ok := s.device(ctx, mid)
+		if !ok {
 			apierr.Write(w, http.StatusNotFound, errUnknownMachine)
 			return
 		}
-		list, err := s.pickerLaunchers(ctx, mid)
+		// New Agent lists what a start in its host can run (?host=, else the computer's default): where that is an
+		// engine that runs only its own launchers (Paseo), its providers alone (#8140). The main chat's menu lists the
+		// computer's own launchers: the assistant runs them on its command line, whatever the engine.
+		host := ""
+		if purpose := r.URL.Query().Get("purpose"); purpose == "" || purpose == "agent.new" {
+			host = agentStartHost(d, r.URL.Query().Get("host"))
+		}
+		list, err := s.pickerLaunchersOn(ctx, mid, host)
 		var unavailable []unavailableLauncher
 		if err == nil && r.URL.Query().Get("purpose") == "assistant" { // the main chat's menu, and the scheduled tasks' that follow it
 			all := list

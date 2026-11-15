@@ -44,6 +44,26 @@ func (s *Service) acceptedDeliveryError(ctx context.Context, t Todo, link, outco
 			return nil
 		}
 	}
+	if r.Err != nil {
+		number, _ := strconv.Atoi(m[2])
+		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		isPR, err := s.forge().IsPR(cctx, m[1], number)
+		cancel()
+		if err == nil && !isPR {
+			if err := s.forgetTaskPR(ctx, t.ID, pr); err != nil {
+				return err
+			}
+			current, ok := s.todoNow(t.ID)
+			if !ok {
+				return fmt.Errorf("task %s no longer exists", t.ID)
+			}
+			if current.PRURL == pr {
+				return fmt.Errorf("task %s: its non-PR record changed during verification; retry the review", t.ID)
+			}
+			// The removed link may have hidden an earlier, real PR. Apply the same delivery gate to that one.
+			return s.acceptedDeliveryError(ctx, current, "", outcome)
+		}
+	}
 	if !r.held() {
 		return nil
 	}

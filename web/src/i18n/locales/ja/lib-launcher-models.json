@@ -1,4 +1,5 @@
 {
   "default": "デフォルト",
-  "default_named": "デフォルト：{name}"
+  "default_named": "デフォルト：{name}",
+  "pi_too": "pi でも使用可"
 }

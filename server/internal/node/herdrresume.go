@@ -104,16 +104,20 @@ func resumeSayable(cmd string) bool {
 		strings.IndexFunc(cmd, unicode.IsControl) < 0
 }
 
-// agentResumeArgv is the resume_argv for an agent Persona started (Claude, Codex, a compatible CLI, pi); a Codex gets
-// HERDR_AGENT=codex like Claude.
+// agentResumeArgv is the resume_argv for an agent Persona started (Claude, Codex, a compatible CLI, pi, the Cursor
+// CLI, the Antigravity CLI). A Codex, and a work agent herdr detects, gets HERDR_AGENT like Claude. A work agent's
+// command is the one it was started with (`--model` included); pi's names its session, the others start again.
 func (n *Node) agentResumeArgv(spec agentLaunch, id string) (argv []string, ok bool) {
 	kind := spec.Agent
 	if kind == "" || kind == "claude" {
 		return n.claudeResumeArgv(spec, id)
 	}
 	cmd := withHerdrAgent(resumeHerdrAgent(kind), n.launcherCommandQ(spec.Launcher, dquote)+" resume "+id)
+	if _, program, ok := workAgent(kind); ok {
+		cmd = withHerdrAgent(resumeHerdrAgent(kind), workAgentResume(kind, workAgentCommand(spec.Launcher, program, spec.Model), id))
+	}
 	cmd = n.agentCommand(cmd, dquote, herdrPaneShell())
-	if !resumeSayable(cmd) || !validID(id) {
+	if !resumeSayable(cmd) || (!validID(id) && !runtimeIDRe.MatchString(id)) {
 		return nil, false
 	}
 	return []string{"eval", cmd}, true

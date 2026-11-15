@@ -67,7 +67,7 @@ export function Row({ row, second, describes, blocked, customizable, flyoutOpen,
   const effort = model.efforts.length ? shownEffort(row.setup, model) : "";
   const tier = priceTier(model.price);
   // what the right side says, in words: "Claude Code · High · Fast"
-  const setupTitle = [agentName(provider.engine), effort && effortTitle(effort), row.setup.fast && t("ui-modelpanel.fast_short")].filter(Boolean).join(" · ");
+  const setupTitle = [agentName(provider.engine, provider.engineLabel), effort && effortTitle(effort), row.setup.fast && t("ui-modelpanel.fast_short")].filter(Boolean).join(" · ");
   const off = Boolean(blocked) || Boolean(frozen);
   // the running model's row stays reachable while picks are off: its Customize still opens the flyout (effort, Fast), so it
   // is not announced as disabled (its pick is a no-op anyway, and Enter does nothing while blocked)
@@ -171,7 +171,7 @@ export function Row({ row, second, describes, blocked, customizable, flyoutOpen,
         )}
         <span className="ml-auto flex shrink-0 items-center">
           <span title={setupTitle} data-row-setup className="flex max-w-[118px] shrink-0 items-center gap-1 truncate text-[12px] text-ink-3">
-            <AgentMark agent={provider.engine} size={12} decorative className="shrink-0" />
+            <AgentMark agent={provider.engine} label={provider.engineLabel} size={12} decorative className="shrink-0" />
             {effort && <span className="truncate">{effortTitle(effort)}</span>}
             {row.setup.fast && <Icon name="bolt" size={11} className="shrink-0 fill-current" />}
           </span>

@@ -69,7 +69,7 @@ struct AskClaudeIntent: AppIntent {
         guard machine.online else { throw IntentFailure.offline(machine.name) }
         if newSession { return try await startSession(api, on: machine, text: text) }
 
-        let sessions = try await api.sessions()
+        let sessions = IntentSupport.folded(try await api.sessions())
         guard let session = IntentPicker.session(sessions, machine: machine.ref.id, group: machine.ref.group) else {
             throw IntentFailure.noSession(machine.name)
         }

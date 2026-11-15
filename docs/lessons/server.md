@@ -1,5 +1,43 @@
 # Lessons: hub / node and networking
 
+## A token does not say whose it is, and a thread does not say whose item (2026-11-15, #7832)
+
+The GitHub connector kept its inbox things, its notifications cursor and its thread cache by thread and path, and swapped only the token when the
+account changed. So account A's review request stayed in the inbox, and a reply to it posted a comment with B's token. Fixing it at the place
+the user switches was not enough, because the login changes in ways nobody chooses:
+
+- A poll that gets a 401 asks the computer for its token again and retries. If `gh` was switched there, the retry is another account's request
+  carrying the first one's `If-Modified-Since`, and its answer is merged into the first one's inbox.
+- `/user` answers arrive in any order. A check of the old token that GitHub answers late wrote the old login back over the new one.
+- A read in flight when the account changes writes its answer into whatever is there afterwards: a cache that was just emptied (or a nil map).
+- A thing can be older than its keep time when the account changes (things are forgotten only when a poll reads the list), so a marker kept
+  by the thing's age is dropped by the next poll, before the hub closed the item.
+- Both accounts can have the same thread unread at the same time: the thread, and even the move's timestamp, do not tell their items apart.
+
+What holds: one owner of the identity (`account.go`). A new token reads or answers nothing that belongs to an account until GitHub named its
+account; every credential has a number and an answer to an older one is dropped; a different login moves an epoch, and the same step that
+adopts it retires and resets everything read under the old one. State and requests carry the epoch they began under (in the context), a
+request for an older epoch is refused before it is sent, and write-backs check the epoch under the state's own lock. Lock order is the
+connector's lock, then the state's; a state lock never takes the connector's. The tests hold a request at the fake GitHub on a channel and
+change the account while it waits (`account_switch_test.go`).
+
+The first version of the fix still failed an independent review, on what the hub keeps rather than on what the connector does:
+
+- The hub holds items longer than the connector's process lives and hands back only a thread and the move the item holds. Anything the
+  connector decides from what it has in memory (a marker per retired thing, "is this thread held") is wrong after a restart, for items it
+  has forgotten (older than its keep time), and for items it considers done while the hub keeps them open (answered through Persona).
+  So the account and its epoch are kept across restarts, every move read after a change carries the epoch (the reply check needs no
+  memory), and the hub's leftovers are closed by exclusion: whatever the account in use holds no thing of.
+- A mark put only where a collision was noticed (the retired thing's last move) misses the collisions nobody remembered: the hub's item
+  one move behind, or a third account meeting the first one's move. Mark every move, or none.
+- A step done once and then recorded has two wrong orders. "Tell the hub, then save that it is done" closes the wrong items after a
+  failed save and a restart; "save, then tell" at worst leaves old items open. Pick the order whose failure is the harmless one, and
+  say which it is. The same review found the record forgotten after `Reload` (whoever held the id had saved over it) and a secret that
+  no longer opens taking a computer's sign-in down: a record added to an existing store inherits every way that store is rewritten or fails.
+- Closing by thread meets the hub's own rule, which starts an item only for a move later than the thread's closed one: a round trip to
+  another account and back does not bring the first inbox back. That is a limit, written down in `docs/assistant/inbox.md`, not a bug to
+  work around by moving a thing's time.
+
 ## An empty list sent as null means "no change" to an optional field (2026-11-14)
 
 The node reads node.configure's `claude_dirs_blocked` as `*[]string`: absent or `null` leaves its patterns as they are.
@@ -134,6 +172,35 @@ in bus order, but one worker persists only the latest pending report, with a bou
 write is logged and left for the next report, never retried in a tight loop. Both kinds of worker join the hub's
 `nodeWorkers`, whose shutdown wait is bounded. Tests hold the node or `PutSetting`, prove a later message or bus event
 is still handled, then release the dependency and join the workers before checking the final value and call count.
+
+## App connection bookkeeping uses ordered background snapshots (2026-11-15, #6889)
+
+`client_hello` and `register_phone` also waited in the app connection's read loop: `hub.client_apps` did a settings
+load and save, the device and user locales did up to two of each, and every phone registration waited for
+`ReplacePhoneTools`. A slow store therefore delayed the hello ack and every later frame just as a slow node did for
+subscriptions. Record connection-local metadata in place, so the next reply and direct phone routing use the new
+language and tools at once, but move persistence to one ordered consumer per setting group. Client-app and locale
+changes are history-dependent: apply every change in message order and coalesce only the final snapshot writes. Phone
+registrations are complete replacements, so pending ones can coalesce to the newest per device. The consumers have
+their own lifetime, not `deployCtx`'s: `runHub` stops them in a bounded shutdown step only after `serveHTTP` has closed
+and joined the app socket handlers, then joins `nodeWorkers`, and closes the database last. Deploy cancellation alone
+must not strand a report read while those connections are closing. Starting and stopping the consumers is serialized,
+so a stop racing the first report is safe. A report that arrives after the stop is not written; the app sends it again
+on reconnect.
+
+Each pending set is capped at 1,024 entries; phone capacity counts distinct pending devices, so replacing one already
+queued takes no new slot. If two producers race for the same new device, the one that becomes a replacement returns
+its now-redundant admission token immediately. Normally admission is a nonblocking semaphore send. At the cap, only
+the producing read loop waits, for at most the existing Store timeout; it then drops that report and logs once for the
+affected queue rather than once per dropped report. Consumers return capacity as soon as they detach a batch, not when
+its Store write ends. Tests use a separate idle condition (pending empty and no flush in flight), so they still wait
+for the final save.
+
+A failed load is not an empty setting. `loadClientAppsLocked` used to clear the map and its caller still saved it, so
+one transient read error could drop every other device. Load into temporary state, publish it only after a complete
+successful read, and otherwise apply and save nothing; the next message retries. The same rule covers both locale
+settings together: in particular, an absent `user_locale` plus a failed `hub.device_locales` read must not publish or
+save a first device's language.
 
 ## A Go file named after a platform builds only there (#5563)
 
@@ -1731,6 +1798,8 @@ When a `httputil.ReverseProxy` has to read what it forwards (the sent-as-user le
 
 Calling both notification channels does not mean either selected a recipient: a saved device may have no usable APNs or relay route, and a connected client may not support `ws_notify`. Return selected and reachable counts from the same recipient walk, before and after its preference filters, so the API can distinguish `no_device` from `filtered` without a separate readiness check racing that selection. Preserve the earlier session-level `muted` result and count both channels: a WebSocket notification can still go out without any push credentials. These counts are not asynchronous APNs / relay acceptance or proof that a phone displayed anything.
 
+The same holds on every path that reports a push, not only the API that was fixed. `POST /api/v1/notify` learned to say `no_device` in #1910, but the assistant's `notify.request` kept dropping the counts, so `notify_user` answered "Notification sent." for days in which no device was paired, and the north star counted each of those notices as an interruption (#8138). When a function returns selected and reachable counts, carry them up to every caller that reports success, and count a browser's Web Push and an offline device's kept copy apart from "nothing".
+
 ## A push's nil "wants" means "asked for explicitly" (2026-11-06, per-manager push switches)
 
 `Pusher.send*` and the WebSocket notify take `wants func(NotifyPrefs) bool`, and nil is not just "every device": `alertWanted` lets it past Phone Muted (`mute_while_desktop`) and the pusher sends it to an open desktop too (an assistant's reminder, an extension's push). Wrapping nil in a filter to add one more condition (a muted manager) silently turns those pushes into ordinary ones, and they stop reaching a phone in Phone Muted mode. Put an extra per-device rule where the devices are walked (`Pusher.sendFrom`, `notifyWSFrom` take the manager) instead of in `wants`.
@@ -2282,3 +2351,14 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
 - It showed up as a test that failed 21 times in 200 under load, and the first reading was "the test's ordering".
   Before making such a test deterministic, make the losing order happen on purpose (a store that runs the other
   side inside the read) and look at what the caller gets.
+
+## A seal anywhere in the server is counted by the key rotation guard (2026-11-15, #7984)
+
+`internal/assistant`'s `TestPlacesThatSealAreKnown` (`keyrotate_guard_test.go`) counts every `.Seal(`, `sealKey(`,
+`.encrypt(`, `SealWith(` and `secretkey.New` per file under `internal/` and `cmd/`, so nothing new seals with the
+manager's `secret.key` without the key rotation re-sealing it. It counts AEADs with keys of their own too, in packages
+that have nothing to do with the assistant: #7954 sealed the live screen's UDP packets in `internal/screenlink`, its
+tests and its importers passed, and the hub deploy failed on this guard. When code under `internal/` or `cmd/` seals,
+run `go test -run TestPlacesThatSealAreKnown ./internal/assistant` (no database needed) and record the file there:
+with `secret.key`, after putting where it keeps the sealed value into `db.sealedTables` or `db.sealedSettings`; with
+any other key, under "other keys" with where the key comes from. Never loosen the guard.

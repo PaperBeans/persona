@@ -136,8 +136,10 @@ struct ChildSessionCard: View {
 
     private func statusLine(_ status: ChildSessions.Status, now: Date) -> String {
         var parts = [word(status)]
-        if showsHarness, let harness = session?.runtime ?? session?.agent, !harness.isEmpty {
-            parts.append(harness)
+        // What runs it by name, as its mark names it (`AgentKind`, the web's `childMeta`): Claude Code, Codex, a Paseo
+        // provider's label; never the id of the engine that runs it ("paseo", #8144).
+        if showsHarness, let session {
+            parts.append(AgentKind(session).name)
         }
         if let model = session?.model, !model.isEmpty { parts.append(model) }
         if let effort = session?.effort, Self.efforts.contains(effort) { parts.append(effort) }
