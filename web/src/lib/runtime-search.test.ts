@@ -36,6 +36,17 @@ describe("all-runtime Agent search transport", () => {
     expect(model.snapshot().hits[0].evidence).toMatchObject({ role: "agent", match: "needle" });
     expect(model.snapshot().hits[0].session.last_text).toBeUndefined(); model.dispose();
   });
+  it("carries the side session a hit is in (#7944, search_hits[<id>].hit_session_id) and refuses one that is no string", async () => {
+    const rows = [session("a-parent"), session("b-other")];
+    const response = page(rows);
+    Object.assign(response.search_hits[runtimeIdentity(rows[0])], { hit_session_id: "side" });
+    const model = new RuntimeSearchModel(vi.fn().mockResolvedValue(response)); model.search("merge"); await debounce();
+    expect(model.snapshot().hits.map((h) => h.side)).toEqual(["side", undefined]); model.dispose();
+    const bad = page([session("parent")]);
+    Object.assign(bad.search_hits[runtimeIdentity(bad.sessions[0])], { hit_session_id: 7 });
+    const refused = new RuntimeSearchModel(vi.fn().mockResolvedValue(bad)); refused.search("merge"); await debounce();
+    expect(refused.snapshot().hits).toHaveLength(0); expect(refused.snapshot().error).not.toBe(""); refused.dispose();
+  });
   it("shows a matched parent in its folded state without re-filtering the summary", async () => {
     const parent = { ...session("parent"), state: "idle" as const, children: { total: 2, working: 1, needs_you: 1 } };
     const response = page([parent], { scores: [35] });

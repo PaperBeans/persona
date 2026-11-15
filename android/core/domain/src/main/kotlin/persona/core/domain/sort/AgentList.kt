@@ -194,8 +194,14 @@ fun buildAgentList(
     /** The hub's direction tree, which "By direction" ([AgentGrouping.Direction]) is built from; null: none to group by. */
     directions: DirectionTree? = null,
 ): AgentListResult {
-    val tree = codexTaskForest(foldRows(sessions, settings.hierarchy), runs = { settings.draws(it, pins) })
-    return buildFlatAgentList(tree.roots, machines, pins, mutes, tree.searchSettings(settings, pins, machines.associate { it.id to it.name }), todos, directions)
+    val listed = foldRows(sessions, settings.hierarchy)
+    val tree = codexTaskForest(listed, runs = { settings.draws(it, pins) })
+    val names = machines.associate { it.id to it.name }
+    // A side session is never a row (#7944): a search that finds one keeps its topmost parent's row instead.
+    val search = tree.searchSettings(settings, pins, names).let { s ->
+        sideSearchHits(sessions, listed, s, names).takeIf { it.isNotEmpty() }?.let { s.copy(queryAncestors = s.queryAncestors + it) } ?: s
+    }
+    return buildFlatAgentList(tree.roots, machines, pins, mutes, search, todos, directions)
         .let { it.copy(children = tree.children.plusChildren(it.children)) }
 }
 

@@ -37,7 +37,14 @@ The prototype is the UI and interaction standard; compare screen by screen durin
 
 - Tasks you explicitly request in the chat (a direct instruction, "have an Agent do it," "go ahead and start," #2559) also start directly. Persona sets `user_requested: true` for that `task_plan` item, and the card shows progress only.
   Inferred tasks you did not request still wait for Start. If any item in a plan needs to wait, the whole plan waits. "Start tasks I request in chat directly" under Settings › Assistant (`assistant.start_requested_tasks`, on by default) can disable this.
-- The plan card offers "Start These Directly," remembered per "project × read-only / file changes." Similar tasks no longer ask. Stored in settings `tasks.trust`; entries can be viewed and deleted in Settings.
+- The plan card offers "Start These Directly," remembered per "computer × directory × read-only / file changes." Similar tasks no longer ask. Stored in settings `tasks.trust`; entries can be viewed and deleted in Settings.
+  An entry covers its directory and every directory under it (#8095, `assistant/task_trust_scope.go`). Directories are compared as the computer
+  names them: `~` is its home, extra and trailing slashes and `.` / `..` are cleaned, and the home as its links resolve (`home_real` in
+  `node.info`) is the home as the node names it, so `/home/me/x` and `/data/home/me/x` are one directory when `/home/me` links there. An entry
+  for `/`, a directory right under it or the computer's home covers only that directory. Entries keep the spelling they were written in, so
+  ones remembered before keep matching. `persona_settings` key `tasks.trust` lists them (`get`) and adds or removes one
+  (`add` / `remove`, `{"machine", "directory", "access": "edit" | "read"}`) after the owner approves its card; `add` refuses those three
+  too-broad directories.
 - Read-only tasks keep `permission: bypassPermissions` for Claude and `permission: plan` for Codex after card edits and on retries. Their first prompt says not to change files, commit, or write externally. Health-space plans still wait for Start. Runtime support and the current card labels are described in [To-dos](todos.md#read-only-planned-tasks).
 - `task_plan` **does not block**: once the plan is handed to you, the turn ends immediately and you can continue talking about something else. When you tap Start, hub starts the Agents directly; Persona sees the result in the next message's live snapshot.
 
@@ -964,7 +971,7 @@ Table `task_plans`: `id`, `conversation`, `tasks` (JSON: each item's `title`, `n
 `state` (`open` / `started` / `dismissed`), `created_at`, `updated_at`. A task also carries its brief's fields (`goal`, `out_of_bounds`,
 `continues`, `continues_why`, `started_why`, and the hub's `brief`): "Briefs" above.
 
-- MCP tool `task_plan` (assistant only): accepts a task list. Start directly if every item is read-only, `user_requested` (with `assistant.start_requested_tasks` enabled), or matched by `tasks.trust`; otherwise save an `open` plan and emit chat activity.
+- MCP tool `task_plan` (assistant only): accepts a task list. Start directly if every item is read-only, `user_requested` (with `assistant.start_requested_tasks` enabled), or covered by a `tasks.trust` entry (its directory or one above it); otherwise save an `open` plan and emit chat activity.
   Return the plan ID and each task's state (text). Automatic dispatch is reported as queued, not as proof of an Agent start. `machine_policy` defaults to `fixed` (including old saved plans); only explicit `flexible` tasks may move off an unhealthy machine. The policy survives storage, card edits and retry. Fixed tasks fail on their own target and can retry there after health recovery.
 - `POST /api/v1/task-plans/{id}/start`: may include user-edited fields. Create a to-do per task (`origin`, `plan_id`), then start its Agent (`startSession` with `todo_id`).
   With `remember: true`, record this kind in `tasks.trust`. `POST …/dismiss`: do not start.
