@@ -111,3 +111,26 @@ describe("NewAgent with an Inbox item (#5933)", () => {
     expect([...document.body.querySelectorAll("textarea")].some((t) => t.value.startsWith("Look into it"))).toBe(true);
   });
 });
+
+describe("NewAgent draft persistence under storage pressure", () => {
+  it("keeps the box mounted when its prompt draft write hits a full localStorage", async () => {
+    const quotaError = () => {
+      const err = new Error("QuotaExceededError");
+      err.name = "QuotaExceededError";
+      throw err;
+    };
+    const original = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === "draft:new-agent") quotaError();
+      return original.call(this, key, value);
+    });
+    try {
+      expect(() => act(() => root.render(<NewAgent open onClose={() => {}} preset={{ prompt: "Check this machine" }} key="quota" />))).not.toThrow();
+      await flush();
+      expect(localStorage.getItem("draft:new-agent")).toBeNull(); // the failed write stayed quiet, nothing half-written
+      expect([...document.body.querySelectorAll("textarea")].some((t) => t.value.startsWith("Check this machine"))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

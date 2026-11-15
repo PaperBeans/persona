@@ -21,7 +21,9 @@ import (
 const launcherCheckDir = "persona-check-"
 
 // launcherCheckTimeout bounds Settings › Models' "Test": no answer by then is a failure (a variable for the tests).
-var launcherCheckTimeout = 90 * time.Second
+// A request through a shared gateway queues behind the account's other traffic; 150 seconds outlasts the queue of a
+// health round burst (2026-11-13: 90 seconds did not).
+var launcherCheckTimeout = 150 * time.Second
 
 // launcherCheck answers Settings › Models' "Test": runs the launcher once, headless, with a one-word prompt in an empty
 // directory, and says whether an answer came back, how long it took and which model answered. It is a real request
@@ -37,6 +39,12 @@ func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherChe
 		return proto.LauncherCheck{Agent: "codex", Error: codexAppCheckMsg}
 	}
 	agent := n.launcherAgent(ctx, name)
+	if argv, ok := n.codexArgv(name); ok && n.codexOnSharedDaemon(argv) {
+		// codex exec runs in its own process and passes while a start, which joins the shared daemon, cannot.
+		if err := codexDaemonSocketGone(n.codexHome()); err != nil {
+			return proto.LauncherCheck{Agent: "codex", Error: err.Error()}
+		}
+	}
 	dir, err := os.MkdirTemp("", launcherCheckDir)
 	if err != nil {
 		return proto.LauncherCheck{Error: err.Error()}
@@ -47,11 +55,11 @@ func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherChe
 		// What Claude Code keeps of the run, the shell's or a runtime's (Paseo's probe agent runs it in dir too).
 		defer n.removeCheckProject(dir)
 	}
-	if _, managed := n.managedLauncher(name); !managed {
-		if _, runtime := n.runtimeLauncherModels(name); runtime {
-			if result, handled := n.runtimeLauncherCheck(ctx, name, dir, prompt); handled {
-				return result
-			}
+	// A runtime's launcher, as a start in ctx's host runs it: where that host's engine runs only its own launchers, its
+	// provider of the name, whatever launcher of the shell's or of Persona's has it too (#8140).
+	if h := n.runtimeOfIn(ctx, name); h != nil {
+		if result, handled := n.runtimeLauncherCheck(ctx, h, name, dir, prompt); handled {
+			return result
 		}
 	}
 	if agent == "claude" {
@@ -62,12 +70,7 @@ func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherChe
 	}
 	// The flag that keeps the run off the disk goes between before and after: a transcript per check, a hundred a day on
 	// each computer, filled the newest offline sessions the list keeps and pushed the user's own Agents out (#2959).
-	before, noSave, after := ` -p `+shellQuote(prompt)+` --output-format json --max-turns 1`, "--no-session-persistence", ""
-	if agent == "agy" || agent == "omp" {
-		before, noSave = ` -p `+shellQuote(prompt), ""
-	} else if agent != "claude" { // Codex and compatible variants: one non-interactive turn
-		before, noSave, after = ` exec`, "--ephemeral", ` --skip-git-repo-check `+shellQuote(prompt)
-	}
+	before, noSave, after := checkArgs(agent, prompt)
 	if agent == "claude" {
 		// No hooks: the check is no session of the user's, and Persona's own hooks can hold it past the timeout (#3412;
 		// the model list does the same, launcher_models.go). claudeSettings merges this with what the launcher needs from
@@ -144,6 +147,23 @@ func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherChe
 
 // launcherAgent is the CLI launcher name runs: a managed one's type, a runtime's word for it, what a probe saw, else
 // claude.
+// checkArgs is the one-turn, non-interactive run a check gives agent's CLI: the arguments before and after the flag that
+// keeps the run off the disk, and that flag ("" for none). Codex's (exec … --skip-git-repo-check) go only to Codex and
+// its variants: pi took them before (#8194), and every check of a pi launcher failed with "Unknown option
+// '--skip-git-repo-check'", which the health check reads as a CLI too old. pi has -p and --no-session; another agent
+// (Antigravity, Oh My Pi, one the node does not know) gets -p alone.
+func checkArgs(agent, prompt string) (before, noSave, after string) {
+	switch agent {
+	case "claude":
+		return ` -p ` + shellQuote(prompt) + ` --output-format json --max-turns 1`, "--no-session-persistence", ""
+	case "codex", traexAgent: // one non-interactive turn
+		return ` exec`, "--ephemeral", ` --skip-git-repo-check ` + shellQuote(prompt)
+	case piAgent:
+		return ` -p ` + shellQuote(prompt), "--no-session", ""
+	}
+	return ` -p ` + shellQuote(prompt), "", ""
+}
+
 func (n *Node) launcherAgent(ctx context.Context, name string) string {
 	if m, managed := n.managedLauncher(name); managed {
 		return m.AgentType()

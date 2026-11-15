@@ -3,9 +3,11 @@
 // group where its newest member is, and every row and count stays the hub's. Checked against the fake hub, with
 // screenshots on a wide window and a phone, light and dark.
 //
-// Needs the web page against the fake hub with the paged list, its side sessions and one assistant, and Chrome:
+// Needs the web page against the fake hub with the paged list, its side sessions (as an older hub sends them, without
+// side folding: MOCK_SIDE_FOLD=0; a hub that folds them puts them in their parent's chat, #7944,
+// scripts/test/web_side_sessions_e2e.py) and one assistant, and Chrome:
 //
-//   MOCK_SESSIONS_LIST=1 MOCK_SIDE_SESSIONS=1 MOCK_MANAGERS=0 PORT=18795 python3 scripts/mock/mock_hub.py &
+//   MOCK_SESSIONS_LIST=1 MOCK_SIDE_SESSIONS=1 MOCK_SIDE_FOLD=0 MOCK_MANAGERS=0 PORT=18795 python3 scripts/mock/mock_hub.py &
 //   (cd web && PERSONA_HUB_URL=http://127.0.0.1:18795 npx vite --port 5195 --strictPort &)
 //   node web/e2e/side-sessions.mjs http://127.0.0.1:5195 <artifact directory> [--before] [--channel chrome]
 //
@@ -44,7 +46,7 @@ const rows = all.sessions ?? [];
 const needs = rows.filter((s) => s.state === "needs_you").length;
 const sides = rows.filter((s) => s.parent_agent_id);
 const parent = rows.find((s) => sides[0] && s.session_id === sides[0].parent_agent_id);
-check(sides.length === 2 && Boolean(parent), "the fake hub lists two side sessions and their parent (MOCK_SIDE_SESSIONS=1)");
+check(sides.length === 3 && Boolean(parent), "the fake hub lists three side sessions and their parent (MOCK_SIDE_SESSIONS=1)");
 const pins = await hubGet("/pins");
 await hubGet("/pins", { method: "PUT", body: JSON.stringify({ spaces: [], sessions: [] }) });
 

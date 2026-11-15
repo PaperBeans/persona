@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/nwverse/persona/server/internal/compat"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -31,7 +32,7 @@ var toolNames = []string{"ask_user", "notify_user", "supervision_finish", "sched
 	"cancel_followup", "list_places", "save_place", "machines_list", "agents_list", "agent_read", "agent_send", "agent_switch", "agents_switch", "agent_interrupt", "agent_start", "agent_supervise", "agent_archive", "agent_unarchive", "agent_autoname", "agent_autoname_receipt", "interaction_answer", "ask_escalate", "inbox_suggest", "inbox_draft",
 	"inbox_folders", "inbox_move", "inbox_post", "kb_search", "kb_list", "kb_get", "kb_update", "kb_history_plan", "kb_history_status", "kb_history_stop", "kb_history_resume", "persona_settings", "secret_run",
 	"model_profiles_list", "model_profile_get", "model_profile_switch", "model_profile_rollback",
-	"repositories_list", "repository_get", "view_show", "view_update", "view_get",
+	"repositories_list", "repository_get", "repository_add", "view_show", "view_update", "view_get",
 	"conversations_list", "conversation_read", "conversation_rename", "conversation_archive", "conversation_unarchive",
 	"conversation_new", "conversation_send", "task_plan", "task_plan_withdraw", "task_review", "task_scope", "task_decided", "task_start_screen", "task_start_keys", "task_retry",
 	"todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete", "concern_report",
@@ -65,6 +66,15 @@ func (s *Service) Tool(ctx context.Context, call ToolCall) proto.ToolResult {
 	switch call.Name {
 	case "persona_settings":
 		return s.toolPersonaSettings(ctx, call, args) // settings_tool.go
+	case "task_plan", "agent_start", "conversation_new":
+		// The optional dispatch policy is checked first: it can refuse a model's call where the task-agent refusal
+		// below still lets a scheduled conversation through. The hub's own starts (an inbox hand-off) come through
+		// runTool and never reach Tool, so they are not limited here.
+		if err := s.dispatchToolGuard(ctx, call.MachineID, call.SessionID, call.Name); err != nil {
+			return proto.TextResult(err.Error(), true)
+		}
+	}
+	switch call.Name {
 	case "task_plan", "agent_start":
 		// A task's agent does the work itself (supervise_leader.go); the hub's own starts (an inbox hand-off) are not
 		// a model's call and come through runTool.
@@ -108,6 +118,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		}
 	}
 	switch name {
+	case "repository_add":
+		return s.toolRepositoryAdd(ctx, machine, self, args)
 	case "repositories_list", "repository_get":
 		return s.toolRepositories(ctx, name, args)
 	case "supervision_finish":
@@ -154,7 +166,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 	case "kb_search", "kb_list", "kb_get", "kb_update":
 		return s.toolKB(ctx, name, args)
 	case "kb_history_plan", "kb_history_status", "kb_history_stop", "kb_history_resume":
-		return s.toolKBHistory(ctx, name, args) // kb_history_tools.go
+		return s.historyTools().Call(ctx, name, args) // kbhistory/tools.go
 	case "interaction_answer":
 		return s.toolInteractionAnswer(ctx, self, args)
 	case "ask_escalate":
@@ -176,9 +188,22 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 	case "inbox_post":
 		return s.toolInboxPost(ctx, machine, self, args) // inbox_post.go
 	case "notify_user":
-		var a struct{ Title, Body string }
+		var a struct {
+			Title      string `json:"title"`
+			Body       string `json:"body"`
+			PushLevel  string `json:"push_level"`
+			RelatedKey string `json:"related_key"`
+		}
 		if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.Title+a.Body) == "" {
 			return "", fmt.Errorf("title and body are required")
+		}
+		// An empty level is passed through, not normalised to P1: with ln mode on the hub decides by conversation
+		// (the main conversation's ordinary notices still interrupt, fleet_link.go lnNotifyPushLevel); with it off the
+		// hub derives P1 for a NotifyPush anyway (hub/lnmode.go levelFor), so delivery there is unchanged.
+		switch a.PushLevel {
+		case "", assistantwire.LevelP0, assistantwire.LevelP1:
+		default:
+			return "", fmt.Errorf("push_level must be P0 or P1")
 		}
 		if s.justMeNow(machine, self) {
 			// A Just me turn (meeting_justme.go): no push and no copy anywhere; the text stays in the conversation,
@@ -189,12 +214,24 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			a.Title, a.Body = healthNotice(s.lang(ctx))
 		}
 		// Asked for explicitly: every device, the Feishu bot too, and no separate push when this turn ends.
-		s.push(ctx, Notification{Subtitle: "Persona", DeviceID: machine, SessionID: self, Title: a.Title, Body: a.Body, Asked: true})
-		// The Feishu bot and the channels with pushes on (channels_handler.go).
-		s.channelsPushed(machine, self, a.Title, a.Body)
-		s.recordNotify(ctx, machine, self) // an interruption (north_star.go)
+		res, err := s.pushResult(ctx, Notification{Subtitle: "Persona", DeviceID: machine, SessionID: self, Title: a.Title, Body: a.Body,
+			Asked: true, Level: a.PushLevel, RelatedKey: clip(strings.TrimSpace(a.RelatedKey), 200)})
+		if err != nil {
+			return "", err
+		}
+		// The Feishu bot and the channels with pushes on (channels_copies.go), unless the hub's low-distraction mode held
+		// the notice for the briefing (a P1 one, or a repeat of a related key within 12 hours): a copy there would
+		// interrupt where the phone does not, as a conclusion's card would (push_quiet.go). A held notice marks no
+		// channel pushed, so a turn-end mirror goes as it would without it (#8268).
+		var copies *copyReport
+		if res.Held {
+			s.logf("assistant: notify_user held by low-distraction mode (%s): no copy to the chat channels", res.Reason)
+		} else {
+			copies = s.channelsCopied(machine, self, a.Title, a.Body)
+		}
+		s.recordNotify(ctx, machine, self, notifyMissed(res)) // an interruption when a device took it (north_star.go)
 		s.promoteSupervision(self)
-		return "Notification sent.", nil
+		return notifyAnswerText(s.lang(ctx), res, copies.wait(notifyCopyWait)), nil
 	case "conversations_list":
 		return s.toolConversationsList(ctx, self, args)
 	case "conversation_read":
@@ -207,14 +244,24 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		return s.toolConversationNew(ctx, self, args)
 	case "conversation_send":
 		return s.toolConversationSend(ctx, self, args)
-	case "schedule_followup":
-		return s.toolScheduleFollowup(ctx, machine, self, args)
 	case "list_followups":
 		space, _ := s.knownSpace(ctx, self)
 		return s.describeSchedule(ctx, space), nil
-	case "schedule_routine":
-		return s.toolScheduleRoutine(ctx, self, args)
+	case "schedule_routine", "schedule_followup":
+		// A conversation the policy limits may not change the schedule: new or changed tasks could alter its own
+		// class or open another run.
+		if err := s.dispatchScheduleGuard(ctx, machine, self); err != nil {
+			return "", err
+		}
+		if name == "schedule_routine" {
+			return s.toolScheduleRoutine(ctx, self, args)
+		}
+		return s.toolScheduleFollowup(ctx, machine, self, args)
 	case "delete_routine", "cancel_followup":
+		// A conversation the policy limits may not delete its own scheduled task either (dispatch_policy.go).
+		if err := s.dispatchScheduleGuard(ctx, machine, self); err != nil {
+			return "", err
+		}
 		var a struct{ ID string }
 		_ = json.Unmarshal(args, &a)
 		space, _ := s.knownSpace(ctx, self)
@@ -260,6 +307,10 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			RawTask json.RawMessage `json:"task"`
 			// Attachments: the user's pictures and files, by their paths on this conversation's computer (#2437).
 			Attachments []string `json:"attachments"`
+			// Resume: resume a stopped agent with its context, as the user's Resume does, with ResumeWhy said to the
+			// user (agent_resume.go, #8099). Ignored for an agent that runs.
+			Resume    bool   `json:"resume"`
+			ResumeWhy string `json:"resume_why"`
 		}
 		_ = json.Unmarshal(args, &a)
 		a.Task = givenTask(a.RawTask)
@@ -270,21 +321,25 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if c.Assistant {
 			return "", fmt.Errorf("that is an assistant conversation, not a coding agent")
 		}
-		if c.SourceKind != "" && (c.Capabilities == nil || !c.Capabilities.Send) {
+		if c.SourceKind != "" && (c.Capabilities == nil || !c.Capabilities.Send) && !stoppedAgent(c) {
 			// i18n-ignore: original MCP refusal for the model, not API error, push or approval-card copy; keep the source reason verbatim.
 			return "", fmt.Errorf("这个 Agent 仅支持查看：%s", c.ReadOnlyReason)
 		}
 		if strings.TrimSpace(a.Text) == "" {
 			return "", fmt.Errorf("text is empty")
 		}
-		if stoppedAgent(c) { // read-only (#4754): nothing here starts it again
+		resume := ""
+		if stoppedAgent(c) { // read-only (#4754): a message does not start it; only a resume asked for does (#8099)
 			if exitText(a.Text) {
 				return fmt.Sprintf("%s has already stopped: nothing was sent.", agentLabel(c)), nil
 			}
-			return "", fmt.Errorf("%s has stopped and is read-only: its conversation and terminal stay, it takes no messages, "+
-				"and nothing here starts it again. Read it with agent_read; to go on, start a new agent with agent_start in its "+
-				"directory (with the task when it worked on one) and give it what it needs. Only the user can resume it, with "+
-				"Resume on its terminal page. Nothing was sent", agentLabel(c))
+			if !a.Resume {
+				return "", stoppedRefusal(c)
+			}
+			resume = cleanWhy(a.ResumeWhy)
+			if err := s.resumeAllowed(ctx, self, am, c, resume, a.Task); err != nil {
+				return "", err
+			}
 		}
 		atts, err := cleanAttachments(a.Attachments)
 		if err == nil {
@@ -300,7 +355,11 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		} else if err := s.exitAllowed(ctx, self, am, c, a.Text, len(atts)); err != nil {
 			return "", err
 		}
-		if ok, err := s.confirmOutbound(ctx, machine, self, name, agentLabel(c)+" · "+am.Name+"\n\n"+a.Text, args); err != nil {
+		summary := agentLabel(c) + " · " + am.Name + "\n\n" + a.Text
+		if resume != "" { // the phone says it resumes the agent, and why
+			summary = s.resumeNote(ctx, c, am, resume) + "\n\n" + a.Text
+		}
+		if ok, err := s.confirmOutbound(ctx, machine, self, name, summary, args); err != nil {
 			return "", err
 		} else if !ok {
 			return "The user declined on the phone: nothing was sent to that agent.", nil
@@ -338,12 +397,23 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			params["text"] = withAttachments(text, handed)
 		}
 		unsent := s.noteAgentSend(self, am.ID, c.SessionID) // more from its task's conversation reopens an accepted task (#6726)
+		// A resume goes through the user's Resume's node call, the text as its first message (agent_resume.go).
+		if resume != "" {
+			return s.resumeAndSend(ctx, self, am, c, params, resume, a.Text, handed.said(), task, unsent)
+		}
 		if c.Status != proto.StatusOffline {
-			if err := s.call(ctx, am.ID, DeviceSessionSend, params, nil); err != nil {
+			var sent struct {
+				Queued bool `json:"queued"` // the runtime holds it behind the turn under way (#8097)
+			}
+			if err := s.call(ctx, am.ID, DeviceSessionSend, params, &sent); err != nil {
 				if !startResultUnknown(err) { // it may still arrive and start the turn
 					unsent()
 				}
 				return "", task.sendFailed(ctx, s, err)
+			}
+			if sent.Queued {
+				return fmt.Sprintf("Queued for %s on %s: it is in the middle of a turn and reads the message once what it is doing now ends.",
+					agentLabel(c), am.Name) + handed.said() + task.sent(ctx, s, a.Text), nil
 			}
 			return fmt.Sprintf("Sent to %s on %s.", agentLabel(c), am.Name) + handed.said() + task.sent(ctx, s, a.Text), nil
 		}
@@ -439,7 +509,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if err := s.applyModel(ctx, "agent.new", run); err != nil {
 			return "", err
 		}
-		swapped, agent, err := s.fitLauncher(ctx, am, own, run)
+		swapped, fit, err := s.fitLauncher(ctx, am, own, run)
 		if err != nil {
 			return "", fmt.Errorf("%w; no agent was started", err)
 		}
@@ -476,6 +546,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		}
 		var res struct {
 			Session proto.Session `json:"session"`
+			// What an engine that runs only its own launchers ran in place of what was asked (#8140).
+			Instead *proto.StartInstead `json:"instead"`
 		}
 		// The node builds the session and starts the agent before answering; a machine waking from sleep or a
 		// launcher cold start can take minutes. Like agent_send's resume branch, this wait is detached from the
@@ -503,11 +575,12 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			a.Cwd = rehome(a.Cwd, am, alt)
 			params["cwd"], am = a.Cwd, alt
 			// The same launcher name may mean a different agent on the destination. Reuse its list before choosing permissions.
-			if _, agent, err = s.fitLauncher(ctx, am, own, params); err != nil {
+			if _, fit, err = s.fitLauncher(ctx, am, own, params); err != nil {
 				return "", fmt.Errorf("%w; no agent was started", err)
 			}
 		}
-		if agent == "claude" {
+		// Allow all for Claude Code and for a provider whose approval is an Auto Accept switch (startAgent.allowAll, #8141).
+		if fit.allowAll() {
 			params["permission_mode"] = "bypassPermissions"
 		}
 		if note != "" {
@@ -565,7 +638,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		// their own ids, so they keep the heuristic fallback (session_adopt.go). The id is generated once, so an
 		// ultracode refusal's retry still names the same session.
 		expectID := ""
-		if agent == "claude" {
+		if fit.agent == "claude" {
 			expectID = newStartSessionID()
 			params["session_id"] = expectID
 		}
@@ -616,7 +689,10 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			}
 			return "", err
 		}
-		s.recordStartSuccess(ctx, am.ID, launcher)
+		s.recordStartSuccess(ctx, am.ID, ranLauncher(launcher, res.Instead, res.Session))
+		if said := s.startInsteadNote(ctx, am, res.Instead, res.Session); said != "" {
+			note += " Note: " + said + "." // the engine ran another of the same kind, its default model, a lower effort (#8140)
+		}
 		s.inboxAgentStarted(ctx, self, am.ID, res.Session.SessionID, a.Prompt) // an inbox event's conversation: its chain
 		if told, ok := s.quietAgentTask(ctx, self, am, a.Cwd, a.Prompt, params["tab_name"], res.Session.SessionID); ok {
 			return fmt.Sprintf("Started on %s in %s: session %s, a task of this conversation (its card is in the conversation; "+
@@ -654,9 +730,10 @@ func startResultUnknown(err error) bool {
 }
 
 // startedWithoutAnswer answers an agent_start whose result is unknown. A list showing the new session the node
-// built (not present before the start) adopts and links it like an answered start; otherwise (or when the pre-start
-// list failed) the model gets neutral text: check the Agents list first and never start a second copy. expectID is
-// the session id the hub asked this start to use, for an exact reconciliation (session_adopt.go).
+// built (not present before the start) adopts and links it like an answered start; otherwise the model gets neutral
+// text: check the Agents list first and never start a second copy. A failed pre-start list disables only the
+// heuristic, not an exact expectID match. expectID is the session id the hub asked this start to use
+// (session_adopt.go).
 func (s *Service) startedWithoutAnswer(ctx context.Context, conversation string, m Device, launcher, cwd, prompt string, tab any, note, expectID string, knownIDs map[string]bool) string {
 	if sess, ok := s.adoptStartedSession(ctx, m, launcher, cwd, expectID, knownIDs); ok {
 		if told, ok := s.quietAgentTask(ctx, conversation, m, cwd, prompt, tab, sess.SessionID); ok {
@@ -673,7 +750,8 @@ func (s *Service) startedWithoutAnswer(ctx context.Context, conversation string,
 		"session there, and only start again if no new session appears.%s", m.Name, cwd, note)
 }
 
-// knownSessionIDs is the machine's session ids before a start; nil when the list could not be read (no adoption).
+// knownSessionIDs is the machine's session ids before a start; nil when the list could not be read (no heuristic
+// adoption, though an exact expectID can still be reconciled).
 func (s *Service) knownSessionIDs(ctx context.Context, machine string) map[string]bool {
 	list, err := s.sessions(ctx, machine)
 	if err != nil {

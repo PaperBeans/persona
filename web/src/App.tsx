@@ -15,9 +15,11 @@ import { stripBase } from "./lib/base";
 import { useSessionPanels } from "./lib/panel-memory";
 import { paneRoute, resolveTab, tabOfSessionLink, tabPagePane } from "./lib/herdr-tree";
 import { askTeamWorker, isWorker } from "./lib/team";
+import { foldsUnder, isSide, sideFoldOn } from "./lib/side-fold";
+import { askSide } from "./lib/side-panel";
 import { resolveSessionLink, sessionLinkRoute, type SessionLink } from "./lib/session-link";
 import { engineSwitchHome } from "./lib/engine-switch";
-import { followSubagentLink, splitSubagentLink } from "./lib/subagent-link";
+import { followChildSession, followSubagentLink, splitSubagentLink } from "./lib/subagent-link";
 import { href, inWorkView, navigate, onLinkClick, type Route, routePath, useRoute, withWorkView } from "./lib/router";
 import { agentChatKey, noteChatShown, personaChatKey } from "./lib/recent-chats";
 import { ago, sessionTitle, shortPath } from "./lib/format";
@@ -34,6 +36,7 @@ import { Empty } from "./views/session/files/parts";
 import { AgentsPage } from "./views/AgentsPage";
 import { AgentArchives } from "./views/agents/AgentArchives";
 import { ChatView } from "./views/chat/ChatView";
+import { preloadCloseoutEvidence } from "./views/chat/CloseoutCard";
 import { RequestPage } from "./views/RequestPage";
 import { Home } from "./views/Home";
 import { PersonaAssistant } from "./views/PersonaAssistant";
@@ -225,6 +228,22 @@ interface PageTarget {
   parent?: string;
   /** The link is a lead's worker's (#5180): the worker, which the lead's page (`to`, `parent` the lead) shows in its Team panel. */
   worker?: string;
+  /** The link is a side session's, or a row's that belongs to one (#7944): the side, which its parent's page (`to`,
+   *  `parent`) shows in its Side sessions panel; `child`, the row of the side's own that the link named. */
+  side?: string;
+  child?: string;
+}
+
+/** A side session's link (#7944), or a link to a row of a side's own (`folded_side`): the parent's page, its Side
+ *  sessions panel on the side; undefined when `row` is neither. */
+function sideTarget(rows: Session[], mid: string, row: Session | undefined, view: boolean): PageTarget | undefined {
+  if (!row) return undefined;
+  const side = isSide(row) ? row.session_id : sideFoldOn() && row.folded_side ? row.folded_side : undefined;
+  const parent = side ? row.folded_under : undefined;
+  if (!side || !parent || parent === row.session_id) return undefined;
+  const parentRow = rows.find((r) => r.session_id === parent);
+  const to = routePath(withWorkView(parentRow ? paneRoute(parentRow) : { name: "session", mid, sid: parent }, view));
+  return { link: undefined, to, mid, sid: undefined, parent, side, child: side === row.session_id ? undefined : row.session_id };
 }
 
 /** A worker's link (#5180): the lead's page, its Team panel on the worker; undefined when `row` is not a worker. */
@@ -259,9 +278,12 @@ function pageTarget(s: State, route: Route): PageTarget | undefined {
   // a lead's worker's (#5180): the lead's page, the worker in its Team panel
   const worker = workerTarget(rows, route.mid, row, inWorkView(route));
   if (worker) return worker;
+  // a side session's (#7944): its parent's page, the side in its Side sessions panel
+  const side = sideTarget(rows, route.mid, row, inWorkView(route));
+  if (side) return side;
   // a child session's (#5120): its parent's chat, which shows the child's card; known once its row is (a listed one, or
   // the lookup of an unlisted chat), the session itself until then
-  const parent = row?.folded_under;
+  const parent = row ? foldsUnder(row) : undefined;
   if (parent && parent !== route.sid) return { link: undefined, to: routePath(withWorkView({ name: "session", mid: route.mid, sid: parent }, inWorkView(route))), mid: route.mid, sid: undefined, parent };
   // an earlier session of a conversation that moved between Claude Code and Codex (#5054): the conversation's own row,
   // whose chat reads that session's stretch in its place
@@ -294,13 +316,19 @@ function Shell() {
   const linkSid = route.name === "session" ? route.sid : "";
   const linkParent = target?.parent;
   const linkWorker = target?.worker;
+  const linkSide = target?.side;
+  const linkChild = target?.child;
   const targetMid = target?.mid ?? "";
   useEffect(() => {
     if (!tabLinkPath) return;
     if (linkWorker && linkParent) askTeamWorker(targetMid, linkParent, linkWorker);
-    else if (linkSid) followSubagentLink(linkMid, linkSid, linkParent);
+    else if (linkSide && linkParent) {
+      askSide(targetMid, linkParent, linkSide);
+      // a row of the side's own (its Codex child): the side's chat opens at its card
+      if (linkChild) followChildSession(targetMid, linkChild, linkSide);
+    } else if (linkSid) followSubagentLink(linkMid, linkSid, linkParent);
     navigate(tabLinkPath, true);
-  }, [tabLinkPath, linkMid, linkSid, linkParent, linkWorker, targetMid]);
+  }, [tabLinkPath, linkMid, linkSid, linkParent, linkWorker, linkSide, linkChild, targetMid]);
   // a tab not among the page's rows (a paged hub lists only active and pinned ones): asked of the hub before it is gone
   const tabRoute = route.name === "tab" ? route : undefined;
   const lookup = useTabLookup(tabRoute, !!tabRoute && loaded && !target?.sid);
@@ -322,6 +350,7 @@ function Shell() {
   const [newAgent, setNewAgent] = useState(false);
   const [preset, setPreset] = useState<NewAgentPreset | null>(null);
   useEffect(() => preloadPages(), []);
+  useEffect(() => preloadCloseoutEvidence(), []);
   useEffect(() => onOpenNewAgent((p) => {
     setPreset(p);
     setNewAgent(true);

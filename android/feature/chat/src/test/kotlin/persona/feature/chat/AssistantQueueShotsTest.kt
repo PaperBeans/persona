@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
@@ -16,6 +17,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.isDialog
@@ -77,7 +79,7 @@ import java.io.File
 /**
  * Persona's conversation with a queue (#4339 C6, iOS QueueStrip in a Persona chat), on the real page: the user's two
  * messages, then one relayed from another conversation (`queued_relayed`), under the In progress entry and right above
- * the composer, folded, opened and with Send Now's confirmation in Persona's words on Glass; Brief and Board draw it as
+ * the composer, folded, opened and with Send Now at one press on Glass; Brief and Board draw it as
  * their Agent chat's strip (always open, no Send now). Then the same page with nothing queued, which every style draws
  * as before. Every style, light and dark (`build/assistant-queue-shots/`, or `-Dpersona.shots=<dir>`).
  */
@@ -147,6 +149,7 @@ class AssistantQueueShotsTest {
         override suspend fun execute(session: Session, action: ChatAction): ChatActionResult = ChatActionResult.Done
         override suspend fun verify(session: Session, action: ChatAction): ChatActionResult = ChatActionResult.Done
         override suspend fun editQueue(session: Session, keep: List<Int>): QueueEdit = QueueEdit(session.queued.orEmpty(), photos)
+        override suspend fun sendQueuedNow(session: Session) = Unit
     }
 
     private fun settle() {
@@ -161,7 +164,8 @@ class AssistantQueueShotsTest {
         File(output, "$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    private fun page(style: () -> AppStyle, dark: () -> Boolean, fontScale: Float = 1f) {
+    private fun page(style: () -> AppStyle, dark: () -> Boolean, fontScale: Float = 1f,
+        composerState: ChatComposerState? = null, sessionKey: SessionKey = main, renderStyle: ChatRenderStyle = ChatRenderStyle.Assistant) {
         val tasks = TasksStore(api, connection, scope).also { it.reloadTodos() }
         rule.mainClock.autoAdvance = false
         rule.setContent {
@@ -173,15 +177,36 @@ class AssistantQueueShotsTest {
                 LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
                 PersonaTheme(darkTheme = dark(), reduceMotion = true, style = style()) {
                     Box(Modifier.width(400.dp).height(760.dp).background(PersonaTheme.palette.background).testTag("assistant-queue-shot")) {
-                        ChatScreen(main, chats, sender, interactions, sessions, {},
-                            chrome = ChatChromeBindings(actions = actions, connection = connection, tasks = tasks, onOpenSession = {}),
-                            renderStyle = ChatRenderStyle.Assistant, embedded = true, showTopBar = false)
+                        // A new chat when the style or theme changes, so a notice or Glass's fold does not carry over.
+                        key(style(), dark()) {
+                            ChatScreen(sessionKey, chats, sender, interactions, sessions, {},
+                                chrome = ChatChromeBindings(actions = actions, connection = connection, tasks = tasks, onOpenSession = {}),
+                                renderStyle = renderStyle, embedded = true, showTopBar = false, composerState = composerState)
+                        }
                     }
                 }
             }
         }
         settle()
-        rule.waitUntil(10_000) { rule.onAllNodesWithTag("assistant-tray-bar").fetchSemanticsNodes().isNotEmpty() }
+        if (renderStyle == ChatRenderStyle.Assistant)
+            rule.waitUntil(10_000) { rule.onAllNodesWithTag("assistant-tray-bar").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test fun mainQueueStaysVisibleWhenTheSlashDraftHasNoMainSuggestions() {
+        val composer = ChatComposerState().apply { value = TextFieldValue("/co") }
+        page({ AppStyle.Glass }, { false }, composerState = composer)
+        rule.onAllNodesWithText("/compact").assertCountEquals(0)
+        rule.onAllNodesWithText("/context").assertCountEquals(0)
+        rule.onAllNodesWithContentDescription("queued · Persona", substring = true).assertCountEquals(1)
+    }
+
+    @Test fun agentQueueHidesWhileTheSlashDraftHasAgentSuggestions() {
+        sessions.sessions.value = listOf(persona, web.copy(agent = "claude", queued = listOf("Run the tests")))
+        val composer = ChatComposerState().apply { value = TextFieldValue("/co") }
+        page({ AppStyle.Glass }, { false }, composerState = composer, sessionKey = web.key, renderStyle = ChatRenderStyle.Agent)
+        rule.onAllNodesWithText("/compact").assertCountEquals(1)
+        rule.onAllNodesWithText("/context").assertCountEquals(1)
+        rule.onAllNodesWithContentDescription("queued · Claude", substring = true).assertCountEquals(0)
     }
 
     @Test fun personasQueueFoldedOpenAndSendNowInEveryStyle() {
@@ -198,12 +223,13 @@ class AssistantQueueShotsTest {
                 rule.onAllNodesWithContentDescription("queued · Persona", substring = true)[0].performClick(); settle()
             }
             shot("queue-open-$suffix")
-            if (rule.onAllNodesWithText("Send now").fetchSemanticsNodes().isNotEmpty()) {
+            // Glass sends at one press and draws no dialog. Brief and Board have no Send now.
+            val sendsNow = s == AppStyle.Glass
+            rule.onAllNodesWithText("Send now").assertCountEquals(if (sendsNow) 1 else 0)
+            if (sendsNow) {
                 rule.onAllNodesWithText("Send now")[0].performClick(); settle()
-                shot("queue-send-now-$suffix", rule.onNode(isDialog()).captureToImage().asAndroidBitmap())
-                rule.onAllNodesWithText("Cancel")[0].performClick(); settle()
-                // Folded again for the next pass.
-                rule.onAllNodesWithContentDescription("queued · Persona", substring = true)[0].performClick(); settle()
+                rule.onAllNodes(isDialog()).assertCountEquals(0)
+                shot("queue-send-now-$suffix")
             }
         }
         // Nothing queued: the page as it was before the queue came to it.

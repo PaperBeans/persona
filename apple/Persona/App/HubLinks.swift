@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PersonaWire
 
 /// One group of paired hubs as the app runs it (docs/protocol/multi-hub.md): its socket, the hello of the hub it is on, and the
 /// per-hub things that came with it. The default group's link is the only one until a second group is paired.
@@ -50,6 +51,7 @@ final class HubLink: Identifiable {
         c.personaNaming = live.personaContracts
         c.sessionLookup = features.contains("sessions_lookup")
         c.sessionList = features.contains("sessions_list")
+        c.sessionsHierarchy = features.contains(ChildSessions.feature)
         #if DEBUG
         c.transport = transportForTests
         #endif
@@ -63,6 +65,10 @@ final class HubLink: Identifiable {
         UserDefaults.standard.bool(forKey: "hubExtensionsAPI." + group)
     }
     var isDemo: Bool { config.isDemo }
+
+    /// The hub folds side sessions into their parent's chat (`SideFold.feature`, #7944): by its hello, or before this
+    /// launch's hello by what the last one said, so a restored list does not show its sides for a moment.
+    var foldsSides: Bool { hello.features.isEmpty ? SideFold.remembered(group) : features.contains(SideFold.feature) }
 
     /// The hub's messaging sources (#2138, docs/extensions/extension-messaging.md): the Feishu screens go through the first.
     private(set) var messagingSources: [ExtensionMessagingSource] = []
@@ -106,6 +112,7 @@ final class HubLink: Identifiable {
         if changed || messagingSources.isEmpty { Task { await refreshMessagingSources() } }
         let ext = f.contains("extensions")
         if !f.isEmpty, ext != Self.remembersExtensions(group) { UserDefaults.standard.set(ext, forKey: "hubExtensionsAPI." + group) }
+        if !f.isEmpty { SideFold.remember(f.contains(SideFold.feature), group: group) }
     }
 }
 

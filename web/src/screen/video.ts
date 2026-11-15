@@ -6,9 +6,9 @@
 // are kept per Mac in this browser, as the display choice is (./displays), and as the iOS app keeps them on the device.
 //
 // What the overlay shows comes from the same instrumentation that would measure the stream, so what is shown equals what
-// was measured; a number that is not measured is left out (undefined), never guessed. Today the web picture is always
-// RFB: the overlay (StatsOverlay, #6558) shows its bitrate and frame rate and the round trip to the hub (./meter,
-// ./probes); the video path's segments, `path` (#6398) and `tier` (#6396) are the interfaces the follow-ups fill.
+// was measured; a number that is not measured is left out (undefined), never guessed. The overlay (StatsOverlay, #6558)
+// shows RFB's bitrate and frame rate and the round trip to the hub (./meter, ./probes), and while video is the picture
+// its own numbers, segments and quality tier (./video-link). `path` (#6398) is the interface the web's own routes fill.
 
 /** Which picture channel a Mac's live screen uses: the hardware **video** channel (smoother, far less bandwidth) or
  *  **VNC/RFB** (always available). Null until the user picks one, so the page can default to video when the computer
@@ -80,17 +80,18 @@ const write = (key: string, value: string | null): void => {
   }
 };
 
-/** Whether this page plays the video channel (#6558). Off for users until the web's video path has been checked on a
- *  real Mac in each browser (#6558's last PR): the page keeps RFB and offers no Picture switcher. A development server
- *  started with VITE_SCREEN_VIDEO=1 turns it on (web/e2e/screen-video.mjs); a production build never does. An object so
- *  the switcher's tests can turn it on. */
-export const webVideo = { plays: import.meta.env.DEV && import.meta.env.VITE_SCREEN_VIDEO === "1" };
+/** Whether this page plays the video channel (#6558). On since it was checked on a real Mac in Chrome, Edge, Safari
+ *  (HEVC) and Firefox (H.264). Where a browser can't play it (no WebCodecs on a plain-http page, no decoder, one that
+ *  fails on the stream) the page keeps RFB on its own and the stats panel says why. False turns the web's video off
+ *  for everyone (the page keeps RFB and offers no Picture switcher), the one line to change if it ever has to go.
+ *  An object so tests can turn it off. */
+export const webVideo = { plays: true };
 
-/** Whether this page's side of the quality tiers drives the stream (#6396, #6558): Quality, the mobile-data card and its
- *  choice (./data-use) are offered only then, and only when the helper's `hello` lists `tiers` too, as the iPhone's
- *  ScreenTiers. Off until the page drives the tiers (#6558's PR 4); a development server started with
- *  VITE_SCREEN_TIERS=1 turns it on to see those (web/e2e/screen-video.mjs); a production build never does. */
-export const webTiers = { supported: import.meta.env.DEV && import.meta.env.VITE_SCREEN_TIERS === "1" };
+/** Whether this page's side of the quality tiers drives the stream (#6396, #6558): the page picks the tier
+ *  (./video-tiers), and Quality, the mobile-data card and its choice (./data-use) are offered, only when the helper's
+ *  `hello` lists `tiers` too, as the iPhone's ScreenTiers. On: the page drives them. An object so tests can turn it off
+ *  (a helper with tiers meeting a page without them). Like everything of the video, users see it once webVideo.plays. */
+export const webTiers = { supported: true };
 
 /** Whether the page offers the picture switcher: this browser plays video and the Mac advertises it. */
 export function videoOffered(screenVideo: unknown): boolean {

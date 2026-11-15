@@ -85,7 +85,7 @@ export function ModelPill({
   const unknown = !shown.model;
   const name = shown.model ?? (loading ? t("chat-modelpill.loading") : failed ? t("chat-modelpill.failed") : t("chat-modelpill.default_model"));
   const describe = (x: PillSetup) =>
-    [agentName(x.engine), x.model ?? name, x.provider, x.effort && effortTitle(x.effort), x.fast && t("chat-sessiondialogs.speed_fast")].filter(Boolean).join(" · ");
+    [agentName(x.engine, x.engineLabel), x.model ?? name, x.provider, x.effort && effortTitle(x.effort), x.fast && t("chat-sessiondialogs.speed_fast")].filter(Boolean).join(" · ");
   const title = pending
     ? t("chat-modelpill.current_and_next", { current: describe(current), next: describe(pending) })
     : [describe(current), failed && !unknown ? t("chat-modelpill.failed") : ""].filter(Boolean).join(" · ");
@@ -93,7 +93,7 @@ export function ModelPill({
   const effort = shown.effort ? effortTitle(shown.effort) : "";
   // what the next message runs on, before its model: the engine when it changes (Cindy's case), else the launcher
   // (Persona's in-session switch, #5035)
-  const target = pending ? (pending.engine !== current.engine ? agentName(pending.engine) : pending.provider) : "";
+  const target = pending ? (pending.engine !== current.engine ? agentName(pending.engine, pending.engineLabel) : pending.provider) : "";
   const label = pending
     ? t(effort ? "chat-modelpill.aria_pending_effort" : "chat-modelpill.aria_pending", { agent: target, model: name, effort })
     : t(effort ? "chat-modelpill.aria_effort" : "chat-modelpill.aria", { model: name, effort });
@@ -120,7 +120,7 @@ export function ModelPill({
       )}
       {/* the engine's mark is the separator before the effort: no "·" */}
       <span aria-hidden data-pill-engine={shown.engine} className={cx("ml-1 flex shrink-0 items-center @max-[520px]/composer:scale-[0.917]", ULTRA_HIDDEN)}>
-        <AgentMark agent={shown.engine} size={12} decorative className="text-ink-2" />
+        <AgentMark agent={shown.engine} label={shown.engineLabel} size={12} decorative className="text-ink-2" />
       </span>
       {shown.effort && (
         <span title={effort} data-pill-effort className={cx("shrink-0 whitespace-nowrap text-ink @max-[600px]/composer:min-w-0 @max-[600px]/composer:shrink @max-[600px]/composer:truncate", ULTRA_HIDDEN)}>

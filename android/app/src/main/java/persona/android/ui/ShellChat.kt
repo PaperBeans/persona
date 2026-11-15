@@ -55,9 +55,25 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
         androidx.compose.material3.CircularProgressIndicator()
         return
     }
-    val key = SessionKey(route.machineId, route.sessionId)
     val sessions by session.sessions.sessions.collectAsStateWithLifecycle()
-    val metadata = sessions.firstOrNull { it.key == key }
+    val routingConnection = wiring?.connection ?: session.connection
+    val routingState by routingConnection.state.collectAsStateWithLifecycle()
+    val routingFeatures = routingConnection.lastHello?.features.orEmpty()
+    val home = rememberChildSessionHome(SessionKey(route.machineId, route.sessionId), sessions, actions,
+        routingFeatures, routingState == ConnectionState.Online, side = route.side)
+    // A link to a side session (#7944: a notification, Needs you, a search hit) opens its parent, then the side over it,
+    // once: Back from the side comes to the parent.
+    val landedSide = remember(home, sessions, routingFeatures) { home.shownSide(sessions, routingFeatures) }
+    var sideShown by rememberSaveable(route.machineId, route.sessionId, requestId) { mutableStateOf(false) }
+    LaunchedEffect(landedSide) {
+        val side = landedSide ?: return@LaunchedEffect
+        if (sideShown) return@LaunchedEffect
+        sideShown = true
+        val chat = ChatRoute(side.machineId, side.sessionId, ConversationKind.Agent, side = true)
+        navigator.navigate(requestId?.let { InteractionRoute(chat, it) } ?: chat)
+    }
+    val key = home.key
+    val metadata = (sessions + home.rows).firstOrNull { it.key == key }
     val managerChoice by AssistantManagerChoice.current.collectAsStateWithLifecycle()
     val managerId = metadata?.manager ?: managerChoice.shown
     val assistantManagement = remember(wiring?.assistantManagement, managerId) {
@@ -107,10 +123,13 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
                     onGit = if (filesAvailable && git?.isRepo == true) ({ open(FilesPane.Git) }) else null,
                     gitLabel = "Git${git?.files?.size?.takeIf { it > 0 }?.let { " · $it" }.orEmpty()}",
                     actions = actions, connection = wiring?.connection ?: session.connection, requestId = requestId, covered = pane != null || terminalOpen,
+                    childSessionId = home.childSessionId.takeIf { landedSide == null },
+                    lookupRows = home.rows,
                     worktrees = wiring?.worktrees,
                     assistantManagement = assistantManagement,
                     leaderConversations = assistantSnapshot.leaders.toSet(),
                     onOpenSession = { navigator.navigate(ChatRoute(it.machineId, it.sessionId)) },
+                    onOpenSide = { navigator.navigate(ChatRoute(it.machineId, it.sessionId, ConversationKind.Agent, side = true)) },
                     onFollowSession = { onGroupGone(route, route.copy(machineId = it.machineId, sessionId = it.sessionId)) },
                     waiting = waiting,
                     onOpenRequest = { chat, request ->
@@ -143,7 +162,7 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
                 onContextCleared = { navigator.navigate(ChatRoute(it.machineId, it.sessionId)) })
             if (pane != null && filesAvailable) {
                 BackHandler { pane = null; openedPath = null; openedLine = null }
-                SessionFilesScreen(route, cwd, requireNotNull(session.files), { pane = null; openedPath = null; openedLine = null }, { path ->
+                SessionFilesScreen(route.copy(sessionId = key.sessionId), cwd, requireNotNull(session.files), { pane = null; openedPath = null; openedLine = null }, { path ->
                     composer.value = insertFilePath(composer.value, path, insertionFocused)
                     pane = null
                     openedPath = null

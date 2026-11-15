@@ -91,9 +91,7 @@ func TestFixedTaskHealthChangesBetweenPreviewDispatchAndRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, "retry failure", func() bool {
-		s.tasks.mu.Lock()
-		busy := s.tasks.retrying[todoID]
-		s.tasks.mu.Unlock()
+		busy := s.taskStartOnWay(todoID)
 		return !busy && todoNow(s, todoID).StartError != ""
 	})
 	if starts := taskStartMachines(f); len(starts) != 0 {

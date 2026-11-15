@@ -6,7 +6,7 @@
   "not_now_title": "30 天内不再建议",
   "joined": "{first}{second}",
   "list_separator": "、",
-  "creates_plan_start": "点「总是」会记住这类任务：在 {machine} 的 {directory} 里改文件的任务不再询问，直接开始。",
+  "creates_plan_start": "点「总是」会记住这类任务：在 {machine} 的 {directory} 及其子目录里改文件的任务不再询问，直接开始。",
   "creates_standing": "点「总是」会为 {machine} 的 {directory} 新增一条长期授权：{action}。",
   "creates_conditions": "仅在满足这些条件时：{conditions}。",
   "creates_quote": "记为你的原话：「{quote}」。",

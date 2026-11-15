@@ -77,7 +77,8 @@ export function SessionInfoDialog({ session, machineName, open, onClose }: { ses
               {t("chat-sessiondialogs.open_in_lark")}
             </Button>
           )}
-          {!session.assistant && (
+          {/* none for a runtime's session (resumeCommand): its runtime keeps it */}
+          {!session.assistant && resumeCommand(session) && (
             <Button tone="secondary" icon="terminal" onClick={() => copyText(resumeCommand(session))}>
               {t("chat-sessiondialogs.copy_resume_command")}
             </Button>

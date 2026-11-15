@@ -390,6 +390,8 @@ it("an unknown tool's subject is its most telling field", () => {
   expect(pickSubject({ title: "T", description: "D" })).toBe("D");
   expect(pickSubject({ path: "/a/b/Store.swift", query: "q" })).toBe("Store.swift");
   expect(pickSubject({ zeta: "z", alpha: " a ", n: 3 })).toBe("a");
+  expect(pickSubject({ zeta: "z", zz_persona_clipped: { note: "Omitted 8 array items" } })).toBe("z");
+  expect(pickSubject({ values: [["short", 42]], zz_persona_clipped: { note: "Omitted 8 array items" } })).toBe("");
   expect(pickSubject({ n: 3 })).toBe("");
 });
 

@@ -6,7 +6,7 @@
   "not_now_title": "30 日間は提案しない",
   "joined": "{first}{second}",
   "list_separator": "、",
-  "creates_plan_start": "「常に」を押すと、この種類のタスクを記憶します。{machine} の {directory} でファイルを変更するタスクは確認なしで開始されます。",
+  "creates_plan_start": "「常に」を押すと、この種類のタスクを記憶します。{machine} の {directory} とそのサブフォルダでファイルを変更するタスクは確認なしで開始されます。",
   "creates_standing": "「常に」を押すと、{machine} の {directory} に継続的な承認を追加します：{action}。",
   "creates_conditions": "次の条件を満たす場合のみ：{conditions}。",
   "creates_quote": "あなたの言葉として保存：「{quote}」。",

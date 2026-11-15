@@ -9,5 +9,6 @@
   "team": "Team",
   "background": "Background tasks",
   "task": "Task",
-  "agent": "Agent"
+  "agent": "Agent",
+  "sides": "Side sessions"
 }

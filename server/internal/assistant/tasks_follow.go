@@ -17,16 +17,34 @@ import (
 
 // taskAgents are the sessions of t's active agents, as the clients see them (with state).
 func (s *Service) taskAgents(ctx context.Context, t Todo) []proto.Session {
+	return s.taskAgentsIn(ctx, t, machineSessions{})
+}
+
+// machineSessions are the machines' session lists read so far in one pass over many tasks (taskAgentsIn), by
+// machine: each machine is listed once for all of them, not once per task (#3029). A failed read is kept too.
+type machineSessions map[string]machineList
+
+type machineList struct {
+	list []proto.Session
+	err  error
+}
+
+// taskAgentsIn is taskAgents with the lists already read in this pass; the machines it lists are added to lists.
+func (s *Service) taskAgentsIn(ctx context.Context, t Todo, lists machineSessions) []proto.Session {
 	var out []proto.Session
 	for _, a := range t.Agents {
 		if a.ReleasedAt != nil || a.DismissedAt != nil {
 			continue
 		}
-		list, err := s.sessions(ctx, a.MachineID)
-		if err != nil {
+		l, ok := lists[a.MachineID]
+		if !ok {
+			l.list, l.err = s.sessions(ctx, a.MachineID)
+			lists[a.MachineID] = l
+		}
+		if l.err != nil {
 			continue
 		}
-		for _, c := range list {
+		for _, c := range l.list {
 			if c.SessionID == a.SessionID {
 				out = append(out, c)
 				break
@@ -641,14 +659,70 @@ func (s *Service) routeToTaskAs(ctx context.Context, conversation, todoID, text,
 		if relay != "" {
 			return FeedItem{}, i18n.Err("assistant-tasks.route_agents_stopped")
 		}
+		// One new agent per task at a time: a second message while it starts (the owner's next line, or the same one
+		// sent again after the app stopped waiting) goes to the agent that start brings up, not to a second one.
+		st, ok := s.claimTaskStart(todoID)
+		if !ok {
+			return s.routeAfterStart(ctx, conversation, todoID, text, guard, st)
+		}
+		// A start that ended between the look at the agents and the claim linked its agent: the text is that one's.
+		if c, ok := s.newlyLinkedAgent(t, todoID); ok {
+			s.endTaskStart(todoID, st, proto.Session{})
+			return s.sendToTaskAgent(ctx, conversation, todoID, c, text, relay, guard)
+		}
 		started, err := s.startTaskSuccessor(ctx, t, last, text)
+		s.endTaskStart(todoID, st, started) // empty when it failed: a message that waited for it starts one itself
 		if err != nil {
 			return FeedItem{}, err
 		}
 		return s.appendFeed(ctx, conversation, feedRouted, todoID, map[string]string{"text": text,
 			"new_agent": started.SessionID, "new_agent_machine": started.MachineID})
 	}
-	c := pickTaskAgent(live)
+	return s.sendToTaskAgent(ctx, conversation, todoID, pickTaskAgent(live), text, relay, guard)
+}
+
+// routeAfterStart waits for task todoID's agent start st, then sends text to the new agent it started; a start that
+// started none (it failed, or was not a new agent's) has the message routed again, which may start one. The wait goes
+// on when the app stops waiting, as the start does, so the text is not lost; it is bounded by taskStartWait.
+func (s *Service) routeAfterStart(ctx context.Context, conversation, todoID, text string, guard func(Todo) bool, st *taskStart) (FeedItem, error) {
+	timer := time.NewTimer(taskStartWait())
+	defer timer.Stop()
+	select {
+	case <-st.done:
+	case <-timer.C:
+		return FeedItem{}, i18n.Err("assistant-tasks.route_starting")
+	}
+	s.tasks.mu.Lock()
+	c := st.agent
+	s.tasks.mu.Unlock()
+	if c.SessionID == "" {
+		return s.routeToTaskAs(context.WithoutCancel(ctx), conversation, todoID, text, "", guard)
+	}
+	s.logf("task %s: a message waited for its new agent %s/%s", todoID, c.MachineID, short(c.SessionID))
+	return s.sendToTaskAgent(context.WithoutCancel(ctx), conversation, todoID, c, text, "", guard)
+}
+
+// newlyLinkedAgent is an agent linked to task todoID since t was read, still active: one a start that ended meanwhile
+// brought up, which its machine may not list yet.
+func (s *Service) newlyLinkedAgent(t Todo, todoID string) (proto.Session, bool) {
+	cur, ok := s.todoNow(todoID)
+	if !ok {
+		return proto.Session{}, false
+	}
+	seen := map[SessionRef]bool{}
+	for _, a := range t.Agents {
+		seen[SessionRef{MachineID: a.MachineID, SessionID: a.SessionID}] = true
+	}
+	for _, a := range cur.Agents {
+		if a.ReleasedAt == nil && a.DismissedAt == nil && a.StartError == "" && !seen[SessionRef{MachineID: a.MachineID, SessionID: a.SessionID}] {
+			return proto.Session{MachineID: a.MachineID, SessionID: a.SessionID, Cwd: a.Cwd, Agent: a.Agent}, true
+		}
+	}
+	return proto.Session{}, false
+}
+
+// sendToTaskAgent sends text to c, an agent of task todoID, and keeps it in conversation's feed (routeToTaskAs).
+func (s *Service) sendToTaskAgent(ctx context.Context, conversation, todoID string, c proto.Session, text, relay string, guard func(Todo) bool) (FeedItem, error) {
 	if _, ok := s.device(ctx, c.MachineID); !ok {
 		return FeedItem{}, i18n.Err("assistant-tasks.route_offline")
 	}

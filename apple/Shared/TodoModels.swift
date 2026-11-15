@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import PersonaWire
 
 /// How far a todo's work got, as the hub sends it in `TodoItem.stage` (#2776): the six steps, in order. A hub that
 /// sends nothing, or a name this build does not know (an older or a newer hub), has none, and no stage bar is drawn.
@@ -62,8 +63,9 @@ nonisolated extension TodoItem {
 
     /// An open task its supervisor accepted, reopened by the hub when its agent got more work, with nothing of it
     /// running or asking now: it reads Accepted, not Follow Up (#3156, docs/assistant/todo-status-sop.md "Accepted tasks").
+    /// An open concern still waits for its report, so acceptance gives it neither that word nor Done styling (#3582).
     func acceptedAtRest(_ state: TaskState) -> Bool {
-        doneAt == nil && acceptanceStands && (state == .followup || state == .unread || state == .notStarted)
+        !isConcern && doneAt == nil && acceptanceStands && (state == .followup || state == .unread || state == .notStarted)
     }
 
     /// The state a row draws its tone and mark from: Done for an accepted task at rest, else its own.

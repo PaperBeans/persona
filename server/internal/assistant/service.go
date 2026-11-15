@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/assistant/saved"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/prompts"
@@ -156,21 +157,22 @@ type Service struct {
 	noBackground bool
 	// briefsOptional: task_plan takes a task without done_when / expect_minutes (briefRequired). Only the tests of
 	// what a plan does once it exists set it; the hub never does.
-	briefsOptional  bool
-	background      backgroundBook  // supervise_background.go
-	autoRuns        autoReviewBook  // supervise_autoreview.go
-	reports         reportBook      // reports.go
-	upReports       reportRate      // agent_control.go: report_to_supervisor
-	noteRate        reportRate      // todo_decisions.go: todo_decision_add
-	dispatch        dispatchBook    // dispatch.go: dispatch_start, dispatch_read
-	admission       admissionBook   // admission.go: execution-agent resource and direction gate
-	adoptMu         sync.Mutex      // agent_control.go: one agent_supervise at a time
-	placeBook       placeBook       // places.go
-	savedPromptBook savedPromptBook // saved_prompts.go
-	accept          acceptBook      // acceptance.go
-	deploy          deployProbe     // deploy_check.go: is the work in the running hub
+	briefsOptional bool
+	background     backgroundBook // supervise_background.go
+	autoRuns       autoReviewBook // supervise_autoreview.go
+	reports        reportBook     // reports.go
+	upReports      reportRate     // agent_control.go: report_to_supervisor
+	noteRate       reportRate     // todo_decisions.go: todo_decision_add
+	dispatch       dispatchBook   // dispatch.go: dispatch_start, dispatch_read
+	admission      admissionBook  // admission.go: execution-agent resource and direction gate
+	adoptMu        sync.Mutex     // agent_control.go: one agent_supervise at a time
+	placeBook      placeBook      // places.go
+	accept         acceptBook     // acceptance.go
+	pushQuiet      quietSwitch    // push_quiet.go: the hub's low-distraction switch as last read
+	deploy         deployProbe    // deploy_check.go: is the work in the running hub
 
 	reviewDismissals taskReviewDismissalBook // task_review_dismissals.go
+	repoRootsMu      sync.Mutex              // pr_number_ref.go: one write of the repository roots at a time
 	// ownerVerifiesAll: every deployed task asks the owner to verify, not only the big ones (ownerVerifies; tests).
 	ownerVerifiesAll bool
 	later            laterBook    // later.go: questions that can wait for a briefing
@@ -274,6 +276,7 @@ func New(o Options) *Service {
 	s.northStarRoutes()
 	s.reporterRoutes()
 	s.directionRoutes()
+	s.dispatchPolicyRoutes() // dispatch_policy_routes.go
 	s.directionTreeRoutes()
 	s.routeRoutes()
 	s.agentRouteRoutes()
@@ -288,7 +291,7 @@ func New(o Options) *Service {
 	s.workoutRoutes()
 	s.scheduleRoutes()
 	s.placeRoutes()
-	s.savedPromptRoutes()
+	saved.Register(saved.Host{Store: func() any { return s.store() }, Event: s.event, Handle: s.handle, Full: fullRole, BodyErr: writeBodyErr})
 	s.repositoryRoutes()
 	s.taskRoutes()
 	s.viewActionRoutes()
@@ -550,13 +553,21 @@ func (s *Service) kbReady(ctx context.Context) bool { return s.kbOn(ctx) }
 
 // push asks the hub to push n to the user (notify.request).
 func (s *Service) push(ctx context.Context, n Notification) {
+	_, _ = s.pushResult(ctx, n)
+}
+
+// pushResult is push with the hub's answer: Held/reason say ln mode kept the notice for the briefing instead of
+// alerting the phone (notify_user shows that to the model).
+func (s *Service) pushResult(ctx context.Context, n Notification) (NotifyResult, error) {
 	n.ID, n.Kind = "ntf_"+randomHex(8), NotifyPush
 	if n.Asked { // the conversation pushed what matters itself: its own finished push is left out (fleet_push.go)
 		s.noteAsked(n.SessionID)
 	}
-	if err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
+	res, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n})
+	if err != nil {
 		s.logf("assistant: push: %v", err)
 	}
+	return res, err
 }
 
 // event tells the apps what changed (ws.broadcast: the hub sends ev to them as it is).

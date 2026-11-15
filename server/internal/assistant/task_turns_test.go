@@ -376,7 +376,7 @@ func TestCompletionUnseenNotSupervisedOrClosed(t *testing.T) {
 		f.setItems(turnPage("turn-1", "修好了", true)...)
 		nodeListed(s, f, turnRow(proto.StatusDone, 3, "修好了"))
 		wantTurns(t, "the turn", oneEach, s, todo.ID, f)
-		raw, _ := json.Marshal(map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "看过了"})
+		raw, _ := json.Marshal(map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "看过了", "checks": completeReviewChecks(todoNow(s, todo.ID))})
 		if _, err := s.runTool(ctx, "server", "conv1", "task_review", raw); err != nil {
 			t.Fatal(err)
 		}

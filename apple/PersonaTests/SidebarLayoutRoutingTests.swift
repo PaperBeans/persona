@@ -87,13 +87,23 @@ struct SidebarLayoutRoutingTests {
     }
 
     @Test func theChoiceAndThePlaces() {
-        #expect(NavigationLayout.allCases == [.separate, .sidebar])
+        #expect(NavigationLayout.allCases == [.sidebar, .separate])
         #expect(NavigationLayout(rawValue: "sidebar") == .sidebar)
         #expect(NavigationLayout.key == "app.navigation")
         #expect(!NavigationLayout.separate.title.isEmpty && !NavigationLayout.sidebar.summary.isEmpty)
         // The places the sidebar lists are shaded while beside it; a conversation and New Chat are not places.
         #expect(ShellPage.inbox.isSidebarPlace && ShellPage.machines.isSidebarPlace && ShellPage.messages.isSidebarPlace)
         #expect(!ShellPage.conversation.isSidebarPlace && !ShellPage.newConversation.isSidebarPlace && !ShellPage.profile.isSidebarPlace)
+    }
+
+    /// Nothing picked: Merged where wide (the iPad, the open Duo), Separate at compact width; a pick holds at every
+    /// width (#4206).
+    @Test func nothingPickedIsMergedWhereWide() {
+        #expect(NavigationLayout.effective(picked: "", regular: true) == .sidebar)
+        #expect(NavigationLayout.effective(picked: "", regular: false) == .separate)
+        #expect(NavigationLayout.effective(picked: "separate", regular: true) == .separate)
+        #expect(NavigationLayout.effective(picked: "sidebar", regular: false) == .sidebar)
+        #expect(NavigationLayout.effective(picked: "unknown", regular: true) == .sidebar)
     }
 }
 #endif

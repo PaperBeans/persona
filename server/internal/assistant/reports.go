@@ -3,6 +3,8 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -170,6 +172,14 @@ var generalTaskWords = lazyre.New(`(?i)\b(research|investigate|report|plan|triag
 func (s *Service) advanceTaskReply(ctx context.Context, t Todo, machine, session, text string) bool {
 	stage, pr := stageOf(text)
 	d, marked := deliveryMark(text)
+	if pr != "" {
+		s.learnRepoRoot(ctx, machine, session, pr)
+	} else if pr = s.prFromNumber(ctx, t, machine, session, text); pr != "" && stage == "develop" && !marked {
+		stage = "review" // as stageOf has it for a linked PR (#7921)
+		if said(mergedWords, text) {
+			stage = "merge"
+		}
+	}
 	if !marked && stageIndex(stage) < stageIndex("merge") && pr == "" && t.PRURL != "" && said(mergedWords, text) {
 		stage = "merge" // later replies need not repeat the link already kept on the task
 	}
@@ -249,6 +259,64 @@ const stagePRsKept = 20
 func keptPRs(prs []string, pr string) []string {
 	out := append(slices.DeleteFunc(slices.Clone(prs), func(p string) bool { return p == pr }), pr)
 	return out[max(0, len(out)-stagePRsKept):]
+}
+
+// forgetTaskPR removes a confirmed non-PR from both current and historical delivery links before publishing it.
+func (s *Service) forgetTaskPR(ctx context.Context, id, pr string) error {
+	b := &s.reports
+	b.stageWriting.Lock()
+	defer b.stageWriting.Unlock()
+	b.mu.Lock()
+	if !s.loadStagesLocked(ctx) {
+		b.mu.Unlock()
+		return fmt.Errorf("task %s: stages could not be read", id)
+	}
+	cur := b.stages[id]
+	removed := cur.PR == pr
+	history := slices.DeleteFunc(slices.Clone(cur.PRs), func(p string) bool { return p == pr })
+	changed := removed || len(history) != len(cur.PRs)
+	cur.PRs = history
+	if removed {
+		cur.PR = ""
+		if len(cur.PRs) > 0 {
+			cur.PR = cur.PRs[len(cur.PRs)-1]
+			cur.PRs = cur.PRs[:len(cur.PRs)-1]
+		}
+		if cur.PR == "" && !cur.Verified && (cur.Stage == "review" || cur.Stage == "merge") {
+			cur.Stage = "develop"
+		}
+	}
+	if cur.Deploy != nil && cur.Deploy.PR == pr {
+		cur.Deploy, changed = nil, true
+	}
+	if removed && cur.PR == "" && cur.Delivery != nil &&
+		(cur.Delivery.State == deliveryPR || cur.Delivery.State == deliveryMerged) {
+		cur.Delivery = nil
+	}
+	if !changed {
+		b.mu.Unlock()
+		return nil
+	}
+	stages := maps.Clone(b.stages)
+	stages[id] = cur
+	if st := s.store(); st != nil {
+		if err := st.PutSetting(ctx, reportStagesKey, stages); err != nil {
+			b.mu.Unlock()
+			return fmt.Errorf("task %s: remove non-PR: %w", id, err)
+		}
+	}
+	b.stages = stages
+	b.mu.Unlock()
+	s.todos.mu.Lock()
+	if t := s.todos.todos[id]; t != nil {
+		t.Stage, t.PRURL, t.PRs, t.Delivery = cur.Stage, cur.PR, cur.PRs, cur.Delivery
+	}
+	s.todos.mu.Unlock()
+	s.deploy.mu.Lock()
+	delete(s.deploy.seen, id)
+	s.deploy.mu.Unlock()
+	s.todosChanged(ctx)
+	return nil
 }
 
 // taskReport notes a change of task t for the next card. ix: what it asks (needs).
@@ -427,6 +495,7 @@ func (s *Service) sendReports() {
 		return
 	}
 	var keep, asks []*reportItem // asks: decisions whose own card goes out without a line in the report (only_conclusions)
+	quiet := s.quietModeOn(ctx)
 	for _, it := range items {
 		t, ok := s.todoNow(it.todo)
 		if !ok {
@@ -440,6 +509,14 @@ func (s *Service) sendReports() {
 		}
 		if t.Quiet && f.Sync && it.state != reportClosed {
 			continue // told in the main conversation, whose turns the chat mirrors (sync); closing is not told there
+		}
+		if quiet {
+			// Low-distraction mode (push_quiet.go): no progress, stuck or conclusion lines in the chat; the briefing and the
+			// board have them. A decision still gets its own answerable card.
+			if it.state == reportNeeds && it.ix != nil {
+				asks = append(asks, it)
+			}
+			continue
 		}
 		if !f.ReportSteps {
 			if it.state == reportNeeds && it.ix != nil {

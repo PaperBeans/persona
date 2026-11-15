@@ -6,6 +6,7 @@ import SwiftUI
 import UIKit
 #endif
 import UserNotifications
+import PersonaWire
 
 /// App-wide state: server pairing, live connection, machines, sessions, interactions and per-session chats.
 @Observable
@@ -63,43 +64,116 @@ final class AppModel {
     private(set) var machineChoices: [MachineChoice] = []
     /// `machines` without watching it, as `sessionsNow`: for `namedMachine(_:)` / `namedMachines`.
     @ObservationIgnored private(set) var machinesNow: [Machine] = []
+    /// Every machine's sessions as the hub sent them, side sessions too. The lists and every count read `allSessions`,
+    /// where a side session is folded into its parent's chat (`sessionsChanged`); a session's own page looks it up by key.
     private(set) var sessionsByMachine: [MachineRef: [Session]] = [:] {
-        didSet {
-            allSessions = sessionsByMachine.values.flatMap { $0 }
-            sessionsNow = allSessions
-            let going = DockAgent.going(scoped(allSessions))
-            if going != goingAgents { goingAgents = going }
-            let lists = AssistantLists(allSessions, group: hub?.group ?? "", shown: assistantShown)
-            if lists != assistantLists { assistantLists = lists }
-            var index: [SessionKey: Session] = [:]
-            for (machine, sessions) in sessionsByMachine {
-                for session in sessions {
-                    let key = SessionKey(group: machine.group, machineID: machine.id, sessionID: session.sessionID)
-                    if index[key] == nil {
-                        index[key] = session
-                        chats[key]?.updateSendFeedback(session, previous: sessionIndex[key])
-                    }
+        didSet { sessionsChanged() }
+    }
+
+    /// What follows a change of the lists, the one place they land: folded once (`SideFold`, #7944; never in a view's
+    /// body, docs/apple/performance.md P4/P5), then the index, the cells the views watch, the counts and the snapshot.
+    private func sessionsChanged() {
+        var raw = sessionsByMachine.values.flatMap { $0 }
+        var groups = Set(links.lazy.filter(\.foldsSides).map(\.group))
+        #if DEBUG
+        // `-showSideSessions …`: sample side sessions under the open session, for screenshots (`SideSessionSamples`).
+        sampleSides = []
+        if let samples = SideSessionSamples.rows(raw) {
+            raw += samples.rows
+            groups.insert(samples.group)
+            sampleSides = samples.rows
+        }
+        #endif
+        // A paged window (`roots=1`) holds no side: the ones the child index read for an open parent fold in too, so its
+        // chip and sheet list them and a side's page finds its row (#7944).
+        var indexedSides: [Session] = []
+        if !groups.isEmpty {
+            let read = childIndex.heldNow.values.flatMap { $0 }.filter { groups.contains($0.group) && SideFold.isSideRow($0) }
+            if !read.isEmpty {
+                let held = Set(raw.map(\.key))
+                indexedSides = read.filter { !held.contains($0.key) }
+                raw += indexedSides
+            }
+        }
+        let fold = SideFold.fold(raw, groups: groups)
+        sideFoldGroups = groups
+        sideFold = fold
+        allSessions = fold.listed
+        sessionsNow = allSessions
+        let going = DockAgent.going(scoped(allSessions))
+        if going != goingAgents { goingAgents = going }
+        let lists = AssistantLists(allSessions, group: hub?.group ?? "", shown: assistantShown)
+        if lists != assistantLists { assistantLists = lists }
+        var index: [SessionKey: Session] = [:]
+        for (machine, sessions) in sessionsByMachine {
+            for session in sessions {
+                let key = SessionKey(group: machine.group, machineID: machine.id, sessionID: session.sessionID)
+                if index[key] == nil {
+                    index[key] = session
+                    chats[key]?.updateSendFeedback(session, previous: sessionIndex[key])
                 }
             }
-            sessionIndex = index
-            for (key, cell) in sessionCells where !Session.sameForItsPage(cell.value, index[key]) { cell.value = index[key] }
-            for (key, cell) in sessionLineCells where !Session.sameApartFromTicks(cell.value, index[key]) { cell.value = index[key] }
-            for (key, cell) in workflowCells {
-                let run = index[key.session]?.workflows?.first { $0.toolUseID == key.call }
-                if cell.value != run { cell.value = run }
-            }
-            dropSpentUltracodeAsks()
-            // Only the spaces a view watches (`siblings(of:)`): working out every space's tabs sorted each one on every
-            // push, with no chat open to show them (#343).
-            if !spaceCells.isEmpty {
-                let watched = allSessions.filter { $0.spaceKey.map { spaceCells[$0] != nil } ?? false }
-                let spaces = Self.liveBySpace(watched)
-                for (space, cell) in spaceCells where !Self.sameForTheirPages(cell.value, spaces[space] ?? []) { cell.value = spaces[space] ?? [] }
-            }
-            countBadges()
-            saveSnapshot()
         }
+        #if DEBUG
+        for s in sampleSides where index[s.key] == nil { index[s.key] = s }
+        #endif
+        for s in indexedSides where index[s.key] == nil { index[s.key] = s }
+        sessionIndex = index
+        for (key, cell) in sideCells {
+            let now = SideSessions(fold, parent: key)
+            if cell.value != now { cell.value = now }
+        }
+        for (key, cell) in sessionCells where !Session.sameForItsPage(cell.value, index[key]) { cell.value = index[key] }
+        for (key, cell) in sessionLineCells where !Session.sameApartFromTicks(cell.value, index[key]) { cell.value = index[key] }
+        for (key, cell) in workflowCells {
+            let run = index[key.session]?.workflows?.first { $0.toolUseID == key.call }
+            if cell.value != run { cell.value = run }
+        }
+        dropSpentUltracodeAsks()
+        refreshChildFolds()
+        // Only the spaces a view watches (`siblings(of:)`): working out every space's tabs sorted each one on every
+        // push, with no chat open to show them (#343).
+        if !spaceCells.isEmpty {
+            let watched = allSessions.filter { $0.spaceKey.map { spaceCells[$0] != nil } ?? false }
+            let spaces = Self.liveBySpace(watched)
+            for (space, cell) in spaceCells where !Self.sameForTheirPages(cell.value, spaces[space] ?? []) { cell.value = spaces[space] ?? [] }
+        }
+        countBadges()
+        saveSnapshot()
     }
+
+    /// The lists are folded again when a hub's hello says it folds side sessions now, or no longer.
+    func refoldSides() {
+        if Set(links.lazy.filter(\.foldsSides).map(\.group)) != sideFoldGroups { sessionsChanged() }
+    }
+    /// The side-session fold of the lists as they are now (`SideFold`, #7944): which rows went under which parent, each
+    /// parent's sides and their rollup. Empty without the feature. A view reads a parent's through `sides(of:)`.
+    @ObservationIgnored private(set) var sideFold = SideFold.Result()
+    /// The groups whose hub folds side sessions, as the lists were last folded for.
+    @ObservationIgnored private(set) var sideFoldGroups: Set<String> = []
+    /// One observable cell per parent a view shows the sides of (`sides(of:)`): its chat's chip and sheet are drawn again
+    /// when what they show of its sides changes, not on every push.
+    @ObservationIgnored private var sideCells: [SessionKey: SidesCell] = [:]
+    #if DEBUG
+    @ObservationIgnored private var sampleSides: [Session] = []
+    #endif
+
+    /// A parent's side sessions, for views about it (its chat's chip, ⋯ and sheet).
+    func sides(of key: SessionKey) -> SideSessions {
+        if let cell = sideCells[key] { return cell.value }
+        let cell = SidesCell(SideSessions(sideFold, parent: key))
+        sideCells[key] = cell
+        return cell.value
+    }
+
+    /// The side session whose chat shows a card; nil for a card that is no side's.
+    func sideChat(of ix: Interaction) -> SessionKey? {
+        SideFold.chat(ix, fold: sideFold, on: sideFoldGroups.contains(ix.group))
+    }
+
+    /// The parent whose chat a folded side session lives in; nil for any other session.
+    func sideParent(of key: SessionKey) -> SessionKey? { sideFold.home[key] }
+
     private(set) var allSessions: [Session] = []
     /// The Persona conversations (`assistantConversations`, `archivedConversations`).
     private var assistantLists = AssistantLists([], group: "")
@@ -198,8 +272,18 @@ final class AppModel {
     /// over the picture.
     var computerActivities: [MachineRef: ComputerActivity] = [:]
     var openChat: SessionKey? {
-        didSet { if openChat != nil { agentsNavigationRevision += 1 } }
+        didSet {
+            // A side session lives in its parent's chat (#7944): a notification, a Needs You card or a link that names one
+            // opens the parent with it shown (ChatView takes `sideLanding`).
+            if let k = openChat, let parent = sideFold.home[k] {
+                sideLanding = SideLanding(parent: parent, side: sideFold.chat[k] ?? k)
+                openChat = parent
+            }
+            if openChat != nil { agentsNavigationRevision += 1 }
+        }
     }
+    /// The side session to show over its parent's chat once that chat is on screen (`openChat`); taken by the chat.
+    var sideLanding: SideLanding?
     /// Cancels deferred list resets even after a newer targeted open has already been consumed.
     @ObservationIgnored private(set) var agentsNavigationRevision = 0
     /// An explicit Agents-tab selection returns to its list; targeted opens do not change this request.
@@ -485,6 +569,10 @@ final class AppModel {
         }
         #if os(iOS)
         HomeWidgetWriter.shared.source = { [weak self] in self?.homeSnapshotSource() }
+        // A tool call asked iOS for a source's permission (#7659): a refused source's tools leave the hub's list.
+        NotificationCenter.default.addObserver(forName: .phoneAccessAnswered, object: nil, queue: .main) { @Sendable [weak self] _ in
+            MainActor.assumeIsolated { self?.registerPhone() }
+        }
         #endif
         #if os(iOS) || os(visionOS)
         if registryUnreadable {
@@ -980,6 +1068,14 @@ final class AppModel {
         if let b = m.browser, b.enabled, b.screenSharing, let v = b.screenVideo, v.advertised { return v }
         return nil
     }
+    /// Pixel scrolling as the extension showing this Mac's screen reports it (#7775): whether its node reads scroll records
+    /// and Persona Input may post them; nil when no shown extension's node reads them.
+    func screenInput(_ ref: MachineRef) -> MachineScreenInput? {
+        guard let m = machine(ref) else { return nil }
+        if let c = m.computer, c.enabled, c.screenSharing, let i = c.screenInput, i.reads { return i }
+        if let b = m.browser, b.enabled, b.screenSharing, let i = b.screenInput, i.reads { return i }
+        return nil
+    }
     nonisolated static func advertisesVideo(_ m: Machine) -> Bool {
         (m.computer.map { $0.enabled && $0.screenSharing && ($0.screenVideo?.advertised ?? false) } ?? false)
             || (m.browser.map { $0.enabled && $0.screenSharing && ($0.screenVideo?.advertised ?? false) } ?? false)
@@ -1334,7 +1430,23 @@ final class AppModel {
     }
 
     /// Routes a notification / deep link to the right tab; `latestAnswer` lands on the start of the agent's last answer.
-    func open(_ key: SessionKey, latestAnswer: Bool = false) {
+    /// A child whose parent row is already in hand opens that parent, with the child's card revealed. Anything else
+    /// opens immediately. A child whose row is not loaded yet is looked up in the background (`refreshSessionDetail`),
+    /// and moves to the parent only when that parent row exists.
+    func open(_ key: SessionKey, latestAnswer: Bool = false, reveal: String? = nil) {
+        // A side session lives in its parent's chat (#7944): its parent opens with the side shown over it, not with a
+        // child's card revealed (`openChat` turns it into the parent and `sideLanding`).
+        if reveal == nil, sideFold.home[key] == nil, let home = localChildHome(key), home.key != key {
+            moveDraft(from: key, to: home.key)
+            open(home.key, latestAnswer: latestAnswer, reveal: home.childID)
+            return
+        }
+        if let reveal {
+            revealToken += 1
+            revealChild = ChildReveal(sessionID: reveal, token: revealToken)
+        } else {
+            revealChild = nil
+        }
         if latestAnswer { latestAnswerFor = key }
         if session(key)?.assistant == true {
             // A conversation of another group's Persona: that group's Persona. Also off the shell's Settings sheet and back
@@ -1351,7 +1463,61 @@ final class AppModel {
     }
 
     func interactions(for key: SessionKey) -> [Interaction] {
-        pendingInteractions.filter { $0.sessionKey == key }
+        pendingInteractions.filter { ix in
+            if ix.sessionKey == key { return true }
+            // A folded child's card is shown on the parent, and only when that parent row is in hand. A row of a side
+            // session's chat (`folded_side`, #7944) is shown in that side's chat too.
+            guard ix.machineID == key.machineID, ix.group == key.group,
+                  ix.requestHome == key.sessionID || ix.foldedSide == key.sessionID else { return false }
+            return session(key) != nil
+        }
+    }
+
+    /// Folded children of an open session. One cell per parent, filled when the lists land: a view reads that cell,
+    /// not every agent (`sessionsNow` and `childIndex.knownNow` are not watched).
+    func childRows(_ parent: SessionKey) -> [Session] {
+        if let cell = childFoldCells[parent] { return cell.rows }
+        let cell = ChildFoldCell(foldedChildren(parent))
+        childFoldCells[parent] = cell
+        return cell.rows
+    }
+
+    /// Every row folded under `parent` that this app holds, its side sessions too: what is still missing is read by it.
+    private func everyFoldedChild(_ parent: SessionKey) -> [Session] {
+        ChildSessions.children(of: parent, in: sessionsNow + childIndex.knownNow(parent))
+    }
+
+    private func foldedChildren(_ parent: SessionKey) -> [Session] {
+        let rows = everyFoldedChild(parent)
+        // A side session is no child card in its parent's chat: its chip and sheet have it (#7944, `SideFold`).
+        guard sideFoldGroups.contains(parent.group) else { return rows }
+        return rows.filter { !SideFold.isSideRow($0) }
+    }
+
+    private func refreshChildFold(_ parent: SessionKey) {
+        guard let cell = childFoldCells[parent] else { return }
+        let rows = foldedChildren(parent)
+        if cell.rows != rows { cell.rows = rows }
+    }
+
+    /// The child index read `parent`'s children: its child cards, and when the read holds side sessions the lists, which
+    /// fold them behind its Side Sessions chip (#7944).
+    private func childRowsRead(_ parent: SessionKey) {
+        refreshChildFold(parent)
+        if sideFoldGroups.contains(parent.group), childIndex.knownNow(parent).contains(where: SideFold.isSideRow) { sessionsChanged() }
+    }
+
+    private func refreshChildFolds() {
+        for parent in childFoldCells.keys { refreshChildFold(parent) }
+    }
+
+    /// The parent page for a child whose parent row is already loaded. Nil when this key is not a folded child, or
+    /// the parent row is not in hand: opening does not wait on a lookup.
+    func localChildHome(_ key: SessionKey) -> ChildSessions.Home? {
+        guard let row = session(key) ?? childIndex.row(key), let parentKey = ChildSessions.parentKey(row),
+              let parent = session(parentKey) else { return nil }
+        let home = ChildSessions.home(requested: key, row: row, parent: parent)
+        return home.childID == nil ? nil : home
     }
 
     func chat(_ key: SessionKey) -> ChatStore {
@@ -1403,22 +1569,111 @@ final class AppModel {
     /// Chat views on screen, newest last: `visibleSession` is the top one.
     @ObservationIgnored private var shown: [(owner: UUID, key: SessionKey)] = []
     @ObservationIgnored private var filling = Set<SessionKey>()
-    @ObservationIgnored private var detailFetching = Set<SessionKey>()
+    /// A detail or children lookup already running. The latest hint that arrived during it runs once it ends.
+    @ObservationIgnored private var detailHints: [SessionKey: FetchHint] = [:]
+    @ObservationIgnored private var childHints: [SessionKey: FetchHint] = [:]
+    /// Folded children of open chats, kept out of the root list window.
+    let childIndex = ChildSessionIndex()
+    /// One parent's folded children, observed on their own. A push about any other agent does not redraw the chat.
+    @ObservationIgnored private var childFoldCells: [SessionKey: ChildFoldCell] = [:]
+    /// The child card to open after a link to that child landed on its parent. A new token each time, so a second
+    /// link to the same child opens the card again. Nil for an ordinary open.
+    var revealChild: ChildReveal?
+    @ObservationIgnored private var revealToken = 0
 
-    func refreshSessionDetail(_ key: SessionKey) async {
-        guard sessionLists.lists[key.group]?.paged == true, let api = api(key.group), detailFetching.insert(key).inserted else { return }
-        defer { detailFetching.remove(key) }
+    func refreshSessionDetail(_ key: SessionKey, listHint: String? = nil) async {
+        guard sessionLists.lists[key.group]?.paged == true, let api = api(key.group) else { return }
+        var hint: String? = listHint
+        while true {
+            var gate = detailHints[key] ?? FetchHint()
+            guard gate.start(hint) else {
+                detailHints[key] = gate
+                return
+            }
+            detailHints[key] = gate
+            await loadSessionDetail(key, api: api, listHint: hint)
+            gate = detailHints[key] ?? FetchHint()
+            switch gate.finish() {
+            case .none:
+                detailHints[key] = gate
+                return
+            case .hint(let next):
+                detailHints[key] = gate
+                hint = next
+            }
+        }
+    }
+
+    private func loadSessionDetail(_ key: SessionKey, api: APIClient, listHint: String?) async {
         do {
             // Not in the list: there is no detail to add. This runs on its own whenever a chat opens, so a session the
             // list does not have (hidden from it, or gone) is not a chat error. A transcript that cannot be read is
             // still reported, by the read of the transcript itself.
             guard let full = try await api.sessionListDetail(key, title: latest(key)?.title ?? "") else { return }
             guard self.api(key.group)?.config.url == api.config.url else { return }
+            if let parentKey = ChildSessions.parentKey(full) {
+                // A folded child does not join the root window while its parent row exists.
+                childIndex.hold(full)
+                childRowsRead(parentKey)
+                if let parent = await parentRow(parentKey, api: api) {
+                    if session(parent.key) == nil {
+                        applySessions([parent.machineRef: Self.replacing(parent, in: sessionsByMachine[parent.machineRef] ?? [])])
+                    }
+                    if openChat == key {
+                        moveDraft(from: key, to: parent.key)
+                        open(parent.key, reveal: full.sessionID)
+                    }
+                    return
+                }
+            }
             // In its place: the same row again must leave the list equal, or every reader of the sessions redraws
-            // for nothing (#4683).
+            // for nothing (#4683). A child whose parent is gone is a row of its own.
             applySessions([key.machineRef: Self.replacing(full, in: sessionsByMachine[key.machineRef] ?? [])])
+            await refreshOpenChildren(key, hint: listHint)
         } catch {
             if isSubscribed(key), !error.isQuiet { chat(key).error = error.localizedDescription }
+        }
+    }
+
+    /// The parent row when it is already listed, or one exact lookup while the socket is connected. Not connected:
+    /// no lookup, and the child stays where it was opened.
+    private func parentRow(_ key: SessionKey, api: APIClient) async -> Session? {
+        if let known = session(key) { return known }
+        guard socket(key.group)?.state == .connected else { return nil }
+        return try? await api.sessionListDetail(key, title: "")
+    }
+
+    /// The open parent's folded children, on a `sessions_list` hint. Nothing is read on a timer, and nothing is read
+    /// again while the checkpoint is this hint or no child is missing, working or waiting.
+    func refreshOpenChildren(_ key: SessionKey, hint: String?) async {
+        guard features(key.group).contains(ChildSessions.feature),
+              sessionLists.lists[key.group]?.paged == true,
+              subscribers[key] != nil,
+              let api = api(key.group),
+              socket(key.group)?.state == .connected,
+              ChildSessions.needsRead(parent: session(key), known: everyFoldedChild(key)) else { return }
+        if let hint, childIndex.checkpoint(key) == hint { return }
+        var next = hint
+        while true {
+            var gate = childHints[key] ?? FetchHint()
+            guard gate.start(next) else {
+                childHints[key] = gate
+                return
+            }
+            childHints[key] = gate
+            await childIndex.refresh(parent: key, api: api)
+            childRowsRead(key)
+            gate = childHints[key] ?? FetchHint()
+            switch gate.finish() {
+            case .none:
+                childHints[key] = gate
+                return
+            case .hint(let queued):
+                childHints[key] = gate
+                next = queued
+                guard ChildSessions.needsRead(parent: session(key), known: everyFoldedChild(key)) else { return }
+                if let queued, childIndex.checkpoint(key) == queued { return }
+            }
         }
     }
 
@@ -1990,6 +2245,20 @@ final class AppModel {
             AgentSync.shared.sessions(new)
         }
         readSettingsForNewTaskConversations(olds)
+        // A link may have opened a child before this list held its parent. Once the parent row is here, that page is
+        // the parent's. An ordinary open is not a child, so a list update does not move it.
+        if !olds.isEmpty { redirectFoldedOpenChat() }
+    }
+
+    private func redirectFoldedOpenChat() {
+        // A side session asked for before its parent was listed: its parent's chat, with the side shown (#7944).
+        if let shown = openChat, sideFold.home[shown] != nil {
+            openChat = shown
+            return
+        }
+        guard let shown = openChat, let home = localChildHome(shown), home.key != shown else { return }
+        moveDraft(from: shown, to: home.key)
+        open(home.key, reveal: home.childID)
     }
 
     /// Conversations the assistant settings were read again for (`readSettingsForNewTaskConversations`): once each.
@@ -2053,6 +2322,7 @@ final class AppModel {
         case .hello(let hello):
             let previousSurfaceCapabilities = extensionSurfaceCapabilities
             link(group)?.received(hello)
+            refoldSides() // this hub may fold side sessions now, or no longer (#7944)
             if let page = sessionLists.lists[group], page.loaded, !page.query.legacy, page.paged != hello.features.contains("sessions_list"), let link = link(group) {
                 page.cancel()
                 Task { await self.refresh(link) }
@@ -2127,7 +2397,7 @@ final class AppModel {
         case .sessionsList(let revision):
             sessionLists.invalidate(group, revision: revision)
             if isHub { followNeedsYou() }
-            for key in subscribers.keys where key.group == group { Task { await refreshSessionDetail(key) } }
+            for key in subscribers.keys where key.group == group { Task { await refreshSessionDetail(key, listHint: revision) } }
         case .sessions(let machineID, let list):
             // A busy hub sends each machine's list on its own, one after another: they are applied together a moment
             // later, so the pages that read the sessions update once for the lot (one SwiftUI pass, not one a machine).
@@ -2529,6 +2799,14 @@ final class AppModel {
 
     /// Unsent composer text per chat (also where an edited queued message lands); kept across launches.
     var drafts: [SessionKey: String] = AppModel.savedDrafts() { didSet { saveDrafts(); markDrafts() } }
+
+    /// A child's unsent text belongs to the parent page. A parent that already has a draft keeps it.
+    func moveDraft(from: SessionKey, to: SessionKey) {
+        let text = drafts[from] ?? ""
+        guard !text.isEmpty, (drafts[to] ?? "").isEmpty else { return }
+        drafts[to] = text
+        drafts[from] = nil
+    }
     /// What each chat's composer holds besides its text (#2626): photos, videos and file uploads, in memory, as the
     /// text is in `drafts`. A composer built again keeps them: the whole tree is built again when iOS takes the app's
     /// snapshots in another width on its way to the background (iPhone Duo open, `RootView.usesShell`), and the photos
@@ -2790,6 +3068,12 @@ final class AppModel {
     func discard(_ key: SessionKey, _ msg: PendingMessage) {
         let store = chat(key)
         guard let i = store.pending.firstIndex(where: { $0.id == msg.id }) else { return }
+        // As it is now, not as the menu saw it: one the outbox started sending since may be arriving, and stays
+        // (#8171: it went out with its bubble gone, and Undo put it back sending, which nothing settled).
+        guard store.pending[i].onlyHere else {
+            toast = Toast(String(localized: "It's already being sent, so it can't be stopped."))
+            return
+        }
         let gone = store.pending.remove(at: i)
         saveOutbox()
         toast = .messageDeleted { [weak self] in self?.undoDiscard(key, gone, at: i) }
@@ -4005,7 +4289,7 @@ final class AppModel {
             return ix
         }
         return WatchSummary(sessions: WatchGroupRefresh.summarySessions(live), interactions: interactions, machines: machines,
-                            inbox: Array(inbox.prefix(20)))
+                            inbox: Array(inbox.prefix(20)), sideFold: links.isEmpty ? nil : sideFoldGroups.sorted())
     }
 }
 
@@ -4109,6 +4393,19 @@ nonisolated struct WorkflowCallKey: Hashable, Sendable {
 @Observable final class SpaceCell {
     var value: [Session]
     init(_ value: [Session]) { self.value = value }
+}
+
+/// One parent's folded children, as `AppModel.childRows(_:)` hands them out. A push about any other agent leaves it.
+@Observable final class ChildFoldCell {
+    var rows: [Session]
+    init(_ rows: [Session]) { self.rows = rows }
+}
+
+/// A link to a folded child, once per open. `token` changes when the same child is opened again, so the card opens
+/// again; an ordinary open has none.
+struct ChildReveal: Equatable {
+    var sessionID: String
+    var token: Int
 }
 
 /// Questions and approvals waiting, as the tab bar counts them: the Persona tab's (its conversations') and the Agents
