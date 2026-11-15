@@ -38,6 +38,17 @@ The first version of the fix still failed an independent review, on what the hub
   another account and back does not bring the first inbox back. That is a limit, written down in `docs/assistant/inbox.md`, not a bug to
   work around by moving a thing's time.
 
+## A new connection reports nothing the hub keeps for it until the hub has handed it over (2026-11-15, #8275)
+
+Every node connection is a new `Node` with empty state, and the hub hands back what it keeps for the computer (the
+Codex inventory: homes, app-servers, joined threads) only in the `node.configure` that follows `devices.connected`.
+The engine is settled earlier (`engine.use` is the first call of the handshake), and the manager passes a node's events
+on before it calls `devices.connected`, so a report made "once the engine is ready" reached the hub first and the hub
+stored the empty registry over what it kept. A node's report of state the hub keeps waits for the hub's part of the
+connection (`codexHanded`); the hub keeps such a report only from a connection it has done that part for
+(`codexInventoryHanded`: `hookedAt` equal to the manager's `ConnectedAt`), which also covers older nodes. Write a test
+of the sequence, not only of each side's storage.
+
 ## An empty list sent as null means "no change" to an optional field (2026-11-14)
 
 The node reads node.configure's `claude_dirs_blocked` as `*[]string`: absent or `null` leaves its patterns as they are.

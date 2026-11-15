@@ -728,6 +728,10 @@ func (m *Machine) onEvent(event string, params json.RawMessage) {
 			m.hub.toSubscribers(m.cfg.ID, p.SessionID, deltaPush{Type: "delta", MachineID: m.cfg.ID, SessionID: p.SessionID, Text: p.Text})
 		}
 	case "codex.inventory":
+		if !m.codexInventoryHanded() {
+			m.hub.logf("[%s] Codex inventory from a connection the hub has not handed its own yet: not kept", m.cfg.ID)
+			return
+		}
 		m.rememberCodexInventory(params)
 	case "session.echo":
 		m.recordEcho(params)

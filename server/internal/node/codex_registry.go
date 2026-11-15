@@ -28,6 +28,11 @@ type codexRegistry struct {
 	remotes      map[string]*codexRemote
 	retries      map[string]codexRetry // server id -> attempts that did not connect (codex_backoff.go)
 	report       func(proto.CodexConfig)
+	// handed: the hub handed this connection the inventory it keeps for the computer (node.configure's codex, every
+	// connection: devices.connected). Until then the registry is a new Node's, without the threads the user joined, the
+	// homes and the app-servers the hub kept, and the hub would store it over what it kept: reports wait for it
+	// (rememberCodex), and held says one did.
+	handed, held bool
 	kick         chan struct{}
 	scan         func() []codexProcess
 	// checked lists the processes as scan does, and says whether it could (scanCodexProcessesChecked); nil: scan's
@@ -139,16 +144,39 @@ func (n *Node) codexInventory() proto.CodexConfig {
 	return cloneCodexConfig(n.codices.config)
 }
 
+// rememberCodex reports the inventory for the hub to keep, once the hub handed this connection what it kept
+// (codexHanded); before that it only notes that a report waits.
 func (n *Node) rememberCodex() {
 	r := n.codices
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
+	if !r.handed {
+		r.held = true
+		r.mu.Unlock()
+		return
+	}
 	cfg, report := cloneCodexConfig(r.config), r.report
 	r.mu.Unlock()
 	if report != nil {
 		report(cfg)
+	}
+}
+
+// codexHanded: node.configure handed the inventory the hub keeps (configureCodex merged it). A report that waited for
+// it goes now, with what the node found meanwhile added to the hub's.
+func (n *Node) codexHanded() {
+	r := n.codices
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	held := r.held && !r.handed
+	r.handed, r.held = true, false
+	r.mu.Unlock()
+	if held {
+		n.rememberCodex()
 	}
 }
 
