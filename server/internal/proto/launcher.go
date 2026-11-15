@@ -2,6 +2,7 @@ package proto
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -367,3 +368,12 @@ func MessagesBaseURL(base string) string {
 		path = strings.TrimRight(rest, "/")
 	}
 }
+
+// WorkAgentTypes are the agent types the node starts as work agents (docs/integrations/launchers.md "Work agents"):
+// pi, the Cursor CLI and the Antigravity CLI. The node starts them without Claude's permission mode or effort,
+// ignoring one the start names rather than refusing it (node/workagent.go, node/control.go); the hub drops the two
+// for them the same way (assistant/launcher_modes.go). node TestWorkAgentTypesMatchTheNode keeps the lists together.
+var WorkAgentTypes = []string{"pi", "cursor", "agy"}
+
+// IsWorkAgentType: agent is one of WorkAgentTypes.
+func IsWorkAgentType(agent string) bool { return slices.Contains(WorkAgentTypes, agent) }

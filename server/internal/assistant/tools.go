@@ -512,7 +512,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			tier, runs = "", "" // the tier's launcher is not what runs
 		}
 		// traex, omp…: no effort (launcher_modes.go). One this call names is refused before the user is asked, rather
-		// than by the computer after they said yes; one a tier filled in is dropped.
+		// than by the computer after they said yes; one a tier filled in is dropped. pi, cursor, agy: dropped either way.
 		if !startTakesModes(agent) {
 			launcher, _ := run["launcher"].(string)
 			if err := startModesRefused(launcher, agent, "", own.effort); err != nil {

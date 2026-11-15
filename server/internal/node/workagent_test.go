@@ -120,3 +120,15 @@ func TestSessionStartPiUsesTheWorkAgent(t *testing.T) {
 		t.Errorf("typed %v", typed)
 	}
 }
+
+// The hub tells work agents from the agents the node refuses a permission mode or effort for by proto.WorkAgentTypes
+// (assistant/launcher_modes.go, #7559): it must name exactly the agent types workAgent starts, so the hub drops the
+// two where the node ignores them and refuses them only where the node would.
+func TestWorkAgentTypesMatchTheNode(t *testing.T) {
+	for _, kind := range append([]string{"", "claude", "codex", traexAgent, ompAgent, piAgent, cursorAgent, agyAgent, "opencode"}, proto.WorkAgentTypes...) {
+		_, _, node := workAgent(kind)
+		if hub := proto.IsWorkAgentType(kind); hub != node {
+			t.Errorf("%q: the node starts it as a work agent: %v, proto.WorkAgentTypes says %v", kind, node, hub)
+		}
+	}
+}
