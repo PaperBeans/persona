@@ -138,6 +138,7 @@ type Proxy struct {
 	rules         map[string]Rule
 	creds         map[string]string // credential → extension
 	credOf        map[string]string // extension → its credential
+	checks        map[string]*check // a settings check's credential → the check (Check)
 	unix          map[string]net.Listener
 	relay         map[string]net.Listener // ext → its socket that leads to one fixed unix socket (RelayUnix)
 	counts        map[string]*Counts
@@ -250,6 +251,7 @@ func (p *Proxy) Register(ext string, r Rule) string {
 		p.rules, p.creds, p.credOf, p.counts = map[string]Rule{}, map[string]string{}, map[string]string{}, map[string]*Counts{}
 	}
 	p.cancelIOLocked(ext)
+	p.endChecksLocked(ext)
 	if old, ok := p.credOf[ext]; ok {
 		delete(p.creds, old)
 	}
@@ -267,6 +269,7 @@ func (p *Proxy) Unregister(ext string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.cancelIOLocked(ext)
+	p.endChecksLocked(ext)
 	if cred, ok := p.credOf[ext]; ok {
 		delete(p.creds, cred)
 		delete(p.credOf, ext)
@@ -326,8 +329,41 @@ func (p *Proxy) logf(format string, args ...any) {
 	}
 }
 
-// who is the extension a request on the loopback listener is from (its Proxy-Authorization).
-func (p *Proxy) who(r *http.Request) string {
+// who is the extension a request on the loopback listener is from (its Proxy-Authorization), and the settings check
+// whose credential it came with (nil: the program's own).
+func (p *Proxy) who(r *http.Request) (string, *check) {
+	pass := credential(r)
+	if pass == "" {
+		return "", nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if ext := p.creds[pass]; ext != "" {
+		return ext, nil
+	}
+	if c := p.liveCheckLocked(pass); c != nil {
+		return c.ext, c
+	}
+	return "", nil
+}
+
+// checkOf is the settings check of ext whose credential a request on ext's own socket came with (nil: none, or
+// another extension's).
+func (p *Proxy) checkOf(r *http.Request, ext string) *check {
+	pass := credential(r)
+	if pass == "" {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if c := p.liveCheckLocked(pass); c != nil && c.ext == ext {
+		return c
+	}
+	return nil
+}
+
+// credential is the password of a request's Proxy-Authorization for User ("": none).
+func credential(r *http.Request) string {
 	auth := r.Header.Get("Proxy-Authorization")
 	scheme, b64, ok := strings.Cut(auth, " ")
 	if !ok || !strings.EqualFold(scheme, "Basic") {
@@ -341,9 +377,7 @@ func (p *Proxy) who(r *http.Request) string {
 	if user != User {
 		return ""
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.creds[pass]
+	return pass
 }
 
 func (p *Proxy) rule(ext string) (Rule, bool) {

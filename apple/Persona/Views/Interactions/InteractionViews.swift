@@ -28,13 +28,17 @@ extension InteractionKind {
 extension Interaction {
     /// The assistant asks through its ask_user tool: it is Persona asking, not a Claude Code agent; a Codex card names
     /// Codex.
-    var title: String {
+    var title: String { title(session: nil) }
+
+    /// `title`, its agent named as `session`'s row names it where the card names only the engine that runs it
+    /// (`agentName(session:)`, #8144).
+    func title(session: Session?) -> String {
         if toolName == "ask_user" { return String(localized: "Persona Has a Question") }
         if isSecretRun { return secretRunTitle }
         if kind == .elicitation {
             return elicitation?.isURL == true ? String(localized: "MCP Link Needs You") : String(localized: "MCP Form Needs You")
         }
-        if let name = agentName {
+        if let name = agentName(session: session) {
             switch kind {
             case .question: return String(localized: "\(name) Has a Question")
             case .permission: return String(localized: "\(name) Is Waiting for Your Approval")
@@ -82,6 +86,19 @@ extension Interaction {
         case nil, "", "claude": nil
         default: agentLabelHint ?? agent
         }
+    }
+
+    /// The card names only the engine that runs its agent, not the provider (`Session.namesOnlyEngine`): a Paseo card
+    /// with no label of its own, or the node's "Paseo", which a node gave every card of a provider other than Claude
+    /// Code before its rows' labels reached the cards (#8142). Its session's row says who answers.
+    var namesOnlyEngine: Bool { Session.namesOnlyEngine(agent: agent, label: agentLabelHint) }
+
+    /// `agentName`, with the provider's name from `session`'s row where the card names only the engine (#8144): a Paseo
+    /// card asks "Tell Grok what to do instead", never Paseo. A card that carries its provider's label keeps it.
+    func agentName(session: Session?) -> String? {
+        guard let name = agentName else { return nil }
+        guard namesOnlyEngine, let session else { return name }
+        return session.agentLabel
     }
 }
 
@@ -478,7 +495,8 @@ struct InteractionPanel: View {
             let name = model.session(interaction.sessionKey)?.agentLabel ?? "Claude"
             return d.commandAsk != nil ? String(localized: "\(name) Is Waiting for Your Approval") : String(localized: "\(name) Has a Question")
         }
-        return interaction.title
+        // A card that names only the engine (a Paseo provider's, #8144) takes its provider's name from its row.
+        return interaction.title(session: interaction.namesOnlyEngine ? model.session(interaction.sessionKey) : nil)
     }
 }
 
@@ -882,6 +900,11 @@ struct PlanForm: View {
         if AppStyle.current.usesBeautifulUI { BUIPlanForm(interaction: interaction, showFull: $showFull) } else { plain }
     }
 
+    /// The card's agent, its provider's name where the card names only the engine (#8144); nil: Claude Code.
+    private var agentName: String? {
+        interaction.agentName(session: interaction.namesOnlyEngine ? model.session(interaction.sessionKey) : nil)
+    }
+
     /// The plan's first lines (Show Full Text opens it whole, #6605) over the answers, which stay in view.
     @ViewBuilder private var plain: some View {
         CardForm {
@@ -895,7 +918,7 @@ struct PlanForm: View {
     @ViewBuilder private var answers: some View {
         if rejecting {
             // The card's own agent: a runtime's plan (DSH…) names it, as AgentPermissionForm does; nil is Claude Code.
-            TextField(String(localized: "Tell \(interaction.agentName ?? "Claude") what to change…"), text: $feedback, axis: .vertical)
+            TextField(String(localized: "Tell \(agentName ?? "Claude") what to change…"), text: $feedback, axis: .vertical)
                 .lineLimit(2...6)
                 .padding(Theme.Space.m)
                 .background(Theme.Fill.well, in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
@@ -1016,7 +1039,11 @@ struct AgentPermissionForm: View {
     @State private var why = ""
     @FocusState private var whyFocused: Bool
 
-    private var name: String { interaction.agentName ?? "Codex" }
+    /// Who to tell: the card's agent, its provider's name where the card names only the engine (#8144). The session is
+    /// read only then, so other cards observe no row.
+    private var name: String {
+        interaction.agentName(session: interaction.namesOnlyEngine ? model.session(interaction.sessionKey) : nil) ?? "Codex"
+    }
 
     var body: some View {
         if AppStyle.current.usesBeautifulUI { BUIPermissionForm(interaction: interaction) } else { plain }

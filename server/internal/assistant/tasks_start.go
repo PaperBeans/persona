@@ -65,10 +65,14 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if err := s.resolveTaskWorkspace(ctx, &p.Tasks[i]); err != nil {
 			return nil, planInvalid{err}
 		}
+		s.resolveTaskRepo(ctx, &p.Tasks[i]) // where it runs after the card's edits (its workspace, not the plan's cwd)
 	}
 	p.State = planStarted
 	for i := range p.Tasks {
 		p.Tasks[i].OwnerStarted = ownerStarts(ctx)
+		// Remembered by startTaskAgent once admission fixed the folder that runs: its repository is the kind, never
+		// the one the plan was made from when the workspace is in another (#8259).
+		p.Tasks[i].rememberKind = remember
 	}
 	ok, err := s.movePlan(ctx, p, planOpen)
 	if err != nil {
@@ -140,9 +144,6 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 	}
 	if _, err := s.movePlan(ctx, p, planStarted); err != nil { // keep the todo ids
 		s.logf("plan %s: %v", p.ID, err)
-	}
-	if remember {
-		s.trustKinds(ctx, p.Tasks)
 	}
 	s.event(ctx, map[string]any{"type": "task_plan", "plan": p})
 	for i := range p.Tasks {
@@ -508,7 +509,7 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 	// An admission-gate refusal means the machine or direction is briefly full, not that the start failed: park the
 	// task in the admission queue (no failTodo, no failure receipt) and let the queue loop retry it (task_queue.go).
 	if isAdmissionDenied(err) {
-		s.queueAdmissionRefusal(planID, i, t, err)
+		s.queueAdmissionRefusal(planID, i, t, err, retry)
 		return
 	}
 	s.logf("task %s: start: %v", t.TodoID, err)
@@ -521,6 +522,11 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		limit = proto.CodedStartErrorMax // the hub's sentence, whose remedy comes last (#1642): kept whole
 	}
 	reason := clip(oneLine(s.startFailureText(ctx, t.Machine, err)), limit)
+	if t.Queue != nil {
+		// A queued start got past the gate and failed otherwise: its wait is over, and its card reads what happened
+		// next rather than "waiting" until the queue's bounds run out (#8092).
+		s.clearAdmissionQueue(ctx, planID, i, t.TodoID)
+	}
 	// The new tab's shell waits on a question, or the agent's screen stopped, and the computer keeps the tab: a
 	// supervised task's start is remedied first, not failed yet (start_remedy.go, #2570).
 	code, args := codedStartRefusal(err)
@@ -680,13 +686,15 @@ func (s *Service) retryTask(ctx context.Context, todoID string) (json.RawMessage
 	if cur.DoneAt == nil {
 		return s.continueTask(ctx, cur)
 	}
-	s.tasks.mu.Lock()
-	busy := s.tasks.retrying[todoID]
-	if !busy && cur.DoneAt != nil && cur.StartError != "" {
-		s.tasks.retrying[todoID] = true
+	failed := cur.DoneAt != nil && cur.StartError != ""
+	var st *taskStart
+	busy := s.taskStartOnWay(todoID)
+	if failed {
+		var claimed bool
+		st, claimed = s.claimTaskStart(todoID)
+		busy = !claimed
 	}
-	s.tasks.mu.Unlock()
-	if busy || cur.DoneAt == nil || cur.StartError == "" {
+	if busy || !failed {
 		if !busy && cur.DoneAt != nil {
 			return nil, errTaskNotRetryable // done by hand or by the hub, not a failed start
 		}
@@ -695,9 +703,7 @@ func (s *Service) retryTask(ctx context.Context, todoID string) (json.RawMessage
 	started := false
 	defer func() {
 		if !started {
-			s.tasks.mu.Lock()
-			delete(s.tasks.retrying, todoID)
-			s.tasks.mu.Unlock()
+			s.endTaskStart(todoID, st, proto.Session{})
 		}
 	}()
 	p, i, err := s.currentPlanAssignment(ctx, cur)
@@ -738,11 +744,7 @@ func (s *Service) retryTask(ctx context.Context, todoID string) (json.RawMessage
 	}
 	s.logf("task %s: retrying its start on %s", todoID, m.ID)
 	started = true
-	s.startPlanTaskAsync(p.ID, p.Conversation, i, t, true, func() {
-		s.tasks.mu.Lock()
-		delete(s.tasks.retrying, todoID)
-		s.tasks.mu.Unlock()
-	})
+	s.startPlanTaskAsync(p.ID, p.Conversation, i, t, true, func() { s.endTaskStart(todoID, st, proto.Session{}) })
 	return view, nil
 }
 
@@ -774,24 +776,19 @@ func (s *Service) continueTask(ctx context.Context, cur Todo) (json.RawMessage, 
 		}
 		return nil, machineOffline(name)
 	}
-	s.tasks.mu.Lock()
-	busy := s.tasks.retrying[cur.ID]
-	s.tasks.retrying[cur.ID] = true
-	s.tasks.mu.Unlock()
-	if busy {
+	st, claimed := s.claimTaskStart(cur.ID)
+	if !claimed {
 		return s.todoView(ctx, cur.ID)
 	}
-	release := func() {
-		s.tasks.mu.Lock()
-		delete(s.tasks.retrying, cur.ID)
-		s.tasks.mu.Unlock()
-	}
+	release := func() { s.endTaskStart(cur.ID, st, proto.Session{}) }
 	if stoppedAgent(cut) { // it stopped since (read-only, #4754): a new agent goes on with the task (tasks_successor.go)
-		defer release()
+		var started proto.Session
+		defer func() { s.endTaskStart(cur.ID, st, started) }() // a message that waited for it goes to the new agent
 		if live, _ := liveTaskAgents(s.taskAgents(ctx, cur)); len(live) > 0 {
 			return s.todoView(ctx, cur.ID) // another agent of the task still runs: it is that one's
 		}
-		if _, err := s.startTaskSuccessor(ctx, cur, cut, continueText); err != nil {
+		var err error
+		if started, err = s.startTaskSuccessor(ctx, cur, cut, continueText); err != nil {
 			return nil, err
 		}
 		return s.todoView(ctx, cur.ID)

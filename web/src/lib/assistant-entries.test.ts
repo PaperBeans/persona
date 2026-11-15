@@ -198,3 +198,30 @@ describe("an Agent several to-dos list", () => {
     expect(got.needsYou.find((i) => i.key === "task:tests")).toMatchObject({ asks: [] });
   });
 });
+
+// How a task ended is told in In progress, not by a card in the chat (#8237): the handed-out tasks that finished in the
+// last day and were not opened since are a group of their own, newest first and not counted.
+describe("Just finished in the Assistant's entries", () => {
+  const now = Date.parse("2026-11-10T09:00:00Z");
+  const done = (id: string, doneAt: string, extra: Partial<Todo> = {}): Todo => ({
+    id, title: id, origin: "main", created_at: "2026-11-10T07:00:00Z", updated_at: doneAt, done_at: doneAt, agents: [], ...extra,
+  } as unknown as Todo);
+  const run = (todos: Todo[], conversation = "main") => assistantEntries({ conversation, main: "main", todos, sessions: [], interactions: [], plans: {}, feed: [], now });
+
+  it("lists what just finished, newest first, and counts none of it", () => {
+    const got = run([
+      done("older", "2026-11-10T08:00:00Z"),
+      done("newer", "2026-11-10T08:30:00Z"),
+      done("seen", "2026-11-10T08:10:00Z", { seen_at: "2026-11-10T08:20:00Z" }),
+      done("stale", "2026-11-08T08:00:00Z"),
+      done("byHand", "2026-11-10T08:40:00Z", { origin: "" }),
+    ]);
+    expect(got.justFinished.map((i) => i.key)).toEqual(["task:newer", "task:older"]);
+    expect(got.justFinished.every((i) => i.kind === "task" && !i.countsOpen)).toBe(true);
+    expect([...got.needsYou, ...got.running, ...got.shelved]).toEqual([]);
+  });
+
+  it("leaves another conversation's finished work to it", () => {
+    expect(run([done("newer", "2026-11-10T08:30:00Z")], "side").justFinished).toEqual([]);
+  });
+});

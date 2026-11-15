@@ -26,7 +26,66 @@ var (
 // classifyLark reads a Bash command against the command gates (curl / wget aimed at one's API is refused); cwd
 // resolves @file bodies; risk supplies CLI metadata when configured. Known read commands also have a static fallback.
 func classifyLark(cmd string, gates []proto.CommandGate, cwd string, risk larkRisk) larkVerdict {
-	return classifyLarkDepth(cmd, gates, cwd, risk, 0)
+	v := classifyLarkDepth(cmd, gates, cwd, risk, 0)
+	// A relative @file body is read from cwd at check time. Whatever else the command runs may run the call
+	// elsewhere (cd in any spelling, env -C, sudo -D, a subshell) or change the file first (a redirect, an earlier
+	// command), so the body is known only for a lone call (larkLoneGateCall, #8404).
+	if slices.ContainsFunc(v.calls, func(c larkCall) bool { return c.relBody }) && !larkLoneGateCall(cmd, gates) {
+		v.other, v.unknown = true, true
+	}
+	return v
+}
+
+// larkLoneGateCall: the command is one gated call with literal words and no assignment or redirect, at most under
+// `timeout <duration>`, piped only into output filters. Nothing in it runs before the call or changes its directory.
+func larkLoneGateCall(cmd string, gates []proto.CommandGate) bool {
+	tree, err := syntax.NewParser().Parse(strings.NewReader(cmd), "")
+	if err != nil || len(tree.Stmts) != 1 {
+		return false
+	}
+	var calls []*syntax.CallExpr
+	var walk func(*syntax.Stmt) bool
+	walk = func(st *syntax.Stmt) bool {
+		if st.Background || st.Coprocess || st.Negated || len(st.Redirs) != 0 {
+			return false
+		}
+		switch c := st.Cmd.(type) {
+		case *syntax.CallExpr:
+			calls = append(calls, c)
+			return true
+		case *syntax.BinaryCmd:
+			return c.Op == syntax.Pipe && walk(c.X) && walk(c.Y)
+		}
+		return false
+	}
+	if !walk(tree.Stmts[0]) {
+		return false
+	}
+	for i, c := range calls {
+		if len(c.Assigns) != 0 || len(c.Args) == 0 {
+			return false
+		}
+		words := make([]string, len(c.Args))
+		for j, arg := range c.Args {
+			var dynamic bool
+			if words[j], dynamic = executionWord(arg); dynamic {
+				return false
+			}
+		}
+		if i > 0 {
+			if !larkFilters[words[0]] || words[0] == "cd" {
+				return false
+			}
+			continue
+		}
+		if words[0] == "timeout" && len(words) > 2 && timeoutArg.MatchString(words[1]) {
+			words = words[2:]
+		}
+		if gateOf(gates, words[0]) < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk larkRisk, depth int) larkVerdict {
@@ -694,7 +753,7 @@ func parseGateCall(g proto.CommandGate, args []string, vars map[string]string, c
 	if len(rest) > 0 && (strings.HasPrefix(rest[0], "{") || strings.HasPrefix(rest[0], "[")) {
 		c.Body, rest = rest[0], rest[1:]
 	} else if len(rest) > 0 && strings.HasPrefix(rest[0], "@") {
-		c.Body, rest = readBodyFile(rest[0][1:], cwd), rest[1:]
+		c.Body, c.relBody, rest = readBodyFile(rest[0][1:], cwd), !filepath.IsAbs(rest[0][1:]), rest[1:]
 	}
 	for i := 0; i < len(rest); i++ {
 		f := rest[i]

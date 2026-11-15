@@ -7,6 +7,11 @@ import "strings"
 // identity takes precedence over that legacy kind. Do not infer this from message
 // text: a human can quote or forward a notification while asking for help.
 func inboxTaskLinkEligible(it *InboxItem) bool {
+	// An owner's bot request takes the main-conversation handoff route, not
+	// the task-update route for messages from other people.
+	if it.Source == "larkcli" && it.Kind == "bot_handoff" {
+		return false
+	}
 	if it.Kind != KindBot {
 		return true
 	}

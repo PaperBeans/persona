@@ -1144,7 +1144,7 @@ struct AssistantSidebarPresenters: ViewModifier {
             AssistantFullSearch(scope: ui.searchScope) { key in
                 ui.picked = key
                 ui.fullSearch = false
-            } openAgent: { key in
+            } onOpenAgent: { key in
                 ui.pickedAgent = key
                 ui.fullSearch = false
             }
@@ -1571,7 +1571,7 @@ extension AssistantSidebar {
         }
         let recent = AssistantSidebarGroups.recent(all, leaders: model.assistantLeaders, main: main,
                                                    background: model.assistantConfig?.backgroundSupervisor,
-                                                   tasks: taskChats.known(on: model.api))
+                                                   tasks: taskChats.known(on: model.api), withTasks: model.recentTaskChats)
         if !recent.isEmpty {
             recentHeading(recent)
         }
@@ -2184,11 +2184,13 @@ nonisolated enum AssistantSidebarGroups {
     /// ones in All Chats only) and the scheduled tasks' own chats (#6228: those have their own Scheduled Tasks entry and
     /// stay in All Chats). `tasks` also catches a task chat a hub did not mark with `origin` (#2838). `sessions` are the
     /// open ones (no archived). `leaders`: the directions' session ids; `background`: the background supervisor's.
-    static func recent(_ sessions: [Session], leaders: [String], main: SessionKey?, background: String?, tasks: AssistantTaskChats = .none) -> [Session] {
+    /// `withTasks`: the user's Show Scheduled Task Chats (#8324) brings those last two back, by time with the rest.
+    static func recent(_ sessions: [Session], leaders: [String], main: SessionKey?, background: String?, tasks: AssistantTaskChats = .none,
+                       withTasks: Bool = false) -> [Session] {
         let lead = Set(leaders)
         let rest = sessions.filter {
-            $0.key != main && !lead.contains($0.sessionID) && $0.sessionID != background
-                && AutoConversations.source(of: $0, tasks: tasks) != .task
+            $0.key != main && !lead.contains($0.sessionID)
+                && (withTasks || ($0.sessionID != background && AutoConversations.source(of: $0, tasks: tasks) != .task))
         }
         return Array(newestFirst(rest).prefix(recentLimit))
     }

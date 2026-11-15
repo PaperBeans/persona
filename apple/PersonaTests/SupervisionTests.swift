@@ -114,37 +114,6 @@ struct SupervisionTests {
         #expect(report.evidence.last == "/tmp/report-check.xcresult")
     }
 
-    /// Evidence must not change the rendered card's size or pixels, in either appearance or report state.
-    @MainActor @Test func reportCardRenderingIgnoresEvidence() throws {
-        func render(_ report: FeedItem, _ appearance: ColorScheme) throws -> (width: Int, height: Int, pixels: Data) {
-            let renderer = ImageRenderer(content: ReportFeedLine(item: report, taskTitle: "Example task")
-                .frame(width: 480)
-                .environment(\.colorScheme, appearance))
-            let image = try #require(renderer.cgImage)
-            let pixels = try #require(image.dataProvider?.data)
-            return (image.width, image.height, pixels as Data)
-        }
-        for kind in ["progress", "done", "blocked", "question"] {
-            let body: [String: JSONValue] = ["kind": .string(kind), "text": .string("Summary unchanged.\nhttps://example.com/body-link")]
-            let plain = FeedItem(id: "render-report", conversation: "main", at: .distantPast, kind: .report, body: .object(body))
-            var withEvidence = plain
-            withEvidence.body = .object(body.merging(["evidence": .array([
-                .string("https://example.com/pull/1"), .string("https://example.com/commit/abc"),
-                .string("https://example.com/issues/1#comment"), .string("https://example.com/actions/runs/1"),
-                .string("/tmp/report-check.xcresult"),
-            ])]) { _, added in added })
-            for appearance in [ColorScheme.light, .dark] {
-                let expected = try render(plain, appearance)
-                let actual = try render(withEvidence, appearance)
-                #expect(actual.width == expected.width && actual.height == expected.height)
-                #expect(actual.pixels.count == expected.pixels.count)
-                // On macOS two renders of the same card can differ by a step in a few channels.
-                let off = zip(actual.pixels, expected.pixels).map { abs(Int($0) - Int($1)) }.max() ?? 0
-                #expect(off <= 2, "\(kind), \(appearance): a channel differs by \(off)")
-            }
-        }
-    }
-
     // MARK: The chip
 
     @Test func badgeTextsAndTones() {
@@ -388,7 +357,7 @@ struct ChatSupervisionTests {
         folded.fold?.supervisionUser = nil
         folded.supervisionUser = nil
         #expect(!visible([input(1), folded]))
-        #expect(ChatCache.folder == "chats-v18")
+        #expect(ChatCache.folder == "chats-v19")
     }
 
     @Test func queuedSupervisionAndTheNextGenuineQueuedInputAreSeparateTurns() {

@@ -80,6 +80,14 @@ type inboxBook struct {
 	settleAsked map[string]time.Time
 	settleSeen  map[string]string // the newest later position the settle model said "open" to, by item
 	settlePass  time.Time         // when the last handled-elsewhere pass started
+	// ruledFails / ruledRetryAt: the passes in a row whose retries of rule-tiered items (RuleOf) went out with no model
+	// answer since, and when the next may go out (retryRuled). Memory only, under mu.
+	ruledFails   int
+	ruledRetryAt time.Time
+	// mailBaselines: by mail account id, the newest UID when the inbox first read it (inbox_mail.go mailBaseline),
+	// stored (inboxMailBaselinesKey) when dirty. Under mu.
+	mailBaselines      map[string]uint32
+	mailBaselinesDirty bool
 
 	cfgMu sync.Mutex
 	cfg   assistantwire.InboxConfig // the hub's (InboxConfigMethod), as last read

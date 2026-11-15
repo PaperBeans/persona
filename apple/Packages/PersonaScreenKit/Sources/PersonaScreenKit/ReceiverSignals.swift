@@ -104,6 +104,7 @@ public struct ReceiverSignals: Sendable {
         s.frames = recent.count
         s.queueP50Ms = Self.percentile(recent, 0.5)
         s.queueP95Ms = Self.percentile(window.filter { !$0.wake }.map(\.ms), 0.95)
+        s.queueLastMs = window.last?.ms
         let early = queue.filter { Self.within($0.at, now, 1_000_000) && !Self.within($0.at, now, 750_000) }.map(\.ms)
         let late = queue.filter { Self.within($0.at, now, 250_000) }.map(\.ms)
         if let a = Self.mean(early), let b = Self.mean(late) {
@@ -152,6 +153,9 @@ public struct TierSignals: Equatable, Sendable {
     public var queueP50Ms: Double?
     /// Leaving out a keyframe's wake (#7842): nil when only that came, which doesn't break a calm stretch.
     public var queueP95Ms: Double?
+    /// The newest frame's: whether there is still a backlog now (a backlog that just came in all at once leaves the p50
+    /// high for a moment, and its newest frame barely waited).
+    public var queueLastMs: Double?
     /// The queue grew over the last second (its last quarter's mean over 10 ms above its first's), or shrank.
     public var queueRising = false
     public var queueFalling = false

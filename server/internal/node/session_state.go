@@ -64,6 +64,14 @@ type sessionState struct {
 	// record so a node restart neither loses it nor carries it out without the message. Written by setPendingSwitch,
 	// which never makes a record; cleared by the start that carries it out (which writes a new record).
 	PendingSwitch *proto.PendingSwitch `json:"pending_switch,omitempty"`
+	// ModelRecovery: the node's own bounded recovery has this protected conversation answering on another model, or
+	// its chain was exhausted (#7824). Node-owned state, not a user preference: it never changes the configured model
+	// and is cleared once the configured model runs again. Persisted so a node restart keeps the marker.
+	ModelRecovery *proto.ModelRecovery `json:"model_recovery,omitempty"`
+	// FollowsSetting marks a leader/supervisor conversation the manager sends with the main chat's model setting
+	// (assistant/start.go). Together with IsMain it identifies the conversations the owner's recovery rule protects;
+	// worker Agent conversations have neither flag.
+	FollowsSetting bool `json:"follows_setting,omitempty"`
 	// EngineHistory: the conversation's earlier stretches this session continues after a switch between Claude Code
 	// and Codex (engine_switch.go, Session.engine_history), oldest first. Only the session running the conversation now
 	// has it: the switch that moves the conversation on gives it to the next session and clears it here. A start that

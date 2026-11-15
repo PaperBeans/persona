@@ -149,27 +149,59 @@ func (n *Node) stoppable(id string, retire bool) (unlock func(), a host.Agent, o
 // closes the pane: the shell the agent ran in stays. An agent that does not quit is refused as not_stopped.
 func (n *Node) quitAgent(ctx context.Context, id, pane string) (bool, error) {
 	for range stopRounds {
-		_ = n.sendKeys(ctx, pane, "ctrl+c")
-		time.Sleep(200 * time.Millisecond)
-		if err := n.sendKeys(ctx, pane, "ctrl+c"); err != nil {
+		stopped, err := n.quitAgentRound(ctx, id, pane, nil, false)
+		if err != nil {
 			return false, err
 		}
-		for deadline := time.Now().Add(stopWait); ; {
-			if err := ctx.Err(); err != nil {
-				return false, err
-			}
-			if err := n.refreshHosts(ctx); err == nil {
-				if a, ok := n.agent(id); !ok || a.PaneID != pane {
-					return true, nil
-				}
-			}
-			if time.Now().After(deadline) {
-				break
-			}
-			time.Sleep(250 * time.Millisecond)
+		if stopped {
+			return true, nil
 		}
 	}
 	return false, refusal(notStopped, "the agent did not quit", nil)
+}
+
+// quitAgentRound is one quitAgent attempt: two Ctrl+C presses, then a bounded wait for the session to leave pane.
+// With only and requireFresh, an abandoned start uses the same primitive but every verification refresh must succeed
+// for that pane's host; the ordinary quitAgent keeps its tolerant multi-round refresh behavior.
+func (n *Node) quitAgentRound(ctx context.Context, id, pane string, only host.Host, requireFresh bool) (bool, error) {
+	if requireFresh {
+		// Do not let a successful discovery followed by an outage turn the first Ctrl+C pair into an unverified interrupt,
+		// and do not send it to a shell after the agent has already left.
+		if err := n.refreshHosts(ctx, only); err != nil {
+			return false, err
+		}
+		if a, ok := n.agent(id); !ok || a.PaneID != pane {
+			return true, nil
+		}
+	}
+	_ = n.sendKeys(ctx, pane, "ctrl+c")
+	time.Sleep(200 * time.Millisecond)
+	if err := n.sendKeys(ctx, pane, "ctrl+c"); err != nil {
+		return false, err
+	}
+	for deadline := time.Now().Add(stopWait); ; {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		var err error
+		if only != nil {
+			err = n.refreshHosts(ctx, only)
+		} else {
+			err = n.refreshHosts(ctx)
+		}
+		if err == nil {
+			if a, ok := n.agent(id); !ok || a.PaneID != pane {
+				return true, nil
+			}
+		} else if requireFresh {
+			return false, err
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return false, nil
 }
 
 // resumed is what a Claude session that is not running is resumed with: the directory, launcher and model it was

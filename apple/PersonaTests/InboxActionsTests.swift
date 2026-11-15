@@ -75,6 +75,14 @@ struct InboxActionsTests {
         #expect(back.count == 2)
     }
 
+    /// Hubs before #8310 named the row by its bare id and sent empty lists as null: the answer still reads, so Undo works.
+    @Test func aHubNamingTheRowByItsBareIDStillReads() async throws {
+        let hub = FakeHub()
+        hub.on("POST", "/api/v1/inbox/todo", json: #"{"changed":[],"unchanged":null,"skipped":null,"failed":null,"todos":[{"item":"a","todo":{"id":"t1","title":"t a","notes":"p","done_at":null,"inbox_item":"a"}}],"undo":{"items":[{"id":"a","todo_id":"t1"}]}}"#)
+        let reply = try await hub.client.todoInbox([Self.item("a")], due: .today)
+        #expect(reply.todos == [.init(itemID: "a", todoID: "t1")])
+    }
+
     // MARK: Offers and links
 
     @Test func mergeNeedsTwoOpenRowsOfOneManager() throws {

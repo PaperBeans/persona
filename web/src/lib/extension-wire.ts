@@ -862,6 +862,32 @@ export interface AuthPrompt {
   expires_at?: string;
 }
 
+/**
+ * settings.check (manifest settings_check): the configuration and secrets as a change would leave them, before the
+ * hub saves it. The program answers whether they work (SettingsCheckResult) within 10 seconds.
+ */
+export interface SettingsCheckParams {
+  /** The whole configuration as it would be saved, the schema's defaults filled in. */
+  config: unknown;
+  secrets: Record<string, string>;
+  /**
+   * The egress proxy URL for this check only, when the program runs behind the proxy and a config: entry of
+   * permissions.network names an address: requests sent through it reach the addresses this configuration names, its
+   * ordinary requests only the saved ones. It stops working once the check answers. Absent: use the program's
+   * ordinary proxy (an older hub sends none).
+   */
+  proxy?: string;
+}
+
+/**
+ * settings.check's answer: ok, or why not in one sentence for the owner (the hub takes every secret out of it and
+ * cuts it to 300 characters).
+ */
+export interface SettingsCheckResult {
+  ok: boolean;
+  error?: string;
+}
+
 export type HubRole = "center" | "member" | (string & {});
 export const HUB_ROLES = ["center", "member"] as const;
 

@@ -67,6 +67,7 @@
   "rewind_mismatch": "所选消息的位置发生了变化，请刷新对话后再回退。",
   "rewind_nothing": "没有可以回退到的消息。",
   "rewind_failed": "尚未确认回退结果，请刷新对话检查当前历史。",
+  "not_loaded": "这个 Agent 现在没在 Paseo 里运行，打开它的对话时才会加载内容。",
   "preview_no_terminal": "这台电脑没有启用终端引擎，没法在这里运行服务器。在这台电脑的设置里启用一个后再试。",
   "space_gone": "这台电脑上已经没有引擎列出这个空间了。刷新后再试。",
   "assistant_service_tier_start_only": "Fast 只能在新建对话时随第一条消息选择。已有对话请直接调整速度。",

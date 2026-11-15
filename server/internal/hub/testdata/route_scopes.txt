@@ -257,6 +257,7 @@ machines.read        GET /api/v1/machines/{id}/usage
 -                    GET /api/v1/machines/{mid}/git/review
 -                    GET /api/v1/machines/{mid}/git/show
 -                    GET /api/v1/machines/{mid}/git/status
+-                    GET /api/v1/machines/{mid}/grok-settings
 -                    GET /api/v1/machines/{mid}/health/reports
 -                    GET /api/v1/machines/{mid}/herdr
 -                    GET /api/v1/machines/{mid}/iphone
@@ -463,6 +464,7 @@ inbox.write          POST /api/v1/inbox/{id}/task-link/recheck
 agents.control       POST /api/v1/interactions/{id}/choose
 agents.control       POST /api/v1/interactions/{id}/reanswer
 agents.control       POST /api/v1/interactions/{id}/resolve
+-                    POST /api/v1/iphone/try
 -                    POST /api/v1/kb-trash/{id}/restore
 -                    POST /api/v1/later/{id}/handled
 -                    POST /api/v1/launchers
@@ -654,6 +656,7 @@ kb.write             PUT /api/v1/kb/{kind}/{id}
 -                    PUT /api/v1/machines/{mid}/computer
 -                    PUT /api/v1/machines/{mid}/engine
 -                    PUT /api/v1/machines/{mid}/file-transfer/settings
+-                    PUT /api/v1/machines/{mid}/grok-settings
 -                    PUT /api/v1/machines/{mid}/herdr
 -                    PUT /api/v1/machines/{mid}/iphone
 -                    PUT /api/v1/machines/{mid}/omp-settings

@@ -11,7 +11,7 @@ import { BackStrip } from "./HandoffBack";
 
 export function inboxBackLabel(item: Pick<InboxOrigin, "title">): string {
   const title = item.title?.trim();
-  return title ? t("chat-chatview.inbox_back_title", { title }) : t("chat-chatview.inbox_back_generic");
+  return title ? t("chat-backstrip.inbox_back_title", { title }) : t("chat-backstrip.inbox_back_generic");
 }
 
 export function InboxBack({ mid, sid, session }: { mid: string; sid: string; session: Session | undefined }) {
@@ -23,5 +23,5 @@ export function InboxBack({ mid, sid, session }: { mid: string; sid: string; ses
     if (from && sameItem(from, item)) return history.back();
     navigate(itemRoute(item));
   };
-  return <BackStrip inbox label={inboxBackLabel(item)} dismissLabel={t("chat-chatview.handoff_dismiss")} onBack={back} onDismiss={() => setDismissed(true)} />;
+  return <BackStrip inbox label={inboxBackLabel(item)} dismissLabel={t("chat-backstrip.handoff_dismiss")} onBack={back} onDismiss={() => setDismissed(true)} />;
 }

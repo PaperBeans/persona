@@ -203,3 +203,41 @@ func TestStoppedFromPhoneLocalized(t *testing.T) {
 		}
 	}
 }
+
+// Paseo's input to an agent (transcript/paseo.go): a child waiting for a permission and a schedule's run are notices
+// the node writes in Chinese, an untitled agent's message is from the node's stand-in; each in the reader's language.
+func TestLocalizedPaseoLines(t *testing.T) {
+	env := func(attrs, body string) string {
+		return `<paseo-system version="1" ` + attrs + ">\n" + body + "\n</paseo-system>"
+	}
+	cases := []struct {
+		in, en, ja string
+	}{
+		{env(`kind="agent-notification" source-agent-id="c1" message-id="n1" source-agent-title="Ticket 44" event="permission-required"`, "Agent c1 (Ticket 44) needs permission."),
+			"Subagent is waiting for approval · Ticket 44", "サブエージェントが承認を待っています · Ticket 44"},
+		{env(`kind="agent-notification" source-agent-id="c1" message-id="n2" event="permission-required"`, "Agent c1 (c1) needs permission."),
+			"Subagent is waiting for approval", "サブエージェントが承認を待っています"},
+		{env(`kind="agent-notification" source-agent-id="c1" message-id="n3" source-agent-title="Ticket 45" event="finished"`, "Agent c1 (Ticket 45) finished."),
+			"Subagent finished · Ticket 45", "サブエージェント完了 · Ticket 45"},
+		{"<paseo-system>\nSchedule \"nightly\" fired (id=s1, run=r1).\nCheck the queue.\n</paseo-system>",
+			"A scheduled run started: nightly", "スケジュール実行が始まりました：nightly"},
+	}
+	for _, c := range cases {
+		items := userLine(t, c.in)
+		zh := items[0].Text
+		if got := localizedItems(i18n.ZhHans, items); got[0].Text != zh {
+			t.Fatalf("zh-Hans changed %q into %q", zh, got[0].Text)
+		}
+		for l, want := range map[i18n.Lang]string{i18n.En: c.en, i18n.Ja: c.ja} {
+			if got := localizedItems(l, items)[0].Text; got != want {
+				t.Errorf("%s: %q → %q, want %q", l, zh, got, want)
+			}
+		}
+	}
+	untitled := userLine(t, env(`kind="agent-message" source-agent-id="c1" message-id="m1"`, "Found it."))
+	for l, want := range map[i18n.Lang]string{i18n.En: "Another session", i18n.Ja: "別のセッション", i18n.ZhHans: transcript.FromSession} {
+		if got := localizedItems(l, untitled)[0]; got.From != want || got.Text != "Found it." {
+			t.Errorf("%s: %+v", l, got)
+		}
+	}
+}

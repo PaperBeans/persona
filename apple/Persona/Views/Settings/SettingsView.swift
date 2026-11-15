@@ -359,6 +359,7 @@ struct SettingsView: View {
         }
         else if d.bool(forKey: "openConnectorBot") { p.append(SettingsPage.feishuBot) }
         else if d.bool(forKey: "openConnectorDevice") { p.append(SettingsPage.phoneData) }
+        else if d.bool(forKey: "openIPhoneSetup") { p = SettingsPage.iphoneSetupPath } // the guided setup (#8199)
         else if d.bool(forKey: "openTranslationSettings") { p.append(SettingsPage.translation) }
         else if d.bool(forKey: "openLiveScreenSettings") { // Settings › Live Screen (#6396)
             #if os(iOS)
@@ -410,6 +411,8 @@ enum SettingsPage: Hashable {
     case liveScreen
     #endif
     case persona, themeColor, style, colorScheme, language, assistant, claude, codex, devices, phoneData, mail, feishuBot, notifications, storage, translation, modelConfiguration
+    /// Settings › Connectors › This iPhone › iPhone Control: the guided setup (#8199).
+    case iphoneSetup
     /// Settings › Connectors › the chat connector; `manager`: whose (Messages' Settings names the default's, whose
     /// account its chats follow; nil: the current assistant's).
     case feishu(manager: String? = nil)
@@ -474,6 +477,8 @@ enum SettingsPage: Hashable {
 
     /// One canonical path for current callers and legacy Sent destinations.
     static var sentPath: NavigationPath { NavigationPath([SettingsPage.connectors, .sent]) }
+    /// This iPhone's guided setup, under Settings › This iPhone (`persona://iphone/setup`).
+    static var iphoneSetupPath: NavigationPath { NavigationPath([SettingsPage.phoneData, .iphoneSetup]) }
 
 }
 
@@ -540,6 +545,12 @@ private struct SettingsDestinations: ViewModifier {
         case .codex: ClaudeSettingsView(agent: .codex)
         case .devices: DevicesView()
         case .phoneData: PhoneDataView()
+        case .iphoneSetup:
+            #if os(iOS)
+            IPhoneSetupView()
+            #else
+            EmptyView()
+            #endif
         case .mail: MailAccountsView(inSheet: false)
         case .feishu(let manager): FeishuConnectorView(manager: manager)
         case .connector(let id, let manager):
@@ -649,12 +660,14 @@ struct PhoneDataView: View {
     @State private var enabled: [PhoneDataSource: Bool] = [:]
     @State private var asking: PhoneDataSource?
     @StoredValue(ClipboardOffer.enabledKey) private var offerClipboard = false
-    #if os(iOS)
-    @State private var iphoneConsent = IPhoneConsentModel()
-    #endif
 
     var body: some View {
         List {
+            #if os(iOS)
+            // Being operated by the assistant through a computer (docs/extensions/iphone.md): the guided setup, first,
+            // always offered on an iPhone (#8199).
+            IPhoneSetupEntry()
+            #endif
             Section {
                 ForEach(PhoneDataSource.onThisDevice) { s in
                     HStack(spacing: Theme.Space.m) {
@@ -681,9 +694,6 @@ struct PhoneDataView: View {
                 #endif
             }
             #if os(iOS)
-            // Being operated by the assistant through a paired Mac (docs/extensions/iphone.md): only while the hub's
-            // extension iphone is on.
-            IPhoneConsentSection(consent: iphoneConsent)
             // Sending the phone's clipboard to a computer (#3064): offered when the app comes back after copying.
             Section {
                 Toggle(isOn: $offerClipboard) {
@@ -703,9 +713,6 @@ struct PhoneDataView: View {
         .navigationTitle(ConnectorText.device)
         .navigationBarTitleDisplayMode(.inline) // like the other connectors' pages
         .task { refresh() }
-        #if os(iOS)
-        .task(id: model.config) { await iphoneConsent.load() } // again once the app has its hub (pairing, switching)
-        #endif
         // Back from the system's Settings, where a permission may have been given or taken away.
         .onChange(of: phase) { _, p in if p == .active { refresh() } }
     }

@@ -89,7 +89,7 @@ export function SidesPanel({ mid, sid, side, at, onClose }: { mid: string; sid: 
   return (
     <StripPanel
       icon="sideSessions"
-      title={t("chat-chatview.side_sessions")}
+      title={t("chat-teampanel.side_sessions")}
       subtitle={shown ? sessionTitle(shown) : undefined}
       onClose={onClose}
       strip={sides.length > 0 && <SessionStrip members={sides} shown={shown?.session_id} controls={body} onPick={(w) => showSide(mid, sid, w.session_id)} words={SIDE_WORDS} hint={sideHint} named />}
@@ -128,7 +128,7 @@ interface StripWords {
   right: string;
 }
 const WORKER_WORDS: StripWords = { label: "chat-teampanel.strip_label", left: "chat-teampanel.scroll_left", right: "chat-teampanel.scroll_right" };
-const SIDE_WORDS: StripWords = { label: "chat-chatview.side_sessions", left: "chat-teampanel.sides_scroll_left", right: "chat-teampanel.sides_scroll_right" };
+const SIDE_WORDS: StripWords = { label: "chat-teampanel.side_sessions", left: "chat-teampanel.sides_scroll_left", right: "chat-teampanel.sides_scroll_right" };
 
 /** cindy's tab layout of the worker list: one row of pills that scrolls sideways, with ‹ › at its ends while there is more
  *  that way and the edges fading; a mouse wheel scrolls it too. The shown pill is kept in view. Arrow keys, Home and End

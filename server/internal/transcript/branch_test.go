@@ -725,7 +725,7 @@ func TestTailSkippedLineIsTheSameInTheTree(t *testing.T) {
 		}
 		got, want := skipped.tree.recs[3], whole.tree.recs[3]
 		if got.uuid != want.uuid || got.parent != want.parent || got.prompt != want.prompt || got.reply != want.reply ||
-			got.system != want.system || got.turnEnd != want.turnEnd || got.prompt != c.prompt || got.outcomeChanged {
+			got.system != want.system || got.turnEnd != want.turnEnd || got.prompt != c.prompt || got.hasOutcome != c.prompt {
 			t.Fatalf("%.80s…: skipped %+v, whole %+v; a skipped line must keep only the tree shape, not new outcome evidence", c.line, got, want)
 		}
 	}
@@ -745,8 +745,12 @@ func TestTailSkippedLineDoesNotResetOutcomeEvidence(t *testing.T) {
 	recap := `{"type":"system","subtype":"away_summary","uuid":"recap","parentUuid":"p","timestamp":"2026-11-05T10:01:00Z","content":"recap"}`
 	whole.Line(&wm, ParseLine(4, []byte(recap), &wm))
 	skipped.Line(&sm, ParseLine(4, []byte(recap), &sm))
-	got, want := skipped.tree.recs[len(skipped.tree.recs)-1], whole.tree.recs[len(whole.tree.recs)-1]
-	if got.outcomeChanged != want.outcomeChanged || got.outcomeChanged {
-		t.Fatalf("a visible recap after a skipped line reset outcome evidence: skipped %+v, whole %+v", got, want)
+	whole.Settle(&wm)
+	skipped.Settle(&sm)
+	if sm.TurnOpen != wm.TurnOpen || sm.TurnClosed != wm.TurnClosed || sm.TurnSucceeded() != wm.TurnSucceeded() ||
+		sm.TurnError != wm.TurnError || sm.TurnErrorResumes != wm.TurnErrorResumes {
+		t.Fatalf("a visible recap after a skipped line reset outcome evidence: skipped open=%v closed=%v success=%v error=%q resumes=%v; whole open=%v closed=%v success=%v error=%q resumes=%v",
+			sm.TurnOpen, sm.TurnClosed, sm.TurnSucceeded(), sm.TurnError, sm.TurnErrorResumes,
+			wm.TurnOpen, wm.TurnClosed, wm.TurnSucceeded(), wm.TurnError, wm.TurnErrorResumes)
 	}
 }

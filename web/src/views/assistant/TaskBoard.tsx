@@ -69,17 +69,17 @@ export function TaskBoard({ open, conversation, onClose }: { open: boolean; conv
     return [where, now].filter(Boolean).join(" · ");
   };
   return (
-    <Dialog open={open} onClose={onClose} title={t("assistant-tasks.board_title")} width={480}>
+    <Dialog open={open} onClose={onClose} title={t("assistant-task-actions.board_title")} width={480}>
       {sections.length === 0 ? (
-        <Empty icon="todo" title={t("assistant-tasks.board_empty_title")}>
-          {t("assistant-tasks.board_empty_body")}
+        <Empty icon="todo" title={t("assistant-task-actions.board_empty_title")}>
+          {t("assistant-task-actions.board_empty_body")}
         </Empty>
       ) : (
         <div className="flex flex-col gap-4" data-testid="task-board">
           {sections.map((sec) => (
             <section key={sec.key} aria-label={BOARD_TITLE[sec.key]}>
               <h3 className="mb-1 px-1 text-[12px] font-medium text-ink-3">
-                {t("assistant-tasks.board_section", { title: BOARD_TITLE[sec.key], count: sec.rows.length + sec.agents.length })}
+                {t("assistant-task-actions.board_section", { title: BOARD_TITLE[sec.key], count: sec.rows.length + sec.agents.length })}
               </h3>
               <div className="divide-y divide-line overflow-hidden rounded-card bg-field">
                 {sec.rows.map(({ todo, status }) => (
@@ -107,7 +107,7 @@ export function TaskBoard({ open, conversation, onClose }: { open: boolean; conv
                       <Icon name="chevronRight" size={13} className="shrink-0 text-ink-3" />
                     </button>
                     {isRemovable(status) && (
-                      <IconButton icon="trash" label={t("assistant-tasks.board_remove", { title: todo.title })} onClick={() => removeTaskNow(todo)} className="mr-1.5" />
+                      <IconButton icon="trash" label={t("assistant-task-actions.board_remove", { title: todo.title })} onClick={() => removeTaskNow(todo)} className="mr-1.5" />
                     )}
                   </div>
                 ))}

@@ -136,6 +136,8 @@ type updater struct {
 
 	// androidNote is what syncAndroid last logged: the same failure is not logged again every hour.
 	androidNote string
+	// behindNote is the update source and release noteBehind last logged as behind: once per pair, not every hour.
+	behindNote string
 }
 
 func newUpdater(h *Hub) *updater {
@@ -615,6 +617,10 @@ type updateView struct {
 	UpdateURL   string `json:"update_url,omitempty"`
 	UpdateFrom  string `json:"update_url_from,omitempty"`
 	UpdateProxy string `json:"update_proxy,omitempty"`
+	// SourceBehind: the newest release the update source has (Latest) is older than this hub and than the release its
+	// code contains (Build.Behind, #8108): the source looks stopped, and nothing newer will come from it until update.url
+	// names another. Left out otherwise.
+	SourceBehind bool `json:"source_behind,omitempty"`
 }
 
 type latestView struct {
@@ -654,6 +660,7 @@ func (u *updater) viewIn(l i18n.Lang) updateView {
 		released := r.Manifest.Released
 		v.Latest = &latestView{Version: r.Manifest.Version, Build: r.Manifest.Build, Released: &released, Notes: r.Manifest.Notes,
 			Newer: u.h.build.Newer(r.Manifest.Build), Bad: slices.Contains(u.settings.Bad, r.Manifest.Build)}
+		v.SourceBehind = u.h.build.Behind(r.Manifest)
 		if v.Latest.Newer && selfUpdates {
 			v.Latest.Held = u.h.build.Hold(r.Manifest)
 			if v.Latest.Held == "" && u.blocked != nil {

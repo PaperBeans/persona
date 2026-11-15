@@ -174,6 +174,7 @@ final class TierFixtureTests: XCTestCase {
                 func v(_ d: Double?) -> Any { d.map { $0 as Any } ?? NSNull() }
                 steps.append(["take": ["now": now],
                               "expected": ["frames": s.frames, "queueP50Ms": v(s.queueP50Ms), "queueP95Ms": v(s.queueP95Ms),
+                                           "queueLastMs": v(s.queueLastMs),
                                            "queueRising": s.queueRising, "queueFalling": s.queueFalling,
                                            "deliveredKbps": v(s.deliveredKbps), "burstKbps": s.burstKbps,
                                            "lateShare": v(s.lateShare), "decodeP95Ms": v(s.decodeP95Ms),
@@ -206,12 +207,13 @@ final class TierFixtureTests: XCTestCase {
         var ops: [Op] = []
     }
 
-    private static func sig(queue: Double, p95: Double? = nil, delivered: Double? = nil, rising: Bool = false,
+    private static func sig(queue: Double, p95: Double? = nil, last: Double? = nil, delivered: Double? = nil, rising: Bool = false,
                             falling: Bool = false, frames: Int = 30, bursts: [Double] = [], decode: Double? = 4) -> TierSignals {
         var s = TierSignals()
         s.frames = frames
         s.queueP50Ms = queue
         s.queueP95Ms = p95 ?? queue
+        s.queueLastMs = last ?? queue
         s.deliveredKbps = delivered
         s.queueRising = rising
         s.queueFalling = falling
@@ -239,6 +241,10 @@ final class TierFixtureTests: XCTestCase {
         PolicyCase(name: "start_relay_wifi", description: "The relay over Wi-Fi: the second.", link: relay),
         PolicyCase(name: "start_relay_cellular", description: "The relay over cellular, under the cellular cap: the third rung.",
                    capKbps: 4_000, link: cellular),
+        PolicyCase(name: "start_relay_1x_display", description: "The relay on a display at one pixel per point: its step (1.5×60) is 2×60's picture, so 60 fps, as on a Retina Mac.",
+                   display: TierPolicy.Display(points: [1920, 1080], pixels: [1920, 1080], maxSize: 2868), link: relay),
+        PolicyCase(name: "start_cellular_1x_display", description: "Cellular on a display at one pixel per point: its step (1.5×30), so 30 fps.",
+                   display: TierPolicy.Display(points: [1920, 1080], pixels: [1920, 1080], maxSize: 2868), capKbps: 4_000, link: cellular),
         PolicyCase(name: "start_unmeasured", description: "No route measured yet: as the relay over Wi-Fi.", link: nil),
         PolicyCase(name: "start_remembered", description: "Where this computer last settled over this route.", link: relay,
                    remembered: 3),
@@ -246,9 +252,15 @@ final class TierFixtureTests: XCTestCase {
                    capKbps: 1_500, maxScale: 1, link: cellular),
         PolicyCase(name: "long_queue_jumps", description: "A queue over 400 ms for a quarter second jumps to what arrived.",
                    link: lan, ops: [.tick(sig(queue: 500, delivered: 3_000), now: 1), .tick(sig(queue: 500, delivered: 3_000), now: 1.25)]),
-        PolicyCase(name: "skipped_frames", description: "Frames the helper skipped count as a long queue; no rate: one down.",
-                   link: lan, ops: [.helper(target: 7_000, sent: 7_000, skipped: 4), .tick(sig(queue: 100), now: 1),
-                                    .tick(sig(queue: 100), now: 1.25)]),
+        PolicyCase(name: "skipped_frames", description: "Frames the helper skipped, with a queue still over 150 ms, count as a long queue; no rate: one down.",
+                   link: lan, ops: [.helper(target: 12_000, sent: 12_000, skipped: 4), .tick(sig(queue: 200), now: 1),
+                                    .tick(sig(queue: 200), now: 1.25)]),
+        PolicyCase(name: "backlog_gone", description: "Skipped frames with the queue under 150 ms, a backlog that came in at once (its newest frame barely waited), the band's floor with no backlog now: nothing steps down; a backlog still there does.",
+                   link: lan, ops: [.helper(target: 12_000, sent: 12_000, skipped: 4), .tick(sig(queue: 100), now: 1), .tick(sig(queue: 100), now: 1.25),
+                                    .tick(sig(queue: 500, last: 3, delivered: 1_000), now: 1.5),
+                                    .tick(sig(queue: 500, last: 3, delivered: 1_000), now: 1.75),
+                                    .helper(target: 2_500, sent: 900, skipped: 0), .tick(sig(queue: 200, last: 2, delivered: 1_000), now: 2.25),
+                                    .tick(sig(queue: 200, last: 180, delivered: 1_000), now: 2.5)]),
         PolicyCase(name: "exhausted_band", description: "The bitrate at the band's floor and the queue not draining: down, spaced, and at once for a runaway queue.",
                    link: lan, ops: [.helper(target: 10_000, sent: 10_000, skipped: 0), .tick(sig(queue: 200), now: 1),
                                     .helper(target: 6_500, sent: 6_500, skipped: 0), .tick(sig(queue: 200, delivered: 5_500), now: 1.25),
@@ -264,7 +276,7 @@ final class TierFixtureTests: XCTestCase {
                    link: lan, ops: [.tick(sig(queue: 5, decode: 30), now: 1), .tick(sig(queue: 5, decode: 30), now: 2.75),
                                     .tick(sig(queue: 5, decode: 30), now: 3)]),
         PolicyCase(name: "up_needs_proof", description: "A calm window isn't enough: up only once the link carried more.",
-                   link: relay, ops: [.helper(target: 12_000, sent: 300, skipped: 0)] + ticks(from: 0.25, to: 12, sig(queue: 5))
+                   link: relay, ops: [.helper(target: 12_000, sent: 4_000, skipped: 0)] + ticks(from: 0.25, to: 12, sig(queue: 5))
                        + [.helper(target: 12_000, sent: 11_000, skipped: 0)] + ticks(from: 12, to: 22, sig(queue: 5))),
         PolicyCase(name: "first_seconds", description: "In the first 10 s a step up waits 3 s, not 8.",
                    link: relay, ops: [.helper(target: 12_000, sent: 11_500, skipped: 0)] + ticks(from: 0.25, to: 4, sig(queue: 5))),
@@ -285,8 +297,11 @@ final class TierFixtureTests: XCTestCase {
                    link: relay, ops: [.helper(target: 4_500, sent: 4_500, skipped: 0), .setBias(.sharper, now: 1), .setBias(.sharper, now: 2),
                                       .setBias(.smoother, now: 3)]),
         PolicyCase(name: "skipped_then_still", description: "Skipped frames, then a still screen: one step down for that second's report, not one a second after it (#7842).",
-                   link: lan, ops: [.helper(target: 9_000, sent: 9_000, skipped: 2), .tick(sig(queue: 5), now: 0.25), .tick(sig(queue: 5), now: 0.5)]
+                   link: lan, ops: [.helper(target: 9_000, sent: 9_000, skipped: 2), .tick(sig(queue: 200), now: 0.25), .tick(sig(queue: 200), now: 0.5)]
                        + ticks(from: 0.75, to: 6, sig(queue: 0, frames: 0))),
+        PolicyCase(name: "light_content_up", description: "A screen sending at most half the next floor, calm for twice the window: up without proof, from the new tier's floor.",
+                   link: relay, ops: stride(from: 10.25, to: 27, by: 0.25).flatMap { t -> [Op] in
+                       (Int(t * 4) % 4 == 1 ? [Op.helper(target: 12_000, sent: 600, skipped: 0)] : []) + [.tick(sig(queue: 5), now: t)] }),
         PolicyCase(name: "bias_on_a_still_screen", description: "The helper's last word under the tier's floor (a still screen): Smoother starts from the tier's floor and keeps 60 fps (#7842).",
                    link: lan, ops: [.helper(target: 300, sent: 150, skipped: 0), .tick(sig(queue: 0, frames: 0), now: 1),
                                     .setBias(.smoother, now: 2)]),
@@ -318,7 +333,8 @@ final class TierFixtureTests: XCTestCase {
 
     private static func signalsObject(_ s: TierSignals) -> [String: Any] {
         func v(_ d: Double?) -> Any { d.map { $0 as Any } ?? NSNull() }
-        return ["frames": s.frames, "queueP50Ms": v(s.queueP50Ms), "queueP95Ms": v(s.queueP95Ms), "queueRising": s.queueRising,
+        return ["frames": s.frames, "queueP50Ms": v(s.queueP50Ms), "queueP95Ms": v(s.queueP95Ms), "queueLastMs": v(s.queueLastMs),
+                "queueRising": s.queueRising,
                 "queueFalling": s.queueFalling, "deliveredKbps": v(s.deliveredKbps), "burstKbps": s.burstKbps,
                 "lateShare": v(s.lateShare), "decodeP95Ms": v(s.decodeP95Ms), "replacedShare": v(s.replacedShare)]
     }

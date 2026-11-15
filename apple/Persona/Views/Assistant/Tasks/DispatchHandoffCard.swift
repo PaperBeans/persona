@@ -4,7 +4,8 @@ import PersonaWire
 /// One dispatch, one card per Agent (docs/design/DESIGN_SYSTEM.md §3.3; the web's `HandoffCard`): an arrow, the Agent's
 /// title with how it came to the task (New, Already Active, Resumed), when it last moved and its state, and an arrow out.
 /// A plan names only its own tasks. Before an Agent is up the card stands for the task: starting, why it did not start,
-/// or that it closed. Agents linked together are each a card; a later Agent is not on this hand-off.
+/// or that it closed. Agents linked together are each a card; a later Agent is not on this hand-off. It is the task's only
+/// card in the chat (#8237): a start that failed or a turn the model service cut off shows here, in place, with why.
 struct DispatchHandoffCards: View {
     var tasks: [DispatchedTasks.Entry]
     private var store: TasksStore { .shared }
@@ -39,9 +40,10 @@ struct DispatchHandoffCard: View {
     enum Meta: Equatable {
         /// An Agent has the task: when it last moved (nil when nothing yet) and the task's state.
         case agent(at: Date?, state: TaskState, limit: Bool)
+        /// The Agent stopped on a model service error nothing continues: when, and why in words ("" when unknown).
+        case interrupted(at: Date?, reason: String)
+        /// Its Agent did not start: the line that says so, in plain words (`StartFailureWords.cardLine`).
         case failed(String)
-        /// Did not start, and the conversation's failed receipt says why: the card only says it did not.
-        case failedBelow
         case gone
         case closedEarly
         case starting
@@ -78,32 +80,29 @@ struct DispatchHandoffCard: View {
             let at = (session?.activityAt ?? session?.updatedAt).flatMap { $0.isMeaningful ? $0 : nil }
             let state = session.map { TaskState(todo: todo, sessions: [$0]) } ?? store.state(todo)
             let limit = session.map { Self.limited(state: state, closed: todo.doneAt != nil, lead: $0) } ?? false
+            if !limit, let session, let reason = Self.interruption(session, closed: todo.doneAt != nil) {
+                return .interrupted(at: at, reason: reason)
+            }
             return .agent(at: at, state: state, limit: limit)
         }
-        if let failure = failure(todo) { return Self.failedMeta(failure, receiptBelow: failedReceipt(todo)) }
+        if let failure = failure(todo) { return .failed(StartFailureWords.cardLine(failure)) }
         if todo?.doneAt != nil { return .closedEarly }
         if todo == nil, entry.todoID != nil, !store.todos.isEmpty { return .gone }
         return .starting
     }
 
-    /// A failed start is said once: the failed receipt below the card carries the reason, so the card only says it did not.
-    nonisolated static func failedMeta(_ failure: String, receiptBelow: Bool) -> Meta {
-        receiptBelow ? .failedBelow : .failed(failure)
+    /// Why the Agent's turn was cut off, in words, while it is (the tray's `interrupted`: stopped on a turn error that is
+    /// not a usage limit, the task open); "" when the error says nothing readable; nil when it was not cut off.
+    nonisolated static func interruption(_ session: Session, closed: Bool) -> String? {
+        let error = (session.turnError ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !closed, !error.isEmpty, session.turnErrorKind != "usage_limit",
+              session.state == .unread || session.state == .idle else { return nil }
+        return TurnErrorReason.of(error) ?? error
     }
 
     /// The Agent is waiting out a usage limit: not when it needs you, not once the task is closed.
     static func limited(state: TaskState, closed: Bool, lead: Session, now: Date = .now) -> Bool {
         state != .needsYou && !closed && lead.isUsageLimited(now: now)
-    }
-
-    /// The conversation has a failed receipt for the task (the web's `useFailedReceipts`): it says why, so the card need not.
-    private func failedReceipt(_ todo: TodoItem?) -> Bool {
-        guard let id = entry.todoID ?? todo?.id, let conversation = entry.conversation else { return false }
-        return Self.hasFailedReceipt(store.feed(conversation), todo: id)
-    }
-
-    nonisolated static func hasFailedReceipt(_ feed: [FeedItem], todo: String) -> Bool {
-        feed.contains { $0.kind == .receipt && $0.ref == todo && $0.failed }
     }
 
     /// Why the task's Agent did not start: the hub's word on the to-do, its plan's, the Agent's own row, or the plan task's.
@@ -202,11 +201,25 @@ struct DispatchHandoffCardBody: View, Equatable {
             }
             .font(Theme.Font.caption)
             .foregroundStyle(.secondary)
-        case .failed(let failure):
-            Text("Didn't start: \(failure) [Tasks Store 38bbb7]").font(Theme.Font.caption).foregroundStyle(Theme.danger).lineLimit(2)
-                .accessibilityIdentifier("dispatch.failure")
-        case .failedBelow:
-            Text("Didn't Start").font(Theme.Font.caption).foregroundStyle(Theme.danger).lineLimit(1)
+        case .interrupted(let at, let reason):
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
+                if let at {
+                    ThemedIcon(Theme.Icon.recent).font(Theme.Font.label).foregroundStyle(.secondary)
+                    VisibleTimelineView(interval: 60) { now in
+                        Text(Self.relative.localizedString(for: min(at, now), relativeTo: now)).lineLimit(1).foregroundStyle(.secondary)
+                    }
+                    Text(verbatim: "·").foregroundStyle(.tertiary)
+                }
+                ThemedIcon(Theme.Icon.infoFilled).foregroundStyle(Theme.danger).scaledFrame(width: Theme.Size.markM)
+                    .accessibilityHidden(true)
+                Text(Self.interruptedLine(reason)).foregroundStyle(Theme.danger).lineLimit(2)
+            }
+            .font(Theme.Font.caption)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("dispatch.interrupted")
+        case .failed(let line):
+            // the raw error is the task's details' (TaskDetailSheet), never the card's
+            Text(line).font(Theme.Font.caption).foregroundStyle(Theme.danger).lineLimit(2)
                 .accessibilityIdentifier("dispatch.failure")
         case .gone:
             Text("This task no longer exists").font(Theme.Font.caption).foregroundStyle(.tertiary).lineLimit(1)
@@ -215,6 +228,12 @@ struct DispatchHandoffCardBody: View, Equatable {
         case .starting:
             Text("Starting the agent").font(Theme.Font.caption).foregroundStyle(.tertiary).lineLimit(1)
         }
+    }
+
+    /// "Interrupted · <why>", or the word alone when nothing readable says why (the tray row's words, #8237).
+    nonisolated static func interruptedLine(_ reason: String) -> String {
+        let word = String(localized: "Interrupted [Chat Layout]")
+        return reason.isEmpty ? word : word + " · " + reason
     }
 
     private func open(_ id: String) {

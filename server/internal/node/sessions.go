@@ -394,6 +394,7 @@ func (n *Node) decorateIn(s *proto.Session, pass *codexListPass) {
 		s.PendingSwitch = st.PendingSwitch   // launcher_switch.go
 		s.SetEngineHistory(st.EngineHistory) // engine_switch.go
 	}
+	n.decorateModelRecovery(s) // node-owned recovery marker, and the shipped fallback-card projection (#7824)
 	if s.PendingSwitch == nil {
 		s.PendingSwitch = n.unrecordedSwitch(s.SessionID)
 	}

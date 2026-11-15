@@ -75,8 +75,12 @@ func RenderMeetingAnswerInput(in MeetingAnswerInput) string {
 }
 
 // MeetingRoomClaudeMD is a meeting room's CLAUDE.md (meeting/room_claude): the owner's name and the meeting's language,
-// nothing else of the owner's.
-type MeetingRoomClaudeMD struct{ Owner, Language string }
+// nothing else of the owner's. Lean: a room started with lean batches (#8253), told that batches come every two minutes
+// and show the lists only now and then, and to read the newest lines before answering about what was just said.
+type MeetingRoomClaudeMD struct {
+	Owner, Language string
+	Lean            bool
+}
 
 func RenderMeetingRoomClaudeMD(d MeetingRoomClaudeMD) string { return render("meeting/room_claude", d) }
 

@@ -87,6 +87,26 @@ describe("baseline browser persistence compatibility", () => {
     expect(getToken()).toBe("");
   });
 
+  it("keeps serving the legacy value on read when the alias restore write hits a full quota", () => {
+    const quotaError = () => {
+      const err = new Error("QuotaExceededError");
+      err.name = "QuotaExceededError";
+      throw err;
+    };
+    // storage holds only the legacy key and refuses every write: a read must not throw into the composer's mount
+    const full = {
+      getItem: (k: string) => (k === "draft:jarvis-new" ? "legacy words" : null),
+      setItem: quotaError,
+      removeItem() {},
+    } as unknown as Storage;
+
+    let value: string | null = null;
+    expect(() => {
+      value = storedValue("draft:persona-new", full);
+    }).not.toThrow();
+    expect(value).toBe("legacy words");
+  });
+
   it("migrates the legacy theme before either HTML entry point applies its initial theme", () => {
     for (const html of [appHTML, adminHTML]) {
       expect(html.indexOf('src="compatibility-bootstrap.js"')).toBeLessThan(html.indexOf('localStorage.getItem("persona.theme")'));

@@ -33,6 +33,13 @@
   <h2>Other Data</h2>
   <p>With your authorization, Persona can read and write data such as contacts, calendars, reminders, photos, health, and location on your iPhone. It accesses this data only when you actively use the corresponding features, and the data is transmitted only between your device and your self-deployed hub. Only when you ask the AI assistant (Claude) to use this data is the relevant content sent to the model service as conversation content.</p>
 
+  <h2>Meeting Recordings</h2>
+  <ul>
+    <li>By default, a meeting is transcribed on your iPhone (privacy mode): the audio stays on the iPhone, and only the text and its timestamps are stored in the knowledge base on your own hub. The one exception is while you hold “Talk” during a meeting: what is said then is sent to the voice service.</li>
+    <li>You can also have your hub transcribe a meeting: choose “On the Hub” when you start recording, or make it the default in Settings. That meeting's audio, “Talk” included, then goes through your hub to the speech service the hub is set up with (the service set in the voice extension, or another extension you chose). The hub deletes this audio once the meeting's minutes are written, and never keeps it longer than the recording's retention period. The speech service processes the audio it receives under its own terms.</li>
+    <li>In both modes, transcripts and meeting minutes are stored on your own hub according to your retention settings; the audio on your iPhone is kept as before, until the retention period ends or you delete it.</li>
+  </ul>
+
   <h2>Push Relay</h2>
   <ul>
     <li>iPhone notifications must be sent through Apple's Push Notification service (APNs). If a hub is not configured with its own APNs push key, notifications are sent through the push relay operated by the developer. If you configure your own key or run your own relay, notifications do not pass through the developer's relay.</li>

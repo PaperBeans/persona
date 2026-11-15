@@ -63,6 +63,7 @@ GET /api/v1/machines/{mid}/git/pr
 GET /api/v1/machines/{mid}/git/review
 GET /api/v1/machines/{mid}/git/show
 GET /api/v1/machines/{mid}/git/status
+GET /api/v1/machines/{mid}/grok-settings
 GET /api/v1/machines/{mid}/omp-settings
 GET /api/v1/machines/{mid}/panes
 GET /api/v1/machines/{mid}/ports/{port}
@@ -199,6 +200,7 @@ PUT /api/v1/machines/{id}/name
 PUT /api/v1/machines/{mid}/agy-settings
 PUT /api/v1/machines/{mid}/claude-settings
 PUT /api/v1/machines/{mid}/codex-settings
+PUT /api/v1/machines/{mid}/grok-settings
 PUT /api/v1/machines/{mid}/omp-settings
 PUT /api/v1/mutes
 PUT /api/v1/pins

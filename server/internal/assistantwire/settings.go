@@ -62,7 +62,8 @@ const (
 	DeviceAssistantWarm = "assistant.warm"
 	// DeviceAssistantMemory: {op, cwd, name?, content?} → the memory files (op list) or {}.
 	DeviceAssistantMemory = "assistant.memory"
-	// DeviceAssistantCompact: {session_id} → {}.
+	// DeviceAssistantCompact: {session_id, only_running?} → {}; only_running refuses not_running instead of starting a
+	// process that is not running (an older node ignores it and starts one).
 	DeviceAssistantCompact = "assistant.compact"
 	// DeviceAssistantHandoff: {session_id} → {summary, recent}: what a main conversation leaves for the next one.
 	DeviceAssistantHandoff = "assistant.handoff"

@@ -5,7 +5,7 @@
   "tab_providers": "モデルプロバイダー",
   "tab_agents": "エージェント",
   "hint_persona": "自分について、メモリ、定期タスク、セッションの振り分け",
-  "hint_agents": "Claude Code、Codex、Antigravity、omp",
+  "hint_agents": "Claude Code、Codex、Antigravity、omp、Grok",
   "tab_model_config": "モデル構成",
   "tab_channels": "チャネル",
   "tab_connectors": "コネクタ",

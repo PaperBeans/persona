@@ -16,7 +16,6 @@
   "reading_web": "Reading web pages…",
   "organizing": "Organizing the conversation…",
   "processing": "Working…",
-  "token_rate": "{rate} tok/s",
   "token_count": "{tokens} tok",
   "background_workflow": "Background workflow",
   "background_task": "Background task",

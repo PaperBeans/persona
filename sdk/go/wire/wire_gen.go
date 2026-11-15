@@ -882,6 +882,26 @@ type AuthPrompt struct {
 	ExpiresAt time.Time `json:"expires_at,omitzero"`
 }
 
+// SettingsCheckParams: settings.check (manifest settings_check): the configuration and secrets as a change would
+// leave them, before the hub saves it. The program answers whether they work (SettingsCheckResult) within 10 seconds.
+type SettingsCheckParams struct {
+	// The whole configuration as it would be saved, the schema's defaults filled in.
+	Config  json.RawMessage   `json:"config"`
+	Secrets map[string]string `json:"secrets"`
+	// The egress proxy URL for this check only, when the program runs behind the proxy and a config: entry of
+	// permissions.network names an address: requests sent through it reach the addresses this configuration names, its
+	// ordinary requests only the saved ones. It stops working once the check answers. Absent: use the program's ordinary
+	// proxy (an older hub sends none).
+	Proxy string `json:"proxy,omitempty"`
+}
+
+// SettingsCheckResult: settings.check's answer: ok, or why not in one sentence for the owner (the hub takes every
+// secret out of it and cuts it to 300 characters).
+type SettingsCheckResult struct {
+	Ok    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
 // Values of HubRole.
 const (
 	HubRoleCenter = "center"
@@ -6038,6 +6058,8 @@ var newDef = map[string]func() any{
 	"AuthStepParams":                func() any { return new(AuthStepParams) },
 	"AuthField":                     func() any { return new(AuthField) },
 	"AuthPrompt":                    func() any { return new(AuthPrompt) },
+	"SettingsCheckParams":           func() any { return new(SettingsCheckParams) },
+	"SettingsCheckResult":           func() any { return new(SettingsCheckResult) },
 	"InitializeParams":              func() any { return new(InitializeParams) },
 	"ExportedContribution":          func() any { return new(ExportedContribution) },
 	"HubInfo":                       func() any { return new(HubInfo) },

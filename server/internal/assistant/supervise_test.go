@@ -18,7 +18,7 @@ var shortSuperviseTimings = superviseTimings{gather: 20 * time.Millisecond, ever
 // shortSupervise makes s's supervision messages come at once and often, for a test. The timings are s's own, not the
 // package's: a digest timer still running after the test ends reads only them, never another test's. The timer is
 // stopped when the test ends.
-func shortSupervise(t *testing.T, s *Service) {
+func shortSupervise(t testing.TB, s *Service) {
 	t.Helper()
 	s.superviseTimes = shortSuperviseTimings
 	t.Cleanup(func() {

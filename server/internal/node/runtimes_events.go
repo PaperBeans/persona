@@ -130,7 +130,12 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 		}
 		seen[s.SessionID] = true
 		s.MachineID, s.State, s.PendingInteractions = "", "", 0 // the hub's to fill
-		s.StartedByPersona, s.Assistant = false, false
+		// Started from Persona is the runtime's word for a session the hub started through it (Paseo keeps it on the
+		// agent's label, #8130): it outlives a node restart in the middle of a start, which the manager then adopts
+		// rather than starting a second agent (assistant/session_adopt.go). A daemon's sessions are another machine's
+		// or another user's: never. The node's own record of a start says so too (decorateState).
+		s.StartedByPersona = s.StartedByPersona && !daemon
+		s.Assistant = false
 		// Of the hierarchy (docs/protocol/protocol.md "Session hierarchy") the runtime says when the session began
 		// (started_at); what it folds under and the rollup are the manager's, the parent a blocked child asks for the
 		// node's (below), from what a daemon's own node named (daemons.go) when the row names no other.

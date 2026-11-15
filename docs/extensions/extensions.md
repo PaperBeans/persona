@@ -797,7 +797,7 @@ The hub has an **egress proxy** (`server/internal/extension/egress`), started th
   - Only the proxy knows this name: sandboxed extensions (including ones on machines without a sandbox that only point at the proxy) get through via the proxy; resolving it directly without the proxy fails (DNS has no such name), which is expected.
     Extensions with the sandbox off don't go through the proxy (see above) and still connect to `127.0.0.1` directly.
 - **Who it recognizes**: on the local TCP port, extensions are identified by proxy credentials (`HTTP(S)_PROXY=http://ext:<credential>@127.0.0.1:<port>`, renewed at every start, invalid once disabled or uninstalled); the Linux sandbox also has one unix socket per extension
-  (`~/.persona/extensions/run/<id>/proxy.sock`), and the socket itself says who it is.
+  (`~/.persona/extensions/run/<id>/proxy.sock`), and the socket itself says who it is. A settings check's own credential (`settings.check`'s `proxy`, "Settings the user fills in") is recognized on both, for that extension only.
 - **Hosts the owner allowed** (#5697): in the admin UI (an installed extension's details › Network and isolation), and only there (the admin session; device credentials have no route), the owner can allow a sandboxed extension more hosts than its `permissions.network` lists: a self-hosted RSSHub, Sentry or GitHub Enterprise, a proxy. Each is one specific host, as typed or taken from an http(s) URL: `rss.example.org` (any port, like `permissions.network`) or `rss.example.org:8443` (that port only); no wildcard, path or account. The proxy reaches them the way it reaches a `config:` settings address: no subdomain, https or plain http, the name resolved by the proxy and **every** answer checked on each connection, only checked addresses dialled. Private LAN addresses (10/8, 172.16/12, 192.168/16, fc00::/7) pass, which is the usual case for a service at home; loopback, link-local, unspecified, multicast and metadata addresses refuse the name, so a name that later resolves to loopback (DNS rebinding) is refused. This machine's own services are not allowed here (`127.0.0.1`, `localhost` and the like are refused with the hint to use `host.persona.internal`, which the manifest asks for). Allowing is immediate with no question (the toast offers Undo); revoking closes the extension's open proxy connections. Each change is audited (`egress_allow` / `egress_revoke`, actor `admin UI`). They are stored in the hub setting `extension_egress_allow` by extension, at most 32 each, and dropped when the extension is uninstalled. Endpoints: `POST /api/v1/admin/extensions/{id}/egress/allow` `{"host": "…"}` and `DELETE /api/v1/admin/extensions/{id}/egress/allow?host=…`, both answering with the extension (400 `invalid_host` with the reason). The proxy also keeps, in memory, the last 5 different hosts it refused each extension (`sandbox.egress.recent_denied`: `target`, `count`, `at`), which the admin UI lists with **Allow**.
 - **The hub's own upstream proxy**: when the hub's environment has `HTTPS_PROXY` / `HTTP_PROXY` (`NO_PROXY` honored), the proxy goes out through it (CONNECT); extensions don't need to know.
 - **Several addresses** (#1181): when a name resolves to several addresses, the proxy checks every one first (the rules above), then races only those
@@ -1629,13 +1629,30 @@ manifest can ask for four things. A hub from before them refuses the manifest, s
   - The consent line is 「访问你在设置里填的地址」: the field's title, the address there now (「当前：…」, 未填 before
     install), and whether http is allowed. An upgrade that adds such an entry lists it under the permissions that grew,
     like a new host.
-  - Only with the sandbox on does the proxy hold the extension to it; without the sandbox the extension reaches what it
-    likes, as before.
+  - The proxy holds the extension to these rules only while its sandbox is **enabled** (`sandbox.enabled`, "Sandbox").
+    With the sandbox also **active**, the proxy is its only way out. Enabled but not active (this machine has no
+    sandbox), its environment points it at the proxy: a well-behaved program goes through it, a misbehaving one can go
+    round it ("Egress"). With the sandbox off, the extension reaches what it likes, as before.
 - **`secrets[].hint: "last4"`**: once set, the detail's `secrets[].hint` is the secret's last four characters (none for one
   shorter than 12). The apps show 已设置 · 末 4 位 <hint>. It is read for the detail only, never logged or audited.
 - **`settings_check: true`**: before saving a secret or the configuration, the hub calls the running program's
-  `settings.check {config, secrets}`, with the values as they would be after the change. The answer is `{ok: true}` or
-  `{ok: false, error}`.
+  `settings.check {config, secrets, proxy?}`, with the values as they would be after the change. The answer is
+  `{ok: true}` or `{ok: false, error}` (`SettingsCheckParams` / `SettingsCheckResult` in `schema/extension/protocol.schema.json`).
+  - **The check's own way out** (#8459): a program behind the egress proxy (its sandbox enabled) whose granted
+    `permissions.network` has a `config:` entry also gets `proxy`, the proxy URL with a credential for this check only:
+    `http://ext:<credential>@<address>`, where the address is the one the program reaches the proxy at (the loopback
+    listener, or `127.0.0.1:3128` inside a Linux sandbox).
+    - Requests sent through it are held to the extension's rule, with the addresses the **proposed** configuration names
+      in place of the saved ones, by the rules above. The program's ordinary requests keep the saved addresses, also
+      while the check runs (#1180).
+    - The credential is revoked when the check answers, fails or times out, and stops working by itself 5 seconds after
+      the time limit. The connections opened with it are closed then. The program restarting or stopping ends it too.
+    - It is taken out of a refusal's words like a secret.
+    - An older hub sends no `proxy`, and an older program ignores it: the check goes through the program's ordinary
+      proxy and reaches only the saved addresses, as before.
+    - The Go SDK's `ext.SettingsCheckClient(params)` is an HTTP client through `proxy` (an ordinary one without it); in
+      another language, use `proxy` as the proxy of the check's requests.
+    - Source runtimes get none yet: their fetches go through the runtime's broker (#1180).
   - A refusal saves nothing and is not audited. The route answers 400 `check_failed` with the extension's words.
   - Before the words go back, every secret handed to the check is replaced by `***`: whole, and any prefix or suffix of
     6 characters or more. The words are cut to 300 characters.
@@ -1649,7 +1666,8 @@ manifest can ask for four things. A hub from before them refuses the manifest, s
 - **`open_url: "persona://settings/extensions/<its own id>"`** from an action: the apps open 设置 › 扩展 › that extension
   (the web `/settings?tab=extensions&extension=<id>`). Another extension's id is refused like any non-https link.
 
-Code: `extension/configured.go`, `extension/egress` (`Target`, `dialConfigured`), `extmgr/extension_settings_check.go`;
+Code: `extension/configured.go`, `extension/egress` (`Target`, `dialConfigured`, `Proxy.Check`), `extmgr/extension_settings_check.go`,
+`sdk/go/ext/settings_check.go`;
 the clients `web/src/lib/extensions.ts`, `web/src/views/settings/Extensions.tsx`,
 `apple/Persona/Views/Settings/ExtensionsModel.swift`, `ExtensionUIModel.swift`.
 
@@ -2675,8 +2693,9 @@ Used to connect directly to a personal Agent service (e.g. one with real-time pu
   The hub clears caches and pushes `{"type":"agents","session_ids":[…]}`, and the app refetches immediately. Only this extension's own sources are accepted. The hub also pushes after its own sends, then again at 4 / 15 / 45 seconds;
   every 60 seconds it relists all sources as a fallback.
   The hub keeps each source's list for 20 seconds; reads that miss it at the same time (the Agents page's sections, groups and counts after a change, other open apps) share one `sessions` call, and one that comes after a change does not share a call made before it (#7204).
+  A source whose `sessions` call timed out (its own timeout, not the asker going away) answers the reads after it with that failure at once for up to 60 seconds, instead of each waiting out the 30-second call timeout again; its rows are left out as before. An answer to the fallback poll, an `agentsrc.updated` from it, or the source being added again ends that sooner. Other failures are asked again each time (#8471).
 - Implementation: `server/internal/extmgr/extension_agents.go`; tests `TestExtensionAgentSource` (`extension_agents_test.go`, fake extension exercises the protocol),
-  `agents.TestAddAndRemoveSources`, `agents.TestListsMissingTheCacheTogetherAskTheSourceOnce` (`inflight_test.go`).
+  `agents.TestAddAndRemoveSources`, `agents.TestListsMissingTheCacheTogetherAskTheSourceOnce` (`inflight_test.go`), `agents.TestATimedOutSourceIsNotAskedAgainByEveryRead` (`timeout_memo_test.go`).
 
 ## Events
 

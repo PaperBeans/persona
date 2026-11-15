@@ -12,6 +12,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistant"
 	"github.com/nwverse/persona/server/internal/clitext"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/manager"
 	"github.com/nwverse/persona/server/internal/managerconf"
@@ -80,7 +81,7 @@ func managerExit(err error, stderr io.Writer) (code int, done bool) {
 		if err != manager.ErrUsage { // it says what was wrong
 			fmt.Fprintln(stderr, err)
 		}
-		fmt.Fprint(stderr, clitext.Named(manager.Usage))
+		fmt.Fprint(stderr, clitext.Named(manager.Usage(i18n.Terminal())))
 		return 2, true
 	case errors.Is(err, manager.ErrHelp):
 		return 0, true

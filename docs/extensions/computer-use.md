@@ -601,6 +601,9 @@ Android don't decode video yet: they keep RFB and show no switcher.
   the bytes without parsing them. The iOS app's screen-sharing stream carries the pair it will bind to
   (`…/ports/5900/connect?pair=…`, `RFBWebSocket`): 16 random bytes in hex, a new one each connection, so no other
   stream can bind video to it by guessing. Hubs and nodes from before the video channel ignore the parameter.
+  A refused `screen.dial` is the handshake's status: 403 `not_signed_in`, 410 `session_gone`, 429 `busy`, 503
+  `video_unavailable`. A browser can't read that, so with `refusals=close` (the web page, #8320) the hub accepts the
+  WebSocket instead and closes it at once with 4000 + the status and the node's code as the reason (4429 `busy`).
 - **Wire** (length-prefixed messages: u32 big-endian length, u8 type, body). Helper → phone: `hello`, `format`,
   `frame`, `heartbeat`, `paused`, `resumed`, `timing`, `encoding`. Phone → helper: `start`, `report`, `keyframe`, `update`. Unknown types
   are skipped by length, so either side may add more. `PersonaScreenCore` (`apple/Packages/PersonaScreenCore`, its own
@@ -661,18 +664,25 @@ Android don't decode video yet: they keep RFB and show no switcher.
   - **Signals** (the phone's, from the frames): queueing above the 10 s floor of the one-way delay (p50 / p95 over
     0.5 s, rising or falling over 1 s), the rate the link carried while busy (frames queued behind one another: their
     bytes over their arrival gaps, so quiet stretches don't read as a slow link; frames read together all count, #7842),
+    the newest frame's queueing (a backlog now, or one already in),
     bursts of large frames, late frames, decode time and pictures replaced before they showed. A keyframe (one every
     10 s) and the frames queued behind it are left out of the p95 that says whether the link is calm: that queue is the
     keyframe's size, not a slower link, and its burst is the proof of headroom (#7842). The route's round trip, jitter and loss are `LinkStats`'.
   - **Policy**, every 250 ms. A tier fits the link when its floor is at most 80% of what the link carries. Down, fast:
-    a long queue (over 400 ms for a quarter second, or skipped frames) or one the bitrate can't fix (the helper's
-    bitrate within 15% of the band's floor and over 150 ms), with a tier that no longer fits, goes straight to the best
-    tier that does; another step down waits 1 s and a queue that isn't draining, unless the queue runs away. A phone that
+    a long queue (over 400 ms for a quarter second, or skipped frames with the queue over 150 ms) or one the bitrate
+    can't fix (the helper's bitrate within 15% of the band's floor and over 150 ms), with the newest frame still queued
+    and a tier that no longer fits, goes straight to the best tier that does. A backlog that came in all at once after a
+    stall (its newest frame barely waited), or skipped frames the helper reports once the queue is under 150 ms, steps
+    nothing down: the stall is over; another step down waits 1 s and a queue that isn't draining, unless the queue runs away. A phone that
     can't decode or show as fast for 2 s gets a lower frame rate. Up, slow: one tier after a calm window (8 s; 3 s in the
     first 10 s or after a route change) with proof the link carried 1.25× the next floor, or three large frames at 1.5×
-    it; a step up undone within 15 s doubles that tier's window, to 60 s. The start comes from the route: the same
-    network the best tier, Tailscale (direct IPv6 too) under 30 ms the best else the second, the relay the second over
-    Wi-Fi, the third over cellular. A slower route steps down at once; a new bias or cap takes the tier the rate fits,
+    it. Light content, sending at most half the next floor, never fills the bitrate, and on a fast link its keyframes
+    come in too quickly to measure: it steps up after twice the window without proof. A step up undone within 15 s
+    doubles that tier's window, to 60 s. The start comes from the route, as a step of
+    the bias (Auto: 2×60, 1.5×60, 1.5×30): the same network the first, Tailscale (direct IPv6 too) under 30 ms the first
+    else the second, the relay the second over Wi-Fi, the third over cellular; the stream starts on the best tier no
+    richer in pixels a second than that step on this display, so a display at one pixel per point, where steps merge,
+    starts as high as a Retina one (the relay at 60 fps, not 30). A slower route steps down at once; a new bias or cap takes the tier the rate fits,
     the rate at least the current tier's floor, which the link carries. The helper's `timing` comes once a second only
     while frames flow, so its skipped frames count until the next is due (1.25 s) and its bitrate proves headroom once:
     a still screen never steps down or up on an old second's numbers (#7842).
@@ -717,8 +727,9 @@ Android don't decode video yet: they keep RFB and show no switcher.
   release carries both and before #6396's iPhone policy the choice would change nothing) and runs only while one display is
   shown: the Mac's only one, or one picked from several the node numbered; all of several displays at once stay RFB.
   It pauses while Picture in Picture shows the screen or the app is in the background (RFB carries the picture then).
-  When VNC shows instead, a line under the bars says why in plain words: the video stopped, the Mac is locked, or the
-  Mac hasn't allowed video yet (`permission` missing, so no stream is opened).
+  When VNC shows instead, a line under the bars says why in plain words: the video stopped, the Mac is locked, the
+  Mac hasn't allowed video yet (`permission` missing, so no stream is opened), or two devices already watch its video
+  (the hub's 429 for the node's `busy`, read from the WebSocket task's response, #8320; tried again as a stopped one).
   Connection Stats (⋯, off by default) reads the video once a second: frames shown and megabits that arrived, the
   helper's capture, encode and network from `timing`, the phone's decode, and their total first when encode, network
   and decode are all known (a helper before `timing` gives the phone's numbers only). With quality tiers (#6396) a Tier
@@ -750,7 +761,7 @@ Android don't decode video yet: they keep RFB and show no switcher.
     clear, and keeps the pointer and keyboard), and a `report` goes back for every frame. While video shows, noVNC's
     update requests are held (`rfb-hold.ts`, a guarded hook on `RFB.messages.fbUpdateRequest`; the last one goes out
     when video stops). The iPhone's rules: video by default where it plays, one display at a time, back to VNC with the
-    same three lines (the Mac locked, video stopped, not allowed with "How to turn it on"), 3 s of silence, 30 s doubling
+    same four lines (the Mac locked, video stopped, not allowed with "How to turn it on", two devices already watching), 3 s of silence, 30 s doubling
     to 5 min, reset after a minute of video, and nothing while the tab is in the background. A decoder that fails on the
     stream before any picture means this browser can't play it: no switcher, no retry on that page.
   - **Connection stats**: video mode shows the iPhone's lines (Video · Via hub · total; with tiers, Tier · Quality ·
@@ -903,9 +914,10 @@ On a direct route (same network or Tailscale), the live screen's video can ride 
 connection, so a lost packet delays only the frame it belongs to, usually by no round trip, and never slows the stream
 by itself ([#7873](https://github.com/nwverse/persona/issues/7873) has the design and the shaped-link numbers it rests
 on). The node's end is `internal/screenlink` (`udp.go`, `udp_wire.go`, `rs.go`); the shared cases are
-`spec/fixtures/screen-udp`. In place: the node's side, offered in `paths` as `"udp": 1`, and the iPhone's, off in
-release builds until the check on real devices (`ScreenRoutes.udpReleaseEnabled`; a DEBUG build launched with
--showScreenUDP has it). No setting of its own: the Settings switch for direct routes covers it.
+`spec/fixtures/screen-udp`. In place: the node's side, offered in `paths` as `"udp": 1`, and the iPhone's, on in
+release builds since the live check against a real Mac (`ScreenRoutes.udpReleaseEnabled` turns it off again; a DEBUG
+build launched with -showScreenUDP has it either way). No setting of its own: the Settings switch for direct routes
+covers it.
 
 - **What rides it**: only the video channel's bytes from the node to the phone, plus the phone's acknowledgements,
   requests to send again, give-ups and pings for it. RFB, the phone's video messages (`start`, `report`, `keyframe`,

@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -217,5 +219,168 @@ func TestRuntimeSearchCursorExpiryAndProjectionInvalidation(t *testing.T) {
 	page, err := index.Query(options)
 	if err != nil || page.Total != 1 || page.SearchHits["b"].Score != 105 {
 		t.Fatalf("stale cached search metadata: %+v %v", page, err)
+	}
+}
+
+// Evidence is built only for the hits a page returns (rankedHit): a paged search returns the same rows, order, hits,
+// evidence and totals as one page holding them all, on the first page and on its continuations.
+func TestRuntimeSearchPagesKeepHitsAndEvidence(t *testing.T) {
+	ctx := searchContext()
+	at := ctx.Now
+	text := func(id, title, agentText, userText string, age time.Duration) Item {
+		item := searchItem(id, "computer", title, at.Add(-age))
+		d := item.Full.(SearchDocument)
+		d.AgentText, d.UserText = agentText, userText
+		item.Full = d
+		return item
+	}
+	items := []Item{
+		text("prefix", "Needle first", "", "", 0),
+		text("inside", "The needle inside", "", "", time.Minute),
+		text("answer-a", "Other", "the agent found a NEEDLE in the logs", "", 2*time.Minute),
+		text("answer-b", "Other", "", "find the needle, please", 3*time.Minute),
+		text("answer-c", "Other", strings.Repeat("界", 100)+"needle"+strings.Repeat("x", 200), "", 4*time.Minute),
+		text("tied-1", "Other", "needle", "", 5*time.Minute),
+		text("tied-2", "Other", "needle", "", 5*time.Minute),
+		text("miss", "Other", "nothing here", "", 0),
+		// A side session folded under "row": the row's hit is the side's, with the side's text as its evidence.
+		text("row", "Row", "", "", 6*time.Minute),
+		text("side", "Side", "the side's NEEDLE", "", 7*time.Minute),
+	}
+	offline := text("offline", "Other", "needle offline", "", 0)
+	offline.State = "offline"
+	items = append(items, offline)
+	items[9].Fold = &Fold{Root: "row-session", SearchAs: "row", SearchSession: "side-session"}
+	var index Index
+	index.Replace("computer", items)
+	base := Options{Search: "needle", SearchContext: ctx, Roots: true, Summary: true}
+
+	whole := base
+	whole.Limit = 100
+	all, err := index.Query(whole)
+	if err != nil || all.HasMore {
+		t.Fatalf("whole: %+v %v", all, err)
+	}
+	ids := func(p Page) []string {
+		out := make([]string, len(p.Sessions))
+		for n, s := range p.Sessions {
+			out[n] = s.(map[string]string)["id"]
+		}
+		return out
+	}
+	want := []string{"prefix", "inside", "answer-a", "answer-b", "answer-c", "tied-1", "tied-2", "row", "offline"}
+	if got := ids(all); !reflect.DeepEqual(got, want) {
+		t.Fatalf("order %v, want %v", got, want)
+	}
+	evidence := map[string]SearchEvidence{
+		"answer-a": {Role: "agent", Before: "the agent found a ", Match: "NEEDLE", After: " in the logs"},
+		"answer-b": {Role: "user", Before: "find the ", Match: "needle", After: ", please"},
+		"answer-c": {Role: "agent", Before: strings.Repeat("界", 64), Match: "needle", After: strings.Repeat("x", 160)},
+		"tied-1":   {Role: "agent", Match: "needle"},
+		"tied-2":   {Role: "agent", Match: "needle"},
+		"row":      {Role: "agent", Before: "the side's ", Match: "NEEDLE"},
+		"offline":  {Role: "agent", Match: "needle", After: " offline"},
+	}
+	for _, id := range want {
+		hit := all.SearchHits[id]
+		if e, ok := evidence[id]; ok != (hit.Evidence != nil) || ok && *hit.Evidence != e {
+			t.Fatalf("%s evidence %+v, want %+v", id, hit.Evidence, e)
+		}
+	}
+	if hit := all.SearchHits["row"]; hit.HitSessionID != "side-session" || hit.Score != 45 {
+		t.Fatalf("folded side hit: %+v", hit)
+	}
+	if all.SearchHits["prefix"].Score != 105 || all.SearchHits["inside"].Score != 85 || all.SearchHits["offline"].Score != 40 {
+		t.Fatalf("scores: %+v", all.SearchHits)
+	}
+
+	paged := base
+	paged.Limit = 4
+	var got []string
+	hits := map[string]SearchHit{}
+	for pages := 1; ; pages++ {
+		page, err := index.Query(paged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if page.Total != all.Total || page.Revision != all.Revision || len(page.SearchHits) != len(page.Sessions) {
+			t.Fatalf("page %d: %+v", pages, page)
+		}
+		got = append(got, ids(page)...)
+		for id, hit := range page.SearchHits {
+			hits[id] = hit
+		}
+		if !page.HasMore {
+			break
+		}
+		paged.Cursor, paged.SearchContext = page.NextCursor, nil
+	}
+	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(hits, all.SearchHits) {
+		t.Fatalf("pages differ from one page:\n%v\n%+v\nwant\n%v\n%+v", got, hits, want, all.SearchHits)
+	}
+}
+
+// A search decodes its documents without the index's lock: a session push (Replace) and a list read made while it
+// decodes do not wait for it, and the search then sees the push. Cold is the first search; changed is a search after
+// one row changed, which decodes only that row.
+func TestRuntimeSearchDecodesOutsideTheLock(t *testing.T) {
+	for _, cold := range []bool{true, false} {
+		t.Run(map[bool]string{true: "cold", false: "changed"}[cold], func(t *testing.T) {
+			ctx := searchContext()
+			var index Index
+			items := []Item{searchItem("a", "computer", "Needle A", ctx.Now), searchItem("b", "computer", "Needle B", ctx.Now)}
+			index.Replace("computer", items)
+			if !cold {
+				if _, err := index.Query(Options{Search: "needle", SearchContext: ctx}); err != nil {
+					t.Fatal(err)
+				}
+				items[1] = searchItem("b", "computer", "Needle B changed", ctx.Now)
+				index.Replace("computer", items)
+			}
+			decoding, release := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			var decoded atomic.Int32
+			document := ctx.Document
+			ctx.Document = func(item Item) (SearchDocument, error) {
+				decoded.Add(1)
+				once.Do(func() {
+					close(decoding)
+					<-release
+				})
+				return document(item)
+			}
+			type answer struct {
+				page Page
+				err  error
+			}
+			searched := make(chan answer, 1)
+			go func() {
+				page, err := index.Query(Options{Search: "needle", SearchContext: ctx})
+				searched <- answer{page, err}
+			}()
+			<-decoding
+			waited := make(chan Page, 1)
+			go func() {
+				index.Replace("other", []Item{searchItem("c", "computer", "Needle C", ctx.Now)})
+				list, _ := index.Query(Options{})
+				waited <- list
+			}()
+			var list Page
+			select {
+			case list = <-waited:
+			case <-time.After(time.Minute): // a failure bound, not a wait: the push lands at once unless it waits for the search
+				close(release)
+				t.Fatal("a session push waited for a search's decoding")
+			}
+			close(release)
+			search := <-searched
+			if search.err != nil || list.Total != 3 || search.page.Total != 3 {
+				t.Fatalf("list %+v, search %+v", list, search)
+			}
+			// Each document is decoded once: outside the lock, and the pushed row on the search's second pass.
+			if want := map[bool]int32{true: 3, false: 2}[cold]; decoded.Load() != want {
+				t.Fatalf("decoded %d documents, want %d", decoded.Load(), want)
+			}
+		})
 	}
 }

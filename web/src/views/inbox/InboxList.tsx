@@ -479,7 +479,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
                     action={clear && list.length && !picking ? { label: clear, run: () => setAllDone(list, true) } : undefined}>
                     {titled ? (
                       <>
-                        {waiting.length > 0 && groupOf(tier.key, { key: "agents", title: t("lib-inbox.group_agents"), items: [] }, agentRows, { count: waiting.length })}
+                        {waiting.length > 0 && groupOf(tier.key, { key: "agents", title: t("lib-inbox-groups.group_agents"), items: [] }, agentRows, { count: waiting.length })}
                         {groups.map((g) => groupOf(tier.key, g, <Rows items={g.items} row={openRow} keep={isSelected} all={view.restored} />, { pickable: true }))}
                       </>
                     ) : (

@@ -36,6 +36,7 @@ struct PersonaApp: App {
                     #endif
                     if let link = ExtensionSystemLink(url: url) { model.openExtension(link); return }
                     if SentSettingsLink.matches(url) { model.openSentRecords(); return }
+                    if IPhoneSetupLink.matches(url) { model.openIPhoneSetup(); return }
                     // A computer's pairing link (「添加电脑」, Add computer) is for Persona Link on that computer, not for this device (#4198).
                     if ServerConfig.isComputerLink(url) {
                         model.toast = Toast(String(localized: "Open this link on the computer you're adding"))
@@ -123,6 +124,7 @@ struct PersonaApp: App {
                 QuickAction.publish() // the home screen menu with the conversations' titles as they are now (#2191)
                 RecordingDayCatchUp.scheduleIfNeeded() // transcribe and upload the day's backlog while charging
                 #endif
+                CacheBudget.runOnce() // chat pictures, Feishu media and WebKit's cache back under their budgets (#8341)
             }
         }
         #if os(visionOS)

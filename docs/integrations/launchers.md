@@ -128,7 +128,7 @@ pi, the Cursor CLI (`cursor-agent`) and the Antigravity CLI (`agy`) are agents t
 
 The first message is never typed into the pane:
 
-- **pi**: through the Persona extension in that pi process (`session.send`, `docs/integrations/pi.md`). A pi whose extension does not list the session within 30 seconds is closed and the message is not sent (`pi_no_extension`), so a start never falls back to typing into pi's input.
+- **pi**: through the Persona extension in that pi process (`session.send`, `docs/integrations/pi.md`). If the extension does not list the session within 30 seconds, Persona uses bounded, best-effort agent cleanup and leaves the tab at the shell; a user-picked pane with ambiguous ownership is left untouched. The message is not sent (`pi_no_extension`), so a start never falls back to typing into pi's input.
 - **cursor and agy**: through herdr's `agent.prompt`, once herdr reports the agent. herdr 0.9.5 detects both (its integrations `cursor` and `antigravity-cli`) and reads `HERDR_AGENT` for a wrapper that execs them under another name. Persona does not read their conversations: the phone shows the terminal and can send and interrupt.
 
 Neither cursor nor agy names a session Persona can resume, so a herdr restart starts them again without one; pi's resume names its session (`pi --session`). Resuming one of these sessions from the phone with `session.start` is refused (`work_agent_resume`): a stopped pi resumes in its own herdr tab when the phone sends it a message (`docs/integrations/pi.md`), and the others are resumed on the computer.
@@ -140,6 +140,7 @@ What these agents do not do here, and why:
 - No conversation in the app for cursor and agy. herdr drives the pane; reading their transcripts would be a runtime of their own (agy's `agy acp` is the candidate, `docs/plans/plan-antigravity.md`), which this change does not add.
 - No phone approval cards for cursor and agy. pi's come from its extension; the other two have no Persona hook, so their own dialogs stay on the terminal.
 - Supervision (`report_to_supervisor`, done checks) reaches an agent Persona can send to. pi qualifies once its extension is in; cursor and agy qualify for a message through herdr, and nothing more.
+- **No read-only start.** Claude Code runs a read-only task with `bypassPermissions` and the constraint written into its first message, and Codex with `--sandbox read-only`; these three have neither, and a prompt-only constraint would not hold an agent whose own tools write files. So a `task_plan` task with `readonly: true` for one of them is refused when it is planned (#8316, `server/internal/assistant/tasks_placement.go` `readonlyLauncherRefusal`): `readonly_unsupported`, naming that computer's Claude Code and Codex launchers, so the task can be planned writable or on one of them. Nothing is saved or started, it is never started writable, and Persona does not substitute another launcher. The same check runs before a start (a card edited to one of them, a plan saved earlier), and the node still refuses a plan-mode start of theirs that reaches it, before any pane opens (`readonly_unsupported`, `server/internal/node/control.go`).
 
 ## Running Persona-managed launchers
 

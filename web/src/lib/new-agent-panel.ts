@@ -93,7 +93,7 @@ export function newAgentPanel({ launchers, listOf, choice, configured, runs, tie
     const p: PanelProvider = { id: l.name, name: providerTitle(l), engine: agentId(providerAgent(agent, l.name)), models: null };
     const idNote = providerIdNote(l);
     if (idNote) p.idNote = idNote;
-    if (l.pi) p.alsoNote = t("lib-launcher-models.pi_too"); // docs/integrations/pi.md "Persona's model providers"
+    if (l.pi) p.alsoNote = t("lib-new-agent-panel.pi_too"); // docs/integrations/pi.md "Persona's model providers"
     const block = launcherBlock(l);
     if (block) p.unavailable = block.reason;
     // a launcher that can't start here isn't asked for its list (its rows are off anyway): its Default row stands for it

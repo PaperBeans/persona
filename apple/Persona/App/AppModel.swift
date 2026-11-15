@@ -1390,6 +1390,27 @@ final class AppModel {
         }
     }
 
+    /// Whether the sidebar's Recent lists the scheduled tasks' chats too (#8324): off until the hub says on, an older hub
+    /// and settings not read yet included.
+    var recentTaskChats: Bool { assistantConfig?.recentTaskChats ?? false }
+
+    /// Show Scheduled Task Chats (#8324), from Settings or All Chats' menu: one value on the hub for all of the user's
+    /// devices. Shown at once, put back if the hub says no.
+    func setRecentTaskChats(_ on: Bool) async {
+        guard let api, var shown = assistantConfig, shown.recentTaskChats != on else { return }
+        let was = shown.recentTaskChats
+        shown.recentTaskChats = on
+        assistantConfig = shown
+        do {
+            let st = try await api.setAssistant(APIClient.AssistantConfigBody(recentTaskChats: on))
+            guard showsPage(of: api) else { return }
+            assistantConfig = st
+        } catch {
+            if showsPage(of: api) { assistantConfig?.recentTaskChats = was }
+            show(error)
+        }
+    }
+
     /// Whether conversation `id` is the hub's built-in background supervisor (#5083, docs/assistant/unified-entry.md
     /// "Background supervisor"): its row has no Archive, End or Pin (the hub refuses the first and the last).
     func isBackgroundSupervisor(_ id: String) -> Bool { assistantConfig?.isBackgroundSupervisor(id) ?? false }
@@ -3597,6 +3618,17 @@ final class AppModel {
     }
 
     /// Shared by native deep links and settings links supplied by channels.
+    /// This iPhone's guided setup (`persona://iphone/setup`, #8199).
+    func openIPhoneSetup() {
+        settingsPath = SettingsPage.iphoneSetupPath
+        #if os(macOS)
+        MacShellState.shared.go(.settings, self)
+        #else
+        selectedTab = .settings
+        if tabRouter != nil { shellSettings = true }
+        #endif
+    }
+
     func openSentRecords() {
         settingsPath = SettingsPage.sentPath
         #if os(macOS)
@@ -4185,6 +4217,9 @@ final class AppModel {
     func refresh() async {
         guard let api else { return }
         Task { await loadPins() }
+        // The assistant's settings too, once read: one changed on another device (Show Scheduled Task Chats, #8324)
+        // shows here when the user comes back.
+        if assistantConfig != nil { Task { await refreshAssistant() } }
         for link in links { Task { await refreshManagerRoster(link.group) } }
         Task {
             let writes = muteWrites, saves = notifyPrefsWrites

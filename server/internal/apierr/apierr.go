@@ -206,6 +206,7 @@ var rpcFailureKeys = map[string]string{
 	"rewind_mismatch":    "rpc-errors.rewind_mismatch",
 	"rewind_nothing":     "rpc-errors.rewind_nothing",
 	"rewind_failed":      "rpc-errors.rewind_failed",
+	proto.CodeNotLoaded:  "rpc-errors.not_loaded", // a read that would start an agent its engine let go (Paseo, #8132)
 	"skill_unavailable":  "rpc-errors.skill_unavailable",
 	"timeout":            "rpc-errors.timeout",
 	"node_unreachable":   "rpc-errors.unreachable",

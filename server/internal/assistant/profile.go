@@ -81,6 +81,10 @@ type Settings struct {
 	// MainBackgroundFolded: the apps fold the main conversation's background rounds (another conversation's message,
 	// a scheduled task or follow-up) into one line that opens on request (#4314). nil is on (the default).
 	MainBackgroundFolded *bool `json:"main_background_folded,omitempty"`
+	// RecentTaskChats: the apps' sidebar Recent lists the chats a scheduled task or the background supervisor started
+	// too, by last activity with the others (#8324; since #6228 they are only in All chats). Display only, one value
+	// for every device. nil is off (the default).
+	RecentTaskChats *bool `json:"recent_task_chats,omitempty"`
 	// MeetingAttendanceDefault: the role a meeting recording pre-selects on the phone (off, listener, participant;
 	// docs/assistant/meeting-minutes.md "Attending a meeting"); nil is off.
 	MeetingAttendanceDefault *string `json:"meeting_attendance_default,omitempty"`
@@ -388,6 +392,12 @@ func (s *Service) mainBackgroundFolded(ctx context.Context) bool {
 	return quietOn(s.settings(ctx).MainBackgroundFolded)
 }
 
+// recentTaskChats: the apps' sidebar Recent lists the scheduled tasks' chats too (recent_task_chats, off by default).
+func (s *Service) recentTaskChats(ctx context.Context) bool {
+	v := s.settings(ctx).RecentTaskChats
+	return v != nil && *v
+}
+
 // kbTopicsNow is kbTopics for the knowledge base loop, from the last settings read well: a database that does not
 // answer neither starts nor stops the curation.
 func (s *Service) kbTopicsNow() bool {
@@ -495,6 +505,8 @@ type assistantView struct {
 	KBTopics bool `json:"kb_topics"`
 	// MainBackgroundFolded is in effect, like MainTasksQuiet.
 	MainBackgroundFolded bool `json:"main_background_folded"`
+	// RecentTaskChats is in effect, like DoneNeedsDelivery.
+	RecentTaskChats bool `json:"recent_task_chats"`
 	// MeetingAttendanceDefault is in effect (off until changed).
 	MeetingAttendanceDefault      string   `json:"meeting_attendance_default"`
 	MeetingTranscriptionDefault   string   `json:"meeting_transcription_default"`
@@ -544,6 +556,7 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 		MeetingTranscriptionExtension: meetingTranscriptionExtensionOf(v), MeetingTranscriptionReady: s.transcriptionReadyNow(),
 		TaskWorkspacePreference: s.taskWorkspacePreference(ctx),
 		MainBackgroundFolded:    quietOn(v.MainBackgroundFolded),
+		RecentTaskChats:         v.RecentTaskChats != nil && *v.RecentTaskChats,
 		DoneNeedsDelivery:       v.DoneNeedsDelivery != nil && *v.DoneNeedsDelivery, IdleCloseHours: int(s.idleCloseAfter(ctx) / time.Hour),
 		ArchiveClosedDays:            int(s.archiveClosedAfter(ctx) / (24 * time.Hour)),
 		ReviewSamplePercent:          s.reviewSamplePercent(ctx),

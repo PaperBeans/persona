@@ -17,6 +17,7 @@
   "fallback_lost": "Video stopped. Showing VNC for now.",
   "fallback_locked": "The Mac is locked. Showing VNC until it’s unlocked.",
   "fallback_not_allowed": "This Mac hasn’t allowed video yet. Showing VNC.",
+  "fallback_busy": "Two devices are already watching this Mac’s video. Showing VNC for now.",
   "how_to_turn_on": "How to turn it on",
   "turn_on_title": "Turn on video for this Mac",
   "how_settings": "On that Mac, turn on Persona Screen in System Settings › Privacy & Security › Screen & System Audio Recording.",

@@ -1,6 +1,5 @@
 {
   "systemd_user_unavailable": "systemd ユーザーインスタンスに接続できません",
-  "running_before_purge": "別の persona-link が実行中です（このサービス以外、または手動で起動したもの）。--purge の前に停止してください",
   "node_install_failed": "常駐 node をインストールできませんでした：{error}",
   "binary_install_failed": "{path} を配置できません：{error}",
   "binary_installed": "{path} をインストールしました。",

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/compat"
+	"github.com/nwverse/persona/server/internal/extension/sandbox"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/osproc"
@@ -180,7 +181,14 @@ func (n *Node) spawnAssistant(id, cwd, launcher string, resume, spare bool, opti
 		return nil, err
 	}
 	defer done()
-	if n.agentOf(launcher) == "codex" {
+	agent := n.agentOf(launcher)
+	if agent != "claude" && id != "" && (n.guestOf(id) != nil || n.guestKindOf(id) == guestMeeting) {
+		// A guest (a meeting's room too) runs on Claude Code only, whatever starts its process: on a launcher that runs
+		// another agent by now it would get that agent's tools and the owner's setup. assistant.send refuses it before
+		// this; a compaction (assistant_compact.go) resumes a process that is not running through here alone.
+		return nil, errGuestAgent
+	}
+	if agent == "codex" {
 		return n.spawnCodex(id, cwd, launcher, resume, spare, options...)
 	}
 	if id == "" {
@@ -225,7 +233,7 @@ func (n *Node) assistantCLICommand(shell, launcher, cwd string, args, env []stri
 	if _, managed := n.managedLauncher(launcher); !managed {
 		base := env
 		argv, env, _ = wrapAgent("assistant", n.home, n.dir, cwd, settingsArgs(args),
-			func() string { return claudeInner(args, base, cwd, n.home, n.claudeConfigDirs()) }, argv, env, n.logger.Printf)
+			func() *sandbox.StatusReason { return claudeInnerReason(args, base, cwd, n.home, n.claudeConfigDirs()) }, argv, env, n.logger.Printf)
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir, cmd.Env = cwd, env

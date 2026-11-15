@@ -207,7 +207,8 @@ func rulePlanRuns(plans []*TaskPlan) (runs map[string]int, task map[string]PlanT
 				runs[k] = 0
 			case p.State == planStarted && t.OwnerStarted:
 				runs[k]++
-				task[k] = PlanTask{Machine: t.Machine, Cwd: t.Cwd}
+				// The repository's folder when it is the kind (#8259): what the suggestion names and tasks.trust keeps.
+				task[k] = PlanTask{Machine: t.Machine, Cwd: firstNonEmpty(t.Repo, t.Cwd), Repo: t.Repo}
 			}
 		}
 	}

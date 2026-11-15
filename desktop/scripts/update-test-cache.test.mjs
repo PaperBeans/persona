@@ -94,6 +94,7 @@ test("test-only configuration keeps disposable shortcuts disabled and production
   assert.match(config, /createDesktopShortcut: false/);
   assert.match(config, /createStartMenuShortcut: false/);
   assert.match(script, /-c\.appId=\$\{testAppId\(runPaths\.identity\)\}/);
+  assert.match(script, /-c\.extraMetadata\.name=\$\{runPaths\.identity\}/);
   assert.match(script, /-c\.nsis\.guid=\$\{nsisGuid\(runPaths\.identity\)\}/);
   assert.match(script, /updaterCacheDirName: \$\{cacheIdentity\}\$/);
   assert.doesNotMatch(script, /com\.example\.persona\.desktop\.ShipIt/);

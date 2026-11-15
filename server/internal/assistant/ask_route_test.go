@@ -553,7 +553,7 @@ func TestRestoredAskFindsItsSupervisorAgain(t *testing.T) {
 	e.f.mu.Lock()
 	e.f.sends, e.f.told, e.f.pushes = nil, nil, nil // what the first manager told and pushed
 	e.f.mu.Unlock()
-	s2 := New(Options{Hub: e.f, Store: func() Store { return database }, Logf: t.Logf, Devices: e.d})
+	s2 := newRestartedService(t, Options{Hub: e.f, Store: func() Store { return database }, Logf: t.Logf, Devices: e.d})
 	shortSupervise(t, s2)
 	noDirectionsTimers(s2)
 
@@ -624,7 +624,7 @@ func TestRestoredApprovalReachingTheUserRings(t *testing.T) {
 	gone()
 	<-wait
 
-	s2 := New(Options{Hub: e.f, Store: func() Store { return database }, Logf: t.Logf, Devices: e.d})
+	s2 := newRestartedService(t, Options{Hub: e.f, Store: func() Store { return database }, Logf: t.Logf, Devices: e.d})
 	shortSupervise(t, s2)
 	noDirectionsTimers(s2)
 	s2.FleetUp(context.Background())
@@ -677,7 +677,7 @@ func TestRestoredQuestionReachingTheUserDoesNotRing(t *testing.T) {
 	gone()
 	<-wait
 
-	s2 := New(Options{Hub: e.f, Store: func() Store { return database }, Logf: t.Logf, Devices: e.d})
+	s2 := newRestartedService(t, Options{Hub: e.f, Store: func() Store { return database }, Logf: t.Logf, Devices: e.d})
 	shortSupervise(t, s2)
 	noDirectionsTimers(s2)
 	s2.FleetUp(context.Background())

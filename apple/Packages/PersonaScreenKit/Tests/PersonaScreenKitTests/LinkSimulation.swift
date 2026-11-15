@@ -66,6 +66,9 @@ struct LinkSimulation {
     var keyframeEvery: Double?
     /// A keyframe's bits per pixel (screen text, #7842: about 1).
     var keyframeBits = 0.33
+    /// At most this many seconds of the target bitrate in one keyframe (the encoder's rate control keeps keyframes near
+    /// its target: a light screen's at a low target is small, 2026-11-15); nil, no limit.
+    var keyframeSeconds: Double?
     /// The phone takes what arrived every this many seconds, all of it at once (a busy phone, a link that delivers in
     /// bursts, #7842); nil: each frame as it arrives.
     var readEvery: Double?
@@ -73,6 +76,18 @@ struct LinkSimulation {
     static func label(_ t: TierLadder.Tier) -> String {
         let s = t.scale == t.scale.rounded() ? String(Int(t.scale)) : String(t.scale)
         return "\(s)x\(t.fps)"
+    }
+
+    /// When `bits` sent from `from` are through: the link's rate taken millisecond by millisecond, so a frame sent into
+    /// a stall goes once the stall ends rather than at the stall's rate throughout.
+    static func finish(_ link: Link, bits: Double, from: Double) -> Double {
+        var t = from, left = bits
+        while true {
+            let perMs = max(link.kbps(t), 1) // kbit/s is bits per ms
+            if perMs * 0.001 * 1000 >= left { return t + left / (perMs * 1000) }
+            left -= perMs
+            t += 0.001
+        }
     }
 
     func run(_ link: Link, seconds: Double) -> Result {
@@ -157,7 +172,8 @@ struct LinkSimulation {
             if let every = keyframeEvery, t - keyframeAt >= every { keyframe = true }
             let budget = Double(rate.kbps) * 1000 * interval
             let pixels = Double(running.width * running.height)
-            let bits = keyframe ? pixels * keyframeBits : min(0.9 * budget, content.map { $0 * pixels } ?? .infinity)
+            let keyBits = min(pixels * keyframeBits, keyframeSeconds.map { $0 * Double(rate.kbps) * 1000 } ?? .infinity)
+            let bits = keyframe ? keyBits : min(0.9 * budget, content.map { $0 * pixels } ?? .infinity)
             if !keyframe, debt > Double(rate.kbps) * 1000 * 0.5 { continue } // the encoder drops it
             let isKeyframe = keyframe
             if keyframe { keyframeAt = t }
@@ -167,8 +183,7 @@ struct LinkSimulation {
             let bytes = Int(bits / 8)
             sentBytes += bytes
             let start = max(t + 0.006, linkFree) // ~6 ms to encode
-            let capacity = max(link.kbps(start), 1) * 1000
-            linkFree = start + bits / capacity
+            linkFree = Self.finish(link, bits: bits, from: start)
             var arrival = max(linkFree + (oneWay + jitter()) / 1000, lastArrival)
             var firstByte = min(start + (oneWay + jitter()) / 1000, arrival)
             if let every = readEvery { // read at the next read after it came, as are its first bytes

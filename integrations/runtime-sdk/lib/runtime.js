@@ -63,7 +63,12 @@ export function defaultSocketPath() {
  * @property {(params: {session_id: string}) => Promise<void | {settled?: boolean}>} [interrupt] - resolves to
  *   {settled: true} once the turn has actually ended; throws when it could not be stopped (a turn that only might stop
  *   resolves to nothing).
- * @property {(params: {cwd: string, prompt?: string}) => Promise<{session: object}>} [start]
+ * @property {(params: {cwd: string, prompt?: string, launcher?: string, agent_type?: string, model?: string, permission_mode?: string,
+ *   effort?: string, workspace_id?: string, resume?: string, session_id?: string}) => Promise<{session: object, instead?: object}>} [start] -
+ *   a new session from the phone (resume: one taken over, under that id; agent_type and instead: options.sameKind).
+ *   session_id: the id the hub named for it, which it takes when the runtime can give it, so that a start whose answer
+ *   the hub never got is found by it; a start answered before the session really began lists it as starting until then
+ *   (docs/integrations/runtimes.md "What to implement").
  * @property {(params: {session_id: string, title: string}) => Promise<void>} [rename]
  * @property {(params: {session_id: string}) => Promise<void>} [close]
  * @property {(params: {session_id: string, prompt: string, occurrence: number, prompts_after?: number, restore: string}) => Promise<object>} [rewind] -

@@ -504,6 +504,8 @@ data class Session(
     @SerialName("can_fork") val canFork: Boolean = false,
     @SerialName("rev") val rev: Long? = null,
     @SerialName("suggestion") val suggestion: String? = null,
+    /** The suggested message must be reviewed in the composer, never sent in one action; absent on older hubs. */
+    @SerialName("suggestion_risky") val suggestionRisky: Boolean = false,
     /** Persona is still opening its tab and starting the agent (docs/protocol/protocol.md "New session"); sends wait for it. */
     @SerialName("starting") val starting: Boolean = false,
     /** Why starting it failed; the session is offline and sends get the same error. */
@@ -800,6 +802,12 @@ data class Item(
  * A Claude Code model_refusal_* record as the hub gives it (server proto.ModelRefusal, #2528): its known fields with
  * values as recorded (unknown ones included) and [text], the refusal's own words. Never the record's line: older hubs
  * also sent it as `raw`, which is not decoded, so it is never shown or kept.
+ *
+ * The recovery fields are present only when the node projects its own bounded recovery onto this shape (#7824): a
+ * runtime-written record never sets them, so they decode to their defaults and older records render unchanged.
+ * [recoveryReset] says when the configured model is available again; [recoveryExhausted] marks an exhausted chain
+ * (then [fallbackModel] is empty); [recoveryReturning] that the configured model answered a probe and the next request
+ * runs on it again; [recoveryTried] lists every model tried, in order, joined by arrows.
  */
 @KeepGeneratedSerializer
 @Serializable(with = ModelRefusalSerializer::class)
@@ -811,6 +819,10 @@ data class ModelRefusal(
     val scope: String? = null,
     val explanation: String? = null,
     val text: String? = null,
+    @WireTime @SerialName("recovery_reset") val recoveryReset: String? = null,
+    @SerialName("recovery_exhausted") val recoveryExhausted: Boolean = false,
+    @SerialName("recovery_returning") val recoveryReturning: Boolean = false,
+    @SerialName("recovery_tried") val recoveryTried: String? = null,
 )
 
 object ModelRefusalSerializer : WireSerializer<ModelRefusal>(ModelRefusal.generatedSerializer())

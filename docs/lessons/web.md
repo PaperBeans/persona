@@ -636,6 +636,7 @@ An auth status push rerenders the sign-in group and replaces inline completion c
 ## Provider probes belong to an editor opening and its connection (#1314)
 
 - Settings keeps the provider wizard mounted while closed. Fence discovery and connection-test success, failure and busy cleanup by an editor generation and the inputs used by the request, including headers and protocol. Comparing values only at completion misses close/reopen and input changes followed by restoration. Invalidate at commit before promise continuations can affect a replacement editor, and release retired busy indicators so the current editor can retry. Discovery still merges through a functional form update to preserve model edits made while waiting; model selection is not a connection change. Regress with the actual component and deferred HTTP responses, including the saved payload and a fresh request still pending when the retired request settles.
+- An import POST keeps running when its dialog closes or changes computer/alias (#8230). Retire that view's close and inline-error callbacks, while preserving the completed import's result notice and the mounted provider list's refresh. Keep the synchronous pending guard until the mutation settles, including across close/reopen; releasing it with the view would admit a duplicate write. A failure after leaving that view uses the existing error toast and names the original computer, so it neither disappears nor replaces the current preview's error.
 
 ## About me saves outlive the settings page (#1338)
 
