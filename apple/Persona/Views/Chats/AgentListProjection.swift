@@ -227,6 +227,8 @@ nonisolated struct AgentListProjection: Sendable {
         var preferences: [String: Preferences] = [:]
         var pagedGroups = Set<String>()
         var listQuery = SessionListQuery()
+        /// The hubs that fold side sessions into their parent's chat (`SideFold`, #7944).
+        var sideFold = Set<String>()
 
         func pinned(_ key: SessionKey) -> Bool {
             preferences[key.group]?.pins.sessions.contains("\(key.machineID)/\(key.sessionID)") == true
@@ -320,8 +322,10 @@ nonisolated struct AgentListProjection: Sendable {
         let plan = AgentSearchPlan.compile(query: settings.query, settings: settings)
         result.searchPlan = plan
         let parsed = plan.parsed
-        // Folded children are not rows. What the hub did not fold still goes through CodexTasks below.
-        let sessions = ChildSessions.fold(input.sessions, asks: input.asks)
+        // A side session lives in its parent's chat (#7944): a paged window's rows fold here, once per revision (the
+        // model's own list is folded already, and folding it again changes nothing). Then the folded children are not
+        // rows; what the hub did not fold still goes through CodexTasks below.
+        let sessions = ChildSessions.fold(SideFold.fold(input.sessions, groups: settings.sideFold).listed, asks: input.asks)
         result.sessionsByKey = Dictionary(sessions.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
         result.machinesByRef = Dictionary(input.machines.map { ($0.ref, $0) }, uniquingKeysWith: { a, _ in a })
         // Subtasks go under the session that started them, as in the Codex App and on Android: the list and its counts

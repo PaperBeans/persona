@@ -175,6 +175,14 @@ describe("等你的 Agent", () => {
     expect(interactionAsk(ix("a", { kind: "permission", tool_name: "Bash", tool_input: { command: "swift test" } }))).toBe("swift test");
   });
 
+  it("names another agent's card by the name it carries, never the engine's id (#8142)", () => {
+    // one of Paseo's providers runs under Paseo's own id; the card carries the provider's label
+    expect(interactionTitle(ix("a", { agent: "paseo", agent_label: "Grok", kind: "permission" }))).toBe("Grok 在等你批准");
+    expect(interactionTitle(ix("a", { agent: "paseo", agent_label: "Grok" }))).toBe("Grok 在问你");
+    expect(interactionTitle(ix("a", { agent: "dsh", agent_label: "DSH" }))).toBe("DSH 在问你");
+    expect(interactionTitle(ix("a", { agent: "traex", kind: "permission" }))).toBe("TRAEX 在等你批准");
+  });
+
   it("助手的会话跳到 Persona，其余跳到会话页", () => {
     const assistant: AssistantInfo = { machine_id: "m1", conversations: [{ machine_id: "m1", session_id: "s-conv", title: "", cwd: "", status: "idle" }] };
     expect(conversationRoute("m1", "s-persona", sessions, null)).toEqual({ name: "persona", sid: "s-persona" });

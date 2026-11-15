@@ -560,6 +560,21 @@ func readCodexOrigin(path string) codexOrigin {
 		source = "" // an object: a subagent
 	}
 	o.exec = source == "exec" || m.Payload.Originator == "codex_exec" || strings.HasPrefix(m.Payload.Originator, "codex_sdk")
+	var spawned string
+	spawned, o.guardian, o.sub = codexSourceObject(m.Payload.Source)
+	o.parent = firstNonEmpty(m.Payload.Parent, spawned)
+	o.sub = o.sub || o.parent != "" || source == "subagent" || m.Payload.ThreadSource == "subagent"
+	if o.sub {
+		o.root = m.Payload.SessionID
+	}
+	codexOrigins.Store(path, o)
+	return o
+}
+
+// codexSourceObject reads a thread's source when it is an object, a subagent's ({"subagent": …}): the thread that
+// spawned it (thread_spawn's parent_thread_id), or an approval review ({"other": "guardian"}). A rollout's session_meta
+// and the App's database row hold the same object.
+func codexSourceObject(raw json.RawMessage) (parent string, guardian, sub bool) {
 	var spawn struct {
 		Subagent struct {
 			ThreadSpawn struct {
@@ -568,21 +583,23 @@ func readCodexOrigin(path string) codexOrigin {
 			Other string `json:"other"`
 		} `json:"subagent"`
 	}
-	if json.Unmarshal(m.Payload.Source, &spawn) == nil {
-		o.parent = spawn.Subagent.ThreadSpawn.Parent
-		o.guardian = spawn.Subagent.Other == "guardian"
+	if json.Unmarshal(raw, &spawn) == nil {
+		parent, guardian = spawn.Subagent.ThreadSpawn.Parent, spawn.Subagent.Other == "guardian"
 	}
-	o.parent = firstNonEmpty(m.Payload.Parent, o.parent)
 	var fields map[string]json.RawMessage
-	if json.Unmarshal(m.Payload.Source, &fields) == nil {
-		_, o.sub = fields["subagent"]
+	if json.Unmarshal(raw, &fields) == nil {
+		_, sub = fields["subagent"]
 	}
-	o.sub = o.sub || o.parent != "" || source == "subagent" || m.Payload.ThreadSource == "subagent"
-	if o.sub {
-		o.root = m.Payload.SessionID
+	return parent, guardian, sub || parent != ""
+}
+
+// codexThreadOrigin is where src's thread came from: its rollout's first line, or, once the App moved the rollout into
+// its database and deleted it, the database row (codexAppThread.origin, #8191). Without either it says nothing.
+func codexThreadOrigin(src codexSource) codexOrigin {
+	if t, ok := codexAppThreadOf(src); ok {
+		return t.origin()
 	}
-	codexOrigins.Store(path, o)
-	return o
+	return readCodexOrigin(src.path)
 }
 
 // codexDesktopChat: a chat of the Codex App running on this machine (not a CLI thread, not a subagent of one).
@@ -593,9 +610,9 @@ func codexDesktopChatIn(src codexSource, pass *codexListPass) bool {
 	if !pass.desktopAvailable(src.home) {
 		return false
 	}
-	if src.path == "" { // its rollout is gone: one the App's sidebar lists and its database has (codex_appdb.go)
-		_, ok := codexAppThreadOf(src)
-		return ok
+	if src.path == "" { // its rollout is gone: one the App's sidebar lists and its database has (codex_appdb.go), not a subagent
+		t, ok := codexAppThreadOf(src)
+		return ok && !t.origin().sub
 	}
 	o := readCodexOrigin(src.path)
 	return o.desktop && o.parent == "" && (o.persona || loadCodexAppState(src.home).listed(src.thread))

@@ -37,6 +37,9 @@ let override: ((url: URL, init: RequestInit) => Promise<Response> | undefined) |
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 const page = () => ({ entries: [first, removed], latest_revision: "12", oldest_revision: "1", next_cursor: "11", retention_limit: 500 });
 const flush = async () => { for (let i = 0; i < 7; i++) await act(async () => { await Promise.resolve(); }); };
+// Until check passes, flushing React each try: for what waits on a lazy chunk, whose import takes as long as the module
+// runner does under load, not a set number of ticks.
+const until = (check: () => void) => vi.waitFor(async () => { await act(async () => { await Promise.resolve(); }); check(); });
 const listReads = () => requests.filter((request) => request.url.pathname.endsWith("/activity"));
 const detailReads = () => requests.filter((request) => /\/activity\/\d+$/.test(request.url.pathname));
 const button = (key: string, values?: Parameters<typeof t>[1]) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === word(key, values))!;
@@ -74,14 +77,16 @@ describe("board activity readers", () => {
     act(() => root.render(<WorkspaceBoard />)); await flush();
     expect(listReads()).toHaveLength(0);
     await act(async () => host.querySelector<HTMLButtonElement>(`button[aria-label="${t("workspaceboard.activity")}"]`)!.click()); await flush();
+    await until(() => expect(document.querySelector('[data-activity-revision="12"] > button')).not.toBeNull());
     expect(listReads()).toHaveLength(1);
     expand(); await flush(); click("open_workspace"); await flush();
+    await until(() => expect(document.querySelector('[role="dialog"] h2')).not.toBeNull());
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
     expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe(currentCard.title);
     const entry = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((item) => item.textContent === t("workspaceboard.activity"))!;
     expect(entry.getAttribute("aria-expanded")).toBe("false");
     await act(async () => entry.click()); await flush();
-    expect(listReads()).toHaveLength(2);
+    await until(() => expect(listReads()).toHaveLength(2));
     expect(listReads().at(-1)?.url.searchParams.get("card_id")).toBe("a");
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
     await act(async () => entry.click()); await flush();

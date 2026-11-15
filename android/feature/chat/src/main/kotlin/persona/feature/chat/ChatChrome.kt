@@ -20,6 +20,7 @@ import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.lines.isLiveStatus
 import persona.core.domain.sort.AgentSession
 import persona.core.domain.sort.SessionRename
+import persona.core.domain.sort.SideRollup
 import persona.core.domain.sort.canAttach
 import persona.core.domain.sort.canClose
 import persona.core.domain.sort.canInterrupt
@@ -60,6 +61,13 @@ internal fun ChatHeader(
     onResumeInTerminal: (() -> Unit)? = null,
     /** When the turn that runs now began (the newest turn's start, iOS `Turn.startedAt`): "Working 22 min" counts from it. */
     turnStart: java.time.Instant? = null,
+    /**
+     * The side sessions folded under this session (#7944), in their panel's order, and what the header's Side sessions
+     * control says ([SideRollup]); [onOpenSide] opens one's own chat. Shown only while it has sides.
+     */
+    sides: List<Session> = emptyList(),
+    sideRollup: SideRollup = SideRollup(),
+    onOpenSide: ((SessionKey) -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -139,6 +147,10 @@ internal fun ChatHeader(
         if (headerTerminal != null && ChatTerminalPlaces.inHeader(PersonaTheme.style))
             JIconButton(PersonaIcons.terminal, stringResource(if (onTerminal != null) R.string.chat_screen_open_terminal else R.string.chat_screen_terminal_help),
                 headerTerminal)
+        // Side sessions (#7944): how many, with the needs-you dot while one waits for the user; never opens by itself.
+        val sidesShown = sideRollup.count > 0 && onOpenSide != null
+        if (sidesShown) JIconButton(PersonaIcons.sideSessions, sideSessionsLabel(sideRollup), { dialog = "sides" },
+            badge = sideRollup.needsYou, count = sideRollup.count)
         actions()
         // The permission mode, always in view and changed here (#3957, iOS #3719).
         // Glass has the mode in the composer, by the model pill (Q11, #5055); Brief and Board keep it here.
@@ -187,6 +199,10 @@ internal fun ChatHeader(
             add(JAction(stringResource(R.string.chat_chrome_attach), PhIcons.PlugsConnected, enabled = canAct) { state.run(target, ChatAction.Attach) })
         }
         add(JAction(pluralStringResource(R.plurals.chat_chrome_peers, peers.size, peers.size), enabled = session != null) { dialog = "peers" })
+        if (sideRollup.count > 0 && onOpenSide != null) add(JAction(stringResource(R.string.chat_side_sessions_count, sideRollup.count),
+            PersonaIcons.sideSessions, subtitle = if (sideRollup.needsYou) stringResource(R.string.chat_side_sessions_needs_you) else null) {
+            dialog = "sides"
+        })
         add(JAction(stringResource(R.string.chat_chrome_switch_session), enabled = session != null) { dialog = "peers" })
         children.forEach { child -> add(JAction(stringResource(R.string.chat_chrome_subagent, child.description?.takeIf(String::isNotBlank) ?: child.type),
             enabled = onOpenSession != null) { onOpenSession?.invoke(SessionKey(session!!.machineId, child.sessionId)) }) }
@@ -271,6 +287,9 @@ internal fun ChatHeader(
                 }
             }
         }
+        "sides" -> ChatSideSessionsSheet(sides, sessions, sideRollup, onDismiss = { dialog = null }) { side ->
+            dialog = null; onOpenSide?.invoke(side)
+        }
         "connection" -> JDialog(onDismiss = { dialog = null }, title = linkTitle ?: stringResource(R.string.chat_chrome_connected), text = stringResource(when (connection) {
             ConnectionState.CertificateMismatch -> R.string.chat_chrome_conn_cert
             ConnectionState.Revoked -> R.string.chat_chrome_conn_revoked
@@ -301,7 +320,7 @@ internal fun ChatActionsSheet(actions: List<JAction>, onDismiss: () -> Unit, tit
         LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp.dense)) {
             items(actions) { action ->
                 JRow(action.label, leadingIcon = action.icon, enabled = action.enabled, destructive = action.destructive,
-                    subtitle = action.subtitle,
+                    subtitle = action.subtitle, titleLines = 2,
                     leading = if (action.icon == null && iconColumn) ({ Spacer(Modifier.width(24.dp.dense)) }) else null,
                     chevron = false, onClick = if (action.enabled) ({ onDismiss(); action.onClick() }) else null)
             }

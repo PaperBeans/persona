@@ -26,6 +26,12 @@ type runtimeLauncher struct {
 	Agent string `json:"agent,omitempty"`
 	// Models are its models for the form (launchers.models), the default marked.
 	Models []proto.AgentModel `json:"models,omitempty"`
+	// PromptOptional: a Codex launcher the runtime starts with no first message too (Paseo's, #8140): the form need not
+	// ask for one (proto.Launcher.PromptOptional).
+	PromptOptional bool `json:"prompt_optional,omitempty"`
+	// AutoAccept: its agents' approval is a switch a start in bypassPermissions turns on (Paseo's Auto Accept), passed on
+	// in launchers.list (proto.Launcher.AutoAccept, #8141).
+	AutoAccept bool `json:"auto_accept,omitempty"`
 }
 
 // Bounds on a runtime's launchers.
@@ -93,6 +99,7 @@ func (h *runtimeConn) launcherList() []runtimeLauncher {
 				}
 				entry.Agent = l.Agent
 				entry.Models = l.Models
+				entry.AutoAccept = l.AutoAccept
 				break
 			}
 		}
@@ -158,8 +165,11 @@ type runtimeStartParams struct {
 	Model, PermissionMode, Effort string
 	WorkspaceID                   string // a space of the runtime's to start in (one of its sessions' space_id)
 	Resume                        string // the Claude session to take over and continue (caps.resume)
-	Shell                         bool   // Launcher is a login shell's launcher: the runtime picks its own of that name
-	OpenElsewhere                 bool   // a running claude has Resume open: only a runtime running it may take it
+	// AgentType: the kind of agent Launcher starts (claude, codex…), for a runtime that runs only its own launchers
+	// (caps.same_kind) and does not have it: it starts one of its own of that kind, or refuses.
+	AgentType     string
+	Shell         bool // Launcher is a login shell's launcher: the runtime picks its own of that name (no caps.same_kind)
+	OpenElsewhere bool // a running claude has Resume open: only a runtime running it may take it
 }
 
 // engineRuntimes maps the engines that are a runtime to that runtime's id (engine.go).
@@ -200,19 +210,27 @@ func (n *Node) engineRuntimeAway(ctx context.Context) error {
 
 // startOnEngineRuntime starts a session on the machine's engine runtime: a launcher of the login shell's, or a session
 // to continue (resume), go there too — on such a machine there is no terminal to start them in.
-func (n *Node) startOnEngineRuntime(ctx context.Context, p runtimeStartParams) (*proto.Session, error) {
+func (n *Node) startOnEngineRuntime(ctx context.Context, p runtimeStartParams) (*proto.Session, *proto.StartInstead, error) {
 	h := n.engineRuntime(ctx)
 	if h == nil {
-		return nil, n.engineRuntimeAway(ctx)
+		return nil, nil, n.engineRuntimeAway(ctx)
 	}
 	if p.Resume != "" {
-		return n.takeOverInRuntime(ctx, h, p)
+		s, err := n.takeOverInRuntime(ctx, h, p)
+		return s, nil, err
 	}
-	// The engine runs every start with a provider of its own: one it has by the launcher's name (a managed launcher made
-	// from it carries the same configuration), else its default (shell_launcher). A managed launcher's own settings
-	// apply only where personad launch runs it (runtimeStart), never inside the engine.
+	// The engine runs every start with a provider of its own: the one it has by the launcher's name (a managed
+	// launcher made from it carries the same configuration). For one it does not have, an engine that runs only its own
+	// launchers (caps.same_kind, Paseo) is told the kind of agent it starts: it runs one of its own of that kind, said
+	// on its answer, or refuses (#8140); never another kind, nor another account unsaid. An older engine picks its
+	// default (shell_launcher). A managed launcher's own settings apply only where personad launch runs it
+	// (runtimeStart), never inside the engine.
 	if _, own := h.launcherNamed(p.Launcher); !own && p.Launcher != "" {
-		p.Shell = true
+		if sameKind(h) {
+			p.AgentType = n.agentKindOf(p.Launcher, p.AgentType)
+		} else {
+			p.Shell = true
+		}
 	}
 	return n.runtimeStartOn(ctx, h, p)
 }
@@ -245,7 +263,7 @@ func (n *Node) takeOverInRuntime(ctx context.Context, h *runtimeConn, p runtimeS
 	if p.PermissionMode == "" && p.Effort == "" {
 		p.PermissionMode, p.Effort = n.modesOf(p.Resume)
 	}
-	s, err := n.runtimeStartOn(ctx, h, p)
+	s, _, err := n.runtimeStartOn(ctx, h, p)
 	if elsewhere != nil && rpcCode(err) == openElsewhere {
 		return nil, elsewhere
 	}
@@ -277,9 +295,9 @@ func (n *Node) continueInRuntime(ctx context.Context, id, text string, images []
 	return err
 }
 
-// liveRuntimeModels asks opt-in runtimes for their current native catalog. Older runtimes keep their advertised list.
-func (n *Node) liveRuntimeModels(ctx context.Context, name string, refresh bool, fallback proto.LauncherModels) (proto.LauncherModels, error) {
-	h := n.runtimes.launcherRuntime(name)
+// liveRuntimeModels asks runtime h, the one offering launcher name to the start in question (runtimeOfIn), for its
+// current native catalog when it opts in. Older runtimes keep their advertised list.
+func (n *Node) liveRuntimeModels(ctx context.Context, h *runtimeConn, name string, refresh bool, fallback proto.LauncherModels) (proto.LauncherModels, error) {
 	if h == nil {
 		return fallback, nil
 	}
@@ -304,10 +322,10 @@ func (n *Node) liveRuntimeModels(ctx context.Context, name string, refresh bool,
 	return out, nil
 }
 
-// runtimeLauncherCheck opts into the runtime's authenticated availability probe. A refused probe never falls back to
-// the login shell, whose credentials may be different. Older runtimes keep the existing shell check.
-func (n *Node) runtimeLauncherCheck(ctx context.Context, name, cwd, prompt string) (proto.LauncherCheck, bool) {
-	h := n.runtimes.launcherRuntime(name)
+// runtimeLauncherCheck opts into the authenticated availability probe of runtime h, the one offering launcher name to
+// the start in question (runtimeOfIn). A refused probe never falls back to the login shell, whose credentials may be
+// different. Older runtimes keep the existing shell check.
+func (n *Node) runtimeLauncherCheck(ctx context.Context, h *runtimeConn, name, cwd, prompt string) (proto.LauncherCheck, bool) {
 	if h == nil {
 		return proto.LauncherCheck{}, false
 	}

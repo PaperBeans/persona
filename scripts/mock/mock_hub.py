@@ -18,6 +18,9 @@ PORT = int(os.environ.get("PORT", "18760"))
 # MOCK_CHILD_SESSIONS=1 (#5120) builds on the Paseo computer: its agent's created agents are its children.
 if os.environ.get("MOCK_CHILD_SESSIONS"):
     os.environ.setdefault("MOCK_PASEO", "1")
+# MOCK_PASEO_PROVIDERS=1 (#8142) builds on it too: two of its providers the apps have no id for (Grok, Cursor).
+if os.environ.get("MOCK_PASEO_PROVIDERS"):
+    os.environ.setdefault("MOCK_PASEO", "1")
 # MOCK_TEAM=1 (#5180) builds on MOCK_TAB_PANES's tab of three: it adds a worker's request, a third worker and a stopped pane.
 MOCK_TEAM = bool(os.environ.get("MOCK_TEAM"))
 if MOCK_TEAM:
@@ -53,6 +56,7 @@ def features():
                 ["conversation_origin"] if os.environ.get("MOCK_AUTO_CONVERSATIONS") == "1" else []) + (
                 ["sessions_list", "sessions_lookup", "sessions_hierarchy", "sessions_todo", "sessions_quick_filters"] if os.environ.get("MOCK_SESSIONS_LIST") == "1" else []) + (
                 ["sessions_catalog"] if CATALOG else []) + (
+                ["sessions_side_fold"] if SIDE_FOLD else []) + (
                 ["preview"] if os.environ.get("MOCK_PREVIEW") else []) + (
                 ["task_cron"] if os.environ.get("MOCK_CRON") == "1" else []) + (
                 [] if os.environ.get("MOCK_TODO_SEEN") == "off" else ["todo_seen"]) + (
@@ -278,6 +282,18 @@ def today_at(hour, minute=0, days=0):
     return local.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def held_today(hours):
+    """A push held `hours` before now, or minutes after this machine's midnight when that was another day: clients list
+    only today's held pushes (#7782), and a mock left running overnight or started before dawn would otherwise have none.
+    Naive wall-clock arithmetic, so a DST transition day keeps the fallback on today (libc applies midnight's offset)."""
+    now_local = datetime.now()
+    midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    at = now_local - timedelta(hours=hours)
+    if at < midnight:
+        at = midnight + timedelta(minutes=10 - hours)
+    return at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _mock_qr(text, n=29):
     """A QR-looking grid of "0" / "1" rows for text: three finder squares and noise from its hash (not scannable)."""
     seed = hashlib.sha256(text.encode()).digest()
@@ -461,6 +477,15 @@ for _i in range(int(os.environ.get("MOCK_PERF_MACHINES", "0"))):
     MACHINES.append(dict(MACHINES[0], id=_mid, name=f"示例机器 {_i + 1:03d}", hostname=f"example-node-{_i + 1:03d}"))
 if RESUME_TERMINAL:  # the Mac mini (#5521)
     SYSTEMS["mini"] = dict(SYSTEMS["macbook"], model="Mac mini", cpu="Apple M4", cores=10, memory=32 * GB)
+# MOCK_MACHINE_ALERTS=1 (#8037): one computer per Machines alert, fictional names; MOCK_DIAGNOSIS=… in every mode
+# (scripts/mock/machine_alerts.py).
+if os.path.dirname(os.path.abspath(__file__)) not in sys.path:  # python3 -I leaves the script's folder out
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import machine_alerts  # noqa: E402
+MACHINE_ALERT_METRICS = machine_alerts.install_machines(MACHINES, SYSTEMS) if machine_alerts.ON else {}
+# The hub's own build (hello server_version, /api/v1/health version): a dated build in that mode, so the alert sheet
+# can say how far apart a node's build is.
+SERVER_VERSION = machine_alerts.HUB_VERSION if machine_alerts.ON else "mock"
 for _m in MACHINES:
     _m["system"] = dict(SYSTEMS[_m["id"]], boot_time=int((NOW - timedelta(days=3, hours=4)).timestamp()))
 # Machines added later (MOCK_MACHINES) have no system and never sent a sample.
@@ -501,15 +526,23 @@ def metric_at(mid, t):
         mem_frac = 0.88 + 0.02 * h
     if concern_level == "critical":
         mem_frac = 0.95
+    alert_metrics = MACHINE_ALERT_METRICS.get(mid)
+    if alert_metrics:
+        cpu = alert_metrics["cpu"] + 2 * h
+        mem_frac = alert_metrics["mem"] + 0.004 * h
     rx = max(0.0, {"server": 2.4e6, "macbook": 4.5e5, "studio": 1.2e6, "nas": 3e5}[template] * (1 + 0.6 * wave + 0.5 * h))
     tx = rx * {"server": 0.35, "macbook": 0.2, "studio": 0.6, "nas": 1.4}[template] * (0.7 + 0.6 * h)
     load = sys_["cores"] * cpu / 100 * (0.9 + 0.3 * h)
     disk_frac = {"server": 0.64, "macbook": 0.71, "studio": 0.38, "nas": 0.93}[template]
     if concern_level == "critical":
         disk_frac = 0.95
+    if alert_metrics:
+        disk_frac = alert_metrics["disk"]
+    disk_total = {"nas": 4000, "studio": 2000}.get(mid, 1000) * GB
+    disk = max(0, disk_frac * disk_total - machine_alerts.FREED.get(mid, 0))
     return {"cpu": round(cpu, 1), "load": round(load, 2), "mem": round(mem_frac * sys_["memory"]),
             "swap": round({"server": 0.0, "macbook": 1.2, "studio": 0.0, "nas": 0.4}[template] * GB),
-            "rx": round(rx, 1), "tx": round(tx, 1), "disk": round(disk_frac * {"nas": 4000, "studio": 2000}.get(mid, 1000) * GB)}
+            "rx": round(rx, 1), "tx": round(tx, 1), "disk": round(disk)}
 
 
 def metric_series(mid, span, step):
@@ -1060,6 +1093,8 @@ if MOCK_MACHINES:
 if os.environ.get("MOCK_MACHINE_CONCERNS") == "1":
     from machine_concerns import install_sessions
     install_sessions(SESSIONS, sess)
+if machine_alerts.ON:
+    machine_alerts.install_sessions(SESSIONS, sess)
 # MOCK_AGENTS=1: a long Agents list (AgentsListTests): ~120 agents, one big space with 35 finished-unread, a quiet
 # space, idle ones to fold. Sessions marked seen (WS "seen" or POST …/seen) turn idle; GET /mock/seen lists them.
 # MOCK_QUIET=1: a quiet space (two seen agents, nothing running) under "Idle spaces", for screenshots of its card
@@ -1217,6 +1252,24 @@ if os.environ.get("MOCK_PASEO"):
         _paseo("9a5e0000-0000-4000-8000-000000000006", "Profile the CSV parser", "Speed up the importer", "calm-owl", "perf/importer",
                "done", "unread", 12, "The parser is three times faster on the sample files."),
     ]
+# MOCK_PASEO_PROVIDERS=1 (#8142, on the Paseo computer): two of Paseo's providers the apps have no id for, as its bridge
+# lists them: under Paseo's own id (agent "paseo"), each with its provider as launcher and the provider's label
+# (agent_label). Grok waits for an approval (its card names Grok); Cursor, whose mark the web has, is idle. The model
+# capability is the node's for a runtime that switches models (Paseo); their launchers are on the server's list
+# (machine_launchers).
+PASEO_GROK, PASEO_CURSOR = "paseo-9a5e0000-0000-4000-8000-000000000010", "paseo-9a5e0000-0000-4000-8000-000000000011"
+PASEO_PROVIDERS = bool(os.environ.get("MOCK_PASEO_PROVIDERS"))
+if PASEO_PROVIDERS:
+    _provider_caps = {"read": True, "send": True, "interrupt": True, "approve": True, "terminal": False, "attach": False,
+                      "close": True, "rename": True, "model": True}
+    SESSIONS += [
+        _paseo(PASEO_GROK, "Check the release notes", "Triage", None, "main", "blocked", "needs_you", 1,
+               "May I run the release script?", agent="paseo", agent_label="Grok", launcher="grok", model="grok-4",
+               pending_interactions=1, capabilities=_provider_caps),
+        _paseo(PASEO_CURSOR, "Tidy the settings page", "Triage", None, "main", "idle", "idle", 20,
+               "Moved the toggles into one group.", agent="paseo", agent_label="Cursor", launcher="cursor", model="auto",
+               capabilities=_provider_caps),
+    ]
 # MOCK_CHILD_SESSIONS=1 (#5120): the Paseo agent that created two agents created two more, both finished (one of them
 # failed), and an agent whose creator is not listed stays a row of its own. With the hub's folding (fold_hierarchy) the
 # web lists none of the children: the lead's row needs you (its waiting child) and its chat draws a card for each.
@@ -1322,13 +1375,13 @@ CLOSEOUT_REPLIES = {
                     "did: 给导出接口补了 50 万行的压测用例\n"
                     "artifact: pr https://github.com/example/app/pull/31\n"
                     "artifact: commit 4f2a91c\n"
-                    "verified: 线上导出 50 万行，用时 11 秒（之前 94 秒超时）\n"
+                    "verified: `go test ./export/...`\n"
                     "</closeout>"),
     CLOSEOUT_DISPROVED: ("支付 SDK 升到 v4 了，回调验签换成了新接口，PR 已经合并。\n\n"
                          '<closeout status="done" merged="yes" deployed="no">\n'
                          "did: 支付 SDK 从 v3 升到 v4，回调验签换成新接口\n"
                          "artifact: pr https://github.com/example/app/pull/32\n"
-                         "verified: 单元测试 212 个全过；沙箱环境没有测\n"
+                         "verified: `npm test`；沙箱环境没有测\n"
                          "missing: 上线前要有人在沙箱里走一遍真实支付\n"
                          "</closeout>"),
     CLOSEOUT_BLOCKED: ("迁移脚本写好了，在预发库上跑过一遍。正式库要等 DBA 给迁移窗口，我先停在这里。\n\n"
@@ -1336,7 +1389,7 @@ CLOSEOUT_REPLIES = {
                        "did: 写了用户表拆分的迁移脚本，可重复执行\n"
                        "artifact: branch feat/split-users\n"
                        "artifact: doc docs/migrations/split-users.md\n"
-                       "verified: 预发库跑通，120 万行用时 3 分 40 秒\n"
+                       "verified: `./scripts/migrate.sh --env staging`\n"
                        "waiting: DBA 批准正式库的迁移窗口\n"
                        "</closeout>"),
     CLOSEOUT_NOT_DONE: ('<closeout status="not_done">\n'
@@ -1353,14 +1406,14 @@ if MOCK_CLOSEOUT:
                    "artifacts": [{"kind": "pr", "ref": "https://github.com/example/app/pull/31"}, {"kind": "commit", "ref": "4f2a91c"}],
                    "closeout": {"status": "done", "merged": "yes", "deployed": "yes",
                                 "did": ["报表导出改成分页流式写出，不再一次读进内存", "给导出接口补了 50 万行的压测用例"],
-                                "verified": "线上导出 50 万行，用时 11 秒（之前 94 秒超时）",
+                                "verified": "`go test ./export/...`",
                                 "checked": {"merged": "yes", "deployed": "yes"}}}),
         sess("server", CLOSEOUT_DISPROVED, "升级支付 SDK", "/home/me/code/app", "done", "unread", "app", 7, "pay", 4, 5,
              CLOSEOUT_REPLIES[CLOSEOUT_DISPROVED],
              work={"phase": "", "by": "rule", "artifacts": [{"kind": "pr", "ref": "https://github.com/example/app/pull/32"}],
                    "closeout": {"status": "done", "merged": "yes", "deployed": "no",
                                 "did": ["支付 SDK 从 v3 升到 v4，回调验签换成新接口"],
-                                "verified": "单元测试 212 个全过；沙箱环境没有测",
+                                "verified": "`npm test`；沙箱环境没有测",
                                 "missing": "上线前要有人在沙箱里走一遍真实支付",
                                 "checked": {"merged": "no"}}}),
         sess("server", CLOSEOUT_BLOCKED, "拆分用户表", "/home/me/code/app", "done", "unread", "app", 7, "migrate", 5, 8,
@@ -1369,7 +1422,7 @@ if MOCK_CLOSEOUT:
                    "artifacts": [{"kind": "branch", "ref": "feat/split-users"}, {"kind": "doc", "ref": "docs/migrations/split-users.md"}],
                    "closeout": {"status": "blocked", "waiting": "DBA 批准正式库的迁移窗口", "merged": "no",
                                 "did": ["写了用户表拆分的迁移脚本，可重复执行"],
-                                "verified": "预发库跑通，120 万行用时 3 分 40 秒"}}),
+                                "verified": "`./scripts/migrate.sh --env staging`"}}),
         sess("server", CLOSEOUT_NOT_DONE, "搜索结果高亮", "/home/me/code/app", "done", "unread", "app", 7, "search", 6, 10,
              CLOSEOUT_REPLIES[CLOSEOUT_NOT_DONE],
              work={"phase": "blocked", "on": "user", "line": "等你确认用哪个分词库", "by": "model",
@@ -1539,16 +1592,25 @@ if os.environ.get("MOCK_OVERVIEW_DENSE"):
                          capabilities={"read": True, "send": True, "interrupt": True, "approve": True, "terminal": True, "attach": False}))
 
 # MOCK_SIDE_SESSIONS=1 (#5935): two sessions the Claude desktop app started from the PR review, newer than it: a /btw
-# question that waits for the user and a side chat. They name the review in parent_agent_id, as the node sets it, and the
-# Agents list draws them under it.
-if os.environ.get("MOCK_SIDE_SESSIONS") == "1":
+# question that waits for the user and a side chat. They name the review in parent_agent_id, as the node sets it. #7944
+# adds a side session of the side chat that has stopped, and the /btw question's card. With the hub's side folding
+# (`sessions_side_fold`, on unless MOCK_SIDE_FOLD=0, which is the older hub that the Agents list nests them for) the
+# three fold into the review's chat: its Side sessions button and panel (fold_hierarchy).
+SIDE_BTW = "a1f3c2d4-0000-4000-8000-0000000059a1"
+SIDE_CHAT = "a1f3c2d4-0000-4000-8000-0000000059a2"
+SIDE_STOPPED = "a1f3c2d4-0000-4000-8000-0000000059a3"
+MOCK_SIDE_SESSIONS = os.environ.get("MOCK_SIDE_SESSIONS") == "1"
+SIDE_FOLD = MOCK_SIDE_SESSIONS and os.environ.get("MOCK_SIDE_FOLD") != "0"
+if MOCK_SIDE_SESSIONS:
     _desktop = dict(space_kind="", space_id="", space_name="", space_index=0, slot_id="", slot_name="", slot_index=0, pane_id="",
                     tab_id="", workspace_id="", started_by_persona=False, parent_agent_id=REVIEW)
     SESSIONS += [
-        sess("macbook", "a1f3c2d4-0000-4000-8000-0000000059a1", "btw: 这个 PR 现在能合吗", "/Users/me/code/weather", "blocked",
+        sess("macbook", SIDE_BTW, "btw: 这个 PR 现在能合吗", "/Users/me/code/weather", "blocked",
              "needs_you", "", 0, "", 0, 4, "想先确认一下：两条命名建议要不要等改完再合？", pending=1, **_desktop),
-        sess("macbook", "a1f3c2d4-0000-4000-8000-0000000059a2", "Side chat", "/Users/me/code/weather", "idle", "idle", "", 0, "", 0,
+        sess("macbook", SIDE_CHAT, "Side chat", "/Users/me/code/weather", "idle", "idle", "", 0, "", 0,
              9, "两条命名建议都改成英文会更统一。", seen_at=ago(minutes=8), **_desktop),
+        sess("macbook", SIDE_STOPPED, "查一下 CI 为什么慢", "/Users/me/code/weather", "offline", "offline", "", 0, "", 0,
+             30, "缓存没命中，依赖每次都重新装。", **dict(_desktop, parent_agent_id=SIDE_CHAT)),
     ]
 
 # MOCK_SESSIONS_MANY=<n> (#4410): n more idle sessions, enough to page an Agents list several pages deep with
@@ -1859,6 +1921,8 @@ SEEN = []  # session ids marked seen (GET /mock/seen)
 SESSION_CLOSE = {"fail": False, "attempts": [], "closed": [], "interactions": []}
 # GET /mock/send-fail?on=1: sends to sessions fail (502) until ?on=0, as MOCK_SEND_FAIL=1 makes them for the whole run.
 SEND_FAIL = {"on": False}
+# Low-distraction mode (#7782): MOCK_LN=1 starts it on; GET /mock/ln?on=0|1 switches it until /mock/reset.
+LN = {"on": bool(os.environ.get("MOCK_LN"))}
 # Delete conversation (DELETE /api/v1/sessions/{mid}/{sid}): what was taken out, so /mock/reset puts it back.
 SESSION_DELETED = []
 PINS = {"spaces": ["macbook/weather"], "sessions": []}  # GET / PUT /api/v1/pins: what the Agents list keeps on top
@@ -2914,6 +2978,18 @@ def _todo_list_fixture(variant):
              done_reason="验收通过")
         todo("tl_failed_panel_a", "部署自托管面板", 60 * 24, **dict(failed, done_at=ago(hours=24)))
         todo("tl_failed_panel_b", "部署自托管面板", 60 * 28, **dict(failed, done_at=ago(hours=28)))
+    if os.environ.get("MOCK_TODO_CONCERNS") == "1":
+        # The general block below adds working, plain-open and report-closed concerns. Only with MOCK_TODO_LIST, this
+        # block adds accepted, finished-unseen and plan-related open concerns plus an ordinary control; the pinned list is unchanged.
+        out = []
+        todo("concern_open", "Weekly errands", 60 * 100, kind="concern", plan_id="plan_concern_mock")
+        todo("concern_accepted", "Backup answer", 30, kind="concern",
+             supervision={"supervisor": "main", "done_when": [], "state": "accepted",
+                          "reviews": [{"at": ago(hours=1), "verdict": "accepted", "checks": []}]})
+        todo("concern_unseen", "Check the unseen answer", 120,
+             [agent(41, "Finish the unseen answer", "/home/me/code/concerns", "unread", 120,
+                    "The answer is ready to read.")], kind="concern")
+        todo("concern_control", "An ordinary follow-up", 10, plan_id="plan_concern_mock")
     return out
 
 
@@ -7849,10 +7925,16 @@ if os.environ.get("MOCK_MODEL_CHANGE") == "1":
     )
 if MOCK_CLOSEOUT:  # each agent's last reply ends with the raw closeout block (the not-done one is only the block)
     for _sid, _ask, _cmd in ((CLOSEOUT_DONE, "报表导出一到 50 万行就超时，修一下", "go test ./export/..."),
-                             (CLOSEOUT_DISPROVED, "把支付 SDK 升到 v4", "npm test"),
-                             (CLOSEOUT_BLOCKED, "把用户表按地区拆开", "./scripts/migrate.sh --env staging"),
+                             (CLOSEOUT_DISPROVED, "把支付 SDK 升到 v4", "cd app; npm test"),
+                             (CLOSEOUT_BLOCKED, "把用户表按地区拆开", "./scripts/migrate.sh --env sandbox"),
                              (CLOSEOUT_NOT_DONE, "搜索结果里把命中的词标出来", "npm run build")):
-        ITEMS[_sid] = ([it("user", "text", 30, text=_ask)] + tool("Bash", {"command": _cmd, "description": "跑一遍"}, "ok", 12)
+        _first = it("user", "text", 13, text=_ask)
+        _items = tool("Bash", {"command": _cmd, "description": "跑一遍"}, "ok", 12)
+        # Closeout command evidence: success, a failed wrapped command, and a different scope that cannot match.
+        _items[1]["outcome"] = {"status": "failed" if _sid == CLOSEOUT_DISPROVED else "ok",
+                                "exit_code": 1 if _sid == CLOSEOUT_DISPROVED else 0}
+        _items[1]["is_error"] = _sid == CLOSEOUT_DISPROVED
+        ITEMS[_sid] = ([_first] + _items
                        + [it("assistant", "text", 3, text=CLOSEOUT_REPLIES[_sid])])
 
 ITEMS[ASK1] = (
@@ -9783,6 +9865,13 @@ if os.environ.get("MOCK_PASEO"):
          "cwd": "/home/me/.paseo/worktrees/1a2b3c4d/brave-fox", "kind": "permission", "agent": "claude",
          "created_at": ago(minutes=1), "expires_at": later(minutes=29), "tool_name": "Bash",
          "summary": "npm run migrate -- --env test", "tool_input": {"command": "npm run migrate -- --env test"}})
+# MOCK_PASEO_PROVIDERS=1: Grok's card, named by the row's label as the node names it (#8142).
+if PASEO_PROVIDERS:
+    INTERACTIONS.append(
+        {"id": "paseo_grok_release", "machine_id": "server", "session_id": PASEO_GROK, "session_title": "Check the release notes",
+         "cwd": PASEO_ROOT, "kind": "permission", "agent": "paseo", "agent_label": "Grok",
+         "created_at": ago(minutes=1), "expires_at": later(minutes=29), "tool_name": "Bash",
+         "summary": "./scripts/release.sh --dry-run", "tool_input": {"command": "./scripts/release.sh --dry-run"}})
 
 # Keep the exported demo fixtures unchanged; only the HTTP mock serves the expanded request inbox.
 # A conversation permission and remembered grants for scope/revocation UI checks (#5867).
@@ -9850,8 +9939,9 @@ def mock_interactions():
             titles = {a["session_id"]: t["title"] for t in TODOS if t.get("origin") and not t.get("done_at") for a in t.get("agents", [])}
             out = [dict(x, task_title=titles[x["session_id"]]) if x.get("session_id") in titles else x for x in out]
     # the session a card's session folds under (Interaction.folded_under, #5120): its home is that session's page; a tab
-    # worker's card says so too (folded_as, #5180)
-    folds = {(r["machine_id"], r["session_id"]): {k: r[k] for k in ("folded_under", "folded_as") if r.get(k)}
+    # worker's card says so too (folded_as, #5180), and a side session's, or the card of a row of a side's own (folded_side,
+    # #7944)
+    folds = {(r["machine_id"], r["session_id"]): {k: r[k] for k in ("folded_under", "folded_as", "folded_side") if r.get(k)}
              for r in all_sessions() if r.get("folded_under")}
     out = [dict(x, suggestion=sg) if (sg := rule_suggestion(x["id"])) else x for x in out]  # MOCK_RULE_SUGGESTIONS
     return [dict(x, **folds[(x.get("machine_id"), x.get("session_id"))]) if (x.get("machine_id"), x.get("session_id")) in folds else x for x in out]
@@ -10018,6 +10108,54 @@ def mock_notify(interaction_id):
         try: send(event)
         except OSError: pass
     return {"sent": len(targets)}, 200
+
+
+def notify_ws(event):
+    """Sends a notify event to the connections that declared ws_notify, as the hub's notifyWSFrom does; how many."""
+    with FAULT_LOCK:
+        targets = [c["send"] for c in CLIENTS.values() if "ws_notify" in c["features"]]
+    for send in targets:
+        try: send(event)
+        except OSError: pass
+    return len(targets)
+
+
+def mock_assistant_ask(q):
+    """GET /mock/assistant_ask?session=<conversation>[&question=…]: an assistant conversation (the main chat, a leader's)
+    calls ask_user (#8145): its card reaches every app, and the hub pushes it as the manager asks (kind interaction, the
+    hub's words for a phone) to the connections that declared ws_notify."""
+    sid = q.get("session", [""])[0]
+    s = next((x for x in ASSISTANT if x["session_id"] == sid), None)
+    if s is None:
+        return {"error": "no assistant conversation " + sid}, 404
+    question = q.get("question", [""])[0] or "要把明早的会挪到下午吗？"  # i18n-ignore: what the assistant asks
+    with REQUEST_LOCK:
+        n = len(INTERACTIONS)
+        ix = {"id": "ix_assistant_ask_%d_%s" % (n, uuid.uuid4().hex[:6]), "machine_id": s["machine_id"], "session_id": sid,
+              "session_title": s.get("title") or "", "kind": "question", "created_at": ago(minutes=0), "expires_at": later(minutes=30),
+              "tool_name": "ask_user", "questions": [{"question": question, "header": "决定", "multi_select": False,  # i18n-ignore
+                                                      "options": [{"label": "好"}, {"label": "先不"}]}]}  # i18n-ignore
+        INTERACTIONS.append(ix)
+    for out, _ in list(LIVE):
+        try: out({"type": "interaction", "interaction": ix})
+        except Exception: pass
+    sent = notify_ws({"type": "notify", "kind": "interaction", "machine_id": ix["machine_id"], "session_id": sid,
+                      "title": "Persona 在问你", "subtitle": s.get("title") or "Persona",  # i18n-ignore: the hub's words
+                      "body": question, "interaction_id": ix["id"]})
+    return {"id": ix["id"], "sent": sent}, 200
+
+
+def mock_notify_user(q):
+    """GET /mock/notify_user?session=<conversation>&body=…[&title=…]: the assistant's notify_user from that conversation
+    (#8145): the hub's "assistant" notify (fleet_link.go deliverPushFrom, NotifyPush) to the connections that declared
+    ws_notify."""
+    sid = q.get("session", [""])[0]
+    s = next((x for x in ASSISTANT if x["session_id"] == sid), None)
+    if s is None:
+        return {"error": "no assistant conversation " + sid}, 404
+    sent = notify_ws({"type": "notify", "kind": "assistant", "machine_id": s["machine_id"], "session_id": sid,
+                      "title": q.get("title", ["Persona"])[0], "subtitle": "", "body": q.get("body", [""])[0]})
+    return {"sent": sent}, 200
 
 
 def renew_requests(minutes):
@@ -13808,6 +13946,13 @@ LAUNCHER_MODELS["sonnetcc"] = dict(LAUNCHER_MODELS["claude"], locked="启动器�
 # (server/internal/node/launcher_models.go), as for the Claude desktop app's.
 LAUNCHER_MODELS["codex-app"] = {"agent": "codex", "models": [], "locked": "Codex App 用它自己选的模型运行这个对话。"}
 LAUNCHER_MODELS["claude-desktop"] = {"agent": "claude", "models": [], "locked": "Claude 桌面版用它自己选的模型运行这个会话。"}
+# MOCK_PASEO_PROVIDERS=1 (#8142): Paseo's Grok and Cursor providers, as the node lists a runtime's launcher models (agent
+# "paseo": the runtime's own id, for an agent the apps have no id for).
+if PASEO_PROVIDERS:
+    LAUNCHER_MODELS["grok"] = {"agent": "paseo", "models": [{"id": "grok-4", "name": "Grok 4", "default": True},
+                                                            {"id": "grok-4-fast", "name": "Grok 4 Fast"}]}
+    LAUNCHER_MODELS["cursor"] = {"agent": "paseo", "models": [{"id": "auto", "name": "Auto", "default": True},
+                                                              {"id": "grok-4", "name": "Grok 4"}]}
 # MOCK_NEW_AGENT_PANEL=1 (#5104, web/e2e/new-agent-model.mjs): the gateway behind claude's glm-5.3 also serves Codex, so
 # codex lists the same model ID and New Agent's flyout offers that model under both engines; and the Mac Studio has no
 # codex launcher, so a Codex pick made on another computer falls back to the default there.
@@ -14021,8 +14166,9 @@ if MOCK_PROVIDERS:
          "opus_model": "example-opus", "sonnet_model": "example-sonnet", "haiku_model": "example-haiku", "fable_model": "example-opus",
          "small_model": "example-haiku", "subagent_model": "example-sonnet", "subagent_force": True, "proxy": "http://127.0.0.1:7890",
          "no_proxy": "localhost,127.0.0.1", "timeout_ms": 600000, "compact_window": 400000, "max_context": 800000, "effort": "high"},
+        # pi can use it too (#8194); gw_full cannot: pi would not go through its proxy
         {"name": "anthropic_main", "source": "persona", "base_url": "https://api.anthropic.com", "model": "claude-sonnet-4-5", "has_key": True,
-         "auth": "api_key", "models": [{"id": "claude-sonnet-4-5", "context_window": 200000}]},
+         "auth": "api_key", "models": [{"id": "claude-sonnet-4-5", "context_window": 200000}], "pi": True},
     ]
     # the aliases the import reads on macbook, as Persona lists them (cc_glm is there already)
     LAUNCHERS[-1:-1] = [
@@ -14084,7 +14230,7 @@ def machine_launchers(mid=""):
     if mid in RUN_HERE_CODEX:
         out = [dict(l, run_here=True, prompt_optional=True) if l.get("agent") == "codex" else l for l in out]
     if MOCK_PROVIDERS:
-        out += [{k: l[k] for k in ("name", "display_name", "base_url", "model", "source") if l.get(k)}
+        out += [{k: l[k] for k in ("name", "display_name", "base_url", "model", "source", "pi") if l.get(k)}
                 for l in LAUNCHERS if l["source"] == "persona" and l.get("kind") != "api"]
     if os.environ.get("MOCK_DESKTOP_APPS") and mid == "macbook":
         # The MacBook's Claude desktop app keeps Claude Code sessions: its launcher starts one there (#5480,
@@ -14092,6 +14238,11 @@ def machine_launchers(mid=""):
         out.append({"name": "claude-desktop", "model": "", "source": "claude_desktop", "agent": "claude", "agent_type": "claude"})
         # Its Codex App runs: its launcher starts a chat there (#5726, docs/integrations/codex.md).
         out.append({"name": "codex-app", "model": "", "source": "codex_app", "agent": "codex", "agent_type": "codex"})
+    if PASEO_PROVIDERS and mid == "server":
+        # Paseo's providers the apps have no id for (#8142): the runtime's own id as their agent, the runtime as source
+        out += [{"name": n, "model": m, "source": "paseo", "agent": "paseo", "agent_type": "paseo"} for n, m in (("grok", "Grok 4"), ("cursor", "Auto"))]
+    if machine_alerts.ON:
+        return machine_alerts.with_health(mid, out)
     return launcher_health_list(out)
 
 
@@ -15771,6 +15922,26 @@ if os.environ.get("MOCK_MESSAGE_LIFT") == "1":
     mock_message_lift()
 
 
+# MOCK_CODE_WIDE=1: an Agents chat whose answer holds a code block with lines far wider than any column (#8212): one in
+# English and one with Chinese, as a pasted prompt is, after a table as wide. They scroll sideways inside their block;
+# nothing is drawn past it. The code block ends the answer, so it sits whole above the composer.
+CODE_WIDE = "a1f3c2d4-0000-4000-8000-0000000c1e30"
+if os.environ.get("MOCK_CODE_WIDE") == "1":
+    _wide = ("A table first, as wide:\n\n"
+             "| Step | What it does | Where |\n| --- | --- | --- |\n"
+             "| Fetch | Brings origin/main up to date before any work starts, every working day without exception | scripts/hooks |\n"
+             "| Merge | Merges origin/main into the branch, never a rebase and never a force push to a shared branch | the branch |\n\n"
+             "The prompt below can be copied as it is:\n\n```text\n"
+             "Background: the last round took about 51 hours; half of it went to building, running tests and waiting for them to finish.\n"
+             "1. Push the branch and open a draft PR on the day you claim an issue, with the plan in its body; never work only locally.\n"
+             "2. 每天开工先 git fetch，把 origin/main merge 进分支（不 rebase）；再按关键词和文件路径搜一下同一块有没有新的 issue 或 PR。\n"
+             "short line\n```\n\nThe end of the answer, after the block.")
+    ITEMS[CODE_WIDE] = [it("user", "text", 6, text="Write the prompt for the next session"),
+                        it("assistant", "text", 5, text=_wide)]
+    SESSIONS.append(sess("macbook", CODE_WIDE, "Wide code block", "/Users/me/code/shop-app", "done", "done", "shop-app", 17,
+                         "wide", 3, 5, "The end of the answer, after the block."))
+
+
 # MOCK_SUBAGENT_PARALLEL=1: three subagents launched together in the live exchange (#5602, the grid): one done, one
 # still running (its latest call is what its card says it does), one that failed.
 SUBPAR = "a1f3c2d4-0000-4000-8000-0000000c1e05"
@@ -16626,6 +16797,22 @@ if os.environ.get("MOCK_TAB_PANES"):
              "cwd": "/home/me/code/app", "kind": "permission", "agent": "codex", "tool_use_id": "toolu_panes_review_test",
              "created_at": ago(minutes=1), "expires_at": later(minutes=29), "tool_name": "Bash",
              "summary": "go test ./auth/...", "tool_input": {"command": "go test ./auth/..."}})
+if MOCK_SIDE_SESSIONS:
+    # #7944: the /btw question's card (with side folding the hub sends it folded_under the review, folded_as "side"), and
+    # what each side session said
+    INTERACTIONS.append(
+        {"id": "ix_side_btw", "machine_id": "macbook", "session_id": SIDE_BTW, "session_title": "btw: 这个 PR 现在能合吗",
+         "cwd": "/Users/me/code/weather", "kind": "question", "created_at": ago(minutes=4), "expires_at": later(minutes=26),
+         "tool_name": "AskUserQuestion", "tool_use_id": "toolu_side_btw",
+         "questions": [{"question": "两条命名建议要不要等改完再合？", "header": "合并", "multi_select": False, "options": [
+             {"label": "等改完再合", "description": "命名统一以后再合进主分支"},
+             {"label": "现在就合", "description": "命名之后单独提一个改动"}]}]})
+    ITEMS[SIDE_BTW] = [it("user", "text", 6, text="btw 这个 PR 现在能合吗"),
+                       it("assistant", "text", 4, text="逻辑和测试都没问题。想先确认一下：两条命名建议要不要等改完再合？")]
+    ITEMS[SIDE_CHAT] = [it("user", "text", 12, text="命名建议你倾向哪种写法？"),
+                        it("assistant", "text", 9, text="两条命名建议都改成英文会更统一。")]
+    ITEMS[SIDE_STOPPED] = [it("user", "text", 34, text="查一下 CI 为什么慢"),
+                           it("assistant", "text", 30, text="缓存没命中，依赖每次都重新装。")]
 if os.environ.get("MOCK_BOTMUX"):
     ITEMS[BOTMUX_BLOCKED] = [it("user", "text", 5, text="把周报导出改成按部门分 sheet")] + [
         it("assistant", "text", 3, text="导出脚本改好了，正在跑全量。")]
@@ -17412,14 +17599,15 @@ def is_child_row(r):
     return bool(r.get("is_subagent") or r.get("parent_session_id") or r.get("asking_parent_session_id") or (root and root != r["session_id"]))
 
 
-def tab_leads(rows):
+def tab_leads(rows, sides=frozenset()):
     """The manager's tab teams (#5180, fold_hierarchy): for each worker's (machine, session id), its lead's row. A tab is the
-    rows of one machine, space kind, space and slot, both named; an assistant row or an archived one is in none. Its lead is
-    the one row in its first pane (pane_index 0) that is no child and not offline: none or two such rows, and its Agents
-    are peers. Every other row of a tab with a lead that is no child and not offline is its worker."""
+    rows of one machine, space kind, space and slot, both named; an assistant row or an archived one is in none, nor is a
+    side session (`sides`, #7944: side wins over worker). Its lead is the one row in its first pane (pane_index 0) that is
+    no child and not offline: none or two such rows, and its Agents are peers. Every other row of a tab with a lead that
+    is no child and not offline is its worker."""
     def tab(r):
         if (r.get("assistant") or r.get("archived") or not r.get("space_id") or not r.get("slot_id") or is_child_row(r)
-                or r.get("state") == "offline"):
+                or r.get("state") == "offline" or (r["machine_id"], r["session_id"]) in sides):
             return None
         return (r["machine_id"], r.get("space_kind") or "", r["space_id"], r["slot_id"])
     first = {}
@@ -17441,21 +17629,36 @@ def fold_hierarchy(rows):
     (is_subagent, a parent, or the parent a waiting runtime child names in asking_parent_session_id) whose topmost listed
     ancestor on its machine is another listed row gets folded_under that ancestor, which gets children (its descendants by
     their own state). A tab's worker (tab_leads) has its lead as its parent and gets folded_as "worker" too; the lead's
-    children count its workers. Orphans and cycles fold nowhere."""
+    children count its workers. Orphans and cycles fold nowhere.
+    With side folding (#7944, SIDE_FOLD) a row that is no child and no Assistant row, whose parent_agent_id names another
+    listed non-Assistant row on its machine, has that row as its parent (before any tab lead): it gets folded_as "side"
+    when that is its own step up, and a row that folds through a side without being one names the nearest in folded_side.
+    The topmost row's children count the sides apart too (sides, sides_working, sides_needs_you, sides_unread)."""
     by = {(r["machine_id"], r["session_id"]): r for r in rows}
-    lead = tab_leads(rows)
+
+    def side_parent(r):
+        if not SIDE_FOLD or is_child_row(r) or r.get("assistant"):
+            return None
+        p = r.get("parent_agent_id")
+        row = by.get((r["machine_id"], p)) if p and p != r["session_id"] else None
+        return row if row is not None and not row.get("assistant") else None
+    side_of = {(r["machine_id"], r["session_id"]): p for r in rows if (p := side_parent(r)) is not None}
+    lead = tab_leads(rows, frozenset(side_of))
 
     def parent(r):
+        k = (r["machine_id"], r["session_id"])
+        if k in side_of:
+            return side_of[k]
         if not is_child_row(r):
-            return lead.get((r["machine_id"], r["session_id"]))
+            return lead.get(k)
         for k in ("parent_session_id", "asking_parent_session_id", "root_session_id"):
             v = r.get(k)
             if v and v != r["session_id"] and (r["machine_id"], v) in by:
                 return by[(r["machine_id"], v)]
         return None
-    top = {}
+    top, through = {}, {}
     for r in rows:
-        cur, seen, found = r, {r["session_id"]}, None
+        cur, seen, found, side = r, {r["session_id"]}, None, None
         while True:
             p = parent(cur)
             if p is None:
@@ -17464,28 +17667,42 @@ def fold_hierarchy(rows):
                 found = None
                 break
             seen.add(p["session_id"])
+            # the nearest side on the way up that is not the row itself (#7944)
+            if side is None and cur is not r and (cur["machine_id"], cur["session_id"]) in side_of:
+                side = cur["session_id"]
             found = cur = p
         if found is not None:
             top[(r["machine_id"], r["session_id"])] = found["session_id"]
+            if side is not None and (r["machine_id"], r["session_id"]) not in side_of:
+                through[(r["machine_id"], r["session_id"])] = side
     if not top and not any("folded_under" in r or "folded_as" in r or "children" in r for r in rows):
         return rows
     rollup = {}
     for (mid, sid), root in top.items():
-        c = rollup.setdefault((mid, root), {"total": 0, "working": 0, "needs_you": 0, "workers": 0})
+        c = rollup.setdefault((mid, root), {"total": 0, "working": 0, "needs_you": 0, "workers": 0,
+                                            "sides": 0, "sides_working": 0, "sides_needs_you": 0, "sides_unread": 0})
         c["total"] += 1
         state = by[(mid, sid)].get("state")
         if state in ("working", "needs_you"):
             c[state] += 1
-        if (mid, sid) in lead:
+        if (mid, sid) in lead and (mid, sid) not in side_of:
             c["workers"] += 1
+        if (mid, sid) in side_of:
+            c["sides"] += 1
+            if state in ("working", "needs_you", "unread"):
+                c["sides_" + state] += 1
     out = []
     for r in rows:
         k = (r["machine_id"], r["session_id"])
-        r = {x: v for x, v in r.items() if x not in ("folded_under", "folded_as", "children")}
+        r = {x: v for x, v in r.items() if x not in ("folded_under", "folded_as", "folded_side", "children")}
         if k in top:
             r["folded_under"] = top[k]
-            if k in lead:
+            if k in side_of:
+                r["folded_as"] = "side"
+            elif k in lead:
                 r["folded_as"] = "worker"
+            if k in through:
+                r["folded_side"] = through[k]
         if k in rollup:
             r["children"] = {x: v for x, v in rollup[k].items() if v or x == "total"}
         out.append(r)
@@ -17504,6 +17721,9 @@ def folded_state(s):
         return "needs_you"
     if c.get("working") and own != "unread" and not (own == "idle" and s.get("awaits_reply")):
         return "working"
+    # #7944: an unread side makes its parent unread, unless the parent works itself (sides only)
+    if c.get("sides_unread") and own != "working":
+        return "unread"
     return own
 
 
@@ -20470,6 +20690,13 @@ MOCK_SKILLS = [{"name": "lark-gateway", "description": "Feishu / Lark through a 
                {"name": "weekly-report", "description": "Draft the week's report from the calendar, docs and chats.", "source": "user"}]
 
 LIVE = []  # (send, subscribed session ids) of each open WebSocket
+
+
+def broadcast(msg):
+    """Sends msg to every open WebSocket."""
+    for send, _ in list(LIVE):
+        try: send(msg)
+        except Exception: pass
 # MOCK_MESSAGING=1 (#2138): the messaging extension point over the mock's Feishu (scripts/mock/lark_messaging.py):
 # GET /api/v1/messaging lists the source lark, /api/v1/messaging/lark/… answers in the protocol's shapes, the feature
 # messaging is on, every {type: lark} push goes out as {type: messaging} too.
@@ -22676,6 +22903,9 @@ def _slot_view(ui, range_="7d", machine=None):
         return {"sections": [{"footer": "只算从 %s 发出的请求。" % name, "items": [
             {"type": "stat_grid", "stats": [{"label": "今天的请求", "value": "214"}, {"label": "失败", "value": "3", "tone": "danger"}]},
             _chart("line", [("请求", None, [120, 180, 90, 40, 260, 230, 214])], title="近 7 天的请求", unit="次")]}]}
+    if ui == "usage-detail":
+        return {"title": "用量明细", "sections": [{"items": [
+            {"type": "row", "title": "示例请求", "subtitle": "今天 10:00 · 1,204 tokens", "value": "¥0.02"}]}]}
     tabs = [("1d", "今天"), ("7d", "7 天"), ("30d", "30 天"), ("90d", "90 天")]
     return {"title": "用量", "state": "range=" + range_, "refresh_after": 600, "sections": [
         {"items": [{"type": "button", "title": ("● " if r == range_ else "") + t, "action": {"id": "range:" + r}} for r, t in tabs]},
@@ -22688,7 +22918,9 @@ def _slot_view(ui, range_="7d", machine=None):
             _chart("line", [("费用", "caution", [3.1, 5.2, 2.0, 1.1, 8.3, 7.6, 3.5])], title="费用", unit="元")]},
         {"title": "按模型", "items": [
             {"type": "row", "title": "model-large", "subtitle": "1,021 次", "value": "12.4M"},
-            {"type": "row", "title": "model-small", "subtitle": "183 次", "value": "4.6M"}]}]}
+            {"type": "row", "title": "model-small", "subtitle": "183 次", "value": "4.6M"}]},
+        # A real pushed child for the iPhone shell's root / sub-page navigation test.
+        {"items": [{"type": "button", "title": "查看用量明细", "action": {"id": "usage-detail", "push": {"ui": "usage-detail", "title": "用量明细"}}}]}]}
 
 
 def _fit_v1(view):
@@ -22892,8 +23124,8 @@ CATALOG = [
 # Uninstalling it with its members answers 409 partial_uninstall (one member uninstalled, one not, with the hub's reason,
 # one not tried) and changes nothing, so a run can repeat; the real hub tries every member, so its "not tried" is
 # rarely more than the failed ones. Example 套件 isn't installed: its preview names Example Notes as installed and installs
-# Example 日历 together with it.
-if PLUGINS_MODE and os.environ.get("MOCK_EXTENSION_PACK") == "1":
+# Example 日历 together with it. MOCK_EXTENSION_PACK=legacy is the same fixture on a hub without member-following switches.
+if PLUGINS_MODE and os.environ.get("MOCK_EXTENSION_PACK") in ("1", "legacy"):
     PLUGINS["example-pack"] = {
         "id": "example-pack", "name": "Example 合集", "kind": "extension_pack", "status": "running", "version": "1.0.0",
         "source": "installed", "enabled": True, "description": "Example 的几个扩展，一起装。", "contributes": {}, "publisher": "example",
@@ -22907,6 +23139,7 @@ if PLUGINS_MODE and os.environ.get("MOCK_EXTENSION_PACK") == "1":
          "publisher": "example", "tags": ["合集"], "contributes": {}, "permissions": [],
          "extension_pack": [{"id": "example-notes", "version": ">=1.0.0"}, {"id": "example-calendar", "market": MARKETS[_MARKET_A]["spec"]}]},
     ]
+_EXTENSION_PACK_OFF = []
 _PREVIEWS = {}
 _PREVIEW_BODIES = {}
 
@@ -23468,9 +23701,11 @@ def markets_route(handler, p, body):
             if action:
                 _UI_STATE["capsule_refreshed"] += 1
             handler.send_json({"view": _capsule_view(), **({"toast": "摘要已刷新"} if action else {})}); return True
-        if parts[7] in ("usage", "today", "gpu"):
+        if parts[7] in ("usage", "usage-detail", "today", "gpu"):
             if parts[7] == "gpu" and not ctx.get("machine"):
                 handler.send_json({"error": "没有这台机器", "code": "not_found"}, 404); return True
+            if parts[7] == "usage-detail":
+                handler.send_json({"view": _slot_view(parts[7])}); return True
             machine = next((m for m in MACHINES if ctx.get("machine") in (m["id"], m.get("name"))), {"name": ctx.get("machine")})
             state = req.get("state") or "range=7d"
             if (req.get("action") or "").startswith("range:"):
@@ -23825,6 +24060,29 @@ def _plugin_needs(pl):
     return pl
 
 
+def _pack_installed_members(pl, enabled=None):
+    for ref in pl.get("extension_pack", []):
+        member = PLUGINS.get(ref["id"])
+        if not member or member.get("source") != "installed":
+            continue
+        if enabled is None or bool(member.get("enabled")) == enabled:
+            yield member
+
+
+def _pack_switch_detail(pl, response):
+    if pl["id"] != "example-pack" or os.environ.get("MOCK_EXTENSION_PACK") != "1":
+        return response
+    response["pack_members_follow"] = True
+    on = [{"id": m["id"], "name": m.get("name") or m["id"]} for m in _pack_installed_members(pl, enabled=True)]
+    if on:
+        response["pack_on"] = on
+    members = {ref["id"] for ref in pl.get("extension_pack", [])}
+    off = [member_id for member_id in _EXTENSION_PACK_OFF if member_id in members]
+    if off:
+        response["pack_off"] = off
+    return response
+
+
 def plugins_route(handler, p, body):
     """MOCK_EXTENSIONS: GET /api/v1/plugins, a plugin's page and its switch, settings and secrets. False otherwise."""
     if not PLUGINS_MODE: return False
@@ -23845,8 +24103,28 @@ def plugins_route(handler, p, body):
     if rest in ([], [""]) and method == "GET":
         pass
     elif rest == ["enabled"] and method == "PUT":
+        following_pack = pl["id"] == "example-pack" and os.environ.get("MOCK_EXTENSION_PACK") == "1"
+        if following_pack and not req.get("enabled"):
+            members = list(_pack_installed_members(pl, enabled=True))
+            for member in members:
+                if member["id"] not in _EXTENSION_PACK_OFF:
+                    _EXTENSION_PACK_OFF.append(member["id"])
+            for member in members:
+                member["enabled"] = False
+                member["status"] = "disabled"
+                _auto_upgrade_paused(member)
         pl["enabled"] = bool(req.get("enabled"))
         pl["status"] = "disabled" if not pl["enabled"] else ("needs_setup" if pl["source"] == "installed" else "running")
+        if following_pack and pl["enabled"]:
+            for member_id in list(_EXTENSION_PACK_OFF):
+                member = PLUGINS.get(member_id)
+                if member and member.get("source") == "installed" and not member.get("enabled"):
+                    member["enabled"] = True
+                    member["status"] = "needs_setup"
+                    _auto_upgrade_paused(member)
+            _EXTENSION_PACK_OFF[:] = []
+        elif pl["id"] in _EXTENSION_PACK_OFF:
+            _EXTENSION_PACK_OFF.remove(pl["id"])
         _auto_upgrade_paused(pl)
     elif rest == ["config"] and method == "PUT":
         cfg = req.get("config") or {}
@@ -23924,7 +24202,7 @@ def plugins_route(handler, p, body):
     if pl["id"] == "ego":
         machines = [m["id"] for m in MACHINES if m.get("browser", {}).get("enabled")]
         pl["config"] = {**{k: v for k, v in pl["config"].items() if k != "machines"}, **({"machines": machines} if machines else {})}
-    handler.send_json({k: v for k, v in _plugin_needs(pl).items() if v is not None})
+    handler.send_json(_pack_switch_detail(pl, {k: v for k, v in _plugin_needs(pl).items() if v is not None}))
     return True
 
 
@@ -23960,7 +24238,7 @@ MOCK_HELP = [
     "MOCK_KB_SELECTION=missing|future|fail  Settings › Knowledge selection: a hub from before it (404) / a document with a field clients don't know / a save the hub refuses (503)",
     "MOCK_SESSIONS_LIST=1  Paged Agents, counts, exact lookup and by to-do (todo=, #6662); list-mode sockets send hints instead of full lists (#6362)",
     "MOCK_SESSIONS_MANY=<n>  n more idle sessions to page through; GET /mock/sessions/touch expires the old cursors (#4410)",
-    "MOCK_SIDE_SESSIONS=1  Two Claude desktop side sessions under the PR review (parent_agent_id, #5935), one waiting for you",
+    "MOCK_SIDE_SESSIONS=1  Three Claude desktop side sessions of the PR review (parent_agent_id, #5935): one waiting for you with its card, one a stopped side of a side; the hub folds them into the review's chat (sessions_side_fold, #7944) unless MOCK_SIDE_FOLD=0",
     "MOCK_SESSIONS_CATALOG=1  With MOCK_SESSIONS_LIST=1: catalog=1, place= and space= on the paged list, a Windows PC, one repository on two computers and a plain notes folder on two",
     "MOCK_MANUAL_HERDR=1  没挂待办的 herdr Agent 算手动开的（started_by_persona 为假），Agents「按待办」里出「手动开的」一段（#2917）",
     "MOCK_ORCA_CHILDREN=1  MacBook 上一个 Orca 工作区带三个子工作区（其中一个还有子项，parent_space_id，#2073）",
@@ -23979,6 +24257,7 @@ MOCK_HELP = [
     "MOCK_HISTORY=1  很长的 Persona 对话历史（最近 30 个 + 查看全部）、一段交接对话、一个置顶，置顶写入会保存",
     "MOCK_MODELS_SECONDS=<秒>  新建 Agent 里列一个启动器的模型要多久（默认 0.8，CLI 起来回答的时间）",
     "MOCK_REPLY_CUT=1|error  The review chat's last turn stopped right after its first words (interrupted; =error: a model API error): its reply says it did not complete (#5314)",
+    "MOCK_LN=1  Low-distraction mode on (#7782); GET /mock/ln?on=0|1 switches it until /mock/reset. Either way /api/v1/push/intercepts has two P1 pushes and one P2 push held today, the first linking the /orders investigation to-do (todo_id), and one of yesterday that clients leave out",
 ]
 
 _features_without_voice = features
@@ -24377,17 +24656,20 @@ class H(BaseHTTPRequestHandler):
         if self.token_refused(): return
         if CASE and case_route(self, "GET", p, q, b""): return
         if preview_route and preview_route(self, "GET", p, q): return
+        if p == "/mock/ln":
+            if "on" in q: LN["on"] = q["on"][0] == "1"
+            return self.send_json(LN)
         if p == "/api/v1/push/ln-mode":
-            return self.send_json({"enabled": bool(os.environ.get("MOCK_LN"))})
-        if p == "/api/v1/push/intercepts":
-            if not os.environ.get("MOCK_LN"):
-                return self.send_json({"intercepts": []})
+            return self.send_json({"enabled": LN["on"]})
+        if p == "/api/v1/push/intercepts":  # kept whether the mode is on or off, as the hub keeps them
             return self.send_json({"intercepts": [
-                {"at": ago(hours=3), "level": "P1", "reason": "ln_p1_held",
-                 "title": "发布结果等你核对", "body": "网页和手机的构建都完成了",
-                 "related_key": "demo-subject", "manager": "assistant", "also": ["请检查最后的发布说明"]},
-                {"at": ago(hours=4), "level": "P1", "reason": "ln_dedup_12h", "title": "同一任务还有一次补充汇报", "manager": "assistant"},
-                {"at": ago(hours=5), "level": "P2", "reason": "ln_p2_silent", "title": "后台检查已完成",
+                # the one with a source the clients follow (todo_id, #7910): the /orders investigation to-do, whose
+                # agent is a session the assistant manager can open
+                {"at": held_today(3), "level": "P1", "reason": "ln_p1_held",
+                 "title": "排查结果等你核对", "body": "/orders 的慢查询已经定位并修复",
+                 "related_key": "demo-subject", "manager": "assistant", "also": ["请确认修复方案"], "todo_id": "todo_orders"},
+                {"at": held_today(4), "level": "P1", "reason": "ln_dedup_12h", "title": "同一任务还有一次补充汇报", "manager": "assistant"},
+                {"at": held_today(5), "level": "P2", "reason": "ln_p2_silent", "title": "后台检查已完成",
                  "body": "没有需要你处理的事项", "manager": "assistant"},
                 {"at": ago(days=1), "level": "P1", "reason": "ln_p1_held", "title": "昨天的记录不应出现"},
             ]})
@@ -24548,7 +24830,7 @@ class H(BaseHTTPRequestHandler):
             if len(parts) == 8 and parts[7] == "connect": return self.port_connect(parts[4], port)
             return self.send_json({"port": port, "listening": port_listening(port), "http": port_listening(port)})
         if p == "/api/v1/health":
-            return self.send_json({"ok": True, "version": "mock", "channel": "release", "build": 202611021500, "protocol": 1,
+            return self.send_json({"ok": True, "version": SERVER_VERSION, "channel": "release", "build": 202611021500, "protocol": 1,
                                    "min_app_build": 0, "features": features(), **identity(), **hub_name_field()})
         if p == "/api/v1/endpoints": return self.send_json({**identity(), **hub_name_field(), "endpoints": list(ENDPOINTS)})
         if p == "/api/v1/hub/update":
@@ -24674,6 +24956,8 @@ class H(BaseHTTPRequestHandler):
         if p == "/mock/tool_call": return self.send_json(mock_tool_call(q.get("name", [""])[0], q.get("args", ["{}"])[0]))
         if p == "/mock/fleet": return self.send_json(*set_fleet_mode(q.get("mode", [""])[0]))
         if p == "/mock/notify": return self.send_json(*mock_notify(q.get("interaction", [""])[0]))
+        if p == "/mock/assistant_ask": return self.send_json(*mock_assistant_ask(q))
+        if p == "/mock/notify_user": return self.send_json(*mock_notify_user(q))
         if p == "/mock/renew": return self.send_json(*renew_requests(int(q.get("minutes", ["30"])[0] or 30)))
         if p == "/api/v1/auth/tokens": return self.send_json({"tokens": TOKENS, "current": "dev_phone", "push": TOKEN_PUSH})
         if p == "/mock/sent": return self.send_json({"sent": SENT})
@@ -24703,8 +24987,10 @@ class H(BaseHTTPRequestHandler):
         if p == "/mock/reset":  # MachinePagesTests: each test starts from the same machines
             BOTMUX_ON.clear()
             TAB_NAMES.clear()  # TerminalsRenameUITests: the tabs' own names again
+            machine_alerts.reset()  # cleaned caches and launcher checks (#8037)
             wire_reset()
             SEND_FAIL["on"] = False  # a FailedSendPlacementTests run that died before turning it off
+            LN["on"] = bool(os.environ.get("MOCK_LN"))  # low-distraction mode as the run started (/mock/ln)
             COOKIES_FAILED[0] = False  # MOCK_COOKIES_FAIL: the next read fails again
             # MOCK_RULE_SUGGESTIONS: every suggestion is offered again, and what Always made is gone (web/e2e/rule-suggestions.mjs)
             RULE_SUGGESTIONS_ANSWERED.clear(); RULE_GRANTS[:] = standing_seed(); RULE_GRANTS_REVISION[0] = 1
@@ -25231,6 +25517,7 @@ class H(BaseHTTPRequestHandler):
                 if listing is None: return self.send_json({"error": "claude 没有登录：claude /login 之后再试"}, 502)
             return self.send_json(listing)
         if doctor_route(self, p, "GET"): return
+        if machine_alerts.route(self, "GET", MACHINES, SYSTEMS, metric_latest, broadcast): return
         if p.startswith("/api/v1/machines/") and p.endswith("/launchers"):
             return self.send_json({"launchers": machine_launchers(p.split("/")[4])})
         if p.startswith("/api/v1/machines/") and p.endswith("/claude-settings"):
@@ -25522,6 +25809,7 @@ class H(BaseHTTPRequestHandler):
         if providers_route(self, self.command, p, parse_qs(urlparse(self.path).query), self.last_body): return
         if chat_pins_route(self, p, parse_qs(urlparse(self.path).query)): return
         if doctor_route(self, p, "POST"): return
+        if self.command == "POST" and machine_alerts.route(self, "POST", MACHINES, SYSTEMS, metric_latest, broadcast): return
         if history_route(self, p, parse_qs(urlparse(self.path).query)): return
         if plugins_route(self, p, self.last_body): return
         if os.environ.get("MOCK_TERMINAL_PANES") and re.fullmatch(r"/api/v1/machines/[^/]+/(panes/(close|close_finished|split|agent|git)|tabs/(close|rename))", p):
@@ -26459,10 +26747,13 @@ class H(BaseHTTPRequestHandler):
         if saved_prompts_route(self, p, self.command):
             return
         if p == "/api/v1/assistant/places" and self.command == "POST":
+            if is_read_only(self): return self.send_json({"error": "只读角色不能修改常用地点"}, 403)
             return self.send_json(*save_place(json.loads(self.last_body or b"{}"), None))
         if p.startswith("/api/v1/assistant/places/") and self.command == "PUT":
+            if is_read_only(self): return self.send_json({"error": "只读角色不能修改常用地点"}, 403)
             return self.send_json(*save_place(json.loads(self.last_body or b"{}"), p.rsplit("/", 1)[1]))
         if p.startswith("/api/v1/assistant/places/") and self.command == "DELETE":
+            if is_read_only(self): return self.send_json({"error": "只读角色不能修改常用地点"}, 403)
             pid = p.rsplit("/", 1)[1]
             PLACES[:] = [x for x in PLACES if x["id"] != pid]
             return self.send_json({"ok": True})
@@ -26861,6 +27152,10 @@ class H(BaseHTTPRequestHandler):
             m = next((m for m in MACHINES if m["id"] == mid), None)
             if not m or not m.get("node_mismatch"):
                 return self.send_json({"error": "这台电脑已经是 hub 这一版"}, 409)
+            if machine_alerts.ON:  # the phases a real hub pushes (MOCK_DEPLOY_ERROR fails it while transferring)
+                machine_alerts.phased_deploy(m, lambda: broadcast({"type": "machines", "machines": out_machines()}),
+                                             os.environ.get("MOCK_DEPLOY_ERROR") or None)
+                return self.send_json({"ok": True})
             m["deploying"] = True
             def done(m=m):
                 time.sleep(3)
@@ -27305,7 +27600,7 @@ class H(BaseHTTPRequestHandler):
         SOCKETS.add(self.connection)
         subscribed = set()
         LIVE.append((send, subscribed))
-        send({"type": "hello", "server_version": "mock", "client_id": observation["id"], "channel": "release",
+        send({"type": "hello", "server_version": SERVER_VERSION, "client_id": observation["id"], "channel": "release",
               "build": 202611021500, "protocol": 1, "min_app_build": 0,
               **identity(), "endpoints": list(ENDPOINTS), **mesh_hello(),
               "features": features() + (["sessions_delta"] if delta else []), **restart_hello(self.path)})

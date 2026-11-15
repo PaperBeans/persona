@@ -554,7 +554,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 		if n.programRun(id, src, pass) {
 			continue
 		}
-		if src.path != "" && readCodexOrigin(src.path).guardian { // an approval review of a tool call, not an Agent (#5486)
+		if codexThreadOrigin(src).guardian { // an approval review of a tool call, not an Agent (#5486), its rollout gone too (#8191)
 			continue
 		}
 		if n.agentFiltered("codex", src.path) && !n.keptSessions()[id] { // another platform's runs (agentfilters.go)
@@ -643,7 +643,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			s.ReadOnlyReason = ""
 			n.placeCodexDesktop(&s, src, src.thread, false)
 			n.codexDesktopEffortRow(&s, src, m) // codex_desktop_effort.go
-		} else if o := readCodexOrigin(src.path); o.desktop {
+		} else if o := codexThreadOrigin(src); o.desktop { // a subagent whose rollout is gone too: its database row (#8191)
 			switch {
 			case o.parent != "":
 				s.AgentName, s.ParentThreadID, s.AgentSurface = "Codex App", o.parent, transcript.SurfaceDesktop
@@ -669,7 +669,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 		}
 		n.decorateCodexSession(&s, src, cfg.LegacyHome, projects)
 		if s.IsSubagent && pass != nil && len(pass.runtimes) > 0 {
-			if root := readCodexOrigin(src.path).root; pass.runtimeOf(s.ParentThreadID).session != "" || pass.runtimeOf(root).session != "" {
+			if root := codexThreadOrigin(src).root; pass.runtimeOf(s.ParentThreadID).session != "" || pass.runtimeOf(root).session != "" {
 				adopted = append(adopted, adoption{len(out), s.ParentThreadID, root})
 			}
 		}

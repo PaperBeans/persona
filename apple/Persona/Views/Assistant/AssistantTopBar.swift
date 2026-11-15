@@ -24,6 +24,10 @@ struct AssistantTopBar: View {
     /// The Sidebar layout on a phone (#6332): the face opens the drawer, the conversation's name is the middle
     /// (`drawerRow`); off elsewhere.
     var drawerTitle = false
+    /// The sidebar beside the page has New Chat at its foot (the Sidebar layout's column on the iPad and the open iPhone
+    /// Duo, the iPad's Persona column): its one entry (#4206, the owner), so the page has none, the column out or away.
+    /// A phone keeps this one.
+    var newChatInSidebar = false
     /// A phone's tabs (iPhone Duo open): the Assistant | Agents switch in the face's place (#2623).
     @Environment(\.pageTabSwitch) private var pageTabSwitch
     var openSidebar: () -> Void
@@ -274,11 +278,16 @@ struct AssistantTopBar: View {
     }
 
     private var classicBar: some View {
-        // On a phone's tabs the column's own button folds it, at its top: this one only brings it back, and is not there
-        // while the column is out. Left out, not faded: a glass button made see-through (or slid away) while the split
-        // moved its columns left the page taking no touches at all on iPhone Duo open (2026-11-10).
-        let sidebarButtonShown = !(pageTabSwitch && sidebarIsColumn && sidebarShown)
+        // On a phone's tabs, and beside the one sidebar's column (#4206), the column's own button folds it, at its top:
+        // this one only brings it back, and is not there while the column is out. Left out, not faded: a glass button
+        // made see-through (or slid away) while the split moved its columns left the page taking no touches at all on
+        // iPhone Duo open (2026-11-10).
+        let sidebarButtonShown = !((pageTabSwitch || sidebarCounts) && sidebarIsColumn && sidebarShown)
         return HStack(alignment: .top) {
+            if !sidebarButtonShown && newChatInSidebar {
+                // Its room kept, empty, as New Chat's on the other side: the face stays in the middle.
+                Color.clear.scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget).accessibilityHidden(true)
+            }
             if sidebarButtonShown {
                 GlassEffectContainer {
                     Self.circle(sidebarIsColumn ? Theme.Icon.sidebar : Theme.Icon.sidebarMenu, label: String(localized: "Chat History [Shell Components 60636b]"), id: "assistant-sidebar-button") {
@@ -292,12 +301,17 @@ struct AssistantTopBar: View {
             Spacer(minLength: 8)
             if !pageTabSwitch { face }
             Spacer(minLength: 8)
-            GlassEffectContainer {
-                Self.circle(Theme.Icon.compose, label: String(localized: "New Chat [Quick Actions ea4b29]"), id: "assistant-new") {
-                    Haptics.tap()
-                    newConversation()
+            if newChatInSidebar {
+                // Its room kept, empty, so the face stays in the middle.
+                Color.clear.scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget).accessibilityHidden(true)
+            } else {
+                GlassEffectContainer {
+                    Self.circle(Theme.Icon.compose, label: String(localized: "New Chat [Quick Actions ea4b29]"), id: "assistant-new") {
+                        Haptics.tap()
+                        newConversation()
+                    }
+                    .disabled(key == nil)
                 }
-                .disabled(key == nil)
             }
         }
         .padding(.horizontal, Theme.Space.l)

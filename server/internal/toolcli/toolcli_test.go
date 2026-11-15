@@ -160,6 +160,9 @@ func TestOneTool(t *testing.T) {
 func TestOneToolCarriesPaneWithoutSession(t *testing.T) {
 	old := dial
 	t.Cleanup(func() { dial = old })
+	// Herdr's and herdr-core's panes come before Orca's (nodeclient.HookPane): a run inside either must not see its own.
+	t.Setenv(nodeclient.HerdrPaneEnv, "")
+	t.Setenv(nodeclient.HerdrCorePaneEnv, "")
 	t.Setenv(nodeclient.OrcaPaneEnv, "tab:leaf")
 	t.Setenv("CODEX_THREAD_ID", "10000000-0000-0000-0000-000000000001")
 	var request map[string]any

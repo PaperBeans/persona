@@ -262,12 +262,8 @@ func (h *Hub) deliverNotify(in notifyRequest, machine, extID, manager string) (m
 		withID["id"] = id
 		ws = func(i18n.Lang) map[string]any { return withID }
 	}
-	wsSelected, wsReachable := h.notifyWSFrom(manager, kindAlert, ws, wants, quietNone)
-	if pushSelected+wsSelected == 0 {
-		reason := "no_device"
-		if pushReachable+wsReachable > 0 {
-			reason = "filtered"
-		}
+	wsr := h.notifyWSFrom(manager, kindAlert, ws, wants, quietNone)
+	if reason := (pushOutcome{devices: pushSelected + wsr.selected, reachable: pushReachable + wsr.reachable}).reason(); reason != "" {
 		return map[string]any{"sent": false, "reason": reason}, nil
 	}
 	return map[string]any{"sent": true}, nil

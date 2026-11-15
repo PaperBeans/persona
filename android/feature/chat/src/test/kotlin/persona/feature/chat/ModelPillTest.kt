@@ -91,6 +91,27 @@ class ModelPillTest {
         assertEquals("Select model. Current: Opus 5.5, thinking effort: Very high", spoken)
     }
 
+    /** #8143: a Paseo provider is named and marked as itself on the pill and in the panel's words, never as "paseo". */
+    @Test fun aPaseoProviderIsNamedAndMarkedAsItself() {
+        val grok = Session("box", "paseo-1", agent = "paseo", agentLabelHint = "My Grok", launcher = "grok", status = "idle", state = "idle")
+        val names = persona.core.domain.models.AgentModelPanel.engineNames(grok,
+            listOf(AgentLauncher("claude"), AgentLauncher("grok", agentType = "paseo"), AgentLauncher("traecli", agentType = "paseo")))
+        val words = panelWords(res, names)
+        assertEquals("Switching from My Grok to Claude Code needs a new conversation",
+            words.reason(persona.core.domain.models.PanelReason.OtherEngine("grok", "claude")))
+        assertEquals("My Grok", words.engine("grok"))
+        assertEquals(persona.core.designsystem.AgentMarkSpec(null, "My Grok", null), words.mark("grok"))
+        // A provider whose name is a mark the design system has draws it.
+        assertEquals(persona.core.designsystem.AgentMarkKind.Trae, words.mark("traecli")?.kind)
+        assertEquals("Claude Code", words.engine("claude"))
+        val (content, spoken) = pillContent(persona.core.domain.models.PillView(persona.core.domain.models.PillSetup("grok", "grok", "Grok 5", null)),
+            null, ultracode = false, res, names)
+        assertEquals(persona.core.designsystem.AgentMarkSpec(null, "My Grok", null), content.engine)
+        assertEquals("Select model. Current: Grok 5", spoken)
+        // Without names (a Persona chat's pill): the engine's id, as before.
+        assertEquals("paseo", panelWords(res).engine("paseo"))
+    }
+
     /** Records what the pill asks the hub. */
     private class Hub : AssistantManagement {
         val asked = mutableListOf<String>()

@@ -160,6 +160,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	over, refused, parks := false, false, 0
 	var waiting *OwnerWait // accepted while the work stopped on the owner's decision: refused, nothing written (#1277)
 	judgedDone := false    // it was waiting for review: the judge had found it done
+	var criteriaErr error
 	var v Supervision
 	if ledger {
 		v, _, err = s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
@@ -167,6 +168,11 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 				w := *v.Waits
 				waiting = &w
 				return false
+			}
+			if verdict == reviewAccepted && a.Outcome != outcomeCannot {
+				if criteriaErr = completeReviewCriteriaError(v.DoneWhen, a.Checks); criteriaErr != nil {
+					return false
+				}
 			}
 			judgedDone = v.State == reviewPending
 			if isMain && !s.isLeader(ctx, v.Supervisor) && !s.isLeaderRef(v.Supervisor) {
@@ -223,6 +229,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	}
 	if err != nil {
 		return "", err
+	}
+	if criteriaErr != nil {
+		return "", criteriaErr
 	}
 	if refused {
 		return "", reworkOverError(t.ID)

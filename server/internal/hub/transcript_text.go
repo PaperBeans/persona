@@ -14,7 +14,9 @@ import (
 // tell apart, from the item's structured fields (a task note's kind and status) or from the node's exact Chinese
 // wording, into the reader's language (docs/protocol/i18n.md). zh-Hans, and anything the hub does not recognize (an older or
 // newer node's wording), go out as the node wrote them. The items the assistant and the channels read are not touched:
-// they match some of these lines (assistant/done.go's interrupted marker).
+// they match some of these lines (assistant/done.go's interrupted marker). The runtime bridges' own words in the items
+// they give (transcript.Runtime*: Paseo's, opencode's and pi's failures, exit codes, cancelled calls) are rewritten the
+// same way.
 //
 // Kept in Chinese because the apps parse them: the compaction divider lines, the API error prefix
 // (the API error card), the truncation marker (cut text) and the /compact echo.
@@ -75,6 +77,8 @@ func localizedItem(l i18n.Lang, it proto.Item) (proto.Item, bool) {
 		set(&it.Text, strings.ReplaceAll(it.Text, codexNewChatLink, "["+tt(l, "open_new_chat")+"](persona://session/"))
 	case it.Kind == proto.KindToolResult && strings.Contains(it.Text, loadedToolPrefix):
 		set(&it.Text, loadedTools(l, it.Text))
+	case it.Kind == proto.KindToolResult:
+		set(&it.Text, runtimeResultText(l, it.Text))
 	}
 	return it, changed
 }
@@ -118,8 +122,30 @@ func noticeText(l i18n.Lang, s string) string {
 		return tt(l, "codex_extension", i18n.Args{"kind": strings.TrimSuffix(strings.TrimPrefix(s, codexExtension), codexRecordNote)})
 	case strings.HasPrefix(s, codexEvent) && strings.HasSuffix(s, codexRecordNote):
 		return tt(l, "codex_event", i18n.Args{"type": strings.TrimSuffix(strings.TrimPrefix(s, codexEvent), codexRecordNote)})
+	case s == transcript.RuntimeError:
+		return tt(l, "runtime_error")
+	case strings.HasPrefix(s, transcript.RuntimeErrorLead):
+		return tt(l, "runtime_error_cause", i18n.Args{"error": strings.TrimPrefix(s, transcript.RuntimeErrorLead)})
 	}
 	return s
+}
+
+// runtimeResultText is a tool result in l when a runtime bridge wrote words of its own into it (transcript.Runtime*):
+// a cancelled call's, and a failed command's exit code after its output; the output itself stays as it is.
+func runtimeResultText(l i18n.Lang, s string) string {
+	if s == transcript.RuntimeCanceled {
+		return tt(l, "runtime_canceled")
+	}
+	rest, ok := strings.CutSuffix(s, transcript.RuntimeExitTail)
+	i := strings.LastIndex(rest, transcript.RuntimeExitHead)
+	if !ok || i < 0 {
+		return s
+	}
+	code := rest[i+len(transcript.RuntimeExitHead):]
+	if _, err := strconv.Atoi(code); err != nil {
+		return s
+	}
+	return rest[:i] + tt(l, "runtime_exit_code", i18n.Args{"code": code})
 }
 
 // taskNoteHead is the key of a task note's heading (transcript/tasknote.go noteText), "" for a task of another kind.

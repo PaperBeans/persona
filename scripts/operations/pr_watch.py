@@ -383,21 +383,26 @@ class Watcher:
                                checks=getattr(error, "checks", []))
                 return False
             return "base_failure"
-        updated_head = pr_watch_repair.update_branch_with_main(repo, pr, str(worktree), pr["baseRefOid"])
+        updated_head = pr_watch_repair.update_branch_with_main(
+            repo, pr, str(worktree), pr["baseRefOid"], self.config["reviewer"],
+            before_conflict=lambda: self.state.put(repo, number, pr["headRefOid"], evidence_key=old.get("evidence_key"),
+                                                  repair_rounds=rounds + 1, outcome="repairing"))
         if updated_head:
-            merged_pr = dict(pr, headRefOid=updated_head)
+            # main may have moved on since the PR was read (#7840): the merged head stands on the main it brought in
+            base = pr_watch_repair.merged_main(str(worktree), updated_head)
+            merged_pr = dict(pr, headRefOid=updated_head, baseRefOid=base)
             results = verify(repo, merged_pr, str(worktree), config["verify"], environ=verification_env())
             scanner = Path(__file__).resolve().parents[2] / "scripts" / "privacy_check.py"
-            checked(["python3", "-I", str(scanner), "--range", pr["baseRefOid"] + ".." + updated_head],
+            checked(["python3", "-I", str(scanner), "--range", base + ".." + updated_head],
                     cwd=worktree, timeout=180, environ=dict(os.environ, PERSONA_PRIVACY_ROOT=str(worktree)))
             if pr.get("isCrossRepository"):
-                new_number, repair_checks = pr_watch_repair.commit_and_push_repair(repo, merged_pr, str(worktree), pr["baseRefOid"], str(error), config["verify"], allow_merge_only=True, original_pr=pr)
+                new_number, repair_checks = pr_watch_repair.commit_and_push_repair(repo, merged_pr, str(worktree), base, str(error), config["verify"], allow_merge_only=True, original_pr=pr)
                 self.state.put(repo, number, pr["headRefOid"], evidence_key=old.get("evidence_key"),
                                outcome="continuation", continuation=new_number, repair_rounds=rounds + 1)
                 self.comment(repo, number, "The stale fork PR was updated in an isolated checkout; continuation PR #%d was opened." % new_number)
             else:
                 pr_watch_repair.push_updated_head(repo, pr, str(worktree), updated_head)
-                updated_key = repo + "#" + str(number) + "@" + pr["baseRefOid"] + ".." + updated_head
+                updated_key = repo + "#" + str(number) + "@" + base + ".." + updated_head
                 self.state.put(repo, number, updated_head, evidence_key=updated_key,
                                repair_rounds=rounds + 1, outcome="base_updated", failure=str(error))
                 self.comment(repo, number, "The verification branch was behind main. The watcher merged current main into the same-repository branch and will review the new head.")
@@ -518,24 +523,29 @@ class Watcher:
                         if not self.state.get(repo, number).get("repair_exhausted"):
                             self.state.put(repo, number, head, evidence_key=evidence_key,
                                            repair_exhausted=True, outcome="repair_exhausted")
-                            self.comment(repo, number, "The automatic repair limit was reached while updating the base; no merge was attempted.")
+                            if not self.dry_run:
+                                self.comment(repo, number, "The automatic repair limit was reached while updating the base; no merge was attempted.")
                         return
                     worktree = self.worktree(repo, number, pr)
-                    updated_head = pr_watch_repair.update_branch_with_main(repo, pr, str(worktree), pr["baseRefOid"])
+                    updated_head = pr_watch_repair.update_branch_with_main(
+                        repo, pr, str(worktree), pr["baseRefOid"], self.config["reviewer"],
+                        before_conflict=lambda: self.state.put(repo, number, head, evidence_key=evidence_key,
+                                                              repair_rounds=rounds + 1, outcome="repairing"))
                     if updated_head:
-                        merged_pr = dict(pr, headRefOid=updated_head)
+                        base = pr_watch_repair.merged_main(str(worktree), updated_head)
+                        merged_pr = dict(pr, headRefOid=updated_head, baseRefOid=base)
                         results = verify(repo, merged_pr, str(worktree), config["verify"], environ=verification_env())
                         scanner = Path(__file__).resolve().parents[2] / "scripts" / "privacy_check.py"
-                        checked(["python3", "-I", str(scanner), "--range", pr["baseRefOid"] + ".." + updated_head],
+                        checked(["python3", "-I", str(scanner), "--range", base + ".." + updated_head],
                                 cwd=worktree, timeout=180, environ=dict(os.environ, PERSONA_PRIVACY_ROOT=str(worktree)))
                         if pr.get("isCrossRepository"):
-                            new_number, repair_checks = pr_watch_repair.commit_and_push_repair(repo, merged_pr, str(worktree), pr["baseRefOid"], "conflicting base", config["verify"], allow_merge_only=True, original_pr=pr)
+                            new_number, repair_checks = pr_watch_repair.commit_and_push_repair(repo, merged_pr, str(worktree), base, "conflicting base", config["verify"], allow_merge_only=True, original_pr=pr)
                             self.state.put(repo, number, head, evidence_key=evidence_key,
                                            outcome="continuation", continuation=new_number, repair_rounds=rounds + 1)
                             self.comment(repo, number, "A continuation PR was opened for the fork branch: #%d." % new_number)
                         else:
                             pr_watch_repair.push_updated_head(repo, pr, str(worktree), updated_head)
-                            updated_key = repo + "#" + str(number) + "@" + pr["baseRefOid"] + ".." + updated_head
+                            updated_key = repo + "#" + str(number) + "@" + base + ".." + updated_head
                             self.state.put(repo, number, updated_head, evidence_key=updated_key,
                                            repair_rounds=rounds + 1, outcome="base_updated")
                             self.comment(repo, number, "The watcher merged current main into the same-repository branch to resolve the stale base. The new head will be reviewed.")
