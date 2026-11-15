@@ -62,11 +62,11 @@ Workspace policy: set workspace="new" for an isolated checkout, {"new":{"branch"
           },
           "launcher": {
             "type": "string",
-            "description": "launcher name, one that machine has (a name it lacks is refused, listing the ones it has); empty: the default, or one the machine has when it lacks the default (claude first; the why says so)"
+            "description": "launcher name, one that machine has (a name it lacks is refused, listing the ones it has): a Claude Code launcher, or pi, cursor or agy to start that agent in herdr; empty: the default, or one the machine has when it lacks the default (claude first; the why says so)"
           },
           "model": {
             "type": "string",
-            "description": "model id (an alias such as opus, or a gateway's own id; letters, digits and . _ - / : @ [ ] only, or a leading ~ as in ~vendor/model-latest); empty: the launcher's default"
+            "description": "model id the agent takes (an alias such as opus, a gateway's own id, or a provider/model such as ag-chat/cursor/grok-4.7 for pi; letters, digits and . _ - / : @ [ ] only, or a leading ~ as in ~vendor/model-latest); empty: the launcher's default"
           },
           "permission": {
             "type": "string",

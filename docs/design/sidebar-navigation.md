@@ -1,6 +1,6 @@
 # Sidebar navigation: places, tasks and the drawer (iPhone shell and iPad sidebar)
 
-Status: option 2 chosen and implemented (issue linked from the PR that adds this file). Baseline: `origin/main` @ `65cbb6b95`
+Status: option 2 chosen and implemented, with the one-button amendment below (#7799). Baseline: `origin/main` @ `65cbb6b95`
 (2026-11-13). Audience: everyone who uses the Assistant side of the app; nothing here is Agents-only.
 
 User report: in the iOS app, choosing a page in the sidebar closes the sidebar while a sheet, a cover or a pushed page comes
@@ -36,7 +36,7 @@ request (`ShellState.show`, `ShellState.swift:91-93`) and starts the drawer's cl
 | Archived, Auto conversations | `AssistantSidebar.swift:904-915`, presented from the drawer's own hosting view | sheet over the drawer | picking a row dismisses the sheet, closes the drawer and resets the stack in the same turn |
 | Search (iPhone Duo open) | `AssistantSidebar.swift:917-923` | `fullScreenCover` | as Archived |
 | Assistant / Agents switch | `apple/Persona/DesignSystem/ShellComponents.swift:118-131`, `AppModel.selectHomeTab` (`apple/Persona/App/AppModel.swift:209-217`) | strip pages | choosing Agents returns to its list by design (#5708); Assistant's stack stays |
-| Opening the drawer at all | `ShellView.swift:25` (`enabled: shell.atRoot`), `DrawerPan.pushed`; ☰ only in the root top bars | — | never from a pushed page: to change place the user first pops to the root, which drops the place's depth |
+| Opening the drawer at all | `ShellView.swift:25` (`enabled: shell.atRoot`), `DrawerPan.pushed` | — | place roots show ☰ in place of Back; sub-pages yield sideways drags to the system's Back gesture; return from a sub-page to its root, then open the drawer |
 | iPad sidebar column | `AssistantView.swift:111-138` | same `show(_:)`, push in the detail stack | switching place drops the previous place's stack; no drawer animation (the column stays) |
 
 Where navigation state lives: Assistant's `path` and flags (`@State` in `AssistantView`), Agents' `path` (`@State` in `ChatsView`),
@@ -95,19 +95,33 @@ Keep every presentation as it is; wait for the drawer to finish closing before p
   `NavigationPath`; choosing it again restores it. Choosing the place already in front returns it to its root (the tab-bar rule).
   Places stay pushed over the conversation, so back from a place's root still returns to the conversation, as today.
   All drawer places push by value (`ShellRoute`), so their sub-pages pushed by value are part of the saved path.
-- **The drawer from any depth:** pages pushed in a place show ☰ next to back (as an iPad split's detail shows the sidebar button
-  next to back), so the user can change place without popping.
+- **One button on each side (#7799, superseding the original “drawer from any depth” bullet):** a place's root hides
+  the system Back button and shows ☰ as its only leading control; a sub-page has Back and no ☰. At the root, returning
+  to the conversation means choosing a conversation in the drawer (or the edge-swipe below). A place still keeps its
+  stack while the user is elsewhere. The top-trailing side also has at most one control on iPhone: Inbox's Select,
+  Knowledge's tag filter and map, an Inbox item's Done, a Lark chat's Pins and summary, and Browser Sign-ins' Select
+  join their respective ⋯ menus. Multi-hub Inbox's hub picker joins that menu too, and only on iPhone does selection's
+  Select All move to the bottom action bar; outside the iPhone shell it stays at the original top leading, beside Back
+  or the hub picker (`IPadInboxSelectionTests`). These menu layouts change only in the iPhone shell; the iPad and Mac
+  keep their original ones.
+- **Edge gestures:** the app's existing `UINavigationController` pop-gesture delegate still permits Back with its
+  button hidden, and `DrawerPan.pushed` yields a sub-page's drag to that gesture. Thus an edge-swipe on a place's root
+  still returns to the conversation; it does not open the drawer. On a sub-page it goes back one level. A sideways
+  drag away from the screen's leading edge at a place's root opens the drawer. No two edge gestures compete for the
+  same drag. This behavior is covered by `ShellPagerTests.testPushedPagesSwipeBack`.
 - **Tasks:** shown over the open drawer, which stays open; closing the task returns to the drawer as it was. A task that
   ends in a place (a conversation picked in Archived, Auto conversations or Search) waits until its sheet is gone, then
   switches as a place does.
 - **iPhone:** as above. **iPad:** the column never closes and Settings is already a sheet; places keep their stacks through the
   same code (`AssistantView.show`).
 - Pros: fixes 1–4 and 6 with the existing routes (`ShellRoute`, `ShellDestinations`, `ShellState.request`) and no new shell
-  structure; the pages look as before except for ☰ on pushed place pages.
+  structure; the place roots show only ☰ instead of the previous Back-and-☰ pair, and sub-pages show only Back.
+  The five existing trailing-action pairs on these pages are consolidated into ⋯ menus on iPhone.
 - Cons: scenario 5 stays by design (places are Assistant's); only pages pushed by value come back (pages pushed with
   `NavigationLink { … }` or by flags inside a place come back to the nearest value page); scroll positions are rebuilt.
 - Risks: a saved path can point at something gone (a removed machine): those pages show their own empty state, and an
-  assistant switch forgets every saved path (`assistantSwitches`). ☰ on pushed pages is a visible change, checked in screenshots.
+  assistant switch forgets every saved path (`assistantSwitches`). The one-leading-control and trailing-menu changes
+  are visible changes, checked in light/dark screenshots.
 
 ### Option 3 — every place is a root with its own live stack (ChatGPT / Claude model)
 
@@ -130,7 +144,7 @@ place to the conversation; ☰ is at every root.
 | Each place keeps its stack | no | yes (value pushes) | yes (everything) |
 | Back from a place | conversation | conversation | none (☰) |
 | After closing a task | the page | the drawer, as it was | the drawer, as it was |
-| Drawer from a pushed page | no | ☰ next to back | ☰ at every root |
+| Drawer from a pushed page | no | Back to the root, then ☰; no second leading button | ☰ at every root |
 | iPad column | unchanged | stacks kept | stacks kept, split rebuilt |
 | Size of change | small | medium | large |
 
@@ -147,7 +161,8 @@ Implementation:
   (`ShellRoute`) like Inbox, so their pushes are part of the path.
 - `ShellView`: places snap the strip without animation and leave closing to the page; Settings opens over the open drawer.
 - `AssistantSidebar`: Archived, Auto conversations and Search open the picked conversation from the sheet's `onDismiss`.
-- `ShellPlaceSidebarButton`: ☰ on pages pushed in a place (`ShellDestinations`).
+- `ShellPlaceRoot`: at a place's root on the iPhone shell, hides Back and supplies ☰; it is not applied to sub-pages.
+  Trailing actions are consolidated in the five affected pages, without changing iPad or Mac toolbar branches.
 - The iPad's column sends every place through `show(_:)` too (Knowledge, Scheduled Tasks, Profile and Health used to set flags).
 - `DrawerSwipeTests.testDrawerSettingsReturnsToTheDrawerThenPagesSwitch` replaces the test that expected Settings to close the drawer.
 
@@ -155,8 +170,12 @@ Implementation:
 
 | Item | Check |
 | --- | --- |
-| A place keeps its stack | ☰ → Machines → a machine → ☰ → Knowledge → ☰ → Machines: the machine's page is in front; back → Machines → conversation (`ShellPlacesUITests.testAPlaceKeepsItsStack`) |
-| Choosing the place in front pops it | ☰ → Machines → a machine → ☰ → Machines: the Machines list (same test) |
+| One leading button and return to the conversation | ☰ → Machines → a machine → Back → Machines → ☰ → a conversation row: root and child each have one leading control, then the drawer returns to the conversation (`ShellPlacesUITests.testAPlaceKeepsItsStack`) |
+| Choosing the place in front pops it | `ShellPlacesTests.choosingThePlaceInFrontGoesToItsRoot` covers the re-pick-to-root rule |
+| A place keeps its stack | `ShellPlacesTests` covers save on leave, restore on return, re-pick and assistant switch; the iPad flow checks it in the UI |
+| One leading button | A place root shows ☰ and no Back; a machine sub-page shows Back and no ☰ (same test) |
+| One trailing action | Inbox, Knowledge, an Inbox item, a Lark chat and Browser Sign-ins have one ⋯; their previous actions remain in that menu on iPhone |
+| Root edge-swipe | From a place root, a slow drag from the leading screen edge returns to the conversation and does not open the drawer (`ShellPagerTests.testPushedPagesSwipeBack`) |
 | A task returns to the drawer | ☰ → Settings: the drawer stays open under the sheet; Done: the drawer is open with its rows (`testSettingsReturnsToTheDrawer`) |
 | Close and modal never overlap | the drawer's closing starts only after the place is in front or the task's sheet is gone, read from `ShellTrace` (`testArchivedPickClosesAfterTheSheet`, `testAPlaceSwitchesBeforeTheDrawerCloses`) |
 | Saved paths are the place's | unit tests: save on leave, restore on return, re-pick pops, assistant switch forgets (`ShellPlacesTests`) |

@@ -51,6 +51,10 @@ export type Panel =
   /** A lead's Team (#5180, lib/team.ts): its workers' strip and the conversation of `worker` (else the one lib/team.ts
    *  shownWorker picks). `sid` is the lead's: the panel stays while the page shows the lead. */
   | { kind: "team"; mid: string; sid: string; worker?: string }
+  /** A session's side sessions (#7944, lib/side-panel.ts): the Team panel's strip of them and the conversation of `side`
+   *  (else the one lib/side-panel.ts shownSide picks), landed at `at` (a search hit's message). `sid` is the parent's: the
+   *  panel stays while the page shows the parent. */
+  | { kind: "sides"; mid: string; sid: string; side?: string; at?: string }
   /** An Agent's background work (#5421, cindy's Background tasks tab; lib/background-panel.ts): its /loop, background tasks
    *  and workflow runs. `run`: a workflow run's task_id to open at (its detail in the panel). */
   | { kind: "background"; mid: string; sid: string; run?: string }

@@ -169,6 +169,48 @@ A SwiftUI container's `accessibilityIdentifier` can replace the identifiers on a
   it. `testNeedsYouAtTheLargestTextSize` lets the page settle without asking for anything, and counts the rows at its
   first look.
 
+## A split's posture belongs to SwiftUI (#4206)
+
+- **Don't set what `NavigationSplitView` sets.** SwiftUI writes the `UISplitViewController`'s `preferredSplitBehavior`,
+  `minimumSecondaryColumnWidth` and `presentsWithGesture` back on every update. A representable that reached the split and set
+  them started a tug: each set laid the split out, the layout updated SwiftUI, SwiftUI set its own back, 5–11 times a second
+  on a turn. A Debug build on the open iPhone Duo ran past the scene-update watchdog (0x8BADF00D, 10 s). Say it to SwiftUI
+  instead: the detail column's least width is `navigationSplitViewColumnWidth(min:ideal:)` on the detail content, and SwiftUI
+  sets `minimumSecondaryColumnWidth` from it (`SplitPageMin`).
+- **A column and page at the edge of fitting never settle.** With a 320 pt column on the Duo upright (349 pt left for the
+  page) and the system's own least page width, UIKit put the column away and back on every pass, 728 times in 290 s on the
+  simulator, and the chat was laid out again each time. Give the page an explicit least width
+  (`Theme.Size.splitPageMin`), so the decision is never borderline.
+- **A turn's sizes do not arrive together.** As a turn lays the split out, SwiftUI's geometry and the split's own bounds
+  change at different moments, and the split's change of columns can come before either. Before keeping a person's choice,
+  check both (`SplitColumnState.fitsBeside`). In the Separate layout the tab not shown is turned too, and its size is not
+  read until it shows: keep nothing for a split that is not in a window.
+- **The app switcher's snapshots lay a backgrounded app out in the other orientations.** The watchdog's stack shows
+  `-[UIApplication _performSnapshotsWithAction:…]` → `_createSnapshotContextForScene`. Don't write UserDefaults or change
+  layout state there (`scenePhase != .active`). `StoredValue` writes only a changed value: a write wakes every `@AppStorage`
+  view, whatever its key, and waits on the preferences daemon. A key a launch argument sets is written still: the value
+  read is the argument's, and skipping the write left an earlier test's stale value for the next launch without it.
+- **Watching a column's geometry costs a frame each time it goes or comes.** #4853's margin read each column's top safe
+  area with `onGeometryChange` on the column itself. On the iPad that laid the column out once more, its list's rows too,
+  as it went and as it came: about 40 ms of main-thread time in an extra frame at each fold's end and show's start. A
+  transform that returned a constant still cost the same, so the cost is the observation itself, not the state writes.
+  Watch only where the value is used, from a clear view behind the column whose `if` comes and goes (`readsSafeTop`): an
+  `if` around the modifier on the column would rebuild the column's content as the Duo turns, losing its scroll position and view state.
+- **Finding which change costs a frame.** Line up `deltas_ms` / `busies_ms` with the cue to find the frame that grew.
+  Then put temporary DEBUG launch-argument switches in one optimized build, one switch per suspect piece. Each test run
+  turns one piece off, and the piece whose removal brings the frame back to main's is the cause. Split a switch that
+  covers several pieces into finer ones before fixing. A `sample` diff of the two builds only says that SwiftUI layout
+  grew, not whose.
+- **Finding such a loop.** A temporary per-second count of view bodies and of the split's column changes, with
+  `Thread.callStackSymbols` on the first few changes, printed to stdout (`devicectl device process launch --console`) and to
+  the app's `tmp/` (`simctl get_app_container … data`). It names the loop in one run; the watchdog's crash report only shows
+  where the main thread happened to be.
+- **The open Duo simulator in Device Hub.** Folding switches only in Device Hub (`simctl io … screenConfig` cannot).
+  `XCUIDevice.shared.orientation` does nothing there, and Simulator.app's rotate items are disabled. Device Hub turns it
+  with ⌘← / ⌘→ (osascript to System Events, to Device Hub's window for that simulator), each a quarter turn from where it
+  is. XCUITest's synthetic drags do not reach it either; a mouse drag in its window does (`CGEvent` left-button events at
+  the screen's place in the window, found from `screencapture -l <window id>` and the device's bezel).
+
 ## Tab selection and targeted opens are different navigation intents (#5641)
 
 - An Agent pushed on Assistant's stack still uses the dev chat view, which writes the shared last-opened Agent marker.
@@ -467,6 +509,17 @@ page and the newest message stays over the composer. A fade drawn by the footer 
 - Any motion that carries the shell's pages sideways is the same bug: the drawer slid the whole page aside to uncover the sidebar (#3755). Sampled through three opens and closes on the Duo simulator, the navigation controllers' relayout (`-[UINavigationController __viewWillLayoutSubviews]` → `-[_UIViewControllerTransitionConductor startDeferredTransitionIfNeeded]` → `_layoutTopViewControllerLookForNested:`) was over half of the main thread's busy samples, against 21 samples on an iPhone: 35 ms a frame (p95), 1.1 ms once the page stayed and the sidebar slid in over it (`AssistantDrawer.inPlace`). A new sideways motion of a page needs the same check on the Duo simulator. A breakpoint on `-[UINavigationController _startDeferredTransitionIfNeeded]` never fires in iOS 27.2 (the conductor runs it); count `transitionConductor:didStartDeferredTransition:context:` instead.
 - A sidebar that slides over the page must be opaque all the way in: `AssistantDrawer.settle` sets the sidebar's alpha inside its `UIView.animate`, so it faded in while sliding and the page showed through it; under side bars the alpha is set with `UIView.performWithoutAnimation`.
 - Measuring with the runtime CLI (`scripts/app/personactl.py launch`), install the build first (`xcrun simctl install`): the launcher runs whatever is installed, and a round of experiments once measured an older build.
+
+## A sideways scroll view draws into the safe area beside it (2026-11-15, #8212)
+
+- A reply's code block scrolls its long lines sideways in a `ScrollView(.horizontal)`. On the iPhone Duo's displays, whose
+  status bar runs down the trailing edge (the outer display, the inner one on its side), those lines ran past the block's
+  background and on under that bar: a scroll view clips to its frame plus the safe area beside it, and the chat's own
+  scroll view hands that room down to its rows. iPhone and iPad never show it; the Duo has no landscape orientation to
+  fake it with on an iPhone, which is portrait only.
+- Give a sideways scroll view inside a column `.clipped()` (before its background) when nothing in it should reach past
+  its frame. `CodeBlockOverflowUITests` checks the strip beside a code block for drawn text; run it on the Duo simulator,
+  folded or open on its side (Device Hub folds it; `simctl io … screenshot --display=1` captures the outer display).
 
 ## A split's detail stack shares its modifiers only with its root page (#3680)
 
@@ -1273,9 +1326,10 @@ Use an invalidation revision as the task key and handle the flag after completio
   first build locally `xcodebuild build -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` and run `release.sh` `strings` checks on `Release-iphoneos/Persona.app/Persona`.
   It happened again with `WorkspaceSidebarCard.openAgent` vs `-openAgent` (2026-11-09, #1675 stopped TestFlight 214, renamed `selectAgent` in #2179):
   name closure properties `select…` / `on…`, not `open…` / `show…`. `@State` / `@Binding` / `@Environment` properties are stored as `_name` and never collide.
-  A quick check against the source: the list in `release.sh` into a file, then
-  `git grep -hoE '(var|let|case)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' -- 'apple/*.swift' ':!apple/PersonaTests' ':!apple/PersonaUITests' ':!apple/Persona/Debug' | awk '{print $2}' | sort -u | grep -xF -f <list>`
-  (each hit that is not a property wrapper or a Mac-only case is a collision).
+  And again on 2026-11-15 with `openAgent` (two views) and `openMachines` (#8306), so it is now a check:
+  `python3 scripts/test/test_apple_release_switch_names.py` reads the app's sources outside `#if DEBUG` (the conditions as a
+  device Release archive sees them) for stored properties, enum cases, `@objc` names and string literals equal to a name on
+  `release.sh`'s list. It runs with the other `scripts/test/test_apple*.py` checks before merge.
 - Launch-argument defaults are `strings` (`-dev.compact YES` is "YES"). Read booleans / numbers with `bool(forKey:)` / `integer(forKey:)` / `double(forKey:)` like AppStorage,
   not `object(forKey:) as? Bool`, which silently falls back (#1473 `StoredValue` broke `-dev.compact YES`; `CompactListShots` showed cards instead of compact rows, #2147).
 - Live Activities (`docs/apple/live-activity.md`): ActivityKit uses default JSONDecoder for `content-state`; `Date` values start 2001; pass Unix-second numbers.

@@ -545,6 +545,7 @@ class Worker:
                 log(name, head, "action-lock-busy")
                 continue
             except StaleCheckout:
+                deferred = True
                 log(name, head, "checkout-stale-deferred")
                 continue
             except WorkerError as error:

@@ -19,6 +19,11 @@ var typedHandleNamespaces = []struct {
 	fields []string // the shared struct's fields only this namespace read
 }{
 	{"file.", []string{"Offset", "Stream"}},
+	{"fs.", []string{"Paths", "Detail"}},
+	{"git.", []string{"IdentityOnly", "Staged", "Hash", "Skip"}},
+	{"worktree.", []string{"Branch", "ParentWorkspaceID", "AutoName"}},
+	{"clipboard.", nil}, // reads none of the shared fields
+	{"preview.", nil},   // the same
 }
 
 func TestTypedHandleNamespacesStayTyped(t *testing.T) {

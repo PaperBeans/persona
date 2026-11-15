@@ -12,7 +12,7 @@ import { getSession } from "../../lib/store";
 import { taskBadge } from "../../lib/tasks";
 import { ownEntry, personaToolVerb, SUBJECT_KEYS, toolChip, toolDisplayName, toolLabel } from "../../lib/turns";
 import type { Item } from "../../lib/types";
-import type { ToolStep } from "../../lib/work-groups";
+import { toolDurationLabel, type ToolStep } from "../../lib/work-groups";
 import { cx, Dialog, EASE, IconButton, Spinner } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { NARROW, useMedia } from "../../ui/media-query";
@@ -225,6 +225,9 @@ export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trac
   const call = use.tool_use_id;
   const bg = call && (tasks.started.has(call) || tasks.notes.has(call)) ? taskBadge(tasks.notes.get(call) ?? []) : null;
   const error = Boolean(result?.is_error);
+  // the call's own elapsed time (#8163): a quiet suffix on wide rows, the row's hover title on compact layouts
+  const narrow = useMedia(NARROW);
+  const duration = toolDurationLabel(step);
 
   const activate = () => {
     if (trace) return setOpen((o) => !o);
@@ -241,6 +244,8 @@ export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trac
     return () => setOpen(false);
   });
   const label = [p.verb, p.param?.text].filter(Boolean).join(" ");
+  // on a compact layout the duration stays in the hover title, not in the crowded row
+  const rowTitle = [p.param?.title, narrow && duration].filter(Boolean).join(" · ") || undefined;
   // A supervision trace is historical: show the original parameters/result, never today's file in the side panel.
   const detail = open && !trace && hasStepDetail(use);
   const input = open && !detail ? trace ? JSON.stringify(use.tool_input ?? {}, null, 2) : inlineInput(use) : "";
@@ -248,7 +253,7 @@ export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trac
   const output = result && (trace || showsResult(name, result)) ? full.text : "";
   return (
     <div className="flex min-w-0 flex-col" data-action-row={name} data-tool-use={call} data-items={ids.join(" ")}>
-      <button type="button" onClick={activate} aria-expanded={inPlace ? open : undefined} aria-label={label || name} title={p.param?.title} className={ROW}>
+      <button type="button" onClick={activate} aria-expanded={inPlace ? open : undefined} aria-label={label || name} title={rowTitle} className={ROW}>
         <span role="img" aria-label={running ? t("chat-actionrow.status_running") : error ? t("chat-actionrow.status_error") : t("chat-actionrow.status_done")} className={cx(STATUS_SLOT, error && "text-red")}>
           {running ? <Spinner size={13} /> : <Icon name={error ? "x" : "check"} size={13} />}
         </span>
@@ -267,6 +272,11 @@ export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trac
           <span className="flex shrink-0 gap-1 font-mono text-[13px] font-medium tabular-nums">
             <span className="text-diff-add-fg">+{stats.add}</span>
             <span className="text-diff-del-fg">-{stats.del}</span>
+          </span>
+        )}
+        {duration && (
+          <span data-tool-duration className="max-lg:hidden shrink-0 font-mono text-[12px] text-tool-ink tabular-nums">
+            {duration}
           </span>
         )}
         {bg && <span className={cx("shrink-0 rounded-[4px] px-1 text-[11px] font-medium whitespace-nowrap", bg.failed ? "bg-red-tint text-red" : "bg-field text-ink-2")}>{bg.text}</span>}

@@ -219,8 +219,10 @@ type tasksState struct {
 	// turn only after its own conversation sent it more (closedTurnReopens, #6726). In memory only: after a restart
 	// such a task stays closed until its conversation sends again or the owner reopens it.
 	sentBy map[[2]string]agentSent
-	// retrying: the tasks whose agent is starting again after a failed start (one start at a time, #1396).
-	retrying map[string]bool
+	// retrying: the tasks whose agent is starting (again), one start at a time: a Retry after a failed start (#1396), a
+	// Continue, or a new agent after all of the task's stopped (startTaskSuccessor). A message on the card that would
+	// start another waits for that one and goes to the agent it started (routeAfterStart).
+	retrying map[string]*taskStart
 	// outcomes: the completions whose outcome was recorded (todo_outcome.go, outcomeKey).
 	outcomes map[string]time.Time
 	// reusing: the todos a started plan took over (PlanTask.ReuseTodo) whose agent is not linked yet, so that a second
@@ -248,7 +250,7 @@ type tasksState struct {
 
 func newTasksState() tasksState {
 	return tasksState{recoverBefore: time.Now(), plans: map[string]*TaskPlan{}, feed: map[string][]FeedItem{},
-		working: map[string]time.Time{}, receipted: map[string]time.Time{}, retrying: map[string]bool{},
+		working: map[string]time.Time{}, receipted: map[string]time.Time{}, retrying: map[string]*taskStart{},
 		outcomes: map[string]time.Time{}, reusing: map[string]bool{}, sentBy: map[[2]string]agentSent{},
 		turns: turnsState{again: map[string]bool{}, looked: map[string]turnLook{}, recovering: map[string]bool{}, tries: map[string]int{},
 			retry:   map[string]turnRetry{},
@@ -525,12 +527,12 @@ func (s *Service) feedPlans(ctx context.Context, items []FeedItem) map[string]*T
 }
 
 // planStartsAtOnce: every task only reads, was asked for by the user in this turn (while start_requested_tasks is on),
-// or is a kind the user said to start without asking.
+// or is a kind the user said to start without asking (its directory or one it is under, task_trust_scope.go).
 func (s *Service) planStartsAtOnce(ctx context.Context, tasks []PlanTask) bool {
-	trusted := s.trustedKinds(ctx)
+	trusted := s.trustCover(ctx)
 	requested := s.startRequestedTasks(ctx)
 	for _, t := range tasks {
-		if !t.Readonly && !(requested && t.UserRequested) && !trusted[trustKey(t)] {
+		if !t.Readonly && !(requested && t.UserRequested) && !trusted(trustKey(t)) {
 			return false
 		}
 	}

@@ -13,4 +13,12 @@ class ChildSessionsTest {
         assertEquals(listOf("p"), capsuleUnreadSessions(listOf(parent, child), preferences, true).map { it.sessionId })
         assertEquals(listOf("c"), capsuleUnreadSessions(listOf(child), preferences, true).map { it.sessionId })
     }
+
+    @Test fun anUnreadSideSessionIsItsParentsUnreadAndNoEntryOfItsOwn() {
+        val parent = Session("m", "p", state = "idle")
+        val side = Session("m", "s", state = "unread", foldedUnder = "p", foldedAs = FoldedAs.SIDE)
+        val preferences = AgentsPreferencesSnapshot()
+        assertEquals(listOf("p"), capsuleUnreadSessions(listOf(parent, side), preferences, true).map { it.sessionId })
+        assertTrue(capsuleUnreadSessions(listOf(parent, side.copy(state = "idle")), preferences, true).isEmpty())
+    }
 }

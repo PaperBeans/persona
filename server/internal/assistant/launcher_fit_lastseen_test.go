@@ -46,13 +46,13 @@ func TestLastSeenAgentUnknownLauncher(t *testing.T) {
 	s.models.zshrcMu.Lock()
 	s.models.zshrc = map[string][]proto.Launcher{"box": {{Name: "relay"}}}
 	s.models.zshrcMu.Unlock()
-	if got := s.lastSeenAgent(context.Background(), "box", "other"); got != "" {
-		t.Fatalf("lastSeenAgent(other) = %q, want empty", got)
+	if got := s.lastSeenAgent(context.Background(), "box", "other"); got != (startAgent{}) {
+		t.Fatalf("lastSeenAgent(other) = %+v, want nothing", got)
 	}
-	if got := s.lastSeenAgent(context.Background(), "elsewhere", "relay"); got != "" {
-		t.Fatalf("lastSeenAgent on another machine = %q, want empty", got)
+	if got := s.lastSeenAgent(context.Background(), "elsewhere", "relay"); got != (startAgent{}) {
+		t.Fatalf("lastSeenAgent on another machine = %+v, want nothing", got)
 	}
-	if got := s.lastSeenAgent(context.Background(), "box", "relay"); got != "claude" {
-		t.Fatalf("lastSeenAgent(relay) = %q, want claude", got)
+	if got := s.lastSeenAgent(context.Background(), "box", "relay"); got != (startAgent{agent: "claude"}) {
+		t.Fatalf("lastSeenAgent(relay) = %+v, want claude", got)
 	}
 }

@@ -118,4 +118,23 @@ final class TierPolicySimulationTests: XCTestCase {
             XCTAssertLessThan((back?.at ?? .infinity) - 90, 30, "within half a minute")
         }
     }
+
+    /// A stall on the relay is no slower link: light content on a 1× display rides out the link carrying nothing for up
+    /// to 3 s without stepping down; a link that really carries less than 30 fps needs (1.4 Mbit/s for 6 s) steps down and
+    /// back (the browser, 2026-11-15).
+    func testAStallIsNotASlowerLink() {
+        for stall in [0.6, 1.5, 3.0] {
+            let link = LinkSimulation.Link(kbps: { $0 >= 20 && $0 < 20 + stall ? 0 : 25_000 }, rttMs: 20, jitterMs: 40,
+                                           stats: LinkStats(kind: .relay, via: .wifi))
+            let r = lightScreen(batched: false).run(link, seconds: 90)
+            report("relay, light content, nothing carried for \(stall) s at 20 s", r, [("all", 0, 90)])
+            XCTAssertFalse(r.changes.contains { $0.reason == .linkSlowed }, "\(r.changes)")
+        }
+        let squeezed = LinkSimulation.Link(kbps: { $0 >= 20 && $0 < 26 ? 1_400 : 25_000 }, rttMs: 20, jitterMs: 40,
+                                           stats: LinkStats(kind: .relay, via: .wifi))
+        let r = lightScreen(batched: false).run(squeezed, seconds: 90)
+        report("relay, light content, 1.4 Mbit/s for 6 s at 20 s", r, [("all", 0, 90)])
+        XCTAssertEqual(r.changes.first { $0.reason == .linkSlowed }?.to, "1x15")
+        XCTAssertEqual(r.changes.last?.to, "2x60", "and back: \(r.changes)")
+    }
 }

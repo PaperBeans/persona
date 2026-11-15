@@ -303,3 +303,44 @@ func TestAgentSessionArchiveIgnoresAListReadBeforeIt(t *testing.T) {
 		t.Fatal("activity after the archive did not restore it")
 	}
 }
+
+// A conversation archived under an id it went by before (a Paseo agent's transcript, or an earlier fork of it, which
+// it was listed under before #6709) is not repeated in Archived or the inventory while a row names that id among its
+// aliases (#8131): the row listed under its own id now is the conversation. The record stays: once no row names the
+// id, it is listed again. A record under another id, and one on another machine, are not touched.
+func TestArchiveUnderAnAliasIsTheListedRow(t *testing.T) {
+	const transcript, fork = "5d510000-0000-4000-8000-0000000000e1", "5d510000-0000-4000-8000-0000000000e0"
+	ft, rows := archiveTestService(t)
+	s, ctx := ft.s, context.Background()
+	old := time.Now().Add(-48 * time.Hour)
+	for _, sid := range []string{transcript, fork} { // archived while the node listed the conversation under these ids
+		if err := s.noteAgentArchive(ctx, proto.Session{MachineID: "mac", SessionID: sid, Agent: "claude", Title: "Fix the build",
+			Status: proto.StatusOffline, State: proto.StateOffline, UpdatedAt: old}, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.noteAgentArchive(ctx, rows[1], true); err != nil { // an Agent archived under its own id
+		t.Fatal(err)
+	}
+	if got := archivedIDs(t, s); !got[transcript] || !got[fork] || !got[rows[1].SessionID] {
+		t.Fatalf("archived %v", got)
+	}
+
+	live := proto.Session{MachineID: "mac", SessionID: "paseo-e1", Agent: "claude", Title: "Fix the build", Status: proto.StatusIdle,
+		State: proto.StateIdle, UpdatedAt: time.Now(), SourceKind: proto.SourceRuntime}
+	live.SetAliases([]string{transcript, fork})
+	ft.d.setSessions("mac", []proto.Session{rows[0], rows[1], live})
+	if got := archivedIDs(t, s); got[transcript] || got[fork] || !got[rows[1].SessionID] || len(got) != 1 {
+		t.Fatalf("Archived while a row names the conversation's other ids: %v", got)
+	}
+	for _, row := range s.decorated("mac") {
+		if row.SessionID == transcript || row.SessionID == fork {
+			t.Fatalf("the inventory repeats the conversation: %+v", row)
+		}
+	}
+
+	ft.d.setSessions("mac", []proto.Session{rows[0], rows[1]}) // no row names them any more
+	if got := archivedIDs(t, s); !got[transcript] || !got[fork] {
+		t.Fatalf("the records went with the row that named them: %v", got)
+	}
+}

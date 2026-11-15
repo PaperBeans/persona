@@ -147,6 +147,12 @@ type Device struct {
 	// ClaudeVersion is Claude Code's version there ("" when it has none or never said): 设置 › 模型供应商's built-in
 	// claude lists the machines that have it.
 	ClaudeVersion string `json:"claude_version,omitempty"`
+	// HomeReal is Home with its links followed, when the node says it is another path (proto.NodeInfo.HomeReal).
+	HomeReal string `json:"home_real,omitempty"`
+	// Engine is the host its starts open in when they name none, as its node reports it (its default engine host:
+	// herdr, orca, paseo…); "" while it has not said. The manager holds a new Agent to what that host can run
+	// (launcher_fit.go, #8140).
+	Engine string `json:"engine,omitempty"`
 }
 
 // ClientApp is one Persona app as it last described itself in client_hello (docs/protocol/protocol.md "Client
@@ -227,12 +233,21 @@ type NotifyRequest struct {
 }
 
 // NotifyResult is notify.request's answer. Held says the hub's low-distraction (ln) mode kept the push off the phone
-// (for the "Needs you" list / briefings); Reason is why ("" when it went out), one of the hub's intercept reasons.
-// The assistant's notify_user tool shows it to the model, which otherwise would assume the user was alerted.
+// (for the "Needs you" list / briefings); Reason is why, one of the hub's intercept reasons. For an assistant's push or
+// a finished turn the hub also says where it went: Devices, how many devices it was handed to now (a push route, a
+// ws_notify connection, a browser's Web Push; not a delivery receipt), and Kept, how many offline devices keep it for
+// their next connection. With Devices 0 and nothing held, Reason is "no_device" or "filtered" (every device that could
+// take it turned it off), as POST /api/v1/notify answers. Devices is nil from a hub that does not report it (older,
+// a card's push, or a notification handed over before). Queued is the manager's own: its outbox kept the push while
+// the hub is away (never on the wire). The assistant's notify_user tool tells the model what happened from it, so the
+// model never assumes the user was alerted when nobody was.
 type NotifyResult struct {
-	OK     bool   `json:"ok"`
-	Held   bool   `json:"held,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	OK      bool   `json:"ok"`
+	Held    bool   `json:"held,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Devices *int   `json:"devices,omitempty"`
+	Kept    int    `json:"kept,omitempty"`
+	Queued  bool   `json:"-"`
 }
 
 // Notification is one notification intent: a push (kind assistant) to every device whose settings take it, like an

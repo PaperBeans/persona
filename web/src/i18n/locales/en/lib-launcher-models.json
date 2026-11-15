@@ -1,4 +1,5 @@
 {
   "default": "Default",
-  "default_named": "Default: {name}"
+  "default_named": "Default: {name}",
+  "pi_too": "pi can use it too"
 }

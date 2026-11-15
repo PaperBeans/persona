@@ -49,6 +49,20 @@ type codexAppThread struct {
 
 func (t codexAppThread) updated() time.Time { return time.UnixMilli(t.UpdatedAtMs) }
 
+// origin is where the thread came from as its database row says, for a row whose rollout is gone (codexThreadOrigin):
+// its source is the rollout's session_meta source, a plain string ("vscode", "exec") or a subagent's object
+// (codexSourceObject), and every row read is the App's (readCodexAppThreads). It names no root and no start time.
+func (t codexAppThread) origin() codexOrigin {
+	o := codexOrigin{desktop: true}
+	source := strings.TrimSpace(t.Source)
+	if !strings.HasPrefix(source, "{") {
+		o.exec, o.sub = source == "exec", source == "subagent"
+		return o
+	}
+	o.parent, o.guardian, o.sub = codexSourceObject(json.RawMessage(source))
+	return o
+}
+
 type codexAppDB struct {
 	at    time.Time // when the database was last looked at
 	stamp string    // the database's files and the sidebar's ids when last read

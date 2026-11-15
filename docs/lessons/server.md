@@ -1,5 +1,43 @@
 # Lessons: hub / node and networking
 
+## A token does not say whose it is, and a thread does not say whose item (2026-11-15, #7832)
+
+The GitHub connector kept its inbox things, its notifications cursor and its thread cache by thread and path, and swapped only the token when the
+account changed. So account A's review request stayed in the inbox, and a reply to it posted a comment with B's token. Fixing it at the place
+the user switches was not enough, because the login changes in ways nobody chooses:
+
+- A poll that gets a 401 asks the computer for its token again and retries. If `gh` was switched there, the retry is another account's request
+  carrying the first one's `If-Modified-Since`, and its answer is merged into the first one's inbox.
+- `/user` answers arrive in any order. A check of the old token that GitHub answers late wrote the old login back over the new one.
+- A read in flight when the account changes writes its answer into whatever is there afterwards: a cache that was just emptied (or a nil map).
+- A thing can be older than its keep time when the account changes (things are forgotten only when a poll reads the list), so a marker kept
+  by the thing's age is dropped by the next poll, before the hub closed the item.
+- Both accounts can have the same thread unread at the same time: the thread, and even the move's timestamp, do not tell their items apart.
+
+What holds: one owner of the identity (`account.go`). A new token reads or answers nothing that belongs to an account until GitHub named its
+account; every credential has a number and an answer to an older one is dropped; a different login moves an epoch, and the same step that
+adopts it retires and resets everything read under the old one. State and requests carry the epoch they began under (in the context), a
+request for an older epoch is refused before it is sent, and write-backs check the epoch under the state's own lock. Lock order is the
+connector's lock, then the state's; a state lock never takes the connector's. The tests hold a request at the fake GitHub on a channel and
+change the account while it waits (`account_switch_test.go`).
+
+The first version of the fix still failed an independent review, on what the hub keeps rather than on what the connector does:
+
+- The hub holds items longer than the connector's process lives and hands back only a thread and the move the item holds. Anything the
+  connector decides from what it has in memory (a marker per retired thing, "is this thread held") is wrong after a restart, for items it
+  has forgotten (older than its keep time), and for items it considers done while the hub keeps them open (answered through Persona).
+  So the account and its epoch are kept across restarts, every move read after a change carries the epoch (the reply check needs no
+  memory), and the hub's leftovers are closed by exclusion: whatever the account in use holds no thing of.
+- A mark put only where a collision was noticed (the retired thing's last move) misses the collisions nobody remembered: the hub's item
+  one move behind, or a third account meeting the first one's move. Mark every move, or none.
+- A step done once and then recorded has two wrong orders. "Tell the hub, then save that it is done" closes the wrong items after a
+  failed save and a restart; "save, then tell" at worst leaves old items open. Pick the order whose failure is the harmless one, and
+  say which it is. The same review found the record forgotten after `Reload` (whoever held the id had saved over it) and a secret that
+  no longer opens taking a computer's sign-in down: a record added to an existing store inherits every way that store is rewritten or fails.
+- Closing by thread meets the hub's own rule, which starts an item only for a move later than the thread's closed one: a round trip to
+  another account and back does not bring the first inbox back. That is a limit, written down in `docs/assistant/inbox.md`, not a bug to
+  work around by moving a thing's time.
+
 ## An empty list sent as null means "no change" to an optional field (2026-11-14)
 
 The node reads node.configure's `claude_dirs_blocked` as `*[]string`: absent or `null` leaves its patterns as they are.
@@ -1759,6 +1797,8 @@ When a `httputil.ReverseProxy` has to read what it forwards (the sent-as-user le
 ## Notification success needs a selected recipient (#1910)
 
 Calling both notification channels does not mean either selected a recipient: a saved device may have no usable APNs or relay route, and a connected client may not support `ws_notify`. Return selected and reachable counts from the same recipient walk, before and after its preference filters, so the API can distinguish `no_device` from `filtered` without a separate readiness check racing that selection. Preserve the earlier session-level `muted` result and count both channels: a WebSocket notification can still go out without any push credentials. These counts are not asynchronous APNs / relay acceptance or proof that a phone displayed anything.
+
+The same holds on every path that reports a push, not only the API that was fixed. `POST /api/v1/notify` learned to say `no_device` in #1910, but the assistant's `notify.request` kept dropping the counts, so `notify_user` answered "Notification sent." for days in which no device was paired, and the north star counted each of those notices as an interruption (#8138). When a function returns selected and reachable counts, carry them up to every caller that reports success, and count a browser's Web Push and an offline device's kept copy apart from "nothing".
 
 ## A push's nil "wants" means "asked for explicitly" (2026-11-06, per-manager push switches)
 

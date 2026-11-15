@@ -65,12 +65,12 @@ settled() {
   "$@" || { echo "$what still differs about two minutes after the deploy" >&2; return 1; }
 }
 served_is() { [ "$(curl -fsSL "$PERSONA_PUBLISH_URL/dl/$1" 2>/dev/null)" = "$(cat "$2")" ]; }
-# node_archives <dir>: the node builds among the downloads (personad-<os>-<arch>.gz, persona-node-<os>-<arch>.gz),
-# the only ones a manager fetches from dl/<version>/.
+# node_archives <dir>: the node builds among the downloads (personad-<os>-<arch>.gz, persona-node-<os>-<arch>.gz) and
+# the iPhone helper's (persona-iphone-bridge-<os>-<arch>.gz), the only ones fetched from dl/<version>/.
 node_archives() {
   local gz
   for gz in "$1"/*.gz; do
-    [[ "${gz##*/}" =~ ^(personad|persona-node)-(linux|darwin)-(amd64|arm64)\.gz$ ]] && printf '%s\n' "$gz"
+    [[ "${gz##*/}" =~ ^(personad|persona-node|persona-iphone-bridge)-(linux|darwin)-(amd64|arm64)\.gz$ ]] && printf '%s\n' "$gz"
   done
   return 0
 }
@@ -239,6 +239,14 @@ for t in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64; do
       -o "../$OUT/bin/$p-${t%/*}-${t#*/}" "./cmd/$p")
   done
 done
+# The iPhone helper (persona-iphone-bridge, Rust, native/iphone-bridge) for each platform this machine can build: in
+# latest.json under helpers (only the builds that are here, all of which go up with the rest below) and kept with the
+# node builds under dl/<version>/, where a computer's node fetches it when the app installs it
+# (docs/extensions/iphone-bridge.md "Releases"). Never in the release's way: a platform it can't build here (no Rust
+# target, no zig) or a build that fails is left out with a note, and the release goes on without it. Cargo's build
+# directory is kept between runs.
+CARGO_TARGET_DIR="${PERSONA_BRIDGE_TARGET:-$HOME/.cache/persona/iphone-bridge-target}" \
+  native/iphone-bridge/release.sh "$OUT/bin" || echo "note: some persona-iphone-bridge builds failed; this release goes without them" >&2
 # adhoc_identifiers <dir>: the darwin builds in dir, signed ad hoc again under their program's identifier
 # (com.nwverse.personad, com.nwverse.persona-node, ...) in place of the a.out Go's linker always writes. Only the name
 # changes: an ad-hoc signature's designated requirement stays the build's cdhash, so keeping macOS privacy permissions
@@ -284,7 +292,9 @@ curl -fsSL "$PERSONA_PUBLISH_URL/dl/latest.json" -o "$OUT/served.json" 2>/dev/nu
 "$host_bin" release check-next "$OUT/served.json" --build "$BUILD" --commit "$COMMIT" || exit 1
 
 # The privacy scan checked the raw binaries; only the gzipped ones are published (to the bucket, see above).
-for bin in "$OUT/bin"/personad-* "$OUT/bin"/persona-link-* "$OUT/bin"/persona-node-* "$OUT/bin"/persona-hub-* "$OUT/bin"/persona-manager-*; do
+for bin in "$OUT/bin"/personad-* "$OUT/bin"/persona-link-* "$OUT/bin"/persona-node-* "$OUT/bin"/persona-hub-* "$OUT/bin"/persona-manager-* \
+  "$OUT/bin"/persona-iphone-bridge-*; do
+  [ -f "$bin" ] || continue # no helper built here
   gzip -n -9 -c "$bin" > "$bin.gz"
 done
 # Only current product names are public downloads; command compatibility stays inside installed services.

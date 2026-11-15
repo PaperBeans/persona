@@ -156,12 +156,20 @@ func (h *Hub) loadMachinesKept(ctx context.Context) error {
 	}
 	d := &h.devices
 	d.mu.Lock()
-	d.kept, d.keptRead = kept, true
+	d.kept = kept
 	reconcile := d.fleetReady
 	d.mu.Unlock()
 	if reconcile {
-		// The first entries read filtered out machines whose kept record was unread. Read them again before listing them.
-		h.loadMachineEntries(ctx)
+		// The first entries read filtered out machines whose kept record was unread. Read them again before listing them,
+		// and do not call the kept-list recovery complete until that read succeeds too.
+		if err := h.loadMachineEntries(ctx); err != nil {
+			return err
+		}
+	}
+	d.mu.Lock()
+	d.keptRead = true
+	d.mu.Unlock()
+	if reconcile {
 		h.reconcileKeptMachines()
 		h.devicesConfigChanged()
 	}

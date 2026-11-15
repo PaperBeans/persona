@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +87,10 @@ func TestNorthStarInterruptionsAndAvailability(t *testing.T) {
 		{At: at(13), MachineID: "pc", SessionID: "worker", Kind: "ask_escalated", Detail: map[string]any{"todo": "task-1"}},
 		{At: at(14), MachineID: "pc", SessionID: "dot-chat", Kind: notifyEvent, Detail: map[string]any{}},
 		{At: at(14), MachineID: "pc", SessionID: "probe", Kind: notifyEvent, Detail: map[string]any{"probe": true}},
+		// notify_user calls no device took (#8138): listed apart, never interruptions.
+		{At: at(14), MachineID: "pc", SessionID: "dot-chat", Kind: notifyEvent, Detail: map[string]any{"missed": missedNoDevice}},
+		{At: at(15), MachineID: "pc", SessionID: "dot-chat", Kind: notifyEvent, Detail: map[string]any{"missed": missedNoDevice}},
+		{At: at(15), MachineID: "pc", SessionID: "worker", Kind: notifyEvent, Detail: map[string]any{"todo": "task-1", "missed": missedHubAway}},
 		// Availability: the main conversation before the split (build b1), the leader conversation after it (b2).
 		{At: at(8), MachineID: "pc", SessionID: "main-chat", Kind: sendEvent, Detail: map[string]any{"op": "resume", "origin": originApp, "role": roleMain, "outcome": outcomeOK, "build": "b1"}},
 		{At: at(9), MachineID: "pc", SessionID: "main-chat", Kind: sendEvent, Detail: map[string]any{"op": "resume", "origin": originApp, "role": roleMain, "outcome": outcomeFailed, "reason": "conversation_not_found", "build": "b1"}},
@@ -122,8 +127,9 @@ func TestNorthStarInterruptionsAndAvailability(t *testing.T) {
 	if in.Categories[nsAuthorization].ByKind[proto.IxPermission] != 1 || in.Categories[nsActionCard].ByKind[proto.IxQuestion] != 2 {
 		t.Fatalf("kinds: %+v %+v", in.Categories[nsAuthorization], in.Categories[nsActionCard])
 	}
-	wantExcluded := InterruptExcluded{SupervisorRouted: 2, SupervisorHeld: 1, SupervisorEscalated: 1, AutoAuthorized: 1, Probe: 2}
-	if in.Excluded != wantExcluded {
+	wantExcluded := InterruptExcluded{SupervisorRouted: 2, SupervisorHeld: 1, SupervisorEscalated: 1, AutoAuthorized: 1, Probe: 2,
+		NotifyMissed: map[string]int{missedNoDevice: 2, missedHubAway: 1}}
+	if !reflect.DeepEqual(in.Excluded, wantExcluded) {
 		t.Fatalf("excluded %+v, want %+v", in.Excluded, wantExcluded)
 	}
 	if len(in.Sources) == 0 || in.Sources[0].Count != 2 || in.Sources[0].TodoID != "task-1" || in.Sources[0].Title != "Fix the build" {

@@ -27,6 +27,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/node/clipshare"
+	"github.com/nwverse/persona/server/internal/node/machdiag"
 	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/nodeupdate"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -184,6 +185,7 @@ type Node struct {
 	sends     sentLog         // recent client_msg_ids (sendsafe.go)
 	echoes    echoLog         // sends tied to their transcript lines (echo.go)
 	typing    typingLocks     // one send at a time per session (sendsafe_turns.go)
+	recovery  typingLocks     // guarded resumes and user closures; first-message delivery takes typing independently
 	sendOrder sendQueue       // sends waiting for a start, in the order they came (sendsafe_turns.go)
 	cx        codexCards      // Codex questions and approvals listed to the hub (codexask.go)
 	kept      map[string]bool // sessions always listed (node.configure keep_sessions)
@@ -437,7 +439,7 @@ func (n *Node) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 			n.onTerminalEvent(event, params)
 		}
 	}
-	n.fsw.start(ctx, func(c fsChanged) { _ = n.peer.Notify("fs.changed", c) })
+	n.fsw.start(ctx, func(c fsChanged) { _ = n.peer.Notify(methodFsChanged, c) })
 	defer n.fsw.close()
 	n.cdirs.report = func(dirs []string) { _ = n.peer.Notify("claude.dirs", map[string]any{"dirs": dirs}) }
 	n.codices.report = func(cfg proto.CodexConfig) { _ = n.peer.Notify("codex.inventory", cfg) }
@@ -658,23 +660,26 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		return n.handlePlugins(ctx, method, params)
 	}
 	switch method { // sharing the clipboard with the phone (clipshare/)
-	case "clipboard.get":
+	case methodClipboardGet:
 		return clipshare.Get(ctx)
-	case "clipboard.set":
+	case methodClipboardSet:
 		return clipshare.Set(ctx, params)
+	}
+	switch method { // the machine page's diagnosis and cache cleanup (machdiag/)
+	case proto.MethodMachineDiagnose:
+		return machdiag.Diagnose(ctx, params)
+	case proto.MethodMachineCleanup:
+		return machdiag.Cleanup(ctx, params)
 	}
 	if method == codexTakeoverPrepare || method == codexTakeoverCommit {
 		return n.codexTakeoverCall(ctx, method, params)
 	}
 	var p struct {
 		Path             string        `json:"path"`
-		Paths            []string      `json:"paths"`
-		Detail           bool          `json:"detail"` // fs.stat: the Info sheet's fields (files_info.go)
 		SessionID        string        `json:"session_id"`
 		CreationID       string        `json:"creation_id"`
 		Incarnation      string        `json:"incarnation"`
 		Cwd              string        `json:"cwd"`
-		IdentityOnly     bool          `json:"identity_only"`
 		Launcher         string        `json:"launcher"`
 		AgentType        string        `json:"agent_type"`
 		Model            string        `json:"model"`
@@ -683,6 +688,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		ConfigDir        string        `json:"config_dir"`
 		Prompt           string        `json:"prompt"`
 		ResumeSessionID  string        `json:"resume_session_id"`
+		ResumeAutomatic  bool          `json:"resume_automatic"`
 		Host             string        `json:"host"` // session.start: the enabled host to open in ("" the default host, #2576)
 		WorkspaceID      string        `json:"workspace_id"`
 		NameHint         string        `json:"name_hint"` // session.start: what a start whose first message goes after it is named after (claudedesktop_new.go)
@@ -698,9 +704,6 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		SinceSeq         int           `json:"since_seq"`
 		Source           string        `json:"source"`
 		Format           string        `json:"format"`
-		Staged           bool          `json:"staged"`
-		Hash             string        `json:"hash"`
-		Skip             int           `json:"skip"`
 		Turns            int           `json:"turns"`
 		LazyImages       bool          `json:"lazy_images"`
 		UserInputs       bool          `json:"user_inputs"`
@@ -716,7 +719,6 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		Kind             string        `json:"kind"`      // tabs.*, panes.git: the host kind ("" the engine's)
 		Op               string        `json:"op"`        // panes.git: fetch, pull or push
 		Action           string        `json:"action"`    // launchers.repair: which of its fixed repairs
-		Branch           string        `json:"branch"`    // worktree.create
 		TabName          *string       `json:"tab_name"`
 		TZ               string        `json:"tz"` // the user's time zone
 		// HTTP is a quota plugin's request to send to a launcher's gateway (launchers.http); nil asks for the gateway.
@@ -742,8 +744,6 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 
 		ConfiguredAgent string `json:"configured_agent"` // strict work-session options: hub.json specifies the harness
 
-		ParentWorkspaceID string `json:"parent_workspace_id"` // worktree.create: independent of the Git source
-		AutoName          bool   `json:"auto_name"`           // worktree.create: host-generated branch and path
 	}
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -848,10 +848,15 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 	}
 	if method == "session.stop" {
 		var a struct {
-			Retire bool `json:"retire"`
+			Retire    bool            `json:"retire"`
+			StopCause proto.StopCause `json:"stop_cause"`
 		}
 		_ = json.Unmarshal(params, &a)
-		stopped, err := n.stop(ctx, p.SessionID, a.Retire)
+		cause := proto.StopUser
+		if a.Retire && a.StopCause.AllowsSupervisorResume() {
+			cause = a.StopCause
+		}
+		stopped, err := n.stopWithCause(ctx, p.SessionID, a.Retire, cause)
 		return map[string]any{"stopped": stopped}, err
 	}
 	if method == "session.restore_model" { // model_restore.go (#2528): closes an idle headless process, sends nothing
@@ -879,6 +884,12 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			return nil, err // the runtime would take the message without the switch (launcher_switch.go)
 		}
 		if res, err, handled := n.runtimeHandle(ctx, h, method, params); handled {
+			return res, err
+		}
+	} else if a, ok := n.agent(p.SessionID); ok && (a.Agent == cursorAgent || a.Agent == agyAgent) {
+		// herdr drives the pane (workagent.go): a message is agent.prompt, an interrupt is Esc. The conversation
+		// itself is not read here, so a page is one notice saying so.
+		if res, err, handled := n.workAgentCalls(ctx, method, p.SessionID, a, params); handled {
 			return res, err
 		}
 	} else if r, ok := n.terminalOnly(p.SessionID); ok { // a pi or opencode without its extension, any other agent (opencode.go)
@@ -1043,6 +1054,20 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 	case "usage.windows": // subscription rate-limit windows read from local files (usagewindows.go, #2432)
 		return n.usageSnapshot(false), nil
 	case "launchers.list":
+		if p.Host != "" {
+			// What a start in that host can run (the manager's New Agent and its starts, #8140): where it is an engine
+			// runtime that runs only its own launchers, its providers and what starts elsewhere whatever the host.
+			if h := n.exclusiveRuntime(withStartHost(ctx, p.Host)); h != nil {
+				ls := n.engineHostLaunchers(h)
+				if withDesktop, added := n.withDesktopLauncher(ls); added {
+					ls = withDesktop
+				}
+				if withApp, added := n.withCodexAppLauncher(ls); added {
+					ls = withApp
+				}
+				return map[string]any{"launchers": typedLaunchers(ls), "host": p.Host, "host_runtime": true}, nil
+			}
+		}
 		ls, err := n.launchers(ctx)
 		bl := n.runtimes.launchers()
 		if len(bl) > 0 {
@@ -1057,7 +1082,11 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			ls, err = withApp, nil
 		}
 		shell, rcFile := launcherShell()
-		return map[string]any{"launchers": typedLaunchers(ls), "shell": shell, "rc_file": rcFile}, err
+		out := map[string]any{"launchers": typedLaunchers(ls), "shell": shell, "rc_file": rcFile}
+		if p.Host != "" {
+			out["host"] = p.Host // answered for that host: a terminal's (or an engine away), whose launchers these are
+		}
+		return out, err
 	case "launchers.managed", "launchers.catalog": // the providers added in Persona (managed.go): all with their secrets, or this computer's scope
 		var c struct {
 			Launchers []proto.ManagedLauncher `json:"launchers"`
@@ -1081,15 +1110,15 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		if err := n.runnableLauncher(ctx, p.Name, p.Configured); err != nil {
 			return nil, err
 		}
-		agent, err := n.launcherModelCheck(ctx, p.Name, p.Model)
+		agent, err := n.launcherModelCheck(withStartHost(ctx, p.Host), p.Name, p.Model) // for a start in that host (#8140)
 		return map[string]any{"agent": agent}, err
 	case "launchers.zshrc": // the hub importing this machine's claude aliases as providers (zshrc.go)
 		return n.zshrcLaunchers()
 	case "launchers.show":
 		def, err := n.launcherDefinition(ctx, p.Name)
 		return map[string]any{"definition": def}, err
-	case "launchers.check":
-		return n.launcherCheck(ctx, p.Name), nil
+	case "launchers.check": // what a start in that host (the default host when none) would run (#8140)
+		return n.launcherCheck(withStartHost(ctx, p.Host), p.Name), nil
 	case "claude.auth_status": // whether Claude Code is signed in as the launcher runs it, no model request (claudeauth.go)
 		return n.claudeAuthStatus(ctx, p.Name)
 	case "launchers.repair": // the hub's launcher health (docs/server/launcher-health.md)
@@ -1106,7 +1135,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		if !p.Configured && p.AgentType == "" && !n.knownLauncher(ctx, p.Name) { // either: the hub vouches, from hub.json
 			return nil, fmt.Errorf("unknown launcher %q", p.Name)
 		}
-		return n.launcherModels(ctx, p.Name, p.AgentType, p.Refresh)
+		return n.launcherModels(withStartHost(ctx, p.Host), p.Name, p.AgentType, p.Refresh) // in that host (#8140)
 	case "launchers.http":
 		if err := n.runnableLauncher(ctx, p.Name, p.Configured); err != nil {
 			return nil, err
@@ -1128,8 +1157,23 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		// update_busy: node.update.commit would refuse now; the manager waits on it before sending a build (node_update_idle).
 		return map[string]any{"sessions": list, "update_busy": updateWouldCut(AssistantsBusy(), list, n.starts.listed(nil))}, nil
 	case "session.start.options":
-		return n.workSessionOptions(ctx, p.Name, p.ConfiguredAgent, "", p.Configured, true)
+		return n.workSessionOptions(ctx, p.Name, p.ConfiguredAgent, p.Host, p.Configured, true)
 	case "session.start", devicewire.MethodStartWorkSession:
+		if p.ResumeSessionID != "" {
+			unlock := n.recovery.lock(p.ResumeSessionID)
+			defer unlock()
+		}
+		if p.ResumeAutomatic {
+			if err := n.supervisorResumeAllowed(p.ResumeSessionID, p.PermissionMode, p.Launcher); err != nil {
+				return nil, err
+			}
+		}
+		if n.stopCause(p.ResumeSessionID).AllowsSupervisorResume() {
+			// Consume the old stop before starting: a failed/interrupted resume is not another confirmed idle stop.
+			if err := n.saveStopCause(ctx, p.ResumeSessionID, proto.StopUnknown); err != nil {
+				return nil, err
+			}
+		}
 		if p.ResumeSessionID != "" && p.Host == "" {
 			p.Host = n.startKind(n.withResumeHost(ctx, p.ResumeSessionID))
 		}
@@ -1174,7 +1218,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			if _, runtime := engineRuntimes[cmp.Or(p.Host, n.defaultKind())]; runtime { // the start's host is a runtime (Paseo)
 				kind = "runtime"
 			}
-			if h, _ := n.startRuntime(p.Launcher); h != nil { // what runtimeStart below would start it in
+			if h, _ := n.startRuntimeIn(withStartHost(ctx, p.Host), p.Launcher); h != nil { // what runtimeStart below would start it in
 				kind = "runtime"
 			}
 			if err := n.checkUltracodeStart(ctx, p.Ultracode, kind); err != nil {
@@ -1186,10 +1230,10 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			tab = *p.TabName
 		}
 		rp := runtimeStartParams{Cwd: p.Cwd, Prompt: p.Prompt, Launcher: p.Launcher, Model: p.Model, PermissionMode: p.PermissionMode,
-			Effort: p.Effort, WorkspaceID: p.WorkspaceID, Resume: p.ResumeSessionID}
+			Effort: p.Effort, WorkspaceID: p.WorkspaceID, Resume: p.ResumeSessionID, AgentType: p.AgentType}
 		if p.SecretTicket != "" { // only a new Claude Code start in a terminal takes one (control.go secretStartProblem)
 			_, onRuntime := engineRuntimes[cmp.Or(p.Host, n.defaultKind())]
-			if h, _ := n.startRuntime(p.Launcher); h != nil || onRuntime || p.ResumeSessionID != "" || isDesktopLauncher(p.Launcher) || isCodexAppLauncher(p.Launcher) {
+			if h, _ := n.startRuntimeIn(withStartHost(ctx, p.Host), p.Launcher); h != nil || onRuntime || p.ResumeSessionID != "" || isDesktopLauncher(p.Launcher) || isCodexAppLauncher(p.Launcher) {
 				return nil, refusal(secretEnvAgentCode, secretEnvAgentText, nil)
 			}
 			if !n.handoffs().has(p.SecretTicket) {
@@ -1198,8 +1242,9 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		}
 		if work.runtime != nil {
 			rp.Model = work.runtimeModel // the runtime's configured default, never a caller override
-			s, err := n.runtimeStartOn(ctx, work.runtime, rp)
-			return n.creationResult(s, err, p.ResumeSessionID, p.CreationID, p.Incarnation)
+			s, instead, err := n.runtimeStartOn(ctx, work.runtime, rp)
+			res, err := n.creationResult(s, err, p.ResumeSessionID, p.CreationID, p.Incarnation)
+			return withInstead(res, err, instead)
 		}
 		if method == "session.start" && p.ResumeSessionID == "" {
 			if s, err, ok := n.startInDesktopApp(ctx, rp, p.NameHint); ok { // a new session in Claude's desktop app (claudedesktop_new.go)
@@ -1208,8 +1253,10 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			if s, err, ok := n.startInCodexApp(ctx, rp, p.NameHint); ok { // a new chat in the Codex App (codexapp_new.go)
 				return n.creationResult(s, err, p.ResumeSessionID, p.CreationID, p.Incarnation)
 			}
-			if s, err, ok := n.runtimeStart(ctx, rp); ok { // a runtime's launcher
-				return n.creationResult(s, err, p.ResumeSessionID, p.CreationID, p.Incarnation)
+			// A runtime's launcher; on a host whose engine runs only its own launchers, any name it offers (#8140).
+			if s, instead, err, ok := n.runtimeStart(withStartHost(ctx, p.Host), rp); ok {
+				res, err := n.creationResult(s, err, p.ResumeSessionID, p.CreationID, p.Incarnation)
+				return withInstead(res, err, instead)
 			}
 		}
 		if err := n.checkStartHost(p.Host); err != nil {
@@ -1217,8 +1264,9 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		}
 		ctx := n.reusingKeptTab(withStartHost(ctx, p.Host), p.InPane)
 		if _, ok := engineRuntimes[n.startKind(ctx)]; ok { // the start's host is a runtime (Paseo): it is its (runtimecontrol.go)
-			s, err := n.startOnEngineRuntime(ctx, rp)
-			return n.creationResult(s, err, p.ResumeSessionID, p.CreationID, p.Incarnation)
+			s, instead, err := n.startOnEngineRuntime(ctx, rp)
+			res, err := n.creationResult(s, err, p.ResumeSessionID, p.CreationID, p.Incarnation)
+			return withInstead(res, err, instead)
 		}
 		// Only Claude Code has a session id before it starts; another agent picks its own (start_agent.go).
 		if p.Async && p.ResumeSessionID == "" && (p.AgentType == "" || p.AgentType == "claude") && launcherAgentType(p.Launcher) != ompAgent {
@@ -1531,64 +1579,64 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			return nil, err
 		}
 		return n.gitOp(ctx, dir, p.Op)
-	case "worktree.prepare": // "New worktree…": what the dialog starts from (worktree.go)
-		var in struct {
-			Composer bool `json:"composer"`
-		}
+	case methodWorktreePrepare: // "New worktree…": what the dialog starts from (worktree.go)
+		var in worktreePrepareParams
 		if err := json.Unmarshal(params, &in); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("bad params: %w", err)
 		}
 		if in.Composer {
-			return n.worktreeComposerPrepare(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID)
+			return n.worktreeComposerPrepare(worktreeComposerContext(ctx, params), in.Kind, in.WorkspaceID)
 		}
-		return n.worktreePrepare(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, p.Cwd)
-	case "worktree.create": // a Git worktree of a workspace's repository, opened as a workspace (worktree.go)
-		var in struct {
-			Composer bool `json:"composer"`
-		}
+		return n.worktreePrepare(worktreeComposerContext(ctx, params), in.Kind, in.WorkspaceID, in.Cwd)
+	case methodWorktreeCreate: // a Git worktree of a workspace's repository, opened as a workspace (worktree.go)
+		var in worktreeCreateParams
 		if err := json.Unmarshal(params, &in); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("bad params: %w", err)
 		}
 		if in.Composer {
-			return n.worktreeCompose(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, params)
+			return n.worktreeCompose(worktreeComposerContext(ctx, params), in.Kind, in.WorkspaceID, params)
 		}
 		if err := rejectComposerFields(ctx, params); err != nil {
 			return nil, err
 		}
-		if p.AutoName {
-			if strings.TrimSpace(p.Branch) != "" || strings.TrimSpace(p.Path) != "" {
+		if in.AutoName {
+			if strings.TrimSpace(in.Branch) != "" || strings.TrimSpace(in.Path) != "" {
 				return nil, errors.New("Choose automatic naming or an explicit branch and path")
 			}
-			return n.worktreeCreateAutomatic(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, p.Cwd, p.ParentWorkspaceID)
+			return n.worktreeCreateAutomatic(worktreeComposerContext(ctx, params), in.Kind, in.WorkspaceID, in.Cwd, in.ParentWorkspaceID)
 		}
-		return n.worktreeCreate(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, p.Cwd, p.Branch, p.Path, p.ParentWorkspaceID)
-	case "worktree.source":
-		return n.worktreeSources(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, params)
-	case "worktree.preset":
-		return n.worktreeSavePreset(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, params)
-	case "worktree.delete":
-		return n.worktreeDelete(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, params)
-	case "worktree.add", "worktree.status", "worktree.remove": // a new agent's own worktree (agentworktree.go, #6115)
-		var a struct {
-			NameHint     string `json:"name_hint"`
-			DeleteBranch bool   `json:"delete_branch"`
-			Force        bool   `json:"force"`
+		return n.worktreeCreate(worktreeComposerContext(ctx, params), in.Kind, in.WorkspaceID, in.Cwd, in.Branch, in.Path, in.ParentWorkspaceID)
+	case methodWorktreeSource, methodWorktreePreset, methodWorktreeDelete:
+		var in worktreeSourceParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
 		}
-		_ = json.Unmarshal(params, &a)
+		switch method {
+		case methodWorktreeSource:
+			return n.worktreeSources(worktreeComposerContext(ctx, params), in.Kind, in.WorkspaceID, params)
+		case methodWorktreePreset:
+			return n.worktreeSavePreset(worktreeComposerContext(ctx, params), in.Kind, in.WorkspaceID, params)
+		}
+		return n.worktreeDelete(worktreeComposerContext(ctx, params), in.Kind, in.WorkspaceID, params)
+	case methodWorktreeAdd, methodWorktreeStatus, methodWorktreeRemove: // a new agent's own worktree (agentworktree.go, #6115)
 		ctx = worktreeComposerContext(ctx, params) // its refusals in the request's language (the hub sends it)
 		switch method {
-		case "worktree.add":
-			return n.worktreeAdd(ctx, p.Kind, p.Cwd, p.Branch, a.NameHint)
-		case "worktree.status":
-			return n.worktreeStatus(ctx, p.Kind, p.Cwd)
+		case methodWorktreeAdd:
+			var in worktreeAddParams
+			_ = json.Unmarshal(params, &in)
+			return n.worktreeAdd(ctx, in.Kind, in.Cwd, in.Branch, in.NameHint)
+		case methodWorktreeStatus:
+			var in worktreeStatusParams
+			_ = json.Unmarshal(params, &in)
+			return n.worktreeStatus(ctx, in.Kind, in.Cwd)
 		}
-		return n.worktreeRemove(ctx, p.Kind, p.Path, a.DeleteBranch, a.Force)
-	case "worktree.snapshot": // a reviewer's own copy of an agent's change (reviewsnapshot.go, #2173)
-		var a struct {
-			NameHint string `json:"name_hint"`
-		}
-		_ = json.Unmarshal(params, &a)
-		return n.worktreeSnapshot(ctx, p.Kind, p.Cwd, a.NameHint)
+		var in worktreeRemoveParams
+		_ = json.Unmarshal(params, &in)
+		return n.worktreeRemove(ctx, in.Kind, in.Path, in.DeleteBranch, in.Force)
+	case methodWorktreeSnapshot: // a reviewer's own copy of an agent's change (reviewsnapshot.go, #2173)
+		var in worktreeSnapshotParams
+		_ = json.Unmarshal(params, &in)
+		return n.worktreeSnapshot(ctx, in.Kind, in.Cwd, in.NameHint)
 	case "tabs.close":
 		return ok(n.closeTab(ctx, p.Kind, p.TabID))
 	case "tabs.rename":
@@ -1777,7 +1825,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			return nil, err
 		}
 		return n.readFileChunk(chunk)
-	case "git.blob":
+	case methodGitBlob:
 		var b proto.GitBlobRequest
 		if err := json.Unmarshal(params, &b); err != nil {
 			return nil, err
@@ -1807,11 +1855,11 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		return n.screenDial(ctx, params)
 	case "port.probe":
 		return n.portProbeRPC(ctx, params)
-	case "preview.servers": // a session folder's dev servers, from its .claude/launch.json (preview_launch.go)
+	case methodPreviewServers: // a session folder's dev servers, from its .claude/launch.json (preview_launch.go)
 		return n.previewServersRPC(ctx, params)
-	case "preview.start": // run one of them in a new terminal tab, after the user confirmed its command
+	case methodPreviewStart: // run one of them in a new terminal tab, after the user confirmed its command
 		return n.previewStartRPC(ctx, params)
-	case "preview.open": // a headless browser tab on a port of this computer, on a stream (preview.go)
+	case methodPreviewOpen: // a headless browser tab on a port of this computer, on a stream (preview.go)
 		return n.previewOpenRPC(ctx, params)
 	// The built-in programs cua and ego by their old names, for a hub from before builtin_programs (builtin.go).
 	case "computer.status", "computer.call", "computer.install", "computer.grant", "computer.cancel", "computer.clipboard",
@@ -1819,16 +1867,24 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		"browser.status", "browser.install", "browser.open", "browser.cancel", "browser.call",
 		"browser.cookies.list", "browser.cookies.import", "browser.cookies.clear":
 		return legacyBuiltinCall(ctx, method, params, n.lcuComputerCall)
-	case "fs.stat": // detail: the Info sheet (files_info.go)
-		return map[string]any{"stats": n.statPaths(p.Paths, p.Cwd, p.Detail)}, nil
+	case methodFsStat: // detail: the Info sheet (files_info.go)
+		var in fsStatParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return map[string]any{"stats": n.statPaths(in.Paths, in.Cwd, in.Detail)}, nil
 	case "space.rename":
 		name, err := n.renameSpace(ctx, p.WorkspaceID, p.Name)
 		if err != nil {
 			return nil, err
 		}
 		return map[string]any{"ok": true, "name": name}, nil
-	case "worktree.rename": // its refusals in the request's language (the hub sends it)
-		return ok(n.renameWorktree(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, p.Name))
+	case methodWorktreeRename: // its refusals in the request's language (the hub sends it)
+		var in worktreeRenameParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return ok(n.renameWorktree(worktreeComposerContext(ctx, params), in.Kind, in.WorkspaceID, in.Name))
 	case "session.rename":
 		return ok(n.renameSession(ctx, p.SessionID, p.TabName, p.Title))
 	case "todo.sync_session_tokens":
@@ -1839,33 +1895,61 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			return nil, err
 		}
 		return ok(n.syncTodoTokens(ctx, in.Tokens))
-	case "fs.list":
-		return n.listDir(p.Path, p.Cwd)
-	case "fs.find": // every file under cwd, for the web palette's file search (files_find.go)
-		return n.findFiles(ctx, p.Cwd, p.Limit)
-	case "fs.watch": // the folders and Git directories the web panels have open (fswatch.go)
-		return n.fsWatch(params)
-	case "git.status":
-		if p.IdentityOnly {
-			return n.gitIdentity(ctx, p.Cwd)
+	case methodFsList:
+		var in fsListParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
 		}
-		return n.gitStatus(ctx, p.Cwd)
-	case "git.pull":
-		return n.gitPull(ctx, p.Cwd)
-	case "git.diff":
-		return n.gitDiff(ctx, p.Cwd, p.Path, p.Staged)
-	case "git.show":
-		return n.gitShow(ctx, p.Cwd, p.Hash)
-	case "git.review": // every file a scope changed, with its hunks, for the web's Review panel (gitreview.go)
+		return n.listDir(in.Path, in.Cwd)
+	case methodFsFind: // every file under cwd, for the web palette's file search (files_find.go)
+		var in fsFindParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.findFiles(ctx, in.Cwd, in.Limit)
+	case methodFsWatch: // the folders and Git directories the web panels have open (fswatch.go)
+		return n.fsWatch(params)
+	case methodGitStatus:
+		var in gitStatusParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		if in.IdentityOnly {
+			return n.gitIdentity(ctx, in.Cwd)
+		}
+		return n.gitStatus(ctx, in.Cwd)
+	case methodGitPull:
+		var in gitCwdParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.gitPull(ctx, in.Cwd)
+	case methodGitDiff:
+		var in gitDiffParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.gitDiff(ctx, in.Cwd, in.Path, in.Staged)
+	case methodGitShow:
+		var in gitShowParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.gitShow(ctx, in.Cwd, in.Hash)
+	case methodGitReview: // every file a scope changed, with its hunks, for the web's Review panel (gitreview.go)
 		var rv proto.GitReviewRequest
 		if err := json.Unmarshal(params, &rv); err != nil {
 			return nil, err
 		}
 		return n.gitReview(ctx, rv)
-	case "git.log":
-		list, err := n.gitLog(ctx, p.Cwd, p.Skip, p.Limit)
+	case methodGitLog:
+		var in gitLogParams
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		list, err := n.gitLog(ctx, in.Cwd, in.Skip, in.Limit)
 		return map[string]any{"commits": list}, err
-	case "git.stage", "git.commit", "git.push", "git.branches", "git.switch", "git.stash", "git.pr", "git.pr_create", "git.pr_merge":
+	case methodGitStage, methodGitCommit, methodGitPush, methodGitBranches, methodGitSwitch, methodGitStash, methodGitPR, methodGitPRCreate, methodGitPRMerge:
 		return n.gitWrite(ctx, method, params) // the Git panel's writes and pull request (gitwrite.go, gitpr.go)
 	case "skills.import":
 		return n.importSkill(ctx, params)
@@ -1980,6 +2064,10 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			n.stopAssistant(p.SessionID)
 			return ok(nil)
 		}
+		release := n.recovery.lock(p.SessionID)
+		defer release()
+		unlock := n.typing.lock(p.SessionID)
+		defer unlock()
 		return ok(n.close(ctx, p.SessionID))
 	case "session.archive", "session.unarchive": // the tool's own archive (archive.go); a runtime's answers above
 		return n.nativeArchive(ctx, p.SessionID, method == "session.archive")
@@ -2102,6 +2190,7 @@ func (n *Node) info(ctx context.Context) proto.NodeInfo {
 		OS:                 runtime.GOOS,
 		Arch:               runtime.GOARCH,
 		Home:               n.home,
+		HomeReal:           realHome(n.home),
 		DataDir:            n.dir,
 		HerdrVersion:       hv,
 		HerdrRunning:       running,

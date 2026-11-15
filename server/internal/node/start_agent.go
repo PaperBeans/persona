@@ -23,8 +23,12 @@ type agentLauncher struct {
 // ompOptionsRefusal: omp's model and thinking level come from its own config.yml, not from a start's arguments.
 const ompOptionsRefusal = "omp 的模型和思考强度由 omp 自己的配置决定，这次没有启动。"
 
-// launcherAgentType is the agent a launcher starts when nothing else says: codex, traex and omp by name, else claude.
+// launcherAgentType is the agent a launcher starts when nothing else says: pi, the Cursor CLI and the Antigravity CLI
+// by name (workagent.go), codex, traex and omp by name, else claude.
 func launcherAgentType(name string) string {
+	if _, _, ok := workAgent(name); ok {
+		return name
+	}
 	if name == "codex" || name == traexAgent || name == ompAgent {
 		return name
 	}

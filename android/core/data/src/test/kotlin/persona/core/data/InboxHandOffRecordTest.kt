@@ -171,6 +171,68 @@ class InboxHandOffRecordTest {
         }
     }
 
+    @Test fun deliveredRecordReplaysAfterOwnerDiesAfterHubSuccess() = runTest {
+        val directory = Files.createTempDirectory("inbox-handoff-record-replay").toFile()
+        val scope = "hub/generation"
+        val key = SessionKey("laptop", "agent")
+        val request = InboxHandOffRequest(InboxItemKey.of("item", "m-2"), "Handle this", key.machineId,
+            key.sessionId, "replay-client", targetTitle = "Example agent")
+        val delivered = InboxAgentHandOff(scope, request, "item", manager = "m-2", delivered = true)
+        InboxReplyJournal(directory, scope).update(scope) { it.enqueue(delivered) }
+        var secondJob: Job? = null
+        val firstJob = SupervisorJob(coroutineContext[Job])
+        try {
+            val first = RecordTransport(JsonArray(emptyList()))
+            val firstCalled = CompletableDeferred<Unit>()
+            first.onRecord = { item, session, title, client ->
+                assertEquals("item", item)
+                assertEquals(key, session)
+                assertEquals("Example agent", title)
+                assertEquals("replay-client", client)
+                assertEquals("m-2", currentCoroutineContext()[RequestManager]?.id)
+                firstCalled.complete(Unit)
+                firstJob.cancel() // The hub succeeded, but the owner dies before its local completion write.
+                JsonObject(emptyMap())
+            }
+            recordTestRepository(first, directory, CoroutineScope(coroutineContext + firstJob), RecordSender())
+            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(5_000) { firstCalled.await(); firstJob.join() }
+            }
+            assertEquals(1, first.records)
+            val interrupted = InboxReplyJournal(directory, scope).read(scope).agentHandOffs.single()
+            assertTrue(interrupted.delivered)
+            assertFalse(interrupted.recorded)
+
+            val second = RecordTransport(JsonArray(emptyList()))
+            val secondCalled = CompletableDeferred<Unit>()
+            second.onRecord = { _, _, _, client ->
+                assertEquals("replay-client", client)
+                assertEquals("m-2", currentCoroutineContext()[RequestManager]?.id)
+                secondCalled.complete(Unit)
+                JsonObject(emptyMap())
+            }
+            secondJob = SupervisorJob(coroutineContext[Job])
+            recordTestRepository(second, directory,
+                CoroutineScope(coroutineContext + checkNotNull(secondJob)), RecordSender())
+            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(5_000) {
+                    secondCalled.await()
+                    val journal = InboxReplyJournal(directory, scope)
+                    while (!journal.read(scope).agentHandOffs.single().recorded) delay(10)
+                }
+            }
+            assertEquals(1, second.records)
+
+            AuthoritativeMessageDeliveries.publish(AuthoritativeMessageDelivery(scope, request.operationId, key, request.text))
+            runCurrent()
+            assertEquals("the durable completion tombstone suppresses later evidence", 1, second.records)
+        } finally {
+            secondJob?.cancelAndJoin()
+            firstJob.cancelAndJoin()
+            // Replay and completion writes use real IO; leave the temporary directory for any final background write.
+        }
+    }
+
     private fun recordTestRepository(
         transport: RecordTransport, directory: java.io.File, owner: CoroutineScope, agents: MessageSender,
     ) = RealInboxRepository(
@@ -197,6 +259,8 @@ class InboxHandOffRecordTest {
         val sent = mutableListOf<Triple<SessionKey, String, String>>()
         override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?) {
             sent += Triple(session, text, clientMessageId)
+            // This fake's hub returned Accepted; local enqueue or a Sent outbox row would not be such evidence.
+            AuthoritativeMessageDeliveries.publish(AuthoritativeMessageDelivery("hub/generation", clientMessageId, session, text))
         }
     }
 

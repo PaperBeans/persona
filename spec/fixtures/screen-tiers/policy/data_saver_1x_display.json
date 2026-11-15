@@ -27,15 +27,15 @@
   },
   "name" : "data_saver_1x_display",
   "start" : {
-    "fps" : 15,
+    "fps" : 30,
     "height" : 1080,
-    "index" : 1,
+    "index" : 0,
     "maxKbps" : 1500,
-    "minKbps" : 200,
+    "minKbps" : 1244,
     "pixelsPerPoint" : 1,
     "reason" : "start",
-    "scale" : 1,
-    "targetKbps" : 200,
+    "scale" : 1.5,
+    "targetKbps" : 1244,
     "width" : 1920
   },
   "steps" : [
@@ -288,18 +288,7 @@
       }
     },
     {
-      "expected" : {
-        "fps" : 30,
-        "height" : 1080,
-        "index" : 0,
-        "maxKbps" : 1500,
-        "minKbps" : 1244,
-        "pixelsPerPoint" : 1,
-        "reason" : "link_steady",
-        "scale" : 1.5,
-        "targetKbps" : 1500,
-        "width" : 1920
-      },
+      "expected" : null,
       "tick" : {
         "now" : 3.25,
         "signals" : {

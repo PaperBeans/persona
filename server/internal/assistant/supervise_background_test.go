@@ -123,7 +123,11 @@ func TestBackgroundSupervisorFollowsUpTheMainConversationsTasks(t *testing.T) {
 	}
 
 	review := func(self, verdict, note string) (string, error) {
-		return runJSON(t, s, self, "task_review", map[string]any{"todo_id": todo.ID, "verdict": verdict, "note": note})
+		args := map[string]any{"todo_id": todo.ID, "verdict": verdict, "note": note}
+		if verdict == reviewAccepted {
+			args["checks"] = completeReviewChecks(todoNow(s, todo.ID))
+		}
+		return runJSON(t, s, self, "task_review", args)
 	}
 	if _, err := review("conv2", "rework", "x"); err == nil {
 		t.Fatal("another side conversation reviewed the task")
@@ -312,7 +316,8 @@ func TestMainSupervisesOwnTasksSetting(t *testing.T) {
 		t.Fatalf("the task changed with the setting: %+v %+v", cur, cur.Supervision)
 	}
 	// What the background supervisor was sent before the switch it may still finish.
-	if _, err := runJSON(t, s, bg, "task_review", map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "好了"}); err != nil {
+	if _, err := runJSON(t, s, bg, "task_review", map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "好了",
+		"checks": completeReviewChecks(todoNow(s, todo.ID))}); err != nil {
 		t.Fatalf("the background supervisor finishing what it was sent: %v", err)
 	}
 }

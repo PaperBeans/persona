@@ -137,5 +137,8 @@
   "search_return": "返回搜索前位置",
   "search_menu": "会话内搜索",
   "todo_completed_label": "待办（已完成）：{title}",
-  "export": "导出对话…"
+  "export": "导出对话…",
+  "side_sessions": "分支会话",
+  "side_sessions_count": "分支会话（{count}）",
+  "side_sessions_needs_you": "有分支会话需要你"
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 const offlineWindow = 7 * 24 * time.Hour
@@ -170,6 +171,9 @@ func (n *Node) scanOffline() []proto.Session {
 		m := n.meta(c.path, c.st)
 		if isLauncherCheckRun(c.path, m) {
 			continue // a launcher health check's run, a hundred a day on each computer: no session of the user's (#2959)
+		}
+		if m.surface == transcript.SurfaceDesktop && !keep[id] && !forked[id] && desktop.gone(id, c.st.ModTime()) {
+			continue // a session deleted in the desktop app: its entry is gone, its transcript stays (claudedesktop.go, #8314)
 		}
 		// Where the session is: an assistant conversation's start directory, before the filters look at it. A desktop
 		// app's session whose transcript says nothing yet (it just began, or went on in a new transcript) has the

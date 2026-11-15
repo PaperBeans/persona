@@ -122,16 +122,11 @@ func (s *Service) remedyOf(ctx context.Context, id string) (Todo, *TaskPlan, int
 	if todo.PlanID == "" {
 		return todo, nil, 0, errTaskNotInPlan
 	}
-	p, err := s.loadPlan(ctx, todo.PlanID)
+	p, i, err := s.currentPlanAssignment(ctx, todo)
 	if err != nil {
 		return todo, nil, 0, err
 	}
-	for i, pt := range p.Tasks {
-		if pt.TodoID == id {
-			return todo, p, i, nil
-		}
-	}
-	return todo, nil, 0, errTaskNotInPlan
+	return todo, p, i, nil
 }
 
 // remedyTool is the task a remedy tool names, checked: the main conversation's own, and its start being remedied.
@@ -272,11 +267,8 @@ func (s *Service) toolTaskRetry(ctx context.Context, self string, args json.RawM
 	default:
 		return "", fmt.Errorf("task %s did not fail to start", todo.ID)
 	}
-	s.tasks.mu.Lock()
-	busy := s.tasks.retrying[todo.ID]
-	s.tasks.retrying[todo.ID] = true
-	s.tasks.mu.Unlock()
-	if busy {
+	st, claimed := s.claimTaskStart(todo.ID)
+	if !claimed {
 		return "", errors.New("it is starting again already")
 	}
 	inPane := ""
@@ -287,19 +279,13 @@ func (s *Service) toolTaskRetry(ctx context.Context, self string, args json.RawM
 		t.Start.Attempt, t.Start.By, t.Start.At = attempt, "assistant", time.Now().UTC()
 		t.Error, t.ErrorCode, t.ErrorArgs = "", "", nil
 	}); err != nil {
-		s.tasks.mu.Lock()
-		delete(s.tasks.retrying, todo.ID)
-		s.tasks.mu.Unlock()
+		s.endTaskStart(todo.ID, st, proto.Session{})
 		return "", err
 	}
 	s.remedyStep(ctx, p.Conversation, todo.ID, startRemedyBody{Action: "retry", By: "assistant", Attempt: attempt, Reason: reason})
 	pt.Start.Attempt, pt.Start.By = attempt, "assistant"
 	pt.inPane = inPane
-	s.startPlanTaskAsync(p.ID, p.Conversation, i, pt, true, func() {
-		s.tasks.mu.Lock()
-		delete(s.tasks.retrying, todo.ID)
-		s.tasks.mu.Unlock()
-	})
+	s.startPlanTaskAsync(p.ID, p.Conversation, i, pt, true, func() { s.endTaskStart(todo.ID, st, proto.Session{}) })
 	where := "a new tab"
 	if inPane != "" {
 		where = "the same tab"
@@ -342,10 +328,7 @@ func (s *Service) giveUpStart(ctx context.Context, id, by string, told bool) {
 	if pt.Start == nil || pt.Start.State != remedying {
 		return
 	}
-	s.tasks.mu.Lock()
-	busy := s.tasks.retrying[id]
-	s.tasks.mu.Unlock()
-	if busy {
+	if s.taskStartOnWay(id) {
 		return
 	}
 	reason := cmp.Or(pt.Start.Reason, pt.Error)

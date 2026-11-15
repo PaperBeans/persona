@@ -223,8 +223,20 @@ final class InboxStore {
     /// counts.
     var actionCount: Int { scopedItems.filter { !$0.isDone && $0.triage == .action }.count }
 
-    /// Unread open items in Needs you.
-    var unreadCount: Int { scopedItems.filter(\.isUnreadAction).count }
+    /// Unread open items in Needs you. Counted once per change of the items or of the current assistant and kept: the
+    /// sidebar's Inbox row reads it in its body, and a turn of an iPhone Duo in the background drew that body many times
+    /// over; a Debug build filtering (and copying) every item each time ran out of the scene's 10 seconds (0x8BADF00D,
+    /// #4206). Reading `items` and the scope here keeps the readers redrawn when either changes.
+    var unreadCount: Int {
+        let scope = AppModel.shared.assistantScope
+        let revision = itemsRevision
+        if let memo = unreadMemo, memo.revision == revision, memo.scope == scope { _ = items.count; return memo.count }
+        var count = 0
+        for item in items where item.isUnreadAction && (scope?.has(item.manager) ?? true) { count += 1 }
+        unreadMemo = (revision, scope, count)
+        return count
+    }
+    @ObservationIgnored private var unreadMemo: (revision: UInt64, scope: AssistantScope?, count: Int)?
 
     /// Pulls the list (bursts of `inbox` events collapse into one request).
     func reload() {

@@ -107,7 +107,7 @@ beforeAll(async () => {
 beforeEach(() => {
   rfbs.length = 0;
   status.video = { version: 1, codecs: ["hevc", "h264"] };
-  webVideo.plays = true; // the switcher as it will be once the browser plays video (not yet: see the last test)
+  webVideo.plays = true; // as shipped: the browser plays video (the switch off: see "is not offered while …")
   chunk.probe = { codecs: ["hevc", "h264"] };
   chunk.tiers = false;
   chunk.budget = null;
@@ -120,7 +120,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  webVideo.plays = false;
+  webVideo.plays = true;
   webTiers.supported = false;
   delete (navigator as { connection?: unknown }).connection;
   act(() => root.unmount());
@@ -223,7 +223,7 @@ describe("the picture switcher otherwise", () => {
   });
 
   it("is not offered while this browser can't play video, even for a Mac that advertises it", async () => {
-    webVideo.plays = false; // as shipped until the web's decoder lands
+    webVideo.plays = false; // the web's video switched off
     await open();
     await connect();
     expect(button(), "the web keeps RFB and shows no Video it can't play").toBeNull();

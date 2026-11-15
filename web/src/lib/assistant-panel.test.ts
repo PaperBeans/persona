@@ -94,6 +94,12 @@ describe("the panel's providers", () => {
     expect(providers.find((p) => p.id === "codex")).toMatchObject({ loading: true, models: null });
   });
 
+  it("a Paseo provider that can't run it is off as that provider, never 'paseo' (#8142)", () => {
+    const paseo: AssistantLaunchers = { ...info, unavailable: [{ name: "grok", kind: "launcher", agent: "paseo", code: "not_main_chat", reason: "跑不了主对话" }, { name: "cursor", kind: "launcher", agent: "paseo", code: "not_main_chat", reason: "跑不了主对话" }] };
+    const { providers } = assistantPanel(assistantSetup(chat({ isMain: true }), paseo), paseo, listOf, {});
+    expect(providers.filter((p) => p.unavailable).map((p) => [p.id, p.engine])).toEqual([["grok", "grok"], ["cursor", "cursor"]]);
+  });
+
   it("an ID typed before is listed (and can be forgotten); typed IDs only where the hub keeps them; a launcher that fixes its model offers its default only", () => {
     const { providers } = assistantPanel(assistantSetup(chat({ isMain: true }), info), info, listOf, { typed: true });
     const claude = providers.find((p) => p.id === "claude")!;

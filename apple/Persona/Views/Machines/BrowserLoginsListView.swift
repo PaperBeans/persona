@@ -5,6 +5,7 @@ import SwiftUI
 /// domain, settled a moment after the last key; by name, or the soonest to expire first; expired sites marked. A site
 /// clears from its swipe or its long press, several from Select; every clear asks first. A leaf: nothing is pushed from it.
 struct BrowserLoginsListView: View {
+    @Environment(\.shell) private var shell
     var logins: BrowserLoginsModel
     var online: Bool
     @State private var typed = ""
@@ -84,33 +85,61 @@ struct BrowserLoginsListView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        #if !os(macOS)
-        ToolbarItem(placement: .topBarTrailing) {
-            if editMode.isEditing {
-                Button("Done") {
-                    withAnimation(Theme.Motion.state) { editMode = .inactive }
-                    chosen = []
-                }
-                .lineLimit(1)
-                .accessibilityIdentifier("browser-logins-done")
-            } else {
-                Button("Select") { withAnimation(Theme.Motion.state) { editMode = .active } }
+        if shell != nil {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    #if !os(macOS)
+                    if editMode.isEditing {
+                        Button("Done") {
+                            withAnimation(Theme.Motion.state) { editMode = .inactive }
+                            chosen = []
+                        }
+                        .lineLimit(1)
+                        .accessibilityIdentifier("browser-logins-done")
+                    } else {
+                        Button("Select") { withAnimation(Theme.Motion.state) { editMode = .active } }
+                            .lineLimit(1)
+                            .disabled(logins.shown.isEmpty || logins.busy)
+                            .accessibilityIdentifier("browser-logins-select")
+                    }
+                    #endif
+                    Section("Sort By") {
+                        Toggle("Name", isOn: choice(.name))
+                        Toggle("Expiring First", isOn: choice(.expiry))
+                    }
+                } label: { ThemedIcon(Theme.Icon.moreMenu) }
+                    .accessibilityLabel("More")
+                    .accessibilityIdentifier("browser-logins-sort")
+            }
+        } else {
+            #if !os(macOS)
+            ToolbarItem(placement: .topBarTrailing) {
+                if editMode.isEditing {
+                    Button("Done") {
+                        withAnimation(Theme.Motion.state) { editMode = .inactive }
+                        chosen = []
+                    }
                     .lineLimit(1)
-                    .disabled(logins.shown.isEmpty || logins.busy)
-                    .accessibilityIdentifier("browser-logins-select")
-            }
-        }
-        #endif
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Section("Sort By") {
-                    Toggle("Name", isOn: choice(.name))
-                    Toggle("Expiring First", isOn: choice(.expiry))
+                    .accessibilityIdentifier("browser-logins-done")
+                } else {
+                    Button("Select") { withAnimation(Theme.Motion.state) { editMode = .active } }
+                        .lineLimit(1)
+                        .disabled(logins.shown.isEmpty || logins.busy)
+                        .accessibilityIdentifier("browser-logins-select")
                 }
-            } label: {
-                Label("Sort By", systemImage: Theme.Icon.upDown)
             }
-            .accessibilityIdentifier("browser-logins-sort")
+            #endif
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Section("Sort By") {
+                        Toggle("Name", isOn: choice(.name))
+                        Toggle("Expiring First", isOn: choice(.expiry))
+                    }
+                } label: {
+                    Label("Sort By", systemImage: Theme.Icon.upDown)
+                }
+                .accessibilityIdentifier("browser-logins-sort")
+            }
         }
         if selecting {
             ToolbarItemGroup(placement: .bottomBar) {

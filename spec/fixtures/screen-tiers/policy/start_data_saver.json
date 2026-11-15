@@ -27,15 +27,15 @@
   },
   "name" : "start_data_saver",
   "start" : {
-    "fps" : 15,
+    "fps" : 30,
     "height" : 982,
-    "index" : 1,
+    "index" : 0,
     "maxKbps" : 1500,
-    "minKbps" : 200,
+    "minKbps" : 891,
     "pixelsPerPoint" : 1,
     "reason" : "start",
     "scale" : 1,
-    "targetKbps" : 200,
+    "targetKbps" : 891,
     "width" : 1512
   },
   "steps" : [

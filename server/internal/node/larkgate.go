@@ -84,7 +84,7 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	if slices.ContainsFunc(cfg.Gates, func(g proto.CommandGate) bool { return g.Auth != nil }) {
 		n.gates() // the proxy goes by this Node's config from now on (a resident node's next connection)
 	}
-	analysisCommand := normalizeLarkCommand(command, cwd)
+	analysisCommand := normalizeLarkCommand(command, cwd, cfg.Gates)
 	v := classifyLark(command, cfg.Gates, cwd, n.larkCLIRisk(cfg))
 	if v.deny != "" {
 		return "deny", v.deny, nil
@@ -92,13 +92,15 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	health := n.gates().healthSession(session) || identity.InHealthSpace(cwd)
 	mode, _ := n.modesOf(session)
 	bypass := !health && mode == proto.ModeBypass && n.isAssistantSession(session) && n.guestOf(session) == nil
-	safe := len(v.calls) > 0 && !v.unparsed && !v.unknown && !v.unsure
+	// classified: every call read off the command and nothing else in it that the gate cannot follow.
+	classified := !v.unparsed && !v.unknown && !v.unsure
 	for _, c := range v.calls {
 		if larkDecision(cfg, c) == "deny" {
 			return "deny", "这个操作按配置不允许（" + c.Method + " " + c.Path + "）。", nil
 		}
-		safe = safe && larkBypassSafe(c)
+		classified = classified && larkBypassSafe(c)
 	}
+	safe := len(v.calls) > 0 && classified
 	if v.other {
 		// A write through a gate whose credentials are at the proxy goes there only as a call read off the command and
 		// let through here: in a command the gate cannot follow it would be refused after the phone said yes.
@@ -121,7 +123,9 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 			return "allow", "Conversation permission mode allows these classified calls.", nil
 		}
 		g, write := gateWrite(cfg.Gates, analysisCommand)
-		if write || v.cliWrite || v.unknown || larkCLIRe.MatchString(analysisCommand) && !safe {
+		// Text naming lark-cli in a command with no call is not one: classifyLark marks unknown what could run it
+		// (larkgate_text.go), so a grep pattern or a note written to a file is no card (#8119).
+		if write || v.cliWrite || v.unknown || larkCLIRe.MatchString(analysisCommand) && !classified {
 			ix.Kind = proto.IxPermission
 			title := wholeCommandTitle(cfg.Gates, v, analysisCommand, g, write)
 			if title != "" {

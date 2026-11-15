@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // ---- node sessions ----
@@ -13,17 +15,19 @@ import (
 // rows without a launcher or directory; newer nodes ignore those rows when loading
 // and write no rows for sessions they did not start (#5510).
 type NodeSession struct {
-	CreationID       string    `json:"creation_id,omitempty"`
-	Incarnation      string    `json:"incarnation,omitempty"`
-	Model            string    `json:"model,omitempty"`
-	ModelFingerprint string    `json:"model_fingerprint,omitempty"`
-	ModelEffort      string    `json:"model_effort,omitempty"`
-	ConfigDir        string    `json:"config_dir,omitempty"` // the assistant's explicit Claude profile
-	Pane             string    `json:"pane,omitempty"`
-	Launcher         string    `json:"launcher"`
-	Cwd              string    `json:"cwd"`
-	StartedAt        time.Time `json:"started_at"`
-	Tasks            []string  `json:"tasks,omitempty"` // an assistant conversation's running background tasks
+	CreationID       string          `json:"creation_id,omitempty"`
+	Incarnation      string          `json:"incarnation,omitempty"`
+	Model            string          `json:"model,omitempty"`
+	ModelFingerprint string          `json:"model_fingerprint,omitempty"`
+	ModelEffort      string          `json:"model_effort,omitempty"`
+	ConfigDir        string          `json:"config_dir,omitempty"` // the assistant's explicit Claude profile
+	Pane             string          `json:"pane,omitempty"`
+	Launcher         string          `json:"launcher"`
+	Cwd              string          `json:"cwd"`
+	StartedAt        time.Time       `json:"started_at"`
+	StopCause        proto.StopCause `json:"stop_cause,omitempty"`
+	StopCauseAt      int64           `json:"stop_cause_at,omitempty"`
+	Tasks            []string        `json:"tasks,omitempty"` // an assistant conversation's running background tasks
 	// The permission mode / effort the app set on an assistant conversation (node/modes.go); kept with the model.
 	AppMode   string `json:"app_mode,omitempty"`
 	AppEffort string `json:"app_effort,omitempty"`
@@ -76,10 +80,18 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 		jsonb_build_object('model', $8::text, 'model_fingerprint', $9::text, 'model_effort', $10::text,
 			'app_mode', $11::text, 'app_effort', $12::text, 'ultracode_process', $13::jsonb,
 			'started_at_unknown', $14::bool, 'guest', $17::jsonb, 'guest_kind', $18::text, 'config_dir', $19::text,
-			'pending_switch', $20::jsonb, 'engine_history', $21::jsonb, 'pending_handoff', $22::jsonb), now() FROM saved
-		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+			'pending_switch', $20::jsonb, 'engine_history', $21::jsonb, 'pending_handoff', $22::jsonb,
+			'stop_cause', $23::text, 'stop_cause_at', $24::bigint), now() FROM saved
+		ON CONFLICT (key) DO UPDATE SET value = CASE
+			WHEN COALESCE((settings.value->>'stop_cause_at')::bigint, 0) > $24
+				OR (COALESCE((settings.value->>'stop_cause_at')::bigint, 0) = $24
+					AND settings.value->>'stop_cause' = 'user' AND $23 <> 'user')
+			THEN EXCLUDED.value || jsonb_build_object('stop_cause', settings.value->'stop_cause',
+				'stop_cause_at', settings.value->'stop_cause_at')
+			ELSE EXCLUDED.value END, updated_at = now()`,
 		machine, id, s.Pane, s.Launcher, s.Cwd, s.StartedAt, tasks, s.Model, s.ModelFingerprint, s.ModelEffort, s.AppMode, s.AppEffort,
-		s.UltracodeProcess, unknownStart, s.CreationID, s.Incarnation, guest, s.GuestKind, s.ConfigDir, pendingSwitch, engineHistory, pendingHandoff)
+		s.UltracodeProcess, unknownStart, s.CreationID, s.Incarnation, guest, s.GuestKind, s.ConfigDir, pendingSwitch, engineHistory, pendingHandoff,
+		string(s.StopCause), s.StopCauseAt)
 	return err
 }
 
@@ -110,6 +122,8 @@ type nodeModel struct {
 	PendingSwitch    json.RawMessage `json:"pending_switch"`
 	EngineHistory    json.RawMessage `json:"engine_history"`
 	PendingHandoff   json.RawMessage `json:"pending_handoff"`
+	StopCause        proto.StopCause `json:"stop_cause"`
+	StopCauseAt      int64           `json:"stop_cause_at"`
 }
 
 // jsonOrNil is raw, or nil when it holds nothing (empty, or a JSON null).
@@ -140,6 +154,7 @@ func (d *DB) NodeSessions(ctx context.Context, machine string) (map[string]NodeS
 		s.ConfigDir = m.ConfigDir
 		s.UltracodeProcess, s.PendingSwitch, s.EngineHistory = jsonOrNil(m.UltracodeProcess), jsonOrNil(m.PendingSwitch), jsonOrNil(m.EngineHistory)
 		s.PendingHandoff = jsonOrNil(m.PendingHandoff)
+		s.StopCause, s.StopCauseAt = m.StopCause, m.StopCauseAt
 		if m.StartedAtUnknown {
 			s.StartedAt = time.Time{}
 		}

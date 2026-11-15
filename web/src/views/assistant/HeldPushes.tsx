@@ -28,11 +28,11 @@ function HeldPushRow({ item, destination, onOpen }: { item: HeldPushItem; destin
   const content = (
     <>
       <div className="min-w-0 flex-1">
-        <div className="break-words text-[13px] font-medium text-ink">{summaries[0] || t("push-intercepts.held_untitled")}</div>
-        {summaries.slice(1).map((summary, index) => <div key={`${item.id}-summary-${index}`} className="mt-1 break-words text-[12px] text-ink-2">{summary}</div>)}
-        <div className="mt-1 text-[11px] text-ink-3">{reasonLabel(item.reason)}{item.manager?.trim() ? ` · ${item.manager}` : ""}</div>
+        <div className="break-words text-meta font-medium text-ink">{summaries[0] || t("push-intercepts.held_untitled")}</div>
+        {summaries.slice(1).map((summary, index) => <div key={`${item.id}-summary-${index}`} className="mt-1 break-words text-label text-ink-2">{summary}</div>)}
+        <div className="mt-1 text-submeta text-ink-3">{reasonLabel(item.reason)}{item.manager?.trim() ? ` · ${item.manager}` : ""}</div>
       </div>
-      <time dateTime={item.at} className="shrink-0 text-[11px] tabular-nums text-ink-3">{formatDate(item.date, { timeStyle: "short" })}</time>
+      <time dateTime={item.at} className="shrink-0 text-submeta tabular-nums text-ink-3">{formatDate(item.date, { timeStyle: "short" })}</time>
       {destination && <Icon name="chevronRight" size={13} className="shrink-0 text-ink-3" />}
     </>
   );
@@ -52,19 +52,19 @@ function HeldPushList({ groups, destinations }: { groups: HeldPushGroups; destin
   return (
     <div className="flex flex-col gap-4" data-held-push-list>
       <section aria-label={t("push-intercepts.held_p1")}>
-        <h3 className="mb-1.5 px-1 text-[12px] font-medium text-ink-3">{t("push-intercepts.held_p1_count", { count: groups.p1.length })}</h3>
+        <h3 className="mb-1.5 px-1 text-label font-medium text-ink-3">{t("push-intercepts.held_p1_count", { count: groups.p1.length })}</h3>
         <div className="flex flex-col gap-1.5">{groups.p1.map(row)}</div>
       </section>
       {groups.p2.length > 0 && (
         <section aria-label={t("push-intercepts.held_p2")}>
-          <button type="button" aria-expanded={showP2} onClick={() => setShowP2((value) => !value)} className="mb-1.5 flex min-h-8 w-full items-center gap-1.5 px-1 text-left text-[12px] font-medium text-ink-3 hover:text-ink">
+          <button type="button" aria-expanded={showP2} onClick={() => setShowP2((value) => !value)} className="mb-1.5 flex min-h-8 w-full items-center gap-1.5 px-1 text-left text-label font-medium text-ink-3 hover:text-ink">
             <Icon name={showP2 ? "chevron" : "chevronRight"} size={12} className="shrink-0" />
             <span>{t("push-intercepts.held_p2_count", { count: groups.p2.length })}</span>
           </button>
           {showP2 && <div className="flex flex-col gap-1.5">{groups.p2.map(row)}</div>}
         </section>
       )}
-      {groups.p1.length + groups.p2.length === 0 && <p className="px-1 py-3 text-[13px] text-ink-2">{t("push-intercepts.held_empty")}</p>}
+      {groups.p1.length + groups.p2.length === 0 && <p className="px-1 py-3 text-meta text-ink-2">{t("push-intercepts.held_empty")}</p>}
     </div>
   );
 }
@@ -154,10 +154,10 @@ export function HeldPushesEntry({ className, destinations }: { className?: strin
       </button>
       <Dialog open={open} onClose={() => setOpen(false)} title={t("push-intercepts.held_title")} width={560}>
         <div className="mb-3 flex items-center justify-between gap-3">
-          <p className="text-[12px] text-ink-3">{t("push-intercepts.held_explanation")}</p>
+          <p className="text-label text-ink-3">{t("push-intercepts.held_explanation")}</p>
           <Button icon="retry" busy={loading} onClick={() => void refresh()}>{t("assistant-tasks.retry")}</Button>
         </div>
-        {failed && <div role="alert" className="mb-3 rounded-control bg-danger-wash px-3 py-2 text-[12px] text-ink">{t("push-intercepts.held_load_failed")}</div>}
+        {failed && <div role="alert" className="mb-3 rounded-control bg-danger-wash px-3 py-2 text-label text-ink">{t("push-intercepts.held_load_failed")}</div>}
         {loading && count === 0 && !failed ? <Loading label={t("push-intercepts.held_loading")} /> : <HeldPushList groups={groups} destinations={destinations} />}
       </Dialog>
     </>
