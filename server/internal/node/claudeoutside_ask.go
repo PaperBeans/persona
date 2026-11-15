@@ -141,7 +141,7 @@ func (n *Node) outsideAnswer(ctx context.Context, session, id string, r proto.Re
 	if text == "" {
 		return fmt.Errorf("没有回答任何一道题")
 	}
-	handled, err := n.sendOutside(ctx, session, text, nil)
+	handled, err := n.sendOutsidePriority(ctx, session, text, nil, peerNow)
 	if !handled {
 		return refusal(screen.PromptChanged, outsideAskGone, nil)
 	}

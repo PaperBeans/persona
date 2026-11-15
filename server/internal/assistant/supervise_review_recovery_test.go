@@ -163,7 +163,7 @@ func TestReportedTaskPRDoesNotRecoverAnotherIssue(t *testing.T) {
 	}))
 	defer server.Close()
 	s.deploy.forge = githubForge{base: server.URL, client: server.Client()}
-	if pr, err := s.reportedTaskPR(context.Background(), todo, "https://github.com/o/r/pull/4"); pr != "" || err != nil {
+	if pr, _, err := s.reportedTaskPR(context.Background(), todo, "https://github.com/o/r/pull/4"); pr != "" || err != nil {
 		t.Fatalf("recovered another ordinary issue as a PR: %q, %v", pr, err)
 	}
 }

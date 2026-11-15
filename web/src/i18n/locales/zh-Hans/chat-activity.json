@@ -6,5 +6,5 @@
   "loop": "循环",
   "stop_loop": "停止循环",
   "stop_loop_explain": "会给 Agent 发一条消息，让它不再安排下一次唤醒。正在执行的这一轮会先做完。",
-  "copy_command": "拷贝命令"
+  "copy_command": "复制命令"
 }

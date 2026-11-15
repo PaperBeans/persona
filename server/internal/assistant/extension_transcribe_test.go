@@ -233,6 +233,22 @@ func TestExtensionTranscriptionIdleAndFailure(t *testing.T) {
 	}
 }
 
+func TestExtensionTranscriptionActiveCallIsNotIdle(t *testing.T) {
+	s, tr := extTranscribeFixture(t)
+	oldIdle, oldWait, oldAhead := extTranscribeIdle, jobDoneWait, replayAhead
+	extTranscribeIdle, jobDoneWait, replayAhead = 150*time.Millisecond, 750*time.Millisecond, time.Second
+	t.Cleanup(func() { extTranscribeIdle, jobDoneWait, replayAhead = oldIdle, oldWait, oldAhead })
+	tr.set(func(f *fakeTranscriber) { f.replay = jobScript{noAck: true} })
+	job := startJob(t, s, "ext-a", assistantwire.TranscriptionStartParams{})
+	began := time.Now()
+	err := extTr(t, s, "ext-a", assistantwire.MethodTranscriptionAudio,
+		assistantwire.TranscriptionAudioParams{Job: job, Data: pcmB64(3)}, nil)
+	if codeOf(err) != assistantwire.CodeTranscriptionTimeout {
+		t.Fatalf("active audio RPC ended after %v with %T %v (code %q), want provider timeout", time.Since(began), err, err, codeOf(err))
+	}
+	waitFor(t, "job socket closed", func() bool { return tr.jobsOf(extwire.TranscriptionReplay)[0].over() })
+}
+
 // A contribution that stops answering ends the job with timeout.
 func TestExtensionTranscriptionTimeout(t *testing.T) {
 	s, tr := extTranscribeFixture(t)

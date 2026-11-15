@@ -87,11 +87,58 @@ func TestReadinessRecoveryDoesNotValidateChangedConfiguration(t *testing.T) {
 	}
 }
 
+func TestReadinessRecoveryRejectsAnotherExecutionModel(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		name := "launcher default"
+		if explicit {
+			name = "configured model"
+		}
+		t.Run(name, func(t *testing.T) {
+			at := time.Now().Add(-time.Minute).UTC()
+			main := proto.Session{SessionID: "m1", Assistant: true, Launcher: "claude", Model: "different-model",
+				Status: proto.StatusDone, State: proto.StateIdle, LastText: "Another model answered", UpdatedAt: at}
+			f, s, st := readyMachine(t, main)
+			f.agentModels = map[string][]proto.AgentModel{"claude": {{ID: "configured-model", Default: true}, {ID: "different-model"}}}
+			if explicit {
+				if r := modelRequest(s, "PATCH", "assistant", `{"revision":0,"provider":"launcher.claude","model":"configured-model"}`); r.Code != 200 {
+					t.Fatalf("configure model: %d %s", r.Code, r.Body.String())
+				}
+			}
+			seedReadinessFailure(t, s, at.Add(-time.Minute))
+			s.assistantTurnSettled(context.Background(), "server", "m1")
+			if kept := s.readinessRecordNow(context.Background()); kept.Success != nil || kept.Probe == nil {
+				t.Fatalf("another model's reply changed the configured binding's evidence: %+v", kept)
+			}
+			main.Status, main.State = proto.StatusOffline, proto.StateOffline
+			f.setSessions("server", main)
+			if step := readinessStep(t, getReadiness(t, newServiceOn(t, f, st), "", "en"), StepModel); step.State == StepOK {
+				t.Fatalf("another model validated the configured binding after release/reload: %+v", step)
+			}
+		})
+	}
+}
+
+func TestReadinessRecoveryAcceptsLauncherDefaultModel(t *testing.T) {
+	at := time.Now().Add(-time.Minute).UTC()
+	main := proto.Session{SessionID: "m1", Assistant: true, Launcher: "claude", Model: "configured-model",
+		Status: proto.StatusDone, State: proto.StateIdle, LastText: "The default model answered", UpdatedAt: at}
+	f, s, st := readyMachine(t, main)
+	f.agentModels = map[string][]proto.AgentModel{"claude": {{ID: "configured-model", Default: true}, {ID: "different-model"}}}
+	seedReadinessFailure(t, s, at.Add(-time.Minute))
+	s.assistantTurnSettled(context.Background(), "server", "m1")
+	main.Status, main.State = proto.StatusOffline, proto.StateOffline
+	f.setSessions("server", main)
+	if r := getReadiness(t, newServiceOn(t, f, st), "", "en"); !r.Ready {
+		t.Fatalf("the launcher's actual default model lost successful reply evidence: %+v", r)
+	}
+}
+
 func TestReadinessRecoveryAcceptsResolvedModelAlias(t *testing.T) {
 	at := time.Now().Add(-time.Minute)
 	main := proto.Session{SessionID: "m1", Assistant: true, Launcher: "claude", Model: "example-canonical-model",
 		Status: proto.StatusDone, State: proto.StateIdle, LastText: "Recovered answer", UpdatedAt: at}
 	f, s, st := readyMachine(t, main)
+	f.agentModels = map[string][]proto.AgentModel{"claude": {{ID: "example-alias", Resolved: "example-canonical-model"}, {ID: "different-model"}}}
 	r := modelRequest(s, "PATCH", "assistant", `{"revision":0,"provider":"launcher.claude","model":"example-alias"}`)
 	if r.Code != 200 {
 		t.Fatalf("configure model alias: %d %s", r.Code, r.Body.String())

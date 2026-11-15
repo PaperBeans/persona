@@ -287,16 +287,27 @@ func TestGoldenAllStopped(t *testing.T) {
 		Detail: "box/leader: agent: waiting for the worker\nbox/worker: agent: waiting for the leader"}}
 	worker := prompts.RenderWorkerSupervise(entries)
 	golden(t, "task_leader.all_stopped", worker)
-	// Both recipients include the same golden-tested diagnosis and action, not
-	// two separately maintained instructions. Existing supervisor goldens cover its envelope.
+	// Both recipients keep the same facts and action. Supervisors receive the
+	// action in their stable system policy, not on every supervision event.
 	_, clause, ok := strings.Cut(worker, ": all participants")
 	if !ok {
 		t.Fatal("missing diagnosis")
 	}
 	clause, _, _ = strings.Cut(clause, " (box/leader")
+	facts, action, ok := strings.Cut(clause, " Check each participant")
+	if !ok {
+		t.Fatal("missing task-leader action")
+	}
+	action = "Check each participant" + action
 	supervisor := prompts.RenderSupervise(prompts.Supervise{Entries: entries})
-	if !strings.Contains(supervisor, "all participants"+clause) || !strings.Contains(supervisor, entries[0].Detail) {
+	if !strings.Contains(supervisor, "all participants"+facts) || !strings.Contains(supervisor, entries[0].Detail) {
 		t.Fatalf("supervisor lost the shared diagnosis or member statements: %s", supervisor)
+	}
+	if strings.Contains(supervisor, action) {
+		t.Fatal("supervision event repeated the handling policy")
+	}
+	if !strings.Contains(prompts.RenderSupervisionInstructions(), action) {
+		t.Fatal("supervisor system policy lost the task-leader action")
 	}
 }
 

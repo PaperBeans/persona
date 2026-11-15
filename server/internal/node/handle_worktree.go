@@ -20,6 +20,7 @@ type worktreePrepareParams struct {
 	Kind        string `json:"kind"`
 	WorkspaceID string `json:"workspace_id"`
 	Cwd         string `json:"cwd"`
+	Branch      string `json:"branch"`
 }
 
 // worktreeCreateParams is worktree.create's request (worktree.go): Composer asks for the composer's variant, AutoName for

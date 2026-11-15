@@ -64,6 +64,74 @@ nonisolated enum SessionModes {
         return list + [mode(current) ?? .init(id: current, title: current, detail: "", symbol: Theme.Icon.help)]
     }
 
+    // MARK: The modes an agent lists (#8261)
+
+    /// A mode of those a session or a launcher lists (`Session.listedModes`, `StartModes.listed`: Paseo's Grok, OpenCode
+    /// or Codex): its own approval is Use Launcher's, which may already allow everything, never Ask First; Allow
+    /// Everything says it can be switched back; any other as Claude Code names it, an unknown one by its id.
+    static func listedOption(_ id: String) -> Option {
+        switch id {
+        case ModeID.launcherDefault:
+            Option(id: id, title: String(localized: "Use Launcher's"),
+                   detail: String(localized: "Its own approval settings decide what it asks, and may already allow everything"),
+                   symbol: Theme.Icon.permissions)
+        case ModeID.bypass:
+            Option(id: id, title: String(localized: "Allow Everything"),
+                   detail: String(localized: "Approves everything without asking; can be switched back in the chat"),
+                   symbol: Theme.Icon.allowEverything)
+        default:
+            mode(id) ?? Option(id: id, title: id, detail: "", symbol: Theme.Icon.help)
+        }
+    }
+
+    /// The listed mode a session runs in: the one it reports when listed, else its own (no mode reported is its own).
+    static func listedNow(_ s: Session, listed: [String]) -> String {
+        if let m = s.permissionMode, listed.contains(m) { return m }
+        return ModeID.launcherDefault
+    }
+
+    /// The mode a session runs in as its menus tick it: a listed session's always one of its own (`listedNow`).
+    static func current(_ s: Session?) -> String? {
+        guard let s else { return nil }
+        guard let ids = s.listedModes else { return s.permissionMode }
+        return listedNow(s, listed: ids)
+    }
+
+    /// The menus' rows for a running session: those a session lists alone (`listedOption`), otherwise the modes it can
+    /// switch to plus the current one (`switchableModes`, `listed`).
+    static func menuOptions(_ s: Session?) -> [Option] {
+        if let ids = s?.listedModes { return ids.map { listedOption($0) } }
+        return listed(switchableModes(s), current: s?.permissionMode)
+    }
+
+    /// A mode can be picked now: Claude Code's (`canChangeModes`), or one of those the session lists.
+    static func switchable(_ s: Session) -> Bool { s.canChangeModes || s.canSwitchListedModes }
+
+    /// The mode chip's symbol: the current mode's, a listed session's own approval the plain permissions symbol;
+    /// Ask First's while no mode is known, as the chip has always drawn it.
+    static func chipSymbol(_ s: Session?) -> String {
+        if s?.listedModes != nil, let now = current(s) { return listedOption(now).symbol }
+        return mode(s?.permissionMode)?.symbol ?? Theme.Icon.askFirst
+    }
+
+    /// The current mode's name: a listed session's in its own words.
+    static func currentLabel(_ s: Session) -> String? {
+        guard s.listedModes != nil else { return modeLabel(s.permissionMode) }
+        return current(s).map { listedOption($0).title }
+    }
+
+    /// "Permission Mode: …" for a session (`modeHeading`), a listed one's mode in its own words.
+    static func modeHeading(session s: Session) -> String {
+        guard s.listedModes != nil, let label = currentLabel(s) else { return modeHeading(s.permissionMode) }
+        return String(localized: "Permission Mode: \(label)")
+    }
+
+    /// Session Info's word for the mode the session reported: a listed session's in its own words, no mode being its own.
+    static func infoLabel(_ id: String?, session: Session?) -> String? {
+        guard let ids = session?.listedModes else { return modeLabel(id) }
+        return listedOption(id.flatMap { ids.contains($0) ? $0 : nil } ?? ModeID.launcherDefault).title
+    }
+
     // MARK: The Agents header's mode (#3719)
 
     /// How much a mode lets the agent do without asking, the tone the header draws its symbol in (`Theme.ModeTone`).
@@ -88,15 +156,26 @@ nonisolated enum SessionModes {
         return HeaderLook(symbol: tone == .unknown ? Theme.Icon.permissions : mode(id)?.symbol ?? Theme.Icon.permissions, tone: tone)
     }
 
+    /// The header's look for a session's mode: a listed session on its own approval (#8261) is the plain permissions
+    /// symbol in no tone, as a mode not known, never Ask First's raised hand: its own settings may allow everything.
+    static func headerLook(session s: Session) -> HeaderLook {
+        let now = current(s)
+        if s.listedModes != nil, now == ModeID.launcherDefault { return headerLook(nil as String?) }
+        return headerLook(now)
+    }
+
     /// The header shows an agent's mode when there is one to see or to change: Claude Code's, before its first prompt
-    /// too (it can be set). Not an assistant conversation (its page has its own bar), nor an agent whose mode can be
-    /// neither read nor changed (Codex, TRAEX, runtimes without modes).
+    /// too (it can be set), and the modes an agent lists (#8261), on its own approval too. Not an assistant conversation
+    /// (its page has its own bar), nor an agent whose mode can be neither read nor changed (Codex, TRAEX, runtimes
+    /// without modes).
     static func showsInHeader(_ s: Session) -> Bool {
-        !s.assistant && (s.permissionMode != nil || s.canChangeModes)
+        !s.assistant && (s.permissionMode != nil || s.canChangeModes || s.listedModes != nil)
     }
 
     enum ModeID {
         static let bypass = "bypassPermissions"
+        /// Claude Code's Ask First, and the own approval of an agent that lists its modes (#8261, Use Launcher's).
+        static let launcherDefault = "default"
     }
 
     /// What switching a running agent to a mode asks first (#3719): going into Allow Everything, and leaving it when
@@ -113,9 +192,11 @@ nonisolated enum SessionModes {
         return mode(ModeID.bypass)
     }
 
+    /// The modes a session lists (#8261) are a switch both ways: only going into Allow Everything asks.
     static func confirmation(_ s: Session?, to mode: String) -> Confirmation? {
-        guard let s, !s.assistant, mode != s.permissionMode else { return nil }
+        guard let s, !s.assistant, mode != current(s) else { return nil }
         if mode == ModeID.bypass { return .allowEverything }
+        if s.listedModes != nil { return nil }
         if s.permissionMode == ModeID.bypass, !s.bypassAvailable { return .leaveAllowEverything }
         return nil
     }
@@ -259,23 +340,24 @@ struct SessionModeBar: View {
         #if DEBUG || PERF_SIGNPOST
         let _ = PerfTrace.body("SessionModeBar")
         #endif
-        let mode = session?.permissionMode
+        // A session that lists its own modes (#8261) is always in one of them: no mode reported is its own approval.
+        let mode = SessionModes.current(session)
         let effort = session?.effort
         HStack(spacing: Theme.Space.s) {
-            if session?.setsEffortOnly != true {
+            if session?.setsEffortOnly != true || session?.canSwitchListedModes == true {
                 Menu {
                     Picker("Permission Mode", selection: Binding(get: { mode ?? "" }, set: { new in change(mode: new) })) {
-                        ForEach(SessionModes.listed(SessionModes.switchableModes(session), current: mode)) { o in
+                        ForEach(SessionModes.menuOptions(session)) { o in
                             Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }.tag(o.id)
                         }
                     }
                     .pickerStyle(.inline)
                 } label: {
-                    ModeChip(symbol: SessionModes.mode(mode)?.symbol ?? Theme.Icon.askFirst,
-                             text: SessionModes.modeLabel(mode) ?? String(localized: "Permission Mode"), tint: SessionModes.modeTint(mode), known: mode != nil)
+                    ModeChip(symbol: SessionModes.chipSymbol(session),
+                             text: session.flatMap { SessionModes.currentLabel($0) } ?? String(localized: "Permission Mode"), tint: SessionModes.modeTint(mode), known: mode != nil)
                 }
                 .labelOnlyMenu()
-                .accessibilityLabel(SessionModes.modeHeading(mode))
+                .accessibilityLabel(session.map { SessionModes.modeHeading(session: $0) } ?? SessionModes.modeHeading(mode))
             }
             Menu {
                 // Claude Code's ultracode (#1307): its own switch under the effort, not a level of it (declared before it where
@@ -336,13 +418,13 @@ struct SessionModeBar: View {
 
     private func change(mode: String? = nil, effort: String? = nil, model picked: String? = nil) {
         if let mode, let pick {
-            if mode != session?.permissionMode { pick(mode) }
+            if mode != SessionModes.current(session) { pick(mode) }
             return
         }
         let list = RunningModelLists.shared.models(key, session)
         let newModel = picked.flatMap { SessionModes.modelPatch($0, current: session?.model, list: list) }
         if picked != nil, newModel == nil { return } // the model it runs already
-        guard mode != session?.permissionMode || effort != session?.effort || newModel != nil, !changing else { return }
+        guard mode != SessionModes.current(session) || effort != session?.effort || newModel != nil, !changing else { return }
         changing = true
         Task {
             await model.setModes(key, permissionMode: mode, effort: effort, model: newModel)
@@ -387,9 +469,11 @@ struct SessionModesMenu: View {
     var body: some View {
         let mode = session?.permissionMode
         let effort = session?.effort
+        // The modes an agent that is not Claude Code's lists (#8261): its own approval and Allow Everything, a switch both ways.
+        let listsModes = !setsModes && session?.canSwitchListedModes == true
         // Allow Everything is said here, not on the composer's button (#1117). First: a menu opening upward from the button puts
         // its first item next to it, where a menu too tall for the screen is never cut off.
-        if setsModes, mode == "bypassPermissions" {
+        if setsModes || listsModes, mode == "bypassPermissions" {
             Section { BypassWarning() }
         }
         Section("Model [Assistant View c98e11]") {
@@ -465,15 +549,24 @@ struct SessionModesMenu: View {
                 Label(SessionModes.modeHeading(mode), systemImage: SessionModes.mode(mode)?.symbol ?? Theme.Icon.askFirst)
             }
             .pickerStyle(.menu)
+        } else if listsModes, let s = session {
+            Picker(selection: Binding(get: { SessionModes.current(s) ?? "" }, set: { new in change(mode: new) })) {
+                ForEach(SessionModes.menuOptions(s)) { o in
+                    Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }.tag(o.id)
+                }
+            } label: {
+                Label(SessionModes.modeHeading(session: s), systemImage: SessionModes.chipSymbol(s))
+            }
+            .pickerStyle(.menu)
         }
     }
 
     private func change(mode: String? = nil, effort: String? = nil) {
         if let mode, let pick {
-            if mode != session?.permissionMode { pick(mode) }
+            if mode != SessionModes.current(session) { pick(mode) }
             return
         }
-        guard mode != session?.permissionMode || effort != session?.effort else { return }
+        guard mode != SessionModes.current(session) || effort != session?.effort else { return }
         Task { await model.setModes(key, permissionMode: mode, effort: effort) }
     }
 }
@@ -542,6 +635,7 @@ struct HeaderModeButton: View, Equatable {
         a.changing == b.changing && a.session.permissionMode == b.session.permissionMode
             && a.session.canChangeModes == b.session.canChangeModes && a.session.bypassAvailable == b.session.bypassAvailable
             && a.session.assistant == b.session.assistant && a.session.status.isLive == b.session.status.isLive
+            && a.session.listedModes == b.session.listedModes && a.session.canSwitchListedModes == b.session.canSwitchListedModes
     }
 
     /// The capsule is as tall as the row's tabs; its 44 pt target overhangs the row by this much above and below.
@@ -551,19 +645,22 @@ struct HeaderModeButton: View, Equatable {
         #if DEBUG || PERF_SIGNPOST
         let _ = PerfTrace.body("HeaderModeButton")
         #endif
-        let mode = session.permissionMode
-        let words = SessionModes.modeHeading(mode)
+        // A session that lists its own modes (#8261) has those two rows alone, one of them always on: no mode reported is
+        // its own approval, drawn as a mode not known (`headerLook(session:)`).
+        let mode = SessionModes.current(session)
+        let words = SessionModes.modeHeading(session: session)
+        let switchable = SessionModes.switchable(session)
         Menu {
             // "Permission Mode: …" heads the list, as on the web and Android. The modes are switches, the current one on:
             // an iOS menu draws no section header over an inline picker's options, whether the section is around the
             // picker or inside it (docs/lessons/ios.md), and does over switches (the composer's ultracode section).
             Section {
-                ForEach(SessionModes.listed(SessionModes.switchableModes(session), current: mode)) { o in
+                ForEach(SessionModes.menuOptions(session)) { o in
                     MenuChoice(id: o.id, selected: mode, pick: pick) {
                         Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }
                     }
                 }
-                .disabled(!session.canChangeModes)
+                .disabled(!switchable)
                 // Allow Everything where this agent cannot take it while it runs: there, and why under it (a menu draws
                 // no footers; it keeps an item's second `Text`, not a `Label`'s).
                 if let o = SessionModes.bypassUnavailable(session) {
@@ -571,10 +668,10 @@ struct HeaderModeButton: View, Equatable {
                 }
             } header: {
                 // Why nothing can be picked goes under the title: words, not a grayed item.
-                Text(!session.canChangeModes && !session.status.isLive ? words + "\n" + StateName.notRunning.text : words)
+                Text(!switchable && !session.status.isLive ? words + "\n" + StateName.notRunning.text : words)
             }
         } label: {
-            HeaderModeCapsule(look: SessionModes.headerLook(mode), changing: changing)
+            HeaderModeCapsule(look: SessionModes.headerLook(session: session), changing: changing)
         }
         .labelOnlyMenu()
         .disabled(changing)

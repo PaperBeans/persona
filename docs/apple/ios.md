@@ -1062,11 +1062,20 @@ app treats as unsupported and off (no section, never offered).
 Two small labels above the chat input: permission mode (Manual approval / Auto-edit files / Plan only / Auto / Allow everything) and effort (Auto / Low … Max),
 like Claude Code's terminal bottom bar; tap to change (`SessionModeBar`, wording and icons in `SessionModes`). The new shell moves these into the input's bottom-right
 "Model · Effort" button (#1091, see the input under "New shell" above). New Agent forms and the assistant home page above its input
-also offer selection (unset means "Follow launcher"). New Agent offers a Paseo provider that is neither Claude Code nor Codex (a launcher with
-`source` `paseo` and an agent of its own, such as Grok) only Use Launcher's and Allow Everything, and only the efforts its model lists (`StartModes`, #8144):
-Paseo refuses Plan Only for it and drops the other modes. The mode remembered per computer is Claude Code's: such a start never sends it, never saves over it,
-and its pick is made on the sheet each time; its footer says the agent uses its own approval settings unless Allow Everything is chosen, and its first message's
-hint names no Claude. Codex / the internal Codex fork sessions do not show them; app-server-driven Codex sessions (hub supplies `efforts`, `Session.setsEffortOnly`)
+also offer selection (unset means "Follow launcher"). New Agent offers a launcher that lists the permission modes a start on it takes
+(`Launcher.permissionModes`, the node's `permission_modes`, #8261: Paseo's Grok, OpenCode or Codex, Codex's start included) only Use Launcher's (its own
+approval, sent as no mode) and, where it lists it, Allow Everything, and only the efforts its model lists (`StartModes`); one whose own approval is all it lists
+shows no mode field. A computer older than the list is told by the agent instead: a launcher with `source` `paseo` and an agent of its own, such as Grok, gets
+Use Launcher's and Allow Everything (#8144). Paseo refuses Plan Only for these and drops the other modes. The mode and effort remembered per computer are
+Claude Code's: such a start never sends them, never saves over them, and its picks are made on the sheet each time (`providerMode`, `providerEffort`); its
+footer says the agent uses its own approval settings unless Allow Everything is chosen (and, where the launcher lists its modes, that the chat can switch
+later), and its first message's hint names no Claude. Pickers name a launcher by its title (`display_name`: Paseo's label for its provider, a
+Persona-managed provider's name), and the search finds it by that too. A running chat whose row lists two modes (`capabilities.permission_modes`,
+`Session.listedModes`) offers those two rows alone in the header's mode menu (`HeaderModeButton`) and the composer's model menu (`SessionModesMenu`,
+`SessionModeBar`): Use Launcher's, drawn as a mode not known (the plain permissions symbol in no tone, never Ask First's hand, since its own settings may
+allow everything; no mode reported is this one), and Allow Everything, which asks first (`SessionModes.confirmation`); leaving it does not. Session Info
+names the mode the same way and leaves out Context, Compactions, Chat and Output where the node says nobody gives them (`usage_unknown`). The web and
+Android follow the same rule (`docs/design/DESIGN_SYSTEM.md`, "Permission modes a provider lists (#8261)"). Codex / the internal Codex fork sessions do not show them; app-server-driven Codex sessions (hub supplies `efforts`, `Session.setsEffortOnly`)
 show effort only, with levels supported by their model (`SessionModes.effortOptions`, `docs/integrations/codex.md` ("Effort")). When the row carries `capabilities.modes`, that Boolean decides instead: `false` hides the controls for Claude outside Persona's terminals, and `true` enables them for a compatible runtime such as Orca or agy. An older hub that omits the field keeps the agent-based behavior (`Session.canChangeModes`; `docs/protocol/protocol.md` "Codex sources and capabilities").
 For Claude Code sessions in herdr, the effort menu also has a Model section (#3119, matching web #2434; `SessionModes.switchesModel`):
 the launcher's list as above (#3754; the fixed Default / Opus / Sonnet / Haiku until it is read), ticked by the running model's exact ID or the alias that stands for it, so a version is never shown as its family; choosing sends `POST …/modes {"model"}`, and the node enters `/model <id>` with message-sending safeguards and checks the screen; failure explains why.
@@ -1089,7 +1098,9 @@ The new shell's Model · Effort menu still sends `/model <id>` as a message.
   wand, Allow Everything a red shield; not reported yet the plain permissions shield (never a guessed Ask First). A tap opens the mode menu; going into
   Allow Everything asks first, and so does leaving it when `bypass_available` is false (no way back from the phone); the composer's model menu
   goes through the same `ChatView.requestMode`. Shown where the agent has a mode to see or change (`SessionModes.showsInHeader`): not Codex,
-  TRAEX or a runtime without modes, not hosted pages (one-row header, #3255), not the folded bar. Client-only: `permission_mode` is already in every
+  TRAEX or a runtime without modes, not hosted pages (one-row header, #3255), not the folded bar. A row that lists its own modes (#8261, Paseo's
+  Grok, OpenCode or Codex) shows its two rows instead, its own approval as the plain shield, a switch both ways (`SessionModes.menuOptions`,
+  `headerLook(session:)`; see the New Agent paragraph above). Client-only: `permission_mode` is already in every
   session row (read off the transcript tail the node reads anyway), so no request, push or poll was added (measured in the PR).
 - Assistant chats (Persona page, including the main chat) can choose Allow everything both at creation and while running (#2416); a red warning at the menu top explains consequences (`BypassWarning`). Persona does not start
   claude with `--dangerously-skip-permissions`, so a control request cannot switch to bypassPermissions: stop an idle process, then resume the next message with `--permission-mode bypassPermissions`;
@@ -1170,6 +1181,7 @@ and what this device asked are `AppModel.setUltracode` / `dismissUltracodeLost`,
 In `LauncherPicker` a blocked row is gray with the line (`LauncherBlockLine`) and an info mark; a tap opens `LauncherBlockedHelp` (why, How to Fix, the record under Details, Add Provider → `ProviderWizard`, Try Anyway picks it once the sheet has closed),
 never picks it. The form says the line under the launcher row when the launcher that will run is blocked (Model Settings' default, or picked anyway); Start stays enabled. Run Agent Here picks a usable launcher first, lists blocked ones last in its menu under a section titled with the line (a picker menu drops an option's second line), and says it in its footer once picked.
 Both read the list with `AppModel.launchersForStart` (fresh, not the cache). Add Provider is offered only for a computer in the hub-level group (the wizard saves there).
+A Persona-managed provider whose own-service rule leaves it out on the computer (`own_service: skip` where Claude Code or Codex has a sign-in of its own, #8109) comes in the hub's `unavailable`, kept with the list (`AppModel.launcherUnavailable`). `LauncherPicker` lists it after the launchers under "Unavailable here", in the main chat model sheet's row (`UnavailableLauncherRow`, `Views/Chat/UnavailableLauncherRow.swift`: a lock, the name, the hub's reason), never picked; How to Fix under the reason pushes the provider's page (`ModelLauncherDetailView`, Settings › Model providers), whose Edit › Computers has the switch, and saving it reads the list again. As Add Provider, only for a computer in the hub-level group (Settings' pages read that hub); elsewhere the row says the reason only. Tests: `NewAgentUnavailableTests`, `NewAgentUnavailableUITests` (`MOCK_OWN_SERVICE_SKIP=1`).
 `StartingNote` shows a coded start failure (`Session.startErrorCode`) as Didn't Start over the hub's whole sentence. Screenshots: `docs/operations/testing.md` ("Mock-data screenshots").
 
 ## Recent setups in New Agent (#2134)
@@ -1199,7 +1211,7 @@ the web's (`web/src/lib/live-text.ts`, `docs/web/web.md`).
   same pacer (`DeltaPacer`, at most 5 draws a second, an empty delta at once).
 - **Even reveal** (#6651): the model's text comes in bursts (a few dozen characters about every 350 ms, up to 2 s apart), so drawing what
   arrived showed a jump per burst. `StreamingText` reveals it a few characters a frame (`StreamReveal` in PersonaKit, driven by
-  `StreamRevealClock`'s display link, which runs only while text waits, at most 30 Hz: each change re-measures the chat list, #7135): a little slower than the stream's average so far,
+  `StreamRevealClock`'s display link, which runs only while text waits, 10 times a second: each change re-measures the chat list, so the rate is the owner's trade-off between smoothness and power, #7135): a little slower than the stream's average so far,
   faster when more waits (waiting / 0.6 s), never slower than 20 characters a second. Only that view redraws per frame; the store and the
   list see the deltas as before. A first text over 80 characters (a chat opened mid-stream) shows at once; when the stream ends
   (`ChatStore.liveDone`), or the user holds the list, or the reply's item replaces it, the whole text shows at once. The Mac shows text as
@@ -2435,6 +2447,10 @@ group's. With one installed manager, or a hub without a roster, nothing below sh
   field, put back if the hub says no. The Mac's own banners (`MacAttention.managerMuted`) skip a muted manager's agents and cards
   of the hub-level group (another group's hub keeps its own prefs); its Dock badge still counts them. A prefs read already on its
   way when a page saves doesn't put the old prefs back (`AppModel.savedNotifyPrefs`).
+- **Low-distraction mode** (#8157): the last section of Settings › Notifications, after this device's own rows, is the hub's
+  push grading switch (`APIClient.pushLnMode` / `setPushLnMode`, `GET` / `PUT /api/v1/push/ln-mode`); its footer says it holds
+  for every device and what still notifies. A hub without the route, or one that does not answer, shows no section; a change
+  shows at once, and a refusal puts it back and says why. `docs/server/server.md` "Push grading (push urgency filtering, `hub/lnmode.go`)".
 - **Quiet hours**: Settings › Notifications has this device's quiet hours (a switch, then From / Until), only when the prefs answer
   has `quiet`; each change sends `quiet` alone with this device's time zone (`APIClient.setQuietHours`), as the web does. Hours set
   in another zone: the section's footer names that zone instead of this device's (`QuietHours.elsewhere`) until they are changed here.

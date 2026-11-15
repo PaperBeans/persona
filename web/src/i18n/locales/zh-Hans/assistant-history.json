@@ -17,7 +17,7 @@
   "archived_footer": "归档只是不在列表里显示，对话还在。在归档的对话里再发消息，它会自动回到列表。",
   "via": "来自{name}",
   "rename_ellipsis": "重命名…",
-  "copy_session_id": "拷贝会话 ID",
+  "copy_session_id": "复制会话 ID",
   "unarchive": "取消归档",
   "archive": "归档",
   "main_chat": "主对话",

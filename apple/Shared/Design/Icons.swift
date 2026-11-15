@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 extension Theme {
     /// SF Symbols by meaning: one meaning, one symbol. Views write `Image(systemName: Theme.Icon.copy)`, not the name.

@@ -90,8 +90,9 @@ internal fun InteractionPanel(
         }
     }
     val closeCard: @Composable (Interaction) -> Unit = { request ->
-        val stoppedWork = blockedReason != null && request.isManagerWorkCard
-        val localOnly = !stoppedWork && (blockedReason != null || (request.kind == "question" && request.canCancel != true))
+        val requestBlock = resolveRequestApprovalBlockedReason(request, blockedReason)
+        val stoppedWork = requestBlock != null && request.isManagerWorkCard
+        val localOnly = !stoppedWork && (requestBlock != null || (request.kind == "question" && request.canCancel != true))
         if ((localOnly && onDiscardLocal != null) || stoppedWork || (request.kind == "question" && request.canCancel == true)) {
             val canClose = busyId == null && !linkVisible && if (localOnly) onDiscardLocal != null else
                 request.id !in uncertainIds && !RequestExpiry.expired(request.expiresAt, now)

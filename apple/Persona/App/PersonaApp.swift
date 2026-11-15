@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 #endif
 import UserNotifications
+import PersonaWire
 
 @main
 struct PersonaApp: App {

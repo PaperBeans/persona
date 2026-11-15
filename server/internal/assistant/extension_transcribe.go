@@ -293,7 +293,7 @@ func (s *Service) extTranscribeJob(method, ext, id string) (*extJob, error) {
 	job.mu.Lock()
 	ended, jc := job.ended, job.jc
 	if job.idle != nil {
-		job.idle.Reset(extTranscribeIdle)
+		job.idle.Stop() // Idle means no call in flight, not no frame for one bounded provider wait.
 	}
 	job.mu.Unlock()
 	if ended || jc == nil {
@@ -301,6 +301,17 @@ func (s *Service) extTranscribeJob(method, ext, id string) (*extJob, error) {
 		return nil, invalidTranscription(method, "no such job (finished, cancelled, or not this extension's)")
 	}
 	return job, nil
+}
+
+// extTranscribeCallDone releases one serialized call and restarts its no-call deadline only while the job lives.
+// Finish and every error path end the job without rearming this timer.
+func (s *Service) extTranscribeCallDone(job *extJob) {
+	job.mu.Lock()
+	if job.idle != nil && !job.ended {
+		job.idle.Reset(extTranscribeIdle)
+	}
+	job.mu.Unlock()
+	job.calls.Unlock()
 }
 
 func (s *Service) extTranscribeAudio(ctx context.Context, call assistantwire.ExtensionTranscription) (any, error) {
@@ -325,7 +336,7 @@ func (s *Service) extTranscribeAudio(ctx context.Context, call assistantwire.Ext
 	if err != nil {
 		return nil, err
 	}
-	defer job.calls.Unlock()
+	defer s.extTranscribeCallDone(job)
 	job.mu.Lock()
 	sent := job.sent
 	job.mu.Unlock()
@@ -430,7 +441,7 @@ func (s *Service) extTranscribeFinish(ctx context.Context, call assistantwire.Ex
 	if err != nil {
 		return nil, err
 	}
-	defer job.calls.Unlock()
+	defer s.extTranscribeCallDone(job)
 	job.mu.Lock()
 	if job.idle != nil {
 		job.idle.Stop() // finishing: it ends here, however long the transcription takes

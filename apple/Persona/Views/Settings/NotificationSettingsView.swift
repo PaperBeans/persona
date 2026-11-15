@@ -18,6 +18,10 @@ struct NotificationSettingsView: View {
     @State private var debugIsland = false
     /// The quiet-hours request in flight: an older one's answer does not undo a newer choice.
     @State private var quietRequest = 0
+    /// The hub's low-distraction switch (#8157); nil until read, and on a hub without it (the section stays away).
+    @State private var lowDistraction: Bool?
+    /// The low-distraction write in flight: an older one's answer does not undo a newer choice.
+    @State private var lowDistractionRequest = 0
 
     var body: some View {
         SettingsForm {
@@ -125,6 +129,9 @@ struct NotificationSettingsView: View {
             }
             #endif
 
+            // The hub's switch, for every device (#8157): after this device's own rows.
+            if let lowDistraction { lowDistractionSection(lowDistraction) }
+
             // The Mac had the button twice while notifications were off (#1224 A5): the warning above has it then.
             #if os(macOS)
             if !systemOff { systemSettingsSection }
@@ -137,6 +144,7 @@ struct NotificationSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .overlay { if page?.spinning != false { ProgressView() } }
         .task { await load() }
+        .task { await loadLowDistraction() }
         .task { await refreshPush() } // the hub's way to this device now, not the one kept since launch (#1859)
         .onChange(of: model.isLive) { _, live in
             if live { Task { await page?.reloadIfNeeded() } } // the hub is back: read what failed
@@ -208,6 +216,50 @@ struct NotificationSettingsView: View {
         let delay = NotifyPrefs.duration(prefs?.doneDelaySeconds)
         let long = NotifyPrefs.duration(prefs?.longTurnSeconds)
         return String(localized: "After finishing, Persona waits \(delay) and skips the notification if you've already looked on your computer or in the app. It notifies once, after background tasks and subagents are all done. A “long task” is a turn that ran \(long) or longer; quick answers are best read where you asked.")
+    }
+
+    /// Low-distraction mode (#8157): the hub's push grading switch (docs/server/server.md "Push grading"), the same one
+    /// persona_settings `notifications.low_distraction` changes after a card. It is the hub's, not this device's: the
+    /// footer says so and what still comes.
+    private func lowDistractionSection(_ on: Bool) -> some View {
+        Section {
+            SettingsSwitchRow(title: String(localized: "Low-Distraction Mode"),
+                              detail: String(localized: "Only what needs you notifies you; the rest waits for the briefing"),
+                              symbol: Theme.Icon.muted, tint: Theme.Hue.orange, iconColor: Theme.Hue.orange,
+                              accessibilityID: "notify.lowDistraction",
+                              isOn: Binding { on } set: { saveLowDistraction($0) })
+        } footer: {
+            Text("For all your devices. When on, questions, approvals, decisions only you can make, your reminders and the main conversation's notices still notify you; task results, “Please verify” requests and other conversations' notices wait for the briefing and Held Pushes, and finished agents stay silent.")
+        }
+    }
+
+    /// Reads the switch; a hub without it (404) or one that does not answer shows no section.
+    private func loadLowDistraction() async {
+        guard let api = model.api, !model.isDemo else { return }
+        let request = lowDistractionRequest
+        let on = try? await api.pushLnMode().enabled
+        guard request == lowDistractionRequest else { return }
+        lowDistraction = on
+    }
+
+    /// Shown at once; the hub's answer then stands, and a refusal puts the switch back and says why.
+    private func saveLowDistraction(_ on: Bool) {
+        guard let api = model.api, let before = lowDistraction, before != on else { return }
+        lowDistraction = on
+        lowDistractionRequest += 1
+        let request = lowDistractionRequest
+        Task {
+            do {
+                let saved = try await api.setPushLnMode(on)
+                guard request == lowDistractionRequest else { return }
+                lowDistraction = saved.enabled
+                Haptics.success()
+            } catch {
+                guard request == lowDistractionRequest else { return }
+                lowDistraction = before
+                model.show(error)
+            }
+        }
     }
 
     @ViewBuilder private func quietHoursSection(_ quiet: QuietHours) -> some View {

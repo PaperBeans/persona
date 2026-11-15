@@ -71,7 +71,11 @@ the Paseo or Cindy runtime, or a host without checkout support), the task runs i
 A repository nobody has committed to (no ref names a commit) has nothing to check out, so `worktree.prepare` fails
 with code `worktree_no_commits` (#5548): an inferred `new` then uses the free directory as `existing`, and an occupied one
 is refused with a message naming the task that holds it; an explicit `new` fails saying the repository has no commits.
-An explicit `workspace` overrides inference. When a caller means a particular branch/PR/checkout, it should name that checkout with `existing`.
+An explicit `workspace` overrides inference. When a caller knows a particular checkout, it should name it with `existing`.
+For an explicit `new.branch`, admission first asks the node whether that branch already has a checkout in the same repository.
+It reuses that checkout only after a successful clean-tree check, complete live-Agent inventory, and the hub's unfinished-task
+ownership check. Dirty, occupied, changed or unverifiable checkouts are refused with their path and known owner; nothing is forced.
+Older nodes omit branch lookup and keep the existing creation/refusal behavior. An unnamed `new` still creates its task-specific branch.
 Inference uses the node's `worktree.status`; if the node cannot answer, the plan reports the error and asks for an explicit choice.
 The same preference is available through `persona_settings` as `assistant.task_workspace_preference`.
 
@@ -88,6 +92,8 @@ There is no new workspace-root/template setting or arbitrary new-path override. 
 calls `newWorktree`, uses the engine's returned path/host workspace ID, and stores the actual `cwd` in the plan and the unchanged
 `todo_agents.cwd` column. A retry uses the created checkout rather than creating another one; a created checkout stays on its machine.
 Creation/lookup failures prevent Agent launch and appear on the task as failed dispatch with the underlying reason.
+A safely reused checkout is saved with `workspace_resolved.reused: true`, not `created: true`; it keeps its actual path and
+machine on retries just as a newly created checkout does. This recovery does not grant permission or change the Start gate.
 
 An existing workspace on the same machine and canonical path cannot be reused while another unfinished task holds it.
 The refusal names that task's ID/title and suggests waiting or choosing New (v1 has no queue).
@@ -159,13 +165,13 @@ each count is its rows:
   back to In progress. An entry with nothing counted (no number on it), Needs you or In progress, is grey and still opens:
   to the rows it lists uncounted, or to its line ("All caught up", "Nothing in progress"); the web drew such an In
   progress in its working blue and ink until 2026-11-14.
-- **One home for an Agent several tasks list** (web, 2026-11-14): an Agent that more than one of the conversation's tasks
-  lists asks under one of them, the task the hub ties its session to (`Session.todo`), else the first that lists it. Its
-  cards are that task's row alone and are counted once; the other tasks do not wait on the user for them and are In
-  progress, unless a decision of their own keeps them in Needs you (without the Agent's cards). Before, each task listing
-  the Agent showed and counted the same approval. Android (#7531) and the Apple clients (#7532) split the old way until
-  they adopt it, and the shared cases (`spec/fixtures/entries`) get one for it once every client does; the whole-client
-  Needs you rule is #5974's.
+- **One home for an Agent several tasks list** (every client, 2026-11-14: web #7490, Android #7531, iOS / Mac #7532): an
+  Agent that more than one of the conversation's tasks lists asks under one of them, the task the hub ties its session
+  to (`Session.todo`), else the first that lists it (oldest card first; one plan's tasks in the plan's order, the web's
+  slot id `plan:<plan>:<index>`). Its cards are that task's row alone and are
+  counted once; the other tasks do not wait on the user for them and are In progress, unless a decision of their own
+  keeps them in Needs you (without the Agent's cards). Before, each task listing the Agent showed and counted the same
+  approval. The shared cases (`spec/fixtures/entries`) pin it; the whole-client Needs you rule is #5974's.
 
 The split is one pure function per client: web `assistantEntries` (`web/src/lib/assistant-entries.ts`), Android
 `assistantEntries` (`persona.core.domain.tasks`), iOS / iPad / Mac `AssistantEntries.split`
@@ -518,7 +524,7 @@ Who does the follow-up: by default the **background supervisor** (#4927, "Backgr
 - **Supervisor loop** (`server/internal/assistant/supervise_signals.go`, no model calls): every 30 seconds, inspect supervised tasks plus task events and derive signals:
   `review` pending review, `idle` stopped unfinished, `needs_you` waiting for an answer over 3 minutes (immediately for quiet tasks, since the user received no push), `stalled` working without progress (no session update) for more than max(20 minutes, estimate × 1.5), or in any other state (waiting on background work, a wake, stopped) with nothing new in its transcript for more than max(2 hours, estimate × 1.5), so a wait nothing ends is still heard of (#5124), `interrupted` by model-service error, `failed` to start, `orphaned` when nobody works on it any more (below), `inbox` new Inbox messages from other people about it (below, off by default).
   These follow the task's current Agents (#6483, `supersededAgents` in `server/internal/assistant/task_completion.go`): an unreleased link whose session is offline or no longer listed, while a link made after it is listed and not offline, is an Agent the task was handed over from. It is left out of the stop receipt and its judgment (the task settles once the current Agent stops, so `idle` reaches the supervisor) and out of `needs_you` / `stalled`. A lone offline Agent with no later one is still the task's Agent.
-  The same signal for the same task is reported only once within the same state segment. A second guard suppresses an unchanged summary for the same task, Agent and signal kind for 30 minutes, regardless of new turn timestamps or elapsed-minute counters. Its hashed fingerprints and timestamps live in Postgres settings (`assistant.supervision_dedup`), survive manager restarts, and are reserved before dispatch; failed dispatch and queue admission release the reservation. An unreadable or unwritable reservation is retried rather than treated as empty history. Changed evidence, questions, summary, task, Agent or status can wake again. Signals from multiple tasks are combined into **one "📋 督办" (supervision) message** in the main chat (`prompts/assistant/supervise.md`: task, signal, criteria, question, Agent's last text, links, and handling instructions).
+  The same signal for the same task is reported only once within the same state segment. A second guard suppresses an unchanged summary for the same task, Agent and signal kind for 30 minutes, regardless of new turn timestamps or elapsed-minute counters. Its hashed fingerprints and timestamps live in Postgres settings (`assistant.supervision_dedup`), survive manager restarts, and are reserved before dispatch; failed dispatch and queue admission release the reservation. An unreadable or unwritable reservation is retried rather than treated as empty history. Changed evidence, questions, summary, task, Agent or status can wake again. Signals from multiple tasks are combined into **one "📋 督办" (supervision) message** in the main chat (`prompts/assistant/supervise.md`: task, signal, criteria, question, Agent's last text, evidence and links; no handling instructions).
   The first waits 15 seconds to coalesce; subsequent messages are at most one per 10 minutes, with a 2-minute minimum for decision-waiting signals such as `needs_you` / `idle` / `interrupted` / `failed`. If the main chat is running, queue between turns ("Supervision message" above the input); replace any queued, undelivered supervision message with the merged one. A supervision message also waits while the owner is talking in the conversation, a decision-waiting one at most 5 minutes, and the queue goes out by rank (`docs/assistant/assistant.md` "Messages from the system wait for the owner").
   Supervised tasks no longer emit "🔔 任务…" (task notices) from `quiet.go`; all appear in supervision messages. Tasks started by other chats are unchanged.
   **A turn that ended unheard** (#5718, `server/internal/assistant/task_turns.go`): the same loop takes up a supervised task's turn that the runtime closed while no session list said `working` (an inventory that says `idle`, `done` or `unknown` throughout, a manager down or disconnected at the time), and finishes what a manager before a restart left of one (the judgment, the message). `review`, `idle`, `unjudged` and `interrupted` are kept on the turn's row in `assistant.task_turns` with when they were told, so each completed turn has one receipt, one judgment and one message across restarts and repeated or reordered lists. Key, bound and cost: `docs/assistant/todos.md`, "Automatic completion".
@@ -544,7 +550,7 @@ Who does the follow-up: by default the **background supervisor** (#4927, "Backgr
   - **The reviewer session** is linked to the to-do in `todo_agents` with `source: "review"`, `via` the run's id, released from the start: it is never one of the task's agents (judge, rework, closing). It is left out of the session lists the apps get, kept quiet (no pushes, badges or Live Activity), and its turns are not triaged.
 - **Assignment deduplication**: `task_plan` compares new tasks with ongoing to-dos and working / waiting Agents. The same issue / PR number, or the same computer and directory (including nested directories) with similar titles, or very similar titles, yields "Possible duplicate" in the result. The assistant is told to inspect before deciding whether to merge or cancel; dispatch is not blocked.
 - **Snapshot**: supervised tasks under "Tasks started from this chat" include "Supervision: normal / stalled N minutes / waiting for an answer N minutes / pending review / rework round N / awaiting your decision / parked until a time, on what and why / accepted" and a criteria count. Items needing action come first.
-- **Assistant workflow** is in its CLAUDE.md (`prompts/assistant/claude_md.md`, "做事方式"): always provide `done_when` when assigning; make decisions independently when possible, nudge or change approach when stalled, sequence resource contention, cancel duplicates; verify PR / CI / screenshots / live status personally before acceptance; tell the user only about decisions they must make and accepted results; split downstream follow-through (deployment, issue closure, TestFlight) into subsequent tasks or follow-ups.
+- **Assistant workflow**: common task planning stays in the shared `prompts/assistant/claude_md.md`; detailed supervision handling lives once in `prompts/assistant/supervision_instructions.md`. The manager sends this static fragment as per-conversation system/developer instructions only to authorized supervisors, including side chats that own open supervised tasks, never by rewriting their shared directory. Event messages contain task facts only. See `docs/assistant/assistant.md`, "Role-scoped supervision instructions (#8251)", for role scope, startup/resume isolation and the custom-runtime compatibility boundary.
 - **In charge of any agent** (#5112, `assistant/agent_control.go`):
   - **Levels of interruption**: `agent_send` queues behind the agent's turn; `agent_interrupt` stops the turn at once (`session.interrupt`: Esc in a herdr pane, the runtime's or Codex's own cancel) and keeps the session; with `then` it sends the new instruction right after (steering). Work already done is not undone. Not for assistant conversations or read-only sources (`capabilities.interrupt` false). An agent that is not working (including one still starting) is not stopped; `then` is still sent (queued if it is busy). Closing an agent is not offered to the model (accepted / cancelled tasks are retired as before).
   - **Adoption**: `agent_supervise`, main conversation only. An agent on no todo becomes a task of the conversation: a new todo (its `title` when given, cleaned as `task_plan` titles are; else the session's title), the agent linked, the supervisor set, a task card in the feed; from then on it is like a `task_plan` task (signals, pending review, `task_review`). On one of its own tasks it sets `done_when` / `expect_minutes`. Another conversation's task or the user's own todo is refused and stays theirs. If the todo is made but the agent cannot be linked, the todo is closed at once (no empty task is left); one adoption runs at a time. The agent is not told: the answer reminds the assistant to tell it with `agent_send` if it should work to the criteria or report.
@@ -1088,7 +1094,7 @@ Hub-inserted chat entries do not enter Claude's transcript (that would trigger a
 | Task details (embedded Agent chat), task board | `apple/Persona/Views/Assistant/Tasks/TaskSheets.swift` |
 | Feed inserted into chat at the end of its turn (before the next message) | `ChatLines.mergeFeed`, `ChatLine.Content.feed` |
 | Above the input: question card (earliest only, with "N more"), `@` list, dock, routing label; routed messages go directly to the task | `ChatView.taskFooter`, `Composer.sendText` |
-| Action bar on iPhone, iPad and Mac: Needs You and In Progress in place of the dock, each opening its tray, each thing in one of them (#3393, the Apple side of #3387) | `apple/Persona/Views/Assistant/Tasks/AssistantActionBar.swift` (`ActionTrayContent`, `DockCapsule`) |
+| Action bar on iPhone, iPad and Mac: Needs You and In Progress in place of the dock, each opening its tray, each thing in one of them (#3393, the Apple side of #3387); in the main conversation with low-distraction mode on, Held Pushes after them, its tray in the same place (#7782, #8223) | `apple/Persona/Views/Assistant/Tasks/AssistantActionBar.swift` (`ActionTrayContent`, `DockCapsule`), `apple/Persona/Views/Assistant/Tasks/PushInterceptsView.swift` |
 
 - Reuse Agent state colors (`AgentState.tone`: Needs you red, Working amber, Unread green), not the prototype's orange waiting state, to match Agents.
 - If dock pills do not fit, truncate the title but never "Waiting for you."
@@ -1108,13 +1114,17 @@ Hub-inserted chat entries do not enter Claude's transcript (that would trigger a
   Dynamic Type), 12 pt horizontal and 6 pt vertical padding, a full capsule radius, `Theme.Fill.chip` behind secondary
   text, 28 pt tall at the default size, 8 pt apart. Open is the filter chip's on look in the same size (accent fill, white
   semibold); Needs You with rows takes the waiting pill's tint, empty it is the plain grey capsule and opens "All Caught Up".
+  In the main conversation with low-distraction mode on, Held Pushes (#7782) is a third entry in the same capsule after
+  them; its tray of today's held pushes opens in the trays' place, above the row at the bar's width, and one tray is open
+  at a time (#8223; Android's `AssistantTray.HeldPushes` shares the slot the same way, the web opens a dialog).
   At the accessibility text sizes the entries (and the computer pill after them) are a `FlowLayoutRow`: one that doesn't
   fit goes on to the next line, each whole. Side by side they made the row, and with it the whole chat page, wider than
   the screen, the header and the composer cut off at both edges (#5702; `docs/design/DESIGN_SYSTEM.md` 1.2 rule 3 (c),
   wrapping rather than a sideways scroll so Needs You and its count stay in view). Below those sizes the row is as before.
   Tests: `AssistantEntriesFixtureTests` (the shared fixture), `AssistantActionBarTests`, UI `AssistantActionBarUITests`
   (`MOCK_TASKS=1 MOCK_TASKS_NO_ASKS=1`; `testEntriesStayOnScreenAtEveryTextSize` in zh-Hans, English and Japanese at
-  the default and the largest size, light and dark).
+  the default and the largest size, light and dark), UI `PushInterceptsUITests` (`MOCK_LN=1`; the held pushes tray's
+  place and width, the three entries on one row, one tray at a time).
 - Task details have one header layer: the embedded Agent page takes over the task name, Close, and task ⋯ (#3255; see "Task details" above).
 - Screenshots: `MOCK_TASKS=1`, `MOCK_TASKS_AT`, `-showTaskDetail`, `-showTaskBoard` (`docs/operations/testing.md`).
 

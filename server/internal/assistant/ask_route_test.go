@@ -194,7 +194,7 @@ func TestAskGoesToTheLeaderFirst(t *testing.T) {
 	e := newRouteEnv(t, nil, true)
 	e.raise(askQuestion("ix1", "worker-1"))
 	n := e.noticeWith("lead1", "interaction_id=ix1")
-	for _, want := range []string{"先交给你处理，用户还没收到", "用哪个分支？", "machine=Mac", "session_id=worker-1", "ask_escalate", "自动上交给主对话"} {
+	for _, want := range []string{"signal=ask", "先交给你处理，用户还没收到", "用哪个分支？", "machine=Mac", "session_id=worker-1"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("the leader's message lacks %q:\n%s", want, n)
 		}
@@ -291,7 +291,7 @@ func TestLeaderEscalatesAnApproval(t *testing.T) {
 		t.Fatalf("the user's card: %+v %+v", shown, shown.Delegate)
 	}
 	m := e.noticeWith("conv1", "负责它的 leader 对话判断要用户决定")
-	for _, want := range []string{"它的 Agent 在等的卡片已经发给用户", "要推到远端分支", "leader 推荐：允许", "interaction_id=ix1", "leader 升级上来的"} {
+	for _, want := range []string{"它的 Agent 在等的卡片已经发给用户", "要推到远端分支", "leader 推荐：允许", "interaction_id=ix1", "signal=escalated"} {
 		if !strings.Contains(m, want) {
 			t.Errorf("the main conversation's message lacks %q:\n%s", want, m)
 		}
@@ -352,7 +352,7 @@ func TestUnhandledAskGoesUp(t *testing.T) {
 	e.noticeWith("lead1", "interaction_id=ix1")
 	e.s.askTick(time.Now().Add(2 * askHoldFor))
 	m := e.noticeWith("conv1", "interaction_id=ix1")
-	for _, want := range []string{"下一层没有及时处理，上交到你这里", "自动上交给用户"} {
+	for _, want := range []string{"signal=ask", "interaction_id=ix1", "下一层没有及时处理，上交到你这里"} {
 		if !strings.Contains(m, want) {
 			t.Errorf("the main conversation's message lacks %q:\n%s", want, m)
 		}
@@ -719,17 +719,27 @@ func TestAskWithoutLeadersIsTheUsers(t *testing.T) {
 
 // What a leader reads of the cards handed to it, and what the main conversation reads of the leader's escalation.
 func TestGoldenSuperviseAsk(t *testing.T) {
-	golden(t, "supervise.ask", prompts.RenderSupervise(prompts.Supervise{Leader: true, Asked: true, AskMinutes: 5,
+	got := prompts.RenderSupervise(prompts.Supervise{Leader: true, Asked: true, AskMinutes: 5,
 		Entries: []prompts.SuperviseEntry{{ID: "todo_1", Title: "修登录崩溃", Kind: sigAsk, DoneWhen: []string{"PR 合并到 main"},
 			Machine: "box", Session: "a1b2c3d4", Last: "改好了，要推到远端",
 			Asks: []prompts.SuperviseAsk{
 				{ID: "ix_1", Kind: proto.IxQuestion, Machine: "box", Session: "a1b2c3d4", Text: "- 用哪个分支？（选项：main / feat/x）"},
 				{ID: "ix_2", Kind: proto.IxPermission, Machine: "box", Session: "e5f6a7b8", Text: "允许运行 Bash：git push", Raised: true}},
-			Decisions: "- 用哪个分支？→ feat/x（用户在卡片上选的）"}}}))
-	golden(t, "supervise.ask_escalated", prompts.RenderSupervise(prompts.Supervise{Escalated: true,
+			Decisions: "- 用哪个分支？→ feat/x（用户在卡片上选的）"}}})
+	golden(t, "supervise.ask", got)
+	for _, fact := range []string{"Question routing: timeout_minutes=5", "signal=ask", "interaction_id=ix_1", "用哪个分支？", "machine=box", "session_id=a1b2c3d4"} {
+		if !strings.Contains(got, fact) {
+			t.Errorf("supervision payload lacks fact %q:\n%s", fact, got)
+		}
+	}
+	escalated := prompts.RenderSupervise(prompts.Supervise{Escalated: true,
 		Entries: []prompts.SuperviseEntry{{ID: "todo_1", Title: "修登录崩溃", Kind: sigEscalated, Detail: "要推到远端分支，需要你同意",
 			Recommend: "允许", Asks: []prompts.SuperviseAsk{{ID: "ix_2", Kind: proto.IxPermission, Machine: "box", Session: "e5f6a7b8",
-				Text: "允许运行 Bash：git push"}}}}}))
+				Text: "允许运行 Bash：git push"}}}}})
+	golden(t, "supervise.ask_escalated", escalated)
+	if !strings.Contains(escalated, "signal=escalated") || !strings.Contains(escalated, "要推到远端分支") {
+		t.Errorf("escalated payload lacks task facts:\n%s", escalated)
+	}
 }
 
 // With leaders configured, a quiet task of the main conversation's still has its card go to the main conversation
@@ -752,7 +762,7 @@ func TestQuietTaskAskIsNotPushedOnTimeout(t *testing.T) {
 	}
 	e.raise(askQuestion("ix1", "worker-3"))
 	n := e.noticeWith("conv1", "interaction_id=ix1")
-	if !strings.Contains(n, "自动上交给用户") {
+	if !strings.Contains(n, "signal=ask") {
 		t.Fatalf("the main conversation's message:\n%s", n)
 	}
 	e.s.askTick(time.Now().Add(2 * askHoldFor))

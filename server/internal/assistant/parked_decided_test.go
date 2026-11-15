@@ -80,9 +80,15 @@ func TestOwnersDecisionEndsAParkingThatWaitsForThem(t *testing.T) {
 	waitFor(t, "the supervisor's message", func() bool { return len(f.notices()) > before })
 	n := f.notices()[before]
 	for _, want := range []string{"搁置期间用户在任务上记下了新的决定，搁置已经结束", "搁置时在等：Whether this goes ahead of the billing work",
-		"这个任务已经定下的事", "Do this now or after the billing work?", "Leave it until someone runs into it", "搁置期间记下决定的："} {
+		"这个任务已经定下的事", "Do this now or after the billing work?", "Leave it until someone runs into it", "signal=park_decided"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("the message lacks %q:\n%s", want, n)
+		}
+	}
+	// Handling belongs to the role-scoped system policy, not every decision event.
+	for _, manual := range []string{"搁置期间记下决定的：", "agent_send", "task_review"} {
+		if strings.Contains(n, manual) {
+			t.Errorf("the event repeats handling policy %q:\n%s", manual, n)
 		}
 	}
 	waitFor(t, "the mark on the review", func() bool {

@@ -338,15 +338,8 @@ struct AssistantModelSheet: View {
                 if !panel.unavailable.isEmpty {
                     Section(String(localized: "Unavailable here")) {
                         ForEach(panel.unavailable) { item in
-                            HStack(alignment: .top, spacing: Theme.Space.m) {
-                                ThemedIcon(Theme.Icon.locked).foregroundStyle(.secondary)
-                                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                                    Text(item.displayName?.isEmpty == false ? item.displayName! : item.name)
-                                        .font(Theme.Font.heading).foregroundStyle(.secondary).lineLimit(1)
-                                    Text(item.reason).font(Theme.Font.label).foregroundStyle(.tertiary)
-                                }
-                            }
-                            .accessibilityIdentifier("assistantModel.unavailable.\(item.name)")
+                            UnavailableLauncherRow(item: item)
+                                .accessibilityIdentifier("assistantModel.unavailable.\(item.name)")
                         }
                     }
                 }

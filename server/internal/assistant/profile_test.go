@@ -273,7 +273,7 @@ func TestSendParams(t *testing.T) {
 	s := newTestService(t, f)
 	setModel(t, s, "assistant", ModelBinding{Provider: "launcher.conv"})
 	if p, err := s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "unlisted", Params: map[string]any{"text": "hi"}}); err != nil ||
-		len(p) != 2 || p["is_main"] != false {
+		len(p) != 3 || p["is_main"] != false || p["supervision_instructions"] != "" {
 		t.Fatalf("unlisted: %v %v", p, err)
 	}
 	p, err := s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "side", Params: map[string]any{"text": "hi"}})

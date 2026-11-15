@@ -224,8 +224,8 @@ func TestParkedDueComesOnceAtItsTimeAndAfterARestart(t *testing.T) {
 	s.superviseWatch(ctx, due.Add(time.Minute))
 	waitFor(t, "the parked_due message", func() bool { return len(f.notices()) > before })
 	n := f.notices()[before]
-	for _, want := range []string{"搁置到期了", "The design team has to pick the icon set first", "等别人", "已经连续搁置 1 次", "还能再搁置 3 次",
-		"搁置到期的：先看等的那件事发生了没有"} {
+	for _, want := range []string{"搁置到期了", "The design team has to pick the icon set first", "等别人", "已经连续搁置 1 次", "剩余搁置次数 3",
+		"signal=parked_due"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("the message lacks %q:\n%s", want, n)
 		}

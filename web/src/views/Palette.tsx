@@ -13,6 +13,7 @@ import type { EvidenceSnippet } from "../lib/agent-chatlist-filter";
 import { storedValue } from "../lib/compatibility";
 import { useScope } from "../lib/current-assistant";
 import { SESSIONS_LIST_FEATURE } from "../lib/session-list";
+import { supportsPagedAgents } from "../lib/runtime-list";
 import { SESSIONS_TODO_FEATURE } from "../lib/session-groups";
 import { GROUPING_KEY, pagedAgentList } from "../lib/sidebar-api";
 import { filterAgentList } from "../lib/agent-list-filters";
@@ -167,7 +168,8 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
   const byTodo = useStore((s) => s.features.includes(SESSIONS_TODO_FEATURE));
   const todosSupported = useStore((s) => s.todosSupported);
   const several = useScope().several;
-  const completeList = !pagedAgentList({ bounded, byTodo, todosSupported, pins, stored: storedValue(GROUPING_KEY), several });
+  const agentsPaging = useStore((s) => supportsPagedAgents(s.features));
+  const completeList = !pagedAgentList({ bounded: agentsPaging, byTodo, todosSupported, pins, stored: storedValue(GROUPING_KEY), several });
   const panesOn = useStore((s) => s.features.includes("terminal_panes"));
   // Persona chats found by what was said in them too (#6283): the manager's search, merged into the local matches
   const searchOn = useStore((s) => s.features.includes("assistant_search"));

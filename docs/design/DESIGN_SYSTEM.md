@@ -411,6 +411,15 @@ For every component: use the design-system one, not a lookalike. Counts are appr
   types in `ink-3`) 8 px beside the panel, right or left, or a line under the rows when neither side has room. Empty:
   **No matching commands**, 40 px, centered, `ink-3`. No key hint line. Ranking, keys and deviations: `docs/web/web.md`
   ("Input (Prompt Bar)").
+- Web `/` palette skill rows (#6171): where the `@` panel can select skills, the palette lists the commands first, then
+  matching skills ranked by the same exact / prefix / containing name rule with description matches last. The existing
+  25-row cap covers both groups and never drops a command for a skill. A skill row reuses the `@` row's spark icon,
+  readable name, description and source in the palette's 36 px row (44 px on touch), rather than reading as a command.
+  Picking one removes `/word` and adds the same opaque skill reference and removable chip as `@`; it never inserts
+  invocation text. The catalog is read only on palette opening, commands render before it answers, late rows do not move
+  the active row, and loading / unavailable / unsupported environments keep commands available with at most the quiet
+  skill status line. The empty state is **No matching commands or skills** where skills can be listed. This is a second
+  entry to the existing skill-selection interaction, not a new component pattern or runtime command.
 - Editing state (web, #4503): editing the last message puts its words and quotes back into the box under a one-line bar at the box's top, above the context chips and quote bars. The bar has an accent pencil, **Editing last message** (`ink-2`, medium), a truncating hint (`ink-3`, precise pointers only) and a × with the quote bar's 24 px look. It is the only sign of the state, and the text field stays the same field. The irreversible step (the rewind) waits for an explicit send, which the bar's hint names. Esc or × leaves with nothing changed (`docs/web/web.md` "Pages", **Edit last message**).
 - Queued messages (web, #5327): drawn as cindy's pending queue at the owner's request (where cindy and the older design
   differ, cindy wins for this area). They sit in the composer's `top` slot, first in the card, flush with its border and
@@ -1090,9 +1099,10 @@ The hub's link while it is down (Waiting for network, Connecting…, Updating…
 
 ### Web skill mentions (#5357)
 
-Reuse the composer's existing `ComposerPanel` surface, neutral sliding highlight, icon set, keyboard/IME/Escape
-behavior and context chips. A skill row has two lines: readable name plus source, then its description; the source
-distinguishes equal names. Selecting it adds a removable skill chip rather than hiding an invocation in display text.
+Reuse the composer's existing `ComposerPanel` surface for `@` and `SlashPalette` surface for `/`, their neutral sliding
+highlight, icon set, keyboard/IME/Escape behavior and context chips. A skill row has a readable name, source and
+description; `@` uses two lines, while `/` puts them in its own 36 px row (44 px on touch). The source
+distinguishes equal names. Selecting either row adds the same removable skill chip and opaque reference rather than hiding an invocation in display text.
 Skill rows and the skill chip's remove target meet the Web 44 px touch size. The menu's loading, partial-inventory and
 failure status stays secondary and never disables ordinary chat. No new primary screen, setting, model choice or
 native client pattern is introduced. Use the existing surface/hover/ink/accent tokens in light/dark and narrow layouts.

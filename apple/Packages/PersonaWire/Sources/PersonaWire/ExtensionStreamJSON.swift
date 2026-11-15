@@ -3,20 +3,26 @@ import PersonaWire
 
 /// Original stream JSON, not a second wire protocol. Numeric tokens and property presence survive
 /// staged reduction; generated DTOs are only a detached projection for the native renderer.
-nonisolated indirect enum ExtensionStreamJSON: Equatable, Sendable {
+public nonisolated indirect enum ExtensionStreamJSON: Equatable, Sendable {
     case null, bool(Bool), number(String), string(String), array([Self]), object([String: Self])
 
-    enum Failure: Error { case malformed, bounds, schema, topology, version, unsupported }
-    var object: [String: Self]? { if case .object(let v) = self { v } else { nil } }
-    var array: [Self]? { if case .array(let v) = self { v } else { nil } }
-    var string: String? { if case .string(let v) = self { v } else { nil } }
-    var decimal: Decimal? { if case .number(let v) = self { Decimal(string: v, locale: Locale(identifier: "en_US_POSIX")) } else { nil } }
-    struct Numeric {
-        let negative: Bool
-        let digits: [UInt8]
-        let scale: Int
-        var integer: Bool { digits.isEmpty || scale >= 0 }
-        func compare(_ other: Self) -> Int {
+    public enum Failure: Error { case malformed, bounds, schema, topology, version, unsupported }
+    public var object: [String: Self]? { if case .object(let v) = self { v } else { nil } }
+    public var array: [Self]? { if case .array(let v) = self { v } else { nil } }
+    public var string: String? { if case .string(let v) = self { v } else { nil } }
+    public var decimal: Decimal? { if case .number(let v) = self { Decimal(string: v, locale: Locale(identifier: "en_US_POSIX")) } else { nil } }
+    public struct Numeric {
+        public let negative: Bool
+        public let digits: [UInt8]
+        public let scale: Int
+
+        public init(negative: Bool, digits: [UInt8], scale: Int) {
+            self.negative = negative
+            self.digits = digits
+            self.scale = scale
+        }
+        public var integer: Bool { digits.isEmpty || scale >= 0 }
+        public func compare(_ other: Self) -> Int {
             if digits.isEmpty && other.digits.isEmpty { return 0 }
             if negative != other.negative { return negative ? -1 : 1 }
             let direction = negative ? -1 : 1
@@ -31,7 +37,7 @@ nonisolated indirect enum ExtensionStreamJSON: Equatable, Sendable {
             return 0
         }
     }
-    var numeric: Numeric? {
+    public var numeric: Numeric? {
         guard case .number(let token) = self else { return nil }
         let parts = token.lowercased().split(separator: "e", omittingEmptySubsequences: false)
         let decimal = parts[0].split(separator: ".", omittingEmptySubsequences: false)
@@ -44,8 +50,8 @@ nonisolated indirect enum ExtensionStreamJSON: Equatable, Sendable {
         let scale = boundedExponent - (decimal.count == 2 ? decimal[1].utf8.count : 0) + coefficient.count - last - 1
         return Numeric(negative: token.first == "-", digits: Array(coefficient[first...last]), scale: scale)
     }
-    subscript(_ key: String) -> Self? { object?[key] }
-    var data: Data {
+    public subscript(_ key: String) -> Self? { object?[key] }
+    public var data: Data {
         switch self {
         case .null: Data("null".utf8)
         case .bool(let v): Data((v ? "true" : "false").utf8)
@@ -61,7 +67,7 @@ nonisolated indirect enum ExtensionStreamJSON: Equatable, Sendable {
         }
     }
 
-    static func parse(_ data: Data, limit: Int = 1_048_576) throws -> Self {
+    public static func parse(_ data: Data, limit: Int = 1_048_576) throws -> Self {
         guard data.count <= limit, String(data: data, encoding: .utf8) != nil else { throw Failure.bounds }
         var parser = Parser(bytes: Array(data))
         let value = try parser.value(depth: 0)
@@ -130,10 +136,10 @@ nonisolated indirect enum ExtensionStreamJSON: Equatable, Sendable {
 
 /// The small JSON Schema vocabulary used by the canonical extension schemas. Constraints are
 /// generated, not copied into a competing Swift component/request model.
-nonisolated enum ExtensionStreamSchema {
+public nonisolated enum ExtensionStreamSchema {
     private static let documents = try! ExtensionStreamJSON.parse(Data(ExtensionWireSchemas.json.utf8), limit: 4_194_304)
 
-    static func check(_ value: ExtensionStreamJSON, definition: String, file: String = "stream.schema.json") throws {
+    public static func check(_ value: ExtensionStreamJSON, definition: String, file: String = "stream.schema.json") throws {
         guard let schema = documents[file]?["$defs"]?[definition], valid(value, schema: schema, file: file, depth: 0) else {
             throw ExtensionStreamJSON.Failure.schema
         }

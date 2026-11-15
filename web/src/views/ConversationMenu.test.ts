@@ -36,18 +36,18 @@ function deps(over: Partial<ConversationMenuDeps> = {}) {
 
 
 describe("a Persona conversation's sidebar menu (iOS AssistantSidebar)", () => {
-  it("offers 设为常驻, 重命名…, 归档, 拷贝会话 ID and 结束… for a running conversation, and never the word 置顶", () => {
+  it("offers 设为常驻, 重命名…, 归档, 复制会话 ID and 结束… for a running conversation, and never the word 置顶", () => {
     const items = conversationMenuItems(conv(), { main: false });
-    expect(items.map((i) => i.label)).toEqual(["设为常驻", "重命名…", "归档", "拷贝会话 ID", "结束…"]);
+    expect(items.map((i) => i.label)).toEqual(["设为常驻", "重命名…", "归档", "复制会话 ID", "结束…"]);
     expect(items.find((i) => i.key === "end")).toMatchObject({ danger: true, confirm: "确认结束", inline: true });
   });
 
-  it("gives the main conversation only 拷贝会话 ID and 结束…", () => {
+  it("gives the main conversation only 复制会话 ID and 结束…", () => {
     expect(conversationMenuItems(conv(), { main: true }).map((i) => i.key)).toEqual(["copy", "end"]);
   });
 
   it("has no 结束… once it has stopped", () => {
-    expect(conversationMenuItems(conv({ status: "offline" }), { main: false, leader: true }).map((i) => i.label)).toEqual(["取消常驻", "重命名…", "归档", "拷贝会话 ID"]);
+    expect(conversationMenuItems(conv({ status: "offline" }), { main: false, leader: true }).map((i) => i.label)).toEqual(["取消常驻", "重命名…", "归档", "复制会话 ID"]);
   });
 
   it("asks a second time before pinning or unpinning, and says what moves (#6214)", () => {
@@ -114,10 +114,10 @@ describe("a Persona conversation's sidebar menu (iOS AssistantSidebar)", () => {
     expect(failed.calls).toEqual(["error:offline", "refresh"]);
   });
 
-  it("gives the background supervisor only 拷贝会话 ID: it is built in, running or not (#5082)", async () => {
+  it("gives the background supervisor only 复制会话 ID: it is built in, running or not (#5082)", async () => {
     const { d, calls } = deps();
     const items = conversationMenuItems(conv(), { main: false, builtIn: true }, d);
-    expect(items.map((i) => i.label)).toEqual(["拷贝会话 ID"]);
+    expect(items.map((i) => i.label)).toEqual(["复制会话 ID"]);
     expect(conversationMenuItems(conv({ status: "offline" }), { main: false, leader: true, builtIn: true }).map((i) => i.key)).toEqual(["copy"]);
     await items[0].onSelect();
     expect(calls).toEqual(["copy:c1"]);

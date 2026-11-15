@@ -452,6 +452,9 @@ final class AppModel {
     @ObservationIgnored private(set) var launcherCache: [MachineRef: [Launcher]] = [:]
     /// What each machine's launcher pickers run with none picked (`LauncherDefault`), loaded with `launcherCache`.
     @ObservationIgnored private(set) var launcherDefaults: [MachineRef: LauncherDefault] = [:]
+    /// What each machine's New Agent list says is left out there, with why (`unavailable`, #8109: the Persona-managed
+    /// providers whose own-service rule skips it), loaded with `launcherCache`; empty from an older hub.
+    @ObservationIgnored private(set) var launcherUnavailable: [MachineRef: [UnavailableLauncher]] = [:]
     /// The main chat's own picker (`?purpose=assistant`, #5033): its eligible launchers, the effective Main chat
     /// default, and what can't run there with why. Separate from `launcherCache`, which serves the agent.new purpose.
     @ObservationIgnored private(set) var assistantLauncherCache: [MachineRef: APIClient.LaunchersResponse] = [:]
@@ -3535,6 +3538,7 @@ final class AppModel {
     func launcherDefaultsChanged() {
         launcherCache = [:]
         launcherDefaults = [:]
+        launcherUnavailable = [:]
         assistantLauncherCache = [:]
         // Model Settings changes are launcher changes too: wake the open main-chat composer to re-read the default.
         launchersRevision += 1
@@ -3554,6 +3558,7 @@ final class AppModel {
         let r = try await api.launcherList(machine: machine.id)
         launcherCache[machine] = r.launchers
         launcherDefaults[machine] = r.default
+        launcherUnavailable[machine] = r.unavailable ?? []
         return r.launchers
     }
 

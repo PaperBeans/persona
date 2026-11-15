@@ -784,6 +784,17 @@ func (h *Hub) interceptReaderAllowed(r *http.Request) bool {
 	return slices.Contains(h.cfg.InterceptReaders, principalOf(r.Context()).Extension)
 }
 
+// setPushGrading turns the switch on or off: the route's PUT (the apps' Settings › Notifications) and persona_settings
+// notifications.low_distraction once the owner approved it on the phone (self_settings_lnmode.go). The managers are told
+// at once, since they hold back their own cards by the switch too (Hello.QuietPush).
+func (h *Hub) setPushGrading(ctx context.Context, on bool) error {
+	if err := h.push.setLnMode(ctx, on); err != nil {
+		return err
+	}
+	h.assistantUpdated()
+	return nil
+}
+
 // lnRoutes serves the switch, the read-only list of held pushes and the read-only daily delivery counts. The routes
 // sit behind the standard API gate; an extension token with the notify scope may read the switch, its own manager's
 // held pushes and counts, but not change the switch.
@@ -803,11 +814,10 @@ func (h *Hub) lnRoutes(api *http.ServeMux) {
 			writeBodyErr(w, err, err)
 			return
 		}
-		if err := h.push.setLnMode(r.Context(), body.Enabled); err != nil {
+		if err := h.setPushGrading(r.Context(), body.Enabled); err != nil {
 			writeErr(w, http.StatusServiceUnavailable, err)
 			return
 		}
-		h.assistantUpdated() // the managers hold back their own cards by the switch too (Hello.QuietPush)
 		writeJSON(w, map[string]any{"enabled": body.Enabled})
 	})
 	api.HandleFunc("GET /api/v1/push/intercepts", func(w http.ResponseWriter, r *http.Request) {

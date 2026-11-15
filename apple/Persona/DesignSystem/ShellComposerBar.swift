@@ -769,6 +769,7 @@ private struct ComposerPageEditor: View {
                     .font(Theme.Font.body)
                     .focused($focused)
                     .scrollContentBackground(.hidden)
+                    .accessibilityIdentifier("composer-page-field") // on the editor, not over its placeholder (#7632)
                     .overlay(alignment: .topLeading) {
                         if text.isEmpty {
                             // Where the text view's first line starts: its inset, then its line padding.
@@ -784,7 +785,6 @@ private struct ComposerPageEditor: View {
                     .padding(.horizontal, Theme.Space.m)
                     .shellScaled() // the box's type size, a size up
                     .accessibilityLabel(placeholder)
-                    .accessibilityIdentifier("composer-page-field")
                 HStack {
                     Spacer()
                     if !canSend, let stop {

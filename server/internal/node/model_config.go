@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -32,12 +33,20 @@ type modelExecution struct {
 	// worker Agent conversations have neither flag.
 	FollowsSetting bool   `json:",omitempty"`
 	ConfigDir      string `json:"-"` // a conversation's directory, not its model; retained across process restarts
+	// SupervisionInstructions is manager-authorized role policy, never task or event data.
+	// It changes the execution fingerprint so a role change resumes in a fresh process.
+	SupervisionInstructions string `json:",omitempty"`
+	SupervisionResolved     bool   `json:"-"`
 	// Interject: a message this one carries, sent while the conversation answers, moves its foreground work to the
 	// background (assistant_interject.go). Per message, never part of the fingerprint.
 	Interject bool `json:"-"`
 	// SecretTicket: the hand-off a new Claude Code start puts in its environment (secretenv.go). Per start, never
 	// part of a fingerprint, never kept for a resume.
 	SecretTicket string `json:"-"`
+}
+
+func supervisionRuntimeRefusal(ctx context.Context) error {
+	return refusal("assistant_supervision_runtime", i18n.T(i18n.From(ctx), "rpc-errors.assistant_supervision_runtime"), nil)
 }
 
 // check refuses a model that is not a model id (proto.ValidModelID, #1644) before anything runs; the error's text is
@@ -72,21 +81,29 @@ func executionOption(options []modelExecution) modelExecution {
 	return modelExecution{}
 }
 
+func (m modelExecution) withSupervision(policy *string) modelExecution {
+	if policy != nil {
+		m.SupervisionInstructions, m.SupervisionResolved = *policy, true
+	}
+	return m
+}
+
 // assistantModel is the launcher and model the hub runs conversation id's next message on (as a message from the phone
 // would be), for a message the node sends it by itself (recoverAssistantTasks). Started on the model it last ran, the
 // conversation's next message from the phone would need another process (#1554). Nothing when the hub can't say (an
 // older hub): the conversation's own then.
 func (n *Node) assistantModel(ctx context.Context, id string) (string, modelExecution) {
 	var res struct {
-		Launcher         string `json:"launcher"`
-		Model            string `json:"model"`
-		Effort           string `json:"effort"`
-		ModelFingerprint string `json:"model_fingerprint"`
-		Runtime          string `json:"runtime"`
-		IsMain           bool   `json:"is_main"`
+		Launcher                string  `json:"launcher"`
+		Model                   string  `json:"model"`
+		Effort                  string  `json:"effort"`
+		ModelFingerprint        string  `json:"model_fingerprint"`
+		Runtime                 string  `json:"runtime"`
+		IsMain                  bool    `json:"is_main"`
+		SupervisionInstructions *string `json:"supervision_instructions"`
 	}
 	if n.peer == nil || n.peer.Call(ctx, "assistant.model", map[string]any{"session_id": id}, &res) != nil {
 		return "", modelExecution{}
 	}
-	return res.Launcher, modelExecution{Model: res.Model, Effort: res.Effort, UseEffort: res.ModelFingerprint != "", Fingerprint: res.ModelFingerprint, Runtime: res.Runtime, IsMain: res.IsMain}
+	return res.Launcher, (modelExecution{Model: res.Model, Effort: res.Effort, UseEffort: res.ModelFingerprint != "", Fingerprint: res.ModelFingerprint, Runtime: res.Runtime, IsMain: res.IsMain}).withSupervision(res.SupervisionInstructions)
 }

@@ -23,6 +23,8 @@ class AndroidPhoneTools(context: Context, private val foreground: () -> Boolean)
                 if (!foreground()) PhoneToolText.needsForeground() else LocationTool(context).current()
             }
             "phone_health_summary" -> Health.summary(context, args)
+            "phone_workouts_recent" -> Workouts.recent(context, args)
+            "phone_workout_detail" -> Workouts.detail(context, args)
             "phone_device_info" -> device()
             "phone_clipboard_get", "phone_clipboard_set" -> withContext(Dispatchers.Main.immediate) {
                 if (!foreground()) return@withContext PhoneToolText.needsForeground()

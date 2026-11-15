@@ -41,6 +41,9 @@ final class ComposerKeyboardTests: XCTestCase {
         app.launchPinned()
         XCTAssertTrue(field.waitForExistence(timeout: 15), "the isolated conversation did not open")
         sleep(2)
+        // Only the field: the placeholder over it once carried the identifier too, and on iPhone took the typing (#7632).
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "shell-composer-field").count, 1,
+                       "something besides the field has its identifier")
     }
 
     @MainActor private var field: XCUIElement {

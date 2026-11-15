@@ -1660,8 +1660,10 @@ manifest can ask for four things. A hub from before them refuses the manifest, s
     program calls can (`TestExtensionCannotWriteItsSettings`).
   - When the settings change, the old address is refused at once (`Proxy.SetTargets`), before the restart.
   - The consent line is 「访问你在设置里填的地址」: the field's title, the address there now (「当前：…」, 未填 before
-    install), and whether http is allowed. An upgrade that adds such an entry lists it under the permissions that grew,
-    like a new host.
+    install), and whether http is allowed. An upgrade keeps the settings, so its preview, the upgrades list and the
+    market's lines for an installed extension name the address saved there (not the old version's default); a fresh
+    install says 未填 (#8570). An upgrade that adds such an entry lists it under the permissions that grew, like a new
+    host.
   - The proxy holds the extension to these rules only while its sandbox is **enabled** (`sandbox.enabled`, "Sandbox").
     With the sandbox also **active**, the proxy is its only way out. Enabled but not active (this machine has no
     sandbox), its environment points it at the proxy: a well-behaved program goes through it, a misbehaving one can go
@@ -3185,7 +3187,8 @@ The hub stores only desired state: if an extension is enabled, configured, selec
 and the node follows (`node/plugins.go`). Reconciliation runs on computer connection and extension install / switch / config change / upgrade / uninstall, as full reconciliation without queuing; offline computers reconcile when reconnecting.
 
 - **Package**: the hub makes a tar.gz for the computer's platform (`extension.NodePackage`: excludes other-platform and hub programs, fixed order, no timestamps or owners, byte-identical for the same package),
-  using sha256 as digest; transfer only if the computer lacks it (`plugin.node.have`), in chunks (`plugin.node.put.begin/chunk/commit`, 1 MB each), then the node verifies sha256, extracts and checks as at install.
+  using sha256 as digest; transfer only if the computer lacks it (`plugin.node.have`), in 32 KiB chunks (`plugin.node.put.begin/chunk/commit`), then the node verifies sha256, extracts and checks as at install.
+  Small chunks leave room for heartbeats on a slow Link connection without upgrading the node. A failed transfer is held for ten minutes per computer and package identity, surviving connection replacements in the hub process; the next lease tick retries due packages. A package already present bypasses and clears this delay. This is not resumable transfer: the existing node protocol has no offset query, so the next attempt starts again. Restarting the hub clears this transient delay.
   Stored in that computer's `~/.persona/node-plugins/<id>/<version>/`, program data in `~/.persona/node-plugins/<id>/data/`, retained across versions.
   **Not `~/.persona/extensions/`**: on the hub computer, node and hub share `~/.persona`; `plugins/` is the hub's extension-install location (`installed/`, `data/`, `staging/`…).
   Every node-created extension directory has `.persona-node`; reconciliation deletes only marked directories. #1921's node used `plugins/` and deleted the hub's `installed/` during reconciliation as if it were an uninstalled extension (#1933).

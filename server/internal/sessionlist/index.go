@@ -38,7 +38,7 @@ type Item struct {
 	// Private: a row a reader with Options.NoPrivate is never shown, in its rows, totals or counts (a health-space
 	// conversation, which an extension's token does not see).
 	Private bool
-	// Assistant marks an Assistant conversation, excluded from the active Agent aggregate.
+	// Assistant marks a Persona conversation, excluded from the Agents list and active Agent aggregate.
 	Assistant bool
 	// Fold is the item's optional per-row metadata: its place in the session hierarchy (#5120) and its open to-do
 	// (#6662). Nil for an item with neither, which shows its own State and BackgroundWaiting. It sits behind a pointer
@@ -110,6 +110,8 @@ type Options struct {
 	// NoPrivate leaves the Private items out of the rows, the totals and every count; like Manager it is the adapter's
 	// to set (who asks), not a key Parse reads, and it binds a cursor as the other filters do.
 	NoPrivate bool
+	// AgentsOnly excludes assistant and health-space conversations from the filtered view.
+	AgentsOnly bool
 	// Places (place=["<machine>","<project>"], repeatable) selects the items at any of these machine and project
 	// pairs: one project's directories across computers. Spaces (space=["<machine>","<group>"]) does the same by
 	// machine and group. An empty key selects the items of that machine without the attribute. Each combines with
@@ -200,8 +202,8 @@ type journalEntry struct {
 type filters struct {
 	ID, State, Machine, Project, Group, Source, Provider, Q, PaneSource, Manager, Under, Todo, Waiting, ExcludePaneSource string
 	// Places and Spaces are Options' as placesKey spells them: filters stay comparable.
-	Places, Spaces   string
-	Roots, NoPrivate bool
+	Places, Spaces               string
+	Roots, NoPrivate, AgentsOnly bool
 }
 
 type binding struct {

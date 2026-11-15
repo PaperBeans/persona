@@ -300,6 +300,15 @@ struct ChatsView: View {
     @State private var rootShown = false
     /// Whether the stack is in the middle of a push or a pop: a chat opened from outside waits for it (#1941).
     @State private var stackStill = StackStillWatcher()
+    /// The list under the stack has been shown once (#8467): from then on it stays in the tree.
+    @State private var listBuilt = false
+    /// A launch onto a chat (`-openSession`, a notification, the chat open last time) on a phone leaves the list out
+    /// until it could be seen (`AgentsListPending`): the chat goes over it at once, and building the list's view types
+    /// took ~150 ms of the launch's main thread before the chat started. A chat on its way or open over it, and the list
+    /// not shown yet; dropped, the list comes in.
+    private var listWaits: Bool {
+        !listBuilt && (model.openChat != nil || model.openPersonalAgent != nil || !path.isEmpty)
+    }
 
     /// An active search keeps the system navigation bar up over what is pushed (the chat showed it over its own
     /// header; closing the search once pushed is too late): opening something from the results closes the search
@@ -571,8 +580,10 @@ struct ChatsView: View {
         if let unified {
             UnifiedSidebarColumn(state: unified) { rows in agentsList(rows: rows.map { AnyView($0) }) }
                 .toolbarVisibility(.hidden, for: .navigationBar)
+        } else if ownsTop, listWaits {
+            AgentsListPending { listBuilt = true }
         } else {
-            agentsList(rows: nil)
+            agentsList(rows: nil).onAppear { listBuilt = true }
         }
         #else
         agentsList(rows: nil)
@@ -5192,6 +5203,43 @@ private struct TopBar<Bar: View>: ViewModifier {
         }
         return nil
     }
+}
+
+/// The Agents list's place while a launch opens a chat over it (#8467): nothing drawn. The list comes in as soon as it
+/// could be seen: the root back in the window (a back swipe starting, ‹ tapped: before the pop's first frame), or the
+/// path empty with no chat on its way (`ChatsView.listWaits`).
+private struct AgentsListPending: View {
+    let build: () -> Void
+
+    var body: some View {
+        Color.clear.background { WindowEntryProbe(entered: build) }
+    }
+}
+
+/// Calls `entered` when its view goes into a window again after its first time: a stack's root page is taken out of
+/// the window under what is pushed over it and put back as a pop or a back swipe starts.
+private struct WindowEntryProbe: UIViewRepresentable {
+    let entered: () -> Void
+
+    final class Probe: UIView {
+        var entered: () -> Void = {}
+        private var entries = 0
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard window != nil else { return }
+            entries += 1
+            if entries > 1 { entered() }
+        }
+    }
+
+    func makeUIView(context: Context) -> Probe {
+        let v = Probe()
+        v.isUserInteractionEnabled = false
+        v.entered = entered
+        return v
+    }
+
+    func updateUIView(_ uiView: Probe, context: Context) { uiView.entered = entered }
 }
 
 /// Where `StackStillWatcher` finds the stack from.

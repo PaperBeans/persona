@@ -806,6 +806,8 @@ describe("the / palette", () => {
     render("p");
     typeInto("/");
     await until(() => expect(palette()).not.toBeNull());
+    act(() => box().dispatchEvent(new Event("pointerdown", { bubbles: true })));
+    expect(palette()).not.toBeNull();
     act(() => document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })));
     expect(palette()).toBeNull();
     typeInto("/c");
@@ -849,6 +851,57 @@ describe("the / palette", () => {
     });
     expect(palette()).toBeNull();
   });
+
+  it("keeps command rows and picks usable while the assistant skill chunk is pending and after it fails", async () => {
+    const chunk = { calls: 0, fail: (_error: Error) => {} };
+    const held = new Promise<void>((_, reject) => { chunk.fail = reject; });
+    void held.catch(() => {}); // every consumer still receives the rejection
+    vi.resetModules();
+    vi.doMock("./AssistantComposerPanel", async () => {
+      chunk.calls++;
+      await held;
+      return vi.importActual<typeof import("./AssistantComposerPanel")>("./AssistantComposerPanel");
+    });
+    try {
+      const { initI18n } = await import("../../i18n");
+      await initI18n("zh-Hans");
+      const { Composer: DeferredComposer } = await import("./Composer");
+      await act(async () => {
+        root.render(<DeferredComposer
+          draftKey="assistant-chunk"
+          placeholder=""
+          mention={{ files: () => [], skills: { manager: "assistant", environment: "test" } }}
+          machineId="computer"
+          commands={[{ word: "/alpha", desc: "First", text: "/alpha" }, { word: "/beta", desc: "Second", text: "/beta" }]}
+          onSend={async () => true}
+        />);
+      });
+      typeInto("/");
+      await vi.waitFor(() => expect(chunk.calls).toBe(1));
+      await vi.waitFor(() => expect(rows()).toEqual(["alpha", "beta"]));
+      key("ArrowDown");
+      expect(focused()).toBe("beta");
+      key("Enter");
+      await vi.waitFor(() => expect(box().value).toBe("/beta"));
+      expect(palette()).toBeNull();
+
+      typeInto("/");
+      await vi.waitFor(() => expect(rows()).toEqual(["alpha", "beta"]));
+      await act(async () => {
+        chunk.fail(new Error("stale assistant chunk"));
+        await Promise.resolve();
+      });
+      await vi.waitFor(() => expect(rows()).toEqual(["alpha", "beta"]));
+      expect(palette()).not.toBeNull();
+      key("ArrowDown");
+      expect(focused()).toBe("beta");
+      key("Enter");
+      await vi.waitFor(() => expect(box().value).toBe("/beta"));
+      expect(palette()).toBeNull();
+    } finally {
+      vi.doUnmock("./AssistantComposerPanel");
+    }
+  }, 20_000);
 });
 
 describe("Composer suggestion chunk", () => {

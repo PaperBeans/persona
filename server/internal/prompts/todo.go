@@ -23,10 +23,11 @@ type TodoDecision struct {
 
 // Where a decision came from (TodoDecision.Source).
 const (
-	TodoDecisionOutcome = "outcome" // pulled out of a finished task's reply
-	TodoDecisionAgent   = "agent"   // todo_decision_add, the agent's own call
-	TodoDecisionThread  = "thread"  // the user's reply in the to-do's chat thread
-	TodoDecisionCard    = "card"    // the user's answer to an agent's question
+	TodoDecisionOutcome        = "outcome"         // pulled out of a finished task's reply
+	TodoDecisionEarlierOutcome = "earlier-outcome" // from an earlier phase of the same task
+	TodoDecisionAgent          = "agent"           // todo_decision_add, the agent's own call
+	TodoDecisionThread         = "thread"          // the user's reply in the to-do's chat thread
+	TodoDecisionCard           = "card"            // the user's answer to an agent's question
 )
 
 // RenderTodoDecisions is the context block of a todo's decisions; empty when it has none.

@@ -507,7 +507,7 @@ func (s *Service) readinessModel(ctx context.Context, lang i18n.Lang, d Device, 
 		switch {
 		case main.TurnError != "":
 			ev = append(ev, readinessEvidence{at: main.UpdatedAt, text: main.TurnError, code: sessionTurnErrorCode(main)})
-		case readinessSucceeded(main, binding, fingerprint, rec.Success):
+		case s.readinessReplySucceeded(ctx, d.ID, launcher, main, binding, fingerprint, rec.Success):
 			ev = append(ev, readinessEvidence{at: main.UpdatedAt, ok: true})
 			s.keepReadinessSuccess(ctx, readinessSuccess{Machine: d.ID, Launcher: launcher,
 				Fingerprint: fingerprint, At: main.UpdatedAt})

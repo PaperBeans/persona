@@ -44,6 +44,9 @@ type AssistantClaudeMD struct {
 
 func RenderAssistantClaudeMD(d AssistantClaudeMD) string { return render("assistant/claude_md", d) }
 
+// RenderSupervisionInstructions is identical for every authorized supervisor and event.
+func RenderSupervisionInstructions() string { return render("assistant/supervision_instructions", nil) }
+
 // AssistantHealthClaudeMD is the health space's CLAUDE.md (docs/assistant/health.md).
 type AssistantHealthClaudeMD struct {
 	Owner    string // "" is "user"
@@ -908,10 +911,14 @@ func RenderRuntimeInstructions(r RuntimeInstructions) string {
 	return render("assistant/runtime_instructions", r)
 }
 
-// RenderCodexInstructions is the Codex assistant's developer instructions (assistant/codex_instructions): the memory.
-// The live snapshot is not in them but in each message (TurnContext), like Claude's.
-func RenderCodexInstructions(memory string) string {
-	return render("assistant/codex_instructions", struct{ Memory string }{memory})
+// RenderCodexInstructions composes memory and optional supervisor policy as developer instructions.
+// The live snapshot stays in each message (TurnContext), like Claude's.
+func RenderCodexInstructions(memory string, supervision ...string) string {
+	policy := ""
+	if len(supervision) > 0 {
+		policy = supervision[0]
+	}
+	return render("assistant/codex_instructions", struct{ Memory, Supervision string }{memory, policy})
 }
 
 // TurnContext is the <persona-context> block a message to the assistant starts with (assistant/turn_context): the

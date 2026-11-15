@@ -102,6 +102,29 @@ func TestAnOutsideClaudesQuestionIsACard(t *testing.T) {
 	}
 }
 
+func TestOutsideAnswerWithTrailingTextUsesNow(t *testing.T) {
+	n, f, home := herdrNode(t)
+	noPaneEnv(t)
+	shortPeerWait(t, 3*time.Second)
+	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
+	p := writeTranscript(t, home, home, sidA, time.Now(),
+		`{"type":"user","uuid":"u1","timestamp":"2026-11-04T09:00:00Z","cwd":"`+home+`","sessionId":"`+sidA+`","message":{"role":"user","content":"choose"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-11-04T09:00:09Z","sessionId":"`+sidA+`","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_trailing","name":"AskUserQuestion","input":{"questions":[{"question":"Which one?","header":"Pick","options":[{"label":"A"},{"label":"B"}],"multiSelect":false}]}},{"type":"text","text":"Please choose one."}]}}`)
+	inbox := newFakeInbox(t, p)
+	writeOutsideClaude(t, home, sidA, "claude-desktop-3p", "waiting", inbox, nil)
+	cards := n.outsideAskCards()
+	if len(cards) != 1 {
+		t.Fatalf("pending question cards = %d, want 1", len(cards))
+	}
+	if err := n.codexAnswer(context.Background(), sidA, cards[0].ID, proto.Resolution{Answers: map[string]string{"Which one?": "B"}}); err != nil {
+		t.Fatalf("answer returned error: %v", err)
+	}
+	priority, _ := inboxPriority(t, inbox, 0)
+	if priority != peerNow {
+		t.Fatalf("card exists and answer returned nil, but priority = %q; the answer is queued behind the open question", priority)
+	}
+}
+
 // No card where the phone could not answer, or nothing is asked: a claude without an inbox (the computer answers), a
 // permission prompt (the latest call is not a question), a question answered on the computer, a busy claude. Handed
 // back to the computer, a card stays off the phone while the claude asks it.

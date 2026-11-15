@@ -183,7 +183,7 @@ describe("a paged Agents row's ⋯", () => {
       const socket = FakeSocket.last!;
       socket.readyState = 1;
       socket.onopen?.();
-      socket.onmessage?.({ data: JSON.stringify({ type: "hello", features: ["sessions_list", "sessions_lookup"] }) });
+      socket.onmessage?.({ data: JSON.stringify({ type: "hello", features: ["sessions_list", "sessions_lookup", "sessions_agents_only"] }) });
     });
     await flush();
     act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));

@@ -371,6 +371,9 @@ func OnMachine(err error, name string) error {
 	if len(re.Data) > 0 && json.Unmarshal(re.Data, &data) != nil {
 		return err
 	}
+	if data == nil {
+		data = map[string]any{}
+	}
 	if n, _ := data["machine_name"].(string); n != "" {
 		return err
 	}

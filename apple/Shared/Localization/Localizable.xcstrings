@@ -24171,6 +24171,29 @@
         }
       }
     },
+    "Approves everything without asking; can be switched back in the chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approves everything without asking; can be switched back in the chat"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認なしですべて許可します。チャットで元に戻せます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "什么都不问直接放行；在对话里可以切回来"
+          }
+        }
+      }
+    },
     "Apps Allowed for the Assistant" : {
       "localizations" : {
         "en" : {
@@ -30300,6 +30323,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "默认分支和你自己开着的 PR 的 CI 失败算「需要你」，其他分支的算「知悉即可」。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Clear the filters to see the whole Inbox." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear the filters to see the whole Inbox."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "絞り込みを解除すると、受信トレイ全体が表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除筛选后，可以看到整个收件箱。"
           }
         }
       },
@@ -63336,6 +63382,28 @@
       },
       "extractionState" : "manual"
     },
+    "For all your devices. When on, questions, approvals, decisions only you can make, your reminders and the main conversation's notices still notify you; task results, “Please verify” requests and other conversations' notices wait for the briefing and Held Pushes, and finished agents stay silent." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "For all your devices. When on, questions, approvals, decisions only you can make, your reminders and the main conversation's notices still notify you; task results, “Please verify” requests and other conversations' notices wait for the briefing and Held Pushes, and finished agents stay silent."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべてのデバイスに適用されます。オンにすると、質問、承認、あなたにしかできない判断、設定したリマインダー、メイン会話からのお知らせは通常どおり通知されます。タスクの結果、「確認してください」の依頼、ほかの会話のお知らせはブリーフィングと「保留された通知」に回り、エージェントの完了は通知されません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对你所有的设备生效。开启后，要你回答、批准或拍板的事、你设的提醒和主对话的通知照常提醒；任务结论、「请验收」和其他对话的通知留给简报和「被拦推送」，Agent 做完不再提醒。"
+          }
+        }
+      }
+    },
     "FYI" : {
       "localizations" : {
         "en" : {
@@ -77081,6 +77149,29 @@
         }
       }
     },
+    "Its own approval settings decide what it asks, and may already allow everything" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Its own approval settings decide what it asks, and may already allow everything"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "何を確認するかは自身の承認設定で決まります。すでにすべて許可している場合もあります"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "问不问你由它自己的审批设置决定，可能本来就全部放行"
+          }
+        }
+      }
+    },
     "Its permissions changed" : {
       "localizations" : {
         "en" : {
@@ -84079,6 +84170,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Low-Distraction Mode" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Low-Distraction Mode"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知を抑えるモード"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "低打扰模式"
+          }
+        }
+      }
     },
     "MCP Form Needs You" : {
       "extractionState" : "manual",
@@ -102669,6 +102782,29 @@
         }
       }
     },
+    "Nothing Open Matches These Filters" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing Open Matches These Filters"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "絞り込みに一致する未対応の項目はありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有符合筛选的未处理条目"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Nothing recorded for %@ yet." : {
       "localizations" : {
         "en" : {
@@ -106712,6 +106848,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "この回のみ"
+          }
+        }
+      }
+    },
+    "Only what needs you notifies you; the rest waits for the briefing" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only what needs you notifies you; the rest waits for the briefing"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "対応が必要なことだけ通知し、ほかはブリーフィングに回します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只提醒要你处理的事，其余留给简报"
           }
         }
       }
@@ -161460,6 +161618,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "除非选「全部放行」，这个 Agent 按它自己的审批设置运行。"
+          }
+        }
+      }
+    },
+    "This agent uses its own approval settings unless you choose Allow Everything. You can switch in the chat later." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This agent uses its own approval settings unless you choose Allow Everything. You can switch in the chat later."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「すべて許可」を選ばない限り、このエージェントは自身の承認設定で動作します。あとからチャットで切り替えることもできます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "除非选「全部放行」，这个 Agent 按它自己的审批设置运行。之后也能在对话里切换。"
           }
         }
       }

@@ -24,6 +24,16 @@ import (
 // assistantRuntimes is what GET /model-config offers for the main chat's runtime.
 var assistantRuntimes = []string{proto.AssistantRuntimeCLI, proto.AssistantRuntimeAgentSDK}
 
+// The Claude profiles GET /model-config offers for the main chat's new conversations (#4633): Persona's own profile
+// (the default, stored as none) or this computer's existing Claude Code setup, resolved as the node resolves
+// config_dir "legacy" (docs/assistant/assistant.md). Selecting one copies nothing between profiles.
+const (
+	assistantConfigDirPrivate = "private"
+	assistantConfigDirLegacy  = "legacy"
+)
+
+var assistantConfigDirs = []string{assistantConfigDirPrivate, assistantConfigDirLegacy}
+
 type modelRecord struct {
 	Revision int64        `json:"revision"`
 	Binding  ModelBinding `json:"binding"`
@@ -72,7 +82,8 @@ type ModelPurpose struct {
 	Limit         *ai.Pause    `json:"limit,omitempty"` // the connection is held: quota used up or busy (ai/limit.go)
 	Fields        []string     `json:"fields"`
 	ProviderIDs   []string     `json:"provider_ids"`
-	Runtimes      []string     `json:"runtimes,omitempty"` // assistant only: the runtimes it can run on
+	Runtimes      []string     `json:"runtimes,omitempty"`    // assistant only: the runtimes it can run on
+	ConfigDirs    []string     `json:"config_dirs,omitempty"` // assistant only: the profiles its new conversations can start in
 }
 
 // launch is the purpose's execution form, independent of its provider or runtime.
@@ -110,7 +121,7 @@ func agentsOverride(id string) bool { return id == purposeAgent || id == purpose
 // modelPurposes are the uses; Name, Group and Uses hold catalog names (assistant-models), read in a language by
 // localized.
 var modelPurposes = []ModelPurpose{
-	{ID: "assistant", Group: "group_default", Kind: "launcher", Runtimes: assistantRuntimes, Uses: []ModelUse{{Name: "use_chat"}, {Name: "use_schedule"}, {Name: "use_meeting_room"}}},
+	{ID: "assistant", Group: "group_default", Kind: "launcher", Runtimes: assistantRuntimes, ConfigDirs: assistantConfigDirs, Uses: []ModelUse{{Name: "use_chat"}, {Name: "use_schedule"}, {Name: "use_meeting_room"}}},
 	{ID: "agent.new", Group: "group_default", Kind: "launcher", Uses: []ModelUse{{Name: "use_new_agent"}, {Name: "use_inbox_agent"}, {Name: "use_lark_agent"}}},
 	{ID: "kb", Group: "group_default", Kind: "api", Uses: []ModelUse{{Name: "use_translate"}, {Name: "use_draft"}, {Name: "use_knowledge"}, {Name: "use_projects"}, {Name: "use_titles"},
 		{Name: "use_meeting_minutes"}, {Name: "use_meeting_answer"}}},
@@ -245,9 +256,11 @@ type modelsState struct {
 	secret *secretkey.Box // secret.key; a key made for this run only in tests
 	quotas quotaCache     // the launchers' quota, kept a minute (models_quota.go)
 
-	cacheMu sync.Mutex
-	cacheAt map[string]time.Time
-	have    map[string]map[string]bool // machine \x00 launcher → its models (ids and what aliases resolve to)
+	cacheMu  sync.Mutex
+	cacheAt  map[string]time.Time
+	have     map[string]map[string]bool   // machine \x00 launcher → its models (ids and what aliases resolve to)
+	aliases  map[string]map[string]string // machine \x00 launcher → alias id → its resolved id
+	defaults map[string]string            // machine \x00 launcher → its default model's resolved or own id
 
 	customMu sync.Mutex // one change of the remembered typed ids at a time (models_custom.go)
 

@@ -17,6 +17,7 @@ not.
 | The main conversation has every task; another conversation only the tasks it dispatched (`origin`). | `taskCardSlots` (`everyTodo`) | `main_conversation_watches_every_task`, `manual_agents_only_in_the_main_conversation` |
 | In the main conversation an Agent that belongs to no task (`dockAgents`) is a row: Needs you while it asks, In progress while it works; idle, unread and the assistant's own sessions are in neither. Other conversations have no such rows. | `dockAgents` | `manual_agent_question_only_in_needs_you`, `manual_agent_working_only_in_progress`, `manual_agents_only_in_the_main_conversation` |
 | A plan waiting for Start is one Needs you row, whatever its task count; a message card waiting for Send (not sent, not filed) is one too. | | `plan_and_message_wait_for_the_user` |
+| An Agent several tasks list has one home (2026-11-14, #7490 / #7531 / #7532): the task the hub ties its session to (`Session.todo`) when it lists it, else the first that lists it (oldest card first; one plan's tasks in the plan's order). Only that task's row has the Agent's cards and counts them; the others do not wait on the user for them. | `assistantEntries` (web, Android), `AssistantEntries.split` (iOS / Mac) | `shared_agent_asks_under_its_tied_task`, `shared_agent_untied_asks_under_its_first_task`, `shared_agent_untied_asks_under_its_first_plan_task` |
 
 - Structure: `{"version": 1, "cases": [...]}`. `input` has `conversation`, `main` (the main conversation's id), `now`
   (RFC 3339, for the 48-hour shelving line), and the hub's wire objects: `todos`, `sessions` (with `state` worked out),
@@ -30,8 +31,7 @@ not.
 - Not covered here: cards of the conversation's own session (they are always Needs you rows and are added by the
   screen), message cards the user put off (`later`), Android's inbox drafts, and subtasks: Android leaves an Agent
   another one started out of the Agent rows while the Agent above it is shown (#4769, `TaskDockTest`); iOS and the web
-  do not yet. An Agent several tasks list: the web and Android (#7531) give it one home and count its cards once
-  (2026-11-14, `docs/assistant/unified-entry.md`); iOS / Mac (#7532) do not yet. Its case comes here once they do.
+  do not yet.
 - Background activity cases (#3588) additionally carry `expected.activity` keyed by running row: `tasks`, `subagents`,
   `workflows`, and optional `phase` / `progress`; null means no background work. They cover command/Monitor counts,
   workflow summary phase and progress, subagents, mixed counts, a real external wait, user-question precedence,

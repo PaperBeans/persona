@@ -356,6 +356,7 @@ Lark, mail and GitHub stay in the hub and only run conformance tests.
 
 Current state: all noise reduction lives in the GitHub connector (`connector/github/rules.go`): CI merges by "repository + branch" (`Thread` itself becomes `ci:<repo>@<branch>`),
 bot recognition (`isBot`), muted repositories and ignored branches (GitHub's own `Options`), and closure after a successful run / branch deletion / PR merge (`followUpCI` + `Settle`).
+A PR's or issue's thing names its move by the newest comment or submitted review (#7471), not by the notification: a push, an edit of the body or title or a label bumps the notification but adds no message, so the hub records nothing new and nothing downstream (supervisor signals, the task Agent's note) runs again. `Last` is opaque: it includes the message time and the distinct comment/review IDs at that time, so two messages in one second are distinct. Deleting a comment or dismissing a review cannot move the cursor back or replay an older message. The cursor is kept per account in the connector's existing sealed store across restarts, with the inbox's eight-day retention. Submitted inline-only reviews advance it even when the preview omits their empty body; pending reviews do not. A thread with no comment or review yet, and CI items, keep the notification's time.
 Telegram and Messages each repeat "groups are FYI" and "bots stay out of the Inbox". Every new source repeats this, and only GitHub can be muted in the App.
 
 Proposal: add these fields to `InboxThing`:

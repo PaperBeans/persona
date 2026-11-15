@@ -1,5 +1,6 @@
 import Foundation
 import PersonaKit
+import PersonaWire
 
 /// Keeps the recent agents' conversations current while the app is open and online, the way an IM client syncs:
 /// the hub pushes a tiny "this transcript changed" (each session's `rev`, in the session list and the `revs` event)

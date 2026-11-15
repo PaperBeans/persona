@@ -136,6 +136,7 @@ type sdkStart struct {
 	launcherArgs                   []string       // a managed launcher's own claude args
 	env                            map[string]string
 	compaction                     *assistantCompaction
+	supervisionInstructions        string
 }
 
 // options are the persona_start options: the SDK's query() options for the start (CONTRACT §3).
@@ -148,6 +149,9 @@ func (s sdkStart) options(claude string) (map[string]any, error) {
 	}
 	if s.guestMCP != nil {
 		o["guestMcpServers"] = s.guestMCP
+	}
+	if s.supervisionInstructions != "" {
+		o["systemPrompt"] = map[string]any{"type": "preset", "preset": "claude_code", "append": s.supervisionInstructions}
 	}
 	if tools := strings.Split(s.allowedTools, ","); s.allowedTools != "" {
 		o["allowedTools"] = tools

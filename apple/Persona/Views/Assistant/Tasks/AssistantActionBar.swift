@@ -5,7 +5,9 @@ import SwiftUI
 // progress: each thing once"): two entries, Needs You and In Progress, each thing in exactly one of them. The split is
 // `AssistantEntries`, a port of the web's `assistantEntries` (web/src/lib/assistant-entries.ts, Android's
 // AssistantEntries.kt, #3387) replaying the shared fixture spec/fixtures/entries/cases.json. Each entry opens a tray above
-// the bar, one at a time; the entries are drawn as the old dock's capsules (`DockCapsule`), so the bar is as low.
+// the bar, one at a time; the entries are drawn as the old dock's capsules (`DockCapsule`), so the bar is as low. In the
+// main conversation with low-distraction mode on, Held Pushes (#7782, PushInterceptsView.swift) comes after them, and its
+// tray opens in the same place (#8223).
 
 /// One of the bar's entries, and the tray it opens.
 nonisolated enum ActionTray: String, CaseIterable, Identifiable, Sendable {
@@ -121,6 +123,13 @@ nonisolated enum AssistantEntries {
         return .followUp
     }
 
+    /// A task's status when some of its Agents ask under another task (`own`: its status from its own Agents alone): it
+    /// does not wait on the user for them, so a Needs You that only those bring is the task at work instead (the web's
+    /// `withNeeds`).
+    static func withNeeds(_ all: Status, own: Status) -> Status {
+        all == .needsYou && own != .needsYou ? (own == .notStarted ? .working : own) : all
+    }
+
     /// The open ask, as the web reads it (`openAsk`): one with a verdict and a time.
     static func openAsk(_ todo: TodoItem) -> TodoAsk? {
         guard let a = todo.ask, !(a.verdict ?? "").isEmpty, !a.askedAt.isEmpty else { return nil }
@@ -189,10 +198,13 @@ nonisolated enum AssistantEntries {
         }
 
         // The conversation's tasks (the web's `taskCardSlots`): the main conversation's every to-do, another's the ones it
-        // dispatched, plus those its plans and feed name. `at` is when its card came: its plan's, else the to-do's.
-        var at: [String: Date] = [:]
+        // dispatched, plus those its plans and feed name. `at` is when its card came: its plan's, else the to-do's; `slot`
+        // is the web's slot id, `plan:<plan>:<index>` for a plan's task (its place in the plan), else `task:<to-do>`.
+        var at: [String: Date] = [:], slot: [String: String] = [:]
         for plan in plans.values.sorted(by: { $0.id < $1.id }) where plan.conversation == conversation {
-            for t in plan.tasks { if let id = t.todoID, at[id] == nil { at[id] = plan.createdAt ?? .distantPast } }
+            for (index, t) in plan.tasks.enumerated() {
+                if let id = t.todoID, at[id] == nil { at[id] = plan.createdAt ?? .distantPast; slot[id] = "plan:\(plan.id):\(index)" }
+            }
         }
         let byID = Dictionary(todos.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         for item in feed where [.task, .receipt, .review, .report].contains(item.kind) {
@@ -200,6 +212,20 @@ nonisolated enum AssistantEntries {
         }
         for todo in todos where (isMain || todo.origin == conversation) && at[todo.id] == nil {
             at[todo.id] = todo.createdAt ?? .distantPast
+        }
+
+        // One home per request (docs/design/DESIGN_SYSTEM.md 4.8, the web's #7490): an Agent several of these tasks list
+        // asks under one of them, the task the hub ties its session to (`Session.todo`) when it lists it, else the first
+        // that lists it in the web's slot order (oldest card first, then slot id: one plan's tasks in the plan's order).
+        // The others neither repeat its cards nor wait on the user for them.
+        var home: [String: String] = [:]
+        let slotOrder = todos.compactMap { t in at[t.id].map { (todo: t, at: $0, slot: slot[t.id] ?? "task:" + t.id) } }
+            .sorted { ($0.at, $0.slot) < ($1.at, $1.slot) }
+        for (todo, _, _) in slotOrder where todo.doneAt == nil {
+            for a in todo.activeAgents {
+                let k = pair(a.machineID, a.sessionID)
+                if home[k] == nil || lookup(a.machineID, a.sessionID)?.todo?.id == todo.id { home[k] = todo.id }
+            }
         }
 
         typealias Ranked = (row: Row, rank: Double, at: Date)
@@ -211,9 +237,14 @@ nonisolated enum AssistantEntries {
         let superseded = TodoTriageLogic.supersededFailedStarts(todos)
         for todo in todos {
             guard let when = at[todo.id] else { continue }
-            let status = status(todo, lookup: lookup, plans: plans)
             let active = todo.doneAt != nil ? [] : todo.activeAgents
-            let asks = active.flatMap { asksOf[pair($0.machineID, $0.sessionID)] ?? [] }
+            let own = active.filter { home[pair($0.machineID, $0.sessionID)] == todo.id }
+            let all = Self.status(todo, lookup: lookup, plans: plans)
+            // what the task waits on the user for is its own Agents' (an Agent another task holds asks there)
+            var mine = todo
+            mine.agents = own
+            let status = own.count < active.count ? withNeeds(all, own: todoStatus(mine, lookup: lookup)) : all
+            let asks = own.flatMap { asksOf[pair($0.machineID, $0.sessionID)] ?? [] }
             let row = Row.task(id: todo.id, status: status, agents: active.count)
             let listed = { folded.formUnion(active.map { pair($0.machineID, $0.sessionID) }) }
             let triage = TodoTriageLogic.triage(todo, lookup: lookup, now: now, restoredAt: restored[todo.id],
@@ -402,6 +433,10 @@ struct AssistantActionBar: View {
     /// the owner's at the hour while nothing else changes (`AssistantEntries.reviewOverdueAfter`; the web and Android
     /// tick the same way).
     @State private var minute = 0
+    /// The main conversation's held pushes (#7782), made the first time the bar reads them there, and whether their tray
+    /// is the one open: in the trays' place, so never with `open` (#8223).
+    @State private var held: PushInterceptsModel?
+    @State private var heldOpen = false
     private var store: TasksStore { .shared }
 
     private var entryRow: AnyLayout { AnyLayout(HStackLayout(spacing: Theme.Space.s)) }
@@ -410,15 +445,24 @@ struct AssistantActionBar: View {
         let _ = minute
         let content = Self.content(conversation, key: key)
         let row = entryRow
+        let inMain = conversation == AppModel.shared.assistantMain?.sessionID && AppModel.shared.api != nil
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if let open {
                 tray(open, content)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if heldOpen, let held {
+                PushInterceptsTray(model: held) { withAnimation(Theme.Motion.state) { heldOpen = false } }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             row {
                 ForEach(ActionTray.allCases) { entry($0, count: content.count($0)) }
-                if conversation == AppModel.shared.assistantMain?.sessionID, let api = AppModel.shared.api {
-                    PushInterceptsEntry(api: api, otherTrayOpen: open != nil, onOpen: { open = nil })
+                if inMain, let held {
+                    PushInterceptsEntry(model: held, open: heldOpen) {
+                        withAnimation(Theme.Motion.state) {
+                            open = nil
+                            heldOpen.toggle()
+                        }
+                    }
                 }
                 if ComputerActivityPill.shows(computer) {
                     ComputerActivityPill(activity: computer).background(Theme.pageBackground, in: .capsule) // as the entries
@@ -432,7 +476,17 @@ struct AssistantActionBar: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         // No fade of its own: the chat runs on behind the bar and fades out there (`FooterFog`, #3696).
         .onChange(of: conversation) { open = nil; expanded = []; drawn = []; planChoices = [:] }
-        .onChange(of: open) { if open == nil { expanded = []; drawn = []; planChoices = [:] } }
+        // One tray at a time: Needs You's or In Progress' opening closes the held pushes'.
+        .onChange(of: open) { if open == nil { expanded = []; drawn = []; planChoices = [:] } else { heldOpen = false } }
+        // The held pushes are read in the main conversation while its tab is in front, every 30 s, with ln mode off too,
+        // so the entry comes when the mode is turned on; the bar reads none of the model's values itself.
+        .tabActiveTask(id: inMain) {
+            guard inMain, let api = AppModel.shared.api else { return }
+            let model = held ?? PushInterceptsModel(api: api)
+            if held == nil { held = model }
+            await model.run()
+        }
+        .onChange(of: inMain) { _, inMain in if !inMain { held = nil; heldOpen = false } }
         #if DEBUG
         .onAppear {
             if let value = UserDefaults.standard.string(forKey: "showActionTray"), let tray = ActionTray(rawValue: value) {

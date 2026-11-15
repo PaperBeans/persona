@@ -133,6 +133,7 @@ func (f filters) matches(r *record) bool {
 	v := r.item
 	todo := v.todo()
 	return (f.ID == "" || f.ID == v.ID) && (!f.NoPrivate || !v.Private) &&
+		(!f.AgentsOnly || (!v.Assistant && !v.Private)) &&
 		(!f.Roots || v.root() == "") && (f.Under == "" || f.Under == v.root()) &&
 		(f.State == "" || f.State == stateOf(v, f.Roots)) &&
 		(f.Machine == "" || f.Machine == v.Machine) &&

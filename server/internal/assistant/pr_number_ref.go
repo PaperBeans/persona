@@ -9,6 +9,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // A PR an agent names by number alone (#7921): "PR #7350", or "pushed to #7350" in a reply that speaks of a PR. prLink
@@ -18,10 +19,12 @@ import (
 // the agent's working copy (its repository root on that computer) pushes to. Anything ambiguous records nothing.
 
 var (
-	prNumbered     = lazyre.New(`(?i)\b(?:PR|pull request)\s*#(\d+)\b`) // i18n-ignore: match what the agent wrote
-	prBareRef      = lazyre.New(`(?:^|[^\w/&#])#(\d+)\b`)
-	prWords        = lazyre.New(`(?i)\bPRs?\b|pull requests?`) // i18n-ignore: match what the agent wrote
-	githubRepoLink = lazyre.New(`https://github\.com/([\w.-]+/[\w.-]+)/(?:pull|issues)/\d+`)
+	prNumbered            = lazyre.New(`(?i)\b(?:PR|pull request)\s*#(\d+)\b`) // i18n-ignore: match what the agent wrote
+	prBareRef             = lazyre.New(`(?:^|[^\w/&#])#(\d+)\b`)
+	prWords               = lazyre.New(`(?i)\bPRs?\b|pull requests?`) // i18n-ignore: match what the agent wrote
+	githubRepoLink        = lazyre.New(`https://github\.com/([\w.-]+/[\w.-]+)/(?:pull|issues)/\d+`)
+	closeoutApplicability = lazyre.New(`\b(merged|deployed)\s*=\s*"([^"]*)"`)
+	closeoutPRLine        = lazyre.New(`(?im)^[\t *-]*artifact\s*[:\x{ff1a}]\s*pr(?:\s|:|$)`)
 )
 
 // repoRootsKey keeps, per computer and repository root, the GitHub repository its agents' PRs went to.
@@ -38,6 +41,9 @@ func prNumberIn(text string) string {
 			return m[2]
 		}
 		return "" // an explicit artifact outranks incidental PR numbers in the prose
+	}
+	if deliveryCloseout(text) != "" {
+		return "" // a closeout without a delivery PR does not delegate that choice to the prose
 	}
 	one := func(re *lazyre.Regexp) string {
 		n := ""
@@ -66,14 +72,70 @@ func prNumberIn(text string) string {
 }
 
 func closeoutPRRef(text string) string {
-	_, artifacts, _ := closeout.Parse(text)
+	_, artifacts, _ := closeout.Parse(deliveryCloseout(text))
 	ref := ""
 	for _, a := range artifacts {
 		if a.Kind == "pr" {
 			ref = strings.TrimSpace(a.Ref)
 		}
 	}
+	if ref != "" && !ciArtifactNumber.MatchString(ref) && !ciArtifactRepo.MatchString(ref) && prLink.FindString(ref) != ref {
+		return ""
+	}
 	return ref
+}
+
+// deliveryCloseout accepts the reply's own final record, not a quoted example or an earlier reference.
+// The general closeout parser intentionally also serves transcripts and does not impose these ownership rules.
+func deliveryCloseout(text string) string {
+	if !strings.Contains(text, "<closeout") {
+		return ""
+	}
+	text = strings.TrimSpace(text)
+	if footer := strings.LastIndex(text, "\n<oai-mem-citation>"); footer >= 0 && strings.HasSuffix(text, "</oai-mem-citation>") {
+		text = strings.TrimSpace(text[:footer]) // runtime citation metadata may follow the agent's final record
+	}
+	var lines []string
+	fence := ""
+	inCloseout := false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if fence != "" {
+			if strings.HasPrefix(trimmed, fence) && strings.Trim(trimmed, fence[:1]) == "" {
+				fence = ""
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			fence = trimmed[:len(trimmed)-len(strings.TrimLeft(trimmed, trimmed[:1]))]
+			continue
+		}
+		if strings.HasPrefix(trimmed, ">") || !inCloseout && (strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t")) {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "<closeout") {
+			inCloseout = true
+		}
+		lines = append(lines, trimmed)
+		if strings.HasSuffix(trimmed, "</closeout>") {
+			inCloseout = false
+		}
+	}
+	reply := strings.TrimSpace(strings.Join(lines, "\n"))
+	start := strings.LastIndex(reply, "\n<closeout")
+	if start >= 0 {
+		start++
+	} else if strings.HasPrefix(reply, "<closeout") {
+		start = 0
+	}
+	if start < 0 || !strings.HasSuffix(reply, "</closeout>") {
+		return ""
+	}
+	block := reply[start:]
+	if _, _, ok := closeout.Parse(block); !ok {
+		return ""
+	}
+	return block
 }
 
 // githubRepoIn is the one GitHub repository ("owner/repo") the texts link an issue or PR of; "" for none or several.
@@ -143,53 +205,114 @@ func (s *Service) numberedPR(ctx context.Context, t Todo, machine, session, text
 	return "https://github.com/" + repo + "/pull/" + n, nil
 }
 
-// reportedTaskPR recovers a delivery artifact hidden by a clipped session-list preview. It reads only linked
-// agents' latest turns, and only while repairing a confirmed false PR; normal session polling never fetches text.
-func (s *Service) reportedTaskPR(ctx context.Context, t Todo, wrong string) (string, error) {
+// reportedTaskPR reads explicit delivery artifacts hidden by clipped session previews. noPR is true only when
+// every active agent's own final closeout explicitly reports a finished, non-PR deliverable.
+func (s *Service) reportedTaskPR(ctx context.Context, t Todo, current string) (pr string, noPR bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
+	active := 0
+	noPR = true
+	recovered := ""
 	for i := len(t.Agents) - 1; i >= 0; i-- {
 		a := t.Agents[i]
 		if a.ReleasedAt != nil || a.DismissedAt != nil {
 			continue
 		}
+		active++
 		items, ok := s.lastTurnItems(ctx, a.MachineID, a.SessionID)
 		if !ok {
+			noPR = false
 			continue
 		}
-		_, text := turnExchange(items)
-		ref := closeoutPRRef(text)
-		if ref == "" {
-			continue
-		}
-		pr := prLink.FindString(ref)
-		if pr == wrong {
-			continue
-		}
-		if pr == "" {
-			var err error
-			pr, err = s.numberedPR(ctx, t, a.MachineID, a.SessionID, text)
-			if err != nil {
-				return "", fmt.Errorf("the reported delivery PR could not be confirmed: %w", err)
+		_, items = splitLastTurn(items)
+		for j := len(items) - 1; j >= 0; j-- {
+			if it := items[j]; it.Role == "assistant" && it.Kind == proto.KindText && strings.TrimSpace(it.Text) != "" {
+				if it.FullSize > 0 || !it.TS.IsZero() && it.TS.Before(a.LinkedAt) {
+					ok = false
+				}
+				break
 			}
-		} else if m := ciPRURL.FindStringSubmatch(pr); m != nil {
+		}
+		from, source := taskTurnSource(t, items)
+		ask, text := turnExchange(items)
+		if !ok || source != "" || from == "" && ask != "" && !sameRequest(ask, t.Notes) {
+			noPR = false
+			continue
+		}
+		block := deliveryCloseout(text)
+		c, artifacts, ok := closeout.Parse(block)
+		if !ok {
+			noPR = false
+			continue
+		}
+		ref := closeoutPRRef(text)
+		explicit := ""
+		parsedPRs := 0
+		for _, artifact := range artifacts {
+			if artifact.Kind == "pr" {
+				parsedPRs++
+				if explicit != "" && explicit != artifact.Ref {
+					return "", false, fmt.Errorf("task %s: several explicit delivery PR artifacts need clarification", t.ID)
+				}
+				explicit = artifact.Ref
+			}
+		}
+		// A malformed or clipped artifact must not turn an explicitly declared PR into a no-PR exemption.
+		if declared := len(closeoutPRLine.FindAllString(block, -1)); declared != parsedPRs || declared > 0 && ref == "" {
+			return "", false, fmt.Errorf("task %s: its explicit delivery PR artifact is incomplete or ambiguous", t.ID)
+		}
+		if ref == "" {
+			mergedNA, deployedNA, hasPR := false, false, false
+			mergedCount, deployedCount := 0, 0
+			for _, a := range closeoutApplicability.FindAllStringSubmatch(block[:strings.IndexByte(block, '>')], -1) {
+				if a[1] == "merged" {
+					mergedCount++
+					mergedNA = strings.EqualFold(a[2], "n/a")
+				} else {
+					deployedCount++
+					deployedNA = strings.EqualFold(a[2], "n/a")
+				}
+			}
+			for _, a := range artifacts {
+				hasPR = hasPR || a.Kind == "pr"
+			}
+			noPR = noPR && !hasPR && len(artifacts) > 0 && c.Status == proto.CloseoutDone &&
+				c.Merged == "" && c.Deployed == "" && mergedNA && deployedNA && mergedCount == 1 && deployedCount == 1
+			continue
+		}
+		noPR = false
+		pr = prLink.FindString(ref)
+		if pr == "" {
+			m, qualified := ciPRURL.FindStringSubmatch(current), ciArtifactRepo.FindStringSubmatch(ref)
+			if m != nil && prNumberIn(text) == m[2] && (qualified == nil || strings.EqualFold(qualified[1], m[1])) {
+				pr = current // let the existing gate use local deployment proof without an extra forge dependency
+			} else {
+				pr, err = s.numberedPR(ctx, t, a.MachineID, a.SessionID, text)
+				if err != nil {
+					return "", false, fmt.Errorf("the reported delivery PR could not be confirmed: %w", err)
+				}
+			}
+		} else if m := ciPRURL.FindStringSubmatch(pr); pr != current && m != nil {
 			number, err := strconv.Atoi(m[2])
 			if err != nil {
-				return "", err
+				return "", false, err
 			}
 			isPR, err := s.forge().IsPR(ctx, m[1], number)
 			if err != nil {
-				return "", fmt.Errorf("the reported delivery PR could not be confirmed: %w", err)
+				return "", false, fmt.Errorf("the reported delivery PR could not be confirmed: %w", err)
 			}
 			if !isPR {
 				continue // do not cycle between several misreported issue URLs
 			}
 		}
-		if pr != "" && pr != wrong {
-			return pr, nil
+		if pr != "" {
+			if recovered != "" && recovered != pr {
+				return "", false, fmt.Errorf("task %s: its active agents report different delivery PR artifacts; clarify before accepting", t.ID)
+			}
+			recovered = pr
 		}
 	}
-	return "", nil
+	return recovered, active > 0 && noPR, nil
 }
 
 // rootKey names the repository root session on machine works in; "" when the node does not say.

@@ -2642,7 +2642,7 @@ function DecisionsSection({ todo, lookup }: { todo: Todo; lookup: ReturnType<typ
                       </div>
                     )}
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 text-[11.5px] text-ink-3">
-                      <span>{clock(d.created_at)}</span>
+                      <span>{clock(d.phase_completed_at ?? d.created_at)}</span>
                       <span>·</span>
                       <span>{decisionSourceLabel(d, todo, lookup)}</span>
                       {off && (

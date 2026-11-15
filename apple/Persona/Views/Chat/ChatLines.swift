@@ -1,5 +1,6 @@
 import Foundation
 import PersonaKit
+import PersonaWire
 
 /// The chat as a flat list of lines (`ChatLine`), from the store's blocks: every message of a turn opens its own
 /// exchange — the message, one work line for what the agent did after it, the agent's last words. Open work lines get

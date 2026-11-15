@@ -35,7 +35,22 @@ func TestPRStatusReadsForgeBlockers(t *testing.T) {
 			pr:      `{"state":"open","draft":false,"mergeable_state":"dirty","head":{"sha":"head"},"requested_reviewers":[{}]}`,
 			reviews: `[]`, statuses: `{"state":"success","total_count":1}`,
 			runs: `{"total_count":2,"check_runs":[{"status":"completed","conclusion":"failure"},{"status":"in_progress"}]}`,
-			want: TodoPRStatus{State: "open", Review: "required", Checks: "failure", Conflicts: true},
+			want: TodoPRStatus{HeadOID: "head", State: "open", Review: "required", Checks: "failure", Conflicts: true},
+		},
+		{
+			name: "explicitly unmergeable", pr: `{"state":"open","mergeable":false,"head":{"sha":"head"}}`,
+			reviews: `[]`, statuses: `{"total_count":0}`, runs: `{"check_runs":[]}`,
+			want: TodoPRStatus{HeadOID: "head", State: "open", Review: "pending", Checks: "none", Conflicts: true},
+		},
+		{
+			name: "mergeability not computed", pr: `{"state":"open","mergeable":null,"mergeable_state":"unknown","head":{"sha":"head"}}`,
+			reviews: `[]`, statuses: `{"total_count":0}`, runs: `{"check_runs":[]}`,
+			want: TodoPRStatus{HeadOID: "head", State: "open", Review: "pending", Checks: "none"},
+		},
+		{
+			name: "blocked without conflicts", pr: `{"state":"open","mergeable":true,"mergeable_state":"blocked","head":{"sha":"head"}}`,
+			reviews: `[]`, statuses: `{"total_count":0}`, runs: `{"check_runs":[]}`,
+			want: TodoPRStatus{HeadOID: "head", State: "open", Review: "pending", Checks: "none"},
 		},
 		{
 			name:     "latest review per reviewer",
@@ -43,14 +58,14 @@ func TestPRStatusReadsForgeBlockers(t *testing.T) {
 			reviews:  `[{"user":{"login":"reviewer"},"state":"CHANGES_REQUESTED"},{"user":{"login":"reviewer"},"state":"APPROVED"}]`,
 			statuses: `{"state":"pending","total_count":0}`,
 			runs:     `{"total_count":1,"check_runs":[{"status":"completed","conclusion":"neutral"}]}`,
-			want:     TodoPRStatus{State: "open", Review: "approved", Checks: "success"},
+			want:     TodoPRStatus{HeadOID: "head", State: "open", Review: "approved", Checks: "success"},
 		},
 		{
 			name:     "draft with requested changes",
 			pr:       `{"state":"open","draft":true,"head":{"sha":"head"}}`,
 			reviews:  `[{"user":{"login":"reviewer"},"state":"CHANGES_REQUESTED"}]`,
 			statuses: `{"state":"pending","total_count":1}`, runs: `{"check_runs":[]}`,
-			want: TodoPRStatus{State: "open", Draft: true, Review: "changes_requested", Checks: "pending"},
+			want: TodoPRStatus{HeadOID: "head", State: "open", Draft: true, Review: "changes_requested", Checks: "pending"},
 		},
 		{
 			name: "merged needs no commit endpoints", pr: `{"state":"closed","merged":true}`,
@@ -381,5 +396,287 @@ func TestPRStatusPassRunsAfterTheDeployChecksOnItsOwnDeadline(t *testing.T) {
 	defer mu.Unlock()
 	if strings.Join(order, ",") != "hub,pr" {
 		t.Fatalf("order %v, want the hub's commit before the PR reads", order)
+	}
+}
+
+func newPRConflictTask(t *testing.T, st Store) (*Service, *fakeHub, Todo) {
+	t.Helper()
+	s, f := newQuietServiceOn(t, st)
+	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+	ctx := context.Background()
+	task, err := s.createTodo(ctx, "Resolve merge conflicts", "Keep the current task PR mergeable.", "conv1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.superviseTodo(ctx, task.ID, "conv1", []string{"The task PR is merged."}, 0)
+	s.setTaskStage(ctx, task.ID, "review", "https://github.com/example/app/pull/12")
+	return s, f, todoNow(s, task.ID)
+}
+
+func pendingPRConflict(s *Service, id string) (superviseSignal, bool) {
+	b := &s.supervise
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	g, ok := b.pending[(superviseSignal{Todo: id, Kind: sigPRConflict}).id()]
+	return g, ok
+}
+
+// Advance the signal queue without real sleeps or a timer racing the state changes under test.
+func sendPendingPRConflicts(s *Service) {
+	b := &s.supervise
+	b.mu.Lock()
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+	for id, g := range b.pending {
+		g.At = time.Now().Add(-2 * time.Hour)
+		b.pending[id] = g
+	}
+	b.last = time.Time{}
+	b.mu.Unlock()
+	s.sendDigest(context.Background())
+}
+
+func TestPRStatusConflictSignalsWithoutRunningAgents(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status TodoPRStatus
+		want   bool
+	}{
+		{"conflicting", TodoPRStatus{State: "open", HeadOID: "head-a", Conflicts: true}, true},
+		{"clean", TodoPRStatus{State: "open", HeadOID: "head-a"}, false},
+		{"failed checks only", TodoPRStatus{State: "open", HeadOID: "head-a", Checks: "failure"}, false},
+		{"closed", TodoPRStatus{State: "closed", HeadOID: "head-a", Conflicts: true}, false},
+		{"merged", TodoPRStatus{State: "merged", HeadOID: "head-a", Conflicts: true}, false},
+		{"missing head", TodoPRStatus{State: "open", Conflicts: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f, task := newPRConflictTask(t, nil)
+			if agents := s.taskAgents(context.Background(), task); len(agents) != 0 {
+				t.Fatalf("fixture has task agents: %+v", agents)
+			}
+			s.deploy.forge = &statusForge{status: tc.status}
+			s.sweepPRStatuses(context.Background(), time.Now())
+			g, ok := pendingPRConflict(s, task.ID)
+			if ok != tc.want {
+				t.Fatalf("conflict signal = %+v, %v; want %v", g, ok, tc.want)
+			}
+			if tc.want && (!g.urgent() || g.level() != supervisionTriage) {
+				t.Fatalf("conflict is not actionable and urgent: %+v", g)
+			}
+			sendPendingPRConflicts(s)
+			notices := f.notices()
+			if !tc.want {
+				if len(notices) != 0 {
+					t.Fatalf("non-conflict notified the supervisor: %q", notices)
+				}
+				return
+			}
+			if len(notices) != 1 || !strings.Contains(notices[0], task.PRURL) ||
+				!strings.Contains(notices[0], "head-a") || !strings.Contains(notices[0], "PR 有合并冲突") {
+				t.Fatalf("supervisor did not receive the conflict facts: %q", notices)
+			}
+		})
+	}
+}
+
+func TestPRStatusConflictQueuedSignalRechecksCurrentFacts(t *testing.T) {
+	for _, changed := range []string{"resolved", "closed", "new head", "new task PR", "new stage PR", "completed", "no status"} {
+		t.Run(changed, func(t *testing.T) {
+			s, f, task := newPRConflictTask(t, nil)
+			ctx := context.Background()
+			status := TodoPRStatus{URL: task.PRURL, State: "open", HeadOID: "head-a", Conflicts: true, CheckedAt: time.Now()}
+			if err := s.applyPRStatus(ctx, task, status); err != nil {
+				t.Fatal(err)
+			}
+			g, ok := pendingPRConflict(s, task.ID)
+			if !ok {
+				t.Fatal("no conflict queued before the facts changed")
+			}
+			switch changed {
+			case "resolved", "closed", "new head":
+				switch changed {
+				case "resolved":
+					status.Conflicts = false
+				case "closed":
+					status.State = "closed"
+				case "new head":
+					status.HeadOID = "head-b"
+				}
+				if err := s.applyPRStatus(ctx, task, status); err != nil {
+					t.Fatal(err)
+				}
+			case "new task PR":
+				s.setTaskStage(ctx, task.ID, "review", "https://github.com/example/app/pull/13")
+			case "new stage PR":
+				b := &s.reports
+				b.mu.Lock()
+				stage := b.stages[task.ID]
+				stage.PR = "https://github.com/example/app/pull/13"
+				b.stages[task.ID] = stage
+				b.mu.Unlock()
+			case "completed", "no status":
+				s.todos.mu.Lock()
+				if changed == "completed" {
+					now := time.Now()
+					s.todos.todos[task.ID].DoneAt = &now
+				} else {
+					s.todos.todos[task.ID].PRStatus = nil
+				}
+				s.todos.mu.Unlock()
+			}
+			if _, holds := s.digestEntry(ctx, g, ""); holds {
+				t.Fatal("the old queued conflict still holds")
+			}
+			if s.deliverDigest(ctx, s.settings(ctx), "conv1", []superviseSignal{g}, "", time.Now(), time.Time{}) ||
+				len(f.notices()) != 0 {
+				t.Fatalf("a stale queued conflict was delivered: %q", f.notices())
+			}
+			if changed == "resolved" {
+				sendPendingPRConflicts(s)
+				if len(f.notices()) != 0 {
+					t.Fatal("resolved conflict escaped the pending queue recheck")
+				}
+			}
+		})
+	}
+}
+
+func TestPRStatusConflictIgnoresStalePRAndFailedPersistence(t *testing.T) {
+	for _, changed := range []string{"task PR", "stage PR", "persistence"} {
+		t.Run(changed, func(t *testing.T) {
+			st := &memStore{}
+			s, _, task := newPRConflictTask(t, st)
+			switch changed {
+			case "task PR":
+				s.setTaskStage(context.Background(), task.ID, "review", "https://github.com/example/app/pull/13")
+			case "stage PR":
+				b := &s.reports
+				b.mu.Lock()
+				stage := b.stages[task.ID]
+				stage.PR = "https://github.com/example/app/pull/13"
+				b.stages[task.ID] = stage
+				b.mu.Unlock()
+			case "persistence":
+				st.mu.Lock()
+				st.failPut = errors.New("synthetic stage write failure")
+				st.mu.Unlock()
+			}
+			err := s.applyPRStatus(context.Background(), task, TodoPRStatus{
+				URL: task.PRURL, State: "open", HeadOID: "head-a", Conflicts: true, CheckedAt: time.Now(),
+			})
+			if (err != nil) != (changed == "persistence") {
+				t.Fatalf("apply error = %v", err)
+			}
+			if g, ok := pendingPRConflict(s, task.ID); ok {
+				t.Fatalf("uncommitted or stale facts signalled: %+v", g)
+			}
+			if got := todoNow(s, task.ID); got.PRStatus != nil {
+				t.Fatalf("uncommitted or stale facts published: %+v", got.PRStatus)
+			}
+		})
+	}
+}
+
+func TestPRStatusConflictTellsEachHeadOnlyOnce(t *testing.T) {
+	st := &memStore{}
+	s, f, task := newPRConflictTask(t, st)
+	for i, head := range []string{"head-a", "head-a", "head-b", "head-a"} {
+		s.deploy.forge = &statusForge{status: TodoPRStatus{State: "open", HeadOID: head, Conflicts: true}}
+		s.sweepPRStatuses(context.Background(), time.Now().Add(time.Duration(i)*deployRecheck))
+		sendPendingPRConflicts(s)
+		want := 1
+		if i >= 2 {
+			want = 2
+		}
+		if notices := f.notices(); len(notices) != want {
+			t.Fatalf("head %s at pass %d: %d notices; want %d: %q", head, i, len(notices), want, notices)
+		}
+	}
+	if got := todoNow(s, task.ID); got.PRStatus.HeadOID != "head-a" {
+		t.Fatalf("the current observation did not return to head-a: %+v", got.PRStatus)
+	}
+}
+
+func TestPRStatusConflictResolvedWhileSupervisorBusyIsNotDelivered(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing relay %v", existing), func(t *testing.T) {
+			s, f, task := newPRConflictTask(t, nil)
+			ctx := context.Background()
+			supervisor, ok := s.session(ctx, "server", "conv1")
+			if !ok {
+				t.Fatal("missing supervisor")
+			}
+			supervisor.Status = "working"
+			f.setSessions("server", supervisor)
+			want := 0
+			if existing {
+				s.signal(superviseSignal{Todo: task.ID, Kind: sigStalled, Key: "earlier", Detail: "Earlier status event."})
+				sendPendingPRConflicts(s)
+				want = 1
+			}
+			status := TodoPRStatus{URL: task.PRURL, State: "open", HeadOID: "head-a", Conflicts: true, CheckedAt: time.Now()}
+			if err := s.applyPRStatus(ctx, task, status); err != nil {
+				t.Fatal(err)
+			}
+			sendPendingPRConflicts(s)
+			if _, pending := pendingPRConflict(s, task.ID); !pending || s.queuedFor("conv1") != want || len(f.notices()) != 0 {
+				t.Fatal("the conflict was not left pending outside the rendered relay queue")
+			}
+			for _, msg := range queuedRelays(s, "conv1") {
+				if strings.Contains(msg.Text, "head-a") {
+					t.Fatal("the conflict was merged into an existing rendered relay")
+				}
+			}
+			status.Conflicts = false
+			if err := s.applyPRStatus(ctx, task, status); err != nil {
+				t.Fatal(err)
+			}
+			supervisor.Status = "idle"
+			f.setSessions("server", supervisor)
+			sessions, err := s.sessions(ctx, "server")
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.drainRelays("server", sessions)
+			if existing {
+				waitFor(t, "the unrelated relay to drain", func() bool { return len(f.notices()) == want })
+			}
+			sendPendingPRConflicts(s)
+			if len(f.notices()) != want {
+				t.Fatalf("a resolved conflict escaped while its supervisor was busy: %q", f.notices())
+			}
+		})
+	}
+}
+
+func TestPRStatusConflictRetriesAfterBusySupervisor(t *testing.T) {
+	st := &memStore{}
+	s, f, task := newPRConflictTask(t, st)
+	ctx := context.Background()
+	supervisor, ok := s.session(ctx, "server", "conv1")
+	if !ok {
+		t.Fatal("missing supervisor")
+	}
+	supervisor.Status = "working"
+	f.setSessions("server", supervisor)
+	if err := s.applyPRStatus(ctx, task, TodoPRStatus{
+		URL: task.PRURL, State: "open", HeadOID: "head-a", Conflicts: true, CheckedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sendPendingPRConflicts(s)
+	var history map[string]superviseFingerprint
+	if _, err := st.Setting(ctx, superviseDedupKey, &history); err != nil || len(history) != 0 {
+		t.Fatalf("a busy supervisor permanently consumed the conflict: %+v, %v", history, err)
+	}
+	supervisor.Status = "idle"
+	f.setSessions("server", supervisor)
+	sendPendingPRConflicts(s)
+	if len(f.notices()) != 1 || s.queuedFor("conv1") != 0 {
+		t.Fatalf("the still-current conflict did not retry once: %q", f.notices())
+	}
+	if _, err := st.Setting(ctx, superviseDedupKey, &history); err != nil || len(history) != 1 {
+		t.Fatalf("the delivered conflict was not kept: %+v, %v", history, err)
 	}
 }

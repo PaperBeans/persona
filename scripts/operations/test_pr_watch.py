@@ -800,6 +800,11 @@ class WatcherTests(unittest.TestCase):
             self.assertEqual(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(), head)
             self.assertEqual(subprocess.check_output(["git", "status", "--porcelain"], cwd=root, text=True), "")
 
+    def test_repair_worker_refuses_without_bwrap(self):
+        with patch.object(pr_watch_repair.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(pr_watch_common.WatchError, "bwrap"):
+                pr_watch_repair.repair_worker_argv(["claude", "--version"], self.root)
+
     def test_dry_run_repair_failure_never_comments(self):
         self.watcher.dry_run = True
         with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \

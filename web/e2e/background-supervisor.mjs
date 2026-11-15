@@ -53,7 +53,7 @@ if (!before && !bg) fail("the fake hub has no background supervisor (start it wi
 
 const WORDS = {
   en: { name: "Background supervisor", builtIn: "Built-in", scheduled: "Scheduled", setting: "The main chat supervises its own tasks", hint: "Off by default", follows: "Follows ", copy: "Copy session ID", accepted: "Accepted", more: "More" },
-  "zh-Hans": { name: "后台督办", builtIn: "内置", scheduled: "定时任务", setting: "主对话自己督办它派出的任务", hint: "默认关闭", follows: "跟随 ", copy: "拷贝会话 ID", accepted: "已验收", more: "更多" },
+  "zh-Hans": { name: "后台督办", builtIn: "内置", scheduled: "定时任务", setting: "主对话自己督办它派出的任务", hint: "默认关闭", follows: "跟随 ", copy: "复制会话 ID", accepted: "已验收", more: "更多" },
   ja: { name: "バックグラウンド監督", builtIn: "内蔵", scheduled: "定期タスク", setting: "メインチャットが自分のタスクを監督する", hint: "既定はオフ", follows: "に従う", copy: "セッションIDをコピー", accepted: "検収済み", more: "その他" },
 };
 

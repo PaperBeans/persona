@@ -12,6 +12,7 @@ import (
 // open PR with no working Agent is a view of that state, not another task lifecycle.
 type TodoPRStatus struct {
 	URL       string    `json:"url"`
+	HeadOID   string    `json:"head_oid,omitempty"`
 	State     string    `json:"state"`
 	Draft     bool      `json:"draft"`
 	Review    string    `json:"review"`
@@ -30,6 +31,7 @@ func (g githubForge) PRStatus(ctx context.Context, repo string, number int) (Tod
 		State          string `json:"state"`
 		Draft          bool   `json:"draft"`
 		Merged         bool   `json:"merged"`
+		Mergeable      *bool  `json:"mergeable"`
 		MergeableState string `json:"mergeable_state"`
 		Head           struct {
 			SHA string `json:"sha"`
@@ -40,7 +42,8 @@ func (g githubForge) PRStatus(ctx context.Context, repo string, number int) (Tod
 	if err := g.get(ctx, path, &pr); err != nil {
 		return TodoPRStatus{}, err
 	}
-	out := TodoPRStatus{State: pr.State, Draft: pr.Draft, Review: "pending", Checks: "none", Conflicts: pr.MergeableState == "dirty"}
+	out := TodoPRStatus{HeadOID: pr.Head.SHA, State: pr.State, Draft: pr.Draft, Review: "pending", Checks: "none",
+		Conflicts: pr.MergeableState == "dirty" || pr.Mergeable != nil && !*pr.Mergeable}
 	if pr.Merged {
 		out.State = "merged"
 	}
@@ -241,6 +244,10 @@ func (s *Service) applyPRStatus(ctx context.Context, t Todo, status TodoPRStatus
 	s.todos.mu.Unlock()
 	b.stageWriting.Unlock()
 	s.todosChanged(ctx)
+	if status.State == "open" && status.Conflicts && status.HeadOID != "" && t.Supervision != nil {
+		s.signal(superviseSignal{Todo: t.ID, Kind: sigPRConflict, Key: status.URL + "@" + status.HeadOID,
+			Detail: fmt.Sprintf("PR %s at head %s is open and has merge conflicts.", status.URL, status.HeadOID)})
+	}
 	if terminal && (wasOpen || legacyHold) && t.Supervision != nil {
 		// Only the hold that waits on this PR wakes: a park waiting on an outside event or someone else whose reason
 		// names this PR (parkWaitsOnPR), the same park (its review's time) as when the PR was read, and the stage's PR

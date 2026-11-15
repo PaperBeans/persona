@@ -8,20 +8,20 @@ import Foundation
 ///
 /// Every field but `status` is optional and decoded on its own: one the hub leaves out, or sends in a shape this
 /// build does not know, is as if it were not there. Session lists carry no `did` and no `verified`.
-nonisolated struct Closeout: Codable, Hashable, Sendable {
+public nonisolated struct Closeout: Codable, Hashable, Sendable {
     /// What the hub found when it looked at the closeout's pull request: "yes" or "no" where it could tell.
-    nonisolated struct Checked: Codable, Hashable, Sendable {
-        var merged: String?
-        var deployed: String?
+    public nonisolated struct Checked: Codable, Hashable, Sendable {
+        public var merged: String?
+        public var deployed: String?
 
-        enum CodingKeys: String, CodingKey { case merged, deployed }
+        public enum CodingKeys: String, CodingKey { case merged, deployed }
 
-        init(merged: String? = nil, deployed: String? = nil) {
+        public init(merged: String? = nil, deployed: String? = nil) {
             self.merged = merged
             self.deployed = deployed
         }
 
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             merged = (try? c.decodeIfPresent(String.self, forKey: .merged)) ?? nil
             deployed = (try? c.decodeIfPresent(String.self, forKey: .deployed)) ?? nil
@@ -29,20 +29,20 @@ nonisolated struct Closeout: Codable, Hashable, Sendable {
     }
 
     /// The statuses this build draws; any other is no closeout to show.
-    nonisolated enum Status: String, Sendable {
+    public nonisolated enum Status: String, Sendable {
         case done
         case notDone = "not_done"
         case blocked
     }
 
     /// The two things an agent claims and the hub can check.
-    nonisolated enum Subject: Sendable {
+    public nonisolated enum Subject: Sendable {
         case merged
         case deployed
     }
 
     /// How a claim stands against the hub's finding. `found`: the agent did not say, the hub's finding stands alone.
-    nonisolated enum ClaimState: Sendable {
+    public nonisolated enum ClaimState: Sendable {
         case confirmed
         case contradicted
         case unchecked
@@ -51,32 +51,38 @@ nonisolated struct Closeout: Codable, Hashable, Sendable {
 
     /// A claim on merged or deployed: what the agent said (nil when it did not), what the hub found (nil when it did
     /// not look or could not tell).
-    nonisolated struct Claim: Hashable, Sendable {
-        var said: Bool?
-        var found: Bool?
-        var state: ClaimState
+    public nonisolated struct Claim: Hashable, Sendable {
+        public var said: Bool?
+        public var found: Bool?
+        public var state: ClaimState
+
+        public init(said: Bool? = nil, found: Bool? = nil, state: ClaimState) {
+            self.said = said
+            self.found = found
+            self.state = state
+        }
     }
 
     /// done, not_done or blocked, as the hub sent it.
-    var status: String
+    public var status: String
     /// For a blocked one: who or what it waits for.
-    var waiting: String?
+    public var waiting: String?
     /// What changed, at most three sentences.
-    var did: [String]?
+    public var did: [String]?
     /// "yes" or "no"; nil when it does not apply or was not said.
-    var merged: String?
-    var deployed: String?
+    public var merged: String?
+    public var deployed: String?
     /// What was run or measured, with its reading.
-    var verified: String?
+    public var verified: String?
     /// What it still needs from someone.
-    var missing: String?
-    var checked: Checked?
+    public var missing: String?
+    public var checked: Checked?
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case status, waiting, did, merged, deployed, verified, missing, checked
     }
 
-    init(status: String, waiting: String? = nil, did: [String]? = nil, merged: String? = nil, deployed: String? = nil,
+    public init(status: String, waiting: String? = nil, did: [String]? = nil, merged: String? = nil, deployed: String? = nil,
          verified: String? = nil, missing: String? = nil, checked: Checked? = nil) {
         self.status = status
         self.waiting = waiting
@@ -88,7 +94,7 @@ nonisolated struct Closeout: Codable, Hashable, Sendable {
         self.checked = checked
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         status = (try? c.decodeIfPresent(String.self, forKey: .status)) ?? ""
         waiting = (try? c.decodeIfPresent(String.self, forKey: .waiting)) ?? nil
@@ -101,7 +107,7 @@ nonisolated struct Closeout: Codable, Hashable, Sendable {
     }
 
     /// The status, when it is one this build knows.
-    var known: Status? { Status(rawValue: status) }
+    public var known: Status? { Status(rawValue: status) }
 
     private static func yesNo(_ value: String?) -> Bool? {
         switch value {
@@ -112,7 +118,7 @@ nonisolated struct Closeout: Codable, Hashable, Sendable {
     }
 
     /// The claim on merged or deployed with the hub's finding; nil when neither the agent said nor the hub found.
-    func claim(_ subject: Subject) -> Claim? {
+    public func claim(_ subject: Subject) -> Claim? {
         let said = Self.yesNo(subject == .merged ? merged : deployed)
         let found = Self.yesNo(subject == .merged ? checked?.merged : checked?.deployed)
         switch (said, found) {
@@ -124,7 +130,7 @@ nonisolated struct Closeout: Codable, Hashable, Sendable {
     }
 
     /// The hub found a claim of the closeout to be untrue.
-    var contradicted: Bool {
+    public var contradicted: Bool {
         claim(.merged)?.state == .contradicted || claim(.deployed)?.state == .contradicted
     }
 
@@ -146,13 +152,13 @@ nonisolated struct Closeout: Codable, Hashable, Sendable {
 
     /// "merged · not deployed": where the closeout stands on merged and deployed, for the end of a row's line; empty
     /// when it says nothing on either and the hub found nothing.
-    var suffix: String {
+    public var suffix: String {
         [words(.merged), words(.deployed)].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// A row's line from the closeout alone, for a turn the hub gave no line of its own: what a blocked one waits for,
     /// what a not-done one still needs; nil for a status this build does not know.
-    var line: String? {
+    public var line: String? {
         switch known {
         case .blocked?:
             if let waiting, !waiting.isEmpty { return String(localized: "Blocked on: \(waiting)") }
@@ -168,7 +174,7 @@ nonisolated struct Closeout: Codable, Hashable, Sendable {
     }
 
     /// The card's head: the status in a word, or what a blocked one waits for.
-    var statusLine: String? {
+    public var statusLine: String? {
         switch known {
         case .done?: return String(localized: "Done [Closeout]")
         case .notDone?: return String(localized: "Not done [Closeout]")
@@ -188,7 +194,7 @@ nonisolated struct Closeout: Codable, Hashable, Sendable {
     /// `text` without its last closeout block, the one the hub read (it takes the last): the card above the transcript
     /// says it, so the reply does not say it again as raw text. Only the block goes, with the blank lines it leaves
     /// and a code fence that held nothing else; text without a block comes back as it is.
-    static func strip(_ text: String) -> String {
+    public static func strip(_ text: String) -> String {
         let all = text as NSString
         guard let last = block.matches(in: text, range: NSRange(location: 0, length: all.length)).last else { return text }
         var before = all.substring(to: last.range.location)
@@ -210,7 +216,7 @@ nonisolated struct Closeout: Codable, Hashable, Sendable {
     }
 
     /// Whether `text` holds a closeout block.
-    static func holdsBlock(_ text: String) -> Bool {
+    public static func holdsBlock(_ text: String) -> Bool {
         block.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil
     }
 
@@ -228,26 +234,26 @@ nonisolated struct Closeout: Codable, Hashable, Sendable {
 }
 
 /// Something the work produced (`work.artifacts`): a pull request, a commit, a branch, a document, a build or a link.
-nonisolated struct WorkArtifact: Codable, Hashable, Sendable {
+public nonisolated struct WorkArtifact: Codable, Hashable, Sendable {
     /// pr, commit, branch, doc, build or url; kept as the hub sent it.
-    var kind: String
-    var ref: String
+    public var kind: String
+    public var ref: String
 
-    enum CodingKeys: String, CodingKey { case kind, ref }
+    public enum CodingKeys: String, CodingKey { case kind, ref }
 
-    init(kind: String, ref: String) {
+    public init(kind: String, ref: String) {
         self.kind = kind
         self.ref = ref
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? ""
         ref = (try? c.decodeIfPresent(String.self, forKey: .ref)) ?? ""
     }
 
     /// The reference as a web link, when it is one (http or https only).
-    var link: URL? {
+    public var link: URL? {
         let raw = ref.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: raw), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
               url.host?.isEmpty == false else { return nil }
@@ -256,7 +262,7 @@ nonisolated struct WorkArtifact: Codable, Hashable, Sendable {
 
     /// What the card shows for it: "PR #12" for a pull request's link (GitLab-style merge requests read "MR !12"),
     /// any other link as its address without the scheme, anything else as it is.
-    var label: String {
+    public var label: String {
         guard let link else { return ref.trimmingCharacters(in: .whitespacesAndNewlines) }
         let parts = link.path.split(separator: "/")
         if kind == "pr", let number = parts.last, Int(number) != nil, parts.count >= 2 {

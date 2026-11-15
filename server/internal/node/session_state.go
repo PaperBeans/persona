@@ -26,20 +26,21 @@ type stateFile struct {
 }
 
 type sessionState struct {
-	CreationID       string          `json:"creation_id,omitempty"`
-	Incarnation      string          `json:"incarnation,omitempty"`
-	Pane             string          `json:"pane,omitempty"`
-	Launcher         string          `json:"launcher"`
-	Model            string          `json:"model,omitempty"`
-	ModelFingerprint string          `json:"model_fingerprint,omitempty"`
-	ModelEffort      string          `json:"model_effort,omitempty"`
-	Runtime          string          `json:"runtime,omitempty"` // the assistant runtime it was asked to run on (assistant_sdk.go)
-	ConfigDir        string          `json:"config_dir,omitempty"`
-	Cwd              string          `json:"cwd"`
-	IsMain           bool            `json:"is_main,omitempty"`
-	StartedAt        time.Time       `json:"started_at"`
-	StopCause        proto.StopCause `json:"stop_cause,omitempty"`
-	StopCauseAt      int64           `json:"stop_cause_at,omitempty"`
+	CreationID              string          `json:"creation_id,omitempty"`
+	Incarnation             string          `json:"incarnation,omitempty"`
+	Pane                    string          `json:"pane,omitempty"`
+	Launcher                string          `json:"launcher"`
+	Model                   string          `json:"model,omitempty"`
+	ModelFingerprint        string          `json:"model_fingerprint,omitempty"`
+	ModelEffort             string          `json:"model_effort,omitempty"`
+	Runtime                 string          `json:"runtime,omitempty"` // the assistant runtime it was asked to run on (assistant_sdk.go)
+	ConfigDir               string          `json:"config_dir,omitempty"`
+	Cwd                     string          `json:"cwd"`
+	IsMain                  bool            `json:"is_main,omitempty"`
+	SupervisionInstructions string          `json:"supervision_instructions,omitempty"`
+	StartedAt               time.Time       `json:"started_at"`
+	StopCause               proto.StopCause `json:"stop_cause,omitempty"`
+	StopCauseAt             int64           `json:"stop_cause_at,omitempty"`
 	// AppMode / AppEffort: the permission mode and effort set on an assistant conversation (modes.go). AppMode
 	// also retains a terminal Codex start constraint for later resumes. They
 	// win over what its transcript recorded and outlive the node: an old "default" there no longer locks it in.

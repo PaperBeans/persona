@@ -89,7 +89,7 @@ The two complement each other and have separate switches.
 | `workbench` Workbench | `/home` brings up a pinned home card of everything going on, kept the only one and up to date; every card gets a "Workbench" button back to it; `/today` and `/inbox` show the day and the Inbox; `/start` asks for a permission mode; extensions can register companion bots (see "The workbench" below). Off by default; settings saved before it read as off |
 | `agents` Drive Agents | `/agents` lists the Agents on every computer (Needs you / Working / Unread / used in the last two days); after tapping "Chat here", messages go to it; `/start` starts a new one |
 
-With `pushes` on, an Agent's finished turn the phone is pushed for also gets one card of its own (#4674); the turn of an Agent on a supervised task gets neither, as its supervisor tells the owner what matters (#8270, `docs/assistant/unified-entry.md` "Supervision").
+With `pushes` on, an Agent's finished turn the phone is pushed for also gets one card of its own (#4674); the turn of an Agent on a supervised task gets neither, as its supervisor tells the owner what matters (#8270, `docs/assistant/unified-entry.md` "Supervision"). Nor does the normal finish of a session hosted in a Lark chat bridge, which answered in its own topic (#8592, `docs/server/server.md` "Push policy").
 
 Defaults (when first turned on) are `main`, `cards` and `reports` (`reports` was added later: settings saved earlier don't have it, and it reads as on). `board`, `only_conclusions`, `report_steps`, `answer_new_card` and `workbench` are off until turned on.
 

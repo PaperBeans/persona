@@ -221,7 +221,19 @@ func (s *Service) toolTodoGet(ctx context.Context, args json.RawMessage) (string
 		if ds, err := st.ListTodoDecisions(ctx, t.ID, false); err == nil && len(ds) > 0 {
 			b.WriteString("decisions in force:\n")
 			for _, d := range ds {
-				fmt.Fprintf(&b, "- %s → %s", clip(oneLine(d.Question), 160), clip(oneLine(d.Choice), 160))
+				question := d.Question
+				if _, earlier := earlierOutcomeSummary(t, d); earlier {
+					question = "Earlier phase outcome"
+				}
+				fmt.Fprintf(&b, "- %s → %s", clip(oneLine(question), 160), clip(oneLine(d.Choice), 160))
+				if at, ok := completionOfDecision(d); ok {
+					_, earlier := earlierPhase(t, d)
+					phase := "current completion"
+					if earlier {
+						phase = "earlier phase"
+					}
+					fmt.Fprintf(&b, " [%s: %s; %s/%s]", phase, at.In(loc).Format(toolTimeLayout), d.SourceMachine, d.SourceSession)
+				}
 				if r := oneLine(d.Reason); r != "" {
 					fmt.Fprintf(&b, " (%s)", clip(r, 160))
 				}

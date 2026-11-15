@@ -157,6 +157,7 @@ func lnHub(t *testing.T) (*Hub, *fakeAPNs) {
 	t.Cleanup(srv.Close)
 	store := newLnStore()
 	p := newPusher(t.TempDir(), nil, t.Logf)
+	t.Cleanup(p.sends.Wait) // before srv.Close (cleanups run last first): a post still on its way logs to this test
 	p.store = store
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	p.direct = apns.NewWithKey(apnsConfig{KeyID: "K", TeamID: "T", Topic: "app.example"}, key)
