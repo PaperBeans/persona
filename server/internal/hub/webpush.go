@@ -522,7 +522,7 @@ func todoID(v any) string {
 // webPushTag is the tag the service worker shows msg under, the one the page gives the same event (web
 // lib/attention-signals.ts notify): `<machine>/<session>#needs` or `#finished`, `card:<id>#needs` for a card no session
 // has, `todo:<id>`, `alert:<id>`; "" for one that replaces nothing. The Topic is made from it, so pushes waiting at the
-// push service replace each other the way the notifications do.
+// push service replace each other the way the notifications do; one with no tag goes without a Topic (TopicFor).
 func webPushTag(msg map[string]any) string {
 	str := func(k string) string { s, _ := msg[k].(string); return s }
 	mid, sid, ix := str("machine_id"), str("session_id"), str("interaction_id")

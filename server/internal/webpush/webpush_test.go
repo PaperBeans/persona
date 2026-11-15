@@ -237,6 +237,14 @@ func TestNewRequestCarriesTheHeadersAndAnOpenableBody(t *testing.T) {
 	if topic := TopicFor(strings.Repeat("long key ", 50)); len(topic) > 32 || strings.ContainsAny(topic, "+/=") {
 		t.Fatalf("topic %q", topic)
 	}
+	// A push about no key replaces nothing: no Topic header, rather than one every such push shares.
+	untagged, err := NewRequest(context.Background(), sub, k, "https://example.com", []byte(`{"title":"t"}`), Message{TTL: 30 * time.Minute, Topic: TopicFor("")}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if topic, ok := untagged.Header["Topic"]; ok {
+		t.Fatalf("a push about no key has Topic %q", topic)
+	}
 }
 
 // Only a plain https URL at a known push service: a client cannot point the hub at an address of its own.
