@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/iphone"
 	"github.com/nwverse/persona/server/internal/node/nodekit"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -40,9 +41,11 @@ type iphoneHost interface {
 	Call(ctx context.Context, device, op string, args json.RawMessage) (json.RawMessage, error)
 	// Connect starts a paired iPhone's session without sending anything; it stays up while idle.
 	Connect(device string) error
-	// Pair and Forget start a background job (one at a time); Cancel stops it; Job is the one running or the last.
+	// Pair, Forget and Install (the bridge itself, from a release) start a background job (one at a time); Cancel
+	// stops it; Job is the one running or the last.
 	Pair(device string) error
 	Forget(device string) error
+	Install(src iphone.InstallSource) error
 	Cancel()
 	Job() *iphoneJob
 }
@@ -57,13 +60,18 @@ type iphoneLink struct {
 	ErrorCode string
 	// Info: the session's latest device_info of it, kept from its own checks (empty when it has none).
 	Info json.RawMessage
+	// DeveloperMode: what the iPhone last said of it, nil when it never did.
+	DeveloperMode *bool
 }
 
-// iphoneJob is the host's pairing job; ErrorCode is the bridge's code for why it failed, shown as its note.
+// iphoneJob is the host's pairing (or install) job; ErrorCode is the bridge's code for why it failed, shown as its
+// note. Waiting: while a pairing runs, what it waits for from the person at the phone (trust_pending, locked). Stage:
+// while an install runs, what it does (download, verify, install). Device: the iPhone it is for.
 type iphoneJob struct {
-	Kind, State, Step string
-	ErrorCode, Error  string
-	Started           time.Time
+	Kind, State, Step      string
+	ErrorCode, Error       string
+	Waiting, Stage, Device string
+	Started                time.Time
 }
 
 // iphoneDriver is the core that runs a look or a do (reading the screen, numbering its elements, acting on them,
@@ -111,6 +119,7 @@ func (noIPhones) Devices(context.Context) []iphoneLink  { return nil }
 func (noIPhones) Connect(string) error                  { return errNoIPhoneBridge }
 func (noIPhones) Pair(string) error                     { return errNoIPhoneBridge }
 func (noIPhones) Forget(string) error                   { return errNoIPhoneBridge }
+func (noIPhones) Install(iphone.InstallSource) error    { return errNoIPhoneBridge }
 func (noIPhones) Cancel()                               {}
 func (noIPhones) Job() *iphoneJob                       { return nil }
 func (noIPhones) Call(context.Context, string, string, json.RawMessage) (json.RawMessage, error) {
@@ -127,6 +136,26 @@ const (
 	iphoneNoteUSB        = "已用数据线连上，还没有配对：在机器页点「配对」"
 	iphoneNoteConnecting = "正在连接这台 iPhone"
 	iphoneNoteFailed     = "这台 iPhone 出了点问题，稍后再试"
+	// A pairing job's step while it runs, and while it waits for the person at the phone (#8199).
+	iphoneNotePairing    = "正在和这台 iPhone 配对"
+	iphoneNotePairTrust  = "在这台 iPhone 上点「信任」，再输入锁屏密码"
+	iphoneNotePairUnlock = "解锁这台 iPhone，配对才能继续"
+)
+
+// An install job's step while it runs, by its stage, and its error once failed, by its code (#8199).
+var (
+	iphoneInstallSteps = map[string]string{
+		"download": "正在下载 iPhone 助手程序",
+		"verify":   "正在校验 iPhone 助手程序",
+		"install":  "正在安装 iPhone 助手程序",
+	}
+	iphoneInstallErrors = map[string]string{
+		"download_failed":   "下载 iPhone 助手程序失败：检查这台电脑的网络，再试一次",
+		"checksum_mismatch": "下载的 iPhone 助手程序和发布的不一致：再试一次",
+		"bad_helper":        "下载的 iPhone 助手程序在这台电脑上运行不了",
+		"install_failed":    "这台电脑上装不上 iPhone 助手程序",
+		"timeout":           "iPhone 助手程序没能及时装好：再试一次",
+	}
 )
 
 var iphoneNotes = map[string]string{
@@ -146,6 +175,9 @@ var iphoneNotes = map[string]string{
 	"not_found":           "数据线上找不到这台 iPhone：重新插上再试",
 	"bridge_missing":      iphoneNoteNoBridge,
 }
+
+// iphoneCode is the code an app gets beside iphoneNote(code): the code itself, "failed" when there is none.
+func iphoneCode(code string) string { return cmp.Or(code, "failed") }
 
 // iphoneNote is the note for code; a code it does not know is a failure without a word on what to do.
 func iphoneNote(code string) string {
@@ -180,7 +212,7 @@ func Status(ctx context.Context) proto.IPhone {
 	p := proto.IPhone{Devices: []proto.IPhoneDevice{}}
 	p.Installed, p.Version = iphones.Bridge(ctx)
 	if !p.Installed {
-		p.Note = iphoneNoteNoBridge
+		p.Note, p.Code = iphoneNoteNoBridge, "bridge_missing"
 	} else {
 		links := iphones.Devices(ctx)
 		p.Devices = make([]proto.IPhoneDevice, len(links))
@@ -194,13 +226,36 @@ func Status(ctx context.Context) proto.IPhone {
 		}
 		wg.Wait()
 		if !slices.ContainsFunc(p.Devices, func(d proto.IPhoneDevice) bool { return d.Paired }) {
-			p.Note = iphoneNoteNonePaired
+			p.Note, p.Code = iphoneNoteNonePaired, "none_paired"
 		}
 	}
 	if j := iphones.Job(); j != nil {
-		p.Job = &proto.ComputerJob{Kind: j.Kind, State: j.State, Step: j.Step, Error: j.Error, Started: j.Started}
-		if n, ok := iphoneNotes[j.ErrorCode]; ok {
+		p.Job = &proto.ComputerJob{Kind: j.Kind, State: j.State, Step: j.Step, Error: j.Error, Device: j.Device, Started: j.Started}
+		notes := iphoneNotes
+		if j.Kind == "install" {
+			notes = iphoneInstallErrors
+		}
+		if n, ok := notes[j.ErrorCode]; ok {
 			p.Job.Error = n // else the job's own words
+		}
+		// A pairing's step in words the hub translates, and what it waits for at the phone as a code; once failed, why.
+		switch {
+		case j.State == "running" && j.Kind == "pair":
+			p.Job.Code = j.Waiting
+			switch j.Waiting {
+			case "trust_pending":
+				p.Job.Step = iphoneNotePairTrust
+			case "locked":
+				p.Job.Step = iphoneNotePairUnlock
+			default:
+				p.Job.Step = iphoneNotePairing
+			}
+		case j.State == "running" && j.Kind == "install":
+			if n, ok := iphoneInstallSteps[j.Stage]; ok {
+				p.Job.Step = n
+			}
+		case j.State == "failed":
+			p.Job.Code = cmp.Or(j.ErrorCode, "failed")
 		}
 	}
 	p.Checked = time.Now().UTC() // last, as computerStatus: the manager keeps the latest answer
@@ -209,12 +264,13 @@ func Status(ctx context.Context) proto.IPhone {
 
 // iphoneInfo is what the bridge's device_info says of an iPhone (the fields status reads).
 type iphoneInfo struct {
-	Name         string            `json:"name"`
-	ProductType  string            `json:"product_type"`
-	OSVersion    string            `json:"os_version"`
-	Locked       *bool             `json:"locked"`
-	Capabilities map[string]bool   `json:"capabilities"`
-	Notes        map[string]string `json:"notes"`
+	Name          string            `json:"name"`
+	ProductType   string            `json:"product_type"`
+	OSVersion     string            `json:"os_version"`
+	Locked        *bool             `json:"locked"`
+	DeveloperMode *bool             `json:"developer_mode"`
+	Capabilities  map[string]bool   `json:"capabilities"`
+	Notes         map[string]string `json:"notes"`
 }
 
 // iphoneNeeds are the capabilities the assistant needs of an iPhone to operate it. The element tree (ax_tree) is not
@@ -226,10 +282,10 @@ var iphoneNeeds = []string{"screenshot", "input"}
 // latest, or (fresh, or when it has none) asked now.
 func iphoneProbeDevice(ctx context.Context, l iphoneLink, fresh bool) proto.IPhoneDevice {
 	d := proto.IPhoneDevice{ID: l.ID, Name: l.Name, ProductType: l.ProductType, IOS: l.IOS, Paired: l.Paired, USB: l.USB,
-		State: l.State, Transport: l.Transport}
+		State: l.State, Transport: l.Transport, DeveloperMode: l.DeveloperMode}
 	switch {
 	case !l.Paired && l.USB:
-		d.Note = iphoneNoteUSB
+		d.Note, d.Code = iphoneNoteUSB, "usb_unpaired"
 		return d
 	case !l.Paired:
 		return d
@@ -237,13 +293,13 @@ func iphoneProbeDevice(ctx context.Context, l iphoneLink, fresh bool) proto.IPho
 		// Asked about while the extension is on: its session starts, so the next look finds it connected. Starting it
 		// sends nothing to the iPhone but the session's own checks.
 		_ = iphones.Connect(l.ID)
-		d.Note = iphoneNoteConnecting
+		d.Note, d.Code = iphoneNoteConnecting, "connecting"
 		return d
 	case l.State == "connecting":
-		d.Note = iphoneNoteConnecting
+		d.Note, d.Code = iphoneNoteConnecting, "connecting"
 		return d
 	case l.State != "connected": // backoff after a failure
-		d.Note = iphoneNote(l.ErrorCode)
+		d.Note, d.Code = iphoneNote(l.ErrorCode), iphoneCode(l.ErrorCode)
 		return d
 	}
 	raw := l.Info
@@ -256,31 +312,50 @@ func iphoneProbeDevice(ctx context.Context, l iphoneLink, fresh bool) proto.IPho
 			if code == "" && pctx.Err() != nil {
 				code = "timeout"
 			}
-			d.Note = iphoneNote(code)
+			d.Note, d.Code = iphoneNote(code), iphoneCode(code)
 			return d
 		}
 	}
 	var info iphoneInfo
 	if json.Unmarshal(raw, &info) != nil {
-		d.Note = iphoneNoteFailed
+		d.Note, d.Code = iphoneNoteFailed, "failed"
 		return d
 	}
 	d.Connected = true
 	d.Name, d.ProductType, d.IOS = cmp.Or(info.Name, d.Name), cmp.Or(info.ProductType, d.ProductType), cmp.Or(info.OSVersion, d.IOS)
 	d.Locked = info.Locked != nil && *info.Locked
 	d.Capabilities = info.Capabilities
+	if info.DeveloperMode != nil {
+		d.DeveloperMode = info.DeveloperMode
+	}
 	for _, c := range iphoneNeeds {
 		if info.Capabilities != nil && !info.Capabilities[c] {
-			d.Note = iphoneNote(info.Notes[c])
+			d.Note, d.Code = iphoneNote(info.Notes[c]), iphoneCode(info.Notes[c])
 			return d
 		}
 	}
 	if d.Locked {
-		d.Note = iphoneNote("locked")
+		d.Note, d.Code = iphoneNote("locked"), "locked"
 		return d
 	}
 	d.Ready = true
 	return d
+}
+
+// Install starts installing the bridge from the release's build the manager found (iphone.InstallSource), in the
+// background; its state comes back as the job (kind install).
+func Install(ctx context.Context, params json.RawMessage) (proto.IPhone, error) {
+	var src iphone.InstallSource
+	if err := json.Unmarshal(params, &src); err != nil {
+		return proto.IPhone{}, fmt.Errorf("iphone.install: %w", err)
+	}
+	if err := iphones.Install(src); err != nil {
+		return proto.IPhone{}, err
+	}
+	iphoneBridgeSeen.Lock()
+	iphoneBridgeSeen.at = time.Time{} // the next status finds the new one
+	iphoneBridgeSeen.Unlock()
+	return Status(ctx), nil
 }
 
 // Call runs one call of the iphone program: status answers here, look and do go to the driver with the bridge

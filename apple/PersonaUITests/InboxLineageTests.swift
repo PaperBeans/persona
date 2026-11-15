@@ -70,7 +70,12 @@ final class InboxLineageTests: XCTestCase {
         app.launchPinned()
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10), "no app window")
         regularWidth = app.windows.firstMatch.frame.width > 600
+        if !regularWidth, app.buttons["inbox.detail.done"].firstMatch.exists == false {
+            requireHittable(element("inbox.detail.more"), "the iPhone's one item-action menu")
+            element("inbox.detail.more").tap()
+        }
         requireHittable(element("inbox.detail.done"), "the lineage item detail")
+        if !regularWidth { app.tap() } // dismiss the menu before reading the item
         shot("detail")
     }
 

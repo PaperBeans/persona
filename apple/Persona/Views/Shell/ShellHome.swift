@@ -439,11 +439,11 @@ struct ShellDestinations: ViewModifier {
     func body(content: Content) -> some View {
         if enabled {
             content
-                // ☰ beside Back on a place's pages: the sidebar opens at any depth, so a place is changed without
-                // popping it (docs/design/sidebar-navigation.md). In the Sidebar layout a place is the split's first
-                // page, with no back to the conversation under it (#6332).
+                // A place's root has ☰ in place of Back; only its sub-pages have Back. The drawer stays
+                // available without putting two leading buttons on the same page (docs/design/sidebar-navigation.md).
                 .navigationDestination(for: ShellRoute.self) { route in
-                    routed(place(route).modifier(ShellPlaceSidebarButton()).modifier(FirstPage(on: !agentRoutes)))
+                    // Last: in the shell this must override a split page's `navigationBarBackButtonHidden(false)`.
+                    routed(place(route).modifier(FirstPage(on: !agentRoutes)).modifier(ShellPlaceRoot()))
                 }
                 .modifier(InboxDestinations(accounts: accounts.accounts, inboxChat: routeChat, openFeishu: { path.append($0) }))
                 .modifier(AgentRoutes(on: agentRoutes, chat: routeChat, openFeishu: { path.append($0) }))
@@ -473,15 +473,15 @@ struct ShellDestinations: ViewModifier {
             if on {
                 content
                     .navigationDestination(for: TodoDetailRoute.self) { r in
-                        TodoDetailView(todoID: r.id).modifier(ShellPlaceSidebarButton())
+                        TodoDetailView(todoID: r.id)
                             .modifier(InboxDestinationEnvironment(chat: chat, openFeishu: openFeishu))
                     }
                     .navigationDestination(for: MachineDetailRoute.self) { r in
-                        MachineDetailView(ref: r.ref).modifier(ShellPlaceSidebarButton())
+                        MachineDetailView(ref: r.ref)
                             .modifier(InboxDestinationEnvironment(chat: chat, openFeishu: openFeishu))
                     }
                     .navigationDestination(for: TerminalsRoute.self) { r in
-                        TerminalsView(only: r.machine).modifier(ShellPlaceSidebarButton())
+                        TerminalsView(only: r.machine)
                             .modifier(InboxDestinationEnvironment(chat: chat, openFeishu: openFeishu))
                     }
                     .navigationDestination(for: SessionKey.self) { key in
@@ -521,28 +521,30 @@ struct ShellDestinations: ViewModifier {
     }
 }
 
-/// ☰ beside Back on the pages of a place the shell's sidebar opened (docs/design/sidebar-navigation.md): it opens the drawer
-/// over the page as it is, so the user can go to another place and come back to this one where they left it. Only in the
-/// iPhone shell; the iPad's sidebar is a column of its own.
-struct ShellPlaceSidebarButton: ViewModifier {
+/// ☰ is the one leading control at the root of a place the shell's sidebar opened; a sub-page has only Back.
+/// Returning to the conversation goes through a conversation row in the drawer. Only in the iPhone shell;
+/// the iPad's sidebar is a column of its own.
+struct ShellPlaceRoot: ViewModifier {
     @Environment(\.shell) private var shell
 
     func body(content: Content) -> some View {
         #if os(iOS)
         if let shell {
-            content.toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Haptics.tap()
-                        shell.drawer.open()
-                    } label: {
-                        Label(String(localized: "Chat History [Shell Components 60636b]"), systemImage: Theme.Icon.sidebarMenu)
-                            .labelStyle(.iconOnly)
+            content
+                .navigationBarBackButtonHidden(true)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            Haptics.tap()
+                            shell.drawer.open()
+                        } label: {
+                            Label(String(localized: "Chat History [Shell Components 60636b]"), systemImage: Theme.Icon.sidebarMenu)
+                                .labelStyle(.iconOnly)
+                        }
+                        .tint(Color.primary)
+                        .accessibilityIdentifier("shell-place-sidebar")
                     }
-                    .tint(Color.primary) // as Back beside it, not the accent
-                    .accessibilityIdentifier("shell-place-sidebar")
                 }
-            }
         } else {
             content
         }

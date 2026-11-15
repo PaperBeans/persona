@@ -55,11 +55,11 @@ func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherChe
 		// What Claude Code keeps of the run, the shell's or a runtime's (Paseo's probe agent runs it in dir too).
 		defer n.removeCheckProject(dir)
 	}
-	if _, managed := n.managedLauncher(name); !managed {
-		if _, runtime := n.runtimeLauncherModels(name); runtime {
-			if result, handled := n.runtimeLauncherCheck(ctx, name, dir, prompt); handled {
-				return result
-			}
+	// A runtime's launcher, as a start in ctx's host runs it: where that host's engine runs only its own launchers, its
+	// provider of the name, whatever launcher of the shell's or of Persona's has it too (#8140).
+	if h := n.runtimeOfIn(ctx, name); h != nil {
+		if result, handled := n.runtimeLauncherCheck(ctx, h, name, dir, prompt); handled {
+			return result
 		}
 	}
 	if agent == "claude" {

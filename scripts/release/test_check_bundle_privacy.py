@@ -107,6 +107,22 @@ class BinaryNoiseEmailTests(unittest.TestCase):
                 self.assertIn("email", cbp.text_kinds(local + "@" + domain, ()))
 
 
+class RustBridgeConstantTests(unittest.TestCase):
+    """persona-iphone-bridge's upstream credits are public in their exact context, and only there."""
+
+    def test_aws_lc_credits_are_classified(self):
+        for text in ("SHA256 block transform for ARMv8, CRYPTOGAMS by <" + "appro@" + "openssl.org>",
+                     "AES GCM module for ARMv8, SPDX BSD-3-Clause by <" + "xiaokang.qian@" + "arm.com>"):
+            with self.subTest(text=text):
+                self.assertEqual(cbp.text_kinds(text, ()), set())
+
+    def test_the_same_addresses_elsewhere_still_count(self):
+        for text in ("mail " + "appro@" + "openssl.org", "<" + "xiaokang.qian@" + "arm.com>",
+                     "by <" + "person@" + "openssl.org>", "by <" + "appro@" + "openssl.org.cn>"):
+            with self.subTest(text=text):
+                self.assertIn("email", cbp.text_kinds(text, ()))
+
+
 class PublicConstantTests(unittest.TestCase):
     def kinds(self, text, words=(), dependencies=DEPENDENCIES):
         return cbp.text_kinds(text, words, whole_short=True, dependencies=dependencies)
@@ -958,7 +974,9 @@ class BinaryPlistTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(cbp.plist_xml(plists[name]), "")
 
-    @unittest.skipUnless(shutil.which("plutil"), "plutil is macOS only")
+    # The reference is macOS's plutil: swift-corelibs-foundation's Linux plutil reads a string with NUL and refuses
+    # some values macOS prints.
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("plutil"), "plutil is macOS only")
     def test_the_xml_view_matches_plutil(self):
         samples = dict(self.odd_plists(), every=plistlib.dumps(EVERY_VALUE, fmt=plistlib.FMT_BINARY, sort_keys=False))
         with tempfile.TemporaryDirectory(prefix="bundle-privacy-plutil-") as directory:

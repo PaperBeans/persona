@@ -30,6 +30,22 @@ type Launcher struct {
 	Pi bool `json:"pi,omitempty"`
 }
 
+// StartInstead is what a new session's start asked for and does not run with, as an engine runtime that runs only its
+// own launchers answers session.start (caps.same_kind, Paseo; docs/integrations/paseo.md "A launcher Paseo does not
+// have"): the launcher it has no usable provider of (one of the same kind of agent runs instead: the session's
+// launcher), the model that one does not offer (it runs its own default), the effort the model does not offer (the
+// session's effort is the one it runs at; none: the model's default). Each empty field ran as asked. The node passes it
+// on with the session (session.start's instead); the hub and the manager say it where the start was asked for.
+type StartInstead struct {
+	Launcher string `json:"launcher,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Effort   string `json:"effort,omitempty"`
+}
+
+// CodeLauncherKindMissing: such an engine has no usable provider of the kind of agent a start's launcher starts, so
+// nothing was started and no other kind of agent runs in its place (#8140).
+const CodeLauncherKindMissing = "launcher_kind_missing"
+
 // LauncherDetail is what a ~/.zshrc launcher really sets (the node runs it with the agent stubbed out,
 // node/launcherprobe.go): every field the page shows; secrets are never in it.
 type LauncherDetail struct {

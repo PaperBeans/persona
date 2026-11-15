@@ -16,9 +16,17 @@ import (
 // main's 447,432 B, with main's 290 B of headroom). Raised by 3,011 B for the Paseo bridge keeping cards and their
 // answers across link drops, and the SDK's wait for the next node counted from the drop (#8128: 452,848 B over main's
 // 449,837 B, with main's 290 B of headroom). Raised by 2,725 B for pi registering Persona's model providers in scope so a
-// computer without a models.json runs pi (#8194: 455,573 B over main's 452,848 B, with main's 290 B of headroom).
+// computer without a models.json runs pi (#8194: 455,573 B over main's 452,848 B, with main's 290 B of headroom). Raised
+// by 1,337 B for the Paseo bridge's rows of closed and archived agents: Unread kept across an unload, archived rows'
+// capabilities, the features last seen, efforts, its own words named for the hub (#8133: 456,910 B over main's 455,573 B,
+// with main's 290 B of headroom). Raised by 2,149 B for the Paseo bridge's same-kind starts and the SDK's
+// caps.same_kind (#8140: a launcher Paseo lacks runs on its provider of the same kind or is refused, an effort the
+// model lacks goes down to one it offers, and the answer says both; 459,059 B over main's 456,910 B, with main's 290 B
+// of headroom). Raised by 1,048 B for the Paseo bridge's agents on one Claude session (one id, the newer agent takes the
+// messages) and its takeover of an archived agent with that agent's own provider (#8131: 460,362 B over main's 459,314 B,
+// with main's 35 B of headroom).
 func TestDistBudget(t *testing.T) {
-	const budget = 455_863
+	const budget = 460_397
 	_, out := generateIntegrations(t)
 	entries, err := os.ReadDir(out)
 	if err != nil {

@@ -207,14 +207,8 @@ func (n *Node) waitWorkAgent(ctx context.Context, pane, herdrName string) (strin
 
 // abandonStart closes the tab a start opened and returns err. A pane the user picked is left open.
 func (n *Node) abandonStart(ctx context.Context, launch host.Launcher, created *host.Created, ws string, err error) error {
-	if org, ok := launch.(host.Organizer); ok && adoptedPane(ctx) == nil && created != nil {
-		space := ws
-		if space == "" {
-			space = created.SpaceID
-		}
-		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		_ = org.Close(cctx, created.Pane, space, created.SlotID)
-		cancel()
+	if created != nil {
+		n.closeNewTab(ctx, launch, created, ws) // the one way a start that never ran closes its tab (terminal_guard_test.go)
 	}
 	return err
 }

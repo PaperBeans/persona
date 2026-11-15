@@ -188,6 +188,97 @@ func TestClaudeTurnSucceededEvidence(t *testing.T) {
 	}
 }
 
+func TestTailSettleReplaysVisibleTurnOutcome(t *testing.T) {
+	const failure = "API Error: 529 Overloaded"
+	bEnd := strings.Replace(strings.Replace(turnEndLine, `"uuid":"d"`, `"uuid":"db"`, 1), `"parentUuid":"x"`, `"parentUuid":"b"`, 1)
+	bReply := `{"type":"assistant","uuid":"b","parentUuid":"ub","timestamp":"2026-01-01T12:00:00Z","message":{"id":"mb","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"B succeeded"}]}}`
+	bTool := `{"type":"assistant","uuid":"b","parentUuid":"ub","timestamp":"2026-01-01T12:00:00Z","message":{"id":"mb","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"tb","name":"Bash","input":{"command":"true"}}]}}`
+	for _, c := range []struct {
+		name, next string
+		base, drop []string
+	}{
+		{
+			name: "hidden tool-only success",
+			base: []string{prompt("u1", "A"), apiErrorLine(t, "e1", failure, map[string]any{"error": "server_error"}), turnEndLine},
+			next: bTool,
+		},
+		{
+			name: "hidden success after a newer visible error",
+			base: []string{prompt("u1", "A"), replyLine, turnEndLine, apiErrorLine(t, "e2", failure, map[string]any{"error": "server_error"})},
+			next: bReply,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var m Meta
+			var tail Tail
+			feed := func(lines []string) {
+				for i, line := range lines {
+					tail.Line(&m, ParseLine(i, []byte(line), &m))
+				}
+			}
+			feed(c.base)
+			tail.Rewound([]string{"ub", "b", "db"})
+			feed([]string{prompt("ub", "B"), c.next, bEnd})
+			if !tail.Settle(&m) {
+				t.Fatal("settling the abandoned turn changed nothing")
+			}
+			if m.TurnSucceeded() || m.LastText != failure || m.TurnError != failure || m.TurnErrorKind == "" {
+				t.Fatalf("visible outcome = last %q, error %q (%q), succeeded %v; want the visible failure",
+					m.LastText, m.TurnError, m.TurnErrorKind, m.TurnSucceeded())
+			}
+		})
+	}
+}
+
+func TestTailSettleRestoresVisibleTurnState(t *testing.T) {
+	const failure = "API Error: 529 Overloaded"
+	bEnd := strings.Replace(strings.Replace(turnEndLine, `"uuid":"d"`, `"uuid":"db"`, 1), `"parentUuid":"x"`, `"parentUuid":"b"`, 1)
+	bReply := `{"type":"assistant","uuid":"b","parentUuid":"ub","timestamp":"2026-01-01T12:00:00Z","message":{"id":"mb","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"B succeeded"}]}}`
+	bTool := `{"type":"assistant","uuid":"b","parentUuid":"ub","timestamp":"2026-01-01T12:00:00Z","message":{"id":"mb","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"tb","name":"Bash","input":{"command":"true"}}]}}`
+	localOut := `{"type":"user","uuid":"o3","timestamp":"2026-01-01T12:00:01Z","message":{"role":"user","content":"<local-command-stdout>Usage</local-command-stdout>"}}`
+	for _, c := range []struct {
+		name               string
+		base, middle, drop []string
+		last, failure      string
+		open, closed       bool
+		succeeded          bool
+	}{
+		{name: "unclosed hidden tool turn", base: []string{prompt("u1", "A"), apiErrorLine(t, "e1", failure, map[string]any{"error": "server_error"}), turnEndLine},
+			drop: []string{prompt("ub", "B"), bTool}, last: failure, failure: failure, closed: true},
+		{name: "unclosed hidden working turn", base: []string{prompt("u1", "A"), replyLine, turnEndLine},
+			drop: []string{prompt("ub", "B"), bReply}, last: "done", closed: true, succeeded: true},
+		{name: "visible wake", base: []string{prompt("u1", "A"), apiErrorLine(t, "e1", failure, map[string]any{"error": "server_error"}), turnEndLine},
+			middle: []string{wake("w1")}, drop: []string{prompt("ub", "B"), bReply, bEnd}, open: true},
+		{name: "visible local command", base: []string{prompt("u1", "A"), replyLine, turnEndLine},
+			middle: []string{prompt("u3", "<command-name>/usage</command-name>"), localOut},
+			drop:   []string{prompt("ub", "B"), bReply, bEnd}, closed: true, succeeded: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var m Meta
+			var tail Tail
+			feed := func(lines []string) {
+				for i, line := range lines {
+					tail.Line(&m, ParseLine(i, []byte(line), &m))
+				}
+			}
+			feed(c.base)
+			feed(c.middle)
+			tail.Rewound([]string{"ub", "b", "db"})
+			feed(c.drop)
+			if !tail.Settle(&m) {
+				t.Fatal("settling the abandoned turn changed nothing")
+			}
+			if m.TurnOpen != c.open || m.TurnClosed != c.closed || m.TurnSucceeded() != c.succeeded || m.TurnError != c.failure {
+				t.Fatalf("open %v closed %v succeeded %v error %q; want %v/%v/%v %q",
+					m.TurnOpen, m.TurnClosed, m.TurnSucceeded(), m.TurnError, c.open, c.closed, c.succeeded, c.failure)
+			}
+			if c.last != "" && m.LastText != c.last {
+				t.Fatalf("LastText = %q, want %q", m.LastText, c.last)
+			}
+		})
+	}
+}
+
 // Whether Claude Code still goes on by itself once the limit resets: its notices say it and take it back, a wake
 // leaves it, a message cancels it, a reply or another kind of failure ends it.
 func TestClaudeLimitResumes(t *testing.T) {

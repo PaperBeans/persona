@@ -362,19 +362,22 @@ func TestRuntimeTranscriptWindowIsTheRunAsModels(t *testing.T) {
 	}
 }
 
-// A runtime running several agents: each session's card is its own agent's (Claude Code's for a Claude session).
+// A runtime running several agents: each session's card is its own agent's (Claude Code's for a Claude session), by
+// the name its row gives it. One of Paseo's other providers runs under Paseo's own id with its provider's label: its
+// card says "Grok", not "Paseo" (#8142); a row without a label of its own keeps the runtime's name.
 func TestRuntimeCardIsTheSessionsAgent(t *testing.T) {
 	n, hub := runtimeNode(t)
 	host := dialRuntime(t, n, paseoHello())
 	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
 		{"session_id": "paseo-c1", "agent": "claude", "status": "working"},
 		{"session_id": "paseo-o1", "status": "working"},
+		{"session_id": "paseo-g1", "agent": "paseo", "agent_label": "Grok", "launcher": "grok", "status": "working"},
 	}})
-	waitFor(t, "listed", func() bool { _, ok := listed(t, n)["paseo-o1"]; return ok })
+	waitFor(t, "listed", func() bool { _, ok := listed(t, n)["paseo-g1"]; return ok })
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var res proto.Resolution
-	for _, id := range []string{"paseo-c1", "paseo-o1"} {
+	for _, id := range []string{"paseo-c1", "paseo-o1", "paseo-g1"} {
 		if err := host.peer.Call(ctx, "interaction.create", map[string]any{"interaction": map[string]any{
 			"kind": "permission", "session_id": id, "tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}}}, &res); err != nil {
 			t.Fatal(err)
@@ -387,6 +390,9 @@ func TestRuntimeCardIsTheSessionsAgent(t *testing.T) {
 	}
 	if a := hub.asked[1]; a.Agent != "paseo" || a.AgentLabel != "Paseo" {
 		t.Fatalf("another agent's card: %q %q", a.Agent, a.AgentLabel)
+	}
+	if a := hub.asked[2]; a.Agent != "paseo" || a.AgentLabel != "Grok" {
+		t.Fatalf("a provider's card under the runtime's own id: %q %q", a.Agent, a.AgentLabel)
 	}
 }
 

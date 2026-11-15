@@ -59,6 +59,23 @@ export function autoAcceptOf(agent) {
   const f = (agent?.features ?? []).find((x) => x?.id === AUTO_ACCEPT && x.type === 'toggle')
   return f ? f.value === true : undefined
 }
+/**
+ * The bridge's own words in items and in a row's last words. Like the node's own lines they are Chinese, since neither
+ * knows the reader's language, and the hub rewrites each of them, word for word, in the reader's: in items
+ * (hub/transcript_text.go) and in a runtime row's last words (assistant/fleet_text.go). The Go side names them
+ * transcript.RuntimeError… (docs/protocol/i18n.md, "Follow-up work"): change both sides together.
+ */
+export const ERROR_TEXT = '出错了' // a failure Paseo says nothing more of
+export const ERROR_LEAD = '出错了：' // a failure, then what Paseo says of it
+export const CANCELED_NOTE = '（已取消）' // a tool call cancelled before it gave anything back
+/** After a failed command's output: its exit code. */
+export const exitNote = (code) => `（退出码 ${code}）`
+/**
+ * Where the context was compacted: the node's notice for it (transcript.CompactedNotice), which stays Chinese because
+ * the apps find their compaction divider by it, and draw the divider in their own language.
+ */
+export const COMPACTED_NOTICE = '上下文已压缩'
+
 /** A launcher name (the node's nameRe: what a shell function may be called). */
 export const LAUNCHER_NAME = /^[A-Za-z_][A-Za-z0-9_-]*$/
 /** A session id the node takes (runtimeIDRe). */
@@ -118,7 +135,8 @@ export function formModel(m) {
 
 /**
  * The new-session form's launchers: one per provider that can start an agent (enabled, not failing, named like a
- * launcher), with the agent it starts and its models.
+ * launcher), with the agent it starts and its models. A Codex provider's says it starts with no first message too
+ * (prompt_optional): Paseo creates an agent without one, where a Codex in a terminal used to need it.
  */
 export function launchersOf(entries = [], roots = {}) {
   const out = []
@@ -129,18 +147,43 @@ export function launchersOf(entries = [], roots = {}) {
     const l = { name: e.provider, agent: appAgent(roots[e.provider] ?? e.provider), models }
     const model = def?.name ?? e.label
     if (model) l.model = String(model)
+    if (l.agent === 'codex') l.prompt_optional = true
     out.push(l)
   }
   return out
 }
 
 /**
- * The provider a new session runs on when the form named none Paseo has (a launcher of the login shell's): Claude
- * Code's own if it is on, else the first one running Claude Code, else the first one there is.
+ * The effort a model runs a start at, given the one asked for and the model's thinking options (Paseo's ids): the one
+ * asked when the model offers it, else the nearest lower one of Persona's it offers (xhigh → high), else the lowest
+ * one it offers; undefined when it offers none of Persona's (its own default applies). Persona's order is EFFORTS.
+ */
+export function effortFor(asked, options = []) {
+  const offered = EFFORTS.filter((e) => options.includes(e))
+  if (offered.includes(asked)) return asked
+  const rank = EFFORTS.indexOf(asked)
+  return offered.filter((e) => EFFORTS.indexOf(e) < rank).at(-1) ?? offered[0]
+}
+
+/**
+ * The provider a new session runs on when the form named no launcher: Claude Code's own if it is on, else the first
+ * one running Claude Code, else the first one there is. Also the form's first choice (Paseo's default).
  */
 export function defaultProvider(entries = [], roots = {}) {
   const usable = (entries ?? []).filter((e) => e?.enabled && e.status !== 'unavailable' && e.status !== 'error')
   return (usable.find((e) => e.provider === 'claude') ?? usable.find((e) => roots[e.provider] === 'claude') ?? usable[0])?.provider
+}
+
+/**
+ * The provider that stands in for a launcher of agent kind `kind` (a Paseo root: claude, codex, omp…) that Paseo has
+ * no usable provider of: among launchers (its usable providers, its default first) those of that kind that accept
+ * takes, Paseo's own provider of that kind first (its built-in claude or codex, when it is on), else the first one.
+ * undefined when it has none of that kind: a start never runs another kind of agent in its place.
+ */
+export function sameKindProvider(launchers = [], roots = {}, kind = '', accept = () => true) {
+  if (!kind) return undefined
+  const fits = (launchers ?? []).filter((l) => (roots[l.name] ?? l.name) === kind && accept(l.name))
+  return (fits.find((l) => l.name === kind) ?? fits[0])?.name
 }
 
 // ---- sessions ----
@@ -246,7 +289,9 @@ export function promptKey(text) {
  * A session row's status for an agent: needing you while a request waits, working, "Offline" when closed. Stopped (idle,
  * or a turn that failed): done while Paseo says it waits for you to look at it (requiresAttention, cleared once you
  * open it in Paseo), idle — seen — once it does not (#2831), as herdr's done / idle carry herdr's own seen state.
- * A Paseo without that flag: done once it has run a turn.
+ * A Paseo without that flag: done once it has run a turn. Closed with the flag still on is done too (#8133): Paseo lets
+ * an idle agent's process go after a while and keeps its mark, so a finished agent nobody looked at stays Unread, from
+ * when it finished, rather than turning into "Offline" until something loads it again.
  * @param {object} agent
  * @param {{ quiet?: boolean, fleet?: boolean }} [o]
  *   quiet: an agent another agent created, in that agent's workspace (#4494). It never waits to be looked at: Paseo
@@ -262,7 +307,8 @@ export function rowStatus(agent, o = {}) {
     case 'initializing':
       return 'working'
     case 'closed':
-      return o.fleet ? 'idle' : 'offline'
+      if (o.fleet) return 'idle'
+      return !o.quiet && agent.requiresAttention === true ? 'done' : 'offline'
   }
   if (o.quiet) return 'idle'
   if (typeof agent?.requiresAttention === 'boolean') return agent.requiresAttention ? 'done' : 'idle'
@@ -358,13 +404,14 @@ export function projectSpaces(placed, canon = (p) => p) {
  * @param {object} agent - an AgentSnapshotPayload
  * @param {{ project?: object, roots?: Record<string, string>, labels?: Record<string, string>, lastText?: string,
  *   spaceId?: string, spaceName?: string, parent?: string, quiet?: boolean, fleet?: object[],
- *   canon?: (path: string) => string, archived?: boolean }} [o]
+ *   canon?: (path: string) => string, archived?: boolean, thinking?: string[] }} [o]
  *   project: its ProjectPlacement; labels: provider id → its label (the name of a provider the apps do not know);
  *   spaceId, spaceName: its project space and that space's name (projectSpaces); parent: the session of the agent that
  *   created it, when that one is listed beside it; quiet: Paseo shows what it did on no workspace (rowStatus); fleet:
  *   the agents it created that have not finished (the bridge knows all three); canon: a path as its physical
  *   directory (the bridge resolves symbolic links); archived: an agent archived in Paseo that is listed all the same
- *   (archivedUnderOwnId): not running, whatever its record says. Without it an archived agent has no row.
+ *   (archivedUnderOwnId): not running, whatever its record says. Without it an archived agent has no row. thinking:
+ *   the thinking options of the model it runs, as Paseo's providers list them.
  */
 export function agentRow(agent, o = {}) {
   const roots = o.roots ?? {}
@@ -410,14 +457,24 @@ export function agentRow(agent, o = {}) {
   if (mode) row.permission_mode = mode
   const effort = agent.effectiveThinkingOptionId ?? agent.thinkingOptionId
   if (EFFORTS.includes(effort)) row.effort = effort
-  // How far a rewind goes here: the node offers it, and the files with it, only where Paseo's provider can.
+  // The efforts an agent that is not Claude Code's can be switched between (the apps know Claude Code's own): its
+  // model's thinking options that are Persona's levels, as the bridge's modes takes them. iOS offers the effort alone on
+  // such a row, as on a Codex thread the node drives (#8133).
+  if (row.agent !== 'claude' && !o.archived) {
+    const efforts = EFFORTS.filter((e) => o.thinking?.includes(e))
+    if (efforts.length) row.efforts = efforts
+  }
+  // How far a rewind goes here: the node offers it, and the files with it, only where Paseo's provider can. Paseo
+  // changes nothing of an agent it keeps archived (a rewind, a mode, an effort, a model: the bridge refuses them), so
+  // that row takes all of them away, whatever the record it was archived with says (#8133); the node narrows them.
   const rewind = rewindOf(agent)
-  row.capabilities = { rewind: rewind.conversation, rewind_code: rewind.code }
+  row.capabilities = o.archived ? { rewind: false, rewind_code: false, modes: false, model: false }
+    : { rewind: rewind.conversation, rewind_code: rewind.code }
   const t = transcriptOf(agent, roots)
   if (t) row.transcript = t
   const thread = codexThreadOf(agent, roots)
   if (thread) row.codex_thread = thread
-  const last = agent.status === 'error' && agent.lastError ? `出错了：${agent.lastError}` : o.lastText
+  const last = agent.status === 'error' && agent.lastError ? ERROR_LEAD + agent.lastError : o.lastText
   if (last) row.last_text = snippet(last)
   // A delegated agent is its creator's subtask, as a Codex subagent is its chat's (#4494): the apps fold it under
   // that session, and the hub pushes no "done" for it and holds its creator's until the fleet has reported back.
@@ -563,7 +620,7 @@ function variantOutput(o) {
   if (typeof o.output === 'string') return o.output
   const r = o.Result
   if (r && typeof r === 'object' && !Array.isArray(r)) {
-    if (typeof r.output === 'string') return r.output + exitNote(r.exit_code, r.output)
+    if (typeof r.output === 'string') return r.output + exitLine(r.exit_code, r.output)
     return typeof r.message === 'string' ? r.message : fieldLines(r)
   }
   // An MCP tool's answer holds one text under the outcome's name ({ OkayOutput: '…' }).
@@ -577,9 +634,9 @@ function fieldLines(o) {
     .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n')
 }
 
-/** A command's exit code after its output, when it failed. */
-function exitNote(code, out) {
-  return typeof code === 'number' && code !== 0 ? `${out ? '\n' : ''}（退出码 ${code}）` : ''
+/** A command's exit code after its output, on a line of its own, when it failed. */
+function exitLine(code, out) {
+  return typeof code === 'number' && code !== 0 ? `${out ? '\n' : ''}${exitNote(code)}` : ''
 }
 
 /** What a finished tool call gave back, as the text of its result. */
@@ -589,7 +646,7 @@ export function toolOutput(item) {
   switch (d.type) {
     case 'shell':
       out = d.output ?? ''
-      out += exitNote(d.exitCode, out)
+      out += exitLine(d.exitCode, out)
       break
     case 'read':
     case 'write':
@@ -624,7 +681,7 @@ export function toolOutput(item) {
   if (item?.status === 'failed' && item.error) {
     const e = typeof item.error === 'string' ? item.error : item.error?.message ?? JSON.stringify(item.error)
     out = out ? `${out}\n${e}` : e
-  } else if (item?.status === 'canceled' && !out) out = '（已取消）'
+  } else if (item?.status === 'canceled' && !out) out = CANCELED_NOTE
   return String(out)
 }
 
@@ -673,16 +730,19 @@ export function entryItems(entry, echoes) {
       add(s, { role: 'assistant', kind: 'tool_use', tool_name: 'TodoWrite', tool_use_id: `paseo-todo-${s}`, tool_input: { todos } })
       break
     }
-    case 'error':
-      add(s, { role: 'system', kind: 'notice', text: `出错了：${snippet(it.message ?? '')}` })
+    case 'error': {
+      const said = typeof it.message === 'string' ? it.message.trim() : ''
+      add(s, { role: 'system', kind: 'notice', text: said ? ERROR_LEAD + snippet(said) : ERROR_TEXT })
       break
+    }
     case 'notification':
       if (it.message) add(s, { role: 'system', kind: 'notice', text: snippet(it.message) })
       break
     case 'compaction':
+      // The node's own notice for a compaction, always with compact: every app draws it as its divider, worded in the
+      // app's language (#8133), as for Claude Code's compact_boundary (transcript.CompactedNotice).
       if (it.status === 'completed') {
-        const compact = dropEmpty({ trigger: it.trigger, pre_tokens: it.preTokens })
-        add(s, { role: 'system', kind: 'notice', text: '已压缩上下文', ...(Object.keys(compact).length ? { compact } : {}) })
+        add(s, { role: 'system', kind: 'notice', text: COMPACTED_NOTICE, compact: dropEmpty({ trigger: it.trigger, pre_tokens: it.preTokens }) })
       }
       break
     // plugin items: a Paseo plugin's own rendering, nothing the apps can show

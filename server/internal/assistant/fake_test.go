@@ -38,8 +38,11 @@ type fakeHub struct {
 	onDevicesList func()                    // runs once, then clears, before the next devices.list; no lock held
 	hello         Hello
 	settings      *Settings
-	launcherList  []proto.Launcher                   // the nodes' launchers.list (nil: the list fails, so it can't be told)
-	zshrc         map[string][]proto.Launcher        // a machine\'s own launchers.list (over launcherList)
+	launcherList  []proto.Launcher            // the nodes' launchers.list (nil: the list fails, so it can't be told)
+	zshrc         map[string][]proto.Launcher // a machine\'s own launchers.list (over launcherList)
+	// hostLaunchers: a machine's launchers.list for a start in its engine host (the call names a host), answered as an
+	// engine that runs only its own launchers would (host_runtime, #8140).
+	hostLaunchers map[string][]proto.Launcher
 	rcFiles       map[string]string                  // a machine's launchers.list rc_file (its shell follows: bash or zsh)
 	slowLaunchers map[string]bool                    // a machine whose launchers.list answers only when the call gives up
 	launcherGate  chan struct{}                      // when set, every launchers.list answer waits for this gate
@@ -95,11 +98,14 @@ type fakeHub struct {
 	agents       int
 	offline      map[string]bool
 	failStart    error
-	refuseUltra  error                     // session.start's answer to a start that asks for ultracode (a node refusing it, #3596)
-	startFailed  string                    // the StartError of the sessions session.start answers (the launcher failed in its new tab)
-	worktrees    []map[string]any          // worktree.prepare / worktree.create params, {"method": …} added
-	failWorktree error                     // worktree.create's answer when set
-	slowStart    bool                      // session.start blocks until the call's context ends, then answers with its error (a node that builds the session before answering late)
+	refuseUltra  error            // session.start's answer to a start that asks for ultracode (a node refusing it, #3596)
+	startFailed  string           // the StartError of the sessions session.start answers (the launcher failed in its new tab)
+	worktrees    []map[string]any // worktree.prepare / worktree.create params, {"method": …} added
+	failWorktree error            // worktree.create's answer when set
+	slowStart    bool             // session.start blocks until the call's context ends, then answers with its error (a node that builds the session before answering late)
+	// startReply shapes session.start's answer: what the session runs with, and what the engine ran in place of what
+	// was asked (#8140).
+	startReply   func(params map[string]any, s *proto.Session) *proto.StartInstead
 	judged       int                       // the done judge's calls to the model
 	judge        string                    // what they answer ("": an error)
 	judgeFails   int                       // the done judge's next calls that fail before f.judge answers
@@ -383,6 +389,11 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 			f.mu.Lock()
 			return nil, ctx.Err()
 		}
+		if host, _ := a["host"].(string); host != "" {
+			if l, ok := f.hostLaunchers[p.Device]; ok {
+				return json.Marshal(map[string]any{"launchers": l, "host": host, "host_runtime": true})
+			}
+		}
 		if l, ok := f.zshrc[p.Device]; ok {
 			if rc := f.rcFiles[p.Device]; rc != "" {
 				shell := map[bool]string{true: "bash", false: "zsh"}[strings.HasSuffix(rc, "bashrc")]
@@ -495,8 +506,12 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 			return nil, f.failStart
 		}
 		f.agents++
-		return json.Marshal(map[string]any{"session": proto.Session{SessionID: fmt.Sprintf("s%d", f.agents), Cwd: a["cwd"].(string), Agent: "claude",
-			StartError: f.startFailed}})
+		sess := proto.Session{SessionID: fmt.Sprintf("s%d", f.agents), Cwd: a["cwd"].(string), Agent: "claude", StartError: f.startFailed}
+		var instead *proto.StartInstead
+		if f.startReply != nil {
+			instead = f.startReply(a, &sess)
+		}
+		return json.Marshal(map[string]any{"session": sess, "instead": instead})
 	case "session.interrupt": // a node whose agent's turn ended (settled); tests answer otherwise through f.nodes
 		return json.RawMessage(`{"ok":true,"settled":true}`), nil
 	case DeviceSessionSend:

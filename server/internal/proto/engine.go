@@ -18,6 +18,11 @@ const (
 	EngineCindy = "cindy"
 )
 
+// RuntimeEngine: engine is one that is a runtime, not a terminal (Paseo, Cindy): its own providers start every session
+// that opens in it. Whether it runs only those (a launcher it lacks gets one of the same kind, or a refusal) its node
+// says per start host (launchers.list's host_runtime, #8140).
+func RuntimeEngine(engine string) bool { return engine == EnginePaseo || engine == EngineCindy }
+
 // EngineNames are the engines a machine may use, with the names the app shows.
 var EngineNames = map[string]string{
 	EngineHerdr:     "herdr",

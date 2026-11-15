@@ -27,6 +27,12 @@ pair)
     echo '{"v":1,"ok":false,"error":{"code":"trust_pending","message":"tap Trust on the phone"}}' >&2
     exit 1
   fi
+  # FAKE_PAIR_WAITS=<file>: each line in the file is one answer to give before pairing (trust_pending, locked, …).
+  if [ -n "$FAKE_PAIR_WAITS" ] && [ -s "$FAKE_PAIR_WAITS" ]; then
+    code=$(head -1 "$FAKE_PAIR_WAITS"); tail -n +2 "$FAKE_PAIR_WAITS" > "$FAKE_PAIR_WAITS.next"; mv "$FAKE_PAIR_WAITS.next" "$FAKE_PAIR_WAITS"
+    echo '{"v":1,"ok":false,"error":{"code":"'"$code"'","message":"not yet"}}' >&2
+    exit 1
+  fi
   printf 'opaque' > "$out"
   if [ -n "$FAKE_SIMULATOR" ]; then
     echo '{"udid":"'"$udid"'","name":"Test Simulator","model":"iPhone99,1","product_version":"26.1","transport":"simulator"}'
@@ -214,8 +220,11 @@ func TestPairKeepsAddressAndCleansUpOnFailure(t *testing.T) {
 	m, _ := bridgeManager(t)
 	ctx := context.Background()
 	t.Setenv("FAKE_PAIR_FAIL", "1")
-	if _, err := m.Pair(ctx, testUDID, nil); Code(err) != "trust_pending" {
-		t.Fatalf("want trust_pending, got %v", err)
+	// The phone never trusts this computer: Pair waits for it until its context ends.
+	short, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+	defer cancel()
+	if _, err := m.Pair(short, testUDID, nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want the wait to run out, got %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(m.store.Dir, testUDID)); !os.IsNotExist(err) {
 		t.Fatalf("a failed first pairing left its directory: %v", err)
@@ -243,7 +252,9 @@ func TestPairKeepsAddressAndCleansUpOnFailure(t *testing.T) {
 	}
 	// A failure pairing again keeps the pairing there was.
 	t.Setenv("FAKE_PAIR_FAIL", "1")
-	if _, err := m.Pair(ctx, testUDID, nil); err == nil {
+	short2, cancel2 := context.WithTimeout(ctx, 150*time.Millisecond)
+	defer cancel2()
+	if _, err := m.Pair(short2, testUDID, nil); err == nil {
 		t.Fatal("want failure")
 	}
 	if _, err := m.store.Load(testUDID); err != nil {
@@ -269,13 +280,21 @@ func TestPairJob(t *testing.T) {
 	if j := m.Job(); j.State != JobDone || j.Kind != "pair" || j.UDID != testUDID {
 		t.Fatalf("job = %+v", j)
 	}
+	// A phone that never trusts this computer: the job waits, saying so, until its time runs out.
+	saved := pairTimeout
+	pairTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { pairTimeout = saved })
 	t.Setenv("FAKE_PAIR_FAIL", "1")
 	_ = m.StartPair(testUDID)
+	sawWaiting := false
 	for m.Job().State == JobRunning {
-		<-time.After(10 * time.Millisecond)
+		if m.Job().Waiting == CodeTrustPending {
+			sawWaiting = true
+		}
+		<-time.After(5 * time.Millisecond)
 	}
-	if j := m.Job(); j.State != JobFailed || j.Code != "trust_pending" {
-		t.Fatalf("job = %+v", j)
+	if j := m.Job(); j.State != JobFailed || j.Code != "timeout" || j.Waiting != "" || !sawWaiting {
+		t.Fatalf("job = %+v (saw waiting %v)", j, sawWaiting)
 	}
 	if err := m.StartForget(testUDID); err != nil {
 		t.Fatal(err)
@@ -285,6 +304,34 @@ func TestPairJob(t *testing.T) {
 	}
 	if _, err := m.store.Load(testUDID); err != ErrNotPaired {
 		t.Fatalf("after forget: %v", err)
+	}
+}
+
+// TestPairWaitsForThePhone: while the phone is locked, then doesn't trust this computer yet, Pair asks again and
+// says what it waits for, once each, and pairs once the phone trusts it (#8199).
+func TestPairWaitsForThePhone(t *testing.T) {
+	m, _ := bridgeManager(t)
+	waits := filepath.Join(t.TempDir(), "waits")
+	if err := os.WriteFile(waits, []byte("locked\ntrust_pending\ntrust_pending\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_PAIR_WAITS", waits)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var said []string
+	rec, err := m.Pair(ctx, testUDID, func(step, waiting string) { said = append(said, waiting) })
+	if err != nil || rec.UDID != testUDID {
+		t.Fatalf("Pair = %+v, %v", rec, err)
+	}
+	if got := strings.Join(said, ","); got != ",locked,trust_pending," {
+		t.Fatalf("progress said waiting %q", got)
+	}
+	// Another refusal is not waited out.
+	if err := os.WriteFile(waits, []byte("pairing_rejected\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Pair(ctx, testUDID, nil); Code(err) != "pairing_rejected" {
+		t.Fatalf("want pairing_rejected at once, got %v", err)
 	}
 }
 
@@ -351,5 +398,32 @@ func TestSimulatorRecordOverBridgeProcess(t *testing.T) {
 	d := m.Devices(ctx)
 	if len(d) != 1 || d[0].Transport != TransportSimulator || d[0].State != StateConnected || d[0].AddressSource != TransportSimulator {
 		t.Fatalf("Devices = %+v", d)
+	}
+}
+
+// TestDeveloperModeFollowsThePhone: a phone paired with Developer Mode off says so in Devices, and once its
+// device_info says it is on (it was turned on after pairing), the record and Devices follow (#8199).
+func TestDeveloperModeFollowsThePhone(t *testing.T) {
+	m, _ := bridgeManager(t)
+	t.Setenv("FAKE_DEVMODE_OFF", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := m.Pair(ctx, testUDID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if d := m.Devices(ctx); len(d) != 1 || d[0].DeveloperMode == nil || *d[0].DeveloperMode {
+		t.Fatalf("after pairing with it off: %+v", d)
+	}
+	m.remember(testUDID, Endpoint{}, json.RawMessage(`{"name":"Test Phone","developer_mode":true}`))
+	if rec, err := m.store.Load(testUDID); err != nil || rec.DeveloperMode == nil || !*rec.DeveloperMode {
+		t.Fatalf("record = %+v, %v", rec, err)
+	}
+	if d := m.Devices(ctx); d[0].DeveloperMode == nil || !*d[0].DeveloperMode {
+		t.Fatalf("Devices = %+v", d[0])
+	}
+	// A device_info that doesn't say leaves it as it was.
+	m.remember(testUDID, Endpoint{}, json.RawMessage(`{"name":"Test Phone"}`))
+	if rec, _ := m.store.Load(testUDID); rec.DeveloperMode == nil || !*rec.DeveloperMode {
+		t.Fatalf("record = %+v", rec)
 	}
 }

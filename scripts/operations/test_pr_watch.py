@@ -754,7 +754,8 @@ class WatcherTests(unittest.TestCase):
         self.assertNotIn("GH_TOKEN", env)
         self.assertNotIn("PR_WATCH_WEBHOOK_SECRET", env)
         self.assertIn("ANTHROPIC_API_KEY", env)
-        argv = pr_watch_repair.repair_worker_argv(["claude", "--version"], self.root)
+        with patch.object(pr_watch_repair.shutil, "which", return_value="/usr/bin/bwrap"):  # a machine without bwrap too
+            argv = pr_watch_repair.repair_worker_argv(["claude", "--version"], self.root)
         home = argv[argv.index("HOME") + 1]
         self.assertNotEqual(Path(home), self.root)
         self.assertFalse(Path(home).is_relative_to(self.root))

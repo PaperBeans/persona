@@ -4,7 +4,7 @@
 // theirs, else the launcher's own), the profile's Agent presets, the setup that runs now, what a pick puts in the form
 // and what the pill says. Pure: views/NewAgentModel.tsx draws it, views/NewAgent.tsx holds the form.
 import { t } from "../i18n";
-import { agentId } from "./agent-kind";
+import { agentId, providerAgent } from "./agent-kind";
 import {
   ALL_EFFORTS, defaultModel, effortChoices, followedBinding, launcherAgent, modelName, takesEffort, typedModelOffered, type AgentModel, type LauncherModels, type PickerTier,
 } from "./launcher-models";
@@ -89,7 +89,8 @@ export function newAgentPanel({ launchers, listOf, choice, configured, runs, tie
     const list = e.list;
     const agent = launcherAgent(l.name, launchers, list);
     const followed = followedBinding(l.name, configured);
-    const p: PanelProvider = { id: l.name, name: providerTitle(l), engine: agentId(agent), models: null };
+    // one of Paseo's providers is its own engine, by its name: its mark where the app has one (#8142)
+    const p: PanelProvider = { id: l.name, name: providerTitle(l), engine: agentId(providerAgent(agent, l.name)), models: null };
     const idNote = providerIdNote(l);
     if (idNote) p.idNote = idNote;
     if (l.pi) p.alsoNote = t("lib-launcher-models.pi_too"); // docs/integrations/pi.md "Persona's model providers"
@@ -189,7 +190,7 @@ export function newAgentPill(o: { launchers: Launcher[]; runs: string; list: Mod
   const named = !list?.locked && choice.model ? modelTitle(list, choice.model) : defaultRuns(l, list, followed);
   const model = !runs ? o.fallback : named || (list !== undefined ? (d ? modelName(d) : t("chat-modelpill.default_model")) : undefined);
   const out: PillSetup & { loading: boolean; failed: boolean } = {
-    engine: agentId(agent),
+    engine: agentId(providerAgent(agent, runs)),
     provider: l ? providerTitle(l) : runs,
     loading: list === undefined && Boolean(e.loading),
     failed: list === undefined && Boolean(e.error),

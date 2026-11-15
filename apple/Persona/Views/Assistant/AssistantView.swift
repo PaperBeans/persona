@@ -524,7 +524,7 @@ struct AssistantView: View {
         #endif
         let kept = placesByValue ? places.enter(page, from: navPath.wrappedValue) : nil
         #if DEBUG
-        ShellTrace.shared.note("place \(page) \(kept == nil ? "root" : "kept") drawer=\(activeDrawer.isOut)")
+        ShellTrace.shared.note("place \(page) \(kept == nil ? "root" : "kept") drawer=\(activeDrawer.isOut) path=\(navPath.wrappedValue.count) kept=\(kept?.count ?? 0)")
         #endif
         underDrawer {
             backToRoot()

@@ -150,7 +150,12 @@ final class InboxSourceDirectTests: XCTestCase {
     }
 
     @MainActor private func assertDetail(route: String) {
+        if !element("inbox.detail.done").exists {
+            requireHittable(element("inbox.detail.more"), "the iPhone's one item-action menu")
+            element("inbox.detail.more").tap()
+        }
         requireHittable(element("inbox.detail.done"), "the item detail after \(route)")
+        app.tap() // dismiss the menu before View original
         let source = element("inbox.viewSource")
         // The chain can leave the detail scrolled below its header; bring View original back on screen before using it.
         for _ in 0..<8 where !(source.exists && source.isHittable) {

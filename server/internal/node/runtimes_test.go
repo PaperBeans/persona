@@ -516,6 +516,56 @@ func TestRuntimeModesCapability(t *testing.T) {
 	}
 }
 
+// A row narrows modes and model for its own session as it narrows rewind (#8133): an agent the runtime keeps archived
+// takes none of them (Paseo refuses them), and the efforts a row lists go with its modes. A row that says nothing keeps
+// what the runtime declared, as an older bridge's rows do; a runtime that declared no modes lists no efforts.
+func TestRuntimeRowNarrowsModesAndModel(t *testing.T) {
+	n, _ := runtimeNode(t)
+	hello := paseoHello()
+	hello["caps"].(map[string]any)["modes"] = true
+	hello["caps"].(map[string]any)["model"] = true
+	h := dialRuntime(t, n, hello)
+	archived := map[string]any{"rewind": false, "rewind_code": false, "modes": false, "model": false}
+	_ = h.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
+		{"session_id": "live-claude", "status": "idle", "agent": "claude", "capabilities": map[string]any{"rewind": true}},
+		{"session_id": "archived-claude", "status": "offline", "agent": "claude", "capabilities": archived},
+		{"session_id": "live-grok", "status": "idle", "agent": "paseo", "efforts": []string{"low", "high"}},
+		{"session_id": "archived-grok", "status": "offline", "agent": "paseo", "efforts": []string{"low"}, "capabilities": archived},
+		{"session_id": "older-bridge", "status": "idle", "agent": "claude"},
+	}})
+	waitFor(t, "rows listed", func() bool { _, ok := listed(t, n)["older-bridge"]; return ok })
+	rows := listed(t, n)
+	caps := func(id string) (modes, model bool) {
+		c := rows[id].Capabilities
+		if c == nil || c.Modes == nil || c.Model == nil {
+			t.Fatalf("%s: modes and model said: %+v", id, c)
+		}
+		return *c.Modes, *c.Model
+	}
+	for _, c := range []struct {
+		id           string
+		modes, model bool
+		efforts      []string
+	}{
+		{"live-claude", true, true, nil},
+		{"archived-claude", false, false, nil},
+		{"live-grok", false, true, []string{"low", "high"}}, // Paseo's catch-all takes no Claude modes, its efforts all the same
+		{"archived-grok", false, false, nil},
+		{"older-bridge", true, true, nil},
+	} {
+		if modes, model := caps(c.id); modes != c.modes || model != c.model || !slices.Equal(rows[c.id].Efforts, c.efforts) {
+			t.Errorf("%s: modes %v model %v efforts %v, want %v %v %v", c.id, modes, model, rows[c.id].Efforts, c.modes, c.model, c.efforts)
+		}
+	}
+	// A runtime that declared no modes: the node refuses session.modes for its sessions, so none lists efforts.
+	other := dialRuntime(t, n, map[string]any{"runtime": "acme-cloud", "caps": map[string]any{"send": true}})
+	_ = other.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{{"session_id": "no-modes", "status": "idle", "efforts": []string{"low"}}}})
+	waitFor(t, "listed", func() bool { _, ok := listed(t, n)["no-modes"]; return ok })
+	if e := listed(t, n)["no-modes"].Efforts; e != nil {
+		t.Fatalf("efforts %v on a runtime without modes", e)
+	}
+}
+
 func TestRuntimeItemsAndDeltasReachTheHub(t *testing.T) {
 	n, hub := runtimeNode(t)
 	host := dialRuntime(t, n, dshHello())

@@ -547,6 +547,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		}
 		var res struct {
 			Session proto.Session `json:"session"`
+			// What an engine that runs only its own launchers ran in place of what was asked (#8140).
+			Instead *proto.StartInstead `json:"instead"`
 		}
 		// The node builds the session and starts the agent before answering; a machine waking from sleep or a
 		// launcher cold start can take minutes. Like agent_send's resume branch, this wait is detached from the
@@ -693,7 +695,10 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			}
 			return "", err
 		}
-		s.recordStartSuccess(ctx, am.ID, launcher)
+		s.recordStartSuccess(ctx, am.ID, ranLauncher(launcher, res.Instead, res.Session))
+		if said := s.startInsteadNote(ctx, am, res.Instead, res.Session); said != "" {
+			note += " Note: " + said + "." // the engine ran another of the same kind, its default model, a lower effort (#8140)
+		}
 		s.inboxAgentStarted(ctx, self, am.ID, res.Session.SessionID, a.Prompt) // an inbox event's conversation: its chain
 		if told, ok := s.quietAgentTask(ctx, self, am, a.Cwd, a.Prompt, params["tab_name"], res.Session.SessionID); ok {
 			return fmt.Sprintf("Started on %s in %s: session %s, a task of this conversation (its card is in the conversation; "+

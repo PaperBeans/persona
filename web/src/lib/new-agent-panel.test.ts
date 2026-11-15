@@ -206,6 +206,26 @@ describe("engines", () => {
     expect(engineChoices(p.providers, def, p.state)).toHaveLength(1);
   });
 
+  it("each of Paseo's providers is an engine of its own, by its provider, never 'paseo' (#8142)", () => {
+    const shared = { id: "anthropic/claude-sonnet-5-5", name: "Sonnet 5.5" };
+    const paseo: Launcher[] = [
+      { name: "opencode", agent: "paseo", agent_type: "paseo", source: "paseo" },
+      { name: "pi", agent: "paseo", agent_type: "paseo", source: "paseo" },
+      { name: "grok", agent: "paseo", agent_type: "paseo", source: "paseo" },
+    ];
+    const paseoLists: Record<string, ModelList> = {
+      opencode: { list: { agent: "paseo", models: [{ ...shared, default: true }] } },
+      pi: { list: { agent: "paseo", models: [{ ...shared, default: true }] } },
+      grok: { list: { agent: "paseo", models: [{ id: "grok-4", name: "Grok 4", default: true }] } },
+    };
+    const p = newAgentPanel({ launchers: paseo, listOf: (n) => paseoLists[n] ?? {}, choice: none, configured: null, runs: "opencode", tiers: [] });
+    expect(p.providers.map((x) => x.engine)).toEqual(["opencode", "pi", "grok"]);
+    // the same model through OpenCode and Pi: two engines, as the flyout's engine pills offer them
+    const row = { kind: "model" as const, provider: p.providers[0], model: p.providers[0].models!.find((m) => m.id === shared.id)! };
+    expect(engineChoices(p.providers, row, p.state).map((c) => [c.engine, c.provider.id])).toEqual([["opencode", "opencode"], ["pi", "pi"]]);
+    expect(newAgentPill({ launchers: paseo, runs: "grok", list: paseoLists.grok, choice: none, configured: null, fallback: "" }).engine).toBe("grok");
+  });
+
   it("of one engine, a launcher that can take the pick is offered over one that can't", () => {
     const off: PanelProvider = { id: "codex-old", name: "old", engine: "codex", models: [{ id: "gateway/glm-5.3", name: "glm-5.3", efforts: [] }], unavailable: "blocked" };
     const ok: PanelProvider = { id: "codex", name: "codex", engine: "codex", models: [{ id: "gateway/glm-5.3", name: "glm-5.3", efforts: ["low", "high"] }] };

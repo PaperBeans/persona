@@ -18,6 +18,9 @@ PORT = int(os.environ.get("PORT", "18760"))
 # MOCK_CHILD_SESSIONS=1 (#5120) builds on the Paseo computer: its agent's created agents are its children.
 if os.environ.get("MOCK_CHILD_SESSIONS"):
     os.environ.setdefault("MOCK_PASEO", "1")
+# MOCK_PASEO_PROVIDERS=1 (#8142) builds on it too: two of its providers the apps have no id for (Grok, Cursor).
+if os.environ.get("MOCK_PASEO_PROVIDERS"):
+    os.environ.setdefault("MOCK_PASEO", "1")
 # MOCK_TEAM=1 (#5180) builds on MOCK_TAB_PANES's tab of three: it adds a worker's request, a third worker and a stopped pane.
 MOCK_TEAM = bool(os.environ.get("MOCK_TEAM"))
 if MOCK_TEAM:
@@ -276,6 +279,18 @@ def today_at(hour, minute=0, days=0):
     """A to-do's due_at at a clock time on this machine (#2029's calendar: 18:00 today, not 50 hours from now), as UTC."""
     local = (NOW.astimezone() + timedelta(days=days)).replace(hour=hour, minute=minute, second=0, microsecond=0)
     return local.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def held_today(hours):
+    """A push held `hours` before now, or minutes after this machine's midnight when that was another day: clients list
+    only today's held pushes (#7782), and a mock left running overnight or started before dawn would otherwise have none.
+    Naive wall-clock arithmetic, so a DST transition day keeps the fallback on today (libc applies midnight's offset)."""
+    now_local = datetime.now()
+    midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    at = now_local - timedelta(hours=hours)
+    if at < midnight:
+        at = midnight + timedelta(minutes=10 - hours)
+    return at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _mock_qr(text, n=29):
@@ -1236,6 +1251,24 @@ if os.environ.get("MOCK_PASEO"):
         _paseo("9a5e0000-0000-4000-8000-000000000006", "Profile the CSV parser", "Speed up the importer", "calm-owl", "perf/importer",
                "done", "unread", 12, "The parser is three times faster on the sample files."),
     ]
+# MOCK_PASEO_PROVIDERS=1 (#8142, on the Paseo computer): two of Paseo's providers the apps have no id for, as its bridge
+# lists them: under Paseo's own id (agent "paseo"), each with its provider as launcher and the provider's label
+# (agent_label). Grok waits for an approval (its card names Grok); Cursor, whose mark the web has, is idle. The model
+# capability is the node's for a runtime that switches models (Paseo); their launchers are on the server's list
+# (machine_launchers).
+PASEO_GROK, PASEO_CURSOR = "paseo-9a5e0000-0000-4000-8000-000000000010", "paseo-9a5e0000-0000-4000-8000-000000000011"
+PASEO_PROVIDERS = bool(os.environ.get("MOCK_PASEO_PROVIDERS"))
+if PASEO_PROVIDERS:
+    _provider_caps = {"read": True, "send": True, "interrupt": True, "approve": True, "terminal": False, "attach": False,
+                      "close": True, "rename": True, "model": True}
+    SESSIONS += [
+        _paseo(PASEO_GROK, "Check the release notes", "Triage", None, "main", "blocked", "needs_you", 1,
+               "May I run the release script?", agent="paseo", agent_label="Grok", launcher="grok", model="grok-4",
+               pending_interactions=1, capabilities=_provider_caps),
+        _paseo(PASEO_CURSOR, "Tidy the settings page", "Triage", None, "main", "idle", "idle", 20,
+               "Moved the toggles into one group.", agent="paseo", agent_label="Cursor", launcher="cursor", model="auto",
+               capabilities=_provider_caps),
+    ]
 # MOCK_CHILD_SESSIONS=1 (#5120): the Paseo agent that created two agents created two more, both finished (one of them
 # failed), and an agent whose creator is not listed stays a row of its own. With the hub's folding (fold_hierarchy) the
 # web lists none of the children: the lead's row needs you (its waiting child) and its chat draws a card for each.
@@ -1878,6 +1911,8 @@ SEEN = []  # session ids marked seen (GET /mock/seen)
 SESSION_CLOSE = {"fail": False, "attempts": [], "closed": [], "interactions": []}
 # GET /mock/send-fail?on=1: sends to sessions fail (502) until ?on=0, as MOCK_SEND_FAIL=1 makes them for the whole run.
 SEND_FAIL = {"on": False}
+# Low-distraction mode (#7782): MOCK_LN=1 starts it on; GET /mock/ln?on=0|1 switches it until /mock/reset.
+LN = {"on": bool(os.environ.get("MOCK_LN"))}
 # Delete conversation (DELETE /api/v1/sessions/{mid}/{sid}): what was taken out, so /mock/reset puts it back.
 SESSION_DELETED = []
 PINS = {"spaces": ["macbook/weather"], "sessions": []}  # GET / PUT /api/v1/pins: what the Agents list keeps on top
@@ -9820,6 +9855,13 @@ if os.environ.get("MOCK_PASEO"):
          "cwd": "/home/me/.paseo/worktrees/1a2b3c4d/brave-fox", "kind": "permission", "agent": "claude",
          "created_at": ago(minutes=1), "expires_at": later(minutes=29), "tool_name": "Bash",
          "summary": "npm run migrate -- --env test", "tool_input": {"command": "npm run migrate -- --env test"}})
+# MOCK_PASEO_PROVIDERS=1: Grok's card, named by the row's label as the node names it (#8142).
+if PASEO_PROVIDERS:
+    INTERACTIONS.append(
+        {"id": "paseo_grok_release", "machine_id": "server", "session_id": PASEO_GROK, "session_title": "Check the release notes",
+         "cwd": PASEO_ROOT, "kind": "permission", "agent": "paseo", "agent_label": "Grok",
+         "created_at": ago(minutes=1), "expires_at": later(minutes=29), "tool_name": "Bash",
+         "summary": "./scripts/release.sh --dry-run", "tool_input": {"command": "./scripts/release.sh --dry-run"}})
 
 # Keep the exported demo fixtures unchanged; only the HTTP mock serves the expanded request inbox.
 # A conversation permission and remembered grants for scope/revocation UI checks (#5867).
@@ -10055,6 +10097,54 @@ def mock_notify(interaction_id):
         try: send(event)
         except OSError: pass
     return {"sent": len(targets)}, 200
+
+
+def notify_ws(event):
+    """Sends a notify event to the connections that declared ws_notify, as the hub's notifyWSFrom does; how many."""
+    with FAULT_LOCK:
+        targets = [c["send"] for c in CLIENTS.values() if "ws_notify" in c["features"]]
+    for send in targets:
+        try: send(event)
+        except OSError: pass
+    return len(targets)
+
+
+def mock_assistant_ask(q):
+    """GET /mock/assistant_ask?session=<conversation>[&question=…]: an assistant conversation (the main chat, a leader's)
+    calls ask_user (#8145): its card reaches every app, and the hub pushes it as the manager asks (kind interaction, the
+    hub's words for a phone) to the connections that declared ws_notify."""
+    sid = q.get("session", [""])[0]
+    s = next((x for x in ASSISTANT if x["session_id"] == sid), None)
+    if s is None:
+        return {"error": "no assistant conversation " + sid}, 404
+    question = q.get("question", [""])[0] or "要把明早的会挪到下午吗？"  # i18n-ignore: what the assistant asks
+    with REQUEST_LOCK:
+        n = len(INTERACTIONS)
+        ix = {"id": "ix_assistant_ask_%d_%s" % (n, uuid.uuid4().hex[:6]), "machine_id": s["machine_id"], "session_id": sid,
+              "session_title": s.get("title") or "", "kind": "question", "created_at": ago(minutes=0), "expires_at": later(minutes=30),
+              "tool_name": "ask_user", "questions": [{"question": question, "header": "决定", "multi_select": False,  # i18n-ignore
+                                                      "options": [{"label": "好"}, {"label": "先不"}]}]}  # i18n-ignore
+        INTERACTIONS.append(ix)
+    for out, _ in list(LIVE):
+        try: out({"type": "interaction", "interaction": ix})
+        except Exception: pass
+    sent = notify_ws({"type": "notify", "kind": "interaction", "machine_id": ix["machine_id"], "session_id": sid,
+                      "title": "Persona 在问你", "subtitle": s.get("title") or "Persona",  # i18n-ignore: the hub's words
+                      "body": question, "interaction_id": ix["id"]})
+    return {"id": ix["id"], "sent": sent}, 200
+
+
+def mock_notify_user(q):
+    """GET /mock/notify_user?session=<conversation>&body=…[&title=…]: the assistant's notify_user from that conversation
+    (#8145): the hub's "assistant" notify (fleet_link.go deliverPushFrom, NotifyPush) to the connections that declared
+    ws_notify."""
+    sid = q.get("session", [""])[0]
+    s = next((x for x in ASSISTANT if x["session_id"] == sid), None)
+    if s is None:
+        return {"error": "no assistant conversation " + sid}, 404
+    sent = notify_ws({"type": "notify", "kind": "assistant", "machine_id": s["machine_id"], "session_id": sid,
+                      "title": q.get("title", ["Persona"])[0], "subtitle": "", "body": q.get("body", [""])[0]})
+    return {"sent": sent}, 200
 
 
 def renew_requests(minutes):
@@ -13845,6 +13935,13 @@ LAUNCHER_MODELS["sonnetcc"] = dict(LAUNCHER_MODELS["claude"], locked="启动器�
 # (server/internal/node/launcher_models.go), as for the Claude desktop app's.
 LAUNCHER_MODELS["codex-app"] = {"agent": "codex", "models": [], "locked": "Codex App 用它自己选的模型运行这个对话。"}
 LAUNCHER_MODELS["claude-desktop"] = {"agent": "claude", "models": [], "locked": "Claude 桌面版用它自己选的模型运行这个会话。"}
+# MOCK_PASEO_PROVIDERS=1 (#8142): Paseo's Grok and Cursor providers, as the node lists a runtime's launcher models (agent
+# "paseo": the runtime's own id, for an agent the apps have no id for).
+if PASEO_PROVIDERS:
+    LAUNCHER_MODELS["grok"] = {"agent": "paseo", "models": [{"id": "grok-4", "name": "Grok 4", "default": True},
+                                                            {"id": "grok-4-fast", "name": "Grok 4 Fast"}]}
+    LAUNCHER_MODELS["cursor"] = {"agent": "paseo", "models": [{"id": "auto", "name": "Auto", "default": True},
+                                                              {"id": "grok-4", "name": "Grok 4"}]}
 # MOCK_NEW_AGENT_PANEL=1 (#5104, web/e2e/new-agent-model.mjs): the gateway behind claude's glm-5.3 also serves Codex, so
 # codex lists the same model ID and New Agent's flyout offers that model under both engines; and the Mac Studio has no
 # codex launcher, so a Codex pick made on another computer falls back to the default there.
@@ -14130,6 +14227,9 @@ def machine_launchers(mid=""):
         out.append({"name": "claude-desktop", "model": "", "source": "claude_desktop", "agent": "claude", "agent_type": "claude"})
         # Its Codex App runs: its launcher starts a chat there (#5726, docs/integrations/codex.md).
         out.append({"name": "codex-app", "model": "", "source": "codex_app", "agent": "codex", "agent_type": "codex"})
+    if PASEO_PROVIDERS and mid == "server":
+        # Paseo's providers the apps have no id for (#8142): the runtime's own id as their agent, the runtime as source
+        out += [{"name": n, "model": m, "source": "paseo", "agent": "paseo", "agent_type": "paseo"} for n, m in (("grok", "Grok 4"), ("cursor", "Auto"))]
     if machine_alerts.ON:
         return machine_alerts.with_health(mid, out)
     return launcher_health_list(out)
@@ -22723,6 +22823,9 @@ def _slot_view(ui, range_="7d", machine=None):
         return {"sections": [{"footer": "只算从 %s 发出的请求。" % name, "items": [
             {"type": "stat_grid", "stats": [{"label": "今天的请求", "value": "214"}, {"label": "失败", "value": "3", "tone": "danger"}]},
             _chart("line", [("请求", None, [120, 180, 90, 40, 260, 230, 214])], title="近 7 天的请求", unit="次")]}]}
+    if ui == "usage-detail":
+        return {"title": "用量明细", "sections": [{"items": [
+            {"type": "row", "title": "示例请求", "subtitle": "今天 10:00 · 1,204 tokens", "value": "¥0.02"}]}]}
     tabs = [("1d", "今天"), ("7d", "7 天"), ("30d", "30 天"), ("90d", "90 天")]
     return {"title": "用量", "state": "range=" + range_, "refresh_after": 600, "sections": [
         {"items": [{"type": "button", "title": ("● " if r == range_ else "") + t, "action": {"id": "range:" + r}} for r, t in tabs]},
@@ -22735,7 +22838,9 @@ def _slot_view(ui, range_="7d", machine=None):
             _chart("line", [("费用", "caution", [3.1, 5.2, 2.0, 1.1, 8.3, 7.6, 3.5])], title="费用", unit="元")]},
         {"title": "按模型", "items": [
             {"type": "row", "title": "model-large", "subtitle": "1,021 次", "value": "12.4M"},
-            {"type": "row", "title": "model-small", "subtitle": "183 次", "value": "4.6M"}]}]}
+            {"type": "row", "title": "model-small", "subtitle": "183 次", "value": "4.6M"}]},
+        # A real pushed child for the iPhone shell's root / sub-page navigation test.
+        {"items": [{"type": "button", "title": "查看用量明细", "action": {"id": "usage-detail", "push": {"ui": "usage-detail", "title": "用量明细"}}}]}]}
 
 
 def _fit_v1(view):
@@ -23516,9 +23621,11 @@ def markets_route(handler, p, body):
             if action:
                 _UI_STATE["capsule_refreshed"] += 1
             handler.send_json({"view": _capsule_view(), **({"toast": "摘要已刷新"} if action else {})}); return True
-        if parts[7] in ("usage", "today", "gpu"):
+        if parts[7] in ("usage", "usage-detail", "today", "gpu"):
             if parts[7] == "gpu" and not ctx.get("machine"):
                 handler.send_json({"error": "没有这台机器", "code": "not_found"}, 404); return True
+            if parts[7] == "usage-detail":
+                handler.send_json({"view": _slot_view(parts[7])}); return True
             machine = next((m for m in MACHINES if ctx.get("machine") in (m["id"], m.get("name"))), {"name": ctx.get("machine")})
             state = req.get("state") or "range=7d"
             if (req.get("action") or "").startswith("range:"):
@@ -24070,6 +24177,7 @@ MOCK_HELP = [
     "MOCK_HISTORY=1  很长的 Persona 对话历史（最近 30 个 + 查看全部）、一段交接对话、一个置顶，置顶写入会保存",
     "MOCK_MODELS_SECONDS=<秒>  新建 Agent 里列一个启动器的模型要多久（默认 0.8，CLI 起来回答的时间）",
     "MOCK_REPLY_CUT=1|error  The review chat's last turn stopped right after its first words (interrupted; =error: a model API error): its reply says it did not complete (#5314)",
+    "MOCK_LN=1  Low-distraction mode on (#7782); GET /mock/ln?on=0|1 switches it until /mock/reset. Either way /api/v1/push/intercepts has two P1 pushes and one P2 push held today, the first linking the /orders investigation to-do (todo_id), and one of yesterday that clients leave out",
 ]
 
 _features_without_voice = features
@@ -24468,17 +24576,20 @@ class H(BaseHTTPRequestHandler):
         if self.token_refused(): return
         if CASE and case_route(self, "GET", p, q, b""): return
         if preview_route and preview_route(self, "GET", p, q): return
+        if p == "/mock/ln":
+            if "on" in q: LN["on"] = q["on"][0] == "1"
+            return self.send_json(LN)
         if p == "/api/v1/push/ln-mode":
-            return self.send_json({"enabled": bool(os.environ.get("MOCK_LN"))})
-        if p == "/api/v1/push/intercepts":
-            if not os.environ.get("MOCK_LN"):
-                return self.send_json({"intercepts": []})
+            return self.send_json({"enabled": LN["on"]})
+        if p == "/api/v1/push/intercepts":  # kept whether the mode is on or off, as the hub keeps them
             return self.send_json({"intercepts": [
-                {"at": ago(hours=3), "level": "P1", "reason": "ln_p1_held",
-                 "title": "发布结果等你核对", "body": "网页和手机的构建都完成了",
-                 "related_key": "demo-subject", "manager": "assistant", "also": ["请检查最后的发布说明"]},
-                {"at": ago(hours=4), "level": "P1", "reason": "ln_dedup_12h", "title": "同一任务还有一次补充汇报", "manager": "assistant"},
-                {"at": ago(hours=5), "level": "P2", "reason": "ln_p2_silent", "title": "后台检查已完成",
+                # the one with a source the clients follow (todo_id, #7910): the /orders investigation to-do, whose
+                # agent is a session the assistant manager can open
+                {"at": held_today(3), "level": "P1", "reason": "ln_p1_held",
+                 "title": "排查结果等你核对", "body": "/orders 的慢查询已经定位并修复",
+                 "related_key": "demo-subject", "manager": "assistant", "also": ["请确认修复方案"], "todo_id": "todo_orders"},
+                {"at": held_today(4), "level": "P1", "reason": "ln_dedup_12h", "title": "同一任务还有一次补充汇报", "manager": "assistant"},
+                {"at": held_today(5), "level": "P2", "reason": "ln_p2_silent", "title": "后台检查已完成",
                  "body": "没有需要你处理的事项", "manager": "assistant"},
                 {"at": ago(days=1), "level": "P1", "reason": "ln_p1_held", "title": "昨天的记录不应出现"},
             ]})
@@ -24765,6 +24876,8 @@ class H(BaseHTTPRequestHandler):
         if p == "/mock/tool_call": return self.send_json(mock_tool_call(q.get("name", [""])[0], q.get("args", ["{}"])[0]))
         if p == "/mock/fleet": return self.send_json(*set_fleet_mode(q.get("mode", [""])[0]))
         if p == "/mock/notify": return self.send_json(*mock_notify(q.get("interaction", [""])[0]))
+        if p == "/mock/assistant_ask": return self.send_json(*mock_assistant_ask(q))
+        if p == "/mock/notify_user": return self.send_json(*mock_notify_user(q))
         if p == "/mock/renew": return self.send_json(*renew_requests(int(q.get("minutes", ["30"])[0] or 30)))
         if p == "/api/v1/auth/tokens": return self.send_json({"tokens": TOKENS, "current": "dev_phone", "push": TOKEN_PUSH})
         if p == "/mock/sent": return self.send_json({"sent": SENT})
@@ -24797,6 +24910,7 @@ class H(BaseHTTPRequestHandler):
             machine_alerts.reset()  # cleaned caches and launcher checks (#8037)
             wire_reset()
             SEND_FAIL["on"] = False  # a FailedSendPlacementTests run that died before turning it off
+            LN["on"] = bool(os.environ.get("MOCK_LN"))  # low-distraction mode as the run started (/mock/ln)
             COOKIES_FAILED[0] = False  # MOCK_COOKIES_FAIL: the next read fails again
             # MOCK_RULE_SUGGESTIONS: every suggestion is offered again, and what Always made is gone (web/e2e/rule-suggestions.mjs)
             RULE_SUGGESTIONS_ANSWERED.clear(); RULE_GRANTS[:] = standing_seed(); RULE_GRANTS_REVISION[0] = 1

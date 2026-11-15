@@ -365,6 +365,49 @@ test('the echo example is a complete runtime: start, send, stream, ask, page', a
   assert.deepEqual(batches.slice(1).filter((b, i) => b.from_seq !== batches[i].to_seq), [])
 })
 
+test('explicit phone-first admits an unlisted session, while local-first and a missing peer do not (#8203)', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal(), { runtime: 'toy', socketPath: n.path, retryMs: 20, pushDelayMs: 5, answerFirst: 'phone' })
+  t.after(() => rt.stop())
+  assert.equal(rt.phoneFirst('s1'), false, 'no node peer: nobody can answer on the phone')
+  rt.start()
+  await n.ready
+  await until('listed', () => n.last('runtime.sessions'))
+  assert.equal(rt.phoneFirst('unlisted'), true, 'explicit phone-first does not depend on inventory membership')
+  assert.equal(rt.phoneFirst('s1'), true, 'the listed behavior is unchanged')
+  n.setHub(false)
+  await until('hub gone', () => !rt.hubConnected)
+  assert.equal(rt.phoneFirst('unlisted'), false, 'no hub: even an explicitly phone-first session asks locally')
+
+  const other = await startFakeNode(t)
+  const local = createRuntime(minimal(), { runtime: 'toy-local', socketPath: other.path, retryMs: 20, pushDelayMs: 5, answerFirst: 'local' })
+  t.after(() => local.stop())
+  assert.equal(local.phoneFirst('s1'), false, 'local-first also stays local without a peer')
+  local.start()
+  await other.ready
+  await until('listed', () => other.last('runtime.sessions'))
+  assert.equal(local.phoneFirst('s1'), false)
+  assert.equal(local.phoneFirst('unlisted'), false)
+  other.peer.notify('runtime.driven', { session_id: 'unlisted' })
+  await until('phone-driven', () => local.touched('unlisted'))
+  assert.equal(local.phoneFirst('unlisted'), false, 'recent phone activity never overrides explicit local-first')
+})
+
+test('recent phone-driven automatic sessions are phone-first before listing, unlike unrelated unlisted sessions (#8203)', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal({ hasLocalClient: () => false }), { runtime: 'toy', socketPath: n.path, retryMs: 20, pushDelayMs: 5 })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await until('listed', () => n.last('runtime.sessions'))
+  assert.equal(rt.phoneFirst('s1'), true, 'a listed session with no local client remains phone-first')
+  assert.equal(rt.phoneFirst('unrelated'), false, 'no local client alone does not admit an unknown automatic session')
+  n.peer.notify('runtime.driven', { session_id: 'session-new' })
+  await until('phone-driven', () => rt.touched('session-new'))
+  assert.equal(rt.phoneFirst('session-new'), true, 'recent phone activity is enough before the delayed inventory')
+  assert.equal(rt.phoneFirst('unrelated'), false, 'admitting one phone-driven session does not admit every unlisted session')
+})
+
 test('without a hub on the node the phone is not asked first; it is again once the hub is back', async (t) => {
   const n = await startFakeNode(t, { hub: false })
   const rt = createRuntime(minimal(), { runtime: 'toy', socketPath: n.path, retryMs: 20, pushDelayMs: 5, answerFirst: 'phone' })
@@ -550,20 +593,25 @@ test('a runtime running several agents: launchers in hello and when they change,
   const rt = createRuntime(minimal({
     start: async (p) => {
       got.push(['start', p])
-      return { session: { session_id: p.resume ?? 'new', status: 'idle' } }
+      // What it asked for and does not run with goes back with the row (caps.same_kind).
+      return { session: { session_id: p.resume ?? 'new', status: 'idle' }, ...(p.resume ? {} : { instead: { launcher: p.launcher } }) }
     },
     modes: async (p) => got.push(['modes', p]),
-  }), { runtime: 'paseo', socketPath: n.path, retryMs: 20, launchers, resume: true, readonly: true })
+  }), { runtime: 'paseo', socketPath: n.path, retryMs: 20, launchers, resume: true, readonly: true, sameKind: true })
   t.after(() => rt.stop())
   rt.start()
   await n.ready
   assert.equal(n.hello.caps.modes, true)
   assert.equal(n.hello.caps.resume, true)
   assert.equal(n.hello.caps.readonly, true)
+  assert.equal(n.hello.caps.same_kind, true)
   assert.deepEqual(n.hello.launchers, launchers)
   await n.peer.call('session.modes', { session_id: 's1', permission_mode: 'plan', effort: 'high' })
   const res = await n.peer.call('session.start', { cwd: '/w', resume: 'cccccccc-0000-0000-0000-000000000001', launcher: 'paseo-claude', model: 'opus' })
   assert.equal(res.session.session_id, 'cccccccc-0000-0000-0000-000000000001')
+  const fresh = await n.peer.call('session.start', { cwd: '/w', launcher: 'cc-gateway', agent_type: 'claude' })
+  assert.deepEqual(fresh.instead, { launcher: 'cc-gateway' })
+  assert.equal(got.at(-1)[1].agent_type, 'claude')
   assert.deepEqual(got[0], ['modes', { session_id: 's1', permission_mode: 'plan', effort: 'high' }])
   assert.equal(got[1][1].model, 'opus')
   rt.launchersChanged([{ name: 'paseo-codex', agent: 'paseo' }])

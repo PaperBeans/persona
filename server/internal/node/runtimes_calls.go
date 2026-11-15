@@ -19,13 +19,24 @@ import (
 var claimMethods = map[string]bool{"session.send": true, "session.items": true, "session.item": true, "session.image": true,
 	"session.watch": true, "session.info": true, "session.interrupt": true}
 
+// awayReads are the calls the node answers itself for a session of a runtime that is away whose conversation is a
+// Claude transcript here (runtimeaway.go): its content, its info and the watch of its transcript.
+var awayReads = map[string]bool{"session.items": true, "session.item": true, "session.image": true, "session.watch": true,
+	"session.info": true}
+
 // runtimeClaimTimeout bounds asking one runtime whether it has a session.
 var runtimeClaimTimeout = 5 * time.Second
 
 // runtimeFor is the runtime a hub call about session id goes to: the one listing it, else the one that listed it
 // before (an older session it no longer lists), else — for a session this machine has nothing else for (no agent, no
 // transcript) — the first connected runtime that answers for it. A session of a runtime that is not connected now is
-// refused (errRuntimeAway): it is not a Claude session to resume in a terminal.
+// refused (errRuntimeAway): it is not a Claude session to resume in a terminal. Only its content is read meanwhile
+// when its conversation is a Claude transcript here (runtimeaway.go).
+//
+// A session none of them has, whose id is one a runtime gives its own sessions ("<runtime id>-…": Paseo's
+// paseo-<agent id>), is refused with that runtime's not-found when it says it does not have it (an agent of another
+// provider archived or deleted in Paseo, opened from an old link): the node has nothing of it either, and answered with
+// its own transcript lookup's failure, a 502 the apps showed as the computer failing (#8131).
 func (n *Node) runtimeFor(ctx context.Context, method, id string) (*runtimeConn, error) {
 	if id == "" || !strings.HasPrefix(method, "session.") || method == "session.start" {
 		return nil, nil
@@ -35,6 +46,9 @@ func (n *Node) runtimeFor(ctx context.Context, method, id string) (*runtimeConn,
 		return h, nil
 	}
 	if known {
+		if awayReads[method] && n.runtimeTranscript(id) != "" {
+			return nil, nil // the node reads the transcript (n.file), as it does while the runtime lists the session
+		}
 		if claimMethods[method] || method == "session.rename" || method == "session.close" || method == "session.rewind" || method == "session.archive" || method == "session.unarchive" {
 			return nil, errRuntimeAway(label)
 		}
@@ -44,9 +58,17 @@ func (n *Node) runtimeFor(ctx context.Context, method, id string) (*runtimeConn,
 		return nil, nil
 	}
 	conns := n.runtimes.askable(id)
-	if len(conns) == 0 || n.hasOwnSession(id) {
+	if len(conns) == 0 {
+		// Asked lately: what the runtime whose id it is said then, unless this machine has the session by now.
+		if gone := n.runtimes.goneOf(id); gone != nil && !n.hasOwnSession(id) {
+			return nil, gone
+		}
 		return nil, nil
 	}
+	if n.hasOwnSession(id) {
+		return nil, nil
+	}
+	var gone error
 	for _, c := range conns {
 		cctx, cancel := context.WithTimeout(ctx, runtimeClaimTimeout)
 		var page struct {
@@ -58,10 +80,17 @@ func (n *Node) runtimeFor(ctx context.Context, method, id string) (*runtimeConn,
 			n.runtimes.claim(c, id)
 			return c, nil
 		}
+		if rpcCode(err) == codeNotFound && strings.HasPrefix(id, c.id()+"-") {
+			gone = err
+		}
 	}
-	n.runtimes.unclaim(id)
-	return nil, nil
+	n.runtimes.unclaim(id, gone)
+	return nil, gone
 }
+
+// codeNotFound is what a node, or a runtime it asks, answers for a session it does not have (the manager's
+// codeSessionNotFound: a card of such a session is withdrawn).
+const codeNotFound = "not_found"
 
 // hasOwnSession: this machine has the session itself (a live agent in a terminal, a Claude / Codex and compatible variants record).
 func (n *Node) hasOwnSession(id string) bool {

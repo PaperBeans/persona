@@ -352,6 +352,119 @@ test('a watch that starts mid-message gets the whole live text so far, not just 
   assert.equal(n.last('session.delta').text, 'Hello')
 })
 
+async function firstInteractionAfterAdmission(t, kind, { automatic = false, beforeStart = false } = {}) {
+  const n = await startFakeNode(t, { strict: true })
+  const ev = bus()
+  const sessions = new Map()
+  let browserAnswers = 0
+  let inventoryAtCard
+  let promptAdmitted
+  const admitted = new Promise((resolve) => { promptAdmitted = resolve })
+  const ctl = {
+    async list() { return { items: [...sessions.values()] } },
+    async create({ cwd }) {
+      sessions.set('session-new', { sessionId: 'session-new', cwd, updatedAt: Date.now(), running: false, blank: true })
+      return { sessionId: 'session-new' }
+    },
+    async prompt() {
+      // The real controller acknowledges inbox admission, rather than holding prompt open until the model turn ends.
+      sessions.get('session-new').blank = false
+      promptAdmitted()
+      return { accepted: true }
+    },
+  }
+  const rt = createDshRuntime({ controller: ctl, on: ev.on, hasLiveClient: () => true },
+    { socketPath: n.path, pushDelayMs: 5000, retryMs: 20, interactions: automatic ? undefined : 'phone' })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await until('initial empty inventory', () => n.last('runtime.sessions'))
+  const starting = n.peer.call('session.start', { cwd: '/w/new', prompt: 'run the first tool' })
+  let startSettled = false
+  starting.then(() => { startSettled = true }, () => { startSettled = true })
+  if (beforeStart) {
+    await admitted
+    assert.equal(startSettled, false, 'the initial prompt settled, but the outer session.start RPC has not')
+  } else {
+    await starting
+  }
+  assert.ok(!n.last('runtime.sessions').sessions.some((s) => s.session_id === 'session-new'), 'the ordinary inventory push is still delayed')
+
+  const agent = { session: { id: 'session-new' } }
+  const plan = { id: 'review', question: 'Approve?', detail: '# Plan\n1. do it', options: [{ label: 'Approve' }, { label: 'Keep planning' }], intent: { kind: 'plan-review', approve: 'Approve' } }
+  const question = { id: 'q1', question: 'Which db?', options: [{ label: 'pg' }, { label: 'sqlite' }] }
+  const event = kind === 'permission' ? 'approval/request' : 'user-questions/request'
+  const payload = kind === 'permission'
+    ? { agent, toolName: 'bash', callId: 'first-call' }
+    : { agent, questions: [kind === 'plan' ? plan : question] }
+  n.resolve = () => {
+    inventoryAtCard = n.last('runtime.sessions')
+    if (kind === 'permission') return { allow: true }
+    if (kind === 'plan') return { approve: true }
+    return { answers: { 'Which db?': 'pg' } }
+  }
+  const fromBrowser = () => { browserAnswers++; return 'browser-answer' }
+  const result = await ev.waterfall(event, payload, fromBrowser)
+  if (beforeStart) await starting
+
+  assert.equal(browserAnswers, 0, 'the first post-admission interaction must not fall through to the browser')
+  assert.equal(n.asked.length, 1, 'exactly one phone card')
+  assert.equal(n.refused.length, 0, 'the node saw the session before its card')
+  assert.ok(inventoryAtCard?.sessions?.some((s) => s.session_id === 'session-new'), 'runtime.sessions containing the new id is published before interaction.create')
+  assert.equal(n.asked[0].kind, kind)
+  if (kind === 'permission') assert.equal(result, 'allowed-once')
+  if (kind === 'plan') assert.deepEqual(result, { answers: [{ id: 'review', selected: ['Approve'] }] })
+  if (kind === 'question') assert.deepEqual(result, { answers: [{ id: 'q1', selected: ['pg'] }] })
+}
+
+for (const [kind, label] of [['permission', 'approval'], ['question', 'question'], ['plan', 'plan review']]) {
+  test(`the first ${label} after immediate prompt admission goes to the phone before delayed inventory (#8203)`, async (t) => {
+    await firstInteractionAfterAdmission(t, kind)
+  })
+  test(`automatic mode keeps the after-start ${label} control on the phone (#8203)`, async (t) => {
+    await firstInteractionAfterAdmission(t, kind, { automatic: true })
+  })
+  test(`automatic mode routes the first ${label} after prompt admission but before session.start resolves (#8203)`, async (t) => {
+    await firstInteractionAfterAdmission(t, kind, { automatic: true, beforeStart: true })
+  })
+}
+
+for (const [label, error] of [
+  ['failure', new Error('initial prompt failed')],
+  ['cancellation', Object.assign(new Error('initial prompt cancelled'), { name: 'AbortError' })],
+]) {
+  test(`automatic mode leaves no phone-driven eligibility after initial prompt ${label} (#8203)`, async (t) => {
+    const n = await startFakeNode(t, { strict: true })
+    const ev = bus()
+    const sessions = new Map()
+    const ctl = {
+      async list() { return { items: [...sessions.values()] } },
+      async create({ cwd }) {
+        sessions.set('session-new', { sessionId: 'session-new', cwd, updatedAt: Date.now(), running: false, blank: true })
+        return { sessionId: 'session-new' }
+      },
+      async prompt() { throw error },
+    }
+    const rt = createDshRuntime({ controller: ctl, on: ev.on, hasLiveClient: () => true },
+      { socketPath: n.path, pushDelayMs: 5000, retryMs: 20 })
+    t.after(() => rt.stop())
+    rt.start()
+    await n.ready
+    await until('initial empty inventory', () => n.last('runtime.sessions'))
+    await assert.rejects(n.peer.call('session.start', { cwd: '/w/new', prompt: 'run the first tool' }), new RegExp(error.message))
+
+    let browserAnswers = 0
+    const result = await ev.waterfall('approval/request', {
+      agent: { session: { id: 'session-new' } }, toolName: 'bash', callId: 'after-failed-start',
+    }, () => { browserAnswers++; return 'browser-answer' })
+    assert.equal(result, 'browser-answer')
+    assert.equal(browserAnswers, 1, 'an unknown unlisted automatic session stays with its local UI')
+    assert.equal(n.asked.length, 0, 'a failed start leaves no phantom phone card')
+    assert.equal(n.refused.length, 0)
+    assert.ok(!n.last('runtime.sessions').sessions.some((s) => s.session_id === 'session-new'))
+  })
+}
+
 test('approvals of a session the phone drives go to the phone first; a dismissed card goes to the browser', async (t) => {
   const { n, ctl, ev, rt } = await setup(t)
   ctl.add('session-x', {}, [text(0, 'user', 'deploy')])

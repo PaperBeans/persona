@@ -347,7 +347,7 @@ func TestRuntimeLauncherAvailabilityCheck(t *testing.T) {
 func TestRuntimeAvailabilityCheckRequiresOptIn(t *testing.T) {
 	n, _ := runtimeNode(t)
 	host := dialRuntime(t, n, paseoEngineHello())
-	if _, handled := n.runtimeLauncherCheck(context.Background(), "paseo-claude", t.TempDir(), "probe"); handled {
+	if _, handled := n.runtimeLauncherCheck(context.Background(), n.runtimes.launcherRuntime("paseo-claude"), "paseo-claude", t.TempDir(), "probe"); handled {
 		t.Fatal("older runtime intercepted the shell check")
 	}
 	if len(host.got("launchers.check")) != 0 {

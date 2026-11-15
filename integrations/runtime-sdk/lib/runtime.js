@@ -115,10 +115,16 @@ export function defaultSocketPath() {
  *   listen?: { port?: number, host?: string, path?: string, token: string | (() => string) } | boolean,
  *   token?: string | (() => string), package?: { name: string, hash: string }, instance?: string,
  *   onUpdate?: (offer: { name: string, hash: string, version?: string }) => void,
- *   launchers?: { name: string, model?: string, agent?: string, models?: object[] }[], resume?: boolean,
- *   keepAlways?: boolean, readonly?: boolean, modelSwitch?: boolean }} options -
+ *   launchers?: { name: string, model?: string, agent?: string, models?: object[], prompt_optional?: boolean }[], resume?: boolean,
+ *   keepAlways?: boolean, readonly?: boolean, sameKind?: boolean, modelSwitch?: boolean }} options -
  *   launchers: more entries for the new-session form than options.launcher (a runtime running several agents: one
- *   per provider, each with the agent it starts and its models); rt.launchersChanged replaces them. resume: start
+ *   per provider, each with the agent it starts and its models; prompt_optional: a Codex one starts with no first
+ *   message too); rt.launchersChanged replaces them. sameKind: start runs only the runtime's own launchers — one
+ *   it does not have runs on one of its launchers of the agent kind the start names (agent_type), or it throws
+ *   RpcError(…, 'launcher_kind_missing'), never another kind of agent nor a default of its own; whatever the start
+ *   asked for that it does not run with (that launcher, a model the stand-in does not offer, an effort the model does
+ *   not offer) the answer says: {session, instead: {launcher?, model?, effort?}}, the row saying what it runs with
+ *   (caps.same_kind; without it the node sends a launcher the runtime does not have as shell_launcher). resume: start
  *   takes {resume: <Claude session id>} — taking a session it does not have over, under that id (caps.resume; the
  *   machine's engine continuing a session not running anywhere). keepAlways: the runtime keeps no "always allow" rule
  *   itself; a permission card with an always_label then gets the hub's "Always allow in this session" for that session and tool
@@ -286,6 +292,9 @@ export function createRuntime(driver, options) {
     if (options.keepAlways === true) caps.keep_always = true
     // It enforces read-only (plan) starts itself, or refuses them (#3238).
     if (options.readonly === true && caps.start) caps.readonly = true
+    // It runs only its own launchers: one it lacks gets one of the kind the start names, said on the answer, or a
+    // refusal (#8140).
+    if (options.sameKind === true && caps.start) caps.same_kind = true
     const h = { runtime: options.runtime, name: options.name ?? options.runtime, version: options.version ?? '', instance, caps }
     if (options.package?.name && options.package?.hash) h.package = { name: options.package.name, hash: options.package.hash }
     if (options.agent) h.agent = options.agent
@@ -709,11 +718,13 @@ export function createRuntime(driver, options) {
 
   function phoneFirst(sessionId) {
     // No hub: nobody can answer on the phone now. The local UI asks (a card already on the phone waits for the hub).
-    if (!peer || !hubConnected || !listed.has(sessionId)) return false
+    if (!peer || !hubConnected) return false
     if (answerFirst === 'phone') return true
     if (answerFirst === 'local') return false
     const at = phoneDriven.get(sessionId)
     if (at !== undefined && Date.now() - at < PHONE_DRIVEN_FOR) return true
+    // Only the no-local-client inference for an otherwise unknown automatic session depends on inventory membership.
+    if (!listed.has(sessionId)) return false
     return typeof driver.hasLocalClient === 'function' && driver.hasLocalClient(sessionId) === false
   }
 
@@ -858,11 +869,23 @@ export function createRuntime(driver, options) {
         schedulePush()
         return { ok: true }
       case 'session.start': {
-        const res = await need(driver.start, 'start')(params)
-        const id = res?.session?.session_id
-        if (id) drivenBy(id)
-        schedulePush()
-        return res
+        const early = new Set()
+        try {
+          // A driver whose initial prompt can need an answer before start returns names the session as soon as it exists.
+          const res = await need(driver.start, 'start')(params, (id) => {
+            if (typeof id !== 'string' || !id) return
+            early.add(id)
+            drivenBy(id)
+          })
+          const id = res?.session?.session_id
+          if (id) drivenBy(id)
+          schedulePush()
+          return res
+        } catch (err) {
+          // Early routing is provisional until the start succeeds; do not admit an unknown session after a failed start.
+          for (const id of early) phoneDriven.delete(id)
+          throw err
+        }
       }
       case 'workspace.prepare':
         return need(keepsWorkspaces && driver.prepareWorkspace, 'workspaces')(params)

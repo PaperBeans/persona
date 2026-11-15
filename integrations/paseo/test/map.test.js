@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  AUTO_ACCEPT_ROOTS, agentRoot, agentRow, archivedUnderOwnId, autoAcceptOf, codexThreadOf, backgroundOf, defaultProvider, interactionOf,
-  launchersOf, linkedWorktree, modeBeforePlan,
-  parentAgentId, paseoMode, promptKey, providerRoots, responseOf, rewindOf, rowStatus, projectSpaces, sessionIdOf, slotNameOf, spaceIdOf,
+  AUTO_ACCEPT_ROOTS, CANCELED_NOTE, ERROR_LEAD, ERROR_TEXT, agentRoot, agentRow, archivedUnderOwnId, autoAcceptOf, codexThreadOf, backgroundOf,
+  defaultProvider, effortFor, exitNote, interactionOf, launchersOf, linkedWorktree, modeBeforePlan,
+  parentAgentId, paseoMode, promptKey, providerRoots, responseOf, rewindOf, rowStatus, projectSpaces, sameKindProvider, sessionIdOf, slotNameOf, spaceIdOf,
   strayRecord, timelineItems, toolCall, transcriptOf, workspaceRow, paseoCheckouts,
 } from '../lib/map.js'
 import { agentSnapshot, autoAcceptFeature, entry, workspaceDescriptor } from './fake-paseo.js'
@@ -73,8 +73,23 @@ test('status: needing you while a request waits; working; done after a turn; 未
   assert.equal(rowStatus({ status: 'error', requiresAttention: false }), 'idle')
   assert.equal(rowStatus({ status: 'error', requiresAttention: true, attentionReason: 'error' }), 'done')
   assert.equal(rowStatus({ status: 'running', requiresAttention: true }), 'working', 'running first')
-  assert.equal(rowStatus({ status: 'closed', requiresAttention: true }), 'offline')
   assert.equal(rowStatus({ status: 'idle', requiresAttention: true, pendingPermissions: [{ id: 'p' }] }), 'blocked')
+})
+
+test('a closed agent Paseo still marks for you to look at stays done: Paseo letting its process go is no "Not running" (#8133)', () => {
+  // Paseo unloads an idle agent after a while (closed) and keeps its attention mark, which only looking at it clears.
+  assert.equal(rowStatus({ status: 'closed', requiresAttention: true, attentionReason: 'finished' }), 'done')
+  assert.equal(rowStatus({ status: 'closed', requiresAttention: true, attentionReason: 'error' }), 'done')
+  assert.equal(rowStatus({ status: 'closed', requiresAttention: false }), 'offline', 'looked at: not running')
+  assert.equal(rowStatus({ status: 'closed' }), 'offline', 'a Paseo without the flag')
+  assert.equal(rowStatus({ status: 'closed', requiresAttention: true }, { quiet: true }), 'offline', "another agent's subtask is never waited on (#4494)")
+  assert.equal(rowStatus({ status: 'closed', requiresAttention: true }, { fleet: true }), 'idle', 'the agents it created still run: their reports wake it')
+  assert.equal(rowStatus({ status: 'closed', requiresAttention: true, pendingPermissions: [{ id: 'p' }] }), 'blocked')
+  const roots = providerRoots(CONFIG)
+  const closed = agentSnapshot({ provider: 'grok', cwd: '/w/x', status: 'closed', requiresAttention: true, updatedAt: '2026-11-04T10:00:00.000Z' })
+  assert.deepEqual([agentRow(closed, { roots }).status, agentRow(closed, { roots }).updated_at], ['done', '2026-11-04T10:00:00.000Z'],
+    'Unread, from when it finished')
+  assert.equal(agentRow({ ...closed, archivedAt: '2026-11-04T11:00:00.000Z' }, { roots, archived: true }).status, 'offline', 'archived: not running, whatever its mark')
 })
 
 test('a row: its space, the agent the apps know, model, modes and transcript', () => {
@@ -136,6 +151,27 @@ test("an archived agent keeps its row when its id is not its transcript's: a ses
   assert.deepEqual([row.session_id, row.status, row.transcript, row.title, row.space_id, row.updated_at], ['paseo-a1', 'offline', CLAUDE_SID, 'T', 'prj', at])
   assert.equal(agentRow({ ...started, status: 'idle' }, { roots, archived: true }).status, 'offline', 'whatever its record says')
   assert.equal(agentRow(started, { roots }), undefined, 'without archived: no row, as before')
+  // Paseo changes nothing of an agent it keeps archived (rewind, permission mode, effort, model): the row offers none of
+  // them, whatever the record it was archived with says it can do (#8133).
+  const able = { ...started, capabilities: { supportsRewindConversation: true, supportsRewindBoth: true } }
+  assert.deepEqual(agentRow(able, { roots, archived: true, thinking: ['low', 'high'] }).capabilities,
+    { rewind: false, rewind_code: false, modes: false, model: false })
+  assert.deepEqual(agentRow({ ...able, archivedAt: null }, { roots }).capabilities, { rewind: true, rewind_code: true },
+    "listed: the provider's own rewind, modes and model left to the node")
+  const grok = agentSnapshot({ id: 'g1', provider: 'grok', archivedAt: at, labels: { 'persona.session': 'paseo-g1' } })
+  assert.equal(agentRow(grok, { roots, archived: true, thinking: ['low', 'high'] }).efforts, undefined, 'no effort to pick either')
+})
+
+test("a row that is not Claude Code's lists the efforts its model takes, among Persona's levels (#8133)", () => {
+  const roots = providerRoots(CONFIG)
+  const grok = agentSnapshot({ provider: 'grok', cwd: '/w/x' })
+  assert.deepEqual(agentRow(grok, { roots, thinking: ['low', 'medium', 'high', 'ultra'] }).efforts, ['low', 'medium', 'high'])
+  assert.deepEqual(agentRow(agentSnapshot({ provider: 'my-codex', cwd: '/w/x' }), { roots, thinking: ['xhigh', 'low'] }).efforts, ['low', 'xhigh'],
+    'weakest first')
+  assert.equal(agentRow(grok, { roots, thinking: ['ultra'] }).efforts, undefined, "none of Persona's levels: none listed")
+  assert.equal(agentRow(grok, { roots }).efforts, undefined, 'Paseo has not said')
+  const claude = agentSnapshot({ provider: 'my-claude', cwd: '/w/x', persistence: { sessionId: CLAUDE_SID, metadata: { provider: 'claude' } } })
+  assert.equal(agentRow(claude, { roots, thinking: ['low', 'high'] }).efforts, undefined, "Claude Code's are the apps' own")
 })
 
 test('an archived Codex conversation keeps a Persona-owned id, without changing Paseo-originated agents (#5129)', () => {
@@ -192,10 +228,11 @@ test("a delegated agent is its creator's subtask: its parent, no waiting to be l
   assert.equal(led.status, 'done', "its own turn ended; the hub counts it as working while they run")
   assert.equal(agentRow(boss, { roots, fleet: [] }).background, undefined)
   // Paseo let its process go while they still run: their reports wake it, so it is not "Offline" (which a list of
-  // what runs leaves out, with them under it). With none left, it is.
+  // what runs leaves out, with them under it). With none left, it is done while Paseo still marks it for you to look
+  // at (#8133), and "Offline" once it does not.
   const let_go = { ...boss, status: 'closed' }
   assert.deepEqual([agentRow(let_go, { roots, fleet: [child({ status: 'running' })] }).status, agentRow(let_go, { roots }).status,
-    rowStatus(let_go, { fleet: true }), rowStatus(let_go)], ['idle', 'offline', 'idle', 'offline'])
+    rowStatus(let_go, { fleet: true }), rowStatus(let_go), rowStatus({ ...let_go, requiresAttention: false })], ['idle', 'done', 'idle', 'done', 'offline'])
   assert.equal(backgroundOf({ title: 'no id' }), undefined)
 })
 
@@ -285,11 +322,31 @@ test("launchers: one per usable provider, with the agent it starts and its model
       { id: 'fable[1m]', name: 'Fable (1M)', default: true, efforts: ['low', 'medium', 'high', 'max'], default_effort: 'max' },
       { id: 'haiku', name: 'Haiku' },
     ] },
-    { name: 'my-codex', agent: 'codex', model: 'My Codex', models: [] },
+    // Paseo creates a Codex agent with no first message: the form need not ask for one (#8140).
+    { name: 'my-codex', agent: 'codex', model: 'My Codex', models: [], prompt_optional: true },
     { name: 'grok', agent: 'paseo', model: 'G', models: [{ id: 'g', name: 'G', efforts: ['xhigh'] }] },
   ])
   assert.equal(defaultProvider(entries, roots), 'my-claude', "Claude Code's own is off: the first running Claude Code")
   assert.equal(defaultProvider([{ provider: 'claude', enabled: true, status: 'ready' }, ...entries], roots), 'claude')
+})
+
+test('a launcher Paseo lacks: its provider of the same kind, its own built-in first, never another kind (#8140)', () => {
+  const roots = { claude: 'claude', 'my-claude': 'claude', 'cc-b': 'claude', codex: 'codex', 'my-codex': 'codex', grok: 'acp' }
+  const launchers = ['my-claude', 'cc-b', 'my-codex', 'grok'].map((name) => ({ name }))
+  assert.equal(sameKindProvider(launchers, roots, 'claude'), 'my-claude', 'the first of its kind, Paseo default first')
+  assert.equal(sameKindProvider([...launchers, { name: 'claude' }], roots, 'claude'), 'claude', "Paseo's built-in Claude Code, when it is on")
+  assert.equal(sameKindProvider(launchers, roots, 'codex'), 'my-codex')
+  assert.equal(sameKindProvider(launchers, roots, 'claude', (p) => p !== 'my-claude'), 'cc-b', 'only those it accepts (plan mode)')
+  for (const kind of ['traex', 'agy', '', undefined]) assert.equal(sameKindProvider(launchers, roots, kind), undefined, String(kind))
+})
+
+test("an effort the model does not offer: the nearest lower one it offers, else its lowest; none of Persona's: none (#8140)", () => {
+  const four = ['low', 'medium', 'high', 'max']
+  assert.equal(effortFor('xhigh', four), 'high')
+  assert.equal(effortFor('high', four), 'high')
+  assert.equal(effortFor('medium', ['low', 'high', 'turbo']), 'low')
+  assert.equal(effortFor('low', ['high', 'max']), 'high', 'none lower: the lowest it offers')
+  assert.equal(effortFor('high', ['turbo', 'minimal']), undefined, "no level of Persona's: the model's own default")
 })
 
 test("tool calls as the apps draw them: Claude Code's names and arguments", () => {
@@ -328,6 +385,23 @@ test("Grok's own tools, named in its ACP input (variant), as the apps' tools, an
   // Its permission card says the tool and what it is about.
   const card = interactionOf('s1', { id: 'p1', provider: 'grok', name: 'other', kind: 'tool', title: 'List directory', input: { variant: 'ListDir', target_directory: '/w/app' } })
   assert.deepEqual([card.tool_name, card.tool_input, card.summary, card.reason], ['LS', { path: '/w/app' }, '/w/app', 'List directory'])
+})
+
+test("the bridge's own words are the Chinese the hub rewrites in the reader's language; a compaction is the node's divider (#8133)", () => {
+  // The hub matches them word for word (server/internal/transcript's Runtime* constants): change both sides together.
+  assert.deepEqual([ERROR_TEXT, ERROR_LEAD, CANCELED_NOTE, exitNote(2)], ['出错了', '出错了：', '（已取消）', '（退出码 2）'])
+  const items = timelineItems([
+    entry(1, { type: 'error', message: 'Provider crashed' }),
+    entry(2, { type: 'error', message: '' }),
+    entry(3, { type: 'compaction', status: 'completed', trigger: 'auto', preTokens: 180000 }),
+    entry(4, { type: 'compaction', status: 'completed' }),
+  ], { maxSeq: 4 }).items
+  assert.deepEqual(items.map((i) => [i.kind, i.text, i.compact]), [
+    ['notice', '出错了：Provider crashed', undefined], ['notice', '出错了', undefined],
+    ['notice', '上下文已压缩', { trigger: 'auto', pre_tokens: 180000 }], ['notice', '上下文已压缩', {}],
+  ], "an error with nothing said is the bare word; a compaction is the node's notice, a divider the apps word themselves")
+  const roots = providerRoots(CONFIG)
+  assert.equal(agentRow(agentSnapshot({ provider: 'grok', status: 'error', lastError: 'boom' }), { roots }).last_text, '出错了：boom')
 })
 
 test('a timeline as items: results where they finished, the text being written held back, echoes tagged', () => {

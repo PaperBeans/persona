@@ -37,19 +37,26 @@ and the engine's note under Settings › Machines asks to update it.
   says it was archived, and after connecting the ones Paseo's directory still has (read newest first, archived Agents included).
   Not named: an Agent deleted in Paseo (it stays gone), an Agent another Agent created (its creator's chat says what it did), Paseo's own helper runs, which have no Agent,
   and an Agent that keeps its own ID (next). The transcript is listed under its Claude session ID, the ID such an Agent had while it was listed.
+  - Named, it is node's from then on (#8131): node reads it, and a message has Paseo take it over (`import_agent`, "Take over") with that Agent's own provider, directory and
+    workspace, so Paseo restores that Agent rather than making a second one beside it. Node used to send every call about it to the bridge, which no longer had it, until
+    node restarted and forgot that Paseo had listed it.
+  - An Agent of another provider has no transcript to stay as. Archived or deleted in Paseo and opened from an old link, it answers Paseo's not-found
+    ("Paseo has no such session"), which the apps show as such, rather than the computer failing to read it (#8131).
 - **Archived Agents that keep their own ID** (#4771, #5129): an Agent whose session ID is not its Claude session's (one created or taken over from Persona, `paseo-<agent id>`
   below, or one whose ID the bridge kept through a fork, #6709) is not named that way: listed as its transcript, it would come back under another ID, and everything Persona keeps under its own (a to-do's link, a pin, an archive
   mark, its read state, its sharing owner) would be left behind. The bridge keeps listing it itself instead, as a row not running under the same ID that names its
   transcript (`transcript`), so its content comes from the transcript as for any Claude Agent and node lists no second row for it. These rows come after the 300: the latest
   80 archived in the last 7 days, and those the phone touched lately. They are read from Paseo's archive at connect, so a restarted bridge lists them again once it has read
-  it, and they leave the list with the bridge, as the other rows do.
+  it; while the bridge is away they stay, not running, as every row of Claude Code does ("Finding Paseo").
   Codex Agents started from Persona keep their ID in the same way: a valid `persona.session` label and a known Codex thread retain an offline row with
   `codex_thread`, so node does not list that thread again as history. These rows share the same archive limits; distinct threads stay distinct, and a live
   Agent naming a thread takes precedence over an archived row for that thread. Codex Agents started in Paseo itself keep their existing archive behavior.
   Resuming a retained Codex Agent requires its original provider to remain enabled; it never imports that thread through a different provider.
   - A message to one goes to the Agent: Paseo takes it back from the archive first, keeping its labels, and it goes on under the same ID. `session.start` with `resume` set
     to that ID does the same through `import_agent` (see "Take over").
-  - While it is archived, interrupting and closing it do nothing, and its permission mode and effort cannot be changed (Paseo changes them only on an Agent it has loaded).
+  - While it is archived, interrupting and closing it do nothing, and its permission mode, effort and model cannot be changed, nor can it be rewound (Paseo changes them only on an Agent it has loaded).
+    Its row offers none of them (#8133): `capabilities` says `rewind`, `rewind_code`, `modes` and `model` false whatever the record it was archived with
+    could do, and it lists no `efforts`; node narrows the row's capabilities by them (`docs/integrations/runtimes.md`).
     A rename goes to Paseo's record, which tells no list of it: the row takes the name from the bridge, and from Paseo's archive when the bridge reads it again (every 2 minutes, below).
   - Deleted in Paseo, it leaves the list as below. The bridge uses the existing `transcript` / `codex_thread` fields, without a new protocol feature.
 - **Deleted Agents** (#4629): an Agent deleted in Paseo (its App, `paseo delete`) leaves Persona too, and an archived one's Claude session is named no more (or its row leaves). Paseo tells a
@@ -86,6 +93,18 @@ and the engine's note under Settings › Machines asks to update it.
       Persona started, so Persona's own tools still ask for permission in it ("Cards"). Once archived, it stays a row under that ID
       (above) and none of its transcripts is named to the node.
     - Codex and other providers' Agents are `paseo-<agent id>` whatever their thread, so nothing needs to be kept for them.
+    - **The IDs a conversation went by** (#8131). Before #6709 such a conversation was listed under its transcript's ID, and under
+      each fork's after it, and Persona's archive (the user's, or closed sessions archiving themselves) kept a record under each.
+      A row under an ID of its own (a kept ID, or `paseo-<agent id>`) names, for the manager, its transcript and the sessions that
+      one was forked from back to its own ID (`aliases`, node reads them from each transcript's first record). Node lists none of
+      them beside it, and the Archived list shows no record under one while that row is listed: the row is the conversation.
+  - **Two Agents on one Claude session** (#8131): Paseo moving a conversation to another provider, or importing it again, makes
+    a new Agent on the same Claude session beside the old one. The newer one takes the ID of the oldest Agent with that session
+    (its label, its kept ID or its Claude session), listed or archived, and is kept on its `persona.session` label with
+    `persona.kept` as above. So the conversation stays one row under the ID Persona knows it by, and a message goes to the
+    newer Agent, on the provider it was moved to, unless the older one is at work (running, or waiting for an answer), which
+    gets it then: no second process writes the transcript. Archived, the one archived last is the row, as for any two
+    archived Agents under one ID.
 - **Content**:
   - **Agents running Claude Code**: content is read directly from the Claude transcript on that computer, exactly as for herdr sessions: tool cards, sub-Agents, background tasks,
     compaction, and "what it is doing" are all available. The same transcript does not produce an extra "Not running" row. If the transcript has not been written yet (the first turn has just started), or node does not recognize its configuration directory,
@@ -107,6 +126,7 @@ and the engine's note under Settings › Machines asks to update it.
   | Older Paseo (no `requiresAttention`): `idle` after a turn, `error` | Persona tracks Unread / Seen itself |
   | `idle`: has not run yet | Idle |
   | `closed`: not running, process exited | Not running (Paseo reloads it when a message is sent). While Agents it created have not finished: Working (background), since their reports wake it |
+  | `closed` while still marked for attention (Paseo lets an idle Agent's process go after a while and keeps its mark) | Unread, from when it finished, as while it was loaded (#8133): Seen once viewed in Persona, which clears the mark in Paseo too (below), and Not running once Paseo no longer marks it. An Agent another Agent created (below): Not running |
 
   Read state goes both ways: viewed in Paseo means Seen in Persona (#2831), and seen in Persona clears Paseo's own mark (#6299): when you see a session Paseo flags
   (Unread here), the manager tells the node (`session.seen`), and the bridge clears `requiresAttention` in Paseo. A loaded agent's with `clear_agent_attention`; one Paseo
@@ -197,12 +217,13 @@ and the engine's note under Settings › Machines asks to update it.
 | Send messages and images | ✅ | While an Agent is working, messages steer the current turn (Paseo's `steer`, like typing while Claude Code works); resending the same message delivers it only once |
 | Interrupt | ✅ | |
 | Permission, question, and plan cards | ✅ | Both the phone and Paseo App can answer; the first answer wins. Answering in Paseo removes the phone's card. Tapping "Return to computer" on the phone leaves the answer to the Paseo App. A card stays on the phone across link drops and goes up again after its 30 minutes while Paseo still waits (Mapping, "Cards") |
-| Create sessions from the phone | ✅ | Each available Paseo provider is a launcher, with its models, reasoning effort, and permission modes (permission modes: Claude Code's five; for providers on Codex, `bypassPermissions` starts Paseo's `full-access`; for providers whose approval is Paseo's Auto Accept switch (`auto_accept`: the ones on ACP, such as Grok, and OpenCode, #7758), `bypassPermissions` starts it with Auto Accept on; the others leave Paseo's default). A read-only start (`plan`, #3238) runs only on a provider running Claude Code, in Paseo's `plan` mode: a launcher Paseo lacks falls back to such a provider, a non-Claude one is refused (`readonly_unsupported`), and an agent Paseo reports in another mode is archived and refused. Workspace selection: use the workspace explicitly named in the form if it exists in Paseo; otherwise, if the directory is exactly a worktree, use that worktree's workspace (prefer one under the main-repository project, then the most recent), matching Paseo's own directory-based lookup. For a main checkout or ordinary directory, Paseo creates a new workspace under that project |
-| Resume a "Not running" Claude session | ✅ | Paseo imports the chat without changing its session ID. If Paseo already has it, reuse it, restoring it first if archived. An archived Agent that keeps its own ID (above) is restored under that ID. Reject if another claude process outside Paseo is using it, to prevent two processes writing at once |
-| Rename | ✅ | Changes the Agent's title in Paseo. iOS, Android and web show Rename on a Paseo session from its row's `capabilities.rename` (#6294; not on an Agent another Agent started), with the session's name only (no tab) |
+| Create sessions from the phone | ✅ | Each available Paseo provider is a launcher, with its models, reasoning effort, and permission modes; where a start goes to Paseo they are the only launchers offered, and a launcher Paseo does not have runs on its provider of the same kind or is refused ("A launcher Paseo does not have" below, #8140). A Codex provider starts without a first message too (`prompt_optional`) (permission modes: Claude Code's five; for providers on Codex, `bypassPermissions` starts Paseo's `full-access`; for providers whose approval is Paseo's Auto Accept switch (`auto_accept`: the ones on ACP, such as Grok, and OpenCode, #7758), `bypassPermissions` starts it with Auto Accept on; the others leave Paseo's default). A read-only start (`plan`, #3238) runs only on a provider running Claude Code, in Paseo's `plan` mode: a Claude Code launcher Paseo lacks runs on one of its Claude Code providers, a non-Claude one is refused (`readonly_unsupported`), and an agent Paseo reports in another mode is archived and refused. Workspace selection: use the workspace explicitly named in the form if it exists in Paseo; otherwise, if the directory is exactly a worktree, use that worktree's workspace (prefer one under the main-repository project, then the most recent), matching Paseo's own directory-based lookup. For a main checkout or ordinary directory, Paseo creates a new workspace under that project |
+| Resume a "Not running" Claude session | ✅ | Paseo imports the chat without changing its session ID. If Paseo already has it, reuse it, restoring it first if archived, with that Agent's own provider (#8131). An archived Agent that keeps its own ID (above) is restored under that ID. Reject if another claude process outside Paseo is using it, to prevent two processes writing at once |
+| Rename | ✅ | Changes the Agent's title in Paseo. iOS, Android and web show Rename on a Paseo session from its row's `capabilities.rename` (#6294; not on an Agent another Agent started), with the session's name only (no tab). A title given in Paseo (a rename in its App, the title another Agent created it with) stays: Persona's automatic naming replaces only a title Paseo made from the first prompt (#8133). Paseo 0.15.4 records nothing of where a title came from, so node counts a Claude Code session's title as its first prompt (`title_source: "prompt"`) only when it is exactly what Paseo makes of that prompt (the first line with words, white space collapsed, at most 60 characters; a prompt that opens with one of Persona's context blocks is titled after the block's first line), or the folder name the bridge stands in with for an untitled Agent; any other title has no known provenance, which nothing replaces |
 | Close | ✅ | Archives the Agent in Paseo, stopping it and removing it from Paseo's list. An Agent of Claude Code stays under Not running (above); any other leaves Persona's list. iOS, Android and web show Close from the row's `capabilities.close` (#6294) |
-| Change permission mode and reasoning effort | ✅ | Claude Code's five modes; on Codex, `bypassPermissions` switches to Paseo's `full-access` and a Codex agent in `full-access` reports `bypassPermissions`; on a provider whose approval is Auto Accept (Grok has no permission modes at all), `bypassPermissions` and `default` turn Auto Accept on and off (`set_agent_feature`, #7758), and an agent with it on reports `bypassPermissions`. One with it off reports no mode, since the agent's own settings may still approve everything (Grok's always-approve). The apps keep the mode chips hidden on these rows: the chips offer Claude Code's modes, and node gives the modes capability to Claude Code rows only; reasoning effort includes only the levels supported by the model |
+| Change permission mode and reasoning effort | ✅ | Claude Code's five modes; on Codex, `bypassPermissions` switches to Paseo's `full-access` and a Codex agent in `full-access` reports `bypassPermissions`; on a provider whose approval is Auto Accept (Grok has no permission modes at all), `bypassPermissions` and `default` turn Auto Accept on and off (`set_agent_feature`, #7758), and an agent with it on reports `bypassPermissions`. One with it off reports no mode, since the agent's own settings may still approve everything (Grok's always-approve). Paseo lists no features for an Agent it has not loaded (closed, after Paseo restarts, a change to its stored record), though the switch stays on: the row keeps the state the bridge last saw (#8133); a bridge started while Paseo has not loaded the Agent sees none until Paseo loads it. The apps keep the mode chips hidden on these rows: the chips offer Claude Code's modes, and node gives the modes capability to Claude Code rows only; reasoning effort includes only the levels supported by the model. The row of an Agent that is not Claude Code's lists its model's levels (`efforts`, the thinking options Paseo lists for it that are Persona's), so iOS offers the effort alone there as web and Android do (#8133) |
 | Change model | ✅ | The model panel's choice goes to Paseo (`set_agent_model`, before an effort chosen with it, which must be the new model's): Claude Code takes it at once, Codex at its next turn. Only a model Paseo lists for the agent's provider (or one of its aliases); not for an archived agent |
+| Switch a running Agent to another launcher, or between Claude Code and Codex | ❌ | The node refuses it for every runtime's session (`switch_unsupported`): the web's model panel lists the other providers off with why, and switches only the session's own provider's model (#8142) |
 | Rewind | ✅ | Back to before one of your messages (`agent.rewind`), found in Paseo's timeline by its text, its occurrence and how many of your messages came after it: a conversation that moved meanwhile is refused, nothing changed. Claude Code can put the files back too; Codex, pi and omp rewind the conversation only; other providers none. Each row says which (`capabilities.rewind` / `rewind_code`). Claude Code forks its session to rewind: an agent listed under its Claude session id first keeps that id on the `persona.session` label (with `persona.kept`, "Session IDs"), so it stays the same session in Persona. Refused while it works or waits for you, and for an archived agent. A message whose turn was interrupted before Claude Code took it in cannot be a target until Paseo reloads the agent (Paseo: "Cannot rewind before the provider acknowledges the submitted prompt") |
 | Test a launcher (Settings › Models) | ✅ | One real prompt through the provider, with the provider's own login (`caps.check`): a probe agent in a background Paseo workspace for the node's empty check directory, in plan mode where the provider has it, without Persona's tools, never listed. Afterwards the probe is deleted, the workspace archived, and the project Paseo made for that directory removed (one Paseo already had stays) |
 | Models of a launcher | ✅ | Asked from Paseo when a picker opens (`list_provider_models`); refresh has Paseo look again first (`refresh_providers_snapshot`) |
@@ -213,13 +234,45 @@ and the engine's note under Settings › Machines asks to update it.
 | Keystrokes, screen reading, live terminal, phone takeover | ❌ | Paseo has no terminal |
 | Agent MCP tools | ✅ for new sessions | A new Agent gets whatever tools the hub gives an agent on that computer (see "Create"). Personal machine: the phone tools (`phone_*`), the connectors' agent tools (such as `mail_*`), the agent tools (`report_to_supervisor`, to-do decisions) and, when enabled, the dispatch tools (`dispatch_*`). Work machine: only the agent tools, no dispatch. A new Claude Code Agent has its own Persona tools preapproved (Paseo's `toolPolicy`), so it never asks for them. Taken-over sessions and Agents Paseo created itself are not given them (what they already have stays): Paseo's `import_agent` takes no config |
 
-Login-shell launchers (those in `~/.zshrc`) still appear in the creation form. If selected, use the Paseo provider with the same name if one exists;
-otherwise use Paseo's default provider (its built-in Claude Code provider if enabled, otherwise the first provider running Claude Code).
-When a named launcher is replaced, the bridge leaves model and reasoning effort unset so the replacement provider uses its own
-defaults. This includes a Persona-managed launcher or a resolved Agent preset: the manager can accept that launcher while the
-Paseo engine has no enabled provider with the same name. An enabled Codex variant does not automatically stand in for `codex`;
-the existing fallback still prefers a Claude provider. Model and effort stay with starts that keep their launcher, or that named
-no launcher. Permission mode, workspace and the first message keep their existing behavior.
+## A launcher Paseo does not have
+
+Paseo runs every Agent with a provider of its own. Where a start goes to Paseo (its engine host is Paseo: the computer's
+default, or the one a start names), the owner's rule of 2026-11-14 applies (#8140). Before it, a launcher Paseo lacked ran on
+Paseo's default provider with that provider's own model and effort (#6192): a Codex launcher started Claude Code, a gateway's
+launcher ran on another account, and a provider added in Persona never applied its gateway or key.
+
+- **List only what can run.** New Agent lists Paseo's providers, each with its own models and efforts, in Paseo's order (its
+  default first), and what starts elsewhere whatever the host (another runtime's launchers, Claude's desktop app, the Codex
+  App). The login shell's launchers, the providers added in Persona and plain `claude` are not offered: Paseo would run one of
+  its own in their place. The node answers `launchers.list` for that host (`host_runtime`), and the manager adds nothing to it
+  (`docs/protocol/protocol.md`, `launchers.list`). The main chat's menu still lists the computer's own launchers: the assistant
+  runs them on the command line, whatever the engine.
+- **A name both have is Paseo's provider there.** On such a computer a launcher of the login shell's (or one added in Persona)
+  named like a Paseo provider means that provider: its models, its Test in Settings › Models, its start options and the
+  start. In a terminal engine the shell's launcher of that name runs, as before.
+- **Substitute openly, within the same kind.** A preset, a task, Model configuration › Agents or a stale list that names a
+  launcher Paseo does not have (or a provider of Paseo's that is switched off or failing) gets one of Paseo's providers of the
+  same kind of agent: its built-in provider of that kind (`claude`, `codex`) when it is on, else the first of that kind in
+  Paseo's order. Persona chooses it and says so where the start was asked for: a task's why and plan card (the manager picks
+  it when the card is made, or at dispatch), `agent_start`'s confirmation and answer, and New Agent's note (`launcher_note`,
+  which the web shows), e.g. "Paseo on <computer> has no “codex”, so this runs on “my-codex”, an agent of the same kind". The
+  model the start named stays only when that provider offers it; otherwise it runs its own default model, and the note says
+  so. The effort goes with it.
+- **Refuse when there is none of that kind.** The start is refused with the reason (the manager names Paseo's providers there;
+  the bridge's code is `launcher_kind_missing`), and nothing runs in its place: never another kind of agent, never Paseo's
+  default, never another account unsaid. A read-only (`plan`) start also needs a provider of the kind that holds Paseo's plan
+  mode, else `readonly_unsupported`.
+- **Lower an unsupported effort and say so.** An effort the model does not offer goes down to the nearest lower one it
+  offers (`xhigh` → `high`; with none lower, the lowest it offers; with no level of Persona's at all, the model's default).
+  The session's effort is the one it runs at, and the note says so. An effort for a model Paseo lists no levels for passes as
+  asked.
+- **How.** The node tells the bridge the kind of agent a launcher it does not have starts (`agent_type` on `session.start`,
+  since the bridge declares `caps.same_kind`; from a node that does not say, the bridge reads the kind from the name as the
+  node does: `pi`, `cursor`, `agy`, `codex`, `traex` and `omp` by name, any other Claude Code); the bridge picks the provider and the effort, and its answer says what it ran
+  in place of what was asked (`instead`), which the node passes on with the session. The hub turns it into the app's note,
+  the manager into the task's; launcher health and a picked model's use are recorded under the launcher that ran.
+- **A computer with a terminal engine and Paseo**: the start's host decides. In the terminal the login shell's launchers run
+  as before; in Paseo, its providers alone, as above.
 
 ## How the bridge runs
 
@@ -270,16 +323,33 @@ no launcher. Permission mode, workspace and the first message keep their existin
   - Pending requests and provider changes
   - Timeline of the Agent being viewed
 - **Paseo restart (for example, an upgrade)**: the bridge reconnects every second; measured recovery is about 1.5 seconds. Sessions remain in the list during this time.
-- **Paseo stopped for over 30 seconds**: the bridge leaves node, and the engine shows as not detected. Claude Code sessions fall back to "Not running," with transcripts preserved.
-  Sending a message then reports that Paseo is not connected; nothing is sent.
+- **Paseo stopped for over 30 seconds**: the bridge leaves node, and the engine shows as not detected. Claude Code sessions stay listed under their IDs as "Not running"
+  (#8131), the archived ones' too, read from their transcripts, until the bridge is back or for as long as the list of sessions not running goes back (7 days); the same
+  after switching the computer to another engine. Sending a message, renaming or closing one then reports that Paseo is not connected; nothing is sent. Agents of other
+  providers leave the list until Paseo is back. A node that restarts while Paseo is down lists none of them until Paseo is back: what the bridge listed is in node's memory
+  only, and Paseo's transcripts read as a script's one-shot runs.
 
 ## Mapping
 
+- **Providers → agents** (#8142): an agent of Claude Code is `agent: "claude"`, one of Codex `"codex"`; every other
+  provider (Grok, Kimi, Cursor, TRAE, pi, OpenCode…) runs under Paseo's own id, `agent: "paseo"`, with its provider as
+  `launcher` and the provider's label in Paseo as `agent_label`. `paseo` names the engine, never an agent: the apps call
+  and draw such a row by its provider. The web (`lib/agent-kind.ts` `providerAgent`) takes the provider as its agent:
+  the mark the web has for it (Cursor, TRAE, Pi, OpenCode, Gemini, by the provider's id or its label), else its
+  label's letter; its label as its name on cards, pushes, the model pill and panel, subagent cards and the composer's
+  source line; one Agents filter entry and one model-panel engine per provider; one Harness choice per provider in the
+  work-session form. The web offers nothing the node refuses on a runtime's session: no other launcher or engine in
+  the model panel, no "Copy resume command", and its queued messages are only shown (no Send now, Edit, Delete or
+  reorder: `session.queue.*` is refused).
 - **timeline → items**: seq uses Paseo timeline's seq. Content is assigned to seq as follows:
   - Messages, thinking, notifications: the row where they start.
   - Tool calls: the call uses its start row; the result uses its completion row.
   - Text being written is delivered only as streaming text, becoming an item once complete.
   - If Paseo rewrites history (rewind), `history` changes and the App refetches the whole page.
+  - The bridge's own words are Chinese, as node's own lines are, and the hub rewrites them in the reader's language (#8133, `docs/protocol/i18n.md`
+    "Follow-up work"): an error's notice and the last words of an Agent that stopped on one (`出错了：` and the cause, `出错了` alone when Paseo says
+    nothing more), a failed command's exit code after its output, and a call cancelled before it gave anything back. A compaction is node's own
+    notice with `compact`, which every App draws as its divider in its own language.
 - **Tool names**:
 
   | Paseo detail | App rendering |
@@ -309,6 +379,9 @@ no launcher. Permission mode, workspace and the first message keep their existin
     - Denial includes the reason you entered.
   - Card IDs are derived from Paseo request IDs: after a node restart the next bridge asks with the same ID, and the hub hangs that on the card the phone already shows.
     A card put up again (below) has an ID of its own.
+  - A card says whose it is by the session's row: Claude Code's is Claude's card, any other the card of the agent the row
+    names, by the row's label. The node takes the row's `agent_label` whenever it has one, so a Grok agent's push reads
+    "Grok needs your permission", not "Paseo…" (#8142).
   - Plan requests Claude Code gives Paseo contain no plan body (`ExitPlanMode` input is empty). The bridge reads the body from that tool call in the timeline.
   - **Across link drops** (#8128): while Paseo waits on a request, its card is on the phone, whatever happened to the links in between ("each pending request has one
     home", `docs/design/DESIGN_SYSTEM.md`).
@@ -325,10 +398,12 @@ no launcher. Permission mode, workspace and the first message keep their existin
     - **"Return to computer"** is the only dismissal that leaves a request to Paseo's app: one made while the card is up, the hub there since it went up and before
       its 30 minutes are over. A dismissal that comes at once is the hub's answer for a card it had ended (a person takes longer), so the bridge puts up a new card,
       except for a card it has just made, which was never on the hub. A hand-back holds until the request is answered.
-- **Create**: use Paseo's `agent.create`. The bridge chooses the Agent ID and includes the form's selected model, permission mode (Allow all on an Auto Accept provider as `featureValues.auto_accept`, "Capabilities"), and reasoning effort. The first message is `initialPrompt`.
-  - The apps start a provider other than Codex with no first message and send it once the start is answered, as an ordinary message that can carry photos and files (iOS and the web; Android since #8143): such a start has no `initialPrompt`.
+- **Create**: use Paseo's `agent.create`. The bridge chooses the Agent ID and includes the form's selected model, permission mode (Allow all on an Auto Accept provider as `featureValues.auto_accept`, "Capabilities"), and reasoning effort (one the model offers: "A launcher Paseo does not have"). The first message is `initialPrompt`; with none, Paseo creates the Agent idle.
+  - The apps start a provider with no first message and send it once the start is answered, as an ordinary message that can carry photos and files (iOS and the web; Android since #8143): such a start has no `initialPrompt`. A Codex provider too, since its launcher is `prompt_optional` (#8140).
   - Creating from a workspace places it in that Paseo workspace, Agents in it or not; one Paseo no longer has is refused (above).
   - If Paseo does not finish creation within 25 seconds, return the session row first and keep waiting in the background.
+    That row is named as the listed one will be: a provider the apps do not know carries its label (`agent_label`), so
+    the apps never call it "Paseo" while it starts (#8142).
   - **Agent MCP tools** (#3655): the bridge reads the node's `mcp.json` (the one terminal Agents load) at each creation and puts its stdio servers (`personad mcp`) into the request's `config.mcpServers`.
     The tool list is the hub's, as for terminal Agents: it decides per computer (personal machine: phone, connector and agent tools; work machine: agent tools only), and the bridge adds no filter.
     Each server's environment gets `PERSONA_SESSION_ID` set to that Agent's own `persona.session` label (`paseo-<uuid>`, from the first Paseo agent ID of that start), not the provider's session ID, so `report_to_supervisor` and the other
@@ -343,12 +418,19 @@ no launcher. Permission mode, workspace and the first message keep their existin
 - **Take over**: use Paseo's `import_agent`, choosing the provider used by the most recent Agent running Claude Code on that computer.
   Set the `persona.session` label to the original session ID; archived Paseo Agents are restored. Paseo finds an archived Agent's record by its provider and Claude session,
   and writes the request's labels over its own: an archived Agent that keeps its own ID is imported with its own provider, Claude session and directory, and that ID as the
-  label, so it comes back as itself, under the same ID (#4771).
+  label, so it comes back as itself, under the same ID (#4771). So is an archived Agent whose Claude session the bridge named to node (#8131): with the provider of the most
+  recent Agent, Paseo made a second Agent on that session beside the archived one.
 
 ## Out of scope and known limitations
 
 - No terminal: no keystrokes, screen reading, live terminal view, or phone takeover. The App hides these entry points based on session capabilities.
 - Persona's MCP tools (phone, connector and agent tools) reach only Agents created through Persona; taken-over sessions and Agents created in Paseo itself are not given them (what they already have stays; see "Create").
+- New Agent's list follows the computer's default engine (#8140): the apps ask for the launchers once per computer. On a computer with a
+  terminal engine and Paseo, picking the other one in "Start in" keeps the default's list; a launcher the chosen engine does not have then
+  goes by "A launcher Paseo does not have" (the same kind, said, or a refusal) in Paseo, and as before in the terminal. The hub's
+  `GET /api/v1/machines/{mid}/launchers?host=` already answers per host for an app that asks again when the host changes.
+- On a computer whose engine is Paseo, a name the login shell and Paseo both have is Paseo's provider in the models and Test a picker
+  asks for, the main chat's model menu too, although the main chat runs the shell's launcher of that name on its command line.
 - The MCP server's `command` is the node's own program as an absolute path, stored in the Agent's config and kept by Paseo across reloads. Updates and deploys replace that file in place, so it normally stays valid. If the node's program
   moves or is switched (for example `persona-link node switch`, or a reinstall elsewhere), Agents created earlier keep the old path and lose their Persona tools until they are created again; the bridge does not rewrite a stored config.
 - Connect only to the local Paseo daemon. Paseo's relay and its other connected hosts are not integrated. Paseo on another computer uses that computer's own node.
@@ -370,14 +452,19 @@ no launcher. Permission mode, workspace and the first message keep their existin
 - Unit tests: `cd integrations/paseo && npm test`. Use a fake Paseo daemon (`test/fake-paseo.js`) and the SDK's fake node to test lists, content,
   streaming, sending, cards, creation, takeover, mode changes, workspaces and worktrees, Paseo restart, and disconnection.
 - End to end: first `cd server && go generate ./internal/runtimepkg && go build -o /tmp/personad ./cmd/personad`, then run
-  `PERSONAD=/tmp/personad CLAUDE_BIN=<a Claude Code executable> node integrations/paseo/e2e/run.mjs`. There are 57 checks; `paseo` must be installed locally.
+  `PERSONAD=/tmp/personad CLAUDE_BIN=<a Claude Code executable> node integrations/paseo/e2e/run.mjs`. There are 61 checks; `paseo` must be installed locally.
   Its temporary directories go under `$TMPDIR` when it is set.
   - Start a real Paseo daemon with its own home and an unused port. The provider uses `extends: "claude"`; the model is a scripted
     Anthropic API in `e2e/model.mjs`.
   - Start a real `personad node --stdio`, with the SDK test tools acting as hub. After setting the engine to Paseo, node runs the bridge itself.
-  - Test from creation through closing (the session stays listed under its ID), a message that continues it, archiving it again across a restart of the bridge, and resuming it.
+  - Test from creation through closing (the session stays listed under its ID, offering no rewind, mode or model change while archived), a message that continues it,
+    archiving it again across a restart of the bridge (meanwhile still listed and read, a message refused as Paseo away, #8131), and resuming it.
   - The launcher test and refreshed models through Paseo (nothing of the probe left), a model switch, a rewind of that session, and a rewind of an Agent started in Paseo (its Claude session forked, its session in Persona the same).
-  - Paseo forking an Agent started there by itself, as its App does to go on after an API error: seen by the bridge (the ID pinned as kept) and while the bridge was not running (the same ID from the line of its transcripts).
+  - What a start in Paseo can run (#8140): the list for Paseo's host is its providers alone, and a launcher Paseo lacks (Claude Code's built-in provider, off there) runs on its provider of the same kind, an effort its model lacks lowered, both said on the answer.
+  - An Agent started in Paseo and archived there: its transcript a session not running, read by node, and a message has Paseo take that same Agent back, with no node
+    restart in between (#8131).
+  - Paseo forking an Agent started there by itself, as its App does to go on after an API error: seen by the bridge (the ID pinned as kept) and while the bridge was not running (the same ID from the line of its transcripts), each row naming its fork in `aliases`.
+  - The engine switched away at the end: Paseo's Claude Code sessions stay listed, not running, readable, and a message is refused as Paseo away (#8131).
   - A branch of the session (fork), continued in Paseo under its own id.
   - Paseo's workspaces (#6295): a workspace with no Agents in node's catalog as its main checkout, New worktree in Paseo's worktrees folder (prepare; create: the new branch at
     the workspace's HEAD, a Paseo worktree), the new worktree in the catalog at once, and a session started in it, placed in that workspace.
@@ -387,6 +474,10 @@ no launcher. Permission mode, workspace and the first message keep their existin
     removed through Paseo with its branch.
   - Use only temporary directories, without touching the active local Paseo or `~/.claude`.
   - Add `KEEP=1` to retain temporary directories, or `DEBUG=1` to print the bridge lines from node's log.
+- How the web names and draws providers (#8142): the mock hub's `MOCK_PASEO_PROVIDERS=1` (`scripts/mock/mock_hub.py`, on the
+  Paseo computer of `MOCK_PASEO=1`) adds two of Paseo's providers the apps have no id for, Grok waiting on an approval and
+  Cursor idle, with their launchers and model lists on the server: the sidebar's marks, the pill and the model panel, the
+  Inbox card and the Agents filter show "Grok" and "Cursor", never "paseo".
 - Codex archive lifecycle: with the same generated `personad` binary, run `PERSONAD=/tmp/personad CODEX_BIN=<a Codex executable> PASEO_BIN=<a Paseo executable> node integrations/paseo/e2e/codex.mjs`.
   It uses a real temporary Paseo daemon and Codex with a scripted local Responses API, isolated homes and synthetic data. It checks that archiving,
   reconnecting and continuing preserve the Agent and thread identity and leave only one conversation row. It never uses the active Paseo daemon or a real model account.

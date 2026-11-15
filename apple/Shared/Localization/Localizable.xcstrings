@@ -76362,6 +76362,29 @@
       },
       "extractionState" : "manual"
     },
+    "It's already being sent, so it can't be stopped." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It's already being sent, so it can't be stopped."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すでに送信中のため、取り消せません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已经在发送了，来不及取消。"
+          }
+        }
+      }
+    },
     "It's Mine" : {
       "localizations" : {
         "en" : {

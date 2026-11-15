@@ -18,10 +18,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/devices"
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/update"
 )
 
 const iphoneExtensionID = "iphone"
@@ -257,14 +259,20 @@ func (h *Manager) putIPhone(w http.ResponseWriter, r *http.Request, m *Machine) 
 	writeJSON(w, i18n.IPhoneStatus(h.requestLang(r), h.refreshIPhone(r.Context(), m)))
 }
 
-// postIPhoneJob: POST /api/v1/machines/{mid}/iphone/{pair|forget|cancel} {"device"}: the machine page's Pair (an
-// iPhone plugged into this computer, trusted on the phone), Forget (its pairing record) and Cancel (no device). The node
-// runs a pairing in the background; its state comes back as IPhone.job (the page asks again while it runs). Pairing
-// needs the computer turned on; forgetting and cancelling only the extension on (a pairing started before the switch
-// went off can still be stopped, a paired iPhone still forgotten).
+// helperSource finds a release's build of a helper program for a computer (devices.Devices.HelperDownload).
+type helperSource interface {
+	HelperDownload(ctx context.Context, goos, arch, name string) ([]string, update.File, error)
+}
+
+// postIPhoneJob: POST /api/v1/machines/{mid}/iphone/{pair|forget|cancel|install} {"device"}: the machine page's Pair (an
+// iPhone plugged into this computer, trusted on the phone), Forget (its pairing record), Cancel (no device) and the
+// guided setup's Install (no device: the device bridge itself, the release's build for this computer, #8199). The node
+// runs them in the background; the state comes back as IPhone.job (the page asks again while it runs). Pairing and
+// installing need the computer turned on; forgetting and cancelling only the extension on (a pairing started before
+// the switch went off can still be stopped, a paired iPhone still forgotten).
 func (h *Manager) postIPhoneJob(w http.ResponseWriter, r *http.Request, m *Machine) {
 	action := r.PathValue("action")
-	if action != "pair" && action != "forget" && action != "cancel" {
+	if action != "pair" && action != "forget" && action != "cancel" && action != "install" {
 		writeErr(w, http.StatusNotFound, i18n.ErrEnglish("hub-computer.err_unknown_action"))
 		return
 	}
@@ -278,7 +286,7 @@ func (h *Manager) postIPhoneJob(w http.ResponseWriter, r *http.Request, m *Machi
 		}
 	}
 	in.Device = strings.TrimSpace(in.Device)
-	if action != "cancel" && in.Device == "" {
+	if action != "cancel" && action != "install" && in.Device == "" {
 		writeErr(w, http.StatusBadRequest, i18n.Err("hub-iphone.err_no_device"))
 		return
 	}
@@ -287,7 +295,7 @@ func (h *Manager) postIPhoneJob(w http.ResponseWriter, r *http.Request, m *Machi
 		writeErr(w, http.StatusNotFound, i18n.Err("hub-iphone.err_off"))
 		return
 	}
-	if action == "pair" && !p.Enabled {
+	if (action == "pair" || action == "install") && !p.Enabled {
 		writeErr(w, http.StatusNotFound, i18n.Err("hub-iphone.err_not_enabled"))
 		return
 	}
@@ -305,6 +313,27 @@ func (h *Manager) postIPhoneJob(w http.ResponseWriter, r *http.Request, m *Machi
 	params := map[string]any{}
 	if in.Device != "" {
 		params["device"] = in.Device
+	}
+	if action == "install" {
+		src, ok := h.opts.Devices.(helperSource)
+		if !ok {
+			writeErr(w, http.StatusNotFound, i18n.Err("hub-iphone.err_no_helper"))
+			return
+		}
+		m.mu.Lock()
+		goos, arch := m.info.OS, m.info.Arch
+		m.mu.Unlock()
+		urls, f, err := src.HelperDownload(ctx, goos, arch, "persona-iphone-bridge")
+		switch {
+		case errors.Is(err, devices.ErrNoHelper), errors.Is(err, devices.ErrNoHelperSource):
+			writeErr(w, http.StatusNotFound, i18n.Err("hub-iphone.err_no_helper"))
+			return
+		case err != nil:
+			h.logf("[%s] iphone bridge: %v", m.cfg.ID, err)
+			writeErr(w, http.StatusBadGateway, i18n.Err("hub-iphone.err_helper_unreachable"))
+			return
+		}
+		params = map[string]any{"urls": urls, "size": f.Size, "sha256": f.SHA256, "binary_sha256": f.BinarySHA256}
 	}
 	var got proto.IPhone
 	if err := m.callBuiltin(ctx, "iphone."+action, params, &got); err != nil {

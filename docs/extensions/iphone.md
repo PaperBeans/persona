@@ -132,11 +132,13 @@ answer on.
 
 ## Interfaces
 
-- `GET /api/v1/machines/{mid}/iphone` → `IPhone` `{enabled, installed, version?, devices: [{id, name, product_type?, ios?, paired, usb?, state?, transport?, connected, locked, capabilities?, ready, note?, allowed}], note?, checked?, job?}` (fields are block C's, `proto/iphone.go`);
+- `GET /api/v1/machines/{mid}/iphone` → `IPhone` `{enabled, installed, version?, devices: [{id, name, product_type?, ios?, paired, usb?, state?, transport?, connected, locked, capabilities?, ready, note?, code?, developer_mode?, allowed}], note?, code?, checked?, job?}` (fields are block C's, `proto/iphone.go`);
   `PUT` `{"enabled": bool}` is the computer's switch. Extension off, or a computer the bridge doesn't run on → 404.
-- `POST /api/v1/machines/{mid}/iphone/{pair|forget|cancel}` `{"device"?}`: pair an iPhone plugged into this computer (progress in `job`),
-  forget one's pairing record, cancel a pairing (no device). Pairing only once the computer is on (404); forget and cancel
-  need only the extension on; no device 400; offline or an old node 409. The log never says which iPhone.
+- `POST /api/v1/machines/{mid}/iphone/{pair|forget|cancel|install}` `{"device"?}`: pair an iPhone plugged into this computer (progress in `job`),
+  forget one's pairing record, cancel a pairing (no device), install the device bridge from the release (no device;
+  [iphone-bridge.md](iphone-bridge.md), "Releases"). Pairing and installing only once the computer is on (404); forget and cancel
+  need only the extension on; no device 400; offline or an old node 409; no release build of the bridge for that
+  computer 404, the release site away 502. The log never says which iPhone.
 - `GET /api/v1/iphone` → `{on, devices: [{…device, machines: [{id, name, enabled}], consented}]}`, every iPhone the computers reach, each once.
 - `PUT /api/v1/iphone/consent` `{"device", "allowed", "app"?: {"bundle_id", "name"}}` → that device as above. Not the user's own app → 403; extension off → 404.
 - `proto.Machine.iphone` is the computer's `IPhone` while the extension is on (the manager's report, like `computer`).
@@ -145,8 +147,9 @@ answer on.
   real iPhone never has one (only the simulator's bridge reads one), so it shows as `capabilities.ax_tree: false` with no
   note, and the core works from the screenshot by points, each input asked on the phone first (#3891);
   `iphone.call` `{device, session, op: status|look|do, args, approved?, timeout_ms?, confirm?, self_apps?, self_names?}` (`proto.IPhoneCall`) → `IPhoneResult`;
-  `iphone.pair` / `iphone.forget` / `iphone.cancel` `{device}` → `IPhone`. Through `plugin.node.call` to the built-in
-  program `iphone` (methods `status`, `call`, `pair`, `forget`, `cancel`) on a node that lists it, by these names otherwise.
+  `iphone.pair` / `iphone.forget` / `iphone.cancel` `{device}` and `iphone.install` `{urls, size, sha256, binary_sha256}` → `IPhone`.
+  Through `plugin.node.call` to the built-in
+  program `iphone` (methods `status`, `call`, `pair`, `forget`, `cancel`, `install`) on a node that lists it, by these names otherwise.
   `op: status` is the node's own answer; `look` and `do` go to block D's package.
   The node passes `confirm` to the core as `Request.Confirm`, and the core's `Response` into `IPhoneResult` as it is:
   `approval_summary` is the core's `Approval` object (`proto.IPhoneApproval` mirrors it field for field) and
@@ -155,6 +158,23 @@ answer on.
   `self_apps` / `self_names` are Persona's own apps on the iPhone (bundle ids and names) for the core's
   `Rules.SelfApps` / `Rules.SelfNames`, as the iPhone app reports them; they only add to what the node already keeps
   out (the name `Persona` and the bundle ids its device's app list gives), for as long as it runs.
+
+## Codes for apps (#8199)
+
+Every note comes with its reason as a `code`, so an app (the iPhone's guided setup) acts on the state without reading
+the words, and an older node that sends none still shows its note:
+
+- The computer's: `bridge_missing` (no device bridge here), `none_paired` (nothing paired with it).
+- Each iPhone's: `usb_unpaired` (on the cable, not paired), `connecting`, then the bridge's or the session's code
+  (`developer_mode_off`, `ddi_not_mounted`, `unsupported` (input below iOS 27), `locked`, `unreachable`, `pairing_rejected`,
+  `tunnel_failed`, `timeout`, …), or `failed` when there is no better word. `developer_mode` is what the iPhone last said of
+  Developer Mode: at pairing, then whenever it answered (it follows a phone that turned it on after pairing).
+- The install job's (`job.kind` `install`): its `step` the stage in the user's words (download, verify, install); once
+  failed, `job.code` `download_failed`, `checksum_mismatch`, `bad_helper`, `install_failed` or `timeout`.
+- The pairing job's (`job.code`, with `job.device`, the iPhone it is for): while it runs, what it waits for from the person
+  at the phone (`trust_pending`: tap Trust and enter the passcode; `locked`: unlock it; empty while it waits for nothing),
+  its `step` the matching note; once failed, why (`timeout` when nobody tapped Trust in its 3 minutes, `pairing_rejected`,
+  …).
 
 ## Notes and their languages
 

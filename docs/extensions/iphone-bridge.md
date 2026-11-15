@@ -26,7 +26,7 @@ screen and start and end apps.
   keeping the tunnel open). Every request has a total deadline.
 - It is optional for the node, like Cua Driver for a Mac: not part of personad's build or CI. The node looks for it at
   `$PERSONA_IPHONE_BRIDGE`, then in `PATH`, then in `$PERSONA_HOME/bin` (`~/.persona/bin/`), then next to `personad`; without it the
-  capability reports "not installed".
+  capability reports "not installed". Releases ship it, and the app can install it on a computer ("Releases").
 - Build: `native/iphone-bridge/build.sh` (format, lint, tests, release build; `--sim-runner` adds the simulator test runner; `--install`
   copies them to `~/.persona/bin/`). Needs a Rust toolchain.
 
@@ -414,6 +414,39 @@ $B serve --udid "$SIM" --record /tmp/sim.record                     # waits on s
 ```
 
 End with Ctrl-D: `serve` stops the runner and exits 0.
+
+## Releases
+
+How the bridge reaches the computers that need it (#8199):
+
+- **Built with each release.** `scripts/release/publish.sh` runs `native/iphone-bridge/release.sh`, which builds
+  `persona-iphone-bridge-<os>-<arch>` for linux/amd64, linux/arm64, darwin/arm64 and darwin/amd64. macOS builds need the
+  Apple Rust targets on a Mac. Linux builds need `zig` and `cargo-zigbuild`, and target glibc 2.28. A platform the publishing
+  computer can't build is left out with a `note:`, and so is a build that fails: the bridge never holds up a release. `--remap-path-prefix` cuts this
+  computer's home and checkout out of panic locations, so the binaries pass `scripts/release/check_bundle_privacy.py`. That
+  scan knows aws-lc's two upstream credits (`by <…@openssl.org>`, `by <…@arm.com>`) in that exact context. The darwin builds are
+  signed ad hoc as `com.nwverse.persona-iphone-bridge`, like the other programs.
+- **Listed in the release.** Each archive is in `SHA256SUMS`, in `latest.json` under `helpers` (`update.Manifest.Helpers`:
+  name → platform → `{name, size, sha256, binary_sha256}`), and kept with the node builds under `dl/<version>/`.
+  Only builds that are there are listed, and `publish.sh` uploads every one it lists. `personad release verify` and
+  `scripts/operations/tag_release.py` check a helper's bytes, but not a build number: it has its own version. On the
+  publishing computer's own platform, `version` must say `persona-iphone-bridge …`. A GitHub release whose private upload
+  command doesn't carry a listed helper's file is not refused: `tag_release.py` warns and uploads a copy of `latest.json`
+  without it, so hubs on that source find no build of the helper.
+- **With Persona Link.** `install.sh` puts it at `~/.persona/bin/persona-iphone-bridge` when it installs a computer's
+  node service and the release has a build for that platform. A failed or missing download is only a warning.
+  `scripts/app/mac-link.sh install` builds it for that Mac (when Rust is there) and puts it in the same place. It leaves the
+  app bundle, and Persona Screen and Persona Input in it, untouched.
+- **From the app.** `POST /api/v1/machines/{mid}/iphone/install` (the computer turned on) has the manager find the build
+  for that computer's OS and architecture (`devices.Devices.HelperDownload`). It looks first in the release of the hub's
+  version from the hub's node packages source (`docs/operations/node-update.md` "Node packages"), then in the newest
+  release, as node builds are found. It then calls the node's `iphone.install` `{urls, size, sha256, binary_sha256}`.
+  The node downloads it itself (from the next address when one fails, so `node_packages.proxy` does not apply). It checks
+  the size and both hashes, checks that the binary runs and names itself, and only then renames it into
+  `<PERSONA_HOME>/bin`, so a bridge already there stays until the new one passes. Its progress is the iPhone status's
+  job (`kind: install`: steps download, verify, install; codes `download_failed`, `checksum_mismatch`, `bad_helper`,
+  `install_failed`, `timeout`). With no build for that platform, or no release source (a development hub), the route says
+  so without asking the node.
 
 ## Verification status
 

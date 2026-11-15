@@ -992,9 +992,8 @@ the other on the same phone, not across phones.
   it moves between runs: an earlier run on the Xiaomi phone put the release median at 8 ms for the Agents list. Read the
   tail and the janky share, not the median.
 - These are two phones, one run each. An earlier run of the same steps agreed: on the Huawei phone 11.33% against
-  1.62% janky for the Agents list and 10.58% against 0% for the chat. The release build has no Baseline Profile of the
-  app's own yet, only the one merged from its libraries (#4055), so its first launches after an install are the slowest
-  it gets.
+  1.62% janky for the Agents list and 10.58% against 0% for the chat. These builds had no Baseline Profile of the app's
+  own yet, only the one merged from its libraries; "Baseline Profile" below adds one (#4055).
 
 `android_scroll_perf.py` (below) opens pages through the debug entry and only runs on a debug package. To compare
 builds, install them under different application ids (`-PpersonaApplicationId`, "Build and install"), pair each one,
@@ -1003,6 +1002,83 @@ and run:
 ```sh
 CHAT=<machine>/<session> COLD=6 python3 scripts/diag/android_build_perf.py <serial> out.json debug=<package> release=<package>
 ```
+
+## Baseline Profile
+
+`android/app/src/main/baseline-prof.txt` lists the app's classes and methods that ART should compile ahead of time
+(#4055). AGP merges it with the profiles the libraries ship, R8 rewrites the names into those of the shrunk app, and
+the release APK carries the result as `assets/dexopt/baseline.prof`. `androidx.profileinstaller` (1.4.1, pulled in by
+the Compose and activity libraries) writes it into the system's profile after the first launch when the install did not
+use it already; some systems read it at install (HarmonyOS 4.2 below), an install from a downloaded APK usually does
+not. The phone's next profile-guided compile then covers the pages people use, not only what the JIT saw so far.
+
+The file is generated, not written by hand. It holds what ART recorded on a phone while the release build walked the
+main pages of the demo: the Agents list, the 60-message assistant conversation, an Agent conversation, Inbox, Settings
+and the Persona page. Each rule names one class or method the phone saw; there are no whole-class wildcards, because
+in a measurement they compiled about twice as much code for no faster start.
+
+### Regenerating it
+
+On a phone with adb (tested on HarmonyOS 4.0, an Android 12 base, without root; `rules` also reads the rule format
+that newer systems print with `cmd package dump-profiles --dump-classes-and-methods`):
+
+```sh
+./scripts/app/android.sh release -s <phone>      # the commit to profile, installed as a release build
+# open the app and tap "No hub? Try the demo first" on the welcome page (or pair it), then:
+python3 scripts/app/android_baseline_profile.py capture -s <phone> --out /tmp/persona-profile.txt
+python3 scripts/app/android_baseline_profile.py rules /tmp/persona-profile.txt --report /tmp/persona-profile.json
+python3 scripts/app/test_android_baseline_profile.py
+```
+
+`capture` opens the pages above with `persona://open` links in one process, scrolls each, stays in the app for 90
+seconds so ART's profile saver writes, then runs `cmd package dump-profiles` and pulls the text. `rules` rewrites
+`baseline-prof.txt`. The phone reports the names of the shrunk app: the project keeps names (`-dontobfuscate`), but R8
+still merges classes, inlines methods, narrows signatures and turns lambdas into synthetic classes, so the script maps
+every name back through the R8 mapping file that the same build writes under the app's build directory, and drops what
+the mapping cannot explain (it prints the count; `--report` lists them). Build and capture from the same commit, or the
+mapping does not match the phone.
+
+Regenerate it when a page's code moves to other classes (a large refactor of the chat, the Agents list or the app
+shell), when a page is added to the walk, or when an R8 or AGP upgrade changes how classes are merged. Rules that no
+longer name anything are ignored by R8, so a stale file costs nothing at build time; it only covers less of the app.
+To see how much still applies, compare the rules with the rewritten profile that the R8 step writes under the app's
+build directory.
+
+The standard way to produce this file is a Macrobenchmark module with `BaselineProfileRule` and the
+`androidx.baselineprofile` Gradle plugin, which drives the pages from a test and handles R8's names itself. It needs a
+new module and an Android 13 or newer device (or a rooted one) to run on; this script is the smaller step that needs
+neither, and replacing it with that module later is optional.
+
+### Measured effect
+
+Measured 2026-11-13 on physical devices via adb: release builds of the same commit without and with the file
+(16 KB larger APK), each freshly installed with `adb install` and opened in the demo, in the order without, with,
+without, with on the same phone. Cold start is the median `TotalTime` of `am start -W` into the demo (10 to 16 starts
+per install, the first dropped); CPU per frame is the app's CPU time over the frames drawn while flinging the
+60-message conversation or the Agents list, 10 rounds each. Two numbers are the two rounds.
+
+| Phone | When | Without | With |
+| --- | --- | --- | --- |
+| Huawei BLK-AL80, HarmonyOS 4.2 | Compiled at install from the APK's profile: odex | 9.9 MB | 17.1 MB |
+| | First launch after install | 511, 522 ms | 435, 453 ms |
+| | Cold start | 366, 416 ms | 343, 384 ms |
+| | CPU per frame, conversation / Agents list | 13.4, 13.2 / 15.8, 15.6 ms | 12.0, 12.1 / 14.7, 14.5 ms |
+| Samsung SM-S9370, Android 15 | Not compiled until the idle job: cold start | 332, 328 ms | 334, 333 ms |
+| | After `cmd package compile -m speed-profile -f` (what the idle job runs): odex | 8.2 MB | 13.9 MB |
+| | Cold start | 121, 127 ms | 116, 116 ms |
+| | CPU per frame, conversation / Agents list | 5.2, 5.1 / 5.7, 5.7 ms | 4.7, 4.7 / 5.4, 5.4 ms |
+| Huawei LIO-AL00, HarmonyOS 4.0 | Did not recompile in the measured minutes: cold start | 340, 367 ms | 343 ms (one round) |
+
+- The file helps from the first compile that reads it until the phone recompiles with its own record of what was used.
+  HarmonyOS 4.2 compiles the APK's profile at install, so the first launch and the first scrolls get it; Android 15
+  installs from adb uncompiled and gets it at the idle job. On the HarmonyOS 4.2 phone, a recompile after five minutes
+  of the same pages brought the build without the file level (cold start 318, 355 ms against 340, 362 ms).
+- Frames of 34 ms or longer were near zero on both phones with and without the file, so the gain shows as CPU time,
+  not as dropped frames. Memory (PSS on the Agents list) moved within the run-to-run spread.
+- The cost is storage: the compiled code is 5 to 7 MB larger.
+- On the HarmonyOS 4.2 phone the cold start of the same build moved by 40 to 50 ms between rounds, more than the 23 to
+  32 ms by which the build with the file was faster within each round; the first launch and CPU per frame differ by
+  more than their spread.
 
 ## Interface style performance
 
