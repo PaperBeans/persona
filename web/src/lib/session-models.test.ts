@@ -156,6 +156,13 @@ describe("what the pill says", () => {
     expect(pillView(session({ launcher: undefined, agent: undefined }), {})).toMatchObject({ engine: "claude", provider: "claude" });
   });
 
+  it("draws one of Paseo's providers as that provider, by its label, never 'paseo' (#8142)", () => {
+    const grok = session({ agent: "paseo", agent_label: "Grok", launcher: "grok", source_kind: "runtime", source_instance_id: "paseo", model: "grok-4", effort: undefined });
+    expect(pillView(grok, {})).toMatchObject({ engine: "grok", engineLabel: "Grok", provider: "grok" });
+    expect(pillView(session({ agent: "paseo", agent_label: "Cursor", launcher: "cursor", source_kind: "runtime" }), {}).engine).toBe("cursor");
+    expect(pillView(session(), {}).engineLabel).toBeUndefined();
+  });
+
   it("loading or failed only while there is no list; no model before one is known, the default entry's name once read", () => {
     expect(pillView(session({ model: undefined }), { loading: true })).toMatchObject({ loading: true, failed: false });
     expect(pillView(session({ model: undefined }), { loading: true }).model).toBeUndefined();

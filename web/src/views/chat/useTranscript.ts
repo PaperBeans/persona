@@ -36,7 +36,7 @@ export interface Transcript {
   hasMore: boolean;
   loadingEarlier: boolean;
   loadEarlier: () => Promise<void>;
-  expandFold: (fold: Item) => Promise<void>;
+  expandFold: (fold: Item) => Promise<boolean | void>;
   /** The reply as it is written, before the transcript has it: the headless assistant's, or an agent's as Claude shows it
    *  (a Claude session Persona started; docs/integrations/claude-integration.md "Live replies"). "" for none. */
   streaming: string;
@@ -96,6 +96,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
   // fold asked for before that is dropped when it lands, so it never merges into the conversation shown by then.
   const generation = useRef(0);
   const earlierInFlight = useRef(false); // set at once, unlike loadingEarlier, so scroll events before a render do not ask twice
+  const rewrite = useRef<() => void>(() => {}); // the effect's cache invalidation, shared with older-page reads below
   // The back-off after a failed older page: when loadEarlier may ask again, and how long the last wait was.
   const earlierRetryAt = useRef(0);
   const earlierWait = useRef(0);
@@ -184,6 +185,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       snapshot.current = null;
       setNonce((x) => x + 1);
     };
+    rewrite.current = rewritten;
 
     // The live text against the newest items, after they changed (`batch`) or a delta came: the assistant's ends at
     // its reply's item; an agent's shows what of its message the latest one does not hold (lib/live-text.ts).
@@ -222,7 +224,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
         // Not what the stream brought while this was on its way: those are merged as they are, and not a miss.
         fresh += got.filter((i) => i.seq > covered.current).length;
         apply(got);
-        remember(got);
+        remember(got, Boolean(p.more_after));
         showLive(got);
         if (p.to_seq) covered.current = Math.max(covered.current, p.to_seq);
         lastArrival = Date.now();
@@ -388,8 +390,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       const p = await api<ItemsPage>(`${sessionPath(mid, sid)}/items?${PAGE}&before_seq=${first.seq}`);
       if (gen !== generation.current) return;
       if (p.history && history.current && p.history !== history.current) {
-        generation.current++;
-        setNonce((n) => n + 1);
+        rewrite.current();
         return;
       }
       apply(p.items ?? []);
@@ -413,19 +414,26 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
   }, [mid, sid, hasMore, apply]);
 
   const expandFold = useCallback(
-    async (fold: Item) => {
-      if (!fold.fold) return;
+    async (fold: Item): Promise<boolean> => {
+      if (!fold.fold) return true;
       const gen = generation.current;
       let from = fold.seq;
       const out: Item[] = [];
+      let complete = false;
       for (let n = 0; n < 20; n++) {
         const p = await api<ItemsPage>(`${sessionPath(mid, sid)}/items?from_seq=${from}&through_seq=${fold.fold.through_seq}&lazy_images=1`);
-        if (gen !== generation.current) return;
-        out.push(...(p.items ?? []));
-        if (!p.more || !p.items?.length) break;
-        from = p.items[p.items.length - 1].seq + 1;
+        if (gen !== generation.current) return false;
+        const batch = p.items ?? [];
+        out.push(...batch);
+        if (!p.more || !batch.length) {
+          complete = !p.more;
+          break;
+        }
+        from = batch[batch.length - 1].seq + 1;
       }
       apply(out);
+      // The closeout's evidence reader needs to know a capped or superseded read; existing fold UI keeps the partial steps.
+      return complete;
     },
     [mid, sid, apply],
   );

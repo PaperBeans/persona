@@ -58,6 +58,8 @@ final class IPadSidebarTests: XCTestCase {
             XCTAssertGreaterThan(new.frame.minY, machines.frame.maxY)
             XCTAssertEqual(new.frame.midY, settings.frame.midY, accuracy: 4, "\(name): 新对话 and 设置 in one row")
             XCTAssertLessThan(new.frame.minX, settings.frame.minX)
+            // The foot's New Chat is the only one (#4206): none on the conversation's top bar beside it.
+            XCTAssertFalse(element("assistant-new").exists, "\(name): a New Chat on the page beside the sidebar")
             // The tabs (iPad's bar at the top, above the sidebar's rows): Persona and Agents, no Inbox or Settings.
             func tabs(_ label: String) -> [XCUIElement] {
                 app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).allElementsBoundByIndex
@@ -77,7 +79,7 @@ final class IPadSidebarTests: XCTestCase {
             shot("inbox-\(name)")
             // Persona goes back to the conversation.
             main.tap()
-            XCTAssertTrue(element("assistant-sidebar-search").waitForExistence(timeout: 5))
+            XCTAssertTrue(element("sidebar-search").waitForExistence(timeout: 5)) // Search at the column's foot (#4206)
 
             // Settings is a sheet with its ×.
             settings.tap()

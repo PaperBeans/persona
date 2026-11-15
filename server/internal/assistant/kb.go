@@ -92,7 +92,7 @@ type kbState struct {
 	postsDirty       atomic.Bool                 // posts came in since the post archive's index was written (kb_posts.go)
 	retries          kb.Retries                  // the steps' backoffs, kept across the engines built one after another
 
-	history   kbHistoryShared  // the history import (kb_history.go)
+	history   kbHistoryShared  // the history import (kbhistory/history.go)
 	selection kbSelectionState // what is brought in and kept (kb_selection.go)
 }
 

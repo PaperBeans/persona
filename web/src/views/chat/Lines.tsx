@@ -27,7 +27,7 @@ export interface LineProps {
   mid: string;
   sid: string;
   streaming?: string;
-  expandFold: (f: Item) => Promise<void>;
+  expandFold: (f: Item) => Promise<boolean | void>;
   /** A Persona conversation: a model error's text may name a fix in Persona's settings. */
   assistant?: boolean;
   /** The hub's word on what to fix for the turn's model error (the session's turn_error_code): the chat's last line only,

@@ -53,6 +53,11 @@ const panel = (o: Partial<Parameters<typeof newAgentPanel>[0]> = {}) =>
 const provider = (p: ReturnType<typeof panel>, id: string) => p.providers.find((x) => x.id === id)!;
 
 describe("the panel's providers", () => {
+  it("says which Persona providers pi can use too (#8194)", () => {
+    const p = panel({ launchers: [...launchers.slice(0, 4), { name: "p-relay", display_name: "Team relay", source: "persona", pi: true }] });
+    expect(provider(p, "p-relay").alsoNote).toBe("pi 也能用");
+    expect(provider(p, "claude").alsoNote).toBeUndefined();
+  });
   it("one per launcher in the hub's order, named by display name, each led by its Default row", () => {
     const p = panel();
     expect(p.providers.map((x) => [x.id, x.name, x.engine])).toEqual([
@@ -199,6 +204,26 @@ describe("engines", () => {
     expect(engineSetup(choices[1], { provider: "claude", model: "gateway/glm-5.3", effort: "high" })).toEqual({ provider: "codex", model: "gateway/glm-5.3" });
     const def = rows.length ? panelSections({ providers: p.providers, state: p.state, view: { kind: "all" }, query: "", favorites: [], recent: [], overrides: {} }).flatMap((s) => s.rows).find((r) => r.provider.id === "claude" && r.model.providerDefault)! : glm;
     expect(engineChoices(p.providers, def, p.state)).toHaveLength(1);
+  });
+
+  it("each of Paseo's providers is an engine of its own, by its provider, never 'paseo' (#8142)", () => {
+    const shared = { id: "anthropic/claude-sonnet-5-5", name: "Sonnet 5.5" };
+    const paseo: Launcher[] = [
+      { name: "opencode", agent: "paseo", agent_type: "paseo", source: "paseo" },
+      { name: "pi", agent: "paseo", agent_type: "paseo", source: "paseo" },
+      { name: "grok", agent: "paseo", agent_type: "paseo", source: "paseo" },
+    ];
+    const paseoLists: Record<string, ModelList> = {
+      opencode: { list: { agent: "paseo", models: [{ ...shared, default: true }] } },
+      pi: { list: { agent: "paseo", models: [{ ...shared, default: true }] } },
+      grok: { list: { agent: "paseo", models: [{ id: "grok-4", name: "Grok 4", default: true }] } },
+    };
+    const p = newAgentPanel({ launchers: paseo, listOf: (n) => paseoLists[n] ?? {}, choice: none, configured: null, runs: "opencode", tiers: [] });
+    expect(p.providers.map((x) => x.engine)).toEqual(["opencode", "pi", "grok"]);
+    // the same model through OpenCode and Pi: two engines, as the flyout's engine pills offer them
+    const row = { kind: "model" as const, provider: p.providers[0], model: p.providers[0].models!.find((m) => m.id === shared.id)! };
+    expect(engineChoices(p.providers, row, p.state).map((c) => [c.engine, c.provider.id])).toEqual([["opencode", "opencode"], ["pi", "pi"]]);
+    expect(newAgentPill({ launchers: paseo, runs: "grok", list: paseoLists.grok, choice: none, configured: null, fallback: "" }).engine).toBe("grok");
   });
 
   it("of one engine, a launcher that can take the pick is offered over one that can't", () => {

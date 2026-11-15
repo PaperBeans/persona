@@ -16,7 +16,7 @@ import (
 // send alerts every device whose settings take it (nil: all of them).
 // A device that chose "Phone Muted" gets none while a desktop app is connected (desktops.go), and a desktop app that is
 // connected gets none of these: it shows them itself. What was asked for explicitly (nil) goes to it all the same.
-// The hub's own alerts (pairing, a computer joining) always pass ln mode: they are P0.
+// The hub's own alerts (pairing, a computer joining) always pass the grading filter: they are P0.
 func (p *Pusher) send(payload map[string]any, collapseID string, wants func(NotifyPrefs) bool) {
 	p.sendLocalized(func(i18n.Lang) map[string]any { return payload }, collapseID, wants)
 }
@@ -40,25 +40,45 @@ func (p *Pusher) sendLocalizedQuietTo(build localized, collapseID string, wants 
 // personad notify): none to a device that turned that manager's pushes off (NotifyPrefs.MutedManagers), whatever else
 // it takes. "" is the hub's own push. wants keeps its meaning: nil (asked for explicitly) still goes past Phone Muted
 // and to an open desktop. Returns the selected count and the reachable count before preferences are applied. Such a
-// push defaults to P1 for ln mode; callers that know its urgency use sendFromPolicy.
+// push defaults to P1 for grading; callers that know its urgency use sendFromPolicy.
 func (p *Pusher) sendFrom(manager string, build localized, collapseID string, wants func(NotifyPrefs) bool, rule quietRule, sent func(Device)) (selected, reachable int) {
 	selected, reachable, _ = p.sendFromPolicy(manager, pushPolicy{level: assistantwire.LevelP1, manager: manager}, build, collapseID, wants, rule, nil, sent)
 	return selected, reachable
 }
 
-// sendFromPolicy is sendFrom with the push's ln-mode policy (level, related key and the held-push record's text).
-// heldReason is "" when the push went out, else why ln mode held it (lnmode.go): a caller that answers the model
-// (the assistant's notify_user) tells it the notice reached the briefing instead of the phone.
+// pushPolicyWithSource keeps the destination the push already carries. Every production alert payload uses the same
+// machine_id / session_id pair; a decision also has a todo object. The related-key conventions stay in deliverPushFrom:
+// a free-form key from notify_user must not become a typed source merely by looking like one.
+func pushPolicyWithSource(policy pushPolicy, payload map[string]any) pushPolicy {
+	if policy.todoID == "" {
+		policy.todoID = todoID(payload["todo"])
+	}
+	machine, _ := payload["machine_id"].(string)
+	session, _ := payload["session_id"].(string)
+	if policy.machineID == "" {
+		policy.machineID = machine
+	}
+	if policy.sessionID == "" {
+		policy.sessionID = session
+	}
+	return policy
+}
+
+// sendFromPolicy is sendFrom with the push's grading policy (level, related key and the held-push record's text).
+// heldReason is "" when the push went out, else why the grading filter held it (lnmode.go): a caller that answers the
+// model (the assistant's notify_user) tells it the notice reached the briefing instead of the phone.
 func (p *Pusher) sendFromPolicy(manager string, policy pushPolicy, build localized, collapseID string, wants func(NotifyPrefs) bool, rule quietRule, only func(Device) bool, sent func(Device)) (selected, reachable int, heldReason string) {
 	if p == nil {
 		return 0, 0, ""
 	}
 	if p.lnModeOn() { // off: nothing below runs and the push goes exactly as before
 		policy.manager = manager
+		payload := build(i18n.Default)
+		policy = pushPolicyWithSource(policy, payload)
 		if policy.title == "" || policy.body == "" {
 			// The held-push record's text, from the alert when the caller gave none. A payload need not have one (an
 			// extension's push_localized may carry no aps at all).
-			aps, _ := build(i18n.Default)["aps"].(map[string]any)
+			aps, _ := payload["aps"].(map[string]any)
 			alert, _ := aps["alert"].(map[string]any)
 			if t, _ := alert["title"].(string); policy.title == "" {
 				policy.title = t
@@ -72,6 +92,14 @@ func (p *Pusher) sendFromPolicy(manager string, policy pushPolicy, build localiz
 			// notifyWSFrom themselves), so the app's lists and briefings keep updating.
 			return 0, 0, reason
 		}
+	} else {
+		// The switch is off, so applyLn never runs; the daily delivery counts still record one logical push.
+		policy.manager = manager
+		level := policy.level
+		if level == "" {
+			level = assistantwire.LevelP1
+		}
+		p.recordSent(policy, level, p.now())
 	}
 	selected, reachable = p.sendFromTo(manager, build, collapseID, wants, rule, only, sent)
 	return selected, reachable, ""

@@ -62,8 +62,9 @@ async function setup(t, { agents = [], claudeHome = tempDir(t, 'ppfork-home-') }
   writeFileSync(join(paseoHome, 'paseo.pid'), JSON.stringify({ pid: process.pid, listen: `127.0.0.1:${fake.port}` }))
   const logs = []
   const paseo = new PaseoClient({ home: paseoHome, retryMin: 30, retryMax: 100, log: (m) => logs.push(m) })
+  // atOnceMs 0: the fake node's instant dismissal is a person's here (bridge.test.js's cards tests cover the hub's own).
   const bridge = createPaseoBridge({ paseo, log: (m) => logs.push(m) }, { socketPath: node.path, retryMs: 30, pushDelayMs: 5, refreshMs: 0, awayGrace: 400,
-    callWait: 1500, sweepMs: 0, claudeHome, claudeEnv: {}, allowTools: ['mcp__persona__report_to_supervisor'] })
+    callWait: 1500, sweepMs: 0, claudeHome, claudeEnv: {}, allowTools: ['mcp__persona__report_to_supervisor'], atOnceMs: 0 })
   bridge.start()
   t.after(() => bridge.stop())
   await node.ready

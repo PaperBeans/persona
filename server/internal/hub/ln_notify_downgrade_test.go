@@ -29,7 +29,8 @@ func TestLnNotifyUserNonMainConversationHeldForBriefing(t *testing.T) {
 		t.Fatal(err)
 	}
 	attempts := lnAttempts(h)
-	reason, err := h.deliverPushFrom(assistantwire.AssistantID, lnNotifyUserPush("routine-conv", ""))
+	out, err := h.deliverPushFrom(assistantwire.AssistantID, lnNotifyUserPush("routine-conv", ""))
+	reason := heldOf(out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +43,7 @@ func TestLnNotifyUserNonMainConversationHeldForBriefing(t *testing.T) {
 	if calls := len(f.calls(t, 0)); calls != 0 {
 		t.Fatalf("APNs got %d calls, want 0", calls)
 	}
-	view := h.push.lnInterceptsView(0)
+	view := h.push.lnInterceptsView("", 0)
 	if len(view) != 1 || view[0].Reason != interceptReasonP1 || view[0].Level != assistantwire.LevelP1 {
 		t.Fatalf("intercepts = %+v, want one P1 held entry", view)
 	}
@@ -56,7 +57,8 @@ func TestLnNotifyUserMainConversationPushes(t *testing.T) {
 		t.Fatal(err)
 	}
 	attempts := lnAttempts(h)
-	reason, err := h.deliverPushFrom(assistantwire.AssistantID, lnNotifyUserPush("main-conv", ""))
+	out, err := h.deliverPushFrom(assistantwire.AssistantID, lnNotifyUserPush("main-conv", ""))
+	reason := heldOf(out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +71,7 @@ func TestLnNotifyUserMainConversationPushes(t *testing.T) {
 	if calls := len(f.calls(t, 1)); calls != 1 {
 		t.Fatalf("APNs got %d calls, want 1", calls)
 	}
-	if view := h.push.lnInterceptsView(0); len(view) != 0 {
+	if view := h.push.lnInterceptsView("", 0); len(view) != 0 {
 		t.Fatalf("got %d intercepts, want none for a pushed main-conversation notice", len(view))
 	}
 }
@@ -82,7 +84,8 @@ func TestLnNotifyUserExplicitP0PushesFromNonMainConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	attempts := lnAttempts(h)
-	reason, err := h.deliverPushFrom(assistantwire.AssistantID, lnNotifyUserPush("supervisor-conv", assistantwire.LevelP0))
+	out, err := h.deliverPushFrom(assistantwire.AssistantID, lnNotifyUserPush("supervisor-conv", assistantwire.LevelP0))
+	reason := heldOf(out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +106,8 @@ func TestLnNotifyUserDowngradeIsOffWithSwitchOff(t *testing.T) {
 	lnMainProfile(h)
 	attempts := lnAttempts(h)
 	for _, session := range []string{"main-conv", "routine-conv", "supervisor-conv"} {
-		reason, err := h.deliverPushFrom(assistantwire.AssistantID, lnNotifyUserPush(session, ""))
+		out, err := h.deliverPushFrom(assistantwire.AssistantID, lnNotifyUserPush(session, ""))
+		reason := heldOf(out)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -117,7 +121,7 @@ func TestLnNotifyUserDowngradeIsOffWithSwitchOff(t *testing.T) {
 	if calls := len(f.calls(t, 3)); calls != 3 {
 		t.Fatalf("APNs got %d calls, want 3", calls)
 	}
-	if view := h.push.lnInterceptsView(0); len(view) != 0 {
+	if view := h.push.lnInterceptsView("", 0); len(view) != 0 {
 		t.Fatalf("got %d intercepts with ln mode off, want none", len(view))
 	}
 }
@@ -132,7 +136,8 @@ func TestLnNotifyUserDowngradeLeavesOtherKindsAlone(t *testing.T) {
 	}
 	n := lnNotifyUserPush("routine-conv", "")
 	n.Kind = assistantwire.NotifyDone
-	reason, err := h.deliverPushFrom(assistantwire.AssistantID, n)
+	out, err := h.deliverPushFrom(assistantwire.AssistantID, n)
+	reason := heldOf(out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +186,7 @@ func TestLnNotifyBusReplyHeldForNonMainConversation(t *testing.T) {
 	if calls := len(f.calls(t, 0)); calls != 0 {
 		t.Fatalf("APNs got %d calls, want 0", calls)
 	}
-	if view := h.push.lnInterceptsView(0); len(view) != 1 || view[0].Reason != interceptReasonP1 {
+	if view := h.push.lnInterceptsView("", 0); len(view) != 1 || view[0].Reason != interceptReasonP1 {
 		t.Fatalf("intercepts = %+v, want one P1 entry", view)
 	}
 }
@@ -210,4 +215,12 @@ func TestLnNotifyBusReplyPushedForMainConversation(t *testing.T) {
 	if calls := len(f.calls(t, 1)); calls != 1 {
 		t.Fatalf("APNs got %d calls, want 1", calls)
 	}
+}
+
+// heldOf is the ln-mode reason out says the push was held ("" when it was not, or nothing was reported).
+func heldOf(out *pushOutcome) string {
+	if out == nil {
+		return ""
+	}
+	return out.held
 }

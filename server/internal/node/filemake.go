@@ -58,35 +58,35 @@ func (n *Node) fileMake(ctx context.Context, method string, params json.RawMessa
 		return nil, err
 	}
 	switch method {
-	case "file.mkdir":
+	case methodFileMkdir:
 		path, err := n.makeDir(p.Dir, p.Cwd, p.Name)
 		if err != nil {
 			return nil, err
 		}
 		return map[string]any{"path": path}, nil
-	case "file.write":
+	case methodFileWrite:
 		return n.writeText(p)
-	case "file.zip":
+	case methodFileZip:
 		if p.OperationID == "" {
 			return n.zipPaths(ctx, p.Paths, p.Cwd, p.Dir, p.Name, nil)
 		}
 		return n.runFileOperation(p.OperationID, "zip", func(report *fileOperationReporter) (any, error) {
 			return n.zipPaths(ctx, p.Paths, p.Cwd, p.Dir, p.Name, report)
 		})
-	case "file.copy": // filecopy.go
+	case methodFileCopy: // filecopy.go
 		if p.OperationID == "" {
 			return n.copyFiles(ctx, p.Paths, p.Cwd, p.Dir, p.Conflict, nil)
 		}
 		return n.runFileOperation(p.OperationID, "copy", func(report *fileOperationReporter) (any, error) {
 			return n.copyFiles(ctx, p.Paths, p.Cwd, p.Dir, p.Conflict, report)
 		})
-	case "file.operation":
+	case methodFileOperation:
 		op, ok := n.fileOps.get(p.OperationID)
 		if !ok {
 			return nil, &rpc.Error{Code: proto.CodeNotFound, Message: "file operation not found"}
 		}
 		return op, nil
-	case "file.chmod": // #5831
+	case methodFileChmod: // #5831
 		return n.changeMode(p.Path, p.Cwd, p.Mode)
 	}
 	return nil, fmt.Errorf("unknown method %s", method)

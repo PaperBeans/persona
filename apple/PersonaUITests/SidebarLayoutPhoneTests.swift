@@ -28,7 +28,7 @@ final class SidebarLayoutPhoneTests: XCTestCase {
         let layout = layoutPinned ? ["-app.navigation", "sidebar"] : []
         app.launchArguments = ["-pairURL", pair, "-dev.openChat", "", "-holdChromeOpen", "YES"] + layout + extra
         app.launchEnvironment["PERSONA_UI_TEST_SESSION"] = "1" // the chat's title carries its session (`chat.title`'s value)
-        app.launchPinned()
+        app.launchPinned(navigation: layoutPinned)
     }
 
     @MainActor private func element(_ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
@@ -94,6 +94,14 @@ final class SidebarLayoutPhoneTests: XCTestCase {
         main.tap()
         waitGone(title, "the Agent's chat stayed over the conversation")
         XCTAssertTrue(face.waitForExistence(timeout: 10))
+    }
+
+    /// With nothing picked an iPhone keeps the Separate layout, the Assistant | Agents shell (#4206, "Merged where
+    /// wide": compact widths keep #6332's default).
+    @MainActor func testNothingPickedIsSeparateOnAPhone() {
+        launch(["-tab", "assistant", "-app.navigation", ""], layoutPinned: false)
+        XCTAssertTrue(app.buttons["Agents"].firstMatch.waitForExistence(timeout: 20), "no Assistant | Agents switch:\n\(app.debugDescription)")
+        XCTAssertFalse(element("unified-sidebar").exists, "the Sidebar layout on a phone with nothing picked")
     }
 
     /// An Agent's chat asked for from outside (a notification, a Live Activity, a link): the page, with the face.

@@ -17,7 +17,7 @@ import {
   type SearchScope,
 } from "../../lib/agent-chatlist-filter";
 import { awaitsReply, sessionSource, sourceName, type AgentMutes } from "../../lib/agent-groups";
-import { ago, backgroundWaiting, sessionPreview, sessionTitle, stateOf } from "../../lib/format";
+import { ago, backgroundWaiting, sessionPreview, sessionTitle, stateOf, tabLabel } from "../../lib/format";
 import { sessionCard } from "../../lib/folded-rows";
 import { machineWithHub } from "../../lib/mesh";
 import { plainMarkdown } from "../../lib/plain-markdown";
@@ -362,6 +362,9 @@ export const AgentChatListRow = memo(function AgentChatListRow({
 
   const machineLabel = machineWithHub(s.machine_id, ctx.machines) || s.machine_id;
   const projectLabel = sessionProjectName(s);
+  const hasTabAssociation = !!(s.slot_id?.trim() || s.tab_id?.trim());
+  const associatedTab = hasTabAssociation ? tabLabel(s) : "";
+  const tabIdentity = associatedTab ? t("sidebar.tab_named", { label: associatedTab }) : "";
   const harnessLabel = sessionHarnessLabel(s);
   const modelLabel = sessionModelId(s);
   const source = sessionSource(s);
@@ -459,7 +462,7 @@ export const AgentChatListRow = memo(function AgentChatListRow({
             )
           )}
 
-          {/* Line 3: Compact metadata capsules (Machine · Project · Harness · Model) */}
+          {/* Line 3: Compact metadata capsules (Machine · Project · Tab · Harness · Model) */}
           <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[10.5px] leading-4 text-ink-3" data-testid="agent-chatlist-chips">
             {machineLabel && (
               <span className="inline-flex max-w-[96px] items-center gap-0.5 truncate rounded bg-inset px-1.5 py-px">
@@ -471,6 +474,11 @@ export const AgentChatListRow = memo(function AgentChatListRow({
               <span className="inline-flex max-w-[110px] items-center gap-0.5 truncate rounded bg-inset px-1.5 py-px">
                 <Icon name="folder" size={9} stroke={2} />
                 <span className="truncate">{projectLabel}</span>
+              </span>
+            )}
+            {tabIdentity && (
+              <span className="inline-flex max-w-[96px] items-center gap-0.5 truncate rounded bg-inset px-1.5 py-px" title={tabIdentity}>
+                <span className="truncate">{tabIdentity}</span>
               </span>
             )}
             {harnessLabel && (

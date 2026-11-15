@@ -174,16 +174,35 @@ func launcherSyncList(zshrc []zshrcLaunchers) []LauncherSync {
 // machineLaunchers is what a machine can start (the pickers: new chat, the assistant's model): its own launchers
 // (the node's list) but the hidden ones, its reported built-in claude, then the managed ones.
 func (s *Service) machineLaunchers(ctx context.Context, machine string) ([]proto.Launcher, error) {
+	list, _, err := s.machineLaunchersOn(ctx, machine, "")
+	return list, err
+}
+
+// machineLaunchersOn is machineLaunchers for a new Agent's start in host (its engine host; "": the machine's own list,
+// which Settings and the main chat read, the assistant running on the command line). hostRuntime: the node answered
+// that every start there goes to an engine runtime that runs only its own launchers (#8140, Paseo): the list is its
+// providers and what starts elsewhere whatever the host. A provider kept in Persona and plain claude are not added
+// then (the engine would run one of its own in their place), and one named like an engine provider is that provider;
+// only a managed Antigravity launcher, which its own runtime runs on any host, still is.
+func (s *Service) machineLaunchersOn(ctx context.Context, machine, host string) (list []proto.Launcher, hostRuntime bool, err error) {
 	var res struct {
-		Launchers []proto.LauncherEnvelope `json:"launchers"`
+		Launchers   []proto.LauncherEnvelope `json:"launchers"`
+		HostRuntime bool                     `json:"host_runtime"`
 	}
-	if err := s.call(ctx, machine, DeviceLaunchersList, map[string]any{}, &res); err != nil {
-		return nil, err
+	params := map[string]any{}
+	if host != "" {
+		params["host"] = host
+	}
+	if err := s.call(ctx, machine, DeviceLaunchersList, params, &res); err != nil {
+		return nil, false, err
 	}
 	hidden := s.hiddenLaunchers(ctx)
 	// Only the providers in this computer's scope: one out of it is not named to the node, whose own launcher by
 	// that name (if any) is what runs there.
 	managed := slices.DeleteFunc(slices.Clone(s.storedLaunchers(ctx)), func(m storedLauncher) bool { return !s.usableOn(ctx, m, machine) })
+	if res.HostRuntime {
+		managed = slices.DeleteFunc(managed, func(m storedLauncher) bool { return m.Agent != "agy" })
+	}
 	out := make([]proto.Launcher, 0, len(res.Launchers)+len(managed))
 	for _, envelope := range res.Launchers {
 		l := proto.Launcher(envelope)
@@ -204,7 +223,7 @@ func (s *Service) machineLaunchers(ctx context.Context, machine string) ([]proto
 	// The node leaves plain claude out when its shell has another Claude launcher. devices.list's version is the
 	// same installation signal used by the built-in provider and Agent-start fallback, and works with older nodes.
 	d, _ := s.device(ctx, machine)
-	if d.ClaudeVersion != "" && !slices.Contains(hidden, "claude") &&
+	if !res.HostRuntime && d.ClaudeVersion != "" && !slices.Contains(hidden, "claude") &&
 		!slices.ContainsFunc(out, func(l proto.Launcher) bool { return l.Name == "claude" }) {
 		out = append(out, proto.Launcher{Name: "claude", Source: "builtin"})
 	}
@@ -213,15 +232,20 @@ func (s *Service) machineLaunchers(ctx context.Context, machine string) ([]proto
 			continue
 		}
 		out = append(out, proto.Launcher{Name: m.Name, BaseURL: m.BaseURL, Model: m.Model, Source: "persona", Agent: m.Agent, Assistant: m.Agent == "agy",
-			PromptOptional: m.Agent == "codex" && codexOptional, RunHere: m.Agent == "codex" && codexHere})
+			PromptOptional: m.Agent == "codex" && codexOptional, RunHere: m.Agent == "codex" && codexHere, Pi: m.PiAPI() != ""})
 	}
-	return out, nil
+	return out, res.HostRuntime, nil
 }
 
 // pickerLaunchers is what machine can start, as New Agent's picker lists it: machineLaunchers with hub.json's
 // launchers for it applied (sessionLaunchers).
 func (s *Service) pickerLaunchers(ctx context.Context, machine string) ([]ConfiguredLauncher, error) {
-	ls, err := s.machineLaunchers(ctx, machine)
+	return s.pickerLaunchersOn(ctx, machine, "")
+}
+
+// pickerLaunchersOn is pickerLaunchers for a new Agent's start in host (machineLaunchersOn).
+func (s *Service) pickerLaunchersOn(ctx context.Context, machine, host string) ([]ConfiguredLauncher, error) {
+	ls, _, err := s.machineLaunchersOn(ctx, machine, host)
 	if err != nil {
 		return nil, err
 	}

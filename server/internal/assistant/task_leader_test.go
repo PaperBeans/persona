@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -775,7 +776,7 @@ func TestTaskLeaderReviewsItsWorkers(t *testing.T) {
 		t.Fatalf("the ledger after a rework: %+v", v)
 	}
 	// accepted: closed by the leader's review, with no card to the user.
-	res = review("s1", map[string]any{"todo_id": w2.ID, "verdict": "accepted", "note": "测试通过"})
+	res = review("s1", map[string]any{"todo_id": w2.ID, "verdict": "accepted", "note": "测试通过", "checks": completeReviewChecks(todoNow(s, w2.ID))})
 	if res.IsError || !strings.Contains(res.Content[0].Text, "accepted and closed") {
 		t.Fatalf("accepted: %+v", res)
 	}
@@ -797,6 +798,55 @@ func TestTaskLeaderReviewsItsWorkers(t *testing.T) {
 	refused("rework of a closed worker", review("s1", map[string]any{"todo_id": w2.ID, "verdict": "rework", "note": "x"}), "is done already")
 	if got := f.notices(); len(got) != 0 {
 		t.Fatalf("the main conversation was told: %q", got)
+	}
+}
+
+// A task leader follows the same complete-evidence rule as a conversation supervisor, with no write on a refusal.
+func TestTaskLeaderAcceptedRequiresCompleteCurrentCriteria(t *testing.T) {
+	for _, stored := range []bool{false, true} {
+		name := "memory"
+		if stored {
+			name = "postgres"
+		}
+		t.Run(name, func(t *testing.T) {
+			var st Store
+			if stored {
+				st = todoTestDB(t)
+			}
+			s, f := newQuietServiceOn(t, st)
+			ctx := context.Background()
+			startTaskLeader(t, s, f)
+			w := planWorker(t, s, f, nil)
+			before := todoNow(s, w.ID)
+			valid := completeReviewChecks(before)
+			for _, tc := range []struct {
+				name   string
+				checks []ReviewCheck
+				want   string
+			}{
+				{name: "missing", checks: valid[:1], want: "has no check"},
+				{name: "duplicate", checks: []ReviewCheck{valid[0], valid[0], valid[1]}, want: "duplicate"},
+				{name: "unknown", checks: append(append([]ReviewCheck{}, valid...), ReviewCheck{Criterion: "old criterion", Met: true, Evidence: "old"}), want: "unknown current done_when"},
+				{name: "unmet", checks: []ReviewCheck{valid[0], {Criterion: before.Supervision.DoneWhen[1], Evidence: "still missing"}}, want: "not met; use rework for what is missing"},
+				{name: "blank evidence", checks: []ReviewCheck{valid[0], {Criterion: before.Supervision.DoneWhen[1], Met: true, Evidence: "  "}}, want: "non-empty evidence"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					res := s.mcpCall(ctx, "box", "s1", "task_review", mustJSON(map[string]any{"todo_id": w.ID, "verdict": "accepted", "checks": tc.checks}), false)
+					if !res.IsError || !strings.Contains(res.Content[0].Text, tc.want) || !strings.Contains(res.Content[0].Text, "nothing was written") ||
+						strings.Contains(res.Content[0].Text, "outcome cannot") {
+						t.Fatalf("accepted invalid checks: %+v", res)
+					}
+					after := todoNow(s, w.ID)
+					if after.DoneAt != nil || !reflect.DeepEqual(after.Supervision, before.Supervision) {
+						t.Fatalf("a refused review wrote the worker or ledger: before %+v, after %+v", before.Supervision, after.Supervision)
+					}
+				})
+			}
+			res := s.mcpCall(ctx, "box", "s1", "task_review", mustJSON(map[string]any{"todo_id": w.ID, "verdict": "accepted", "checks": valid}), false)
+			if res.IsError || !strings.Contains(res.Content[0].Text, "accepted and closed") || todoNow(s, w.ID).DoneAt == nil {
+				t.Fatalf("complete acceptance: %+v", res)
+			}
+		})
 	}
 }
 
@@ -1046,7 +1096,8 @@ func TestClosedLeaderRehomesItsWorkers(t *testing.T) {
 		t.Fatalf("the rehomed worker: %+v %+v", cur, cur.Supervision)
 	}
 	// The conversation can review it, and does not take over a worker whose leader is alive.
-	if _, err := runJSON(t, s, "conv1", "task_review", map[string]any{"todo_id": w.ID, "verdict": "accepted", "note": "测试通过"}); err != nil {
+	if _, err := runJSON(t, s, "conv1", "task_review", map[string]any{"todo_id": w.ID, "verdict": "accepted", "note": "测试通过",
+		"checks": completeReviewChecks(todoNow(s, w.ID))}); err != nil {
 		t.Fatalf("the main conversation reviewing a rehomed worker: %v", err)
 	}
 	if got := todoNow(s, w.ID); got.DoneAt == nil || got.DoneBy != "review" {
@@ -1331,7 +1382,8 @@ func TestNeedsUserFromTaskLeaderIsReviewedByLeaderConversation(t *testing.T) {
 	if cur := todoNow(s, w.ID); cur.Supervision.Supervisor != "box/s1" || cur.Supervision.State != reviewRework {
 		t.Fatalf("lead1 took the worker over, or its state: %+v", cur.Supervision)
 	}
-	if res, err := review("lead1", map[string]any{"todo_id": w.ID, "verdict": "accepted", "note": "好了"}); err != nil || !strings.Contains(res, "accepted and closed") {
+	if res, err := review("lead1", map[string]any{"todo_id": w.ID, "verdict": "accepted", "note": "好了",
+		"checks": completeReviewChecks(todoNow(s, w.ID))}); err != nil || !strings.Contains(res, "accepted and closed") {
 		t.Fatalf("lead1's accepted: %s %v", res, err)
 	}
 	if cur := todoNow(s, w.ID); cur.DoneAt == nil || cur.Supervision.State != reviewAccepted || cur.Supervision.Supervisor != "box/s1" {

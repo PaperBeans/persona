@@ -270,6 +270,18 @@ describe.each([
     expect(effort().value).toBe("");
   });
 
+  it("cleared back to following, lists Agents' launcher's models, not those of the launcher it is leaving", async () => {
+    current = child({ provider: "launcher.custom", model: "custom-model" }, 12);
+    await render();
+    await open();
+    const lists = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input).split("?")[0]).filter((p) => p.endsWith("/models"));
+    expect(lists()).toEqual(["/api/v1/model-config/providers/launcher.custom/models"]);
+    await choose("");
+    expect(lists().at(-1)).toBe("/api/v1/model-config/providers/launcher.default/models");
+    // and its Default is Agents' model
+    expect(dialog().querySelector<HTMLButtonElement>("button[aria-expanded]")!.textContent).toContain("default-model");
+  });
+
   it("keeps conflicting edits and blocks save/reset until reloading the latest child revision", async () => {
     listFails = true;
     await render();

@@ -133,6 +133,35 @@ class AgentModelPanelTest {
         assertTrue(AgentModelPanel.canSwitchModel(agent) && AgentModelPanel.switchesLauncher(agent, switching))
     }
 
+    // #8143: Paseo calls every provider but Claude Code and Codex "paseo"; each is an engine of its own, named and marked as
+    // itself: the panel never says "paseo", and moving to another provider or to Claude Code needs a new conversation.
+    @Test fun eachOfPaseosOtherProvidersIsItsOwnEngine() {
+        val caps = SessionCapabilities(read = true, send = true, interrupt = true, approve = true, modes = false, model = true)
+        val grok = agent.copy(agent = "paseo", agentLabelHint = "My Grok", launcher = "grok", model = "grok-5", effort = null,
+            sourceKind = "runtime", spaceKind = "paseo", paneId = null, capabilities = caps)
+        val paseo = listOf(AgentLauncher("claude"), AgentLauncher("grok", agentType = "paseo"), AgentLauncher("kimi", agentType = "paseo"),
+            AgentLauncher("codex", agentType = "codex"))
+        val models = mapOf("grok" to LauncherModels("paseo", listOf(AgentModel("grok-5", "Grok 5", isDefault = true, efforts = listOf("low", "high")))),
+            "kimi" to LauncherModels("paseo", listOf(AgentModel("kimi-k3", "Kimi K3"))))
+        assertEquals("grok", AgentModelPanel.engine(grok))
+        assertEquals(listOf("claude", "grok", "kimi", "codex"), paseo.map { AgentModelPanel.launcherEngine(it.name, it.agentType) })
+        val panel = AgentModelPanel.panel(grok, paseo, { ModelList(read = true, list = models[it]) }, switching)
+        assertEquals(listOf("claude", "grok", "kimi", "codex"), panel.providers.map { it.engine })
+        assertNull(panel.providers.first { it.id == "grok" }.unavailable)
+        assertEquals(PanelReason.OtherEngine("grok", "claude"), panel.providers.first { it.id == "claude" }.unavailable)
+        assertEquals(PanelReason.OtherEngine("grok", "kimi"), panel.providers.first { it.id == "kimi" }.unavailable)
+        assertEquals(listOf("low", "high"), panel.providers.first { it.id == "grok" }.models?.single()?.efforts)
+        assertEquals(PillSetup("grok", "grok", "Grok 5", null), AgentModelPanel.pill(grok, ModelList(read = true, list = models["grok"]), paseo).setup)
+        // Its own models and their efforts switch at once.
+        assertEquals(listOf(ModeStep.Effort("high")), AgentModelPanel.pickPlan(grok, PanelConfig("grok", "grok-5", "high"), { models[it] }, switching))
+        assertNull(AgentModelPanel.pickPlan(grok, PanelConfig("kimi", "kimi-k3"), { models[it] }, switching))
+        // What the words call them: its own by its label, the others by their launcher's; Claude Code and Codex keep theirs.
+        assertEquals(mapOf("grok" to "My Grok", "kimi" to "kimi"), AgentModelPanel.engineNames(grok, paseo))
+        assertEquals(mapOf("grok" to "grok", "kimi" to "kimi"), AgentModelPanel.engineNames(agent, paseo))
+        // A row with no launcher at all stays the catch-all, never Claude Code.
+        assertEquals("paseo", AgentModelPanel.engine(grok.copy(launcher = null)))
+    }
+
     @Test fun aCodexThreadKeepsItsModel() {
         val codex = agent.copy(agent = "codex", launcher = "cx", model = "gpt-5.5", efforts = listOf("low", "medium", "high"))
         val panel = AgentModelPanel.panel(codex, launchers, ::read, switching)

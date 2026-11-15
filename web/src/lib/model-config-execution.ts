@@ -3,7 +3,7 @@ import { t } from "../i18n";
 import { SUPERVISE_PURPOSE } from "./background-supervisor";
 import { api, enc } from "./api";
 import { MANAGER_HEADER } from "./manager-choice";
-import { modelSummary, providerAgent, providerName, RUNTIMES, runtimeLabel, type ModelConfigurationBody, type ModelDraft, type ModelProvider, type ModelPurpose, type ModelPurposeBody } from "./model-config";
+import { modelSummary, providerAgent, providerName, RUNTIMES, runtimeLabel, type ModelBinding, type ModelConfigurationBody, type ModelDraft, type ModelProvider, type ModelPurpose, type ModelPurposeBody } from "./model-config";
 import type { Machine } from "./types";
 
 /** Older hubs omit launch; keep their known launcher purposes readable without using inheritance-group names. */
@@ -67,15 +67,68 @@ export function withPurposeAfter(catalog: ModelConfigurationBody, id: string, af
   return { ...catalog, purposes: [...rest.slice(0, to), row, ...rest.slice(to)] };
 }
 
+/** The group of this page a purpose is listed in: by how it runs, with the extensions' own purposes under Extensions. */
+function groupKey(p: ModelPurpose): string {
+  return p.id.startsWith("extension.") || p.kind === "plugin" ? "plugin" : purposeLaunch(p) || "api";
+}
+
 export function purposeGroups(purposes: ModelPurpose[], query: string, providers: ModelProvider[] = []): [string, ModelPurpose[]][] {
   const q = query.trim().toLocaleLowerCase();
   return [[t("sidebar.persona_chats"), "headless"], [t("shellswitch.agents"), "engine"], [t("settings-modelconfiguration.processing"), "api"], ["", "plugin"]].map(([name, key]): [string, ModelPurpose[]] => {
     const group = [name, executionLabel(key)].filter(Boolean).join(" · ");
     return [group, purposes.filter((p) =>
-      (p.id.startsWith("extension.") || p.kind === "plugin" ? "plugin" : purposeLaunch(p) || "api") === key
+      groupKey(p) === key
       && (!q || [p.name, p.group, p.id, group, modelSummary(p, providers)].some((s) => s.toLocaleLowerCase().includes(q))))];
   }).filter(([, rows]) => rows.length);
 }
+
+/** The purpose has a field of its own to write (an older hub sends a read-only use with `fields: []`). */
+function ownFields(p: ModelPurpose): boolean {
+  return (p.fields ?? []).some((field) => field === "provider" || field === "model" || field === "effort");
+}
+
+/** The category `p` is a use set apart from, told by the hub's data, not by id (#7980, docs/assistant/model-config.md
+ *  "Meeting minutes and the in-meeting conversation"): a purpose with fields of its own, no `uses` (it is a use itself),
+ *  a `category_id` other than its id, and a `parent` that is a category of `purposes` (its `category_id` its own id)
+ *  listed in the same group of this page. Main chat for the background supervisor and the In-meeting conversation,
+ *  Information processing for Meeting minutes. None for the categories and their read-only uses, nor for the uses of
+ *  Agents (AI twin, Lark /agent: they run in another group than Agents, with words of their own, `agentsOverride`) or
+ *  an extension's purpose (under Extensions). */
+export function setApartFrom(p: ModelPurpose, purposes: ModelPurpose[]): ModelPurpose | undefined {
+  if (!ownFields(p) || p.uses?.length || !p.category_id || p.category_id === p.id || !p.parent) return undefined;
+  const parent = purposes.find((c) => c.id === p.parent && c.category_id === c.id);
+  return parent && groupKey(parent) === groupKey(p) ? parent : undefined;
+}
+
+/** The category a use set apart says it follows, by that category's name in the catalog: **Follows Main chat** /
+ *  **Follow Information processing** (#7980). Not the background supervisor, whose row and editor keep the words they
+ *  had before (the hub's `inherited_from`, and Inherit). */
+export function followedCategory(p: ModelPurpose, purposes: ModelPurpose[]): ModelPurpose | undefined {
+  return p.id === SUPERVISE_PURPOSE ? undefined : setApartFrom(p, purposes);
+}
+
+/** The catalog with each use set apart right after its category, behind those already there (#7980): Main chat, the
+ *  background supervisor, the In-meeting conversation; Information processing, Meeting minutes. The hub lists them
+ *  last among its own purposes so the rows installed apps draw keep their order (the reason the background supervisor
+ *  went last, #5806); here each moves up to what it follows, in the hub's order. The catalog itself when nothing moves,
+ *  as against a hub before #7980. */
+export function withUsesAfterCategories(catalog: ModelConfigurationBody): ModelConfigurationBody {
+  const uses = new Map<ModelPurpose, ModelPurpose[]>(); // each category's uses set apart, in the hub's order
+  for (const p of catalog.purposes) {
+    const parent = setApartFrom(p, catalog.purposes);
+    if (parent) uses.set(parent, [...(uses.get(parent) ?? []), p]);
+  }
+  if (!uses.size) return catalog;
+  const moved = new Set([...uses.values()].flat());
+  const purposes = catalog.purposes.flatMap((p) => moved.has(p) ? [] : [p, ...(uses.get(p) ?? [])]);
+  return purposes.every((p, i) => p === catalog.purposes[i]) ? catalog : { ...catalog, purposes };
+}
+
+/** The In-meeting conversation runs only on Claude Code (#7980): its line in the editor says so. A fact about that
+ *  purpose, so this page knows it by the id; the hub sends no field for it (its `provider_ids` hold only Claude Code
+ *  launchers and Messages connections, without saying why). */
+export const MEETING_ROOM_PURPOSE = "meeting.room";
+export const claudeCodeOnly = (p: Pick<ModelPurpose, "id">): boolean => p.id === MEETING_ROOM_PURPOSE;
 
 // What only Model settings does with a purpose (its editor's draft, what it sends, the catalog): here, so the first
 // screen's lib/model-config carries none of it (startup-preload's budget).
@@ -104,20 +157,67 @@ export function supportsField(p: ModelPurpose, field: Exclude<keyof ModelDraft, 
 /** A use of Agents the hub lets the user set apart (Lark /agent, the AI twin): it says so with fields of its own, and
  * follows Agents while they are empty. Other uses of a category have no fields and stay read-only. */
 export function agentsOverride(p: ModelPurpose): boolean {
-  return p.parent === "agent.new" && (p.fields ?? []).some((field) => field === "provider" || field === "model" || field === "effort");
+  return p.parent === "agent.new" && ownFields(p);
 }
 
-export function modelPatch(p: ModelPurpose, draft: ModelDraft): Record<string, string | number | null> {
+/** The binding says something of its own: the row says **Separately configured**. */
+export function overridden(b: ModelBinding): boolean {
+  return !!(b.provider || b.model || b.effort);
+}
+
+/** A use with a record of its own under a category, told by its own data, whatever group this page lists it in and
+ *  whether the catalog loaded at all: fields to write and a `category_id` other than its id (the AI twin, Lark /agent,
+ *  the background supervisor, a task's own, the two meeting uses of #7980, an extension's purpose). Empty, it follows
+ *  that category. */
+export function ownRecord(p: ModelPurpose): boolean {
+  return ownFields(p) && !!p.category_id && p.category_id !== p.id;
+}
+
+/** The category such a use follows (`ownRecord`), as the catalog has it: its `parent` when that is a category there.
+ *  Its binding is what the use runs on once its record is empty again. */
+export function parentCategory(p: ModelPurpose, purposes: ModelPurpose[]): ModelPurpose | undefined {
+  return ownRecord(p) && p.parent ? purposes.find((c) => c.id === p.parent && c.category_id === c.id) : undefined;
+}
+
+/** A provider that takes a thinking effort: a launcher, or a direct API connection on Messages or Responses (one that
+ *  says no protocol is a Messages one). Unknown: the editor does not hold it back. */
+function takesEffortProvider(v?: ModelProvider): boolean {
+  return v?.kind !== "api" || v.api === "responses" || v.api === "messages" || !v.api;
+}
+
+/** Whether the editor offers a thinking effort for a draft that runs on `chosen`. The hub lists `effort` in an API
+ *  purpose's `fields` only while the provider in effect takes one (models_routes.go), so where that provider takes
+ *  none (a Chat Completions connection) its absence says nothing about another: picking a Messages or Responses one here
+ *  offers it (#7980, Meeting minutes on a Chat Completions connection). Otherwise the hub's `fields`, and on a direct
+ *  API connection only one that takes it. The uses of Agents take it on whatever they run on (`followsAgents`). */
+export function effortOffered(p: ModelPurpose, chosen: ModelProvider | undefined, effective: ModelProvider | undefined, followsAgents = false): boolean {
+  const field = supportsField(p, "effort")
+    || (p.kind === "api" && !!p.fields?.includes("provider") && !!effective && !takesEffortProvider(effective));
+  return field && (followsAgents || takesEffortProvider(chosen));
+}
+
+/** What Save sends: the revision and each field the purpose takes, explicit `null` for an empty one. `effort` says
+ *  whether effort is among them, by default when the hub lists it; the editor passes `effortOffered` too. */
+export function modelPatch(p: ModelPurpose, draft: ModelDraft, effort = supportsField(p, "effort")): Record<string, string | number | null> {
   const patch: Record<string, string | number | null> = { revision: p.revision };
   for (const field of ["provider", "model", "effort"] as const) {
-    if (supportsField(p, field)) patch[field] = draft[field].trim() || null;
+    if (field === "effort" ? effort : supportsField(p, field)) patch[field] = draft[field].trim() || null;
   }
   if (runtimeChoices(p).length && draft.runtime) patch.runtime = draft.runtime;
   return patch;
 }
 
-export function saveModelPurpose(p: ModelPurpose, draft: ModelDraft, manager?: string): Promise<ModelPurposeBody> {
-  return api(`/model-config/purposes/${enc(p.id)}`, { method: "PATCH", json: modelPatch(p, draft), headers: manager ? { [MANAGER_HEADER]: manager } : undefined });
+/** What the editor's reset sends (Inherit, Follow Agents, Follow <the category>): the revision, `null` for each field
+ *  the purpose takes, and the runtime it keeps. A use with a record of its own (`ownRecord`) goes back to following its
+ *  category with explicit nulls for all three, whatever fields the provider in effect takes now (#7980), so an effort
+ *  saved on an earlier provider goes too. */
+export function resetPatch(p: ModelPurpose, runtime = ""): Record<string, string | number | null> {
+  const patch = modelPatch(p, { provider: "", model: "", effort: "", runtime });
+  return ownRecord(p) ? { ...patch, provider: null, model: null, effort: null } : patch;
+}
+
+export function saveModelPurpose(p: ModelPurpose, patch: Record<string, string | number | null>, manager?: string): Promise<ModelPurposeBody> {
+  return api(`/model-config/purposes/${enc(p.id)}`, { method: "PATCH", json: patch, headers: manager ? { [MANAGER_HEADER]: manager } : undefined });
 }
 
 export function providersFor(p: ModelPurpose, providers: ModelProvider[]): ModelProvider[] {

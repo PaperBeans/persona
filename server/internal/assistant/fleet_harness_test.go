@@ -428,11 +428,12 @@ var _ fleetStore = (*fleetMem)(nil)
 
 // fleetTest is a manager with the fleet on: s, its devices d, its hub f, its store st.
 type fleetTest struct {
-	t  *testing.T
-	s  *Service
-	d  *fleetDevs
-	f  *fakeHub
-	st *fleetMem
+	t      *testing.T
+	s      *Service
+	d      *fleetDevs
+	f      *fakeHub
+	st     *fleetMem
+	cancel context.CancelFunc
 }
 
 // newFleetTest is a manager carrying the machine "mac" (named "Mac") with a store, on a fake hub.

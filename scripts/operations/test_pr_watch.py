@@ -261,21 +261,26 @@ class WatcherTests(unittest.TestCase):
 
     def test_test_only_web_change_runs_changed_tests_not_full_lanes(self):
         names = "web/src/views/chat/ContextGroup.test.tsx\n"
-        with patch.object(pr_watch_verify, "checked", return_value=names):
-            commands = pr_watch_verify.persona_checks(".", pr(title="test(web): refine a test"), 1, {})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            test_file = root / names.strip()
+            test_file.parent.mkdir(parents=True)
+            test_file.write_text("import { test } from 'vitest'\n")
+            with patch.object(pr_watch_verify, "checked", return_value=names):
+                commands = pr_watch_verify.persona_checks(str(root), pr(title="test(web): refine a test"), 1, {})
+            with patch.object(pr_watch_verify, "run_check", return_value={"name": "test", "ok": True}) as check, \
+                    patch.object(pr_watch_verify, "checked", return_value=names):
+                pr_watch_verify.verify("example/one", pr(), str(root), {"profile": "persona"})
         self.assertEqual(commands[2], ("Changed web tests", ["node", "./node_modules/vitest/vitest.mjs", "run",
                                                              "src/views/chat/ContextGroup.test.tsx"], "web"))
         guard = next(command[1] for command in commands if command[0] == "Changed test-file baseline guards")
-        self.assertEqual(guard[guard.index("--worktree") + 1], ".")
+        self.assertEqual(guard[guard.index("--worktree") + 1], str(root))
         self.assertFalse(any(command[0] in {"CI web", "CI scripts"} for command in commands))
         self.assertTrue(any(command[0] == "Web typecheck" for command in commands))
         self.assertTrue(any(command[0] == "Privacy and documentation guards" for command in commands))
-        with patch.object(pr_watch_verify, "run_check", return_value={"name": "test", "ok": True}) as check, \
-                patch.object(pr_watch_verify, "checked", return_value=names):
-            pr_watch_verify.verify("example/one", pr(), ".", {"profile": "persona"})
-        self.assertEqual(check.call_args_list[0].kwargs["cwd"], "web")
-        self.assertEqual(check.call_args_list[2].kwargs["cwd"], "web")
         self.assertTrue(any(command[0] == "Web extension mirror cleanup tests" for command in commands))
+        self.assertEqual(check.call_args_list[0].kwargs["cwd"], str(root / "web"))
+        self.assertEqual(check.call_args_list[2].kwargs["cwd"], str(root / "web"))
 
     def test_production_apple_fix_does_not_use_test_only_fast_path(self):
         self.assertIsNone(pr_watch_verify.scoped_test_checks(".", SHA_BASE, SHA_A,
@@ -306,8 +311,21 @@ class WatcherTests(unittest.TestCase):
 
     def test_changed_go_and_python_tests_use_focused_commands(self):
         names = ["server/internal/agents/cache_test.go", "scripts/operations/test_pr_watch.py"]
-        with patch.object(pr_watch_verify, "checked", return_value="\n".join(names) + "\n"):
-            commands = pr_watch_verify.persona_checks(".", pr(title="test: refine relevant tests"), 1, {})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in names:
+                test_file = root / name
+                test_file.parent.mkdir(parents=True, exist_ok=True)
+                test_file.write_text("import unittest\n" if name.endswith(".py") else "package agents\n")
+            calls = []
+            def check(name, argv, root, timeout, environ=None, cwd=None):
+                calls.append(cwd)
+                return {"name": name, "command": argv, "ok": True, "summary": "", "stdout": "", "stderr": ""}
+            with patch.object(pr_watch_verify, "checked", return_value="\n".join(names) + "\n"):
+                commands = pr_watch_verify.persona_checks(str(root), pr(title="test: refine relevant tests"), 1, {})
+            with patch.object(pr_watch_verify, "run_check", side_effect=check), \
+                    patch.object(pr_watch_verify, "checked", return_value="\n".join(names) + "\n"):
+                pr_watch_verify.verify("example/one", pr(), str(root), {"profile": "persona"})
         self.assertEqual(commands[0][0], "Changed Go tests")
         self.assertEqual(commands[0][1][:2], ["python3", "-I"])
         self.assertTrue(commands[0][1][2].endswith("pr_watch_go_tests.py"))
@@ -319,14 +337,7 @@ class WatcherTests(unittest.TestCase):
         self.assertIn(("Changed Python tests", ["python3", "-I", "-B", "-m", "unittest", "test_pr_watch.py"],
                        "scripts/operations"), commands)
         self.assertFalse(any(command[0].startswith("CI ") for command in commands))
-        calls = []
-        def check(name, argv, root, timeout, environ=None, cwd=None):
-            calls.append(cwd)
-            return {"name": name, "command": argv, "ok": True, "summary": "", "stdout": "", "stderr": ""}
-        with patch.object(pr_watch_verify, "run_check", side_effect=check), \
-                patch.object(pr_watch_verify, "checked", return_value="\n".join(names) + "\n"):
-            pr_watch_verify.verify("example/one", pr(), ".", {"profile": "persona"})
-        self.assertEqual(calls, [None, None, None, "scripts/operations", None, None])
+        self.assertEqual(calls, [None, None, None, str(root / "scripts/operations"), None, None])
 
     def test_changed_sleep_guard_requires_lowering_the_baseline(self):
         import pr_watch_test_guards
@@ -482,6 +493,17 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(env["PERSONA_PRIVACY_ROOT"], "/tmp/pr-checkout")
         self.assertNotIn("GH_TOKEN", env)
 
+    def test_production_privacy_scan_uses_maintainer_environment_with_pr_root(self):
+        calls = []
+        def check(name, argv, root, timeout, environ=None, cwd=None):
+            calls.append(environ)
+            return {"name": name, "command": argv, "ok": True, "summary": "", "stdout": "", "stderr": ""}
+        with patch.object(pr_watch_verify, "checked", return_value="server/internal/agents/cache.go\n"), \
+                patch.object(pr_watch_verify, "run_check", side_effect=check):
+            pr_watch_verify.verify("example/one", pr(), ".", {"profile": "persona"}, environ={"HOME": "/isolated-home"})
+        self.assertEqual(calls[-1]["PERSONA_PRIVACY_ROOT"], ".")
+        self.assertNotEqual(calls[-1].get("HOME"), "/isolated-home")
+
     def test_fix_ui_change_runs_checks_without_visual_adapter(self):
         names = "web/src/views/ChatView.tsx\n"
         with patch.object(pr_watch_verify, "checked", return_value=names), \
@@ -632,6 +654,8 @@ class WatcherTests(unittest.TestCase):
                     if "FETCH_HEAD" in argv:
                         return SHA_BASE + "\n"
                     return SHA_B + "\n"
+                if argv[:2] == ["git", "cat-file"]:
+                    return "".join(line.strip() + " commit\n" for line in kwargs["input_text"].splitlines())
                 return ""
             with patch.object(pr_watch_repair, "pr_snapshot", side_effect=lambda repo, number: pr(head=SHA_B if number == 9 else SHA_A)), \
                     patch.object(pr_watch_repair, "verify", return_value=[]), \
@@ -732,10 +756,41 @@ class WatcherTests(unittest.TestCase):
         self.assertNotIn("GH_TOKEN", env)
         self.assertNotIn("PR_WATCH_WEBHOOK_SECRET", env)
         self.assertIn("ANTHROPIC_API_KEY", env)
-        argv = pr_watch_repair.repair_worker_argv(["claude", "--version"], self.root)
+        with patch.object(pr_watch_repair.shutil, "which", return_value="/usr/bin/bwrap"):  # a machine without bwrap too
+            argv = pr_watch_repair.repair_worker_argv(["claude", "--version"], self.root)
         home = argv[argv.index("HOME") + 1]
         self.assertNotEqual(Path(home), self.root)
         self.assertFalse(Path(home).is_relative_to(self.root))
+        self.assertLess(argv.index("--chdir"), argv.index("--bind"))
+        self.assertIn("--proc", argv)
+        self.assertIn("--dev-bind", argv)
+        self.assertNotIn(["--dev-bind", "/dev", "/dev"], [argv[i:i + 3] for i in range(len(argv) - 2)])
+        self.assertNotIn("/sys", argv)
+
+    def test_failed_base_merge_aborts_the_owned_conflicted_index(self):
+        with tempfile.TemporaryDirectory(prefix="pr-watch-conflict-abort-") as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+            (root / "file.txt").write_text("base\n")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=root, check=True)
+            subprocess.run(["git", "checkout", "-qb", "pr"], cwd=root, check=True)
+            (root / "file.txt").write_text("pr\n")
+            subprocess.run(["git", "commit", "-qam", "pr"], cwd=root, check=True)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+            subprocess.run(["git", "checkout", "-q", "main"], cwd=root, check=True)
+            (root / "file.txt").write_text("main\n")
+            subprocess.run(["git", "commit", "-qam", "main"], cwd=root, check=True)
+            base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+            subprocess.run(["git", "checkout", "-q", "pr"], cwd=root, check=True)
+            current = pr(head=head, baseRefOid=base)
+            with patch.object(pr_watch_repair, "fetch_current_main", return_value=base):
+                with self.assertRaises(pr_watch_common.WatchError):
+                    pr_watch_repair.merge_base_in_isolation(current, root, base)
+            self.assertEqual(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(), head)
+            self.assertEqual(subprocess.check_output(["git", "status", "--porcelain"], cwd=root, text=True), "")
 
     def test_dry_run_repair_failure_never_comments(self):
         self.watcher.dry_run = True
@@ -795,6 +850,29 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(len(self.comments), 1)
         self.assertIn("worker unavailable", self.comments[0])
 
+    def test_terminal_verification_failure_is_published_once(self):
+        clock = [1000.0]
+        with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
+                patch.object(pr_watch, "semantic_review", return_value=[]) as review, \
+                patch.object(pr_watch, "verify", side_effect=pr_watch_common.WatchError("infrastructure unavailable")) as verify, \
+                patch.object(pr_watch.time, "time", side_effect=lambda: clock[0]):
+            for now in (1000.0, 1301.0, 1602.0):
+                clock[0] = now
+                self.watcher.process("example/one", 7)
+            self.assertEqual(self.watcher.state.get("example/one", 7)["outcome"], "failed")
+            self.assertEqual(len(self.comments), 3)
+
+            for now in (1903.0, 1904.0):
+                clock[0] = now
+                self.watcher.process("example/one", 7)
+
+        terminal = [body for body in self.comments if "did not pass" in body]
+        self.assertEqual(1, len(terminal), "an already-published terminal failure was posted again")
+        self.assertEqual(len(self.comments), 4)
+        self.assertTrue(self.watcher.state.get("example/one", 7)["failure_posted"])
+        self.assertEqual(verify.call_count, 3)
+        self.assertEqual(review.call_count, 1)
+
     def test_semantic_failure_retries_with_backoff_without_comment_spam(self):
         for attempt in range(3):
             with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
@@ -818,6 +896,69 @@ class WatcherTests(unittest.TestCase):
                 patch.object(self.watcher, "enqueue") as enqueue:
             self.watcher.discover()
         enqueue.assert_called_once()
+
+    def test_conflict_repair_consumes_one_round_and_verifies_before_push(self):
+        calls = []
+        def update(repo, current, worktree, base, reviewer, before_conflict):
+            self.assertEqual(reviewer, self.config["reviewer"])
+            before_conflict()
+            return SHA_B
+        with patch.object(pr_watch, "pr_snapshot", return_value=pr(mergeable="CONFLICTING", mergeStateStatus="DIRTY")), \
+                patch.object(pr_watch_repair, "update_branch_with_main", side_effect=update), \
+                patch.object(pr_watch_repair, "merged_main", return_value=SHA_BASE), \
+                patch.object(pr_watch, "verify", side_effect=lambda *args, **kwargs: calls.append("verify") or []), \
+                patch.object(pr_watch, "checked", side_effect=lambda *args, **kwargs: calls.append("privacy") or ""), \
+                patch.object(pr_watch_repair, "push_updated_head", side_effect=lambda *args: calls.append("push")), \
+                patch.object(self.watcher, "merge") as merge:
+            self.watcher.process("example/one", 7)
+        self.assertEqual(calls, ["verify", "privacy", "push"])
+        merge.assert_not_called()
+        self.assertEqual(self.watcher.state.get("example/one", 7)["repair_rounds"], 1)
+        self.assertEqual(self.watcher.state.get("example/one", 7)["head"], SHA_B)
+
+    def test_failed_conflict_attempt_still_consumes_its_round(self):
+        def update(repo, current, worktree, base, reviewer, before_conflict):
+            before_conflict()
+            raise pr_watch_common.WatchError("worker could not resolve the conflict")
+        with patch.object(pr_watch, "pr_snapshot", return_value=pr(mergeable="CONFLICTING", mergeStateStatus="DIRTY")), \
+                patch.object(pr_watch_repair, "update_branch_with_main", side_effect=update), \
+                patch.object(self.watcher, "merge") as merge:
+            self.watcher.process("example/one", 7)
+        merge.assert_not_called()
+        self.assertEqual(self.watcher.state.get("example/one", 7)["repair_rounds"], 1)
+
+    def test_clean_merge_does_not_consume_a_conflict_round(self):
+        with patch.object(pr_watch, "pr_snapshot", return_value=pr(mergeable="CONFLICTING", mergeStateStatus="DIRTY")), \
+                patch.object(pr_watch_repair, "update_branch_with_main", return_value=False) as update, \
+                patch.object(pr_watch, "semantic_review") as review:
+            self.watcher.process("example/one", 7)
+        review.assert_not_called()
+        update.assert_called_once()
+        self.assertEqual(self.watcher.state.get("example/one", 7).get("repair_rounds", 0), 0)
+
+    def test_conflict_resolution_requires_a_successful_privacy_scan_before_commit(self):
+        calls = []
+        def checked(argv, **kwargs):
+            calls.append(argv)
+            if argv[:2] == ["git", "rev-parse"]:
+                if argv[2] == "MERGE_HEAD":
+                    return SHA_BASE + "\n"
+                if argv[2] == "HEAD":
+                    return SHA_A + "\n"
+                return SHA_B + "\n"
+            if argv[:3] == ["git", "diff", "--name-only"] and "--diff-filter=U" in argv:
+                return "conflicted.txt\0" if len([x for x in calls if x[:2] == ["git", "write-tree"]]) == 0 else ""
+            return ""
+        with patch.object(pr_watch_repair, "repair_repository_copy", return_value=nullcontext(self.root)), \
+                patch.object(pr_watch_repair, "run", return_value=subprocess.CompletedProcess([], 1, "", "conflict")), \
+                patch.object(pr_watch_repair, "repair_worker_argv", return_value=["worker"]), \
+                patch.object(pr_watch_repair, "pr_snapshot", return_value=pr()), \
+                patch.object(pr_watch_repair, "index_entries", return_value=[]), \
+                patch.object(pr_watch_repair, "copy_conflict_resolution"), \
+                patch.object(pr_watch_repair, "checked", side_effect=checked):
+            with self.assertRaises(pr_watch_common.WatchError):
+                pr_watch_repair.repair_merge_conflict("example/one", pr(), self.root, SHA_BASE, {})
+        self.assertFalse(any("commit" in argv for argv in calls if argv and argv[0] == "git"))
 
     def test_failure_summary_retains_actual_errors(self):
         result = subprocess.CompletedProcess([], 1, "PASS earlier lane\n" + "\n".join("ordinary" for _ in range(200)) +
@@ -1008,20 +1149,16 @@ class EventTests(unittest.TestCase):
 
 
 class VerifyTests(unittest.TestCase):
-    def test_persona_apple_cannot_be_silently_skipped(self):
+    def test_apple_change_does_not_require_macos_verifier(self):
         path = "apple/Persona/App/View.swift"
         with patch.object(pr_watch_verify, "checked", side_effect=[path + "\n", "+import SwiftUI"]), \
                 patch.object(pr_watch_verify, "load_paths") as selector:
             selector.return_value.select.return_value = {"apple": True, "scripts": True}
-            with self.assertRaises(pr_watch_common.WatchError):
-                pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1, {})
-        with patch.object(pr_watch_verify, "checked", side_effect=[path + "\n", "+import SwiftUI"]), \
-                patch.object(pr_watch_verify, "load_paths") as selector:
-            selector.return_value.select.return_value = {"apple": True, "scripts": True}
-            commands = pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1, {"apple_command": ["verify", "{head}"],
-                                                                      "ui_evidence_command": ["visual", "{worktree}"]})
-        self.assertIn(("trusted Apple verification", ["verify", SHA_A]), commands)
+            commands = pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1,
+                                                       {"ui_evidence_command": ["visual", "{worktree}"]})
+        self.assertIn(("Apple semantic and portable verification policy", ["true"]), commands)
         self.assertIn(("visual evidence", ["visual", "."]), commands)
+        self.assertFalse(any(command[0] == "trusted Apple verification" for command in commands))
 
     def test_non_ui_apple_paths_are_explicit_and_diff_is_checked(self):
         path = "apple/Packages/PersonaKit/Sources/PersonaKit/StreamChunks.swift"
@@ -1076,7 +1213,7 @@ class VerifyTests(unittest.TestCase):
             commands = pr_watch_verify.persona_checks(".", pr(title="chore: an example"), 1, {})
         self.assertEqual(commands, [("CI server", ["bash", "scripts/ci/server.sh"]),
                                     ("Exact-head privacy scan", commands[1][1]),
-                                    ("Apple non-UI review policy", ["true"])])
+                                    ("Apple semantic and portable verification policy", ["true"])])
         classifier.assert_called_once()
 
     def test_shared_core_lane_is_not_dropped(self):
@@ -1088,15 +1225,16 @@ class VerifyTests(unittest.TestCase):
             commands = pr_watch_verify.persona_checks(".", pr(), 1, {})
         self.assertEqual(commands[:2], [("CI android", ["bash", "scripts/ci/android.sh"]),
                                     ("CI core", ["bash", "scripts/ci/core.sh"])])
-        self.assertEqual(commands[-1], ("Apple non-UI review policy", ["true"]))
+        self.assertEqual(commands[-1], ("Apple semantic and portable verification policy", ["true"]))
 
-    def test_apple_ffi_does_not_use_the_shared_non_ui_exception(self):
+    def test_apple_ffi_keeps_semantic_and_portable_checks_without_macos(self):
         names = "native/app-core/crates/persona-core-ffi/src/lib.rs\n"
         with patch.object(pr_watch_verify, "checked", return_value=names), \
                 patch.object(pr_watch_verify, "load_paths") as selector:
             selector.return_value.select.return_value = {"apple": True, "core": True, "scripts": True}
-            with self.assertRaises(pr_watch_common.WatchError):
-                pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1, {})
+            commands = pr_watch_verify.persona_checks(".", pr(title="feat: an example"), 1, {})
+        self.assertIn(("CI core", ["bash", "scripts/ci/core.sh"]), commands)
+        self.assertIn(("Apple semantic and portable verification policy", ["true"]), commands)
 
     def test_extension_shared_changes_use_full_ci(self):
         with patch.object(pr_watch_verify, "extension_modules", return_value=None), \

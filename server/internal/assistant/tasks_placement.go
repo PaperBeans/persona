@@ -89,18 +89,19 @@ func (t *PlanTask) noteWhy(note string) {
 
 // fitTaskLauncher holds t's resolved launcher (params, resolveStart's) to what m has (fitLauncher): a default m lacks
 // is swapped for one it has, which t then names, without a tier that no longer applies, and its why says so. It also
-// reports whether the resolved launcher is Claude, using the same launcher list rather than another probe.
+// reports whether the task's Agent runs with Allow all (startAgent.allowAll: Claude Code, or a provider whose approval
+// is an Auto Accept switch), using the same launcher list rather than another probe.
 func (s *Service) fitTaskLauncher(ctx context.Context, t *PlanTask, m Device, own startPick, params map[string]any) (bool, error) {
 	note, agent, err := s.fitLauncher(ctx, m, own, params)
 	if err != nil || note == "" {
-		return agent == "claude", err
+		return agent.allowAll(), err
 	}
 	t.Launcher, _ = params["launcher"].(string)
 	t.Model, _ = params["model"].(string)
 	t.Effort, _ = params["effort"].(string)
 	t.Tier = ""
 	t.noteWhy(note)
-	return agent == "claude", nil
+	return agent.allowAll(), nil
 }
 
 // taskDirectoryExists checks the mapped directory before a flexible task changes machines. Missing, denied or
@@ -183,11 +184,11 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	// On the computer it landed on (a flexible task may have moved): a default it lacks gives way to one it has, a
 	// launcher the plan named that it lacks is refused before any tab opens (#2640). Before the health check below,
 	// which is then about the launcher that will run.
-	claude, err := s.fitTaskLauncher(ctx, t, m, own, params)
+	allowAll, err := s.fitTaskLauncher(ctx, t, m, own, params)
 	if err != nil {
 		return "", "", err
 	}
-	if claude && !t.preservePermission {
+	if allowAll && !t.preservePermission {
 		t.Permission = "bypassPermissions"
 	}
 	if t.MachinePolicy == machineFixed {
@@ -206,6 +207,9 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		return "", "", err
 	}
 	prompt := t.Prompt
+	if t.Continues != "" {
+		prompt += "\n\n" + prompts.RenderTaskContinuation(prompts.TaskContinuation{TodoID: t.Continues, Readonly: t.Readonly})
+	}
 	if t.Readonly {
 		prompt += "\n\n" + prompts.RenderReadonlyTaskConstraint()
 	}
@@ -230,8 +234,8 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	if brief != "" {
 		prompt += "\n\n" + brief
 	}
-	// The project background, and the todo's decisions (a task started again may have some), go before the prompt
-	// (#2820, #1618); the tab is named from the title.
+	// The project background, and the decisions of the todo and its continuation ancestors (a task started again may
+	// have some), go before the prompt (#2820, #1618); the tab is named from the title.
 	prompt = s.withProjectContext(ctx, m.ID, t.Cwd, s.withTodoDecisions(ctx, t.TodoID, prompt))
 	prompt, err = s.withStandingAuthorizations(ctx, m.ID, t.Cwd, prompt)
 	if err != nil {
@@ -262,6 +266,8 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	}
 	var res struct {
 		Session proto.Session `json:"session"`
+		// What an engine that runs only its own launchers ran in place of what was asked (#8140).
+		Instead *proto.StartInstead `json:"instead"`
 	}
 	picked, _ := params["launcher"].(string)
 	// Remember the sessions already there, so a start whose answer never comes back can adopt only the session it
@@ -318,16 +324,31 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	if res.Session.SessionID == "" || res.Session.MachineID != "" && res.Session.MachineID != m.ID {
 		return "", "", &rpc.Error{Code: "identity_conflict", Message: i18n.T(s.lang(ctx), "assistant-tasks.start_identity_conflict")}
 	}
+	ran := ranLauncher(s.startLauncher(ctx, picked), res.Instead, res.Session)
 	if res.Session.StartError != "" || res.Session.Starting {
 		observed := res.Session
-		observed.Launcher = s.startLauncher(ctx, picked)
+		observed.Launcher = ran
 		s.followStarts(ctx, DeviceSessions{MachineID: m.ID, Sessions: []proto.Session{observed}})
 		if observed.StartError != "" {
 			return "", "", sessionStartErr(observed)
 		}
 	}
 	if !res.Session.Starting {
-		s.recordStartSuccess(ctx, m.ID, s.startLauncher(ctx, picked))
+		s.recordStartSuccess(ctx, m.ID, ran)
+	}
+	// The engine ran a launcher of the same kind, its own default model or a lower effort in place of what the task
+	// asked for (#8140): the task names what runs, and its why says so.
+	if note := s.startInsteadNote(ctx, m, res.Instead, res.Session); note != "" {
+		if res.Instead.Launcher != "" && ran != picked {
+			t.Launcher, t.Tier = ran, ""
+		}
+		if res.Instead.Model != "" {
+			t.Model = ""
+		}
+		if res.Instead.Effort != "" {
+			t.Effort = res.Session.Effort
+		}
+		t.noteWhy(note)
 	}
 	if refused { // only once it started here: a task moved elsewhere after a failed start asks again
 		off := false
@@ -342,25 +363,28 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 // #6540's incident). taskStartAdoptPoll is the pause between lists. Vars so tests shorten them instead of sleeping
 // through the production bounds.
 var (
-	taskStartAdoptWait = 30 * time.Second
-	taskStartAdoptPoll = 2 * time.Second
+	taskStartAdoptWait         = 30 * time.Second
+	taskStartAdoptPoll         = 2 * time.Second
+	taskStartFinalAdoptTimeout = time.Minute
 )
 
 // adoptTaskStartSession gives a task start whose answer never came back a second opinion from the target machine's
 // own session list, reusing agent_start's adoption rule (adoptStartedSession): the start's own session id is matched
 // exactly first, then a session absent from the pre-start snapshot, hub-started, a non-assistant agent of the same
 // launcher and directory with a fresh sign of life that no open todo links, newest wins. The start's own context may
-// be spent, so the reconciliation runs on a detached one. A pre-start snapshot that failed (nil knownIDs) or a
-// machine that cannot answer confirms nothing: the caller keeps its failure behavior, and nothing is started
-// elsewhere.
+// be spent, so the reconciliation runs on a detached one. A pre-start snapshot that failed (nil knownIDs) disables
+// only the heuristic: the exact expectID still needs no snapshot. With neither a snapshot nor an exact id nothing can
+// be adopted, but a nonzero until still holds the retry while the original request may be running. A machine that
+// cannot answer confirms nothing: the caller keeps its failure behavior, and nothing is started elsewhere.
 func (s *Service) adoptTaskStartSession(ctx context.Context, m Device, launcher, cwd, expectID string, knownIDs map[string]bool) (proto.Session, bool) {
 	return s.adoptTaskStartSessionUntil(ctx, m, launcher, cwd, expectID, knownIDs, time.Time{})
 }
 
 // adoptTaskStartSessionUntil is adoptTaskStartSession that keeps looking until until when that is later than
-// taskStartAdoptWait from now.
+// taskStartAdoptWait from now. For a start that may have reached its node (nonzero until), one final lookup uses a
+// fresh context after the polling deadline: the last pre-deadline list can just miss the session (#7772).
 func (s *Service) adoptTaskStartSessionUntil(ctx context.Context, m Device, launcher, cwd, expectID string, knownIDs map[string]bool, until time.Time) (proto.Session, bool) {
-	if knownIDs == nil {
+	if knownIDs == nil && expectID == "" && until.IsZero() {
 		return proto.Session{}, false
 	}
 	wait := max(taskStartAdoptWait, time.Until(until))
@@ -370,14 +394,22 @@ func (s *Service) adoptTaskStartSessionUntil(ctx context.Context, m Device, laun
 		if sess, ok := s.adoptStartedSession(actx, m, launcher, cwd, expectID, knownIDs); ok {
 			return sess, true
 		}
-		if actx.Err() != nil {
+		if actx.Err() == nil {
+			select {
+			case <-time.After(taskStartAdoptPoll):
+				continue
+			case <-actx.Done():
+			}
+		}
+		if until.IsZero() {
 			return proto.Session{}, false
 		}
-		select {
-		case <-actx.Done():
-			return proto.Session{}, false
-		case <-time.After(taskStartAdoptPoll):
-		}
+		// Each list and the pause inside this final reconciliation have their own bounds, so the expired polling
+		// context must not be reused. Without a snapshot or exact id this returns false after the same safe wait.
+		// The final whole-call deadline also covers the todo book load used by heuristic adoption.
+		fctx, fcancel := context.WithTimeout(context.WithoutCancel(ctx), taskStartFinalAdoptTimeout)
+		defer fcancel()
+		return s.adoptStartedSession(fctx, m, launcher, cwd, expectID, knownIDs)
 	}
 }
 

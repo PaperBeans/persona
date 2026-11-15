@@ -26,12 +26,15 @@ func newUUID() string {
 
 // start launches the selected agent in a new herdr tab and waits for its session: `<launcher> --session-id …` (or
 // --resume) for Claude Code, waiting until claude is ready; a Codex launcher of the login shell with the first message
-// (codex_start.go); a compatible CLI, or a launcher the user says runs another agent, without Claude's flags (start_agent.go).
+// (codex_start.go); pi, the Cursor CLI and the Antigravity CLI with `--model` and the first message delivered once they
+// are up (workagent.go); a compatible CLI, or a launcher the user says runs another agent, without Claude's flags
+// (start_agent.go).
 // workspaceID puts the tab into an existing space (e.g. "new tab next to this agent"); otherwise the workspace named
 // after the directory is reused or created.
 // tabName names the herdr tab (hub picks one from the first message when the user gave none); empty: agent-<n>.
 // newID is the id a new session gets (startAsync picked it already); empty: a fresh one.
-// agentType is the agent the user picked for the launcher (claude, codex, traex, omp); empty: what the launcher runs.
+// agentType is the agent the user picked for the launcher (claude, codex, traex, omp, pi, cursor, agy); empty: what
+// the launcher runs.
 func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspaceID, mode, effort, tabName, newID, agentType string, options ...modelExecution) (_ *proto.Session, startErr error) {
 	execution := executionOption(options)
 	// The effort is checked against the agent this start actually dispatches: an explicit agentType wins over the
@@ -65,7 +68,7 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	if err != nil {
 		return nil, err
 	}
-	if kind != "claude" && kind != "codex" && kind != traexAgent && kind != ompAgent {
+	if kind != "claude" && kind != "codex" && kind != traexAgent && kind != ompAgent && workAgentKind(launcher, kind) == "" {
 		return nil, fmt.Errorf("unsupported agent type %q", kind)
 	}
 	if execution.SecretTicket != "" {
@@ -112,7 +115,7 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	if err := n.checkUltracodeStart(ctx, execution.Ultracode, kind); err != nil {
 		return nil, err
 	}
-	if execution.Model != "" {
+	if execution.Model != "" && workAgentKind(launcher, kind) == "" {
 		agent, err := n.launcherModelCheck(ctx, launcher, execution.Model)
 		if err != nil {
 			return nil, err
@@ -168,6 +171,14 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 			execution.Effort = ""
 		}
 		return n.startCodex(ctx, launch, cwd, launcher, codexExecutionArgs(argv, execution), prompt, ws, tabName, mode)
+	}
+	if work := workAgentKind(launcher, kind); work != "" { // workagent.go
+		if resume != "" {
+			return nil, refusal("work_agent_resume", "这个会话不能用启动器接着：pi 在它原来的标签里继续，cursor 和 agy 请在电脑上恢复。这次没有启动。", nil)
+		}
+		// A permission mode or effort chosen for Claude does not apply: these agents keep their own, and the
+		// start still goes through, so a model configuration's effort does not refuse every one of them.
+		return n.startWorkAgent(ctx, launch, cwd, launcher, work, execution.Model, prompt, ws, tabName)
 	}
 	if kind != "claude" { // start_agent.go
 		if mode != "" || effort != "" {
@@ -465,10 +476,15 @@ func (n *Node) sessionFor(id string, a host.Agent) *proto.Session {
 
 // close quits any Claude running in the machine's engine (started by Persona or by hand) and closes its pane: herdr
 // closes its tab, or in a split tab only its own pane, so the other panes survive; herdr-core ends its terminal.
+// Its user-action callers hold the recovery and typing locks, including retire's already-checked turn.
 func (n *Node) close(ctx context.Context, id string) error {
 	if err := n.switchingRefusal(id); err != nil { // a launcher switch, maybe on the last connection's Node
 		return err
 	}
+	if err := n.saveStopCause(ctx, id, proto.StopUser); err != nil {
+		return err
+	}
+	defer n.state.stopped(id, proto.StopUser)
 	a, ok := n.agent(id)
 	if !ok {
 		if _, mine := n.state.get(id); mine {
@@ -500,6 +516,10 @@ func exitCommand(text string) bool {
 // the shell, retire.go), and one already stopped is left as it is rather than resumed in a new tab just to quit there.
 // It runs inside send's turn for the session, so it does not take the typing lock again as stop does.
 func (n *Node) exitAgent(ctx context.Context, id string) error {
+	if err := n.saveStopCause(ctx, id, proto.StopUser); err != nil {
+		return err
+	}
+	defer n.state.stopped(id, proto.StopUser)
 	a, ok := n.agent(id)
 	if !ok {
 		return nil

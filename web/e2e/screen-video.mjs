@@ -1,7 +1,7 @@
 // The live screen's video channel in a real browser (#6558), against the mock hub's helper side (MOCK_SCREEN_VIDEO=1:
 // the HEVC or H.264 fixture, picked from start.codecs) and its own Screen Sharing:
 //   PORT=<port> MOCK_COMPUTER=ready MOCK_SCREEN=fake MOCK_SCREEN_VIDEO=1 python3 scripts/mock/mock_hub.py
-//   (cd web && VITE_SCREEN_VIDEO=1 PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port>)
+//   (cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port>)
 //   node web/e2e/screen-video.mjs <web URL> <mock hub URL> [--shots <dir>] [--lang en|zh-Hans|ja] [--executable <chromium>]
 // Checks: after signing in, the video takes the picture (its canvas drawn, noVNC's clear, its update requests held) and
 // a report goes back for its frames; Connection stats shows Video with the segments, the codec and the size; the Mac

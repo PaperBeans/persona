@@ -390,7 +390,8 @@ export const Composer = memo(function Composer({
 
   // What is typed goes into the conversation's stored draft 250 ms after the last key; one still waiting is written at
   // once when the box goes away or moves to another conversation, and when the page is hidden (closed, reloaded,
-  // left), so the last words typed before switching are not lost (#4591).
+  // backgrounded or the screen locked — mobile WebViews often skip pagehide there), so the last words typed before
+  // switching are not lost (#4591).
   const unsaved = useRef<{ key: string; text: string } | null>(null);
   const saveDraft = useCallback(() => {
     const u = unsaved.current;
@@ -411,9 +412,15 @@ export const Composer = memo(function Composer({
     return () => clearTimeout(t);
   }, [draft, draftKey, saveDraft, contexts]);
   useEffect(() => {
+    // visibilitychange to hidden reaches mobile WebViews that never fire pagehide; saveDraft is a no-op without unsaved words
+    const flushOnHidden = () => {
+      if (document.visibilityState === "hidden") saveDraft();
+    };
     addEventListener("pagehide", saveDraft);
+    document.addEventListener("visibilitychange", flushOnHidden);
     return () => {
       removeEventListener("pagehide", saveDraft);
+      document.removeEventListener("visibilitychange", flushOnHidden);
       // only this conversation's: on a switch the box still holds the old words under the new key for one render
       if (unsaved.current?.key === draftKey) saveDraft();
     };
