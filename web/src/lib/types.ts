@@ -388,8 +388,13 @@ export interface Session {
    *  (lib/side-sessions.ts). Set by the node while both are listed; older hubs leave it out. */
   parent_agent_id?: string;
   /** How it folds under `folded_under`: `"worker"` for an Agent of a host tab whose lead (its first pane) is
-   *  `folded_under` (#5180, a Claude Code agent team's teammate): it is in the lead's Team panel, not a card in its chat. */
-  folded_as?: "worker";
+   *  `folded_under` (#5180, a Claude Code agent team's teammate): it is in the lead's Team panel, not a card in its chat.
+   *  `"side"` for a side session (#7944, `parent_agent_id`, with `sessions_side_fold`): it is in its topmost parent's
+   *  Side sessions panel (lib/side-fold.ts). */
+  folded_as?: "worker" | "side";
+  /** The side session a folded row belongs to when it folds through one and is not itself the side (#7944: a side's own
+   *  Codex children or workers): its card and child card are in that side's chat, not `folded_under`'s. */
+  folded_side?: string;
   /** On a session other sessions fold under: how many, and how many of them work or need the user (by their own state). */
   children?: SessionChildren;
   /** When the session began, where the node knows it (child sessions at least). */
@@ -778,6 +783,12 @@ export interface SessionChildren {
   needs_you?: number;
   /** How many of them are its tab's workers (`folded_as: "worker"`, #5180): a lead with workers has a Team panel. */
   workers?: number;
+  /** Of them, its side sessions (`folded_as: "side"`, #7944), and how many of those work, need the user or are unread,
+   *  by their own state; absent when 0. Counted in the keys above too. */
+  sides?: number;
+  sides_working?: number;
+  sides_needs_you?: number;
+  sides_unread?: number;
 }
 
 export interface Interaction {
@@ -824,8 +835,11 @@ export interface Interaction {
   agent_type?: string;
   /** The session the card's session folds under (Session.folded_under, #5120): the card's home is that session's page. */
   folded_under?: string;
-  /** Session.folded_as of the card's session (#5180): `"worker"` when a lead's worker asks. */
-  folded_as?: "worker";
+  /** Session.folded_as of the card's session (#5180): `"worker"` when a lead's worker asks, `"side"` when a side
+   *  session does (#7944). */
+  folded_as?: "worker" | "side";
+  /** Session.folded_side of the card's session (#7944): the side session whose chat the card is answered in. */
+  folded_side?: string;
   elicitation?: Elicitation;
   /** What a permission card needs filled in before it is approved (a password): such a card is never approved in one tap. */
   fields?: { key: string; label: string; secret?: boolean }[];

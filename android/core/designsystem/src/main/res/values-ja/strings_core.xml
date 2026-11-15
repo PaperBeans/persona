@@ -52,6 +52,7 @@
         <item quantity="other">%1$d日後に期限切れ</item>
     </plurals>
     <string name="designsystem_core_request_from_subagent">サブエージェントから · %1$s</string>
+    <string name="designsystem_core_request_from_side">子セッション・%1$sから</string>
     <string name="designsystem_core_request_from_mcp">MCPサーバー%1$sから</string>
     <string name="designsystem_core_request_from_mcp_configured">MCPサーバー%1$sから（設定元：%2$s）</string>
     <string name="designsystem_core_request_from_terminal">このリクエストはターミナルから来ています。コンピューターで同時に対応しないでください</string>

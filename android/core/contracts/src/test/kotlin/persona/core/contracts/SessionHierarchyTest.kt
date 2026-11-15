@@ -25,4 +25,28 @@ class SessionHierarchyTest {
         assertEquals(SessionKey("m", "child"), row.sessionKey)
         assertEquals("q", row.id)
     }
+
+    @Test fun sideSessionFieldsDecodeAndOnlyASideUnreadMakesTheParentUnread() {
+        val parent = JsonCodec.decodeFromString(Session.serializer(), """{"machine_id":"m","session_id":"p","state":"idle",
+            "children":{"total":3,"working":1,"sides":2,"sides_working":1,"sides_needs_you":0,"sides_unread":1}}""")
+        assertEquals(SessionChildren(3, working = 1, sides = 2, sidesWorking = 1, sidesUnread = 1), parent.children)
+        assertEquals(AgentState.Working, parent.foldedState)
+        assertEquals(AgentState.Unread, parent.copy(children = parent.children?.copy(working = 0, sidesWorking = 0)).foldedState)
+        assertEquals(AgentState.Idle, parent.agentState)
+        val side = JsonCodec.decodeFromString(Session.serializer(),
+            """{"machine_id":"m","session_id":"s","state":"unread","parent_agent_id":"p","folded_under":"p","folded_as":"side"}""")
+        assertEquals("p", side.parentAgentId)
+        assertEquals(FoldedAs.SIDE, side.foldedAs)
+        assertEquals(AgentState.Unread, side.agentState)
+        val sub = JsonCodec.decodeFromString(Session.serializer(), """{"machine_id":"m","session_id":"c","folded_under":"p","folded_side":"s"}""")
+        assertEquals("s", sub.foldedSide)
+        val card = JsonCodec.decodeFromString(Interaction.serializer(),
+            """{"id":"q","machine_id":"m","session_id":"c","folded_under":"p","folded_as":"","folded_side":"s"}""")
+        assertEquals("s", card.foldedSide)
+        assertEquals(SessionKey("m", "p"), card.homeKey)
+        val old = JsonCodec.decodeFromString(Session.serializer(), """{"session_id":"old","children":{"total":1}}""")
+        assertNull(old.foldedSide)
+        assertNull(old.parentAgentId)
+        assertEquals(0, old.children?.sidesUnread)
+    }
 }

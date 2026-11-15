@@ -177,7 +177,11 @@ fun JButton(
 fun JTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, icon: PhIcon? = null) =
     JButton(text, onClick, modifier, kind = JButtonKind.Quiet, size = JButtonSize.Medium, icon = icon, enabled = enabled)
 
-/** Plain icons sit in bars; [raised] ones are standalone controls (a glass circle, a wash disc, a bordered square). */
+/**
+ * Plain icons sit in bars; [raised] ones are standalone controls (a glass circle, a wash disc, a bordered square).
+ * [badge] is the needs-you dot at the top end; [count], when above 0, a neutral count capsule at the bottom end (how many
+ * a control holds, never how many need the user: that is [JBadge]'s, in the needs-you color).
+ */
 @Composable
 fun JIconButton(
     icon: PhIcon,
@@ -189,6 +193,26 @@ fun JIconButton(
     tint: Color? = null,
     badge: Boolean = false,
     selected: Boolean = false,
+    count: Int = 0,
+) {
+    if (count <= 0) JIconButtonBox(icon, contentDescription, onClick, modifier, enabled, raised, tint, badge, selected)
+    else Box(modifier) {
+        // The circle clips the button's ripple; the capsule hangs over its edge, so it sits outside that clip.
+        val palette = PersonaTheme.palette
+        val label = if (count > 99) "99+" else "$count"
+        JIconButtonBox(icon, contentDescription, onClick, Modifier, enabled, raised, tint, badge, selected)
+        Text(label, style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.SemiBold),
+            color = palette.ink2, maxLines = 1,
+            modifier = Modifier.align(Alignment.BottomEnd).clearAndSetSemantics {}.stableAlpha(if (enabled) 1f else 0.4f)
+                .clip(CircleShape).background(palette.surfaceOpaque).border(Tokens.Size.line, palette.line, CircleShape)
+                .padding(horizontal = SectionHeaderTokens.countPadding, vertical = SectionHeaderTokens.countPaddingVertical))
+    }
+}
+
+@Composable
+private fun JIconButtonBox(
+    icon: PhIcon, contentDescription: String?, onClick: () -> Unit, modifier: Modifier, enabled: Boolean, raised: Boolean,
+    tint: Color?, badge: Boolean, selected: Boolean,
 ) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
