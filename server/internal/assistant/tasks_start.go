@@ -514,7 +514,7 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 	// An admission-gate refusal means the machine or direction is briefly full, not that the start failed: park the
 	// task in the admission queue (no failTodo, no failure receipt) and let the queue loop retry it (task_queue.go).
 	if isAdmissionDenied(err) {
-		s.queueAdmissionRefusal(planID, i, t, err)
+		s.queueAdmissionRefusal(planID, i, t, err, retry)
 		return
 	}
 	s.logf("task %s: start: %v", t.TodoID, err)
@@ -527,6 +527,11 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		limit = proto.CodedStartErrorMax // the hub's sentence, whose remedy comes last (#1642): kept whole
 	}
 	reason := clip(oneLine(s.startFailureText(ctx, t.Machine, err)), limit)
+	if t.Queue != nil {
+		// A queued start got past the gate and failed otherwise: its wait is over, and its card reads what happened
+		// next rather than "waiting" until the queue's bounds run out (#8092).
+		s.clearAdmissionQueue(ctx, planID, i, t.TodoID)
+	}
 	// The new tab's shell waits on a question, or the agent's screen stopped, and the computer keeps the tab: a
 	// supervised task's start is remedied first, not failed yet (start_remedy.go, #2570).
 	code, args := codedStartRefusal(err)
