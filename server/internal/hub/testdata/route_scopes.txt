@@ -257,6 +257,7 @@ machines.read        GET /api/v1/machines/{id}/usage
 -                    GET /api/v1/machines/{mid}/git/review
 -                    GET /api/v1/machines/{mid}/git/show
 -                    GET /api/v1/machines/{mid}/git/status
+-                    GET /api/v1/machines/{mid}/grok-settings
 -                    GET /api/v1/machines/{mid}/health/reports
 -                    GET /api/v1/machines/{mid}/herdr
 -                    GET /api/v1/machines/{mid}/iphone
@@ -315,6 +316,7 @@ agents.read          GET /api/v1/sessions/{mid}/{sid}/screen
 -                    GET /api/v1/task-trust
 todos.read           GET /api/v1/todos
 todos.read           GET /api/v1/todos/{id}/decisions
+todos.read           GET /api/v1/todos/{id}/repositories
 -                    GET /api/v1/usage
 -                    GET /api/v1/usage/windows
 agents.read          GET /api/v1/workspace-board
@@ -655,6 +657,7 @@ kb.write             PUT /api/v1/kb/{kind}/{id}
 -                    PUT /api/v1/machines/{mid}/computer
 -                    PUT /api/v1/machines/{mid}/engine
 -                    PUT /api/v1/machines/{mid}/file-transfer/settings
+-                    PUT /api/v1/machines/{mid}/grok-settings
 -                    PUT /api/v1/machines/{mid}/herdr
 -                    PUT /api/v1/machines/{mid}/iphone
 -                    PUT /api/v1/machines/{mid}/omp-settings
@@ -669,6 +672,8 @@ kb.write             PUT /api/v1/kb/{kind}/{id}
 -                    PUT /api/v1/recordings/{id}/private
 -                    PUT /api/v1/subscriptions/{id}
 todos.write          PUT /api/v1/todos/{id}/agents/{mid}/{sid}
+todos.write          PUT /api/v1/todos/{id}/repositories
+todos.write          PUT /api/v1/todos/{id}/repositories/{repo_id}/links
 -                    PUT /api/v1/todos/{id}/seen
 todos.write          PUT /api/v1/todos/{id}/spaces/{mid}/{space...}
 -                    PUT /api/v1/todos/{id}/thread

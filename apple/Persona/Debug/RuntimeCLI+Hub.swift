@@ -1,6 +1,5 @@
 #if DEBUG && (os(iOS) || os(visionOS))
 import Foundation
-import PersonaWire
 
 /// The runtime CLI over the hub (docs/operations/runtime-cli.md「Reaching a real device through the hub」), for a DEBUG build on a real phone: launched with
 /// `-runtimeCLIHub YES`, the app lists `phone_runtime_cli` with its tools in `register_phone`, but only when the hub
@@ -38,3 +37,4 @@ extension RuntimeCLI {
     }
 }
 #endif
+import PersonaWire

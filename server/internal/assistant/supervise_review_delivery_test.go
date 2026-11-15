@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // deliveryReviewService is a supervised task with a GitHub PR, the hub running oldHub and the forge as given, with
@@ -193,10 +195,15 @@ func TestAcceptedNonPRCannotHideEarlierRealPR(t *testing.T) {
 	s, todo := deliveryReviewService(t, &fakeForge{}, &runningHub{commit: oldHub}, false)
 	ctx := context.Background()
 	s.setTaskStage(ctx, todo.ID, "review", "https://github.com/o/r/pull/10")
+	s.hub.(*fakeHub).setItems(proto.Item{Role: "assistant", Kind: proto.KindText,
+		Text: "<closeout status=\"not_done\" merged=\"no\" deployed=\"no\">\n" +
+			"artifact: pr https://github.com/o/r/pull/9\n</closeout>"})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/o/r/issues/10":
 			_, _ = w.Write([]byte(`{"number":10}`))
+		case "/repos/o/r/issues/9":
+			_, _ = w.Write([]byte(`{"pull_request":{}}`))
 		case "/repos/o/r/pulls/9":
 			_, _ = w.Write([]byte(`{"merged":false}`))
 		default:
@@ -230,7 +237,7 @@ func TestForgetTaskPRKeepsStateOnWriteFailure(t *testing.T) {
 	st.mu.Lock()
 	st.failPut = errors.New("database unavailable")
 	st.mu.Unlock()
-	if err := s.forgetTaskPR(ctx, todo.ID, pr); err == nil {
+	if err := s.forgetTaskPR(ctx, todo.ID, pr, "https://github.com/o/r/pull/8"); err == nil {
 		t.Fatal("non-PR removal succeeded without persisting it")
 	}
 	st.mu.Lock()
@@ -258,7 +265,7 @@ func TestForgetTaskPRPersistsRemoval(t *testing.T) {
 	s.setTaskStage(ctx, todo.ID, "review", real)
 	s.setTaskStage(ctx, todo.ID, "review", pr)
 	s.watchDeploy(ctx, todo.ID, deployWatch{PR: pr, Since: time.Now()})
-	if err := s.forgetTaskPR(ctx, todo.ID, pr); err != nil {
+	if err := s.forgetTaskPR(ctx, todo.ID, pr, real); err != nil {
 		t.Fatal(err)
 	}
 	restarted, _ := newTaskServiceOn(t, st)

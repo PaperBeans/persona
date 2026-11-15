@@ -163,6 +163,8 @@ nonisolated final class ScreenVideoStream: @unchecked Sendable {
         case silent
         /// A frame that did not decode, or a message that did not parse.
         case undecodable
+        /// The hub refused it: the Mac already sends video to two devices (429, the node's `busy`, #8320).
+        case busy
     }
 
     /// How long without a frame or heartbeat before the stream counts as dead (not while capture is paused).
@@ -217,7 +219,7 @@ nonisolated final class ScreenVideoStream: @unchecked Sendable {
             } catch let e as Ended {
                 ending = e.why
             } catch {
-                ending = .closed
+                ending = closedEnding() // a refused socket fails its first send, `start`
             }
             transport.close()
             finish(ending)
@@ -282,6 +284,9 @@ nonisolated final class ScreenVideoStream: @unchecked Sendable {
 
     private struct Ended: Error { let why: Ending }
 
+    /// How a transport that failed ended: busy when the hub refused it with 429 (#8320), else closed.
+    private func closedEnding() -> Ending { transport.refusedStatus == 429 ? .busy : .closed }
+
     private func finish(_ why: Ending) {
         let tell = lock.withLock { () -> Bool in
             defer { over = true }
@@ -310,7 +315,7 @@ nonisolated final class ScreenVideoStream: @unchecked Sendable {
         var partialSince: UInt64?
         while !Task.isCancelled {
             let chunk: [UInt8]
-            do { chunk = try await transport.receive() } catch { throw Ended(why: .closed) }
+            do { chunk = try await transport.receive() } catch { throw Ended(why: closedEnding()) }
             bytes += chunk.count
             lock.withLock { total += chunk.count }
             let arrived = Self.nowMicros

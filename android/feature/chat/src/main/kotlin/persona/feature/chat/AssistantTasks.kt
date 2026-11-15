@@ -745,7 +745,7 @@ private fun InterruptBatchCard(batch: InterruptBatch, host: AssistantTaskHost, t
 }
 
 @Composable
-private fun QuickResultCard(result: QuickResult) {
+internal fun QuickResultCard(result: QuickResult) {
     val locale = currentLocale
     val time = AssistantLines.time(result.time)?.let { LocalizedFormats.format(it, LocalizedFormats.MONTH_DAY_TIME, locale) }
     Row(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.cardShape).background(PersonaTheme.palette.sunken).padding(Tokens.Space.m),
@@ -757,7 +757,6 @@ private fun QuickResultCard(result: QuickResult) {
             Text(listOfNotNull(time, result.title, result.place).joinToString(" · "), style = PersonaTheme.type.caption,
                 color = PersonaTheme.palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Text(stringResource(R.string.chat_tasks_quick_on_iphone), style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3)
     }
 }
 

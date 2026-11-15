@@ -151,6 +151,7 @@ export const WorkGroup = memo(function WorkGroup({ g, p, limit }: { g: WorkGroup
         onClick={opens ? toggle : undefined}
         disabled={!opens}
         aria-expanded={opens ? open : undefined}
+        title={g.clock ? t(g.clock === "run" ? "chat-workgroup.run_clock" : "chat-workgroup.exchange_clock") : undefined}
         // on a touch screen 40 tall, the margin taking back what it adds, so nothing around it moves
         className={cx("flex w-full min-w-0 items-center gap-1.5 py-[2px] text-left select-none [@media(pointer:coarse)]:-my-[7.5px] [@media(pointer:coarse)]:min-h-10", opens ? "cursor-pointer transition-opacity hover:opacity-80" : "cursor-default")}
       >

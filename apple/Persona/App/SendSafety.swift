@@ -1,4 +1,5 @@
 import SwiftUI
+import PersonaWire
 
 // Sending into a terminal safely (docs/protocol/protocol.md「Sending messages」): the node refuses a message — nothing typed — when the
 // computer's Claude input box holds a draft or a dialog has the keyboard. Each pending message carries its id as

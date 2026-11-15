@@ -164,7 +164,7 @@ describe("Persona's main row", () => {
   it("draws no ⋯ without it", () => {
     expect(renderToStaticMarkup(<PersonaRow {...props} main={undefined} active={false} />)).not.toContain("对话的操作");
   });
-  it("whose menu has only 拷贝会话 ID and 结束…", () => {
+  it("whose menu has only 复制会话 ID and 结束…", () => {
     expect(conversationMenuItems(main, { main: true }).map((i) => i.key)).toEqual(["copy", "end"]);
   });
 });

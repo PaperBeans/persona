@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/nwverse/persona/server/internal/extension/sandbox"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/runtimepkg"
@@ -135,6 +136,7 @@ type sdkStart struct {
 	launcherArgs                   []string       // a managed launcher's own claude args
 	env                            map[string]string
 	compaction                     *assistantCompaction
+	supervisionInstructions        string
 }
 
 // options are the persona_start options: the SDK's query() options for the start (CONTRACT §3).
@@ -147,6 +149,9 @@ func (s sdkStart) options(claude string) (map[string]any, error) {
 	}
 	if s.guestMCP != nil {
 		o["guestMcpServers"] = s.guestMCP
+	}
+	if s.supervisionInstructions != "" {
+		o["systemPrompt"] = map[string]any{"type": "preset", "preset": "claude_code", "append": s.supervisionInstructions}
 	}
 	if tools := strings.Split(s.allowedTools, ","); s.allowedTools != "" {
 		o["allowedTools"] = tools
@@ -312,7 +317,9 @@ func (n *Node) sdkCommand(b sdkBridge, launcher string, s sdkStart, base []strin
 		settings, innerArgs = append(settings, s.settings), append(innerArgs, "--settings", s.settings)
 	}
 	argv, env, _ := wrapAgent("assistant-sdk", n.home, n.dir, s.cwd, settings,
-		func() string { return claudeInner(innerArgs, base, s.cwd, n.home, n.claudeConfigDirs()) }, []string{b.js.Path, b.script}, b.js.env(base), n.logger.Printf)
+		func() *sandbox.StatusReason {
+			return claudeInnerReason(innerArgs, base, s.cwd, n.home, n.claudeConfigDirs())
+		}, []string{b.js.Path, b.script}, b.js.env(base), n.logger.Printf)
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = s.cwd
 	cmd.Env = env

@@ -73,6 +73,21 @@ type webDelivery struct {
 	Error    string     `json:"error,omitempty"`
 }
 
+// webPushSubscription identifies one subscription's delivery queue. An endpoint rotation is a new queue: an old push
+// service that is slow or no longer answers cannot hold up the browser's replacement endpoint.
+type webPushSubscription struct {
+	device   string
+	endpoint string
+}
+
+// webPushQueued is one dispatch. done closes only after its complete delivery attempt, including all of its retries.
+type webPushQueued struct {
+	sub       webSub
+	plaintext []byte
+	message   webpush.Message
+	done      chan struct{}
+}
+
 type webPusher struct {
 	store Store
 	logf  func(string, ...any)
@@ -93,12 +108,16 @@ type webPusher struct {
 	mu     sync.Mutex
 	subs   map[string]webSub // by device
 	last   map[string]webDelivery
+
+	queueMu sync.Mutex
+	tails   map[webPushSubscription]*webPushQueued // the last dispatch queued for each browser endpoint
 }
 
 func newWebPusher(store Store, logf func(string, ...any)) *webPusher {
 	w := &webPusher{store: store, logf: logf, now: time.Now, client: &http.Client{Timeout: webPushTimeout},
 		check: webpush.CheckEndpoint, retryWaits: []time.Duration{time.Second, 4 * time.Second},
-		storeTimeout: deviceStoreTimeout, subs: map[string]webSub{}, last: map[string]webDelivery{}}
+		storeTimeout: deviceStoreTimeout, subs: map[string]webSub{}, last: map[string]webDelivery{},
+		tails: map[webPushSubscription]*webPushQueued{}}
 	if store == nil {
 		return w
 	}
@@ -411,12 +430,33 @@ func (w *webPusher) postOnce(ctx context.Context, s webSub, keys webpush.Keys, p
 	return resp.StatusCode, fmt.Errorf("%d %s", resp.StatusCode, strings.TrimSpace(string(text)))
 }
 
-// dispatch sends plaintext to s in the background, the delivery bounded by webPushTimeout and its retries.
+// dispatch sends plaintext to s in the background, the delivery bounded by webPushTimeout and its retries. Dispatches
+// to one subscription run in FIFO order, including the whole retry loop; different subscriptions stay concurrent.
 func (w *webPusher) dispatch(s webSub, plaintext []byte, m webpush.Message) {
+	key := webPushSubscription{device: s.Device, endpoint: s.Endpoint}
+	queued := &webPushQueued{sub: s, plaintext: plaintext, message: m, done: make(chan struct{})}
+	// Append before starting the worker: a later dispatch must see this tail even if this worker has not run yet.
+	w.queueMu.Lock()
+	previous := w.tails[key]
+	w.tails[key] = queued
+	w.queueMu.Unlock()
 	go func() {
+		defer func() {
+			close(queued.done)
+			w.queueMu.Lock()
+			if w.tails[key] == queued { // a newer dispatch owns the queue now; its completion cleans it up
+				delete(w.tails, key)
+			}
+			w.queueMu.Unlock()
+		}()
+		if previous != nil {
+			<-previous.done
+		}
+		// Queued waiting is not part of the delivery's timeout. Cancellation, Gone and every other return from push
+		// still close done above, allowing the next dispatch to proceed.
 		ctx, cancel := context.WithTimeout(context.Background(), webPushTimeout*time.Duration(len(w.retryWaits)+1)+10*time.Second)
 		defer cancel()
-		_, _ = w.push(ctx, s, plaintext, m)
+		_, _ = w.push(ctx, queued.sub, queued.plaintext, queued.message)
 	}()
 }
 

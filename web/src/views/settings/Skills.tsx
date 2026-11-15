@@ -1,16 +1,25 @@
-// Settings › Assistant › Skills: existing discovery plus bounded, explicitly confirmed ZIP imports.
+// Settings › Assistant › Skills: the Persona-provided skills on the assistant's computer, plus a bounded, explicitly
+// confirmed ZIP import. The dialog borrows the shapes the rest of the app already uses: LookUpload's drop zone,
+// ProviderImport's preview card and footer, ErrorNotice for what went wrong.
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../../i18n";
 import { credentialOwner, errorText, subscribeCredentialOwner } from "../../lib/api";
+import { bytes } from "../../lib/format";
 import type { Skill } from "../../lib/hub-update";
 import { useShownManager } from "../../lib/manager-choice";
 import { importSkill, readSkillZIP, skillImportError, skillImportList, type SkillImportResult } from "../../lib/skill-import";
-import { Button, Dialog, Loading } from "../../ui/atoms";
+import { Button, cx, Dialog, Loading } from "../../ui/atoms";
+import { ErrorNotice } from "../../ui/ErrorNotice";
+import { Icon } from "../../ui/icons";
 import { Group, Pill, Row, RowFailed, SettingsHint } from "./SettingsParts";
 
+type Phase = "select" | "checking" | "preview" | "installing" | "success" | "undoing" | "undone";
+
 type ImportView = {
-  phase: "select" | "checking" | "preview" | "installing" | "success" | "undoing" | "undone";
+  phase: Phase;
   archive?: string;
+  /** The chosen file's own name, shown while it is checked. */
+  file?: string;
   result?: SkillImportResult;
   error?: string;
 };
@@ -32,9 +41,8 @@ function SkillsForManager({ manager, owner }: { manager: string; owner: string }
   const request = useRef<AbortController | null>(null);
   const reading = useRef<AbortController | null>(null);
   const admitted = useRef(false);
-  const uploadButton = useRef<HTMLDivElement>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const previewBody = useRef<HTMLDivElement>(null);
+  const uploadButton = useRef<HTMLButtonElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
   const current = () => active.current && credentialOwner() === owner;
 
   async function refresh() {
@@ -56,7 +64,8 @@ function SkillsForManager({ manager, owner }: { manager: string; owner: string }
     return () => { active.current = false; version.current++; request.current?.abort(); reading.current?.abort(); };
   }, [manager, owner]);
   useEffect(() => {
-    if (view?.phase === "preview") previewBody.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    // Cancel, not Install, takes the focus: Enter must not install what the user has only just seen.
+    if (view?.phase === "preview") cancelButton.current?.focus();
   }, [view?.phase]);
 
   function close() {
@@ -68,7 +77,7 @@ function SkillsForManager({ manager, owner }: { manager: string; owner: string }
     if (result && current()) {
       void importSkill(manager, { op: "cancel", reference: result.reference, environment: result.environment }, undefined, current).catch(() => {});
     }
-    uploadButton.current?.querySelector("button")?.focus();
+    uploadButton.current?.focus();
   }
   async function check(file?: File) {
     if (!file || admitted.current) return;
@@ -76,7 +85,7 @@ function SkillsForManager({ manager, owner }: { manager: string; owner: string }
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
-    setView({ phase: "checking" });
+    setView({ phase: "checking", file: file.name });
     try {
       const archive = await readSkillZIP(file, controller.signal);
       const result = await importSkill(manager, { op: "preview", archive }, controller.signal, current);
@@ -108,70 +117,197 @@ function SkillsForManager({ manager, owner }: { manager: string; owner: string }
       if (current()) void refresh();
     }
   }
-  const busy = view?.phase === "checking" || view?.phase === "installing" || view?.phase === "undoing";
-  const committing = view?.phase === "installing" || view?.phase === "undoing";
+
+  const phase = view?.phase;
   const result = view?.result;
+  const committing = phase === "installing" || phase === "undoing";
+  const done = phase === "success" || phase === "undone";
 
   return (
     <>
       <Group
         anchor="skills"
-        title={<span className="flex items-center gap-2">{t("settings-skills.title")}{list && list.length > 0 && <span className="font-normal tabular-nums">{t("settings-skills.count", { count: list.length })}</span>}</span>}
-        right={<div ref={uploadButton}><Button className="min-h-11" onClick={() => setView({ phase: "select" })}>{t("settings-skills.upload")}</Button></div>}
-        footer={t("settings-skills.discovery")}
+        title={
+          <span className="flex items-center gap-2">
+            {t("settings-skills.title")}
+            {list && list.length > 0 && <span className="font-normal tabular-nums">{t("settings-skills.count", { count: list.length })}</span>}
+          </span>
+        }
+        right={
+          <Button ref={uploadButton} tone="quiet" icon="upload" className="-mb-1 touch-hit" onClick={() => setView({ phase: "select" })}>
+            {t("settings-skills.upload")}
+          </Button>
+        }
+        footer={machine ? t("settings-skills.footer_where", { machine }) : t("settings-skills.footer_shared")}
       >
-        {list === null ? <div className="px-4 py-4"><Loading /></div> :
-          error ? <RowFailed text={t("settings-skills.load_failed", { error })} retry={t("settings-skills.retry")} onRetry={() => void refresh()} /> :
-          list.length === 0 ? <SettingsHint>{t("settings-skills.empty")}</SettingsHint> :
+        {list === null ? (
+          <div className="px-4 py-4"><Loading /></div>
+        ) : error ? (
+          <RowFailed text={t("settings-skills.load_failed", { error })} retry={t("settings-skills.retry")} onRetry={() => void refresh()} />
+        ) : list.length === 0 ? (
+          <SettingsHint>{t("settings-skills.empty")}</SettingsHint>
+        ) : (
           list.map((s) => (
             <Row key={s.name} label={s.name} hint={s.description} wrapHint>
               <Pill tone={s.source === "builtin" ? undefined : "accent"}>{t(s.source === "builtin" ? "settings-skills.source_builtin" : s.source === "plugin" ? "settings-skills.source_plugin" : "settings-skills.source_mine")}</Pill>
             </Row>
-          ))}
-        {machine && <SettingsHint>{t("settings-skills.computer", { machine })}</SettingsHint>}
-        <SettingsHint>{t("settings-skills.shared")}</SettingsHint>
-        {lastInstall && !view && <Row label={t("settings-skills.installed", { name: lastInstall.name })} hint={t("settings-skills.undo_hint")} wrapHint stackOnNarrow>
-          <Button className="min-h-11" onClick={() => void write("undo", lastInstall)}>{t("settings-skills.undo")}</Button>
-        </Row>}
+          ))
+        )}
+        {lastInstall && !view && (
+          <Row icon="check" label={t("settings-skills.installed", { name: lastInstall.name })} hint={t("settings-skills.undo_hint")} wrapHint stackOnNarrow>
+            <Button className="touch-hit" icon="undo" onClick={() => void write("undo", lastInstall)}>{t("settings-skills.undo")}</Button>
+          </Row>
+        )}
       </Group>
-      <Dialog open={view !== null} onClose={close} title={t("settings-skills.upload")}>
-        <div ref={previewBody} className="space-y-4" aria-busy={busy || undefined}>
-          {view?.error && <p role="alert" className="text-red">{view.error}</p>}
-          {view?.phase === "select" && <>
-            <p>{t("settings-skills.package_hint")}</p>
-            <Button className="min-h-11" onClick={() => fileInput.current?.click()}>{t("settings-skills.file_label")}</Button>
-            <input ref={fileInput} type="file" accept=".zip,application/zip" className="hidden" aria-label={t("settings-skills.file_label")}
-              onChange={(e) => { void check(e.currentTarget.files?.[0]); e.currentTarget.value = ""; }} />
-          </>}
-          {busy && <div role="status" className="flex items-center gap-3"><Loading />{t(view?.phase === "checking" ? "settings-skills.checking" : view?.phase === "undoing" ? "settings-skills.undoing" : "settings-skills.installing")}</div>}
-          {view?.phase === "preview" && result && <>
-            <p role="status" className="text-green">{t("settings-skills.valid")}</p>
-            <dl className="space-y-3">
-              <div><dt className="text-ink-3">{t("settings-skills.name")}</dt><dd className="break-words font-medium text-ink">{result.name}</dd></div>
-              <div><dt className="text-ink-3">{t("settings-skills.description")}</dt><dd className="break-words whitespace-pre-wrap text-ink">{result.description}</dd></div>
-              <div><dt className="text-ink-3">{t("settings-skills.destination")}</dt><dd className="break-all font-mono text-ink">{result.destination}</dd></div>
-            </dl>
-            <p>{t("settings-skills.preview_computer", { machine: result.machine })}</p>
-            <p>{t("settings-skills.package_size", { count: result.files, bytes: result.bytes })}</p>
-            <p>{t("settings-skills.shared")}</p>
-            <p>{t("settings-skills.trust")}</p>
-          </>}
-          {view?.phase === "success" && result && <div role="status" className="space-y-3">
-            <p className="text-green">{t("settings-skills.installed", { name: result.name })}</p>
-            <p>{t("settings-skills.discovery")}</p>
-            <p>{t("settings-skills.undo_hint")}</p>
-          </div>}
-          {view?.phase === "undone" && <div role="status" className="space-y-3">
-            <p>{t("settings-skills.undone")}</p>
-            {result?.recovery && <p className="break-all font-mono">{result.recovery}</p>}
-          </div>}
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button className="min-h-11" disabled={committing} onClick={close}>{view?.phase === "success" || view?.phase === "undone" ? t("settings-skills.close") : t("common.cancel")}</Button>
-            {view?.phase === "preview" && result && <Button className="min-h-11" tone="primary" onClick={() => void write("install", result, view.archive)}>{t("settings-skills.install")}</Button>}
-            {view?.phase === "success" && result && <Button className="min-h-11" onClick={() => void write("undo", result)}>{t("settings-skills.undo")}</Button>}
+
+      <Dialog
+        open={view !== null}
+        onClose={close}
+        title={t("settings-skills.dialog_title")}
+        width={480}
+        footer={
+          <div className="flex flex-1 items-center gap-2">
+            {phase === "success" || phase === "undoing" ? (
+              <Button className="touch-hit" tone="quiet" icon="undo" busy={phase === "undoing"} onClick={() => result && void write("undo", result)}>{t("settings-skills.undo")}</Button>
+            ) : !done && (
+              <Button ref={cancelButton} className="touch-hit" tone="quiet" disabled={committing} onClick={close}>{t("common.cancel")}</Button>
+            )}
+            <span className="flex-1" />
+            {(phase === "preview" || phase === "installing") && result && (
+              <Button className="touch-hit" tone="primary" busy={phase === "installing"} onClick={() => void write("install", result, view?.archive)}>{t("settings-skills.install")}</Button>
+            )}
+            {(done || phase === "undoing") && (
+              <Button className="touch-hit" tone="primary" disabled={committing} onClick={close}>{t("settings-skills.close")}</Button>
+            )}
+            {committing && <span role="status" className="sr-only">{t(phase === "installing" ? "settings-skills.installing" : "settings-skills.undoing")}</span>}
           </div>
-        </div>
+        }
+      >
+        {view && (
+          <div className="flex flex-col gap-3" aria-busy={phase === "checking" || committing || undefined}>
+            {(phase === "select" || phase === "checking") && <PickZip view={view} onPick={(f) => void check(f)} />}
+            {(phase === "preview" || phase === "installing") && result && <Preview result={result} />}
+            {(phase === "success" || phase === "undoing") && result && (
+              <Outcome icon="check" tone="green" title={t("settings-skills.installed", { name: result.name })} text={t("settings-skills.next_chat")} note={t("settings-skills.undo_hint")} />
+            )}
+            {phase === "undone" && (
+              <>
+                <Outcome icon="undo" title={t("settings-skills.undone_title")} text={t("settings-skills.undone")} />
+                {result?.recovery && <p className="rounded-control bg-inset px-2.5 py-2 font-mono text-submeta leading-relaxed break-all text-ink-2 shadow-hairline">{result.recovery}</p>}
+              </>
+            )}
+          </div>
+        )}
       </Dialog>
     </>
+  );
+}
+
+/** Choosing the ZIP: LookUpload's drop zone, the error the last try ended on above it, and the check's progress in its place. */
+function PickZip({ view, onPick }: { view: ImportView; onPick: (file?: File) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
+  const checking = view.phase === "checking";
+  const drop = {
+    onDragOver: (e: React.DragEvent) => {
+      e.preventDefault();
+      if (!checking && [...e.dataTransfer.types].includes("Files")) setOver(true);
+    },
+    onDragLeave: () => setOver(false),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      setOver(false);
+      if (checking || !e.dataTransfer.files.length) return;
+      onPick(e.dataTransfer.files[0]);
+    },
+  };
+  return (
+    <>
+      {view.error && <ErrorNotice role="alert" message={view.error} />}
+      <div
+        {...drop}
+        data-testid="skill-zip-drop"
+        className={cx(
+          "flex min-h-52 flex-col items-center justify-center gap-3 rounded-card border border-dashed px-6 py-6 text-center transition-colors duration-150",
+          over ? "border-accent bg-accent-tint" : "border-line-strong bg-inset",
+        )}
+      >
+        {checking ? (
+          <>
+            <Loading label={t("settings-skills.checking")} />
+            {view.file && <p className="max-w-full truncate text-submeta text-ink-3">{view.file}</p>}
+          </>
+        ) : (
+          <>
+            <span className="flex size-14 items-center justify-center rounded-full bg-field text-ink-3">
+              <Icon name="archive" size={24} />
+            </span>
+            <Button className="touch-hit" tone="secondary" icon="upload" onClick={() => input.current?.click()}>{t("settings-skills.file_label")}</Button>
+            <p className="max-w-72 text-submeta leading-relaxed text-ink-3">{t("settings-skills.drop_hint")}</p>
+          </>
+        )}
+      </div>
+      <input
+        ref={input}
+        type="file"
+        accept=".zip,application/zip"
+        className="hidden"
+        aria-label={t("settings-skills.file_label")}
+        onChange={(e) => { onPick(e.currentTarget.files?.[0]); e.currentTarget.value = ""; }}
+      />
+    </>
+  );
+}
+
+/** What the package would install, before anything is: the skill as its row will read, then where it goes. Its name
+ *  and description come from the ZIP, so they are only ever text. */
+function Preview({ result }: { result: SkillImportResult }) {
+  return (
+    <>
+      <p role="status" className="flex items-center gap-1.5 text-label font-medium text-green">
+        <Icon name="check" size={13} stroke={2.4} className="shrink-0" />
+        {t("settings-skills.valid")}
+      </p>
+      <div className="overflow-hidden rounded-card bg-surface shadow-btn">
+        <div className="flex items-start gap-3 px-3 py-3">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-control bg-inset text-ink-2 shadow-hairline">
+            <Icon name="spark" size={14} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-meta font-medium break-words text-ink">{result.name}</p>
+            <p className="mt-0.5 text-submeta leading-relaxed break-words whitespace-pre-wrap text-ink-3">{result.description}</p>
+          </div>
+        </div>
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 border-t border-line px-3 py-2.5 text-submeta leading-relaxed">
+          <dt className="text-ink-3">{t("settings-skills.computer_label")}</dt>
+          <dd className="break-words text-ink-2">{result.machine}</dd>
+          <dt className="text-ink-3">{t("settings-skills.destination")}</dt>
+          <dd className="font-mono break-all text-ink-2">{result.destination}</dd>
+          <dt className="text-ink-3">{t("settings-skills.contents_label")}</dt>
+          <dd className="text-ink-2 tabular-nums">{t("settings-skills.package_size", { count: result.files, bytes: bytes(result.bytes) })}</dd>
+        </dl>
+      </div>
+      <div className="flex items-start gap-2 px-1 text-submeta leading-relaxed text-ink-3">
+        <Icon name="shield" size={13} className="mt-0.5 shrink-0" />
+        <div className="flex flex-col gap-1">
+          <p>{t("settings-skills.trust")}</p>
+          <p>{t("settings-skills.shared")}</p>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** How an install or an undo ended: a mark, what happened, what to do next. */
+function Outcome({ icon, tone, title, text, note }: { icon: "check" | "undo"; tone?: "green"; title: string; text: string; note?: string }) {
+  return (
+    <div role="status" className="flex flex-col items-center gap-2 px-2 pt-3 pb-1 text-center">
+      <span className={cx("flex size-12 items-center justify-center rounded-full", tone === "green" ? "bg-green-tint text-green" : "bg-field text-ink-3")}>
+        <Icon name={icon} size={22} stroke={tone === "green" ? 2.4 : 1.9} />
+      </span>
+      <p className="mt-1 text-meta font-semibold break-words text-ink">{title}</p>
+      <p className="max-w-80 text-submeta leading-relaxed text-ink-2">{text}</p>
+      {note && <p className="max-w-80 text-submeta leading-relaxed text-ink-3">{note}</p>}
+    </div>
   );
 }

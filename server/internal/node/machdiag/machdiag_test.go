@@ -60,6 +60,19 @@ func TestDiagnoseAllSections(t *testing.T) {
 	}
 }
 
+func TestDiagnoseYarnCacheInUseByNode(t *testing.T) {
+	s := testSystem(t, "node")
+	writeFile(t, filepath.Join(cacheDir(t, s, "yarn-cache"), "v6", "npm-example-1.0.0", "node_modules", "example", "package.json"), 4096)
+
+	d, err := s.diagnose(context.Background(), []string{proto.DiagnoseDisk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Disk == nil || len(d.Disk.Caches) != 1 || d.Disk.Caches[0].ID != "yarn-cache" || !d.Disk.Caches[0].InUse {
+		t.Fatalf("Yarn running as node: disk = %+v", d.Disk)
+	}
+}
+
 func TestDiagnoseOnlyWhatIsAsked(t *testing.T) {
 	s := testSystem(t)
 	d, err := s.diagnose(context.Background(), []string{proto.DiagnoseTools})

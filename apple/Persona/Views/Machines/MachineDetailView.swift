@@ -1,5 +1,6 @@
 import BeautifulUI
 import SwiftUI
+import PersonaWire
 
 /// One machine (docs/server/machines.md「App」), most used first: how it is (the card of Machines, without its numbers), its
 /// agents (a tap opens the chat), its values now and CPU / memory / network / load over 1, 6 or 24 hours (hold a chart

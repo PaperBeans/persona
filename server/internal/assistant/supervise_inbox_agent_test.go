@@ -56,7 +56,7 @@ func TestInboxGitHubCommentGoesToTheTaskAgent(t *testing.T) {
 		}
 	}
 	n := f.notices()[0]
-	for _, want := range []string{"任务「修登录崩溃」", "收件箱里有别人发来的新消息说到它", linkedPRURL, "直接发给它的 Agent（它收到了），这里是副本", "不要再 agent_send 转一遍"} {
+	for _, want := range []string{"任务「修登录崩溃」", "signal=inbox", "收件箱事件", linkedPRURL, "直接发给它的 Agent（它收到了），这里是副本"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("supervisor message lacks %q:\n%s", want, n)
 		}

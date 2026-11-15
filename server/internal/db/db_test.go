@@ -52,7 +52,7 @@ func open(t testing.TB) *DB {
 var openTables = []string{"push_device_retirements", "lock_tests", "client_ops", "devices", "device_tokens", "pair_tokens",
 	"device_sessions", "live_activities", "phone_tools", "node_sessions", "mail_accounts", "interactions", "settings",
 	"inbox_items", "kb_entities", "connector_secrets", "machine_systems", "machine_metrics", "machine_usage",
-	"sent_messages", "todos", "todo_agents", "assistant_always", "sent_as_user"}
+	"sent_messages", "todos", "todo_agents", "assistant_always", "sent_as_user", "hub_push_sent"}
 
 // open empties what TRUNCATE openTables CASCADE did, a table only the cascade reaches included, and leaves a table
 // that had no row in that cascade its files: it truncates only what has a row.
@@ -252,6 +252,206 @@ func TestLiveActivityStartBudget(t *testing.T) {
 		t.Fatalf("budget FK cleanup: n=%d err=%v", n, err)
 	}
 	t.Log("two independent pools: 20 concurrent attempts, one claim; renewal retained budget; failed save rolled back")
+}
+
+// The hold on the next push-start after one the phone has not answered (#7641): counted from the claim, seen by the
+// other blue-green process, and back to the cooldown when lifted.
+func TestLiveActivityStartHold(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	at := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	const cooldown, maxAge = 10 * time.Minute, 8 * time.Hour
+	if err := d.UpsertDevice(ctx, Device{DeviceID: "phone"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SaveLiveActivity(ctx, LiveActivity{DeviceID: "phone", PushToStartToken: "start"}); err != nil {
+		t.Fatal(err)
+	}
+	other, err := Open(ctx, os.Getenv("PERSONA_TEST_DATABASE_URL"), AllSets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	// hold is HoldLiveActivityStart for the start claimed at asOf, and says whether the deadline moved.
+	hold := func(pool *DB, device string, asOf time.Time, d time.Duration) bool {
+		t.Helper()
+		changed, err := pool.HoldLiveActivityStart(ctx, device, asOf, d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return changed
+	}
+	// Nothing claimed yet: nothing to hold, and no row appears.
+	if hold(d, "phone", at, maxAge) {
+		t.Fatal("a hold without a claim changed something")
+	}
+	if _, claimed, err := d.ClaimLiveActivityStart(ctx, "phone", "start", at, cooldown, maxAge); err != nil || !claimed {
+		t.Fatalf("first claim: %v %v", claimed, err)
+	}
+	if !hold(d, "phone", at, maxAge) {
+		t.Fatal("the hold of the claimed start was not applied")
+	}
+	if hold(other, "phone", at, maxAge) {
+		t.Fatal("the same hold again reported a change")
+	}
+	due, claimed, err := other.ClaimLiveActivityStart(ctx, "phone", "start", at.Add(cooldown), cooldown, maxAge)
+	if err != nil || claimed || !due.Equal(at.Add(maxAge)) {
+		t.Fatalf("held start claimed by the other pool: due=%s claimed=%v err=%v", due, claimed, err)
+	}
+	due, claimed, err = other.ClaimLiveActivityStart(ctx, "phone", "start", at.Add(maxAge-time.Microsecond), cooldown, maxAge)
+	if err != nil || claimed || !due.Equal(at.Add(maxAge)) {
+		t.Fatalf("held start claimed before the hold ended: due=%s claimed=%v err=%v", due, claimed, err)
+	}
+	// The phone answered a minute after the start: the cooldown from that claim again, which has passed.
+	if !hold(other, "phone", at.Add(time.Minute), cooldown) {
+		t.Fatal("the phone's answer did not lift the hold")
+	}
+	second := at.Add(cooldown)
+	if _, claimed, err = d.ClaimLiveActivityStart(ctx, "phone", "start", second, cooldown, maxAge); err != nil || !claimed {
+		t.Fatalf("claim after the hold was lifted: %v %v", claimed, err)
+	}
+	// Held again and never answered: the hold ends by itself, counted from the second claim.
+	if !hold(d, "phone", second, maxAge) {
+		t.Fatal("the hold of the second start was not applied")
+	}
+	if _, claimed, err = d.ClaimLiveActivityStart(ctx, "phone", "start", second.Add(maxAge), cooldown, maxAge); err != nil || !claimed {
+		t.Fatalf("claim when the hold ended: %v %v", claimed, err)
+	}
+	if hold(d, "missing", second, maxAge) {
+		t.Fatal("a hold for an unknown device changed something")
+	}
+}
+
+// A hold, a refusal or an answer is about the start it followed, named by the time that start was claimed at (#7641
+// review): arriving after the device's next start was claimed, it leaves that start's deadline as it is. Before the
+// fix the late lift of start A put start B back on the cooldown (a second card beside B's), and A's late hold kept a
+// refused B back for fleetMaxAge.
+func TestLiveActivityStartHoldLeavesNewerClaim(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	at := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	const cooldown, maxAge = 10 * time.Minute, 8 * time.Hour
+	if err := d.UpsertDevice(ctx, Device{DeviceID: "phone"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SaveLiveActivity(ctx, LiveActivity{DeviceID: "phone", PushToStartToken: "start"}); err != nil {
+		t.Fatal(err)
+	}
+	// Two pools: the two blue-green processes, as in TestLiveActivityStartBudget.
+	other, err := Open(ctx, os.Getenv("PERSONA_TEST_DATABASE_URL"), AllSets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	deadline := func() (claimedAt, next time.Time) {
+		t.Helper()
+		if err := d.pool.QueryRow(ctx, `SELECT claimed_at, next_start_at FROM live_activity_start_budget WHERE device_id = 'phone'`).Scan(&claimedAt, &next); err != nil {
+			t.Fatal(err)
+		}
+		return claimedAt, next
+	}
+	// late sends what start A's flush, its refusal and an answer from before B still had on their way.
+	a, answered := at.Add(123456*time.Nanosecond), at.Add(time.Minute) // A's claim keeps microseconds: 123 of them
+	late := func(pool *DB, what string, wantNext time.Time) {
+		t.Helper()
+		for _, w := range []struct {
+			name string
+			asOf time.Time
+			hold time.Duration
+		}{
+			{"A's hold", a, maxAge},
+			{"A's lift", a, cooldown},
+			{"an answer from before B", answered, cooldown},
+			{"an answer a microsecond before B", a.Truncate(time.Microsecond).Add(cooldown - time.Microsecond), cooldown},
+		} {
+			changed, err := pool.HoldLiveActivityStart(ctx, "phone", w.asOf, w.hold)
+			if err != nil || changed {
+				t.Fatalf("%s: %s arriving late: changed=%v err=%v, want no change", what, w.name, changed, err)
+			}
+			if _, next := deadline(); !next.Equal(wantNext) {
+				t.Fatalf("%s: %s arriving late moved B's next start to %s, want %s", what, w.name, next, wantNext)
+			}
+		}
+	}
+
+	// Start A: claimed, held, then lifted by the phone's answer.
+	if _, claimed, err := d.ClaimLiveActivityStart(ctx, "phone", "start", a, cooldown, maxAge); err != nil || !claimed {
+		t.Fatalf("claim A: %v %v", claimed, err)
+	}
+	if changed, err := d.HoldLiveActivityStart(ctx, "phone", a, maxAge); err != nil || !changed {
+		t.Fatalf("A's own hold: changed=%v err=%v", changed, err)
+	}
+	if changed, err := d.HoldLiveActivityStart(ctx, "phone", answered, cooldown); err != nil || !changed {
+		t.Fatalf("the answer to A: changed=%v err=%v", changed, err)
+	}
+	// Start B, claimed by the other process as soon as A's cooldown is over, so the two claims are as close as two can
+	// be. A claim at the time of the last one is refused whatever the deadline says: claimed_at names one claim.
+	b := a.Truncate(time.Microsecond).Add(cooldown)
+	if _, claimed, err := other.ClaimLiveActivityStart(ctx, "phone", "start", b, cooldown, maxAge); err != nil || !claimed {
+		t.Fatalf("claim B: %v %v", claimed, err)
+	}
+	if claimedAt, _ := deadline(); !claimedAt.Equal(b) {
+		t.Fatalf("B claimed at %s, want %s", claimedAt, b)
+	}
+	if changed, err := other.HoldLiveActivityStart(ctx, "phone", b, 0); err != nil || !changed {
+		t.Fatalf("B's deadline set to its claim: changed=%v err=%v", changed, err)
+	}
+	if due, claimed, err := d.ClaimLiveActivityStart(ctx, "phone", "start", b, cooldown, maxAge); err != nil || claimed {
+		t.Fatalf("a second claim at B's own time: due=%s claimed=%v err=%v", due, claimed, err)
+	}
+	if changed, err := other.HoldLiveActivityStart(ctx, "phone", b, cooldown); err != nil || !changed {
+		t.Fatalf("B's cooldown put back: changed=%v err=%v", changed, err)
+	}
+
+	// B is on its cooldown (its hold has not been written yet): A's late hold must not keep it back for maxAge.
+	late(d, "B on its cooldown", b.Add(cooldown))
+	// B is held: A's late lift must not put it back on the cooldown.
+	if changed, err := other.HoldLiveActivityStart(ctx, "phone", b, maxAge); err != nil || !changed {
+		t.Fatalf("B's own hold: changed=%v err=%v", changed, err)
+	}
+	late(other, "B held", b.Add(maxAge))
+
+	// The same from both processes at once, with B's own refusal and B's own hold among them: whatever the order, only
+	// B's writes land, and the last of them decides.
+	if changed, err := d.HoldLiveActivityStart(ctx, "phone", b, cooldown); err != nil || !changed {
+		t.Fatalf("B's refusal: changed=%v err=%v", changed, err)
+	}
+	var wg sync.WaitGroup
+	for i := range 40 {
+		pool := d
+		if i%2 == 1 {
+			pool = other
+		}
+		asOf, dur := a, maxAge
+		switch i % 4 {
+		case 1:
+			dur = cooldown
+		case 2:
+			asOf, dur = answered, cooldown
+		case 3:
+			asOf = b.Add(-time.Microsecond)
+		}
+		wg.Go(func() {
+			if changed, err := pool.HoldLiveActivityStart(ctx, "phone", asOf, dur); err != nil || changed {
+				t.Errorf("a late write as of %s for %s: changed=%v err=%v, want no change", asOf, dur, changed, err)
+			}
+		})
+	}
+	wg.Go(func() {
+		if changed, err := other.HoldLiveActivityStart(ctx, "phone", b, maxAge); err != nil || !changed {
+			t.Errorf("B's own hold among the late writes: changed=%v err=%v", changed, err)
+		}
+	})
+	wg.Wait()
+	if claimedAt, next := deadline(); !claimedAt.Equal(b) || !next.Equal(b.Add(maxAge)) {
+		t.Fatalf("after 40 late writes from two pools: claimed_at=%s next_start_at=%s, want %s and %s", claimedAt, next, b, b.Add(maxAge))
+	}
+	// B's own answer still lifts it.
+	if changed, err := d.HoldLiveActivityStart(ctx, "phone", b.Add(time.Second), cooldown); err != nil || !changed {
+		t.Fatalf("the answer to B: changed=%v err=%v", changed, err)
+	}
+	if _, next := deadline(); !next.Equal(b.Add(cooldown)) {
+		t.Fatalf("after B's answer: next_start_at=%s, want %s", next, b.Add(cooldown))
+	}
+	t.Log("claim A, claim B, then A's hold, A's lift and an older answer late (alone and 40 at once from two pools): B's deadline never moved")
 }
 
 func TestLiveActivityStartParentLockOrder(t *testing.T) {

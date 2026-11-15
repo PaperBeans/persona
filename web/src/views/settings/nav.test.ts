@@ -42,7 +42,7 @@ describe("settings location", () => {
   it("redirects each old combined category to its new section and preserves its destination", () => {
     expect(redirectLegacySettings("?tab=model-config&purpose=agent.triage&manager=work", "")).toBe("/settings?tab=models&purpose=agent.triage&manager=work#settings-model-config");
     expect(redirectLegacySettings("?tab=models&launcher=example&add=1", "")).toBeNull();
-    for (const agent of ["claude", "codex", "agy", "omp"]) {
+    for (const agent of ["claude", "codex", "agy", "omp", "grok"]) {
       expect(redirectLegacySettings(`?tab=${agent}`, "")).toBe(`/settings?tab=agents#settings-${agent}`);
     }
     expect(redirectLegacySettings("?tab=translate", "")).toBe("/settings?tab=general#settings-translation");

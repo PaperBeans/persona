@@ -1538,6 +1538,9 @@ func (h *Hub) onClientMessage(ctx context.Context, c *client, data []byte) {
 			// calls still reach this connection, but nothing is saved under a credential about to disappear.
 			return
 		}
+		// Its app reaches the hub: what the hub push-starts there is answered again (#7641). Off the read loop, as the
+		// tools' write. By its push id, which starts are claimed under; not deviceID above, which falls back to the credential.
+		h.live.phoneConnectedLater(msg.DeviceID, c.device)
 		h.setPhoneTools(db.PhoneToolRegistration{DeviceID: deviceID, Platform: msg.Platform, CredentialID: c.device, Tools: tools})
 	case "register_desktop":
 		h.registerDesktop(c, msg.DeviceName, msg.DeviceID)

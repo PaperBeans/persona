@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Session } from "./types";
 import { makeSessionLookup, shownStatus, todoStatus, todoStatusLabel, type Todo } from "./todos";
 import { checkCount, checklist, reviewBadge, type Supervision } from "./supervision";
-import { FOLDED_SECTIONS, lastActivity, relatedKeys, SHELVE_AFTER_MS, supersededFailedStarts, todoBucket, TRIAGE_SECTIONS, triage, triageTodos } from "./todo-triage";
+import { FOLDED_SECTIONS, lastActivity, relatedKeys, SHELVE_AFTER_MS, supersededFailedStarts, todoBucket, TRIAGE_SECTIONS, triage, triageTodos, waitingForMerge } from "./todo-triage";
 import { resetRestoredCache, restoreTodo } from "./todo-restore";
 
 const NOW = Date.parse("2026-11-10T12:00:00Z");
@@ -156,28 +156,58 @@ describe("triage (docs/assistant/todo-status-sop.md, decision table)", () => {
     // the unseen session last moved an hour ago
     expect(at(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(0.5) }))).toMatchObject({ section: "done", rule: "seen" });
     expect(at(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(2) }))).toMatchObject({ section: "just_done", rule: "finished_unseen" });
-    expect(at(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(0.5), pr_url: "https://example.com/pull/1", stage: "review" }))).toMatchObject({ section: "pr", rule: "pr_open" });
+    const url = "https://example.com/pull/1";
+    expect(at(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(0.5), pr_url: url, stage: "review", pr_status: { url, state: "open", draft: false, review: "pending", checks: "none", conflicts: false, checked_at: new Date(NOW).toISOString() } }))).toMatchObject({ section: "pr", rule: "pr_open" });
     // seen, it is no longer open work: every count reads it the same way
     expect(todoBucket(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(0.5) }), lookup, NOW)).toBe("closed");
     expect(todoBucket(todo("t", { agents: [agent("unseen")] }), lookup, NOW)).toBe("open");
   });
 
-  it("an open PR is PR to merge however old, a merged one is not", () => {
+  it("legacy PR hints do not claim waiting for merge without fresh PR facts", () => {
     const old = { updated_at: hoursAgo(300), agents: [agent("old")] };
-    expect(at(todo("t", { ...old, delivery: { state: "pr" } })).section).toBe("pr");
-    expect(at(todo("t", { ...old, pr_url: "https://example.com/pull/1" })).section).toBe("pr");
+    expect(at(todo("t", { ...old, delivery: { state: "pr" } })).section).toBe("shelved");
+    expect(at(todo("t", { ...old, pr_url: "https://example.com/pull/1" })).section).toBe("shelved");
     expect(at(todo("t", { ...old, pr_url: "https://example.com/pull/1", delivery: { state: "merged" } })).section).toBe("shelved");
   });
 
-  it("a PR the stage says is merged is not PR to merge, whatever the delivery (#3205)", () => {
+  it("fresh open PR facts take precedence over stage hints, not over a live delivery", () => {
     const fresh = { updated_at: hoursAgo(1), agents: [agent("old")] };
+    const url = "https://example.com/pull/1";
+    const pr_status = { url, state: "open" as const, draft: false, review: "approved" as const, checks: "success" as const, conflicts: false, checked_at: new Date(NOW).toISOString() };
     for (const stage of ["merge", "deploy", "verify"]) {
-      expect(at(todo("t", { ...fresh, pr_url: "https://example.com/pull/1", stage })).rule).not.toBe("pr_open");
+      expect(at(todo("t", { ...fresh, pr_url: url, pr_status, stage })).rule).toBe("pr_open");
     }
-    expect(at(todo("t", { ...fresh, pr_url: "https://example.com/pull/1", stage: "review" })).rule).toBe("pr_open");
-    // merged, not deployed: Other open; deployed: Just finished
-    expect(at(todo("t", { ...fresh, pr_url: "https://example.com/pull/1", stage: "merge", delivery: { state: "merged" } })).section).toBe("other");
-    expect(at(todo("t", { ...fresh, pr_url: "https://example.com/pull/1", stage: "deploy", delivery: { state: "live", at: hoursAgo(1) } })).section).toBe("just_done");
+    // accepted or deployed work stays finished whatever its PR facts say (#7614 review)
+    expect(at(todo("t", { ...fresh, pr_url: url, pr_status, delivery: { state: "live", at: hoursAgo(1) } })).rule).toBe("deployed");
+    for (const state of ["merged", "closed"] as const) {
+      expect(at(todo("t", { ...fresh, pr_url: url, pr_status: { ...pr_status, state } })).rule).not.toBe("pr_open");
+    }
+  });
+
+  it("puts a fresh matching open non-draft PR in its own open bucket ahead of parked hints", () => {
+    const facts = { url: "https://example.com/pull/7", state: "open" as const, draft: false, review: "required" as const, checks: "pending" as const, conflicts: false, checked_at: new Date(NOW - 60_000).toISOString() };
+    const td = todo("waiting-pr", { pr_url: `${facts.url}/`, pr_status: facts, delivery: { state: "pr" }, supervision: { supervisor: "c", state: "parked", parked: { reason: "Wait", waiting_on: "someone_else", until: hoursAgo(-4), count: 1 } } });
+    expect(waitingForMerge(td, lookup, NOW)).toBe(true);
+    expect(triage(td, lookup, NOW)).toMatchObject({ section: "pr", rule: "pr_open" });
+    expect(triageTodos([td], lookup, NOW)).toMatchObject({ open: 1, todoCounts: { pr: 1 } });
+  });
+
+  it("does not infer waiting for merge from stale, unknown, mismatched, draft, merged or closed facts", () => {
+    const facts = { url: "https://example.com/pull/7", state: "open" as const, draft: false, review: "approved" as const, checks: "success" as const, conflicts: false, checked_at: new Date(NOW - 16 * 60_000).toISOString() };
+    expect(triage(todo("legacy", { pr_url: facts.url, delivery: { state: "pr" } }), lookup, NOW).section).not.toBe("pr");
+    expect(waitingForMerge(todo("stale", { pr_url: facts.url, pr_status: facts }), lookup, NOW)).toBe(false);
+    expect(waitingForMerge(todo("mismatch", { pr_url: facts.url, pr_status: { ...facts, url: "https://example.com/pull/8", checked_at: new Date(NOW).toISOString() } }), lookup, NOW)).toBe(false);
+    for (const patch of [{ draft: true }, { state: "merged" as const }, { state: "closed" as const }]) {
+      const td = todo("terminal", { pr_url: facts.url, delivery: { state: "pr" }, pr_status: { ...facts, checked_at: new Date(NOW).toISOString(), ...patch } });
+      expect(waitingForMerge(td, lookup, NOW)).toBe(false);
+      expect(triage(td, lookup, NOW).section).not.toBe("pr");
+    }
+  });
+
+  it("keeps genuine owner decisions and active agents ahead of a fresh PR", () => {
+    const pr_status = { url: "https://example.com/pull/7", state: "open" as const, draft: false, review: "required" as const, checks: "none" as const, conflicts: false, checked_at: new Date(NOW).toISOString() };
+    expect(triage(todo("decision", { pr_url: pr_status.url, pr_status, supervision: { supervisor: "c", state: "needs_user" } }), lookup, NOW).section).toBe("waiting");
+    expect(triage(todo("active", { pr_url: pr_status.url, pr_status, agents: [agent("run")] }), lookup, NOW).section).toBe("working");
   });
 
   it("a task with no move for 48 hours is Shelved; a newer move of its agent keeps it", () => {
@@ -220,11 +250,12 @@ describe("triageTodos", () => {
   const lookup = makeSessionLookup([session("run", "working"), session("old", "idle", 100), session("old2", "idle", 120)]);
 
   it("merges the same issue, PR, title or plan into one row, led by its most urgent member", () => {
+    const prStatus = { url: "https://example.com/pull/9", state: "open" as const, draft: false, review: "pending" as const, checks: "none" as const, conflicts: false, checked_at: new Date(NOW).toISOString() };
     const list = [
       todo("fix", { title: "Fix #412 lost pushes", agents: [agent("run")] }),
       todo("test", { title: "#412 lost pushes: regression test", updated_at: hoursAgo(100), agents: [agent("old")] }),
-      todo("pr-a", { title: "A", pr_url: "https://example.com/pull/9", agents: [agent("old2")], updated_at: hoursAgo(120) }),
-      todo("pr-b", { title: "B", pr_url: "https://example.com/pull/9/", agents: [agent("old2")], updated_at: hoursAgo(121) }),
+      todo("pr-a", { title: "A", pr_url: "https://example.com/pull/9", pr_status: prStatus, agents: [agent("old2")], updated_at: hoursAgo(120) }),
+      todo("pr-b", { title: "B", pr_url: "https://example.com/pull/9/", pr_status: { ...prStatus, url: "https://example.com/pull/9/" }, agents: [agent("old2")], updated_at: hoursAgo(121) }),
       todo("lone", { title: "Something else", updated_at: hoursAgo(1) }),
     ];
     const r = triageTodos(list, lookup, NOW);

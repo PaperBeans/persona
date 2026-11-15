@@ -41,5 +41,5 @@ export function HandoffBack({ from, onDismiss }: { from: HandoffFrom; onDismiss:
   const title = useStore((s) => fromTitle(s, from.path));
   // the entry before this one is the conversation (the card pushed this one); a page opened on its own has none to go to
   const back = () => (history.length > 1 ? history.back() : navigate(from.path));
-  return <BackStrip label={t("chat-chatview.handoff_from", { title })} dismissLabel={t("chat-chatview.handoff_dismiss")} onBack={back} onDismiss={onDismiss} />;
+  return <BackStrip label={t("chat-backstrip.handoff_from", { title })} dismissLabel={t("chat-backstrip.handoff_dismiss")} onBack={back} onDismiss={onDismiss} />;
 }

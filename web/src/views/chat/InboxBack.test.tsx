@@ -36,12 +36,12 @@ function render() {
 describe("the Inbox way-back strip", () => {
   it("names the item when its title is known, and uses generic words otherwise", () => {
     render();
-    expect(host.querySelector("button")?.textContent).toBe(t("chat-chatview.inbox_back_title", { title: "Release review" }));
-    expect(inboxBackLabel({ title: "  " })).toBe(t("chat-chatview.inbox_back_generic"));
+    expect(host.querySelector("button")?.textContent).toBe(t("chat-backstrip.inbox_back_title", { title: "Release review" }));
+    expect(inboxBackLabel({ title: "  " })).toBe(t("chat-backstrip.inbox_back_generic"));
 
     origin.current = { id: "i1" };
     act(() => root.render(<InboxBack key="untitled" mid="m1" sid="s1" session={undefined} />));
-    expect(host.querySelector("button")?.textContent).toBe(t("chat-chatview.inbox_back_generic"));
+    expect(host.querySelector("button")?.textContent).toBe(t("chat-backstrip.inbox_back_generic"));
   });
 
   it("goes Back when this history entry came from the same item", () => {
@@ -81,7 +81,7 @@ describe("the Inbox way-back strip", () => {
 
     origin.current = { id: "i1" };
     act(() => root.render(<InboxBack key="found" mid="m1" sid="s1" session={undefined} />));
-    const close = host.querySelector<HTMLButtonElement>(`button[aria-label="${t("chat-chatview.handoff_dismiss")}"]`)!;
+    const close = host.querySelector<HTMLButtonElement>(`button[aria-label="${t("chat-backstrip.handoff_dismiss")}"]`)!;
     act(() => close.click());
     expect(host.querySelector("[data-inbox-back]")).toBeNull();
   });

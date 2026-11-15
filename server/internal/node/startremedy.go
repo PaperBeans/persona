@@ -21,6 +21,12 @@ const (
 func (n *Node) keptStartTab(pane string) (keptStart, bool) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	return n.keptStartTabLocked(pane)
+}
+
+// keptStartTabLocked is keptStartTab with n.mu already held. Reusing a tab needs its expiry, binding and agent checks
+// plus its deletion in one critical section, so two session.start requests cannot claim the same kept tab.
+func (n *Node) keptStartTabLocked(pane string) (keptStart, bool) {
 	k, ok := n.keptStarts[pane]
 	if !ok || !time.Now().Before(k.until) {
 		return keptStart{}, false
@@ -49,6 +55,9 @@ func (n *Node) startKeys(ctx context.Context, pane, text string, keys []string) 
 	if utf8.RuneCountInString(text) > startKeysText || len(keys) > startKeysCount {
 		return refusal("too_large", "start.keys types at most 32 characters and 8 keys", nil)
 	}
+	// start.keys must not type into a pane that another request claims as a fresh start while it waits.
+	unlock := n.typing.lock(workAgentPaneLockPrefix + pane)
+	defer unlock()
 	if _, ok := n.keptStartTab(pane); !ok {
 		return errStartTabGone
 	}
@@ -77,11 +86,12 @@ func (n *Node) reusingKeptTab(ctx context.Context, pane string) context.Context 
 	if pane == "" {
 		return ctx
 	}
-	k, ok := n.keptStartTab(pane)
+	n.mu.Lock()
+	k, ok := n.keptStartTabLocked(pane)
 	if !ok {
+		n.mu.Unlock()
 		return ctx
 	}
-	n.mu.Lock()
 	delete(n.keptStarts, pane)
 	n.mu.Unlock()
 	return context.WithValue(ctx, reusedTabKey{}, k.created)

@@ -151,7 +151,7 @@ describe("a background task", () => {
     expect(getPanel()).toEqual({ kind: "file", mid: "m", path: "/tmp/out/b1.log", cwd: "/work" });
     const cmd = row.querySelector<HTMLElement>("[data-bg-command]")!;
     expect(cmd.title).toBe("npm test -- --watch=false");
-    expect(cmd.getAttribute("aria-label")).toBe("拷贝命令");
+    expect(cmd.getAttribute("aria-label")).toBe("复制命令");
     act(() => cmd.click());
     expect(writeText).toHaveBeenCalledWith("npm test -- --watch=false");
   });

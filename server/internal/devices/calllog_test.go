@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -166,5 +167,20 @@ func TestReconnectLogsSayWhy(t *testing.T) {
 	}
 	if len(log.with(`[m1] connection over ssh closed with 1 call(s) out: session.start (reason: "reconnect requested")`)) != 1 {
 		t.Fatalf("no line for the calls cut off: %q", log.lines)
+	}
+}
+
+// An error text over the limit is cut on a whole character: a cut inside a Chinese character would put invalid UTF-8
+// in the log line.
+func TestOneLineErrCutsOnWholeCharacter(t *testing.T) {
+	// 100 characters of 3 bytes each: the 300-byte limit lands on a boundary, so start with one ASCII byte to move it
+	// inside a character.
+	err := errors.New("x" + strings.Repeat("好", 100))
+	got := oneLineErr(err)
+	if !utf8.ValidString(got) {
+		t.Fatalf("cut inside a character: %q", got)
+	}
+	if !strings.HasSuffix(got, "好…") || len(got) > 300+len("…") {
+		t.Fatalf("got %d bytes: %q", len(got), got)
 	}
 }

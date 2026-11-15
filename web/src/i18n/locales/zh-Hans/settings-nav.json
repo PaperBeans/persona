@@ -5,7 +5,7 @@
   "tab_providers": "模型供应商",
   "tab_agents": "Agent",
   "hint_persona": "关于我、记忆、定时任务和会话分诊",
-  "hint_agents": "Claude Code、Codex、Antigravity 和 omp",
+  "hint_agents": "Claude Code、Codex、Antigravity、omp 和 Grok",
   "tab_model_config": "模型配置",
   "tab_channels": "渠道",
   "tab_connectors": "连接器",

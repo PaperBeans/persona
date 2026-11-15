@@ -19,10 +19,11 @@ import (
 // sends them).
 type ownConfig struct {
 	Assistant *struct {
-		Owner    *string `json:"owner"`
-		Notes    *string `json:"notes"`
-		Machine  *string `json:"machine"`
-		Launcher *string `json:"launcher"`
+		Owner          *string `json:"owner"`
+		Notes          *string `json:"notes"`
+		Machine        *string `json:"machine"`
+		Launcher       *string `json:"launcher"`
+		MemoryDreaming bool    `json:"memory_dreaming"`
 	} `json:"assistant"`
 	Agents *assistantwire.AgentsConfig `json:"agents"`
 	KB     *struct {
@@ -79,6 +80,7 @@ func (c ownConfig) validatePlacement(h Hello) error {
 // over is h with c's sections in place of the hello's.
 func (c ownConfig) over(h Hello) Hello {
 	if a := c.Assistant; a != nil {
+		h.Assistant.MemoryDreaming = a.MemoryDreaming
 		if a.Owner != nil {
 			h.Owner = strings.TrimSpace(*a.Owner)
 		}

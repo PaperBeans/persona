@@ -19,6 +19,8 @@ files:
   - package.json
   - package-lock.json
 mac:
+  # build/icon.png and build/icon.ico come from scripts/assets/make_icon.py desktop (docs/desktop/desktop.md "Icons")
+  icon: build/icon.png
   category: public.app-category.productivity
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
@@ -30,6 +32,7 @@ mac:
     - target: zip
       arch: [universal]
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch: [x64]

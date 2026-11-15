@@ -154,10 +154,9 @@ func TestNotifyUserFeishuCopyFollowsLowDistractionOverTheBus(t *testing.T) {
 			lnMode(st.ln)
 			lnOn = st.ln
 		}
+		// notify_user answers only after the copies it sent landed or their wait ran out (copies.wait(notifyCopyWait),
+		// tools.go), so a copy sent anyway is already among the posts here.
 		answer := notify(st.session, st.title, st.lvl, st.key)
-		if !st.copied {
-			time.Sleep(500 * time.Millisecond) // a copy sent anyway would have been posted by now
-		}
 		got, reason := posted(st.title), held(st.title)
 		t.Logf("ln=%v %s %q level=%q key=%q: Feishu copies %d, hub held %q; answer: %s", st.ln, st.session, st.title, st.lvl, st.key, got, reason, answer)
 		switch {

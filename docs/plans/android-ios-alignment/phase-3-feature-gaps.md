@@ -28,7 +28,7 @@ What people do on an iPhone they can also do on Android, most-used first. Whatev
 
 **F9. Larger areas, each decided in its own issue.** Health; meeting recording (Android shows the minutes in Knowledge but can't record); and the Machines extras (live view, usage chart, clipboard, computer use). The archived-chats browser moved to [chats](chats.md) (C12), with the rest of the conversation history.
 
-**F10. Settings Android lacks.** Saved Places; Knowledge Selection; meeting settings (with recording); Claude Code Live Replies; GitHub connector sign-in and Inbox settings; offering the clipboard when you come back to the app; the in-app tunnel page; Appearance (text size, which is open question 6, layout, glow while replying); workout reports; source subscriptions (#2041). The Live Activity, Dynamic Island, Watch sync and background push are platform features, not gaps.
+**F10. Settings Android lacks.** Saved Places; meeting settings (with recording); Claude Code Live Replies; GitHub connector sign-in and Inbox settings; offering the clipboard when you come back to the app; the in-app tunnel page; Appearance (text size, which is open question 6, layout, glow while replying); workout reports; source subscriptions (#2041). Knowledge Selection is complete (#2217) in Settings › Knowledge Selection and is no longer an outstanding gap. The Live Activity, Dynamic Island, Watch sync and background push are platform features, not gaps.
 
 Related: #506 (marking up photos before sending, recording context in the composer), #1581 (password cards).
 
@@ -129,7 +129,7 @@ Each gets an iOS issue: answering questions and terminal choices from notificati
 | Setting | Size |
 | --- | --- |
 | Saved Places | S |
-| Knowledge Selection | M |
+| Knowledge Selection | M — done (#2217); Settings › Knowledge Selection |
 | Meeting settings | with recording |
 | Claude Code Live Replies | S |
 | GitHub connector sign-in and Inbox settings | S to M |

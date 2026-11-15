@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PersonaWire
 
 /// A comment on lines of a review, kept on the device until the review is sent (#151, docs/web/review.md): the file,
 /// the lines (the old file's when only removed lines were picked), the diff rows with their marks, and the note.

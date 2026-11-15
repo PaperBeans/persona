@@ -417,11 +417,17 @@ func TestMainChatPickerListsWhatItCantRun(t *testing.T) {
 	if !slices.ContainsFunc(out.Launchers, func(l ConfiguredLauncher) bool { return l.Name == "msgs" }) {
 		t.Error("a Messages API provider is not listed")
 	}
-	// In the request's language; New Agent's picker has no such list.
+	// In the request's language. New Agent's picker lists only what its own-service rule leaves out here (#8109): the
+	// rest are the main chat's reasons, or a scope the user chose.
 	if w := appRequest(t, s, "GET", "/api/v1/machines/server/launchers?purpose=assistant", "", "zh-Hans"); !strings.Contains(w.Body.String(), "跑不了助手对话") {
 		t.Fatalf("zh-Hans: %s", w.Body.String())
 	}
-	if r := request(s, "GET", "/api/v1/machines/server/launchers?purpose=agent.new", ""); strings.Contains(r.Body.String(), `"unavailable"`) {
+	r = request(s, "GET", "/api/v1/machines/server/launchers?purpose=agent.new", "")
+	out.Unavailable = nil
+	if err := json.Unmarshal(r.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Unavailable) != 1 || out.Unavailable[0].Name != "own" || out.Unavailable[0].Code != proto.CodeLauncherOwnService {
 		t.Fatalf("agent.new: %s", r.Body.String())
 	}
 }

@@ -6,5 +6,6 @@
   "scroll_right": "Scroll to more workers",
   "no_sides": "No side sessions",
   "sides_scroll_left": "Scroll to earlier side sessions",
-  "sides_scroll_right": "Scroll to more side sessions"
+  "sides_scroll_right": "Scroll to more side sessions",
+  "side_sessions": "Side sessions"
 }

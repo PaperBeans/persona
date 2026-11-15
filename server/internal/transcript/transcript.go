@@ -492,7 +492,7 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		return nil
 	}
 	meta.tree = treeLine{uuid: e.UUID, parent: e.ParentUUID, sidechain: e.IsSidechain, assistant: e.Type == "assistant",
-		system: e.Type == "system", turnEnd: e.Type == "system" && e.Subtype == "turn_duration"}
+		system: e.Type == "system", turnEnd: e.Type == "system" && e.Subtype == "turn_duration", raw: line}
 	if e.Type == "user" {
 		meta.sawUser = true
 	}

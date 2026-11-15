@@ -2,7 +2,7 @@
 // moving with the conversation's state; the header menu's "Details" / "Knowledge" / "Back to main chat" / "Copy info"; the
 // main conversation's "Compact context" / "New main chat" and the strip above the composer while it compacts (#1727). Its
 // model is the composer's model pill (views/chat/ModelPill.tsx AssistantModelPill, #5033).
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { api, ApiError, errorText } from "../../lib/api";
 import { assistantInfoText, conversationKey, effectiveLauncher, shortModel, usePickedLauncher } from "../../lib/assistant-chat";
 import { isBackgroundSupervisor } from "../../lib/background-supervisor";
@@ -19,11 +19,12 @@ import { hubHas, refreshAssistant, useStore } from "../../lib/store";
 import type { Item, Session } from "../../lib/types";
 import { Button, copyText, Dialog, IconButton, Spinner, toast, type MenuItem } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
-import { ModelFallbackCard } from "../chat/ModelFallbackCard";
 import { conversationArchiveItem } from "../ConversationMenu";
 import { Switch } from "./parts";
 import { PersonaDot, usePersona } from "./Persona";
 import { t } from "../../i18n";
+
+const ModelFallbackCard = lazy(() => import("../chat/ModelFallbackCard").then((m) => ({ default: m.ModelFallbackCard })));
 
 // ── the header ──────────────────────────────────────────
 
@@ -118,7 +119,7 @@ function AssistantModelFallback({ session }: { session: Session }) {
   const offer = isMain && canNewMain;
   return (
     <>
-      <ModelFallbackCard session={session} headless onNewMain={offer ? () => setOpen(true) : undefined} />
+      <Suspense fallback={null}><ModelFallbackCard session={session} headless onNewMain={offer ? () => setOpen(true) : undefined} /></Suspense>
       {offer && <NewMainDialog open={open} onClose={() => setOpen(false)} session={session} />}
     </>
   );

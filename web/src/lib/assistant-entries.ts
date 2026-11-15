@@ -1,9 +1,9 @@
 import { backgroundWork, taskBackgroundWork, type BackgroundWork } from "./background-work";
 import { cardDismissed, cardFiled, cardSent, startFailure, type FeedItem, type TaskPlan } from "./feed";
 import { cardBucket, taskCardSlots, type TaskCardMetadata } from "./task-cards";
-import { reviewState } from "./supervision";
-import { supersededFailedStarts } from "./todo-triage";
-import { dockAgents, makeSessionLookup, openAsk, todoRank, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
+import { reviewState, supervisorReviewing } from "./supervision";
+import { supersededFailedStarts, triage } from "./todo-triage";
+import { awaitsReview, dockAgents, makeSessionLookup, openAsk, todoRank, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 import { byTime } from "./times";
 import { homeKey } from "./folded-rows";
 import type { Interaction, Session } from "./types";
@@ -12,7 +12,8 @@ import type { Interaction, Session } from "./types";
  * The Assistant's two entries above the composer (#3387, docs/assistant/unified-entry.md "Needs you and In progress"):
  * Needs you lists everything waiting on the user, In progress everything running that does not. Each thing is one row in
  * exactly one of them, Needs you first; finished things are in neither (the board has them), and each entry's count is
- * its rows. A task its supervisor parked is In progress, saying until when and why; it is never in Needs you for that. A task is one row whatever its agents: they are not listed on their own. In the main conversation an
+ * its rows. A task its supervisor parked is In progress, saying until when and why; it is never in Needs you for that. So is
+ * a task waiting for its supervisor's review, for the first hour of the wait (`supervisorReviewing`). A task is one row whatever its agents: they are not listed on their own. In the main conversation an
  * Agent that belongs to no task (opened by hand) is a row of its own.
  */
 export type NeedsYouItem =
@@ -28,8 +29,9 @@ export type NeedsYouItem =
   | { kind: "message"; key: string; item: FeedItem };
 
 export type RunningItem =
-  /** A dispatched task not finished and not waiting on the user. `countsOpen`: see NeedsYouItem. */
-  | { kind: "task"; key: string; card: TaskCardMetadata; todo: Todo; status: TodoStatus; activity?: BackgroundWork; countsOpen: boolean }
+  /** A dispatched task not finished and not waiting on the user. `countsOpen`: see NeedsYouItem. `supervisorReview`:
+   *  it is here because its supervisor's review is under way, and its row says so. */
+  | { kind: "task"; key: string; card: TaskCardMetadata; todo: Todo; status: TodoStatus; activity?: BackgroundWork; countsOpen: boolean; supervisorReview?: boolean }
   /** A working Agent that belongs to no task. */
   | { kind: "agent"; key: string; session: Session; activity?: BackgroundWork };
 
@@ -39,6 +41,12 @@ export interface AssistantEntries {
   /** Open tasks with no progress for 48 hours and nothing running (the To-dos page's shelved, #3331): folded under
    *  In progress, not counted. */
   shelved: RunningItem[];
+  /** Fresh open PRs with no active agent, separate from In progress; still open tasks. */
+  pr: RunningItem[];
+  /** Handed-out tasks that finished in the last 24 hours and that the owner has not opened since (the To-dos page's Just
+   *  finished, todo-triage), newest first: a group under In progress, not counted (#8237). How a task ended is told
+   *  here, not by a card in the chat. */
+  justFinished: RunningItem[];
 }
 
 export interface AssistantEntriesInput {
@@ -82,11 +90,13 @@ export function entryStatus(todo: Todo, lookup: SessionLookup, plans: Record<str
 }
 
 /** The task waits for the user's decision or review: an open ask (a decided one only while the task is open), or its
- *  supervisor's `pending_review` / `needs_user` on an open task. */
-export function taskAwaitsDecision(todo: Todo): boolean {
+ *  supervisor's `needs_user` on an open task, or a `pending_review` that is the owner's: one waiting an hour or more,
+ *  or one the hub gives no start for (`supervisorReviewing`). A younger review is its supervisor's to do. */
+export function taskAwaitsDecision(todo: Todo, now: number = Date.now()): boolean {
   const ask = openAsk(todo);
   if (ask) return !(todo.done_at && ask.outcome === "decide");
-  return !todo.done_at && (todo.supervision?.state === "pending_review" || todo.supervision?.state === "needs_user");
+  if (todo.done_at) return false;
+  return todo.supervision?.state === "needs_user" || (todo.supervision?.state === "pending_review" && !supervisorReviewing(todo, now));
 }
 
 /** The message card still waits for Send: not sent, filed, dismissed, or put off. */
@@ -122,6 +132,8 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
   const deciding: { item: NeedsYouItem; rank: number; at: string }[] = [];
   const open: { item: RunningItem; rank: number; at: string }[] = [];
   const shelved: { item: RunningItem; at: string }[] = [];
+  const pr: { item: RunningItem; at: string }[] = [];
+  const finished: { item: RunningItem; at: number }[] = [];
   const folded = new Set<string>();
   const slots = taskCardSlots(conversation, input.cards ?? [], feed, plans, todos, isMain);
   const activeAgents = (todo: Todo) => (todo.done_at ? [] : (todo.agents ?? []).filter((a) => !a.released_at));
@@ -157,7 +169,9 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     const countsOpen = bucket === "open";
     // a failed start carries done_at (the hub ends it), yet it is the user's to retry while its bucket says open
     const waits = status === "failed" ? bucket === "open" : !todo.done_at && WAITS_ON_YOU.has(status);
-    const decision = taskAwaitsDecision(todo);
+    const decision = taskAwaitsDecision(todo, now);
+    // its supervisor's review is under way (not the owner's yet): in progress, whatever the To-dos page files it under
+    const reviewing = !decision && supervisorReviewing(todo, now);
     if (asks.length) asking.push({ kind: "task", key, todo, status, asks, countsOpen });
     else if (waits || decision) {
       // Only the review decision is hidden; a live Agent question above still has its home.
@@ -166,9 +180,17 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
       }
     }
     // a parked task waits on purpose (#3804): with the tasks in progress however long it has been still, never folded away
-    else if (bucket === "open" || reviewState(todo) === "parked") open.push({ item: { kind: "task", key, card, todo, status, activity: taskBackgroundWork(todo, lookup), countsOpen }, rank: todoRank(todo, status), at: card.at });
+    // a supervisor's review under way is Persona's own work, not a wait on the upstream maintainer: In progress, even
+    // with a fresh open PR; once reviewed (accepted, or parked on the PR) the PR rule below files it
+    else if (!reviewing && triage(todo, lookup, now, input.restored?.get(todo.id) ?? 0, superseded.has(todo.id)).section === "pr") pr.push({ item: { kind: "task", key, card, todo, status, countsOpen }, at: card.at });
+    else if (bucket === "open" || reviewState(todo) === "parked" || reviewing) open.push({ item: { kind: "task", key, card, todo, status, activity: taskBackgroundWork(todo, lookup), countsOpen, ...(reviewing && awaitsReview(todo, status) ? { supervisorReview: true } : {}) }, rank: todoRank(todo, status), at: card.at });
     else if (bucket === "shelved") shelved.push({ item: { kind: "task", key, card, todo, status, countsOpen: false }, at: card.at });
-    else continue;
+    else {
+      // finished work a conversation handed out (a failed start a related to-do finished is history, not news)
+      const tr = triage(todo, lookup, now, input.restored?.get(todo.id) ?? 0, superseded.has(todo.id));
+      if (tr.section === "just_done" && status !== "failed" && todo.origin) finished.push({ item: { kind: "task", key, card, todo, status, countsOpen: false }, at: tr.last });
+      continue;
+    }
     for (const agent of active) folded.add(sessionKey(agent.machine_id, agent.session_id));
   }
 
@@ -199,6 +221,8 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     ],
     running: [...open.sort(newest).map((row) => row.item), ...agentsRunning],
     shelved: shelved.sort(newest).map((row) => row.item),
+    pr: pr.sort(newest).map((row) => row.item),
+    justFinished: finished.sort((a, b) => b.at - a.at).map((row) => row.item),
   };
 }
 

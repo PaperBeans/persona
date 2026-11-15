@@ -6,7 +6,7 @@ import ja from "./locales/ja/inbox-inboxdetail.json";
 it("pins the original-source action labels in every locale", () => {
   expect(en.view_source).toBe("View original");
   expect(en.hide_source).toBe("Hide original");
-  expect(en.view_event).toBe("Handling");
+  expect(en.view_event).toBe("View handling");
 
   expect(zh.view_source).toBe("看原文");
   expect(zh.hide_source).toBe("收起原文");

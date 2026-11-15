@@ -350,10 +350,19 @@ func (s *Service) launcherModelSet(ctx context.Context, machine, launcher string
 		return nil
 	}
 	set := map[string]bool{}
+	aliases := map[string]string{}
+	defaultModel := ""
 	for _, x := range res.Models {
 		set[x.ID] = true
 		if x.Resolved != "" {
 			set[x.Resolved] = true
+			aliases[x.ID] = x.Resolved
+		}
+		if x.Default && defaultModel == "" {
+			defaultModel = x.ID
+			if x.Resolved != "" {
+				defaultModel = x.Resolved
+			}
 		}
 	}
 	if len(set) == 0 {
@@ -363,9 +372,33 @@ func (s *Service) launcherModelSet(ctx context.Context, machine, launcher string
 	if c.cacheAt == nil {
 		c.cacheAt, c.have = map[string]time.Time{}, map[string]map[string]bool{}
 	}
+	if c.aliases == nil {
+		c.aliases, c.defaults = map[string]map[string]string{}, map[string]string{}
+	}
 	c.cacheAt[key], c.have[key] = time.Now(), set
+	c.aliases[key], c.defaults[key] = aliases, defaultModel
 	c.cacheMu.Unlock()
 	return set
+}
+
+// launcherModelResolution reads the alias and default relationships alongside launcherModelSet's cached ids. A failed
+// or empty model read is unknown, not proof that a reply from another model belongs to this binding.
+func (s *Service) launcherModelResolution(ctx context.Context, machine, launcher string) (map[string]string, string) {
+	key := machine + "\x00" + launcher
+	c := &s.models
+	c.cacheMu.Lock()
+	if c.cacheAt != nil && time.Since(c.cacheAt[key]) < 5*time.Minute {
+		aliases, defaultModel := c.aliases[key], c.defaults[key]
+		c.cacheMu.Unlock()
+		return aliases, defaultModel
+	}
+	c.cacheMu.Unlock()
+	if set := s.launcherModelSet(ctx, machine, launcher); set == nil {
+		return nil, ""
+	}
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	return c.aliases[key], c.defaults[key]
 }
 
 // askLauncherModels is machine's node's /model list of launcher name (node/launcher_models.go), with the models of

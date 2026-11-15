@@ -55,7 +55,7 @@ export function TaskDecision({ todo, rowKey, hideTitle = false }: { todo: Todo; 
       apply(state);
       later(deferredKey, false);
       toast(t("assistant-decisionrow.dismissed"), "ok", {
-        label: t("assistant-tasks.undo_dismiss"),
+        label: t("assistant-task-actions.undo_dismiss"),
         run: async () => {
           if (!current() || !state.dismissal_id) return;
           try {
@@ -69,7 +69,7 @@ export function TaskDecision({ todo, rowKey, hideTitle = false }: { todo: Todo; 
     } catch (error) {
       if (current()) {
         later(deferredKey, false);
-        toast(t("assistant-tasks.dismiss_failed", { error: errorText(error) }), "error");
+        toast(t("assistant-task-actions.dismiss_failed", { error: errorText(error) }), "error");
       }
     } finally {
       admission.current = false;
@@ -82,8 +82,8 @@ export function TaskDecision({ todo, rowKey, hideTitle = false }: { todo: Todo; 
     later(decisionLaterKey(todo));
   };
   const buttons = <>
-    <Button className="min-h-11" disabled={busy} onClick={defer}>{t("assistant-tasks.later")}</Button>
-    <Button className="min-h-11" disabled={busy || !round} busy={dismissing} onClick={dismiss}>{t("assistant-tasks.dismiss_draft")}</Button>
+    <Button className="min-h-11" disabled={busy} onClick={defer}>{t("assistant-task-actions.later")}</Button>
+    <Button className="min-h-11" disabled={busy || !round} busy={dismissing} onClick={dismiss}>{t("assistant-task-actions.dismiss_draft")}</Button>
   </>;
   const controls = <div data-decision-actions className={`${ask && askOptions(ask).length ? "" : "sticky -bottom-2.5 "}-mx-3 -mb-2.5 mt-1 flex items-center gap-2 border-t border-line bg-field px-3 py-2.5`}>{buttons}</div>;
   // a decision that offers a go-ahead the owner gave three times carries a suggested rule: its line goes under the

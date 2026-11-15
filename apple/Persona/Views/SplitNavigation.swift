@@ -20,8 +20,6 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
     var listKey: String? = nil
     /// The pages the list opens (`navigationDestination`s), registered in both layouts.
     var destinations: Destinations
-    /// The Assistant | Agents switch over the page column, on a phone's tabs (iPhone Duo open: `pageTabSwitch`, #2623).
-    var pageSwitch = false
     /// The list column's own color, for the strip over it on the iPad (`SidebarTopFill`) and behind the phone's drawer;
     /// nil, the system sidebar's.
     var columnColor: Color? = nil
@@ -50,12 +48,11 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
     @State private var pageSafeTop: CGFloat = 0
     #endif
 
-    init(path: Binding<NavigationPath>, listKey: String? = nil, destinations: Destinations, pageSwitch: Bool = false,
-         columnColor: Color? = nil, @ViewBuilder sidebar: () -> Sidebar, @ViewBuilder empty: () -> Empty) {
+    init(path: Binding<NavigationPath>, listKey: String? = nil, destinations: Destinations, columnColor: Color? = nil,
+         @ViewBuilder sidebar: () -> Sidebar, @ViewBuilder empty: () -> Empty) {
         _path = path
         self.listKey = listKey
         self.destinations = destinations
-        self.pageSwitch = pageSwitch
         self.columnColor = columnColor
         self.sidebar = sidebar()
         self.empty = empty()
@@ -126,8 +123,6 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
                     empty.modifier(destinations)
                 }
                 #if os(iOS)
-                // The stack's root page only: the pages opened on it carry their own (`SplitDetailPage`, #3680).
-                .safeAreaInset(edge: .top, spacing: 0) { if pageSwitch { PageTabSwitchRow() } }
                 .safeAreaPadding(.top, topPad(pageSafeTop))
                 .background { readsSafeTop { pageSafeTop = $0 } }
                 .background { columnControl }
@@ -153,7 +148,7 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
             #endif
             // On the whole split, not the detail stack: its pages are built from the destinations the sidebar
             // registered, in the sidebar's environment.
-            .environment(\.splitDetail, SplitDetail(isFirstPage: path.count <= 1, listHidden: columns == .detailOnly, pageSwitch: pageSwitch))
+            .environment(\.splitDetail, SplitDetail(isFirstPage: path.count <= 1, listHidden: columns == .detailOnly))
             .environment(\.splitShowList, SplitShowList(show: { [columns = $columns] in
                 withAnimation(Theme.Motion.layout) { columns.wrappedValue = SplitColumns.shown }
             }, hide: { [columns = $columns] in
@@ -330,8 +325,6 @@ struct SplitDetail: Equatable {
     /// The page is a window of its own (the Mac's chat window), not a split's detail column: the window's title bar has
     /// its title.
     var ownWindow = false
-    /// The Assistant | Agents switch rides over each page of the column (a phone's tabs, `pageTabSwitch`, #3680).
-    var pageSwitch = false
     /// The Sidebar layout on a phone (#6332): the list is the drawer's, and a first page has the drawer's button where a
     /// back would be.
     var drawer = false
@@ -369,9 +362,8 @@ struct SplitPush {
 }
 
 extension View {
-    /// A page the list opens: in the split's detail column its first page has no back button, and on a phone's tabs each
-    /// page there carries the Assistant | Agents switch (`SplitDetail.pageSwitch`, #3680). `ownsBack`: the page shows or
-    /// hides the system's back itself (an Agents chat); on iOS this leaves it alone, as an outer
+    /// A page the list opens: in the split's detail column its first page has no back button. `ownsBack`: the page
+    /// shows or hides the system's back itself (an Agents chat); on iOS this leaves it alone, as an outer
     /// `navigationBarBackButtonHidden(false)` wins over the page's own `true` (iPhone Duo's side bars, 2026-11-04: the
     /// system's back beside the chat's own, two backs). On the Mac the title row draws no ‹ for it: the chat's header
     /// has its own, shown only with a page under the chat (#1337).
@@ -391,7 +383,6 @@ private struct SplitDetailPage: ViewModifier {
             if ownsBack { content } else { content.navigationBarBackButtonHidden(split?.isFirstPage == true) }
         }
         #if os(iOS)
-        .modifier(PageTabSwitchInset(shown: split?.pageSwitch == true))
         // The Sidebar layout on a phone (#6332): a first page opens the drawer where its back would be.
         .modifier(DrawerButtonItem(shown: !ownsBack && split?.drawer == true && split?.isFirstPage == true))
         #endif

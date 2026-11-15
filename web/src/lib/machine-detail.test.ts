@@ -130,6 +130,22 @@ describe("formats", () => {
     expect(usedOfTotal(5 * GB, undefined)).toBe("5.00 GB / —");
   });
 
+  // apple/Shared/MachineMetrics.swift bytes: the unit and the decimals follow the number as it is shown, after rounding (#8497).
+  it("step to the next unit when the value rounds to 1024, like the app's bytes (#8497)", () => {
+    expect(bytesBin(1023.4 * 1024)).toBe("1023 KB");
+    expect(bytesBin(1023.6 * 1024)).toBe("1.00 MB");
+    expect(bytesBin(1023.6 * MB)).toBe("1.00 GB");
+    expect(bytesBin(1023.6 * GB)).toBe("1.00 TB");
+    expect(bytesBin(1023.6 * 1024 * GB)).toBe("1024 TB");
+  });
+
+  it("choose the decimals from the rounded value, like the app's bytes (#8497)", () => {
+    expect(bytesBin(99.96 * MB)).toBe("100 MB");
+    expect(bytesBin(99.94 * MB)).toBe("99.9 MB");
+    expect(bytesBin(9.999 * MB)).toBe("10.0 MB");
+    expect(bytesBin(9.99 * MB)).toBe("9.99 MB");
+  });
+
   it("say bytes, rates, percents and uptimes like the app", () => {
     expect(bytesBin(48 * GB)).toBe("48.0 GB");
     expect(bytesBin(512 * 1024)).toBe("512 KB");

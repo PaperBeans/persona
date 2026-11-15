@@ -383,7 +383,8 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
                                             stopped = entry.status == TriageStatus.Unread || entry.status == TriageStatus.FollowUp)
                                         else projected
                                         TrayProgressRow(row, activity = entry.activity, waiting = entry.waiting,
-                                            working = entry.status == TriageStatus.Working, onClick = { openTask(host, entry.todo) })
+                                            working = entry.status == TriageStatus.Working, supervisorReview = entry.supervisorReview,
+                                            onClick = { openTask(host, entry.todo) })
                                     }
                                     is RunningEntry.Agent -> {
                                         val agent = entry.session
@@ -600,7 +601,7 @@ internal fun trayPullRequestNumber(reference: String): String? =
 
 @Composable
 private fun TrayProgressRow(row: TrayProgress, activity: BackgroundWork? = null, waiting: Boolean = false,
-    working: Boolean = false, onClick: () -> Unit) {
+    working: Boolean = false, supervisorReview: Boolean = false, onClick: () -> Unit) {
     val live = !row.done && !row.cancelled
     val work = activity.takeIf { live }
     val detail = trayBackgroundLine(work) ?: row.text
@@ -608,7 +609,9 @@ private fun TrayProgressRow(row: TrayProgress, activity: BackgroundWork? = null,
     JRow(onClick = onClick, modifier = Modifier.testTag("assistant-progress-${row.id}"), chevron = false, trailing = {
         if (row.done) JIcon(PhIcons.Check, stringResource(if (row.todo?.supervision?.state == "accepted")
             R.string.chat_tray_accepted else R.string.chat_tray_done), tint = palette.positive)
+        // judged finished and with its supervisor for review (`RunningEntry.Task.supervisorReview`): the row says whose turn it is
         else Text(stringResource(if (work != null) R.string.chat_tray_working else if (live && waiting) R.string.chat_tray_waiting
+            else if (live && supervisorReview) R.string.chat_tray_supervisor_review
             else if (row.cancelled) R.string.chat_tray_cancelled else if (row.blocked) R.string.chat_tray_blocked else if (row.plan != null) R.string.chat_tray_planned
             else if (row.stopped) R.string.chat_tray_stopped_state else R.string.chat_tray_in_progress),
             style = PersonaTheme.type.micro, color = if (row.blocked || row.orphaned != null) palette.cautionText else palette.ink3, maxLines = 1)

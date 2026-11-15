@@ -92,7 +92,8 @@ func (u *updater) check(ctx context.Context) (*update.Published, error) {
 	if u.h.build.Channel == update.Docker {
 		return nil, u.checkImage(ctx)
 	}
-	source := u.h.updateURL()
+	src := u.h.updateSource()
+	source := src.url
 	if source == "" {
 		return nil, errNotRelease
 	}
@@ -114,12 +115,37 @@ func (u *updater) check(ctx context.Context) (*update.Published, error) {
 		u.setCheckState("idle", su(u.h.userLang(), "check_failed", i18n.Args{"error": i18n.Localize(err, u.h.userLang())}))
 		return nil, err
 	}
+	u.noteBehind(src, r.Manifest)
 	if u.h.build.Newer(r.Manifest.Build) {
 		u.setCheckState("available", "")
 	} else {
 		u.setCheckState("idle", "")
 	}
 	return r, nil
+}
+
+// noteBehind logs that the update source looks stopped (Build.Behind, #8108): its newest release is older than the one
+// this hub's code contains, so every check finds nothing newer and the phones no newer Android app. Once per source and
+// release, not at every hourly check; again when either changes. The app shows it too (updateView.SourceBehind).
+func (u *updater) noteBehind(src updateSource, m *update.Manifest) {
+	note := ""
+	if u.h.build.Behind(m) {
+		note = fmt.Sprintf("%s %d", src.url, m.Build)
+	}
+	u.mu.Lock()
+	again := note == u.behindNote
+	u.behindNote = note
+	u.mu.Unlock()
+	if note == "" || again {
+		return
+	}
+	from := "built in"
+	if src.from == updateFromConfig {
+		from = "hub.json update.url"
+	}
+	u.h.logf("update: the update source %s (%s) has nothing newer than %s (build %d), older than this hub's %s: it looks stopped, "+
+		"so neither this hub nor its phones get updates from it; hub.json update.url sets another (docs/operations/hub-update.md \"Update source\")",
+		src.url, from, m.Version, m.Build, u.h.version)
 }
 
 // syncAndroid keeps apps/android, which the phones update from (androidapp.go), at the Android app the release
@@ -177,7 +203,8 @@ func (u *updater) freshRelease(ctx context.Context) {
 	if u == nil || u.h.build.Channel == update.Docker {
 		return
 	}
-	source := u.h.updateURL()
+	src := u.h.updateSource()
+	source := src.url
 	if source == "" {
 		return
 	}
@@ -206,6 +233,7 @@ func (u *updater) freshRelease(ctx context.Context) {
 	u.release, u.releaseRead, u.blocked = r, u.lastCheck, blocked
 	available := u.state == "idle" && u.h.build.Newer(r.Manifest.Build)
 	u.mu.Unlock()
+	u.noteBehind(src, r.Manifest)
 	if available {
 		u.setState("available")
 	}

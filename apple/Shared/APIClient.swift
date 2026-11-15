@@ -583,7 +583,8 @@ nonisolated struct APIClient: Sendable {
 
     struct MachinesResponse: Decodable { var machines: [Machine] }
     /// A machine's launchers and what runs with none picked (`default`, #2455; nil from an older hub). With
-    /// `purpose=assistant` (#5033) it also carries `unavailable`: launchers and providers that can't run the main chat.
+    /// `purpose=assistant` (#5033) it also carries `unavailable`: launchers and providers that can't run the main chat;
+    /// for New Agent (`agent.new`, #8109) the Persona-managed providers left out there by their own-service rule.
     struct LaunchersResponse: Decodable, Sendable {
         var launchers: [Launcher]
         var `default`: LauncherDefault?
@@ -719,10 +720,16 @@ nonisolated struct APIClient: Sendable {
         struct Body: Encodable { var enabled: Bool }
         return try JSON.decoder.decode(MachineIPhone.self, from: await request("PUT", "/api/v1/machines/\(machine)/iphone", body: Body(enabled: enabled), timeout: 60))
     }
-    /// Pair (an iPhone plugged into the computer), Forget, Cancel: `pair`, `forget`, `cancel`.
+    /// Pair (an iPhone plugged into the computer), Forget, Cancel, Install (the bridge), Prepare: `pair`, `forget`,
+    /// `cancel`, `install`, `prepare`.
     func iphoneJob(machine: String, _ action: String, device: String?) async throws -> MachineIPhone {
         struct Body: Encodable { var device: String? }
         return try JSON.decoder.decode(MachineIPhone.self, from: await request("POST", "/api/v1/machines/\(machine)/iphone/\(action)", body: Body(device: device), timeout: 60))
+    }
+    /// The guided setup's Try It (#8199): a screenshot of this iPhone and Weather opened, without the model.
+    func tryIPhone(device: String) async throws -> IPhoneTryResult {
+        struct Body: Encodable { var device: String }
+        return try JSON.decoder.decode(IPhoneTryResult.self, from: await request("POST", "/api/v1/iphone/try", body: Body(device: device), timeout: 120))
     }
     /// Every iPhone the computers reach, for this iPhone to find itself among them.
     func iphones() async throws -> IPhoneList {
@@ -1254,11 +1261,14 @@ nonisolated struct APIClient: Sendable {
         var turns: Int
         var startedAt: Date?
         var lastActivity: Date?
+        /// Nobody gives this session's counts (#8261, `usage_unknown`: Paseo sends no usage for an agent that is not
+        /// Claude Code's): Session Info leaves out the tokens, compactions and turns rather than showing zeros.
+        var usageUnknown: Bool?
         enum CodingKeys: String, CodingKey {
             case cwd, model, launcher, version, compactions, turns, effort
             case sessionID = "session_id", transcriptPath = "transcript_path", gitBranch = "git_branch",
                  permissionMode = "permission_mode", contextTokens = "context_tokens", outputTokens = "output_tokens",
-                 startedAt = "started_at", lastActivity = "last_activity"
+                 startedAt = "started_at", lastActivity = "last_activity", usageUnknown = "usage_unknown"
         }
     }
     func sessionInfo(_ k: SessionKey) async throws -> SessionInfo { try await get(sp(k) + "/info") }
@@ -1339,6 +1349,9 @@ nonisolated struct APIClient: Sendable {
         var timezonePicked: Bool?
         /// The main conversation's session id (the Persona tab opens it); nil until there is one.
         var main: String?
+        /// The computer the hub actually routes the main conversation to. It can differ from `machine_id`, which is
+        /// only the default for new work; older hubs omit it and use `machine_id`.
+        var mainMachineID: String?
         /// Notify Main-Chat Tasks Only in the Main Chat (#1731): tasks the main conversation starts are quiet (`TodoItem.quiet`). The
         /// value in effect (on by default); nil from a hub without the setting, which hides the switch.
         var mainTasksQuiet: Bool?
@@ -1346,6 +1359,10 @@ nonisolated struct APIClient: Sendable {
         /// conversation, a scheduled task or a follow-up started into one line. The value in effect; nil from a hub
         /// without the setting, which hides the switch and folds as if on (`backgroundFolded`).
         var mainBackgroundFolded: Bool?
+        /// Show Scheduled Task Chats in the sidebar's Recent (#8324): the chats a scheduled task or the background
+        /// supervisor started are listed there too. The value in effect, one for all of the user's devices; nil from a
+        /// hub without the setting, which hides the switch and keeps them out of Recent, as before.
+        var recentTaskChats: Bool?
         /// The role a meeting recording starts with (#2981, docs/assistant/meeting-minutes.md「Attendance fields」): `off`,
         /// `listener` or `participant`; nil from a hub without attending.
         var meetingAttendanceDefault: String?
@@ -1399,8 +1416,8 @@ nonisolated struct APIClient: Sendable {
         var agentAutoNamingIntervalHours: Int?
         enum CodingKeys: String, CodingKey {
             case launcher, cwd, conversations, timezone, main, leaders, manager
-            case machineID = "machine_id", notes = "notes_effective", mainTasksQuiet = "main_tasks_quiet"
-            case mainBackgroundFolded = "main_background_folded"
+            case machineID = "machine_id", mainMachineID = "main_machine_id", notes = "notes_effective", mainTasksQuiet = "main_tasks_quiet"
+            case mainBackgroundFolded = "main_background_folded", recentTaskChats = "recent_task_chats"
             case meetingAttendanceDefault = "meeting_attendance_default", timezonePicked = "timezone_picked"
             case mainSupervisesOwnTasks = "main_supervises_own_tasks", backgroundSupervisor = "background_supervisor"
             case meetingTranscriptionDefault = "meeting_transcription_default", meetingGlossary = "meeting_glossary"
@@ -1421,8 +1438,17 @@ nonisolated struct APIClient: Sendable {
 
         /// Whether the main conversation folds its background rounds: on unless the hub says off (an older hub omits it).
         var backgroundFolded: Bool { mainBackgroundFolded ?? true }
+
+        /// The confirmed main conversation on its actual computer, not merely the default computer for new work.
+        func mainKey(group: String = "") -> SessionKey? {
+            guard let main, !main.isEmpty else { return nil }
+            let route = mainMachineID?.isEmpty == false ? mainMachineID : nil
+            return SessionKey(group: group, machineID: route ?? machineID, sessionID: main)
+        }
     }
-    func assistant() async throws -> AssistantState { owned(try await get("/api/v1/assistant")) }
+    /// Decoded off the main actor: it holds every conversation, and the app reads it again each time it comes back to
+    /// the front (#8324).
+    func assistant() async throws -> AssistantState { owned(try await getDecodedOffMain("/api/v1/assistant")) }
     /// A direction as `GET /api/v1/assistant/leaders` lists it (#3519, #3695): its leader conversation's id and the name
     /// the hub gives the direction (the name set, else its project's, else the title without its "MMDD | kind | " prefix).
     struct LeaderInfo: Codable, Sendable, Equatable {
@@ -1493,6 +1519,7 @@ nonisolated struct APIClient: Sendable {
         var notes: String?
         var mainTasksQuiet: Bool?
         var mainBackgroundFolded: Bool?
+        var recentTaskChats: Bool?
         var meetingAttendanceDefault: String?
         var mainSupervisesOwnTasks: Bool?
         /// Hub transcription's settings (phase 5); `[]` clears the glossary. `meeting_transcription_ready` is read-only.
@@ -1513,6 +1540,7 @@ nonisolated struct APIClient: Sendable {
             case launcher, timezone, notes
             case machineID = "machine_id", mainTasksQuiet = "main_tasks_quiet", meetingAttendanceDefault = "meeting_attendance_default"
             case mainBackgroundFolded = "main_background_folded", mainSupervisesOwnTasks = "main_supervises_own_tasks"
+            case recentTaskChats = "recent_task_chats"
             case meetingTranscriptionDefault = "meeting_transcription_default", meetingGlossary = "meeting_glossary"
             case meetingTranscriptionExtension = "meeting_transcription_extension"
             case nextSuggestions = "next_suggestions", kbTopics = "kb_topics"

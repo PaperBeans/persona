@@ -3,6 +3,7 @@ import { appendFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import { finishUpdateTest, isNsisInstallAt, packagedUpdateConfigPath, readPackagedUpdateConfig, readUpdateTestEvents, watchForNsisInstall, watchUpdateTestEvents } from "./update-test-receipts.mjs";
 
 async function fixture(t) {
@@ -76,6 +77,21 @@ test("watch awaits a genuinely delayed NSIS event and validates its real executa
   assert.equal(result.event.executableDirectory, installed);
   assert.equal(result.event.updaterInstallDirectory, null);
   assert.equal(result.event.executableInRunDirectory, true);
+});
+
+test("watch abort stops polling and never returns a later event as success", async t => {
+  const profile = await fixture(t);
+  const controller = new AbortController();
+  let predicates = 0;
+  const pending = watchUpdateTestEvents(profile, 60, () => { predicates++; return undefined; }, { pollMilliseconds: 20, signal: controller.signal });
+  const observed = pending.catch(error => error);
+  await new Promise(resolve => setTimeout(resolve, 45));
+  controller.abort(new Error("cancel watcher"));
+  assert.match((await observed).message, /cancel watcher/);
+  const before = predicates;
+  await writeFile(join(profile, "update-test.jsonl"), record({ event: "nsis-install", executableDirectory: profile }));
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(predicates, before, "an aborted watch must not read or evaluate later events");
 });
 
 test("watch returns undefined after a missing-event deadline, not a Promise treated as an event", async t => {
@@ -203,7 +219,7 @@ test("test-only instrumentation forwards the real updater's full restart argumen
   const platform = Object.getOwnPropertyDescriptor(process, "platform");
   Object.defineProperty(process, "platform", { value: "win32" });
   t.after(() => Object.defineProperty(process, "platform", platform));
-  await import(join(directory, "update-test/main.mjs"));
+  await import(pathToFileURL(join(directory, "update-test/main.mjs")).href);
   assert.equal(autoUpdater.install(true, true), "real updater return");
   assert.deepEqual(received, [[true, true]]);
   const receipt = (await readUpdateTestEvents(profile)).find(entry => entry.event === "nsis-install");

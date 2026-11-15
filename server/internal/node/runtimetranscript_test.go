@@ -493,6 +493,68 @@ func TestRuntimeTranscriptEcho(t *testing.T) {
 	}
 }
 
+// pageTags is the client_msg_id of each of the user's words on session id's page, as the node serves it.
+func pageTags(t *testing.T, n *Node, id string) map[string]string {
+	t.Helper()
+	raw, err := nodeCall(t, n, "session.items", map[string]any{"session_id": id, "limit": 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page struct {
+		Items []proto.Item `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &page); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, it := range page.Items {
+		if it.Role == "user" && it.Kind == proto.KindText {
+			out[it.Text] = it.ClientMsgID
+		}
+	}
+	return out
+}
+
+// A runtime's session reads its runtime's own items until its row names a transcript here (a new session before its
+// first turn, a takeover answered without one). Messages sent meanwhile keep their client_msg_id once it reads the
+// transcript (#8358): one the runtime tied to its own line while that was the content, and one it had not pushed yet,
+// sent after the runtime's items had counted further than the transcript does. Before, the first id stayed on the
+// runtime's line and the second was looked for past the transcript's seq 41: neither line carried its id there, and
+// the app's bubbles stayed pending or the messages showed twice.
+func TestRuntimeTranscriptEchoAcrossTheMove(t *testing.T) {
+	n, hub := runtimeNode(t)
+	t.Cleanup(freshOffline)
+	host := dialRuntime(t, n, paseoHello())
+	row := map[string]any{"session_id": "paseo-a7", "agent": "claude", "cwd": "/w/app", "status": "working"}
+	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{row}})
+	waitFor(t, "listed", func() bool { _, ok := listed(t, n)["paseo-a7"]; return ok })
+	runtimeSessionCall(t, hub, "session.watch", map[string]any{"session_id": "paseo-a7", "since_seq": 0})
+	_ = host.peer.Notify("session.items", map[string]any{"session_id": "paseo-a7", "to_seq": 40, "items": []proto.Item{
+		{ID: "40#0", Seq: 40, Role: "assistant", Kind: proto.KindText, Text: "ready"}}})
+	waitFor(t, "the runtime's items pushed", func() bool { return n.runtimes.lastPushed("paseo-a7") == 40 })
+	send := func(cm, text string) {
+		t.Helper()
+		if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": "paseo-a7", "text": text, "client_msg_id": cm}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send("cm-tied", "run the tests please")
+	_ = host.peer.Notify("session.items", map[string]any{"session_id": "paseo-a7", "to_seq": 41, "items": []proto.Item{
+		{ID: "41#0", Seq: 41, Role: "user", Kind: proto.KindText, Text: "run the tests please", ClientMsgID: "cm-tied", TS: time.Now()}}})
+	waitFor(t, "the runtime's line pushed", func() bool { return n.runtimes.lastPushed("paseo-a7") == 41 })
+	send("cm-late", "and then deploy")
+	// Claude Code has written both into the transcript, and the runtime's list names it now.
+	now := time.Now()
+	writeTranscript(t, n.home, "/w/app", sdkSession, now, userLine("u1", now, "run the tests please"),
+		assistantLine("a1", now, "running them"), userLine("u2", now, "and then deploy"))
+	row["transcript"] = sdkSession
+	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{row}})
+	waitFor(t, "moved to the transcript", func() bool { return n.runtimes.transcriptOf("paseo-a7") == sdkSession })
+	if got := pageTags(t, n, "paseo-a7"); got["run the tests please"] != "cm-tied" || got["and then deploy"] != "cm-late" {
+		t.Fatalf("the transcript's lines carry %v", got)
+	}
+}
+
 // A runtime's session in a Claude transcript shows the agent's plan, as the same transcript in a terminal does
 // (#5421 set Session.plan on the pane and background rows only).
 func TestRuntimeTranscriptShowsThePlan(t *testing.T) {

@@ -1,5 +1,6 @@
 import Foundation
 import PersonaKit
+import PersonaWire
 
 /// What a chat last went through, in its structure only (#3783): the batches that came in (how many, which lines, what
 /// the store did with them), when the streamed text started and was cleared, and how the end of the chat was drawn

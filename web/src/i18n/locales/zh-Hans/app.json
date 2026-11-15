@@ -31,5 +31,6 @@
   "title_agent_archives": "已归档的 Agent",
   "title_subscriptions": "订阅来源",
   "new_version": "有新版本",
-  "new_version_reload": "点此刷新"
+  "new_version_reload": "点此刷新",
+  "title_request": "请求"
 }

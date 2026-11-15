@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 // Messages written while the hub is out of reach (docs/apple/ios.md「Connection status」): they stay in their chat as pending bubbles
 // with a clock (Sends when connected) and go out by themselves once the app is connected and caught up, in the order they

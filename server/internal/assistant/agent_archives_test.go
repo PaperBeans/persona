@@ -50,6 +50,31 @@ func archiveRows(t *testing.T, s *Service) []proto.Session {
 	return body.Sessions
 }
 
+func TestArchiveSnapshotKeepsStopCauseWithoutLiveControls(t *testing.T) {
+	for _, cause := range []proto.StopCause{
+		proto.StopTaskCompleted, proto.StopIdle, proto.StopRestart, proto.StopUser, proto.StopUnknown, "future-cause",
+	} {
+		t.Run(string(cause), func(t *testing.T) {
+			c := stoppedBoxAgent("stop0001")
+			c.SourceKind = "codex_history"
+			c.Capabilities = &proto.SessionCapabilities{
+				Read: true, Send: true, Terminal: true, Attach: true, Interrupt: true, Approve: true,
+				StopCause: cause, Modes: proto.CanModes(true), Model: proto.CanModes(true),
+			}
+			snapshot := archiveSnapshot(c)
+			want := &proto.SessionCapabilities{Read: true, Terminal: true, StopCause: cause}
+			if !reflect.DeepEqual(snapshot.Capabilities, want) || !stoppedAgent(snapshot) {
+				t.Fatalf("lost stopped provenance or retained live controls: %+v", snapshot.Capabilities)
+			}
+		})
+	}
+	c := stoppedBoxAgent("stop0001")
+	c.Capabilities = nil
+	if got := archiveSnapshot(c).Capabilities; !reflect.DeepEqual(got, &proto.SessionCapabilities{Read: true}) {
+		t.Fatalf("snapshot inferred capabilities: %+v", got)
+	}
+}
+
 func TestAgentSessionArchivesPersistAndRestore(t *testing.T) {
 	ft, _ := archiveTestService(t)
 	for _, agent := range []string{"claude", "codex"} {

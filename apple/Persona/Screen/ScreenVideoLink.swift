@@ -56,6 +56,8 @@ nonisolated enum ScreenVideoFallback: Equatable, Sendable {
     case locked
     /// The Mac hasn't allowed Persona Screen to record its screen.
     case notAllowed
+    /// The Mac already sends video to two devices (the hub refused this one as busy, #8320); tried again as `lost` is.
+    case busy
 
     /// The helper's `paused` reason as a fallback.
     static func paused(_ reason: String) -> ScreenVideoFallback {
@@ -71,6 +73,7 @@ nonisolated enum ScreenVideoFallback: Equatable, Sendable {
         case .lost: String(localized: "Video stopped. Showing VNC for now.")
         case .locked: String(localized: "The Mac is locked. Showing VNC until it’s unlocked.")
         case .notAllowed: String(localized: "This Mac hasn’t allowed video yet. Showing VNC.")
+        case .busy: String(localized: "Two devices are already watching this Mac’s video. Showing VNC for now.")
         }
     }
 
@@ -412,7 +415,7 @@ import UIKit
         opened = nil
         show(false)
         guard want != nil, ready != nil else { return }
-        say(.lost)
+        say(why == .busy ? .busy : .lost) // busy: tried again as a lost stream is, and video comes once one leaves
         let wait = backoff.take()
         retryAt = Date.now.addingTimeInterval(Double(wait.components.seconds) + Double(wait.components.attoseconds) / 1e18)
         onRetry(wait)
@@ -517,7 +520,7 @@ import UIKit
         // The live screen's session (#6398): the video joins it as a channel when the RFB stream opened one.
         if ScreenRoutes.enabled, let session = ScreenLinkRegistry.shared.session(for: r.pair) {
             let ws = RFBWebSocket(api: api, path: path, pair: r.pair, protocols: [ScreenLinkWire.subprotocol, "binary"])
-            return ScreenLinkRFBTransport(ScreenLinkVideoStream(socket: ScreenLinkRelaySocket(ws), session: session))
+            return ScreenLinkRFBTransport(ScreenLinkVideoStream(socket: ScreenLinkRelaySocket(ws), session: session), relay: ws)
         }
         return RFBWebSocket(api: api, path: path, pair: r.pair)
     }

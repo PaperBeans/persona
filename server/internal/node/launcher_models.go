@@ -26,7 +26,9 @@ import (
 // list its own /model menu shows. That list is in no config file — settings.json and config.toml hold the default
 // model and the gateway; the CLI makes the list from its aliases and what the gateway's /models answers — so the node
 // asks the CLI itself, run the way the launcher runs it: Claude Code answers its initialize control request (headless,
-// stream-json) with `models`, Codex's app-server answers model/list. Nothing is sent to a model.
+// stream-json) with `models`, Codex's app-server answers model/list. Nothing is sent to a model. A managed provider's
+// gateway models are read by the node as well (launcher_gateway_models.go): the CLI's answer has them only when its one
+// discovery cache was that gateway's.
 
 // launcherModelsTTL: a list is kept this long per launcher (and managed launcher's settings); refresh skips it.
 const launcherModelsTTL = 10 * time.Minute
@@ -89,7 +91,7 @@ func (n *Node) launcherModels(ctx context.Context, name, agentType string, refre
 		}
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), launcherModelsTimeout)
 		defer cancel()
-		var models []proto.AgentModel
+		var models, gateway []proto.AgentModel
 		var listErr error
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -97,6 +99,15 @@ func (n *Node) launcherModels(ctx context.Context, name, agentType string, refre
 			defer wg.Done()
 			models, listErr = n.listAgentModels(ctx, name, agent)
 		}()
+		// A managed provider's gateway models, read here: the CLI's own answer has them only when its one cache file
+		// was this gateway's (launcher_gateway_models.go).
+		if m, ok := n.managedLauncher(name); ok && agent == "claude" {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				gateway = n.gatewayModels(ctx, m)
+			}()
+		}
 		// Whether a picked model reaches the agent at all: a launcher that fixes its own --model would start with
 		// that one whatever is picked (the start refuses it).
 		if _, err := n.launcherModelCheck(ctx, name, modelCheckProbe); err != nil {
@@ -106,7 +117,7 @@ func (n *Node) launcherModels(ctx context.Context, name, agentType string, refre
 		if listErr != nil {
 			return nil, listErr
 		}
-		res.Models = models
+		res.Models = withGatewayModels(models, gateway)
 		launcherModelsCache.Lock()
 		if len(launcherModelsCache.got) > 64 {
 			launcherModelsCache.at, launcherModelsCache.got = map[string]time.Time{}, map[string]proto.LauncherModels{}

@@ -6,5 +6,7 @@
   "remind_late": "{when} の予定でした",
   "delete_card": "ToDo「{title}」を削除",
   "complete_card": "タスク「{title}」を完了にする（エージェントは止まったあと閉じられます）",
-  "reopen_card": "タスク「{title}」を再開"
+  "reopen_card": "タスク「{title}」を再開",
+  "supervision_waits_upstream": "上流でのレビューまたはマージ待ち：{url}",
+  "supervision_needs_deployment": "マージ済み。デプロイと実環境での検証がまだ必要です"
 }

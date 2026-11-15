@@ -102,7 +102,13 @@ nonisolated final class ScreenLinkRelaySocket: ScreenLinkSocket, @unchecked Send
 /// A screen stream as the RFB client and the video stream read it.
 nonisolated final class ScreenLinkRFBTransport: RFBTransport, @unchecked Sendable {
     let stream: ScreenLinkByteStream
-    init(_ stream: ScreenLinkByteStream) { self.stream = stream }
+    /// The hub's relay the stream opened on, for a refusal's status (#8320).
+    private let relay: RFBWebSocket?
+    init(_ stream: ScreenLinkByteStream, relay: RFBWebSocket? = nil) {
+        self.stream = stream
+        self.relay = relay
+    }
+    var refusedStatus: Int? { relay?.refusedStatus }
     func send(_ bytes: [UInt8]) async throws { try await stream.send(Data(bytes)) }
     func receive() async throws -> [UInt8] { [UInt8](try await stream.receive()) }
     func close() { stream.close() }

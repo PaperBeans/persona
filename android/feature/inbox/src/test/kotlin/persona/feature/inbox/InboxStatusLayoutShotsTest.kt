@@ -11,6 +11,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -180,6 +181,79 @@ class InboxStatusLayoutShotsTest {
             saveStatusCrop("$prefix-$suffix", actions)
         }
         assertTrue("Status layout failures:\n${failures.joinToString("\n")}", failures.isEmpty())
+    }
+
+    private fun saveZeroActionCrop(case: ZeroActionCase, text: String, style: AppStyle, dark: Boolean) {
+        val bitmap = rule.onNodeWithTag("zero-action-status-shot").captureToImage().asAndroidBitmap()
+        val state = bounds(text)
+        val top = floor(state.top - 16f).toInt().coerceIn(0, bitmap.height - 1)
+        val bottom = ceil(state.bottom + 16f).toInt().coerceIn(top + 1, bitmap.height)
+        val crop = Bitmap.createBitmap(bitmap, 0, top, bitmap.width, bottom - top)
+        assertTrue("${case.id} drew nothing", crop.width > 0 && crop.height > 0)
+        val out = File("build/inbox-zero-action-status-shots").apply { mkdirs() }
+        val name = "${case.id}-${style.name.lowercase()}-${if (dark) "dark" else "light"}"
+        File(out, "$name.png").outputStream().use { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    private fun drawZeroActionMatrix(cases: List<ZeroActionCase>, label: String) {
+        val repository = FakeInboxRepository()
+        repository.snapshot.value = InboxSnapshot(records = listOf(zeroActionRecord(cases.first())))
+        var currentCase by mutableStateOf(cases.first())
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        var run by mutableIntStateOf(0)
+        var renderedText = ""
+        rule.setContent {
+            ZeroActionStatusFixture(currentCase, repository, navigator, style, dark, run, onText = { renderedText = it })
+        }
+        val measurements = mutableListOf<ZeroActionMeasurement>()
+        for (case in cases) for (appearance in AppStyle.entries) for (night in listOf(false, true)) {
+            rule.runOnIdle {
+                repository.snapshot.value = InboxSnapshot(records = listOf(zeroActionRecord(case)))
+                currentCase = case
+                style = appearance
+                dark = night
+                run++
+                Snapshot.sendApplyNotifications()
+            }
+            rule.waitForIdle()
+            val suffix = "${appearance.name.lowercase()}-${if (night) "dark" else "light"}"
+            val measurement = measureZeroActionText(rule, case, renderedText)
+            measurements += measurement.copy(caseId = "${measurement.caseId}-$suffix")
+            saveZeroActionCrop(case, renderedText, appearance, night)
+        }
+        writeZeroActionMeasurements("shots-$label", measurements)
+        val failures = measurements.mapNotNull(ZeroActionMeasurement::failure)
+        assertTrue("Zero-action status captures were cut (${failures.size}/${measurements.size} cases):\n" +
+            failures.joinToString("\n"), failures.isEmpty())
+    }
+
+    @Test fun zeroActionDirectEnglishEveryStyleAndAppearance() {
+        drawZeroActionMatrix(zeroActionDirectCases("en"), "direct-en")
+    }
+
+    @Config(qualifiers = "zh-w360dp-h1800dp-xhdpi")
+    @Test fun zeroActionDirectSimplifiedChineseEveryStyleAndAppearance() {
+        drawZeroActionMatrix(zeroActionDirectCases("zh-Hans"), "direct-zh-Hans")
+    }
+
+    @Config(qualifiers = "ja-w360dp-h1800dp-xhdpi")
+    @Test fun zeroActionDirectJapaneseEveryStyleAndAppearance() {
+        drawZeroActionMatrix(zeroActionDirectCases("ja"), "direct-ja")
+    }
+
+    @Test fun zeroActionDetailEnglishEveryStyleAndAppearance() {
+        drawZeroActionMatrix(zeroActionDetailCases("en"), "detail-en")
+    }
+
+    @Config(qualifiers = "zh-w360dp-h1800dp-xhdpi")
+    @Test fun zeroActionDetailSimplifiedChineseEveryStyleAndAppearance() {
+        drawZeroActionMatrix(zeroActionDetailCases("zh-Hans"), "detail-zh-Hans")
+    }
+
+    @Config(qualifiers = "ja-w360dp-h1800dp-xhdpi")
+    @Test fun zeroActionDetailJapaneseEveryStyleAndAppearance() {
+        drawZeroActionMatrix(zeroActionDetailCases("ja"), "detail-ja")
     }
 
     @Test fun englishExpandedDefaultFontInEveryStyleAndAppearance() {

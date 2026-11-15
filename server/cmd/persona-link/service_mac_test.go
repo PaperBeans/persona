@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/link"
 )
@@ -67,6 +68,73 @@ func TestInstallOnMacUsesAnIndependentLaunchdService(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(f.calls, "\n"), "launchctl bootout gui/1000/com.persona.link") {
 		t.Fatalf("calls %q", f.calls)
+	}
+}
+
+func TestInstallOnMacRetriesTransientBootstrap(t *testing.T) {
+	f := newFakeEnv(t)
+	f.goos = "darwin"
+	f.pairHere(t)
+	if err := os.MkdirAll(filepath.Dir(f.linkPlistPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.linkPlistPath(), []byte("old agent"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	started := f.now()
+	bootouts, bootstraps := 0, 0
+	f.onCommand = func(call string) (string, error) {
+		switch {
+		case strings.HasPrefix(call, "launchctl bootout"):
+			bootouts++
+		case strings.HasPrefix(call, "launchctl bootstrap"):
+			bootstraps++
+			if bootstraps == 1 {
+				return "Bootstrap failed: 5: Input/output error", errors.New("exit status 5")
+			}
+			f.saveStatus(t, link.Status{State: "connected", Kind: "lan", Address: "https://192.0.2.10:18662", Node: "online"}, 42)
+		}
+		return "", nil
+	}
+	if err := installMac(f.env, false, "", false, nil); err != nil {
+		t.Fatalf("reinstall after a transient bootstrap failure: %v\n%s", err, f.out)
+	}
+	if bootstraps != 2 || bootouts != 1 {
+		t.Fatalf("bootstraps = %d, bootouts = %d; want 2 and 1", bootstraps, bootouts)
+	}
+	if elapsed := f.now().Sub(started); elapsed != time.Second {
+		t.Fatalf("fake clock advanced %s, want the one-second retry delay", elapsed)
+	}
+}
+
+func TestInstallOnMacStopsAfterFiveBootstrapFailures(t *testing.T) {
+	f := newFakeEnv(t)
+	f.goos = "darwin"
+	f.pairHere(t)
+	if err := os.MkdirAll(filepath.Dir(f.linkPlistPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.linkPlistPath(), []byte("old agent"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bootouts, bootstraps := 0, 0
+	f.onCommand = func(call string) (string, error) {
+		switch {
+		case strings.HasPrefix(call, "launchctl bootout"):
+			bootouts++
+		case strings.HasPrefix(call, "launchctl bootstrap"):
+			bootstraps++
+			return "Bootstrap failed: 5: Input/output error", errors.New("exit status 5")
+		}
+		return "", nil
+	}
+	err := installMac(f.env, false, "", false, nil)
+	const want = "launchctl bootstrap 失败：Bootstrap failed: 5: Input/output error"
+	if err == nil || err.Error() != want {
+		t.Fatalf("persistent bootstrap error = %v, want %q", err, want)
+	}
+	if bootstraps != 5 || bootouts != 1 {
+		t.Fatalf("bootstraps = %d, bootouts = %d; want 5 and 1", bootstraps, bootouts)
 	}
 }
 

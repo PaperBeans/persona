@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -51,8 +52,8 @@ func echoVNC(t *testing.T) string {
 
 // screenNode is a Mac's node for the live screen's two routes: port.dial and screen.dial both reach vnc. newNode
 // answers a screen session asked for with {link: 1}, as a node with #6398 does; otherwise it answers {} as an older
-// node. gone answers session_gone. seen gets each request's params.
-func screenNode(t *testing.T, h *Hub, vnc string, newNode, gone bool, seen func(method string, params map[string]any)) {
+// node. refuse, when set, is the error code every dial gets (session_gone, busy…). seen gets each request's params.
+func screenNode(t *testing.T, h *Hub, vnc string, newNode bool, refuse string, seen func(method string, params map[string]any)) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	h2nR, h2nW := io.Pipe()
@@ -65,8 +66,8 @@ func screenNode(t *testing.T, h *Hub, vnc string, newNode, gone bool, seen func(
 		var p map[string]any
 		_ = json.Unmarshal(raw, &p)
 		seen(method, p)
-		if gone {
-			return nil, &rpc.Error{Code: "session_gone", Message: "no session"}
+		if refuse != "" {
+			return nil, &rpc.Error{Code: refuse, Message: "refused: " + refuse}
 		}
 		id, _ := p["id"].(string)
 		c, err := net.DialTimeout("tcp", vnc, 2*time.Second)
@@ -134,7 +135,7 @@ func TestOnlyAPhoneOfferingTheScreenLinkGetsIt(t *testing.T) {
 			_ = h.store.CreateDeviceToken(context.Background(), db.DeviceToken{ID: "dev", Name: "iPhone", Kind: "phone", Role: roleFull}, hashToken(tok))
 			var mu sync.Mutex
 			var asked map[string]any
-			screenNode(t, h, echoVNC(t), tc.newNode, false, func(method string, p map[string]any) {
+			screenNode(t, h, echoVNC(t), tc.newNode, "", func(method string, p map[string]any) {
 				mu.Lock()
 				asked = p
 				mu.Unlock()
@@ -192,7 +193,7 @@ func TestRejoiningAGoneSessionIs410(t *testing.T) {
 			h.store = &tokenStore{memStore: *newMemStore(), rows: map[string]db.DeviceToken{}, rev: map[string]bool{}}
 			tok := "jd_" + randomHex(24)
 			_ = h.store.CreateDeviceToken(context.Background(), db.DeviceToken{ID: "dev", Name: "iPhone", Kind: "phone", Role: roleFull}, hashToken(tok))
-			screenNode(t, h, echoVNC(t), true, true, func(string, map[string]any) {})
+			screenNode(t, h, echoVNC(t), true, "session_gone", func(string, map[string]any) {})
 			srv := httptest.NewServer(h.routes())
 			t.Cleanup(srv.Close)
 			u := fmt.Sprintf("ws%s/api/v1/machines/m1/%s?token=%s&pair=K&attach=1", strings.TrimPrefix(srv.URL, "http"), path, url.QueryEscape(tok))
@@ -201,6 +202,48 @@ func TestRejoiningAGoneSessionIs410(t *testing.T) {
 			_, res, err := websocket.Dial(ctx, u, &websocket.DialOptions{Subprotocols: []string{screenLinkSubprotocol}})
 			if err == nil || res == nil || res.StatusCode != http.StatusGone {
 				t.Fatalf("rejoining a gone session: %v %v", res, err)
+			}
+		})
+	}
+}
+
+// A refused video dial is an HTTP status on the handshake, which a browser can't read: with refusals=close (the web,
+// #8320) it is a WebSocket that closes at once with 4000 + that status and the node's code. Without it, the status as
+// before.
+func TestARefusedVideoDialClosesWithItsReasonWhenAsked(t *testing.T) {
+	for _, tc := range []struct {
+		code   string
+		status int
+	}{{"busy", http.StatusTooManyRequests}, {"not_signed_in", http.StatusForbidden}, {"video_unavailable", http.StatusServiceUnavailable}} {
+		t.Run(tc.code, func(t *testing.T) {
+			h := newTestHub(t)
+			h.store = &tokenStore{memStore: *newMemStore(), rows: map[string]db.DeviceToken{}, rev: map[string]bool{}}
+			tok := "jd_" + randomHex(24)
+			_ = h.store.CreateDeviceToken(context.Background(), db.DeviceToken{ID: "dev", Name: "Browser", Kind: "web", Role: roleFull}, hashToken(tok))
+			screenNode(t, h, echoVNC(t), false, tc.code, func(string, map[string]any) {})
+			srv := httptest.NewServer(h.routes())
+			t.Cleanup(srv.Close)
+			u := fmt.Sprintf("ws%s/api/v1/machines/m1/screen/video/connect?token=%s&pair=K", strings.TrimPrefix(srv.URL, "http"), url.QueryEscape(tok))
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			_, res, err := websocket.Dial(ctx, u, nil)
+			if err == nil || res == nil || res.StatusCode != tc.status {
+				t.Fatalf("without refusals=close: want %d, got %v %v", tc.status, res, err)
+			}
+
+			c, _, err := websocket.Dial(ctx, u+"&refusals=close", nil)
+			if err != nil {
+				t.Fatalf("with refusals=close the socket opens: %v", err)
+			}
+			defer c.CloseNow()
+			_, _, err = c.Read(ctx)
+			if got := websocket.CloseStatus(err); got != websocket.StatusCode(4000+tc.status) {
+				t.Fatalf("close status: want %d, got %d (%v)", 4000+tc.status, got, err)
+			}
+			var ce websocket.CloseError
+			if !errors.As(err, &ce) || ce.Reason != tc.code {
+				t.Fatalf("close reason: want %q, got %v", tc.code, err)
 			}
 		})
 	}

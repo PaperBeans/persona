@@ -18,7 +18,7 @@ import { ScreenVideoTiers } from "./video-tiers";
 import type { Encoding, Hello, Timing } from "./video-wire";
 
 /** Why VNC shows while video was chosen, in words the page turns into a line (screen-video). */
-export type Fallback = "lost" | "locked" | "notAllowed";
+export type Fallback = "lost" | "locked" | "notAllowed" | "busy";
 
 /** The helper's `paused` reason as a fallback. */
 export function pausedFallback(reason: string): Fallback {
@@ -272,7 +272,7 @@ export class ScreenVideoLink {
     this.opened = null;
     this.show(false);
     if (!this.wanted || !this.ready) return;
-    this.say("lost");
+    this.say(why === "busy" ? "busy" : "lost"); // busy: tried again as a lost stream is, and video comes once one leaves
     if (why === "undecodable" && !this.everShown) {
       this.decoderFailed = true; // no picture ever decoded here: not tried again on this page
       this.onChange();

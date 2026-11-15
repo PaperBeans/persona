@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strings"
 	"sync"
 	"time"
 
@@ -500,10 +499,12 @@ func (n *Node) setAgentsAt(agents []host.Agent, epoch uint64, heard map[string]b
 			continue
 		}
 		home := n.codexPaneHome(a.PaneID)
-		id := a.SessionID()
+		reported := a.SessionID() // what the host says the pane runs now, not what the node remembers of the pane
+		id := reported
 		if id != "" {
 			id = mainThread(home, id) // a subagent's id stands for its conversation
 		}
+		sub := id != reported
 		if id == "" {
 			n.mu.Lock()
 			id = n.panes[a.PaneID]
@@ -511,8 +512,15 @@ func (n *Node) setAgentsAt(agents []host.Agent, epoch uint64, heard map[string]b
 		}
 		if named := n.codexByTitle(a, id, m); named != "" {
 			id = named
-		} else if strings.LastIndex(a.Title, " | ") > 0 {
-			id = "" // an unrecognised current title must not reuse a stale pane binding either
+		} else if _, match, ok := codexTitleName(a.Title); ok && (reported == "" ||
+			(!sub && threadTitle(home, id) != "" && !threadFormerlyNamed(home, id, match))) {
+			// An unrecognised current title must not reuse a stale pane binding either, nor a thread the host named
+			// that the index knows under another name (a /resume in Codex since). A reported thread the index has no
+			// name for is not contradicted by a name the index lacks, so the host's word stands: left out, the pane
+			// was listed nowhere and its thread only as its app-server's row, with no terminal (#7538). Nor is a
+			// reported subagent contradicted by its conversation's name, which is not the name of the thread reported,
+			// nor a renamed thread by the name the index gave it before (a rename on the app-server the title missed).
+			id = ""
 		}
 		if id != "" {
 			id = n.codexPublicID(home, id)

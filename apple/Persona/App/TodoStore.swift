@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PersonaWire
 
 /// Hub-wide todo list management (docs/assistant/todos.md, issue #401):
 /// The hub's todos, cached locally in StateCache, refreshed on {"type":"todos"} WS event and (re)connect.

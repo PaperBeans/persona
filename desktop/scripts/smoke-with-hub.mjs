@@ -134,7 +134,8 @@ async function scenario(name, { prefix, token, starting }) {
     clearTimeout(timer);
     await writeFile(join(directory, "electron.log"), log.replaceAll(profile, "<temporary profile>").replaceAll(token, "<run token>").replaceAll(other?.token ?? "no-second-pairing-code", "<second run token>"), "utf8");
     try { result = JSON.parse(await readFile(join(directory, "result.json"), "utf8")); } catch { result = { ok: false, error: "No result was written", steps: [] }; }
-    if (exit.code !== 0) result = { ...result, ok: false, error: result.error ?? `Electron exited with ${JSON.stringify(exit)}` };
+    if (exit.code !== 0) result = { ...result, ok: false, error: result.error ?? `Electron exited with ${JSON.stringify(exit)}`, exit };
+    else result = { ...result, exit };
     const outside = gateway.outside();
     if (prefix && outside.length) result = { ...result, ok: false, error: result.error ?? `Requests left the prefix: ${outside.slice(0, 5).join(", ")}` };
     result = { ...result, outsidePrefix: outside, otherLocalRequests: gateway.strangers(), headless, hubStartMs: hub.startMs, hubStartAttempts: hub.attempts };

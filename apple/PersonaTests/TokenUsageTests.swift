@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Persona
+import PersonaWire
 
 /// Token counts in K / M / B, the same rules as the web's formatTokens (#4973), and the usage API's shapes.
 struct TokenUsageTests {

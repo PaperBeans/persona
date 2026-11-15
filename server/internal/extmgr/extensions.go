@@ -1073,8 +1073,10 @@ func (ps *extensions) specOf(ctx context.Context, p *extension.Extension, hp *hu
 				tok = hubToken.renew(ps, p, attachedFull)
 			}
 			scopes := slices.Clone(g.Hub)
-			if attachedFull { // the routes' scopes: model calls are granted by name only (extension_model_calls.go)
-				scopes = slices.DeleteFunc(extension.EveryScope(), func(s string) bool { return s == extension.ScopeModels })
+			if attachedFull { // the routes' scopes: model calls and transcription are granted by name only
+				scopes = slices.DeleteFunc(extension.EveryScope(), func(s string) bool {
+					return s == extension.ScopeModels || s == extension.ScopeTranscription
+				})
 			}
 			params.Hub.URL, params.Hub.Token, params.Hub.Scopes = url, tok, scopes
 		}
@@ -1134,6 +1136,9 @@ func (ps *extensions) specOf(ctx context.Context, p *extension.Extension, hp *hu
 			return ps.extensionAssistantCall(ctx, id, method, params)
 		case "model.complete": // assistantwire.MethodModelComplete (extension_model_calls.go)
 			return ps.extensionModelCall(ctx, id, params)
+		case assistantwire.MethodTranscriptionStart, assistantwire.MethodTranscriptionAudio, assistantwire.MethodTranscriptionFinish,
+			assistantwire.MethodTranscriptionCancel: // the transcription scope's (extension_transcription.go)
+			return ps.extensionTranscriptionCall(ctx, id, method, params)
 		case assistantwire.MethodAssistantDataStatus: // its own data contributions only, no scope (extension_assistant_data.go)
 			items := ps.assistantDataStatus(ctx, id, false)
 			if items == nil {

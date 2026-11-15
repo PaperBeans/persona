@@ -183,6 +183,18 @@ internal class AppNavigator(
             stack.removeAll { page -> page is ChatRoute && sameConversation(page, chat) }
         }
         val stack = stacks.getValue(target)
+        val visibleMail = stack.lastOrNull() as? MailRoute
+        // A UID chooses a position in one mail page. Replace its visible target instead of stacking another copy.
+        if (route is MailRoute && visibleMail?.itemId == route.itemId) {
+            if (visibleMail != route) stack[stack.lastIndex] = route
+            return route
+        }
+        // The wide Inbox can reopen the event beside its mail; reveal that event rather than burying the mail below it.
+        if (route is InboxEventRoute && visibleMail?.itemId == route.itemId &&
+            stack.getOrNull(stack.lastIndex - 1) == route) {
+            stack.removeAt(stack.lastIndex)
+            return route
+        }
         // The sourced-Persona path does not use Router.restore, but an already-visible kindless reopen needs the same
         // exact-key retention. A page buried below a newer detail keeps the existing push/pop chain behavior.
         val retained = if (chat?.kind == null) stack.lastOrNull()?.takeIf { sameKindlessTarget(it, route) } else null

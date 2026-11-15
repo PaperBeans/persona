@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Persona
+import PersonaWire
 
 @MainActor @Suite struct ExtensionStreamTreeTests {
     typealias Raw = ExtensionStreamJSON

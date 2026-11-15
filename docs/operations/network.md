@@ -143,9 +143,10 @@ iOS implementation (#4670): Settings › hub › Addresses keeps a paired hub's 
 - On a later address, the app asks the earlier ones again on every network change and every `HubRoute.centerRecheck`, and moves back once one answers.
 - An added address must answer the health probe with the paired hub's `hub_id` (once the app knows it). An answer without a `hub_id` fails the probe, and a hello from another hub on an added address changes nothing in the pairing. HTTPS uses system trust and hostname verification; there is no fingerprint pinning on iOS yet.
 - Known gap against the spec above: iOS does not hold plain HTTP to the LAN or check the peer address. An `http://` address works as the paired one does, on any host, and the device token goes over it unencrypted. Add `http://` addresses only for networks you trust (a VPN overlay, the LAN).
+- Typing an address: one without a scheme gets `https://` in front, a bare IP or `localhost` too (`http://` only when typed), and the line under the field shows the full address **Add Address** will add. An address that still can't be read, a scheme other than http or https, or one the hub has already (scheme and host in any case, the default port written or not) is said on that line instead, and Add stays off (`HubAddressInput`, `apple/Shared/Hubs.swift`).
 - Settings › hub shows the address in use under the hub's name, and the Addresses page marks it **In Use**.
 - Not yet: the hub's own list (`/api/v1/endpoints`) does not feed this list, and the watch, widgets and other extensions keep the paired address.
-- DEBUG builds: `-seedHubAddresses <base64 of a [HubAddress] JSON>` sets the first hub's added addresses, and `-tab settings -openHubAddresses YES` opens its page (screenshots).
+- DEBUG builds: `-seedHubAddresses <base64 of a [HubAddress] JSON>` sets the first hub's added addresses, `-tab settings -openHubAddresses YES` opens its page, and `-showHubAddressDraft <text>` starts its field with that text (screenshots).
 
 ## Allowing IPv6 ingress
 

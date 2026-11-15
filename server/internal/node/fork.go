@@ -98,8 +98,10 @@ func (n *Node) fork(ctx context.Context, id, at string) (string, error) {
 // forkRuntime branches a runtime's session from the Claude transcript its runtime names (#6298): the copy is of that
 // transcript, under a new Claude session id, named after the session. Like any branch it is an offline Claude session;
 // its first message continues it with the machine's engine (on a Paseo machine Paseo takes it over, runtimecontrol.go).
-// The node keeps state for it (its directory and model): the copy reads like the runtime's own runs of Claude Code's
-// command line, which the offline list leaves out, and a session the node keeps state for is listed (claude_oneshot.go).
+// The node keeps state for it (its directory, model and launcher): the copy reads like the runtime's own runs of Claude
+// Code's command line, which the offline list leaves out, and a session the node keeps state for is listed
+// (claude_oneshot.go). The launcher is the one the session ran on (Paseo: its provider), which the takeover asks for:
+// without it Paseo went on with whichever Claude provider ran last, maybe another account's (#8130).
 func (n *Node) forkRuntime(s proto.Session, at string) (string, error) {
 	t := n.runtimes.transcriptOf(s.SessionID)
 	src := ""
@@ -125,7 +127,7 @@ func (n *Node) forkRuntime(s proto.Session, at string) (string, error) {
 		_ = os.Remove(dst)
 		return "", refusal("fork_turn_running", "这一轮还没做完，等它停下再分支", nil)
 	}
-	n.state.put(newID, sessionState{Cwd: s.Cwd, Model: s.Model})
+	n.state.put(newID, sessionState{Launcher: s.Launcher, Cwd: s.Cwd, Model: s.Model})
 	n.forkMade(newID, dst)
 	return newID, nil
 }

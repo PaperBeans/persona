@@ -429,7 +429,7 @@ export function rateText(rate: number, calls: number): string {
 export function msText(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return "—";
   if (ms < 10) return `${Number(ms.toFixed(1))} ms`;
-  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 999.5) return `${Math.round(ms)} ms`; // from 999.5 it would read "1000 ms"
   return `${Number((ms / 1000).toFixed(ms < 10_000 ? 1 : 0))} s`;
 }
 

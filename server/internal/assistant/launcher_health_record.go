@@ -69,9 +69,15 @@ func (s *Service) recordHealth(ctx context.Context, machine, launcher string, r 
 	rec.ResetsAt = nil
 	if r.ok {
 		rec.State, rec.Kind, rec.Error, rec.Fails, rec.Repairs, rec.BlockedReason = healthOK, "", "", 0, 0, ""
+		rec.MissingFails = 0
 		rec.Model = r.model
 	} else {
 		rec.Fails++
+		if missingCode(r.err) == proto.CodeClaudeMissing {
+			rec.MissingFails++
+		} else {
+			rec.MissingFails = 0
+		}
 		rec.Error = clip(oneLine(r.err), 400)
 		rec.Kind = r.kind
 		if rec.Kind == "" {

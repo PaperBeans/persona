@@ -1,6 +1,5 @@
 {
   "systemd_user_unavailable": "Cannot reach your systemd user instance",
-  "running_before_purge": "Another persona-link is running (not this service, or one you started yourself): stop it before --purge",
   "node_install_failed": "The resident node service was not installed: {error}",
   "binary_install_failed": "Cannot install {path}: {error}",
   "binary_installed": "Installed {path}.",

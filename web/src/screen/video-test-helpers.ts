@@ -23,7 +23,7 @@ export const framed = (m: VideoMessage) => encode(m);
 export function scripted() {
   const sent: VideoMessage[] = [];
   let closedHere = false;
-  const t: VideoTransport & { feed(b: Uint8Array): void; end(): void; sent: VideoMessage[]; closedHere: () => boolean } = {
+  const t: VideoTransport & { feed(b: Uint8Array): void; end(refused?: string): void; sent: VideoMessage[]; closedHere: () => boolean } = {
     send: (b) => {
       for (const r of new VideoParser().push(b)) sent.push(decode(r.type, r.body));
     },
@@ -31,7 +31,7 @@ export function scripted() {
     onBytes: () => {},
     onClosed: () => {},
     feed: (b) => t.onBytes(b),
-    end: () => t.onClosed(),
+    end: (refused?: string) => t.onClosed(refused),
     sent,
     closedHere: () => closedHere,
   };

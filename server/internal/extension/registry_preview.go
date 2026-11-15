@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -58,6 +59,9 @@ type Preview struct {
 	root                  string       // the staged package
 	l10n                  Translations // its translations, for the name and description shown (In)
 	staging               string
+	// config is the upgraded extension's saved settings at preview (nil for a fresh install): the address its "config:"
+	// lines name, which the upgrade keeps (#8570).
+	config json.RawMessage
 }
 
 // MarketTrust is the market address and trusted public key pinned at preview time; it adds no protocol field.
@@ -357,8 +361,9 @@ func (r *Registry) previewIdentity(ctx context.Context, src Source, upgrade, ren
 	if upgrade != "" {
 		pv.Upgrade, pv.From = true, cur.Record.Version
 		pv.MorePermissions = MorePermissions(cur, m)
-		pv.previous = cur.Full
-		pv.AddedPermissions = Added(cur.Full, m)
+		pv.previous, pv.config = cur.Full, slices.Clone(cur.Record.Config)
+		pv.Permissions = ExplainWith(i18n.Default, m, pv.config)
+		pv.AddedPermissions = AddedWith(i18n.Default, cur.Full, m, pv.config)
 	}
 	r.previews[pv.ID] = pv
 	return pv, nil // the check is done when the hub has resolved its bundle too (it says so)

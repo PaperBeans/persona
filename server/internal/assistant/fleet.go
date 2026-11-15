@@ -41,6 +41,8 @@ type fleetBook struct {
 	// reportSent: assistant conversation -> when a scheduled run or a task notice was sent into it (noteReportTurn):
 	// the turn it starts is pushed however short it is.
 	reportSent map[string]time.Time
+	// cardTell serializes telling the hub a card with checking it is still held (fleet_ix.go tellCard).
+	cardTell sync.Mutex
 	// codexAnnounced: Codex card id -> when it was announced (fleet_ix_codex.go)
 	codexAnnounced map[string]time.Time
 	// codexEnded: Codex card id -> when the node stopped listing it (fleet_ix_codex.go)

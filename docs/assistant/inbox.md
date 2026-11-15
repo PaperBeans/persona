@@ -68,7 +68,7 @@ or the manager restarts and retries). A previous interrupted send (hub stopped o
 | --- | --- | --- |
 | Lark | Unhandled new messages in one chat (starting at the first new message; later ones merge into it) | `lark:<feedId>:<first message position>` |
 | Lark Docs | One document notification-center card (latest mentions / comments / replies to me in one document) | `doc:<notification id>:<update time in milliseconds>` |
-| Mail | Unread mail in a thread (same subject after stripping Re: / Fwd: / 回复： [reply] / [list name] means the same thread; when nothing is left after stripping, mail is split further by sender address: one person's subject-less mail is one item, different people's are separate items, #4852) | `mail:<account>:<thread>:<first mail uid>` |
+| Mail | Unread mail in a thread, or mail already read when it arrived, filed at once (#8298) (same subject after stripping Re: / Fwd: / 回复： [reply] / [list name] means the same thread; when nothing is left after stripping, mail is split further by sender address: one person's subject-less mail is one item, different people's are separate items, #4852) | `mail:<account>:<thread>:<first mail uid>` |
 | Subscription | New items of one row: a thread's for `group_by: thread` (an item without a thread is its own), the whole subscription's for `group_by: source` (#5671), like a Lark chat (titled by the subscription, no tag); its count goes up by the items each pull brings | `<subscription>:<hash of the row's thread and first last>`, thread `sub:<subscription>:<thread, uid or all>` ([subscriptions.md](../extensions/subscriptions.md) "Destinations") |
 
 - Subject-less mail used to be one item per account (sender, preview and "sent to me" taken from the latest); since #4852 it is split by sender, so a subject-less back-and-forth among several people also becomes several items.
@@ -88,6 +88,16 @@ or the manager restarts and retries). A previous interrupted send (hub stopped o
 - Messages sent by the app bound to `lark-cli` (the `appId` reported by `lark-cli auth status --json`) are marked seen and omitted to prevent Persona's own bot replies from looping back into the Inbox. If that app id is unavailable, the connector keeps the existing behavior; messages from other apps remain eligible.
 - Mail: unread messages in each account's latest 40 Inbox messages, within 7 days. The list API reads only the first 2 KB of body (HTML mail often contains nothing but `<style>`),
   so new mails fetch the full body again (IMAP `BODY.PEEK`, without marking read) for preview and AI context (`BodyOf` tracks which mail was read).
+- Mail already read when a round first sees it (read in another client, or marked read by a forwarding rule, in the
+  minutes between two rounds) gets an item too, so no mail the inbox saw is missing from Done (#8298, `mailReadOnArrival`
+  in `inbox_mail.go`): one item per thread, read and filed as `read` the moment it is created, with its rule tier
+  ("Rule-based", no model is asked). It is never unread and never in Needs you, so it raises no push or badge; like any
+  changed item it goes out in `inbox.changed`. Only mail newer than the account's **baseline** counts: on an account's
+  first round (and the first round after this was added) the baseline is the page's newest UID, so turning an account
+  on does not file the window's read mail all at once; a page whose newest UID is under the baseline (the mailbox was
+  renumbered) starts a new one the same way. Baselines are stored by account id in the setting `inbox_mail_baselines`.
+  Mail in a thread that already has an open item stays that item's, as before. The mail listing carries no
+  `Delivered-To` / `X-Forwarded-To`, so forwarded mail is still not counted as direct (its rule tier is noise).
 - Mail that leaves that page (archived or deleted in the mail client, or pushed off by newer mail) follows the same rules (#5993,
   `inbox_mail_off_page.go`): after a round applies an account's page, its open, unread mail items with no mail on the page are
   settled. One whose newest mail is past the 7 days is handled like a mail past the window on the page; for the others the manager asks
@@ -183,14 +193,22 @@ a summary up to 40 characters, and a short reason:
   the connector's kind words (`group_input.md`: a person, a bot or an app), so a bot's "在问你" isn't read as a person asking.
   The user's own rules are unchanged and still come last and win.
 - **Sorted again once after the criteria change**: `inboxTriageRev` (`inbox_triage.go`) is the criteria's revision, and an item
-  records the one its tier was given under (`triage_rev`, kept, not listed; a rule tier given under the current criteria stays
-  final). Each triage pass also takes up to 8 open Needs you items tiered under an older revision (newest activity first): Lark and
+  records the one its tier was given under (`triage_rev`, kept, not listed; a rule tier given under the current criteria stays,
+  unless it is provisional: below). Each triage pass also takes up to 8 open Needs you items tiered under an older revision (newest activity first): Lark and
   mail items and connectors' events, skipping anything the AI twin or a follow-up touched (handling, a suggestion, a due check, an
   agent record) and tiers a policy sets, and asks the model again with `triage.md`. A new tier records a `triaged` chain entry as
   usual (an FYI one the owner already read elsewhere is then filed as read, like any FYI item). A model error leaves the item as it
   was (no rule tier replaces the model's) and it is tried once a run; a model that is held, missing or too slow gives the try
   back for a later pass.
 - If the model cannot triage (unconfigured, no quota / concurrency full, error, timeout), use fallback rules (private chat / mention of me → action; everyone-only mention without me → fyi, an announcement; group → fyi; direct mail → fyi; others → noise), with reason "Rule-based."
+  **A rule tier given because the model failed (an error such as a 404 for a removed model, or a timeout) is provisional**
+  (#8298): the item keeps `triaged_at` behind and records `rule_of` (its `last` then; kept, not listed), and later
+  passes ask the model again until it answers, then take its tier as for any triage. The retries are capped: up to 8 a
+  pass (newest activity first), none until 10 minutes after the last failure, the wait doubling with each pass whose
+  retries got no answer, up to 2 hours (memory only, so a restart allows one early pass); any model answer, for a new
+  item too, makes the next pass retry at once. Items the AI twin or a follow-up touched (handling, a suggestion, a due
+  check, an agent record) and handled items are not retried. The AI twin and policies treat a provisional rule tier like
+  a triaged one (`tiered()`). With no model set up, or a held connection, the rule tier stays as before.
   Connector items use their rule-provided fallback (`tier`). Model-triaged items (empty `tier`) from hub-owned connectors (GitHub, Telegram, Messages) still fall back to noise.
   **Plugin-provided connectors have no fallback**: noise would silently hide items the user must see (below).
 - **Scope (requested 2026-11-04)**: "Triage before admission" and "No admission without fallback" below **apply only to plugin-provided connectors** (installed plugins or plugins in the manager's manager.json, not bundled personad connectors;
@@ -200,7 +218,7 @@ a summary up to 40 characters, and a short reason:
   A subscription's rows follow its recipe's `group_by` (#5671): one a thread, or one for the whole subscription, which is triaged as one row like a Lark chat (an item in it that needs the user makes it Needs you). The source also has `counts`, so a move adds the thing's `extra.count` (the items its newest pull brought) to the item's count instead of one; for every other generic connector `extra.count` is not read there and a move counts one. A row is `read` when its recipe maps `seen` and its newest item was seen in the source (#6176), and is then handled like any connector's thing read elsewhere. A subscription that failed its last run, needs a new recipe or was asked to wait carries a `read_error` (#6189), so it is listed as behind like a built-in. A row whose recipe maps `reply_to` can be replied to (#6198): `inbox.reply` for it goes to the subscription's connector with the item's own thread and id.
 - **Triage before admission (#1644)**: hold new plugin-connector items aside for a collection round (`inbox_admit.go`). After collection, triage in the background; only then write to the database and list them:
   - Model succeeds: use its tier and summary.
-  - Model fails, fallback exists: admit by fallback with "Rule-based." **That version is final**, with no retriage on model recovery (only new activity triggers it).
+  - Model fails, fallback exists: admit by fallback with "Rule-based." When the model errored or was too slow that tier is provisional and retried as above (`rule_of`, #8298); under no model or a held connection it is final.
   - Model fails, no fallback: **do not write this round**. Do not store hidden rows (hard to inspect). The connector answers `inbox.collect` from its own memory and resubmits next round, naturally retrying until the model works.
   - Time limit: new items must begin triage within 20 seconds of a batch start (concurrency 4, at most 30 seconds per item). Unreached items wait for the next round (a round with progress immediately triggers another).
     Background triage does not block collection or pull-to-refresh (`{"type":"inbox"}` pushed afterward). Only one batch runs at once; new items arriving during it are not written that round and are resubmitted next round.
@@ -535,7 +553,7 @@ Handing an item to a conversation or an Agent records `handling` or `agent` with
 
 **Read and replied state from a grouping connector.** The hub advertises `inbox_group_state` (`extension.HubInboxGroupState`) in `hub.capabilities`; without it, a connector behaves as before. The same advertisement permits its fallback plan to assign messages to an already handled event, which the manager accepts and reopens. When the capability is present, a grouping connector may hand, in its collect answer, one thing per event the user read or replied to in the source: `{thread, kind, id: <the event's item id>, group: {batch: "", new: []}, read, done: "" | "replied", at, last}`, with no messages and optionally `rules`. The manager ignores the report's `rules` and all its other content, leaving the item's title, summary, reason, tier, count, meta, rules, preview and sender unchanged. A report is accepted only for an existing, open grouped event of that source connector, in the same conversation or one nested under it, whose current `last` equals the report's; a stale position, a different source or conversation, a handled event and an unknown id are ignored. `done: "replied"` takes precedence when `read` is also true. A replied report whose `last` equals the item's recorded `Agent.SentOf` is Persona's own send, not a new source reply, even when a due check or another wake has temporarily moved the item out of waiting: it records no `self_replied` step, requests no wake, and leaves the current handling and follow-up state, including an active due check, undisturbed. A read at that position only sets `Read`; a read at a position already recorded as `self_replied` likewise only sets `Read`, without another note or wake.
 
-With a processing conversation, a replied report records `self_replied` with `via` set to the item's source and a source link whose `position` is `last`, does not archive the item, and puts it in `waiting` with a fresh default 24-hour `follow.check_at`. It preserves the existing `who` and `next`, resets `checks` to zero, clears `due`, and removes the reply suggestion superseded by the user's reply together with its old-App draft mirror. A matching `self_replied` position makes repeated reports idempotent. With the twin on, the wake queues a `self_replied` note with `at` rendered in the user's timezone, sets handling to `looking`, and records `Agent.Back = waiting`. A recap-only response, `no_draft`, or a timeout returns the item to `waiting`, filling a missing `check_at` with the default 24 hours rather than marking it `failed`; a `conclusion` with `outcome: done` archives it. The conversation can otherwise submit a suggestion or write a new follow as usual.
+With a processing conversation, a replied report records `self_replied` with `via` set to the item's source and a source link whose `position` is `last`, does not archive the item, and puts it in `waiting` with a fresh default 24-hour `follow.check_at`. It preserves the existing `who` and `next`, resets `checks` to zero, clears `due`, and removes the reply suggestion superseded by the user's reply together with its old-App draft mirror. A matching `self_replied` position makes repeated reports idempotent; the item also keeps that position (`replied_of`, kept, not listed), so they stay idempotent after later steps at the same `last` push the `self_replied` out of the 50 kept (#8424). A row stored before `replied_of` has only the entry. With the twin on, the wake queues a `self_replied` note with `at` rendered in the user's timezone, sets handling to `looking`, and records `Agent.Back = waiting`. A recap-only response, `no_draft`, or a timeout returns the item to `waiting`, filling a missing `check_at` with the default 24 hours rather than marking it `failed`; a `conclusion` with `outcome: done` archives it. The conversation can otherwise submit a suggestion or write a new follow as usual.
 
 For an item already in `handling.state = agent`, the same reply record, `checks` / `due` reset and superseded-suggestion cleanup apply, and the twin-on wake still runs, but its handling state remains `agent` rather than changing to `waiting` or `looking`.
 
@@ -606,6 +624,8 @@ conversation the item was handed to ("Item actions", Hand to AI), rejecting othe
   Without `item` the tool works as before. A suggestion from a hand-off records where it came from (`suggestion.conversation`), its chain entry links that
   conversation, and the item's `agent` / `handling` stay as they were (no message card, no old-App draft).
 - **Task-related items**: for linked tasks (2′), prompts include task progress; a reply suggestion inserts a message card into the chat that started the task (`message`, retaining sent state after sending).
+  A Lark CLI `bot_handoff` is the owner's request for the main conversation, not somebody else's task update: neither task-link router nor the task judge associates it with a task (#8351).
+  A stored stale association cannot raise a supervisor signal or follow a task's continuation. The link recheck clears only that association, preserving handling, suggestions and handoff history without resending the request.
   When the linked task is supervised and the assistant's `inbox_signals` is on (off by default, #4293), each pass that takes new messages from other people into the item also tells the task's supervisor:
   the signal `inbox` in its next supervision message, naming the item (id, title, sender, one line) and how many messages came ([unified-entry.md](unified-entry.md), "Supervision (#3124)").
   Persona's own confirmed reply and bot chats never raise one, and nothing the handling chat does goes into the Inbox.
@@ -763,6 +783,8 @@ which users saw as one action: clear this batch they do not need to handle now. 
 - **Confirmation**: 10 or more items require confirmation ("Clean up N items (scope). New messages arriving later are unaffected; you can undo afterward."); fewer act directly with Undo. Scope / count are from the list at tap time.
 - **Entry points (one per client)**: web has Clean up all to the filter row's right (hidden at narrow widths), and one Clean up all item in ⋯ with scope / count below. With nothing open under filters or a search the web names the scope without a count ("Lark · Mail", not "Nothing to do"), and before the list has loaded, or after a failed read, it shows no scope (the Inbox entry in `docs/web/web.md`).
   Android top-bar More has one item; iOS More has one item with scope / count below ("All · 12 items", "Lark · Mentions · 3 items", "Search ‘weekly report’ · 2 items").
+  With nothing open iOS says "Nothing left to handle" only for the whole Inbox; under filters or a search it names them without a count ("Lark · Group chat"),
+  and while nothing is shown because the list is still being read, or its read failed, the item has no line at all (#7551, as the web).
   Mac has one toolbar button (scope on hover) and one Inbox-menu item, ⇧⌘E while Inbox is active. Apple passes `items` (ID + version) for current filtered / searched unhandled items, not `filter`.
   Section Mark All Seen / Clear All still use `/done`. Watch has only single-item done, no bulk entry, and reply-only devices cannot call `/bulk`; extensions need `inbox.write`.
 - **Old hubs**: without `/bulk` (404 / 405), fall back to `/done`. It lacks dismiss, so Clean up all records done (`done_by=user`), still removing items from the list. Reopen also falls back to `/done`.
@@ -806,9 +828,13 @@ The same rules on the web (`web/src/lib/inbox-groups.ts`) and iOS / iPad (`Perso
   a folded group is picked through its title's tick (none / some / all of it), which picks or unpicks the whole group, folded or not, and its title says how many are picked.
   The web's bar also says how many picked rows are folded away. The one action is Mark as Done: `POST /api/v1/inbox/bulk` `action: done` per manager, with Undo ("Clean up all").
   There is no Mark as Read: Done stays Persona-only.
+- **Nothing open** (web, iOS / iPad): the check mark and All caught up only for the whole Inbox. When the chips leave nothing open (with or without a search), a neutral
+  filter mark, "Nothing open matches these filters", "Clear the filters to see the whole Inbox." and **Clear filters**; a search alone, the search mark, "No matches",
+  "Try a different search." and **Clear search**. Either button clears the chips and the search: the chips are kept on this device, so a list left filtered opens
+  filtered, and the Inbox outside them may still hold plenty (web #7478, `docs/web/web.md` "Pages"; iOS #7551, `InboxPage.emptyKind`).
 - DEBUG (iOS): `-showInboxPicked <n>`, `-showInboxPickedDone YES`, `-showInboxDone YES` (Done and its newest group open), `-showInboxPickGroups YES`, `-showInboxDue YES` / `-showInboxMerge YES` / `-showInboxTodo YES` (the first two rows picked and the due sheet open / merged / added to to-dos for today, #6480; `MOCK_INBOX_TODO=1|time` puts a to-do suggestion on the mock's design-review mail),
   `-showInboxJump <group>` (Done jumped to that group, `week` or `month`, its first page loaded). Mock hub: `MOCK_INBOX_HISTORY=busy` (36 done a day for two months), `MOCK_INBOX_DAYS=none`.
-- Tests: web `lib/inbox-groups.test.ts`, `views/inbox/Inbox.groups.test.tsx`, `views/inbox/Inbox.select.test.tsx`; Apple `InboxGroupsTests`, `InboxBulkTests`.
+- Tests: web `lib/inbox-groups.test.ts`, `views/inbox/Inbox.groups.test.tsx`, `views/inbox/Inbox.select.test.tsx`; Apple `InboxGroupsTests`, `InboxBulkTests`, `InboxFilteredEmptyTests`.
 
 ## App
 

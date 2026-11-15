@@ -105,7 +105,8 @@ func (n *Node) contextCompacted(id string) {
 	n.mu.Lock()
 	delete(n.ctxSent, id)
 	n.mu.Unlock()
-	n.forgetFallback(id) // the refused turns are summarized away: its own model again (#3788)
+	n.forgetFallback(id)     // the refused turns are summarized away: its own model again (#3788)
+	n.clearModelRecovery(id) // the temporary switch ended with the refused turns (#7824)
 }
 
 // toolsAtStart notes the tools a conversation's process started with (claude's init) and says so when they differ

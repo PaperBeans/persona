@@ -20,6 +20,7 @@ import {
   sendRouted,
   setRoute,
   startFailure,
+  startInFlight,
   type FeedItem,
   type TaskPlan,
 } from "./feed";
@@ -143,6 +144,17 @@ describe("a task whose agent did not start (#1077, #1142)", () => {
     expect(startFailure(todo(), plans)).toBe("rpc: connection closed"); // a hub before #1077 left the todo open
     expect(startFailure(todo({ agents: [{ machine_id: "box", session_id: "s1", linked_at: "" }] }), plans)).toBeUndefined();
     expect(startFailure(todo(), {})).toBeUndefined(); // may still be starting
+  });
+
+  it("is starting only while a dispatch is in flight, never for a to-do nobody dispatched (#7552)", () => {
+    const own = todo({ origin: undefined, plan_id: undefined });
+    expect(startInFlight(own, {})).toBe(false); // todo_create, made by hand: no plan, no start
+    expect(startInFlight(todo(), {})).toBe(true); // a plan made it and its start has not failed
+    expect(startInFlight(todo(), plans)).toBe(false); // that start failed
+    expect(startInFlight(todo({ start_error: "launcher not found" }), {})).toBe(false);
+    const taking = { p2: { id: "p2", conversation: "c1", state: "started" as const, tasks: [{ title: "", prompt: "", machine: "box", cwd: "/code/app", todo_id: "t1" }] } };
+    expect(startInFlight(own, taking)).toBe(true); // a plan took over the to-do (it keeps no plan_id)
+    expect(startInFlight(own, { p2: { ...taking.p2, state: "dismissed" } })).toBe(false);
   });
 
   describe("removing it", () => {

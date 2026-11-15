@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  customModel, defaultDetail, defaultLabel, effortChoices, fitEffort, followedBinding, forgetCustomModel, launcherAgent, launcherModels, modelDetail, modelName, modelRows,
-  pickerLauncher, machineLaunchers, providerModels, startPicks, takesTypedModel, tierLeftOut, typedModelOffered, withoutCustom, type AgentModel, type LauncherModels,
+  customModel, defaultDetail, defaultLabel, effortChoices, effortRule, fitEffort, followedBinding, forgetCustomModel, launcherAgent, launcherModels, listedModes, modelDetail,
+  modelName, modelRows, pickerLauncher, machineLaunchers, providerModels, startPicks, takesEffort, takesTypedModel, tierLeftOut, typedModelOffered, withoutCustom,
+  type AgentModel, type LauncherModels,
 } from "./launcher-models";
 
 const all = ["low", "medium", "high", "xhigh", "max"];
@@ -174,6 +175,25 @@ describe("思考强度", () => {
     expect(fitEffort("max", effortChoices(claude, "gateway/glm-5.3"))).toBe("");
     expect(fitEffort("high", effortChoices(claude, "gateway/glm-5.3"))).toBe("high");
     expect(fitEffort("", all)).toBe("");
+  });
+
+  // A launcher that lists its own permission modes (#8261, Paseo's other providers) takes the efforts its model lists and
+  // nothing else: no list, or a model it doesn't list, offers none rather than Claude Code's five.
+  it("a launcher that lists its permission modes takes only the efforts its model lists", () => {
+    const grok = { name: "grok", agent: "paseo", source: "paseo", permission_modes: ["default", "bypassPermissions"] };
+    const list: LauncherModels = { agent: "paseo", models: [{ id: "grok-4", name: "Grok 4", default: true, efforts: ["low", "high"] }, { id: "grok-mini", name: "Grok mini" }] };
+    expect([effortRule("claude"), effortRule("agy"), effortRule("paseo", grok), effortRule("codex", grok), effortRule("paseo"), effortRule("codex")])
+      .toEqual(["any", "any", "listed", "listed", "none", "none"]);
+    expect([listedModes(grok), listedModes({ permission_modes: [] }), listedModes(undefined)]).toEqual([["default", "bypassPermissions"], undefined, undefined]);
+    expect([takesEffort("paseo", grok), takesEffort("paseo"), takesEffort("claude")]).toEqual([true, false, true]);
+    expect(effortChoices(list, "", {}, "listed")).toEqual(["low", "high"]);
+    expect(effortChoices(list, "grok-mini", {}, "listed")).toEqual([]);
+    expect(effortChoices(list, "typed-id", {}, "listed")).toEqual([]);
+    expect(effortChoices(null, "", {}, "listed")).toEqual([]);
+    expect(effortChoices(list, "", {}, "none")).toEqual([]);
+    expect(startPicks({ agent: "paseo", list, model: "", effort: "high", launcher: grok })).toEqual({ effort: "high" });
+    expect(startPicks({ agent: "paseo", list, model: "", effort: "max", launcher: grok })).toEqual({});
+    expect(startPicks({ agent: "paseo", list, model: "", effort: "high" }), "an older computer's launcher: no effort, as before").toEqual({});
   });
 });
 

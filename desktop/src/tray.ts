@@ -1,6 +1,7 @@
+import { join } from "node:path";
 import { app, Menu, Tray, nativeImage } from "electron";
-import type { BrowserWindow } from "electron";
-import { PERSONA_TRAY_ICON } from "./badge-art.js";
+import type { BrowserWindow, NativeImage } from "electron";
+import { trayIconFile } from "./tray-icon.js";
 import { trayTemplate } from "./tray-menu.js";
 import type { TrayLabels } from "./tray-menu.js";
 import type { UpdateAction, UpdateMenuItem } from "./update-state.js";
@@ -25,10 +26,13 @@ export interface DesktopTray {
   setUpdate(items: readonly UpdateMenuItem[]): void;
 }
 
+function trayIcon(): NativeImage {
+  return nativeImage.createFromPath(join(import.meta.dirname, "assets", trayIconFile(process.platform)));
+}
+
 export function installTray(labels: TrayLabels, open: () => void, quit: () => void, update: (action: UpdateAction) => void): DesktopTray {
   // Resolve the current main window at click time: the local setup window may have closed before it existed.
-  const icon = nativeImage.createFromDataURL(PERSONA_TRAY_ICON);
-  const tray = new Tray(icon.resize({ width: 16, height: 16 }));
+  const tray = new Tray(trayIcon());
   tray.setToolTip("Persona");
   const draw = (items: readonly UpdateMenuItem[]) => tray.setContextMenu(Menu.buildFromTemplate(trayTemplate(labels, items, { open, quit, update })));
   draw([]);

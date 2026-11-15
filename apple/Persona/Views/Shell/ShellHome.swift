@@ -12,6 +12,8 @@ struct ShellHome: View {
     @Environment(\.shellRailEdge) private var railEdge
     var pending: PendingStart?
     var error: String?
+    /// Clear context (#5100): the same composer, an empty middle. Not the centered new-chat page.
+    var cleared = false
     @Binding var launcher: String?
     @Binding var mode: String
     @Binding var effort: String
@@ -42,6 +44,10 @@ struct ShellHome: View {
                     // The page's height inside its margins, the message at its bottom (a long one runs up out of it, as the
                     // chat shows its newest end).
                     .containerRelativeFrame(.vertical, alignment: .bottom)
+            } else if cleared {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("main-cleared")
             } else {
                 VStack(alignment: .leading, spacing: Theme.Space.xl) {
                     // Its errors stay over the composer, where the send was.
@@ -80,12 +86,12 @@ struct ShellHome: View {
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room.card = $0 }
                         .onDisappear { room.card = 0 }
                 }
-                if pending == nil, !mentionOpen {
+                if pending == nil, !mentionOpen, !cleared {
                     ShellNeedsYou(maxHeight: room.needs(withError: shownError != nil, top: AssistantTopBar.room(railEdge)), openInbox: openInbox).shellScaled()
                 }
                 if let m = model.assistantManagerOffline { ManagerOfflineNote(manager: m) }
                 StarterComposer(disabled: pending != nil || model.assistantManagerOffline != nil, shell: StarterComposer.ShellModes(launcher: $launcher, mode: $mode, effort: $effort),
-                                gate: model.readinessGate(route: $route), send: send)
+                                gate: model.readinessGate(route: $route), offersClear: cleared && pending == nil, send: send)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room.composerAtRest($0, typeSize: typeSize) }
                     .onPreferenceChange(MentionMenuOpen.self) { open in withAnimation(Theme.Motion.standard) { mentionOpen = open } }
             }

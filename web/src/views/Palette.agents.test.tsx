@@ -143,7 +143,7 @@ describe("⌘K as the Agents list's search", () => {
     act(() => root.unmount());
     root = createRoot(host);
     // the default By to-do is the paged list's on a hub that lists sessions by to-do (#6662)
-    Object.assign(getState(), { features: ["sessions_list", "sessions_todo"], sessionSummaries: sessions });
+    Object.assign(getState(), { features: ["sessions_list", "sessions_agents_only", "sessions_todo"], sessionSummaries: sessions });
     await search("parser");
     expect(titles()).toContain("parser rewrite");
     const row = document.body.querySelector<HTMLButtonElement>("[data-testid=palette-filter-list]")!;
