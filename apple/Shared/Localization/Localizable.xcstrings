@@ -15016,6 +15016,28 @@
         }
       }
     },
+    "A side session needs you" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A side session needs you"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "子セッションが対応を待っています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有分支会话需要你"
+          }
+        }
+      }
+    },
     "A start with it that works clears this; otherwise it clears by itself after 6 hours." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35007,19 +35029,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Check “Start these directly from now on” on a plan card in a chat, and tasks on the same computer and folder with the same read or edit access won't ask first again."
+            "value" : "Check “Start directly here and in subfolders” on a plan card in a chat, and tasks on the same computer, in that folder or one under it, with the same read or edit access won't ask first again."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "チャットのプランカードで「今後はすぐに開始」にチェックを入れると、同じコンピューター・同じフォルダで同じ読み取り／編集権限のタスクは、次から確認なしで開始します。"
+            "value" : "チャットのプランカードで「今後このフォルダ以下はすぐに開始」にチェックを入れると、同じコンピューターのそのフォルダとその下のフォルダで、同じ読み取り／編集権限のタスクは、次から確認なしで開始します。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在对话的计划卡上勾「这类以后直接开」，同一台电脑、同一个目录、同样读或改的任务以后就不再先问。"
+            "value" : "在对话的计划卡上勾「这些目录及子目录以后直接开」，同一台电脑上那个目录及其子目录里、同样读或改的任务以后就不再先问。"
           }
         }
       }
@@ -66520,6 +66542,28 @@
         }
       }
     },
+    "From Side Session · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "From Side Session · %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "子セッション・%@から"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来自分支会话 · %@"
+          }
+        }
+      }
+    },
     "From [Notification Settings View 5d2f81]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -76361,6 +76405,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "It's already being sent, so it can't be stopped." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It's already being sent, so it can't be stopped."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すでに送信中のため、取り消せません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已经在发送了，来不及取消。"
+          }
+        }
+      }
     },
     "It's Mine" : {
       "localizations" : {
@@ -94410,6 +94477,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "No Side Sessions" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Side Sessions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "子セッションはありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有分支会话"
+          }
+        }
+      }
     },
     "No Skills Yet" : {
       "localizations" : {
@@ -139084,6 +139173,50 @@
       },
       "extractionState" : "manual"
     },
+    "Side Sessions" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Side Sessions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "子セッション"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分支会话"
+          }
+        }
+      }
+    },
+    "Side Sessions (%lld)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Side Sessions (%lld)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "子セッション（%lld）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分支会话（%lld）"
+          }
+        }
+      }
+    },
     "Side by Side" : {
       "localizations" : {
         "en" : {
@@ -139106,6 +139239,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Side sessions started from this session show up here." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Side sessions started from this session show up here."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このセッションから始めた子セッションがここに表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从这个会话开出的分支会话会显示在这里。"
+          }
+        }
+      }
     },
     "Sidebar [Appearance]" : {
       "extractionState" : "manual",
@@ -142262,19 +142417,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Start these directly from now on"
+            "value" : "Start directly here and in subfolders"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "今後はすぐに開始"
+            "value" : "今後このフォルダ以下はすぐに開始"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这类以后直接开"
+            "value" : "这些目录及子目录以后直接开"
           }
         }
       }
@@ -160754,6 +160909,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "This agent uses its own approval settings unless you choose Allow Everything." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This agent uses its own approval settings unless you choose Allow Everything."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「すべて許可」を選ばない限り、このエージェントは自身の承認設定で動作します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "除非选「全部放行」，这个 Agent 按它自己的审批设置运行。"
+          }
+        }
+      }
     },
     "This agent wasn't started with Allow Everything, so it can't be switched back to it from here." : {
       "localizations" : {
@@ -180371,6 +180549,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "What should the agent do? (Optional)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What should the agent do? (Optional)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェントに何をさせますか？（空欄でも可）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "想让 Agent 做什么？（可以留空）"
+          }
+        }
+      }
     },
     "What the assistant found" : {
       "localizations" : {

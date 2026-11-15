@@ -9,7 +9,7 @@ import (
 // Job is the background pairing, forgetting or installing of the bridge the app started (one at a time): its state
 // comes back with the machine's phone status, as the computer extension's install job does.
 type Job struct {
-	Kind  string `json:"kind"`  // pair / forget / install
+	Kind  string `json:"kind"`  // pair / forget / install / prepare
 	UDID  string `json:"udid"`  // the phone it is for ("" for install)
 	State string `json:"state"` // running / done / failed / cancelled
 	Step  string `json:"step,omitempty"`
@@ -18,7 +18,7 @@ type Job struct {
 	// Waiting: while a pairing runs, what it waits for from the person at the phone (CodeTrustPending, CodeLocked), ""
 	// when it waits for nothing (PairProgress).
 	Waiting string `json:"waiting,omitempty"`
-	// Stage: while an install runs, what it does (StageDownload, StageVerify, StageInstall).
+	// Stage: while an install or a prepare runs, what it does (StageDownload, StageVerify, StageInstall; StagePrepare).
 	Stage   string    `json:"stage,omitempty"`
 	Started time.Time `json:"started"`
 }
@@ -95,10 +95,10 @@ func (m *Manager) startJob(kind, udid string, run func(context.Context, func(ste
 		err := run(ctx, func(step, code string) {
 			m.mu.Lock()
 			job.Step = step
-			if kind == "install" {
-				job.Stage = code
-			} else {
+			if kind == "pair" {
 				job.Waiting = code
+			} else {
+				job.Stage = code
 			}
 			m.mu.Unlock()
 		})
@@ -114,8 +114,11 @@ func (m *Manager) startJob(kind, udid string, run func(context.Context, func(ste
 			job.State, job.Error, job.Code = JobFailed, err.Error(), Code(err)
 			if errors.Is(err, context.DeadlineExceeded) {
 				job.Code, job.Error = "timeout", "the phone didn't confirm in time: unlock it, tap Trust and enter its passcode, then try again"
-				if kind == "install" {
+				switch kind {
+				case "install":
 					job.Error = "the iPhone bridge didn't install in time"
+				case "prepare":
+					job.Error = "the developer disk image didn't mount in time"
 				}
 			}
 		}

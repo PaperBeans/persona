@@ -71,6 +71,9 @@ type pushIntercept struct {
 	Title      string    `json:"title,omitempty"`
 	Body       string    `json:"body,omitempty"`
 	RelatedKey string    `json:"related_key,omitempty"`
+	TodoID     string    `json:"todo_id,omitempty"`
+	MachineID  string    `json:"machine_id,omitempty"`
+	SessionID  string    `json:"session_id,omitempty"`
 	Manager    string    `json:"manager,omitempty"`
 	// Also holds the titles of P1 conclusion pushes that merged into this one: several conclusion cards arriving in
 	// the same minute become one intercepted entry instead of a stack.
@@ -91,6 +94,9 @@ type pushSent struct {
 type pushPolicy struct {
 	level      string
 	relatedKey string
+	todoID     string
+	machineID  string
+	sessionID  string
 	title      string
 	body       string
 	manager    string
@@ -202,7 +208,14 @@ func (p *Pusher) applyLn(policy pushPolicy) (allow bool, reason string) {
 		return true, ""
 	}
 	key := strings.TrimSpace(policy.relatedKey)
-	in := pushIntercept{At: now.UTC(), Level: level, Title: policy.title, Body: policy.body, RelatedKey: key, Manager: policy.manager}
+	in := pushIntercept{
+		At: now.UTC(), Level: level, Title: policy.title, Body: policy.body, RelatedKey: key, Manager: policy.manager,
+		TodoID: strings.TrimSpace(policy.todoID), MachineID: strings.TrimSpace(policy.machineID), SessionID: strings.TrimSpace(policy.sessionID),
+	}
+	if in.MachineID == "" || in.SessionID == "" {
+		// Clients follow a session only as a complete pair; do not persist a half-destination.
+		in.MachineID, in.SessionID = "", ""
+	}
 	p.lnMu.Lock()
 	if level == assistantwire.LevelP0 {
 		// P0 is what the owner must do or decide themself: it always interrupts, before and whatever the 12-hour check
@@ -250,17 +263,43 @@ func (p *Pusher) noteKeyPushedLocked(key string, now time.Time) {
 	p.lnLastPush[key] = now
 }
 
+// relatedDestination is the legacy destination a held-push client follows when related_key is a to-do or an http(s)
+// URL form. Opaque keys all have an empty destination and do not split the existing same-minute conclusion merge.
+func relatedDestination(key string) string {
+	key = strings.TrimSpace(key)
+	if id, ok := strings.CutPrefix(key, "todo:"); ok {
+		id, _, _ = strings.Cut(id, "@")
+		if id = strings.TrimSpace(id); id != "" {
+			return "todo:" + id
+		}
+	}
+	for _, scheme := range []string{"https:", "http:"} {
+		if len(key) > len(scheme) && strings.EqualFold(key[:len(scheme)], scheme) {
+			// WHATWG URLs also accept special forms such as https:foo and https:/foo. Be conservative for merging:
+			// an unusual or even invalid suffix may split a row, but can never give it another row's link.
+			rest := key[len(scheme):]
+			if rest[0] != '?' && rest[0] != '#' {
+				return "url:" + key
+			}
+		}
+	}
+	return ""
+}
+
 // addInterceptLocked keeps one held push and schedules its save. merge (P1): it folds into a recent P1 entry of the
-// same manager opened in the same minute, or about the same related key within the 12-hour window, so several
-// conclusion cards arriving together, or three cards about one PR, become one entry. Entries past the age and count
-// limits go. lnMu is held.
+// same manager and compatible destination opened in the same minute, or about the same related key within the 12-hour
+// window, so several conclusion cards arriving together, or three cards about one PR, become one entry. Entries past
+// the age and count limits go. lnMu is held.
 func (p *Pusher) addInterceptLocked(in pushIntercept, merge bool) {
 	in.Body = summaryBody(in.Body)
 	if merge {
 		minute := in.At.Truncate(time.Minute)
 		for i := len(p.intercepts) - 1; i >= 0 && i >= len(p.intercepts)-64; i-- {
 			e := &p.intercepts[i]
-			if e.Reason != interceptReasonP1 || e.Manager != in.Manager {
+			if e.Reason != interceptReasonP1 || e.Manager != in.Manager ||
+				e.TodoID != in.TodoID || e.MachineID != in.MachineID || e.SessionID != in.SessionID ||
+				relatedDestination(e.RelatedKey) != relatedDestination(in.RelatedKey) {
+				// One merged row has one destination. A different (or missing) source needs its own row.
 				continue
 			}
 			sameMinute := e.At.Truncate(time.Minute).Equal(minute)

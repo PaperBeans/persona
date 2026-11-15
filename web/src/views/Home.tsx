@@ -9,6 +9,8 @@ import { interactionAsk } from "../lib/inbox";
 import { interactionKicker } from "../lib/row-line";
 import { answerLines, type Resolution } from "../lib/answered";
 import { quickAnswers, withHeld, type HeldRow, type QuickChoice } from "../lib/quick-answers";
+import { cardTapKey } from "../lib/card-tap-key";
+import { currentViewId, TapGuardSurface, useTapGuard, useTapGuardView } from "../lib/tap-guard";
 import { optionDisplay, permissionDetail } from "../lib/tool-detail";
 import { cardToolName } from "../lib/turns";
 import { plainMarkdown } from "../lib/plain-markdown";
@@ -47,6 +49,8 @@ function greeting() {
 }
 
 export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; onToggleSidebar: () => void }) {
+  // stamp the opened overview before its first rows are read: a row arriving later is judged against the open-grace
+  useTapGuardView(overviewTapSurface, currentViewId());
   // with several assistants, the current one's computers, cards, agents and tasks (docs/assistant/managers.md "Clients")
   const machines = useScopedMachines();
   const interactions = useScopedInteractions();
@@ -499,13 +503,22 @@ function ContinueAction({ s, title, several }: { s: Session; title: string; seve
 
 const ANSWERED_HOLD_MS = 1600;
 
+/** The overview's rows share one guard surface (#8161): opening Overview exempts its first rows for this grace. */
+const overviewTapSurface = new TapGuardSurface(1000);
+
+/** Tests: the module-level surface outlives any one render, so each test starts with a freshly opened overview. */
+export function resetOverviewTapGuardForTest(): void {
+  overviewTapSurface.reset();
+}
+
 /** A row's one-tap answers (lib/quick-answers.ts), under its words; the one being sent spins, the others wait. An answer
  *  on its way from anywhere (this row, the chat's card, a notification) holds them all too, also after leaving Overview
  *  and coming back, and the row says which one, as the chat's card does (#2793). */
 function QuickAnswers({ ix, choices, sending, onPick }: { ix: Interaction; choices: QuickChoice[]; sending?: string; onPick: (c: QuickChoice) => void }) {
   const { pending, line } = usePendingLine(ix);
+  const { ref } = useTapGuard(overviewTapSurface, `${ix.id}${cardTapKey(ix)}`, currentViewId(), "button");
   return (
-    <div className="flex flex-wrap gap-1.5 px-3 pb-2 pl-10.5">
+    <div ref={ref} className="flex flex-wrap gap-1.5 px-3 pb-2 pl-10.5">
       {line && <p data-row-pending role="status" className="basis-full truncate text-[12px] text-ink-2">{line}</p>}
       {choices.map((c) => {
         const shown = optionDisplay(c.label);

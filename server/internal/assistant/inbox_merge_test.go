@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -147,7 +148,7 @@ func TestInboxTodoAndUndo(t *testing.T) {
 		if td["due_date"] != "2026-11-15" || td["inbox_item"] == "" {
 			t.Fatalf("todo %v", td)
 		}
-		if m.(map[string]any)["item"] == "b" && td["title"] != "Send Ana the numbers" {
+		if m.(map[string]any)["item"].(map[string]any)["id"] == "b" && td["title"] != "Send Ana the numbers" {
 			t.Fatalf("title %v", td["title"])
 		}
 	}
@@ -164,6 +165,33 @@ func TestInboxTodoAndUndo(t *testing.T) {
 	}
 	if _, ok := h.todoNow(made[0].(map[string]any)["todo"].(map[string]any)["id"].(string)); ok {
 		t.Fatal("to-do stays after Undo")
+	}
+}
+
+// Each made to-do names its row as {"id": …}, the shape the iPhone app decodes (#7215): with a bare string id the app
+// failed the whole answer and showed a decoding error, though the to-do was made and the row filed (#8310).
+func TestInboxTodoReplyItemIsAnObject(t *testing.T) {
+	h := muteHub(t)
+	mergeItems(h)
+	code, out := inboxCall(t, h.routes(), "POST", "/api/v1/inbox/todo", `{"items":[{"id":"a"}]}`)
+	if code != 200 {
+		t.Fatalf("%d %v", code, out)
+	}
+	var reply struct {
+		Todos []struct {
+			Item struct {
+				ID string `json:"id"`
+			} `json:"item"`
+			Todo struct {
+				ID string `json:"id"`
+			} `json:"todo"`
+		} `json:"todos"`
+	}
+	if err := json.Unmarshal(rawJSON(out), &reply); err != nil {
+		t.Fatalf("an app decoding item and todo as objects cannot read the answer: %v", err)
+	}
+	if len(reply.Todos) != 1 || reply.Todos[0].Item.ID != "a" || reply.Todos[0].Todo.ID == "" {
+		t.Fatalf("todos %+v", reply.Todos)
 	}
 }
 

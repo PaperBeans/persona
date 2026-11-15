@@ -74,10 +74,11 @@ class RepairIntegrationTests(unittest.TestCase):
         self.assertEqual(self.git("ls-remote", "origin", "refs/heads/fix/example").split()[0], self.head)
 
     def test_worker_clone_cleanup_never_removes_source_checkout(self):
-        with pr_watch_repair.repair_repository_copy(str(self.repo)) as copy:
+        with pr_watch_repair.repair_repository_copy(str(self.repo), [self.main]) as copy:
             self.assertTrue(Path(copy, ".git").is_dir())
             self.assertFalse(Path(copy, ".git").is_file())
             self.assertNotEqual(Path(copy), self.repo)
+            self.assertEqual(self.git("cat-file", "-t", self.main, cwd=copy), "commit")
         self.assertTrue(self.repo.exists())
         self.assertTrue(Path(self.repo, ".git").exists())
     def test_head_change_before_repair_push_is_refused(self):
@@ -104,8 +105,13 @@ class RepairIntegrationTests(unittest.TestCase):
         return tip
 
     def passthrough(self):
-        return patch.object(pr_watch_repair, "checked", side_effect=lambda argv, **kwargs:
-                            self.git(*argv[1:], cwd=kwargs.get("cwd")) if argv[0] == "git" else "")
+        def passthrough(argv, **kwargs):
+            if argv[0] != "git":
+                return ""
+            if argv[1] == "cat-file":
+                return "".join(line.strip() + " commit\n" for line in kwargs["input_text"].splitlines())
+            return self.git(*argv[1:], cwd=kwargs.get("cwd"))
+        return patch.object(pr_watch_repair, "checked", side_effect=passthrough)
 
     def test_merge_follows_main_that_moved_after_the_pr_was_read(self):
         newer = self.push_main("newer")
@@ -212,6 +218,31 @@ class RepairIntegrationTests(unittest.TestCase):
             self.assertEqual(subprocess.run(["git", "config", "--local", "--get", "user.name"], cwd=copy,
                                             env=self.env, capture_output=True, text=True).returncode, 1)
             self.assertFalse((self.root / "hook-ran").exists())
+
+    def test_conflict_clone_fetches_a_main_not_reachable_from_the_pr(self):
+        self.conflicting_merge()
+        result = subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                                 "merge", "--no-ff", "--no-edit", self.main],
+                                cwd=self.repo, env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(pr_watch_repair.unmerged_paths(str(self.repo)), ["file.txt"])
+        try:
+            with pr_watch_repair.repair_repository_copy(str(self.repo), [self.main]) as copy:
+                # A normal branch clone has no object for a non-ancestor main.
+                # The conflict path must explicitly fetch that exact parent.
+                self.assertEqual(self.git("cat-file", "-t", self.main, cwd=copy), "commit")
+                result = subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                                         "merge", "--no-ff", "--no-edit", self.main],
+                                        cwd=copy, env=self.env, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(pr_watch_repair.unmerged_paths(str(copy)), ["file.txt"])
+        finally:
+            self.git("merge", "--abort")
+
+    def test_conflict_clone_refuses_an_unavailable_main_parent(self):
+        with self.assertRaisesRegex(pr_watch_repair.WatchError, "not our ref"):
+            with pr_watch_repair.repair_repository_copy(str(self.repo), ["d" * 40]):
+                pass
 
     def test_conflict_worker_rejects_a_permission_denial_even_after_a_correct_edit(self):
         self.conflicting_merge()

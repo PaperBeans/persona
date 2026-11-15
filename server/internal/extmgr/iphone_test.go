@@ -71,11 +71,14 @@ func iphoneMac(t *testing.T, h *Manager, id string, devices []proto.IPhoneDevice
 				return proto.IPhoneResult{Output: json.RawMessage(`{"elements":"[1] button \"Settings\""}`), Image: &proto.Image{Mime: "image/jpeg", Data: "AAAA"}}, nil
 			}
 			return proto.IPhoneResult{Output: json.RawMessage(`{"done":true}`)}, nil
-		case "iphone.pair", "iphone.forget", "iphone.cancel", "iphone.install":
+		case "iphone.pair", "iphone.forget", "iphone.cancel", "iphone.install", "iphone.prepare":
 			seen = append(seen, phoneCallSeen{Method: method, Raw: params})
 			kind := "pair"
-			if method == "iphone.install" {
+			switch method {
+			case "iphone.install":
 				kind = "install"
+			case "iphone.prepare":
+				kind = "prepare"
 			}
 			job = &proto.ComputerJob{Kind: kind, State: "running"}
 			return proto.IPhone{Devices: devices, Checked: time.Now(), Job: job}, nil
@@ -622,6 +625,37 @@ func TestIPhoneInstall(t *testing.T) {
 		if code, _ := call(t, mux, "POST", "/api/v1/machines/mac/iphone/install", h.cfg.Token, ""); code != tc.code || installs() != 1 {
 			t.Fatalf("%v: %d (node asked %d times)", tc.err, code, installs())
 		}
+	}
+}
+
+// Prepare (#8199) names its iPhone and needs the computer on, as pairing does; the node gets the device.
+func TestIPhonePrepare(t *testing.T) {
+	h, _ := extensionTestHub(t)
+	ctx := context.Background()
+	mux := h.routes()
+	_, seen := iphoneMac(t, h, "mac", []proto.IPhoneDevice{testIPhone}, nil)
+	if err := h.extensions.reg.SetEnabled(ctx, iphoneExtensionID, true, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := call(t, mux, "POST", "/api/v1/machines/mac/iphone/prepare", h.cfg.Token, `{"device": "dev-a1"}`); code != 404 {
+		t.Fatalf("preparing needs the computer on: %d", code)
+	}
+	call(t, mux, "PUT", "/api/v1/machines/mac/iphone", h.cfg.Token, `{"enabled": true}`)
+	if code, _ := call(t, mux, "POST", "/api/v1/machines/mac/iphone/prepare", h.cfg.Token, ""); code != 400 {
+		t.Fatalf("prepare names a device: %d", code)
+	}
+	code, out := call(t, mux, "POST", "/api/v1/machines/mac/iphone/prepare", h.cfg.Token, `{"device": "dev-a1"}`)
+	if job, _ := out["job"].(map[string]any); code != 200 || job["kind"] != "prepare" {
+		t.Fatalf("%d %v", code, out)
+	}
+	var got map[string]any
+	for _, c := range seen() {
+		if c.Method == "iphone.prepare" {
+			_ = json.Unmarshal(c.Raw, &got)
+		}
+	}
+	if got["device"] != "dev-a1" {
+		t.Fatalf("the node got %v", got)
 	}
 }
 

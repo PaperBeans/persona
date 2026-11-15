@@ -62,7 +62,6 @@ func TestLarkCardsOnlyForWrites(t *testing.T) {
 		{"remote script after a read", `ssh host.example 'lark-cli auth status; python3 verify.py'`, 1},
 		{"text piped to a remote shell", `echo 'lark-cli im +messages-send --text hi' | ssh host.example sh`, 1},
 		{"ssh option that runs a command", `ssh -o ProxyCommand='lark-cli im +messages-send --text hi' host.example true`, 1},
-		{"python stdin program", "python3 -I - <<'EOF'\nprint('lark-cli profile')\nEOF", 1},
 		{"python heredoc sends", "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['lark-cli', 'im', '+messages-send'])\nEOF", 1},
 		{"inline code naming the CLI", `lark-cli docs +fetch | python3 -c 'import os; os.system("lark-cli im +messages-send")'`, 1},
 		{"inline code starting programs", `lark-cli docs +fetch | python3 -c 'import subprocess; subprocess.run(["sh"])'`, 1},

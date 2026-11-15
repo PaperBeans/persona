@@ -510,6 +510,17 @@ page and the newest message stays over the composer. A fade drawn by the footer 
 - A sidebar that slides over the page must be opaque all the way in: `AssistantDrawer.settle` sets the sidebar's alpha inside its `UIView.animate`, so it faded in while sliding and the page showed through it; under side bars the alpha is set with `UIView.performWithoutAnimation`.
 - Measuring with the runtime CLI (`scripts/app/personactl.py launch`), install the build first (`xcrun simctl install`): the launcher runs whatever is installed, and a round of experiments once measured an older build.
 
+## A sideways scroll view draws into the safe area beside it (2026-11-15, #8212)
+
+- A reply's code block scrolls its long lines sideways in a `ScrollView(.horizontal)`. On the iPhone Duo's displays, whose
+  status bar runs down the trailing edge (the outer display, the inner one on its side), those lines ran past the block's
+  background and on under that bar: a scroll view clips to its frame plus the safe area beside it, and the chat's own
+  scroll view hands that room down to its rows. iPhone and iPad never show it; the Duo has no landscape orientation to
+  fake it with on an iPhone, which is portrait only.
+- Give a sideways scroll view inside a column `.clipped()` (before its background) when nothing in it should reach past
+  its frame. `CodeBlockOverflowUITests` checks the strip beside a code block for drawn text; run it on the Duo simulator,
+  folded or open on its side (Device Hub folds it; `simctl io … screenshot --display=1` captures the outer display).
+
 ## A split's detail stack shares its modifiers only with its root page (#3680)
 
 - In a `NavigationSplitView`, the detail column's `NavigationStack` becomes the column's own navigation controller: a page opened on it covers the whole column. A `.safeAreaInset` on that stack, or a row in a `VStack` above it, shows only over the stack's root page and goes as soon as a page is opened (the Assistant | Agents switch over Agents' empty page vanished over every opened agent, with no way back to Assistant). Put what every page of the column needs on the pages themselves: the root page, each destination (`SplitDetailPage`), and pages pushed with `navigationDestination(item:)` / `(isPresented:)` (`detailPresentation`, a space's New Session).
@@ -1315,9 +1326,10 @@ Use an invalidation revision as the task key and handle the flag after completio
   first build locally `xcodebuild build -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` and run `release.sh` `strings` checks on `Release-iphoneos/Persona.app/Persona`.
   It happened again with `WorkspaceSidebarCard.openAgent` vs `-openAgent` (2026-11-09, #1675 stopped TestFlight 214, renamed `selectAgent` in #2179):
   name closure properties `select…` / `on…`, not `open…` / `show…`. `@State` / `@Binding` / `@Environment` properties are stored as `_name` and never collide.
-  A quick check against the source: the list in `release.sh` into a file, then
-  `git grep -hoE '(var|let|case)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' -- 'apple/*.swift' ':!apple/PersonaTests' ':!apple/PersonaUITests' ':!apple/Persona/Debug' | awk '{print $2}' | sort -u | grep -xF -f <list>`
-  (each hit that is not a property wrapper or a Mac-only case is a collision).
+  And again on 2026-11-15 with `openAgent` (two views) and `openMachines` (#8306), so it is now a check:
+  `python3 scripts/test/test_apple_release_switch_names.py` reads the app's sources outside `#if DEBUG` (the conditions as a
+  device Release archive sees them) for stored properties, enum cases, `@objc` names and string literals equal to a name on
+  `release.sh`'s list. It runs with the other `scripts/test/test_apple*.py` checks before merge.
 - Launch-argument defaults are `strings` (`-dev.compact YES` is "YES"). Read booleans / numbers with `bool(forKey:)` / `integer(forKey:)` / `double(forKey:)` like AppStorage,
   not `object(forKey:) as? Bool`, which silently falls back (#1473 `StoredValue` broke `-dev.compact YES`; `CompactListShots` showed cards instead of compact rows, #2147).
 - Live Activities (`docs/apple/live-activity.md`): ActivityKit uses default JSONDecoder for `content-state`; `Date` values start 2001; pass Unix-second numbers.

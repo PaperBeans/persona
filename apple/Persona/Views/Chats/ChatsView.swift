@@ -889,7 +889,7 @@ private struct AgentsList: View {
                      pinnedOnly: pinnedOnly, hub: hubFilter, multiHub: model.isMultiHub, kept: kept,
                      held: model.heldInList, preferences: preferences,
                      pagedGroups: Set(model.sessionLists.lists.filter { $0.value.paged }.keys),
-                     listQuery: listQuery)
+                     listQuery: listQuery, sideFold: model.sideFoldGroups)
     }
 
     private func listProjection() -> AgentListProjection {
@@ -3113,7 +3113,9 @@ private struct AgentsList: View {
                              pane: TabPanes.Role?, branch: Bool, open: Bool = false) -> some View {
         let level = depth + (branch ? 1 : 0)
         #if os(macOS)
-        let closes = s.state.isLive && s.canTerminal // the row's Close
+        // The row's Close, as its menu offers Close Agent… (`AgentRowMenu`): the session's close capability, so a Paseo
+        // agent without a terminal closes from its row too (#8144).
+        let closes = s.state.isLive && s.canClose
         #endif
         return Group {
             if searching {

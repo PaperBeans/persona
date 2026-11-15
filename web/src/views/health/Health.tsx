@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, enc, errorText } from "../../lib/api";
 import { ago } from "../../lib/format";
 import { memoryEntries, type MemoryEntry, type MemoryFile } from "../../lib/memory";
+import { safeDraftWrite } from "../../lib/drafts";
 import { noteSent } from "../../lib/outbox";
 import { plainMarkdown } from "../../lib/plain-markdown";
 import { href, navigate, onLinkClick } from "../../lib/router";
@@ -168,7 +169,8 @@ function HealthHome({ onToggleSidebar }: { onToggleSidebar: () => void }) {
     }
   };
   const fill = (text: string) => {
-    localStorage.setItem("draft:health-new", text);
+    const stored = "draft:health-new";
+    safeDraftWrite(stored, () => localStorage.setItem(stored, text));
     setSeed((x) => x + 1);
   };
 

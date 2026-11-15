@@ -180,11 +180,12 @@ describe("ScreenVideoLink", () => {
   });
 });
 
-/** The fixture's hello from a helper with tiers on a 960×600-point display, then its format. */
+/** The fixture's hello from a helper with tiers on a 960×600-point display, then its format and first frame (the
+ *  start tier goes out with it). */
 function tieredHello(): Uint8Array {
-  const raws = new VideoParser().push(prefix(2));
+  const raws = new VideoParser().push(prefix(3));
   const h = decode(raws[0].type, raws[0].body) as Hello;
   const hello = framed({ ...h, features: ["tiers"], points: [960, 600], pixels: [1920, 1200] });
-  const format = framed(decode(raws[1].type, raws[1].body));
-  return new Uint8Array([...hello, ...format]);
+  const rest = raws.slice(1).map((r) => framed(decode(r.type, r.body)));
+  return new Uint8Array([...hello, ...rest.flatMap((m) => [...m])]);
 }

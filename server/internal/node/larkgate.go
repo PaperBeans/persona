@@ -84,7 +84,7 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	if slices.ContainsFunc(cfg.Gates, func(g proto.CommandGate) bool { return g.Auth != nil }) {
 		n.gates() // the proxy goes by this Node's config from now on (a resident node's next connection)
 	}
-	analysisCommand := normalizeLarkCommand(command, cwd)
+	analysisCommand := normalizeLarkCommand(command, cwd, cfg.Gates)
 	v := classifyLark(command, cfg.Gates, cwd, n.larkCLIRisk(cfg))
 	if v.deny != "" {
 		return "deny", v.deny, nil

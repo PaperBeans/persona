@@ -56,6 +56,10 @@ struct NewChatView: View {
     /// Model Settings › New Agent's model: what runs with no pick when its launcher does.
     @State private var configuredModel = ""
     @State private var mode = ""   // "" = whatever the launcher uses
+    /// The mode picked for a Paseo provider that is neither Claude Code nor Codex (`StartModes.limited`): Allow
+    /// Everything or its own, picked on this sheet and never remembered. The remembered `mode` is Claude Code's and
+    /// never goes to such a start (#8144).
+    @State private var providerMode = ""
     @State private var effort = ""
     /// Claude Code's ultracode for this start (#1307): off each time the sheet opens and never saved, unlike the effort
     /// (no choice carries over, the server's rule); only an explicit on is sent.
@@ -161,11 +165,17 @@ struct NewChatView: View {
         return typesWithoutList && ModelID.isValid(pickedModel) ? pickedModel : nil
     }
 
-    /// The efforts the model that will run takes (all of them when that is not known).
-    private var effortOptions: [SessionModes.Option] {
-        guard let efforts = modelChoice?.efforts else { return SessionModes.startEffortLevels }
-        return SessionModes.startEffortLevels.filter { efforts.contains($0.id) }
-    }
+    /// The efforts the model that will run takes (all of them when that is not known; none for a Paseo provider other
+    /// than Claude Code and Codex then, `StartModes.efforts`).
+    private var effortOptions: [SessionModes.Option] { StartModes.efforts(known: modelChoice?.efforts, for: runEntry) }
+
+    /// The launcher that will run, as this computer lists it; nil before its launchers are in.
+    private var runEntry: Launcher? { launchers.first(where: { $0.name == runLauncher }) }
+    /// It is a Paseo provider other than Claude Code and Codex: Use Launcher's and Allow Everything only, picked in
+    /// `providerMode` (#8144).
+    private var limitedModes: Bool { StartModes.limited(runEntry) }
+    /// The mode the picker shows and the start sends: Claude Code's remembered one, or the limited launcher's own pick.
+    private var startMode: String { limitedModes ? providerMode : mode }
 
     /// What the launcher that will run starts: its model list's agent, else the launcher's; Claude Code by default.
     private var startAgent: String {
@@ -186,7 +196,18 @@ struct NewChatView: View {
     private var promptHint: String {
         if codexNeedsFirst { return String(localized: "What should Codex do? (Required: Codex starts a session only after the first message)") }
         if codex { return String(localized: "What should Codex do? (Optional: you can also send it later, here or in its terminal)") }
+        // Claude only for Claude Code: a Paseo provider such as Grok, TRAEX or a runtime's agent is just the agent (#8144).
+        if startAgent != "claude" { return String(localized: "What should the agent do? (Optional)") }
         return String(localized: "What should Claude do? (Optional)")
+    }
+
+    /// Permissions & Thinking's footer while no mode is picked. A Paseo provider other than Claude Code and Codex is told
+    /// as it is: its own approval unless Allow Everything, nothing promised about changing it later in the chat, where
+    /// its mode can't be changed (#8144).
+    private var modesFooter: String {
+        if limitedModes { return String(localized: "This agent uses its own approval settings unless you choose Allow Everything.") }
+        return effortOptions.isEmpty ? String(localized: "This model's thinking effort can't be changed. You can change the permission mode anytime in the chat.")
+            : String(localized: "You can change the permission mode and thinking effort anytime in the chat.")
     }
 
     /// Nothing missing for Start Chat, and the machine's own launchers and directories are in.
@@ -395,14 +416,15 @@ struct NewChatView: View {
                 } header: { Text(models?.models.isEmpty == false || modelChoice?.canPick == true ? String(localized: "Launcher & Model (This Time Only)") : String(localized: "Launcher (This Time Only)")) } footer: {
                     let about = unifiedModels ? String(localized: "Uses Model Configuration › New Agent by default. A choice here applies to this session only and doesn't change the global default.")
                         : String(localized: "Claude Code / Codex launchers from this machine. It runs in a new tab in the terminal engine.")
-                    Text(modelChoice?.canPick == true ? String(localized: "\(about) Models are the same as what /model shows in the terminal.") : about)
+                    // A Paseo provider of another kind has no terminal and no /model (#8144).
+                    Text(modelChoice?.canPick == true && !limitedModes ? String(localized: "\(about) Models are the same as what /model shows in the terminal.") : about)
                 }
 
-                if !codex { // Claude Code's modes; a Codex keeps its own
+                if !codex { // Claude Code's modes (`StartModes`); a Codex keeps its own
                     Section {
-                        Picker(selection: $mode) {
+                        Picker(selection: limitedModes ? $providerMode : $mode) {
                             Text("Use Launcher's").tag("")
-                            ForEach(SessionModes.permissionModes) { o in Label(o.title, systemImage: o.symbol).tag(o.id) }
+                            ForEach(StartModes.modes(for: runEntry)) { o in Label(o.title, systemImage: o.symbol).tag(o.id) }
                         } label: { Label { Text("Permission Mode") } icon: { ThemedIcon(Theme.Icon.permissions).foregroundStyle(Theme.accent) } }
                         if !effortOptions.isEmpty {
                             Picker(selection: $effort) {
@@ -414,9 +436,7 @@ struct NewChatView: View {
                             UltracodeStartRow(on: $ultracode, blocked: ultracodeBlocked, group: ref.group)
                         }
                     } header: { Text("Permissions & Thinking") } footer: {
-                        Text(SessionModes.mode(mode)?.detail
-                             ?? (effortOptions.isEmpty ? String(localized: "This model's thinking effort can't be changed. You can change the permission mode anytime in the chat.")
-                                                    : String(localized: "You can change the permission mode and thinking effort anytime in the chat.")))
+                        Text(SessionModes.mode(startMode)?.detail ?? modesFooter)
                     }
                     .pickerStyle(.menu)
                     .tint(Theme.accent)
@@ -854,6 +874,7 @@ struct NewChatView: View {
         launchers = []
         launcher = ""
         mode = ""
+        providerMode = ""
         effort = ""
         restoredModel = nil
         defaultsFor = ""
@@ -1018,8 +1039,11 @@ struct NewChatView: View {
             }
             // The hub answers at once and starts claude in the background; the first message goes out as an ordinary
             // message (on screen right away, typed in once claude is ready).
+            // Only a mode the launcher runs (`StartModes.sent`): a Plan Only remembered from a Claude Code start never
+            // reaches a Paseo provider of another kind, which refuses it (#8144).
             let s = try await api.start(.init(machineID: ref.id, cwd: dir, launcher: launcher, prompt: nil,
-                                              workspaceID: targetPreset?.workspaceID, host: targetPreset?.host, permissionMode: mode.isEmpty ? nil : mode,
+                                              workspaceID: targetPreset?.workspaceID, host: targetPreset?.host,
+                                              permissionMode: StartModes.sent(startMode, for: runEntry),
                                               effort: effort.isEmpty ? nil : effort, model: sentModel, tabName: name.isEmpty ? nil : name,
                                               async: true, nameHint: nameHint ?? (p.isEmpty ? nil : p), todoID: todoID,
                                               ultracode: sendsUltracode ? true : nil))
@@ -1027,7 +1051,8 @@ struct NewChatView: View {
                 UserDefaults.standard.set(launcher, forKey: "launcher.\(machineID)")
                 UserDefaults.standard.set(effort, forKey: "effort.\(machineID)")
             }
-            UserDefaults.standard.set(mode, forKey: "mode.\(machineID)")
+            // The remembered mode is Claude Code's: a limited launcher's start leaves it as it was.
+            if !limitedModes { UserDefaults.standard.set(mode, forKey: "mode.\(machineID)") }
             UserDefaults.standard.set(cwd, forKey: "cwd.\(machineID)")
             record(setup)
             Haptics.success()

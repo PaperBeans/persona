@@ -24,6 +24,8 @@ dependencies {
     ksp(libs.room.compiler)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
+    testImplementation(project(":core:hub"))
+    testImplementation("com.squareup.okhttp3:mockwebserver:${libs.versions.okhttp.get()}")
     // FixtureReader: the shared chat sync scenarios (spec/fixtures/sync, ChatSyncScenariosTest).
     testImplementation(testFixtures(project(":core:domain")))
     // The items cache against a real Room database on the JVM (SessionItemsCacheTest).

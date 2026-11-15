@@ -1,5 +1,7 @@
 # Lessons: assistant (headless Claude / Codex)
 
+- A GitHub number is not proof of a delivery PR (#8248). Resolve number-only references through issue metadata before recording them; an ordinary issue has no `pull_request` object. Recover old false PR records on acceptance, but do not turn a masked permission 404 into proof of absence: confirm PR access, preserve real historical PRs, and persist removal before publishing it. Item-level misses must not put unrelated PR checks on an outage cooldown.
+
 - A presence window is not an owner-turn guarantee (#6394). The two-minute `ownerPresentFor` hold and the
   five-minute `relayDecisionMax` cap let queued relayed/decision messages start new rounds behind the owner's back
   once the window expires, even while the owner is still waiting on their own round. Keep the ranked queue and the
@@ -126,6 +128,8 @@
 Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; index `docs/lessons/README.md`). Add lessons to relevant sections, or a new section if none fits.
 
 - Push delivery is per destination, not just per conversation (#1896). A shared `notify_user` mark lets one successful channel suppress another channel's failed delivery, while an unmarked extension push duplicates its turn-end mirror. Key delivery by channel, machine and session, record only confirmed sends, and apply the same check to main-chat mirrors, scheduled-task mirrors and Lark mirror retries. Test mixed successes and failures, including text split across several sends.
+
+- A copy sent beside a filtered push must follow the filter's answer, and the answer about it must count the copy (#8268). `notify_user` copied every notice to the Feishu bot and the channels after `notify.request`, without reading `held`, so low-distraction mode held nothing for an owner who reads Persona through the bot; and with that owner's phone pushes off the tool answered "the user was not alerted" for a notice whose Feishu copy had landed, and the conversation sent it again. Gate the copy on the hub's answer for the same push (not on the assistant's own reading of the switch: the hub levels by conversation and related key), and say in the tool's answer which copies went out, failed or are not confirmed yet.
 
 - A one-shot send that forgets its record on failure loses what it was for (2026-11-07, #7). The "Please verify" card is asked once, when a task's deploying turn ends; a failed or timed-out send used to drop the claim, and nothing asked the owner again. Keep the record (the ask, without a message id) and retry from a sweep, under a key per round (`uuid`) so a timeout that did land is not a second card, and only within the hour Feishu remembers a key (`acceptPostWindow`, as the nudge's `nudgeRetryWindow`); past it, fall back to the card-less path the briefing and board already show. Whatever a sweep or a load reads back may hold a claim saved mid-flight (no time) or a null entry: clean the map that was read, before it becomes the book, and never dereference an entry unchecked.
 

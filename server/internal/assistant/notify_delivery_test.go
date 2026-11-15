@@ -33,7 +33,7 @@ func TestNotifyUserSaysWhereTheNoticeWent(t *testing.T) {
 		if c.key != "" {
 			want = i18n.T(en, c.key, c.args)
 		}
-		if got := notifyAnswerText(en, c.res); got != want {
+		if got := notifyAnswerText(en, c.res, nil); got != want {
 			t.Errorf("%s: said %q, want %q", c.name, got, want)
 		}
 		if got := notifyMissed(c.res); got != c.wantMissed {

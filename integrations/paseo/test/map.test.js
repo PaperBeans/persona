@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  AUTO_ACCEPT_ROOTS, CANCELED_NOTE, ERROR_LEAD, ERROR_TEXT, agentRoot, agentRow, archivedUnderOwnId, autoAcceptOf, codexThreadOf, backgroundOf,
-  defaultProvider, effortFor, exitNote, interactionOf, launchersOf, linkedWorktree, modeBeforePlan,
+  AGENT_NOTICE, AUTO_ACCEPT_ROOTS, CANCELED_NOTE, ERROR_LEAD, ERROR_TEXT, FROM_SESSION, SCHEDULE_NOTICE, agentRoot, agentRow, archivedUnderOwnId, asksForTool,
+  autoAcceptOf, codexThreadOf, backgroundOf, defaultProvider, effortFor, exitNote, interactionOf, launchersOf, linkedWorktree, modeBeforePlan,
   parentAgentId, paseoMode, promptKey, providerRoots, responseOf, rewindOf, rowStatus, projectSpaces, sameKindProvider, sessionIdOf, slotNameOf, spaceIdOf,
   strayRecord, timelineItems, toolCall, transcriptOf, workspaceRow, paseoCheckouts,
 } from '../lib/map.js'
@@ -304,7 +304,7 @@ test("spaces: a project's checkout and its worktrees are one space; a workspace 
   assert.deepEqual([bare.space_id, bare.space_name, bare.slot_id], ['wks_x', 'x', undefined], 'no placement: its workspace, as before')
 })
 
-test("launchers: one per usable provider, with the agent it starts and its models' Persona efforts", () => {
+test("launchers: one per usable provider, with the agent it starts, its models' Persona efforts, and whether its approval is Auto Accept", () => {
   const entries = [
     { provider: 'claude', enabled: false, status: 'unavailable', models: [] },
     { provider: 'my-claude', enabled: true, status: 'ready', label: 'My Claude', models: [
@@ -315,8 +315,12 @@ test("launchers: one per usable provider, with the agent it starts and its model
     { provider: 'my-codex', enabled: true, status: 'loading', label: 'My Codex', models: [] },
     { provider: 'grok', enabled: true, status: 'ready', label: 'Grok', models: [{ id: 'g', label: 'G', thinkingOptions: [{ id: 'xhigh' }, { id: 'ultra' }], defaultThinkingOptionId: 'ultra' }] },
     { provider: 'bad.name', enabled: true, status: 'ready', models: [] },
+    { provider: 'opencode', enabled: true, status: 'ready', label: 'OpenCode', models: [] },
+    { provider: 'pi', enabled: true, status: 'ready', label: 'Pi', models: [] },
   ]
   const roots = providerRoots(CONFIG, entries)
+  // Grok (over ACP) and OpenCode approve through Paseo's Auto Accept switch (#8141); Claude Code and Codex have modes,
+  // pi neither.
   assert.deepEqual(launchersOf(entries, roots), [
     { name: 'my-claude', agent: 'claude', model: 'Fable (1M)', models: [
       { id: 'fable[1m]', name: 'Fable (1M)', default: true, efforts: ['low', 'medium', 'high', 'max'], default_effort: 'max' },
@@ -324,7 +328,9 @@ test("launchers: one per usable provider, with the agent it starts and its model
     ] },
     // Paseo creates a Codex agent with no first message: the form need not ask for one (#8140).
     { name: 'my-codex', agent: 'codex', model: 'My Codex', models: [], prompt_optional: true },
-    { name: 'grok', agent: 'paseo', model: 'G', models: [{ id: 'g', name: 'G', efforts: ['xhigh'] }] },
+    { name: 'grok', agent: 'paseo', model: 'G', models: [{ id: 'g', name: 'G', efforts: ['xhigh'] }], auto_accept: true },
+    { name: 'opencode', agent: 'paseo', model: 'OpenCode', models: [], auto_accept: true },
+    { name: 'pi', agent: 'paseo', model: 'Pi', models: [] },
   ])
   assert.equal(defaultProvider(entries, roots), 'my-claude', "Claude Code's own is off: the first running Claude Code")
   assert.equal(defaultProvider([{ provider: 'claude', enabled: true, status: 'ready' }, ...entries], roots), 'claude')
@@ -387,6 +393,38 @@ test("Grok's own tools, named in its ACP input (variant), as the apps' tools, an
   assert.deepEqual([card.tool_name, card.tool_input, card.summary, card.reason], ['LS', { path: '/w/app' }, '/w/app', 'List directory'])
 })
 
+test("a request for an MCP tool, whichever provider asks: Claude Code's name, an ACP call, OpenCode's name, Codex's approval (#8141)", () => {
+  const own = 'mcp__persona__report_to_supervisor'
+  // Claude Code names it.
+  assert.equal(asksForTool({ provider: 'claude', name: own, kind: 'tool' }, own), true)
+  assert.equal(asksForTool({ provider: 'claude', name: 'mcp__persona__phone_notify', kind: 'tool' }, own), false)
+  // Grok over ACP: Paseo names the request after the ACP kind; its input (in the detail Paseo maps) names the tool.
+  const grok = (tool, at = 'detail') => {
+    const input = { variant: 'UseTool', tool_name: tool, tool_input: { kind: 'done', text: 'x' } }
+    return { provider: 'acp', name: 'other', kind: 'tool', title: 'Use tool', ...(at === 'detail' ? { detail: { type: 'unknown', input, output: null } } : { input }) }
+  }
+  assert.equal(asksForTool(grok('persona__report_to_supervisor'), own), true)
+  assert.equal(asksForTool(grok('persona__report_to_supervisor', 'input'), own), true)
+  assert.equal(asksForTool(grok('persona__phone_notify'), own), false, 'another tool of the same server')
+  assert.equal(asksForTool(grok('other__report_to_supervisor'), own), false, "another server's tool of the same name")
+  assert.equal(asksForTool({ provider: 'acp', name: 'execute', kind: 'tool', detail: { type: 'shell', command: 'ls' } }, own), false)
+  // OpenCode's name for an MCP tool is <server>_<tool>, its permission key.
+  assert.equal(asksForTool({ provider: 'opencode', name: 'persona_report_to_supervisor', kind: 'tool' }, own), true)
+  assert.equal(asksForTool({ provider: 'opencode', name: 'persona_phone_notify', kind: 'tool' }, own), false)
+  assert.equal(asksForTool({ provider: 'opencode', name: 'bash', kind: 'tool' }, own), false)
+  // Codex asks for an MCP tool as an approval of its server, the tool named in the message.
+  const codex = (server, message) => ({ provider: 'codex', name: 'CodexMcpElicitation', kind: 'tool', title: `MCP approval: ${server}`,
+    description: message, input: { mode: 'form', requestedSchema: null, url: null }, metadata: { threadId: 't1', turnId: null, serverName: server, elicitationId: null } })
+  assert.equal(asksForTool(codex('persona', 'Allow the persona MCP server to run tool "report_to_supervisor"?'), own), true)
+  assert.equal(asksForTool(codex('persona', 'Allow the persona MCP server to run tool "phone_notify"?'), own), false)
+  assert.equal(asksForTool(codex('other', 'Allow the other MCP server to run tool "report_to_supervisor"?'), own), false)
+  assert.equal(asksForTool(codex('persona', 'Something else entirely'), own), false, 'a message that names no tool')
+  assert.equal(asksForTool({ provider: 'codex', name: 'CodexBash', kind: 'tool', metadata: { serverName: 'persona' },
+    description: 'Allow the persona MCP server to run tool "report_to_supervisor"?' }, own), false, "Codex's other requests")
+  // A name that is no MCP tool's matches nothing.
+  assert.equal(asksForTool({ provider: 'claude', name: 'Bash', kind: 'tool' }, 'Bash'), false)
+})
+
 test("the bridge's own words are the Chinese the hub rewrites in the reader's language; a compaction is the node's divider (#8133)", () => {
   // The hub matches them word for word (server/internal/transcript's Runtime* constants): change both sides together.
   assert.deepEqual([ERROR_TEXT, ERROR_LEAD, CANCELED_NOTE, exitNote(2)], ['出错了', '出错了：', '（已取消）', '（退出码 2）'])
@@ -402,6 +440,44 @@ test("the bridge's own words are the Chinese the hub rewrites in the reader's la
   ], "an error with nothing said is the bare word; a compaction is the node's notice, a divider the apps word themselves")
   const roots = providerRoots(CONFIG)
   assert.equal(agentRow(agentSnapshot({ provider: 'grok', status: 'error', lastError: 'boom' }), { roots }).last_text, '出错了：boom')
+})
+
+test("what another agent hands this one is a message from another session, a subagent's task note or a notice, as from a transcript (#8220)", () => {
+  // The node's words for the same lines read from a transcript (server/internal/transcript/paseo.go): change both sides together.
+  assert.deepEqual([FROM_SESSION, AGENT_NOTICE, SCHEDULE_NOTICE], ['另一个会话',
+    { completed: '子 Agent 完成', failed: '子 Agent 失败', stopped: '子 Agent 已停止', waiting: '子 Agent 等待批准' }, '定时任务到点'])
+  const child = '00000000-0000-4000-8000-00000000c41d'
+  // Paseo's projection of an envelope (agent-messages/envelope.ts projectAgentMessage), and of a bare one (`heartbeat`).
+  const said = (callId, event, text, sender = { id: child, title: 'Ticket 01' }) => ({ type: 'tool_call', callId, name: 'agent_message', status: 'completed',
+    error: null, agentMessage: { event, sender, text }, detail: { type: 'plain_text', text, icon: 'bot' } })
+  const bare = (text) => ({ type: 'tool_call', callId: 'paseo-system:abc', name: 'heartbeat', status: 'completed', error: null,
+    detail: { type: 'plain_text', text, icon: 'sparkles' } })
+  const request = JSON.stringify({ agentId: child, requestId: 'permission-1', request: { id: 'permission-1', name: 'Bash', kind: 'tool',
+    input: { command: 'make smoke', description: 'Run the smoke test' } } }, null, 2)
+  const items = timelineItems([
+    entry(1, said('paseo-agent-message:m1', 'message', 'Ticket 01 is done, please review.')),
+    entry(2, said('paseo-agent-message:m2', 'message', 'Found it.', { id: child })),
+    entry(3, said('paseo-agent-message:n1', 'finished', `Agent ${child} (Ticket 01) finished.\n\nServer: srv_test\n\n<agent-response>\nAll checks pass.\n` +
+      '[truncated 99 chars; use get_agent_activity for the full response]\n</agent-response>')),
+    entry(4, said('paseo-agent-message:n2', 'permission-required', `Agent ${child} (Ticket 01) needs permission.\n\nServer: srv_test\n\n` +
+      'Respond with `respond_to_permission` using the `agentId` and `requestId` below.\n\n<permission-request>\n' + request + '\n</permission-request>')),
+    entry(5, said('paseo-agent-message:n3', 'errored', `Agent ${child} (${child}) was canceled.`, { id: child, title: child })),
+    entry(6, bare('Schedule "nightly review" fired (id=s1, run=r1).\nReview the day.')),
+    entry(7, bare(`Agent ${child} (Ticket 02) errored.\n\n<agent-response>\nNo database.\n</agent-response>`)),
+    entry(8, bare('Something Paseo has not sent yet.\nMore of it.')),
+    entry(9, said('paseo-agent-message:m4', 'message', '  ')),
+  ], { maxSeq: 9 }).items
+  assert.deepEqual(items.map((i) => [i.id, i.role, i.kind, i.text ?? i.tool_name, i.from, i.task]), [
+    ['1#0', 'user', 'text', 'Ticket 01 is done, please review.', 'Ticket 01', undefined],
+    ['2#0', 'user', 'text', 'Found it.', '另一个会话', undefined],
+    ['3#0', 'system', 'notice', '子 Agent 完成 · Ticket 01', undefined, { kind: 'agent', status: 'completed', title: 'Ticket 01', detail: 'All checks pass.…' }],
+    ['4#0', 'system', 'notice', '子 Agent 等待批准 · Ticket 01', undefined, { kind: 'agent', status: 'waiting', title: 'Ticket 01', detail: 'Bash: Run the smoke test' }],
+    ['5#0', 'system', 'notice', '子 Agent 已停止', undefined, { kind: 'agent', status: 'stopped', title: '' }],
+    ['6#0', 'system', 'notice', '定时任务到点：nightly review', undefined, undefined],
+    ['7#0', 'system', 'notice', '子 Agent 失败 · Ticket 02', undefined, { kind: 'agent', status: 'failed', title: 'Ticket 02', detail: 'No database.' }],
+    ['8#0', 'system', 'notice', 'Something Paseo has not sent yet.', undefined, undefined], // a bare envelope of another kind
+  ], 'an empty message shows nothing')
+  assert.ok(items.every((i) => !i.wake && !i.queued), 'the timeline does not say whether one started a run')
 })
 
 test('a timeline as items: results where they finished, the text being written held back, echoes tagged', () => {

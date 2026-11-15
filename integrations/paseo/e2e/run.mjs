@@ -13,9 +13,11 @@
 //   PERSONAD=<personad binary, built after go generate> CLAUDE_BIN=<a Claude Code binary> [PASEO_BIN=paseo] \
 //     node integrations/paseo/e2e/run.mjs
 //
-// Nothing outside a fresh temp directory is touched: the daemon's home, the node's HOME (which is also the HOME Claude
+// Nothing outside a fresh temp directory is written: the daemon's home, the node's HOME (which is also the HOME Claude
 // Code runs with, so its transcripts and its own config live there) and the workspace. The daemon listens on a free
-// port; the bridge reaches it only through its home's paseo.pid.
+// port; the bridge reaches it only through its home's paseo.pid. The node still reads the config directory each of the
+// machine's other running claudes names (CLAUDE_CONFIG_DIR), as every node does (server/internal/node/claudedirs.go),
+// so its list can hold their transcripts too: the checks pick out this run's own sessions, by id, folder or engine.
 
 import { execFileSync, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'

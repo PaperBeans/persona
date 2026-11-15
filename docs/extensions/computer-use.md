@@ -532,8 +532,8 @@ A hardware video channel next to RFB, so the phone shows a Mac's screen at a fra
 picture (from #3067's frames: 0.27–0.31 Mbit/s as HEVC at SSIM ≥ 0.98, against 2.1–2.6 as ZRLE). RFB stays open for
 input, the clipboard and as the fallback; only the picture moves to video. The iPhone offers it for a Mac whose node
 advertises `screen_video`, which a node does once it has the helper (the picture switcher in ⋯ stays hidden
-otherwise). The web, the Mac app and Android don't decode video yet: they keep RFB and show no switcher (the web's is
-behind `webVideo.plays` in `web/src/screen/video.ts`).
+otherwise). The web plays it too (Chrome, Edge and Safari as HEVC, Firefox as H.264; "Browser" below). The Mac app and
+Android don't decode video yet: they keep RFB and show no switcher.
 
 - **Persona Screen** (`apple/PersonaLink/Sources/PersonaScreen`, `apple/Packages/PersonaScreenCore`): a Swift helper app inside
   Persona Link.app (`Contents/Helpers/Persona Screen.app`, bundle id `<link id>.screen`) that captures one display
@@ -670,9 +670,11 @@ behind `webVideo.plays` in `web/src/screen/video.ts`).
     tier that does; another step down waits 1 s and a queue that isn't draining, unless the queue runs away. A phone that
     can't decode or show as fast for 2 s gets a lower frame rate. Up, slow: one tier after a calm window (8 s; 3 s in the
     first 10 s or after a route change) with proof the link carried 1.25× the next floor, or three large frames at 1.5×
-    it; a step up undone within 15 s doubles that tier's window, to 60 s. The start comes from the route: the same
-    network the best tier, Tailscale (direct IPv6 too) under 30 ms the best else the second, the relay the second over
-    Wi-Fi, the third over cellular. A slower route steps down at once; a new bias or cap takes the tier the rate fits,
+    it; a step up undone within 15 s doubles that tier's window, to 60 s. The start comes from the route, as a step of
+    the bias (Auto: 2×60, 1.5×60, 1.5×30): the same network the first, Tailscale (direct IPv6 too) under 30 ms the first
+    else the second, the relay the second over Wi-Fi, the third over cellular; the stream starts on the best tier no
+    richer in pixels a second than that step on this display, so a display at one pixel per point, where steps merge,
+    starts as high as a Retina one (the relay at 60 fps, not 30). A slower route steps down at once; a new bias or cap takes the tier the rate fits,
     the rate at least the current tier's floor, which the link carries. The helper's `timing` comes once a second only
     while frames flow, so its skipped frames count until the next is due (1.25 s) and its bitrate proves headroom once:
     a still screen never steps down or up on an old second's numbers (#7842).
@@ -732,8 +734,11 @@ behind `webVideo.plays` in `web/src/screen/video.ts`).
   heartbeat's kind of ping) and shows the median of the last 5 from the last 20 s (`HubRoundTrips`). It is the same leg
   the web overlay times ("Connection stats on the web"), and like it never sits on the first line. Bitrates have two
   decimals under 1 Mbps, one above, as on the web.
-- **Browser** (#6558; off for users until it has been checked on a real Mac in each browser: `video.ts` `webVideo.plays`,
-  on only in a development server started with `VITE_SCREEN_VIDEO=1`):
+- **Browser** (#6558; on since it was checked on a real Mac on 2026-11-15, over the hub's relay, all at 1920×1080:
+  Chrome 157, Edge 157 and Safari 26.6 with HEVC on the hardware decoder, Firefox 160 with H.264, as it has no HEVC
+  decoder. Each showed video in at least 39 of 41 two-second samples, about 15 ms end to end, 2–3 ms to decode, and
+  the tier's frame rate. `video.ts` `webVideo.plays` false turns the web's video off for everyone: the page keeps RFB
+  and offers no Picture switcher):
   - **Wire and decoding**: `web/src/screen/video-wire.ts` frames the wire as `PersonaScreenKit` does (both replay
     `spec/fixtures/screen-video`, written from Swift's own messages by `ScreenVideoFixtureTests`); `video-bitstream.ts`
     turns `format` into WebCodecs' codec string (`hvc1.1.6.L93.B0`, `avc1.64001F`) and decoder configuration record.
@@ -760,7 +765,10 @@ behind `webVideo.plays` in `web/src/screen/video.ts`).
     The stream feeds `ReceiverSignals` from each frame as it arrives (when its first bytes came, for a frame over
     several reads; refinement passes apart), from each decode time and from each picture drawn or replaced before the
     next animation frame; the helper's `timing` goes to the policy, which decides every 250 ms (not while capture is
-    paused). Each change goes out as an `update` (`scale`, `fps`, `min_kbps`, `target_kbps`, `max_kbps`). ⋯ › Quality
+    paused). Each change goes out as an `update` (`scale`, `fps`, `min_kbps`, `target_kbps`, `max_kbps`), but not before
+    the first frame after a `hello` or `paused` (capture starts again on resume): until then the newest change waits,
+    as on the iPhone, since Persona Screen can lose an `update` that comes before its capture has started (#7856); a
+    new `hello` drops it. ⋯ › Quality
     (Auto, Sharper, Smoother, kept per Mac) moves the bias at once; the data cap and the mobile-data choice go to the
     policy (`setBudget`). The route is the hub's relay, read as an unmeasured one (the relay over Wi-Fi); the tier a
     computer settles on is where its next stream on the page starts. A helper without tiers keeps the cap as before.
@@ -897,9 +905,10 @@ On a direct route (same network or Tailscale), the live screen's video can ride 
 connection, so a lost packet delays only the frame it belongs to, usually by no round trip, and never slows the stream
 by itself ([#7873](https://github.com/nwverse/persona/issues/7873) has the design and the shaped-link numbers it rests
 on). The node's end is `internal/screenlink` (`udp.go`, `udp_wire.go`, `rs.go`); the shared cases are
-`spec/fixtures/screen-udp`. In place: the node's side, offered in `paths` as `"udp": 1`, and the iPhone's, off in
-release builds until the check on real devices (`ScreenRoutes.udpReleaseEnabled`; a DEBUG build launched with
--showScreenUDP has it). No setting of its own: the Settings switch for direct routes covers it.
+`spec/fixtures/screen-udp`. In place: the node's side, offered in `paths` as `"udp": 1`, and the iPhone's, on in
+release builds since the live check against a real Mac (`ScreenRoutes.udpReleaseEnabled` turns it off again; a DEBUG
+build launched with -showScreenUDP has it either way). No setting of its own: the Settings switch for direct routes
+covers it.
 
 - **What rides it**: only the video channel's bytes from the node to the phone, plus the phone's acknowledgements,
   requests to send again, give-ups and pings for it. RFB, the phone's video messages (`start`, `report`, `keyframe`,

@@ -654,6 +654,8 @@ class WatcherTests(unittest.TestCase):
                     if "FETCH_HEAD" in argv:
                         return SHA_BASE + "\n"
                     return SHA_B + "\n"
+                if argv[:2] == ["git", "cat-file"]:
+                    return "".join(line.strip() + " commit\n" for line in kwargs["input_text"].splitlines())
                 return ""
             with patch.object(pr_watch_repair, "pr_snapshot", side_effect=lambda repo, number: pr(head=SHA_B if number == 9 else SHA_A)), \
                     patch.object(pr_watch_repair, "verify", return_value=[]), \

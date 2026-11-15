@@ -38,6 +38,8 @@ import { runtimeIdentity } from "../lib/runtime-list";
 import { heldSeen } from "../lib/seen-outbox";
 import { runningChildren } from "../lib/child-sessions";
 import { childCards, foldedRow } from "../lib/folded-rows";
+import { countSides } from "../lib/side-fold";
+import { useHeldSides } from "../lib/use-child-sessions";
 import { backgroundWork } from "../lib/background-work";
 import { SESSIONS_LIST_FEATURE } from "../lib/session-list";
 import { personalHideDeps, personalOrder, personalSessions, removeAgentSession, useGoingIds } from "../lib/agents";
@@ -261,7 +263,9 @@ function sameProps<P extends { to: Route }>(a: P, b: P): boolean {
 export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, active, to, go, tab, label, prefix, prefixClass, hint, hintFull, host, showState = true, showTodoTag, onMenu, menuLabel = t("sidebar.agent_actions"), endRoom, icon = "chat", workingMark = false, keepTrailing = false }: SessionRowProps) {
   // a parent of child sessions in its folded state (#5120): one of them waiting makes it need you, one working makes it
   // work; the rows of the paged list come as the hub sends them, the other lists' folded already (lib/folded-rows.ts)
-  const given = foldedRow(row);
+  // its side sessions' part from their rows when an open chat holds them (#7944): a side seen here shows at once
+  const sides = useHeldSides(row.machine_id, row.session_id, Boolean(row.children?.sides));
+  const given = foldedRow(row, sides && countSides(sides));
   // what it asks you, or what it did, under its title (#3195): no hover or click needed to see why it is red or green;
   // its own card first, else what one of its child sessions asks (the card's home is this row's page)
   const own = useStore((st) => st.interactions.find((i) => i.machine_id === given.machine_id && i.session_id === given.session_id));

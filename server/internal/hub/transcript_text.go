@@ -126,6 +126,10 @@ func noticeText(l i18n.Lang, s string) string {
 		return tt(l, "runtime_error")
 	case strings.HasPrefix(s, transcript.RuntimeErrorLead):
 		return tt(l, "runtime_error_cause", i18n.Args{"error": strings.TrimPrefix(s, transcript.RuntimeErrorLead)})
+	case s == transcript.PaseoScheduleNotice:
+		return tt(l, "schedule_fired")
+	case strings.HasPrefix(s, transcript.PaseoScheduleNotice+"："):
+		return tt(l, "schedule_fired_what", i18n.Args{"what": strings.TrimPrefix(s, transcript.PaseoScheduleNotice+"：")})
 	}
 	return s
 }
@@ -208,6 +212,10 @@ func taskNoteHead(n *proto.TaskNote) (key string, args i18n.Args) {
 // taskNoteText is a task note's line in l: its heading rewritten from the note's kind and status when text is what the
 // node wrote for them (the "background command finished · <title>" heading), what follows the heading (the title, a Monitor's event) kept.
 func taskNoteText(l i18n.Lang, n *proto.TaskNote, text string) string {
+	// A Paseo child waiting for a permission (transcript/paseo.go): its words, not a subagent's wait for its own work.
+	if n.Kind == "agent" && n.Status == "waiting" && (text == transcript.PaseoPermissionNotice || strings.HasPrefix(text, transcript.PaseoPermissionNotice+" · ")) {
+		return tt(l, "agent_permission") + strings.TrimPrefix(text, transcript.PaseoPermissionNotice)
+	}
 	key, args := taskNoteHead(n)
 	if key == "" {
 		if text == "后台任务有更新" {

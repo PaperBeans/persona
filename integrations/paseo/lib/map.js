@@ -75,6 +75,15 @@ export const exitNote = (code) => `（退出码 ${code}）`
  * the apps find their compaction divider by it, and draw the divider in their own language.
  */
 export const COMPACTED_NOTICE = '上下文已压缩'
+/**
+ * What another agent hands this one (agentMessageItem), in the node's words for the same lines read from a transcript
+ * (server/internal/transcript/paseo.go): the sender of a message whose agent has no title (transcript.FromSession), a
+ * child's notice by how it went (the node's noteText for a subagent, transcript.PaseoPermissionNotice), a schedule's
+ * run (transcript.PaseoScheduleNotice). The hub rewrites each in the reader's language: change both sides together.
+ */
+export const FROM_SESSION = '另一个会话'
+export const AGENT_NOTICE = { completed: '子 Agent 完成', failed: '子 Agent 失败', stopped: '子 Agent 已停止', waiting: '子 Agent 等待批准' }
+export const SCHEDULE_NOTICE = '定时任务到点'
 
 /** A launcher name (the node's nameRe: what a shell function may be called). */
 export const LAUNCHER_NAME = /^[A-Za-z_][A-Za-z0-9_-]*$/
@@ -135,8 +144,9 @@ export function formModel(m) {
 
 /**
  * The new-session form's launchers: one per provider that can start an agent (enabled, not failing, named like a
- * launcher), with the agent it starts and its models. A Codex provider's says it starts with no first message too
- * (prompt_optional): Paseo creates an agent without one, where a Codex in a terminal used to need it.
+ * launcher), with the agent it starts and its models; `auto_accept` when its approval is Auto Accept (#8141). A Codex
+ * provider's says it starts with no first message too (prompt_optional): Paseo creates an agent without one, where a
+ * Codex in a terminal used to need it.
  */
 export function launchersOf(entries = [], roots = {}) {
   const out = []
@@ -144,10 +154,12 @@ export function launchersOf(entries = [], roots = {}) {
     if (!e?.enabled || e.status === 'unavailable' || e.status === 'error' || !LAUNCHER_NAME.test(e.provider ?? '')) continue
     const models = (e.models ?? []).filter((m) => m && m.id && m.isSelectable !== false).map(formModel)
     const def = models.find((m) => m.default) ?? models[0]
-    const l = { name: e.provider, agent: appAgent(roots[e.provider] ?? e.provider), models }
+    const root = roots[e.provider] ?? e.provider
+    const l = { name: e.provider, agent: appAgent(root), models }
     const model = def?.name ?? e.label
     if (model) l.model = String(model)
     if (l.agent === 'codex') l.prompt_optional = true
+    if (AUTO_ACCEPT_ROOTS.has(root)) l.auto_accept = true
     out.push(l)
   }
   return out
@@ -690,6 +702,107 @@ function toolFailed(item) {
   return item?.status === 'failed' || (item?.detail?.type === 'shell' && typeof item.detail.exitCode === 'number' && item.detail.exitCode !== 0)
 }
 
+// A child's notice's first line (Paseo's formatFinishNotificationBody), a schedule's run (buildScheduleFireBody) and
+// Paseo's note to the model that it cut a child's answer, as the node reads them (server/internal/transcript/paseo.go).
+const PASEO_STATUS = /^Agent (\S+) \((.*)\) (finished|errored|needs permission|was closed|is unavailable|was canceled)\.$/
+const PASEO_SCHEDULE = /^Schedule (?:"(.*)" )?fired \(id=[^,)]*, run=[^)]*\)\.$/
+const PASEO_CUT = /\n\[truncated \d+ chars; use get_agent_activity for the full response\]$/
+const PASEO_EVENTS = { finished: 'finished', errored: 'errored', 'needs permission': 'permission-required', 'was closed': 'closed', 'is unavailable': 'closed', 'was canceled': 'errored' }
+
+/** The first non-blank line of s, at most n characters (the node's oneLine). */
+function oneLine(s, n = 100) {
+  const line = String(s ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? ''
+  const chars = [...line]
+  return chars.length > n ? chars.slice(0, n - 1).join('') + '…' : line
+}
+
+/** What is between <tag> and </tag> in s, trimmed; '' when s has no such pair (the node's firstTag). */
+function tagged(s, tag) {
+  const i = s.indexOf(`<${tag}>`)
+  if (i < 0) return ''
+  const j = s.indexOf(`</${tag}>`, i)
+  return j < 0 ? '' : s.slice(i + tag.length + 2, j).trim()
+}
+
+/**
+ * Another agent's message, a child's notice or a schedule's run, which Paseo hands an agent in a <paseo-system>
+ * envelope and its timeline projects into a tool call (`agentMessage`; a bare envelope's into `heartbeat`, whatever it
+ * says). Its items as the node draws the same input read from a transcript: a message from another session, a
+ * subagent's task note, a notice, none for an empty message; null for any other call. The timeline does not say whether
+ * one started a run, so none is a wake.
+ */
+export function agentMessageItems(it) {
+  const am = it?.agentMessage
+  if (am && typeof am === 'object') {
+    const text = typeof am.text === 'string' ? am.text : ''
+    let title = oneLine(am.sender?.title)
+    if (title === String(am.sender?.id ?? '').trim()) title = '' // Paseo names an untitled agent by its id
+    if (am.event === 'message') {
+      const words = text.trim()
+      return words ? [{ role: 'user', kind: 'text', text: words, from: title || FROM_SESSION }] : []
+    }
+    return ['finished', 'errored', 'permission-required', 'closed'].includes(am.event) ? [childNotice(am.event, title, text)] : null
+  }
+  if (it?.name !== 'heartbeat' || !String(it.callId ?? '').startsWith('paseo-system:')) return null
+  const body = String(it.detail?.text ?? '')
+  const [first, ...rest] = body.split('\n')
+  const status = PASEO_STATUS.exec(first)
+  if (status) return [childNotice(PASEO_EVENTS[status[3]], oneLine(status[2]) === status[1] ? '' : oneLine(status[2]), body)]
+  const schedule = PASEO_SCHEDULE.exec(first)
+  if (!schedule) { // Paseo's words of another kind: a notice of its first line
+    const line = snippetLine(body, 200)
+    return line ? [{ role: 'system', kind: 'notice', text: line }] : []
+  }
+  const what = snippetLine(schedule[1], 80) || snippetLine(rest.join('\n'), 80)
+  return [{ role: 'system', kind: 'notice', text: what ? `${SCHEDULE_NOTICE}：${what}` : SCHEDULE_NOTICE }]
+}
+
+/** The first line of s, at most n characters and an ellipsis (the node's snippetLine). */
+function snippetLine(s, n) {
+  const chars = [...String(s ?? '').trim().split('\n', 1)[0].trim()]
+  return chars.length > n ? chars.slice(0, n).join('') + '…' : chars.join('')
+}
+
+/**
+ * A child's notice as a subagent's task note: how it went (by its first line, which tells a cancel from an error, else
+ * by the event), its title, and as the detail what a permission asks for and the child's last answer. The server it
+ * runs on, the request's JSON and how to answer it are for the model.
+ */
+function childNotice(event, title, body) {
+  const reason = PASEO_STATUS.exec(body.split('\n', 1)[0])?.[3] ?? ''
+  const status = reason === 'finished' || (!reason && event === 'finished') ? 'completed'
+    : reason === 'needs permission' || (!reason && event === 'permission-required') ? 'waiting'
+      : ['was canceled', 'was closed', 'is unavailable'].includes(reason) || (!reason && event === 'closed') ? 'stopped'
+        : 'failed'
+  const detail = [status === 'waiting' ? permissionAsk(tagged(body, 'permission-request')) : '', childAnswer(body)].filter(Boolean).join('\n\n')
+  const task = { kind: 'agent', status, title, ...(detail ? { detail } : {}) }
+  return { role: 'system', kind: 'notice', text: title ? `${AGENT_NOTICE[status]} · ${title}` : AGENT_NOTICE[status], task }
+}
+
+/** A child's last answer, the notice's last section (<agent-response>), without Paseo's note that it was cut. */
+function childAnswer(body) {
+  const open = '<agent-response>\n', close = '\n</agent-response>'
+  const i = body.indexOf(open)
+  if (i < 0 || !body.endsWith(close) || i + open.length > body.length - close.length) return ''
+  let answer = body.slice(i + open.length, body.length - close.length)
+  const cut = PASEO_CUT.exec(answer)
+  if (cut) answer = answer.slice(0, cut.index).trimEnd() + '…'
+  return answer.trim()
+}
+
+/** What a child's permission request asks for, in a line: its title, else the tool and the call's description or command. */
+function permissionAsk(raw) {
+  let request
+  try { request = JSON.parse(raw)?.request } catch { return '' }
+  if (!request || typeof request !== 'object') return ''
+  const title = oneLine(request.title)
+  if (title) return title
+  const input = request.input && typeof request.input === 'object' ? request.input : {}
+  const what = oneLine(input.description) || oneLine(input.command)
+  const name = String(request.name ?? '').trim()
+  return name && what ? `${name}: ${what}` : name || what
+}
+
 /**
  * The items of one projected timeline entry (fetch_agent_timeline's). Where each lands: a message, a thought or a
  * note at its first row (seqStart); a tool call at its first row, its result — once it finished — at its last
@@ -719,6 +832,11 @@ export function entryItems(entry, echoes) {
       if (it.text) add(s, { role: 'assistant', kind: 'thinking', text: it.text })
       break
     case 'tool_call': {
+      const said = agentMessageItems(it)
+      if (said) {
+        for (const x of said) add(s, x)
+        break
+      }
       const call = toolCall(it.name, it.detail)
       const useId = it.callId || `paseo-${s}`
       add(s, { role: 'assistant', kind: 'tool_use', tool_name: call.name, tool_use_id: useId, tool_input: call.input })
@@ -808,6 +926,33 @@ function alwaysLabel(suggestions) {
   if (!rules) return undefined
   const where = s.destination === 'session' ? '本会话' : s.destination === 'userSettings' ? '所有项目' : '这个项目'
   return snippet(`${where}不再问：${rules}`)
+}
+
+/** Codex 0.167's MCP approval: `Allow the <server> MCP server to run tool "<tool>"?`. */
+const CODEX_MCP_TOOL = / to run tool "([^"\n]+)"\?/
+
+/**
+ * Whether a permission request asks for MCP tool `name` (`mcp__<server>__<tool>`), whichever provider asks (#8141):
+ * Claude Code by that name, OpenCode as `<server>_<tool>`, Codex in an approval of the server naming the tool, any
+ * other by the call its card shows (Grok's UseTool).
+ */
+export function asksForTool(request, name) {
+  const r = request ?? {}
+  const m = /^mcp__(.+?)__(.+)$/.exec(name ?? '')
+  if (!m || typeof r.name !== 'string') return false
+  const [, server, tool] = m
+  switch (r.provider) {
+    case 'claude':
+      return r.name === name
+    case 'opencode': {
+      const safe = (s) => s.replace(/[^a-zA-Z0-9_-]/g, '_')
+      return r.name === `${safe(server)}_${safe(tool)}`
+    }
+    case 'codex':
+      return r.name === 'CodexMcpElicitation' && r.metadata?.serverName === server && CODEX_MCP_TOOL.exec(r.description ?? '')?.[1] === tool
+  }
+  const input = r.input && typeof r.input === 'object' ? r.input : {}
+  return toolCall(r.name, r.detail ?? { type: 'unknown', input }).name === name
 }
 
 /**

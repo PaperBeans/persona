@@ -113,7 +113,9 @@ tint. State colors are the same in every style.
 ## Avatars, state dots and app icons
 
 - **Agent state**: `StatusDot` (sizes `Theme.Size.dot*`, the Needs you dot breathes unless Reduce Motion is on) and
-  `AgentStateBadge`. A session's mark is `SessionAvatar`; an Agent's runtime is `AgentMark`.
+  `AgentStateBadge`. A session's mark is `SessionAvatar`; an Agent's runtime is `AgentMark`. An agent a runtime runs is
+  known by its name too: a Paseo provider whose label or launcher names a known agent (TRAE, `AgentKind.brand(named:)`)
+  draws that agent's mark, any other its letter, never Claude's (#8144). The share card's avatar follows the same names.
 - **People and conversations**: `ThreadAvatar`, `Monogram`, `PersonalAgentAvatar`.
 - **Brand marks** sit in fixed boxes with `Theme.Brand.optical` compensation (`BrandMark`), on a white tile in
   BeautifulUI (`BrandTile`) and in a circle as a source badge (`BrandBadge`).

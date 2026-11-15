@@ -7,12 +7,14 @@ import { t } from "../i18n";
 
 export const RUNTIME_SEARCH_FEATURE = "sessions_search";
 export const RUNTIME_SEARCH_PAGE_SIZE = 40;
-export interface RuntimeSearchHit { session: Session; score: number; evidence?: EvidenceSnippet }
+/** `side`: with `roots=1`, the folded side session the hit is in when it is not the row's own (#7944, the hub's
+ *  `search_hits[<id>].hit_session_id`; lib/side-fold.ts searchHitSide). */
+export interface RuntimeSearchHit { session: Session; score: number; evidence?: EvidenceSnippet; side?: string }
 export interface RuntimeSearchSnapshot {
   query: string; hits: RuntimeSearchHit[]; loaded: boolean; loading: boolean; loadingMore: boolean; error: string; moreError: string;
   hasMore: boolean; total: number; expired: boolean; supported: boolean; retryable: boolean;
 }
-interface WireHit { score: number; evidence?: Omit<EvidenceSnippet, "roleLabel"> }
+interface WireHit { score: number; evidence?: Omit<EvidenceSnippet, "roleLabel">; hit_session_id?: string }
 interface SearchPage {
   sessions: Session[]; search_hits: Record<string, WireHit>; has_more: boolean; next_cursor?: string; revision: string; total: number;
 }
@@ -41,7 +43,8 @@ function readPage(page: SearchPage): RuntimeSearchHit[] {
     const match = Object.hasOwn(page.search_hits, id) ? page.search_hits[id] : undefined;
     if (ids.has(id) || !match || !Number.isFinite(match.score) || match.score <= 0 || match.score > 200) throw invalid();
     ids.add(id);
-    return { session: foldedRow(session), score: match.score, evidence: hitEvidence(match.evidence) };
+    if (match.hit_session_id !== undefined && typeof match.hit_session_id !== "string") throw invalid();
+    return { session: foldedRow(session), score: match.score, evidence: hitEvidence(match.evidence), ...(match.hit_session_id ? { side: match.hit_session_id } : {}) };
   });
   // Evidence for a row not in the response is never allowed to leak through a side map.
   if (Object.keys(page.search_hits).some((id) => !ids.has(id))) throw invalid();

@@ -82,7 +82,7 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 		}
 		return v
 	}
-	cmd = normalizeLarkCommand(cmd, cwd)
+	cmd = normalizeLarkCommand(cmd, cwd, gates)
 	v.unknown = shellCommandUnknown(cmd, false, depth)
 	segs, ok := shellcmd.Split(cmd)
 	if !ok {
@@ -95,11 +95,30 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 	// Text naming lark-cli is a call only where a program executes it (larkgate_text.go): flow notes each
 	// segment for larkTextRuns.
 	flow := make([]larkFlow, 0, len(segs))
+	// sequential: a `;` / `&&` / `||` list of simple commands, run one after another in the order written.
+	sequential := false
+	if tree, err := syntax.NewParser().Parse(strings.NewReader(cmd), ""); err == nil {
+		_, sequential = larkFlatStmts(tree.Stmts)
+	}
 	for _, s := range segs {
-		flow = append(flow, larkFlow{text: s.Text, writes: larkWritesFile(s.Redirect)})
+		writes, notes := larkWritesFile(s.Redirect)
+		flow = append(flow, larkFlow{text: s.Text, writes: writes, notes: notes})
 		seg := &flow[len(flow)-1]
 		nestedUnsure := false
 		for _, nested := range s.Nested {
+			if inner, ok := larkArithmetic(nested); ok {
+				// $((…)) is arithmetic, not a subshell: it runs only its own $(…). It stays unsure (a variable's
+				// value is evaluated as an expression, which may hold a substitution of its own).
+				nestedUnsure = true
+				for _, c := range inner {
+					child := classifyLarkDepth(c, gates, cwd, risk, depth+1)
+					if len(child.calls) > 0 || child.unknown || child.unparsed {
+						v.other = true
+					}
+					merge(child)
+				}
+				continue
+			}
 			child := classifyLarkDepth(nested, gates, cwd, risk, depth+1)
 			if len(child.calls) > 0 || child.unknown || child.unparsed {
 				v.other = true
@@ -276,15 +295,25 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 			v.other, seg.filter, seg.writes = true, true, true
 		default:
 			v.other, seg.program = true, true
-			if larkCLIRe.MatchString(s.Text) || dynamicCommandName(name) {
+			// Inline Python that can start nothing holds lark-cli's name as data (#8148); it may write it to a file.
+			inert := inertPythonCode(words)
+			if larkCLIRe.MatchString(s.Text) && !inert || dynamicCommandName(name) {
 				v.unknown = true // an interpreter, wrapper or script may invoke the CLI
+			}
+			if inert && larkCLIRe.MatchString(s.Text) {
+				if files, ok := pythonWrites(words); ok {
+					seg.notes = append(seg.notes, files...)
+				} else {
+					seg.writes = true
+				}
 			}
 			// A program whose code the command does not show may run lark-cli; inline code that runs nothing
 			// else is read by its own words above.
-			seg.opaque = indirectLarkCommand(name) && !selfContainedCode(words)
+			seg.opaque = indirectLarkCommand(name) && !selfContainedCode(words) && !inert
+			sequential = sequential && name != "trap" // its code runs later
 		}
 	}
-	if larkTextRuns(cmd, flow) {
+	if larkTextRuns(cmd, flow, sequential) {
 		v.other, v.unknown = true, true
 	}
 	if executableEnv && (len(v.calls) > 0 || larkCLIRe.MatchString(cmd)) {
