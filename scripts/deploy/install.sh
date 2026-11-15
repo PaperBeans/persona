@@ -701,6 +701,22 @@ fetch_link() {
 	say program_installed persona-link "$("$DEST/persona-link" version 2>/dev/null || install_text unknown_version)" "$DEST/persona-link"
 }
 
+# fetch_bridge puts the iPhone helper (persona-iphone-bridge, docs/extensions/iphone-bridge.md "Releases") at
+# $DEST/persona-iphone-bridge when the release has a build for this computer, checked against SHA256SUMS like the
+# others. Optional: a release without one, or a failed download, leaves it out (the app can install it later).
+fetch_bridge() {
+	bname="persona-iphone-bridge-$os-$arch"
+	awk -v n="$bname.gz" '$2 == n || $2 == "*" n { found=1 } END { exit !found }' "$tmp/SHA256SUMS" || return 0
+	fetch "$DL/$bname.gz" "$tmp/$bname.gz" || { warn download_failed "$DL/$bname.gz" && return 1; }
+	bwant="$(awk -v n="$bname.gz" '$2 == n || $2 == "*" n { print $1 }' "$tmp/SHA256SUMS")"
+	[ "$(sum "$tmp/$bname.gz")" = "$bwant" ] || { warn checksum_mismatch "$bname.gz" && return 1; }
+	gzip -dc "$tmp/$bname.gz" > "$tmp/$bname" && [ -s "$tmp/$bname" ] || { warn unpack_failed "$bname.gz" && return 1; }
+	cp "$tmp/$bname" "$DEST/.persona-iphone-bridge.new" && chmod 755 "$DEST/.persona-iphone-bridge.new" &&
+		mv -f "$DEST/.persona-iphone-bridge.new" "$DEST/persona-iphone-bridge" ||
+		{ warn install_failed "$DEST/persona-iphone-bridge" && return 1; }
+	say program_installed persona-iphone-bridge "$("$DEST/persona-iphone-bridge" version 2>/dev/null || install_text unknown_version)" "$DEST/persona-iphone-bridge"
+}
+
 # node_service: the node service, chosen at the questions below: with the device's own program when the release has it.
 node_service() {
 	if has_node_build && ! hosts_hub_or_manager; then get_node_program; fi
@@ -711,6 +727,7 @@ node_service() {
 # (docs/operations/link.md). persona-link does the work; this only picks how it pairs.
 install_node() {
 	fetch_link || fail node_link_required
+	fetch_bridge || :
 	if [ -z "$PAIR" ] && [ -z "$LISTEN_SET" ] && (: </dev/tty) 2>/dev/null; then
 		install_format node_connect_help >/dev/tty
 		printf '\n' >/dev/tty

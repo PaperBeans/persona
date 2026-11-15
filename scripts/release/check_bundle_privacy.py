@@ -93,6 +93,10 @@ SSH_ALGORITHM_NAMES = frozenset(name + "@" + domain for name, domain in (
     ("ecdsa-sha2-nistp521-cert-v01", "openssh.com"), ("ssh-ed25519-cert-v01", "openssh.com"),
 ))
 TAILSCALE_CONTACT = re.compile(r'<a href="mailto:support\+webclient@tailscale[.]com" class="link">contact us</a>')
+# persona-iphone-bridge (Rust, native/iphone-bridge): aws-lc's assembly credits ("SHA256 block transform for ARMv8,
+# CRYPTOGAMS by <…@openssl.org>", "AES GCM module for ARMv8, SPDX BSD-3-Clause by <…@arm.com>", the two authors below).
+# Upstream author strings, not accounts; only right after "by <" and before ">".
+RUST_TLS_CONSTANTS = re.compile(r"(?<=by <)(?:appro@openssl[.]org|xiaokang[.]qian@arm[.]com)(?=>)")
 # Go lays string constants out back to back in rodata. larkcli's chat-link path ends where its display name begins
 # (the path, then the display name), which reads as a banned name that neither constant holds. Exact join only.
 # The name is split here because this file must not spell it either.
@@ -174,6 +178,7 @@ def generic_text(text, dependencies, original_text=None):
         text = GO_ADJACENT_CONSTANTS.sub("", text)
     if WIREGUARD_MODULES & set(dependencies):
         text = WIREGUARD_IDENTIFIER.sub("", text)
+    text = RUST_TLS_CONSTANTS.sub("", text)
     text = pc.EMAIL.sub(lambda m: "" if binary_noise_email(m.group(1)) else m.group(0), text)
     text = GO_ADJACENT_MAIL_FIELD.sub("", text)
     if "golang.org/x/crypto" in dependencies:

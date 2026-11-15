@@ -117,6 +117,7 @@ func TestSaveMachineEntriesAfterLockWait(t *testing.T) {
 			st := newHandoverTestStore()
 			h := newHandoverTestHub(t, st)
 			h.devices.reportedRead = true
+			h.devices.keptRead = true // this lock/context test starts with both persisted records known
 			h.devices.reportedSave.Lock()
 			ctx, cancel := context.WithCancel(context.Background())
 			if expired {

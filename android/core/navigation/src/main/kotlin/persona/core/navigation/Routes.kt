@@ -24,6 +24,14 @@ sealed interface RouteSource {
     val sessionId: String,
     val kind: ConversationKind? = null,
     val source: RouteSource? = null,
+    /**
+     * A side session (#7944) opened from its parent's chat: its own conversation, over the parent's page. Without it a
+     * route to a side opens the parent, which then shows the side this way. Written only when set, so routes saved
+     * before it keep their stored form.
+     */
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val side: Boolean = false,
 ) : NavKey
 
 @Serializable @SerialName("persona.core.navigation.InboxItemRoute") data class InboxItemRoute(val itemId: String) : NavKey

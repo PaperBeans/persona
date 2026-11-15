@@ -39,6 +39,17 @@ func sdkTranscript(t *testing.T, n *Node, id, answer string) string {
 		strings.Repeat(" ", 4096))
 }
 
+// runtimeSessionCall drives the real RPC connection, so watch lifetimes are tested against ConnContext rather than a
+// direct handler call's request context.
+func runtimeSessionCall(t *testing.T, hub *runtimeHub, method string, params any) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := hub.nodePeer.Call(ctx, method, params, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A runtime's session whose conversation is a Claude transcript here: listed once, as the runtime says (status,
 // title, modes) with what the transcript says (the last words, its revision); its content, info and watch are the
 // node's, from the transcript, and the runtime pushes only live text for it.
@@ -93,9 +104,7 @@ func TestRuntimeSessionInATranscript(t *testing.T) {
 	}
 
 	// Watched: the node tails the transcript; the runtime only streams live text (transcript: true).
-	if _, err := nodeCall(t, n, "session.watch", map[string]any{"session_id": "paseo-a1", "since_seq": 2}); err != nil {
-		t.Fatal(err)
-	}
+	runtimeSessionCall(t, hub, "session.watch", map[string]any{"session_id": "paseo-a1", "since_seq": 2})
 	waitFor(t, "the runtime told to stream", func() bool { return len(host.got("session.watch")) == 1 })
 	var w map[string]any
 	_ = json.Unmarshal(host.got("session.watch")[0], &w)
@@ -136,11 +145,54 @@ func TestRuntimeSessionInATranscript(t *testing.T) {
 	if len(host.got("session.send")) != 1 {
 		t.Fatal("the send did not reach the runtime")
 	}
-	if _, err := nodeCall(t, n, "session.unwatch", map[string]any{"session_id": "paseo-a1"}); err != nil {
-		t.Fatal(err)
-	}
+	runtimeSessionCall(t, hub, "session.unwatch", map[string]any{"session_id": "paseo-a1"})
 	if len(host.got("session.unwatch")) != 1 || n.runtimes.isWatched("paseo-a1") {
 		t.Fatal("unwatch not passed on")
+	}
+}
+
+func TestRuntimeTranscriptWatchStopsWithItsConnection(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		moved bool
+	}{
+		{name: "initial watch"},
+		{name: "runtime-only watch moved to a transcript", moved: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n, hub := runtimeNode(t)
+			host := dialRuntime(t, n, paseoHello())
+			var path string
+			if !tc.moved {
+				path = sdkTranscript(t, n, sdkSession, "ready")
+			}
+			list := map[string]any{"sessions": []map[string]any{{"session_id": "paseo-a1", "transcript": sdkSession, "status": "working"}}}
+			_ = host.peer.Notify("runtime.sessions", list)
+			waitFor(t, "listed", func() bool { _, ok := listed(t, n)["paseo-a1"]; return ok })
+			runtimeSessionCall(t, hub, "session.watch", map[string]any{"session_id": "paseo-a1", "since_seq": 0})
+			if tc.moved {
+				path = sdkTranscript(t, n, sdkSession, "written now")
+				_ = host.peer.Notify("runtime.sessions", list)
+			}
+			watchExists := func() bool {
+				n.mu.Lock()
+				defer n.mu.Unlock()
+				_, ok := n.watches["paseo-a1"]
+				return ok
+			}
+			waitFor(t, "the transcript watch", watchExists)
+			hub.cancel()
+			waitFor(t, "the watch to stop with its connection", func() bool { return !watchExists() })
+
+			before := len(hub.items)
+			f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+			_, _ = f.WriteString(`{"type":"assistant","uuid":"a2","timestamp":"2026-11-04T10:00:09Z","message":{"role":"assistant","content":[{"type":"text","text":"after the connection"}]}}` + "\n")
+			_ = f.Close()
+			time.Sleep(700 * time.Millisecond) // sleep-ok: a negative check, several 250 ms watch polls must pass with nothing pushed
+			if after := len(hub.items); after != before {
+				t.Fatalf("the watch kept pushing after its connection ended: items %d -> %d", before, after)
+			}
+		})
 	}
 }
 
@@ -170,7 +222,7 @@ func TestRuntimeSessionUnderItsTranscriptID(t *testing.T) {
 
 // A transcript this node does not have (a config directory it does not know): the content stays the runtime's.
 func TestRuntimeTranscriptNotHere(t *testing.T) {
-	n, _ := runtimeNode(t)
+	n, hub := runtimeNode(t)
 	host := dialRuntime(t, n, paseoHello())
 	host.answer = func(method string, params json.RawMessage) (any, error) {
 		if method == "session.items" {
@@ -186,9 +238,7 @@ func TestRuntimeTranscriptNotHere(t *testing.T) {
 	if err != nil || !strings.Contains(string(raw), "from the runtime") {
 		t.Fatalf("page %s %v", raw, err)
 	}
-	if _, err := nodeCall(t, n, "session.watch", map[string]any{"session_id": "paseo-a2", "since_seq": 1}); err != nil {
-		t.Fatal(err)
-	}
+	runtimeSessionCall(t, hub, "session.watch", map[string]any{"session_id": "paseo-a2", "since_seq": 1})
 	var w map[string]any
 	_ = json.Unmarshal(host.got("session.watch")[0], &w)
 	if w["transcript"] != nil || w["since_seq"] != float64(1) {
@@ -203,9 +253,7 @@ func TestRuntimeTranscriptComesLater(t *testing.T) {
 	host := dialRuntime(t, n, paseoHello())
 	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{{"session_id": "paseo-a3", "status": "idle"}}})
 	waitFor(t, "listed", func() bool { _, ok := listed(t, n)["paseo-a3"]; return ok })
-	if _, err := nodeCall(t, n, "session.watch", map[string]any{"session_id": "paseo-a3", "since_seq": 0}); err != nil {
-		t.Fatal(err)
-	}
+	runtimeSessionCall(t, hub, "session.watch", map[string]any{"session_id": "paseo-a3", "since_seq": 0})
 	path := sdkTranscript(t, n, sdkSession, "started")
 	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{{
 		"session_id": "paseo-a3", "transcript": sdkSession, "status": "working"}}})
@@ -314,19 +362,22 @@ func TestRuntimeTranscriptWindowIsTheRunAsModels(t *testing.T) {
 	}
 }
 
-// A runtime running several agents: each session's card is its own agent's (Claude Code's for a Claude session).
+// A runtime running several agents: each session's card is its own agent's (Claude Code's for a Claude session), by
+// the name its row gives it. One of Paseo's other providers runs under Paseo's own id with its provider's label: its
+// card says "Grok", not "Paseo" (#8142); a row without a label of its own keeps the runtime's name.
 func TestRuntimeCardIsTheSessionsAgent(t *testing.T) {
 	n, hub := runtimeNode(t)
 	host := dialRuntime(t, n, paseoHello())
 	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
 		{"session_id": "paseo-c1", "agent": "claude", "status": "working"},
 		{"session_id": "paseo-o1", "status": "working"},
+		{"session_id": "paseo-g1", "agent": "paseo", "agent_label": "Grok", "launcher": "grok", "status": "working"},
 	}})
-	waitFor(t, "listed", func() bool { _, ok := listed(t, n)["paseo-o1"]; return ok })
+	waitFor(t, "listed", func() bool { _, ok := listed(t, n)["paseo-g1"]; return ok })
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var res proto.Resolution
-	for _, id := range []string{"paseo-c1", "paseo-o1"} {
+	for _, id := range []string{"paseo-c1", "paseo-o1", "paseo-g1"} {
 		if err := host.peer.Call(ctx, "interaction.create", map[string]any{"interaction": map[string]any{
 			"kind": "permission", "session_id": id, "tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}}}, &res); err != nil {
 			t.Fatal(err)
@@ -339,6 +390,9 @@ func TestRuntimeCardIsTheSessionsAgent(t *testing.T) {
 	}
 	if a := hub.asked[1]; a.Agent != "paseo" || a.AgentLabel != "Paseo" {
 		t.Fatalf("another agent's card: %q %q", a.Agent, a.AgentLabel)
+	}
+	if a := hub.asked[2]; a.Agent != "paseo" || a.AgentLabel != "Grok" {
+		t.Fatalf("a provider's card under the runtime's own id: %q %q", a.Agent, a.AgentLabel)
 	}
 }
 
@@ -375,9 +429,7 @@ func TestRuntimeTranscriptWrittenLater(t *testing.T) {
 	if n.runtimes.transcriptOf("paseo-a5") != "" {
 		t.Fatal("a transcript not written yet counts")
 	}
-	if _, err := nodeCall(t, n, "session.watch", map[string]any{"session_id": "paseo-a5", "since_seq": 0}); err != nil {
-		t.Fatal(err)
-	}
+	runtimeSessionCall(t, hub, "session.watch", map[string]any{"session_id": "paseo-a5", "since_seq": 0})
 	var w map[string]any
 	_ = json.Unmarshal(host.got("session.watch")[0], &w)
 	if w["transcript"] != nil {
@@ -418,9 +470,7 @@ func TestRuntimeTranscriptEcho(t *testing.T) {
 	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{{
 		"session_id": "paseo-a6", "transcript": sdkSession, "agent": "claude", "status": "idle"}}})
 	waitFor(t, "listed", func() bool { return n.runtimes.transcriptOf("paseo-a6") == sdkSession })
-	if _, err := nodeCall(t, n, "session.watch", map[string]any{"session_id": "paseo-a6", "since_seq": 3}); err != nil {
-		t.Fatal(err)
-	}
+	runtimeSessionCall(t, hub, "session.watch", map[string]any{"session_id": "paseo-a6", "since_seq": 3})
 	if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": "paseo-a6", "text": "run the tests please", "client_msg_id": "cm-echo"}); err != nil {
 		t.Fatal(err)
 	}

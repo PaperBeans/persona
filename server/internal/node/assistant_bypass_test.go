@@ -472,7 +472,7 @@ func TestAssistantBypassCLIControls(t *testing.T) {
 		`$C im +messages-send --text hello`,
 		`$(printf '%s' "$C") im +messages-send --text hello`,
 		"`printf '%s' \"$C\"` im +messages-send --text hello",
-		`lark-cli docs +fetch --doc-id "$DOCUMENT"`,
+		`lark-cli docs +create --title "$DOCUMENT"`, // a read with a variable flag value runs (#8119); a write is confirmed whole
 		`lark-cli im +messages-send --text hello < /home/me/message.txt`,
 		`echo hi > "/tmp/$(lark-cli im +messages-send --text hello)"`,
 		`$C im +messages-send --text hello <<< input`,

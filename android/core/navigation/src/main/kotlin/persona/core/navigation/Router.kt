@@ -229,7 +229,8 @@ fun restoreConnectorParents(stack: MutableList<NavKey>) {
 }
 
 private fun sameTarget(left: NavKey, right: NavKey): Boolean = when {
-    left is ChatRoute && right is ChatRoute -> left.machineId == right.machineId && left.sessionId == right.sessionId
+    // A side session's own chat (#7944) sits over the page a link to it opened, its parent's: two pages.
+    left is ChatRoute && right is ChatRoute -> left.machineId == right.machineId && left.sessionId == right.sessionId && left.side == right.side
     // One conversation is one page, whichever of its requests it was opened at.
     left is InteractionRoute -> sameTarget(left.chat, right)
     right is InteractionRoute -> sameTarget(left, right.chat)

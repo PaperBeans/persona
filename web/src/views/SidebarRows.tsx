@@ -38,6 +38,8 @@ import { runtimeIdentity } from "../lib/runtime-list";
 import { heldSeen } from "../lib/seen-outbox";
 import { runningChildren } from "../lib/child-sessions";
 import { childCards, foldedRow } from "../lib/folded-rows";
+import { countSides } from "../lib/side-fold";
+import { useHeldSides } from "../lib/use-child-sessions";
 import { backgroundWork } from "../lib/background-work";
 import { SESSIONS_LIST_FEATURE } from "../lib/session-list";
 import { personalHideDeps, personalOrder, personalSessions, removeAgentSession, useGoingIds } from "../lib/agents";
@@ -261,7 +263,9 @@ function sameProps<P extends { to: Route }>(a: P, b: P): boolean {
 export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, active, to, go, tab, label, prefix, prefixClass, hint, hintFull, host, showState = true, showTodoTag, onMenu, menuLabel = t("sidebar.agent_actions"), endRoom, icon = "chat", workingMark = false, keepTrailing = false }: SessionRowProps) {
   // a parent of child sessions in its folded state (#5120): one of them waiting makes it need you, one working makes it
   // work; the rows of the paged list come as the hub sends them, the other lists' folded already (lib/folded-rows.ts)
-  const given = foldedRow(row);
+  // its side sessions' part from their rows when an open chat holds them (#7944): a side seen here shows at once
+  const sides = useHeldSides(row.machine_id, row.session_id, Boolean(row.children?.sides));
+  const given = foldedRow(row, sides && countSides(sides));
   // what it asks you, or what it did, under its title (#3195): no hover or click needed to see why it is red or green;
   // its own card first, else what one of its child sessions asks (the card's home is this row's page)
   const own = useStore((st) => st.interactions.find((i) => i.machine_id === given.machine_id && i.session_id === given.session_id));
@@ -291,7 +295,12 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
   // a desktop app's runtime that can be written to: its mark says where it is and the agent's mark which agent, so the
   // runtime's name at the end only repeats them (it stays in the tooltip); a read-only one still says why
   const sameAsMarks = source === "desktop" && s.source_kind === "runtime" && sessionCan(s, "send");
-  const tail = [sameAsMarks ? "" : sourceSubtitle(s), hint ?? (tab ? tabLabel(s) : "")].filter(Boolean).join(" · ");
+  const hasTabAssociation = !!(s.slot_id?.trim() || s.tab_id?.trim());
+  const associatedTab = hasTabAssociation ? tabLabel(s) : "";
+  const tabIdentity = associatedTab ? t("sidebar.tab_named", { label: associatedTab }) : "";
+  // A structural tab row keeps its old plain-text fallback, but only a real association earns the localized identity.
+  const structuralTabHint = tab && !tabIdentity ? tabLabel(s) : "";
+  const tail = [sameAsMarks ? "" : sourceSubtitle(s), hint ?? structuralTabHint, tabIdentity].filter(Boolean).join(" · ");
   const preview = sessionPreview(s);
   // Settings › Appearance › show details on agent rows (#2430): a second line under an agent's title — folder · model · context · age
   const details = useAgentDetails();
@@ -301,9 +310,9 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
   // when the details line shows it; a tab's row, whose end is the room for "N agents", keeps it to offline and
   // stateless rows without a hint, as before
   const ageAtEnd = !withDetail && !!s.updated_at && (!endRoom || (!tail && (st === "offline" || !showState)));
-  // beside the age, a row that already carries its marks (where it was opened, its to-do) drops the hint from its end,
-  // where it would only squeeze the title; the hint stays in the row's tooltip
-  const tailShown = !!tail && !(ageAtEnd && (source || (showTodoTag && s.todo)));
+  // beside the age, a row that already carries its marks (where it was opened, its to-do) drops an ordinary hint from
+  // its end, where it would only squeeze the title; an associated tab name stays visible as the Agent's terminal identity.
+  const tailShown = !!tail && (!(ageAtEnd && (source || (showTodoTag && s.todo))) || !!tabIdentity);
   // the age at the row's end, in the details line, or a background workflow's progress
   // (#2935) moves on with the clock: the memo keeps an unchanged row from re-rendering on a push, so a minute tick
   // does it, and only in a row that shows one of them. The ages read the clock when the row renders: `now` is the
@@ -347,7 +356,7 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
       onBlur={() => hover(null)}
       aria-current={active ? "page" : undefined}
       // its mark's name is in the row's tooltip too: the mark steps aside while the row is hovered
-      title={`${sessionTitle(s)}${source ? `\n${sourceName(source)}` : ""}${origin ? `\n${originMarkLabel(origin)}` : ""}${sourceSubtitle(s) ? `\n${sourceSubtitle(s)}` : ""}${hint ? `\n${hint}` : ""}${s.todo ? `\n${t("sidebar.todo_tag", { title: s.todo.title })}` : ""}${preview ? `\n${preview}` : ""}`}
+      title={`${sessionTitle(s)}${source ? `\n${sourceName(source)}` : ""}${origin ? `\n${originMarkLabel(origin)}` : ""}${sourceSubtitle(s) ? `\n${sourceSubtitle(s)}` : ""}${hint ? `\n${hint}` : ""}${tabIdentity ? `\n${tabIdentity}` : ""}${s.todo ? `\n${t("sidebar.todo_tag", { title: s.todo.title })}` : ""}${preview ? `\n${preview}` : ""}`}
       // a touch screen: rows a finger can hit (44), and room at the end for the ⋯ that is always there; the open row
       // keeps its ⋯ too, so it has room for it
       className={cx("relative z-10 flex w-full items-center gap-2 rounded-[7px] px-2 sidebar-row transition-transform duration-150 active:scale-[0.98] [@media(pointer:coarse)]:min-h-11", active && CURRENT_ROW, // room for "N agents" and the ⋯ beside it (instead of the ⋯'s own)

@@ -2,7 +2,9 @@ package persona.feature.settings
 
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -122,6 +124,40 @@ class ExtensionOperationStateTest {
             assertEquals(listOf("已安装 Example Notes"), notices)
             assertNull(model.state.value.operation)
             assertFalse("install" in api.calls)
+        }
+    }
+
+    @Test fun aSucceededOperationReadsOverAHeldPreOperationCatalog() = runBlocking {
+        val held = CompletableDeferred<Unit>()
+        var reads = 0
+        val api = object : FakeOperations() {
+            override suspend fun catalog(query: String, market: String?, refresh: Boolean): ExtensionCatalog {
+                val snapshot = catalog
+                reads++
+                if (reads == 1) held.await()
+                return ExtensionCatalog(listOf(ExtensionMarket("m1", name = "Example")), snapshot)
+            }
+        }
+        val model = CatalogExtensionModel(api, "m1", "example-notes", res)
+        val notices = mutableListOf<String>()
+        val reading = async { model.load() }
+        yield()
+        assertEquals(1, reads)
+        val job = launch(Dispatchers.Unconfined) { model.watch { notices += it } }
+        try {
+            api.pushes.emit(op("running", "install", 6, "install" to "running"))
+            until { model.state.value.operation != null }
+            api.catalog = api.catalog.map { it.copy(installed = "1.2.0", installedSource = "installed", fromThisMarket = true) }
+            api.pushes.emit(op("succeeded", "nodes", 9, "install" to "done"))
+            until { notices.isNotEmpty() }
+            held.complete(Unit)
+            reading.await()
+            assertEquals("success must start a fresh catalog read", 2, reads)
+            assertEquals(listOf(CatalogAction.Uninstall), CatalogText.actions(model.state.value.extension!!))
+        } finally {
+            held.complete(Unit)
+            reading.cancelAndJoin()
+            job.cancelAndJoin()
         }
     }
 

@@ -11,7 +11,7 @@ import { chosenManager, currentHeaders, defaultKnown, onDefaultManager, onManage
 import { setSavedPromptRows } from "./saved-prompt-rows";
 import { onHubEvent } from "./store";
 
-/** The hub's limits (server/internal/assistant/saved_prompts.go). */
+/** The hub's limits (server/internal/assistant/saved/prompts.go). */
 export const SAVED_PROMPT_NAME_MAX = 32;
 export const SAVED_PROMPT_TEXT_MAX = 8000;
 export const SAVED_PROMPTS_MAX = 100;

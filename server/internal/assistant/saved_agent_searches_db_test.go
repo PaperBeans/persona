@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"github.com/nwverse/persona/server/internal/assistant/saved"
 	"reflect"
 	"strconv"
 	"strings"
@@ -22,7 +23,7 @@ type barrierSearchStore struct {
 
 func (st *barrierSearchStore) Setting(ctx context.Context, key string, out any) (bool, error) {
 	found, err := st.DB.Setting(ctx, key, out)
-	if key == savedAgentSearchesKey {
+	if key == saved.SearchesKey {
 		st.ready <- struct{}{}
 		select {
 		case <-st.release:
@@ -64,22 +65,22 @@ func TestSavedAgentSearchRealDatabaseCASAndRestart(t *testing.T) {
 		t.Fatalf("CAS not atomic: %v events=%d", counts, len(ah.messages())+len(bh.messages()))
 	}
 	restarted, _ := savedSearchService(database)
-	saved := savedSearchResponseOf(t, restarted, "GET", nil)
-	if saved.Revision != "1" || len(saved.Searches) != 1 {
-		t.Fatalf("restart lost winner: %+v", saved)
+	kept1 := savedSearchResponseOf(t, restarted, "GET", nil)
+	if kept1.Revision != "1" || len(kept1.Searches) != 1 {
+		t.Fatalf("restart lost winner: %+v", kept1)
 	}
-	var stored savedAgentSearchDocument
-	if found, err := database.Setting(ctx, savedAgentSearchesKey, &stored); err != nil || !found || stored.Revision != 1 || !reflect.DeepEqual(stored.Searches, saved.Searches) {
+	var stored saved.SearchDocument
+	if found, err := database.Setting(ctx, saved.SearchesKey, &stored); err != nil || !found || stored.Revision != 1 || !reflect.DeepEqual(stored.Searches, kept1.Searches) {
 		t.Fatalf("stored document: %+v %v", stored, err)
 	}
-	removed := savedSearchResponseOf(t, restarted, "POST", searchMutation("1", "delete", map[string]any{"id": saved.Searches[0].ID}))
+	removed := savedSearchResponseOf(t, restarted, "POST", searchMutation("1", "delete", map[string]any{"id": kept1.Searches[0].ID}))
 	third, _ := savedSearchService(database)
 	empty := savedSearchResponseOf(t, third, "GET", nil)
 	if empty.Revision != "2" || len(empty.Searches) != 0 {
 		t.Fatal(empty)
 	}
-	restored := savedSearchResponseOf(t, third, "POST", searchMutation(removed.Revision, "restore", map[string]any{"item": saved.Searches[0]}))
-	if restored.Revision != "3" || !reflect.DeepEqual(restored.Searches, saved.Searches) {
+	restored := savedSearchResponseOf(t, third, "POST", searchMutation(removed.Revision, "restore", map[string]any{"item": kept1.Searches[0]}))
+	if restored.Revision != "3" || !reflect.DeepEqual(restored.Searches, kept1.Searches) {
 		t.Fatalf("persistent undo: %+v", restored)
 	}
 	// Exercise the UPDATE branch of CompareSetting too, after the collection has
@@ -95,7 +96,7 @@ func TestSavedAgentSearchRealDatabaseCASAndRestart(t *testing.T) {
 	for i, service := range []*Service{left, right} {
 		wg.Go(func() {
 			name := "Update winner " + strconv.Itoa(i)
-			raw, _ := json.Marshal(searchMutation("3", "update", map[string]any{"id": saved.Searches[0].ID, "name": name, "query": "project:example"}))
+			raw, _ := json.Marshal(searchMutation("3", "update", map[string]any{"id": kept1.Searches[0].ID, "name": name, "query": "project:example"}))
 			updates <- updateResult{serve(service, "POST", savedSearchPath, string(raw)).Code, name}
 		})
 	}
@@ -115,16 +116,16 @@ func TestSavedAgentSearchRealDatabaseCASAndRestart(t *testing.T) {
 		t.Fatalf("subsequent SQL CAS lost an update: %v", updateCounts)
 	}
 	kept := savedSearchResponseOf(t, third, "GET", nil)
-	if kept.Revision != "4" || len(kept.Searches) != 1 || kept.Searches[0].Name != winner || kept.Searches[0].Query != "project:example" || !kept.Searches[0].CreatedAt.Equal(saved.Searches[0].CreatedAt) {
+	if kept.Revision != "4" || len(kept.Searches) != 1 || kept.Searches[0].Name != winner || kept.Searches[0].Query != "project:example" || !kept.Searches[0].CreatedAt.Equal(kept1.Searches[0].CreatedAt) {
 		t.Fatalf("winning update was not retained: %+v winner=%q", kept, winner)
 	}
 
 	// Revision strings round-trip beyond JavaScript's safe integer range.
-	stored = savedAgentSearchDocument{Revision: 9007199254740993, Searches: restored.Searches}
-	if err := database.PutSetting(ctx, savedAgentSearchesKey, stored); err != nil {
+	stored = saved.SearchDocument{Revision: 9007199254740993, Searches: restored.Searches}
+	if err := database.PutSetting(ctx, saved.SearchesKey, stored); err != nil {
 		t.Fatal(err)
 	}
-	final := savedSearchResponseOf(t, third, "POST", searchMutation("9007199254740993", "update", map[string]any{"id": saved.Searches[0].ID, "name": "Changed", "query": "is:error"}))
+	final := savedSearchResponseOf(t, third, "POST", searchMutation("9007199254740993", "update", map[string]any{"id": kept1.Searches[0].ID, "name": "Changed", "query": "is:error"}))
 	if final.Revision != "9007199254740994" {
 		t.Fatal(final)
 	}

@@ -1,7 +1,8 @@
 // Messages another page sent for this conversation (lib/outbox.ts): sending ones like the composer's own bubbles,
 // sent ones as plain bubbles until the transcript has them, failed ones with why and "Retry" / "Delete" ("Clear and send" when the
-// computer's input box holds text it can clear). A failed one's message menu ends in "Delete" too (#4626).
-import { discardOutbox, outboxMessage, retryOutbox, type OutboxEntry } from "../../lib/outbox";
+// computer's input box holds text it can clear), uncertain ones with read-only "Check" instead. A failed one's message menu ends in "Delete" too (#4626).
+import { useRef, useState } from "react";
+import { checkOutbox, discardOutbox, outboxMessage, retryOutbox, type OutboxEntry } from "../../lib/outbox";
 import { toast } from "../../ui/atoms";
 import { UserBubble } from "./SegmentView";
 import { t } from "../../i18n";
@@ -14,6 +15,17 @@ export function deleteFailed(mid: string, sid: string, id: string) {
 }
 
 export function OutboxBubbles({ mid, sid, entries, canRetry = true }: { mid: string; sid: string; entries: OutboxEntry[]; canRetry?: boolean }) {
+  const [checking, setChecking] = useState<string>();
+  const checkLock = useRef(false);
+  const check = async (id: string) => {
+    if (checkLock.current) return;
+    checkLock.current = true;
+    setChecking(id);
+    try { await checkOutbox(mid, sid, id); } finally {
+      checkLock.current = false;
+      setChecking(undefined);
+    }
+  };
   if (!entries.length) return null;
   return (
     <>
@@ -24,12 +36,16 @@ export function OutboxBubbles({ mid, sid, entries, canRetry = true }: { mid: str
           {e.state === "failed" && (
             <div role="alert" className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 pl-[12%] text-[11.5px]">
               <span className="min-w-0 text-red">{t("chat-outboxbubbles.failed", { error: e.error ?? "" })}</span>
-              {canRetry && e.clearable !== undefined && (
+              {canRetry && !e.inDoubt && e.clearable !== undefined && (
                 <button type="button" onClick={() => void retryOutbox(mid, sid, e.id, e.clearable)} className="whitespace-nowrap font-medium text-accent-ink hover:underline">
                   {t("chat-outboxbubbles.clear_and_send")}
                 </button>
               )}
-              {canRetry && (
+              {e.inDoubt ? (
+                <button type="button" disabled={checking === e.id} aria-busy={checking === e.id} onClick={() => void check(e.id)} className="whitespace-nowrap font-medium text-accent-ink hover:underline">
+                  {t(checking === e.id ? "chat-outboxbubbles.checking" : "chat-outboxbubbles.check")}
+                </button>
+              ) : canRetry && (
                 <button type="button" onClick={() => void retryOutbox(mid, sid, e.id)} className="whitespace-nowrap font-medium text-accent-ink hover:underline">
                   {t("chat-outboxbubbles.retry")}
                 </button>

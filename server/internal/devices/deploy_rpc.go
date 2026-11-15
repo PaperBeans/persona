@@ -193,24 +193,26 @@ func (m *Machine) waitNodeIdle(ctx context.Context) error {
 			Sessions   []proto.Session `json:"sessions"`
 			UpdateBusy *bool           `json:"update_busy"` // the node's own commit check (node_update_idle)
 		}
+		snapshot := new(sessionSnapshot)
 		check, cancel := context.WithTimeout(ctx, 15*time.Second)
-		err := m.call(check, "sessions.list", map[string]any{}, &list)
+		err := m.callWithSnapshot(check, "sessions.list", map[string]any{}, &list, snapshot)
 		cancel()
 		if err != nil {
 			return explain(i18n.Err("devices-deploy.idle_check_failed", i18n.Args{"err": err.Error()}), err)
 		}
-		m.setSessions(list.Sessions)
+		sessions, accepted := m.acceptSessionsList(snapshot, list.Sessions, false)
 		m.mu.Lock()
 		ownCheck := nodeHas(m.info, nodeproto.NodeUpdateIdle) && list.UpdateBusy != nil
 		m.mu.Unlock()
 		var busy bool
 		if ownCheck {
 			// Only the node knows whether a conversation it runs headless is busy: its rows do not say so (#6364).
-			busy = *list.UpdateBusy
+			// A rejected response has no current update_busy to accept, so ask the node again rather than deploy on it.
+			busy = !accepted || *list.UpdateBusy
 		} else {
 			// A node that commits on the old rule refuses while anything works: wait for that here too, rather than
 			// transfer the whole build again on every refusal.
-			busy = m.machinePending() || slices.ContainsFunc(list.Sessions, sessionAtWork) // a question of its agents waits on the phone
+			busy = m.machinePending() || slices.ContainsFunc(sessions, sessionAtWork) // a question of its agents waits on the phone
 		}
 		if !busy {
 			return nil

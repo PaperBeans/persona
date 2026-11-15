@@ -14,7 +14,7 @@ struct AppearanceSection: View {
     var settingsHome = true
     #if os(iOS)
     private let layoutDisplay = AgentListDisplayChoice()
-    @StoredValue(NavigationLayout.key) private var navigation: NavigationLayout = .separate
+    @StoredValue(NavigationLayout.key) private var navigation = ""
     #endif
     @StoredValue(ComposerGlowPrefs.enabledKey) private var composerGlow = false
 
@@ -46,11 +46,11 @@ struct AppearanceSection: View {
                     .accessibilityIdentifier("settings-language")
                 }
                 #if os(iOS)
-                // Separate or Sidebar (#6332): where the sidebar layout is built (`NavigationLayout.offered`).
+                // Merged or Separate (#6332, #4206): where the sidebar layout is built (`NavigationLayout.offered`).
                 if NavigationLayout.offered {
                     NavigationLink(value: SettingsPage.navigation) {
-                        SettingsRow(title: String(localized: "Navigation"), symbol: Theme.Icon.sidebar, tint: Theme.Hue.teal,
-                                    value: navigation.title, look: .oneLine)
+                        SettingsRow(title: String(localized: "Sidebar [Appearance]"), symbol: Theme.Icon.sidebar, tint: Theme.Hue.teal,
+                                    value: NavigationLayout.effectiveNow(picked: navigation).title, look: .oneLine)
                     }
                     .settingsListRow(SettingsPage.navigation)
                     .accessibilityIdentifier("settings-navigation")

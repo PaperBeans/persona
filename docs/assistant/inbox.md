@@ -171,7 +171,26 @@ a summary up to 40 characters, and a short reason:
   (the user's original words, such as Lark-plugin Triage rules `triage_rules`; `docs/protocol/connector-protocol.md`). The item **uses only its own rules**, with no global `inbox.rules` appended.
   Only items without rules use global ones. Default tier criteria above are unchanged; user rules remain last and authoritative. Rules are stored with the item (not listed), updated from each new version when activity arrives,
   up to 4000 characters. The assistant can change plugin-source rules (`inbox.rules.<plugin>` in `persona_settings`, confirmed on the phone; `docs/assistant/assistant.md`). Built-in GitHub and Messages connectors do not yet have their own rules (the Telegram extension has `triage_rules`).
-- When uncertain between action / fyi, choose action. If the model cannot triage (unconfigured, no quota / concurrency full, error, timeout), use fallback rules (private chat / mention of me → action; everyone-only mention without me → fyi, an announcement; group → fyi; direct mail → fyi; others → noise), with reason "Rule-based."
+- **Needs you is what is aimed at the owner** (#7986). The criteria list what is *not* Needs you: requests that @ someone
+  else or a bot / on-call assistant / agent, group discussions that neither @ nor name the owner, automated alerts, monitoring
+  and capacity reports, on-call and ticket notices (unless one assigns the owner to act now), @all notices, small talk, threads
+  already answered or closed (or answered by the owner), and Persona's own Lark bot pushes and cards ("要你批准", "在问你",
+  "请验收", "任务进展" and the like, which the app handles). When unsure, the question is whether someone waits on the owner or
+  the owner's own work slips (it used to be "choose action"). @me no longer makes something Needs you by itself.
+  A real person's direct message stays Needs you by default, even without a question, unless it is plainly small talk.
+  Grouping (`group.md`) also spells out what the batch's `（@了我）` / `（@所有人）` markers mean: without them a group message
+  did not @ the owner, and a name @'d in the text is someone else; and its input names the other side of a direct chat in
+  the connector's kind words (`group_input.md`: a person, a bot or an app), so a bot's "在问你" isn't read as a person asking.
+  The user's own rules are unchanged and still come last and win.
+- **Sorted again once after the criteria change**: `inboxTriageRev` (`inbox_triage.go`) is the criteria's revision, and an item
+  records the one its tier was given under (`triage_rev`, kept, not listed; a rule tier given under the current criteria stays
+  final). Each triage pass also takes up to 8 open Needs you items tiered under an older revision (newest activity first): Lark and
+  mail items and connectors' events, skipping anything the AI twin or a follow-up touched (handling, a suggestion, a due check, an
+  agent record) and tiers a policy sets, and asks the model again with `triage.md`. A new tier records a `triaged` chain entry as
+  usual (an FYI one the owner already read elsewhere is then filed as read, like any FYI item). A model error leaves the item as it
+  was (no rule tier replaces the model's) and it is tried once a run; a model that is held, missing or too slow gives the try
+  back for a later pass.
+- If the model cannot triage (unconfigured, no quota / concurrency full, error, timeout), use fallback rules (private chat / mention of me → action; everyone-only mention without me → fyi, an announcement; group → fyi; direct mail → fyi; others → noise), with reason "Rule-based."
   Connector items use their rule-provided fallback (`tier`). Model-triaged items (empty `tier`) from hub-owned connectors (GitHub, Telegram, Messages) still fall back to noise.
   **Plugin-provided connectors have no fallback**: noise would silently hide items the user must see (below).
 - **Scope (requested 2026-11-04)**: "Triage before admission" and "No admission without fallback" below **apply only to plugin-provided connectors** (installed plugins or plugins in the manager's manager.json, not bundled personad connectors;
@@ -319,6 +338,11 @@ Triage, drafting, AI twin, done state, and retention use hub's generic logic.
     4 CI failures on default branch / my open PRs, 1 PR comment). Seven feature-branch CI items and one bot-PR review request became FYI.
 - Ended: merged / closed → read; latest thread entry is mine → replied; review request withdrawn (I am no longer a reviewer) → replied if I reviewed, otherwise read. Done state **does not write back** GitHub read state.
 - Context: title, state, author, requested reviewers, description (1500 characters), latest 8 comments / reviews oldest first (600 characters each). Prompt kind line: `prompts/inbox/kinds/github.md`.
+- **One account at a time (#7832)** (`server/internal/connector/github/account.go`): the things, the notifications cursor and the thread page's kept answers belong to the account they were read as. The connector asks GitHub whose a token is (`/user`) before it reads or answers anything as an account with it, and counts the accounts it has read as (the epoch). A login that differs from the last one, however it arrives (another sign-in source chosen, a token a computer hands over after GitHub refused the last, a device-code sign-in, a login that changed while the manager was down), retires the old account's state in the same step: its things leave `Collect`, the cursor and the caches start again, and the change wakes Watch, which reads the new account's inbox and says the inbox changed without waiting a poll. A `/user` answer to a credential since replaced is dropped, so answers arriving out of order never put the old account back. A poll, a thread page or a reply that began under the old account is refused before its next request and writes nothing back. The same login again (a refreshed token, the same account from another computer) keeps everything.
+  - **Kept across restarts**: the login, the epoch and whether the old account's items are still to be closed are kept with the connector's sign-in (the manager's sealed store for `github`), so a restart neither forgets the account nor takes the next login for the first. It is read again after the hub gives the connector back from an extension that held its id, and written back if that extension saved over it. A store that cannot be read stops nothing: the connector goes on with what it has in memory until it can, and a device sign-in writes over a secret that no longer opens.
+  - **Replies** are checked before anything is sent. From the first change of account on, every move's `last` carries the epoch it was read under (`<time>#<epoch>`; a hub that has only ever read as one account keeps plain times, so nothing changes for it), and the hub hands a reply the `last` its item holds: a reply to a move of another epoch is refused, whether or not the connector still holds the thing. The thread alone is never enough, since both accounts may have it.
+  - **Closing the old account's items**: after a change, once the account in use has tried to read its inbox, the next `Settle` answers "over" ("GitHub: the account changed") for every open item the connector holds no thing of, once. The hub's items come only from the things it was handed, and it asks in the round it takes them, so whatever has no thing here was read as the account before, including items answered through Persona, items older than things are kept, and items from before a restart. A thread both accounts have unread is held: its item stays and the new account's thing, a new move to the hub, takes it over. That the closing is done is saved before the hub is told, so a save that fails, a manager that stops or an answer that is lost leaves old items open (they cannot be answered) and never closes one of the account in use.
+  - Limits, all from the hub starting an item only for a move later than the thread's closed one: going to another account and back leaves the first account's still-unread notifications out of the inbox until their threads move (their items were closed when the account changed); so does a shared thread whose item was closed before the new account's thing was read (past the 30 threads of the first poll, a detail read that failed, or a first poll that failed or ran with few requests left). Where the old account's move on a shared thread is later than the new account's notification, the old item stays open and cannot be answered. An item taken over keeps a reply suggested for it while it was the old account's until the new move replaces it. A renamed login counts as another account. The knowledge base's GitHub cursor is the hub's and is not reset. Items a hub collected under another account before this change carry no mark and are not told apart. Without a store that can be written the account is not kept, and a login that changes across a restart is not noticed.
 - **Send** = PR / issue comment (`POST /repos/{o}/{r}/issues/{n}/comments`); tapping Send is confirmation. `reply_to` says "Comment on … (visible to everyone with repository access)." CI failures cannot be replied to (Hand to AI only).
 - App (only iOS passes `?sources=all`; Mac, Watch, Android do not see this step):
   - Row: avatar of the latest actor, GitHub badge, `label` (Review requested / Mentions / CI failed…), second line "repository#number · who: content."
@@ -657,6 +681,48 @@ To-dos do not store a separate tree. Code: `assistant/inbox_parent.go`.
   Already-read open items with remaining unread count or stale rule tiers (read before a rule change) are reconciled next round (#798).
 - A reply by me in Lark (latest chat message is mine, newer than the item) handles it (`done_by=replied`).
 - Lark collection reads messages without holding a lock. If an item is marked done during the read (manually or in bulk), newly read messages create another item rather than merge into the done one (previously swallowed and invisible, #1105).
+- What the owner handled elsewhere is filed too: see "Handled elsewhere" below.
+
+## Handled elsewhere (2026-11-15, #7986)
+
+An open item the owner already dealt with in the source, or that was closed there, leaves the Inbox by itself. Every filing
+writes a chain entry saying why, can be reopened as usual (`done:false`, bulk `reopen`), and records its evidence on the
+item (`settled_of`, kept, not listed) so a reopened item is not filed again on the same messages, only on newer ones.
+Code: `assistant/inbox_settle.go`.
+
+- **Grouping says so** (`group.md`): for an existing open event, the model may answer `"settled": "replied"` (the owner's own
+  lines in the batch answered it) or `"over"` (the other side said it's done, no longer needed, or someone else answered). It
+  is taken only for a tier other than action, never for a new event (one the owner hasn't seen is not filed unseen; its tier
+  says what it is), and not for an event its conversation handles or a suggestion waits on; noise folding keeps such an event
+  apart. A value that isn't one of the two (`false`, `null`) is ignored, not a reason to re-ask the batch: `replied` files it
+  `done_by=replied` with a `self_replied` entry, `over` files it `done_by=manager` with a `done` entry ("Looks settled in the
+  conversation") whose `detail` is the model's reason. Any other value is ignored.
+- **A pass over the conversation**: the owner's own messages never start a batch (connectors hand in other people's messages), so
+  after a round a background pass (one at a time, at most one a minute) looks at up to 8 open Needs you events of a grouping
+  connector, each at most every 20 minutes, the longest unasked first. It reads 5 messages either side of the event's newest
+  message from someone else (`InboxLark.reply_to`) through the connector's `messages_around` group tool (whose `mine` marks the
+  owner's messages; the hub cuts an answer past 8 KB, so the pass reads what is whole). Only messages after the event count, and
+  after a hand reopen only those newer than what it was filed on; a recalled message of the owner's counts for nothing.
+  - The owner's message quoting or in the thread of one of the event's messages (the ids its context names), or in a direct chat
+    any message of the owner's with no other open event of the chat in between (it may answer that one), is a reply:
+    `done_by=replied`, a `self_replied` entry linking that position, without a model.
+  - Anything else after the event goes to the triage model with `settled.md` (the later lines carry what they reply to and their
+    topic): `replied`, `over` or `open` (left alone, the default when unsure). `replied` without a message of the owner's after
+    the event is taken as `over`, so the chain never says the owner replied when they didn't. An `open` is not asked again until
+    something newer comes; a failed call is.
+  - Nothing after the event: nothing to do. In a busy chat the owner's reply may lie beyond the five messages read; such an event
+    waits for its next move, or for the owner.
+  A connector's repeated `replied` report for an event the manager filed and the owner reopened doesn't file it again either
+  (`groupStateHasSelfReply` reads `settled_of`).
+- **Mail answered from another client**: the mail page carries IMAP `\Answered` (`InboxMailSummary.answered`); an open mail
+  item with an answered mail on the page is `done_by=replied` with a `self_replied` entry, whatever its tier, unless a
+  conversation handles it, a suggestion waits, or an unread mail of the thread came after the answered one.
+- **Its to-do finished**: an open item linked to a to-do (`agent.todo_id`, `inbox_task_links.go`) whose to-do is done (not
+  cancelled), after a closed task's continuation was followed, is filed `done_by=manager` with a `done` entry ("Its task is
+  done") linking the to-do. An item with the AI twin's processing conversation is left to it (its judge links the item to the
+  task carrying the work on). Reopened, it is not filed again for the same to-do (`settled_of` is `todo:<id>`; an answered mail's
+  is `mail:<uid>`). A to-do continued by a task planned after the item was filed does not reopen it.
+- Not covered: emoji reactions. The Lark plugin's group tool doesn't say who reacted; reading them needs the plugin.
 
 ## Mark All as Done (2026-11-04, #1105)
 

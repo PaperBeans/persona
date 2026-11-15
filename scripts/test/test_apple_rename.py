@@ -128,10 +128,10 @@ class AppleRenameTests(unittest.TestCase):
 
     def test_launch_and_ctl_have_one_canonical_entry(self):
         launch = (APPLE / 'PersonaUITests/UITestStyle.swift').read_text()
-        self.assertEqual(len(re.findall(r'func launchPersona\(\)', launch)), 1)
-        self.assertNotRegex(launch, r'func launchPersona\(\)\s*\{\s*launchPersona\(\)')
+        self.assertEqual(len(re.findall(r'func launchPersona\(', launch)), 1)
+        self.assertNotRegex(launch, r'func launchPersona\([^)]*\)\s*\{\s*launchPersona\(')
         self.assertNotIn('func launch' + FORMER_NAME + '()', launch)
-        self.assertEqual(len(re.findall(r'func launchPinned\(\)', launch)), 1)
+        self.assertEqual(len(re.findall(r'func launchPinned\(', launch)), 1)
         command = ROOT / 'scripts/app/personactl.py'
         self.assertTrue(command.is_file())
         self.assertFalse(command.is_symlink())
@@ -147,8 +147,10 @@ class AppleRenameTests(unittest.TestCase):
         # Active compact width still selects the shell; #2836 holds that width while iOS snapshots the app away.
         self.assertRegex(selection, r'#elseif os\(iOS\)\s+return \(heldWidthClass \?\? widthClass\) == \.compact \|\| flipped\s+#else\s+return false')
         # The Sidebar layout when it is chosen, at every width (#6332: the drawer on a phone, the column at regular width);
-        # otherwise the shell at compact width, else the tabs. Separate stays the default.
-        self.assertIn('@StoredValue(NavigationLayout.key) private var navigation: NavigationLayout = .separate', root)
+        # otherwise the shell at compact width, else the tabs. Nothing picked is Merged where wide and the shell at compact
+        # width (#4206, NavigationLayout.effective).
+        self.assertIn('@StoredValue(NavigationLayout.key) private var navigation = ""', root)
+        self.assertIn('NavigationLayout.effective(picked: navigation, regular:', root)
         self.assertRegex(root, r'if usesSidebar \{ SidebarRoot\(\)[^\n]*\n\s+else if usesShell \{ ShellView\(\)[^\n]*\n'
                                r'\s+else \{ RootTabs\(\)')
         self.assertIn('RootTabs().visionShell()', root)
@@ -157,7 +159,7 @@ class AppleRenameTests(unittest.TestCase):
         self.assertIn('AssistantRootTab()', tabs)
         self.assertIn('AgentsRootTab()', tabs)
         self.assertRegex(tabs, r'#if !os\(iOS\)\s+InboxRootTab\(\)\s+SettingsRootTab\(\)\s+#endif')
-        self.assertRegex(tabs, r'#if os\(iOS\)\s+\.modifier\(PadRoutes\(router: pad\)\)\s+#endif')
+        self.assertRegex(tabs, r'#if os\(iOS\)(?:(?!#endif)[\s\S])*?\.modifier\(PadRoutes\(router: pad\)\)\s+#endif')
         for name in ('Assistant', 'Agents', 'Inbox', 'Settings'):
             self.assertRegex(root, r'private struct ' + name + r'RootTab: TabContent')
         routes = root.split('final class PadRouter: TabRouter {', 1)[1].split('private struct PadRoutes:', 1)[0]
@@ -169,10 +171,13 @@ class AppleRenameTests(unittest.TestCase):
 
     def test_ui_launch_helpers_preserve_default_navigation(self):
         source = (APPLE / 'PersonaUITests/UITestStyle.swift').read_text()
-        launch = source.split('func launchPersona() {', 1)[1].split('\n    }', 1)[0]
-        # Only the clean Demo Mode reset may add arguments; navigation belongs to the app.
+        launch = source.split('func launchPersona(navigation: Bool = true) {', 1)[1].split('\n    }', 1)[0]
+        # Only the clean Demo Mode reset and the Separate layout (#4206: with nothing picked an iPad starts Merged, and the
+        # tests were written for the tabs and the shell) may add arguments; a test that names a layout, or passes
+        # navigation: false to test the setting itself, keeps it.
         self.assertEqual(re.findall(r'launchArguments\s*\+=\s*(\[[^\]]*\])', launch),
-                         ['["-openWelcome", "YES"]'])
+                         ['["-app.navigation", "separate"]', '["-openWelcome", "YES"]'])
+        self.assertIn('if navigation, !launchArguments.contains("-app.navigation")', launch)
         self.assertIn('Self.wantsDemo(launchArguments)', launch)
         self.assertRegex(launch, r'\blaunch\(\)')
         self.assertNotIn('ProcessInfo', launch)
@@ -190,8 +195,10 @@ class AppleRenameTests(unittest.TestCase):
         self.assertNotIn('path: "Sources/PersonaLink"', package)
         self.assertFalse((APPLE / 'PersonaLink/Info.plist').exists())
         script = (ROOT / 'scripts/app/mac-link.sh').read_text()
-        self.assertIn('-scheme PersonaScreen', script)
+        # Persona Screen is the package's one product, built by name (#7927: swift build, kept by its sources).
+        self.assertIn('PersonaScreen "$@"', script)
         self.assertNotIn('-scheme PersonaLink', script)
+        self.assertNotIn('--product PersonaLink', script)
         self.assertIn('persona-link" install --node-bin', script)
         self.assertNotIn('open "/Applications/Persona Link.app"', script)
 

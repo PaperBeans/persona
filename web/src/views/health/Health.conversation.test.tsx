@@ -63,6 +63,41 @@ describe("the health page's box", () => {
     expect(hub.started).toBe(1);
     expect(host.querySelector("textarea")!.disabled).toBe(true);
   });
+
+  it("keeps the home page alive when a suggestion's draft write hits a full localStorage", async () => {
+    hub.answers.push(listed);
+    localStorage.clear();
+    const quotaError = () => {
+      const err = new Error("QuotaExceededError");
+      err.name = "QuotaExceededError";
+      throw err;
+    };
+    const original = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === "draft:health-new") quotaError();
+      return original.call(this, key, value);
+    });
+    const errors: string[] = [];
+    const onError = (e: ErrorEvent) => {
+      errors.push(e.message);
+      e.preventDefault(); // keep the jsdom console clean; the failure is asserted below
+    };
+    window.addEventListener("error", onError);
+    try {
+      act(() => root.render(<Health fresh onToggleSidebar={() => {}} />));
+      await flush();
+      const suggestion = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes(t("health.suggestion_sleep")))!;
+      expect(suggestion).toBeTruthy();
+      expect(() => act(() => suggestion.click())).not.toThrow();
+      await flush();
+      expect(errors).toEqual([]); // a raw localStorage throw escapes React as a window error; the helper swallows it
+      expect(localStorage.getItem("draft:health-new")).toBeNull(); // the quota failure was swallowed, not surfaced
+      expect(host.querySelector("textarea")).not.toBeNull(); // the page and its composer stay mounted
+    } finally {
+      window.removeEventListener("error", onError);
+      spy.mockRestore();
+    }
+  });
 });
 
 describe("a health conversation", () => {

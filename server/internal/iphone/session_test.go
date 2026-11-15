@@ -14,12 +14,12 @@ import (
 
 // fastTiming shortens the session's delays for a test.
 func fastTiming(t *testing.T) {
-	saved := []time.Duration{backoffMin, backoffMax, stableAfter, parkAfter, minGap, browseWait, answerMargin, healthEvery, healthTimeout, usbFresh}
+	saved := []time.Duration{backoffMin, backoffMax, stableAfter, parkAfter, minGap, browseWait, answerMargin, healthEvery, healthTimeout, usbFresh, pairRetry}
 	backoffMin, backoffMax, stableAfter, parkAfter, minGap, browseWait, answerMargin = 5*time.Millisecond, 40*time.Millisecond, time.Hour, time.Hour, time.Millisecond, 20*time.Millisecond, 0
-	healthEvery, healthTimeout, usbFresh = time.Hour, 50*time.Millisecond, 0
+	healthEvery, healthTimeout, usbFresh, pairRetry = time.Hour, 50*time.Millisecond, 0, 5*time.Millisecond
 	t.Cleanup(func() {
 		backoffMin, backoffMax, stableAfter, parkAfter, minGap, browseWait, answerMargin = saved[0], saved[1], saved[2], saved[3], saved[4], saved[5], saved[6]
-		healthEvery, healthTimeout, usbFresh = saved[7], saved[8], saved[9]
+		healthEvery, healthTimeout, usbFresh, pairRetry = saved[7], saved[8], saved[9], saved[10]
 	})
 }
 

@@ -429,7 +429,7 @@ Phase 3 lands in several PRs.
   - `persona_core::state` decodes client and hub session states: client-state precedence, hub `done` with a
     2-second seen tolerance, waiting detection from loop info / background tasks / subagents / workflows.
   - `persona_core::recents` implements the conversation and setup LRU with dedup, skip-current and limits.
-  - 43 sort cases (32 projection + 2 session_state + 11 hub_state) + 21 recents cases (11 conversations +
+  - 43 sort cases (30 projection + 2 session_state + 11 hub_state) + 21 recents cases (11 conversations +
     10 setups) = 64 exact fixture cases, all passing in `cargo test`. The exact manifest assertion catches
     added, dropped or renamed cases; a mutation test catches a reversed date comparison.
   - Multi-hub grouping uses `group|machine_id` (`MachineRef.path`); BackgroundWaiting quick filter shows only

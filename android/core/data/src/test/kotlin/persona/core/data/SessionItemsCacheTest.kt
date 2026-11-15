@@ -249,4 +249,22 @@ class SessionItemsCacheTest {
         db.query("SELECT (SELECT COUNT(*) FROM items) + (SELECT COUNT(*) FROM cursors)").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
         db.close()
     }
+
+    /** Version 6 drops Paseo input cached as the user's raw envelopes; the hub now serves the same lines as messages and notices. */
+    @Test fun migratingToSixEmptiesTheCache() {
+        val db = androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(
+            androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication()).name(null)
+                .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(5) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("CREATE TABLE items (scope TEXT, machine TEXT, session TEXT, seq INTEGER, part INTEGER, id TEXT, json TEXT)")
+                        db.execSQL("CREATE TABLE cursors (scope TEXT, machine TEXT, session TEXT)")
+                        db.execSQL("INSERT INTO items VALUES ('s','m','x',1,0,'u','{}')")
+                        db.execSQL("INSERT INTO cursors VALUES ('s','m','x')")
+                    }
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                }).build()).writableDatabase
+        ItemsDatabase.MIGRATION_5_6.migrate(db)
+        db.query("SELECT (SELECT COUNT(*) FROM items) + (SELECT COUNT(*) FROM cursors)").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
+        db.close()
+    }
 }

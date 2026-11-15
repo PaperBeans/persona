@@ -32,7 +32,7 @@ final class SidebarLayoutTests: XCTestCase {
         let layout = layoutPinned ? ["-app.navigation", "sidebar"] : []
         app.launchArguments = ["-pairURL", pair, "-dev.openChat", "", "-holdChromeOpen", "YES"] + layout + extra
         app.launchEnvironment["PERSONA_UI_TEST_SESSION"] = "1" // the chat's title carries its session (`chat.title`'s value)
-        app.launchPinned()
+        app.launchPinned(navigation: layoutPinned)
     }
 
     @MainActor private func element(_ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
@@ -70,8 +70,11 @@ final class SidebarLayoutTests: XCTestCase {
         let tabs = app.buttons.matching(NSPredicate(format: "label == 'Agents' OR label == 'Persona'")).allElementsBoundByIndex
             .filter { $0.exists && $0.frame.maxY < main.frame.minY - 20 }
         XCTAssertTrue(tabs.isEmpty, "the tabs are still there: \(tabs.map(\.label))")
-        // New Chat and Settings at the foot.
+        // New Chat and Settings at the foot. That New Chat is the only one (#4206): none on the page's top bar or on the
+        // Persona Chats heading.
         XCTAssertTrue(element("sidebar-new").exists && element("sidebar-settings").exists)
+        XCTAssertFalse(element("assistant-new").exists, "a New Chat on the page beside the sidebar")
+        XCTAssertFalse(element("sidebar-chats-new").exists, "a New Chat on the Persona Chats heading")
         shot("home")
 
         // Inbox replaces the conversation beside the sidebar.
@@ -97,7 +100,55 @@ final class SidebarLayoutTests: XCTestCase {
         // Persona's row goes back to the conversation, nothing over it.
         main.tap()
         waitGone(title, "the Agent's chat stayed over the conversation")
-        XCTAssertTrue(element("assistant-sidebar-button").waitForExistence(timeout: 10), "not on the conversation:\n\(app.debugDescription)")
+        XCTAssertTrue(element("persona-avatar").waitForExistence(timeout: 10), "not on the conversation:\n\(app.debugDescription)")
+    }
+
+    /// With nothing picked an iPad starts in the Merged sidebar (#4206, "Merged where wide"), and Settings names it
+    /// so: Appearance › Sidebar says Merged.
+    @MainActor func testNothingPickedIsMergedOnTheIPad() {
+        launch(["-tab", "assistant", "-app.navigation", ""], layoutPinned: false)
+        XCTAssertTrue(element("sidebar-main").waitForExistence(timeout: 20), "not the Merged sidebar:\n\(app.debugDescription)")
+        XCTAssertTrue(element("unified-sidebar").exists, "no one column")
+        let tabs = app.buttons.matching(NSPredicate(format: "label == 'Agents' OR label == 'Persona'")).allElementsBoundByIndex
+            .filter { $0.exists && $0.frame.maxY < element("sidebar-main").frame.minY - 20 }
+        XCTAssertTrue(tabs.isEmpty, "the tabs are there: \(tabs.map(\.label))")
+    }
+
+    /// The column's one search (#4206, the owner): Search at the foot opens it over the whole window, with Persona's chats
+    /// and the Agents as its scopes, starting on the chats beside the conversation and on the Agents beside an Agent's
+    /// chat; an Agent found opens beside the sidebar. No search field in the column's head.
+    @MainActor func testSearchFromTheFootHasChatsAndAgents() {
+        launch(["-tab", "assistant"])
+        let main = element("sidebar-main"), search = element("sidebar-search")
+        XCTAssertTrue(main.waitForExistence(timeout: 20), "no Persona row:\n\(app.debugDescription)")
+        XCTAssertTrue(search.exists, "no Search at the foot")
+        XCTAssertFalse(element("assistant-sidebar-search").exists, "a search button still in the column's head")
+        XCTAssertFalse(app.searchFields.firstMatch.exists, "a search field still in the column")
+        search.tap()
+        let field = element("full-search-field")
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Search opened no page:\n\(app.debugDescription)")
+        // The scope's segments: Chats (「对话」 in Chinese) and Agents.
+        let scope = element("full-search-scope")
+        XCTAssertTrue(scope.waitForExistence(timeout: 5), "no scopes:\n\(app.debugDescription)")
+        let chats = scope.buttons.matching(NSPredicate(format: "label IN %@", ["Chats", "对话"])).firstMatch
+        let agents = scope.buttons["Agents"].firstMatch
+        XCTAssertTrue(chats.exists && chats.isSelected, "not on Persona's chats beside the conversation:\n\(app.debugDescription)")
+        XCTAssertTrue(app.buttons.matching(identifier: "full-search-row").firstMatch.waitForExistence(timeout: 5), "no chats listed")
+        shot("search-chats")
+        agents.tap()
+        let agent = app.buttons.matching(identifier: "full-search-agent").firstMatch
+        XCTAssertTrue(agent.waitForExistence(timeout: 5), "no Agents listed:\n\(app.debugDescription)")
+        shot("search-agents")
+        agent.tap()
+        let title = app.buttons["chat.title"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 10), "the Agent found did not open:\n\(app.debugDescription)")
+        XCTAssertGreaterThan(title.frame.minX, main.frame.maxX, "the Agent's chat is not beside the sidebar")
+        // Beside an Agent's chat, Search starts on the Agents.
+        search.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Search opened no page")
+        XCTAssertTrue(agents.waitForExistence(timeout: 5) && agents.isSelected, "not on the Agents beside an Agent's chat:\n\(app.debugDescription)")
+        app.buttons["full-search-close"].firstMatch.tap()
+        XCTAssertTrue(field.waitForNonExistence(timeout: 5), "the search did not close")
     }
 
     /// An Agent's chat asked for at launch (as a notification, a Live Activity or a link does): beside the sidebar.
@@ -242,6 +293,8 @@ final class SidebarLayoutTests: XCTestCase {
         pick(separate, "Separate")
         app.buttons["settings-close"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Agents"].firstMatch.waitForExistence(timeout: 10), "the tabs did not come back:\n\(app.debugDescription)")
-        XCTAssertFalse(element("unified-sidebar").exists, "the Sidebar layout is still there")
+        // Separate's tabs show their own part of the same column (#4206): Persona's has no Agents heading.
+        XCTAssertTrue(app.buttons["Persona"].firstMatch.exists, "no Persona tab")
+        XCTAssertFalse(element("sidebar-agents-new").exists, "the Agents in Persona's tab: still the whole sidebar")
     }
 }
