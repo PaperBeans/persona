@@ -41,7 +41,7 @@ vi.mock("./Composer", async (importOriginal) => ({
   },
 }));
 // one transcript for every render: a new one each time would re-run the sending bubble's echo check forever
-const transcript = vi.hoisted(() => ({ items: [] as unknown[], loading: false, firstRead: true, error: "", hasMore: false, streaming: "" }));
+const transcript = vi.hoisted(() => ({ items: [] as unknown[], loading: false, firstRead: true, error: "", hasMore: false, streaming: "", reload: vi.fn() }));
 vi.mock("./useTranscript", () => ({ useTranscript: () => transcript }));
 vi.mock("../../lib/store", async (importOriginal) => {
   const store = await importOriginal<typeof import("../../lib/store")>();
@@ -120,6 +120,7 @@ beforeEach(() => {
   localStorage.clear();
   resetMessageFeedback();
   resetRestoredForTests();
+  transcript.reload.mockClear();
   for (const key of Object.keys(getState().outbox)) setOutbox(key, []);
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(String(input).endsWith("/messages") ? reply() : json({}))));
   host = document.createElement("div");
@@ -404,6 +405,7 @@ describe("a message that did not go, in an agent's chat (#1122)", () => {
 
 describe("a send whose answer came back in doubt (the hub stopped waiting, the message went in)", () => {
   const failed = () => host.querySelector('[data-user-bubble][data-send-state="failed"]');
+  const action = (label: string) => Array.from(host.querySelectorAll("[data-outbox] button")).find((b) => b.textContent === label) as HTMLButtonElement | undefined;
   let bodies: { client_msg_id: string; text: string }[];
   let answer!: (r: Response) => void;
   beforeEach(() => {
@@ -420,6 +422,60 @@ describe("a send whose answer came back in doubt (the hub stopped waiting, the m
     transcript.items = [];
   });
   const inDoubt = () => json({ error: "The message may have been sent: the computer did not answer in time.", delivered: "unknown" }, 502);
+
+  it("offers read-only Check instead of Retry; an inconclusive answer sends nothing", async () => {
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    let sending!: Promise<boolean>;
+    act(() => { sending = captured.onSend!({ text: "只核对，不重发", images: [] }); });
+    await flush();
+    answer(inDoubt());
+    await act(async () => void (await sending));
+    await flush();
+    const check = action(t("chat-outboxbubbles.check"));
+    expect(check).toBeDefined();
+    expect(action(t("chat-outboxbubbles.retry"))).toBeUndefined();
+    expect(action(t("chat-outboxbubbles.delete"))).toBeDefined();
+
+    await act(async () => check!.click());
+    await flush();
+    const id = bodies[0].client_msg_id;
+    expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith(`/ops/${id}`))).toBe(true);
+    expect(transcript.reload).toHaveBeenCalledOnce();
+    expect(bodies).toHaveLength(1);
+    expect(action(t("chat-outboxbubbles.check"))).toBeDefined();
+    expect(action(t("chat-outboxbubbles.retry"))).toBeUndefined();
+  });
+
+  it("a late Check answer settles only its original bubble, never the next chat or its draft", async () => {
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    let sending!: Promise<boolean>;
+    act(() => { sending = captured.onSend!({ text: "原会话的消息", images: [] }); });
+    await flush();
+    answer(inDoubt());
+    await act(async () => void (await sending));
+    await flush();
+    const id = bodies[0].client_msg_id;
+    let finish!: (r: Response) => void;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).endsWith(`/ops/${id}`)
+      ? new Promise<Response>((resolve) => { finish = resolve; })
+      : Promise.resolve(json({}))));
+    await act(async () => action(t("chat-outboxbubbles.check"))!.click());
+
+    localStorage.setItem("draft:hub/c2", "新会话的草稿");
+    act(() => root.render(<ChatView mid="hub" sid="c2" />));
+    await act(async () => {
+      finish(json({ id, kind: "message", target: { path: "/api/v1/sessions/hub/c1/messages" }, state: "done" }));
+      await Promise.resolve();
+    });
+    await flush();
+    expect(getState().outbox["hub/c1"]?.[0]).toMatchObject({ id, state: "sent" });
+    expect(getState().outbox["hub/c2"]).toBeUndefined();
+    expect(localStorage.getItem("draft:hub/c2")).toBe("新会话的草稿");
+    expect(transcript.reload).not.toHaveBeenCalled();
+    expect(bodies).toHaveLength(1);
+  });
 
   it("shows as sent once its line reaches the transcript, without the hub tying it, so nothing asks to send it again", async () => {
     act(() => root.render(<ChatView mid="hub" sid="c1" />));

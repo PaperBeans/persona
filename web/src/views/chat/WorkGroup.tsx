@@ -37,7 +37,7 @@ export interface WorkProps {
   sid: string;
   /** Keys the reader's open / closed state (expanded.ts) to this chat. */
   scope: string;
-  expandFold: (f: Item) => Promise<void>;
+  expandFold: (f: Item) => Promise<boolean | void>;
   agentStatus: (s: ToolStep) => AgentStatus;
   /** The Workflow calls whose run the hub lists (#3434): those draw the run's card. */
   workflowCalls?: WorkflowCalls;
@@ -135,7 +135,7 @@ export const WorkGroup = memo(function WorkGroup({ g, p, limit }: { g: WorkGroup
     setFailed(false);
     folds
       // each fold that comes in runs this again with the rest: this run stops there
-      .reduce((done, f) => done.then(() => (live ? expandFold(f) : undefined)), Promise.resolve())
+      .reduce<Promise<boolean | void>>((done, f) => done.then(() => (live ? expandFold(f) : undefined)), Promise.resolve())
       .catch(() => live && setFailed(true))
       .finally(() => live && setLoading(false));
     return () => {

@@ -40,6 +40,10 @@ func (n *Node) paneFor(ctx context.Context, id string) (string, error) {
 }
 
 func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, opts sendOpts) error {
+	if exitCommand(text) {
+		release := n.recovery.lock(id)
+		defer release()
+	}
 	// Two sends at once (quick taps, two phones) would both find the box empty and type into each other, or the second
 	// would see the first still in the box and be refused as a draft: one at a time, in the order they came.
 	unlock, err := n.inputTurn(ctx, id)

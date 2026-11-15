@@ -97,6 +97,12 @@ type runtimeHello struct {
 		// Readonly: a session.start with permission_mode "plan" either starts in a read-only mode before its first
 		// prompt runs or is refused with readonly_unsupported; it never falls back to a writable provider (#3238).
 		Readonly bool `json:"readonly"`
+		// SameKind: its starts run only its own launchers (#8140). One it does not have runs on one of its launchers
+		// of the agent kind session.start names (agent_type), or is refused (launcher_kind_missing), never another
+		// kind of agent; what it asked for and does not run with comes back with the session (instead). As the start's
+		// engine host its launchers are then all a start there can run (runtimes_samekind.go). Without it the node sends a
+		// launcher it does not have as shell_launcher, as before (Cindy).
+		SameKind bool `json:"same_kind"`
 		// Workspaces: it keeps workspaces of its own, pushes them (runtime.workspaces) and makes worktrees as its
 		// workspaces (workspace.prepare, workspace.create): as the machine's engine, they are the catalog's and its
 		// worktrees are made by it (runtimeworkspaces.go).
@@ -116,6 +122,8 @@ type runtimeConn struct {
 	ready    bool            // runtime.hello arrived
 	sessions []proto.Session // its last runtime.sessions
 	watched  map[string]bool // sessions this connection was asked to watch
+	// drivenTold: sessions this connection was told the hub started through another runtime (runtime.driven).
+	drivenTold map[string]bool
 	// What its list said beyond the rows the apps see: the terminal pane a session runs in (pane_id: the extension of a
 	// pi in a herdr pane, pi.go), how the terminal engine resumes one it lists offline (resume_argv), the Claude
 	// session whose transcript holds a session's conversation (transcript: a runtime running Claude Code through its

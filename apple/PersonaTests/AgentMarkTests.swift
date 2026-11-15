@@ -34,6 +34,34 @@ struct AgentMarkTests {
         #expect(dsh.brand == nil && dsh.letter == "D")
     }
 
+    /// A Paseo provider that is neither Claude Code nor Codex (`agent` "paseo", #8144): named by its label, else its
+    /// launcher, never the engine; a known provider (TRAE) draws its mark, any other its letter, never Claude's.
+    @Test func aPaseoProviderIsNamedAndMarkedByItsProvider() {
+        let grok = AgentKind(Self.session(#","agent":"paseo","agent_label":"Grok","launcher":"grok""#))
+        #expect(grok.brand == nil && grok.name == "Grok" && grok.letter == "G")
+        // The node's fallback ("Paseo", the engine's name) and a row with no label: the launcher, Paseo's provider id.
+        let engine = AgentKind(Self.session(#","agent":"paseo","agent_label":"Paseo","launcher":"grok""#))
+        #expect(engine.brand == nil && engine.name == "grok")
+        #expect(AgentKind(Self.session(#","agent":"paseo","launcher":"kimi""#)).name == "kimi")
+        // TRAE by its label, or by its launcher when the row names only the engine.
+        #expect(AgentKind(Self.session(#","agent":"paseo","agent_label":"Trae CLI","launcher":"traecli""#)).brand == Theme.Brand.trae)
+        #expect(AgentKind(Self.session(#","agent":"paseo","agent_label":"Paseo","launcher":"traecli""#)).brand == Theme.Brand.trae)
+        // Another runtime's agent keeps its own label and letter; its launcher names no mark.
+        let dsh = AgentKind(Self.session(#","agent":"dsh","agent_label":"DSH","launcher":"trae""#))
+        #expect(dsh.brand == nil && dsh.name == "DSH")
+    }
+
+    @Test func knownNamesMapToTheirMarks() {
+        #expect(AgentKind.brand(named: "TRAE") == Theme.Brand.trae)
+        #expect(AgentKind.brand(named: "trae-cli") == Theme.Brand.trae)
+        #expect(AgentKind.brand(named: "Claude Code") == Theme.Brand.claude)
+        #expect(AgentKind.brand(named: "Codex") == Theme.Brand.openAI)
+        // TRAEX is an in-house Codex fork, not TRAE; an unknown provider has no mark.
+        #expect(AgentKind.brand(named: "TRAEX") == nil)
+        #expect(AgentKind.brand(named: "Grok") == nil)
+        #expect(AgentKind.brand(named: nil) == nil)
+    }
+
     @Test func theClientComesFromAgentSurface() {
         #expect(AgentKind(Self.session(#","agent":"claude","agent_surface":"cli""#)).surface == .cli)
         #expect(AgentKind(Self.session(#","agent":"codex","agent_surface":"desktop""#)).surface == .desktop)

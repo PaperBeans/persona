@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.isDialog
@@ -163,7 +164,8 @@ class AssistantQueueShotsTest {
         File(output, "$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    private fun page(style: () -> AppStyle, dark: () -> Boolean, fontScale: Float = 1f) {
+    private fun page(style: () -> AppStyle, dark: () -> Boolean, fontScale: Float = 1f,
+        composerState: ChatComposerState? = null, sessionKey: SessionKey = main, renderStyle: ChatRenderStyle = ChatRenderStyle.Assistant) {
         val tasks = TasksStore(api, connection, scope).also { it.reloadTodos() }
         rule.mainClock.autoAdvance = false
         rule.setContent {
@@ -177,16 +179,34 @@ class AssistantQueueShotsTest {
                     Box(Modifier.width(400.dp).height(760.dp).background(PersonaTheme.palette.background).testTag("assistant-queue-shot")) {
                         // A new chat when the style or theme changes, so a notice or Glass's fold does not carry over.
                         key(style(), dark()) {
-                            ChatScreen(main, chats, sender, interactions, sessions, {},
+                            ChatScreen(sessionKey, chats, sender, interactions, sessions, {},
                                 chrome = ChatChromeBindings(actions = actions, connection = connection, tasks = tasks, onOpenSession = {}),
-                                renderStyle = ChatRenderStyle.Assistant, embedded = true, showTopBar = false)
+                                renderStyle = renderStyle, embedded = true, showTopBar = false, composerState = composerState)
                         }
                     }
                 }
             }
         }
         settle()
-        rule.waitUntil(10_000) { rule.onAllNodesWithTag("assistant-tray-bar").fetchSemanticsNodes().isNotEmpty() }
+        if (renderStyle == ChatRenderStyle.Assistant)
+            rule.waitUntil(10_000) { rule.onAllNodesWithTag("assistant-tray-bar").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test fun mainQueueStaysVisibleWhenTheSlashDraftHasNoMainSuggestions() {
+        val composer = ChatComposerState().apply { value = TextFieldValue("/co") }
+        page({ AppStyle.Glass }, { false }, composerState = composer)
+        rule.onAllNodesWithText("/compact").assertCountEquals(0)
+        rule.onAllNodesWithText("/context").assertCountEquals(0)
+        rule.onAllNodesWithContentDescription("queued · Persona", substring = true).assertCountEquals(1)
+    }
+
+    @Test fun agentQueueHidesWhileTheSlashDraftHasAgentSuggestions() {
+        sessions.sessions.value = listOf(persona, web.copy(agent = "claude", queued = listOf("Run the tests")))
+        val composer = ChatComposerState().apply { value = TextFieldValue("/co") }
+        page({ AppStyle.Glass }, { false }, composerState = composer, sessionKey = web.key, renderStyle = ChatRenderStyle.Agent)
+        rule.onAllNodesWithText("/compact").assertCountEquals(1)
+        rule.onAllNodesWithText("/context").assertCountEquals(1)
+        rule.onAllNodesWithContentDescription("queued · Claude", substring = true).assertCountEquals(0)
     }
 
     @Test fun personasQueueFoldedOpenAndSendNowInEveryStyle() {

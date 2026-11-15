@@ -21,7 +21,7 @@ vi.hoisted(() => {
 import { t } from "../../i18n";
 import { getAgentListFilters, filterAgentList, resetAgentListFilters } from "../../lib/agent-list-filters";
 import { closePalette, getPalette } from "../../lib/palette";
-import { getState, reset, savePins } from "../../lib/store";
+import { getState, reset, savePins, upsertSession } from "../../lib/store";
 import type { Machine, Session } from "../../lib/types";
 import { AgentsList, Sidebar } from "../Sidebar";
 
@@ -244,5 +244,84 @@ describe("Agents list Filter menu (#4397) on the title row, the search in ⌘K (
     expect(block().getAttribute("aria-expanded")).toBe("false");
     await act(async () => filterAgentList("orca"));
     expect(block().getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
+describe("an associated tab name in the complete Agents list (#7595)", () => {
+  it("shows the current name and finds the same session by it", async () => {
+    const named = { ...sessions[1], slot_id: "w1:t2", slot_name: "Release Review", pane_id: "w1:p1" };
+    seed();
+    getState().sessions.mac = [named];
+    localStorage.setItem("persona.agentChatList", "1");
+    await act(async () => {
+      root.render(<AgentsList route={{ name: "agent-list" }} onNewAgent={() => {}} />);
+    });
+
+    const row = () => host.querySelector<HTMLElement>('[data-session-id="s2"]')!;
+    expect(row().textContent).toContain(t("sidebar.tab_named", { label: "Release Review" }));
+
+    await act(async () => filterAgentList("Release Review"));
+    expect(row()).toBeTruthy();
+    expect(host.querySelectorAll('[data-testid="agent-chatlist-row"]')).toHaveLength(1);
+    await act(async () => filterAgentList(""));
+
+    await act(async () => {
+      upsertSession({ ...named, slot_name: "Triage" });
+    });
+    expect(row().textContent).toContain(t("sidebar.tab_named", { label: "Triage" }));
+    expect(row().textContent).not.toContain(t("sidebar.tab_named", { label: "Release Review" }));
+
+    await act(async () => filterAgentList("Triage"));
+    expect(host.querySelectorAll('[data-testid="agent-chatlist-row"]')).toHaveLength(1);
+    await act(async () => filterAgentList("Release Review"));
+    expect(host.querySelectorAll('[data-testid="agent-chatlist-row"]')).toHaveLength(0);
+  });
+
+  it("does not mistake a workspace name without a tab association for a tab", async () => {
+    seed();
+    getState().sessions.mac = [{ ...sessions[1], slot_name: "Workspace name" }];
+    localStorage.setItem("persona.agentChatList", "1");
+    await act(async () => {
+      root.render(<AgentsList route={{ name: "agent-list" }} onNewAgent={() => {}} />);
+    });
+
+    const row = host.querySelector<HTMLElement>('[data-session-id="s2"]')!;
+    expect(row.textContent).toContain("Fix WebSocket Reconnect");
+    expect(row.textContent).not.toContain(t("sidebar.tab_named", { label: "Workspace name" }));
+  });
+
+  it("keeps the index-only fallback with a real association", async () => {
+    seed();
+    getState().sessions.mac = [{ ...sessions[1], slot_id: "w1:t2", slot_index: 2, pane_id: "w1:p1" }];
+    localStorage.setItem("persona.agentChatList", "1");
+    await act(async () => {
+      root.render(<AgentsList route={{ name: "agent-list" }} onNewAgent={() => {}} />);
+    });
+
+    const row = host.querySelector<HTMLElement>('[data-session-id="s2"]')!;
+    expect(row.textContent).toContain(t("sidebar.tab_named", { label: "#2" }));
+    expect(row.textContent).toContain("Fix WebSocket Reconnect");
+  });
+
+  it("keeps the plain fallback in an idle multi-session space without duplicating an associated identity", async () => {
+    const plain = { ...sessions[1], session_id: "plain", title: "Plain fallback", space_id: "w1", space_name: "demo", slot_name: "Workspace only", status: "idle" as const, state: "idle" as const, updated_at: undefined };
+    const associated = { ...plain, session_id: "associated", title: "Associated", slot_id: "w1:t1", tab_id: "w1:t1", slot_name: "Release Review", pane_id: "w1:p1" };
+    seed();
+    getState().sessions = { mac: [plain, associated] };
+    localStorage.setItem("persona.agentGrouping", "space");
+    await act(async () => {
+      root.render(<AgentsList route={{ name: "agent-list" }} onNewAgent={() => {}} />);
+    });
+
+    const idleToggle = [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes(t("sidebar.idle_spaces", { count: 1 })));
+    expect(idleToggle).toBeTruthy();
+    await act(async () => idleToggle!.click());
+
+    const plainRow = host.querySelector<HTMLElement>('a[href="/s/mac/plain"]')!;
+    expect(plainRow.textContent).toContain("demo › Workspace only");
+    expect(plainRow.textContent).not.toContain(t("sidebar.tab_named", { label: "Workspace only" }));
+    const associatedRow = host.querySelector<HTMLElement>('a[href="/s/mac/associated"]')!;
+    expect(associatedRow.textContent).toContain(t("sidebar.tab_named", { label: "Release Review" }));
+    expect(associatedRow.textContent).not.toContain("demo › Release Review");
   });
 });

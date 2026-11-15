@@ -155,5 +155,7 @@
   "search_no_results": "没有匹配的设置",
   "search_placeholder_settings": "搜索设置",
   "search_key_words": "API Key、密钥",
-  "device_tokens": "设备 token"
+  "device_tokens": "设备 token",
+  "pi_too": "pi 也能用",
+  "pi_too_title": "范围内电脑上的 pi 也能用这个供应商，不需要 models.json"
 }

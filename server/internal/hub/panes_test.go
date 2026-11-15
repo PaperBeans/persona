@@ -289,6 +289,14 @@ func TestNodeActionsPassOnlyTheirFields(t *testing.T) {
 	}
 }
 
+// Removing a closed Agent's worktree on a runtime engine waits for the runtime's archive as deleting one does (the
+// node gives both 145 s): the hub gives the user's request as long, not an answer of its own first (#8135).
+func TestWorktreeRemoveWaitsAsLongAsDelete(t *testing.T) {
+	if remove, del := nodeActions["worktree/remove"].timeout, nodeActions["worktree/delete"].timeout; remove < del {
+		t.Fatalf("worktree/remove %s, worktree/delete %s", remove, del)
+	}
+}
+
 // Not on the lists of what an answer-only device may call, and credentials-only in the extension scopes.
 func TestNodeActionRoutesAreFullCredentialsOnly(t *testing.T) {
 	data, err := os.ReadFile("testdata/route_scopes.txt")

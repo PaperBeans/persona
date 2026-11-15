@@ -253,29 +253,23 @@ func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation stri
 		return Todo{}, err
 	}
 	// TodoID is the execution binding; ReuseTodo preserves each historical plan's intended target.
-	// Retire old bindings while this takeover holds the to-do, before the new agent can ask for approval.
-	// Creation order is not start order, and a later retry can change an old plan's UpdatedAt. A supervisor taking
-	// over a to-do another conversation opened retires that conversation's bindings too.
-	convs := []string{conversation}
-	if t, ok := s.todoNow(id); ok && t.Origin != "" && t.Origin != conversation {
-		convs = append(convs, t.Origin)
+	// Retire old bindings while this takeover holds the to-do, before the new agent can ask for approval. Main-chat
+	// handoffs move the to-do, not its plans, so the old current binding can belong to any earlier conversation.
+	// Creation order is not start order, and a later retry can change an old plan's UpdatedAt.
+	plans, err := s.planExecutionHistory(ctx)
+	if err != nil {
+		s.releaseTakenTodo(id)
+		return Todo{}, err
 	}
-	for _, conv := range convs {
-		plans, err := s.conversationPlans(ctx, conv)
-		if err != nil {
-			s.releaseTakenTodo(id)
-			return Todo{}, err
+	for _, p := range plans {
+		if p.ID == planID {
+			continue
 		}
-		for _, p := range plans {
-			if p.ID == planID {
-				continue
-			}
-			for i, task := range p.Tasks {
-				if task.TodoID == id {
-					if err := s.patchPlanTask(ctx, p.ID, i, func(t *PlanTask) { t.TodoID = "" }); err != nil {
-						s.releaseTakenTodo(id)
-						return Todo{}, err
-					}
+		for i, task := range p.Tasks {
+			if task.TodoID == id {
+				if err := s.patchPlanTask(ctx, p.ID, i, func(t *PlanTask) { t.TodoID = "" }); err != nil {
+					s.releaseTakenTodo(id)
+					return Todo{}, err
 				}
 			}
 		}
@@ -582,6 +576,86 @@ func (e offlineError) Error() string        { return e.msg.Error() }
 func (e offlineError) Unwrap() error        { return e.msg }
 func (e offlineError) Is(target error) bool { return target == errMachineOffline }
 
+var errTaskPlanHistory = errors.New("task plan execution history is unavailable")
+
+type planExecutionHistoryStore interface {
+	TaskPlansMadeSince(ctx context.Context, since time.Time) ([]db.TaskPlanRow, error)
+}
+
+// planExecutionHistory lists every started or dismissed plan across conversations. Main-chat handoffs move open
+// to-dos without moving their plans, so no single Origin/Supervisor/historical conversation is a complete search scope.
+func (s *Service) planExecutionHistory(ctx context.Context) ([]*TaskPlan, error) {
+	if st := s.store(); st != nil {
+		history, ok := st.(planExecutionHistoryStore)
+		if !ok {
+			return nil, errTaskPlanHistory
+		}
+		rows, err := history.TaskPlansMadeSince(ctx, time.Time{})
+		if err != nil {
+			return nil, err
+		}
+		plans := make([]*TaskPlan, 0, len(rows))
+		for _, row := range rows {
+			plans = append(plans, planFromRow(row))
+		}
+		return plans, nil
+	}
+	s.tasks.mu.Lock()
+	defer s.tasks.mu.Unlock()
+	var plans []*TaskPlan
+	for _, plan := range s.tasks.plans {
+		if plan.State != planStarted && plan.State != planDismissed {
+			continue
+		}
+		cp := *plan
+		cp.Tasks = append([]PlanTask(nil), plan.Tasks...)
+		plans = append(plans, &cp)
+	}
+	return plans, nil
+}
+
+// currentPlanAssignment resolves the execution binding, which is not the to-do's historical PlanID after a same-to-do
+// continuation. An exact binding in the same owning conversation keeps the ordinary direct lookup cheap. A handoff or
+// retired binding requires a global started-plan check: exactly one exact TodoID is current; guessing or merging
+// candidates could restore the wrong permission, so absence and ambiguity both fail closed with errTaskNotInPlan.
+func (s *Service) currentPlanAssignment(ctx context.Context, todo Todo) (*TaskPlan, int, error) {
+	p, loadErr := s.loadPlan(ctx, todo.PlanID)
+	if loadErr != nil && !errors.Is(loadErr, errPlanNotFound) {
+		return nil, 0, loadErr
+	}
+	if loadErr == nil {
+		i := slices.IndexFunc(p.Tasks, func(t PlanTask) bool { return t.TodoID == todo.ID })
+		sameOwner := p.Conversation == todo.Origin && (todo.Supervision == nil || todo.Supervision.Supervisor == "" || todo.Supervision.Supervisor == p.Conversation)
+		if i >= 0 && sameOwner {
+			return p, i, nil
+		}
+	}
+	plans, err := s.planExecutionHistory(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	var found *TaskPlan
+	foundAt := -1
+	for _, candidate := range plans {
+		if candidate.State != planStarted {
+			continue
+		}
+		for i, task := range candidate.Tasks {
+			if task.TodoID != todo.ID {
+				continue
+			}
+			if found != nil {
+				return nil, 0, errTaskNotInPlan
+			}
+			found, foundAt = candidate, i
+		}
+	}
+	if found == nil {
+		return nil, 0, errTaskNotInPlan
+	}
+	return found, foundAt, nil
+}
+
 // retryTask starts again the agent of a task that did not start (#1396): the same task as its plan has it (machine,
 // directory, prompt, launcher, model, permission, title), in the same todo — reopened, its error and the plan's
 // cleared — so the task shows as starting where it was, not as a second one. A task already
@@ -626,13 +700,9 @@ func (s *Service) retryTask(ctx context.Context, todoID string) (json.RawMessage
 			s.tasks.mu.Unlock()
 		}
 	}()
-	p, err := s.loadPlan(ctx, cur.PlanID)
+	p, i, err := s.currentPlanAssignment(ctx, cur)
 	if err != nil {
 		return nil, err
-	}
-	i := slices.IndexFunc(p.Tasks, func(t PlanTask) bool { return t.TodoID == todoID })
-	if i < 0 {
-		return nil, errTaskNotInPlan
 	}
 	p.Tasks[i].normalizeReadonlyPermission()
 	t := p.Tasks[i]

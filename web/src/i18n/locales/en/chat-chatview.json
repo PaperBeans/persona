@@ -137,5 +137,8 @@
   "search_return": "Back to where you were",
   "search_menu": "Search in chat",
   "todo_completed_label": "To-do (Completed): {title}",
-  "export": "Export Conversation…"
+  "export": "Export Conversation…",
+  "side_sessions": "Side sessions",
+  "side_sessions_count": "Side sessions ({count})",
+  "side_sessions_needs_you": "A side session needs you"
 }

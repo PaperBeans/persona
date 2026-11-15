@@ -341,7 +341,7 @@ internal fun InteractionForm(
         when (interaction.kind) {
             "permission" -> if (interaction.isSecretRun) SecretRunSummary(interaction) else {
                 // Another agent's card says why it asks, in its own words.
-                interaction.reason?.takeIf { interaction.agentDisplayName != null && it.isNotBlank() }?.let {
+                interaction.reason?.takeIf { interaction.fromOtherAgent && it.isNotBlank() }?.let {
                     ChatLinkText(it, style = PersonaTheme.type.callout.copy(color = PersonaTheme.palette.ink2))
                 }
                 PermissionRequestSummary(interaction)

@@ -30,6 +30,7 @@ import { Empty } from "../session/files/parts";
 import { SearchField } from "../../ui/SearchField";
 import { formatDate, t } from "../../i18n";
 import { composing } from "../../lib/send-history";
+import { storedPageDraft, storePageDraft } from "../../lib/drafts";
 import { fetchHiddenSessions, personalHideDeps, personalOrder, personalSessions, restoreAgentSession, type AgentSession } from "../../lib/agents";
 import { SESSIONS_LIST_FEATURE } from "../../lib/session-list";
 import { useStore } from "../../lib/store";
@@ -321,7 +322,7 @@ function AgentSessionView({ id, onToggleSidebar }: { id: string; onToggleSidebar
           ))}
         </div>
       </div>
-      <AgentComposer disabled={!canSend} reason={session ? t("agents-agentsview.cannot_send") : t("agents-agentsview.loading")} onSend={(text) => void deliver({ clientId: uuid(), text, at: Date.now(), status: "sending" })} />
+      <AgentComposer id={id} disabled={!canSend} reason={session ? t("agents-agentsview.cannot_send") : t("agents-agentsview.loading")} onSend={(text) => void deliver({ clientId: uuid(), text, at: Date.now(), status: "sending" })} />
     </div>
   );
 }
@@ -383,13 +384,23 @@ function MessageRow({ m }: { m: AgentMessage }) {
   );
 }
 
-export function AgentComposer({ disabled, reason, onSend }: { disabled: boolean; reason: string; onSend: (text: string) => void }) {
-  const [text, setText] = useState("");
+/** The draft key for a personal agent's box: stable while its rows are recreated, and shaped so no sidebar row reads it
+ *  (the draft indicator only asks for `draft:<machine>/<session>` keys). */
+const agentDraftKey = (id: string) => `agent:${id}`;
+
+export function AgentComposer({ id, disabled, reason, onSend }: { id: string; disabled: boolean; reason: string; onSend: (text: string) => void }) {
+  const draftKey = agentDraftKey(id);
+  const [text, setText] = useState(() => storedPageDraft(draftKey));
+  useEffect(() => {
+    storePageDraft(draftKey, text);
+  }, [draftKey, text]);
   const submit = () => {
     const body = text.trim();
     if (!body || disabled) return;
     onSend(body);
     setText("");
+    // even if the send navigates away before the effect above runs, no words stay stored
+    storePageDraft(draftKey, "");
   };
   return (
     <div className="shrink-0 border-t border-line px-3 py-3 sm:px-4">

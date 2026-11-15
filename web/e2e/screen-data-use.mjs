@@ -1,7 +1,7 @@
 // The live screen's data use with quality tiers in a real browser (#6558), against the mock's helper with tiers and its
 // own Screen Sharing:
 //   PORT=<port> MOCK_COMPUTER=ready MOCK_SCREEN=fake MOCK_SCREEN_VIDEO=1 MOCK_SCREEN_VIDEO_TIERS=1 python3 scripts/mock/mock_hub.py
-//   (cd web && VITE_SCREEN_VIDEO=1 PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port>)
+//   (cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port>)
 //   node web/e2e/screen-data-use.mjs <web URL> <mock hub URL> [--shots <dir>] [--lang en|zh-Hans|ja] [--executable <chromium>]
 // Checks, on mobile data (navigator.connection says cellular), as on the iPhone: the stream starts at mobile data's
 // 4 Mbit/s (tiers aren't known before the helper's hello), and once the hello lists them, the page's tiers pick a tier

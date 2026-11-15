@@ -40,6 +40,11 @@ type Manifest struct {
 	// Links are the independently installed persona-link connectors, by platform. They are downloaded and installed
 	// explicitly, never swapped by a hub or manager. Old hubs ignore this field.
 	Links map[string]File `json:"links,omitempty"`
+	// Helpers are native programs a computer's node runs beside it and installs on demand (HelperPrograms:
+	// persona-iphone-bridge, docs/extensions/iphone-bridge.md "Releases"): name -> "linux-amd64" -> its download. Built
+	// from native/, with versions of their own (no build number in them); a platform this release could not build is
+	// left out. Old hubs ignore this field.
+	Helpers map[string]map[string]File `json:"helpers,omitempty"`
 	// NodeProtocol, NodeProtocolMin and NodeCapabilities are what this release's nodes announce in node.info
 	// (internal/nodeproto, docs/protocol/protocol.md "Node handshake"): a manager of another build sends one only when it
 	// drives such a node. Releases from before leave them out (0: unknown, never taken in another build's place).
@@ -50,6 +55,9 @@ type Manifest struct {
 
 // NodePrograms are the programs in Manifest.Nodes, each built from server/cmd/<name>.
 var NodePrograms = []string{"persona-node"}
+
+// HelperPrograms are the programs in Manifest.Helpers: <name>-<os>-<arch>.gz.
+var HelperPrograms = []string{"persona-iphone-bridge"}
 
 // ProgramNames are the programs released with personad, each built from server/cmd/<name>: the
 // hub's and the manager's own programs (personad runs the same code: docs/server/server.md "Programs").
@@ -150,8 +158,9 @@ func ParseManifest(b []byte) (*Manifest, error) {
 }
 
 // BuildManifest describes the downloads in dir: every personad-<os>-<arch>.gz there, every program's
-// <program>-<os>-<arch>.gz, every node program's (persona-node-<os>-<arch>.gz) and the independent connector's
-// (persona-link-<os>-<arch>[.exe].gz), with its hashes and the hash of what it unpacks to.
+// <program>-<os>-<arch>.gz, every node program's (persona-node-<os>-<arch>.gz), every helper's
+// (persona-iphone-bridge-<os>-<arch>.gz) and the independent connector's (persona-link-<os>-<arch>[.exe].gz), with its
+// hashes and the hash of what it unpacks to.
 func BuildManifest(dir string, m Manifest) (*Manifest, error) {
 	gzs, err := manifestArtifacts(dir)
 	if err != nil {
@@ -174,6 +183,25 @@ func BuildManifest(dir string, m Manifest) (*Manifest, error) {
 				m.Nodes[p] = map[string]File{}
 			}
 			m.Nodes[p][strings.TrimSuffix(strings.TrimPrefix(filepath.Base(gz), p+"-"), ".gz")] = f
+		}
+	}
+	for _, p := range HelperPrograms {
+		more, err := filepath.Glob(filepath.Join(dir, p+"-*-*.gz"))
+		if err != nil {
+			return nil, err
+		}
+		for _, gz := range more {
+			f, err := describe(gz)
+			if err != nil {
+				return nil, err
+			}
+			if m.Helpers == nil {
+				m.Helpers = map[string]map[string]File{}
+			}
+			if m.Helpers[p] == nil {
+				m.Helpers[p] = map[string]File{}
+			}
+			m.Helpers[p][strings.TrimSuffix(strings.TrimPrefix(filepath.Base(gz), p+"-"), ".gz")] = f
 		}
 	}
 	links, err := filepath.Glob(filepath.Join(dir, "persona-link-*-*.gz"))
@@ -274,6 +302,12 @@ func CheckNext(served *Manifest, build int64, commit string, isAncestor func(old
 
 // NodeFile is the download of a node that runs program on plat ("linux-amd64"): program's own (Nodes) when the
 // release has it, else personad's (personad runs every node). program is "" or personad for personad's.
+// HelperFile is helper's download for plat ("darwin-arm64"), if the release has one.
+func (m *Manifest) HelperFile(helper, plat string) (File, bool) {
+	f, ok := m.Helpers[helper][plat]
+	return f, ok && f.Name != ""
+}
+
 func (m *Manifest) NodeFile(program, plat string) (File, bool) {
 	if f, ok := m.Nodes[program][plat]; ok && program != "" {
 		return f, true

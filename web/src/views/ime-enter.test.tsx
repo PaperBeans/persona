@@ -179,7 +179,7 @@ describe("Safari's candidate Enter (isComposing false, keyCode 229)", () => {
 
   it("does not send from the Agents page composer", async () => {
     const onSend = vi.fn();
-    act(() => root.render(<AgentComposer disabled={false} reason="" onSend={onSend} />));
+    act(() => root.render(<AgentComposer id="lark:a" disabled={false} reason="" onSend={onSend} />));
     const area = host.querySelector("textarea")!;
     typeArea(area, "会議");
     await pressSafariIme(area);

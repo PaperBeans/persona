@@ -159,6 +159,10 @@ type NodeInfo struct {
 	// Clipboard: whether the node reaches a clipboard where it runs (clipboard.get / clipboard.set, capability
 	// clipboard). An older node leaves it out.
 	Clipboard *ClipboardSupport `json:"clipboard,omitempty"`
+	// HomeReal is Home with its links followed, when that is another path (a home reached through a symlink, such as
+	// /home/me -> /data/home/me): the hub cannot resolve another computer's links, and a directory named either way
+	// is the same one (remembered kinds of tasks, #8095). Older nodes, and homes that are no link, leave it out.
+	HomeReal string `json:"home_real,omitempty"`
 }
 
 // System is what a machine is: OS, hardware, since when it runs (sysmon; docs/server/machines.md). Read once when the node

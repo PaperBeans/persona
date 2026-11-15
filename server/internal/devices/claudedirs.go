@@ -297,9 +297,9 @@ func (m *Machine) reconfigureClaudeDirs(ctx context.Context) {
 	var list struct {
 		Sessions []proto.Session `json:"sessions"`
 	}
-	if err := m.call(ctx, "sessions.list", map[string]any{}, &list); err == nil {
-		m.setSessions(list.Sessions)
-		m.d.forward(m.cfg.ID, "sessions.changed", map[string]any{"sessions": m.sessionList()})
+	snapshot := new(sessionSnapshot)
+	if err := m.callWithSnapshot(ctx, "sessions.list", map[string]any{}, &list, snapshot); err == nil {
+		m.acceptSessionsList(snapshot, list.Sessions, true)
 	}
 }
 

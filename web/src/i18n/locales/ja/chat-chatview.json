@@ -137,5 +137,8 @@
   "search_return": "検索前の位置に戻る",
   "search_menu": "会話内を検索",
   "todo_completed_label": "To-do（完了）：{title}",
-  "export": "会話を書き出す…"
+  "export": "会話を書き出す…",
+  "side_sessions": "子セッション",
+  "side_sessions_count": "子セッション（{count}）",
+  "side_sessions_needs_you": "子セッションが対応を待っています"
 }

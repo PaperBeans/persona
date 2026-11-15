@@ -23,7 +23,7 @@ Four categories count, each only at the moment it was **first dispatched to the 
 | `ask_user` | A conversation's own `ask_user` question card (`kind` `question`, `tool_name` `ask_user`). |
 | `action_card` | Any other card the owner has to act on: an Agent's question, a terminal dialog (`screen`), a form (`elicitation`). |
 | `authorization` | A tool permission card (`permission`) or a plan approval (`plan`). |
-| `notify_user` | A `notify_user` call, when it is sent (work event `notify_user`). |
+| `notify_user` | A `notify_user` call that a device took (work event `notify_user`): the hub handed it to a phone, computer or browser (`notify.request`'s `devices`, `docs/protocol/protocol.md` "Bus"). One a hub that does not report devices took counts too, as before. |
 
 Each counted item has a source:
 
@@ -42,6 +42,7 @@ These are listed apart and never count as interruptions:
 | `supervisor_escalated` | Cards a supervisor passed up (`ask_escalated`). If one then reached the owner, it counts in its category. |
 | `auto_authorized` | Cards answered by a standing authorization (`interactions.auto_authorized_at`). |
 | `probe` | Cards and notifications from a session whose working directory is under a temporary directory (`/tmp`, `/private/tmp`, `/var/folders`, the manager's `os.TempDir()`), where local tests and live probes run. |
+| `notify_missed` | `notify_user` calls no device took when they were made, by why (the work event's `missed`, #8138): `no_device` (nothing could take it), `filtered` (every device that could turned it off), `kept` (only offline devices keep it for their next connection), `held` (low-distraction mode held it for the briefing and no connected device took it), `hub_away` (the hub was away; the manager's outbox sends it when it is back). Copies to chat channels with pushes on are not known when the call returns and do not change this. |
 
 ### Unknown, never zero
 
@@ -134,7 +135,7 @@ answers 503. The answer (abridged):
       "authorization": {"count": 1, "by_source": {"session": 1}, "by_kind": {"permission": 1}, "unknown": 0},
       "notify_user": {"count": 1, "by_source": {"dot": 1}, "by_kind": {"notify_user": 1}, "unknown": 0}
     },
-    "excluded": {"supervisor_routed": 2, "supervisor_held": 1, "supervisor_escalated": 1, "auto_authorized": 1, "probe": 2},
+    "excluded": {"supervisor_routed": 2, "supervisor_held": 1, "supervisor_escalated": 1, "auto_authorized": 1, "probe": 2, "notify_missed": {"no_device": 1}},
     "sources": [{"category": "action_card", "source": "task", "kind": "question", "machine_id": "<machine>",
                  "session_id": "<session>", "todo_id": "<task>", "title": "Fix the build", "count": 2}]
   },

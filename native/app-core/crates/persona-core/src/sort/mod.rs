@@ -284,11 +284,8 @@ struct Query {
 }
 
 impl Query {
-    fn parse(raw: &str, machine_filter: &str) -> Self {
+    fn parse(raw: &str) -> Self {
         let mut query = Self::default();
-        if !machine_filter.is_empty() {
-            query.machines.push(machine_filter.to_lowercase());
-        }
         for token in raw.split_whitespace() {
             let Some((key, value)) = token.split_once(':') else {
                 query.words.push(token.to_lowercase());
@@ -336,14 +333,16 @@ impl Query {
                 && machine.group.as_deref().unwrap_or("") == session.app_hub_group.as_deref().unwrap_or("")
         });
         let machine_name = machine.map_or("", |machine| machine.name.as_str()).to_lowercase();
-        let machine_path = {
-            let group = session.app_hub_group.as_deref().unwrap_or("");
-            if group.is_empty() {
-                session.machine_id.to_lowercase()
-            } else {
-                format!("{group}|{}", session.machine_id).to_lowercase()
-            }
+        let group = session.app_hub_group.as_deref().unwrap_or("");
+        let machine_path = if group.is_empty() {
+            session.machine_id.clone()
+        } else {
+            format!("{group}|{}", session.machine_id)
         };
+        if !input.settings.machine_filter.is_empty() && machine_path != input.settings.machine_filter {
+            return false;
+        }
+        let machine_path = machine_path.to_lowercase();
         if !self
             .machines
             .iter()
@@ -452,7 +451,7 @@ pub fn project(input: &Input) -> Projection {
 }
 
 fn project_impl(input: &Input, oldest_first: bool) -> Projection {
-    let query = Query::parse(&input.settings.query, &input.settings.machine_filter);
+    let query = Query::parse(&input.settings.query);
     let base: Vec<Row> = input
         .sessions
         .iter()

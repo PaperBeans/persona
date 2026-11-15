@@ -155,6 +155,27 @@ build() {
   echo "built $APP ($ID, persona-link $version, no menu bar UI)"
 }
 
+# install_bridge: the iPhone helper (persona-iphone-bridge, docs/extensions/iphone-bridge.md "Releases") built for this
+# Mac and put at ~/.persona/bin, where the node looks for it. Outside the app bundle: Persona Screen and Persona Input are
+# left as they are. Optional: without a Rust toolchain it says so, and the app can install a release's build later.
+install_bridge() {
+  local out
+  out=$(mktemp -d)
+  local plat
+  plat="darwin/$(uname -m | sed 's/x86_64/amd64/')"
+  local said
+  said=$(native/iphone-bridge/release.sh "$out" "$plat" || true)
+  if [[ "$said" == *": built"* ]] && [ -x "$out/persona-iphone-bridge-${plat/\//-}" ]; then
+    mkdir -p "$HOME/.persona/bin"
+    cp "$out/persona-iphone-bridge-${plat/\//-}" "$HOME/.persona/bin/.persona-iphone-bridge.new"
+    mv -f "$HOME/.persona/bin/.persona-iphone-bridge.new" "$HOME/.persona/bin/persona-iphone-bridge"
+    echo "installed $("$HOME/.persona/bin/persona-iphone-bridge" version) at ~/.persona/bin/persona-iphone-bridge"
+  else
+    echo "note: the iPhone helper wasn't built here (needs a Rust toolchain); the app can install a release's build"
+  fi
+  rm -rf "${out:?}"
+}
+
 case "${1:-build}" in
   build) build ;;
   install)
@@ -164,7 +185,8 @@ case "${1:-build}" in
     # The helpers have stable paths for the node's Persona Screen lookup and the desktop's separately installed Link.
     # The bundle is an install location, not a launchable UI: launchd owns the connector and its login startup.
     "$APP/Contents/Helpers/persona-link" install --node-bin "$APP/Contents/Helpers/persona-node"
-    echo "installed independent Persona Link at ~/.persona/bin/persona-link (launchd com.persona.link; no menu bar UI)" ;;
+    echo "installed independent Persona Link at ~/.persona/bin/persona-link (launchd com.persona.link; no menu bar UI)"
+    install_bridge ;;
   verify-screen) verify_helper screen ;;
   verify-input) verify_helper input ;;
   *) echo "usage: $0 [build|install|verify-screen|verify-input]" >&2; exit 2 ;;

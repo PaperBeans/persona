@@ -23,6 +23,11 @@ data class ChatChromeBindings(
     /** Worktree status and removal for Close Agent / Delete Chat (#4532), by the group's own machine ids; null: none offered. */
     val worktrees: (() -> persona.core.contracts.api.AgentCreationService?)? = null,
     val onOpenSession: ((SessionKey) -> Unit)? = null,
+    /**
+     * Opens a side session's own chat over this one (#7944, `ChatRoute.side`): from the header's Side sessions, and
+     * when a link to a side landed on its parent. Null: sides are not offered.
+     */
+    val onOpenSide: ((SessionKey) -> Unit)? = null,
     /** The waiting pane became a thread: replace this page's route, preserving its Back destination. */
     val onFollowSession: ((SessionKey) -> Unit)? = null,
     /**

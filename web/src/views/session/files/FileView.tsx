@@ -644,7 +644,7 @@ function machineImage(mid: string, path: string): Promise<string | null> {
   if (!p) {
     if (images.size > 64) images.clear();
     p = api<FileContent>(fileURL(mid, path))
-      .then((f) => (typeof f.data === "string" && f.mime?.startsWith("image/") ? `data:${f.mime};base64,${f.data}` : null))
+      .then((f) => (f.mime?.startsWith("image/") ? inlineSrc(mid, f) : null))
       .catch(() => null);
     images.set(key, p);
   }

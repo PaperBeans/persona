@@ -28,13 +28,17 @@ extension InteractionKind {
 extension Interaction {
     /// The assistant asks through its ask_user tool: it is Persona asking, not a Claude Code agent; a Codex card names
     /// Codex.
-    var title: String {
+    var title: String { title(session: nil) }
+
+    /// `title`, its agent named as `session`'s row names it where the card names only the engine that runs it
+    /// (`agentName(session:)`, #8144).
+    func title(session: Session?) -> String {
         if toolName == "ask_user" { return String(localized: "Persona Has a Question") }
         if isSecretRun { return secretRunTitle }
         if kind == .elicitation {
             return elicitation?.isURL == true ? String(localized: "MCP Link Needs You") : String(localized: "MCP Form Needs You")
         }
-        if let name = agentName {
+        if let name = agentName(session: session) {
             switch kind {
             case .question: return String(localized: "\(name) Has a Question")
             case .permission: return String(localized: "\(name) Is Waiting for Your Approval")
@@ -82,6 +86,19 @@ extension Interaction {
         case nil, "", "claude": nil
         default: agentLabelHint ?? agent
         }
+    }
+
+    /// The card names only the engine that runs its agent, not the provider (`Session.namesOnlyEngine`): a Paseo card
+    /// with no label of its own, or the node's "Paseo", which a node gave every card of a provider other than Claude
+    /// Code before its rows' labels reached the cards (#8142). Its session's row says who answers.
+    var namesOnlyEngine: Bool { Session.namesOnlyEngine(agent: agent, label: agentLabelHint) }
+
+    /// `agentName`, with the provider's name from `session`'s row where the card names only the engine (#8144): a Paseo
+    /// card asks "Tell Grok what to do instead", never Paseo. A card that carries its provider's label keeps it.
+    func agentName(session: Session?) -> String? {
+        guard let name = agentName else { return nil }
+        guard namesOnlyEngine, let session else { return name }
+        return session.agentLabel
     }
 }
 
@@ -285,6 +302,8 @@ struct CardFormKeepsEnd: PreferenceKey {
 struct InteractionPanel: View {
     @Environment(AppModel.self) private var model
     var interaction: Interaction
+    /// Whose card it is when it is not the chat's own session's: a side session's card in its parent's chat (#7944).
+    var from: String? = nil
     @State private var collapsed = false
     @State private var formHeight: CGFloat = 0
     /// What the page has (PendingCards measures it): the form's cap. Not `containerRelativeFrame`: inside the cards'
@@ -390,51 +409,57 @@ struct InteractionPanel: View {
 
     /// The title, ⋯ and fold; a tap anywhere on it folds the card.
     private var header: some View {
-        HStack(spacing: Theme.Space.sm) {
-            ThemedIcon(interaction.symbol)
-                .font(Theme.Font.labelStrong)
-                .foregroundStyle(StatusPalette.needsYou.dot)
-            Text(panelTitle).font(Theme.Font.labelStrong).foregroundStyle(StatusPalette.needsYou.text)
-                .lineLimit(1)
-            VoiceAskMark(interaction: interaction) // Asking by Voice (docs/assistant/voice.md 1.2 H)
-            if collapsed {
-                Text(previewText).font(Theme.Font.secondary).foregroundStyle(.primary).lineLimit(1)
-            }
-            Spacer(minLength: 4)
-            if interaction.kind == .plan && !collapsed {
-                Button { showFullPlan = true } label: {
-                    ThemedIcon(Theme.Icon.enlarge)
-                        .font(Theme.Font.captionStrong)
-                        .foregroundStyle(.secondary)
-                        .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
-                        .contentShape(.rect)
+        VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+            HStack(spacing: Theme.Space.sm) {
+                ThemedIcon(interaction.symbol)
+                    .font(Theme.Font.labelStrong)
+                    .foregroundStyle(StatusPalette.needsYou.dot)
+                Text(panelTitle).font(Theme.Font.labelStrong).foregroundStyle(StatusPalette.needsYou.text)
+                    .lineLimit(1)
+                VoiceAskMark(interaction: interaction) // Asking by Voice (docs/assistant/voice.md 1.2 H)
+                if collapsed {
+                    Text(previewText).font(Theme.Font.secondary).foregroundStyle(.primary).lineLimit(1)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("View plan full screen")
-            }
-            if interaction.toolName != "ask_user" {
-                Menu {
-                    Button { Task { await model.resolve(interaction, .dismissed) } } label: {
-                        Label("Handle in Terminal on Computer", systemImage: Theme.Icon.machine)
+                Spacer(minLength: 4)
+                if interaction.kind == .plan && !collapsed {
+                    Button { showFullPlan = true } label: {
+                        ThemedIcon(Theme.Icon.enlarge)
+                            .font(Theme.Font.captionStrong)
+                            .foregroundStyle(.secondary)
+                            .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
+                            .contentShape(.rect)
                     }
-                } label: {
-                    ThemedIcon(Theme.Icon.more)
-                        .font(Theme.Font.captionStrong)
-                        .foregroundStyle(.secondary)
-                        .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
-                        .contentShape(.rect)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("View plan full screen")
                 }
-                .labelOnlyMenu() // just the ⋯, next to the fold ⌄
-                .accessibilityIdentifier("interaction-menu")
-                #if os(macOS)
-                .help("More")
-                #endif
+                if interaction.toolName != "ask_user" {
+                    Menu {
+                        Button { Task { await model.resolve(interaction, .dismissed) } } label: {
+                            Label("Handle in Terminal on Computer", systemImage: Theme.Icon.machine)
+                        }
+                    } label: {
+                        ThemedIcon(Theme.Icon.more)
+                            .font(Theme.Font.captionStrong)
+                            .foregroundStyle(.secondary)
+                            .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
+                            .contentShape(.rect)
+                    }
+                    .labelOnlyMenu() // just the ⋯, next to the fold ⌄
+                    .accessibilityIdentifier("interaction-menu")
+                    #if os(macOS)
+                    .help("More")
+                    #endif
+                }
+                ThemedIcon(Theme.Icon.expand)
+                    .font(Theme.Font.captionStrong)
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(collapsed ? 180 : 0))
+                    .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
             }
-            ThemedIcon(Theme.Icon.expand)
-                .font(Theme.Font.captionStrong)
-                .foregroundStyle(.secondary)
-                .rotationEffect(.degrees(collapsed ? 180 : 0))
-                .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
+            // A side session's card in its parent's chat says whose it is: "From Side Session · <title>" (#7944).
+            if let from {
+                Text(from).font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
         }
         .contentShape(.rect)
         .onTapGesture { withAnimation(Theme.Motion.standard) { collapsed.toggle() } }
@@ -470,7 +495,8 @@ struct InteractionPanel: View {
             let name = model.session(interaction.sessionKey)?.agentLabel ?? "Claude"
             return d.commandAsk != nil ? String(localized: "\(name) Is Waiting for Your Approval") : String(localized: "\(name) Has a Question")
         }
-        return interaction.title
+        // A card that names only the engine (a Paseo provider's, #8144) takes its provider's name from its row.
+        return interaction.title(session: interaction.namesOnlyEngine ? model.session(interaction.sessionKey) : nil)
     }
 }
 
@@ -874,6 +900,11 @@ struct PlanForm: View {
         if AppStyle.current.usesBeautifulUI { BUIPlanForm(interaction: interaction, showFull: $showFull) } else { plain }
     }
 
+    /// The card's agent, its provider's name where the card names only the engine (#8144); nil: Claude Code.
+    private var agentName: String? {
+        interaction.agentName(session: interaction.namesOnlyEngine ? model.session(interaction.sessionKey) : nil)
+    }
+
     /// The plan's first lines (Show Full Text opens it whole, #6605) over the answers, which stay in view.
     @ViewBuilder private var plain: some View {
         CardForm {
@@ -887,7 +918,7 @@ struct PlanForm: View {
     @ViewBuilder private var answers: some View {
         if rejecting {
             // The card's own agent: a runtime's plan (DSH…) names it, as AgentPermissionForm does; nil is Claude Code.
-            TextField(String(localized: "Tell \(interaction.agentName ?? "Claude") what to change…"), text: $feedback, axis: .vertical)
+            TextField(String(localized: "Tell \(agentName ?? "Claude") what to change…"), text: $feedback, axis: .vertical)
                 .lineLimit(2...6)
                 .padding(Theme.Space.m)
                 .background(Theme.Fill.well, in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
@@ -1008,7 +1039,11 @@ struct AgentPermissionForm: View {
     @State private var why = ""
     @FocusState private var whyFocused: Bool
 
-    private var name: String { interaction.agentName ?? "Codex" }
+    /// Who to tell: the card's agent, its provider's name where the card names only the engine (#8144). The session is
+    /// read only then, so other cards observe no row.
+    private var name: String {
+        interaction.agentName(session: interaction.namesOnlyEngine ? model.session(interaction.sessionKey) : nil) ?? "Codex"
+    }
 
     var body: some View {
         if AppStyle.current.usesBeautifulUI { BUIPermissionForm(interaction: interaction) } else { plain }
@@ -2452,6 +2487,10 @@ extension Interaction {
     func placeLine(machine: String?) -> String {
         if let under = foldedUnder, !under.isEmpty, under != sessionID {
             let title = sessionTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            // A side session's card says so (#7944), in the words its parent's chat uses.
+            if foldedAs == SideFold.side || foldedSide != nil, !title.isEmpty {
+                return String(localized: "From Side Session · \(title)")
+            }
             let name = title.isEmpty ? String(localized: "Subagent task [Child Session]") : title
             return String(localized: "From subagent · \(name)")
         }

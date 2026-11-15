@@ -99,8 +99,12 @@ def main():
             run([sys.executable, '-B', '-m', 'unittest', '-v', suite.stem], suite.parent)
     run(['npm', 'test'], root / 'integrations/runtime-sdk')
     run(['npm', 'ci', '--no-audit', '--no-fund', '--registry', os.environ.get('PERSONA_NPM_REGISTRY', 'https://registry.npmjs.org/')], root / 'web')
-    for script in ['typecheck', 'test', 'build']:
-        run(['npm', 'run', script], root / 'web')
+    run(['npm', 'run', 'typecheck'], root / 'web')
+    # Vitest starts a jsdom worker per core, and every worker's imports go through the one Vite process: on a
+    # 64-core release machine, lazy chunks and 5-second tests time out at random. Eight workers pass every time,
+    # in about three minutes.
+    run(['npm', 'run', 'test', '--', f'--maxWorkers={min(8, os.cpu_count() or 1)}'], root / 'web')
+    run(['npm', 'run', 'build'], root / 'web')
     version = f'master-{sha[:12]}-{args.build}'
     webdist = root / 'server/internal/hub/webdist'
     try:

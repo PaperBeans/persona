@@ -122,7 +122,11 @@ func TestTaskReviewIsRecordedByTheSupervisorsModel(t *testing.T) {
 	}
 	review := func(self, verdict string) {
 		t.Helper()
-		if _, err := runJSON(t, s, self, "task_review", map[string]any{"todo_id": todo.ID, "verdict": verdict, "note": "补测试"}); err != nil {
+		args := map[string]any{"todo_id": todo.ID, "verdict": verdict, "note": "补测试"}
+		if verdict == reviewAccepted {
+			args["checks"] = completeReviewChecks(todoNow(s, todo.ID))
+		}
+		if _, err := runJSON(t, s, self, "task_review", args); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -217,8 +221,12 @@ func TestTaskLeadersReviewIsRecorded(t *testing.T) {
 	w := planWorker(t, s, f, nil)
 	call := func(verdict string) {
 		t.Helper()
-		args, _ := json.Marshal(map[string]any{"todo_id": w.ID, "verdict": verdict, "note": "补测试"})
-		if res := s.mcpCall(ctx, "box", "s1", "task_review", args, false); res.IsError {
+		args := map[string]any{"todo_id": w.ID, "verdict": verdict, "note": "补测试"}
+		if verdict == reviewAccepted {
+			args["checks"] = completeReviewChecks(todoNow(s, w.ID))
+		}
+		raw, _ := json.Marshal(args)
+		if res := s.mcpCall(ctx, "box", "s1", "task_review", raw, false); res.IsError {
 			t.Fatalf("%s: %+v", verdict, res)
 		}
 	}
@@ -315,7 +323,11 @@ func superviseRun(t *testing.T, patch string) (run map[string]any, models []map[
 	run = map[string]any{}
 	review := func(verdict, note string) {
 		t.Helper()
-		res, err := runJSON(t, s, bg, "task_review", map[string]any{"todo_id": todo.ID, "verdict": verdict, "note": note})
+		args := map[string]any{"todo_id": todo.ID, "verdict": verdict, "note": note}
+		if verdict == reviewAccepted {
+			args["checks"] = completeReviewChecks(todoNow(s, todo.ID))
+		}
+		res, err := runJSON(t, s, bg, "task_review", args)
 		if err != nil {
 			t.Fatal(err)
 		}

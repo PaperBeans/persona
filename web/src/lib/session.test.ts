@@ -85,6 +85,22 @@ describe("session capability contract", () => {
     expect(resumeCommand({ ...legacy, agent: "traex", cwd: "" })).toBe("traex resume raw-thread");
   });
 
+  it("gives no resume command for a runtime's session, which its runtime keeps (#8142)", () => {
+    const paseo: Session = { ...legacy, source_kind: "runtime", source_instance_id: "paseo", capabilities: { read: true, send: true } };
+    expect(resumeCommand({ ...paseo, session_id: "paseo-1", agent: "paseo", agent_label: "Grok", launcher: "grok" })).toBe("");
+    expect(resumeCommand({ ...paseo, session_id: "aaaaaaaa-0000-4000-8000-000000000001", agent: "claude", launcher: "my-claude" })).toBe("");
+    expect(resumeCommand({ ...paseo, session_id: "paseo-2", agent: "codex", launcher: "my-codex" })).toBe("");
+  });
+
+  it("says a runtime's session comes from its agent, by name, never a raw id (#8142)", () => {
+    const paseo: Session = { ...legacy, source_kind: "runtime", source_instance_id: "paseo", capabilities: { read: true, send: true } };
+    expect(sourceSubtitle({ ...paseo, agent: "paseo", agent_label: "Grok", launcher: "grok" })).toBe("Grok");
+    expect(sourceSubtitle({ ...paseo, agent: "claude", launcher: "my-claude" })).toBe("Claude Code");
+    // a row Paseo names no label for yet: its provider, never "paseo"
+    expect(sourceSubtitle({ ...paseo, agent: "paseo", launcher: "kimi" })).toBe("kimi");
+    expect(sourceSubtitle({ ...paseo, agent: "dsh", agent_label: "DSH", source_instance_id: "dsh" })).toBe("DSH");
+  });
+
   it("keeps plain paths as they are and a leading ~ outside the quotes", () => {
     expect(shellPath("/home/me/work-2/a_b.c")).toBe("/home/me/work-2/a_b.c");
     expect(shellPath("~")).toBe("~");

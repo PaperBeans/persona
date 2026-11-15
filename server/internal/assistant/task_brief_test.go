@@ -216,16 +216,32 @@ func TestBriefSurvivesTakeOvers(t *testing.T) {
 	if _, done := s.briefDigest(context.Background(), now, now.Add(-time.Hour), time.UTC); len(done) != 0 {
 		t.Fatalf("the briefing says the work ended while its take-over goes on: %+v", done)
 	}
-	// Accepted with one criterion shown and one not: the report is against the original criteria.
-	got, isErr := tool(t, s, "task_review", map[string]any{"todo_id": third.ID, "verdict": "accepted",
+	// An old criterion and a missing current one cannot be accepted: the refusal writes neither a review result nor completion.
+	rejected, isErr := tool(t, s, "task_review", map[string]any{"todo_id": third.ID, "verdict": "accepted",
 		"checks":    []map[string]any{{"criterion": "PR merged to main", "met": true, "evidence": "merged"}, {"criterion": "something else entirely", "met": true}},
 		"also_done": []string{"removed a dead flag"}})
-	if isErr || !strings.Contains(got, `"PR merged to main" met`) || !strings.Contains(got, `"a test covers landscape" not checked`) ||
+	if !isErr || !strings.Contains(rejected, "unknown current done_when") {
+		t.Fatalf("partial task_review was accepted: %s", rejected)
+	}
+	if cur := todoNow(s, third.ID); cur.DoneAt != nil || len(cur.Supervision.Reviews) != 0 {
+		t.Fatalf("the refused review changed the task: %+v %+v", cur, cur.Supervision)
+	}
+	if b, _ := s.briefOfTodo(first.ID); b.Result != nil {
+		t.Fatalf("the refused review recorded a result: %+v", b.Result)
+	}
+	// A complete acceptance has exactly one met check with evidence for each current criterion.
+	got, isErr := tool(t, s, "task_review", map[string]any{"todo_id": third.ID, "verdict": "accepted",
+		"checks": []map[string]any{
+			{"criterion": "PR merged to main", "met": true, "evidence": "merged"},
+			{"criterion": "a test covers landscape", "met": true, "evidence": "landscape test passed"},
+		},
+		"also_done": []string{"removed a dead flag"}})
+	if isErr || !strings.Contains(got, `"PR merged to main" met`) || !strings.Contains(got, `"a test covers landscape" met`) ||
 		!strings.Contains(got, "Also done: removed a dead flag") {
 		t.Fatalf("task_review: %s", got)
 	}
 	done, _ := s.briefOfTodo(first.ID)
-	if r := done.Result; r == nil || len(r.Criteria) != 2 || r.Criteria[0].State != criterionMet || r.Criteria[1].State != criterionUnchecked ||
+	if r := done.Result; r == nil || len(r.Criteria) != 2 || r.Criteria[0].State != criterionMet || r.Criteria[1].State != criterionMet ||
 		r.Todo != third.ID || len(r.AlsoDone) != 1 {
 		t.Fatalf("result = %+v", done.Result)
 	}
@@ -233,7 +249,7 @@ func TestBriefSurvivesTakeOvers(t *testing.T) {
 	now = time.Now()
 	_, ended := s.briefDigest(context.Background(), now, now.Add(-time.Hour), time.UTC)
 	if len(ended) != 1 || ended[0].Words != "please fix the login crash before Friday" || len(ended[0].Result) != 2 ||
-		ended[0].Result[0].State != criterionMet || ended[0].Result[1].State != criterionUnchecked || len(ended[0].AlsoDone) != 1 {
+		ended[0].Result[0].State != criterionMet || ended[0].Result[1].State != criterionMet || len(ended[0].AlsoDone) != 1 {
 		t.Fatalf("digest = %+v", ended)
 	}
 	s.briefDigestTold(context.Background(), now)

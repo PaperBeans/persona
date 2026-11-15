@@ -287,7 +287,7 @@
     <string name="chat_tasks_plan_single">この内容で開始</string>
     <string name="chat_tasks_default_model">デフォルトモデル</string>
     <string name="chat_tasks_read_only">読み取り専用を要求</string>
-    <string name="chat_tasks_plan_remember">今後はすぐに開始</string>
+    <string name="chat_tasks_plan_remember">今後このフォルダ以下はすぐに開始</string>
     <plurals name="chat_tasks_plan_start_count">
         <item quantity="other">%1$d件のタスクを開始</item>
     </plurals>

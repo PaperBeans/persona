@@ -20,6 +20,7 @@ spec/
     comments/         comment blocks a message leads with (web and iOS)
     sync/             chat sync scenarios: hub state, frames with faults, what each device shows
     fold-changes/     the files a run of work changed, counted by the hub and the web alike
+    input-clip/       the whole-input bound after the hub and runtime SDK's two string passes
     attention/        Persona Link's "Needs you" summary against the web badge
     entries/          the Assistant's two composer entries, Needs you and In progress
     needs-you/        the Agents tab's Needs you: one row per waiting session, what its header, filter and badge count
@@ -59,6 +60,7 @@ spec/
 | sync | [README](fixtures/sync/README.md): stories of one chat on one or more devices (sends, cards, reconnects, hub restarts, wakes, long chats) with faults, checked at every step by Go, the clients and the end-to-end runs (#1073) |
 | tool-names | [README](fixtures/tool-names/README.md): a tool no table names in words ("GitHub · Create issue"), what its call is about, a shell's command line and its arguments as a key/value list, checked by Android; iOS's own tests hold the same cases until it reads them (#4339) |
 | fold-changes | [README](fixtures/fold-changes/README.md): the files a run of work's successful edits changed and their lines, counted by the hub for a fold and by the web for the same calls unfolded (#5157) |
+| input-clip | [README](fixtures/input-clip/README.md): the hub and runtime SDK's third tool-input pass, bounding encoded objects by dropping array tails and then object fields (#2907) |
 | provider-import-link | [README](fixtures/provider-import-link/README.md): provider import links (cindy v1), the payload and fragment the web builds for a provider and what the hub reads from a link, checked by Go, the mock hub and the web app (#5420) |
 | star-prompt | [README](fixtures/star-prompt/README.md): when the GitHub star prompts show, the empty Agents pill, the milestone card after enough Agents started and the onboarding toast, checked by the web app and Android (#5761; iOS with #5910) |
 | meeting-echo | [README](fixtures/meeting-echo/README.md): which transcript lines of a meeting are Persona's own answer heard by the microphone (they overlap a stretch it spoke in and their words match what it said; a stretch saved without text keeps the time rule), checked by the hub and the iOS app (#5905) |

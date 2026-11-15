@@ -734,11 +734,15 @@ func (h *Hub) reindexSessions(m *Machine) {
 	if revision == before {
 		return
 	}
-	hint := h.sessionListHint(before, revision)
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	var hint *listHint // worked out for the first app that lists, as broadcastSessions does: none may
 	for c := range h.clients {
 		if c.listMode {
+			if hint == nil {
+				x := h.sessionListHint(before, revision)
+				hint = &x
+			}
 			hint.send(c)
 		}
 	}
@@ -756,20 +760,27 @@ type listHint struct{ plain, detailed []byte }
 // after before up to revision, the ["<machine>","<session>"] tuples a page's `remove` holds. A change made by
 // another pass in between is in it too, which only makes an app read once more.
 func (h *Hub) sessionListHint(before, revision string) listHint {
-	plain, _ := json.Marshal(map[string]any{"type": "sessions_list", "revision": revision})
-	hint := listHint{plain: plain}
+	// Written by hand, keys in json.Marshal's order for a map: no encoder state to set up for each hint (#2809's
+	// allocation ceilings, TestReindexOneRevAllocation).
+	plain := appendJSONID(append(make([]byte, 0, 64), `{"revision":`...), revision)
+	hint := listHint{plain: append(plain, `,"type":"sessions_list"}`...)}
 	ids, ok := h.listCache.index.Changed(before, revision, sessionListChangedMax)
 	if !ok {
 		return hint
 	}
-	changed := make([]json.RawMessage, len(ids))
+	detailed := []byte(`{"changed":[`)
 	for i, id := range ids {
 		if !json.Valid([]byte(id)) {
 			return hint
 		}
-		changed[i] = json.RawMessage(id)
+		if i > 0 {
+			detailed = append(detailed, ',')
+		}
+		detailed = append(detailed, id...)
 	}
-	hint.detailed, _ = json.Marshal(map[string]any{"type": "sessions_list", "revision": revision, "since": before, "changed": changed})
+	detailed = appendJSONID(append(detailed, `],"revision":`...), revision)
+	detailed = appendJSONID(append(detailed, `,"since":`...), before)
+	hint.detailed = append(detailed, `,"type":"sessions_list"}`...)
 	return hint
 }
 

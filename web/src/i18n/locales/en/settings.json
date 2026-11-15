@@ -158,5 +158,7 @@
   "search_no_results": "No matching settings",
   "search_placeholder_settings": "Search settings",
   "search_key_words": "API key, secret key",
-  "device_tokens": "Device tokens"
+  "device_tokens": "Device tokens",
+  "pi_too": "pi too",
+  "pi_too_title": "pi on the computers in its scope can use this provider too, without a models.json"
 }
