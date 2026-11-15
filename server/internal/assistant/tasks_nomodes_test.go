@@ -183,7 +183,7 @@ func TestNonClaudeTaskRefusesAskedModeOrEffort(t *testing.T) {
 
 // agent_start to traex or omp: an effort the call names is refused before anything starts (and before a health
 // conversation's card asks the user); a tier's is dropped; no mode. pi and cursor start with neither, the call's own
-// effort dropped rather than refused (#8151). Codex keeps the effort it is given.
+// effort dropped rather than refused (#8151). Claude, Codex and a Paseo provider keep the effort they are given.
 func TestAgentStartNonClaudeEffort(t *testing.T) {
 	run := func(t *testing.T, agent string, input map[string]any) (*fakeHub, error) {
 		t.Helper()
@@ -232,15 +232,18 @@ func TestAgentStartNonClaudeEffort(t *testing.T) {
 			noModesStart(t, oneStart(t, f, agent))
 		})
 	}
-	t.Run("codex/asked", func(t *testing.T) {
-		f, err := run(t, "codex", map[string]any{"launcher": "codex", "effort": "high"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if start := oneStart(t, f, "codex"); start["effort"] != "high" {
-			t.Fatalf("codex lost its effort: %v", start)
-		}
-	})
+	// Codex, and an agent a runtime starts (a Paseo provider, #8141), keep the effort: the node or the runtime judges it.
+	for _, agent := range []string{"codex", "paseo"} {
+		t.Run(agent+"/asked", func(t *testing.T) {
+			f, err := run(t, agent, map[string]any{"launcher": agent, "effort": "high"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if start := oneStart(t, f, agent); start["effort"] != "high" {
+				t.Fatalf("%s lost its effort: %v", agent, start)
+			}
+		})
+	}
 	t.Run("claude/asked", func(t *testing.T) {
 		f, err := run(t, "claude", map[string]any{"launcher": "claude", "effort": "high"})
 		if err != nil {

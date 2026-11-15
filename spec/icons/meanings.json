@@ -601,6 +601,10 @@
       "sf": "sidebar.left",
       "phosphor": "sidebar-simple"
     },
+    "sideSessions": {
+      "sf": "rectangle.portrait.on.rectangle.portrait",
+      "phosphor": "stack"
+    },
     "skills": {
       "sf": "puzzlepiece.extension",
       "phosphor": "puzzle-piece"

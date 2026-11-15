@@ -242,6 +242,7 @@ func TestTailSettleRestoresVisibleTurnState(t *testing.T) {
 		last, failure      string
 		open, closed       bool
 		succeeded          bool
+		resumes            bool
 	}{
 		{name: "unclosed hidden tool turn", base: []string{prompt("u1", "A"), apiErrorLine(t, "e1", failure, map[string]any{"error": "server_error"}), turnEndLine},
 			drop: []string{prompt("ub", "B"), bTool}, last: failure, failure: failure, closed: true},
@@ -249,6 +250,12 @@ func TestTailSettleRestoresVisibleTurnState(t *testing.T) {
 			drop: []string{prompt("ub", "B"), bReply}, last: "done", closed: true, succeeded: true},
 		{name: "visible wake", base: []string{prompt("u1", "A"), apiErrorLine(t, "e1", failure, map[string]any{"error": "server_error"}), turnEndLine},
 			middle: []string{wake("w1")}, drop: []string{prompt("ub", "B"), bReply, bEnd}, open: true},
+		{name: "visible wake preserves automatic resume", base: []string{prompt("u1", "A"),
+			apiErrorLine(t, "e1", fixtureLimit, map[string]any{"error": "rate_limit", "quotaLimits": map[string]any{"status": "rejected", "resetsAt": 1767284400}}),
+			informational("Usage limit reached · continuing automatically at 4:20pm · esc to cancel"), turnEndLine},
+			middle: []string{wake("w1")}, drop: []string{prompt("ub", "B"), bReply, bEnd}, open: true, resumes: true},
+		{name: "visible same-state prompt after hidden prompt", base: []string{prompt("u1", "A"), apiErrorLine(t, "e1", failure, map[string]any{"error": "server_error"}), turnEndLine},
+			drop: []string{prompt("ub", "B"), prompt("uc", "C")}, open: true},
 		{name: "visible local command", base: []string{prompt("u1", "A"), replyLine, turnEndLine},
 			middle: []string{prompt("u3", "<command-name>/usage</command-name>"), localOut},
 			drop:   []string{prompt("ub", "B"), bReply, bEnd}, closed: true, succeeded: true},
@@ -272,10 +279,36 @@ func TestTailSettleRestoresVisibleTurnState(t *testing.T) {
 				t.Fatalf("open %v closed %v succeeded %v error %q; want %v/%v/%v %q",
 					m.TurnOpen, m.TurnClosed, m.TurnSucceeded(), m.TurnError, c.open, c.closed, c.succeeded, c.failure)
 			}
+			if m.TurnErrorResumes != c.resumes {
+				t.Fatalf("TurnErrorResumes = %v, want %v", m.TurnErrorResumes, c.resumes)
+			}
 			if c.last != "" && m.LastText != c.last {
 				t.Fatalf("LastText = %q, want %q", m.LastText, c.last)
 			}
 		})
+	}
+}
+
+func TestTailSettleDoesNotInheritHiddenResume(t *testing.T) {
+	var m Meta
+	var tail Tail
+	feed := func(lines []string) {
+		for i, line := range lines {
+			tail.Line(&m, ParseLine(i, []byte(line), &m))
+		}
+	}
+	feed([]string{prompt("u1", "A"), replyLine, turnEndLine})
+	tail.Rewound([]string{"ub", "eb", "n", "db"})
+	feed([]string{prompt("ub", "B"),
+		apiErrorLine(t, "eb", fixtureLimit, map[string]any{"error": "rate_limit", "quotaLimits": map[string]any{"status": "rejected", "resetsAt": 1767284400}}),
+		informational("Usage limit reached · continuing automatically at 4:20pm · esc to cancel"),
+		strings.Replace(strings.Replace(turnEndLine, `"uuid":"d"`, `"uuid":"db"`, 1), `"parentUuid":"x"`, `"parentUuid":"eb"`, 1)})
+	feed([]string{wake("w1")})
+	if !tail.Settle(&m) {
+		t.Fatal("settling the abandoned limited turn changed nothing")
+	}
+	if m.TurnErrorResumes {
+		t.Fatal("a hidden turn's automatic resume leaked into the visible wake")
 	}
 }
 
@@ -393,8 +426,9 @@ func TestTailSettlesARewoundTurnError(t *testing.T) {
 		t.Fatalf("before the rewind: %q, resumes %v", m.TurnError, m.TurnErrorResumes)
 	}
 	recap := `{"type":"system","subtype":"away_summary","uuid":"s1","parentUuid":"t1","timestamp":"2026-01-01T12:13:00Z","content":"recap"}`
-	if m := read(append(lines, recap)); m.TurnError != "" || m.TurnErrorKind != "" || !m.TurnErrorResetsAt.IsZero() || m.TurnErrorResumes || m.LastText != "answer one" {
-		t.Fatalf("after the rewind: %q %q %v resumes %v, last text %q", m.TurnError, m.TurnErrorKind, m.TurnErrorResetsAt, m.TurnErrorResumes, m.LastText)
+	if m := read(append(lines, recap)); m.TurnError != "" || m.TurnErrorKind != "" || !m.TurnErrorResetsAt.IsZero() || m.TurnErrorResumes ||
+		!m.TurnSucceeded() || m.LastText != "answer one" {
+		t.Fatalf("after the rewind: %q %q %v resumes %v, succeeded %v, last text %q", m.TurnError, m.TurnErrorKind, m.TurnErrorResetsAt, m.TurnErrorResumes, m.TurnSucceeded(), m.LastText)
 	}
 }
 

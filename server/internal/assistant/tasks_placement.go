@@ -89,9 +89,9 @@ func (t *PlanTask) noteWhy(note string) {
 
 // fitTaskLauncher holds t's resolved launcher (params, resolveStart's) to what m has (fitLauncher): a default m lacks
 // is swapped for one it has, which t then names, without a tier that no longer applies, and its why says so. It also
-// reports the agent the resolved launcher runs ("" when it can't tell), using the same launcher list rather than another
-// probe.
-func (s *Service) fitTaskLauncher(ctx context.Context, t *PlanTask, m Device, own startPick, params map[string]any) (string, error) {
+// reports what the resolved launcher runs (startAgent: its agent type, and whether it runs with Allow all), using the same
+// launcher list rather than another probe.
+func (s *Service) fitTaskLauncher(ctx context.Context, t *PlanTask, m Device, own startPick, params map[string]any) (startAgent, error) {
 	note, agent, err := s.fitLauncher(ctx, m, own, params)
 	if err != nil || note == "" {
 		return agent, err
@@ -184,14 +184,14 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	// On the computer it landed on (a flexible task may have moved): a default it lacks gives way to one it has, a
 	// launcher the plan named that it lacks is refused before any tab opens (#2640). Before the health check below,
 	// which is then about the launcher that will run.
-	agent, err := s.fitTaskLauncher(ctx, t, m, own, params)
+	fit, err := s.fitTaskLauncher(ctx, t, m, own, params)
 	if err != nil {
 		return "", "", err
 	}
-	if agent == "claude" && !t.preservePermission {
+	if fit.allowAll() && !t.preservePermission {
 		t.Permission = "bypassPermissions"
 	}
-	modes := startTakesModes(agent)
+	modes := startTakesModes(fit.agent)
 	if !modes { // traex, omp…: no mode and no effort, whatever a default or a tier filled in (launcher_modes.go)
 		delete(params, "effort")
 		t.Effort = ""

@@ -25,6 +25,11 @@ type Launcher struct {
 	RunHere bool `json:"run_here,omitempty"`
 	// Assistant: a runtime's launcher that may run the Persona assistant (docs/integrations/runtimes.md "Assistant"), whatever its agent.
 	Assistant bool `json:"assistant,omitempty"`
+	// AutoAccept: a runtime's launcher whose agents ask for approval unless a switch is on, which a start in
+	// bypassPermissions turns on (Paseo's Auto Accept: its ACP providers such as Grok, and OpenCode;
+	// docs/integrations/paseo.md). The Agents Persona itself starts on it run with the switch on, as Claude Code's run in
+	// bypassPermissions (#8141). Older nodes and runtimes leave it out.
+	AutoAccept bool `json:"auto_accept,omitempty"`
 	// Pi: a Persona-managed provider pi can use on this computer too (ManagedLauncher.PiAPI, docs/integrations/pi.md
 	// "Persona's model providers").
 	Pi bool `json:"pi,omitempty"`
@@ -385,11 +390,20 @@ func MessagesBaseURL(base string) string {
 	}
 }
 
-// WorkAgentTypes are the agent types the node starts as work agents (docs/integrations/launchers.md "Work agents"):
-// pi, the Cursor CLI and the Antigravity CLI. The node starts them without Claude's permission mode or effort,
-// ignoring one the start names rather than refusing it (node/workagent.go, node/control.go); the hub drops the two
-// for them the same way (assistant/launcher_modes.go). node TestWorkAgentTypesMatchTheNode keeps the lists together.
+// The agents the node starts without Claude Code's permission mode and effort (Codex takes its own sandbox and
+// effort): the hub matches what the node does with one a start names (assistant/launcher_modes.go), and node
+// TestStartModeAgentTypesMatchTheNode keeps these lists and the node's together.
+//
+// WorkAgentTypes are the work agents (docs/integrations/launchers.md "Work agents"): pi, the Cursor CLI and the
+// Antigravity CLI. The node starts them with the two ignored rather than refusing the start (node/control.go, #8151).
 var WorkAgentTypes = []string{"pi", "cursor", "agy"}
+
+// NoModeAgentTypes are the other agents the node starts in a terminal, traex and Oh My Pi: it refuses a start of one
+// that names a permission mode or effort (node/control.go).
+var NoModeAgentTypes = []string{"traex", "omp"}
 
 // IsWorkAgentType: agent is one of WorkAgentTypes.
 func IsWorkAgentType(agent string) bool { return slices.Contains(WorkAgentTypes, agent) }
+
+// IsNoModeAgentType: agent is one of NoModeAgentTypes.
+func IsNoModeAgentType(agent string) bool { return slices.Contains(NoModeAgentTypes, agent) }

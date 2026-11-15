@@ -525,12 +525,12 @@ func (s *Service) feedPlans(ctx context.Context, items []FeedItem) map[string]*T
 }
 
 // planStartsAtOnce: every task only reads, was asked for by the user in this turn (while start_requested_tasks is on),
-// or is a kind the user said to start without asking.
+// or is a kind the user said to start without asking (its directory or one it is under, task_trust_scope.go).
 func (s *Service) planStartsAtOnce(ctx context.Context, tasks []PlanTask) bool {
-	trusted := s.trustedKinds(ctx)
+	trusted := s.trustCover(ctx)
 	requested := s.startRequestedTasks(ctx)
 	for _, t := range tasks {
-		if !t.Readonly && !(requested && t.UserRequested) && !trusted[trustKey(t)] {
+		if !t.Readonly && !(requested && t.UserRequested) && !trusted(trustKey(t)) {
 			return false
 		}
 	}

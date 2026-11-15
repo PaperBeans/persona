@@ -465,6 +465,7 @@ func ParseLine(seq int, line []byte, meta *Meta) []proto.Item {
 				meta.localTurn, meta.beforeLocal = true, [2]bool{meta.TurnOpen, meta.TurnClosed}
 			} else if !local {
 				meta.localTurn = false
+				meta.tree.turnStart = true
 				// A local command (a slash command, "! cmd") is not sent to the model: it does not end a limit.
 				meta.ClaudeTurnStarted(it.Wake)
 			}

@@ -564,7 +564,7 @@ func (h *runtimeConn) formLauncherLocked(l runtimeLauncher) proto.Launcher {
 		agent = ""
 	}
 	return proto.Launcher{Name: l.Name, Model: l.Model, Source: h.hello.Runtime, Agent: agent, PromptOptional: l.PromptOptional,
-		Assistant: h.hello.Caps.Assistant && l.Name == h.hello.Launcher}
+		Assistant: h.hello.Caps.Assistant && l.Name == h.hello.Launcher, AutoAccept: l.AutoAccept}
 }
 
 // launcherRuntime is the runtime offering a launcher name, nil when none does.

@@ -501,7 +501,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if err := s.applyModel(ctx, "agent.new", run); err != nil {
 			return "", err
 		}
-		swapped, agent, err := s.fitLauncher(ctx, am, own, run)
+		swapped, fit, err := s.fitLauncher(ctx, am, own, run)
 		if err != nil {
 			return "", fmt.Errorf("%w; no agent was started", err)
 		}
@@ -513,9 +513,9 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		}
 		// traex, omp…: no effort (launcher_modes.go). One this call names is refused before the user is asked, rather
 		// than by the computer after they said yes; one a tier filled in is dropped. pi, cursor, agy: dropped either way.
-		if !startTakesModes(agent) {
+		if !startTakesModes(fit.agent) {
 			launcher, _ := run["launcher"].(string)
-			if err := startModesRefused(launcher, agent, "", own.effort); err != nil {
+			if err := startModesRefused(launcher, fit.agent, "", own.effort); err != nil {
 				return "", fmt.Errorf("%w; no agent was started", err)
 			}
 			a.Effort = ""
@@ -576,15 +576,16 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			a.Cwd = rehome(a.Cwd, am, alt)
 			params["cwd"], am = a.Cwd, alt
 			// The same launcher name may mean a different agent on the destination. Reuse its list before choosing permissions.
-			if _, agent, err = s.fitLauncher(ctx, am, own, params); err != nil {
+			if _, fit, err = s.fitLauncher(ctx, am, own, params); err != nil {
 				return "", fmt.Errorf("%w; no agent was started", err)
 			}
 		}
-		if agent == "claude" {
+		// Allow all for Claude Code and for a provider whose approval is an Auto Accept switch (startAgent.allowAll, #8141).
+		if fit.allowAll() {
 			params["permission_mode"] = "bypassPermissions"
 		}
-		if !startTakesModes(agent) { // the machine a health detour landed on may run another agent under this name
-			if err := startModesRefused(picked, agent, "", own.effort); err != nil {
+		if !startTakesModes(fit.agent) { // the machine a health detour landed on may run another agent under this name
+			if err := startModesRefused(picked, fit.agent, "", own.effort); err != nil {
 				return "", fmt.Errorf("%w; no agent was started", err)
 			}
 			delete(params, "effort") // Model configuration's, not this call's
@@ -644,7 +645,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		// their own ids, so they keep the heuristic fallback (session_adopt.go). The id is generated once, so an
 		// ultracode refusal's retry still names the same session.
 		expectID := ""
-		if agent == "claude" {
+		if fit.agent == "claude" {
 			expectID = newStartSessionID()
 			params["session_id"] = expectID
 		}

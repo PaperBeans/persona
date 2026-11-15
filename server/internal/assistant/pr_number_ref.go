@@ -2,7 +2,9 @@ package assistant
 
 import (
 	"context"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/lazyre"
 )
@@ -87,6 +89,20 @@ func (s *Service) prFromNumber(ctx context.Context, t Todo, machine, session, te
 		repo = s.repoOfRoot(ctx, machine, session)
 	}
 	if repo == "" {
+		return ""
+	}
+	number, err := strconv.Atoi(n)
+	if err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	isPR, err := s.forge().IsPR(ctx, repo, number)
+	if err != nil {
+		s.logf("task %s: PR number %s could not be confirmed: %v", t.ID, n, err)
+		return ""
+	}
+	if !isPR {
 		return ""
 	}
 	return "https://github.com/" + repo + "/pull/" + n

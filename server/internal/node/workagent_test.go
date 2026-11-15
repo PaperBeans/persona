@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -121,14 +122,42 @@ func TestSessionStartPiUsesTheWorkAgent(t *testing.T) {
 	}
 }
 
-// The hub tells work agents from the agents the node refuses a permission mode or effort for by proto.WorkAgentTypes
-// (assistant/launcher_modes.go, #7559): it must name exactly the agent types workAgent starts, so the hub drops the
-// two where the node ignores them and refuses them only where the node would.
-func TestWorkAgentTypesMatchTheNode(t *testing.T) {
-	for _, kind := range append([]string{"", "claude", "codex", traexAgent, ompAgent, piAgent, cursorAgent, agyAgent, "opencode"}, proto.WorkAgentTypes...) {
-		_, _, node := workAgent(kind)
-		if hub := proto.IsWorkAgentType(kind); hub != node {
-			t.Errorf("%q: the node starts it as a work agent: %v, proto.WorkAgentTypes says %v", kind, node, hub)
+// The hub decides what to do with a permission mode or effort by proto.WorkAgentTypes and proto.NoModeAgentTypes
+// (assistant/launcher_modes.go, #7559): it drops them for the agents a start goes through without (work agents) and
+// refuses them for the ones the node refuses (traex, omp). Both lists must say what start here does with an effort.
+func TestStartModeAgentTypesMatchTheNode(t *testing.T) {
+	kinds := []string{piAgent, cursorAgent, agyAgent, traexAgent, ompAgent}
+	for _, k := range append(append([]string{}, proto.WorkAgentTypes...), proto.NoModeAgentTypes...) {
+		if !slices.Contains(kinds, k) {
+			kinds = append(kinds, k)
 		}
+	}
+	for _, kind := range kinds {
+		t.Run(kind, func(t *testing.T) {
+			n, f, home := herdrNode(t)
+			f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
+			f.reply("tab.create", map[string]any{"tab": map[string]any{"tab_id": "w1:t2"}, "root_pane": map[string]any{"pane_id": "w1:p2"}})
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			f.after(func(c herdrCall) {
+				if c.Method == "pane.send_input" && strings.Contains(c.String(), "HERDR_AGENT=") {
+					cancel() // the start went through to the agent's command: that is all this asks
+				}
+			})
+			_, err := n.start(ctx, home, kind, "do the thing", "", "", "", "high", "", "", kind)
+			typed := f.trace("pane.send_input")
+			ran := slices.ContainsFunc(typed, func(c string) bool { return strings.Contains(c, "HERDR_AGENT=") })
+			// Refused: an error before anything was typed. Went through: the agent's command was typed.
+			refused := err != nil && len(typed) == 0
+			work, none := proto.IsWorkAgentType(kind), proto.IsNoModeAgentType(kind)
+			switch {
+			case work == none:
+				t.Fatalf("%s: in proto.WorkAgentTypes %v, in proto.NoModeAgentTypes %v: want exactly one", kind, work, none)
+			case none && !refused:
+				t.Fatalf("%s with an effort: the node did not refuse it (%v), but proto.NoModeAgentTypes lists it", kind, err)
+			case work && (refused || !ran):
+				t.Fatalf("%s with an effort: the node did not start it (%v), but proto.WorkAgentTypes lists it", kind, err)
+			}
+		})
 	}
 }

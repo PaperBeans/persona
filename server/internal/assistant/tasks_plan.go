@@ -155,18 +155,19 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 			if err != nil {
 				return "", fmt.Errorf("task %d: %w", i+1, err)
 			}
-			agent, err := s.fitTaskLauncher(ctx, t, m, own, params)
+			// The card shows the mode that runs: Allow all for Claude Code and an Auto Accept provider (#8141).
+			fit, err := s.fitTaskLauncher(ctx, t, m, own, params)
 			if err != nil {
 				return "", fmt.Errorf("task %d: %w", i+1, err)
 			}
-			if agent == "claude" {
+			if fit.allowAll() {
 				t.Permission = "bypassPermissions"
 			}
 			// traex, omp…: no mode, no effort (launcher_modes.go). One the call names is refused now, rather than by
 			// the computer once the task starts; one a tier filled in is dropped. pi, cursor, agy: dropped either way.
-			if takesModes = startTakesModes(agent); !takesModes {
+			if takesModes = startTakesModes(fit.agent); !takesModes {
 				launcher, _ := params["launcher"].(string)
-				if err := startModesRefused(launcher, agent, asked, own.effort); err != nil {
+				if err := startModesRefused(launcher, fit.agent, asked, own.effort); err != nil {
 					return "", fmt.Errorf("task %d: %w", i+1, err)
 				}
 				t.Effort = ""

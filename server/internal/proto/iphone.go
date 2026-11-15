@@ -20,8 +20,11 @@ type IPhone struct {
 	// hub to translate.
 	Note string `json:"note,omitempty"`
 	// Code is Note's reason as a code, for an app to act on without reading the words: bridge_missing, none_paired.
-	Code    string    `json:"code,omitempty"`
-	Checked time.Time `json:"checked,omitempty"`
+	Code string `json:"code,omitempty"`
+	// DDIPresent: this computer has the developer disk image a phone's Prepare mounts (Xcode's, or
+	// PERSONA_IPHONE_DDI_DIR's); absent from a node that doesn't say (#8199).
+	DDIPresent *bool     `json:"ddi_present,omitempty"`
+	Checked    time.Time `json:"checked,omitempty"`
 	// Job: pairing or forgetting an iPhone from the app (kind pair | forget), the one running or the last one since the
 	// node started.
 	Job *ComputerJob `json:"job,omitempty"`
@@ -55,6 +58,9 @@ type IPhoneDevice struct {
 	// DeveloperMode is what the iPhone last said of its Developer Mode (at pairing, then whenever it answered); absent
 	// when it never said.
 	DeveloperMode *bool `json:"developer_mode,omitempty"`
+	// AutoPrepare: its owner prepared it once from the app (its developer disk image mounted), so this computer mounts
+	// the image again by itself whenever it comes back without it, as after a restart (#8199).
+	AutoPrepare bool `json:"auto_prepare,omitempty"`
 	// Allowed is the manager's: the computer is on and this iPhone consented.
 	Allowed bool `json:"allowed"`
 }

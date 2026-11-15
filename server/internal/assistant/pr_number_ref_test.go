@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/proto"
@@ -23,10 +24,59 @@ func TestPRNumberIn(t *testing.T) {
 	}
 }
 
+func TestPRFromNumberRequiresPullRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		text  string
+		forge *fakeForge
+		want  string
+	}{
+		{"issue mentioned with PR wording", "Research references issue #9; no PR was opened", &fakeForge{issueOnly: true}, ""},
+		{"issue mislabeled as a PR", "PR #9", &fakeForge{issueOnly: true}, ""},
+		{"explicit issue URL", "No PR: https://github.com/o/r/issues/9", &fakeForge{}, ""},
+		{"linked issue number", "No PR: [#9](https://github.com/o/r/issues/9)", &fakeForge{issueOnly: true}, ""},
+		{"unconfirmed type", "PR #9", &fakeForge{issueErr: errors.New("rate limited")}, ""},
+		{"confirmed PR", "PR #9", &fakeForge{}, "https://github.com/o/r/pull/9"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newTaskServiceOn(t, &memStore{})
+			s.deploy.forge = tc.forge
+			todo := Todo{Notes: "https://github.com/o/r/issues/1"}
+			if got := s.prFromNumber(context.Background(), todo, "", "", tc.text); got != tc.want {
+				t.Fatalf("prFromNumber(%q) = %q, want %q", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTaskDoesNotRecordIssueAsPR(t *testing.T) {
+	for _, text := range []string{
+		"Research references issue #9; no PR was opened",
+		"Research references https://github.com/o/r/issues/9; no PR was opened",
+		"Research references [issue #9](https://github.com/o/r/issues/9); no PR was opened",
+	} {
+		t.Run(text, func(t *testing.T) {
+			s, f := newTaskService(t)
+			s.deploy.forge = &fakeForge{issueOnly: true}
+			todo := startedTask(t, s, f)
+			ctx := context.Background()
+			s.setTaskStage(ctx, todo.ID, "develop", "")
+			cur := todoNow(s, todo.ID)
+			cur.Notes = "https://github.com/o/r/issues/1"
+			s.advanceTaskReply(ctx, cur, "box", "s1", text)
+			got := todoNow(s, todo.ID)
+			if got.PRURL != "" || len(got.PRs) != 0 || got.Stage != "develop" {
+				t.Fatalf("issue became delivery work: PR %q, history %v, stage %s", got.PRURL, got.PRs, got.Stage)
+			}
+		})
+	}
+}
+
 // A PR named by number alone is recorded as a full URL when its repository is known: the task's own PR, a link in the
 // reply or the to-do, or what earlier replies from the same repository root linked. Unknown or several: nothing.
 func TestPRFromNumber(t *testing.T) {
 	s, f := newTaskServiceOn(t, &memStore{})
+	s.deploy.forge = &fakeForge{}
 	ctx := context.Background()
 	f.setSessions("box", proto.Session{SessionID: "s1", MachineID: "box", RepoRoot: "/code/app"},
 		proto.Session{SessionID: "s2", MachineID: "box", RepoRoot: "/code/other"})
@@ -63,6 +113,7 @@ func TestPRFromNumber(t *testing.T) {
 // review stage), so its PR status is read and it can wait for merge.
 func TestTaskRecordsAPRNamedByNumber(t *testing.T) {
 	s, f := newTaskService(t)
+	s.deploy.forge = &fakeForge{}
 	todo := startedTask(t, s, f)
 	ctx := context.Background()
 	s.setTaskStage(ctx, todo.ID, "develop", "")

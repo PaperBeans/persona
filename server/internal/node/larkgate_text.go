@@ -3,6 +3,7 @@ package node
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/lazyre"
@@ -17,20 +18,27 @@ import (
 // larkFlow is what classifyLark notes of one segment for larkTextRuns.
 type larkFlow struct {
 	text    string
-	call    bool // lark-cli's own call (or ssh's, read remotely): its words reach no other program
-	filter  bool // an output filter: it prints what it is given or told, and runs none of it
-	program bool // anything else: a program that may run a file
-	opaque  bool // a program whose code the command does not show (a script, a shell reading its input)
-	writes  bool // it writes a file
+	call    bool     // lark-cli's own call (or ssh's, read remotely): its words reach no other program
+	filter  bool     // an output filter: it prints what it is given or told, and runs none of it
+	program bool     // anything else: a program that may run a file
+	opaque  bool     // a program whose code the command does not show (a script, a shell reading its input)
+	writes  bool     // it writes a file
+	notes   []string // the notes it writes (larkNoteFile): run only by a program that names them (#8148)
 }
 
 // larkTextRuns: the command may run lark-cli where classifyLark cannot see it. That is a program with code the
 // command does not show in a command that names lark-cli (as before #8119, minus inline code that runs nothing
 // else), text naming lark-cli piped through filters into a program, or such text written to a file while a program
-// runs as well. Text naming lark-cli that only filters see or print stays data.
-func larkTextRuns(cmd string, flow []larkFlow) bool {
+// runs as well. Text naming lark-cli that only filters see or print stays data. In a sequential list (one command
+// after another, as written) only a program after the text was written can run the file, and a note (Markdown,
+// plain text, a log, a table) only a program that names it (#8148).
+func larkTextRuns(cmd string, flow []larkFlow, sequential bool) bool {
 	names := larkCLIRe.MatchString(cmd)
-	tainted, mentioned, writes, program, pos := false, false, false, false, 0
+	tainted, mentioned, writes, program, notesRun, pos := false, false, false, false, false, 0
+	var notes []string
+	runsNote := func(f larkFlow) bool {
+		return f.program && slices.ContainsFunc(notes, func(n string) bool { return strings.Contains(f.text, filepath.Base(n)) })
+	}
 	for _, f := range flow {
 		own := !f.call && larkCLIRe.MatchString(f.text)
 		piped := true // unless only another separator stands before the segment
@@ -43,10 +51,16 @@ func larkTextRuns(cmd string, flow []larkFlow) bool {
 			return true
 		}
 		tainted = f.filter && (own || piped && tainted)
+		program = program || f.program && (!sequential || mentioned && writes)
+		notesRun = notesRun || mentioned && runsNote(f)
 		mentioned = mentioned || own
-		writes, program = writes || f.writes, program || f.program
+		writes = writes || f.writes
+		notes = append(notes, f.notes...)
 	}
-	return mentioned && writes && program
+	if !sequential {
+		notesRun = notesRun || mentioned && slices.ContainsFunc(flow, runsNote)
+	}
+	return mentioned && (writes && program || notesRun)
 }
 
 // larkPipedFrom: the command text before a segment ends in a pipe (`|`, `|&`), not `||`.
@@ -126,19 +140,28 @@ func larkInlineScript(args []string, valued, flags string) (string, bool) {
 	return "", false
 }
 
-// larkWritesFile: a segment's redirections write a file (anything but /dev/null or another descriptor).
-func larkWritesFile(redirect string) bool {
+// larkWritesFile: a segment's redirections write a file (anything but /dev/null or another descriptor); the notes
+// among them (larkNoteFile) are listed apart.
+func larkWritesFile(redirect string) (writes bool, notes []string) {
 	for _, t := range strings.Fields(redirect) {
 		op := strings.TrimLeft(t, "0123456789&")
 		if !strings.HasPrefix(op, ">") || redirectFD.MatchString(t) {
 			continue
 		}
-		if target := strings.TrimLeft(op, ">|"); target != "/dev/null" {
-			return true
+		switch target := strings.TrimLeft(op, ">|"); {
+		case target == "/dev/null":
+		case larkNoteFile.MatchString(target):
+			notes = append(notes, target)
+		default:
+			writes = true
 		}
 	}
-	return false
+	return writes, notes
 }
+
+// larkNoteFile: a literal path to a note (Markdown, plain text, a log, a table). No program runs one unless it is
+// told to: by its name.
+var larkNoteFile = lazyre.New(`^[\w./~+-]+\.(?:md|markdown|txt|log|csv|tsv)$`)
 
 // larkExecutableAssignment: an assignment that can change which program a command runs or what it loads. A PATH of
 // directories already trusted here (trustedPATH) does not; on another machine PATH names that machine's directories

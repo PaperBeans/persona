@@ -78,6 +78,7 @@ private fun resourceOf(key: CoreText.Key): Int = when (key) {
     CoreText.Key.ExpiresInHours -> -R.plurals.designsystem_core_expires_in_hours
     CoreText.Key.ExpiresInDays -> -R.plurals.designsystem_core_expires_in_days
     CoreText.Key.RequestFromSubagent -> R.string.designsystem_core_request_from_subagent
+    CoreText.Key.RequestFromSide -> R.string.designsystem_core_request_from_side
     CoreText.Key.RequestFromMcp -> R.string.designsystem_core_request_from_mcp
     CoreText.Key.RequestFromMcpConfigured -> R.string.designsystem_core_request_from_mcp_configured
     CoreText.Key.RequestFromTerminal -> R.string.designsystem_core_request_from_terminal
