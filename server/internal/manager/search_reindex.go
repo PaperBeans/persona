@@ -24,7 +24,7 @@ func cmdSearchReindex(ctx context.Context, e *env, args []string) error {
 	}
 	d := *dir
 	if d == "" {
-		if d, err = onlyManager(); err != nil {
+		if d, err = onlyManager(e.l()); err != nil {
 			return ConfigError{err}
 		}
 	}

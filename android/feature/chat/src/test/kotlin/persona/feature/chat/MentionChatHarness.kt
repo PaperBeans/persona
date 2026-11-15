@@ -1,6 +1,8 @@
 package persona.feature.chat
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -74,9 +76,10 @@ internal class MentionChatHarness(scope: CoroutineScope) {
     private val site = Session("macbook", "site", title = "Release notes for 2.4", cwd = "/Users/me/code/site", state = "idle", status = "idle",
         updatedAt = "2026-11-11T17:20:00Z")
 
+    val sessionRows = MutableStateFlow(listOf(agentSession, web, photos, site,
+        Session("macbook", "main", title = "Persona", cwd = personaCwd, assistant = true, status = "done", state = "idle")))
     val sessions = object : SessionsRepository {
-        override val sessions = MutableStateFlow(listOf(agentSession, web, photos, site,
-            Session("macbook", "main", title = "Persona", cwd = personaCwd, assistant = true, status = "done", state = "idle")))
+        override val sessions = sessionRows
         override val machines = MutableStateFlow(listOf(Machine("macbook", "MacBook", online = true), Machine("studio", "Studio", online = true)))
         override suspend fun refresh() = Unit
     }
@@ -97,9 +100,12 @@ internal class MentionChatHarness(scope: CoroutineScope) {
         override suspend fun loadOlder(session: SessionKey) = Unit
         override suspend fun expandFold(session: SessionKey, fromSeq: Int, toSeq: Int) = emptyList<Item>()
     }
+    val sent = mutableListOf<Pair<SessionKey, String>>()
     val sender = object : MessageSender {
         override val outbox = MutableStateFlow(emptyList<OutboxMessage>())
-        override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?) = Unit
+        override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?) {
+            sent += session to text
+        }
     }
     val interactions = object : InteractionCenter {
         override val pending = MutableStateFlow(emptyList<Interaction>())
@@ -133,7 +139,9 @@ internal class MentionChatHarness(scope: CoroutineScope) {
     /** [key]'s page (the agent's, or Persona's conversation with its tasks) with the composer holding [composer]'s draft. */
     @Composable
     fun Page(key: SessionKey, composer: ChatComposerState) {
-        if (key == persona) ChatScreen(key, chats, sender, interactions, sessions, {},
+        val rows by sessions.sessions.collectAsState()
+        val assistant = rows.firstOrNull { it.key == key }?.assistant == true
+        if (assistant) ChatScreen(key, chats, sender, interactions, sessions, {},
             chrome = ChatChromeBindings(tasks = tasks, onOpenSession = {}, files = computer),
             renderStyle = ChatRenderStyle.Assistant, composerState = composer, embedded = true, showTopBar = false)
         else ChatScreen(key, chats, sender, interactions, sessions, {}, chrome = ChatChromeBindings(onOpenSession = {}, files = computer),

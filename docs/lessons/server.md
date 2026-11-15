@@ -38,6 +38,17 @@ The first version of the fix still failed an independent review, on what the hub
   another account and back does not bring the first inbox back. That is a limit, written down in `docs/assistant/inbox.md`, not a bug to
   work around by moving a thing's time.
 
+## A new connection reports nothing the hub keeps for it until the hub has handed it over (2026-11-15, #8275)
+
+Every node connection is a new `Node` with empty state, and the hub hands back what it keeps for the computer (the
+Codex inventory: homes, app-servers, joined threads) only in the `node.configure` that follows `devices.connected`.
+The engine is settled earlier (`engine.use` is the first call of the handshake), and the manager passes a node's events
+on before it calls `devices.connected`, so a report made "once the engine is ready" reached the hub first and the hub
+stored the empty registry over what it kept. A node's report of state the hub keeps waits for the hub's part of the
+connection (`codexHanded`); the hub keeps such a report only from a connection it has done that part for
+(`codexInventoryHanded`: `hookedAt` equal to the manager's `ConnectedAt`), which also covers older nodes. Write a test
+of the sequence, not only of each side's storage.
+
 ## An empty list sent as null means "no change" to an optional field (2026-11-14)
 
 The node reads node.configure's `claude_dirs_blocked` as `*[]string`: absent or `null` leaves its patterns as they are.
@@ -575,6 +586,13 @@ Don't add a `pending.json` field for it: older edges and watchdogs read the same
 ## Test a staged node before stopping the resident one (#5097)
 
 A completed gzip stream and `chmod 755` prove that bytes arrived, not that the target machine can execute them. The SSH deploy therefore runs the staged binary's `version` command before the atomic rename and before `pkill`: an `exec format error` or another failed self-test removes `.new`, preserves the installed binary, and leaves the working node running. Package selection still validates GOOS / GOARCH through Go build info; the remote self-test is the final target-side guard, not a duplicate package check. Exercise this boundary through the real login-shell deploy script with an isolated HOME and a fake `pkill`, never by replacing or stopping a development machine's resident node.
+
+## A release archive's checksum does not verify its version (#8338)
+
+A correctly hashed Windows ZIP can contain programs reporting another version while sharing the manifest's build number.
+Run the bundled version and node self-check commands on the target architecture, before installation or publication.
+Bind the successful results to both the ZIP and executable hashes, and reject missing or stale verification at the upload boundary.
+Cross-platform build metadata and a version-shaped string somewhere in a binary are not substitutes for those command results.
 
 ## Migrating a long-poll channel without duplicate consumers (#2020)
 
@@ -2143,6 +2161,15 @@ On TestFlight 224 an extension's **Review** spun for two minutes and then failed
 - Make room before raising a budget. The 17 bools sat in 10 separate words, 63 bytes of padding; moving bools beside other bools brought the row back to 1,528 bytes without dropping a field. Reordering fields reorders the reflect encoder's keys, so `appendSession` and `sessionWireLayout` follow, and byte goldens change only in key order (check that every line decodes to the same object). `TestSessionFitsItsSizeClass` now fails in `proto`, listing the bools that sit alone, instead of in another package's budgets.
 - The same happens to a type built as one slice per pass (2026-11-12, #5188). #5150 added three fold fields to `sessionlist.Item` (208 to 240 bytes); the hub reads a machine's 150 items as one `[]Item` each pass, and 36,000 B is past the largest size class (32 KiB), so it took whole pages, 40 KiB, 8 KB more a pass. Moving the fields behind one pointer (`Item.Fold`, nil for a row without a hierarchy) brought it back to 216 bytes. Then allocate the pointer only where it is new: `return &fold` moves `fold` to the heap where it is declared, for every row, even on the paths that return nil; copy it in the branch that returns it (`go build -gcflags=-m` says `moved to heap`). A later sparse to-do id rode in that same optional pointer rather than taking `Item` past the class again (#7200); `TestItemBatchFitsItsSizeClass` now checks the 150-row batch beside the type, with no architecture-specific struct size.
 
+- A small list on every runtime row (2026-11-15, #8261). `proto.Session` had no byte left (1,528 of 1,528), so a row's
+  permission modes went into `SessionCapabilities`, which the node allocates for every runtime row. As a `[]string` it
+  took that struct from 64 to 88 bytes, the 96-byte class: a push of 300 rows allocated 9,600 B more and
+  `TestRuntimeSessionsPushAllocatesOneList` failed. It also made `proto.Launcher` uncomparable, and the manager compares
+  launcher lists (`slices.Equal` in `models_launchers_push.go`), so the build broke there and in three tests. A set of
+  at most eight known ids fits one byte: `proto.PermissionModeSet`, sent as the same JSON list, sits in the padding after
+  the six bools, so neither struct grew nor stopped being comparable. Read leniently: anything that is not a list of
+  strings is an empty set, never an error that would lose the rest of the row.
+
 ## A fact about a directory does not go on every row in it (2026-11-13, #994)
 
 - #4637 put a project identity on each session (`inventory` on `proto.Session`, more attributes on `sessionlist.Item`) so the paged list could group a repository across computers. `Item` went from 200 to 328 bytes, a 150-row reindex allocated 17% more, two allocation guards failed, and it was reverted the same day (#4744). `proto.Session` is at 1,528 bytes with one spare byte, so a new string there costs every row copied anywhere 256 bytes.
@@ -2231,6 +2258,15 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
   minute is then the same machine for all of them, and the head's CPU time over the base's in the same minute came
   out at 0.943 with every one of the 20 minutes below 1, the unchanged hub's at 0.983 (`pairedCPU`). Measure a noisy
   quantity against a reference that sees the same noise at the same moment.
+- The largest share was not in the event path at all: `liveLoop` builds the fleet again up to ten times a second
+  while it changes, and each round took a new copy of every machine's list to decorate, 54% of what the manager
+  allocated. A loop that reads the same lists again and again keeps its arrays: `Devices.AppendSessions` copies a
+  machine's rows over the list the last round kept (`fleetInputsInto`), 78 KB a round where new copies were 886 KB.
+  What makes that safe is stated in the code and pinned by tests: every row is overwritten whole before it is
+  decorated, so no decoration carries over; rows a shorter list leaves behind are cleared; one goroutine owns the
+  arrays; and nothing built from a round keeps a row (`TestLiveRoundsOverKeptListsAreFreshRounds` runs every round
+  both ways and marshals each round's results again after the arrays were rewritten). Give the arrays back on the
+  slow tick, or a fleet gone quiet holds a second copy of its lists for good.
 
 ## The manager read its own session lists through their JSON (2026-11-13, #3197)
 
@@ -2353,3 +2389,23 @@ tests and its importers passed, and the hub deploy failed on this guard. When co
 run `go test -run TestPlacesThatSealAreKnown ./internal/assistant` (no database needed) and record the file there:
 with `secret.key`, after putting where it keeps the sealed value into `db.sealedTables` or `db.sealedSettings`; with
 any other key, under "other keys" with where the key comes from. Never loosen the guard.
+
+## A setting moved into a table stays readable by the build before it (2026-11-15, #8257)
+
+Moving `hub.push_sent` (one list, rewritten whole by every push) into the `hub_push_sent` table first deleted the
+setting once its entries were in the table. A switch back to the build from before (`personad hub switch`, a
+self-update going back) then started with no delivered history: that build reads only the setting, its daily counts
+began again at zero, and the pushes the new build had recorded were not there for it. The forward tests all passed;
+nothing ran the old build after the new one.
+
+- Keep the old record for the build before, and say when it can go. Write it back off the hot path: where the hub
+  stops (`Hub.closeDatabaseAfterWorkers`, before the database closes) and on the updater's way back before it runs the
+  old binary, since an exec skips the cleanup; while running only at a bounded rate (hourly here), or the move saves
+  nothing. A handoff in `hub switch` alone is not enough: the command, the edge and a watchdog may each be another
+  build, and a killed hub runs none of them.
+- Going forward again merges, never replaces. The old build writes the list back without the table's ids, so match
+  entry and row by content (time to the precision the table keeps, and the other fields), count equal entries as
+  separate pushes, and skip what the table's sweep would remove, or every start adds expired entries again.
+- Do not write the old record from a start that failed to read it: its list may be shorter than what is stored.
+- Test the round trip with the old build's reader: upgrade, deliver, old build (reads only the old record), deliver,
+  upgrade again, the same counts at each step (`TestPushSentSurvivesSwitchBackAndForward`).

@@ -2,6 +2,7 @@ package persona.feature.settings
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
@@ -42,6 +43,7 @@ class SettingsAssistantScopeTest {
             when (method.name) {
                 "getAvailable" -> flowOf(true)
                 "getConversations" -> flowOf(emptyList<persona.core.contracts.Session>())
+                "getChanges" -> emptyFlow<persona.core.contracts.api.KnowledgeSelectionChange>()
                 "getMachines" -> MutableStateFlow(emptyList<persona.core.contracts.Machine>())
                 "getState" -> MutableStateFlow(persona.core.contracts.api.ConnectionState.Online)
                 "getIsPaired" -> MutableStateFlow(true)
@@ -86,6 +88,7 @@ class SettingsAssistantScopeTest {
         providers = Providers(),
         models = Models(),
         triage = recorder(AgentTriage::class.java, "triage"),
+        knowledgeSelection = recorder(persona.core.contracts.api.KnowledgeSelection::class.java, "knowledgeSelection"),
         connectors = recorder(ConnectorsManagement::class.java, "connectors"),
         channels = recorder(ChannelManagement::class.java, "channels"),
         feishuBot = recorder(FeishuBotSettings::class.java, "bot"),
@@ -103,6 +106,7 @@ class SettingsAssistantScopeTest {
         runCatching { scoped.providers!!.launchers() }
         runCatching { scoped.models!!.catalog() }
         runCatching { scoped.triage!!.switches() }
+        runCatching { scoped.knowledgeSelection!!.selection() }
         runCatching { scoped.connectors!!.connectors() }
         runCatching { scoped.channels!!.channels() }
         runCatching { scoped.feishuBot!!.status() }
@@ -111,7 +115,7 @@ class SettingsAssistantScopeTest {
         seen.toList()
     }
 
-    private val names = listOf("providers", "models", "triage", "connectors", "channels", "bot", "sent", "extensions")
+    private val names = listOf("providers", "models", "triage", "knowledgeSelection", "connectors", "channels", "bot", "sent", "extensions")
 
     @Test fun anOlderHubTheDefaultAndOneAssistantNameNone() {
         val one = ManagerRoster(listOf(HubManager("assistant", "助手", online = true, isDefault = true)), "assistant")

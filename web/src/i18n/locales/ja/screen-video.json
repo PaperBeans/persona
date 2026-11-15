@@ -17,6 +17,7 @@
   "fallback_lost": "ビデオが途切れました。いったん VNC で表示します。",
   "fallback_locked": "Mac がロックされています。ロックが解除されるまで VNC で表示します。",
   "fallback_not_allowed": "この Mac はまだビデオを許可していません。VNC で表示します。",
+  "fallback_busy": "この Mac のビデオはすでに 2 台のデバイスで表示中です。いったん VNC で表示します。",
   "how_to_turn_on": "オンにする方法",
   "turn_on_title": "この Mac でビデオをオンにする",
   "how_settings": "その Mac の「システム設定 › プライバシーとセキュリティ › 画面収録とシステムオーディオ録音」で Persona Screen をオンにしてください。",

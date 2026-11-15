@@ -69,9 +69,9 @@ nonisolated enum ShareTargets {
         var out = Listed()
         if let a = assistant {
             let mainID = a.main.flatMap { $0.isEmpty ? nil : $0 }
-            if let mainID {
-                let s = a.conversations.first { $0.sessionID == mainID }
-                out.main = ShareTarget(kind: .main, key: SessionKey(machineID: a.machineID, sessionID: mainID), title: "Persona",
+            if let key = a.mainKey() {
+                let s = a.conversations.first { $0.sessionID == key.sessionID }
+                out.main = ShareTarget(kind: .main, key: key, title: "Persona",
                                        state: s?.state ?? .idle, date: s?.updatedAt)
             }
             out.conversations = a.conversations

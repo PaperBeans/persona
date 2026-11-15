@@ -261,6 +261,14 @@ export function shownFeed(feed: FeedItem[], now = new Date()): FeedItem[] {
   return hidden.size === 0 ? feed : feed.filter((it) => !hidden.has(it.id));
 }
 
+/** What a Persona conversation draws of its feed (#8237, docs/assistant/unified-entry.md "Receipts"): a task's card comes
+ *  once, when it is handed out, and updates in place; how it goes on (a receipt for each stretch of work, its Agent's
+ *  reports, its reviews) is its row in Needs you / In progress, never another card. The hub keeps writing them all: the
+ *  trays read them, and a hub-side reader (the "Today" card) still does. */
+export function drawnFeed(feed: FeedItem[]): FeedItem[] {
+  return feed.filter((it) => it.kind !== "receipt" && it.kind !== "report" && it.kind !== "review");
+}
+
 /** Persona's messages to task `todoId`, oldest first: what its card lists. */
 export function sentTo(feed: FeedItem[], todoId: string): FeedItem[] {
   return feed
@@ -709,6 +717,17 @@ export function startFailure(todo: Todo, plans: Record<string, TaskPlan>): strin
 }
 
 /**
+ * Whether an Agent is being started for a to-do with none up yet (#7552): a plan made it (`plan_id`), or a plan that is
+ * not dismissed holds it as a task (a to-do a plan takes over keeps no `plan_id`), and that start has not failed.
+ * A to-do nobody dispatched (`todo_create`, a leader's piece, one made by hand) is not starting: it is "Not started".
+ */
+export function startInFlight(todo: Todo, plans: Record<string, TaskPlan>): boolean {
+  if (todo.done_at || startFailure(todo, plans)) return false;
+  if (todo.plan_id) return true;
+  return Object.values(plans).some((p) => p.state !== "dismissed" && p.tasks.some((t) => t.todo_id === todo.id && !t.error));
+}
+
+/**
  * Removes a task that does not run: its todo goes (its agents and their chats stay on the Agents page), and with it
  * its card, pill and panel. One whose agents ran asks first; one whose agent never started goes at once. Answers
  * whether it went.
@@ -907,8 +926,8 @@ export function loadedFrom(items: Item[]): number | undefined {
  *  stack on top of the newest page, with their day lines, and read as the conversation's start with its messages gone;
  *  they wait for the page that covers them. */
 export function displayLines(lines: ChatLine[], all: FeedItem[], from?: number): DisplayLine[] {
-  // the hand-offs the task cards take in are drawn there, not among the lines (#1542)
-  const feed = shownFeed(all).filter((it) => from === undefined || !(Date.parse(it.at) < from));
+  // the hand-offs the task cards take in are drawn there, not among the lines (#1542); how a task goes on is its row (#8237)
+  const feed = drawnFeed(shownFeed(all)).filter((it) => from === undefined || !(Date.parse(it.at) < from));
   const out: DisplayLine[] = [];
   let next = 0;
   for (const line of lines) {

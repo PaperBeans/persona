@@ -251,6 +251,7 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 	// The tail's lines in the transcript's tree: a turn the user went back over (a rewind in the terminal, then a recap
 	// beside it) is not where the agent's last words come from (transcript/branch.go).
 	var tail transcript.Tail
+	tail.PriorModelFallback(tm.ModelFallback)
 	tail.Rewound(prev.rewound)
 	m.rewound = prev.rewound
 	buf := make([]byte, st.Size()-off)

@@ -43,18 +43,24 @@ type Hub struct {
 	// tests: replaces os.Hostname
 	hostname func() (string, error)
 
-	cfg       *Config
-	version   string
-	build     update.Build // channel, build number, where updates come from (docs/operations/hub-update.md)
-	upd       *updater     // updating itself to the publisher's release (selfupdate.go)
-	logger    *log.Logger
-	traffic   trafficLog // privacy-safe minute counters, flushed to the journal
-	machines  []*Machine
-	byID      map[string]*Machine
-	push      *Pusher
-	agentWork agentWork    // whether the manager is there to ask (agents_link.go)
-	store     Store        // nil in unit tests: nothing is persisted
-	lockTests lockTestWake // wakes the lock test dispatcher when a test is scheduled (locktest.go)
+	cfg      *Config
+	version  string
+	build    update.Build // channel, build number, where updates come from (docs/operations/hub-update.md)
+	upd      *updater     // updating itself to the publisher's release (selfupdate.go)
+	logger   *log.Logger
+	traffic  trafficLog // privacy-safe minute counters, flushed to the journal
+	machines []*Machine
+	byID     map[string]*Machine
+	// fs.watch: generation fences stale node writes, and forced replays survive machine-ID recreation.
+	fsWatchGenMu     sync.Mutex
+	fsWatchGen       map[string]uint64
+	fsWatchEpoch     uint64
+	fsWatchForceMu   sync.Mutex
+	fsWatchForceByID map[string]bool
+	push             *Pusher
+	agentWork        agentWork    // whether the manager is there to ask (agents_link.go)
+	store            Store        // nil in unit tests: nothing is persisted
+	lockTests        lockTestWake // wakes the lock test dispatcher when a test is scheduled (locktest.go)
 
 	terms terminals  // the terminal tab's live streams (terminal.go)
 	fulls fullRelays // the web's full herdr views (herdrclient.go)
@@ -342,6 +348,8 @@ func (h *Hub) closeDatabaseAfterWorkers(cancel context.CancelFunc, closeDatabase
 	if h.stopping.Load() {
 		h.shutdown.step(h, "hand over the event log", func(ctx context.Context) error { h.saveEventLog(ctx); return nil })
 	}
+	// Every stop, planned or not: the next process may be a build from before hub_push_sent (lnmode.go mirrorSent).
+	h.shutdown.step(h, "delivered pushes for an older build", h.push.mirrorSent)
 	h.shutdown.step(h, "close database", closeDatabase)
 }
 

@@ -121,6 +121,17 @@ unmerged tree, not by dropping the visual assertion. With a frozen Compose clock
 can keep waiting for a choreographer frame and fill the trace-recording heap; keep the requested rows visible in a
 bounded real-page fixture and test state transitions on the same row instead of hiding the failure with more heap.
 
+## A chat's loading means the hub has not answered, not that the cache was read (#8321)
+
+`HubChatRepository.publish` set `loading = false` on every publish, and the first publish is the disk cache's. An uncached chat
+was therefore an empty one ("No messages yet") for as long as its first page took, and a page refused until a watch loads it
+(Paseo's `not_loaded`) showed the error instead of the skeleton. Loading is a fact about the hub: nothing shown and no answer for
+the chat yet (a page, items, the hub's error). Keep it on the entry and derive the snapshot's `loading` from it in `publish`,
+since every metadata event publishes again. The same goes for an error that must outlive those publishes: `state.update` errors
+(the existing `ChatSyncFailed`) are gone at the next session-list event, so a wait's own failure goes in `eventError`, which
+only items clear. In tests, let the repository's collectors settle before opening the chat: a list publish that lands after
+the open's first read hides what that read published.
+
 ## Snapshot subscriptions are not page visibility
 
 The shell, badges and floating capsule can collect a repository snapshot without its page being visible. Do not use subscriber
@@ -338,6 +349,8 @@ Pitfalls in the new multi-module Android App (`android/`, `docs/android/android.
 - `./gradlew --stop` stops all daemons of that Gradle version on the machine. Shared lanes (worktrees) therefore stop other people's builds too. To stop only yours, use Ctrl-C or kill your own command.
 
 ## Testing
+
+- A complete Robolectric run can still have no heap headroom (#8339): 205 chat classes finished with 498 MiB live after a full GC on the 512 MiB default, followed by repeated full GCs. Near-end shallow histograms were led by Robolectric resource/theme tables (265.7 MiB) and Compose objects (82.0 MiB); they do not establish GC roots or native bitmap ownership. Measure the whole task with GC logs and a live class histogram before changing test lifetimes or choosing `maxHeapSize`; one class cannot expose growth across the shared test process.
 
 - A shot diff against `main` needs the images' own noise first (2026-11-12, #4339). `android_shots_diff.py` on one run of `main` and one of a branch with no relevant change calls hundreds of the ~1,700 images different: live clocks ("21:30"), a shimmer, the dither of dark Brief and Board, text heights that jump by 4 px between two runs of the same code. Run each side at least twice (`clean…UnitTest` and `--no-build-cache`, or Gradle replays the results without redrawing a picture), take the pixels that differ between two runs of one side as that image's noise, and count only the differences outside it, with a pixel of margin; what is left is what the change drew, and it is looked at by eye. Shots drawn by tests whose class name does not end in `ShotsTest` need a `--tests` pattern of their own.
 

@@ -27,6 +27,9 @@ struct PromptComposer: View {
     var models: [PromptModel] = []
     /// The model shown; `pickModel` gets the one picked from the menu.
     var modelID = ""
+    /// A direct action instead of the catalog menu, with the effective model as its button title (#6542).
+    var assistantModelName: String? = nil
+    var assistantPick: (() -> Void)? = nil
     var pickModel: (String) -> Void = { _ in }
     var onAttach: (PromptSource) -> Void
     /// True when the caller took the mention (a quoted session); otherwise its `insert` is typed.
@@ -77,6 +80,8 @@ struct PromptComposer: View {
         o.onAttachSource = onAttach
         o.onPickSource = onMention
         o.onPickCommand = onCommand
+        o.modelAction = assistantPick
+        o.modelActionTitle = assistantModelName
         return VStack(alignment: .leading, spacing: 0) {
             if let quotes, !quotes.wrappedValue.isEmpty {
                 QuoteBar(refs: quotes)

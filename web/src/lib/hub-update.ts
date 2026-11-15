@@ -38,6 +38,12 @@ export interface HubUpdateStatus {
   last_check?: string;
   confirmed: boolean;
   image?: { name: string; tag: string; pinned: boolean };
+  /** Where the hub reads its releases now, and whether hub.json's update.url or the build says so. */
+  update_url?: string;
+  update_url_from?: string; // hub.json | build
+  /** The source's newest release (`latest`) is older than this hub and the release its code contains: the source
+   *  looks stopped (#8108). */
+  source_behind?: boolean;
 }
 
 export interface HubUpdateRecord {
@@ -138,6 +144,14 @@ export function latestWarning(s: HubUpdateStatus): string | null {
   if (l.bad) return t("lib-hub-update.warning_bad");
   if (l.held && s.auto) return t("lib-hub-update.warning_held", { why: l.held });
   return null;
+}
+
+/** The line in place of "Up to date" when the update source looks stopped (`source_behind`, docs/operations/hub-update.md
+ *  "Update source"): it names the source and where it came from, and hub.json's update.url, which sets another. */
+export function sourceBehindWarning(s: HubUpdateStatus): string | null {
+  if (!s.source_behind || !s.latest || !s.update_url) return null;
+  const from = t(s.update_url_from === "hub.json" ? "lib-hub-update.source_from_config" : "lib-hub-update.source_from_build");
+  return t("lib-hub-update.warning_source_behind", { url: s.update_url, from, version: s.latest.version });
 }
 
 /** The lines for a Docker hub: what to say and what to copy. */

@@ -123,7 +123,7 @@ export const HandoffCard = memo(function HandoffCard({ item: feed }: { item: Fee
             {suggestionButtons({ version: card.version, kind: card.kind, text: card.text }).confirm}
           </Button>
           <Button disabled={sending} onClick={() => later(feed.id)} className="min-h-11">
-            {t("assistant-tasks.later")}
+            {t("assistant-task-actions.later")}
           </Button>
         </div>
       )}

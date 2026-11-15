@@ -140,6 +140,7 @@ func TestMeetingLiveLines(t *testing.T) {
 func TestMeetingTopics(t *testing.T) {
 	r := newRoomFixture(t)
 	sid := r.roomUp(meetingRec, "participant")
+	r.olderRoom(meetingRec) // the rules and the topics in every batch (a lean room's: meeting_room_lean_test.go)
 	view := r.do("GET", livePath(meetingRec), "", nil, http.StatusOK)
 	if topics, ok := view["topics"].([]any); !ok || len(topics) != 0 || view["topics_at"] != nil || view["revs"].(map[string]any)["topics"] != float64(0) {
 		t.Fatalf("before the first: %v", view)
@@ -262,6 +263,7 @@ func TestMeetingHighlights(t *testing.T) {
 	loc := zoneApart(t, start)
 	setSettings(t, r.s, func(v *Settings) { v.Timezone = loc.String() })
 	sid := r.roomUpWith(meetingRec, "participant", map[string]any{"started_at": start.Format(time.RFC3339)})
+	r.olderRoom(meetingRec) // the rules and the lists in every batch (a lean room's: meeting_room_lean_test.go)
 	view := r.do("GET", livePath(meetingRec), "", nil, http.StatusOK)
 	if raw, _ := json.Marshal(view["highlights"]); string(raw) != `[]` || view["highlights_at"] != nil || view["revs"].(map[string]any)["highlights"] != float64(0) {
 		t.Fatalf("before the first: %v", view)

@@ -94,6 +94,18 @@ func (r *roomFixture) roomUpWith(id, role string, more map[string]any) string {
 	return m.Room.SessionID
 }
 
+// olderRoom makes recording id's room one an older manager started (before #8253): a batch a minute with the rules and
+// the lists in each, never compacted.
+func (r *roomFixture) olderRoom(id string) {
+	r.t.Helper()
+	if _, err := r.engine().MeetingUpdate(id, func(m *kb.Meeting, _ kb.Recording) error {
+		m.Room.Batching, m.Room.Lean = 0, kb.MeetingRoomLean{}
+		return nil
+	}); err != nil {
+		r.t.Fatal(err)
+	}
+}
+
 func (r *roomFixture) sends() []map[string]any {
 	r.f.mu.Lock()
 	defer r.f.mu.Unlock()
@@ -235,7 +247,7 @@ func TestMeetingRoomFed(t *testing.T) {
 	text, _ := batch["text"].(string)
 	src, _ := batch["message_source"].(map[string]any)
 	if batch["session_id"] != sid || batch["resume_only"] != true || src["kind"] != proto.SourceMeeting ||
-		!strings.Contains(text, "Ada: we keep the cap.") || !strings.Contains(text, "Write nothing in reply.") {
+		!strings.Contains(text, "Ada: we keep the cap.") || !strings.Contains(text, "then write nothing.") {
 		t.Fatalf("batch %v", batch)
 	}
 	if running, _ := r.s.meetingTurnRunning(context.Background(), "server", sid); running {

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/nwverse/persona/server/internal/extension/sandbox"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/runtimepkg"
@@ -312,7 +313,9 @@ func (n *Node) sdkCommand(b sdkBridge, launcher string, s sdkStart, base []strin
 		settings, innerArgs = append(settings, s.settings), append(innerArgs, "--settings", s.settings)
 	}
 	argv, env, _ := wrapAgent("assistant-sdk", n.home, n.dir, s.cwd, settings,
-		func() string { return claudeInner(innerArgs, base, s.cwd, n.home, n.claudeConfigDirs()) }, []string{b.js.Path, b.script}, b.js.env(base), n.logger.Printf)
+		func() *sandbox.StatusReason {
+			return claudeInnerReason(innerArgs, base, s.cwd, n.home, n.claudeConfigDirs())
+		}, []string{b.js.Path, b.script}, b.js.env(base), n.logger.Printf)
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = s.cwd
 	cmd.Env = env

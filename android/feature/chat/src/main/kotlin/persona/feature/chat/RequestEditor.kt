@@ -110,6 +110,7 @@ fun RequestEditor(
     val requestBlock = requestApprovalBlockedReason(request, child, blockedReason) {
         approvalBlockedReason(context.resources, it)
     }
+    val stoppedWork = requestBlock != null && request.isManagerWorkCard
     val shown = if (!request.foldedUnder.isNullOrBlank() && request.sessionTitle.isNullOrBlank())
         request.copy(sessionTitle = side?.displayTitle
             ?: stringResource(if (request.fromSide) R.string.chat_side_session_untitled else R.string.chat_subagent_untitled)) else request
@@ -143,7 +144,7 @@ fun RequestEditor(
         .collectAsStateWithLifecycle(ChatSnapshot())
     InteractionForm(shown, machine, draft, update, busy || !online, uncertain, full,
         { action, submitted, read ->
-            if (requestBlock == null) {
+            if (requestBlock == null || stoppedWork) {
                 storageScope?.let { store.clear(it, request) }
                 transient = AnswerDraft()
                 onAnswer(action, submitted, read)

@@ -257,6 +257,11 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	for _, k := range []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigOrphaned, sigOverdue, sigRecheck, sigUndecidable, sigOwnerCannot, sigParkedDue} {
 		delete(b.pending, t.ID+"|"+k) // reviewed: what waited is answered
 	}
+	if verdict == reviewAccepted || verdict == reviewCancelled {
+		// Closed: a decision that ended a parking has nothing left to move. A review that leaves the task open, parking
+		// it again included, does not say its supervisor heard of the decision: that waits for its message (decidedPark).
+		delete(b.pending, t.ID+"|"+sigParkDecided)
+	}
 	b.mu.Unlock()
 	// How it ended against what was asked (task_brief_result.go): each criterion of the brief, as scope changes left them.
 	var result *BriefResult

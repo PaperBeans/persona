@@ -80,9 +80,23 @@ func (m *Manager) install(ctx context.Context, src InstallSource, dir string, st
 	defer os.Remove(staged)
 
 	step("downloading the iPhone bridge", StageDownload)
+	checksumErr := &Error{Code: CodeChecksumMismatch, Message: "the download is not the release's build (size or sha256)"}
 	var lastErr error
+	integrityFailed := false
 	for _, u := range src.URLs {
-		if lastErr = download(ctx, u, archive, src.Size); lastErr == nil || ctx.Err() != nil {
+		if lastErr = download(ctx, u, archive, src.Size); lastErr == nil {
+			sum, n, err := fileSHA256(archive)
+			if err == nil && n == src.Size && sum == src.SHA256 {
+				break
+			}
+			integrityFailed = true
+			if err != nil {
+				lastErr = err
+			} else {
+				lastErr = checksumErr
+			}
+		}
+		if ctx.Err() != nil {
 			break
 		}
 		m.logf("iphone bridge: download from the next address (%v)", lastErr)
@@ -91,13 +105,13 @@ func (m *Manager) install(ctx context.Context, src InstallSource, dir string, st
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		if integrityFailed {
+			return checksumErr
+		}
 		return &Error{Code: CodeDownloadFailed, Message: "couldn't download the iPhone bridge: " + lastErr.Error()}
 	}
 
 	step("checking the iPhone bridge", StageVerify)
-	if sum, n, err := fileSHA256(archive); err != nil || n != src.Size || sum != src.SHA256 {
-		return &Error{Code: CodeChecksumMismatch, Message: "the download is not the release's build (size or sha256)"}
-	}
 	if err := unpack(archive, staged); err != nil {
 		return &Error{Code: CodeChecksumMismatch, Message: "couldn't unpack the download: " + err.Error()}
 	}

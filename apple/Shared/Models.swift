@@ -529,12 +529,16 @@ nonisolated struct ComputerApp: Codable, Hashable, Sendable, Identifiable {
 }
 
 nonisolated struct ComputerJob: Codable, Hashable, Sendable {
-    /// install | grant
+    /// install | grant (Cua, ego); pair | forget | install | prepare (an iPhone's, #8199)
     var kind: String
     /// running | done | failed | cancelled
     var state: String
     var step: String? = nil
     var error: String? = nil
+    /// An iPhone job's code: while it runs, what it waits for at the phone (trust_pending, locked); once failed, why.
+    var code: String? = nil
+    /// An iPhone job's iPhone.
+    var device: String? = nil
 
     var running: Bool { state == "running" }
 }
@@ -547,10 +551,13 @@ extension Machine {
 
 nonisolated struct Launcher: Codable, Identifiable, Hashable, Sendable {
     var name: String
+    var displayName: String? = nil
     var baseURL: String?
     var model: String?
     /// "codex" for plain codex or an alias running it (docs/integrations/codex.md「Starting from the phone」); nil: Claude Code.
     var agent: String? = nil
+    /// The configured runtime kind, when the hub supplies one (claude, codex, or another runtime).
+    var agentType: String? = nil
     /// An agent runtime's launcher that can run the Persona assistant (DSH's, docs/integrations/runtimes.md「Assistant」).
     var assistant: Bool? = nil
     /// How its last check or start went on the computer the list is for (`GET …/machines/{id}/launchers`,
@@ -575,11 +582,14 @@ nonisolated struct Launcher: Codable, Identifiable, Hashable, Sendable {
     static let codexAppSource = "codex_app"
     /// A Codex start sends its first message with it and waits for the thread Codex makes.
     var isCodex: Bool { agent == "codex" }
+    /// The hub's configured kind wins when present; an empty or missing value falls back to the node's agent.
+    var runtimeAgent: String? { agentType?.isEmpty == false ? agentType : agent }
     /// Starting it needs a first message: a Codex on a computer that cannot open it without one.
     var needsFirstMessage: Bool { isCodex && promptOptional != true }
 
     enum CodingKeys: String, CodingKey {
         case name, model, agent, assistant, health, source
+        case displayName = "display_name", agentType = "agent_type"
         case baseURL = "base_url"
         case promptOptional = "prompt_optional"
         case runHere = "run_here"
@@ -591,9 +601,11 @@ nonisolated extension Launcher {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
+        displayName = (try? c.decodeIfPresent(String.self, forKey: .displayName)).flatMap { $0 }
         baseURL = try c.decodeIfPresent(String.self, forKey: .baseURL)
         model = try c.decodeIfPresent(String.self, forKey: .model)
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
+        agentType = (try? c.decodeIfPresent(String.self, forKey: .agentType)).flatMap { $0 }
         assistant = try c.decodeIfPresent(Bool.self, forKey: .assistant)
         health = (try? c.decodeIfPresent(LauncherHealth.self, forKey: .health)) ?? nil
         promptOptional = try c.decodeIfPresent(Bool.self, forKey: .promptOptional)

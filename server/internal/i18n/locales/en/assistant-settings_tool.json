@@ -1,4 +1,6 @@
 {
+  "title_readonly_mode": "Read-only task protection",
+  "change_readonly_mode": "Read-only task protection: {before} -> {after}. sandbox keeps existing runtime protection (Codex uses a read-only sandbox; Claude uses instructions). prompt uses instructions only, not a security boundary; normal runtime permissions still apply. Applies to new task starts and retries, not running agents. Switch back to sandbox to restore the default.",
   "title_task_workspace_preference": "Task workspace preference",
   "change_task_workspace_preference": "Task workspace preference: {before} → {after}",
   "title_notes": "About me",
@@ -46,6 +48,8 @@
   "minutes_applied": "Meeting minutes retention is saved as {saved}; {after} is in effect. Transcripts still follow the recording retention.",
   "title_main_background_folded": "Fold background rounds",
   "change_main_background_folded": "“Fold background rounds”: {before} → {after}",
+  "title_recent_task_chats": "Show scheduled task chats in Recent",
+  "change_recent_task_chats": "“Show scheduled task chats in Recent”: {before} → {after}",
   "title_standing_authorizations": "Standing authorizations",
   "title_meeting_transcription_default": "Meeting transcription",
   "change_meeting_transcription_default": "Meeting transcription: {before} → {after}, for meetings started from now on. In hub mode, the meeting’s audio is sent to the hub’s transcription service. The hub deletes the audio once the minutes are written.",

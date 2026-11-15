@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -414,6 +415,41 @@ class TagReleaseTests(unittest.TestCase):
         state = json.loads((config["state_dir"] / "state.json").read_text())
         self.assertEqual(state["phase"], "publishing")
         self.assertNotIn("complete", state.values())
+
+    def windows_receipt(self, config):
+        directory = config["state_dir"]
+        directory.mkdir(parents=True, exist_ok=True)
+        archive = directory / "Persona-0.5.3-windows-amd64.zip"
+        with zipfile.ZipFile(archive, "w") as output:
+            for program in ("persona-link.exe", "personad.exe"):
+                output.writestr(archive.stem + "/" + program, b"unverified executable")
+        metadata = directory / "BUILD.json"
+        metadata.write_text(json.dumps({"version": "0.5.3", "build": 202611140822}))
+        assets = [{"path": str(path), "name": path.name} for path in (archive, metadata)]
+        Path(config["receipt"]).write_text(json.dumps({"commit": self.commit, "assets": assets}))
+        return assets
+
+    def test_unverified_windows_archive_is_never_uploaded(self):
+        config = self.config()
+        self.windows_receipt(config)
+        with patch.object(tag_release, "prepare_worktree", side_effect=lambda config, commit: config["worktree"].mkdir()), \
+                patch.object(tag_release, "upload") as upload:
+            with self.assertRaises(tag_release.ConfigError):
+                tag_release.publish_once(config, "v0.5.3", self.commit)
+            upload.assert_not_called()
+        state = json.loads((config["state_dir"] / "state.json").read_text())
+        self.assertEqual(state["phase"], "publishing")
+
+    def test_windows_verification_precedes_upload_and_receives_the_requested_version(self):
+        config = self.config()
+        assets = self.windows_receipt(config)
+        events = []
+        with patch.object(tag_release, "prepare_worktree", side_effect=lambda config, commit: config["worktree"].mkdir()), \
+                patch.object(tag_release, "check_windows_archives", side_effect=lambda *args: events.append("verified")) as verify, \
+                patch.object(tag_release, "upload", side_effect=lambda *args: events.append("uploaded")):
+            tag_release.publish_once(config, "v0.5.3", self.commit)
+        verify.assert_called_once_with(assets, "0.5.3")
+        self.assertEqual(events, ["verified", "uploaded"])
 
     def test_complete_same_tag_is_not_published_twice(self):
         config = self.config()

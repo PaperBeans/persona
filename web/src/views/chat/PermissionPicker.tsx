@@ -3,19 +3,23 @@
 // red. Its menu is the header's (`modeMenuItems`: into Full access asks again, leaving it asks where it can't come back,
 // Full access shown disabled with its reason where the agent can't take it) without Plan mode, which is the + panel's
 // check row (`usePlanMode`); each mode's description is its row's tooltip. A Persona conversation keeps all its modes
-// (#2416) in the same words.
+// (#2416) in the same words. A session that lists its own modes (#8261, Paseo's Grok, OpenCode, Codex) has those two
+// rows alone, "Launcher default" and Full access, a switch both ways.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { bypassNote, leavePlanTo, modeConfirmation, modeMenuItems, pickerIcon } from "../../lib/header-mode";
 import { onPermissionPicker } from "../../lib/permissions-command";
-import { BYPASS_MODE, BYPASS_WARNING, modeTitle, PERMISSION_MODES } from "../../lib/session-actions";
+import { BYPASS_MODE, BYPASS_WARNING, listedModeNow, listedModeOption, listedModesOf, modeTitle, PERMISSION_MODES } from "../../lib/session-actions";
 import type { Session } from "../../lib/types";
 import { cx, Menu, useMenu } from "../../ui/atoms";
 import type { MenuItem } from "../../ui/menu-model";
-import { Icon } from "../../ui/icons";
+import { Icon, type IconName } from "../../ui/icons";
 import { t } from "../../i18n";
 import { applyModes, useModeSet } from "./SessionDialogs";
 
 const PLAN = "plan";
+
+/** A listed session's own approval (#8261): the plain shield, not Claude Code's raised hand of "asks first". */
+const LISTED_DEFAULT_ICON: IconName = "shield";
 
 /** The words a mode's chip and row show on hover: what the mode does (Full access's warning when it is on); none while
  *  the mode is not known. */
@@ -30,11 +34,13 @@ function modeTip(mode: string | undefined): string {
  *  it does not take effect at once (`bypassNote`: a restart, the next message). */
 export function pickerItems(s: Session, pick: (mode: string) => void, assistant?: boolean, all?: boolean): MenuItem[] {
   const later = bypassNote(s, assistant);
+  const listed = !assistant && listedModesOf(s);
   return modeMenuItems(s, pick, { assistant })
     .filter((r) => all || r.key !== PLAN)
     .map((r) => ({
       ...r,
-      icon: pickerIcon(r.key),
+      // a session's own approval (#8261) is no "Ask": the plain shield
+      icon: listed && r.key === "default" ? LISTED_DEFAULT_ICON : pickerIcon(r.key),
       ...(r.disabled || (r.key === BYPASS_MODE && later) ? {} : { detail: undefined, tip: r.detail }),
       danger: r.danger || (r.key === BYPASS_MODE && (r.checked || s.bypass_pending)),
     }));
@@ -43,7 +49,9 @@ export function pickerItems(s: Session, pick: (mode: string) => void, assistant?
 export const PermissionPicker = memo(function PermissionPicker({ session, assistant }: { session: Session; assistant?: boolean }) {
   const menu = useMenu();
   const { set } = useModeSet(session);
-  const mode = session.permission_mode;
+  // a session that lists its own modes (#8261) always runs in one of them: no mode reported is its own approval
+  const listed = assistant ? undefined : listedModesOf(session);
+  const mode = listed ? listedModeNow(session, listed) : session.permission_mode;
   const danger = mode === BYPASS_MODE;
   // `/permissions` opens the menu with every mode, Plan mode included (#6476); the chip's own click without it
   const [all, setAll] = useState(false);
@@ -57,9 +65,10 @@ export const PermissionPicker = memo(function PermissionPicker({ session, assist
   }), [key]);
   // A mode not known yet (Claude Code's before its first prompt, which can still be changed) is named by no value: just
   // "Permission mode", as on iOS (#5756, #5596), never a mode the agent may not have.
-  const label = mode ? modeTitle(mode) : t("chat-sessiondialogs.permission_mode");
+  const own = listed ? listedModeOption(mode ?? "default") : undefined;
+  const label = own ? own.title : mode ? modeTitle(mode) : t("chat-sessiondialogs.permission_mode");
   // a restart into Full access waits for the turn to end: the chip says so on hover, the mode shown is the one it runs in
-  const tip = session.bypass_pending ? bypassNote(session, assistant) : modeTip(mode);
+  const tip = session.bypass_pending ? bypassNote(session, assistant) : own && mode !== BYPASS_MODE ? own.detail : modeTip(mode);
   return (
     <>
       <button
@@ -87,7 +96,7 @@ export const PermissionPicker = memo(function PermissionPicker({ session, assist
           danger ? "text-red" : mode === "auto" ? "text-mode-acts" : "text-ink",
         )}
       >
-        <Icon name={pickerIcon(mode)} size={14} stroke={2} className="shrink-0" />
+        <Icon name={own && mode === "default" ? LISTED_DEFAULT_ICON : pickerIcon(mode)} size={14} stroke={2} className="shrink-0" />
         <span className="min-w-0 truncate @max-[300px]/composer:hidden">{label}</span>
         <Icon name="chevron" size={14} stroke={2} className="shrink-0 @max-[300px]/composer:hidden" />
       </button>

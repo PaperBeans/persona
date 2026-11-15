@@ -184,7 +184,7 @@ describe("Settings category navigation", () => {
   it("redirects old agent, translation, and assistant links to their new categories", async () => {
     await mount("/settings?tab=codex");
     expect(location.pathname + location.search + location.hash).toBe("/settings?tab=agents#settings-codex");
-    expect([...host.querySelectorAll('[data-page="agent"]')].map((el) => el.getAttribute("data-agent"))).toEqual(["claude", "codex", "agy", "omp"]);
+    expect([...host.querySelectorAll('[data-page="agent"]')].map((el) => el.getAttribute("data-agent"))).toEqual(["claude", "codex", "agy", "omp", "grok"]);
     expect(host.querySelector("#settings-codex-body")?.hasAttribute("hidden")).toBe(false);
     expect(host.querySelector("#settings-claude-body")?.hasAttribute("hidden")).toBe(false);
     await act(async () => root.render(null));
@@ -200,8 +200,8 @@ describe("Settings category navigation", () => {
   it("starts with every agent open, and a heading folds just that one", async () => {
     await mount("/settings?tab=agents");
     const rows = [...host.querySelectorAll<HTMLButtonElement>("button[aria-expanded]:not([data-settings-switch])")];
-    expect(rows.map((b) => b.textContent)).toEqual(["Claude Code", "Codex", "Antigravity", "omp"]);
-    expect(rows.map((b) => b.getAttribute("aria-expanded"))).toEqual(["true", "true", "true", "true"]);
+    expect(rows.map((b) => b.textContent)).toEqual(["Claude Code", "Codex", "Antigravity", "omp", "Grok"]);
+    expect(rows.map((b) => b.getAttribute("aria-expanded"))).toEqual(["true", "true", "true", "true", "true"]);
     await act(async () => rows[1].click());
     expect(host.querySelector("#settings-codex-body")?.hasAttribute("hidden")).toBe(true);
     expect(host.querySelector("#settings-claude-body")?.hasAttribute("hidden")).toBe(false);

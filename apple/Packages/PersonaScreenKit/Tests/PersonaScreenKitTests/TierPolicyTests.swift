@@ -12,11 +12,12 @@ final class TierPolicyTests: XCTestCase {
 
     private func label(_ t: TierLadder.Tier) -> String { "\(t.width)x\(t.height)@\(t.fps)" }
 
-    private func signals(queue: Double, p95: Double? = nil, delivered: Double? = nil, rising: Bool = false, frames: Int = 30,
-                         bursts: [Double] = [], decode: Double? = 4) -> TierSignals {
+    private func signals(queue: Double, p95: Double? = nil, last: Double? = nil, delivered: Double? = nil, rising: Bool = false,
+                         frames: Int = 30, bursts: [Double] = [], decode: Double? = 4) -> TierSignals {
         var s = TierSignals()
         s.frames = frames
         s.queueP50Ms = queue
+        s.queueLastMs = last ?? queue
         s.queueP95Ms = p95 ?? queue
         s.deliveredKbps = delivered
         s.queueRising = rising
@@ -73,9 +74,24 @@ final class TierPolicyTests: XCTestCase {
 
     func testSkippedFramesCountAsALongQueue() {
         var p = policy(LinkStats(kind: .lan, via: .wifi))
-        p.helper(timing(target: 7_000, sent: 7_000, skipped: 4))
+        p.helper(timing(target: 12_000, sent: 12_000, skipped: 4))
+        XCTAssertNil(p.tick(signals(queue: 200), now: 1))
+        XCTAssertEqual(p.tick(signals(queue: 200), now: 1.25)?.index, 1, "no rate measured: one tier down")
+    }
+
+    /// The helper skips until a report shows 150 ms or less, and says so up to a second later: a phone that sees the queue
+    /// under that, or a backlog that came in all at once (its newest frame barely waited), has nothing to step down for
+    /// (2026-11-15: a stall that was over stepped a light screen down to 15 fps).
+    func testABacklogThatIsGoneStepsNothingDown() {
+        var p = policy(LinkStats(kind: .lan, via: .wifi))
+        p.helper(timing(target: 12_000, sent: 12_000, skipped: 4))
         XCTAssertNil(p.tick(signals(queue: 100), now: 1))
-        XCTAssertEqual(p.tick(signals(queue: 100), now: 1.25)?.index, 1, "no rate measured: one tier down")
+        XCTAssertNil(p.tick(signals(queue: 100), now: 1.25), "skipped, but the queue is under 150 ms")
+        XCTAssertNil(p.tick(signals(queue: 500, last: 3, delivered: 1_000), now: 1.5))
+        XCTAssertNil(p.tick(signals(queue: 500, last: 3, delivered: 1_000), now: 1.75), "a backlog that came in at once")
+        p.helper(timing(target: 2_500, sent: 900, skipped: 0)) // the helper at the band's floor
+        XCTAssertNil(p.tick(signals(queue: 200, last: 2, delivered: 1_000), now: 2.25), "nor at the band's floor")
+        XCTAssertEqual(p.tick(signals(queue: 200, last: 180, delivered: 1_000), now: 2.5)?.reason, .linkSlowed, "one still there")
     }
 
     func testAnExhaustedBandStepsDownToWhatArrived() {
@@ -120,9 +136,10 @@ final class TierPolicyTests: XCTestCase {
 
     func testUpNeedsACalmWindowAndProof() {
         var p = policy(LinkStats(kind: .relay, via: .wifi))
-        p.helper(timing(target: 12_000, sent: 300)) // typing: the helper at its ceiling, the screen using little of it
+        p.helper(timing(target: 12_000, sent: 4_000)) // the screen using a third of the helper's ceiling, not all of it
         var now = 0.25
         while now < 30 {
+            if Int(now * 4) % 4 == 0 { p.helper(timing(target: 12_000, sent: 4_000)) } // once a second, as the helper does
             XCTAssertNil(p.tick(signals(queue: 5), now: now), "no proof of headroom at \(now)")
             now += 0.25
         }
@@ -184,6 +201,26 @@ final class TierPolicyTests: XCTestCase {
         XCTAssertEqual(up, 16, "16 s instead of 8 before trying 2×60 again")
     }
 
+    /// Light content (2026-11-15): a screen sending at most half the next tier's floor never fills the bitrate, and on a
+    /// fast link its keyframes come in too quickly to measure; after twice the window it steps up without proof.
+    func testLightContentStepsUpAfterTwiceTheWindow() {
+        var p = policy(LinkStats(kind: .relay, via: .wifi)) // 1.5×60; 2×60's floor is 6,408 kbit/s
+        var now = 10.25 // past the first seconds' short window: 8 s, light content steps up after 16
+        var up: Double?
+        let start = now
+        while up == nil, now < start + 40 {
+            if Int(now * 4) % 4 == 1 { p.helper(timing(target: 12_000, sent: 600)) }
+            if p.tick(signals(queue: 5), now: now) != nil { up = now - start }
+            now += 0.25
+        }
+        XCTAssertEqual(up, 16)
+        XCTAssertEqual(p.index, 0)
+        XCTAssertEqual(p.last.targetKbps, p.ladder[0].minKbps, "from the new tier's floor")
+        var still = policy(LinkStats(kind: .relay, via: .wifi))
+        for i in 0 ..< 160 { _ = still.tick(signals(queue: 0, frames: 0), now: 10.25 + Double(i) / 4) }
+        XCTAssertEqual(still.index, 1, "a still screen (no timing) shows nothing, light or not")
+    }
+
     func testAStillScreenNeitherProvesNorBreaksTheWindow() {
         var p = policy(LinkStats(kind: .relay, via: .wifi))
         p.helper(timing(target: 12_000, sent: 11_500))
@@ -234,7 +271,7 @@ final class TierPolicyTests: XCTestCase {
         var changes = 0
         var now = 0.25
         while now < 6 {
-            if p.tick(signals(queue: 5, frames: now <= 0.5 ? 30 : 0), now: now) != nil { changes += 1 }
+            if p.tick(signals(queue: now <= 0.5 ? 200 : 5, frames: now <= 0.5 ? 30 : 0), now: now) != nil { changes += 1 }
             now += 0.25
         }
         XCTAssertEqual(changes, 1)

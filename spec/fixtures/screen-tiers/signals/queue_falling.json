@@ -892,6 +892,7 @@
         "frames" : 40,
         "lateShare" : 0.80000000000000004,
         "queueFalling" : true,
+        "queueLastMs" : 4,
         "queueP50Ms" : 84,
         "queueP95Ms" : 152,
         "queueRising" : false,

@@ -58,13 +58,12 @@ nonisolated enum AskPersonaFlow {
 
     static func ask(_ api: APIClient, text: String) async throws -> String? {
         let state = try await api.assistant()
-        guard let main = state.main, !main.isEmpty else {
+        guard let key = state.mainKey() else {
             // No main conversation yet: the first one becomes it. The prompt rides with the start request.
             // Marked: what Siri or a Shortcut sends (a locked phone's too) never counts as typed in the app (`via`).
             let s = try await api.startConversation(prompt: text, main: true, via: .intent)
             return try await waitForAnswer(api, key: SessionKey(machineID: s.machineID, sessionID: s.sessionID), after: 0)
         }
-        let key = SessionKey(machineID: state.machineID, sessionID: main)
         let last = (try? await api.items(key, beforeSeq: nil, turns: 1).toSeq) ?? 0
         try await api.send(key, text: text, clientMsgID: UUID().uuidString, via: .intent)
         return try await waitForAnswer(api, key: key, after: last ?? 0)

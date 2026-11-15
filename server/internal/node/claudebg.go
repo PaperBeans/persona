@@ -201,6 +201,8 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 			s.AttentionReason = proto.AttentionClaudeComputer // no dialog read from a pane (yet)
 			if s.Capabilities != nil && s.Capabilities.Send && s.PaneID == "" && asking(c, m) {
 				s.AttentionReason = proto.AttentionClaudeAnswer // a message answers it (sendOutside)
+				// Its question is a card the apps answer (claudeoutside_ask.go): the answer goes as that message.
+				s.Capabilities.Approve = true
 			}
 		}
 		if s.Cwd == "" {

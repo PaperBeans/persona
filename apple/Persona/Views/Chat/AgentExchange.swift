@@ -60,37 +60,6 @@ struct UserRoutedExchange: View {
     }
 }
 
-/// A task's agent to Persona (`report`): a question, a block, done, or how far it got.
-struct ReportExchange: View {
-    var item: FeedItem
-    var taskTitle: String
-    var layout: ChatLayout
-    private var store: TasksStore { .shared }
-
-    var body: some View {
-        let kind = item.reportKind ?? ""
-        let attention = ReviewText.reportWantsAttention(kind)
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Button {
-                if let id = item.ref, store.todos[id] != nil { store.detailTask = id }
-            } label: {
-                ExchangeHeader(from: taskTitle, to: ChatNames.persona, icon: Theme.Icon.reported,
-                               tint: attention ? Theme.cautionText : .secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(item.ref.flatMap { store.todos[$0] } == nil)
-            ExchangeText(text: ReviewText.reportLine(kind: kind, text: ExchangeText.withoutHeadingMarks(item.text ?? ""), step: item.step, steps: item.steps),
-                         shown: layout.shownLines, pinKey: "report-" + item.id)
-                .chatBoxed(Theme.ChatBox.persona)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.trailing, Theme.Space.xxl)
-        .chatPinned("report-" + item.id)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("exchange.report")
-    }
-}
-
 /// The names in the headers. Persona is the assistant's role here, whatever its avatar is called (as the web's
 /// "task reported to Persona" line).
 enum ChatNames {

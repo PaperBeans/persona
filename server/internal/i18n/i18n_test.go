@@ -146,6 +146,30 @@ func TestCatalogsAgree(t *testing.T) {
 	}
 }
 
+func TestLinkPeerCatalogIsExhaustivelyPinned(t *testing.T) {
+	var got []string
+	for key := range catalogs()[ZhHans] {
+		if strings.HasPrefix(key, "link-peer.") {
+			got = append(got, key)
+		}
+	}
+	slices.Sort(got)
+	want := []string{
+		"link-peer.bad_code",
+		"link-peer.code_required",
+		"link-peer.machine_required",
+		"link-peer.pair_json_required",
+		"link-peer.pair_save_failed",
+		"link-peer.rate_limited",
+		"link-peer.token_invalid",
+		"link-peer.websocket_required",
+		"link-peer.wrong_credential",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("link-peer keys = %v, want exactly %v; pin every new peer text in internal/link", got, want)
+	}
+}
+
 // Server code's literal keys exist and get every placeholder: a missing key reads as the key itself and a missing
 // argument as "{name}" (the web has the same guard in web/src/i18n/catalog.test.ts). Keys and Args built at run
 // time are not checked.

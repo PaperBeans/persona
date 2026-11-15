@@ -243,6 +243,14 @@ func (n *Node) runAgentInPane(ctx context.Context, pane, launcher string) (*prot
 	if err != nil {
 		return nil, err
 	}
+	// Serialize the whole start with any other work-agent start or abandoned-start cleanup for this pane. The first
+	// listedPane was only a cheap lookup; read it again after the wait before trusting the occupancy checks below.
+	unlock := n.typing.lock(workAgentPaneLockPrefix + p.PaneID)
+	defer unlock()
+	p, err = n.listedPane(ctx, pane)
+	if err != nil {
+		return nil, err
+	}
 	if p.Agent != "" || n.sessionOfPane(pane) != "" {
 		return nil, errors.New("这个窗格里已经有 Agent 在运行")
 	}

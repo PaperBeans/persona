@@ -1972,11 +1972,11 @@ function AutoReviewResult({ sup }: { sup: Supervision }) {
     <div data-testid="auto-review" className="mt-2 flex flex-col gap-1 text-[12.5px] text-ink-2">
       <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
         <Icon name="target" size={12} className="shrink-0" />
-        <span className="shrink-0 whitespace-nowrap font-semibold">{t("assistant-tasks.auto_review_title")}</span>
+        <span className="shrink-0 whitespace-nowrap font-semibold">{t("assistant-task-actions.auto_review_title")}</span>
         <span className="min-w-0">· {line}</span>
         {findings && (
           <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="touch-hit ml-auto shrink-0 whitespace-nowrap text-ink-3 hover:text-ink-2">
-            {t(open ? "assistant-tasks.auto_review_hide" : "assistant-tasks.auto_review_show")}
+            {t(open ? "assistant-task-actions.auto_review_hide" : "assistant-task-actions.auto_review_show")}
           </button>
         )}
       </div>

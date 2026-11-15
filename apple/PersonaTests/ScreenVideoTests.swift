@@ -46,7 +46,7 @@ struct ScreenVideoTests {
         #expect(ScreenVideoFallback.paused("permission") == .notAllowed)
         #expect(ScreenVideoFallback.paused("display_gone") == .lost)
         #expect(ScreenVideoFallback.paused("busy") == .lost)
-        for f in [ScreenVideoFallback.lost, .locked, .notAllowed] {
+        for f in [ScreenVideoFallback.lost, .locked, .notAllowed, .busy] {
             for word in ["RFB", "HEVC", "H.264", "codec", "stream", "helper"] {
                 #expect(!f.message.localizedCaseInsensitiveContains(word), "\(f): \(f.message)")
             }
@@ -205,6 +205,34 @@ struct ScreenVideoTests {
         s.run()
         try await seen.until { $0.last?.hasPrefix("ended") == true }
         #expect(seen.all.last == "ended undecodable")
+    }
+
+    /// The hub refused the stream: 429 (the Mac already sends video to two devices, #8320) ends it busy; any other
+    /// refusal, or a socket that just closed, ends it closed.
+    @Test func aRefusedStreamSaysWhetherItWasBusy() async throws {
+        for (status, want) in [(429, "ended busy"), (503, "ended closed"), (nil, "ended closed")] as [(Int?, String)] {
+            let t = VideoScript([], holds: false, refused: status)
+            let seen = Events()
+            let s = ScreenVideoStream(transport: t, start: Self.start) { seen.add($0) }
+            s.run()
+            try await seen.until { $0.last?.hasPrefix("ended") == true }
+            #expect(seen.all.last == want, "\(String(describing: status))")
+        }
+    }
+
+    /// Busy says two devices already watch, and tries again in 30 s as for a lost stream (#8320).
+    @MainActor @Test func aBusyRefusalSaysTwoDevicesWatch() async throws {
+        let link = ScreenVideoLink()
+        var said: [ScreenVideoFallback?] = []
+        link.onFallback = { said.append($0) }
+        link.transport = { _ in VideoScript([], holds: false, refused: 429) }
+        link.want(.init(display: nil, rect: nil))
+        link.rfb(.init(group: "", machine: "macbook", pair: "0123"))
+        try await Self.until { link.fallback != nil }
+        #expect(said == [.busy])
+        let wait = (link.retryAt ?? .distantPast).timeIntervalSinceNow
+        #expect(wait > 25 && wait <= 30)
+        link.want(nil)
     }
 
     /// The link: RFB signed in and video wanted opens the stream; the first picture makes video the picture (RFB's
@@ -466,13 +494,20 @@ private final class VideoScript: RFBTransport, @unchecked Sendable {
     private let holds: Bool
     private var _sent: [[UInt8]] = []
     var sent: [[UInt8]] { lock.withLock { _sent } }
+    /// The status the hub refused it with, as `RFBWebSocket` says (#8320).
+    let refusedStatus: Int?
 
-    init(_ chunks: [[UInt8]], holds: Bool) {
+    init(_ chunks: [[UInt8]], holds: Bool, refused: Int? = nil) {
         self.chunks = chunks
         self.holds = holds
+        self.refusedStatus = refused
     }
 
-    func send(_ bytes: [UInt8]) async throws { lock.withLock { _sent.append(bytes) } }
+    /// A refused socket never opened: its first send fails, as `URLSessionWebSocketTask`'s does.
+    func send(_ bytes: [UInt8]) async throws {
+        if refusedStatus != nil { throw URLError(.badServerResponse) }
+        lock.withLock { _sent.append(bytes) }
+    }
 
     /// More from the other side, later (a `holds` script).
     func feed(_ bytes: [UInt8]) { lock.withLock { chunks.append(bytes) } }

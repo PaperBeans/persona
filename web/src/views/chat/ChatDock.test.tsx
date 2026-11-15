@@ -9,6 +9,7 @@ import { HEADER_SLOT, HEADER_SLOT_END, HEADER_SLOT_START } from "./header";
 import { Composer } from "./Composer";
 import { PendingCards, permissionFrom } from "./Interactions";
 import { restoreQueued } from "./QueueStrip";
+import { getComposerFiles, removeFile } from "../../lib/composer-files";
 import { QueuePanel } from "./QueuePanel";
 import { onDraftEvent, type DraftEvent } from "../../lib/drafts";
 import { getContexts, removeContext, withContexts } from "../../lib/links";
@@ -519,7 +520,7 @@ describe("restoreQueued (#3032)", () => {
     for (const c of getContexts("rq")) removeContext("rq", c.id);
   });
 
-  it("puts the words in the box, the photos in the tray, the contexts on their chips and a lost photo in as its path", async () => {
+  it("puts the words in the box, the photos in the tray, the files on their tiles, the contexts on their chips and a lost photo in as its path", async () => {
     const urls: string[] = [];
     vi.stubGlobal("localStorage", { getItem: () => "tok", setItem: () => {}, removeItem: () => {} });
     vi.stubGlobal("fetch", async (url: string) => {
@@ -534,13 +535,15 @@ describe("restoreQueued (#3032)", () => {
       await restoreQueued("rq", session, parseQueued(raw));
       expect(urls).toHaveLength(2);
       expect(urls[0]).toContain("/machines/m/file/download?path=");
+      expect(getComposerFiles("rq").map((f) => [f.state, f.file?.path])).toEqual([["ready", "/tmp/spec.pdf"]]); // #8361
       expect(events).toEqual([
-        { type: "append", text: "Fix the header /tmp/spec.pdf" },
+        { type: "append", text: "Fix the header" },
         { type: "image", image: { name: "a1.jpg", mime: "image/jpeg", data: "AQID" } },
         { type: "append", text: gone },
       ]);
       expect(getContexts("rq").map(({ kind, title, text, attrs }) => ({ kind, title, text, attrs }))).toEqual([{ kind: "workspace", title: "web", text: "~/code/web", attrs: workspace.attrs }]);
     } finally {
+      getComposerFiles("rq").forEach((f) => removeFile("rq", f.id));
       off();
     }
   });

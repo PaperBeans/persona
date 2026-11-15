@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
@@ -17,14 +18,19 @@ import (
 // of thing that is, and until when. A parked task stays open and is nobody's to answer: no ask, no push, no conclusion
 // card, and none of the signals that say work stopped (stalled, idle, orphaned, overdue, undecidable). At its time its
 // supervisor gets one parked_due signal: decide, park again with a new reason, or close it. Its agent starting a turn
-// (someone sent it something) ends the parking, and it is supervised as before. Parking again and again is the old
-// habit under a new name, so the parks in a row with no agent turn between them are counted, and one past maxReparks
-// re-parks is refused. Only waiting_on owner_priority concerns the owner: the daily digest lists it, never Needs you.
+// (someone sent it something) ends the parking, and it is supervised as before. So does a decision of the owner's
+// recorded on a task parked for them or for someone else (parkDecided, #8044): its supervisor gets the decision.
+// Parking again and again is the old habit under a new name, so the parks in a row with no agent turn between them
+// are counted, and one past maxReparks re-parks is refused. Only waiting_on owner_priority concerns the owner: the
+// daily digest lists it, never Needs you.
 
 const (
 	reviewParked = "parked"
 	// sigParkedDue: a parked task's time came (parkedDueSignal).
 	sigParkedDue = "parked_due"
+	// sigParkDecided: a decision of the owner's was recorded on a task parked for them or for someone else, which
+	// ended the parking (parkDecided).
+	sigParkDecided = "park_decided"
 )
 
 // What a parked task waits on (task_review waiting_on).
@@ -162,6 +168,11 @@ func parkedAnswer(id string, p Parked, loc *time.Location) string {
 	if p.WaitingOn == parkOwnerPriority {
 		owner = " The user's daily digest lists it as parked, waiting for their priority call, with your reason; it is not in their Needs you."
 	}
+	decided := ""
+	if p.WaitingOn == parkOwnerPriority || p.WaitingOn == parkSomeoneElse {
+		decided = " A decision the user records on the task (an answered card, a reply in its topic, one written in the apps) ends " +
+			"it too, and a supervision message brings you the decision."
+	}
 	left := 1 + maxReparks - p.Count
 	again := fmt.Sprintf("It can be parked again %d more time(s) with no agent turn in between.", left)
 	if left <= 0 {
@@ -170,8 +181,8 @@ func parkedAnswer(id string, p Parked, loc *time.Location) string {
 	return fmt.Sprintf("Task %s is parked until %s (waiting_on %s; parked %d time(s) in a row). It stays open; the user is not asked, and "+
 		"no stalled, idle, orphaned or overdue signal is raised for it meanwhile.%s At that time a supervision message (parked_due) brings it "+
 		"back to you: decide, park it again with a new reason, or close it. Its agent starting a turn ends the parking (anything sent "+
-		"to it does that, so tell it what it needs before you park, not after). %s", id, p.Until.In(loc).Format(toolTimeLayout), p.WaitingOn,
-		p.Count, owner, again)
+		"to it does that, so tell it what it needs before you park, not after).%s %s", id, p.Until.In(loc).Format(toolTimeLayout), p.WaitingOn,
+		p.Count, owner, decided, again)
 }
 
 // parkedDueSignal: supervised open task t is parked and its time came, and no supervision message carried that yet
@@ -210,6 +221,159 @@ func (s *Service) parkedDueTold(ctx context.Context, list []superviseSignal) {
 			return true
 		}); err != nil {
 			s.logf("task %s: parked due: %v", g.Todo, err)
+		}
+	}
+}
+
+// decisionEndsPark: a decision from source is the owner's own call: written or chosen by them in the apps or on a
+// card of the task's (manual), their answer to a question card of its agent (card), or their reply in its topic
+// (thread). Not an agent's note, a supervisor's answer to a routed card or the hub's default at a deadline (agent),
+// and not what the hub or an extension writes of a task's outcome (outcome, reported): none of those is what a task
+// parked for the owner or for someone else waits for, and its supervisor is not woken for them.
+func decisionEndsPark(source string) bool {
+	return source == db.DecisionManual || source == db.DecisionCard || source == db.DecisionThread
+}
+
+// parkWaitsForDecision: a task parked waiting on on waits for an answer (the owner's call, or someone else's), which
+// a decision of the owner's recorded on it may be.
+func parkWaitsForDecision(on string) bool { return on == parkOwnerPriority || on == parkSomeoneElse }
+
+// decidedPark is the latest park of v that a recorded decision ended (parkDecided), whatever was reviewed since: a
+// review that followed it, parking it again included, does not mean its supervisor heard of the decision, so the
+// decision is told until a supervision message carried it (DecidedTold). nil when no park of v was ended so.
+func (v *Supervision) decidedPark() *TaskReview {
+	if v == nil {
+		return nil
+	}
+	for i := len(v.Reviews) - 1; i >= 0; i-- {
+		if r := &v.Reviews[i]; r.Verdict == reviewParked && r.Decided != "" {
+			return r
+		}
+	}
+	return nil
+}
+
+// parkDecidedKey names one park a decision ended: the decision.
+func parkDecidedKey(r *TaskReview) string { return "park_decided@" + r.Decided }
+
+// parkDecided: decision row was just stored. When its to-do is an open supervised task parked for the owner's call or
+// for someone else (waiting_on owner_priority, someone_else) and the decision is the owner's own (decisionEndsPark),
+// what the task waited for may have come: the parking ends as when its agent starts a turn (supervisedWorking), a
+// parked_due still waiting is dropped, and its supervisor is told with the to-do's decisions (parkDecidedSignal), so it
+// sends the agent on, reviews the task or closes it. A task parked for something outside or for a date waits on: no
+// decision is what it waits for. Every writer of decisions passes here (insertDecision).
+//
+// The decision is stored by then, so nothing here fails the request that recorded it: a ledger write that fails is
+// logged, and the watch ends the parking from the stored decision on its next look (parkDecidedRetry).
+func (s *Service) parkDecided(ctx context.Context, row db.TodoDecisionRow) {
+	if err := s.endParkOnDecision(ctx, row); err != nil {
+		s.logf("task %s: decision %s on a parked task: %v (the watch ends the parking from the stored decision)", row.TodoID, row.ID, err)
+	}
+}
+
+// endParkOnDecision is parkDecided's work: an error only when the ledger could not be written.
+func (s *Service) endParkOnDecision(ctx context.Context, row db.TodoDecisionRow) error {
+	if !decisionEndsPark(row.Source) {
+		return nil
+	}
+	t, ok := s.todoNow(row.TodoID)
+	if !ok || t.DoneAt != nil || t.Supervision.parking() == nil {
+		return nil
+	}
+	v, changed, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
+		r := v.parking()
+		if r == nil || !parkWaitsForDecision(r.WaitingOn) ||
+			!row.CreatedAt.IsZero() && row.CreatedAt.Before(r.At.Truncate(time.Microsecond)) {
+			return false // not parked for an answer, or parked again after this decision (parkDecidedRetry)
+		}
+		r.Decided = row.ID
+		v.State = ""
+		if v.Round > 0 {
+			v.State = reviewRework
+		}
+		return true
+	})
+	if err != nil || !changed {
+		return err
+	}
+	b := &s.supervise
+	b.mu.Lock()
+	delete(b.pending, t.ID+"|"+sigParkedDue)
+	b.mu.Unlock()
+	s.logf("task %s: decision %s was recorded while it was parked: the parking ends, its supervisor is told", t.ID, row.ID)
+	t.Supervision = &v
+	if g, ok := parkDecidedSignal(t); ok {
+		s.signal(g)
+	}
+	return nil
+}
+
+// parkDecidedRetry: open task t is parked for an answer, and a decision of the owner's was stored after it was parked
+// (the latest such one in effect): the parking ends on it, as parkDecided would have when it was stored. The watch
+// asks this on every look, so a ledger write that failed then (or a manager that stopped between the decision and the
+// ledger) is made good from what is stored, never lost.
+func (s *Service) parkDecidedRetry(ctx context.Context, t Todo) {
+	r := t.Supervision.parking()
+	if t.DoneAt != nil || r == nil || !parkWaitsForDecision(r.WaitingOn) {
+		return
+	}
+	st := s.todoDB()
+	if st == nil {
+		return
+	}
+	list, err := st.ListTodoDecisions(ctx, t.ID, false)
+	if err != nil {
+		s.logf("task %s: the decisions of a parked task: %v", t.ID, err)
+		return
+	}
+	for i := len(list) - 1; i >= 0; i-- {
+		if d := list[i]; decisionEndsPark(d.Source) && !d.CreatedAt.Before(r.At.Truncate(time.Microsecond)) {
+			if err := s.endParkOnDecision(ctx, d); err != nil {
+				s.logf("task %s: decision %s on a parked task: %v (tried again on the next look)", t.ID, d.ID, err)
+			}
+			return
+		}
+	}
+}
+
+// parkDecidedSignal: a recorded decision ended a parking of open task t (parkDecided) and no supervision message
+// carried that yet (kept on the review once one did: parkDecidedTold): the signal that tells its supervisor, even when
+// it was reviewed or parked again since. Its key names the decision, so the watch raising it again every tick tells it
+// once, and a manager restarted before the message went raises it again from the ledger.
+func parkDecidedSignal(t Todo) (superviseSignal, bool) {
+	v := t.Supervision
+	if v == nil || t.DoneAt != nil {
+		return superviseSignal{}, false
+	}
+	r := v.decidedPark()
+	if r == nil || !r.DecidedTold.IsZero() {
+		return superviseSignal{}, false
+	}
+	return superviseSignal{Todo: t.ID, Kind: sigParkDecided, Key: parkDecidedKey(r), Detail: "搁置时在等：" + r.Reason}, true // i18n-ignore: the supervision message is the assistant's prompt
+}
+
+// parkDecidedTold keeps on each park in list that a supervision message carried its park_decided (sent, or queued
+// where a restart keeps it), as parkedDueTold does for parked_due. An earlier park a decision ended that was not told
+// yet is marked too: the message carried every decision of the to-do.
+func (s *Service) parkDecidedTold(ctx context.Context, list []superviseSignal) {
+	for _, g := range list {
+		if g.Kind != sigParkDecided {
+			continue
+		}
+		if _, _, err := s.updateSupervision(ctx, g.Todo, func(v *Supervision) bool {
+			r := v.decidedPark()
+			if r == nil || parkDecidedKey(r) != g.Key || !r.DecidedTold.IsZero() {
+				return false
+			}
+			now := time.Now().UTC()
+			for i := range v.Reviews {
+				if p := &v.Reviews[i]; p.Verdict == reviewParked && p.Decided != "" && p.DecidedTold.IsZero() {
+					p.DecidedTold = now
+				}
+			}
+			return true
+		}); err != nil {
+			s.logf("task %s: park decided: %v", g.Todo, err)
 		}
 	}
 }

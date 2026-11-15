@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/db"
 )
 
 // statsRequest serves one GET against the push grading routes with an optional principal (nil is a full credential).
@@ -287,7 +288,8 @@ func TestPushDailyStatsHeldToManager(t *testing.T) {
 	}
 }
 
-// The delivered-push record lives in hub_settings, so a restart keeps the counts like the switch and the held list.
+// The delivered-push record lives in the store (hub_push_sent), so a restart keeps the counts like the switch and the
+// held list.
 func TestPushSentPersists(t *testing.T) {
 	h, f := lnHub(t)
 	if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP1, "persisted-sent", "x")); err != nil {
@@ -319,26 +321,39 @@ func TestPushPairingReceiptCountsAsSent(t *testing.T) {
 	}
 }
 
-// flakyPutStore fails the first failsLeft PutSetting calls, then delegates to the real in-memory store.
+// flakyPutStore fails the first failsLeft PutSetting and AddPushSent calls, then delegates to the real in-memory store.
 type flakyPutStore struct {
 	*lnStore
 	mu        sync.Mutex
 	failsLeft int
 }
 
-func (s *flakyPutStore) PutSetting(ctx context.Context, key string, v any) error {
+func (s *flakyPutStore) fail() bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.failsLeft > 0 {
 		s.failsLeft--
-		s.mu.Unlock()
+		return true
+	}
+	return false
+}
+
+func (s *flakyPutStore) PutSetting(ctx context.Context, key string, v any) error {
+	if s.fail() {
 		return errors.New("database down")
 	}
-	s.mu.Unlock()
 	return s.lnStore.PutSetting(ctx, key, v)
 }
 
-// A failed settings write is retried instead of dropped: waitInterceptsSaved must not report idle while the change is
-// unsaved, and the row eventually lands.
+func (s *flakyPutStore) AddPushSent(ctx context.Context, entries []db.PushSent) error {
+	if s.fail() {
+		return errors.New("database down")
+	}
+	return s.lnStore.AddPushSent(ctx, entries)
+}
+
+// A failed write is retried instead of dropped: waitInterceptsSaved must not report idle while the change is unsaved,
+// and the row eventually lands, once.
 func TestPushWriterRetriesFailedSave(t *testing.T) {
 	h, f := lnHub(t)
 	store := &flakyPutStore{lnStore: h.push.store.(*lnStore), failsLeft: 2}
@@ -356,12 +371,11 @@ func TestPushWriterRetriesFailedSave(t *testing.T) {
 	if left != 0 {
 		t.Fatalf("the flaky store still has %d failures budgeted, want all retries spent", left)
 	}
-	var saved []pushSent
-	if ok, err := store.Setting(context.Background(), pushSentSettingKey, &saved); err != nil || !ok || len(saved) != 1 {
-		t.Fatalf("saved row = %d (ok %v, err %v), want one delivered push", len(saved), ok, err)
+	if rows := store.sentTable(); len(rows) != 1 || rows[0].RelatedKey != "retry-me" {
+		t.Fatalf("saved rows = %+v, want one delivered push", rows)
 	}
 	h.push.lnMu.Lock()
-	idle := !h.push.lnWriting && !h.push.lnDirty && !h.push.sentDirty
+	idle := !h.push.lnWriting && !h.push.lnDirty && len(h.push.sentPending) == 0
 	h.push.lnMu.Unlock()
 	if !idle {
 		t.Fatal("the writer stayed busy after the retry landed")

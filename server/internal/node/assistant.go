@@ -393,7 +393,11 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		return "", err
 	}
 	if recovery == nil && id != "" {
-		execution = n.heldFallback(id, launcher, execution) // the fallback that answered, for a while (#3788)
+		askedModel := execution.Model
+		// The fallback that answered (#3788). holdExpired is declared apart: ":=" would shadow execution in this block.
+		var holdExpired bool
+		execution, holdExpired = n.heldFallbackWithExpiry(id, launcher, execution)
+		execution = n.applyModelRecoveryReturn(ctx, id, askedModel, execution, holdExpired)
 	}
 	if execution.Model != "" {
 		if _, err := n.launcherModelCheck(ctx, launcher, execution.Model); err != nil {
@@ -520,7 +524,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		}
 		n.noteModes(id, mode, effort)
 	}
-	if st, known := n.state.get(id); !known || st.Launcher != launcher || st.Cwd != cwd || st.Model != execution.Model || st.ModelFingerprint != execution.Fingerprint || st.ModelEffort != execution.Effort || st.Runtime != execution.Runtime || st.IsMain != execution.IsMain || st.ConfigDir != execution.ConfigDir {
+	if st, known := n.state.get(id); !known || st.Launcher != launcher || st.Cwd != cwd || st.Model != execution.Model || st.ModelFingerprint != execution.Fingerprint || st.ModelEffort != execution.Effort || st.Runtime != execution.Runtime || st.IsMain != execution.IsMain || st.ConfigDir != execution.ConfigDir || st.FollowsSetting != execution.FollowsSetting {
 		started := st.StartedAt
 		if started.IsZero() {
 			started = time.Now().UTC()
@@ -528,6 +532,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		st.Launcher, st.Cwd, st.StartedAt = launcher, cwd, started
 		st.Model, st.ModelFingerprint, st.ModelEffort, st.Runtime = execution.Model, execution.Fingerprint, execution.Effort, execution.Runtime
 		st.IsMain = execution.IsMain
+		st.FollowsSetting = execution.FollowsSetting
 		st.ConfigDir = execution.ConfigDir
 		n.state.put(id, st)
 	}
@@ -862,6 +867,13 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 			recovering := n.recoverAssistantResult(p, ev.IsError, ev.Result, kinds...)
 			if !recovering {
 				n.clearAssistantRecovery(p, !ev.IsError)
+				// A turn that ended well is newer evidence than an exhausted chain: the failure card's cause and reset
+				// time must not survive onto a later error, so drop the marker on any successful result (#7824).
+				if !ev.IsError {
+					if r := n.modelRecovery(p.id); r != nil && r.ChainExhausted {
+						n.clearModelRecovery(p.id)
+					}
+				}
 			}
 			p.mu.Lock()
 			manual := p.manual

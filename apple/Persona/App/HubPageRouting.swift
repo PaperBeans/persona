@@ -61,8 +61,8 @@ extension AppModel {
         for (ref, sessions) in sessionsByMachine where ref.group == group {
             if let s = sessions.first(where: { $0.sessionID == id }) { return SessionKey(group: group, machineID: ref.id, sessionID: s.sessionID) }
         }
-        guard group == hub?.group, let machine = assistantConfig?.machineID, !machine.isEmpty else { return nil }
-        return SessionKey(group: group, machineID: machine, sessionID: id)
+        guard group == hub?.group, let config = assistantConfig, config.main == id else { return nil }
+        return config.mainKey(group: group)
     }
 
     /// Opens a chat a link leads to, at `item` when it names one: a Persona conversation in the Persona tab, an agent's

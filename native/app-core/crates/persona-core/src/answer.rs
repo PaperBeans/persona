@@ -1,0 +1,216 @@
+//! Pure question-answer construction following Apple's `QuestionForm` and `QuestionOption.display`.
+//!
+//! This is the `ios_current` answer-construction contract, not the UI's timed paging, review presentation, transport
+//! state or a proposed unified approval policy. A produced resolution is a request to send, not delivery evidence.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Input {
+    pub interaction: Interaction,
+    pub operation: Operation,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Interaction {
+    pub kind: String,
+    #[serde(default)]
+    pub questions: Vec<Question>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Question {
+    pub question: String,
+    #[serde(default)]
+    pub multi_select: bool,
+    #[serde(default)]
+    pub options: Vec<QuestionOption>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct QuestionOption {
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Action {
+    PickOption,
+    Advance,
+    Submit,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Operation {
+    pub action: Action,
+    #[serde(default)]
+    pub page: usize,
+    #[serde(default)]
+    pub picks: BTreeMap<String, BTreeSet<String>>,
+    #[serde(default)]
+    pub other: BTreeMap<String, String>,
+    #[serde(default)]
+    pub sending: bool,
+    pub option_index: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Transition {
+    pub allowed: bool,
+    pub page: usize,
+    pub picks: BTreeMap<String, BTreeSet<String>>,
+    pub other: BTreeMap<String, String>,
+    pub resolution: Option<Answers>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Answers {
+    pub answers: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Display {
+    pub text: String,
+    pub recommended: bool,
+}
+
+/// CoreFoundation's whitespace set includes U+2000...U+200B, not Unicode White_Space alone.
+fn is_apple_whitespace(character: char) -> bool {
+    matches!(
+        character,
+        ' ' | '\t' | '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200b}' | '\u{202f}' | '\u{205f}' | '\u{3000}'
+    )
+}
+
+fn trim_display(text: &str) -> &str {
+    text.trim_matches(is_apple_whitespace)
+}
+
+fn trim_answer(text: &str) -> &str {
+    text.trim_matches(|character| {
+        is_apple_whitespace(character)
+            || matches!(
+                character,
+                '\n' | '\u{000b}' | '\u{000c}' | '\r' | '\u{0085}' | '\u{2028}' | '\u{2029}'
+            )
+    })
+}
+
+/// Display-only suffix removal. The submitted answer always retains the original option label.
+pub fn display(label: &str) -> Display {
+    // i18n-ignore: exact suffixes written by the agent in protocol option labels.
+    for suffix in [" (Recommended)", "(Recommended)", "（推荐）", "(推荐)"] {
+        if let Some(text) = label.strip_suffix(suffix) {
+            return Display {
+                text: trim_display(text).to_owned(),
+                recommended: true,
+            };
+        }
+    }
+    Display {
+        text: label.to_owned(),
+        recommended: false,
+    }
+}
+
+fn answer(
+    question: &Question,
+    picks: &BTreeMap<String, BTreeSet<String>>,
+    other: &BTreeMap<String, String>,
+) -> Option<String> {
+    let custom = other
+        .get(&question.question)
+        .map(|text| trim_answer(text))
+        .unwrap_or_default();
+    if !custom.is_empty() {
+        return Some(custom.to_owned());
+    }
+    let picks = picks.get(&question.question)?;
+    if picks.is_empty() {
+        return None;
+    }
+    Some(
+        question
+            .options
+            .iter()
+            .map(|option| &option.label)
+            .filter(|label| picks.contains(*label))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
+}
+
+/// Applies one of the three operations in the existing answer fixture driver. Invalid pages/options are rejected
+/// rather than indexed, since those inputs are outside the current Apple replay's contract.
+pub fn project(input: &Input) -> Option<Transition> {
+    if input.interaction.kind != "question" {
+        return None;
+    }
+    let questions = &input.interaction.questions;
+    let operation = &input.operation;
+    let mut next = Transition {
+        allowed: false,
+        page: operation.page,
+        picks: operation.picks.clone(),
+        other: operation.other.clone(),
+        resolution: None,
+    };
+    if operation.sending {
+        return Some(next);
+    }
+    if operation.action == Action::PickOption {
+        let question = questions.get(operation.page)?;
+        let label = question.options.get(operation.option_index?)?.label.clone();
+        next.allowed = true;
+        let selected = next.picks.entry(question.question.clone()).or_default();
+        if question.multi_select {
+            if !selected.remove(&label) {
+                selected.insert(label);
+            }
+            return Some(next);
+        }
+        selected.clear();
+        selected.insert(label);
+        next.other.insert(question.question.clone(), String::new());
+        if questions.len() > 1 {
+            // The current UI animates this later. The existing synchronous projection does not model that delay.
+            next.page = operation.page.saturating_add(1).min(questions.len() - 1);
+            return Some(next);
+        }
+    } else {
+        let question = questions.get(operation.page)?;
+        if answer(question, &next.picks, &next.other).is_none() {
+            return Some(next);
+        }
+        next.allowed = true;
+        let all_answered = questions
+            .iter()
+            .all(|question| answer(question, &next.picks, &next.other).is_some());
+        if operation.action == Action::Advance && operation.page + 1 < questions.len() && !all_answered {
+            next.page += 1;
+            return Some(next);
+        }
+    }
+
+    let missing = questions
+        .iter()
+        .position(|question| answer(question, &next.picks, &next.other).is_none());
+    if let Some(missing) = missing {
+        next.page = missing;
+        return Some(next);
+    }
+    let answers = questions
+        .iter()
+        .map(|question| {
+            answer(question, &next.picks, &next.other)
+                .map(|answer| (question.question.clone(), answer))
+                .ok_or(())
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()
+        .ok()?;
+    next.resolution = Some(Answers { answers });
+    Some(next)
+}

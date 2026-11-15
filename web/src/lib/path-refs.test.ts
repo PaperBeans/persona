@@ -25,10 +25,46 @@ describe("findPathRefs", () => {
     expect(paths("（/tmp/a/b.txt）")).toEqual(["/tmp/a/b.txt"]);
   });
 
+  it("takes names in any script outside backticks", () => {
+    // a Chinese file name, Chinese folders, with and without an extension, a folder
+    expect(paths("已保存到 /home/me/.persona/assistant/report/报表_2026H2.xlsx")).toEqual(["/home/me/.persona/assistant/report/报表_2026H2.xlsx"]);
+    expect(paths("在 ~/文档/项目/notes.md 里")).toEqual(["~/文档/项目/notes.md"]);
+    expect(paths("合同在 /home/me/资料/合同 和 /var/log/归档/")).toEqual(["/home/me/资料/合同", "/var/log/归档/"]);
+    // Japanese, Korean, accents (a combining one too), mixed scripts
+    expect(paths("~/ドキュメント/会議メモ.txt と /Users/me/デスクトップ/レポート.pdf")).toEqual(["~/ドキュメント/会議メモ.txt", "/Users/me/デスクトップ/レポート.pdf"]);
+    expect(paths("~/문서/보고서.hwp, ~/Café/menu\u0301.txt")).toEqual(["~/문서/보고서.hwp", "~/Café/menu\u0301.txt"]);
+    expect(paths("/srv/data/2026年/sales-売上_v2.csv")).toEqual(["/srv/data/2026年/sales-売上_v2.csv"]);
+    // the line, with a Chinese word after it
+    expect(paths("见 /tmp/报告/main.go:12行 和 ~/项目/说明.md#L3")).toEqual(["/tmp/报告/main.go:12", "~/项目/说明.md:3"]);
+    // a relative one has an ASCII first folder in text, so the words before it stay out
+    expect(paths("请看docs/设计/说明.md")).toEqual(["docs/设计/说明.md"]);
+    expect(paths("请看文档/报告.md")).toEqual([]);
+    // where it is: UTF-16, past a character outside the BMP
+    const t = "𠀋 /tmp/𠀋/报告.md";
+    const [r] = findPathRefs(t);
+    expect(t.slice(r.start, r.end)).toBe("/tmp/𠀋/报告.md");
+  });
+
+  it("ends a path at Chinese and Japanese punctuation, not at the names", () => {
+    expect(paths("已写入 /tmp/报告/第四季度.docx。")).toEqual(["/tmp/报告/第四季度.docx"]);
+    expect(paths("先看 /tmp/报告.md，再看 /tmp/数据.csv、/tmp/图表.png；")).toEqual(["/tmp/报告.md", "/tmp/数据.csv", "/tmp/图表.png"]);
+    expect(paths("（/tmp/资料/a.txt）「~/笔记/待办.md」『~/メモ/買い物.txt』")).toEqual(["/tmp/资料/a.txt", "~/笔记/待办.md", "~/メモ/買い物.txt"]);
+    expect(paths("见：/tmp/报告.md！")).toEqual(["/tmp/报告.md"]);
+  });
+
+  it("ends a name before a Chinese or Japanese word right after its extension", () => {
+    expect(paths("写到 /tmp/报告.md里了")).toEqual(["/tmp/报告.md"]);
+    expect(paths("~/ドキュメント/メモ.txtを開いて")).toEqual(["~/ドキュメント/メモ.txt"]);
+    // two paths joined by the Chinese word for "and"
+    expect(paths("/tmp/报告.md和/tmp/数据.csv")).toEqual(["/tmp/报告.md", "/tmp/数据.csv"]);
+  });
+
   it("leaves URLs, words with a slash, versions and lone roots alone", () => {
     expect(paths("https://example.com/a/b.md and //cdn/x/y.js")).toEqual([]);
     expect(paths("model deepseek/v4.1-flash, and/or, /tmp alone, 1/2")).toEqual([]);
     expect(paths("a ~ b / c")).toEqual([]);
+    // a path right after a URL and its punctuation
+    expect(paths("链接 https://example.com/a，文件在/tmp/报告/a.md")).toEqual(["/tmp/报告/a.md"]);
   });
 
   it("takes a path in backticks whole, non-ASCII names and spaces too", () => {
@@ -57,6 +93,8 @@ describe("codePathRef", () => {
     expect(codePathRef("src/a.ts:12")).toMatchObject({ path: "src/a.ts", line: 12 });
     expect(codePathRef(" /tmp/x/y.md ")).toMatchObject({ path: "/tmp/x/y.md", start: 1, end: 12 });
     expect(codePathRef("~/报告/第四季度.docx")).toMatchObject({ path: "~/报告/第四季度.docx" });
+    expect(codePathRef("docs/设计/说明.md:7")).toMatchObject({ path: "docs/设计/说明.md", line: 7 });
+    expect(codePathRef("和/或")).toBeUndefined();
     expect(codePathRef("ls /tmp/x/y.md")).toBeUndefined();
     expect(codePathRef("/tmp")).toBeUndefined();
     expect(codePathRef("https://example.com/a/b")).toBeUndefined();

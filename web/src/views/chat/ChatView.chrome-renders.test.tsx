@@ -18,7 +18,8 @@ vi.mock("./SessionDialogs", async (load) => {
   const { createElement } = await import("react");
   return {
     ...real,
-    SessionInfoDialog: (p: Parameters<typeof real.SessionInfoDialog>[0]) => (renders.info++, createElement(real.SessionInfoDialog, p)),
+    // a lazy dialog now (its chunk loads on its first open): still drawn by the header on each of its renders
+    SessionInfoDialog: (p: ComponentProps<typeof real.SessionInfoDialog>) => (renders.info++, createElement(real.SessionInfoDialog, p)),
   };
 });
 vi.mock("./PermissionPicker", async (load) => {
@@ -193,7 +194,7 @@ it("the main conversation's composer has the model pill; another Persona convers
   getState().assistant = { machine_id: "mac", launcher: "claude", main: "s1", conversations: [] };
   await open(<ChatView mid="mac" sid="s1" assistant />);
   expect(host.querySelector("button[data-model-pill]")).not.toBeNull();
-  expect(host.querySelector(`button[title="${t("chat-sessiondialogs.effort")}"]`)).toBeNull(); // no effort chip
+  expect(host.querySelector(`button[title="${t("chat-sessioninfo.effort")}"]`)).toBeNull(); // no effort chip
   // A leader, the supervisor or another assistant conversation is not the main one: no per-conversation picker.
   act(() => root.render(<></>));
   getState().assistant = { machine_id: "mac", launcher: "claude", main: "other", conversations: [] };

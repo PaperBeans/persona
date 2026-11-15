@@ -109,6 +109,43 @@ func TestCleanupEmptiesCachesAndKeepsTheirFolders(t *testing.T) {
 	}
 }
 
+// Official Yarn launched through Corepack runs as node, so an active Yarn cache must survive cleanup.
+func TestCleanupYarnCacheWhileNodeRuns(t *testing.T) {
+	s := testSystem(t, "node")
+	entry := filepath.Join(cacheDir(t, s, "yarn-cache"), "v6", "npm-example-1.0.0", "node_modules", "example", "package.json")
+	writeFile(t, entry, 4096)
+
+	r, err := s.cleanup(context.Background(), []string{"yarn-cache"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := itemsByID(r)["yarn-cache"]
+	info, statErr := os.Stat(entry)
+	if item.Status != proto.CleanupInUse || statErr != nil {
+		t.Fatalf("Yarn running as node: item = %+v, cache entry stat = %v", item, statErr)
+	}
+	if info.Size() != 4096 {
+		t.Fatalf("Yarn cache entry size = %d, want 4096", info.Size())
+	}
+}
+
+func TestCleanupYarnCacheWhenUnused(t *testing.T) {
+	s := testSystem(t, "zsh")
+	entry := filepath.Join(cacheDir(t, s, "yarn-cache"), "v6", "npm-example-1.0.0", "node_modules", "example", "package.json")
+	writeFile(t, entry, 4096)
+
+	r, err := s.cleanup(context.Background(), []string{"yarn-cache"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item := itemsByID(r)["yarn-cache"]; item.Status != proto.CleanupCleaned {
+		t.Fatalf("unused Yarn cache: %+v", item)
+	}
+	if _, err := os.Stat(entry); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unused Yarn cache entry still exists or stat failed unexpectedly: %v", err)
+	}
+}
+
 func TestCleanupRefusesWhatItMayNotTouch(t *testing.T) {
 	s := testSystem(t, "python3.12")
 	pip := cacheDir(t, s, "pip-cache")

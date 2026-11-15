@@ -424,7 +424,15 @@ struct SessionModesMenu: View {
                 // It names the next message's effective model, the one source the composer title uses (#6911 M7).
                 Button(action: assistantPick) {
                     Label {
-                        Text(assistantModelName ?? SessionModes.modelName(session?.model) ?? String(localized: "Unknown model"))
+                        VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                            Text("Change Model…")
+                                .font(Theme.Font.heading)
+                                .lineLimit(1)
+                            Text(assistantModelName ?? SessionModes.modelName(session?.model) ?? String(localized: "Unknown model"))
+                                .font(Theme.Font.label)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     } icon: {
                         ThemedIcon(Theme.Icon.agentChat)
                     }

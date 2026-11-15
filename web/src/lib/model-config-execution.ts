@@ -74,7 +74,7 @@ function groupKey(p: ModelPurpose): string {
 
 export function purposeGroups(purposes: ModelPurpose[], query: string, providers: ModelProvider[] = []): [string, ModelPurpose[]][] {
   const q = query.trim().toLocaleLowerCase();
-  return [[t("sidebar.persona_chats"), "headless"], [t("shellswitch.agents"), "engine"], [t("settings-modelconfiguration.processing"), "api"], ["", "plugin"]].map(([name, key]): [string, ModelPurpose[]] => {
+  return [[t("sidebar.persona_chats"), "headless"], [t("settings-modelconfiguration.agents"), "engine"], [t("settings-modelconfiguration.processing"), "api"], ["", "plugin"]].map(([name, key]): [string, ModelPurpose[]] => {
     const group = [name, executionLabel(key)].filter(Boolean).join(" · ");
     return [group, purposes.filter((p) =>
       groupKey(p) === key

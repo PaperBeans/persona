@@ -41,10 +41,6 @@ const (
 	leaderWorkersMost = 8
 )
 
-// leaderListWait bounds how long a tool list asked for by an agent that is no task's yet waits for a task leader being
-// started: its agent asks for its tools before the start returns and it is linked.
-var leaderListWait = 8 * time.Second
-
 func (a TodoAgent) active() bool { return a.ReleasedAt == nil && a.DismissedAt == nil }
 
 // linkSource is the todo_agents source and via the agent of plan task t is linked with.
@@ -206,22 +202,7 @@ func (s *Service) leaderTools(ctx context.Context, machine, session string) []pr
 	if _, _, ok := s.leaderTask(ctx, machine, session); ok {
 		return leaderToolList()
 	}
-	// An agent asks for its tools as it starts, before the start that made it returns and it is linked: with a leader
-	// being started, an agent that is no task's yet waits for it (bounded), so a leader is not left without its tool
-	// for the whole session. A worker, or an agent in any other task, is known and does not wait.
-	if _, ok := s.taskOf(ctx, s.canonical(machine), session); ok {
-		return nil
-	}
-	for deadline := time.Now().Add(leaderListWait); s.leaderStarts.Load() > 0 && time.Now().Before(deadline); {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(100 * time.Millisecond):
-		}
-		if _, _, ok := s.leaderTask(ctx, machine, session); ok {
-			return leaderToolList()
-		}
-	}
+	// Linking later wakes MCP discovery; no startup timing assumption grants rights.
 	return nil
 }
 
@@ -461,8 +442,10 @@ func (e leaderUnreachable) Unwrap() error { return e.err }
 
 // sendToLeader sends text, the supervision message for signals kept, into the leader agent's session. A closed agent is
 // resumed in the background (that takes minutes): when that fails the signals are escalated and retried
-// (escalateLeaderMessage). A session its computer does not list, or a failed send, is a leaderUnreachable for the
-// caller, which puts the signals back for the next digest.
+// (escalateLeaderMessage). A send the node refuses because the agent has stopped (agent_stopped: read-only until the
+// user's Resume, node stopped.go) goes the same way at once (#8518): another digest would only be refused again. A
+// session its computer does not list, or a send that failed otherwise, is a leaderUnreachable for the caller, which
+// puts the signals back for the next digest.
 func (s *Service) sendToLeader(ctx context.Context, lead TodoAgent, text string, kept []superviseSignal) error {
 	c, ok := s.session(ctx, lead.MachineID, lead.SessionID)
 	if !ok {
@@ -480,6 +463,11 @@ func (s *Service) sendToLeader(ctx context.Context, lead TodoAgent, text string,
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
 	defer cancel()
 	if err := s.call(sctx, lead.MachineID, DeviceSessionSend, sendParams(lead.SessionID, text, false), nil); err != nil {
+		if refusedWith(err, proto.CodeAgentStopped) {
+			s.logf("task leader %s: it has stopped: %v", short(lead.SessionID), err)
+			s.escalateLeaderMessage(lead, kept, text)
+			return nil
+		}
 		return leaderUnreachable{err}
 	}
 	return nil
@@ -494,11 +482,11 @@ func (s *Service) sendToLeaderNow(ctx context.Context, lead TodoAgent, text stri
 }
 
 // escalateLeaderMessage handles supervision message text for signals kept that could not be put into the leader's
-// session (a closed agent's resume failed). Each worker's signal becomes a decision for the conversation above the
-// leader, naming the worker (so that conversation can review it) and saying the leader could not be reached; and in any
-// case, with or without a conversation above, the message is tried again on the leader itself with a growing wait, until
-// it is taken or the leader's task is closed (its workers are then rehomed). The retry runs on its own context: it must
-// outlive the call that started it.
+// session (a closed agent's resume failed, or the node refused it because the agent has stopped). Each worker's signal
+// becomes a decision for the conversation above the leader, naming the worker (so that conversation can review it) and
+// saying the leader could not be reached; and in any case, with or without a conversation above, the message is tried
+// again on the leader itself with a growing wait, until it is taken or the leader's task is closed (its workers are then
+// rehomed). The retry runs on its own context: it must outlive the call that started it.
 func (s *Service) escalateLeaderMessage(lead TodoAgent, kept []superviseSignal, text string) {
 	ctx := context.Background()
 	for _, g := range kept {

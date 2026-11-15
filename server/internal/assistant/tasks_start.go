@@ -41,7 +41,7 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if i < len(edits) {
 			applyPlanEdit(&p.Tasks[i], edits[i])
 		}
-		p.Tasks[i].normalizeReadonlyPermission()
+		p.Tasks[i].normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
 		if err := p.Tasks[i].normalizeMachinePolicy(); err != nil {
 			return nil, planInvalid{err}
 		}
@@ -65,10 +65,14 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if err := s.resolveTaskWorkspace(ctx, &p.Tasks[i]); err != nil {
 			return nil, planInvalid{err}
 		}
+		s.resolveTaskRepo(ctx, &p.Tasks[i]) // where it runs after the card's edits (its workspace, not the plan's cwd)
 	}
 	p.State = planStarted
 	for i := range p.Tasks {
 		p.Tasks[i].OwnerStarted = ownerStarts(ctx)
+		// Remembered by startTaskAgent once admission fixed the folder that runs: its repository is the kind, never
+		// the one the plan was made from when the workspace is in another (#8259).
+		p.Tasks[i].rememberKind = remember
 	}
 	ok, err := s.movePlan(ctx, p, planOpen)
 	if err != nil {
@@ -140,9 +144,6 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 	}
 	if _, err := s.movePlan(ctx, p, planStarted); err != nil { // keep the todo ids
 		s.logf("plan %s: %v", p.ID, err)
-	}
-	if remember {
-		s.trustKinds(ctx, p.Tasks)
 	}
 	s.event(ctx, map[string]any{"type": "task_plan", "plan": p})
 	for i := range p.Tasks {
@@ -426,10 +427,6 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 	ctx, cancel := context.WithTimeout(context.Background(), taskStartTimeout)
 	defer cancel()
 	placed, placedWhy, placedPermission := t.Machine, t.Why, t.Permission
-	if t.Role == roleLeader { // its tools are listed once it is linked: a list asked for meanwhile waits (task_leader.go)
-		s.leaderStarts.Add(1)
-		defer s.leaderStarts.Add(-1)
-	}
 	t.Permission = strings.TrimSpace(t.Permission)
 	mid, sid, err := s.startTaskAgent(ctx, &t, retry)
 	var lost startLinkLost
@@ -508,7 +505,7 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 	// An admission-gate refusal means the machine or direction is briefly full, not that the start failed: park the
 	// task in the admission queue (no failTodo, no failure receipt) and let the queue loop retry it (task_queue.go).
 	if isAdmissionDenied(err) {
-		s.queueAdmissionRefusal(planID, i, t, err)
+		s.queueAdmissionRefusal(planID, i, t, err, retry)
 		return
 	}
 	s.logf("task %s: start: %v", t.TodoID, err)
@@ -521,6 +518,11 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		limit = proto.CodedStartErrorMax // the hub's sentence, whose remedy comes last (#1642): kept whole
 	}
 	reason := clip(oneLine(s.startFailureText(ctx, t.Machine, err)), limit)
+	if t.Queue != nil {
+		// A queued start got past the gate and failed otherwise: its wait is over, and its card reads what happened
+		// next rather than "waiting" until the queue's bounds run out (#8092).
+		s.clearAdmissionQueue(ctx, planID, i, t.TodoID)
+	}
 	// The new tab's shell waits on a question, or the agent's screen stopped, and the computer keeps the tab: a
 	// supervised task's start is remedied first, not failed yet (start_remedy.go, #2570).
 	code, args := codedStartRefusal(err)
@@ -704,7 +706,7 @@ func (s *Service) retryTask(ctx context.Context, todoID string) (json.RawMessage
 	if err != nil {
 		return nil, err
 	}
-	p.Tasks[i].normalizeReadonlyPermission()
+	p.Tasks[i].normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
 	t := p.Tasks[i]
 	t.Permission = strings.TrimSpace(t.Permission)
 	m, ok := s.machineByName(ctx, t.Machine)

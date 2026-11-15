@@ -36,6 +36,7 @@ const Repositories = lazyPage(() => import("./Repositories").then((m) => m.Repos
 interface AssistantState extends AgentAutoNamingState {
   manager?: string;
   default_permission_mode?: string;
+  readonly_mode?: "sandbox" | "prompt";
   machine_id?: string;
   /** The main chat and the node it is routed through (not where it runs: `MainExecution`'s location). */
   main?: string;
@@ -53,6 +54,9 @@ interface AssistantState extends AgentAutoNamingState {
   task_workspace_preference?: "prefer-existing" | "prefer-new";
   /** "Fold background rounds" (#4314, docs/assistant/assistant.md "Background rounds"): on by default; unset from a hub before it (on). */
   main_background_folded?: boolean;
+  /** "Show scheduled task chats" in the sidebar's Recent (#8324): off by default, one value for all of the user's
+   *  devices; unset from a hub before it (no switch). All chats' ⋯ menu has the same switch (lib/recent-task-chats.ts). */
+  recent_task_chats?: boolean;
   /** The role a meeting recording pre-selects (#2981, docs/assistant/meeting-minutes.md "Attendance fields"); only from a hub
    *  that attends meetings. */
   meeting_attendance_default?: string;
@@ -114,8 +118,10 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
   const [open, setOpen] = useState<{ file: MemoryFile; index?: boolean } | null>(null);
   const [quietBusy, setQuietBusy] = useState(false);
   const [foldBusy, setFoldBusy] = useState(false);
+  const [recentBusy, setRecentBusy] = useState(false);
   const [startBusy, setStartBusy] = useState(false);
   const [permissionBusy, setPermissionBusy] = useState(false);
+  const [readonlyBusy, setReadonlyBusy] = useState(false);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const setWorkspacePreference = async (value: "prefer-existing" | "prefer-new") => {
     setWorkspaceBusy(true);
@@ -136,6 +142,16 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
     } catch (e) {
       toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
     } finally { setPermissionBusy(false); }
+  };
+  const setReadonlyMode = async (mode: "sandbox" | "prompt") => {
+    setReadonlyBusy(true);
+    try {
+      const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: { readonly_mode: mode } });
+      if (r.manager !== manager || r.readonly_mode !== mode) throw new Error(t("settings-assistantsettings.readonly_mode_unconfirmed"));
+      setInfo((i) => i ? { ...i, readonly_mode: r.readonly_mode } : i);
+    } catch (e) {
+      toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
+    } finally { setReadonlyBusy(false); }
   };
   const [meetingBusy, setMeetingBusy] = useState(false);
   const setMeetingRole = async (role: string) => {
@@ -192,6 +208,22 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
       toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
     } finally {
       setFoldBusy(false);
+    }
+  };
+
+  const setRecentTaskChats = async (on: boolean) => {
+    setRecentBusy(true);
+    setInfo((i) => (i ? { ...i, recent_task_chats: on } : i));
+    try {
+      const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: { recent_task_chats: on } });
+      setInfo((i) => (i ? { ...i, recent_task_chats: r.recent_task_chats ?? on } : i));
+      // the sidebar reads it from the store's /assistant answer
+      void refreshAssistant().catch(() => {});
+    } catch (e) {
+      setInfo((i) => (i ? { ...i, recent_task_chats: !on } : i));
+      toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
+    } finally {
+      setRecentBusy(false);
     }
   };
 
@@ -318,6 +350,15 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         </Row>
       </Group>
 
+      {/* Show scheduled task chats in the sidebar's Recent (#8324): only from a hub that has the setting */}
+      {typeof info?.recent_task_chats === "boolean" && (
+        <Group title={t("settings-assistantsettings.recent_task_chats_title")} footer={t("settings-assistantsettings.recent_task_chats_footer")} anchor="recent-task-chats">
+          <Row label={t("settings-assistantsettings.recent_task_chats")}>
+            <Switch on={info.recent_task_chats} onChange={(on) => void setRecentTaskChats(on)} disabled={recentBusy} label={t("settings-assistantsettings.recent_task_chats")} />
+          </Row>
+        </Group>
+      )}
+
       {/* The next-message suggestion for chats without one of their own (#4644): only from a hub that has the setting */}
       {typeof info?.next_suggestions === "boolean" && (
         <Group anchor="next-suggestions" footer={t("settings-assistantsettings.next_suggestions_footer")}>
@@ -400,6 +441,15 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
             onChange={(e) => void setPermission(e.target.value)}>
             <option value="" disabled>{t("settings-assistantsettings.default_permissions_unset")}</option>
             {PERMISSION_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.title}</option>)}
+          </select>
+        </Row>
+        <Row label={t("settings-assistantsettings.readonly_mode")} hint={t("settings-assistantsettings.readonly_mode_hint")} wrapHint stackOnNarrow anchor="readonly-mode">
+          <select aria-label={t("settings-assistantsettings.readonly_mode")} value={info?.readonly_mode ?? "sandbox"}
+            disabled={!info || info.manager !== manager || readonlyBusy}
+            className="min-w-0 max-w-full rounded-control bg-field px-3 py-2 text-meta text-ink shadow-inset-field pointer-coarse:min-h-11"
+            onChange={(e) => void setReadonlyMode(e.target.value as "sandbox" | "prompt")}>
+            <option value="sandbox">{t("settings-assistantsettings.readonly_mode_sandbox")}</option>
+            <option value="prompt">{t("settings-assistantsettings.readonly_mode_prompt")}</option>
           </select>
         </Row>
       </Group>

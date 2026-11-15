@@ -122,7 +122,7 @@ func (b *inboxBook) merge(items []*InboxItem, now time.Time) (*InboxItem, []*Inb
 	b.chainAdd(sv, InboxChainEntry{Kind: ChainMerged, At: now.UTC(),
 		Text: i18n.T(b.userLang(), "assistant-inbox_chain.merged_from", i18n.Args{"n": len(sv.MergedFrom) + 1})})
 	sv.Read = false
-	sv.TriagedAt = "" // the merged row is judged again, with the members' text
+	sv.TriagedAt, sv.RuleOf = "", "" // the merged row is judged again, with the members' text
 	return sv, took
 }
 
@@ -179,7 +179,7 @@ func (b *inboxBook) unmerge(sv *InboxItem, now time.Time) []*InboxItem {
 		sv.Tier = t[:len(t)-1]
 		sv.PreMergeTier = ""
 	}
-	sv.TriagedAt = ""
+	sv.TriagedAt, sv.RuleOf = "", ""
 	restoreMergeTitle(sv)
 	b.chainAdd(sv, InboxChainEntry{Kind: ChainMerged, At: now.UTC(), Text: i18n.T(b.userLang(), "assistant-inbox_chain.unmerged")})
 	return out
@@ -211,7 +211,7 @@ func (b *inboxBook) followMerged(changed []*InboxItem, now time.Time) []*InboxIt
 		if it.Context != "" {
 			sv.Context = clipRunesTo(it.Context+"\n\n"+sv.Context, mergeCtxMax)
 		}
-		sv.TriagedAt = ""
+		sv.TriagedAt, sv.RuleOf = "", ""
 		b.chainAdd(sv, InboxChainEntry{Kind: ChainReceived, At: it.UpdatedAt.UTC(), Count: 1, Sender: it.Sender, Via: it.Source,
 			Link: firstLink(it), Text: receivedText(b.userLang(), it, 1, it.Sender)})
 		if !containsItem(changed, sv) {

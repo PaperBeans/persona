@@ -255,7 +255,11 @@ nonisolated enum TodoTriageLogic {
     /// Progress entry read this one rule, so the two numbers agree (the web's `todoBucket`).
     static func bucket(_ todo: TodoItem, lookup: TodosLogic.SessionLookup?, now: Date, restoredAt: Date? = nil,
                        superseded: Bool = false) -> TodoBucket {
-        let t = triage(todo, lookup: lookup, now: now, restoredAt: restoredAt, superseded: superseded)
+        bucket(todo, triage(todo, lookup: lookup, now: now, restoredAt: restoredAt, superseded: superseded))
+    }
+
+    /// `bucket` from a triage already worked out (the assistant's trays need its section too: Just Finished, #8237).
+    static func bucket(_ todo: TodoItem, _ t: TodoTriage) -> TodoBucket {
         if countsAsOpen(todo, t) { return .open }
         return t.section == .shelved ? .shelved : .closed
     }
