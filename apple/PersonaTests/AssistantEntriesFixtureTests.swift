@@ -71,7 +71,7 @@ final class AssistantEntriesFixtureTests: XCTestCase {
                 guard case .task(let id, let status, _) = row, let todo = i.todos.first(where: { $0.id == id }) else { return false }
                 return AssistantEntries.saysSupervisorReview(todo, status: status, now: now)
             }
-            XCTAssertEqual(reviewing.map(\.id), c.expected.supervisor_review ?? [], "\(c.name): rows saying Awaiting supervisor review")
+            XCTAssertEqual(reviewing.map(\.id), c.expected.supervisor_review ?? [], "\(c.name): rows saying Supervisor reviewing")
             if let expected = c.expected.activity {
                 for row in got.running where expected.keys.contains(row.id) {
                     let sessions: [Session]

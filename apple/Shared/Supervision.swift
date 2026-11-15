@@ -186,7 +186,7 @@ nonisolated struct ReviewBadge: Hashable, Sendable {
 
     /// What a task's row among the tasks in progress says while its supervisor's review is under way and not yet the
     /// owner's (docs/assistant/unified-entry.md "Needs you and In progress"); "Awaiting review" is the owner's.
-    static var supervisorReview: String { String(localized: "Awaiting supervisor review") }
+    static var supervisorReview: String { String(localized: "Supervisor reviewing") }
 }
 
 /// One criterion's line in the checklist.

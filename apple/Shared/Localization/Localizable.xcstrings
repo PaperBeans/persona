@@ -27035,28 +27035,6 @@
       },
       "extractionState" : "manual"
     },
-    "Awaiting supervisor review" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Awaiting supervisor review"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "監督の確認待ち"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "督办验收中"
-          }
-        }
-      }
-    },
     "Back" : {
       "localizations" : {
         "en" : {
@@ -147476,6 +147454,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "バックグラウンドで処理中…"
+          }
+        }
+      }
+    },
+    "Supervisor reviewing" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supervisor reviewing"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "監督の確認待ち"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "督办验收中"
           }
         }
       }

@@ -130,7 +130,7 @@ each count is its rows:
 - **A supervisor's review is not the owner's until it is overdue.** A supervised task judged finished waits in
   `pending_review` for its supervisor (the background supervisor, a leader, or the conversation that handed it out;
   "Supervision" and "Background supervisor" below), who closes it with `task_review`. That review is Persona's to do,
-  so the task is **In progress**, its row saying "Awaiting supervisor review" (zh 督办验收中, ja 監督の確認待ち), and
+  so the task is **In progress**, its row saying "Supervisor reviewing" (zh 督办验收中, ja 監督の確認待ち), and
   the Needs you badge does not count it. It comes to the owner only when something of it is theirs: its agent asks, it
   has an open `ask` (please verify), the review ends in `needs_user`, or the review is still waiting one hour after
   the task entered `pending_review` (`supervision.pending_since`; the threshold is `REVIEW_OVERDUE_MS` on the web and

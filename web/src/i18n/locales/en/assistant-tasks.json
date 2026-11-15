@@ -128,7 +128,7 @@
   "plan_edit_prompt": "First message to the agent",
   "plan_edit_discard": "Discard these changes?",
   "review_pending": "Awaiting review",
-  "review_supervisor": "Awaiting supervisor review",
+  "review_supervisor": "Supervisor reviewing",
   "review_rework": "Rework round {round}",
   "review_needs_user": "Needs your call",
   "review_parked": "Parked",
