@@ -106072,6 +106072,29 @@
         }
       }
     },
+    "Only addresses starting with https:// or http:// work." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only addresses starting with https:// or http:// work."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "https:// または http:// で始まるアドレスだけが使えます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址只能以 https:// 或 http:// 开头。"
+          }
+        }
+      }
+    },
     "Only CI failures on the default branch go to the Inbox, as Needs you." : {
       "localizations" : {
         "en" : {
@@ -161118,6 +161141,29 @@
         }
       }
     },
+    "This hub already has this address." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This hub already has this address."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このハブにはすでにこのアドレスがあります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 hub 已经有这个地址了。"
+          }
+        }
+      }
+    },
     "This Hub Is Disconnected" : {
       "localizations" : {
         "en" : {
@@ -161140,6 +161186,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "This isn't a valid address. Write it like hub.example.com or https://hub.example.com:8443." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This isn't a valid address. Write it like hub.example.com or https://hub.example.com:8443."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有効なアドレスではありません。hub.example.com や https://hub.example.com:8443 のように入力してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是有效的地址，可以写成 hub.example.com 或 https://hub.example.com:8443。"
+          }
+        }
+      }
     },
     "This Isn't What I Asked For" : {
       "extractionState" : "manual",
@@ -183536,6 +183605,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ウィジェット"
+          }
+        }
+      }
+    },
+    "Will add %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Will add %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ を追加します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将添加 %1$@"
           }
         }
       }
