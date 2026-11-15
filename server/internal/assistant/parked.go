@@ -234,14 +234,21 @@ func decisionEndsPark(source string) bool {
 	return source == db.DecisionManual || source == db.DecisionCard || source == db.DecisionThread
 }
 
-// decidedPark is the park of v that a recorded decision ended (parkDecided), while no review followed it: v's latest
-// review. nil when it is parked still, was never ended so, or was reviewed since.
+// parkWaitsForDecision: a task parked waiting on on waits for an answer (the owner's call, or someone else's), which
+// a decision of the owner's recorded on it may be.
+func parkWaitsForDecision(on string) bool { return on == parkOwnerPriority || on == parkSomeoneElse }
+
+// decidedPark is the latest park of v that a recorded decision ended (parkDecided), whatever was reviewed since: a
+// review that followed it, parking it again included, does not mean its supervisor heard of the decision, so the
+// decision is told until a supervision message carried it (DecidedTold). nil when no park of v was ended so.
 func (v *Supervision) decidedPark() *TaskReview {
-	if v == nil || v.State == reviewParked || len(v.Reviews) == 0 {
+	if v == nil {
 		return nil
 	}
-	if r := &v.Reviews[len(v.Reviews)-1]; r.Verdict == reviewParked && r.Decided != "" {
-		return r
+	for i := len(v.Reviews) - 1; i >= 0; i-- {
+		if r := &v.Reviews[i]; r.Verdict == reviewParked && r.Decided != "" {
+			return r
+		}
 	}
 	return nil
 }
@@ -255,18 +262,29 @@ func parkDecidedKey(r *TaskReview) string { return "park_decided@" + r.Decided }
 // parked_due still waiting is dropped, and its supervisor is told with the to-do's decisions (parkDecidedSignal), so it
 // sends the agent on, reviews the task or closes it. A task parked for something outside or for a date waits on: no
 // decision is what it waits for. Every writer of decisions passes here (insertDecision).
+//
+// The decision is stored by then, so nothing here fails the request that recorded it: a ledger write that fails is
+// logged, and the watch ends the parking from the stored decision on its next look (parkDecidedRetry).
 func (s *Service) parkDecided(ctx context.Context, row db.TodoDecisionRow) {
+	if err := s.endParkOnDecision(ctx, row); err != nil {
+		s.logf("task %s: decision %s on a parked task: %v (the watch ends the parking from the stored decision)", row.TodoID, row.ID, err)
+	}
+}
+
+// endParkOnDecision is parkDecided's work: an error only when the ledger could not be written.
+func (s *Service) endParkOnDecision(ctx context.Context, row db.TodoDecisionRow) error {
 	if !decisionEndsPark(row.Source) {
-		return
+		return nil
 	}
 	t, ok := s.todoNow(row.TodoID)
 	if !ok || t.DoneAt != nil || t.Supervision.parking() == nil {
-		return
+		return nil
 	}
 	v, changed, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
 		r := v.parking()
-		if r == nil || r.WaitingOn != parkOwnerPriority && r.WaitingOn != parkSomeoneElse {
-			return false
+		if r == nil || !parkWaitsForDecision(r.WaitingOn) ||
+			!row.CreatedAt.IsZero() && row.CreatedAt.Before(r.At.Truncate(time.Microsecond)) {
+			return false // not parked for an answer, or parked again after this decision (parkDecidedRetry)
 		}
 		r.Decided = row.ID
 		v.State = ""
@@ -275,12 +293,8 @@ func (s *Service) parkDecided(ctx context.Context, row db.TodoDecisionRow) {
 		}
 		return true
 	})
-	if err != nil {
-		s.logf("task %s: a decision on a parked task: %v", t.ID, err)
-		return
-	}
-	if !changed {
-		return
+	if err != nil || !changed {
+		return err
 	}
 	b := &s.supervise
 	b.mu.Lock()
@@ -291,12 +305,41 @@ func (s *Service) parkDecided(ctx context.Context, row db.TodoDecisionRow) {
 	if g, ok := parkDecidedSignal(t); ok {
 		s.signal(g)
 	}
+	return nil
 }
 
-// parkDecidedSignal: a recorded decision ended open task t's parking (parkDecided) and no supervision message carried
-// that yet (kept on the review once one did: parkDecidedTold): the signal that tells its supervisor. Its key names the
-// decision, so the watch raising it again every tick tells it once, and a manager restarted before the message went
-// raises it again from the ledger.
+// parkDecidedRetry: open task t is parked for an answer, and a decision of the owner's was stored after it was parked
+// (the latest such one in effect): the parking ends on it, as parkDecided would have when it was stored. The watch
+// asks this on every look, so a ledger write that failed then (or a manager that stopped between the decision and the
+// ledger) is made good from what is stored, never lost.
+func (s *Service) parkDecidedRetry(ctx context.Context, t Todo) {
+	r := t.Supervision.parking()
+	if t.DoneAt != nil || r == nil || !parkWaitsForDecision(r.WaitingOn) {
+		return
+	}
+	st := s.todoDB()
+	if st == nil {
+		return
+	}
+	list, err := st.ListTodoDecisions(ctx, t.ID, false)
+	if err != nil {
+		s.logf("task %s: the decisions of a parked task: %v", t.ID, err)
+		return
+	}
+	for i := len(list) - 1; i >= 0; i-- {
+		if d := list[i]; decisionEndsPark(d.Source) && !d.CreatedAt.Before(r.At.Truncate(time.Microsecond)) {
+			if err := s.endParkOnDecision(ctx, d); err != nil {
+				s.logf("task %s: decision %s on a parked task: %v (tried again on the next look)", t.ID, d.ID, err)
+			}
+			return
+		}
+	}
+}
+
+// parkDecidedSignal: a recorded decision ended a parking of open task t (parkDecided) and no supervision message
+// carried that yet (kept on the review once one did: parkDecidedTold): the signal that tells its supervisor, even when
+// it was reviewed or parked again since. Its key names the decision, so the watch raising it again every tick tells it
+// once, and a manager restarted before the message went raises it again from the ledger.
 func parkDecidedSignal(t Todo) (superviseSignal, bool) {
 	v := t.Supervision
 	if v == nil || t.DoneAt != nil {
@@ -310,7 +353,8 @@ func parkDecidedSignal(t Todo) (superviseSignal, bool) {
 }
 
 // parkDecidedTold keeps on each park in list that a supervision message carried its park_decided (sent, or queued
-// where a restart keeps it), as parkedDueTold does for parked_due.
+// where a restart keeps it), as parkedDueTold does for parked_due. An earlier park a decision ended that was not told
+// yet is marked too: the message carried every decision of the to-do.
 func (s *Service) parkDecidedTold(ctx context.Context, list []superviseSignal) {
 	for _, g := range list {
 		if g.Kind != sigParkDecided {
@@ -321,7 +365,12 @@ func (s *Service) parkDecidedTold(ctx context.Context, list []superviseSignal) {
 			if r == nil || parkDecidedKey(r) != g.Key || !r.DecidedTold.IsZero() {
 				return false
 			}
-			r.DecidedTold = time.Now().UTC()
+			now := time.Now().UTC()
+			for i := range v.Reviews {
+				if p := &v.Reviews[i]; p.Verdict == reviewParked && p.Decided != "" && p.DecidedTold.IsZero() {
+					p.DecidedTold = now
+				}
+			}
 			return true
 		}); err != nil {
 			s.logf("task %s: park decided: %v", g.Todo, err)

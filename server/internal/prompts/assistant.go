@@ -761,7 +761,7 @@ type SuperviseEntry struct {
 	// (decide_yourself, not_what_i_asked, explain_first).
 	Decision *SuperviseDecision
 	Response string
-	// parked_due: what the task was parked for.
+	// parked_due: what the task was parked for; park_decided: what it was parked for again before the message went.
 	Parked *SuperviseParked
 	// From the task's brief (#3822): Asked is the owner's message that led to the work (clipped) and AskedAt its day;
 	// Started says who started it when it was not the owner; Dropped are the criteria scope changes took out.

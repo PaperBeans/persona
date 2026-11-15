@@ -411,6 +411,7 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 		if g, ok := s.orphanSignal(t); ok { // nobody works on it, as the minute pass found (tasks_orphan.go)
 			s.signal(g)
 		}
+		s.parkDecidedRetry(ctx, t)             // a stored decision ends its parking when the ledger write missed it then (parked.go)
 		if g, ok := parkDecidedSignal(t); ok { // a decision ended its parking, and no message carried that yet (parked.go)
 			s.signal(g)
 		}

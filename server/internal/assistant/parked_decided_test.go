@@ -3,10 +3,12 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -201,5 +203,122 @@ func TestParkedDueCarriesTheRecordedDecisions(t *testing.T) {
 		if !strings.Contains(n, want) {
 			t.Errorf("the message lacks %q:\n%s", want, n)
 		}
+	}
+}
+
+// releaseDigest lets the supervision message holdDigest kept back go now.
+func releaseDigest(s *Service) {
+	b := &s.supervise
+	b.mu.Lock()
+	b.init()
+	b.last = time.Time{}
+	s.scheduleDigestLocked(time.Now())
+	b.mu.Unlock()
+}
+
+// ledgerDown is a database whose supervision ledger cannot be written while down is set.
+type ledgerDown struct {
+	*db.DB
+	down atomic.Bool
+}
+
+func (d *ledgerDown) PutTodoSupervision(ctx context.Context, r db.TodoSupervisionRow) error {
+	if d.down.Load() {
+		return errors.New("the database did not answer")
+	}
+	return d.DB.PutTodoSupervision(ctx, r)
+}
+
+// The decision is stored but the ledger cannot be written as it ends the parking: the request that recorded it
+// succeeds all the same, and the watch ends the parking from the stored decision once the ledger can be written, and
+// tells the supervisor.
+func TestDecisionStoredWhileTheLedgerFailsStillEndsTheParking(t *testing.T) {
+	database := &ledgerDown{DB: todoTestDB(t)}
+	s, f, todo := newSupervisedServiceOn(t, database)
+	ctx := context.Background()
+	parkFor(t, s, todo.ID, "Whether this goes ahead of the billing work", "owner_priority", "3d")
+	holdDigest(s)
+
+	database.down.Store(true)
+	writeDecision(t, s, todo.ID, "Do this now or after the billing work?", "After the billing work") // a 200, or it fails
+	stored, err := database.ListTodoDecisions(ctx, todo.ID, false)
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("decisions stored = %+v, %v", stored, err)
+	}
+	if cur := todoNow(s, todo.ID); cur.Supervision.state(cur) != reviewParked {
+		t.Fatalf("the parking ended with no ledger write: %+v", cur.Supervision)
+	}
+	s.superviseWatch(ctx, time.Now()) // the ledger is still down: tried, and left for the next look
+	if cur := todoNow(s, todo.ID); cur.Supervision.state(cur) != reviewParked {
+		t.Fatalf("the parking ended with no ledger write: %+v", cur.Supervision)
+	}
+
+	database.down.Store(false)
+	s.superviseWatch(ctx, time.Now())
+	cur := todoNow(s, todo.ID)
+	if v := cur.Supervision; v.state(cur) == reviewParked || v.Parked != nil {
+		t.Fatalf("still parked after the ledger came back: %+v", v)
+	}
+	if r := cur.Supervision.decidedPark(); r == nil || r.Decided != stored[0].ID {
+		t.Fatalf("the park the decision ended = %+v, want decision %s", r, stored[0].ID)
+	}
+	if got := pendingKinds(s, todo.ID); !slices.Equal(got, []string{sigParkDecided}) {
+		t.Fatalf("signals: %v", got)
+	}
+	before := len(f.notices())
+	releaseDigest(s)
+	waitFor(t, "the supervisor's message", func() bool { return len(f.notices()) > before })
+	if n := f.notices()[before]; !strings.Contains(n, "搁置期间用户在任务上记下了新的决定") || !strings.Contains(n, "After the billing work") {
+		t.Fatalf("the message lacks the decision:\n%s", n)
+	}
+}
+
+// The decision ends the parking, and its supervisor parks the task again before the message that tells it went out:
+// the decision still reaches it, saying the task was parked again, and the new park is not ended by the old decision.
+func TestDecisionReachesTheSupervisorThatParkedAgainBeforeItWasTold(t *testing.T) {
+	s, f, todo := newSupervisedServiceOn(t, todoTestDB(t))
+	ctx := context.Background()
+	parkFor(t, s, todo.ID, "Whether this goes ahead of the billing work", "owner_priority", "3d")
+	holdDigest(s)
+	writeDecision(t, s, todo.ID, "Do this now or after the billing work?", "After the billing work")
+	if got := pendingKinds(s, todo.ID); !slices.Equal(got, []string{sigParkDecided}) {
+		t.Fatalf("signals after the decision: %v", got)
+	}
+
+	parkFor(t, s, todo.ID, "The billing work lands first", "someone_else", "5d")
+	if got := pendingKinds(s, todo.ID); !slices.Equal(got, []string{sigParkDecided}) {
+		t.Fatalf("signals after parking again: %v", got)
+	}
+	forgetUntold(s) // a restart in between: the ledger still knows nobody was told
+	holdDigest(s)
+	s.superviseWatch(ctx, time.Now())
+	if got := pendingKinds(s, todo.ID); !slices.Equal(got, []string{sigParkDecided}) {
+		t.Fatalf("signals after a restart: %v", got)
+	}
+	if cur := todoNow(s, todo.ID); cur.Supervision.state(cur) != reviewParked {
+		t.Fatalf("the decision from before ended the new parking: %+v", cur.Supervision)
+	}
+
+	before := len(f.notices())
+	releaseDigest(s)
+	waitFor(t, "the supervisor's message", func() bool { return len(f.notices()) > before })
+	n := f.notices()[before]
+	for _, want := range []string{"搁置期间用户在任务上记下了新的决定", "这条消息到之前你又搁置了它", "The billing work lands first",
+		"Do this now or after the billing work?", "After the billing work"} {
+		if !strings.Contains(n, want) {
+			t.Errorf("the message lacks %q:\n%s", want, n)
+		}
+	}
+	waitFor(t, "the mark on the review", func() bool {
+		r := todoNow(s, todo.ID).Supervision.decidedPark()
+		return r != nil && !r.DecidedTold.IsZero()
+	})
+	forgetSignals(t, s)
+	s.superviseWatch(ctx, time.Now())
+	if got := pendingKinds(s, todo.ID); len(got) != 0 {
+		t.Fatalf("told a second time: %v", got)
+	}
+	if cur := todoNow(s, todo.ID); cur.Supervision.state(cur) != reviewParked {
+		t.Fatalf("no longer parked: %+v", cur.Supervision)
 	}
 }

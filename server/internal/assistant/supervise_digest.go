@@ -402,7 +402,7 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 		}
 	case sigParkDecided:
 		if r := v.decidedPark(); r == nil || parkDecidedKey(r) != g.Key {
-			return prompts.SuperviseEntry{}, false // reviewed again meanwhile: its supervisor acted
+			return prompts.SuperviseEntry{}, false // told by another message meanwhile (a later decision's)
 		}
 	case sigOrphaned:
 		if o, ok := s.orphanOf(t.ID); !ok || o.key != g.Key {
@@ -465,6 +465,9 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 	}
 	if g.Kind == sigParkedDue { // what it waited for is the signal, not a reason in brackets
 		e.Detail, e.Parked = "", s.parkedEntry(ctx, v.parking())
+	}
+	if g.Kind == sigParkDecided && st == reviewParked { // parked again before this went: what it waits for now
+		e.Parked = s.parkedEntry(ctx, v.parking())
 	}
 	if g.Kind == sigParkedDue || g.Kind == sigParkDecided {
 		// What was decided on the task meanwhile: the answer it waited for may be there (#8044).
