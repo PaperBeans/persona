@@ -205,7 +205,7 @@ func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, 
 // are writable roots, and its macOS sandbox refuses one with a symlink in it (~/.persona → .persona, a ~/.claude kept in
 // dotfiles), turning every command down before it runs. Only Codex sees the real paths; the session keeps its cwd.
 func (n *Node) codexDirs(cwd string) (root, memDir string) {
-	memDir = n.memoryDir(cwd)
+	memDir = n.memoryForUse(cwd)
 	if err := os.MkdirAll(memDir, 0o700); err != nil {
 		n.logger.Printf("assistant codex: memory dir: %v", err)
 	}

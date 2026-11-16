@@ -39,6 +39,11 @@ import (
 )
 
 type Node struct {
+	// The assistant's one memory (memory_merge.go), both under memoryMu: per project key, the other profiles' notes
+	// already merged, and when a merge that failed is tried again.
+	memoryMerged     map[string]map[string]bool
+	memoryMergeRetry map[string]time.Time
+
 	memoryMu     sync.Mutex
 	Version      string
 	skillImports assistantskills.Importer

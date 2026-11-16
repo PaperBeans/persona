@@ -105,7 +105,7 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		return "", errRuntimeAway(launcher)
 	}
 	n.assistantRuntimeSkills(cwd)
-	memDir := n.memoryDir(cwd)
+	memDir := n.memoryForUse(cwd)
 	turn := map[string]any{"assistant": true, "memory_dir": memDir}
 	instructions := ""
 	if pickedModel != "" {

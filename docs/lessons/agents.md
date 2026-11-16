@@ -167,6 +167,9 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
   and records discovered directories in the database. Put rarely running profiles in `machines[].claude_config_dirs` in `hub.json` (`server/internal/node/claudedirs.go`).
   The old workaround symlinked `~/.claude/projects` and `sessions` to a profile; existing symlinks are fine (deduped by real path), but no more are needed.
   Symptoms of a missed directory: assistant resume says "Session ID … is already in use", transcript not found in the App, herdr Agents can't be mapped to sessions.
+- Auto memory follows the config directory too: a conversation given its own profile gets its own `projects/<encoded cwd>/memory`, with nothing
+  saying so. Whatever must be one memory across profiles needs `autoMemoryDirectory` in the start's `--settings` (ignored in checked-in project
+  settings, known from Claude Code 2.1.74) and a merge of the copies made before it (#9440; `docs/assistant/assistant.md`, "One memory").
   Conversely, automation running claude with its own `CLAUDE_CONFIG_DIR` is discovered and remembered by hub, flooding lists with hundreds of offline sessions. Deleting `claude_dirs/<machine>` records doesn't help
   (the next scan reports it again); use "Mute configuration directory" (`docs/integrations/claude-integration.md`, #676).
 - After node discovered all config directories (PR #12), a machine with over ten Agents and hundreds of MB of transcripts read disk continuously at about 20 MB/s: every herdr event rebuilt session lists,

@@ -69,7 +69,7 @@ Changing trust does not erase context already delivered to a computer or termina
 | Control Persona itself | `persona_settings` (`list` first, an assistant tool, `assistant/settings_tool.go`: About Me, default launcher, and `main_tasks_quiet` are assistant-owned settings, read / written by it with its own phone confirmation cards; other settings belong to hub, listed through `app.call settings.list`, read / written through `app.tool persona_settings`, with hub confirmation): read / write triage rules (global `inbox.rules` and per-plugin-source `inbox.rules.<plugin>` for sources declaring `triage_rules`, overriding global when present), every configurable extension's form settings (`extension.<id>`: `get` lists each field, `set` changes only the fields given, each shown before → after on the card, #2385), inbox task-linking rules (`inbox.agent_rules`: which running task a needs-you item belongs to; what the AI twin takes on is inbox policies. Reading or changing it says when the AI twin is off, #5865), About Me, default launcher, "Main chat tasks notify only in main chat" (`assistant.main_tasks_quiet`), per-machine muted Claude config directories (`agents.blocked_claude_dirs`), low-distraction mode for every device (`notifications.low_distraction`, the hub's push grading switch, #8157; `docs/server/server.md` "Push grading (push urgency filtering, `hub/lnmode.go`)"), and add / remove mail accounts. Changes first show a phone confirmation card; added-account passwords / authorization codes are entered on the phone card, never through the model or chat / interaction history. After approval, hub tests IMAP / SMTP and encrypts / saves only if both work. Gmail requires Google sign-in in the App; launchers are written to unified model configuration while retaining existing model and effort |
 | Live snapshot | Each message to the assistant starts with `<persona-context>` (not system prompt, see "Live snapshots and prefix caching"): time (phone timezone), online computers, Needs you / Unread / Working Agents, unread connector chats and @me, today's upcoming meetings, scheduled follow-ups, and up to five open Inbox matters being followed by check time. Agents and tasks include web links: hub `public_url` (default `http://<hostname>:18660` when unset) plus `/s/<machine>/<session id>`, `/todos?id=<to-do id>`; the assistant uses Markdown links when mentioning them. Omit if hub can't supply the address (#2194). The main conversation's task lists (task details, open-task index, waiting to be verified or approved) hold every task; a leader's or side conversation's hold only the ones it handed out or supervises (#8666, `docs/assistant/todos.md`). Include only changes since this chat's previous snapshot (time always included): changed sections, and inside the task details, the Agents section and the unread chats only the rows that changed (#9078). hub gives each source 3 seconds, reuses reads for 45 seconds, and messages wait at most 1.5 seconds for fresh data, not at all while reads take longer than that (#8948) |
 | Faster | When the App displays a new-chat page, `POST /api/v1/assistant/warm` starts a spare node process (`spare`, valid for 10 minutes), used directly by new chats. Persona tools are marked `anthropic/alwaysLoad` by `personad mcp`; other MCP servers keep Claude Code's ordinary ToolSearch deferral (#5838) |
-| Memory | Claude Code auto memory (`~/.claude/projects/<encoded directory>/memory/*.md`); App Settings can view / edit / delete it (node `assistant.memory`). Codex and DSH read / write the same memory ("Codex", "Agent runtime (DSH)" below), so changing launchers doesn't lose it. Health chats have a separate health space and separate memory (`docs/assistant/health.md`) |
+| Memory | Claude Code auto memory (`~/.claude/projects/<encoded directory>/memory/*.md`); App Settings can view / edit / delete it (node `assistant.memory`). Codex and DSH read / write the same memory ("Codex", "Agent runtime (DSH)" below), so changing launchers doesn't lose it, and a Claude conversation in any profile is told to use it too ("One memory" below). Health chats have a separate health space and separate memory (`docs/assistant/health.md`) |
 | About Me | App edits go to settings `assistant.notes`, override `assistant.notes` in the manager's `manager.json`, and append to CLAUDE.md |
 | Phone not in foreground | No phone connected during a `phone_*` call → hub sends a silent push (`content-available`, `persona_wake`) → App connects WS in the background to execute, disconnects after 25 seconds; wait up to 20 seconds. The App proactively disconnects WS on backgrounding, or a suspended socket makes hub think it is online and calls wait 2 minutes. Once disconnected, nothing else in the background reopens it (network recovery, refresh completion, reconnect backoff, `LiveConnection.suspended`, 2026-11-02); only this silent push (`wake()`) connects. The same push with `persona_wake: "widgets"` wakes a phone whose Home Screen widgets show other agent counts than the hub's (`server/internal/hub/widget_wake.go`, #5721): the app connects, writes the widgets again and disconnects |
 
@@ -1597,6 +1597,43 @@ The apps find an assistant chat by what was said in it through `GET /api/v1/assi
 - **Privacy**: full devices only (a read-only role gets 403), not an extension scope, not a tool the model can call; the query is never logged. The rows go with their chat; dropping the manager's database drops them.
 - **Reading it again** (#6340): `personad assistant search-reindex` (the built-in manager; `persona-manager assistant search-reindex`) or `personad manager search-reindex [--dir D]` (a manager made in the app, `--dir` left out when the computer has one) empties both tables in the database the manager runs on and counts the reset (`db.ResetSearch`, the manager setting `assistant_search.reset`). The built-in manager's database is its own once its data moved there, else the hub's (`builtinDatabaseNow`, as `builtinDatabase` decides at its start); another manager's is its `manager.json`'s, never the hub's. A running manager sees the count move at its next sweep (`searchLoad`): it empties what it wrote meanwhile from its old cursors, drops the cursors it held and reads every chat again from the start, so it need not be stopped; a stopped one reads them when it starts. A database without the index (a manager from before chat search) is left as it is. There is no separate `--purge`: the manager always fills the index again from the transcripts, so emptying it and rebuilding it are the same act.
 - **Not yet**: the earlier stretches of a chat that moved between Claude Code and Codex are not indexed, only the session it runs in now.
+
+## One memory
+
+The assistant has one memory, the one the Memory page shows (#9440). Claude Code keeps auto memory under the config
+directory, and assistant conversations run in more than one Claude profile ("Claude assistant profile compatibility"
+above), so without this each profile would keep its own.
+
+- **The directory** (`node/memory.go` `memoryDir`): for the assistant's own directory it is always
+  `<the node's default Claude config directory>/projects/<encoded assistant directory>/memory`, whichever directories
+  exist. The Memory page, Codex and the other runtimes (`memory_dir`) and dreaming resolve it there.
+- **Claude Code** (CLI and Agent SDK): every assistant start's settings carry `autoMemoryDirectory` with that directory
+  (`assistantCompactionSettings`). Claude Code takes the key from `--settings` before the profile's own settings, and
+  knows it from 2.1.74; an older one ignores it and keeps writing to its profile's copy, which the merge below still
+  brings in. Writes to `.md` files in the directory need no permission, as in the default location (read from Claude
+  Code 2.1.325's permission rule; not measured in a live conversation).
+- **Not changed**: a guest conversation and a meeting's room get no directory and keep auto memory off. The Health
+  space keeps its own memory where Claude Code puts it (`docs/assistant/health.md`), with no new setting and no merge.
+- **The copies other profiles hold** (`node/memory_merge.go`) are merged before the directory is handed to a
+  conversation, the Memory page or dreaming, under the lock the memory API takes. The check runs each time (under a
+  millisecond with twenty notes), because a conversation that was already running keeps the settings it started with
+  until it restarts. A note only a copy has is copied in with its modification time and its `MEMORY.md` line. The
+  same file name with the same bytes is left. The same file name with different content keeps the one modified
+  later. Notes with different names about the same matter are both kept: reconciling them is not this merge's job.
+- **Nothing is deleted.** The other copies are never written. Each run first saves the memory as it was (`before/`),
+  the notes it read (`copies/<n>/`) and a manifest of what it did, in `<data dir>/memory-merge/<encoded directory>/<UTC time>/`.
+  A note whose bytes a run has already read is skipped, so a note deleted on the Memory page does not come back and a
+  second run does nothing. To undo a merge by hand, copy `before/` back over the memory directory.
+- **Concurrent writers**: the model writes memory with its own file tools, outside the node's lock. The merge creates a
+  new note only if the name is still free, replaces a note only if it has not changed since it was compared, and
+  re-reads `MEMORY.md` just before replacing it.
+- **Telling the user** (`assistant/memory_merge.go`): every ten minutes the manager asks the node for its runs
+  (`assistant.memory`, op `merges`). For a run it has not told about (`persona_settings` key `assistant.memory_merge`) it
+  writes `memory-merge.md` into the memory directory in the user's language and sends one P1 push. The report lists
+  the notes brought in and, for each conflict, both modification times, which version was kept and the full text of
+  the other. It is not in `MEMORY.md`, so no conversation loads it; the Memory page lists it like any note, and the
+  user deletes it when done. A node that does not know the op answers an error and nothing is told until it does.
+- **Rollback**: without the setting each profile reads its own directory again, exactly as it left it.
 
 ## Memory dreaming
 
