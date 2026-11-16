@@ -2637,3 +2637,19 @@ nothing ran the old build after the new one.
   then installs that older build: here it moved a resident node back five days, to a build without the live screen's
   video status. Check the folder's build before pressing Redeploy, and after a deploy check that no machine reports
   `node_mismatch`.
+
+## A fence keyed to the first credential keeps a re-paired phone under its old one (2026-11-17, #9611)
+
+- A push registration is keyed by the app's own `device_id` and fenced to the credential that first registered it.
+  Pairing the phone again issues a new credential but keeps the `device_id`, and the fence answered every registration
+  from the new credential with 409: pushes kept working through the old row, so nobody noticed for days. The old
+  credential then looked unused (Settings › Devices: not seen since the re-pair), and revoking it retired the push
+  registration of the phone still in use. Afterwards its settings and Live Activity writes hit the fence too and came
+  back as 500 / 503, which the app just retried.
+- Fix (migration 0541): an authenticated registration moves the row to its new credential when it proves the same
+  installation (topic, environment, push key or APNs token, the proof 0435 already took after a revocation) and the
+  old credential has not been seen since the new one was created; fenced writes answer 409
+  `push_registration_required`.
+- Lesson: a 409 the client swallows hides a broken ownership model until something else (here a cleanup) depends on
+  it. When a fence refuses a live, authenticated client, either let it prove the move or tell it plainly what to do;
+  and check what a "looks unused" revocation still owns before treating it as cleanup.

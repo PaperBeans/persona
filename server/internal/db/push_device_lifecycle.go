@@ -41,14 +41,11 @@ func upsertPushDevice(ctx context.Context, tx pgx.Tx, v Device) error {
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),$11,$12,$13,$14,COALESCE($15,now()),$16,$17,$18,$19)
 		ON CONFLICT(device_id) DO UPDATE SET name=$2,kind=$3,apns_token=$4,apns_env=$5,topic=$6,push_key=$7,relay_url=$8,relay_grant=$9,credential=$10,updated_at=now(),credential_id=$11,locale=$12,relay_error=$13,features=$14,voip_token=$17,voip_grant=$18,voip_error=$19,
 		registered_at=GREATEST(devices.registered_at,COALESCE($15,devices.registered_at)),last_push_at=GREATEST(devices.last_push_at,$16)
-		WHERE (COALESCE(NULLIF(devices.credential_id,''),devices.credential)='' OR COALESCE(NULLIF(devices.credential_id,''),devices.credential)=COALESCE(NULLIF($11,''),$10))
+		WHERE (COALESCE(NULLIF(devices.credential_id,''),devices.credential)='' OR COALESCE(NULLIF(devices.credential_id,''),devices.credential)=COALESCE(NULLIF($11,''),$10)
+			OR current_setting('persona.push_transfer',true)=devices.device_id)
 		AND ($15::timestamptz IS NULL OR devices.registered_at <= $15)`, v.DeviceID, v.Name, v.Kind, v.APNSToken, v.APNSEnv, v.Topic, v.PushKey, v.RelayURL, v.RelayGrant, v.Credential, v.CredentialID, v.Locale, v.RelayError, features, registered, delivered, v.VoIPToken, v.VoIPGrant, v.VoIPError)
 	if err != nil {
-		var pgerr *pgconn.PgError
-		if errors.As(err, &pgerr) && pgerr.Code == "23514" && (pgerr.Message == "push registration was superseded" || pgerr.Message == "push registration ownership changed") {
-			return ErrPushRegistrationConflict
-		}
-		return err
+		return pushRegistrationConflict(err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrPushRegistrationConflict
@@ -56,18 +53,35 @@ func upsertPushDevice(ctx context.Context, tx pgx.Tx, v Device) error {
 	return nil
 }
 
+// pushRegistrationConflict maps the fence's refusals (migrations 0435 and 0541) to ErrPushRegistrationConflict, so
+// callers can tell "register again" apart from a database that is down.
+func pushRegistrationConflict(err error) error {
+	var pgerr *pgconn.PgError
+	if errors.As(err, &pgerr) && pgerr.Code == "23514" && (pgerr.Message == "push registration was superseded" || pgerr.Message == "push registration ownership changed") {
+		return ErrPushRegistrationConflict
+	}
+	return err
+}
+
+func pushOwner(d Device) string {
+	if d.CredentialID != "" {
+		return d.CredentialID
+	}
+	return d.Credential
+}
+
+// sameInstallationTarget is SamePushInstallation without the owner: the proof a re-paired phone gives that it is the
+// installation a row already holds (its encryption key or exact APNs target, scoped by topic and environment).
+func sameInstallationTarget(a, b Device) bool {
+	return a.Topic != "" && a.Topic == b.Topic && a.APNSEnv == b.APNSEnv &&
+		(a.PushKey != "" && a.PushKey == b.PushKey || a.APNSToken != "" && a.APNSToken == b.APNSToken)
+}
+
 // SamePushInstallation requires a registered owner and either its encryption key
 // or exact APNs target, scoped by environment/topic. Names and IPs are never proof.
 func SamePushInstallation(a, b Device) bool {
-	ownerA, ownerB := a.CredentialID, b.CredentialID
-	if ownerA == "" {
-		ownerA = a.Credential
-	}
-	if ownerB == "" {
-		ownerB = b.Credential
-	}
-	return ownerA != "" && ownerA == ownerB && a.Topic != "" && a.Topic == b.Topic && a.APNSEnv == b.APNSEnv &&
-		(a.PushKey != "" && a.PushKey == b.PushKey || a.APNSToken != "" && a.APNSToken == b.APNSToken)
+	owner := pushOwner(a)
+	return owner != "" && owner == pushOwner(b) && sameInstallationTarget(a, b)
 }
 
 func devicesIn(ctx context.Context, tx pgx.Tx) ([]Device, error) {

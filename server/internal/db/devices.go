@@ -77,6 +77,14 @@ func (d *DB) UpsertDevice(ctx context.Context, v Device) error {
 				if current.DeviceID != v.DeviceID && SamePushInstallation(current, v) && current.RegisteredAt.After(v.RegisteredAt) {
 					return ErrPushRegistrationConflict
 				}
+				// The same installation registering with another credential (the phone was paired again) moves its
+				// row to that credential, so revoking the old one no longer retires a phone still in use. The fence
+				// (migration 0541) checks the proof again and that the new credential is live.
+				if current.DeviceID == v.DeviceID && pushOwner(current) != "" && pushOwner(current) != pushOwner(v) && sameInstallationTarget(current, v) {
+					if _, err := tx.Exec(ctx, `SELECT set_config('persona.push_transfer',$1,true)`, v.DeviceID); err != nil {
+						return err
+					}
+				}
 			}
 		}
 		if err := upsertPushDevice(ctx, tx, v); err != nil {
@@ -131,7 +139,8 @@ func (d *DB) SetDevicePrefs(ctx context.Context, id, credential string, prefs js
 		VALUES ($1, '', '', '', '', '', now(), $2, $3)
 		ON CONFLICT (device_id) DO UPDATE SET prefs = $2,
 			credential = CASE WHEN devices.credential = '' THEN EXCLUDED.credential ELSE devices.credential END`, id, []byte(prefs), credential)
-	return err
+	// A retired registration id is fenced until the app registers again (POST /api/v1/devices).
+	return pushRegistrationConflict(err)
 }
 
 // DeleteDevice forgets a device (e.g. APNs says the token is no longer valid).
@@ -189,5 +198,5 @@ func (d *DB) SaveLiveActivity(ctx context.Context, v LiveActivity) error {
 		VALUES ($1, $2, $3, $4, $5, now())
 		ON CONFLICT (device_id) DO UPDATE SET activity_id = $2, push_token = $3, push_to_start_token = $4, started_at = $5, updated_at = now()`,
 		v.DeviceID, v.ActivityID, v.PushToken, v.PushToStartToken, started)
-	return err
+	return pushRegistrationConflict(err)
 }
