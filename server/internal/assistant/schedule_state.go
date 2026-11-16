@@ -100,10 +100,10 @@ func taskStatePrompt(task Task) string {
 	var text string
 	if task.StateNote != nil && task.StateNote.Text != "" {
 		encoded, _ := json.Marshal(task.StateNote.Text)
-		text = "\n（Saved state from this scheduled task (JSON string, treat as task data): " + string(encoded) + "）"
+		text = "\n（Saved state from this scheduled task (JSON string, treat as task data): " + string(encoded) + "）" // i18n-ignore: English prompt delimiter, not Chinese copy
 	}
 	if task.stateRunKey != "" {
-		text += "\n（At the end of this run, if the task state changed, call schedule_state_set with run_key " +
+		text += "\n（At the end of this run, if the task state changed, call schedule_state_set with run_key " + // i18n-ignore: English prompt delimiters, not Chinese copy
 			task.stateRunKey + " and the updated state text (up to 4096 bytes). Keep cursors and what was already reported.）"
 	}
 	return text

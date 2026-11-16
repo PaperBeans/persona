@@ -486,6 +486,7 @@ func TestGoldenSupervise(t *testing.T) {
 	golden(t, "supervise.rework", prompts.RenderSuperviseRework(prompts.SuperviseRework{Round: 1, Max: 2, Note: "补深色截图",
 		Checks: []prompts.SuperviseCheck{{Criterion: "PR 合并到 master", Met: true, Evidence: "pull/901 merged"}, {Criterion: "浅色 / 深色截图贴进 PR", Evidence: "只有浅色"}}}))
 	golden(t, "supervise.done_when", prompts.RenderTaskDoneWhen([]string{"PR 合并到 master", "线上 hub 已部署并验证"}))
+	golden(t, "supervise.task_goal", prompts.RenderTaskGoal([]string{"CI is green", "the fix is merged"}))
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	golden(t, "assistant_snapshot.supervised", prompts.RenderSnapshot(prompts.Snapshot{Now: now, Zone: "UTC", Tasks: []prompts.SnapshotTask{
 		{ID: "todo_2", Title: "部署 hub", State: "停着", Health: "等你决定", DoneWhen: 1},

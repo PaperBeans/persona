@@ -111,7 +111,11 @@ func TestAcceptedTaskFollowUpIsNotStoppedShort(t *testing.T) {
 		t.Fatalf("not closed: %+v", got)
 	}
 
-	// Its agent is sent more: the task is open again.
+	// Its agent is sent more (the owner's message on its card: a turn nobody sent leaves it closed, #7539): the task
+	// is open again.
+	if _, err := s.routeToTask(ctx, "conv1", todo.ID, "顺手把 README 也改一下"); err != nil {
+		t.Fatal(err)
+	}
 	f.setItems(text("assistant", fullReport), text("user", "顺手把 README 也改一下"), text("assistant", "README 改了一半"))
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	reopened := todoNow(s, todo.ID)

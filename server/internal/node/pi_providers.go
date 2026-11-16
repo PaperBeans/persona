@@ -231,12 +231,25 @@ func piModelOf(api, id string, known []proto.ProviderModel) piModel {
 		if k.ContextWindow > 0 {
 			m.ContextWindow = k.ContextWindow
 		}
-		if len(k.Efforts) > 0 {
+		if k.NoEffort {
+			m.Reasoning = false
+		} else if len(k.Efforts) > 0 || len(k.AllEfforts) > 0 {
 			m.Reasoning = true
+		}
+		if k.ImageInput != nil {
+			m.Input = []string{"text"}
+			if *k.ImageInput {
+				m.Input = append(m.Input, "image")
+			}
+		}
+		if k.MaxOutputTokens > 0 {
+			m.MaxTokens = min(k.MaxOutputTokens, m.ContextWindow)
 		}
 		break
 	}
-	m.MaxTokens = min(32000, m.ContextWindow/4)
+	if m.MaxTokens == 0 {
+		m.MaxTokens = min(32000, m.ContextWindow/4)
+	}
 	return m
 }
 

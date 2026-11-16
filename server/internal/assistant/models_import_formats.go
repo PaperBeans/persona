@@ -678,8 +678,12 @@ type cindyModel struct {
 	ID                     string   `json:"id"`
 	Name                   string   `json:"name"`
 	ContextWindow          int      `json:"contextWindow"`
+	MaxOutputTokens        int      `json:"maxOutputTokens"`
+	Reasoning              *bool    `json:"reasoning"`
 	ReasoningEfforts       []string `json:"reasoningEfforts"`
 	ReasoningDefaultEffort string   `json:"reasoningDefaultEffort"`
+	SupportsImageInput     *bool    `json:"supportsImageInput"`
+	SupportsToolCalls      *bool    `json:"supportsToolCalls"`
 }
 
 func (m *cindyModel) UnmarshalJSON(b []byte) error {
@@ -837,5 +841,9 @@ func cindyProviderModel(m cindyModel) proto.ProviderModel {
 	if slices.Contains(pm.Efforts, m.ReasoningDefaultEffort) {
 		pm.DefaultEffort = m.ReasoningDefaultEffort
 	}
+	// what else cindy says of it, as discovery reads a gateway (#8778): reasoning false and no level is a model that
+	// takes none
+	pm.MaxOutputTokens, pm.ImageInput, pm.ToolCalls = max(m.MaxOutputTokens, 0), m.SupportsImageInput, m.SupportsToolCalls
+	pm.NoEffort = len(pm.Efforts) == 0 && m.Reasoning != nil && !*m.Reasoning
 	return pm
 }

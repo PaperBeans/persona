@@ -14,6 +14,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/extmgr"
 	"github.com/nwverse/persona/server/internal/identity"
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/nodecmd"
 	"github.com/nwverse/persona/server/internal/nodeproto"
 
@@ -83,6 +84,7 @@ const usage = `usage:
   personad version [-v]     the version; -v adds the channel and build number`
 
 func main() {
+	modelhttp.SetVersion(version)
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, named(usage))
 		os.Exit(2)

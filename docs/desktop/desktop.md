@@ -77,6 +77,8 @@ On a Linux machine without a display server the smoke uses Chromium's headless p
 
 `npm --prefix desktop run smoke` remains the quick check of the first window against a hub already running at `PERSONA_HUB_URL`.
 
+`desktop/scripts/link-real-common.test.mjs` independently checks the development evidence helpers: real child close, nonzero and signal receipts, bounded POSIX process-group termination, a descendant retaining captured pipes, path redaction and provenance vetoes. Observing an empty original process group does not prove that a detached descendant has exited, so the generic process receipt does not authorize removal of the whole run root. These tests do not launch Electron or establish setup, preload, production IPC, successful Link pairing, production Quit, native notification, installation or update acceptance. The real-Link Electron driver remains separate and is not made available by this helper.
+
 ## Updates
 
 **The default, in one sentence:** Persona checks for a new version when it opens and every four hours, downloads it in the background, and installs it only when you quit or choose **Restart to update**. Nothing restarts the app while you are working, and there is no setting to configure.

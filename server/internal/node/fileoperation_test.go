@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -203,19 +204,24 @@ func TestFileZipOperationCancelRemovesPartialFile(t *testing.T) {
 	var op proto.FileOperation
 	statusCtx, statusCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer statusCancel()
-	if err := f.peer.Call(statusCtx, "file.operation", map[string]any{"operation_id": "op-zip-cancel"}, &op); err != nil {
+	statusArgs := map[string]any{"operation_id": "op-zip-cancel"}
+	if err := f.peer.Call(statusCtx, "file.operation", statusArgs, &op); err != nil {
 		t.Fatal(err)
 	}
 	if op.State != proto.FileOperationRunning || op.BytesDone == 0 || op.BytesTotal != int64(len(data)) || op.FilesTotal != 1 {
 		t.Fatalf("running operation = %+v", op)
 	}
 	cancel()
-	unblock()
-	if err := awaitUpload(t, done); err == nil {
-		t.Fatal("cancelled zip succeeded")
+	if err := awaitUpload(t, done); !errors.Is(err, context.Canceled) {
+		t.Fatalf("zip call returned %v, want cancellation", err)
 	}
+	// This request follows the cancel frame on the same connection. Wait for its reply before letting the zip finish.
+	if err := f.peer.Call(statusCtx, "file.operation", statusArgs, &op); err != nil {
+		t.Fatal(err)
+	}
+	unblock()
 	waitFor(t, "cancelled zip operation", func() bool {
-		return f.peer.Call(statusCtx, "file.operation", map[string]any{"operation_id": "op-zip-cancel"}, &op) == nil && op.State == proto.FileOperationCancelled
+		return f.peer.Call(statusCtx, "file.operation", statusArgs, &op) == nil && op.State == proto.FileOperationCancelled
 	})
 	if _, err := os.Stat(filepath.Join(home, "out.zip")); !os.IsNotExist(err) {
 		t.Fatalf("partial zip remains: %v", err)

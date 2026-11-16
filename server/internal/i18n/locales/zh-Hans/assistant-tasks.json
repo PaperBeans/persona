@@ -36,8 +36,10 @@
   "route_no_task": "这段对话里没有这个任务",
   "route_no_agent": "这个任务没有在跑的 Agent",
   "route_agents_stopped": "这个任务的 Agent 都已经停了，这次没有发送。在任务上发一条消息会为它开一个新的 Agent。",
+  "route_agents_exited": "这个任务的 Agent 都已经停了，没有可以退出的，这次没有发送。",
   "route_starting": "这个任务的新 Agent 还在启动，这条消息没有发送。请稍后再发一次。",
   "route_offline": "那台电脑不在线",
+  "route_not_kept": "没能记下这条消息会重新打开这个任务，所以没有发送：请再试一次。",
   "earlier_phase_outcome": "先前阶段的结论",
   "outcome_question": "做完的结论",
   "outcome_pitfall": "踩过的坑",
@@ -62,5 +64,6 @@
   "admission_queue_timeout": "排队等待超过 {limit} 仍未启动，放弃本次启动。最后一次原因：{reason}",
   "start_link_lost": "和「{machine}」的连接断了，重连后也没看到任务起来：{reason}",
   "start_machine_busy": "「{machine}」一直连着，但在等待时间内没回应（电脑可能太忙）：{reason}",
-  "start_link_down": "和「{machine}」的连接断了，等了一阵也没重连上：{reason}"
+  "start_link_down": "和「{machine}」的连接断了，等了一阵也没重连上：{reason}",
+  "start_goal_skipped": "没在第一条消息前设目标就启动了：{reason}"
 }

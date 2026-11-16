@@ -382,3 +382,20 @@ the same cause. Recheck scrolling, folding and layout separately with synthetic 
 - To photograph the Dock, pair the build (the mock hub is enough) so it asks; check the label with `lsappinfo` before
   blaming the code. Run such builds under a bundle id of their own (`PERSONA_BUNDLE_ID=…` on the `xcodebuild` line):
   the installed app's container and preferences stay untouched.
+
+## VideoToolbox's low-latency encoder takes no speed setting, and slows when its process is clamped (2026-11-16, #8713)
+
+- `kVTVideoEncoderSpecification_EnableLowLatencyRateControl` selects another encoder,
+  `com.apple.videotoolbox.videoencoder.{hevc,h264}.rtvc` (read back with `kVTCompressionPropertyKey_EncoderID`). It
+  refuses `MaxFrameDelayCount`, `PrioritizeEncodingSpeedOverQuality`, `MaximumRealTimeFrameRate`,
+  `SpatialAdaptiveQPLevel` and `MaxH264SliceBytes` with -12900 (`kVTPropertyNotSupportedErr`), and the status of
+  `VTSessionSetProperty` is the only sign: Persona Screen set `MaxFrameDelayCount` 0 from its first release to no effect. Check the
+  status, or `VTCopySupportedPropertyDictionaryForEncoder` with the same specification, before believing a setting.
+- On an M1-class media engine it takes 7–8 ms for a 1080p frame whatever the frame rate, bitrate or any other knob, and
+  a smaller picture is no faster at 60 fps (it paces itself). It logs its own time in the process's unified log
+  (`VCPRateControlSession … enc_time=… ms`), which is how to read a real session afterwards.
+- The plain encoder with `RealTime` on paces itself to the frame interval (17–20 ms at 60 fps). With `RealTime` off and
+  speed over quality, HEVC takes 5.5–6 ms but needs about three times the bits for the same picture.
+- Under a QoS clamp (`taskpolicy -c utility` or `-b`) the output callback comes 10–30 ms late while the engine's own
+  time barely moves: a windowless helper that encodes holds a latency-critical activity (`ProcessInfo.beginActivity`).
+- `ReferenceBufferCount` 1 makes the low-latency H.264 encoder drop every frame.

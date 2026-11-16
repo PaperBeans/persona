@@ -318,6 +318,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 				}
 			}
 		}
+		if verdict == reviewAccepted {
+			s.sendsAccepted(ctx, t.ID, time.Now()) // what was sent its agent before is answered: closed already, too (#7539)
+		}
 		if verdict == reviewCancelled {
 			s.stopTaskAgents(ctx, t) // its cards stop asking the user (supervise_leader.go)
 			return fmt.Sprintf("Task %s is cancelled and closed; its agents are being stopped and archived (their terminals stay; archived, not deleted: "+

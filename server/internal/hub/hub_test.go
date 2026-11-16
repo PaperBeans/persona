@@ -242,6 +242,15 @@ func removeTestClient(h *Hub, c *client) {
 	delete(h.clients, c)
 }
 
+// addCfgMachines adds hub.json entries to a test hub whose managers are already connected. Until startDevices, which
+// most test hubs never call, entryOwner and cfgEntries read h.cfg.Machines under h.devices.mu from the hub's goroutines
+// (a manager's bus event, an HTTP handler), so the write takes the same lock (#8639).
+func addCfgMachines(h *Hub, machines ...MachineConfig) {
+	h.devices.mu.Lock()
+	defer h.devices.mu.Unlock()
+	h.cfg.Machines = append(h.cfg.Machines, machines...)
+}
+
 // newTestHub builds a Hub with no machines, no clients and push disabled, so interaction logic can be exercised offline.
 func newTestHub(t *testing.T) *Hub {
 	t.Helper()

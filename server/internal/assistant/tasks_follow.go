@@ -145,7 +145,10 @@ func (s *Service) taskWaits(ctx context.Context, t Todo) bool {
 // taskWorking: one of the task's agents started a turn. The agent of a task the hub closed meanwhile (judged done,
 // accepted) works on it again — sent more by agent_send, which resumes a closed one, or by the user: the task is open
 // again first, as a change asked for on its "Please verify" card reopens it (#3457), so this turn is followed
-// (interrupted or done receipt, judgment) and the task shows in progress, not done (#5892).
+// (interrupted or done receipt, judgment) and the task shows in progress, not done (#5892). An accepted task opens
+// again only for what its conversation sent (closedTurnReopens; once the node took that send, the send opened it
+// already, agentSendNote.sent); any other turn leaves it closed, and its end makes nothing of it either (settleTurn
+// follows open tasks only). A turn that starts while such a send is still out waits for its answer (closedTurnHeld).
 func (s *Service) taskWorking(ctx context.Context, mid, sid string) {
 	s.tasks.completionMu.Lock()
 	defer s.tasks.completionMu.Unlock()
@@ -155,13 +158,22 @@ func (s *Service) taskWorking(ctx context.Context, mid, sid string) {
 		if !found {
 			return
 		}
-		if !s.closedTurnReopens(closed, mid, sid) {
+		s.loadSendsOut(ctx) // the sends of more for it a manager before this one kept (tasks_sends_out.go)
+		switch s.closedTurnReopens(closed, mid, sid) {
+		case closedTurnHeld:
+			s.logf("task %s: accepted; its agent works again while more for it is being sent: held for that send's answer", closed.ID)
+			s.saveSendsOut(ctx) // the hold too: after a restart, the turn is the task's (recoverSendsOut)
+			return
+		case closedTurnStays:
 			s.logf("task %s: accepted; its agent works again, but nothing was sent for the task: left closed", closed.ID)
 			return
 		}
 		if err := s.reopenTodo(ctx, closed.ID); err != nil {
 			s.logf("task %s: reopen: %v", closed.ID, err)
 			return
+		}
+		if closed.DoneBy == db.DoneByReview {
+			s.sendsOpened(ctx, closed, mid, sid) // the send it was opened for is done with
 		}
 		if t, ok = s.taskOf(ctx, mid, sid); !ok {
 			return
@@ -186,50 +198,68 @@ func (s *Service) taskWorks(ctx context.Context, t Todo) {
 	}
 }
 
-// agentSent is one send to an agent for a conversation: which one and when (tasksState.sentBy).
-type agentSent struct {
-	conversation string
-	at           time.Time
-}
-
-// noteAgentSend records that conversation self is sending agent mid/sid text now (agent_send, or the owner's message on
-// a task's card, routeToTask), before the send goes: its turn may start before the call returns. undo takes the record
-// back when the send failed, unless a later send replaced it.
-func (s *Service) noteAgentSend(self, mid, sid string) (undo func()) {
-	key, sent := [2]string{mid, sid}, agentSent{conversation: self, at: time.Now()}
-	s.tasks.mu.Lock()
-	s.tasks.sentBy[key] = sent
-	s.tasks.mu.Unlock()
-	return func() {
-		s.tasks.mu.Lock()
-		if s.tasks.sentBy[key] == sent {
-			delete(s.tasks.sentBy, key)
-		}
-		s.tasks.mu.Unlock()
-	}
-}
-
-// closedTurnReopens: a new turn of agent mid/sid opens closed task t again (taskWorking). One the hub's judge closed,
-// yes: the judge may have been early, and more for it comes as a turn of its agent. So does one its supervisor
-// accepted whose agent its plan started (task_plan): that session exists for the task, and more for it (the owner's
-// follow-up, a start that failed and came up late) is the task's work. A task with no plan has an agent that was often
-// running before it became the task's (agent_supervise, agent_send with a task, an agent that became a task by itself,
-// a link by hand; agent_start's tasks have no plan either) and is kept on for other work: turns for its own timers,
-// other conversations, messages from other sessions and the owner's words in its own session reopened the finished
-// task each time and woke its supervision again (#6726). Such an accepted task reopens only when the task's
-// conversation (or its supervisor) sent the agent more after the acceptance: agent_send, or the owner's message on the
-// task's card. The owner can still reopen one by hand.
-func (s *Service) closedTurnReopens(t Todo, mid, sid string) bool {
-	if t.DoneBy != db.DoneByReview || t.PlanID != "" {
-		return true
-	}
-	s.tasks.mu.Lock()
-	sent, ok := s.tasks.sentBy[[2]string{mid, sid}]
-	s.tasks.mu.Unlock()
-	if !ok || t.DoneAt == nil || !sent.at.After(*t.DoneAt) {
+// sendReopens: what conversation self sends the agent of accepted task t asks t for more. self is t's conversation, its
+// supervisor, or the background supervisor standing in for the main conversation (backgroundSupervises: it accepts and
+// reworks the main conversation's tasks while their ledger keeps the main conversation as the supervisor), for a task
+// whose signals go to it: one whose ledger names the main conversation or no one (digestTo). A task another
+// conversation supervises sends that conversation its review signals, so the background supervisor's send leaves it
+// closed. Any other conversation's send is its own business with the agent.
+func (s *Service) sendReopens(ctx context.Context, self string, t Todo) bool {
+	if self == "" {
 		return false
 	}
-	return sent.conversation == t.Origin || t.Supervision != nil && sent.conversation == t.Supervision.Supervisor
+	if self == t.Origin || t.Supervision != nil && self == t.Supervision.Supervisor {
+		return true
+	}
+	if !s.backgroundSupervises(ctx, self, t) {
+		return false
+	}
+	sup := t.Supervision.Supervisor
+	return sup == "" || sup == s.settings(ctx).Main
+}
+
+// closedTurn is what a new turn of its agent does to a closed task (closedTurnReopens).
+type closedTurn int
+
+const (
+	closedTurnStays closedTurn = iota // other work: the task stays closed
+	closedTurnOpens                   // the task opens again, and the turn is followed
+	closedTurnHeld                    // a send that may reopen it is out: its answer decides (agentSendNote.sent)
+)
+
+// closedTurnReopens: what a new turn of agent mid/sid does to closed task t (taskWorking). One the hub's judge closed
+// on its own opens again: that close is provisional (nobody accepted it, the judge may have been early), and more for
+// it comes as a turn of its agent (#5892). One its supervisor accepted (done_by review) is closed for good, whoever
+// started its agent: a turn for the agent's own timers, other conversations, messages from other sessions or the
+// owner's words in its own session is no word that the task wants more. Such turns reopened the finished task each
+// time and woke its supervision again, "judged done, waiting for your review" (#6726 for adopted agents; #7539 for
+// agents a task_plan started, which once reopened on any turn). An accepted task reopens only for what the task's
+// conversation, its supervisor or the background supervisor acting for it (sendReopens) sent the agent after the
+// acceptance: agent_send, agent_interrupt with then, or the owner's message on the task's card (which, when its agents
+// have all stopped, reopens the task once its new agent started, routeToTaskAs). A send the node took reopens the task
+// itself (agentSendNote.sent, tasks_sends_out.go). The agent's next turn after a send whose answer was unknown opens it
+// here, however late (the agent may read the text much later); one that starts while a send is out is held for the
+// answer. The owner can still reopen one by hand,
+// and todo_reopen does too. That covers an acceptance by the judge's own spot check (supervise_sample.go), which is a
+// review too.
+func (s *Service) closedTurnReopens(t Todo, mid, sid string) closedTurn {
+	if t.DoneBy != db.DoneByReview {
+		return closedTurnOpens
+	}
+	if t.DoneAt == nil {
+		return closedTurnStays
+	}
+	s.tasks.mu.Lock()
+	defer s.tasks.mu.Unlock()
+	o := s.tasks.sendsOut[[2]string{mid, sid}]
+	switch pending, answered := o.asking(t.ID, *t.DoneAt, time.Now()); {
+	case answered: // it may be the turn that send asked for: no answer to wait for
+		return closedTurnOpens
+	case pending:
+		o.held, o.heldAt, o.ended = t.ID, *t.DoneAt, false
+		return closedTurnHeld
+	}
+	return closedTurnStays
 }
 
 type receiptBody struct {
@@ -330,10 +360,19 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 	if s.meetingTurnNow(machine, sid) {
 		return settleRefused // a meeting's batch: never the task's progress, report or completion (meeting_turns.go)
 	}
+	if s.endHeld(ctx, machine, sid) {
+		s.logf("agent %s/%s ended a turn held for a send still out: taken up once that send is answered", machine, short(sid))
+		return settleLater
+	}
 	t, ok := s.taskOf(ctx, machine, sid)
 	if !ok {
 		// An agent Persona started that is on no todo becomes a task once a turn of it did work (#3617, agent_tasks.go).
 		if t, ok = s.agentTaskAtTurnEnd(ctx, machine, sid); !ok {
+			if closed, found := s.closedTaskOf(ctx, machine, sid); found {
+				// Its closed task's agent still: a turn nobody sent for the task, or one running when it was accepted
+				// (#7539). Nothing is made of its end; this line says it was seen.
+				s.logf("task %s: closed; its agent %s/%s ended a turn: dropped", closed.ID, machine, short(sid))
+			}
 			return settleRefused
 		}
 	}
@@ -453,6 +492,9 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 		body := receiptBody{Title: t.Title, State: "interrupted", Summary: i18n.T(s.lang(cctx), "assistant-tasks.interrupted"), Machine: name,
 			Error: clip(strings.TrimSpace(cut.TurnError), 300)}
 		s.appendInterrupted(cctx, t, body, false)
+		if s.closedWhileRead(t.ID) {
+			return settleTaken
+		}
 		s.taskNotice(cctx, t, name, "interrupted", "", body.Error)
 		s.taskReport(t, reportInterrupted, name, where, body.Error, nil)
 		return settleTaken
@@ -489,6 +531,9 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 		body := receiptBody{Title: t.Title, State: "interrupted", Summary: i18n.T(l, "assistant-tasks.interrupted"), Machine: name,
 			Error: silentTurnErrorIn(l)}
 		s.appendInterrupted(cctx, t, body, true)
+		if s.closedWhileRead(t.ID) {
+			return settleTaken
+		}
 		s.taskNotice(cctx, t, name, "interrupted", "", body.Error)
 		s.taskReport(t, reportInterrupted, name, where, body.Error, nil)
 		return settleTaken
@@ -554,6 +599,10 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 			s.turnReceipted(cctx, t.ID) // no name to find it by later: the ledger says it is out
 		}
 	}
+	if s.closedWhileRead(t.ID) {
+		s.turnJudged(cctx, t.ID, taskDoneCheck{}, nil, "done") // nothing to judge: the sweep does not ask again
+		return settleTaken
+	}
 	if again {
 		s.turnAgain(cctx, t, turn, last, text, since, worked)
 		return settleTaken
@@ -565,6 +614,17 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 	s.taskReport(t, reportDone, name, [2]string{last.MachineID, last.SessionID}, text, nil)
 	s.autoFinishTask(t, since, worked) // the work may be finished: then the todo is done (done.go)
 	return settleTaken
+}
+
+// closedWhileRead: task id was closed (accepted, cancelled, closed by hand) while its agent's turn end was read. The
+// receipt written for that end says how the turn ended, and that is all: no notice, stage, report, judgment or
+// supervision signal for a task that is over (#7539).
+func (s *Service) closedWhileRead(id string) bool {
+	if t, ok := s.todoNow(id); ok && t.DoneAt == nil {
+		return false
+	}
+	s.logf("task %s: closed while its agent's turn end was read: receipt only", id)
+	return true
 }
 
 // releaseReceipt gives back the receipt taskTurnSettled reserved for task id at reserved, when its second look at
@@ -608,6 +668,31 @@ func (s *Service) taskTurnEndedAfter(ctx context.Context, machine, sid string, a
 		s.tasks.mu.Unlock()
 		s.taskTurnEnded(ctx, machine, sid)
 	})
+}
+
+// successorOpens: the owner's message on the card of closed task t (judged done or accepted, not cancelled) started
+// started, a new agent for it, after its agents had all stopped, or may have (the start's answer is unknown; started is
+// empty then). The owner asks the task for more: it is open again, and the new agent's work is the task's from now (it
+// has no send on record for closedTurnReopens, and its first turn may have started before it was linked, while the
+// task was still closed). A start that definitely failed (refused, or it never went out: rpc.ErrNotSent) asked for
+// nothing, and the task stays as it was (#7539).
+func (s *Service) successorOpens(ctx context.Context, t Todo, started proto.Session) {
+	s.tasks.completionMu.Lock()
+	defer s.tasks.completionMu.Unlock()
+	if cur, ok := s.todoNow(t.ID); !ok || cur.DoneAt == nil || !sameInstant(*cur.DoneAt, *t.DoneAt) {
+		return // opened already (its new agent's first turn), or moved since
+	}
+	if err := s.reopenTodo(ctx, t.ID); err != nil {
+		s.logf("task %s: reopen for the owner's message: %v", t.ID, err)
+		return
+	}
+	s.logf("task %s: reopened: the owner's message started a new agent for it", t.ID)
+	if started.SessionID == "" {
+		return
+	}
+	if cur, ok := s.taskOf(ctx, started.MachineID, started.SessionID); ok && cur.ID == t.ID {
+		s.taskWorks(ctx, cur)
+	}
 }
 
 // routeToTask sends text straight to the agent of task todoID that most needs it, and keeps it in the conversation as
@@ -670,7 +755,14 @@ func (s *Service) routeToTaskAs(ctx context.Context, conversation, todoID, text,
 			s.endTaskStart(todoID, st, proto.Session{})
 			return s.sendToTaskAgent(ctx, conversation, todoID, c, text, relay, guard)
 		}
+		if exitText(text) { // what it would close is closed: no new agent, and a closed task stays closed (#7539)
+			s.endTaskStart(todoID, st, proto.Session{})
+			return FeedItem{}, i18n.Err("assistant-tasks.route_agents_exited")
+		}
 		started, err := s.startTaskSuccessor(ctx, t, last, text)
+		if hubClosedTask(&t) && (err == nil || sendUnknown(err)) { // a start that never went out asked for nothing
+			s.successorOpens(ctx, t, started) // before a message that waited for the start goes to its agent
+		}
 		s.endTaskStart(todoID, st, started) // empty when it failed: a message that waited for it starts one itself
 		if err != nil {
 			return FeedItem{}, err
@@ -728,7 +820,7 @@ func (s *Service) sendToTaskAgent(ctx context.Context, conversation, todoID stri
 	}
 	// An offline row a node before #4754 lists is resumed first: that can take minutes, and goes on when the phone
 	// stops waiting, as a send from the chat does.
-	wait := 90 * time.Second
+	wait := liveSendWait
 	if c.Status == proto.StatusOffline {
 		wait = 5 * time.Minute
 	}
@@ -743,12 +835,17 @@ func (s *Service) sendToTaskAgent(ctx context.Context, conversation, todoID stri
 			return FeedItem{}, db.ErrTodoCompleted
 		}
 	}
-	unsent := s.noteAgentSend(conversation, c.MachineID, c.SessionID) // the owner's words to the task reopen it (#6726)
-	if err := s.call(sctx, c.MachineID, DeviceSessionSend, map[string]any{"session_id": c.SessionID, "text": text}, nil); err != nil {
-		if !startResultUnknown(err) {
-			unsent()
-		}
-		return FeedItem{}, err
+	// The owner's words to the task reopen it (#6726, #7539): this task only, should its agent have gone to another one
+	// since its agents were read (routeToTaskAs).
+	note, err := s.noteAgentSend(sctx, conversation, c.MachineID, c.SessionID, todoID, text)
+	if err != nil { // not sent: it would not reopen the task after a manager restart
+		s.logf("task %s: card message: %v", todoID, err)
+		return FeedItem{}, i18n.Err("assistant-tasks.route_not_kept")
+	}
+	err = s.call(sctx, c.MachineID, DeviceSessionSend, map[string]any{"session_id": c.SessionID, "text": text}, nil)
+	note.sent(sctx, err)
+	if err != nil {
+		return FeedItem{}, s.dialogRefusal(ctx, c, err) // a dialog_open refusal names the agent and the dialog (#7343)
 	}
 	body := map[string]string{"text": text}
 	if relay != "" {

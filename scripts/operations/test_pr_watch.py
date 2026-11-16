@@ -371,7 +371,8 @@ class WatcherTests(unittest.TestCase):
         self.assertIn("-timeout=10m", command)
         self.assertEqual(command[-1], "./internal/agents")
         cleanup.assert_called_once()
-        self.assertEqual(cleanup.call_args.args[0][:3], ["docker", "rm", "-f"])
+        container = calls[0][0][calls[0][0].index("--name") + 1]
+        self.assertEqual(cleanup.call_args.args[0], ["docker", "rm", "-fv", container])
 
         calls.clear()
         with tempfile.TemporaryDirectory() as directory, \
@@ -386,6 +387,28 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(len(runs), 2)
         self.assertEqual([run[-1] for run in runs], ["./internal/node", "./internal/node"])
         self.assertTrue(all("-timeout=10m" in run for run in runs))
+
+    def test_go_test_runner_removes_postgres_volume_on_failure(self):
+        import pr_watch_go_tests
+        for fail_at in (1, 2, 3):
+            with self.subTest(fail_at=fail_at):
+                calls = []
+                def fake_checked(argv, **kwargs):
+                    calls.append(argv)
+                    if len(calls) == fail_at:
+                        raise pr_watch_go_tests.WatchError("fixture failure")
+                    return ""
+                with tempfile.TemporaryDirectory() as directory, \
+                        patch.object(pr_watch_go_tests, "checked", side_effect=fake_checked), \
+                        patch.object(pr_watch_go_tests.subprocess, "run") as cleanup:
+                    package = Path(directory) / "server/internal/agents"
+                    package.mkdir(parents=True)
+                    (package / "cache_test.go").write_text("package agents\n")
+                    with self.assertRaisesRegex(pr_watch_go_tests.WatchError, "fixture failure"):
+                        pr_watch_go_tests.main(["--worktree", directory, "./internal/agents"])
+                container = calls[0][calls[0].index("--name") + 1]
+                cleanup.assert_called_once()
+                self.assertEqual(cleanup.call_args.args[0], ["docker", "rm", "-fv", container])
 
     def test_argument_driven_python_verification_keeps_full_scripts_lane(self):
         names = "scripts/test/test_rolling_compatibility.py\n"
@@ -1104,6 +1127,37 @@ class WatcherTests(unittest.TestCase):
                 self.assertEqual(self.watcher.queue_priority("example/one", 8, SHA_B), 1)
                 self.watcher.state.data["prs"]["example/one#8"].update(
                     {"retry_after": 0, "outcome": "failed", "blocking": False})
+
+    def test_portable_two_repository_example_has_no_private_configuration(self):
+        path = HERE / "pr-watch.persona.example.json"
+        config = pr_watch.load_config(path)
+        self.assertEqual(config["workers"], 10)
+        self.assertEqual(config["reviewer"]["timeout_seconds"], 2700)
+        self.assertEqual([item["name"] for item in config["repositories"]],
+                         ["nwverse/persona", "nwverse/persona-extensions"])
+        self.assertEqual([item["verify"]["profile"] for item in config["repositories"]],
+                         ["persona", "extensions"])
+        self.assertTrue(all(item["merge"] is False for item in config["repositories"]))
+        text = path.read_text()
+        self.assertNotIn("/home/", text)
+        self.assertNotIn("/data00/", text)
+        self.assertNotIn("token", text.lower())
+        service = (HERE / "persona-pr-watch.example.service").read_text()
+        self.assertIn("EnvironmentFile=-%h/.config/persona/pr-watch.env", service)
+        self.assertNotIn("Environment=ANTHROPIC", service)
+        self.assertNotIn("/home/", service)
+
+    def test_ten_workers_start_and_stop_cleanly(self):
+        self.config["workers"] = 10
+        watcher = pr_watch.Watcher(self.config, verbose=False)
+        watcher.start_workers()
+        self.addCleanup(watcher.stopping.set)
+        self.assertEqual(len(watcher.workers), 10)
+        for _ in watcher.workers:
+            watcher.tasks.put((2, -1, ("", 0)))
+        for worker in watcher.workers:
+            worker.join(timeout=5)
+            self.assertFalse(worker.is_alive())
 
     def test_config_has_no_implicit_merge_or_repositories(self):
         path = self.root / "config.json"

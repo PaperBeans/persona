@@ -757,6 +757,9 @@ func (h *Hub) startSession(w http.ResponseWriter, r *http.Request) {
 		PermissionMode string `json:"permission_mode,omitempty"`
 		Effort         string `json:"effort,omitempty"`
 		Ultracode      *bool  `json:"ultracode,omitempty"`
+		// Goal: a one-line condition the node sets with /goal after the first message is in (node/startgoal.go); a
+		// start it cannot take there answers 409 start_goal_unsupported before anything starts.
+		Goal string `json:"goal,omitempty"`
 		// TabName names the herdr tab; empty: one made from the first message (tabName, assistant/agents_start.go),
 		// else agent-<n>.
 		TabName string `json:"tab_name,omitempty"`

@@ -34,7 +34,10 @@ import (
 // mentions; and a transcript written in the last desktopEntryGrace stays, as the app may not have written its entry yet.
 // But Delete also writes deleted_<uuid> beside the entries, for the session's own id and for each transcript it ran
 // (measured 2026-11-15: each holds the time of the delete in ms; 51 of 57 deletes wrote more than one): a transcript a marker
-// names is gone at once.
+// names is gone at once. Some deletes leave only the session's own marker after removing its sole entry. A bounded,
+// process-local cache of entries actually read here retains their current and earlier transcript associations for that
+// case. It does not infer associations for a local-only marker first seen after a restart, and never broadens the age
+// fallback to every old transcript merely because some deletion marker exists (#8673).
 //
 // A scheduled task's runs are sessions of their own in the index, each naming the task (scheduledTaskId); the app's
 // sidebar lists them under the task in its own section, apart from the projects. The list draws a task's runs the
@@ -95,10 +98,26 @@ type claudeDesktopFile struct {
 	mentions []string
 }
 
+type claudeDesktopAssociation struct {
+	transcripts []string
+	markerSeen  bool // the last scans saw deleted_<local uuid>; its disappearance retires this association
+	used        uint64
+}
+
 var claudeDesktopFiles = struct {
 	sync.Mutex
 	byPath map[string]claudeDesktopFile
-}{byPath: map[string]claudeDesktopFile{}}
+	// associations retains what a readable local_<uuid>.json named after the entry is removed, keyed by the tombstone's
+	// path beside it. It is process-local: only an entry actually observed by this process can make a local-only
+	// deleted_<uuid> name its transcripts. The bound and markerSeen keep stale associations from growing forever.
+	associations     map[string]*claudeDesktopAssociation
+	associationClock uint64
+}{byPath: map[string]claudeDesktopFile{}, associations: map[string]*claudeDesktopAssociation{}}
+
+const (
+	maxDesktopAssociations           = 1024
+	maxDesktopAssociationTranscripts = 128
+)
 
 // claudeDesktopIndex is what the desktop apps' session index says about transcripts.
 type claudeDesktopIndex struct {
@@ -121,6 +140,9 @@ type claudeDesktopIndex struct {
 	entries int
 	// deleted: the ids the app's deleted_<uuid> markers name (deletedMarkers): a transcript among them is gone at once.
 	deleted map[string]bool
+	// deletedFromEntry: transcripts a deleted local session's previously readable entry named. A local-only tombstone
+	// hides exactly these, never every unnamed old transcript.
+	deletedFromEntry map[string]bool
 }
 
 type claudeDesktopAbout struct{ title, cwd, local string }
@@ -134,14 +156,25 @@ type claudeDesktopNow struct {
 // readClaudeDesktopIndex reads the index under home; a file is parsed again only when it changed.
 func readClaudeDesktopIndex(home string) claudeDesktopIndex {
 	var paths []string
-	for _, dir := range claudeDesktopDirs(home) {
+	dirs := claudeDesktopDirs(home)
+	for _, dir := range dirs {
 		found, _ := filepath.Glob(filepath.Join(dir, "claude-code-sessions", "*", "*", "local_*.json"))
 		paths = append(paths, found...)
 	}
+	deleted, markerPaths := deletedMarkers(home)
 	x := claudeDesktopIndex{visible: map[string]bool{}, earlier: map[string][]claudeDesktopNow{}, about: map[string]claudeDesktopAbout{},
-		parents: map[string]string{}, origins: map[string]string{}, seen: map[string]claudeDesktopSeen{}, named: map[string]bool{}, deleted: deletedMarkers(home)}
+		parents: map[string]string{}, origins: map[string]string{}, seen: map[string]claudeDesktopSeen{}, named: map[string]bool{},
+		deleted: deleted, deletedFromEntry: map[string]bool{}}
 	claudeDesktopFiles.Lock()
 	defer claudeDesktopFiles.Unlock()
+	if claudeDesktopFiles.associations == nil {
+		claudeDesktopFiles.associations = map[string]*claudeDesktopAssociation{}
+	}
+	currentEntries := map[string]bool{}
+	currentMarkers := make(map[string]bool, len(markerPaths))
+	for _, p := range markerPaths {
+		currentMarkers[p] = true
+	}
 	current := make(map[string]bool, len(paths))
 	byLocal := map[string]claudeDesktopEntry{} // the readable entries by the app's own id, to find a side session's parent
 	var started []claudeDesktopEntry           // the unarchived entries another session started
@@ -191,10 +224,53 @@ func readClaudeDesktopIndex(home string) claudeDesktopIndex {
 		}
 		if e.local != "" {
 			byLocal[e.local] = e
+			key := filepath.Join(filepath.Dir(p), "deleted_"+strings.TrimPrefix(e.local, "local_"))
+			currentEntries[key] = true
+			a := claudeDesktopFiles.associations[key]
+			if a == nil {
+				a = &claudeDesktopAssociation{}
+				claudeDesktopFiles.associations[key] = a
+			}
+			a.transcripts = desktopAssociationTranscripts(e)
+			if !currentMarkers[key] {
+				a.markerSeen = false
+			}
+			claudeDesktopFiles.associationClock++
+			a.used = claudeDesktopFiles.associationClock
 		}
 		for _, old := range e.prior {
 			x.earlier[old] = append(x.earlier[old], claudeDesktopNow{e.transcript, e.archived})
 		}
+	}
+	for _, p := range markerPaths {
+		a := claudeDesktopFiles.associations[p]
+		if a == nil {
+			continue
+		}
+		for _, id := range a.transcripts {
+			x.deletedFromEntry[id] = true
+		}
+		a.markerSeen = true
+		claudeDesktopFiles.associationClock++
+		a.used = claudeDesktopFiles.associationClock
+	}
+	for key, a := range claudeDesktopFiles.associations {
+		if !desktopPathInAny(key, dirs) {
+			continue // another home's scan owns this association's marker-disappearance cleanup
+		}
+		if !currentEntries[key] && a.markerSeen && !currentMarkers[key] {
+			delete(claudeDesktopFiles.associations, key)
+		}
+	}
+	for len(claudeDesktopFiles.associations) > maxDesktopAssociations {
+		var oldestKey string
+		var oldest uint64
+		for key, a := range claudeDesktopFiles.associations {
+			if oldestKey == "" || a.used < oldest {
+				oldestKey, oldest = key, a.used
+			}
+		}
+		delete(claudeDesktopFiles.associations, oldestKey)
 	}
 	for _, e := range started {
 		if p, ok := byLocal[e.parent]; ok && !p.archived && p.transcript != e.transcript {
@@ -222,19 +298,49 @@ func readClaudeDesktopIndex(home string) claudeDesktopIndex {
 	return x
 }
 
+// desktopAssociationTranscripts bounds what one readable entry retains: its current transcript first, then each
+// distinct valid earlier transcript. The entry itself is already capped at 4 MiB; these caps bound the retained copy.
+func desktopAssociationTranscripts(e claudeDesktopEntry) []string {
+	out := make([]string, 0, 1+min(len(e.prior), maxDesktopAssociationTranscripts-1))
+	seen := map[string]bool{e.transcript: true}
+	out = append(out, e.transcript)
+	for _, id := range e.prior {
+		if len(out) == maxDesktopAssociationTranscripts {
+			break
+		}
+		if validID(id) && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func desktopPathInAny(path string, dirs []string) bool {
+	for _, dir := range dirs {
+		if dir = filepath.Clean(dir); path == dir || strings.HasPrefix(path, dir+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
 // deletedMarkers are the ids the app's deleted_<uuid> markers name under home: a deleted session's own (local_<uuid>
-// without its prefix) and the transcripts it ran.
-func deletedMarkers(home string) map[string]bool {
+// without its prefix) and the transcripts it ran. The paths retain which index directory each marker belongs to so a
+// local session id can be matched only to an entry observed beside it.
+func deletedMarkers(home string) (map[string]bool, []string) {
 	out := map[string]bool{}
+	var paths []string
 	for _, dir := range claudeDesktopDirs(home) {
 		found, _ := filepath.Glob(filepath.Join(dir, "claude-code-sessions", "*", "*", "deleted_*"))
 		for _, p := range found {
 			if id := strings.TrimPrefix(filepath.Base(p), "deleted_"); validID(id) {
 				out[id] = true
+				paths = append(paths, p)
 			}
 		}
 	}
-	return out
+	return out, paths
 }
 
 func readClaudeDesktopEntry(path string) claudeDesktopEntry {
@@ -298,11 +404,12 @@ var desktopIDRe = lazyre.New(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a
 const desktopEntryGrace = 2 * time.Minute
 
 // gone: transcript id, which the desktop app ran, belongs to a session deleted in the app: no entry names id and nothing
-// unreadable mentions it, and either a deleted_<id> marker says so, or the index has readable entries and the transcript
-// was last written (written) longer than desktopEntryGrace ago. The caller asks only about a transcript whose
-// entrypoint is the desktop app's.
+// unreadable mentions it, and either a deleted_<id> marker says so, the local session's retained entry association says
+// so, or the index has readable entries and the transcript was last written (written) longer than desktopEntryGrace ago.
+// A local-only marker without an observed association never widens the age fallback. The caller asks only about a
+// transcript whose entrypoint is the desktop app's.
 func (x claudeDesktopIndex) gone(id string, written time.Time) bool {
-	return !x.named[id] && (x.deleted[id] || x.entries > 0 && time.Since(written) > desktopEntryGrace)
+	return !x.named[id] && (x.deleted[id] || x.deletedFromEntry[id] || x.entries > 0 && time.Since(written) > desktopEntryGrace)
 }
 
 // localID is id when it is the app's own form of a session id (local_<uuid>), else "": it goes into a link.

@@ -13,6 +13,8 @@
   "tray_needs_you": "要你处理",
   "tray_running": "进行中",
   "tray_empty_pr": "没有等待合并的 PR",
+  "tray_review": "等 Persona 验收",
+  "tray_empty_review": "没有等 Persona 验收的任务",
   "pr_blocker_review_required": "需要审查",
   "pr_blocker_changes_requested": "需要修改",
   "pr_blocker_checks_failed": "检查未通过",

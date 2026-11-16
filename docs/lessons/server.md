@@ -49,12 +49,37 @@ connection (`codexHanded`); the hub keeps such a report only from a connection i
 (`codexInventoryHanded`: `hookedAt` equal to the manager's `ConnectedAt`), which also covers older nodes. Write a test
 of the sequence, not only of each side's storage.
 
+## On macOS a process holds inheritable sockets nobody meant to hand on (2026-11-14, #7489)
+
+Sealing what a process was handed (`osproc.SealInherited`, `claimInherited` in `server/internal/hub/listen.go`) does not cover what it makes later, and on macOS two kinds of socket are inheritable without anyone clearing close-on-exec. Go's `accept` there makes the new connection close-on-exec only after the call returns, without `syscall.ForkLock` (`src/internal/poll/sys_cloexec.go` in Go; Linux uses `accept4` with `SOCK_CLOEXEC`): a child started at that moment holds the connection too, and sealing it there keeps it open. The first lookup through the system resolver, Go's default on macOS, leaves a `com.apple.netsrc` kernel control socket open for the life of the process, never close-on-exec: every child started afterwards holds it (`lsof` shows `[ctl com.apple.netsrc …]`).
+
+A test process that has run other tests holds the servers and connections they left, so a test of what a child inherits must not depend on what that process holds: have the process that starts the child seal first, as the real one does, and hand it a stray descriptor of its own to show that it does. `TestPassedSocketsReachNoChild`'s exec helper took only the listeners before its exec and failed now and then in a full `go test ./internal/hub/` on a Mac (`a child got sockets [26]`); with a server accepting in a loop beside it, about one run in 1,500.
+
 ## An empty list sent as null means "no change" to an optional field (2026-11-14)
 
 The node reads node.configure's `claude_dirs_blocked` as `*[]string`: absent or `null` leaves its patterns as they are.
 Go marshals a nil slice as `null`, so lifting the last blocked pattern stored none on the hub but left the node blocking
 the directory, and its sessions stayed hidden. A field where null means "leave it" must be sent as `[]` when it is
 empty, and a fake peer in a test must read null the way the real one does, or it hides exactly this.
+
+## Nothing on a handshake path may wait on system_profiler (2026-11-13, #6028)
+
+`sysmon.ReadSystem` ran `system_profiler SPHardwareDataType` for the Mac's model name, under a 10 s timeout, on the
+assumption that it takes half a second. On a Mac whose Activation Lock check does not answer (macOS 26.6.2) it prints
+"Timed out waiting for the Activation Lock Capable check" and returns after 10.2-11 s, using 0.2 s of CPU: it waits,
+so load does not explain it and a faster machine does not help. It was killed just before it answered, every time,
+and `node.info` paid the 10 s on each hub connection, since a resident node makes a new `Node` per connection and the
+hub shows the computer online only after `node.info`. Per-`Node` caches (`sync.Once` on the Node) start over with each
+connection: anything slow a handshake needs must be cached per process, or not be on the handshake at all.
+
+On Apple silicon the IORegistry's `product` entry has the same name in about 20 ms (`ioreg -p IODeviceTree -rd1 -n
+product`); system_profiler remains for Intel Macs, run in the background, and a read waits only a second for it.
+A per-process cache must not also keep a failure: the first version cached an empty result with `sync.Once`, so one
+system_profiler that failed or was cut off (a machine busy right after login) left the identifier until the node
+restarted, where the per-connection read had at least tried again. Keep only a found name; let a later read retry an
+empty one after a backoff (five minutes), so a Mac where it always fails does not run it on every connection. Its
+output, like ioreg's, holds serial numbers: read only the one line. Tests fake both commands (`newModelLookup` takes
+the runner) and use `synctest`; a node-level test puts hanging fakes first on `PATH`.
 
 ## A node binary's name does not prove its platform (2026-11-14, #7206)
 
@@ -510,6 +535,16 @@ A successful connection probe can still hide a request the model server will rej
 
 A working inference base need not expose model discovery beneath it: DeepSeek documents Messages under `/anthropic/v1/messages` but discovery at the same origin's `/models`. Keep endpoint selection separate without rewriting the saved inference base, stripping unknown gateway prefixes or forwarding credentials to another authority. A discovery 404 needs its own explanation and a manual-model fallback, not advice to change a working Messages address.
 
+## Gateway model metadata: read shapes, keep "none" apart from "unknown" (#8778)
+
+- **One gateway, several list shapes.** A gateway may answer `GET /v1/models` in Anthropic's paginated envelope whenever the request carries any `anthropic-*` header (discovery always sends `anthropic-version`), a Codex manifest when asked with `?client_version=`, and its own flat list otherwise. The envelope carries no thinking levels, so levels for such a gateway come only from its separate capability report. Read every field by shape and test each shape with synthetic fixtures; never branch on which gateway answered.
+- **An empty list is an answer.** `reasoning_levels: []`, `reasoning: false` or a capability status `unsupported` say the model takes no level, while a missing field says nothing. `efforts` alone cannot carry that difference (empty there has always meant "unknown, offer every level", and older clients still read it so), hence `no_effort`. Catalog enrichment must check it before filling levels, and a catalog default must be one of the levels the gateway reported, or saving refuses the model.
+- **`max_tokens` is not an output limit everywhere.** Some lists use it for the whole context; one that pairs it with `max_input_tokens` may fill both with stand-ins for a model it doesn't know, which the list can't tell apart from real values. Read only names that mean one thing (`max_output_tokens`, `max_completion_tokens`, `limit.output`).
+- **An extra request breaks request-counting tests.** Adding the capability report changed the calls and headers several existing tests counted or asserted per path; route the new path explicitly in fixtures instead of loosening the counts.
+- **`null` decodes into a Go `bool` without an error** (#8796). `json.Unmarshal([]byte("null"), &b)` leaves `b` false and returns nil, so a field a gateway left empty read as an explicit `false`: models became "no thinking level" and "no images". Decode into `*bool` and treat nil as unsaid. The same goes for lists: a list read only in part (an entry of an unknown shape skipped) must say nothing rather than less, and an empty list is a statement only where the gateway means it (`reasoning_levels: []`, `protocols: []`), not where it is just unfilled (`supported_parameters: []`).
+- **Guesses must lose to knowledge when the consumers act on them.** "No reasoning parameter listed" is a guess; once the launch paths skip `--effort` and pi's reasoning for `no_effort`, a wrong guess costs more than "unknown". Take it only from a whole parameter list, settle it after every other source (repeated entries, the capability report) and let the catalog's known levels win over it: applied while parsing one entry, it beat real levels that came later.
+- **Tell a client that omits a field from one that never knew it by the key, not the value.** Restoring stored metadata for any model sent without it kept the web from ever clearing a stale report; decode the request's keys (present even as `false` / `null`) to keep stored values only for older apps, and have the new client name a key for every model.
+
 ## Battery investigations need attributed transport counts (#1633)
 
 A slow/error request log is not an access log, and successful Live Activity updates
@@ -738,6 +773,10 @@ For embedded signatures, retain the complete envelope and verify the exact decod
 ## A socket systemd passes reaches every child unless it is taken first (2026-11-08)
 
 Sockets passed by socket activation (`LISTEN_FDS`, descriptors 3 and up) are not close-on-exec, and Go's `os/exec` does not close what is not: every process started before the hub marks them is handed the hub's listening port, and hands it on to everything it starts in turn. The hub without its edge marked them only when it first listened, and it could start the built-in manager before that; the manager, the local node, extension programs and the agents the node started then all held the hub's listening socket (several pids on `ss -tlnp` for the hub's port). Take what a process was handed first thing, before anything can start a child (`claimInherited`, `osproc.SealInherited`); hand a child a descriptor only through `exec.Cmd.ExtraFiles`. Never seal in `main` of a binary whose helper commands hand descriptors on by exec (the sandbox's launcher passes its mount data to bwrap that way).
+
+## On macOS a connection a process accepts reaches whatever it starts at that moment (2026-11-14, #7765)
+
+Go's `accept` on macOS makes the new connection close-on-exec in a second call, outside `syscall.ForkLock` (`src/internal/poll/sys_cloexec.go` in Go; Linux's `accept4` does both at once), so a process `os/exec` starts in between inherits the connection and keeps it open for as long as it lives: the other end never sees the parent close it. Sealing at startup (`osproc.SealInherited`) cannot reach a connection accepted later. Every listener in `server/` therefore comes from `osproc.Listen` or `osproc.FileListener`, which on macOS accept with the lock held for reading, as Go does when it makes a socket or a pipe; archguard's `TestListenersComeFromOsproc` fails on any other. When touching them: a listener's own `SyscallConn` cannot wait for a connection (its `Read` returns `EINVAL`), so the acceptor waits and accepts on an `*os.File` copy of the socket. `Fd` on any copy puts the socket, which every copy shares, in blocking mode, and a blocking `accept` would hold the lock, and every process start with it, until the next connection (Go's reason for leaving the lock out); the acceptor sets non-blocking mode again before each accept, so only an `Fd` landing between the two gets through: never call `Fd` on a copy of a listener that is still accepting (the resident node's handover calls it once its listener is closed), read the number with `SyscallConn().Control`. osproc's listener types keep net's to themselves, so nothing accepts around the acceptor; an assertion to `*net.UnixListener` or `*net.TCPListener` would never match, and the guard rejects those names too.
 
 ## A process that execs itself inherits its own children (2026-11-10, #2978)
 
@@ -998,6 +1037,7 @@ Splitting a registry at its first colon reads `[::1]:5000` as `[`, selecting HTT
 
 - Connector mode watching mustn't record only startup mtime and wait for a later change before checking mode (2026-11-03, #748): the run loop picks active/passive then starts its watcher asynchronously; if the user switches before the watcher goroutine begins, new config becomes the initial snapshot and the first switch is missed forever. Sample initial time, then immediately compare actual mode and cancel the old mode if different. Bidirectional regressions directly simulate "config changed before watcher starts", not longer waits; observing initial state doesn't mean the watcher is ready.
 
+- Optional Chat Completions parameters need error-shape-specific compatibility retries, not a generic "400 mentions the field" rule. `reasoning_effort` can appear in an unsupported-parameter response (safe to remove and retry once), but also in an invalid-level or operator-ceiling response (must be returned unchanged). Off is the one exception to value rejection: because Information screening defaults to `off` without a user choice, a gateway rejecting `none` as a value must also get one without-field retry, or existing Chat providers regress; explicit non-off values still fail unchanged. Keep independent per-field retry flags so existing token/usage fallbacks still compose, log every without-effort downgrade, and make a degraded connection test return an empty effort that it did not verify. A retry alone still makes every later loop call fail first, so share a one-hour, hard-bounded cache by Base URL + credential + route computer + model between probes and real calls, distinguishing whole-field rejection from none-only rejection; an explicit no-retry response neither retries nor populates it (#8779, #8822). Empty provider-model effort lists still mean unknown, while `no_effort` is explicit and `all_efforts` carries the direct API's complete levels; keep that capability suppression in one helper shared by probes and runtime resolution so their wire behavior cannot split.
 - Collapsing purpose models into category defaults needs more than hiding lists or making the resolver ignore old records (2026-11-03, #697): starting a task, resuming its own session, or returning to the source session may reintroduce old `Launcher/Model/Effort` execution parameters, which `applyModel` treats as explicit choices. Stop passing these old purpose parameters at execution entry points; compare only category results when deciding launcher changes on resume. Regressions check real RPC arguments for all three paths, unchanged permissions, rejected old-purpose PATCH, and preserved original records.
 - Sending into an existing assistant chat (phone messages, scheduled follow-ups returning to the source) mustn't choose launchers independently (2026-11-04, #1518): follow-ups resolved the Agents category, defaulting to bare Claude Code,
   and at the scheduled time `--resume`d the main chat into a logged-out claude on the hub machine. Main-chat sends then inherited the "currently running" launcher, so they never switched back and every message reported
@@ -1210,6 +1250,7 @@ back) and only keeps the entry. Tell them apart by git's `CONFLICT` lines plus `
 
 - Gateways return `HTTP 429 account_quota_exhausted` for exhausted quota and `HTTP 503 account_concurrency_full` for full concurrency. Previously each caller treated these as ordinary failures: knowledge processing and Inbox sorting retried item by item, producing 429 requests and log lines in 15 minutes; Inbox items were marked sorted "by rules" and weren't reprocessed after quota recovery.
   Handle rate limits per connection in the shared client (`ai/limit.go`, `docs/assistant/model-config.md` ("Upstream rate limits")): while paused, return `ai.PausedError` without sending; callers seeing `ai.IsPaused` stop the round, don't log, and don't mark items processed. New model-calling loops must do the same.
+- Classify gateway errors by `error.code`, not by an envelope's broad `type` or by status alone. OpenAI- and Anthropic-shaped bodies can carry `code` at the top level or inside `error`; a recognized code wins over wording, while an unknown code must retain the previous fallback. `X-Should-Retry: false` overrides status-based transience. A 429 carrying it together with `Retry-After` is a quota pause until the reset, not busy backoff; HTTP 402 and explicit budget-exhaustion codes are quota pauses too. Keep model-unavailable, missing-endpoint and excess-context classifications separate, and never infer an automatic model switch from any of them (#8776).
 - Thinking models (e.g. `claude-haiku-5-5` thinks by default) count thinking tokens toward `max_tokens` too (2026-11-03, #1000): a project profile of about 2000 Chinese characters needs 3.7–4.7K,
   so `kb.project`'s old 4000 cap often truncated into thinking plus half a JSON object, reported as "unterminated JSON object", retrying every 2 minutes.
   Inspect Messages `stop_reason`: if `ai.JSONMax` lacks a complete object and stopped on `max_tokens`, double the cap and retry once; if still truncated, return `ai.ErrTruncated`.

@@ -278,6 +278,10 @@ func TestAgentSettingsSavedTogetherKeepEachOther(t *testing.T) {
 	if err := os.WriteFile(path, []byte("theme = \"dark\"\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
+	// WriteFile's mode goes through the umask (0600 under umask 077, #8723): set it, so the check below is of the save.
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
 	keys := []string{"ui.yolo", "ui.compact_mode"}
 	for round := 0; round < 50; round++ {
 		want := round%2 == 0

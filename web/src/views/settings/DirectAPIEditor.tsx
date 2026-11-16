@@ -52,7 +52,7 @@ export function DirectAPIEditor({ manager, purpose, provider, draft, disabled, e
   const inheritedModel = sameProvider && !purpose.override.model ? purpose.effective.model : undefined;
   const model = draft.model.trim() || inheritedModel || provider.model || "";
   const inheritedEffort = sameProvider && !purpose.override.effort ? purpose.effective.effort : undefined;
-  const effort = draft.effort.trim() || (provider.api === "chat" ? "" : inheritedEffort || (purpose.id === "inbox.triage" ? "off" : ""));
+  const effort = draft.effort.trim() || inheritedEffort || (purpose.id === "inbox.triage" ? "off" : "");
   const selected = models.find((item) => item.id === model);
   const reportedEfforts = selected?.efforts;
   const efforts = provider.api === "chat" ? [] : reportedEfforts ?? (provider.api === "responses"

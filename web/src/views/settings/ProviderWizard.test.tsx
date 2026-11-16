@@ -451,8 +451,9 @@ describe("ProviderWizard from presets", () => {
     await act(async () => button("保存")!.click());
     expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/launchers/chat"))?.body).toMatchObject({
       headers: "", env: "", proxy: "", no_proxy: "", timeout_ms: 0, compact_window: 0, max_context: 0,
-      effort: "", opus_model: "", sonnet_model: "", haiku_model: "", fable_model: "", subagent_force: false,
+      opus_model: "", sonnet_model: "", haiku_model: "", fable_model: "", subagent_force: false,
     });
+    expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/launchers/chat"))?.body).not.toHaveProperty("effort");
   });
 
   it("keeps the Chat Completions protocol when editing", async () => {

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/nwverse/persona/server/internal/assistant/repositorystore"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -26,7 +27,7 @@ func TestMeetingRepositoryReadsDoNotImportLegacyLinks(t *testing.T) {
 				id := e.create("Review related work").ID
 				e.must("PUT", "/api/v1/todos/"+id+"/agents/box/attendee", "")
 				if populated {
-					if _, _, err := database.ImportTodoRepositoryLinks(t.Context(), id, []string{"https://github.com/example/web/pull/6"}, "explicit"); err != nil {
+					if _, _, err := repositorystore.New(database).ImportTodoRepositoryLinks(t.Context(), id, []string{"https://github.com/example/web/pull/6"}, "explicit"); err != nil {
 						t.Fatal(err)
 					}
 				}

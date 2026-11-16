@@ -9,6 +9,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import persona.core.contracts.api.*
 import persona.core.contracts.JsonCodec
 import persona.core.domain.AttachedFile
+import persona.core.domain.ComposerMessage
 import persona.core.domain.parseAttachedFiles
 import kotlinx.serialization.encodeToString
 
@@ -68,6 +69,8 @@ class ChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()) {
     var photosOnlyText: String = ""
     /** What [message] says for videos sent without words or photos ("Please look at the video", iOS); kept like [photosOnlyText]. */
     var videosOnlyText: String = ""
+    /** What [message] says for ordinary files sent without words or photos; kept like [photosOnlyText]. */
+    var filesOnlyText: String = ""
     var value by mutableStateOf(TextFieldValue(initial.text, TextRange(initial.text.length)))
     var draftLoaded by mutableStateOf(false)
     private var attachmentList by mutableStateOf(initial.attachments)
@@ -107,19 +110,10 @@ class ChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()) {
     fun message(): String {
         check(ready)
         val images = attachments.filter { it.image }.mapNotNull { it.path }
-        val files = attachments.filterNot { it.media }.mapNotNull { it.path }.map(::quoteComposerPath)
+        val files = attachments.filterNot { it.media }.mapNotNull { it.attachedFile() }
         val videos = attachments.filter { it.video }.mapNotNull { it.attachedFile() }
-        // Photos or videos alone still say something to the agent (iOS and the old app send "Please look at the images"), in the app's language.
-        val words = when {
-            value.text.isNotBlank() || files.isNotEmpty() -> value.text
-            images.isNotEmpty() -> photosOnlyText
-            videos.isNotEmpty() -> videosOnlyText
-            else -> value.text
-        }
-        val text = (listOf(words) + files).filter(String::isNotBlank).joinToString(" ")
-        // A tag per video after a blank line (iOS `AttachedFile.message`): the agent reads the path, the apps draw a card.
-        return text + (if (videos.isEmpty()) "" else "\n\n" + videos.joinToString("\n") { it.toXml() }) +
-            if (images.isEmpty()) "" else "\n\n<attached_images>\n${images.joinToString("\n")}\n</attached_images>"
+        return ComposerMessage.text(value.text, images, files, videos,
+            photosOnly = photosOnlyText, videosOnly = videosOnlyText, filesOnly = filesOnlyText)
     }
 
     fun clearIfUnchanged(sent: ChatComposerDraft) {
@@ -128,8 +122,18 @@ class ChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()) {
 
     /** Fills an empty composer with a stored draft: the composer is drawn before the draft is read (#4045). */
     internal fun load(draft: ChatComposerDraft) {
-        value = TextFieldValue(draft.text, TextRange(draft.text.length))
-        attachments = draft.attachments
+        val tagged = parseAttachedFiles(draft.text).first.any { it.kind == "file" || it.kind == "video" }
+        if (tagged) {
+            // Drafts written by an older build can still carry tags as words; bring their files back as ready rows.
+            editMessage(draft.text)
+            val restored = attachments
+            attachments = restored + draft.attachments.filter { item ->
+                restored.none { it.path == item.path && it.image == item.image && it.video == item.video }
+            }
+        } else {
+            value = TextFieldValue(draft.text, TextRange(draft.text.length))
+            attachments = draft.attachments
+        }
         sessionVersion = draft.sessionVersion
         draftLoaded = true
     }
@@ -137,10 +141,13 @@ class ChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()) {
     fun editMessage(text: String) {
         beginEdit()
         val paths = composerImagePaths(text)
-        // Its videos come back as videos already on the machine (iOS `VideoAttachments.restore`); other files keep their tags.
-        val (files, rest) = parseAttachedFiles(text)
-        val videos = files.filter { it.kind == "video" }.take(MAX_COMPOSER_MEDIA)
-        val source = if (videos.isEmpty()) text else rest + files.filter { it.kind != "video" }.joinToString("") { "\n\n" + it.toXml() }
+        // Videos and ordinary files come back already on the machine; kinds this composer does not own keep their tags.
+        val (files, rest) = parseComposerFileTags(text)
+        // The media cap limits new picks; older or hand-written messages keep every video and document on edit.
+        val videos = files.filter { it.kind == "video" }
+        val documents = files.filter { it.kind == "file" }
+        val restored = files.filter { it.kind == "video" || it.kind == "file" }
+        val source = if (restored.isEmpty()) text else rest + files.filter { it !in restored }.joinToString("") { "\n\n" + it.toXml() }
         val plain = source.replace(composerImagePlaceholders, "").replace(composerImageTags, "").trimEnd()
         value = TextFieldValue(plain, TextRange(plain.length))
         attachments = paths.mapIndexed { index, path ->
@@ -149,6 +156,9 @@ class ChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()) {
         } + videos.mapIndexed { index, file ->
             ComposerAttachment("restored-video-$index-${file.path}", file.name, "", false, file.path, size = file.size.takeIf { it > 0 },
                 uploadState = DraftUploadState.Uploaded, video = true, duration = file.duration)
+        } + documents.mapIndexed { index, file ->
+            ComposerAttachment("restored-file-$index-${file.path}", file.name, "", false, file.path, size = file.size.takeIf { it > 0 },
+                uploadState = DraftUploadState.Uploaded)
         }
     }
 
@@ -169,7 +179,7 @@ class ChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()) {
         val restored = ChatComposerState().apply { editMessage(text) }
         val words = restored.value.text.let {
             if (restored.attachments.isNotEmpty() && (it.trim() in composerPhotoStandIns || it.trim() == photosOnlyText ||
-                    it.trim() == videosOnlyText)) "" else it
+                    it.trim() == videosOnlyText || it.trim() == filesOnlyText)) "" else it
         }
         val combined = when {
             value.text.isEmpty() -> words
@@ -214,18 +224,36 @@ fun rememberChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()):
     return state
 }
 
-internal fun quoteComposerPath(path: String): String =
-    if (path.any { it.isWhitespace() || it in "'\"\\\$`;&|<>()[]{}*?!" }) "'${path.replace("'", "'\\''")}'" else path
+internal fun quoteComposerPath(path: String): String = ComposerMessage.quotePath(path)
+
+private val composerContextTags = Regex("<persona-context\\b[^>]*>[\\s\\S]*?</persona-context>")
+
+/** Parse only this message's own file tags; a forwarded context's tags stay inside that context, byte for byte. */
+private fun parseComposerFileTags(text: String): Pair<List<AttachedFile>, String> {
+    val contexts = mutableListOf<Pair<String, String>>()
+    val masked = composerContextTags.replace(text) { match ->
+        val marker = "\u0000${contexts.size}\u0000"
+        contexts += marker to match.value
+        marker
+    }
+    val (files, rest) = parseAttachedFiles(masked)
+    var restored = rest
+    contexts.forEach { (marker, context) -> restored = restored.replace(marker, context) }
+    return files to restored
+}
 
 private val composerImageTags = Regex("<attached_images>([\\s\\S]*?)</attached_images>")
 private val composerImagePlaceholders = Regex("\\A(?:\\[Image #\\d+]\\s*)+")
 // Photo-only words sent by current and older clients: wire data, not interface copy.
 private val composerPhotoStandIns = setOf(
     "Please look at the image", "Please look at the images", "Please look at the photos", "See the images", "Please look at the video",
+    "Please look at the attached files",
     "请看图片", // i18n-ignore
     "请看视频", // i18n-ignore
+    "请看附件", // i18n-ignore
     "画像を見てください", // i18n-ignore
     "動画を見てください", // i18n-ignore
+    "添付ファイルを見てください", // i18n-ignore
 )
 
 /** How many photos a message carries as paths on the computer (its `<attached_images>` block): what a queued row says it carries. */
@@ -257,6 +285,6 @@ internal fun composerMessagePreview(text: String, photo: String, video: String? 
 internal fun composerMessagePreview(text: String): String =
     composerMessagePreview(text, stringResource(R.string.chat_composer_photo_placeholder), stringResource(R.string.chat_composer_video_placeholder))
 
-/** A video on the session's machine as the tag its message carries; null until it is there. */
-internal fun ComposerAttachment.attachedFile(): AttachedFile? =
-    path?.takeIf { video }?.let { AttachedFile("video", it, name, size ?: 0, duration) }
+/** A video or ordinary file on the session's machine as the tag its message carries; null for a photo or until uploaded. */
+fun ComposerAttachment.attachedFile(): AttachedFile? =
+    path?.takeIf { !image }?.let { AttachedFile(if (video) "video" else "file", it, name, size ?: 0, duration) }

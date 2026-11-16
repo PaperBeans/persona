@@ -186,6 +186,52 @@ func TestMachineCallGatesUltracodeStarts(t *testing.T) {
 	}
 }
 
+// A start that carries a goal goes only to a node that announces start_goal: an older one would start the session and
+// drop the goal without a word. The refusal has its own code, so the caller can tell it from ultracode's and start
+// again without the goal.
+func TestMachineCallGatesStartGoal(t *testing.T) {
+	d := newTestDevices(t)
+	m := newMachine(d, MachineConfig{ID: "box", Name: "Box", Kind: "ssh", SSHHost: "box.invalid"})
+	set := func(info proto.NodeInfo) {
+		m.mu.Lock()
+		m.info, m.online = info, true
+		m.mu.Unlock()
+	}
+	code := func(method string, params any) string {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		var re *rpc.Error
+		if err := m.call(ctx, method, params, nil); errors.As(err, &re) {
+			return re.Code
+		}
+		return ""
+	}
+	goal := map[string]any{"cwd": "/x", "goal": "the tests pass"}
+
+	set(current("b1"))
+	if c := code("session.start", goal); c == proto.CodeStartGoalUnsupported {
+		t.Fatal("a node announcing start_goal was refused")
+	}
+	without := current("b1")
+	without.Capabilities = slices.DeleteFunc(slices.Clone(without.Capabilities), func(c string) bool { return c == nodeproto.StartGoal })
+	set(without)
+	if c := code("session.start", goal); c != proto.CodeStartGoalUnsupported {
+		t.Fatalf("a goal on a node without start_goal: code %q", c)
+	}
+	for _, p := range []map[string]any{{"cwd": "/x", "goal": "  "}, {"cwd": "/x"}} {
+		if c := code("session.start", p); c == proto.CodeStartGoalUnsupported {
+			t.Fatalf("%v refused on a node without start_goal", p)
+		}
+	}
+	if c := code("session.send", goal); c == proto.CodeStartGoalUnsupported {
+		t.Fatal("only session.start carries a start's goal")
+	}
+	set(proto.NodeInfo{Version: "b1", ModelConfiguration: true}) // from before the handshake
+	if c := code("session.start", goal); c != proto.CodeStartGoalUnsupported {
+		t.Fatalf("a goal on a node from before the handshake: code %q", c)
+	}
+}
+
 func TestMachineCallGatesAssistantConfigDir(t *testing.T) {
 	d := newTestDevices(t)
 	m := newMachine(d, MachineConfig{ID: "box", Name: "Box", Kind: "ssh", SSHHost: "box.invalid"})

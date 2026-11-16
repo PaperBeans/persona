@@ -13256,29 +13256,6 @@
         }
       }
     },
-    "10K+" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "10K+"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "1万+"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "1万+"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
     "24 Hours" : {
       "localizations" : {
         "en" : {
@@ -25611,6 +25588,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "需先在 iPhone 上实时接入，或到电脑上处理。"
+          }
+        }
+      }
+    },
+    "Attach live to answer it here, or answer it on the computer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Attach live to answer it here, or answer it on the computer."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リアルタイム接続すると、ここで回答できます。コンピュータで回答することもできます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时接入后就能在这里作答，也可以到电脑上处理。"
           }
         }
       }
@@ -134721,29 +134721,6 @@
       },
       "extractionState" : "manual"
     },
-    "Send the queued messages now? [Queue Strip]" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Send the queued messages now?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "送信待ちのメッセージを今すぐ送りますか？"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "现在就发送排队的消息？"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
     "Send this number to the bot in Lark" : {
       "localizations" : {
         "en" : {
@@ -162944,6 +162921,29 @@
         }
       }
     },
+    "This conversation isn't available" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This conversation isn't available"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この会話は利用できません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话现在不可用"
+          }
+        }
+      }
+    },
     "This conversation's launcher is no longer available. Follow the Main Chat default or choose another launcher." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -165892,6 +165892,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "This session can't be answered from here. Answer it on the computer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This session can't be answered from here. Answer it on the computer."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このセッションはここでは回答できません。コンピュータで回答してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个会话不允许在这里作答，请到电脑上处理。"
+          }
+        }
+      }
     },
     "This session can't be approved from here. Open the app to check it." : {
       "localizations" : {

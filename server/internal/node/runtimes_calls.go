@@ -218,8 +218,11 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 		out, err := call(method, params)
 		return out, err, true
 	case "session.watch":
-		n.runtimes.watch(h, p.SessionID, p.SinceSeq, rpc.ConnContext(ctx))
+		attempt := n.runtimes.watch(h, p.SessionID, p.SinceSeq, rpc.ConnContext(ctx))
 		_, err := call("session.watch", map[string]any{"session_id": p.SessionID, "since_seq": p.SinceSeq})
+		if err != nil {
+			n.runtimes.watchFailed(h, p.SessionID, attempt.token)
+		}
 		return okResult(err), err, true
 	case "session.unwatch":
 		n.runtimes.unwatch(p.SessionID)

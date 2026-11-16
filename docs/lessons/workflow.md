@@ -2,6 +2,10 @@
 
 Pitfalls, odd behavior and the trade-offs made at the time (formerly in `CLAUDE.md`; index in `docs/lessons/README.md`). Put new lessons in the matching section; if none fits, start a new one.
 
+- Disposable Postgres containers need `docker rm -fv`, not only `docker rm -f` (#8832): the image creates an anonymous
+  data volume even without a mount argument. Remove only the current fixture's container; never prune historical
+  volumes or change persistent database cleanup to repair a test fixture leak.
+
 - Remote-tracking refs and `FETCH_HEAD` are shared across worktrees (#2705). Another task's fetch can advance
   `origin/main` between inspection and local commit consolidation, turning an older tree into apparent reversions
   of unrelated main changes. Capture the full base SHA or fetch into a task-specific ref before integrating or

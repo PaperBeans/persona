@@ -222,4 +222,86 @@ class ChatComposerServiceTest {
             assertEquals("$code $body", if (endsPairing) 1 else 0, expired)
         }
     }
+
+    @Test fun uploadDestinationFollowsFeaturesAndExplicitHealthAlwaysWins() = runBlocking {
+        val scope = HubScope("test-hub", "generation")
+        val session = SessionKey("machine", "session")
+        val transport = object : MessageTransport {
+            override val readyToSend = MutableStateFlow(true)
+            override val supportsClientOps = false
+            override suspend fun send(request: MessageRequest): MessageTransportResult = error("Unexpected delegate send")
+        }
+        val cases = listOf(
+            Triple(setOf("file_upload", "upload_attachment"), "attachment", "attachment"),
+            Triple(emptySet(), "attachment", "attachment"),
+            Triple(setOf("file_upload"), "attachment", null),
+            Triple(setOf("upload_attachment"), "health", "health"),
+            Triple(setOf("file_upload"), "health", "health"),
+        )
+        for ((features, requested, expected) in cases) {
+            val paths = mutableListOf<String>()
+            val service = HttpChatComposerService(scope, transport, request = { path, _, _ ->
+                paths += path
+                uploadResponse(200, """{"path":"/up/file.txt"}""")
+            }, features = { features })
+            val file = File.createTempFile("composer-destination-", ".txt")
+            try {
+                assertEquals("/up/file.txt", service.upload(session, "file.txt", file, requested))
+                val expectedQuery = "name=file.txt" + (expected?.let { "&dest=$it" } ?: "")
+                assertEquals("features=$features requested=$requested",
+                    listOf("/api/v1/machines/machine/files?$expectedQuery"), paths)
+            } finally { file.delete() }
+        }
+    }
+
+    @Test fun unknownAttachmentDestinationRetriesThatFileOnceWithoutDestAndNeverLoops() = runBlocking {
+        val scope = HubScope("test-hub", "generation")
+        val session = SessionKey("machine", "session")
+        val transport = object : MessageTransport {
+            override val readyToSend = MutableStateFlow(true)
+            override val supportsClientOps = false
+            override suspend fun send(request: MessageRequest): MessageTransportResult = error("Unexpected delegate send")
+        }
+        val file = File.createTempFile("composer-fallback-", ".txt")
+        try {
+            val paths = mutableListOf<String>()
+            val service = HttpChatComposerService(scope, transport, request = { path, _, _ ->
+                paths += path
+                if (paths.size == 1) uploadResponse(400, """{"error":"unknown dest"}""")
+                else uploadResponse(200, """{"path":"/tmp/file.txt"}""")
+            }, features = { setOf("upload_attachment") })
+            assertEquals("/tmp/file.txt", service.upload(session, "file.txt", file, "attachment"))
+            assertEquals(listOf(
+                "/api/v1/machines/machine/files?name=file.txt&dest=attachment",
+                "/api/v1/machines/machine/files?name=file.txt",
+            ), paths)
+
+            val refused = mutableListOf<String>()
+            val noLoop = HttpChatComposerService(scope, transport, request = { path, _, _ ->
+                refused += path
+                uploadResponse(400, """{"error":"unknown dest"}""")
+            }, features = { setOf("upload_attachment") })
+            try {
+                noLoop.upload(session, "file.txt", file, "attachment")
+                fail("The second refusal must remain a failure")
+            } catch (_: ComposerOperationException) { }
+            assertEquals(2, refused.size)
+            assertFalse(refused[1].contains("dest="))
+
+            val health = mutableListOf<String>()
+            val noHealthFallback = HttpChatComposerService(scope, transport, request = { path, _, _ ->
+                health += path
+                uploadResponse(400, """{"error":"unknown dest"}""")
+            })
+            try {
+                noHealthFallback.upload(session, "health.json", file, "health")
+                fail("Health must not silently change destination")
+            } catch (_: ComposerOperationException) { }
+            assertEquals(listOf("/api/v1/machines/machine/files?name=health.json&dest=health"), health)
+        } finally { file.delete() }
+    }
+
+    private fun uploadResponse(code: Int, body: String): Response = Response.Builder()
+        .request(Request.Builder().url("https://example.com/").build())
+        .protocol(Protocol.HTTP_1_1).code(code).message("test").body(body.toResponseBody()).build()
 }

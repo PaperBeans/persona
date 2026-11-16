@@ -7,10 +7,8 @@ import { api, ApiError, errorText } from "../../lib/api";
 import { startConversation } from "../../lib/assistant-start";
 import { adoptConversation, askPersonaOf, noteSent, sendToSession } from "../../lib/outbox";
 import { baseName, sessionTitle, stateOf, uuid } from "../../lib/format";
-import {
-  agentDraft, connectorReference, conversationRoute, docChangeKey, docChangeLine, HANDOFF_PRESETS, handOffContext, handOffMessage, handOffToMain, isLark, itemKey, itemPath, itemRequest, keepDropped, keptChanges, recordHandOff, sendReply, useDroppedChanges,
-  setDone, unsentReplies, type InboxItem,
-} from "../../lib/inbox";
+import { agentDraft, connectorReference, conversationRoute, docChangeKey, handOffToMain, isLark, itemKey, itemPath, itemRequest, keepDropped, keptChanges, sendReply, useDroppedChanges, setDone, unsentReplies, type InboxItem } from "../../lib/inbox";
+import { docChangeLine, HANDOFF_PRESETS, handOffContext, handOffMessage, recordHandOff } from "../../lib/inbox-page";
 import { isTransient } from "../../lib/ops";
 import { hasFinePointer } from "../../lib/viewport";
 import { machineWithHub } from "../../lib/mesh";

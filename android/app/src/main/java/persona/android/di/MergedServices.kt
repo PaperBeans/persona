@@ -434,6 +434,7 @@ internal fun mergedAgentsState(list: List<GroupNames>, states: List<AgentsWiring
         private fun of(machineId: String) = list.indexOfFirst { it.owns(machineId) }.takeIf { it >= 0 }
         private fun creation(index: Int?) = index?.let { creations[it] } ?: throw HubFailure(HubError.NoNetwork)
         override suspend fun launchers(machineId: String) = creation(of(machineId)).launchers(machineId)
+        override suspend fun launcherList(machineId: String) = creation(of(machineId)).launcherList(machineId)
         override suspend fun directories(machineId: String, path: String) = creation(of(machineId)).directories(machineId, path)
         override suspend fun start(request: AgentStartRequest, operationId: String): AgentStartResult {
             val index = of(request.machineId)

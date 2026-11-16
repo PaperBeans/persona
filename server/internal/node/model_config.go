@@ -43,6 +43,9 @@ type modelExecution struct {
 	// SecretTicket: the hand-off a new Claude Code start puts in its environment (secretenv.go). Per start, never
 	// part of a fingerprint, never kept for a resume.
 	SecretTicket string `json:"-"`
+	// Goal: a Claude Code /goal condition typed after the first message of a new start is in (startgoal.go). Per start,
+	// never part of a fingerprint, never kept for a resume.
+	Goal string `json:"-"`
 }
 
 func supervisionRuntimeRefusal(ctx context.Context) error {

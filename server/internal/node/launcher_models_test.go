@@ -93,7 +93,8 @@ func fakeModelServer(t *testing.T, in io.Reader, out io.WriteCloser) {
 				`"serviceTiers":[{"id":"priority","name":"Fast","description":"Increased usage"}]},` +
 				`{"id":"old","model":"old","displayName":"Old","hidden":true}],"nextCursor":"p2"}`)
 		case req.Method == "model/list" && req.Params["cursor"] == "p2":
-			reply(`{"data":[{"id":"gateway/model-b","model":"gateway/model-b","displayName":"","hidden":false}],"nextCursor":null}`)
+			reply(`{"data":[{"id":"gateway/model-b","model":"gateway/model-b","displayName":"","hidden":false,` +
+				`"defaultReasoningEffort":"none","supportedReasoningEfforts":[]}],"nextCursor":null}`)
 		default:
 			io.WriteString(out, `{"jsonrpc":"2.0","id":1,"error":{"message":"unexpected"}}`+"\n")
 		}
@@ -120,7 +121,8 @@ func TestCodexModelListPagesAndHides(t *testing.T) {
 	if !strings.Contains(string(raw), `"service_tiers":[{"id":"priority","name":"Fast","description":"Increased usage"}]`) {
 		t.Fatalf("first lost its native speed choices: %s", raw)
 	}
-	if b.ID != "gateway/model-b" || b.Name != "gateway/model-b" || b.Default {
+	// A model that takes no level (a gateway catalog's) offers none, and no default one either.
+	if b.ID != "gateway/model-b" || b.Name != "gateway/model-b" || b.Default || len(b.Efforts) != 0 || b.DefaultEffort != "" {
 		t.Fatalf("second %+v", b)
 	}
 }
@@ -205,6 +207,48 @@ func TestLauncherModelsRunsTheLauncher(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, "args.txt")); err == nil {
 		t.Fatal("asked the CLI again")
+	}
+}
+
+// A managed Codex provider's list is its codex's app-server's, through personad launch: the node used to run
+// `personad launch <name>` alone, whose codex started its TUI ("stdin is not a terminal") and listed nothing.
+func TestManagedCodexModelsAskTheAppServer(t *testing.T) {
+	home := fakeCLIHome(t)
+	n, _ := testNode(t)
+	n.home, n.dir = home, filepath.Join(home, ".persona")
+	// personad launch, as the provider's codex: an app-server when asked for one, else a TUI with no terminal.
+	n.bin = filepath.Join(home, "bin", "personad")
+	writeFile(t, n.bin, `#!/bin/sh
+printf '%s\n' "$@" > "$HOME/personad-args.txt"
+case " $* " in *" app-server "*) ;; *) echo "Error: stdin is not a terminal" >&2; exit 1 ;; esac
+read line
+echo '{"jsonrpc":"2.0","id":1,"result":{"userAgent":"codex"}}'
+read line
+read line
+echo '{"jsonrpc":"2.0","id":2,"result":{"data":[{"id":"example-big","model":"example-big","displayName":"Example Big","hidden":false,"defaultReasoningEffort":"high","supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high"}]},{"id":"example-plain","model":"example-plain","displayName":"Example Plain","hidden":false,"defaultReasoningEffort":"none","supportedReasoningEfforts":[]}],"nextCursor":null}}'
+sleep 60
+`)
+	if err := os.Chmod(n.bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	n.setManaged([]proto.ManagedLauncher{{Name: "gw", Agent: "codex", BaseURL: "http://127.0.0.1:9/v1", APIKey: "k", Model: "example-big"}})
+	res, err := n.launcherModels(context.Background(), "gw", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, _ := os.ReadFile(filepath.Join(home, "personad-args.txt"))
+	if got := strings.Fields(string(args)); !slices.Equal(got, []string{"launch", "gw", "app-server"}) {
+		t.Fatalf("personad got %q", got)
+	}
+	if res.Agent != "codex" || len(res.Models) != 2 {
+		t.Fatalf("got %+v", res)
+	}
+	big, plain := res.Models[0], res.Models[1]
+	if big.ID != "example-big" || !slices.Equal(big.Efforts, []string{"low", "high"}) || big.DefaultEffort != "high" {
+		t.Fatalf("example-big %+v", big)
+	}
+	if plain.ID != "example-plain" || len(plain.Efforts) != 0 || plain.DefaultEffort != "" {
+		t.Fatalf("a model that takes no level: %+v", plain)
 	}
 }
 

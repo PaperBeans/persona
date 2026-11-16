@@ -66,6 +66,13 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if in.StartDefaults != nil && len(in.StartDefaults.Rules) > 0 {
+		if err := in.StartDefaults.validate(true, time.Now().UTC()); err != nil {
+			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		}
+		in.StartDefaults.By = "owner" // this route is full credentials only
+	}
 	before := s.settings(ctx)
 	machine := before.MachineID
 	if in.MachineID != "" {
@@ -270,6 +277,13 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 				v.DispatchPolicy = nil
 			} else {
 				v.DispatchPolicy = in.DispatchPolicy
+			}
+		}
+		if in.StartDefaults != nil { // the same for the start defaults (start_defaults.go)
+			if len(in.StartDefaults.Rules) == 0 {
+				v.StartDefaults = nil
+			} else {
+				v.StartDefaults = in.StartDefaults
 			}
 		}
 		return nil

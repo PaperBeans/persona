@@ -115,5 +115,6 @@
   "brief_more": "…ほか {n} 件",
   "brief_also_done": "ほかに実施：{list}",
   "brief_also_sep": "；",
+  "delivery_verification_unavailable": "タスク {task} はまだ受理できません：{pr} の配信状態を一時的に確認できません（{reason}）。作業が未完了という意味ではありません。現在の状態を維持し、検証が復旧したら再確認してください。検証不能だけを理由に再マージ、再デプロイ、保留、キャンセルを求めないでください。",
   "decision_not_delivered": "オーナーの決定：{decision}。記録済みですが、Agent に届いておらず（{error}）、自動では再送していません。Agent が受け取れるようになったら伝えてください"
 }

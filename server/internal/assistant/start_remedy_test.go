@@ -226,7 +226,7 @@ func TestRemedyExpiresWithItsTab(t *testing.T) {
 	if err := s.patchPlanTask(ctx, p.ID, 0, func(pt *PlanTask) { pt.Start.Until = time.Now().Add(-time.Second) }); err != nil {
 		t.Fatal(err)
 	}
-	s.remedyWatch(ctx, todoNow(s, todo.ID), time.Now())
+	s.remedyWatch(ctx, todoNow(s, todo.ID), time.Now(), s.planHistoryOnce())
 	if got := todoNow(s, todo.ID); got.DoneAt == nil {
 		t.Fatalf("not failed: %+v", got)
 	}

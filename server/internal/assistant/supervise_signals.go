@@ -412,14 +412,15 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 	// Only the open tasks: everything below passes the finished ones by, and there can be thousands of them.
 	tasks := s.todosWhere(ctx, "*", func(t *Todo) bool { return t.DoneAt == nil })
 	s.pruneAllStoppedDedup(ctx)
-	lists := machineSessions{}   // each machine listed once for all the supervised tasks (#3029)
-	s.backfillBriefs(ctx, tasks) // tasks from before briefs get one from what they still have (task_brief.go)
+	lists := machineSessions{}     // each machine listed once for all the supervised tasks (#3029)
+	history := s.planHistoryOnce() // and the plans read once, when a task's start needs them (start_remedy.go)
+	s.backfillBriefs(ctx, tasks)   // tasks from before briefs get one from what they still have (task_brief.go)
 	groups := allStoppedTaskGroups(tasks)
 	for _, t := range tasks {
 		if t.Supervision == nil || t.DoneAt != nil {
 			continue
 		}
-		s.remedyWatch(ctx, t, now) // a failed start's kept tab expired (start_remedy.go)
+		s.remedyWatch(ctx, t, now, history) // a failed start's kept tab expired (start_remedy.go)
 		agents := s.taskAgentsIn(ctx, t, lists)
 		group := s.allStoppedGroup(ctx, t, groups[t.ID], lists)
 		allStopped := false

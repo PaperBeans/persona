@@ -364,6 +364,7 @@ func (b *runtimeRegistry) resetWatches() {
 	for _, h := range b.conns {
 		h.mu.Lock()
 		h.watched = map[string]bool{}
+		h.watchTokens = map[string]uint64{}
 		h.mu.Unlock()
 	}
 }
@@ -391,7 +392,7 @@ func (b *runtimeRegistry) add(peer *rpc.Peer) *runtimeConn {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.serial++
-	h := &runtimeConn{serial: b.serial, peer: peer, watched: map[string]bool{}}
+	h := &runtimeConn{serial: b.serial, peer: peer, watched: map[string]bool{}, watchTokens: map[string]uint64{}}
 	b.conns[h.serial] = h
 	return h
 }
@@ -433,10 +434,32 @@ func (b *runtimeRegistry) recomputeOwners() {
 	}
 }
 
+// runtimeWatchAttempt is one registered session.watch RPC. The token changes for every explicit or automatic attempt;
+// since is the sequence to resume from. A failure may clear watched only while it still belongs to this attempt.
+type runtimeWatchAttempt struct {
+	since int
+	token uint64
+}
+
+// beginWatchLocked installs a fresh attempt while watched continues to suppress duplicate automatic calls, including
+// while the RPC is pending. Callers hold b.mu and h.mu.
+func (b *runtimeRegistry) beginWatchLocked(h *runtimeConn, id string, since int) runtimeWatchAttempt {
+	h.nextWatchToken++
+	if h.watched == nil {
+		h.watched = map[string]bool{}
+	}
+	if h.watchTokens == nil {
+		h.watchTokens = map[string]uint64{}
+	}
+	h.watched[id] = true
+	h.watchTokens[id] = h.nextWatchToken
+	return runtimeWatchAttempt{since: since, token: h.nextWatchToken}
+}
+
 // setSessions records a runtime's list and returns the watched sessions this connection has not been asked to watch
-// yet (with the seq to start after), and the sessions it now runs that another runtime started for the hub lately,
-// which it has not been told of yet (runtime.driven).
-func (b *runtimeRegistry) setSessions(h *runtimeConn, list []proto.Session) (map[string]int, []string) {
+// yet (with the sequence and generation of each attempt), and the sessions it now runs that another runtime started
+// for the hub lately, which it has not been told of yet (runtime.driven).
+func (b *runtimeRegistry) setSessions(h *runtimeConn, list []proto.Session) (map[string]runtimeWatchAttempt, []string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	h.mu.Lock()
@@ -445,7 +468,7 @@ func (b *runtimeRegistry) setSessions(h *runtimeConn, list []proto.Session) (map
 	h.mu.Unlock()
 	b.backAgain(rt) // its rows while it was away (runtimeaway.go): this list says what it has
 	b.recomputeOwners()
-	rewatch := map[string]int{}
+	rewatch := map[string]runtimeWatchAttempt{}
 	var driven []string
 	now := time.Now()
 	h.mu.Lock()
@@ -465,8 +488,7 @@ func (b *runtimeRegistry) setSessions(h *runtimeConn, list []proto.Session) (map
 			driven = append(driven, s.SessionID)
 		}
 		if since, ok := b.watching[s.SessionID]; ok && !h.watched[s.SessionID] {
-			h.watched[s.SessionID] = true
-			rewatch[s.SessionID] = since
+			rewatch[s.SessionID] = b.beginWatchLocked(h, s.SessionID, since)
 		}
 	}
 	h.mu.Unlock()
@@ -589,7 +611,7 @@ func (b *runtimeRegistry) launcherRuntime(name string) *runtimeConn {
 	return b.launcherOwners()[name]
 }
 
-func (b *runtimeRegistry) watch(h *runtimeConn, id string, since int, parent context.Context) {
+func (b *runtimeRegistry) watch(h *runtimeConn, id string, since int, parent context.Context) runtimeWatchAttempt {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if cur, ok := b.watching[id]; !ok || since > cur {
@@ -601,8 +623,35 @@ func (b *runtimeRegistry) watch(h *runtimeConn, id string, since int, parent con
 		delete(b.watchParents, id)
 	}
 	h.mu.Lock()
-	h.watched[id] = true
-	h.mu.Unlock()
+	defer h.mu.Unlock()
+	return b.beginWatchLocked(h, id, since)
+}
+
+// watchFailed releases a failed attempt so the next list can retry it. watched is connection-private: clearing h's
+// current attempt cannot clear another owner's state, whether this connection is temporarily not the owner or another
+// connection has taken over. The registered serial fences a departed connection, while the token fences newer attempts
+// and unwatch/reset generations. Success deliberately has no registry write: watched covers pending and established watches.
+func (b *runtimeRegistry) watchFailed(h *runtimeConn, id string, token uint64) {
+	if b == nil || h == nil || token == 0 {
+		return
+	}
+	if h.onWatchFailed != nil {
+		defer h.onWatchFailed()
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conns[h.serial] != h {
+		return
+	}
+	if _, ok := b.watching[id]; !ok {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.watched[id] && h.watchTokens[id] == token {
+		delete(h.watched, id)
+		delete(h.watchTokens, id)
+	}
 }
 
 func (b *runtimeRegistry) unwatch(id string) {
@@ -613,6 +662,7 @@ func (b *runtimeRegistry) unwatch(id string) {
 	for _, h := range b.conns {
 		h.mu.Lock()
 		delete(h.watched, id)
+		delete(h.watchTokens, id)
 		h.mu.Unlock()
 	}
 }

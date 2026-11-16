@@ -218,6 +218,86 @@ pub extern "system" fn Java_persona_core_rustcore_NativeBridge_projectSort<'a>(
     .or_else(|| env.new_string("").ok())
     .unwrap_or_default()
 }
+
+/// Projects static transcript rows into turns from a JSON input string. Pure function, no runtime handle needed.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_persona_core_rustcore_NativeBridge_projectTurns<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    input: JString<'a>,
+) -> JString<'a> {
+    catch_unwind(AssertUnwindSafe(|| {
+        let input: String = env.get_string(&input).ok()?.into();
+        let input: persona_core_domain::turns::Input = serde_json::from_str(&input).ok()?;
+        let projection = persona_core_domain::turns::project(&input);
+        let json = serde_json::to_string(&projection).ok()?;
+        env.new_string(json).ok()
+    }))
+    .ok()
+    .flatten()
+    .or_else(|| env.new_string("").ok())
+    .unwrap_or_default()
+}
+
+/// Splits streamed text into finished blocks and an unfinished tail. Pure function, no runtime handle needed.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_persona_core_rustcore_NativeBridge_projectStreamChunks<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    input: JString<'a>,
+) -> JString<'a> {
+    catch_unwind(AssertUnwindSafe(|| {
+        let input: String = env.get_string(&input).ok()?.into();
+        let input: persona_core_domain::stream_chunks::Input = serde_json::from_str(&input).ok()?;
+        let projection = persona_core_domain::stream_chunks::split(&input);
+        let json = serde_json::to_string(&projection).ok()?;
+        env.new_string(json).ok()
+    }))
+    .ok()
+    .flatten()
+    .or_else(|| env.new_string("").ok())
+    .unwrap_or_default()
+}
+
+/// Applies one question-answer operation from a JSON input string. Pure function, no runtime handle needed.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_persona_core_rustcore_NativeBridge_projectAnswer<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    input: JString<'a>,
+) -> JString<'a> {
+    catch_unwind(AssertUnwindSafe(|| {
+        let input: String = env.get_string(&input).ok()?.into();
+        let input: persona_core_domain::answer::Input = serde_json::from_str(&input).ok()?;
+        let transition = persona_core_domain::answer::project(&input)?;
+        let json = serde_json::to_string(&transition).ok()?;
+        env.new_string(json).ok()
+    }))
+    .ok()
+    .flatten()
+    .or_else(|| env.new_string("").ok())
+    .unwrap_or_default()
+}
+
+/// Formats a question option's display text and recommendation flag. Pure function, no runtime handle needed.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_persona_core_rustcore_NativeBridge_displayAnswer<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    input: JString<'a>,
+) -> JString<'a> {
+    catch_unwind(AssertUnwindSafe(|| {
+        let label: String = env.get_string(&input).ok()?.into();
+        let display = persona_core_domain::answer::display(&label);
+        let json = serde_json::to_string(&display).ok()?;
+        env.new_string(json).ok()
+    }))
+    .ok()
+    .flatten()
+    .or_else(|| env.new_string("").ok())
+    .unwrap_or_default()
+}
+
 #[cfg(any(target_os = "android", feature = "test-support"))]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_persona_core_rustcore_NativeDiagnostics_enableDiagnostics(

@@ -47,7 +47,8 @@ vi.mock("../../lib/extension-slots", () => ({ useInboxItemPlace: () => undefined
 vi.mock("../../lib/translate", () => ({ useTranslatePrefs: () => ({ enabled: false }), hubTranslation: () => undefined, translatesChat: () => false, translatesMail: () => false, languageName: () => "" }));
 
 import type { InboxItem } from "../../lib/inbox";
-import { resetInboxForTests, shortTime, sourceLine } from "../../lib/inbox";
+import { resetInboxForTests, shortTime } from "../../lib/inbox";
+import { sourceLine } from "../../lib/inbox-page";
 import { rowMeta } from "../../lib/inbox-now";
 import { chainRows, type ChainEntry } from "../../lib/inbox-events";
 import { ApiError } from "../../lib/api";

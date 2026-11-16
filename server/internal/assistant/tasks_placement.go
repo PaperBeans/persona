@@ -183,7 +183,31 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	if err := t.normalizeMachinePolicy(); err != nil {
 		return "", "", err
 	}
+	// What the task itself named, kept from its first try in this process. The task as stored never carries what a
+	// start-defaults policy filled in (storedLaunch), so a task read back from the store (a remedy, a queued start, a
+	// retry from the card, a manager restart) names only its own.
+	if t.callerPick == nil {
+		own := t.launchPick()
+		t.callerPick = &own
+	}
+	caller := *t.callerPick
+	// Every try starts from what the task named: what a policy filled in on an earlier try goes back first, whichever
+	// rule fits now (start_defaults.go), so a rule that changed or no longer fits leaves nothing of the earlier one.
+	if t.startFilled.any() {
+		t.Launcher, t.Model, t.Effort, t.Tier = caller.launcher, caller.model, caller.effort, caller.tier
+		t.Permission, t.Ultracode = caller.permission, copyBool(caller.ultracode)
+	}
+	t.startFilled = startFill{}
+	// A self-planning constraint applies only while a policy rule asks for it on this try.
+	t.planFirst = false
 	params := map[string]any{"launcher": t.Launcher, "model": t.Model, "effort": t.Effort, "tier": t.Tier}
+	// The start-defaults policy: its preset goes in before the start is resolved, as if the task had named that tier;
+	// its effort, ultracode and goal after the launcher fit.
+	defaults, withDefaults := s.taskStartDefaults(ctx, t)
+	presetNote := ""
+	if withDefaults {
+		presetNote = s.applyStartPreset(ctx, t, caller, defaults, params)
+	}
 	own, err := s.resolveStart(ctx, params)
 	if err != nil {
 		return "", "", err
@@ -250,6 +274,9 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		delete(params, "effort")
 		t.Effort = ""
 	}
+	if withDefaults { // only what the task left open, after the fit, which may itself have filled some in
+		s.applyStartExtras(ctx, t, caller, defaults, fit.agent == "claude", params, presetNote)
+	}
 	if t.MachinePolicy == machineFixed {
 		// Only an actual terminal start can recheck a repaired terminal shell.
 		// An explicit retry keeps that existing recovery path on the fixed target;
@@ -275,6 +302,9 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	}
 	if t.Readonly {
 		prompt += "\n\n" + prompts.RenderReadonlyTaskConstraint()
+	}
+	if t.planFirst {
+		prompt += "\n\n" + prompts.RenderPlanFirstTaskConstraint()
 	}
 	if len(t.DoneWhen) > 0 { // what the supervisor will check (supervise.go)
 		prompt += "\n\n" + prompts.RenderTaskDoneWhen(t.DoneWhen)
@@ -352,11 +382,26 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	s.setPlanThen(ctx, m.ID, params)
 	sentAt := time.Now()
 	err = s.call(ctx, m.ID, DeviceSessionStart, params, &res)
-	skipped, refused := s.ultracodeRefusal(ctx, err, params)
-	if refused {
-		delete(params, "ultracode") // an extra the agent it landed on cannot have: it starts without it (#3596)
-		s.logf("task %s: start: %s; starting without ultracode", t.TodoID, skipped)
-		err = s.call(ctx, m.ID, DeviceSessionStart, params, &res)
+	// Extras the agent it landed on cannot have (ultracode #3596, a start goal: start_defaults.go) are each dropped
+	// once, in whatever order the node refuses them; both refusals come before anything starts.
+	var skipped string
+	var refused bool
+	for range 2 {
+		if reason, no := s.goalRefusal(err, params); no {
+			delete(params, "goal")
+			s.logf("task %s: start: %s; starting without a goal", t.TodoID, reason)
+			t.noteWhy(i18n.T(s.lang(ctx), "assistant-tasks.start_goal_skipped", i18n.Args{"reason": reason}))
+			err = s.call(ctx, m.ID, DeviceSessionStart, params, &res)
+			continue
+		}
+		if reason, no := s.ultracodeRefusal(ctx, err, params); no {
+			skipped, refused = reason, true
+			delete(params, "ultracode")
+			s.logf("task %s: start: %s; starting without ultracode", t.TodoID, skipped)
+			err = s.call(ctx, m.ID, DeviceSessionStart, params, &res)
+			continue
+		}
+		break
 	}
 	if err != nil {
 		s.recordStartFailure(ctx, m.ID, s.startLauncher(ctx, picked), err)
@@ -418,6 +463,9 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	if refused { // only once it started here: a task moved elsewhere after a failed start asks again
 		off := false
 		t.Ultracode = &off // a retry does not ask again
+		if t.callerPick != nil {
+			t.callerPick.ultracode = copyBool(t.Ultracode) // nor a policy's later rule: off is the task's own now
+		}
 		t.noteWhy(i18n.T(s.lang(ctx), "assistant-tasks.ultracode_skipped", i18n.Args{"reason": skipped}))
 	}
 	return m.ID, res.Session.SessionID, nil
@@ -479,15 +527,18 @@ func (s *Service) adoptTaskStartSessionUntil(ctx context.Context, m Device, laun
 }
 
 // updatePlanTask keeps the machine, directory and why task i of started plan planID runs with now, its actual launch
-// permission, and its ultracode when the start went without it.
+// permission, and its ultracode when the start went without it. For whatever a start-defaults policy filled in on
+// this try (a preset's launcher, model, effort, tier and permission mode, the policy's effort or ultracode) it keeps
+// the task's own value (storedLaunch): a later start reading the task back must not take the policy's for its own.
 func (s *Service) updatePlanTask(ctx context.Context, planID string, i int, t PlanTask) {
+	launch := t.storedLaunch()
 	if err := s.patchPlanTask(ctx, planID, i, func(pt *PlanTask) {
 		pt.Machine, pt.Cwd, pt.Why = t.Machine, t.Cwd, t.Why
-		pt.Reroute, pt.Ultracode = t.Reroute, t.Ultracode
+		pt.Reroute, pt.Ultracode = t.Reroute, launch.ultracode
 		pt.Workspace, pt.WorkspaceResolved, pt.MachinePolicy = t.Workspace, t.WorkspaceResolved, t.MachinePolicy
 		pt.WorkspaceInferred, pt.ReservedTodoID = t.WorkspaceInferred, t.ReservedTodoID
-		pt.Launcher, pt.Model, pt.Effort, pt.Tier = t.Launcher, t.Model, t.Effort, t.Tier
-		pt.Permission = t.Permission
+		pt.Launcher, pt.Model, pt.Effort, pt.Tier = launch.launcher, launch.model, launch.effort, launch.tier
+		pt.Permission = launch.permission
 	}); err != nil {
 		s.logf("plan %s: %v", planID, err)
 	}

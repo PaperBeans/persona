@@ -146,6 +146,14 @@ nonisolated extension Interaction {
     }
 }
 
+/// Why the app can't answer a card on a session (`Interaction.answerBlock`, #6868).
+nonisolated enum AnswerBlock: Equatable, Sendable {
+    /// Its session can be attached live (a Codex thread on a shared app-server not joined yet): joined, the app answers it.
+    case attach
+    /// Its session's source doesn't let the app answer at all: only the computer can.
+    case computer
+}
+
 nonisolated extension Interaction {
     /// A card on no session (#4059): `personad ask` run outside herdr, or before the pane's agent hooked in, has no
     /// session the node could tie it to (docs/integrations/script-cli.md「Attribution」).
@@ -158,6 +166,13 @@ nonisolated extension Interaction {
         if let session { return isSessionless || session.canApprove }
         if let under = foldedUnder, !under.isEmpty, under != sessionID { return true }
         return isSessionless
+    }
+
+    /// Why the app can't answer it, for the line under its greyed card (#6868; Android `approvalBlockedReason`, the
+    /// watch's `blockedReason`): nil where it can (`canAnswer`).
+    func answerBlock(session: Session?) -> AnswerBlock? {
+        guard !canAnswer(session: session) else { return nil }
+        return session?.canAttach == true ? .attach : .computer
     }
 
     /// The words a list row shows for this card: the question, else the summary, else the tool.

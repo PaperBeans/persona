@@ -32,7 +32,7 @@ export const wire = await import(wireUrl.href);
 
 // The helper's frames: a u32 little-endian length, a tag byte, then the fields.
 const MAX_FRAME = 16 * 1024 * 1024;
-export const Command = {config: 1, create: 2, dispatch: 3, flush: 4, drain: 5, close: 6, reencode: 7, samples: 8, transport: 9, sort: 10};
+export const Command = {config: 1, create: 2, dispatch: 3, flush: 4, drain: 5, close: 6, reencode: 7, samples: 8, transport: 9, sort: 10, state: 11};
 export const Record = {ok: 1, error: 2, changed: 3, effect: 4, sample: 5, end: 6};
 export const PayloadKind = {latest: 1, newer: 2, reloaded: 3, older: 4, range: 5, frame: 6};
 const WireType = {Action: 1, ChatEvent: 2, ChatPatch: 3, ChatSnapshot: 4, Config: 5, Effect: 6, ListOp: 7, Request: 8, WireBatch: 9, Payload: 10};
@@ -273,6 +273,11 @@ export class HostCore {
     const value = await this.#call(Command.sort, Buffer.from(JSON.stringify(input), 'utf8'));
     return JSON.parse(Buffer.from(value).toString('utf8'));
   }
+  async state(kind, input) {
+    const body = JSON.stringify({kind, input});
+    const value = await this.#call(Command.state, Buffer.from(body, 'utf8'));
+    return JSON.parse(Buffer.from(value).toString('utf8'));
+  }
 
   #flag(value) {
     assert.ok(value.length === 1 && value[0] <= 1, 'a flag is one byte, 0 or 1');
@@ -297,7 +302,14 @@ export class HostCore {
     assert.equal(this.#records.length + this.#pending.length + this.#callbacks.length, 0, 'nothing follows the end record');
   }
 
-  kill() { this.#child.kill('SIGKILL'); }
+  kill() {
+    this.#child.kill('SIGKILL');
+    // A test-timeout or an unresponsive helper must also release its stdio handles without waiting for #record().
+    this.#child.stdin.destroy();
+    this.#child.stdout.destroy();
+    this.#child.stderr.destroy();
+    this.#child.unref();
+  }
 }
 
 const cores = [];

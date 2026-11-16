@@ -14,6 +14,7 @@ import (
 	"golang.org/x/net/http/httpproxy"
 
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -119,6 +120,7 @@ func (n *Node) gatewayModels(ctx context.Context, l proto.ManagedLauncher) []pro
 			req.Header.Set(strings.TrimSpace(k), strings.TrimSpace(v))
 		}
 	}
+	modelhttp.SetDefaultUserAgent(req.Header)
 	resp, err := gatewayClient(env).Do(req)
 	if err != nil {
 		n.logf("launcher %s: its gateway's model list: %v", l.Name, redactSecrets(err.Error()))

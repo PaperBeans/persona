@@ -287,6 +287,37 @@ func TestRPCFailureLocalePreservesOutcomeAndDiagnostics(t *testing.T) {
 	}
 }
 
+// The node's open_elsewhere refusal (#6803) is said in the request's language by where the session is open, with the
+// node's words as the detail and its fields kept; one without a known where (an older node, an Agent runtime's own
+// refusal) keeps its words.
+func TestOpenElsewhereSpeaksTheClientsLanguage(t *testing.T) {
+	const words = "node's own words"
+	for _, where := range []string{"desktop", "terminal", "program", "other", "agents_list"} {
+		err := &rpc.Error{Code: "open_elsewhere", Message: words, Data: json.RawMessage(`{"delivered":"none","pid":42,"where":"` + where + `"}`)}
+		for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
+			rec := httptest.NewRecorder()
+			body := call(t, langWriter{rec, lang}, rec, err)
+			want := i18n.T(lang, "rpc-errors.open_elsewhere_"+where)
+			if want == "rpc-errors.open_elsewhere_"+where || body["error"] != want {
+				t.Fatalf("%s %s: %v", where, lang, body)
+			}
+			if rec.Code != http.StatusConflict || body["code"] != "open_elsewhere" || body["delivered"] != "none" || body["where"] != where || body["detail"] != words {
+				t.Fatalf("%s %s: %d %v", where, lang, rec.Code, body)
+			}
+			if lang == i18n.ZhHans && strings.Contains(want, "手机") {
+				t.Fatalf("%s names the phone: %s", where, want)
+			}
+		}
+	}
+	for _, data := range []string{`{"delivered":"none","pid":42}`, `{"delivered":"none","where":"elsewhere"}`} {
+		err := &rpc.Error{Code: "open_elsewhere", Message: words, Data: json.RawMessage(data)}
+		rec := httptest.NewRecorder()
+		if body := call(t, langWriter{rec, i18n.En}, rec, err); body["error"] != words {
+			t.Fatalf("%s: %v", data, body)
+		}
+	}
+}
+
 func TestAssistantServiceTierFailuresWithholdNativeDiagnostics(t *testing.T) {
 	for _, code := range []string{"assistant_service_tier_start_only", "assistant_service_tier_unsupported", "assistant_service_tier_refused"} {
 		for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {

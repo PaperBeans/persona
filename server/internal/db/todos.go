@@ -188,6 +188,11 @@ func (d *DB) CreateTodo(ctx context.Context, t TodoRow) error {
 	return createTodo(ctx, d.pool, t)
 }
 
+// CreateTodoTx inserts a new todo in a caller's transaction.
+func CreateTodoTx(ctx context.Context, tx pgx.Tx, t TodoRow) error {
+	return createTodo(ctx, tx, t)
+}
+
 func createTodo(ctx context.Context, executor interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, t TodoRow) error {

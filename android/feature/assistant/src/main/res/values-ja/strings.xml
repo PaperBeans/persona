@@ -7,6 +7,8 @@
     <string name="assistant_profile">アシスタントのプロフィール</string>
     <string name="assistant_got_it">OK</string>
     <string name="assistant_composer_placeholder">%1$sに質問…</string>
+    <string name="assistant_model_setup_title">アシスタントのモデルを接続</string>
+    <string name="assistant_model_setup_detail">アシスタントは%1$sで動作しています。このClaude Code設定ではモデルに接続できません。既存のプロバイダーを選ぶか、お使いのゲートウェイを追加してください。</string>
     <string name="assistant_info_settings">アシスタントの設定</string>
     <string name="assistant_info_knowledge">ナレッジ</string>
     <string name="assistant_info_schedule">定期タスク</string>

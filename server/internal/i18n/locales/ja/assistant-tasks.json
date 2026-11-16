@@ -36,8 +36,10 @@
   "route_no_task": "このチャットにはそのタスクがありません",
   "route_no_agent": "このタスクには実行中のエージェントがありません",
   "route_agents_stopped": "このタスクのエージェントはすべて停止しているため、送信していません。タスクにメッセージを送ると、新しいエージェントが開始されます。",
+  "route_agents_exited": "このタスクのエージェントはすべて停止済みのため、終了するものはありません。送信していません。",
   "route_starting": "このタスクの新しいエージェントがまだ起動中のため、このメッセージは送信していません。少し待ってからもう一度送ってください。",
   "route_offline": "そのコンピューターはオフラインです",
+  "route_not_kept": "このメッセージでタスクを再開することを記録できなかったため、送信していません。もう一度お試しください。",
   "earlier_phase_outcome": "以前の段階の結果",
   "outcome_question": "完了時の結論",
   "outcome_pitfall": "つまずいた点",
@@ -62,5 +64,6 @@
   "admission_queue_timeout": "{limit} 待っても開始できなかったため、開始を中止します。最後の理由：{reason}",
   "start_link_lost": "「{machine}」との接続が切れ、再接続後もタスクは起動していませんでした：{reason}",
   "start_machine_busy": "「{machine}」は接続されたままですが、待機時間内に応答がありませんでした（混雑している可能性があります）：{reason}",
-  "start_link_down": "「{machine}」との接続が切れ、しばらく待っても再接続できませんでした：{reason}"
+  "start_link_down": "「{machine}」との接続が切れ、しばらく待っても再接続できませんでした：{reason}",
+  "start_goal_skipped": "開始目標なしで開始しました：{reason}"
 }

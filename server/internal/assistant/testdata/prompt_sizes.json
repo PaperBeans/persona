@@ -78,8 +78,9 @@
   "mcp_tools.assistant#repository_add": 1423,
   "mcp_tools.assistant#repository_get": 904,
   "mcp_tools.assistant#save_place": 802,
-  "mcp_tools.assistant#schedule_followup": 4818,
-  "mcp_tools.assistant#schedule_routine": 4872,
+  "mcp_tools.assistant#schedule_followup": 4260,
+  "mcp_tools.assistant#schedule_routine": 4783,
+  "mcp_tools.assistant#schedule_state_set": 624,
   "mcp_tools.assistant#secret_run": 2673,
   "mcp_tools.assistant#skill_import": 2154,
   "mcp_tools.assistant#subscription_dry_run": 1827,
@@ -124,5 +125,6 @@
   "supervise.parked_due": 856,
   "supervise.review_rework": 555,
   "supervise.rework": 396,
+  "supervise.task_goal": 111,
   "supervision_instructions": 15442
 }

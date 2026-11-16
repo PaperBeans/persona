@@ -306,7 +306,11 @@ func (s *Service) launcherRoutes() {
 				result := proto.LauncherCheck{Agent: "api", Model: config.Model, Answer: textfmt.Clip(textfmt.OneLine(answer), 200), OK: err == nil,
 					Millis: int(time.Since(started).Milliseconds())}
 				if err != nil {
-					result.Error = textfmt.Clip(textfmt.OneLine(err.Error()), 400)
+					message := err.Error()
+					if explanation := directCallFailureExplanation(s.requestCtxLang(ctx), err); explanation != "" {
+						message = explanation + ": " + message
+					}
+					result.Error = textfmt.Clip(textfmt.OneLine(message), 400)
 				}
 				apierr.WriteJSON(w, map[string]any{"check": result})
 				return

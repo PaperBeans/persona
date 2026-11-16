@@ -81,7 +81,8 @@ type Task struct {
 	// Report: a daily report (a dot's, docs/assistant/north-star.md "Daily briefing"): its runs open with the north
 	// star's lines. Set with schedule_routine's report or in the body of PUT /api/v1/assistant/tasks/{id}; a change
 	// that leaves it out keeps it.
-	Report bool `json:"report,omitempty"`
+	Report bool          `json:"report,omitempty"`
+	RunIf  *routineCheck `json:"run_if,omitempty"`
 	// factsText is the run's facts as the model is given them (briefing.go); set on the copy a run is made from, never stored.
 	factsText string
 	// kbDir is the knowledge directory the run's hint names (a daily run with the knowledge base on); set on the copy, never stored.
@@ -224,17 +225,19 @@ type Followup struct {
 
 // ScheduleRun is one entry of the history: a task that ran, failed to start, or was skipped.
 type ScheduleRun struct {
-	ID        string    `json:"id"`
-	Kind      string    `json:"kind"`   // routine / followup (Task.kind)
-	RefID     string    `json:"ref_id"` // the task's id
-	Title     string    `json:"title"`
-	Due       time.Time `json:"due"` // when it was meant to run (the tap for "Run now")
-	At        time.Time `json:"at"`  // when it ran
-	Status    string    `json:"status"`
-	Error     string    `json:"error,omitempty"`
-	Manual    bool      `json:"manual,omitempty"` // "Run now"
-	MachineID string    `json:"machine_id,omitempty"`
-	SessionID string    `json:"session_id,omitempty"`
+	ID               string    `json:"id"`
+	Kind             string    `json:"kind"`   // routine / followup (Task.kind)
+	RefID            string    `json:"ref_id"` // the task's id
+	Title            string    `json:"title"`
+	Due              time.Time `json:"due"` // when it was meant to run (the tap for "Run now")
+	At               time.Time `json:"at"`  // when it ran
+	Status           string    `json:"status"`
+	Error            string    `json:"error,omitempty"`
+	RunIfError       string    `json:"run_if_error,omitempty"`
+	ConditionSkipped bool      `json:"condition_skipped,omitempty"`
+	Manual           bool      `json:"manual,omitempty"` // "Run now"
+	MachineID        string    `json:"machine_id,omitempty"`
+	SessionID        string    `json:"session_id,omitempty"`
 	// Retried: this run is the automatic retry after a failure (so a retry that fails again does not retry forever).
 	Retried bool `json:"retried,omitempty"`
 	// NotReady: skipped because a required computer or model was not ready, including temporary offline states.
@@ -295,7 +298,7 @@ type schedule struct {
 func (sc *schedule) missedRuns(since time.Time) []ScheduleRun {
 	var missed []ScheduleRun
 	for i, r := range sc.runs {
-		if r.At.Before(since) || (r.Status != runFailed && r.Status != runSkipped) || r.Manual {
+		if r.At.Before(since) || (r.Status != runFailed && r.Status != runSkipped) || r.Manual || r.ConditionSkipped {
 			continue
 		}
 		recovered := false
@@ -1032,7 +1035,7 @@ func (s *Service) describeSchedule(ctx context.Context, space string) string {
 }
 
 // toolScheduleRoutine adds a daily task from a conversation ("give me a morning briefing at 9 every day"), or changes one by id.
-func (s *Service) toolScheduleRoutine(ctx context.Context, self string, args json.RawMessage) (string, error) {
+func (s *Service) toolScheduleRoutine(ctx context.Context, machine, self string, args json.RawMessage) (string, error) {
 	var a struct {
 		FreshEachRun *bool           `json:"fresh_each_run"`
 		ID           string          `json:"id"`
@@ -1046,12 +1049,17 @@ func (s *Service) toolScheduleRoutine(ctx context.Context, self string, args jso
 		Push         *string         `json:"push"`   // left out: a new routine pushes every run, an existing one keeps its push
 		Inbox        *string         `json:"inbox"`  // left out: a new routine puts nothing in the Inbox, an existing one keeps its setting
 		Until        json.RawMessage `json:"until"`
+		RunIf        json.RawMessage `json:"run_if"`
 		// The task's own model configuration (schedule_model.go): nil leaves it as it is, "" clears that part.
 		Launcher *string `json:"launcher"`
 		Model    *string `json:"model"`
 		Effort   *string `json:"effort"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	runIf, err := parseRoutineCheck(a.RunIf)
+	if err != nil {
 		return "", err
 	}
 	a.Cron = strings.TrimSpace(a.Cron)
@@ -1091,6 +1099,15 @@ func (s *Service) toolScheduleRoutine(ctx context.Context, self string, args jso
 			if err := s.validateTaskModel(ctx, a.ID, a.Launcher, a.Model, a.Effort); err != nil {
 				return "", err
 			}
+		}
+	}
+	if runIf != nil {
+		approved, err := s.approveRoutineCheck(ctx, machine, self, runIf)
+		if err != nil {
+			return "", err
+		}
+		if !approved {
+			return "The owner did not approve the pre-run command. The routine was not changed.", nil
 		}
 	}
 	mayBeMain := s.mayBeMainNow(ctx)
@@ -1139,6 +1156,9 @@ func (s *Service) toolScheduleRoutine(ctx context.Context, self string, args jso
 	}
 	if inbox != nil {
 		t.Inbox = *inbox
+	}
+	if len(a.RunIf) != 0 {
+		t.RunIf = runIf
 	}
 	if a.FreshEachRun != nil {
 		t.FreshEachRun = *a.FreshEachRun
@@ -1321,6 +1341,7 @@ func (s *Service) Run(ctx context.Context) {
 	if err := s.recoverTaskStarts(recoverCtx, s.tasks.recoverBefore); err != nil {
 		s.logf("recover interrupted task starts: %v", err)
 	}
+	s.recoverSendsOut(recoverCtx) // sends of more for accepted tasks the manager before this one left out (tasks_sends_out.go)
 	cancel()
 	go s.taskCloseLoop(ctx)      // the agents of finished tasks (tasks_close.go)
 	go s.superviseLoop(ctx)      // the tasks the main conversation follows up (supervise_signals.go)
@@ -1685,6 +1706,16 @@ func (s *Service) runTask(t Task, due, now time.Time, manual, retried bool) (pro
 		// runs in its own instead (#2396).
 		s.logf("task %s: %s is a quiet task's conversation; running in its own", t.ID, short(t.SessionID))
 		t.SessionID = ""
+	}
+	// A retry continues a run that was already admitted. A one-off follow-up must never be condition-skipped.
+	if !manual && !retried && t.Repeat != repeatOnce && t.RunIf != nil {
+		message, skip := s.checkRoutine(ctx, t)
+		if skip {
+			run.Status, run.Error, run.ConditionSkipped = runSkipped, message, true
+			s.recordRun(run)
+			return proto.Session{}, nil
+		}
+		run.RunIfError = message
 	}
 	if !manual && t.Repeat != repeatOnce { // a one-off is never held back: skipped it would be lost (schedule_ready.go)
 		if err := s.gateRun(ctx, t); err != nil { // not set up yet: skipped, nothing pushed (schedule_ready.go)
@@ -2554,6 +2585,12 @@ func (s *Service) scheduleRoutes() {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
+		runIf, err := parseRoutineCheck(raw["run_if"])
+		if err != nil {
+			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		}
+		delete(raw, "run_if")
 		delete(raw, "until") // not a time.Time: "30m" and a local clock time would not unmarshal
 		ignoreTaskStateNote(raw)
 		var in Task
@@ -2563,7 +2600,7 @@ func (s *Service) scheduleRoutes() {
 			return
 		}
 		t := editTask(Task{ID: "task_" + randomHex(4), CreatedAt: now.UTC()}, in, now)
-		t.SessionID, t.Push, t.Inbox = "", push, inbox
+		t.SessionID, t.Push, t.Inbox, t.RunIf = "", push, inbox, runIf
 		if err := editTaskState(&t, in, raw, now); err != nil {
 			writeTaskStateError(w, err)
 			return
@@ -2604,6 +2641,13 @@ func (s *Service) scheduleRoutes() {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
+		runIf, err := parseRoutineCheck(raw["run_if"])
+		if err != nil {
+			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		}
+		_, hasRunIf := raw["run_if"]
+		delete(raw, "run_if")
 		delete(raw, "until") // not a time.Time: "30m" and a local clock time would not unmarshal
 		ignoreTaskStateNote(raw)
 		mayBeMain := s.mayBeMainNow(r.Context())
@@ -2632,6 +2676,9 @@ func (s *Service) scheduleRoutes() {
 			in.Repeat, in.Cron, in.At, in.Time, in.Weekdays, in.EveryMinutes = old.Repeat, old.Cron, old.At, "", nil, 0
 		}
 		t := editTask(sc.tasks[i], in, now)
+		if hasRunIf {
+			t.RunIf = runIf
+		}
 		if err := editTaskState(&t, in, raw, now); err != nil {
 			sc.mu.Unlock()
 			writeTaskStateError(w, err)

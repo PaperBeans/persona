@@ -37,6 +37,7 @@ struct InboxHandOffNewAgentTests {
             plainToMain: { _ in calls.sent += 1; return SessionKey(machineID: "server", sessionID: "main") },
             startNew: { _ in calls.sent += 1; return SessionKey(machineID: "server", sessionID: "new") },
             sendToAgent: { _, _, _ in calls.sent += 1; return .sent },
+            waitForNewAgent: { _, _ in .sent },
             open: { calls.went.append(($0, $1)) },
             markDone: { calls.done += 1 }))
     }

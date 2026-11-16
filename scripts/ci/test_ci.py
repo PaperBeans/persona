@@ -367,6 +367,47 @@ class AppleWorkflowTests(unittest.TestCase):
             self.assertIn(required_batch, script)
 
 
+class PostgresCleanupTests(unittest.TestCase):
+    def test_server_fixture_removes_its_volume_on_success_and_failure(self):
+        for run_status, ready_status in ((0, 0), (23, 0), (0, 19)):
+            with self.subTest(run_status=run_status, ready_status=ready_status), \
+                    tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                fixtures = root / "fixtures"
+                fixtures.mkdir()
+                shutil.copyfile(Path(__file__).with_name("server.sh"), root / "server.sh")
+                # Run the real entrypoint and EXIT trap without starting Docker or Go tests.
+                (root / "common.sh").write_text("""ci_run() {
+  local label="$1"
+  shift 2
+  case "$label" in
+    'Postgres 18 fixture') "$@" ;;
+    'Postgres readiness') return "$FIXTURE_READY_STATUS" ;;
+    *) return 0 ;;
+  esac
+}
+""")
+                docker = root / "docker"
+                docker.write_text("""#!/bin/sh
+printf '%s\\n' "$*" >> "$FIXTURE_DOCKER_CALLS"
+if [ "$1" = run ]; then exit "$FIXTURE_RUN_STATUS"; fi
+""")
+                docker.chmod(0o755)
+                log = root / "docker-calls"
+                environment = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"],
+                                   TMPDIR=str(fixtures), FIXTURE_DOCKER_CALLS=str(log),
+                                   FIXTURE_RUN_STATUS=str(run_status), FIXTURE_READY_STATUS=str(ready_status))
+                result = subprocess.run(["bash", str(root / "server.sh"), "managers"],
+                                        env=environment, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, run_status or ready_status, result.stderr)
+                calls = [line.split() for line in log.read_text().splitlines()]
+                self.assertEqual(len(calls), 2, calls)
+                self.assertEqual(calls[0][:2], ["run", "--detach"])
+                container = calls[0][calls[0].index("--name") + 1]
+                self.assertEqual(calls[1], ["rm", "-fv", container])
+                self.assertEqual(list(fixtures.iterdir()), [])
+
+
 class RunnerTests(unittest.TestCase):
     def invoke(self, command, timeout=5):
         return subprocess.run([sys.executable, str(Path(__file__).with_name("run.py")), "--label", "fixture", "--timeout", str(timeout), "--", sys.executable, "-c", command], capture_output=True, text=True, timeout=10)

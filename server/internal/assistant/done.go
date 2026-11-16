@@ -446,7 +446,11 @@ func (s *Service) autoFinishTask(t Todo, work time.Time, worked bool) {
 		}
 	}
 	if !s.taskCompletionCurrent(ctx, t, work) {
-		s.logf("task %s: work changed while judged: left open", t.ID)
+		if cur, ok := s.todoNow(t.ID); !ok || cur.DoneAt != nil {
+			s.logf("task %s: closed while judged: judgment dropped", t.ID) // accepted, cancelled or closed by hand (#7539)
+		} else {
+			s.logf("task %s: work changed while judged: left open", t.ID)
+		}
 		return
 	}
 	s.applyTaskDone(ctx, t, work, worked, c, err)
@@ -455,8 +459,19 @@ func (s *Service) autoFinishTask(t Todo, work time.Time, worked bool) {
 // applyTaskDone writes judgment c (err: the judge could not say) of task t, whose agents last started a turn at work
 // (worked false: not known): the verdict on the todo, where its delivery is held, and then what follows a finished
 // stretch of work. A supervised task waits for its supervisor's review (never closed here); another is closed when
-// the judge found it done. autoFinishTask and Re-check with apply (doneCheckRoute) end here.
+// the judge found it done. autoFinishTask and Re-check with apply (doneCheckRoute) end here. A task closed since that
+// stretch began (accepted, cancelled, closed by hand, or a review that has written its acceptance and not closed the
+// to-do yet) gets none of it: the judgment is of work that is over (#7539).
 func (s *Service) applyTaskDone(ctx context.Context, t Todo, work time.Time, worked bool, c taskDoneCheck, err error) {
+	since := work
+	if !worked {
+		since = t.CreatedAt
+	}
+	if s.closedSince(t.ID, since) {
+		s.logf("task %s: closed since the work judged began: judged %s, dropped", t.ID, cmp.Or(c.Verdict, "with an error"))
+		s.turnJudged(ctx, t.ID, taskDoneCheck{}, nil, "done") // nothing to judge: the sweep does not ask again
+		return
+	}
 	if ai.IsNotConfigured(err) {
 		// A missing provider is not a transient judge failure: keep the same localized explanation the settings row shows.
 		c = taskDoneCheck{Verdict: verdictWaiting, Reason: mc(s.lang(ctx), s.noAPIStatus(ctx))}

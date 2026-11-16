@@ -7,6 +7,8 @@
     <string name="assistant_profile">助手资料</string>
     <string name="assistant_got_it">知道了</string>
     <string name="assistant_composer_placeholder">问 %1$s…</string>
+    <string name="assistant_model_setup_title">助手还没接上模型</string>
+    <string name="assistant_model_setup_detail">助手在「%1$s」上运行，当前的 Claude Code 配置还没接上模型。你可以选择已有供应商，或添加你正在用的网关。</string>
     <string name="assistant_info_settings">助手设置</string>
     <string name="assistant_info_knowledge">知识库</string>
     <string name="assistant_info_schedule">定时任务</string>

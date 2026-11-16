@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"image"
 	"math"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/osproc"
 )
 
 type runFlags struct {
@@ -132,9 +133,9 @@ const benchPort = "127.0.0.1:38780"
 func newBench(addr string) (*bench, error) {
 	b := &bench{scene: "idle"}
 	b.photos = photos()
-	l, err := net.Listen("tcp", addr)
+	l, err := osproc.Listen("tcp", addr)
 	if err != nil {
-		if l, err = net.Listen("tcp", "127.0.0.1:0"); err != nil {
+		if l, err = osproc.Listen("tcp", "127.0.0.1:0"); err != nil {
 			return nil, err
 		}
 	}

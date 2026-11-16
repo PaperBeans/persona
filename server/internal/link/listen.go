@@ -24,6 +24,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/osproc"
 )
 
 // The passive listener (docs/operations/link.md "Passive mode"): TLS with the connector's own identity, four endpoints and nothing
@@ -119,7 +120,7 @@ func runPassive(ctx context.Context, o Options, rep *reporter) {
 			o.wait(ctx, b.next(), was)
 			continue
 		}
-		ln, err := net.Listen("tcp", listen)
+		ln, err := osproc.Listen("tcp", listen)
 		if err != nil {
 			wait := b.next()
 			retry := time.Now().Add(wait)

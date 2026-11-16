@@ -2,7 +2,8 @@
 // an agent session) and what grew out of it (the items right under it). Each row opens where it lives. Nothing is
 // drawn when the item has neither. A pair whose lower end is an Inbox item can be unlinked; another open item can become this item's parent.
 import { useEffect, useState } from "react";
-import { fetchInboxTree, itemRoute, parentRoute, type InboxItem, type InboxParent, type InboxTree } from "../../lib/inbox";
+import { itemRoute, type InboxItem, type InboxParent, type InboxTree } from "../../lib/inbox";
+import { fetchInboxTree, parentRoute } from "../../lib/inbox-page";
 import { openFromInbox } from "../../lib/inbox-nav";
 import type { Route } from "../../lib/router";
 import { sessionTitle } from "../../lib/format";

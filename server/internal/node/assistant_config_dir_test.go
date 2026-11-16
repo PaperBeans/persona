@@ -133,6 +133,9 @@ func TestAssistantProfileSelectionBoundaries(t *testing.T) {
 		if got, err := n.assistantProfileSelection(context.Background(), "", "claude", "", "", false); err != nil || got != n.sessionScope.claude {
 			t.Fatalf("scoped default=%q: %v", got, err)
 		}
+		if got, err := n.assistantProfileSelection(context.Background(), "", "claude", "", "legacy", false); err != nil || got != n.sessionScope.claude {
+			t.Fatalf("legacy did not resolve to the node's scoped profile: got %q, want %q (error %v)", got, n.sessionScope.claude, err)
+		}
 	})
 	t.Run("wrapper keeps its own directory", func(t *testing.T) {
 		f := sdkTest(t)

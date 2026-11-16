@@ -176,6 +176,41 @@ class AgentCreationServiceTest {
         }
     }
 
+    /**
+     * New Agent's list with what it lists off there (#8109): the hub's `unavailable`, in the main chat's shape, next to the
+     * launchers; none from an older hub, and a list that can't be read costs none of the launchers.
+     */
+    @Test fun newAgentsListCarriesTheProvidersLeftOutThereWithWhy() = runBlocking {
+        MockWebServer().use { server ->
+            val service = HttpAgentCreationService("hub/pairing", server.url("/").toString(), "test-token", OkHttpClient())
+            server.enqueue(MockResponse().setBody("""{"launchers":[{"name":"claude","agent":"claude"}],"default":{"provider":"claude","model":"","effort":""},""" +
+                """"tiers":[],"unavailable":[{"name":"deepseek","display_name":"DeepSeek","kind":"launcher","agent":"claude",""" +
+                """"code":"launcher_own_service","reason":"Studio already has its own Claude Code service.","x":1},""" +
+                """{"name":"cx-gw","kind":"launcher","agent":"codex","code":"launcher_own_service","reason":"Codex is signed in."}]}"""))
+            val list = service.launcherList("computer")
+            assertEquals("/api/v1/machines/computer/launchers", server.takeRequest().path)
+            assertEquals(listOf("claude"), list.launchers.map { it.name })
+            assertEquals(listOf(
+                UnavailableLauncher("deepseek", "DeepSeek", "launcher", "claude", code = "launcher_own_service", reason = "Studio already has its own Claude Code service."),
+                UnavailableLauncher("cx-gw", kind = "launcher", agent = "codex", code = "launcher_own_service", reason = "Codex is signed in."),
+            ), list.unavailable)
+            assertEquals(listOf("DeepSeek", "cx-gw"), list.unavailable.map { it.title })
+            // an older hub: no such list
+            server.enqueue(MockResponse().setBody("""{"launchers":[{"name":"claude"}]}"""))
+            assertEquals(AssistantLaunchers(listOf(AgentLauncher("claude"))), service.launcherList("computer"))
+            // one this client can't read: the launchers stay
+            for (odd in listOf(""""unavailable":"none"""", """"unavailable":[{"name":["x"]}]""")) {
+                server.enqueue(MockResponse().setBody("""{"launchers":[{"name":"claude"},{"name":"work_gw"}],$odd}"""))
+                val read = service.launcherList("computer")
+                assertEquals(odd, listOf("claude", "work_gw"), read.launchers.map { it.name })
+                assertTrue(odd, read.unavailable.isEmpty())
+            }
+            // launchers() is the same list
+            server.enqueue(MockResponse().setBody("""{"launchers":[{"name":"claude"}],"unavailable":[{"name":"deepseek","code":"launcher_own_service"}]}"""))
+            assertEquals(listOf(AgentLauncher("claude")), service.launchers("computer"))
+        }
+    }
+
     /** The manager refuses a provider outside the computer's scope before anything starts: its words are the answer, no lookup. */
     @Test fun aStartRefusedForTheProvidersScopeSaysWhy() = runBlocking {
         MockWebServer().use { server ->

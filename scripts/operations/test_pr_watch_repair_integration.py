@@ -154,6 +154,46 @@ class RepairIntegrationTests(unittest.TestCase):
         branch = "refs/heads/pr-watch/repair-7-" + merged["headRefOid"][:12]
         self.assertEqual(self.git("ls-remote", "origin", branch).split()[0], merged["headRefOid"])
 
+    def test_fork_continuation_retries_an_unchanged_absent_branch_without_force(self):
+        pr, merged, base = self.fork_merge()
+        snapshots = {7: pr, 8: dict(merged, number=8)}
+        created = []
+        original_checked = pr_watch_repair.checked
+        pushes = []
+
+        def reject_first_push(argv, **kwargs):
+            if argv[:2] == ["git", "push"]:
+                pushes.append(argv)
+                if len(pushes) == 1:
+                    raise pr_watch_repair.WatchError(
+                        "git failed (1): [remote rejected] missing necessary objects")
+            return original_checked(argv, **kwargs)
+
+        def github(argv, **kwargs):
+            if argv[:2] == ["pr", "list"]:
+                return []
+            created.append(json.loads(kwargs["input_text"]))
+            return {"number": 8}
+
+        common = dict(verify_config={"profile": "commands", "commands": [["true"]]},
+                      allow_merge_only=True, original_pr=pr)
+        with patch.object(pr_watch_repair, "verify", return_value=[]), self.passthrough(), \
+                patch.object(pr_watch_repair, "privacy_scanner_environment", return_value={}), \
+                patch.object(pr_watch_repair, "pr_snapshot", side_effect=lambda repo, number: snapshots[number]), \
+                patch.object(pr_watch_repair, "gh_json", side_effect=github), \
+                patch.object(pr_watch_repair, "checked", side_effect=reject_first_push):
+            with self.assertRaisesRegex(pr_watch_repair.WatchError, "missing necessary objects"):
+                pr_watch_repair.commit_and_push_repair("example/one", merged, str(self.repo), base, "failure", **common)
+            self.assertEqual(created, [])
+            self.assertEqual(self.git("ls-remote", "origin", "refs/heads/pr-watch/*"), "")
+            self.assertEqual(self.git("rev-parse", "HEAD"), merged["headRefOid"])
+            number, _ = pr_watch_repair.commit_and_push_repair("example/one", merged, str(self.repo), base, "failure", **common)
+        self.assertEqual(number, 8)
+        self.assertTrue(all("--force" not in argv and "--force-with-lease" not in argv for argv in pushes))
+        branch = "refs/heads/pr-watch/repair-7-" + merged["headRefOid"][:12]
+        self.assertEqual(self.git("ls-remote", "origin", branch).split()[0], merged["headRefOid"])
+        self.assertEqual(created[0]["head"], "example:pr-watch/repair-7-" + merged["headRefOid"][:12])
+
     def test_fork_continuation_refuses_a_main_rewritten_before_the_push(self):
         pr, merged, base = self.fork_merge()
         rewritten = self.push_main("rewritten", parent=self.base)

@@ -1,6 +1,8 @@
 package screen
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -175,5 +177,26 @@ func TestReadCodexComposerWithSingleRowFooter(t *testing.T) {
 				t.Fatalf("view %q draft %q, want composer draft %q", s.View, s.Draft, tc.want)
 			}
 		})
+	}
+}
+
+// The Codex 0.169 rate-limit picker ("Approaching rate limits", footer "enter select · esc back") is a dialog, and its
+// first line is its own heading, not the conversation above it, which DialogHead would give (#7343).
+func TestCodexDialogHeadRateLimitPicker(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "codex-0.169-rate-limit-picker.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := CodexDialogHead(string(b)); got != "Approaching rate limits" {
+		t.Fatalf("head %q, want Approaching rate limits (DialogHead: %q)", got, DialogHead(Plain(string(b))))
+	}
+	for _, name := range []string{"codex-0.163.0-empty-120.txt", "codex-0.163.0-exec-approval-120.txt"} {
+		b, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := CodexDialogHead(string(b)); got != "" {
+			t.Fatalf("%s: head %q, want none", name, got)
+		}
 	}
 }

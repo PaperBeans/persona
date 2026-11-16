@@ -793,12 +793,7 @@ func (s *Service) closedTaskOf(ctx context.Context, mid, sid string) (Todo, bool
 	}
 	var found *Todo
 	for _, t := range s.todos.todos {
-		if t.Origin == "" || t.DoneAt == nil || t.StartError != "" || t.DoneBy != db.DoneByAuto && t.DoneBy != db.DoneByReview ||
-			found != nil && !t.DoneAt.After(*found.DoneAt) {
-			continue
-		}
-		// Older cancellations used done_by=review; the ledger preserves their verdict.
-		if t.Supervision.state(*t) == reviewCancelled {
+		if !hubClosedTask(t) || found != nil && !t.DoneAt.After(*found.DoneAt) {
 			continue
 		}
 		for _, a := range t.Agents {
@@ -812,6 +807,14 @@ func (s *Service) closedTaskOf(ctx context.Context, mid, sid string) (Todo, bool
 		return Todo{}, false
 	}
 	return copyTodoLocked(found), true
+}
+
+// hubClosedTask: t is a task the hub closed, judged done or accepted by a review, and not cancelled: more work for it
+// may open it again (closedTaskOf, routeToTaskAs). Older cancellations used done_by=review; the ledger keeps their
+// verdict. Cancelled tasks and ones the user closed stay theirs to reopen.
+func hubClosedTask(t *Todo) bool {
+	return t.Origin != "" && t.DoneAt != nil && t.StartError == "" && (t.DoneBy == db.DoneByAuto || t.DoneBy == db.DoneByReview) &&
+		t.Supervision.state(*t) != reviewCancelled
 }
 
 // ---- HTTP ----

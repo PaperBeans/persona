@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initI18n, t } from "../i18n";
-import { api, apiBlob, ApiError, errorText } from "./api";
+import { api, apiBlob, ApiError, errorText, isTransient } from "./api";
 import { isOfflineError } from "./feedback";
 import { sessionLoadError } from "./session-link";
 
@@ -182,6 +182,19 @@ describe("no model set up", () => {
     expect(text).toBe(t("lib-api.model_unavailable"));
     expect(text).not.toContain("HTTP 50");
     expect(isOfflineError(text)).toBe(false);
+  });
+});
+
+// A decision's accept the Agent's terminal refused, a dialog being open there (#7343): the hub answers 409 dialog_open,
+// and the toast says to close the dialog in the terminal, not "try again later (HTTP 502)".
+describe("a dialog open in the terminal", () => {
+  it("says to close it there first", () => {
+    const refused = new ApiError(409, "终端正在等待选择，请先到终端处理。", { code: "dialog_open", delivered: "none", retryable: false }); // i18n-ignore
+    const text = errorText(refused);
+    expect(text).toBe(t("lib-api.dialog_open"));
+    expect(text).toContain("先关掉终端里的对话框"); // i18n-ignore
+    expect(text).not.toContain("HTTP");
+    expect(isTransient(refused)).toBe(false);
   });
 });
 

@@ -250,8 +250,14 @@ func (m *Machine) establishViaOnce(ctx context.Context, p *nodePath, via string,
 		return nil, err
 	}
 	peer := rpc.New("h", l.w)
-	// A model request or a long file copy / zip stops on this computer when the manager stops waiting (an older node ignores it).
-	peer.Cancels = map[string]bool{proto.MethodModelHTTP: true, proto.MethodModelRun: true, "file.copy": true, "file.zip": true}
+	// Stop these operations on the node when the manager stops waiting (an older node ignores it).
+	peer.Cancels = map[string]bool{
+		proto.MethodModelHTTP:    true,
+		proto.MethodModelRun:     true,
+		proto.MethodRoutineCheck: true,
+		"file.copy":              true,
+		"file.zip":               true,
+	}
 	// Every event goes on to the hub, the forwarded ports' bytes among them (the hub is their end, ports.go there).
 	c := &nodeConn{path: p, via: via, pipe: l, peer: peer, served: make(chan error, 1), cancel: cancel}
 	peer.OnClose = func(err error, inflight []string) { m.logCutOff(via, err, inflight) }

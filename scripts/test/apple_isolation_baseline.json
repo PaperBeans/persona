@@ -10,6 +10,19 @@
       "main" : 1
     }
   },
+  "apple/Packages/PersonaWire/Sources/PersonaWire/Keychain.swift" : {
+    "keychain-read" : {
+      "main" : 2
+    }
+  },
+  "apple/Packages/PersonaWire/Sources/PersonaWire/StateCache.swift" : {
+    "directory-listing" : {
+      "main" : 1
+    },
+    "file-read" : {
+      "main" : 1
+    }
+  },
   "apple/Persona/App/DemoHub.swift" : {
     "file-read" : {
       "main" : 1
@@ -187,11 +200,6 @@
       "main" : 1
     }
   },
-  "apple/Shared/Keychain.swift" : {
-    "keychain-read" : {
-      "main" : 2
-    }
-  },
   "apple/Shared/NativeStateMigration.swift" : {
     "keychain-read" : {
       "main" : 1
@@ -216,14 +224,6 @@
     }
   },
   "apple/Shared/Recording/RecordingSegmentWriter.swift" : {
-    "file-read" : {
-      "main" : 1
-    }
-  },
-  "apple/Shared/StateCache.swift" : {
-    "directory-listing" : {
-      "main" : 1
-    },
     "file-read" : {
       "main" : 1
     }

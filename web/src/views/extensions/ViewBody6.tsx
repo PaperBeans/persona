@@ -3,7 +3,7 @@
 // and carousels of tiles, sparklines, a named color's badge, and the new fields (date, time, datetime, multichoice,
 // multiline). The readings and the arithmetic are in lib/extension-ui-v6.ts; what a control's change does (shown at
 // once, put back when it fails) is settings/ExtensionView.tsx's.
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { rowIcon, type UIAction, type UIItem } from "../../lib/extension-ui";
 import {
   aspectRatio, colorOf, controlText, controlValue, hue, hueTint, imageSrc, isHubImage, multilineRows, multiText, multiValues, sliderStep, snap, sparkColor, sparkPoints,
@@ -16,10 +16,15 @@ import { SearchField } from "../../ui/SearchField";
 import { contextMenuProps } from "../../ui/context-menu";
 import type { MenuAt, MenuItem } from "../../ui/menu-model";
 import { Pill, Switch } from "../settings/SettingsParts";
-import { ImageViewer } from "../chat/ImageViewer";
 import { Slider } from "../../ui/Slider";
 import { scrollBehavior } from "../../ui/stream/motion";
 import { NEW_ICON_GLYPH } from "./icon-map";
+import { lazyPage } from "../../lib/lazy-page";
+
+// A picture opens the image viewer from its own chunk, on the first open: this renderer is fetched by the idle preload
+// (view-sections-lazy.tsx), and the viewer need not come with it. As with the renderer's charts, lazyPage under a
+// Suspense, which adds no module to this chunk's imports (LazyImageViewer.tsx is the chat's).
+const ImageViewer = lazyPage(() => import("../chat/ImageViewer").then((m) => m.ImageViewer));
 
 /** What UI version 6's components are drawn with, besides a view's handlers. */
 export interface V6Handlers {
@@ -288,7 +293,11 @@ export function ImageItem({ item, compact, onImageFailed }: { item: UIItem; comp
         )}
       </div>
       {item.caption && <figcaption className="mt-1.5 text-[11.5px] leading-relaxed break-words text-ink-3">{item.caption}</figcaption>}
-      {open && src && <ImageViewer images={[{ id: item.key ?? src, src, label: alt }]} start={0} onClose={() => setOpen(false)} />}
+      {open && src && (
+        <Suspense fallback={null}>
+          <ImageViewer images={[{ id: item.key ?? src, src, label: alt }]} start={0} onClose={() => setOpen(false)} />
+        </Suspense>
+      )}
     </figure>
   );
 }

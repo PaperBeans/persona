@@ -115,5 +115,6 @@
   "brief_more": "……另有 {n} 条",
   "brief_also_done": "另外做了：{list}",
   "brief_also_sep": "；",
+  "delivery_verification_unavailable": "任务 {task} 暂不能验收：交付状态暂时无法验证，{pr}（{reason}）。这不代表任务没有完成。请保持当前状态，待验证服务恢复后再次检查；不要仅因无法验证就要求重新合并、部署、搁置或取消。",
   "decision_not_delivered": "用户已决定：{decision}。已记下，但没发到 Agent（{error}），也没有自动重发：等 Agent 能接收时由你转给它"
 }

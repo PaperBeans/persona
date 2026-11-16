@@ -61,10 +61,13 @@ func scanned(r io.Reader, size, maximum, piece int, scanner bool) (lines []strin
 		}
 		return lines, sc.Err()
 	}
-	sc := newLineReaderSize(r, size, maximum)
+	shapes := &readShapes{r: r}
+	sc := newLineReaderSize(shapes, size, maximum)
 	if piece > 0 {
 		sc.piece = piece
 	}
+	middles := 0
+	sc.middle = func() { middles++ }
 	for sc.Scan() {
 		lines = append(lines, string(sc.Bytes()))
 	}
@@ -74,7 +77,39 @@ func scanned(r io.Reader, size, maximum, piece int, scanner bool) (lines []strin
 	if sc.held != 0 || sc.parts != nil {
 		return lines, errors.New("pieces of a line are left after the last")
 	}
+	if middles != shapes.middle {
+		return lines, fmt.Errorf("told of %d reads from the middle of a line, want %d", middles, shapes.middle)
+	}
 	return lines, sc.Err()
+}
+
+// readShapes counts, from the reads alone, what a lineReader's middle hook is told of: the reads that go on with a
+// line begun in an earlier read, do not finish it, and have already grown past pingFrameMiddleBytes.
+type readShapes struct {
+	r       io.Reader
+	middle  int
+	open    bool // the reads so far end inside a line
+	openLen int  // bytes of the line still open
+}
+
+func (s *readShapes) Read(p []byte) (int, error) {
+	n, err := s.r.Read(p)
+	if n > 0 && n <= len(p) { // a lineReader drops a bad count's bytes (bufio.ErrBadReadCount)
+		chunk := p[:n]
+		if s.open && bytes.IndexByte(chunk, '\n') < 0 {
+			s.openLen += n
+			if s.openLen > pingFrameMiddleBytes {
+				s.middle++
+			}
+		}
+		if i := bytes.LastIndexByte(chunk, '\n'); i >= 0 {
+			s.openLen = n - i - 1
+		} else if !s.open {
+			s.openLen = n
+		}
+		s.open = chunk[n-1] != '\n'
+	}
+	return n, err
 }
 
 func sameAsAScanner(t *testing.T, data, sizes []byte, scale, size, maximum, piece int, end error, withEnd bool) {

@@ -115,20 +115,26 @@ func resumeParams(c proto.Session, text string) map[string]any {
 
 // resumeAndSend resumes stopped agent c of am with params' text as its first message (resumeParams) and says so in
 // conversation self: on task's card when the send made or found one, else on the open task of self's it is on.
-// handed is what the receipt says of the attachments.
+// handed is what the receipt says of the attachments. The text is noted before it goes, as any agent_send's
+// (noteAgentSend, #7539).
 func (s *Service) resumeAndSend(ctx context.Context, self string, am Device, c proto.Session, params map[string]any, why, told, handed string,
-	task *handedTask, unsent func()) (string, error) {
+	task *handedTask) (string, error) {
 	text, _ := params["text"].(string)
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute) // a resume can take minutes
 	defer cancel()
+	sendNote, err := s.noteAgentSend(sctx, self, am.ID, c.SessionID, "", text) // more from its task's conversation reopens an accepted task (#6726, #7539)
+	if err != nil {
+		return "", task.sendFailed(sctx, s, err)
+	}
 	var res struct {
 		Session proto.Session `json:"session"`
 	}
-	if err := s.call(sctx, am.ID, DeviceSessionStart, resumeParams(c, text), &res); err != nil {
+	err = s.call(sctx, am.ID, DeviceSessionStart, resumeParams(c, text), &res)
+	sendNote.sent(sctx, err) // an unknown answer counts for the agent's next turn: it may still come up and take it
+	if err != nil {
 		if startResultUnknown(err) { // it may still come up and take the message
 			return "", task.sendFailed(sctx, s, err)
 		}
-		unsent()
 		return "", task.sendFailed(sctx, s, resumeFailed(c, am, err))
 	}
 	s.logf("resume %s on %s for %s: %s", short(c.SessionID), am.ID, self, why)

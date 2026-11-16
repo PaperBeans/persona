@@ -78,6 +78,7 @@
   "api_test_inheritance": "请选择具体值后测试当前修改；此中枢暂时无法预览继承设置的变化。",
   "api_test_effort": "此中枢无法验证所选推理强度，请更新中枢后重试。",
   "save_note": "保存只是改设置：不会调用模型，也不会打断正在跑的任务。",
+  "main_other_kind": "当前主对话使用 {actual}。选择 {configured} 后需要新建主对话，当前对话不会切换。",
   "reload_discard": "重新加载（丢弃编辑）",
   "save_note_plugin": "保存只是改设置：不会调用模型，也不会打断正在跑的任务。这里的语音模型只是 Persona 的默认值，扩展自己的供应商和凭据不变。",
   "runtime": "运行方式",

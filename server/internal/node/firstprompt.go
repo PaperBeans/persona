@@ -32,14 +32,15 @@ const firstPromptTries = 3
 // firstPrompt types the first message into the new Claude in pane (a is how waitReady left it) and, in the
 // background, makes sure the session's transcript gets it: the start answers as it did (a sync start's caller has
 // a budget of its own), and messages sent to the session meanwhile wait for the check (the typing lock), so a
-// message typed again cannot mix with them. An error: the host refused the first message (nothing went in).
-func (n *Node) firstPrompt(ctx context.Context, pane, id, prompt string, a *host.Agent) error {
+// message typed again cannot mix with them. goal, when set, is typed as /goal once the transcript has the message,
+// still under the lock (startgoal.go). An error: the host refused the first message (nothing went in).
+func (n *Node) firstPrompt(ctx context.Context, pane, id, prompt string, a *host.Agent, goal string) error {
 	prompt = inertControls(keepImagePaths(prompt)) // the same image-path/paste form as other Claude sends
 	since := time.Now()
 	if a != nil && a.AgentStatus == proto.StatusBlocked {
 		// A dialog of Claude's own has the keyboard: the message would answer it. Held until the dialog is answered
 		// (from a screen card or at the computer), then typed (firstAfterDialog).
-		n.holdFirstForDialog(pane, id, prompt, since)
+		n.holdFirstForDialog(pane, id, prompt, since, goal)
 		return nil
 	}
 	watch := n.watchPrompt(id, prompt)
@@ -50,7 +51,7 @@ func (n *Node) firstPrompt(ctx context.Context, pane, id, prompt string, a *host
 	draft := n.firstDraftFor(id, prompt)
 	err := n.hostPrompt(ctx, pane, prompt)
 	if errors.Is(err, host.ErrAgentBlocked) {
-		n.holdFirstForDialog(pane, id, prompt, since)
+		n.holdFirstForDialog(pane, id, prompt, since, goal)
 		return nil
 	}
 	if err != nil {
@@ -65,7 +66,9 @@ func (n *Node) firstPrompt(ctx context.Context, pane, id, prompt string, a *host
 	n.firstWait.Add(1)
 	go func() {
 		defer n.firstWait.Done()
-		defer unlock()
+		var once sync.Once
+		release := func() { once.Do(unlock) }
+		defer release()
 		bctx, cancel := context.WithTimeout(parent,
 			firstPromptTries*firstPromptWait+(firstPromptTries-1)*firstPromptRecover+15*time.Second)
 		defer cancel()
@@ -73,7 +76,9 @@ func (n *Node) firstPrompt(ctx context.Context, pane, id, prompt string, a *host
 			log.Printf("start %s: %s", id, why)
 			n.lostFirst.set(id, why, since)
 			n.notifySessions()
+			return // no goal without the task it is about
 		}
+		n.goalAfterFirst(parent, id, pane, goal, release) // gives the lock back once /goal is typed
 	}()
 	return nil
 }
@@ -84,13 +89,13 @@ var firstAfterDialogWait, firstAfterDialogPoll = 30 * time.Minute, time.Second
 
 // holdFirstForDialog lists the session as needing the user (lostDialogHeld) and, in the background, types its first
 // message once the dialog that kept it out is gone (firstAfterDialog).
-func (n *Node) holdFirstForDialog(pane, id, prompt string, since time.Time) {
+func (n *Node) holdFirstForDialog(pane, id, prompt string, since time.Time, goal string) {
 	n.lostFirst.set(id, lostDialogHeld, since)
 	wait, poll := firstAfterDialogWait, firstAfterDialogPoll // read here: a goroutine still waiting never races a test setting them
 	n.dialogWait.Add(1)
 	go func() {
 		defer n.dialogWait.Done()
-		n.firstAfterDialog(pane, id, prompt, since, wait, poll)
+		n.firstAfterDialog(pane, id, prompt, since, wait, poll, goal)
 	}()
 }
 
@@ -99,7 +104,7 @@ func (n *Node) holdFirstForDialog(pane, id, prompt string, since time.Time) {
 // had to send the task again. It gives up when anything else reaches the session first (a message from the phone or
 // the computer clears or replaces the lost mark: nothing is typed twice), when claude leaves the pane (the dialog's
 // "exit"), or after wait, leaving the session listed as needing the user as before.
-func (n *Node) firstAfterDialog(pane, id, prompt string, since time.Time, wait, poll time.Duration) {
+func (n *Node) firstAfterDialog(pane, id, prompt string, since time.Time, wait, poll time.Duration, goal string) {
 	ours := func() bool {
 		p, ok := n.lostFirst.get(id)
 		return ok && p.at.Equal(since) && !n.promptedSince(id, since)
@@ -140,7 +145,11 @@ func (n *Node) firstAfterDialog(pane, id, prompt string, since time.Time, wait, 
 			continue
 		}
 		why := n.typeFirstAfterDialog(pane, id, prompt)
-		unlock()
+		if why == "" {
+			n.goalAfterFirst(context.Background(), id, pane, goal, unlock) // gives the lock back once /goal is typed
+		} else {
+			unlock()
+		}
 		if why == errDialogBack {
 			continue // another dialog came up first: wait for it too
 		}

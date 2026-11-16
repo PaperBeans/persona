@@ -12,14 +12,24 @@ import (
 )
 
 func TestRecoveredNumberedPRUsesReplyRepository(t *testing.T) {
-	for _, saved := range []string{"https://github.com/o/r/pull/4", "https://github.com/o/r/pull/5"} {
-		t.Run(strings.TrimPrefix(saved, "https://github.com/"), func(t *testing.T) {
+	for _, tc := range []struct {
+		saved, ref, replyRepo string
+	}{
+		{"4", "#5", "o/actual"},
+		{"5", "#5", "o/actual"},
+		{"4", "5", "o/actual"},
+		{"5", "5", "o/actual"},
+		// A repository-qualified artifact outranks the reply's incidental repository link.
+		{"4", "o/actual#5", "o/r"},
+		{"5", "o/actual#5", "o/r"},
+	} {
+		t.Run("saved_"+tc.saved+"/"+tc.ref, func(t *testing.T) {
 			s, todo := deliveryReviewService(t, &fakeForge{}, nil, false)
 			f := s.hub.(*fakeHub)
 			ctx := context.Background()
-			s.setTaskStage(ctx, todo.ID, "review", saved)
-			f.setItems(proto.Item{Role: "assistant", Kind: proto.KindText, Text: "Delivery repository: https://github.com/o/actual/issues/5\n" +
-				"<closeout status=\"not_done\" merged=\"no\" deployed=\"no\">\nartifact: pr #5\n</closeout>"})
+			s.setTaskStage(ctx, todo.ID, "review", "https://github.com/o/r/pull/"+tc.saved)
+			f.setItems(proto.Item{Role: "assistant", Kind: proto.KindText, Text: "Delivery repository: https://github.com/" + tc.replyRepo + "/issues/5\n" +
+				"<closeout status=\"not_done\" merged=\"no\" deployed=\"no\">\nartifact: pr " + tc.ref + "\n</closeout>"})
 
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
@@ -43,8 +53,8 @@ func TestRecoveredNumberedPRUsesReplyRepository(t *testing.T) {
 				got := todoNow(s, todo.ID)
 				t.Fatalf("accepted the wrong repository's merged PR: err=%v, task PR=%s, done=%v", err, got.PRURL, got.DoneAt != nil)
 			}
-			if got := todoNow(s, todo.ID).PRURL; got != "https://github.com/o/actual/pull/5" {
-				t.Fatalf("recovery selected %q, want the repository named by the agent", got)
+			if got := todoNow(s, todo.ID); got.DoneAt != nil || got.PRURL != "https://github.com/o/actual/pull/5" {
+				t.Fatalf("recovery did not keep the actual delivery open: PR=%s, done=%v", got.PRURL, got.DoneAt != nil)
 			}
 		})
 	}

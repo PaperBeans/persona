@@ -1485,6 +1485,9 @@ struct InboxDetailView: View {
         _slot = State(initialValue: InboxItemSlotModel(item: item))
     }
 
+    /// Managers number their own items: a manager-only change opens a fresh detail too.
+    nonisolated static func identity(for item: InboxItem) -> String { item.key }
+
     private var current: InboxItem { InboxStore.shared.items.first { $0.key == item.key } ?? item }
 
     var body: some View {
@@ -1497,8 +1500,9 @@ struct InboxDetailView: View {
             .sheet(item: $ruling) { InboxPolicySheet(target: $0) }
             .sheet(item: $todoRequest) { InboxDueSheet(request: $0) }
             #if os(iOS)
-            .onChange(of: item.key) { _, _ in
+            .onChange(of: Self.identity(for: item)) { oldKey, newKey in
                 expandedSourceKey = nil
+                slot.detailIdentityChanged(from: oldKey, to: newKey)
             }
             #endif
             #if DEBUG
@@ -1697,7 +1701,7 @@ struct InboxDestinations: ViewModifier {
             // unkeyed one is updated in place with the last item's state — a Feishu chat kept the chat before's messages
             // and draft under the new chat's title (#885).
             .navigationDestination(for: InboxItem.self) {
-                InboxDetailView(item: $0, accounts: accounts).id($0.id).splitDetailPage()
+                InboxDetailView(item: $0, accounts: accounts).id(InboxDetailView.identity(for: $0)).splitDetailPage()
                     .feishuHandlesLinks(routeOpen, manager: model.linkManager($0.manager))
                     .modifier(InboxDestinationEnvironment(chat: inboxChat, openFeishu: routeOpen))
             }

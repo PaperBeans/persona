@@ -441,6 +441,50 @@ Phase 3 lands in several PRs.
   - Not done: no production client calls these functions yet; Swift codec generation is typegen-only; device-side
     NAPI linking and ArkTS runtime behavior remain blocked: no physical device.
 
+- **Turn grouping and wake-aware answer selection (#8218).**
+  - `persona_core::turns` projects the static corpus's rows into turns, following current iOS `ChatBlock.build` and
+    `Turn.pickAnswerAcrossWakes`. It handles raw-item frozen cuts, entry-based user pictures, tool pairing,
+    compaction, supervision provenance, recap reopening and pending wakes; it does not project rendered `ChatLine`s.
+  - All 57 static turn cases compare complete `turns` arrays after applying the checked-in current-iOS overlay
+    (`spec/fixtures/lines/ios/differences.json`, #8429). The independent maintainer's macOS replay passed the 59
+    executable content cases and its properties; this Rust PR does not run Swift or claim that replay itself.
+  - The Kotlin `projectTurns` declaration reaches the same pure projection through the real host JNI (#8756). Its
+    replay independently applies the repository overlay and compares all 57 complete expected `turns` arrays: 54
+    cases contain 62 complete turn objects after the overlay; `empty_session` and the two empty-turn layout cases
+    compare empty arrays only. It checks malformed input plus a wrong expected value. This is host-JNI evidence, not
+    a production Android adapter.
+  - The four operation-sequence cases also have real Kotlin/JNI coverage (#8815). The host uses `RustCore`'s
+    dispatch/drain patches to retain raw item JSON, then `projectTurns` for all 10 checkpoints: 13 complete turn
+    objects and exact item IDs match the corpus plus the current-iOS overlay. A separate replay sends the existing
+    burst replacement through the standalone `replace` branch against the same expected checkpoint. Malformed input
+    and a deliberately wrong checkpoint are rejected. This is runtime-operation and turn consistency, not the
+    incremental ChatStore rebuild algorithm or its timing evidence.
+  - The two source-order layout cases, rendered lines, task indexes, incremental rebuilds, production adapters and
+    turn C/NAPI/Swift boundaries are outside this slice. Both turn comparisons deliberately ignore rendered `lines`
+    and `task_index` even where an overlay replaces them. No physical-device or performance claim is made.
+    `spec/README.md` continues to name the shared corpus, not Rust, as the reference until migration.
+
+- **Question answers and recommendation labels (#8460).**
+  - `persona_core::answer` constructs the `ios_current` synchronous question answers and display-only recommendation
+    labels, with 15 + 8 complete fixture comparisons and Apple/CoreFoundation-derived whitespace boundaries.
+  - `AnswerBindingFixtureTest` drives `projectAnswer` and `displayAnswer` through real host-JNI string boundaries
+    (#8838). All 15 + 8 cases compare complete expected objects from the unchanged fixtures, including conditional
+    next-page, multi-select picks and display fields. Invalid pages/options, malformed input and a deliberately wrong
+    expectation are rejected, and the U+200B boundary is exercised. This is synchronous host-JNI evidence, not UI
+    timing, hub delivery or production Android integration. The current SwiftUI multi-question review confirmation
+    remains separately #8483; C/NAPI/Swift bindings, transport and physical-device evidence are not included.
+
+- **Streaming block boundaries (#8607).**
+  - `persona_core::stream_chunks` projects only `StreamChunks.split` and its direct fence recognition. Its 21
+    source-cited cases compare complete expected objects; direct Apple-test assertions are distinguished from
+    source-derived boundaries. No Apple runtime was run for this slice.
+  - `StreamBindingFixtureTest` drives the same pure projection through the real Kotlin/JNI `projectStreamChunks`
+    boundary (#8827). All 21 complete `{done, tail}` expected objects come from the unchanged checked-in fixture;
+    malformed input and a deliberately wrong expectation are rejected. Reconstruction is a secondary invariant, not
+    the expected oracle. This is host-JNI evidence, not production Android integration or executed Swift.
+  - `StreamRepair`, visual gaps, timing, rendering, C/NAPI/Swift bindings, production adapters and the #4044
+    performance goal remain open.
+
 ### Migration rules (each domain)
 
 1. **Fixtures first.** The domain's fixtures cover the rules the current iOS implementation follows today. Compare

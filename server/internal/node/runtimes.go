@@ -121,7 +121,13 @@ type runtimeConn struct {
 	hello    runtimeHello
 	ready    bool            // runtime.hello arrived
 	sessions []proto.Session // its last runtime.sessions
-	watched  map[string]bool // sessions this connection was asked to watch
+	watched  map[string]bool // sessions this connection was asked to watch, including an attempt still pending
+	// watchTokens identifies the current attempt for each watched session. The counter is per connection and is never
+	// reset while it can have an RPC outstanding, so a late error cannot clear a newer attempt or a later hub watch.
+	watchTokens    map[string]uint64
+	nextWatchToken uint64
+	// onWatchFailed is nil in production and used by concurrency tests to observe completion after locks are released.
+	onWatchFailed func()
 	// drivenTold: sessions this connection was told the hub started through another runtime (runtime.driven).
 	drivenTold map[string]bool
 	// What its list said beyond the rows the apps see: the terminal pane a session runs in (pane_id: the extension of a

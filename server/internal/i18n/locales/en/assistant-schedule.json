@@ -42,5 +42,8 @@
   "cron_month": "month (1–12 or JAN–DEC)",
   "cron_day_of_week": "day of week (0–7 or SUN–SAT, 0 and 7 are Sunday)",
   "cron_often": "{cron} runs {gap} minutes apart. A scheduled task runs at most every {min} minutes.",
-  "cron_never": "{cron} never runs: no date in the next 5 years matches it."
+  "cron_never": "{cron} never runs: no date in the next 5 years matches it.",
+  "run_if_approval": "Allow this command to run on the routine’s computer before each scheduled run?",
+  "run_if_skipped": "The pre-run command asked to skip this run.",
+  "run_if_failed": "Pre-run check failed: {error}"
 }

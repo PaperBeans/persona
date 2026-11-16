@@ -225,7 +225,7 @@ func (s *Service) runModelCall(ctx context.Context, purpose, who, what string, c
 				return nil, &rpc.Error{Code: assistantwire.CodeModelRefused, Message: "model.complete: " + err.Error(), Data: data}
 			}
 			logged("failed")
-			return nil, modelCallError(cctx, err)
+			return nil, modelCallError(cctx, s.requestCtxLang(cctx), err)
 		}
 		add(reply.Usage)
 		if c.schema == nil {
@@ -276,9 +276,23 @@ func cmpOr(s, fallback string) string {
 	return s
 }
 
+// directCallFailureExplanation is the plain-language cause shared by manager model calls and saved direct-API checks.
+// The caller appends the upstream's original detail; an unclassified error keeps its established message.
+func directCallFailureExplanation(l i18n.Lang, err error) string {
+	switch {
+	case ai.IsModelUnavailable(err):
+		return pt(l, "status_model_not_found")
+	case ai.IsContextTooLong(err):
+		return pt(l, "context_too_long")
+	default:
+		return ""
+	}
+}
+
 // modelCallError codes a failed request for the extension: held connection, nothing set up, out of time, or the
-// upstream's failure. A declined request (ai.RefusalError) is model_refused, coded by the caller with its usage.
-func modelCallError(ctx context.Context, err error) error {
+// upstream's failure. l is the manager request's language, or the user's language for a background call. A declined
+// request (ai.RefusalError) is model_refused, coded by the caller with its usage.
+func modelCallError(ctx context.Context, l i18n.Lang, err error) error {
 	var paused *ai.PausedError
 	switch {
 	case errors.As(err, &paused):
@@ -288,6 +302,13 @@ func modelCallError(ctx context.Context, err error) error {
 		return &rpc.Error{Code: assistantwire.CodeModelUnavailable, Message: "model.complete: " + err.Error()}
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		return &rpc.Error{Code: assistantwire.CodeModelTimeout, Message: "model.complete: timed out"}
+	}
+	if explanation := directCallFailureExplanation(l, err); explanation != "" {
+		code := assistantwire.CodeModelFailed
+		if ai.IsModelUnavailable(err) {
+			code = assistantwire.CodeModelUnavailable
+		}
+		return &rpc.Error{Code: code, Message: "model.complete: " + explanation + ": " + err.Error()}
 	}
 	return &rpc.Error{Code: assistantwire.CodeModelFailed, Message: "model.complete: " + err.Error()}
 }

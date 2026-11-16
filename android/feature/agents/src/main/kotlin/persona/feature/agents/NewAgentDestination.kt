@@ -70,5 +70,6 @@ internal fun NewAgentDestination(route: NewAgentRoute, navigator: Navigator, dep
         }
     }
     NewAgentPage(model, machines, connection == ConnectionState.Online, onBack = navigator::back, initialModelQuery = modelQuery,
-        onAddProvider = { navigator.navigate(persona.core.navigation.SettingsPageRoute(persona.core.navigation.SettingsPage.Providers)) })
+        onAddProvider = { navigator.navigate(persona.core.navigation.SettingsPageRoute(persona.core.navigation.SettingsPage.Providers)) },
+        onOpenProvider = { navigator.navigate(persona.core.navigation.ModelProviderRoute(it)) })
 }

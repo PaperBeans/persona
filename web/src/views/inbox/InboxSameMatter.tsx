@@ -1,6 +1,7 @@
 // "Same matter as…": pick another open item as this item's parent. Loaded on first open (lazyDialog in InboxLine).
 import { useEffect, useMemo, useState } from "react";
-import { fetchInboxTree, isDone, useInbox, type InboxItem, type InboxTree } from "../../lib/inbox";
+import { isDone, useInbox, type InboxItem, type InboxTree } from "../../lib/inbox";
+import { fetchInboxTree } from "../../lib/inbox-page";
 import { rowMeta } from "../../lib/inbox-now";
 import { sameManager } from "../../lib/manager-choice";
 import { byTime } from "../../lib/times";

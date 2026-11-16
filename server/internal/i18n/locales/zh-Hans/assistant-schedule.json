@@ -42,5 +42,8 @@
   "cron_month": "月份（1–12 或 JAN–DEC）",
   "cron_day_of_week": "星期（0–7 或 SUN–SAT，0 和 7 都是周日）",
   "cron_often": "{cron} 两次运行只隔 {gap} 分钟。定时任务最多每 {min} 分钟运行一次。",
-  "cron_never": "{cron} 永远不会运行：未来 5 年里没有符合的日期。"
+  "cron_never": "{cron} 永远不会运行：未来 5 年里没有符合的日期。",
+  "run_if_approval": "允许在每次定时运行前，在任务电脑上执行此命令吗？",
+  "run_if_skipped": "运行前检查要求跳过本次运行。",
+  "run_if_failed": "运行前检查失败：{error}"
 }

@@ -306,8 +306,10 @@ func (n *Node) watchTakenOver(h *runtimeConn, id string) {
 	if w == nil || w.parent == nil || w.ctx.Err() != nil || n.runtimes.watchedOn(h, id) {
 		return
 	}
-	n.runtimes.watch(h, id, 0, w.parent)
-	n.runtimeWatch(h, id, 0)
+	attempt := n.runtimes.watch(h, id, 0, w.parent)
+	if err := n.runtimeWatch(h, id, attempt.since); err != nil {
+		n.runtimes.watchFailed(h, id, attempt.token)
+	}
 }
 
 // continueInRuntime is a message to a Claude session not running anywhere on a machine whose engine is a runtime: the

@@ -3,6 +3,7 @@ package proto
 import (
 	"encoding/json"
 	"math"
+	"slices"
 	"time"
 )
 
@@ -62,6 +63,34 @@ func (s *PermissionModeSet) UnmarshalJSON(b []byte) error {
 // CodexEffortLevels are Codex's reasoning efforts, weakest first: a codex launcher's model catalog advertises ultra,
 // so a start on one takes it too (node/codex_effort.go). Claude Code's list stops at max.
 var CodexEffortLevels = []string{"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+
+// EffortWords are the thinking levels gateways and APIs name, weakest first: Claude Code's (EffortLevels), the APIs'
+// none and minimal below them and Codex's ultra above. Every other list of levels is a part of it in this order.
+var EffortWords = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+
+// ProjectEfforts is levels (EffortWords) in the words vocab takes, weakest first and each once: a level vocab names
+// stays as it is, minimal becomes low and ultra max where vocab lacks them (cindy's clampEffortForClaude), and
+// anything else vocab lacks (none, a word outside EffortWords) is left out.
+func ProjectEfforts(levels, vocab []string) []string {
+	var out []string
+	for _, w := range EffortWords {
+		for _, e := range levels {
+			p := e
+			if !slices.Contains(vocab, p) {
+				switch p {
+				case "minimal":
+					p = "low"
+				case "ultra":
+					p = "max"
+				}
+			}
+			if p == w && slices.Contains(vocab, p) && !slices.Contains(out, p) {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
 
 // ModeBypass skips every permission prompt; a headless claude only takes it at start (--permission-mode).
 const ModeBypass = "bypassPermissions"

@@ -519,6 +519,9 @@ class ChatRepositoriesTest {
         assertTrue(connection.sent.none { it.type() == "seen" })
         event(DeltaEvent(key.machineId, key.sessionId, "示例回复"))
         assertEquals(draftId, snapshot.items.last().id)
+        // Within the stream's publish window the chunk waits for the window's end (ChatDeltaPublishTest).
+        assertEquals("示例", snapshot.items.last().text)
+        advanceTimeBy(50); runCurrent()
         assertEquals("示例回复", snapshot.items.last().text)
         event(DeltaEvent(key.machineId, key.sessionId))
         assertEquals(draftId, snapshot.items.last().id)

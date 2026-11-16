@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/link"
+	"github.com/nwverse/persona/server/internal/osproc"
 	"golang.org/x/sys/unix"
 )
 
@@ -60,7 +61,7 @@ func TestResidentListenerHandoverRetainsBacklogAndLock(t *testing.T) {
 	if err != nil || !os.SameFile(before, after) {
 		t.Fatal("socket was replaced instead of handed over")
 	}
-	next.Listener.(*net.UnixListener).SetDeadline(time.Now().Add(time.Second))
+	next.Listener.(*osproc.UnixListener).SetDeadline(time.Now().Add(time.Second))
 	accepted, err := next.Listener.Accept()
 	if err != nil {
 		t.Fatalf("queued connection was not inherited: %v", err)

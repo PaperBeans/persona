@@ -296,6 +296,22 @@ describe("checking an uncertain send", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  // An uncertain send the receipt says a dialog refused (#7343): the failed bubble carries dialog_open, as a live
+  // refusal does, so the terminal button shows the dialog waits; a receipt without a code leaves none.
+  it("keeps the code of a definite failure the receipt saved", async () => {
+    failed();
+    const body = (b: Record<string, unknown>) => Buffer.from(JSON.stringify(b)).toString("base64");
+    const fetcher = vi.fn().mockResolvedValueOnce(receipt("failed", { result: { status: 409, body: body({ error: "a dialog is open", code: "dialog_open", delivered: "none" }) } }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await checkOutbox("m", "s", id)).toBe("not_applied");
+    expect(outbox()["m/s"][0]).toMatchObject({ id, state: "failed", inDoubt: false, newId: true, code: "dialog_open" });
+    delete outbox()["m/s"];
+    failed();
+    fetcher.mockResolvedValueOnce(receipt("failed", { result: { status: 400, body: body({ error: "会话已结束", delivered: "none" }) } }));
+    expect(await checkOutbox("m", "s", id)).toBe("not_applied");
+    expect(outbox()["m/s"][0].code).toBeUndefined();
+  });
+
   it("a definite failure restores ordinary Retry, which then uses a new id", async () => {
     failed();
     const body = Buffer.from(JSON.stringify({ error: "会话已结束", delivered: "none" })).toString("base64");
@@ -509,6 +525,25 @@ describe("messages kept across a reload", () => {
     expect(store.size).toBe(1); // accepted, still waiting for its transcript copy
     settleOutbox("m", "s", [{ id: "accepted-retry", client_msg_id: "a1", text: "accepted", images: [] }]);
     expect(store.size).toBe(0);
+  });
+
+  // A send refused because a dialog had the terminal (#7343) lights the terminal button by its code: the code comes
+  // back with the failed bubble after a reload, and goes once the message is sent, so the dot does not stay behind.
+  it("keeps a refusal's code across a reload and drops it once the message goes", async () => {
+    const refused = new ApiError(409, "a dialog is open", { code: "dialog_open", delivered: "none", retryable: false });
+    keepFailed("m", "s", { id: "d1", text: "go on", images: [], at: 1000 }, refused);
+    expect(outbox()["m/s"]).toMatchObject([{ id: "d1", state: "failed", code: "dialog_open" }]);
+    reload();
+    restoreOutbox("m", "s");
+    expect(outbox()["m/s"]).toMatchObject([{ id: "d1", state: "failed", code: "dialog_open", restored: true }]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response({ ok: true })));
+    expect(await retryOutbox("m", "s", "d1")).toBe(true);
+    const sent = outbox()["m/s"].find((e) => e.text === "go on")!;
+    expect(sent).toMatchObject({ state: "sent" });
+    expect(sent.code).toBeUndefined();
+    const kept = [...store.values()].map((v) => JSON.parse(v) as { code?: string });
+    expect(kept.length).toBe(1);
+    expect(kept[0].code).toBeUndefined();
   });
 
   it("restores an accepted message as pending with its original id, never resends, and settles once", async () => {

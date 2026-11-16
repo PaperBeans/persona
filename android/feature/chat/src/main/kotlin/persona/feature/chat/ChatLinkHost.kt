@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.res.stringResource
@@ -168,28 +169,42 @@ fun ChatLinkHost(
     // Standalone hosts use the safe top instead; the larger value avoids counting an inset already in the host's bar twice.
     val hostBar = LocalChromeInsets.current.top
     var hostTop by remember { mutableFloatStateOf(0f) }
+    // The host's height, in pixels: it shrinks on every frame the keyboard slides up (the page's imePadding), so it is read
+    // in layout and effects, and in composition only while a card is open; a BoxWithConstraints here composed the whole
+    // conversation again on each of those frames.
+    var hostHeight by remember { mutableIntStateOf(-1) }
     CompositionLocalProvider(LocalUriHandler provides uriHandler, LocalChatLinkOpening provides opening) {
-        BoxWithConstraints(modifier.fillMaxSize().onGloballyPositioned { hostTop = it.positionInWindow().y }) {
-            val height = maxHeight
+        Box(modifier.fillMaxSize().onGloballyPositioned { hostTop = it.positionInWindow().y }.onSizeChanged { hostHeight = it.height }) {
+            // safeDrawing includes the keyboard: read it in a derived state, whose value (the top) does not move with it.
             val safeDrawing = WindowInsets.safeDrawing
             val density = LocalDensity.current
-            // Window insets use window coordinates; this host may already start below its page bar or a sheet's safe top.
-            val remainingSafeTop = with(density) { (safeDrawing.getTop(this) - hostTop).coerceAtLeast(0f).toDp() }
-            val cardTop = maxOf(hostBar, remainingSafeTop)
-            val pixels = with(density) { height.toPx() }
-            val above = with(density) { cardTop.toPx() }.coerceIn(0f, pixels)
+            // Until the host is measured (its first frame) the window's height stands in.
+            val windowHeight = LocalWindowInfo.current.containerSize.height
+            val geometryState = remember(safeDrawing, density, hostBar, windowHeight) {
+                derivedStateOf {
+                    val pixels = (if (hostHeight >= 0) hostHeight else windowHeight).toFloat()
+                    // Window insets use window coordinates; this host may already start below its page bar or a sheet's safe top.
+                    val remainingSafeTop = (safeDrawing.getTop(density) - hostTop).coerceAtLeast(0f)
+                    LinkGeometry(pixels, maxOf(with(density) { hostBar.toPx() }, remainingSafeTop).coerceIn(0f, pixels))
+                }
+            }
+            val geometry by geometryState
             val drag = remember { AnchoredDraggableState(LinkDetent.Hidden) }
-            SideEffect {
-                drag.updateAnchors(DraggableAnchors {
-                    LinkDetent.Full at above
-                    LinkDetent.Peek at above + (pixels - above) * 0.4f
-                    LinkDetent.Hidden at pixels
-                })
+            // Keyed on the derived state itself: one made anew for a new bar, inset or window (now and then, never per
+            // keyboard frame) restarts the collector, which would otherwise keep the old one's anchors.
+            LaunchedEffect(drag, geometryState) {
+                snapshotFlow { geometryState.value }.collect { (pixels, above) ->
+                    drag.updateAnchors(DraggableAnchors {
+                        LinkDetent.Full at above
+                        LinkDetent.Peek at above + (pixels - above) * 0.4f
+                        LinkDetent.Hidden at pixels
+                    })
+                }
             }
             LaunchedEffect(opening) { if (url != null) drag.animateTo(LinkDetent.Full) }
             LaunchedEffect(closeRequest) { if (closeRequest > 0 && url != null) drag.animateTo(LinkDetent.Hidden) }
             LaunchedEffect(drag.settledValue) { if (drag.settledValue == LinkDetent.Hidden && !drag.isAnimationRunning) { url = null; forwarded = null } }
-            content(if (url != null && drag.currentValue == LinkDetent.Peek) (height - cardTop.coerceAtMost(height)) * 0.6f else 0.dp)
+            content(if (url != null && drag.currentValue == LinkDetent.Peek) with(density) { (geometry.pixels - geometry.above).toDp() } * 0.6f else 0.dp)
             url?.let { target ->
                 // A page whose renderer went away is loaded anew (a new view) when the user asks.
                 var generation by remember(target) { mutableIntStateOf(0) }
@@ -239,6 +254,7 @@ fun ChatLinkHost(
                 fun close() { scope.launch { drag.animateTo(LinkDetent.Hidden) } }
                 fun back() { if (view != null && !view.gone && view.canGoBack()) view.goBack() else close() }
                 BackHandler { back() }
+                val pixels = geometry.pixels
                 val offset = drag.offset.takeIf { it.isFinite() } ?: pixels
                 val panelHeight = with(density) { (pixels - offset).coerceIn(0f, pixels).toDp() }
                 val palette = PersonaTheme.palette
@@ -384,3 +400,6 @@ internal data class ChatPorts(
 )
 
 internal val LocalChatPorts = androidx.compose.runtime.compositionLocalOf<ChatPorts?> { null }
+
+/** The link card's room in the host, in pixels: its height and where the card's top stops. */
+private data class LinkGeometry(val pixels: Float, val above: Float)

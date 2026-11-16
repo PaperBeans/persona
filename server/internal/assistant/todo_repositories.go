@@ -11,6 +11,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/assistant/repositorystore"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
@@ -22,7 +23,7 @@ type todoRepositoryStore interface {
 	SetTodoRepositoryLinks(context.Context, string, string, repository.LinksInput) (repository.TaskSet, error)
 }
 
-var _ todoRepositoryStore = (*db.DB)(nil)
+var _ todoRepositoryStore = (*repositorystore.Store)(nil)
 
 func decodeTaskRepositoryInput(raw []byte, out any) error {
 	if len(raw) > 256<<10 {

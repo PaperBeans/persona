@@ -20,6 +20,12 @@ import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuProv
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
@@ -199,6 +205,53 @@ class MessageSelectionTest {
         assertEquals("a", menu.target?.id)
     }
 
+    @Test fun wordsThatChangeRightAfterTheFirstFrameAreStillCopied() {
+        show {
+            SelectableWords(MessageTarget("a", "settled words", user = false)) {
+                var phase by remember { mutableStateOf(0) }
+                // Start only once "Select" has run. show()'s waitForIdle would otherwise finish this first.
+                val selecting = menu.selecting?.id == "a"
+                LaunchedEffect(selecting) {
+                    if (!selecting) return@LaunchedEffect
+                    // Same words for the frame a first-frame selectAll would use, then they change.
+                    repeat(2) { withFrameNanos { } }
+                    phase = 1
+                    repeat(2) { withFrameNanos { } }
+                    phase = 2
+                }
+                Text(if (phase < 2) "partial $phase" else "settled words")
+            }
+        }
+        rule.runOnIdle { menu.select(MessageTarget("a", "settled words", user = false)) }
+        rule.waitForIdle()
+        copy()
+        assertTrue("copied: $copied", copied.isNotEmpty() && copied.all { it == "settled words" })
+        assertEquals("a", menu.selecting?.id)
+    }
+
+    @Test fun wordsThatChangeAfterTheSelectionWasSeenAreStillCopied() {
+        show {
+            SelectableWords(MessageTarget("a", "settled words", user = false)) {
+                var phase by remember { mutableStateOf(0) }
+                val selecting = menu.selecting?.id == "a"
+                LaunchedEffect(selecting) {
+                    if (!selecting) return@LaunchedEffect
+                    // Past the point where the words have been taken and composition has seen them.
+                    repeat(12) { withFrameNanos { } }
+                    phase = 1
+                    repeat(2) { withFrameNanos { } }
+                    phase = 2
+                }
+                Text(if (phase < 2) "partial $phase" else "settled words")
+            }
+        }
+        rule.runOnIdle { menu.select(MessageTarget("a", "settled words", user = false)) }
+        rule.waitForIdle()
+        copy()
+        assertTrue("copied: $copied", copied.isNotEmpty() && copied.all { it == "settled words" })
+        assertEquals("a", menu.selecting?.id)
+    }
+
     @Test fun copyTakesTheWordsAsTheChatShowsThem() {
         show {
             Reply("a", "先看 `foo()` 的结果。\n\n- 要点一\n- 要点二\n\n1. 第一步\n2. 第二步\n\n```kotlin\nfun a() = 1\nfun b() = 2\n```\n\n结尾 [链接](https://example.com/x)。")
@@ -207,7 +260,8 @@ class MessageSelectionTest {
         copy()
         // No thin spaces round the code, a list item's marker on its line, the code block's lines among the words and
         // none of its title bar (the language and Copy), the link as its words.
-        assertEquals("先看 foo() 的结果。\n• 要点一\n• 要点二\n1. 第一步\n2. 第二步\nfun a() = 1\nfun b() = 2\n结尾 链接。", copied.last())
+        assertEquals("selecting=${menu.selecting?.id} copied=$copied",
+            "先看 foo() 的结果。\n• 要点一\n• 要点二\n1. 第一步\n2. 第二步\nfun a() = 1\nfun b() = 2\n结尾 链接。", copied.lastOrNull())
     }
 
     @Test fun quoteTakesThePickedWordsAndEndsTheSelection() {
@@ -218,6 +272,18 @@ class MessageSelectionTest {
         rule.waitForIdle()
         assertEquals(listOf("a" to "改好了：先备份，再迁移。"), quotedWords)
         assertNull("the selection is over", menu.selecting)
+    }
+
+    @Test fun toolbarCopyTakesTheWordsAndEndsTheSelection() {
+        show { Reply("a", "改好了：先备份，再迁移。") }
+        select("a", "改好了：先备份，再迁移。")
+        val copyItem = items().single { it.label == "复制" }
+        rule.runOnIdle { copyItem.onClick(object : TextContextMenuSession { override fun close() {} }) }
+        rule.waitForIdle()
+        assertEquals("改好了：先备份，再迁移。", copied.lastOrNull())
+        // The toolbar's Copy releases the selection. A few frames later the message is not selecting.
+        settle()
+        assertNull("selecting=${menu.selecting?.id} copied=$copied", menu.selecting)
     }
 
     @Test fun noQuoteWhereTheChatDoesNotQuote() {

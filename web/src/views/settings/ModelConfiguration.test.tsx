@@ -8,10 +8,11 @@ vi.hoisted(() => {
 });
 vi.mock("./ConfigurationManager", () => ({ ConfigurationManager: ({ children }: { children: (id: string) => unknown }) => children("assistant") }));
 vi.mock("./ModelProfiles", () => ({ ModelProfiles: () => null }));
-vi.mock("../../lib/store", () => ({ useStore: (select: (s: { machines: [] }) => unknown) => select({ machines: [] }) }));
 vi.mock("../../ui/atoms", async (original) => ({ ...(await original<typeof import("../../ui/atoms")>()), toast: vi.fn() }));
 import { initI18n, t } from "../../i18n";
 import type { ModelBinding, ModelProvider, ModelPurpose } from "../../lib/model-config";
+import { getState, reset } from "../../lib/store";
+import type { Session } from "../../lib/types";
 import { ModelConfiguration } from "./ModelConfiguration";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,6 +30,10 @@ const providers: ModelProvider[] = [
   { id: "launcher.codex", name: "Codex", kind: "launcher", agent: "codex" },
   { id: "launcher.responses", name: "Responses provider", kind: "api", api: "responses" },
 ];
+const main: ModelPurpose = {
+  ...agents, id: "assistant", name: "主对话", launch: "headless", runtimes: ["cli", "agentsdk"],
+  provider_ids: providers.map((p) => p.id),
+};
 // The uses of Agents the hub lets the user set apart; each runs the same editor tests.
 const LARK = { id: "lark.agent", name: "Lark /agent" };
 const TWIN = { id: "inbox.agent", name: "AI twin runs" };
@@ -66,12 +71,12 @@ const hub = async (input: RequestInfo | URL, init?: RequestInit): Promise<Respon
     return json({ purpose: current, providers });
   }
   if (path.endsWith("/model-config")) return json({ purposes: [
-    { ...agents, id: "assistant", name: "主对话", launch: "headless", runtimes: ["cli", "agentsdk"] },
-    agents, current, readonly,
+    main, agents, current, readonly,
     { ...agents, id: "kb", name: "信息处理", kind: "api", effective: { provider: "launcher.messages" } },
     { ...agents, id: "extension.example", name: "Example extension", kind: "api", effective: { provider: "launcher.responses" } },
   ], providers });
   if (path.endsWith("/purposes/assistant.supervise")) return json({ error: "not found" }, 404); // a hub without the background supervisor's purpose (#5082)
+  if (path.endsWith("/purposes/assistant")) return json({ purpose: main, providers });
   if (path.endsWith(`/purposes/${current.id}`)) return json({ purpose: current, providers });
   if (path.endsWith(`/purposes/${readonly.id}`)) return json({ purpose: readonly, providers });
   if (path.endsWith("/launchers/discover")) return json({ models: [
@@ -120,6 +125,8 @@ async function render() {
 }
 beforeEach(async () => {
   await initI18n("zh-Hans");
+  reset();
+  Object.assign(getState(), { features: [], machines: [], sessions: {}, assistant: undefined });
   writes = [];
   conflict = false;
   listFails = false;
@@ -132,6 +139,7 @@ afterEach(async () => {
   act(() => root.unmount());
   host.remove();
   vi.unstubAllGlobals();
+  reset();
   await initI18n("zh-Hans");
 });
 
@@ -321,6 +329,36 @@ describe.each([
     expect(button(t("common.save"), dialog()).disabled).toBe(true);
     expect(button(t("settings-modelconfiguration.restore"), dialog()).disabled).toBe(true);
     expect(writes).toEqual([]);
+  });
+});
+
+describe("the Main chat editor's agent-kind mismatch", () => {
+  beforeEach(() => {
+    use = LARK;
+    current = child();
+    readonly = { ...child(), ...TWIN, fields: [] };
+  });
+
+  it("explains a default of another agent kind and clears the note for the current kind", async () => {
+    const running = {
+      machine_id: "hub", session_id: "main", title: "", cwd: "/", assistant: true, status: "idle", state: "idle",
+      agent: "codex", launcher: "codex", model: "gpt-5.5",
+    } as Session;
+    Object.assign(getState(), {
+      features: ["assistant_model_pick"],
+      sessions: { hub: [running] },
+      assistant: { machine_id: "hub", main: "main", launcher: "launcher.default", conversations: [running] },
+    });
+    await render();
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-model-purpose="assistant"] button')!.click());
+    await flush();
+    const note = () => document.querySelector<HTMLElement>("[data-main-chat-agent-setting]");
+    expect(note()).not.toBeNull();
+    expect(note()!.textContent).toBe(t("settings-modelconfiguration.main_other_kind", { configured: "Default launcher", actual: "Codex" }));
+    await choose("launcher.codex");
+    expect(note()).toBeNull();
+    await choose("launcher.default");
+    expect(note()).not.toBeNull();
   });
 });
 

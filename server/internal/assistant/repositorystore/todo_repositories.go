@@ -1,4 +1,5 @@
-package db
+// Package repositorystore keeps to-do repository associations in the assistant manager's database.
+package repositorystore
 
 import (
 	"context"
@@ -9,7 +10,15 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/db"
 )
+
+// Store adds repository persistence to the manager's ordinary database store.
+// Embedding preserves every unrelated assistant store capability on the same connection pool.
+type Store struct{ *db.DB }
+
+// New wraps the assistant manager's database without opening another pool.
+func New(database *db.DB) *Store { return &Store{DB: database} }
 
 func decodeTodoRepositories(id string, revision int64, raw []byte) (repository.TaskSet, error) {
 	out := repository.TaskSet{SchemaVersion: 1, TodoID: id, Revision: revision, Repositories: []repository.TaskRepository{}}
@@ -24,12 +33,12 @@ func decodeTodoRepositories(id string, revision int64, raw []byte) (repository.T
 	return out, nil
 }
 
-func (d *DB) TodoRepositories(ctx context.Context, id string) (repository.TaskSet, error) {
+func (d *Store) TodoRepositories(ctx context.Context, id string) (repository.TaskSet, error) {
 	var revision int64
 	var raw []byte
-	err := d.pool.QueryRow(ctx, `SELECT COALESCE(r.revision,0), r.repositories FROM todos t LEFT JOIN todo_repository_sets r ON r.todo_id=t.id WHERE t.id=$1`, id).Scan(&revision, &raw)
+	err := d.QueryRow(ctx, `SELECT COALESCE(r.revision,0), r.repositories FROM todos t LEFT JOIN todo_repository_sets r ON r.todo_id=t.id WHERE t.id=$1`, id).Scan(&revision, &raw)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return repository.TaskSet{}, ErrTodoNotFound
+		return repository.TaskSet{}, db.ErrTodoNotFound
 	}
 	if err != nil {
 		return repository.TaskSet{}, err
@@ -46,7 +55,7 @@ func ReadTodoRepositoriesTx(ctx context.Context, tx pgx.Tx, id string, expected 
 	var todo string
 	if err := tx.QueryRow(ctx, `SELECT id FROM todos WHERE id=$1 FOR UPDATE`, id).Scan(&todo); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return repository.TaskSet{}, ErrTodoNotFound
+			return repository.TaskSet{}, db.ErrTodoNotFound
 		}
 		return repository.TaskSet{}, err
 	}
@@ -88,12 +97,12 @@ func writeTodoRepositoriesTx(ctx context.Context, tx pgx.Tx, set repository.Task
 	return err
 }
 
-func (d *DB) CreateTodoWithRepositories(ctx context.Context, t TodoRow, in repository.CreateBindings) error {
+func (d *Store) CreateTodoWithRepositories(ctx context.Context, t db.TodoRow, in repository.CreateBindings) error {
 	if !repository.ValidRevision(in.CatalogRevision) || in.Repositories == nil {
 		return repository.Problem("invalid")
 	}
-	return pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
-		if err := createTodo(ctx, tx, t); err != nil {
+	return d.Transaction(ctx, func(tx pgx.Tx) error {
+		if err := db.CreateTodoTx(ctx, tx, t); err != nil {
 			return err
 		}
 		catalog, err := ReadRepositoryCatalogTx(ctx, tx)
@@ -111,12 +120,12 @@ func (d *DB) CreateTodoWithRepositories(ctx context.Context, t TodoRow, in repos
 	})
 }
 
-func (d *DB) SetTodoRepositories(ctx context.Context, id string, in repository.SetInput) (repository.TaskSet, error) {
+func (d *Store) SetTodoRepositories(ctx context.Context, id string, in repository.SetInput) (repository.TaskSet, error) {
 	var out repository.TaskSet
 	if !repository.ValidRevision(in.ExpectedRevision) || !repository.ValidRevision(in.ExpectedCatalogRevision) || in.Repositories == nil {
 		return out, repository.Problem("invalid")
 	}
-	err := pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
+	err := d.Transaction(ctx, func(tx pgx.Tx) error {
 		cur, err := ReadTodoRepositoriesTx(ctx, tx, id, in.ExpectedRevision)
 		if err != nil {
 			return err
@@ -143,12 +152,12 @@ func (d *DB) SetTodoRepositories(ctx context.Context, id string, in repository.S
 	return out, err
 }
 
-func (d *DB) SetTodoRepositoryLinks(ctx context.Context, id, repoID string, in repository.LinksInput) (repository.TaskSet, error) {
+func (d *Store) SetTodoRepositoryLinks(ctx context.Context, id, repoID string, in repository.LinksInput) (repository.TaskSet, error) {
 	var out repository.TaskSet
 	if !repository.ValidRevision(in.ExpectedRevision) || in.Links == nil {
 		return out, repository.Problem("invalid")
 	}
-	err := pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
+	err := d.Transaction(ctx, func(tx pgx.Tx) error {
 		cur, err := ReadTodoRepositoriesTx(ctx, tx, id, in.ExpectedRevision)
 		if err != nil {
 			return err
@@ -195,7 +204,7 @@ func rememberTodoRepositoryLinksTx(ctx context.Context, tx pgx.Tx, id string, ur
 // ImportTodoRepositoryLinks is additive and serializes with interactive edits on the Todo.
 // Historical imports run once; repeated reports cannot resurrect removed references.
 // An explicit agent/user request can deliberately add a previously removed reference.
-func (d *DB) ImportTodoRepositoryLinks(ctx context.Context, id string, urls []string, source string) (repository.TaskSet, bool, error) {
+func (d *Store) ImportTodoRepositoryLinks(ctx context.Context, id string, urls []string, source string) (repository.TaskSet, bool, error) {
 	input := make([]repository.LinkInput, 0, len(urls))
 	for _, raw := range urls {
 		input = append(input, repository.LinkInput{URL: raw})
@@ -204,7 +213,7 @@ func (d *DB) ImportTodoRepositoryLinks(ctx context.Context, id string, urls []st
 }
 
 // ImportTodoRepositoryLinkDetails uses the same transaction for references and titles.
-func (d *DB) ImportTodoRepositoryLinkDetails(ctx context.Context, id string, input []repository.LinkInput, source string) (repository.TaskSet, bool, error) {
+func (d *Store) ImportTodoRepositoryLinkDetails(ctx context.Context, id string, input []repository.LinkInput, source string) (repository.TaskSet, bool, error) {
 	var out repository.TaskSet
 	var changed bool
 	if source != "legacy" && source != "report" && source != "explicit" {
@@ -213,7 +222,7 @@ func (d *DB) ImportTodoRepositoryLinkDetails(ctx context.Context, id string, inp
 	if len(input) > repository.MaxTaskRepositories*repository.MaxRepositoryLinks {
 		return out, false, repository.Problem("limit")
 	}
-	err := pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
+	err := d.Transaction(ctx, func(tx pgx.Tx) error {
 		cur, err := ReadTodoRepositoriesTx(ctx, tx, id, nil)
 		if err != nil {
 			return err

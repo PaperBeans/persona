@@ -72,12 +72,23 @@ final class DictationBarTests: XCTestCase {
         return value == field.placeholderValue ? "" : value
     }
 
-    /// Earlier runs keep their draft across launches: empty it first.
-    @MainActor private func clearDraft() {
+    /// Empties the draft wherever the caret is, and fails the test if it is still there: earlier runs keep their draft
+    /// across launches. The tap that focuses the field leaves the caret where the field's selection was before the text
+    /// came in (a restored draft, the words ■ put in), at its start, where deletes remove nothing (#8799); a second tap,
+    /// at the focused field's end, puts the caret after the last character first.
+    @MainActor private func clearDraft(line: UInt = #line) {
         guard !draft.isEmpty else { return }
-        field.tap()
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: draft.count + 2))
-        app.buttons["shell-composer-dismiss-keyboard"].firstMatch.tap()
+        let hide = app.buttons["shell-composer-dismiss-keyboard"].firstMatch // there while the field has the focus
+        for _ in 0..<3 where !draft.isEmpty {
+            if !hide.exists {
+                field.tap()
+                _ = hide.waitForExistence(timeout: 5)
+            }
+            field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.9)).tap()
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: draft.count + 2))
+        }
+        XCTAssertTrue(wait { self.draft.isEmpty }, "the draft was not cleared: \(draft)", line: line)
+        hide.tap()
         sleep(2) // drafts are saved a moment after the last change
     }
 
@@ -121,7 +132,7 @@ final class DictationBarTests: XCTestCase {
         offBarUnnamed("after ■")
         XCTAssertEqual(draft, words)
         XCTAssertEqual(try sent().count, before, "■ sent the message")
-        clearDraft()
+        clearDraft() // fails if the words stay: saved, they would be the next run's draft
     }
 
     @MainActor func testCancelDropsWhatWasHeard() throws {

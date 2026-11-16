@@ -25,7 +25,7 @@ func TestHerdrFixtureCancelsUnfinishedPromptChecks(t *testing.T) {
 				once.Do(func() { close(reading) })
 			}
 		})
-		if err := n.firstPrompt(context.Background(), "w1:p2", startID, "fixture cleanup", &host.Agent{AgentStatus: proto.StatusIdle}); err != nil {
+		if err := n.firstPrompt(context.Background(), "w1:p2", startID, "fixture cleanup", &host.Agent{AgentStatus: proto.StatusIdle}, ""); err != nil {
 			t.Fatal(err)
 		}
 		select { // observe an active check, rather than hoping it has started
@@ -47,7 +47,7 @@ func TestFirstPromptStillOutlivesItsRequest(t *testing.T) {
 	n.firstPromptParent = nil
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := n.firstPrompt(ctx, "w1:p2", startID, "later receipt", &host.Agent{AgentStatus: proto.StatusIdle}); err != nil {
+	if err := n.firstPrompt(ctx, "w1:p2", startID, "later receipt", &host.Agent{AgentStatus: proto.StatusIdle}, ""); err != nil {
 		t.Fatal(err)
 	}
 	cancel()

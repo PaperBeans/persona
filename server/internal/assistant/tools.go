@@ -262,7 +262,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			return "", err
 		}
 		if name == "schedule_routine" {
-			return s.toolScheduleRoutine(ctx, self, args)
+			return s.toolScheduleRoutine(ctx, machine, self, args)
 		}
 		return s.toolScheduleFollowup(ctx, machine, self, args)
 	case "delete_routine", "cancel_followup":
@@ -404,18 +404,34 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			handed = s.handAttachments(ctx, machine, am.ID, atts, mentioned)
 			params["text"] = withAttachments(text, handed)
 		}
-		unsent := s.noteAgentSend(self, am.ID, c.SessionID) // more from its task's conversation reopens an accepted task (#6726)
+		sending, _ := params["text"].(string)
 		// A resume goes through the user's Resume's node call, the text as its first message (agent_resume.go).
 		if resume != "" {
-			return s.resumeAndSend(ctx, self, am, c, params, resume, a.Text, handed.said(), task, unsent)
+			return s.resumeAndSend(ctx, self, am, c, params, resume, a.Text, handed.said(), task)
 		}
 		if c.Status != proto.StatusOffline {
+			// A running agent takes it at once. A send of more for an accepted task holds a turn of the agent that
+			// starts meanwhile for its answer, so it is bounded however long the caller waits (a runtime's tool call
+			// has no deadline) and the turn is not held for good; any other send waits as long as its caller (#7539).
+			lctx, cancel := context.WithTimeout(ctx, liveSendWait)
+			defer cancel()
+			note, err := s.noteAgentSend(lctx, self, am.ID, c.SessionID, "", sending) // more from its task's conversation reopens an accepted task (#6726, #7539)
+			if err != nil {
+				return "", task.sendFailed(ctx, s, err)
+			}
+			if !note.reopens() {
+				lctx = ctx
+			}
 			var sent struct {
 				Queued bool `json:"queued"` // the runtime holds it behind the turn under way (#8097)
 			}
-			if err := s.call(ctx, am.ID, DeviceSessionSend, params, &sent); err != nil {
-				if !startResultUnknown(err) { // it may still arrive and start the turn
-					unsent()
+			err = s.call(lctx, am.ID, DeviceSessionSend, params, &sent)
+			note.sent(lctx, err) // an unknown answer counts for the agent's next turn: it may still arrive
+			if err != nil {
+				if note.reopens() && sendUnknown(err) {
+					// Its own wait ran out, or the link dropped, while the node may still type it in: the model reads
+					// the agent before it sends the text twice.
+					err = fmt.Errorf("%w (it may still arrive; check with agent_read before sending again)", err)
 				}
 				return "", task.sendFailed(ctx, s, err)
 			}
@@ -430,10 +446,13 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		// stops waiting.
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
-		if err := s.call(sctx, am.ID, DeviceSessionSend, params, nil); err != nil {
-			if !startResultUnknown(err) { // it may still arrive and start the turn
-				unsent()
-			}
+		note, err := s.noteAgentSend(sctx, self, am.ID, c.SessionID, "", sending)
+		if err != nil {
+			return "", task.sendFailed(sctx, s, err)
+		}
+		err = s.call(sctx, am.ID, DeviceSessionSend, params, nil)
+		note.sent(sctx, err)
+		if err != nil {
 			return "", task.sendFailed(sctx, s, err)
 		}
 		return fmt.Sprintf("Resumed %s on %s (same session, directory and launcher) and sent.", agentLabel(c), am.Name) + handed.said() + task.sent(sctx, s, a.Text), nil
@@ -751,6 +770,33 @@ func startResultUnknown(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
 		errors.Is(err, rpc.ErrClosed) || errors.As(err, &re) && re.Message == rpc.ErrClosed.Error()
 }
+
+// sendUnknown: a session.send or session.start that failed though its text may have reached the agent: its answer
+// never came back (startResultUnknown), or the node's error says the text may have arrived or did (nodeMayHaveTaken).
+// Not when the manager's own connection says it never went out (rpc.ErrNotSent: the caller's wait ran out, or the
+// connection closed, before it was written, or the node's not-started refusals outlasted the retries).
+func sendUnknown(err error) bool {
+	return (startResultUnknown(err) || nodeMayHaveTaken(err)) && !errors.Is(err, rpc.ErrNotSent)
+}
+
+// nodeMayHaveTaken: err is the node's, and its delivered says the text may have arrived ("unknown": typing failed part
+// way, or a Claude's inbox read it but the session has not confirmed it yet, peer_unconfirmed) or did ("yes"). A refusal
+// says "none" (nothing was typed); an error that says neither is read by its kind alone (startResultUnknown).
+func nodeMayHaveTaken(err error) bool {
+	var re *rpc.Error
+	if !errors.As(err, &re) || len(re.Data) == 0 {
+		return false
+	}
+	var d struct {
+		Delivered string `json:"delivered"`
+	}
+	_ = json.Unmarshal(re.Data, &d)
+	return d.Delivered == "unknown" || d.Delivered == "yes"
+}
+
+// liveSendWait bounds a send to an agent that runs when the send may reopen its accepted task (agent_send), and the
+// owner's message on a task's card: its node types it in at once. A var so tests shorten it.
+var liveSendWait = 90 * time.Second
 
 // startedWithoutAnswer answers an agent_start whose result is unknown. A list showing the new session the node
 // built (not present before the start) adopts and links it like an answered start; otherwise the model gets neutral

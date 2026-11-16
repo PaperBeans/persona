@@ -40,6 +40,50 @@ import PersonaWire
         }
     }
 
+    @Test func detailIdentityIncludesTheManager() throws {
+        var first = try item("lark:F1:1051", source: "lark")
+        first.manager = "manager-a"
+        var second = first
+        second.manager = "manager-b"
+        #expect(first.id == second.id)
+        #expect(InboxDetailView.identity(for: first) == first.key)
+        #expect(InboxDetailView.identity(for: first) != InboxDetailView.identity(for: second))
+        second.manager = nil
+        #expect(InboxDetailView.identity(for: first) != InboxDetailView.identity(for: second))
+    }
+
+    @Test func detailIdentityStaysStableForTheSameItem() throws {
+        var first = try item("lark:F1:1051", source: "lark")
+        first.manager = "manager-a"
+        var updated = first
+        updated.count += 1
+        updated.preview = "Another message"
+        let oldKey = InboxDetailView.identity(for: first), newKey = InboxDetailView.identity(for: updated)
+        #expect(oldKey == newKey)
+
+        let slot = InboxItemSlotModel(item: first)
+        #expect(slot.open(try #require(URL(string: "persona://inbox/lark:F1:1051/source"))))
+        slot.detailIdentityChanged(from: oldKey, to: newKey)
+        #expect(slot.showsSource, "updates to the same item keep its explicit source opening")
+    }
+
+    @Test(arguments: [("lark:F1:1051", "manager-b"), ("lark:F2:2", "manager-a")])
+    func detailIdentityChangeClearsDirectSource(id: String, manager: String) throws {
+        var first = try item("lark:F1:1051", source: "lark")
+        first.manager = "manager-a"
+        var next = try item(id, source: "lark")
+        next.manager = manager
+        let oldKey = InboxDetailView.identity(for: first), newKey = InboxDetailView.identity(for: next)
+        #expect(oldKey != newKey)
+
+        let slot = InboxItemSlotModel(item: first)
+        let source = try #require(URL(string: "persona://inbox/lark:F1:1051/source"))
+        #expect(slot.open(source) && slot.showsSource)
+        slot.detailIdentityChanged(from: oldKey, to: newKey)
+        #expect(!slot.showsSource, "a new identity needs its own explicit source action")
+        #expect(slot.open(source) && slot.showsSource, "explicit opening still works after reset")
+    }
+
     @Test func theSourcesAnExtensionDraws() async throws {
         let hub = FakeHub()
         listing(hub)

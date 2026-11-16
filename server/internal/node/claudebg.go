@@ -111,7 +111,7 @@ func (n *Node) agentsListRefusal(id string) error {
 	if !listed {
 		return nil
 	}
-	return refusal(openElsewhere, claudeAgentsList+"。这次没有发送。", nil)
+	return refusal(openElsewhere, claudeAgentsList+"。这次没有发送。", map[string]any{"where": whereAgentsList})
 }
 
 // outsideSource is the source a live claude outside Persona's panes lists under, "" for one the node leaves alone: a

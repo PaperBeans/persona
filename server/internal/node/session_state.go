@@ -17,9 +17,14 @@ import (
 // is Persona's (takesReport, close and decorate's StartedByPersona go by that): what the node only observes of the
 // user's own sessions never goes in (ultracode.go keeps that in memory, #5510).
 type stateFile struct {
-	mu       sync.Mutex
-	Sessions map[string]sessionState `json:"sessions"`
-	persist  func(id string, v sessionState)
+	// persistMu orders each snapshot and Sessions mutation with its persist callback. Acquire it before mu and release
+	// it only after persist returns; neither n.mu nor mu is held across persist. Node recovery/ultracode writers take
+	// their recoveryPersistMu / ultracodeState.persistMu before this lock (releasing n.mu after their own snapshots),
+	// and switchShare.drain releases switchShare.mu before adoptSwitch takes it.
+	persistMu sync.Mutex
+	mu        sync.Mutex
+	Sessions  map[string]sessionState `json:"sessions"`
+	persist   func(id string, v sessionState)
 	// loading: the hub's copy has yet to come (Serve opens it before loadState runs, which closes it). Until then a
 	// session missing from Sessions may still be Persona's. Nil once loaded.
 	loading chan struct{}
@@ -192,6 +197,8 @@ func (s *stateFile) ultracode(id string) (ultracodeRecord, bool) {
 // the lock, so a copy read before another writer's change is never written back over it. A session without a record
 // is not Persona's, or not loaded yet: nothing is written for it (false).
 func (s *stateFile) setUltracode(id string, rec ultracodeRecord) bool {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
 	s.mu.Lock()
 	v, ok := s.Sessions[id]
 	if !ok {
@@ -230,6 +237,8 @@ func (s *stateFile) setPendingSwitch(id string, ps *proto.PendingSwitch) bool {
 // was, with the rest as it is now (an ultracode observation made since stays), and no pending switch: a failed switch
 // is dropped (launcher_switch.go). launcher is the one to put back when there was no record before (the start made one).
 func (s *stateFile) restoreLaunch(id string, prev sessionState, had bool, launcher string) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
 	s.mu.Lock()
 	v, ok := s.Sessions[id]
 	if !ok {
@@ -257,6 +266,8 @@ func (s *stateFile) restoreLaunch(id string, prev sessionState, had bool, launch
 // Node's record, the rest of it as this Node has
 // it (an ultracode observation the new claude's hooks made on this connection); v whole when there is no record.
 func (s *stateFile) adoptSwitch(id string, v sessionState) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
 	s.mu.Lock()
 	if cur, ok := s.Sessions[id]; ok {
 		cur.Launcher, cur.Model, cur.ModelFingerprint, cur.ModelEffort = v.Launcher, v.Model, v.ModelFingerprint, v.ModelEffort
@@ -275,6 +286,8 @@ func (s *stateFile) adoptSwitch(id string, v sessionState) {
 // update changes session id's record with change under the lock and writes it through when change says it changed;
 // false when the session has no record: nothing is written for it.
 func (s *stateFile) update(id string, change func(v *sessionState) bool) bool {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
 	s.mu.Lock()
 	v, ok := s.Sessions[id]
 	if !ok {
@@ -361,21 +374,20 @@ func (s *stateFile) panes() map[string]string {
 }
 
 func (s *stateFile) setPane(id, pane string) {
-	s.mu.Lock()
-	v, ok := s.Sessions[id]
-	if !ok || v.Pane == pane {
-		s.mu.Unlock()
-		return
-	}
-	v.Pane = pane
-	s.Sessions[id] = v
-	s.mu.Unlock()
-	s.put(id, v)
+	s.update(id, func(v *sessionState) bool {
+		if v.Pane == pane {
+			return false
+		}
+		v.Pane = pane
+		return true
+	})
 }
 
 // put reports only whether its persistence callback was invoked, not whether the
 // one-way notification reached durable storage.
 func (s *stateFile) put(id string, v sessionState) bool {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
 	s.mu.Lock()
 	if old, ok := s.Sessions[id]; ok {
 		if old.CreationID != "" {

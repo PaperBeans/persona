@@ -445,6 +445,14 @@ setup.
 
 `scripts/mock/mock_hub.py` answers every request whatever the credential, so a watch feature checked only in a simulator against it can be refused on a real hub. The watch's Milk Frog shipped that way: its art requests got 403 from `allowed()` (the watch's `answer` token reads only `answerReads`), and the frog never appeared on a real watch. A new request from the watch (or any `answer`, `link` or extension credential) needs its path in the hub's allowlist, a case in `TestAnswerRoleOnlyWhatTheWatchDoes`, and one end-to-end call with a real token through `h.routes()` (`TestDeviceTokens`).
 
+## One machine can't show what a phone's network change does (2026-11-16, #8709)
+
+The live screen's route acceptance (#6398) ran the simulator on the same Mac as the node, so the hub relay and the direct route never shared a network the test could take away. On a real iPhone they do: both leave over Wi-Fi. Turning Wi-Fi off took the relays down with the direct route, their sockets said nothing, and the session sat on dead relays until the user opened the screen again.
+
+- Before calling a fallback done, ask what else leaves on the interface that fails. A path you fall back to can fail in the same event.
+- A transport that is a fallback needs its own silence rule. "The socket will throw" is not enough on a vanished interface.
+- With no screenshots, the timeline comes from the node's `screenlink:` lines in the hub journal, the hub's per-minute `traffic` lines (start, `elapsed_ms`) and the Mac's `log show` for `screensharingd` (each new sign-in is a new session, not a rejoin).
+
 ## A client's wire fixture comes from the hub's real answer (2026-11-15, #8310)
 
 The iPhone's Add to To-Dos decoded `todos[].item` as `{"id": …}` while the hub sent the bare row id, so every tap made the to-do, filed the row and then showed "The data couldn't be read because it isn't in the correct format" (`DecodingError.typeMismatch`). The app's unit test and `scripts/mock/mock_hub.py` were both written from the client's guess, so everything passed until a real hub answered. When a client starts reading a new answer, take its fixture from the hub's own handler output (a Go test's response body) or the protocol table, and pin the shape on the hub side with a test that decodes it the way the shipped client does (`TestInboxTodoReplyItemIsAnObject`). A decoding error on a 200 means the shapes disagree: fix the hub first so installed apps work again, then make the client accept both.

@@ -133,9 +133,9 @@ class QuietTasksUiTest {
         var showNeeds by mutableStateOf(true)
         rule.setContent {
             PersonaTheme(reduceMotion = true) {
-                if (showNeeds) AssistantTrays(host, needs, emptyList(), emptyList(), emptyList(), 900.dp, busy = false, enabled = true,
+                if (showNeeds) AssistantTrays(host, needs, emptyList(), emptyList(), emptyList(), { 900.dp }, busy = false, enabled = true,
                     onApprove = {}, onReview = {}, onSend = {}, onSchedule = {})
-                else AssistantTrays(host, running, emptyList(), emptyList(), emptyList(), 900.dp, busy = false, enabled = true,
+                else AssistantTrays(host, running, emptyList(), emptyList(), emptyList(), { 900.dp }, busy = false, enabled = true,
                     onApprove = {}, onReview = {}, onSend = {}, onSchedule = {})
             }
         }
@@ -181,9 +181,9 @@ class QuietTasksUiTest {
                     Column(Modifier.testTag("shot").width(400.dp).background(PersonaTheme.palette.background).padding(Tokens.Space.m),
                         verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                         AgentHandoffCards(handoffs, host)
-                        AssistantTrays(host, needs, emptyList(), emptyList(), emptyList(), 700.dp, busy = false, enabled = true,
+                        AssistantTrays(host, needs, emptyList(), emptyList(), emptyList(), { 700.dp }, busy = false, enabled = true,
                             onApprove = {}, onReview = {}, onSend = {}, onSchedule = {})
-                        AssistantTrays(host, running, emptyList(), emptyList(), emptyList(), 700.dp, busy = false, enabled = true,
+                        AssistantTrays(host, running, emptyList(), emptyList(), emptyList(), { 700.dp }, busy = false, enabled = true,
                             onApprove = {}, onReview = {}, onSend = {}, onSchedule = {})
                     }
                 }

@@ -72,6 +72,7 @@ struct InboxHandOffModelTests {
                 if let delay = calls.agentDelay { try? await Task.sleep(for: delay) }
                 return calls.agentAccepted ? InboxHandOffModel.AgentSendResult(delivered: true, error: nil, filed: calls.agentFiled) : .failed(calls.agentError)
             },
+            waitForNewAgent: { _, _ in .sent },
             open: { calls.went.append(($0, $1)) },
             markDone: { calls.done += 1 }))
     }

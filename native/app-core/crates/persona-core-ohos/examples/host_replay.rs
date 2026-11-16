@@ -2,8 +2,9 @@
 //! without an SDK, a HAP or a device (#7450). It drives the runtime through `persona_core_ohos::registry` exactly as
 //! `core_config`, `core_create`, `core_dispatch`, `core_flush`, `core_drain` and `core_close` do, with a `Host` that
 //! records every callback. `harmony/tests/core-host/replay.test.mjs` and `transport.test.mjs` are its clients. The
-//! transport command also decodes raw payloads directly with `persona_core::transport`. It proves nothing about the
-//! NAPI glue itself (argument conversion, thread-safe functions), which only a device build links.
+//! transport command also decodes raw payloads directly with `persona_core::transport`. The state command projects
+//! existing session/hub fixtures through `persona_core::state`. Neither loads the NAPI library or proves the NAPI glue
+//! itself (argument conversion, thread-safe functions), which only a device build links.
 //!
 //! # Framing
 //!
@@ -25,6 +26,7 @@
 //! | 8 | samples | none | none, after one `sample` record per value |
 //! | 9 | transport | payload kind `u8`, UTF-8 JSON body | decoded result as UTF-8 JSON, including an `error` object on refusal |
 //! | 10 | sort | UTF-8 JSON `sort::Input` | the `sort::Projection` as UTF-8 JSON |
+//! | 11 | state | UTF-8 JSON `{kind, input}` | the state fixture's expected-shaped JSON |
 //!
 //! Wire types for `reencode`: 1 `Action`, 2 `ChatEvent`, 3 `ChatPatch`, 4 `ChatSnapshot`, 5 `Config`, 6 `Effect`,
 //! 7 `ListOp`, 8 `Request`, 9 `WireBatch`, 10 `Payload`. It uses the decoder the worker uses for actions, which
@@ -95,6 +97,7 @@ const REENCODE: u8 = 7;
 const SAMPLES: u8 = 8;
 const TRANSPORT: u8 = 9;
 const SORT: u8 = 10;
+const STATE: u8 = 11;
 
 const OK: u8 = 1;
 const ERROR: u8 = 2;
@@ -350,6 +353,57 @@ fn transport_json(kind: u8, body: &[u8]) -> Vec<u8> {
             debug_assert!(serde_json::from_str::<serde_json::Value>(&message).is_ok());
             message.into_bytes()
         }
+    }
+}
+
+/// The fixture's state decoder, reached by the host rather than by a production NAPI export.
+fn state_json(bytes: &[u8]) -> Result<String, String> {
+    let input: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|_| "state: input is not valid JSON".to_owned())?;
+    let object = input.as_object().ok_or("state: input is not an object")?;
+    if object.len() != 2 || !object.contains_key("kind") || !object.contains_key("input") {
+        return Err("state: expected exactly kind and input".into());
+    }
+    let kind = object["kind"].as_str().ok_or("state: kind is not a string")?;
+    let input = &object["input"];
+    match kind {
+        "session_state" => {
+            let sessions: Vec<persona_core::state::ClientSession> =
+                serde_json::from_value(input["sessions"].clone())
+                    .map_err(|_| "session_state: sessions does not decode".to_owned())?;
+            let rows: Vec<_> = sessions.iter().map(persona_core::state::session_state).collect();
+            serde_json::to_string(&serde_json::json!({"sessions": rows})).map_err(|e| e.to_string())
+        }
+        "hub_state" => {
+            let session = input.get("session").ok_or("hub_state: session is missing")?;
+            let status = session
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .ok_or("hub_state: status is not a string")?;
+            let pending_interactions = session
+                .get("pending_interactions")
+                .and_then(serde_json::Value::as_i64)
+                .ok_or("hub_state: pending_interactions is not an integer")?;
+            let timestamp = |value: &serde_json::Value| -> Result<Option<i128>, String> {
+                if value.is_null() {
+                    return Ok(None);
+                }
+                let text = value.as_str().ok_or("hub_state: timestamp is not a string or null")?;
+                persona_core::state::utc_timestamp(text)
+                    .map(Some)
+                    .ok_or("hub_state: invalid timestamp".into())
+            };
+            let updated_at = timestamp(session.get("updated_at").unwrap_or(&serde_json::Value::Null))?;
+            let seen_at = timestamp(input.get("seen_at").unwrap_or(&serde_json::Value::Null))?;
+            let state = persona_core::state::AgentState::from_hub(&persona_core::state::HubSession {
+                status,
+                pending_interactions,
+                updated_at,
+                seen_at,
+            });
+            serde_json::to_string(&serde_json::json!({"state": state.as_str()})).map_err(|e| e.to_string())
+        }
+        _ => Err("state: unknown projection kind".into()),
     }
 }
 
@@ -719,6 +773,11 @@ fn run(input: &mut impl Read, output: &mut impl Write) -> Result<(), String> {
                 }))
                 .unwrap_or_else(|_| Err("sort: projection panicked".to_owned()));
                 write_result(output, result.map(|json| json.into_bytes()))?;
+            }
+            STATE => {
+                let result = catch_unwind(AssertUnwindSafe(|| state_json(fields("state").rest())))
+                    .unwrap_or_else(|_| Err("state: projection panicked".to_owned()));
+                write_result(output, result.map(String::into_bytes))?;
             }
             other => return Err(format!("unknown command {other}")),
         }

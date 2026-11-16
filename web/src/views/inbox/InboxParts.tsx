@@ -1,10 +1,8 @@
 // Small pieces the inbox pages share: avatars (chat, mail, document, Moments) with their source mark, tags, counts,
 // the AI twin's draft card, a document row's status menu, and the few glyphs the shared icon set does not have.
 import { useState, type CSSProperties, type ReactNode } from "react";
-import {
-  agentDraft, docChangeKey, docChangeLine, isDone, isLark, itemKey, keptChanges, movingKey, setDocStatus, useDroppedChanges, useInbox, useUnsentReply, withToken,
-  type DocChange, type DocRow, type DocStatus, type InboxItem,
-} from "../../lib/inbox";
+import { agentDraft, docChangeKey, isDone, isLark, itemKey, keptChanges, movingKey, setDocStatus, useDroppedChanges, useInbox, useUnsentReply, withToken, type DocChange, type DocRow, type DocStatus, type InboxItem } from "../../lib/inbox";
+import { docChangeLine } from "../../lib/inbox-page";
 import { connectorBrand } from "../../lib/connectors";
 import { hubMediaURL } from "../../lib/lark-summary";
 import { useItemManager, useShownManager, withManager } from "../../lib/manager-choice";

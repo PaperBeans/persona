@@ -19,13 +19,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.filter
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onSiblings
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.hasTestTag
@@ -45,9 +49,18 @@ import persona.core.contracts.SessionKey
 import persona.core.contracts.api.*
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
+import persona.core.hub.HubError
+import persona.core.hub.HubFailure
 import persona.feature.chat.ComposerAttachment
 import java.io.File
-import java.io.IOException
+
+/** A hub response with its own reason, as `HttpChatComposerService` can hand the upload to the page. */
+private fun shotUploadError() = HubFailure(
+    HubError.Server,
+    "The computer is out of disk space",
+    status = 507,
+    code = "insufficient_storage",
+)
 
 /**
  * New Agent's attachments on the page (#2321, iOS NewAgentAttachmentRows): Take photo through the system camera (a stand-in
@@ -97,7 +110,7 @@ class NewAgentAttachmentsShotsTest {
         val waiting = mutableSetOf<String>()
         override suspend fun upload(session: SessionKey, name: String, file: File): String {
             uploads += session to name
-            if (name in failing) throw IOException("The computer is out of disk space")
+            if (name in failing) throw shotUploadError()
             if (name in waiting) kotlinx.coroutines.awaitCancellation()
             return "/tmp/persona-uploads/$name"
         }
@@ -132,8 +145,13 @@ class NewAgentAttachmentsShotsTest {
         uploads = NewAgentUploads(
             service = { composer },
             // The service gets the picked name; staging the JPEG (ImageDecoder) is the composer's, and Robolectric has none.
-            upload = { service, session, attachment -> service.upload(session, attachment.name, File(attachment.name)) },
+            upload = { service, session, attachment, onStaged ->
+                onStaged(attachment.size ?: 0)
+                service.upload(session, attachment.name, File(attachment.name))
+            },
             photosOnly = { "Please look at the photos" },
+            filesOnly = { "Please look at the attached files" },
+            errorText = { name, error -> uploadFailureRow(name, error).resolve(context.resources) },
             discard = { persona.feature.chat.deleteCapture(context, it.uri) },
     ))
 
@@ -224,16 +242,27 @@ class NewAgentAttachmentsShotsTest {
         assertEquals(R.string.agents_attach_uploading_hold, model.state.value.attachmentsHold?.id)
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             rule.runOnIdle { style = s; dark = d }
-            // A file that fails: a toast says why and its row goes (iOS `FileUploads.run`).
-            rule.runOnIdle { model.attach(listOf(ComposerAttachment("f$s$d", "build.log", "content://docs/build.log", image = false, size = 4096))) }
+            // A failed file stays with its reason and Retry; only the separate removal action takes it out.
+            val failedId = "f$s$d"
+            rule.runOnIdle { model.attach(listOf(ComposerAttachment(failedId, "build.log", "content://docs/build.log", image = false, size = 4096))) }
+            rule.waitUntil(30_000) {
+                model.state.value.attachments.firstOrNull { it.id == failedId }?.uploadState == DraftUploadState.Failed
+            }
             rule.waitForIdle()
             rule.onNodeWithText("Couldn't send “build.log”", substring = true).assertExists()
-            assertEquals(listOf("notes.txt"), model.state.value.attachments.filterNot { it.image }.map { it.name })
+            val reason = uploadFailureRow("build.log", shotUploadError()).resolve(context.resources)
+            rule.onNodeWithText(reason).assertExists()
+            // The title says the name once; neither its subtitle nor another part of this row repeats it.
+            rule.onNodeWithText("build.log").onSiblings()
+                .filter(hasText("build.log", substring = true)).assertCountEquals(0)
+            assertEquals(listOf("notes.txt", "build.log"), model.state.value.attachments.filterNot { it.image }.map { it.name })
+            rule.onNodeWithText("Retry").assertExists()
             rule.onNodeWithText("Uploading", substring = true).assertExists()
             rule.onNodeWithTag("newAgent.attachHold").assertExists()
             val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
             File(out(), "attachments-${s.name.lowercase()}-${if (d) "dark" else "light"}.png").outputStream()
                 .use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            rule.runOnIdle { model.removeAttachment(failedId) }
         }
     }
 

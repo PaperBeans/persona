@@ -25,6 +25,10 @@ type TaskContinuation struct {
 
 func RenderTaskContinuation(t TaskContinuation) string { return render("agents/task_continuation", t) }
 
+// RenderPlanFirstTaskConstraint carries a task's self-planning requirement in its first prompt, for launches whose
+// thinking-effort setting the underlying model does not act on: the prompt is the only lever there.
+func RenderPlanFirstTaskConstraint() string { return render("agents/plan_first_task", nil) }
+
 // AgentTriage is the system prompt that reads a stopped agent's last reply and says where its work stands
 // (agents/triage, docs/assistant/agent-work.md).
 type AgentTriage struct {

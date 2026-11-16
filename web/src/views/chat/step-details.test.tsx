@@ -178,14 +178,18 @@ describe("plans and questions (G017)", () => {
 });
 
 describe("photos sent with a message (G026)", () => {
-  it("draws them over the bubble and opens them in the viewer", () => {
+  it("draws them over the bubble and opens them in the viewer", async () => {
     act(() => root.render(<UserBubble msg={{ id: "u1", text: "看图", images: [], contexts: [], photos: ["/tmp/persona/a.jpg", "/tmp/persona/b.png"] }} mid="m" sid="s" />));
     const thumbs = host.querySelectorAll<HTMLImageElement>("[data-attached-photos] img");
     expect(thumbs).toHaveLength(2);
     expect(thumbs[0].getAttribute("src")).toContain("/machines/m/file/thumb?path=%2Ftmp%2Fpersona%2Fa.jpg");
     act(() => button((b) => b.getAttribute("aria-label")?.startsWith("图片 2") ?? false).click());
-    const viewer = document.querySelector<HTMLElement>('[aria-label="图片 2 / 2"]');
-    expect(viewer).not.toBeNull();
+    // the viewer is a chunk of its own (LazyImageViewer.tsx), drawn once it is in
+    const viewer = await vi.waitFor(() => {
+      const v = document.querySelector<HTMLElement>('[aria-label="图片 2 / 2"]');
+      expect(v).not.toBeNull();
+      return v;
+    });
     expect(viewer!.querySelector("img")?.getAttribute("src")).toContain("/machines/m/file/download?path=%2Ftmp%2Fpersona%2Fb.png");
   });
 

@@ -120,7 +120,12 @@ func (s *Service) toolAgentInterrupt(ctx context.Context, machine, self string, 
 	var sent struct {
 		Queued bool `json:"queued"` // the runtime holds it behind a turn still running
 	}
-	if err := s.call(sctx, am.ID, DeviceSessionSend, sendParams(c.SessionID, then, false), &sent); err != nil {
+	note, err := s.noteAgentSend(sctx, self, am.ID, c.SessionID, "", then) // more from its task's conversation reopens an accepted task (#6726, #7539)
+	if err == nil {
+		err = s.call(sctx, am.ID, DeviceSessionSend, sendParams(c.SessionID, then, false), &sent)
+	}
+	note.sent(sctx, err) // an unknown answer counts for the agent's next turn: it may still arrive
+	if err != nil {
 		if working {
 			return "", fmt.Errorf("stopped it, but sending the new instruction failed: %w", err)
 		}

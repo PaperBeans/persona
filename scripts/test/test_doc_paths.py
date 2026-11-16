@@ -12,6 +12,9 @@ checked, not the anchor. The section names quoted after a doc path are test_doc_
 
 Every top-level doc must also be listed in CLAUDE.md's Docs index, the place Agents look for the design docs, and every
 record under docs/archive/ in the table of docs/archive/README.md.
+
+The tables in the same docs must stay whole: a blank line ends a table, and the rows after it render as plain text unless
+they start a table of their own (#7424: half of the Docs index).
 """
 from pathlib import Path
 import re
@@ -92,6 +95,9 @@ LINK = re.compile(r"\]\(\s*(<[^>]*>|(?:[^()\s]|\([^()\s]*\))+)(?:\s+\"[^\"]*\")?
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
 INLINE_CODE = re.compile(r"(`+).*?\1")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+# A table row, and the delimiter row under a table's header: | --- | :-: |, the outer pipes optional (GFM 4.10).
+TABLE_ROW = re.compile(r"^\s*\|")
+TABLE_DELIMITER = re.compile(r"^\s*\|?(?:\s*:?-+:?\s*\|)+(?:\s*:?-+:?)?\s*$")
 
 def current_docs():
     """Discover every maintained module guide, but not point-in-time archives."""
@@ -163,6 +169,23 @@ def missing_links(doc):
         if not resolved.exists():
             found.append(f"{doc.relative_to(ROOT)}:{number}: {path}")
     return found
+
+
+def split_tables(text):
+    """Yield the line number of each table row that blank lines cut off from the table rows above them.
+
+    Such a row is a table again only if it starts one of its own, a header row over a delimiter row. Rows in code
+    blocks, and rows after a paragraph or a code block, are not checked."""
+    lines = dict(outside_fences(text))
+    blank = {number for number, line in lines.items() if not line.strip()}
+    for number, line in lines.items():
+        if number - 1 not in blank or not TABLE_ROW.match(line):
+            continue
+        above = number - 1
+        while above in blank:
+            above -= 1
+        if TABLE_ROW.match(lines.get(above, "")) and not TABLE_DELIMITER.match(lines.get(number + 1, "")):
+            yield number
 
 
 def generated_screenshot(path):
@@ -293,6 +316,42 @@ class DocPathTests(unittest.TestCase):
                                   "spec/fixtures/wire/README.md:5: bar(2).md",
                                   "spec/fixtures/wire/README.md:10: span-missing.md",
                                   "spec/fixtures/wire/README.md:15: long-after-missing.md"], missing_links(doc))
+
+    def test_tables_are_not_split_by_blank_lines(self):
+        split = [f"{doc.relative_to(ROOT)}:{number}" for doc in doc_files()
+                 for number in split_tables(doc.read_text(errors="ignore"))]
+        self.assertEqual([], split, "a blank line ends a table, so these rows render as plain text; remove the blank "
+                                    "line, or give the rows a header and delimiter row of their own")
+
+    def test_split_tables_are_reported(self):
+        text = "\n".join([
+            "| Area | Docs |",
+            "| --- | --- |",
+            "| Start | `docs/README.md` |",
+            "",
+            "| Apple | `docs/apple/ios.md` |",
+            "| Desktop | `docs/desktop/desktop.md` |",
+            "",
+            "| Method | Path |",
+            "|:--|:-:|",
+            "| GET | `/api/v1/health` |",
+            "",
+            "",
+            "| POST | `/api/v1/inbox/bulk` |",
+            "",
+            "A paragraph.",
+            "",
+            "| a row after a paragraph |",
+            "```text",
+            "| a row in a code block |",
+            "",
+            "| another |",
+            "```",
+            "",
+            "| a row after a code block |",
+        ]) + "\n"
+        # Line 5 lost its table to one blank line and line 13 to two; line 8 starts a table of its own.
+        self.assertEqual([5, 13], list(split_tables(text)))
 
     def test_module_guides_are_discovered_recursively(self):
         with tempfile.TemporaryDirectory(prefix="doc-modules-") as directory:

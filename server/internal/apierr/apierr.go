@@ -141,11 +141,9 @@ func Call(w http.ResponseWriter, err error) {
 	if errors.Is(err, ErrOffline) {
 		status = http.StatusServiceUnavailable
 	}
-	code := NodeCode(err)
 	var re *rpc.Error
 	if errors.As(err, &re) && re.Code != "" {
-		code = re.Code
-		switch code {
+		switch re.Code {
 		case "internal", "node_unreachable", "timeout":
 			status = http.StatusBadGateway
 		case proto.CodeTerminalNotReady: // the node's new tab would not take the start command; nothing ran
@@ -153,6 +151,17 @@ func Call(w http.ResponseWriter, err error) {
 		default:
 			status = http.StatusConflict
 		}
+	}
+	CallStatus(w, status, err)
+}
+
+// CallStatus writes err, a node call's error, as Call does but with status: for a route whose clients already read
+// Call's status as something else (a to-do's accept, where every app takes a 409 for "already handled", #7343).
+func CallStatus(w http.ResponseWriter, status int, err error) {
+	code := NodeCode(err)
+	var re *rpc.Error
+	if errors.As(err, &re) && re.Code != "" {
+		code = re.Code
 	}
 	body := Body(status, code, err)
 	// delivered stays what the node said (sendsafe.go): the iOS app treats "unknown" as "maybe typed" and stops
@@ -292,6 +301,16 @@ var rpcFailureKeys = map[string]string{
 	proto.CodeSwitchBusy:            "rpc-errors.switch_busy",
 }
 
+// openElsewhereKeys word the node's open_elsewhere refusal by where the session is open (node/openelsewhere.go
+// whereOpen). One without a known where (an older node, an Agent runtime's own refusal) keeps its words.
+var openElsewhereKeys = map[string]string{
+	"desktop":     "rpc-errors.open_elsewhere_desktop",
+	"terminal":    "rpc-errors.open_elsewhere_terminal",
+	"program":     "rpc-errors.open_elsewhere_program",
+	"other":       "rpc-errors.open_elsewhere_other",
+	"agents_list": "rpc-errors.open_elsewhere_agents_list",
+}
+
 func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 	if l == "" {
 		return
@@ -305,6 +324,10 @@ func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 	}
 	code, _ := body["code"].(string)
 	key := rpcFailureKeys[code]
+	if code == "open_elsewhere" {
+		where, _ := body["where"].(string)
+		key = openElsewhereKeys[where]
+	}
 	if errors.Is(err, ErrOffline) {
 		key = "rpc-errors.offline"
 	}

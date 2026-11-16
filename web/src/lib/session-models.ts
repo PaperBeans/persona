@@ -70,8 +70,12 @@ export interface AssistantLaunchers {
 const assistantMachines = new Map<string, { info?: AssistantLaunchers; loading?: boolean; error?: string }>();
 const assistantReads = new Map<string, Promise<void>>();
 
-/** The Persona chats' launchers of `mid` as last read (`info` undefined before the first answer). */
-export const assistantLaunchers = (mid: string): { info?: AssistantLaunchers; loading?: boolean; error?: string } => assistantMachines.get(mid) ?? {};
+/** The Persona chats' launchers of `mid` as last read (`info` undefined before the first answer), plus the in-flight
+ *  read's identity for a caller that must know whether its refresh joined that exact request. */
+export const assistantLaunchers = (mid: string): { info?: AssistantLaunchers; loading?: boolean; error?: string; read?: Promise<void> } => ({
+  ...(assistantMachines.get(mid) ?? {}),
+  read: assistantReads.get(mid),
+});
 
 /** Reads them: once (a pill that needs the default), or `again` behind the ones shown (an opening of the panel). */
 export function readAssistantLaunchers(mid: string, o: { again?: boolean } = {}): Promise<void> {

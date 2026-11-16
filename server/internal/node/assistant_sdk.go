@@ -191,7 +191,7 @@ func (s sdkStart) options(claude string) (map[string]any, error) {
 		if env == nil {
 			env = map[string]any{}
 		}
-		for k, v := range pinnedEnv(s.env) {
+		for k, v := range unpinnedOutput(pinnedEnv(s.env)) { // the reply limit as the CLI leaves it (managedSettingsEnv)
 			env[k] = v
 		}
 		settings["env"] = env
@@ -282,7 +282,11 @@ func (n *Node) sdkCommand(b sdkBridge, launcher string, s sdkStart, base []strin
 				return cmp.Or(user[k], envValue(base, k))
 			})
 		}
-		base = withoutEnv(base, envClearFor(l))
+		// the reply limit as set for this conversation's model, not the provider's (outputTokens), and one a session
+		// Persona launched left in the node's environment (inheritedOutputClear)
+		_, limited := s.env[maxOutputEnv]
+		clear := withOutputClear(envClearFor(l), limited)
+		base = withoutEnv(base, inheritedOutputClear(clear, envList(s.env), func(k string) string { return envValue(base, k) }))
 		own := envList(s.env)
 		base = identity.Environment(base, own...)
 		// as `personad launch` does: a proxy inherited that no longer answers holds every request (deadproxy.go)

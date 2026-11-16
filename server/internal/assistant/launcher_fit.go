@@ -20,13 +20,67 @@ import (
 // (docs/server/launcher-health.md, "A launcher the computer doesn't have").
 
 // startPick is what a start's caller named itself, before a tier and Model configuration › Agents fill in the rest.
-type startPick struct{ launcher, effort string }
+// ultracode is the tri-state the caller gave (nil: it said nothing, false: it explicitly asked for it off). permission
+// is a task's permission mode as it stood before the launcher that runs set it (launchPick only; pickOf leaves it "").
+type startPick struct {
+	launcher, effort, model, tier, permission string
+	ultracode                                 *bool
+}
+
+// launchPick is what task t holds of its launch now, as pickOf reads it from a start's params, with its ultracode.
+func (t *PlanTask) launchPick() startPick {
+	return startPick{launcher: strings.TrimSpace(t.Launcher), effort: strings.TrimSpace(t.Effort),
+		model: strings.TrimSpace(t.Model), tier: strings.TrimSpace(t.Tier), permission: strings.TrimSpace(t.Permission),
+		ultracode: copyBool(t.Ultracode)}
+}
+
+// startFill is what a start-defaults policy filled in on one start try: a preset (which then decided the launcher,
+// model, effort, tier, and with the agent it runs the permission mode its launcher sets), the policy's effort, its
+// ultracode. A rule that fits but fills nothing leaves it empty, and the start is the one without the feature.
+type startFill struct{ preset, effort, ultracode bool }
+
+func (f startFill) any() bool { return f.preset || f.effort || f.ultracode }
+
+// storedLaunch is the launch task t keeps in its plan: what this try resolved, as every task keeps it, with the
+// task's own value instead for whatever a start-defaults policy filled in on this try. A policy's values are for that
+// one start (the Agent's session shows what it runs with): kept with the task, a remedy, a queued start or a retry
+// from the card, which read the task back from the store, would take them for the task's own.
+func (t PlanTask) storedLaunch() startPick {
+	kept := t.launchPick()
+	if t.callerPick == nil {
+		return kept
+	}
+	own := *t.callerPick
+	if t.startFilled.preset {
+		kept.launcher, kept.model, kept.effort, kept.tier, kept.permission = own.launcher, own.model, own.effort, own.tier, own.permission
+	}
+	if t.startFilled.effort {
+		kept.effort = own.effort
+	}
+	if t.startFilled.ultracode {
+		kept.ultracode = copyBool(own.ultracode)
+	}
+	return kept
+}
+
+// copyBool is a copy of an optional switch, so the copy and the original never change together.
+func copyBool(b *bool) *bool {
+	if b == nil {
+		return nil
+	}
+	v := *b
+	return &v
+}
 
 // pickOf is the caller's own pick in a start's params.
 func pickOf(params map[string]any) startPick {
 	l, _ := params["launcher"].(string)
 	e, _ := params["effort"].(string)
-	return startPick{launcher: strings.TrimSpace(l), effort: strings.TrimSpace(e)}
+	m, _ := params["model"].(string)
+	t, _ := params["tier"].(string)
+	u, _ := params["ultracode"].(*bool)
+	return startPick{launcher: strings.TrimSpace(l), effort: strings.TrimSpace(e),
+		model: strings.TrimSpace(m), tier: strings.TrimSpace(t), ultracode: u}
 }
 
 // resolveStart fills params (a session.start's, with the caller's own launcher, model, effort and tier, if any) with

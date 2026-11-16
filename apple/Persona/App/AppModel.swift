@@ -1500,6 +1500,8 @@ final class AppModel {
             open(home.key, latestAnswer: latestAnswer, reveal: home.childID)
             return
         }
+        // A prior missing answer must not flash on a reopen before the lookup returns (#8748).
+        clearMissingSessionDetail(key)
         if let reveal {
             revealToken += 1
             revealChild = ChildReveal(sessionID: reveal, token: revealToken)
@@ -1518,6 +1520,9 @@ final class AppModel {
             #endif
             selectedTab = .chats
             openChat = key
+            // A push / Inbox / link can open another manager's Agent while the filtered list never lands its row
+            // (#8748): fetch that one row now, not only once the chat subscribes on a paged hub.
+            if sessionIndex[key] == nil { Task { await refreshSessionDetail(key) } }
         }
     }
 
@@ -1639,9 +1644,29 @@ final class AppModel {
     /// link to the same child opens the card again. Nil for an ordinary open.
     var revealChild: ChildReveal?
     @ObservationIgnored private var revealToken = 0
+    /// Open / subscribed chats whose exact row the hub answered with none (#8748): the composer says why instead of
+    /// sitting disabled with no explanation. Cleared when a row lands or the chat is no longer held.
+    private(set) var missingSessionDetails: Set<SessionKey> = []
+    /// Rows `retainHeldSessionRows` kept across a filtered complete landing (#8748). Not observed: only the refresh
+    /// gate reads it. Cleared when the chat is no longer held, or a landing includes that row again.
+    @ObservationIgnored private var retainedSessionKeys: Set<SessionKey> = []
+
+    /// Why the composer of `key` is disabled when there is no session row: the hub could not provide one. Nil while a
+    /// lookup is still out, or when a row is in hand (then `Session.sourceSubtitle` covers a real `!canSend`).
+    func missingSessionReason(_ key: SessionKey) -> String? {
+        guard sessionIndex[key] == nil, missingSessionDetails.contains(key) else { return nil }
+        return String(localized: "This conversation isn't available")
+    }
 
     func refreshSessionDetail(_ key: SessionKey, listHint: String? = nil) async {
-        guard sessionLists.lists[key.group]?.paged == true, let api = api(key.group) else { return }
+        forgetRetainedIfUnheld(key)
+        // Paged hubs refresh complete metadata for every open chat. Complete hubs fetch when the opened row is missing
+        // from the filtered index, or when it was only kept by `retainHeldSessionRows` (another manager's Agent, #8748):
+        // list-mode hubs no longer push full snapshots, so those retained rows would otherwise stay stale.
+        let paged = sessionLists.lists[key.group]?.paged == true
+        let missing = sessionIndex[key] == nil
+        let retained = retainedSessionKeys.contains(key)
+        guard paged || missing || retained, let api = api(key.group) else { return }
         var hint: String? = listHint
         while true {
             var gate = detailHints[key] ?? FetchHint()
@@ -1667,9 +1692,15 @@ final class AppModel {
         do {
             // Not in the list: there is no detail to add. This runs on its own whenever a chat opens, so a session the
             // list does not have (hidden from it, or gone) is not a chat error. A transcript that cannot be read is
-            // still reported, by the read of the transcript itself.
-            guard let full = try await api.sessionListDetail(key, title: latest(key)?.title ?? "") else { return }
+            // still reported, by the read of the transcript itself. The composer still needs a reason when the row
+            // stays missing (#8748). A retained row the hub no longer has must leave the index so that reason shows.
+            guard let full = try await api.sessionListDetail(key, title: latest(key)?.title ?? "") else {
+                if retainedSessionKeys.contains(key) { dropRetainedSessionRow(key) }
+                noteMissingSessionDetail(key)
+                return
+            }
             guard self.api(key.group)?.config.url == api.config.url else { return }
+            clearMissingSessionDetail(key)
             if let parentKey = ChildSessions.parentKey(full) {
                 // A folded child does not join the root window while its parent row exists.
                 childIndex.hold(full)
@@ -1690,8 +1721,31 @@ final class AppModel {
             applySessions([key.machineRef: Self.replacing(full, in: sessionsByMachine[key.machineRef] ?? [])])
             await refreshOpenChildren(key, hint: listHint)
         } catch {
+            if sessionIndex[key] == nil { noteMissingSessionDetail(key) }
             if isSubscribed(key), !error.isQuiet { chat(key).error = error.localizedDescription }
         }
+    }
+
+    /// The hub answered with no row for a key we had only kept across a filtered landing: drop it so the composer
+    /// reason can show (#8748).
+    private func dropRetainedSessionRow(_ key: SessionKey) {
+        retainedSessionKeys.remove(key)
+        let list = (sessionsByMachine[key.machineRef] ?? []).filter { $0.sessionID != key.sessionID }
+        applySessions([key.machineRef: list])
+    }
+
+    private func forgetRetainedIfUnheld(_ key: SessionKey) {
+        guard retainedSessionKeys.contains(key) else { return }
+        if !heldSessionKeys(group: key.group).contains(key) { retainedSessionKeys.remove(key) }
+    }
+
+    private func noteMissingSessionDetail(_ key: SessionKey) {
+        guard isSubscribed(key) || openChat == key || visibleSession == key else { return }
+        if !missingSessionDetails.contains(key) { missingSessionDetails.insert(key) }
+    }
+
+    private func clearMissingSessionDetail(_ key: SessionKey) {
+        missingSessionDetails.remove(key)
     }
 
     /// The parent row when it is already listed, or one exact lookup while the socket is connected. Not connected:
@@ -1765,6 +1819,10 @@ final class AppModel {
         guard owners.isEmpty else { subscribers[key] = owners; return }
         subscribers[key] = nil
         forgetAgentLive(key)
+        if openChat != key, visibleSession != key, !shown.contains(where: { $0.key == key }) {
+            clearMissingSessionDetail(key)
+            retainedSessionKeys.remove(key)
+        }
         socket(key.group)?.send(["type": "unsubscribe", "machine_id": key.machineID, "session_id": key.sessionID])
     }
 
@@ -2300,6 +2358,9 @@ final class AppModel {
             for session in new where session.assistant == true {
                 chats[session.key]?.updateQueuePhotoMarks(queued: session.queued, own: session.ownQueuedCount)
             }
+            for session in new where missingSessionDetails.contains(session.key) {
+                clearMissingSessionDetail(session.key)
+            }
             notifyTransitions(old: old, new: new)
             AgentSync.shared.sessions(new)
         }
@@ -2350,7 +2411,9 @@ final class AppModel {
 
     /// The complete fallback is authoritative on a list-negotiated hub. Older delta sockets retain their live rows
     /// while REST fills history, including a snapshot still waiting for the burst flush.
-    func landCompleteSessionList(_ rows: [Session], group: String) {
+    /// `manager` is the list query's filter when the landing is one assistant's sessions only (`sessions_manager`);
+    /// nil or empty means every manager, and a missing held row is dropped as before.
+    func landCompleteSessionList(_ rows: [Session], group: String, manager: String? = nil) {
         var updates = Dictionary(grouping: rows, by: \.machineRef)
         let delta = socket(group)?.state == .connected && features(group).contains(SessionPatch.feature) && !features(group).contains("sessions_list")
         for (ref, list) in updates {
@@ -2363,7 +2426,46 @@ final class AppModel {
         if !delta {
             for ref in pendingSessions.keys where ref.group == group && updates[ref]?.isEmpty != false { pendingSessions[ref] = [] }
         }
+        // A filtered landing would clear another manager's open chat from the index (#8748). Keep only those other-
+        // manager held rows; a row of this filter that really left the list (deleted, archived) still drops.
+        retainHeldSessionRows(&updates, group: group, manager: manager)
         applySessions(updates)
+    }
+
+    /// Keys of chats this group is still showing or streaming: candidates to keep across a filtered complete landing.
+    private func heldSessionKeys(group: String) -> Set<SessionKey> {
+        var keys = Set(subscribers.keys.filter { $0.group == group })
+        if let open = openChat, open.group == group { keys.insert(open) }
+        if let visible = visibleSession, visible.group == group { keys.insert(visible) }
+        for shown in shown where shown.key.group == group { keys.insert(shown.key) }
+        return keys
+    }
+
+    /// Keep an open/subscribed row only when this landing filtered by `manager` and the row's own manager is a
+    /// different nonempty id. An unfiltered landing, or one for the row's manager, leaves removals as they are.
+    /// Keys kept here are remembered so `sessions_list` can refresh them on a complete hub (#8748).
+    private func retainHeldSessionRows(_ updates: inout [MachineRef: [Session]], group: String, manager: String?) {
+        let held = heldSessionKeys(group: group)
+        retainedSessionKeys = retainedSessionKeys.filter { $0.group != group || held.contains($0) }
+        guard let filter = manager, !filter.isEmpty else {
+            // Unfiltered landing is authoritative for every manager: nothing stays "retained across a filter".
+            retainedSessionKeys = retainedSessionKeys.filter { $0.group != group }
+            return
+        }
+        for key in held {
+            if updates[key.machineRef]?.contains(where: { $0.sessionID == key.sessionID }) == true {
+                retainedSessionKeys.remove(key)
+                continue
+            }
+            guard let row = sessionIndex[key] ?? sessionsByMachine[key.machineRef]?.first(where: { $0.sessionID == key.sessionID })
+            else { continue }
+            guard let rowManager = row.manager, !rowManager.isEmpty, rowManager != filter else {
+                retainedSessionKeys.remove(key)
+                continue
+            }
+            updates[key.machineRef] = Self.replacing(row, in: updates[key.machineRef] ?? [])
+            retainedSessionKeys.insert(key)
+        }
     }
 
     private func scheduleSessionsFlush() {
@@ -2716,6 +2818,9 @@ final class AppModel {
     /// Whether the app may answer a card (#4059): one on no session (`personad ask` outside herdr) always; else as its
     /// session's source allows. Every place that answers or greys a card asks this.
     func canAnswer(_ ix: Interaction) -> Bool { ix.canAnswer(session: session(ix.sessionKey)) }
+
+    /// Why the app can't answer the card, said under it (#6868); nil where it can.
+    func answerBlock(_ ix: Interaction) -> AnswerBlock? { ix.answerBlock(session: session(ix.sessionKey)) }
 
     /// This device's answer to the card is on its way (the card is hidden meanwhile).
     func isAnswering(_ uid: String) -> Bool { answering.contains(uid) }

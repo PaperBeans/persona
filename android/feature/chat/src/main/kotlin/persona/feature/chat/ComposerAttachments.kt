@@ -39,11 +39,26 @@ import java.io.File
 import java.util.UUID
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 internal const val MAX_COMPOSER_FILE_BYTES = 200L * 1024 * 1024
+const val MAX_COMPOSER_FILES = 10
+private const val MAX_COMPOSER_UPLOADS = 3
+
+internal fun composerFileRoom(attachments: List<ComposerAttachment>): Int =
+    // A refused pick is not a file the message can carry; it must not take the next valid pick's place.
+    (MAX_COMPOSER_FILES - attachments.count { !it.media && it.uploadState != DraftUploadState.Invalid }).coerceAtLeast(0)
+
+/** One draft's upload pump: three on the wire, every other picked file retained locally until a slot opens. */
+class ComposerUploadLimiter {
+    private val slots = Semaphore(MAX_COMPOSER_UPLOADS)
+    suspend fun <T> withSlot(upload: suspend () -> T): T = slots.withPermit { upload() }
+}
 
 /** Photos go to the computer as JPEG at this quality, the long side at most [PHOTO_MAX_SIDE] (as iOS). */
 internal const val PHOTO_JPEG_QUALITY = 75
@@ -145,15 +160,28 @@ internal fun decodePhoto(context: Context, uri: Uri): Bitmap =
  * uploaded. Back from the camera or a picker the connection is often still catching up (the app was in the
  * background): it waits for it a little instead of failing at once with "Retry the upload once reconnected".
  */
-suspend fun uploadAttachment(context: Context, service: ChatComposerService, session: SessionKey, attachment: ComposerAttachment): String {
+suspend fun uploadAttachment(
+    context: Context, service: ChatComposerService, session: SessionKey, attachment: ComposerAttachment,
+    destination: String? = null,
+    /** The exact staged byte count, for providers whose reported size was missing or stale. */
+    onStaged: suspend (Long) -> Unit = {},
+): String {
     (service as? MessageTransport)?.readyToSend?.let { ready ->
         withTimeoutOrNull(UPLOAD_READY_WAIT_MILLIS) { ready.first { it } }
     }
-    return withContext(Dispatchers.IO) {
-        val staged = stageAttachment(context, attachment)
-        try {
-            service.upload(session, if (attachment.image) "${attachment.name.substringBeforeLast('.')}.jpg" else attachment.name, staged)
-        } finally { staged.delete() }
+    val staged = withContext(Dispatchers.IO) { stageAttachment(context, attachment) }
+    try {
+        onStaged(staged.length())
+        return withContext(Dispatchers.IO) {
+            val name = if (attachment.image) "${attachment.name.substringBeforeLast('.')}.jpg" else attachment.name
+            when {
+                attachment.media -> service.upload(session, name, staged)
+                destination != null -> service.upload(session, name, staged, destination)
+                else -> service.upload(session, name, staged, "attachment")
+            }
+        }
+    } finally {
+        withContext(NonCancellable + Dispatchers.IO) { staged.delete() }
     }
 }
 
@@ -240,6 +268,7 @@ internal fun ComposerAttachmentPreviews(
                             attachment.video && attachment.path != null -> attachment.attachedFile()?.let { attachedDetail(it, resources) }.orEmpty()
                             attachment.path != null -> stringResource(R.string.chat_attach_uploaded)
                             service == null -> stringResource(R.string.chat_attach_no_service)
+                            attachment.uploadState == DraftUploadState.Pending -> stringResource(R.string.chat_attach_waiting)
                             else -> stringResource(R.string.chat_attach_uploading)
                         }, color = if (attachment.error != null) PersonaTheme.palette.danger.text else PersonaTheme.palette.ink2,
                             style = PersonaTheme.type.caption)

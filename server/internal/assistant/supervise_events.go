@@ -76,6 +76,10 @@ func (s *Service) taskNoticeOf(ctx context.Context, t Todo, machine, state, ask,
 // superviseJudged: supervised task t's agents all stopped after work since work, and the judge said c (err: it could
 // not). Finished: the task waits for review. Not finished: the supervisor hears it stopped short.
 func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c taskDoneCheck, err error) {
+	if s.closedSince(t.ID, work) {
+		s.logf("task %s: closed since the work judged began: judged %s, dropped", t.ID, cmp.Or(c.Verdict, "with an error"))
+		return
+	}
 	st := t.Supervision.state(t)
 	key := work.UTC().Format(time.RFC3339Nano)
 	if err == nil && c.Verdict == verdictDone {
@@ -92,7 +96,11 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 				detail = "抽查：判官已逐条核对通过且已上线，" + c.Reason // i18n-ignore: the supervision message is the assistant's prompt
 			}
 		}
+		closed := false
 		v, _, uerr := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
+			if closed = s.closedSince(t.ID, work) || reviewClosedSince(v, work); closed {
+				return false // accepted or cancelled meanwhile: with the ledger's lock, so no review is undone
+			}
 			if v.state(t) == reviewPending && v.Waits == nil {
 				return false
 			}
@@ -101,6 +109,10 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 		})
 		if uerr != nil {
 			s.logf("task %s: pending review: %v", t.ID, uerr)
+			return
+		}
+		if closed {
+			s.logf("task %s: closed while judged done: no review asked", t.ID)
 			return
 		}
 		s.logf("task %s: waits for review: %s", t.ID, detail)
@@ -141,6 +153,24 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 		detail += "）"
 	}
 	s.signal(superviseSignal{Todo: t.ID, Kind: sigIdle, Key: key, Detail: detail})
+}
+
+// closedSince: task id is closed now (accepted, cancelled, closed by hand), or a review accepted or cancelled it after
+// the stretch of work begun at work (task_review writes the ledger before it closes the to-do). A judgment of that
+// stretch is moot: it neither changes the ledger nor tells the supervisor (#7539). A task opened again is judged
+// again by the work after its reopening, which began after that review.
+func (s *Service) closedSince(id string, work time.Time) bool {
+	t, ok := s.todoNow(id)
+	return !ok || t.DoneAt != nil || reviewClosedSince(t.Supervision, work)
+}
+
+// reviewClosedSince: v's latest review accepted or cancelled its task after work.
+func reviewClosedSince(v *Supervision, work time.Time) bool {
+	if v == nil || len(v.Reviews) == 0 {
+		return false
+	}
+	r := v.Reviews[len(v.Reviews)-1]
+	return (r.Verdict == reviewAccepted || r.Verdict == reviewCancelled) && r.At.After(work)
 }
 
 var verdictWords = map[string]string{verdictNotDone: "没做完", verdictWaiting: "在等别人或别的事", verdictNeedsUser: "要用户决定",

@@ -75,6 +75,7 @@
   "scope_todos_write": "新建和修改待办、把对话挂到待办上（不能删待办）",
   "scope_leaders_read": "查看主管对话（方向）和它们的上报",
   "scope_assistant_dispatch_policy": "读取和修改助手派活策略（哪些对话可以派活）",
+  "scope_assistant_start_defaults": "查看 Agent 预设，设置任务 Agent 启动时的默认值",
   "scope_models": "用你在「设置 › 模型配置」里为它选的模型（不经手密钥）",
   "scope_transcription": "把它自己的音频交给你给会议选的转写服务转成文字（不经手密钥，拿不到别的音频）",
   "scope_call": "调用扩展「{id}」的接口",

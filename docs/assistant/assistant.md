@@ -872,6 +872,7 @@ Now one `Task` table (`assistant/schedule.go`, settings `assistant.tasks`), four
 - Two runs are at least 5 minutes apart (as `interval`), checked from the minute and hour fields. `@every`, a seconds field, `TZ=` / `CRON_TZ=` and an expression that matches no date in five years are refused with the field and what it takes (`assistant-schedule.cron_*`; English for the tools).
 - The words for an expression (`cron_text`, the preview's `text`) come from `github.com/lnquy/cron` in en / zh-Hans / ja; none when a day field is a step from `*` and the other is restricted, since the words would read Vixie's "both" as "either". `next_runs` always shows what it does.
 - `schedule_routine` takes `cron` instead of `time` / `weekdays`, `schedule_followup` instead of `at` / `every` (a run of a one-off that reschedules itself with `cron` turns it into a cron task). Their replies give the expression, its words, the time zone and the next 5 runs, so the model can check them against what was asked.
+- A routine can set `run_if` through `schedule_routine` (with the owner's approval) or through `PUT /api/v1/assistant/tasks/{id}`. Give a shell `command`, an optional `timeout_s` (default 30, from 1 to 60), and `on_error` (`run` by default or `skip`). The node runs it in the owner's shell before any briefing facts or conversation turn. Exit 0 proceeds, exit 1 skips and records the first line of output, and other failures (including timeout or an unreachable node) follow `on_error`. If the run proceeds after a check failure, its history entry includes `run_if_error`. A skip sends no push and does not advance briefing state. One-off follow-ups, **Run now**, and automatic retries of an already admitted run bypass the check. Omit `run_if` to keep it, or send null to remove it.
 - Older apps: iOS reads an unknown `repeat` as `once`, and Android and the web send it back without `cron`; a `PUT` without `cron` keeps a cron task's rule and saves the rest (title, prompt, on / off, permission mode). The legacy `GET /api/v1/assistant/followups` lists cron tasks with the other non-daily ones. Clients show cron tasks when the hub has `task_cron`.
 
 `until` is optional on a repeating task. It is stored and compared in UTC and shown in the user's time zone. One-off tasks ignore it, and saving a one-off clears it. Omitting `until` on update keeps the stored time; `null` clears it. Once that time is reached the task is turned off and a skipped run is recorded instead of running.
@@ -1525,6 +1526,42 @@ stopped or uninstalled extension leaves nothing in force. The full wire shape an
 - **What the model sees**: a localized refusal starting with "The current organization policy requires…", followed
   by the rule's own note when it has one, and a matching sentence in the `task_plan`, `agent_start`,
   `conversation_new` and `conversation_send` tool descriptions.
+
+## Start defaults
+
+What a task Agent starts with beyond what its caller named can come from an optional start-defaults policy
+(`internal/assistant/start_defaults.go`): rules matched by the kind of work, each saying which Agent presets to try,
+which thinking effort, whether ultracode is on, whether a goal is set from the task's acceptance criteria, and whether
+the prompt asks the Agent to plan first. With no policy stored, one past its expiry, or no rule that fits a task, the
+task starts exactly as it would without the feature. A policy's values belong to the one start they were applied to:
+every try of a task starts again from what the task named itself, whichever rule fits it now, and for whatever a policy
+filled in (a preset's launcher, model, effort, tier and the permission mode its agent sets; the policy's effort or
+ultracode) the task's plan keeps the task's own value (its why names a preset the policy picked), so a remedy, a queued
+start, a retry from the card or a manager restart, which read the task back from its plan, never take an expired
+policy's values for the task's own, and the card does not show them as asked for. A rule that fits but fills nothing
+in leaves the start and what the plan keeps exactly as without the feature. The Agent's session shows what it actually runs with. The owner and an
+extension granted the
+`assistant.start_defaults` hub scope read and write it with `GET`/`PUT /api/v1/assistant/start-defaults` (the owner
+also as `start_defaults` in `PUT /api/v1/assistant`); an extension-written policy must expire within one hour, so a
+stopped or uninstalled extension leaves nothing in force. A rule must set something; a rule whose `then` names nothing
+is refused.
+`GET /api/v1/assistant/worker-presets?machine=<id>` (same scope) lists the presets a computer can start. The wire shape
+is in `docs/protocol/protocol.md` ("Start defaults").
+
+- **Matching**, first rule that fits wins: `supervisor` names the class of the conversation that follows the task up,
+  with the dispatch policy's classes (`main`, `leader`, `background_supervisor`, `scheduled`, `other`; a task leader's
+  worker takes the class of the conversation that follows its leader's task up, and a task no conversation follows up
+  matches only a rule naming no class), `role` is `worker` or `leader`, `readonly` matches read-only or writable tasks.
+- **Applied at the task's start** (`startTaskAgent`, after the launcher fit), so retries, remedies, queued starts and
+  `task_spawn` children get the same: the first preset whose launcher the computer has and that is not at its usage
+  limit (weights share starts among the usable ones; a preset passed over is named in the task's why); then the effort,
+  ultracode and goal on Claude Code only. A caller's own effort, ultracode choice, tier, model or launcher is never
+  replaced, and an effort the caller's tier gives wins over the policy's.
+- **The goal** is the task's `done_when` as one checkable sentence (`prompts/assistant/task_goal.md`), set by the node
+  after the first message is in the transcript ([agent-goal.md](../integrations/agent-goal.md), "A goal set at the start"). A computer
+  whose node cannot set it starts the Agent without it once, and the task's why says so, as for ultracode.
+- **Plan first** adds `prompts/agents/plan_first_task.md` to the prompt: for a launch whose model does not act on an
+  effort setting, the prompt is the only lever.
 
 ## Chat search (#6282)
 

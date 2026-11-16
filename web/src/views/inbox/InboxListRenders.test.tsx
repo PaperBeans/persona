@@ -23,8 +23,8 @@ vi.mock("../../lib/inbox-now", async (load) => {
     },
   };
 });
-vi.mock("../../lib/inbox", async (load) => {
-  const real = await load<typeof import("../../lib/inbox")>();
+vi.mock("../../lib/inbox-page", async (load) => {
+  const real = await load<typeof import("../../lib/inbox-page")>();
   return {
     ...real,
     interactionAgentTitle: (...a: Parameters<typeof real.interactionAgentTitle>) => {

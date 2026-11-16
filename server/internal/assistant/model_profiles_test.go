@@ -276,7 +276,7 @@ func TestModelProfilesInheritedOverridesAndValidation(t *testing.T) {
 		{"inherited model", ModelBinding{Model: "test-selected"}, "responses", false},
 		{"inherited effort", ModelBinding{Effort: "high"}, "responses", false},
 		{"messages effort", ModelBinding{Effort: "high"}, "messages", false},
-		{"chat effort", ModelBinding{Effort: "high"}, "chat", true},
+		{"chat effort", ModelBinding{Effort: "high"}, "chat", false},
 		{"missing provider", ModelBinding{Provider: "launcher.missing", Model: "test-selected"}, "responses", true},
 		{"bad effort", ModelBinding{Effort: "invalid"}, "responses", true},
 		{"runtime", ModelBinding{Runtime: proto.AssistantRuntimeAgentSDK}, "responses", true},

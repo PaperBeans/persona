@@ -8,6 +8,8 @@
     <string name="assistant_profile">Assistant profile</string>
     <string name="assistant_got_it">Got it</string>
     <string name="assistant_composer_placeholder">Ask %1$s…</string>
+    <string name="assistant_model_setup_title">Connect a model to use Assistant</string>
+    <string name="assistant_model_setup_detail">Assistant runs on %1$s. Its Claude Code setup has no usable connection. Choose a provider or add the gateway you already use.</string>
     <string name="assistant_info_settings">Assistant settings</string>
     <string name="assistant_info_knowledge">Knowledge</string>
     <string name="assistant_info_schedule">Scheduled tasks</string>

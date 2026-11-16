@@ -20,6 +20,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/quota"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -905,7 +906,9 @@ func TestANodeThatReconnectsGetsTheManagedLaunchers(t *testing.T) {
 func TestLauncherHTTPSendsWithTheKey(t *testing.T) {
 	s, _, _ := modelService(t)
 	ctx := context.Background()
+	var gotAgent, gotProviderHeader string
 	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAgent, gotProviderHeader = r.UserAgent(), r.Header.Get("X-Provider")
 		if r.Header.Get("Authorization") != "Bearer sk-gw" {
 			http.Error(w, "bad key", http.StatusUnauthorized)
 			return
@@ -914,7 +917,8 @@ func TestLauncherHTTPSendsWithTheKey(t *testing.T) {
 	}))
 	defer gw.Close()
 	key, _ := s.sealKey("sk-gw")
-	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "gw", BaseURL: gw.URL, Model: "m"}, KeySealed: key})
+	headers, _ := s.sealKey("User-Agent: provider/1\nX-Provider: private")
+	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "gw", BaseURL: gw.URL, Model: "m"}, KeySealed: key, HeadersSealed: headers})
 	out, err := s.launcherHTTP(ctx, "gw", "", nil)
 	if err != nil || fmt.Sprint(out) != "map[base_url:"+gw.URL+" machine:]" {
 		t.Fatalf("%v %v", out, err)
@@ -923,6 +927,13 @@ func TestLauncherHTTPSendsWithTheKey(t *testing.T) {
 	resp, _ := out.(quota.Response)
 	if err != nil || resp.Status != 200 || strings.Contains(resp.Body, "sk-gw") || !strings.Contains(resp.Body, quota.KeyPlaceholder) {
 		t.Fatalf("%+v %v", out, err)
+	}
+	if gotAgent != modelhttp.UserAgent() || gotProviderHeader != "" {
+		t.Fatalf("quota inherited provider headers: User-Agent %q, X-Provider %q", gotAgent, gotProviderHeader)
+	}
+	_, err = s.launcherHTTP(ctx, "gw", "", &quota.Request{URL: "/me", Headers: map[string]string{"Authorization": "Bearer " + quota.KeyPlaceholder, "User-Agent": "plugin/1"}})
+	if err != nil || gotAgent != "plugin/1" || gotProviderHeader != "" {
+		t.Fatalf("quota plugin headers: User-Agent %q, X-Provider %q, error %v", gotAgent, gotProviderHeader, err)
 	}
 	var re *rpc.Error
 	if _, err := s.launcherHTTP(ctx, "zshrc-one", "", nil); !errors.As(err, &re) || re.Code != assistantwire.CodeNoLauncher {

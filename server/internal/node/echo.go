@@ -35,7 +35,8 @@ import (
 type echoRecord struct {
 	SessionID   string    `json:"session_id"`
 	ClientMsgID string    `json:"client_msg_id"`
-	Text        string    `json:"text,omitempty"` // the start of what was typed (echoTextLen runes)
+	Text        string    `json:"text,omitempty"`    // the start of what was typed (echoTextLen runes)
+	Literal     string    `json:"literal,omitempty"` // its raw start when clipping a text-only send left Text empty
 	Images      int       `json:"images,omitempty"`
 	SentAt      time.Time `json:"sent_at"`
 	AfterSeq    int       `json:"after_seq"`      // the session's last item before it was typed (counted in In)
@@ -89,12 +90,29 @@ type echoLog struct {
 	recs map[string][]*echoRecord // session id -> records in the order sent
 }
 
+// clip bounds what a record keeps. A text-only send made entirely of markup that echoClip treats as context keeps
+// its literal as well: runtimes that preserve that markup still have an exact user line to match. Outer whitespace is
+// immaterial to matching, so it does not spend the literal's bound.
+func (r *echoRecord) clip() {
+	original := r.Text
+	if original == "" {
+		original = r.Literal // a record restored from session.echoes has already clipped Text
+	}
+	r.Text = echoClip(r.Text)
+	r.Literal = ""
+	if r.Images == 0 && r.Text == "" {
+		if original = strings.TrimSpace(original); original != "" {
+			r.Literal = echoCap(original)
+		}
+	}
+}
+
 // expect records a send to tie; false when it was known already (a record handed back by the hub).
 func (l *echoLog) expect(r echoRecord) bool {
 	if r.SessionID == "" || r.ClientMsgID == "" {
 		return false
 	}
-	r.Text = echoClip(r.Text)
+	r.clip()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.recs == nil {
@@ -315,16 +333,20 @@ var echoDropped = []*lazyre.Regexp{
 	boxChips, // [Image #1], [Pasted text #2 …]
 }
 
+// echoCap bounds text without changing any of its words.
+func echoCap(s string) string {
+	if rs := []rune(s); len(rs) > echoTextLen {
+		s = string(rs[:echoTextLen])
+	}
+	return s
+}
+
 // echoClip is what a record keeps of a text: without the notes (a cut must not leave half of one), its start.
 func echoClip(s string) string {
 	for _, re := range echoDropped {
 		s = re.ReplaceAllString(s, "")
 	}
-	s = strings.TrimSpace(s)
-	if rs := []rune(s); len(rs) > echoTextLen {
-		s = string(rs[:echoTextLen])
-	}
-	return s
+	return echoCap(strings.TrimSpace(s))
 }
 
 // echoWords is the comparable form of a text: the notes Persona and the agents add removed, no whitespace, without
@@ -339,10 +361,49 @@ func echoWords(s string) []rune {
 	return []rune(strings.Join(strings.Fields(s), ""))
 }
 
+// echoRawWords is echoWords without echoDropped: the literal was the user's text, not injected context.
+func echoRawWords(s string) []rune {
+	if i := strings.LastIndex(s, "\n…（已截断"); i >= 0 {
+		s = s[:i]
+	}
+	return []rune(strings.Join(strings.Fields(s), ""))
+}
+
+// echoLiteralFits compares the full raw user text with the usual whitespace normalization. Empty raw text never
+// fits. A line with visible words after context clipping must equal the literal: a raw prefix is not an association.
+// When the line also clips to empty, a full prefix of a literal that reached the record's bound still fits its uncut
+// original.
+func echoLiteralFits(literal string, line []proto.Item) bool {
+	sent := echoRawWords(literal)
+	if len(sent) == 0 {
+		return false
+	}
+	var words, clipped []rune
+	for _, it := range line {
+		if it.Role == "user" && it.Kind == proto.KindText {
+			words = append(words, echoRawWords(it.Text)...)
+			clipped = append(clipped, echoWords(it.Text)...)
+		}
+	}
+	if len(words) == 0 {
+		return false
+	}
+	if string(words) == string(sent) {
+		return true
+	}
+	if len(clipped) != 0 {
+		return false
+	}
+	return len([]rune(literal)) == echoTextLen && len(words) >= len(sent) && string(words[:len(sent)]) == string(sent)
+}
+
 // echoFits: the line's words are what was typed — the same, or for a long text the same start. A message of only
 // pictures fits a line with none; a bare command fits the command with the arguments picked for it; /compact fits the
 // notice it became.
 func echoFits(r *echoRecord, line []proto.Item) bool {
+	if r.Literal != "" {
+		return echoLiteralFits(r.Literal, line)
+	}
 	if inert := inertControls(r.Text); inert != r.Text { // a terminal is pasted the inert text (hostPrompt), a runtime the text
 		e := *r
 		e.Text = inert
@@ -441,7 +502,7 @@ func (n *Node) notifyEcho(r echoRecord) {
 	if n.peer == nil {
 		return
 	}
-	r.Text = echoClip(r.Text)
+	r.clip()
 	_ = n.peer.Notify("session.echo", r)
 }
 

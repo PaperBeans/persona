@@ -25,6 +25,10 @@ const (
 	// ScopeAssistantDispatchPolicy: reading and writing the assistant's dispatch policy
 	// (GET/PUT /api/v1/assistant/dispatch-policy), the organization rule for which conversations may hand out work.
 	ScopeAssistantDispatchPolicy = "assistant.dispatch_policy"
+	// ScopeAssistantStartDefaults: reading the Agent presets a task can start with on a computer and reading and
+	// writing the defaults task Agents start with (GET /api/v1/assistant/worker-presets, GET/PUT
+	// /api/v1/assistant/start-defaults).
+	ScopeAssistantStartDefaults = "assistant.start_defaults"
 	// ScopeAgentsPermissionMode: changing the permission mode of a conversation the extension opened itself, and of no
 	// other (the hub checks who opened it: hub/extension_modes.go).
 	ScopeAgentsPermissionMode = "agents.permission_mode"

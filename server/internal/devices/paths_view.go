@@ -74,14 +74,17 @@ func (d *Devices) measureNodes(ctx context.Context) {
 var (
 	pingWait           = 5 * time.Second
 	pingMissLimit      = 2
-	pingActivityWindow = 30 * time.Second // one measurement cycle; recent traffic is not a dead link
+	pingActivityWindow = 30 * time.Second // one measurement cycle; a recent reply or arriving frame is not a dead link
 )
 
 // pingAnswered counts a ping sent on peer: one written that ran out of time without an answer is a miss, anything
 // else (an answer, an error the node answered with) clears the count; a connection already gone (closed, offline), a
 // ping that could not be written in time, and one during a resident node's handover count neither way. A ping whose
-// writer consumed most of its response budget also counts neither way. Recent incoming activity clears a miss: a
-// large response can hold its pong behind it. pingMissLimit misses in a row on the same connection close it.
+// writer consumed most of its response budget also counts neither way. Recent incoming activity that can explain a
+// late pong clears a miss (rpc.Peer.PingActivity): a reply, late ones included, shows the node gets the hub's calls,
+// and a large frame still arriving can hold the pong behind it. Requests and events the node starts itself do not
+// (#8771): they kept coming for 15 minutes over a link whose hub-to-node direction had stalled, and every call on it
+// waited out its whole timeout. pingMissLimit misses in a row on the same connection close it.
 func (m *Machine) pingAnswered(peer *rpc.Peer, err error) {
 	if peer == nil {
 		return
@@ -105,7 +108,7 @@ func (m *Machine) pingAnswered(peer *rpc.Peer, err error) {
 	}
 	if missed {
 		// rpc.Peer excludes a deadline error response itself, including one that arrives late, so this cannot be kept
-		// alive by a relay answering its own timeout.
+		// alive by a relay answering its own timeout, nor by the node's own requests and events.
 		activity := peer.PingActivity()
 		if !activity.IsZero() && time.Since(activity) <= pingActivityWindow {
 			missed = false

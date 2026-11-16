@@ -568,8 +568,12 @@ func (la *liveActivities) flush(st FleetState, urgent, force bool, settingsDevic
 		rows = append(rows, r)
 	}
 	la.mu.Unlock()
-	if fleetEmpty(st) && !st.Assistant {
-		return time.Time{} // ended by tick after fleetEndAfter, unless something comes back first
+	// Nothing left to show ends by tick after fleetEndAfter, unless something comes back first. When what went was the
+	// last thing needing the user (answered, here or on a computer, or gone: urgent), the running activities are cleared
+	// at once all the same, or their request and its buttons stay up for that minute. Not ended early: a push-start is
+	// rationed (fleetRefresh), and the next request arriving soon after would find no activity to open.
+	if fleetEmpty(st) && !st.Assistant && !urgent {
+		return time.Time{}
 	}
 	// whose agents the activity counts (one manager's: fleetLiveOf): a device that muted it gets no start alert
 	_, stats, from := la.h.fleetLiveOf()
@@ -586,8 +590,12 @@ func (la *liveActivities) flush(st FleetState, urgent, force bool, settingsDevic
 			continue
 		}
 		dst := forDevice(st, prefs, stats)
-		if showsNothing(dst) {
-			continue // only the assistant answering, not on this island: ended by tick like an empty fleet
+		// Nothing for this device to show (an empty fleet, or only the assistant answering where its island does not
+		// show it): ended by tick like an empty fleet, and only an activity already running is cleared, when the last
+		// request went.
+		cleared := showsNothing(dst)
+		if cleared && !urgent {
+			continue
 		}
 		if la.h.phoneOpen(r.DeviceID) {
 			if r.PushToken != "" && now.Sub(r.StartedAt) < fleetMaxAge {

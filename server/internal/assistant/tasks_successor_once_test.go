@@ -246,3 +246,70 @@ func TestStoppedTaskMessageStopsWaitingForAStuckStart(t *testing.T) {
 		<-results
 	})
 }
+
+// A bare /exit on the card while the new agent another message started is still starting is a second message like any
+// other (#8272): it waits for that start and goes to the agent it brought up. Only when no agent is there or on its way
+// is there nothing to exit: after the start failed, the waiting /exit is refused and starts no agent itself (#7539).
+func TestStoppedTaskExitWaitsForTheStartingAgent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fail bool
+	}{{name: "the start comes up"}, {name: "the start fails", fail: true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s, h, todo := stoppedTaskOnGate(t)
+				if tc.fail {
+					h.fail = 1
+				}
+				results := make(chan routed, 2)
+				route := func(text string) {
+					item, err := s.routeToTask(context.Background(), "conv1", todo.ID, text)
+					results <- routed{text, item, err}
+				}
+				go route("接着把环比也算上")
+				<-h.arrived
+				go route("/exit")
+				synctest.Wait()
+				close(h.gate)
+				got := map[string]routed{}
+				for range 2 {
+					r := <-results
+					got[r.text] = r
+				}
+				select {
+				case <-h.arrived:
+					t.Fatal("/exit started an agent")
+				default:
+				}
+				f := h.fakeHub
+				f.mu.Lock()
+				starts := len(f.starts) // a start the gate failed never reaches the fake
+				var exits []map[string]any
+				for _, a := range f.agentSent {
+					if a["text"] == "/exit" {
+						exits = append(exits, a)
+					}
+				}
+				f.mu.Unlock()
+				if want := map[bool]int{false: 1, true: 0}[tc.fail]; starts != want {
+					t.Fatalf("%d starts reached the fake, want %d", starts, want)
+				}
+				exit := got["/exit"]
+				if tc.fail {
+					var m *i18n.Message
+					if !errors.As(exit.err, &m) || m.Key != "assistant-tasks.route_agents_exited" || len(exits) != 0 {
+						t.Fatalf("/exit after the failed start: %v, sent %v; want route_agents_exited, nothing sent", exit.err, exits)
+					}
+					return
+				}
+				agent := newAgentOf(got["接着把环比也算上"].item)
+				if exit.err != nil || agent == "" || newAgentOf(exit.item) != "" {
+					t.Fatalf("/exit: %v, feed %s; first feed %s", exit.err, exit.item.Body, got["接着把环比也算上"].item.Body)
+				}
+				if len(exits) != 1 || exits[0]["session_id"] != agent {
+					t.Fatalf("/exit sent %v, want once to the new agent %s", exits, agent)
+				}
+			})
+		})
+	}
+}

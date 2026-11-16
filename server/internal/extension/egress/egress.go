@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/osproc"
 )
 
 // HubHost is the hub's own API as an extension behind the proxy reaches it (its loopback is not the hub's).
@@ -153,7 +155,7 @@ type Proxy struct {
 
 // Start listens on loopback (an unused port).
 func (p *Proxy) Start() error {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := osproc.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return err
 	}

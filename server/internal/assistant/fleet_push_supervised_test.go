@@ -154,6 +154,17 @@ func (e *supervisedEnv) donePushes() []Notification {
 	return out
 }
 
+// oneDonePush checks that supAgent's finished turn was pushed to the phone once. deliver sends the push on a goroutine
+// of its own, apart from the Lark card's (feishuAgentDone), so a card that has landed says nothing of the push: wait
+// for the push as for the card, then count (#8684).
+func (e *supervisedEnv) oneDonePush(t *testing.T) {
+	t.Helper()
+	waitFor(t, "the finished push", func() bool { return len(e.donePushes()) >= 1 })
+	if got := e.donePushes(); len(got) != 1 {
+		t.Fatalf("pushed %d finished pushes, want 1: %+v", len(got), got)
+	}
+}
+
 // logged are the lines logged so far that contain all of want.
 func (e *supervisedEnv) logged(want ...string) []string {
 	e.mu.Lock()
@@ -237,9 +248,7 @@ func TestUnsupervisedAgentFinishStillPushed(t *testing.T) {
 			tc.setup(e)
 			driveAgentDone(e.fleetTest, supAgentSession())
 			waitFor(t, "the finished card", func() bool { return len(e.agentDoneCards()) == 1 })
-			if got := e.donePushes(); len(got) != 1 {
-				t.Fatalf("pushed %d finished pushes, want 1: %+v", len(got), got)
-			}
+			e.oneDonePush(t)
 			waitFor(t, "the line saying it was sent", func() bool {
 				return len(e.logged("bots: card sent: kind=agent_done machine=mac session="+supAgent+" message=om_done")) == 1
 			})
@@ -279,9 +288,7 @@ func TestSupervisedTaskClosedWhileThePushWaits(t *testing.T) {
 			sess.LastText = "后来又问了它一句"
 			driveAgentDone(e.fleetTest, sess)
 			waitFor(t, "the later turn's card", func() bool { return len(e.agentDoneCards()) == 1 })
-			if got := e.donePushes(); len(got) != 1 {
-				t.Fatalf("pushed %d finished pushes for the later turn, want 1", len(got))
-			}
+			e.oneDonePush(t)
 		})
 	}
 }

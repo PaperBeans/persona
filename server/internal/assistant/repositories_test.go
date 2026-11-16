@@ -8,11 +8,15 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/assistant/repositorystore"
 	"github.com/nwverse/persona/server/internal/db"
 )
 
 func repositoryService(t *testing.T, store Store) (*Service, *int) {
 	t.Helper()
+	if database, ok := store.(*db.DB); ok {
+		store = repositorystore.New(database)
+	}
 	s := New(Options{Hub: newFakeHub(), Store: func() Store { return store }})
 	calls := new(int)
 	s.repositoryCheck = func(context.Context, repository.Identity) error { *calls++; return nil }

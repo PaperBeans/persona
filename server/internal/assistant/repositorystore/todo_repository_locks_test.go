@@ -1,12 +1,15 @@
-package db
+package repositorystore
 
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/db"
 )
 
 func TestTodoRepositoryMutationsSerializeWithEditsAndCatalogUpdates(t *testing.T) {
@@ -27,10 +30,15 @@ func TestTodoRepositoryMutationsSerializeWithEditsAndCatalogUpdates(t *testing.T
 			const id = "repository-lock-order"
 			links := []repository.LinkInput{{Kind: "pull_request", Number: "9", Title: "Keep task context"}}
 			rows := []repository.TaskInput{{RepoID: "web", Links: links}}
-			if err := d.CreateTodoWithRepositories(ctx, TodoRow{ID: id, Title: "Original", CreatedAt: time.Now(), UpdatedAt: time.Now()}, repository.CreateBindings{CatalogRevision: &one, Repositories: rows}); err != nil {
+			if err := d.CreateTodoWithRepositories(ctx, db.TodoRow{ID: id, Title: "Original", CreatedAt: time.Now(), UpdatedAt: time.Now()}, repository.CreateBindings{CatalogRevision: &one, Repositories: rows}); err != nil {
 				t.Fatal(err)
 			}
-			guard, err := d.pool.Begin(ctx)
+			conn, err := pgx.Connect(ctx, os.Getenv("PERSONA_TEST_DATABASE_URL"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close(context.Background())
+			guard, err := conn.Begin(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -55,7 +63,7 @@ func TestTodoRepositoryMutationsSerializeWithEditsAndCatalogUpdates(t *testing.T
 			}()
 			go func() {
 				title := "Edited concurrently"
-				_, err := d.EditTodo(ctx, id, TodoEdit{Title: &title}, time.Now())
+				_, err := d.EditTodo(ctx, id, db.TodoEdit{Title: &title}, time.Now())
 				results <- err
 			}()
 			go func() {
@@ -75,7 +83,7 @@ func TestTodoRepositoryMutationsSerializeWithEditsAndCatalogUpdates(t *testing.T
 			defer ticker.Stop()
 			for {
 				var waiting int
-				if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+				if err := d.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
 					WHERE datname=current_database() AND wait_event_type='Lock'
 					AND query LIKE 'SELECT%FROM todos%FOR UPDATE%'`).Scan(&waiting); err != nil {
 					t.Fatal(err)

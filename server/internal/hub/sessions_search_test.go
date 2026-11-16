@@ -141,9 +141,7 @@ func TestRuntimeSearchHierarchyAndRequestValidation(t *testing.T) {
 }
 func TestRuntimeSearchExtensionScopeBeforeRankAndCounts(t *testing.T) {
 	h, base, _, b := reachHub(t)
-	h.devices.mu.Lock()
-	h.cfg.Machines = append(h.cfg.Machines, MachineConfig{ID: "mc", Name: "mc", Kind: "local"})
-	h.devices.mu.Unlock()
+	addCfgMachines(h, MachineConfig{ID: "mc", Name: "mc", Kind: "local"})
 	if _, err := h.moveMachine(context.Background(), "mc", "m-0b0b0b"); err != nil {
 		t.Fatal(err)
 	}

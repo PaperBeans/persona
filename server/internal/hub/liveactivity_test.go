@@ -1541,6 +1541,104 @@ func TestFleetAssistantHoldsActivity(t *testing.T) {
 	}
 }
 
+// TestFleetClearsWhenTheLastRequestGoes: the last request answered on a computer, or gone, empties the fleet. The
+// running activities lose the request and its buttons at once (priority 10, no items), not when they end a minute
+// later; they still end only fleetEndAfter on, since an early end would leave the next request no activity to open
+// (push-starts are rationed). An island showing the assistant answering keeps it, without the request.
+func TestFleetClearsWhenTheLastRequestGoes(t *testing.T) {
+	h, f, clock := fleetClock(t)
+	la := h.live
+	h.push.register(Device{DeviceID: "pad", Name: "pad", APNSToken: "padtok", Topic: "app.example"})
+	la.update("pad", func(v *db.LiveActivity) { v.ActivityID, v.PushToken, v.StartedAt = "act2", "padact", *clock })
+	showing := NotifyPrefs{Input: true, Done: DoneLong, LiveActivity: true, Island: IslandPrefs{Preset: "custom", Left: SlotStatus, Right: SlotAssistant}}
+	if err := h.push.setPrefs("pad", showing); err != nil {
+		t.Fatal(err)
+	}
+	// A device with only a push-to-start token gets no activity started to show that nothing is left.
+	h.push.register(Device{DeviceID: "mini", Name: "mini", APNSToken: "minitok", Topic: "app.example"})
+	if err := h.push.setPrefs("mini", NotifyPrefs{Input: true, Done: DoneLong, LiveActivity: true}); err != nil {
+		t.Fatal(err)
+	}
+	// last is the latest of the n calls (waited for) that went to token with event, and how many did.
+	last := func(n int, token, event string) (count int, c apnsCall) {
+		for _, call := range f.calls(t, n) {
+			if call.Token == token && call.Event == event {
+				count, c = count+1, call
+			}
+		}
+		return count, c
+	}
+	// offer and flush as the run loop does: the coalescer decides the urgency.
+	deliver := func(st FleetState) {
+		reportLive(t, h, st, FleetStats{})
+		urgent, _ := la.coal.offer(st)
+		la.flush(st, urgent, false)
+	}
+
+	t0 := *clock
+	asks := FleetState{Phase: "needsYou", NeedsYou: 1, Assistant: true,
+		Items: []FleetItem{{ID: "m/b", Title: "api", Kind: proto.IxPermission, Interaction: "ix1", Detail: "Bash: go test"}}}
+	deliver(asks)
+	f.calls(t, 2)
+	la.update("mini", func(v *db.LiveActivity) { v.PushToStartToken = "minip2s" })
+
+	// Answered on the computer 10 s later, with the assistant still answering: both running activities are cleared now.
+	*clock = t0.Add(10 * time.Second)
+	deliver(FleetState{Assistant: true})
+	if n, c := last(4, "acttok", "update"); n != 2 || c.Priority != "10" || c.State.Phase != "" || c.State.NeedsYou != 0 || len(c.State.Items) != 0 || c.State.Assistant {
+		t.Fatalf("phone: %d updates, want the request cleared at once; last %+v", n, c)
+	}
+	if n, c := last(4, "padact", "update"); n != 2 || c.Priority != "10" || len(c.State.Items) != 0 || !c.State.Assistant {
+		t.Fatalf("pad: %d updates, want the request cleared and the assistant kept; last %+v", n, c)
+	}
+	la.mu.Lock()
+	_, started := la.started["mini"]
+	la.mu.Unlock()
+	if started {
+		t.Fatal("clearing started an activity")
+	}
+
+	// Nothing comes back: the phone's activity ends fleetEndAfter on, not earlier (ending forgets its token at once).
+	for *clock = clock.Add(15 * time.Second); clock.Before(t0.Add(10*time.Second + fleetEndAfter)); *clock = clock.Add(15 * time.Second) {
+		la.tick()
+	}
+	la.mu.Lock()
+	phone, pad := la.rows["phone"].PushToken, la.rows["pad"].PushToken
+	la.mu.Unlock()
+	if phone != "acttok" || pad != "padact" {
+		t.Fatalf("an activity ended before fleetEndAfter: phone %q, pad %q", phone, pad)
+	}
+	la.tick()
+	if n, _ := last(5, "acttok", "end"); n != 1 {
+		t.Fatalf("phone: %d ends fleetEndAfter after the request went, want 1", n)
+	}
+	// Nothing else in that minute; the pad's activity stays while the assistant answers.
+	if n := len(f.calls(t, 5)); n != 5 || la.rows["pad"].PushToken != "padact" {
+		t.Fatalf("%d pushes, want 5 (two updates each, the phone's end); pad token %q", n, la.rows["pad"].PushToken)
+	}
+}
+
+// An ordinary change that empties the fleet (the last agent done and seen) is not urgent: no clearing push, the
+// activity ends fleetEndAfter on as before.
+func TestFleetEmptiedWithoutARequestPushesOnlyTheEnd(t *testing.T) {
+	h, f, clock := fleetClock(t)
+	la := h.live
+	working := FleetState{Phase: "working", Working: 1, Items: []FleetItem{{ID: "m/a", Title: "api", Kind: "working"}}}
+	la.coal.offer(working)
+	la.flush(working, false, false)
+	f.calls(t, 1)
+	*clock = clock.Add(10 * time.Second)
+	if urgent, _ := la.coal.offer(FleetState{}); urgent {
+		t.Fatal("an agent finishing is not urgent")
+	}
+	la.flush(FleetState{}, false, false)
+	*clock = clock.Add(fleetEndAfter)
+	la.tick()
+	if c := f.calls(t, 2); len(c) != 2 || c[1].Event != "end" {
+		t.Fatalf("want only the end after the first update, got %+v", c)
+	}
+}
+
 // TestFleetBackgroundRefreshFromLastUpdate: an app that goes to the background may have left its activity's
 // stale-date as an earlier update set it (it does not update for a fleet that changes nothing it shows, nor for a
 // settings change), so the hub is only sure of fleetOpenFresh after the last fleet event: the refresh comes by then,

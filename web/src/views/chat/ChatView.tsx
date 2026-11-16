@@ -7,7 +7,7 @@ import { api, ApiError, errorText, fullItem, pastHub, sessionPath } from "../../
 import { attentionReason, externalLink, failureReason, isStoppedAgent, resumeCommand, sessionCan, sessionCanRename, sessionDeletable, sessionMenuActions, sourceSubtitle, sessionTitle, shortPath, stateOf, tabLabel, uuid } from "../../lib/format";
 import { conversationPage } from "../../lib/conversation-page";
 import { navigate, type SessionView } from "../../lib/router";
-import { canShowTerminal, composerSlot, otherView, useSessionView, viewOnlyRow } from "../../lib/session-view";
+import { canShowTerminal, composerSlot, otherView, terminalJump, terminalWaits, useSessionView, viewOnlyRow } from "../../lib/session-view";
 import { resumeInTerminal, terminalResume } from "../../lib/agent-resume";
 import { openLink } from "../../lib/links";
 import { getPanel, openPanel, togglePanel, usePanel } from "../../lib/panel";
@@ -1906,6 +1906,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
         onView={switchable ? setView : undefined}
         onTerminal={openTerminal}
         viewDot={view === "term" && (interactions.length > 0 || state === "needs_you")}
+        termDot={terminalWaits(session, interactions, outbox)}
         actions={headerActions}
         team={team}
         sides={sideControl}
@@ -2368,6 +2369,7 @@ export const Header = memo(function Header({
   onView,
   onTerminal,
   viewDot,
+  termDot,
   actions,
   team,
   sides,
@@ -2398,6 +2400,8 @@ export const Header = memo(function Header({
   onTerminal?: () => void;
   /** The conversation has something that wants an answer while the terminal is shown. */
   viewDot?: boolean;
+  /** The terminal waits on a dialog while the conversation is shown (lib/session-view.ts terminalWaits, #7343). */
+  termDot?: boolean;
   /** The page's own buttons, at the end of the right side (ChatView `headerActions`). */
   actions?: React.ReactNode;
   /** A lead with workers (#5180): its Team panel's button, whether the panel is open, and whether a worker needs you. */
@@ -2446,6 +2450,13 @@ export const Header = memo(function Header({
   // the page's other view, switched in place (view / onView)
   const here = (p: typeof panel, kind: string) => Boolean(p && p.kind === kind && "sid" in p && session && p.mid === session.machine_id && p.sid === session.session_id);
   const showTerminal = Boolean(view && onView);
+  // the side panel shows no terminal in place: its terminal button opens the agent's page in the terminal view, and the
+  // panel closes, its chat being that page now (#7343)
+  const jumpTerminal = !showTerminal && Boolean(onTerminal) && terminalJump(session, { inPanel: Boolean(chrome), assistant });
+  const openTerminalPage = () => {
+    onTerminal?.();
+    chrome?.onClose();
+  };
   const showFiles = Boolean(session && !assistant && session.cwd);
   const flipView = () => view && onView?.(otherView(view));
   const openFiles = () => session && togglePanel({ kind: "files", mid: session.machine_id, sid: session.session_id, cwd: session.cwd });
@@ -2531,6 +2542,7 @@ export const Header = memo(function Header({
         // its Side sessions panel (#7944), as the header's button
         ...(sides ? [{ key: "sides", label: t("chat-chatview.side_sessions_count", { count: sides.count }), icon: "sideSessions" as const, checked: sides.open, onSelect: sides.onToggle }] : []),
         ...(showTerminal ? [{ key: "terminal", label: t("chat-chatview.terminal"), icon: "terminal" as const, checked: view === "term", onSelect: flipView }] : []),
+        ...(jumpTerminal ? [{ key: "terminal", label: t("chat-chatview.terminal"), icon: "terminal" as const, onSelect: openTerminalPage }] : []),
         ...(resumeOffer !== "hidden"
           ? [{ key: "resume-terminal", label: t("chat-chatview.resume_in_terminal"), icon: "play" as const, disabled: resumeOffer === "no_engine", detail: resumeOffer === "no_engine" ? t("chat-chatview.resume_no_engine", { computer: machineName }) : undefined, onSelect: resumeHere }]
           : []),
@@ -2651,7 +2663,13 @@ export const Header = memo(function Header({
       {view && onView && (
         <span className="relative flex shrink-0">
           <IconButton icon={view === "chat" ? "terminal" : "chat"} label={t(view === "chat" ? "chat-chatview.terminal" : "chat-chatview.chat")} onClick={flipView} />
-          {view === "term" && viewDot && <span aria-hidden className="pointer-events-none absolute top-0.5 right-0.5 size-1.5 rounded-full bg-attention" />}
+          {(view === "term" ? viewDot : termDot) && <span aria-hidden data-terminal-waits={view === "chat" || undefined} className="pointer-events-none absolute top-0.5 right-0.5 size-1.5 rounded-full bg-attention" />}
+        </span>
+      )}
+      {jumpTerminal && (
+        <span className="relative flex shrink-0">
+          <IconButton icon="terminal" label={t("chat-chatview.terminal")} onClick={openTerminalPage} />
+          {termDot && <span aria-hidden data-terminal-waits className="pointer-events-none absolute top-0.5 right-0.5 size-1.5 rounded-full bg-attention" />}
         </span>
       )}
       {/* wide screens have New chat at the top of the sidebar; a phone's sidebar is a drawer */}

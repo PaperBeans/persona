@@ -8,6 +8,7 @@ import (
 	"io"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -248,5 +249,58 @@ func TestLineReaderReusesTwoPieces(t *testing.T) {
 	}()
 	if limit := uint64(lines*length + linePiece); least > limit {
 		t.Errorf("reading %d lines of %d bytes allocated %d bytes, over %d (the lines)", lines, length, least, limit)
+	}
+}
+
+// The middle hook is told only of a read that continues a line already bigger than pingFrameMiddleBytes without
+// finishing it: small lines cut at any read boundary never count (#8771), and neither does the read that begins a line
+// or one that finishes it. The scanned harness checks the same against readShapes for every read pattern.
+func TestLineReaderMiddleHook(t *testing.T) {
+	reads := []string{"a", "b", "c\nd", "e\n", "fg", "h", "\n"}
+	sc := newLineReaderSize(readerFunc(func(p []byte) (int, error) {
+		if len(reads) == 0 {
+			return 0, io.EOF
+		}
+		n := copy(p, reads[0])
+		reads = reads[1:]
+		return n, nil
+	}), 32, 8<<20)
+	var told []string
+	var lines []string
+	sc.middle = func() { told = append(told, string(sc.buf[sc.start:sc.end])) }
+	for sc.Scan() {
+		lines = append(lines, string(sc.Bytes()))
+	}
+	if sc.Err() != nil || !slices.Equal(lines, []string{"abc", "de", "fgh"}) {
+		t.Fatalf("lines %q, %v", lines, sc.Err())
+	}
+	// All lines stay tiny: a split small line is transport framing, not a frame holding a pong, so the hook stays silent.
+	if len(told) != 0 {
+		t.Fatalf("small split lines fired the middle hook: %q", told)
+	}
+
+	// A line that outgrows the threshold fires the hook once it is past it, never on its first read. A buffer big
+	// enough to keep each piece in one raw read makes the firing point deterministic.
+	big := strings.Repeat("z", pingFrameMiddleBytes+64)
+	reads = []string{"xy\n", big[:100], big[100 : pingFrameMiddleBytes+10], big[pingFrameMiddleBytes+10:], "\n"}
+	sc = newLineReaderSize(readerFunc(func(p []byte) (int, error) {
+		if len(reads) == 0 {
+			return 0, io.EOF
+		}
+		n := copy(p, reads[0])
+		reads = reads[1:]
+		return n, nil
+	}), 32<<10, 8<<20)
+	told = nil
+	sc.middle = func() { told = append(told, "x") }
+	for sc.Scan() {
+	}
+	if sc.Err() != nil {
+		t.Fatal(sc.Err())
+	}
+	// The 100-byte start is below the threshold; a piece that crosses it fires, and the hook never fires for a
+	// first read or the read that completes the line.
+	if len(told) == 0 {
+		t.Fatal("a frame over the middle threshold never fired the hook")
 	}
 }

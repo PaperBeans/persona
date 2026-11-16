@@ -69,11 +69,21 @@ final class ComposerKeyboardTests: XCTestCase {
         app.buttons["shell-composer-dismiss-keyboard"].firstMatch
     }
 
-    /// The buttons over the composer within `column`: the chat's header and the bar above it. An iPad's split shows the
-    /// session list beside the chat, whose rows end in a relative time ("35 min ago") that moves on during the test
-    /// (#7479); only buttons overlapping the chat's column count, so the list is left out.
+    /// The buttons of the chat's header and the system bar above it, within `column`. An iPad's split shows the session
+    /// list beside the chat, whose rows end in a relative time ("35 min ago") that moves on during the test (#7479);
+    /// only buttons overlapping the chat's column count. The vertical band is the open header (anchored by
+    /// `chat.title`) or, while it is folded to fog, the navigation bar — not `field.minY - 120`, which reaches into the
+    /// transcript and can pick up message controls such as Expand steps (#8767).
     @MainActor private func headerButtons(in column: CGRect) -> Set<String> {
-        let limit = field.frame.minY - 120
+        let title = app.buttons["chat.title"].firstMatch
+        let limit: CGFloat
+        if title.exists {
+            // Title plus the rows under it (siblings, activity, mode, status); keep clear of the transcript below.
+            limit = title.frame.maxY + 160
+        } else {
+            let bar = app.navigationBars.firstMatch
+            limit = bar.exists ? bar.frame.maxY + 8 : 120
+        }
         return Set(app.buttons.allElementsBoundByIndex.filter {
             $0.isHittable && $0.frame.maxY < limit && $0.frame.minY > 40 && $0.frame.maxX > column.minX && $0.frame.minX < column.maxX
         }.map(\.label))

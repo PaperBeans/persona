@@ -85,7 +85,9 @@ as Claude Code does (`docs/integrations/launchers.md`, "Device scope and on-dema
   Claude Code or Oh My Pi becomes an `anthropic-messages` provider (bearer providers also send `Authorization: Bearer`), a Codex provider an
   `openai-responses` one. Not offered: Antigravity providers, Responses / Chat Completions API connections (the node never gets them), providers with a
   proxy of their own (pi sends straight to the gateway), and providers without a key. They are registered as `persona-<provider id>` with the
-  provider's models (its default model first, context windows from what the provider knows, no prices).
+  provider's models (its default model first, context windows from what the provider knows, no prices). Output limits, image input and thinking
+  support use the provider's reported model metadata when available; otherwise pi receives the existing estimates based on the context window
+  and model name. A reported output limit is capped at the context window.
 - **How**: when pi loads the extension (`lib/providers.js`; every pi process, `pi -p` included, and every pi-web session), it reads the node's launch
   key beside `node.sock` and asks `launcher.pi`. The node (`server/internal/node/pi_providers.go`) pulls what it does not have yet with `launchers.pull`,
   under the provider's scope and own-service rule, and answers. The extension passes the keys to `pi.registerProvider()`: they live in pi's memory

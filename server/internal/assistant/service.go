@@ -75,6 +75,8 @@ type Service struct {
 	mcpChanges mcpToolChanges
 	// ext is the extensions' tools in this process (extensions.go SetExtensions); nil: none (tests).
 	ext ExtensionTools
+	// startDefaultsFor answers a task start's defaults from the extension layer (start_defaults.go); nil: no defaults.
+	startDefaultsFor func(ctx context.Context, facts StartFacts) (StartDefaults, bool, error)
 	// refs is the provider extensions' values for launcher keys that are references (launcher_secrets.go); nil: none.
 	refs launcherSecrets
 	// trans reaches the transcription contributions (meeting_transcribe_ext.go): the extensions' when they offer it
@@ -242,6 +244,9 @@ type Service struct {
 
 	// acceptSweepHook, when set, runs in the acceptance sweeps' unlocked window, after a todo is read (tests).
 	acceptSweepHook func(id string)
+	// sendsSettleHook, when set, runs in sendsSettle once the task is opened again, before the turn held for it is
+	// taken up (tests).
+	sendsSettleHook func()
 	// sessionsSeen, when set, sees every machine's list SessionsChanged is handed (tests).
 	sessionsSeen func(DeviceSessions)
 
@@ -282,6 +287,8 @@ func New(o Options) *Service {
 	s.reporterRoutes()
 	s.directionRoutes()
 	s.dispatchPolicyRoutes() // dispatch_policy_routes.go
+	s.startPresetRoutes()
+	s.startDefaultsRoutes() // start_defaults_routes.go
 	s.directionTreeRoutes()
 	s.routeRoutes()
 	s.agentRouteRoutes()

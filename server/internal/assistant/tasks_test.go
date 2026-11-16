@@ -570,8 +570,9 @@ func TestClosedTaskReopensWhenItsAgentWorksAgain(t *testing.T) {
 // Only a task the hub judged done or its supervisor accepted opens again, and only for an agent that still belongs to it: not
 // a cancelled task or one the user closed (done by hand while its agent still started, #2954), not one whose start failed (that goes
 // through Retry), not one the agent was released or dismissed from, and not when the agent works for an open todo now. An
-// accepted one whose agent its plan did not start only when its conversation or supervisor sent the agent more since:
-// any other turn of such an agent is other work (#6726).
+// accepted one only when its conversation or supervisor sent the agent more since, whether or not its plan started the
+// agent: any other turn of it is other work (#6726, #7539). The send goes through noteAgentSend, and its turn starts before
+// the send returns: the task stays closed until the send's answer is in, and reopens then.
 func TestWhichClosedTaskReopens(t *testing.T) {
 	done := time.Now().Add(-time.Hour)
 	released := done.Add(time.Minute)
@@ -589,42 +590,60 @@ func TestWhichClosedTaskReopens(t *testing.T) {
 	handedOn.Supervision = &Supervision{Supervisor: "conv2", State: reviewAccepted}
 	planned := task(db.DoneByReview, s1) // its plan started the agent
 	planned.PlanID, planned.Supervision = "plan_1", &Supervision{State: reviewAccepted}
-	since, before := done.Add(time.Minute), done.Add(-time.Minute)
 	for _, c := range []struct {
-		name    string
-		todos   []Todo
-		sent    *agentSent // the agent's last send for a conversation, if any
+		name  string
+		todos []Todo
+		from  string // the conversation that last sent the agent text ("": none)
+		early bool   // that send went before the acceptance
+		// reopens: the turn opens it again
 		reopens bool
 	}{
-		{"judged done", []Todo{task(db.DoneByAuto, s1)}, nil, true},
-		{"accepted, its plan started the agent", []Todo{planned}, nil, true},
-		{"reviewed, other work", []Todo{task(db.DoneByReview, s1)}, nil, false},
-		{"accepted, other work", []Todo{accepted}, nil, false},
-		{"accepted, its conversation sent more", []Todo{accepted}, &agentSent{"conv1", since}, true},
-		{"reviewed, its conversation sent more", []Todo{task(db.DoneByReview, s1)}, &agentSent{"conv1", since}, true},
-		{"accepted, its supervisor sent more", []Todo{handedOn}, &agentSent{"conv2", since}, true},
-		{"accepted, another conversation sent", []Todo{accepted}, &agentSent{"conv9", since}, false},
-		{"accepted, sent before the acceptance", []Todo{accepted}, &agentSent{"conv1", before}, false},
-		{"cancelled", []Todo{task(db.DoneByCancelled, s1)}, nil, false},
-		{"legacy cancelled", []Todo{legacyCancelled}, nil, false},
-		{"closed by the user", []Todo{task("", s1)}, nil, false},
-		{"start failed", []Todo{failed}, nil, false},
-		{"released", []Todo{task(db.DoneByAuto, TodoAgent{MachineID: "box", SessionID: "s1", ReleasedAt: &released})}, nil, false},
-		{"dismissed", []Todo{task(db.DoneByAuto, TodoAgent{MachineID: "box", SessionID: "s1", DismissedAt: &released})}, nil, false},
-		{"works for an open todo", []Todo{task(db.DoneByAuto, s1), {ID: "todo_h", Title: "自己记的事", CreatedAt: done, Agents: []TodoAgent{s1}}}, nil, false},
-		{"another agent", []Todo{task(db.DoneByAuto, TodoAgent{MachineID: "box", SessionID: "s2"})}, nil, false},
+		{"judged done", []Todo{task(db.DoneByAuto, s1)}, "", false, true},
+		{"accepted, its plan started the agent", []Todo{planned}, "", false, false},
+		{"accepted, its plan started the agent, its conversation sent more", []Todo{planned}, "conv1", false, true},
+		{"accepted, its plan started the agent, sent before the acceptance", []Todo{planned}, "conv1", true, false},
+		{"reviewed, other work", []Todo{task(db.DoneByReview, s1)}, "", false, false},
+		{"accepted, other work", []Todo{accepted}, "", false, false},
+		{"accepted, its conversation sent more", []Todo{accepted}, "conv1", false, true},
+		{"reviewed, its conversation sent more", []Todo{task(db.DoneByReview, s1)}, "conv1", false, true},
+		{"accepted, its supervisor sent more", []Todo{handedOn}, "conv2", false, true},
+		{"accepted, another conversation sent", []Todo{accepted}, "conv9", false, false},
+		{"accepted, sent before the acceptance", []Todo{accepted}, "conv1", true, false},
+		{"cancelled", []Todo{task(db.DoneByCancelled, s1)}, "", false, false},
+		{"legacy cancelled", []Todo{legacyCancelled}, "", false, false},
+		{"closed by the user", []Todo{task("", s1)}, "", false, false},
+		{"start failed", []Todo{failed}, "", false, false},
+		{"released", []Todo{task(db.DoneByAuto, TodoAgent{MachineID: "box", SessionID: "s1", ReleasedAt: &released})}, "", false, false},
+		{"dismissed", []Todo{task(db.DoneByAuto, TodoAgent{MachineID: "box", SessionID: "s1", DismissedAt: &released})}, "", false, false},
+		{"works for an open todo", []Todo{task(db.DoneByAuto, s1), {ID: "todo_h", Title: "自己记的事", CreatedAt: done, Agents: []TodoAgent{s1}}}, "", false, false},
+		{"another agent", []Todo{task(db.DoneByAuto, TodoAgent{MachineID: "box", SessionID: "s2"})}, "", false, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
 			s, f := newTaskService(t)
+			var note *agentSendNote
+			noted := func() {
+				var err error
+				if note, err = s.noteAgentSend(ctx, c.from, "box", "s1", "", "More for it"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.from != "" && c.early { // sent while the task was open still
+				noted()
+			}
 			for _, td := range c.todos {
 				putTodo(s, td)
 			}
-			if c.sent != nil {
-				s.tasks.mu.Lock()
-				s.tasks.sentBy[[2]string{"box", "s1"}] = *c.sent
-				s.tasks.mu.Unlock()
+			if c.from != "" && !c.early {
+				noted()
 			}
-			agentTurn(s, f, proto.StatusWorking, "", 0)
+			agentTurn(s, f, proto.StatusWorking, "", 0) // its turn starts before the send returns
+			if note != nil {
+				if got := todoNow(s, "todo_a"); got.DoneAt == nil {
+					t.Fatalf("reopened before the send's answer was in: %+v", got)
+				}
+				note.sent(ctx, nil)
+			}
 			got := todoNow(s, "todo_a")
 			if reopened := got.DoneAt == nil && got.ReopenedAt != nil; reopened != c.reopens {
 				t.Fatalf("reopened = %v, want %v: %+v", reopened, c.reopens, got)

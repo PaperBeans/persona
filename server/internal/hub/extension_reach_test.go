@@ -167,9 +167,43 @@ func TestAnExtensionsTokenActsOnlyAsItsManager(t *testing.T) {
 	_ = h
 }
 
+func TestTodoRepositoryRoutesStayOnTheirManager(t *testing.T) {
+	h, url, a, b := reachHub(t)
+	h.noteTodoOwner("todo-a", assistantwire.AssistantID)
+	h.noteTodoOwner("todo-b", "m-0b0b0b")
+	for _, route := range []struct{ method, suffix, body string }{
+		{"GET", "/repositories", ""},
+		{"PUT", "/repositories", `{}`},
+		{"PUT", "/repositories/repo-b/links", `{}`},
+	} {
+		beforeA, beforeB := len(reached(a)), len(reached(b))
+		if code, out := extDo(t, url, route.method, "/api/v1/todos/todo-a"+route.suffix, route.body, nil); code != http.StatusForbidden || !strings.Contains(out, codeOtherManager) {
+			t.Errorf("%s %s: another manager's Todo: %d %s", route.method, route.suffix, code, clip(out, 200))
+		}
+		if got := len(reached(a)); got != beforeA {
+			t.Errorf("%s %s: A was reached: %v", route.method, route.suffix, reached(a)[beforeA:])
+		}
+		if got := len(reached(b)); got != beforeB {
+			t.Errorf("%s %s: a foreign Todo reached B: %v", route.method, route.suffix, reached(b)[beforeB:])
+		}
+
+		ownPath := "/api/v1/todos/todo-b" + route.suffix
+		if code, out := extDo(t, url, route.method, ownPath, route.body, nil); code != http.StatusOK {
+			t.Errorf("%s %s: own Todo: %d %s", route.method, route.suffix, code, clip(out, 200))
+		}
+		if got := len(reached(a)); got != beforeA {
+			t.Errorf("%s %s: own Todo reached A: %v", route.method, route.suffix, reached(a)[beforeA:])
+		}
+		calls := reached(b)[beforeB:]
+		if len(calls) != 1 || !strings.HasPrefix(calls[0], assistantwire.MethodHTTP+" ") || !strings.Contains(calls[0], ownPath) {
+			t.Errorf("%s %s: own Todo did not reach only B: %v", route.method, route.suffix, calls)
+		}
+	}
+}
+
 // Every route an extension's token can open (extwire.RouteScopes) is bounded to its manager one way or another; a new
 // one has to say how here. "path": its machine, session, card or conversation is in the path (extensionReach);
-// "manager": it goes to the extension's own manager (requestManager, byConversation, mergeList), which is held to its
+// "manager": it goes to the extension's own manager (requestManager, byConversation, byTodo, mergeList), which is held to its
 // own machines like any manager; "own": the hub's own answer, limited to the manager's things; "body": the route
 // checks what its body or query names itself.
 func TestEveryExtensionRouteIsBounded(t *testing.T) {
@@ -232,8 +266,14 @@ func TestEveryExtensionRouteIsBounded(t *testing.T) {
 		"GET /api/v1/assistant/leaders":                    "manager",
 		"GET /api/v1/assistant/dispatch-policy":            "manager",
 		"PUT /api/v1/assistant/dispatch-policy":            "manager",
+		"GET /api/v1/assistant/worker-presets":             "manager",
+		"GET /api/v1/assistant/start-defaults":             "manager",
+		"PUT /api/v1/assistant/start-defaults":             "manager",
 		"GET /api/v1/todos":                                "manager", "GET /api/v1/todos/{id}/decisions": "manager",
-		"POST /api/v1/todos": "manager", "PATCH /api/v1/todos/{id}": "manager",
+		"GET /api/v1/todos/{id}/repositories":                 "manager", // associations stay with the todo's manager
+		"PUT /api/v1/todos/{id}/repositories":                 "manager",
+		"PUT /api/v1/todos/{id}/repositories/{repo_id}/links": "manager",
+		"POST /api/v1/todos":                                  "manager", "PATCH /api/v1/todos/{id}": "manager",
 		"POST /api/v1/todos/{id}/decisions":                 "manager",
 		"PUT /api/v1/todos/{id}/agents/{mid}/{sid}":         "path",
 		"DELETE /api/v1/todos/{id}/agents/{mid}/{sid}":      "path",

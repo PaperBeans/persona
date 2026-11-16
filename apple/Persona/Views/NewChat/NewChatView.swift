@@ -41,6 +41,9 @@ struct NewChatView: View {
     var forwardedImages: [UIImage] = []
     var nameHint: String? = nil
     var onlyGroup: String? = nil
+    /// An inbox hand-off follows the ordinary first message's outbox delivery. The message is nil when the local send
+    /// rejected it; Codex keeps its existing start-accepted path and does not use this callback.
+    var onFirstMessage: ((Session, PendingMessage?) -> Void)? = nil
     var onStarted: (Session) -> Void
 
     @AppStorage("newChat.machine") private var machineID = ""
@@ -1100,7 +1103,18 @@ struct NewChatView: View {
             // The photos and the uploaded files' paths go with it (#2321).
             let photos = attachments.images.map(\.1)
             let first = FirstMessage.text(prompt: prompt, contextBlock: contextBlock, paths: attachments.paths, photos: photos.count)
-            if !first.isEmpty { model.sendNow(s.key, text: first, images: photos) }
+            if let onFirstMessage {
+                // Preserve sendNow's immediate local bubble and background send. Only its new pending message is handed
+                // to the inbox's delivery observer; onStarted below still runs without waiting for the hub's answer.
+                let existing = Set(model.chat(s.key).pending.map(\.id))
+                var message: PendingMessage?
+                if !first.isEmpty, model.sendNow(s.key, text: first, images: photos) {
+                    message = model.chat(s.key).pending.last { !existing.contains($0.id) }
+                }
+                onFirstMessage(s, message)
+            } else if !first.isEmpty {
+                model.sendNow(s.key, text: first, images: photos)
+            }
             onStarted(s)
         } catch {
             if sendsUltracode, Ultracode.refused(error) {

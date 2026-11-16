@@ -45,6 +45,8 @@ func TestInboxRetriagesStaleNeedsYouOnce(t *testing.T) {
 	setPolicyFor(t, h, InboxPolicy{Source: "lark", Tag: "sender", Value: "u9", Name: "示例同事", Tier: TierAction})
 
 	h.triageInbox(context.Background())
+	// A nonempty pass runs in its own goroutine: its lock can be released again before the model is called.
+	waitFor(t, "the stale item's triage call", func() bool { return len(m.asked()) == 1 })
 	h.inbox.triaging.Lock()
 	h.inbox.triaging.Unlock() //nolint:staticcheck // waiting for the pass
 
@@ -67,7 +69,9 @@ func TestInboxRetriagesStaleNeedsYouOnce(t *testing.T) {
 	}
 
 	// Sorted again, the stale item is not asked about again; a failed try is not retried in the same run.
+	h.inbox.mu.Lock()
 	stale.Tier, stale.TriageRev = TierAction, 0
+	h.inbox.mu.Unlock()
 	h.triageInbox(context.Background())
 	h.inbox.triaging.Lock()
 	h.inbox.triaging.Unlock() //nolint:staticcheck // waiting for the pass
@@ -192,7 +196,10 @@ func settleHub(t *testing.T, c *settleLark, model *ai.Client, group bool) (*inbo
 		Reason: "示例", Context: "示例：丙：什么时候部署？", Last: "1051", TriagedAt: "1051", TriagedBy: "model", UpdatedAt: time.Now(),
 		Group: &InboxGroup{Connector: "lark", Thread: "chat:F1"},
 		Lark:  &InboxLark{AccountID: 1, FeedID: "F1", IsGroup: group, StartPosition: "1050", ReplyTo: "m1051"}}
+	// inboxReady starts the asynchronous Needs-you counter, which reads this map under inbox.mu.
+	h.inbox.mu.Lock()
 	h.inbox.items[it.ID] = it
+	h.inbox.mu.Unlock()
 	return h, it
 }
 
@@ -460,7 +467,9 @@ func TestInboxRetriageSkipsAndRetries(t *testing.T) {
 		if change != nil {
 			change(it)
 		}
+		h.inbox.mu.Lock()
 		h.inbox.items[id] = it
+		h.inbox.mu.Unlock()
 		return it
 	}
 	stale := add("a", nil)

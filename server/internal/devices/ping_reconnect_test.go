@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,8 +48,257 @@ func TestMeasureNodesClosesAConnectionThatStopsAnswering(t *testing.T) {
 	}
 }
 
-// A large inbound frame can hold the node's pong behind it. Recent chunks count even when none arrive during the
-// ping itself; once the traffic stops, two silent written pings still close the connection.
+// The incident in #8771: the hub-to-node direction of an ssh link stalled (a full-size segment lost to a path MTU
+// black hole) while the node, with Agents running, kept sending its own requests and events, some small lines cut in
+// two by the read boundary. None of that shows a ping got there, so two unanswered pings in a row still close the
+// connection, and a start waiting on it is dropped (what its retry acts on) instead of waiting out its timeout.
+func TestNodeTrafficDoesNotKeepAStalledLinkOpen(t *testing.T) {
+	oldWait, oldWindow := pingWait, pingActivityWindow
+	pingWait, pingActivityWindow = 50*time.Millisecond, 500*time.Millisecond
+	t.Cleanup(func() { pingWait, pingActivityWindow = oldWait, oldWindow })
+	r, w := io.Pipe()
+	lost := &lostWriter{started: make(chan struct{})}
+	peer := rpc.New("h", lost) // nothing the hub writes gets to the node: no ping is ever answered
+	var requests, events atomic.Int64
+	peer.OnRequest = func(context.Context, string, json.RawMessage) (any, error) {
+		requests.Add(1)
+		return map[string]any{}, nil // its reply goes nowhere either
+	}
+	peer.OnEvent = func(string, json.RawMessage) { events.Add(1) }
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- peer.Serve(context.Background(), r) }()
+	stop, nodeDone := make(chan struct{}), make(chan struct{})
+	go func() { // the node's own traffic, far more often than pingActivityWindow, each piece one raw read
+		defer close(nodeDone)
+		for i := 0; ; i++ {
+			pieces := [][]string{
+				{fmt.Sprintf(`{"id":"n%d","method":"state.load","params":{}}`+"\n", i)},
+				{`{"event":"session.screen","params":{"session_id":"s1","status":"working"}}` + "\n"},
+				{`{"event":"sessions.changed","par`, `ams":{"sessions":[]}}` + "\n"},
+				{fmt.Sprintf(`{"id":"n%d","method":"state.lo`, i), `ad","params":{}}` + "\n"},
+			}[i%4]
+			for _, piece := range pieces {
+				if _, err := io.WriteString(w, piece); err != nil {
+					return
+				}
+			}
+			select {
+			case <-stop:
+				return
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		close(stop)
+		_ = w.Close()
+		_ = r.Close()
+		<-nodeDone
+		peer.Close(io.EOF)
+		select {
+		case <-serveDone:
+		case <-time.After(time.Second):
+			t.Error("Serve did not stop")
+		}
+	})
+	d, _ := pingMachine(t, peer)
+	started := make(chan error, 1)
+	go func() { started <- peer.Call(context.Background(), "session.start", map[string]any{}, nil) }()
+	select {
+	case <-lost.started:
+	case <-time.After(time.Second):
+		t.Fatal("session.start was not written")
+	}
+	for i := 1; i <= pingMissLimit; i++ {
+		// Fresh node traffic right before every ping: well inside the activity window when the ping times out.
+		seen := events.Load()
+		deadline := time.Now().Add(time.Second)
+		for events.Load() == seen {
+			if time.Now().After(deadline) {
+				t.Fatal("the node's traffic stopped")
+			}
+			<-time.After(time.Millisecond)
+		}
+		d.measureNodes(context.Background())
+		if i < pingMissLimit {
+			assertPeerOpen(t, peer)
+		}
+	}
+	select {
+	case <-peer.Done():
+	default:
+		t.Fatalf("still open after %d unanswered pings: the node's own requests and events kept it alive", pingMissLimit)
+	}
+	if err := peer.Err(); err == nil || err.Error() != "no answer to 2 pings in a row (a half-open link?)" {
+		t.Fatalf("closed with %v", err)
+	}
+	select {
+	case err := <-started:
+		if !errors.Is(err, rpc.ErrDropped) {
+			t.Fatalf("session.start = %v, want ErrDropped", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("session.start still waits on the closed connection")
+	}
+	if requests.Load() == 0 || events.Load() == 0 {
+		t.Fatalf("the node sent %d requests and %d events, want both", requests.Load(), events.Load())
+	}
+}
+
+// Transport framing can split even a small node event across raw reads (streaming decompression, lost segments).
+// Such a split is not a frame a pong can be queued behind, so it must not keep a stalled link alive (#8771).
+func TestSmallSplitNodeTrafficDoesNotKeepAStalledLinkOpen(t *testing.T) {
+	oldWait, oldWindow := pingWait, pingActivityWindow
+	pingWait, pingActivityWindow = 50*time.Millisecond, 500*time.Millisecond
+	t.Cleanup(func() { pingWait, pingActivityWindow = oldWait, oldWindow })
+	r, w := io.Pipe()
+	peer := rpc.New("h", io.Discard)
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- peer.Serve(context.Background(), r) }()
+	stop := make(chan struct{})
+	go func() {
+		// A well under 16 KiB event, deliberately delivered in three raw reads, more often than the activity window.
+		parts := []string{`{"event":"session.screen","par`, `ams":{"session_id":"s1","status":"wor`, `king"}}` + "\n"}
+		for {
+			for _, part := range parts {
+				if _, err := io.WriteString(w, part); err != nil {
+					return
+				}
+			}
+			select {
+			case <-stop:
+				return
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		close(stop)
+		_ = w.Close()
+		_ = r.Close()
+		peer.Close(io.EOF)
+		select {
+		case <-serveDone:
+		case <-time.After(time.Second):
+			t.Error("Serve did not stop")
+		}
+	})
+	d, _ := pingMachine(t, peer)
+	for i := 1; i <= pingMissLimit; i++ {
+		d.measureNodes(context.Background())
+		if i < pingMissLimit {
+			assertPeerOpen(t, peer)
+		}
+	}
+	select {
+	case <-peer.Done():
+	default:
+		t.Fatalf("still open after %d unanswered pings: small split node traffic kept it alive", pingMissLimit)
+	}
+}
+
+// A node's own large event (a session list of hundreds of KiB, #8771) arrives in many reads, but as a whole line: the
+// reads in its middle can explain a pong queued behind the frame only while it is still arriving. Once the event is
+// through and no frame is moving, two unanswered pings close the link; the completed event must not keep clearing
+// misses for the whole activity window.
+func TestLargeNodeEventsDoNotKeepAStalledLinkOpen(t *testing.T) {
+	oldWait, oldWindow := pingWait, pingActivityWindow
+	pingWait, pingActivityWindow = 50*time.Millisecond, 500*time.Millisecond
+	t.Cleanup(func() { pingWait, pingActivityWindow = oldWait, oldWindow })
+	r, w := io.Pipe()
+	peer := rpc.New("h", io.Discard) // nothing the hub writes gets to the node: no ping is ever answered
+	var events atomic.Int64
+	peer.OnEvent = func(string, json.RawMessage) { events.Add(1) }
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- peer.Serve(context.Background(), r) }()
+	t.Cleanup(func() {
+		_ = w.Close()
+		_ = r.Close()
+		peer.Close(io.EOF)
+		select {
+		case <-serveDone:
+		case <-time.After(time.Second):
+			t.Error("Serve did not stop")
+		}
+	})
+	d, _ := pingMachine(t, peer)
+	line := []byte(`{"event":"sessions.changed","params":{"list":"` + strings.Repeat("x", 200<<10) + `"}}` + "\n")
+	for i := 1; i <= pingMissLimit; i++ {
+		// A whole large event, processed before the ping: every read in its middle is behind us when the ping misses.
+		seen := events.Load()
+		if _, err := w.Write(line); err != nil {
+			t.Fatalf("write event: %v", err)
+		}
+		deadline := time.Now().Add(time.Second)
+		for events.Load() == seen {
+			if time.Now().After(deadline) {
+				t.Fatal("the node's event was not processed")
+			}
+			<-time.After(time.Millisecond)
+		}
+		d.measureNodes(context.Background())
+		if i < pingMissLimit {
+			assertPeerOpen(t, peer)
+		}
+	}
+	select {
+	case <-peer.Done():
+	default:
+		t.Fatalf("still open after %d unanswered pings: a whole large node event kept it alive", pingMissLimit)
+	}
+}
+
+// A pong that comes after its ping gave up still shows that the node got the ping (#8771): the next ping's timeout is
+// not a miss. Once nothing comes back any more, two silent pings close the connection as before.
+func TestLatePongKeepsTheConnection(t *testing.T) {
+	oldWait, oldWindow := pingWait, pingActivityWindow
+	pingWait, pingActivityWindow = 50*time.Millisecond, 500*time.Millisecond
+	t.Cleanup(func() { pingWait, pingActivityWindow = oldWait, oldWindow })
+	r, w := io.Pipe()
+	writes := &signalWriter{ch: make(chan string, 16)}
+	peer := rpc.New("h", writes)
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- peer.Serve(context.Background(), r) }()
+	t.Cleanup(func() {
+		_ = w.Close()
+		_ = r.Close()
+		peer.Close(io.EOF)
+		select {
+		case <-serveDone:
+		case <-time.After(time.Second):
+			t.Error("Serve did not stop")
+		}
+	})
+	d, _ := pingMachine(t, peer)
+	for i := 0; i < pingMissLimit+1; i++ {
+		d.measureNodes(context.Background())
+		var ping struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(writes.wantPing(t)), &ping); err != nil || ping.ID == "" {
+			t.Fatalf("ping id: %q, %v", ping.ID, err)
+		}
+		assertPeerOpen(t, peer)
+		writePingActivity(t, w, peer, `{"id":"`+ping.ID+`","result":{}}`+"\n") // its pong, after measureNodes gave up
+	}
+
+	<-time.After(pingActivityWindow + pingWait)
+	for i := 1; i <= pingMissLimit; i++ {
+		d.measureNodes(context.Background())
+		writes.wantPing(t)
+		if i < pingMissLimit {
+			assertPeerOpen(t, peer)
+		}
+	}
+	select {
+	case <-peer.Done():
+	default:
+		t.Fatal("silent connection stayed open after two more written ping timeouts")
+	}
+}
+
+// A large inbound frame can hold the node's pong behind it. Recent chunks from its middle count even when none arrive
+// during the ping itself; once the traffic stops, two silent written pings still close the connection.
 func TestPingTimeoutsDoNotCloseDuringLargeTransfer(t *testing.T) {
 	oldWait, oldWindow := pingWait, pingActivityWindow
 	pingWait, pingActivityWindow = 50*time.Millisecond, 500*time.Millisecond
@@ -68,13 +319,19 @@ func TestPingTimeoutsDoNotCloseDuringLargeTransfer(t *testing.T) {
 		}
 	})
 	d, _ := pingMachine(t, peer)
+	head := `{"event":"file.chunk","params":"`
 	chunks := []string{
-		`{"event":"file.chunk","params":"`,
-		`first part of a large file; `,
+		head,
+		// This read takes the open frame past the rpc middle-frame threshold (16 KiB): only a frame that big can
+		// genuinely hold the pong on the node's single writer, so only it counts while still arriving (#8771).
+		strings.Repeat("x", 16<<10+1024),
 		`the pong is still queued behind this frame; `,
 		`more bytes before another ping`,
 	}
-	for i := 0; i < pingMissLimit+1; i++ {
+	// The frame's first read could as well be a small line cut by the read boundary (#8771): only the reads after it,
+	// which go on with the frame without finishing it, are activity.
+	writeInput(t, w, chunks[0])
+	for i := 1; i <= pingMissLimit+1; i++ {
 		writePingActivity(t, w, peer, chunks[i])
 		d.measureNodes(context.Background())
 		writes.wantPing(t)
@@ -302,6 +559,20 @@ func runDelayedPing(t *testing.T, d *Devices, peer *rpc.Peer, w *delayWriter, de
 	}
 }
 
+// lostWriter is the hub's end of a link whose hub-to-node direction has stalled: every write succeeds and goes
+// nowhere. started closes once a session.start went out.
+type lostWriter struct {
+	started chan struct{}
+	once    sync.Once
+}
+
+func (w *lostWriter) Write(b []byte) (int, error) {
+	if strings.Contains(string(b), `"method":"session.start"`) {
+		w.once.Do(func() { close(w.started) })
+	}
+	return len(b), nil
+}
+
 // signalWriter completes every write immediately and exposes each complete RPC line to the test.
 type signalWriter struct{ ch chan string }
 
@@ -310,35 +581,44 @@ func (w *signalWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (w *signalWriter) wantPing(t *testing.T) {
+func (w *signalWriter) wantPing(t *testing.T) string {
 	t.Helper()
 	select {
 	case got := <-w.ch:
 		if !strings.Contains(got, `"method":"ping"`) {
 			t.Fatalf("write = %q, want a ping", got)
 		}
+		return got
 	case <-time.After(time.Second):
 		t.Fatal("ping was not written")
 	}
+	return ""
 }
 
-// writePingActivity puts another partial-frame chunk on the wire and waits until the raw reader observed it.
-func writePingActivity(t *testing.T, w io.Writer, peer *rpc.Peer, chunk string) {
+// writeInput puts s on the wire as one raw read and waits until the reader took it.
+func writeInput(t *testing.T, w io.Writer, s string) {
 	t.Helper()
-	before := peer.PingActivity()
 	writeDone := make(chan error, 1)
 	go func() {
-		_, err := io.WriteString(w, chunk)
+		_, err := io.WriteString(w, s)
 		writeDone <- err
 	}()
 	select {
 	case err := <-writeDone:
 		if err != nil {
-			t.Fatalf("write activity: %v", err)
+			t.Fatalf("write input: %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("activity write did not reach the reader")
+		t.Fatal("input write did not reach the reader")
 	}
+}
+
+// writePingActivity puts input that counts as ping activity on the wire (another chunk from the middle of a frame, a
+// reply) and waits until the reader recorded it.
+func writePingActivity(t *testing.T, w io.Writer, peer *rpc.Peer, chunk string) {
+	t.Helper()
+	before := peer.PingActivity()
+	writeInput(t, w, chunk)
 	deadline := time.Now().Add(time.Second)
 	for !peer.PingActivity().After(before) {
 		if time.Now().After(deadline) {

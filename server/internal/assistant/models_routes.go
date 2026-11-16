@@ -63,7 +63,7 @@ func (s *Service) modelPurpose(ctx context.Context, id string, providers []Model
 			if p.Effective.Model == "" {
 				p.Effective.Model = v.Model
 			}
-			if p.Kind == "api" && (v.API == "responses" || v.API == "messages" || v.API == "") {
+			if p.Kind == "api" && (v.API == "responses" || v.API == "messages" || v.API == "chat" || v.API == "") {
 				p.Fields = append(p.Fields, "effort")
 			}
 		}
@@ -250,7 +250,7 @@ func (s *Service) modelConfigRoutes() {
 				apierr.Write(w, 400, e)
 				return
 			}
-			if !messagesAPI(config.API) && config.API != "responses" {
+			if !messagesAPI(config.API) && config.API != "responses" && config.API != "chat" {
 				apierr.Write(w, 400, i18n.Err("assistant-models.err_api_effort"))
 				return
 			}

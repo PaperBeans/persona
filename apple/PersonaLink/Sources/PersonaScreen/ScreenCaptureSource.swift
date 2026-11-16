@@ -8,9 +8,11 @@ import PersonaScreenCore
 import VideoToolbox
 
 /// The real capture source for the live-screen video channel (#3954): ScreenCaptureKit captures one display and
-/// VideoToolbox encodes it with the low-latency settings gate ① measured on a real Mac (≈5 ms p50 / ≈10 ms p95 from a
-/// screen change to an encoded frame at 1080p60): `RealTime`, low-latency rate control, no frame reordering,
-/// `MaxFrameDelayCount` 0, and a capture queue depth of 3.
+/// VideoToolbox encodes it with the low-latency settings gate ① measured on a real Mac: `RealTime`, low-latency rate
+/// control, no frame reordering, and a capture queue depth of 3. From a screen change to an encoded frame that is ≈5 ms
+/// p50 / ≈10 ms p95 at 1080p60, because ScreenCaptureKit hands a frame over about 4.5 ms before its display time; the
+/// encode alone (the phone's Connection Stats) is about 7–8 ms on an M1-class media engine, plus about 1 ms for
+/// VideoToolbox to hand the frame back. That is the engine's floor at this quality (#8713).
 ///
 /// It answers `start` with `hello`, then `format` (the parameter sets) and a keyframe, then a `frame` for each screen
 /// change, and a `heartbeat` each second nothing changed. It pauses (`paused`) when it has no Screen Recording
@@ -311,10 +313,12 @@ final class ScreenCaptureSource: NSObject, ScreenSource, SCStreamOutput, SCStrea
             warn("\(codec) encoder: \(status)")
             return nil
         }
+        // Low-latency rate control selects VideoToolbox's real-time encoder, which holds no frame back and refuses the
+        // speed settings (`MaxFrameDelayCount`, `PrioritizeEncodingSpeedOverQuality`, `MaximumRealTimeFrameRate`, slice
+        // sizes) with kVTPropertyNotSupportedErr, so none is set (#8713).
         func set(_ key: CFString, _ value: CFTypeRef) { VTSessionSetProperty(session, key: key, value: value) }
         set(kVTCompressionPropertyKey_RealTime, kCFBooleanTrue)
         set(kVTCompressionPropertyKey_AllowFrameReordering, kCFBooleanFalse)
-        set(kVTCompressionPropertyKey_MaxFrameDelayCount, NSNumber(value: 0))
         set(kVTCompressionPropertyKey_ProfileLevel,
             codec == "hevc" ? kVTProfileLevel_HEVC_Main_AutoLevel : kVTProfileLevel_H264_High_AutoLevel)
         set(kVTCompressionPropertyKey_ExpectedFrameRate, NSNumber(value: fps))

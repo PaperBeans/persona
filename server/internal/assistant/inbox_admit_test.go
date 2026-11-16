@@ -324,6 +324,62 @@ func TestInboxTriageIsBusyWhileTheModelIs(t *testing.T) {
 	}
 }
 
+// brokenExchange is a transport whose every request panics in the caller's goroutine.
+type brokenExchange struct{}
+
+func (brokenExchange) RoundTrip(*http.Request) (*http.Response, error) { panic("the exchange broke") }
+
+// A panic that unwinds through another use of the triage model's connection does not strand the Inbox (#6698). The
+// knowledge base loop recovers from a panic in one of its steps and carries on, so the process lives; the request
+// the panic unwound through stayed counted as out, and when it was the one finding out whether a pause was over
+// nobody found out after it. Every round then held its items as "the model is at its concurrency limit" with
+// nothing sent to an upstream that was fine, until the manager restarted.
+func TestInboxTriageRecoversAfterAPanicOnItsConnection(t *testing.T) {
+	ai.SetBusyPauseForTest(t, 50*time.Millisecond)
+	window, timeout := admitWindow, admitTimeout
+	admitWindow, admitTimeout = 5*time.Second, 150*time.Millisecond
+	t.Cleanup(func() { admitWindow, admitTimeout = window, timeout })
+	model, client := newTriageModel(t, "busy", `{"tier":"fyi","summary":"示例","reason":"示例"}`)
+	things := sevenThings()
+	h, _ := admitHub(t, client, &inboxConnector{things: things})
+
+	collectAndAdmit(h)
+	if _, status := inboxTriageOf(t, h); status.State != triagePaused || status.Waiting != len(things) {
+		t.Fatalf("while the upstream answers 503: triage %+v", status)
+	}
+
+	// The pause is over and the upstream is fine again. Another use of the connection finds out first, and a panic
+	// unwinds through its request; its caller recovers.
+	pauseOver(t, client)
+	model.mode.Store("ok")
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("the other request did not panic")
+			}
+		}()
+		var out struct{ Tier string }
+		_ = ai.NewWith(client.Config(), brokenExchange{}).JSON(context.Background(), "知识库", "示例", &out)
+	}()
+
+	before := len(model.asked())
+	collectAndAdmit(h)
+	in := 0
+	for _, th := range things {
+		if it := itemOf(h, "example", th.Thread); it != nil && it.Tier == TierFYI {
+			in++
+		}
+	}
+	_, status := inboxTriageOf(t, h)
+	if in != len(things) || status.State != "ok" || status.Waiting != 0 {
+		t.Fatalf("the round after the panic: %d of %d in, %d asked about, triage %+v, held %+v",
+			in, len(things), len(model.asked())-before, status, ai.Held(client.Config()))
+	}
+	if p := ai.Held(client.Config()); p != nil {
+		t.Fatalf("still held: %+v", p)
+	}
+}
+
 // An item with a fallback tier comes in with it when the model fails ("By rule"), marked to be asked again (RuleOf,
 // TriagedAt left behind): once the model is back, the next pass sorts it by the model (#8298). Meanwhile one without
 // a fallback waits.

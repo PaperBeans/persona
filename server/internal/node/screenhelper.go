@@ -20,6 +20,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/nodesign"
+	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -399,7 +400,7 @@ func dialScreenHelper(ctx context.Context, helper string) (net.Conn, error) {
 	}
 	defer os.RemoveAll(dir)
 	sock := filepath.Join(dir, "s")
-	l, err := net.Listen("unix", sock)
+	l, err := osproc.Listen("unix", sock)
 	if err != nil {
 		return nil, err
 	}
@@ -419,7 +420,7 @@ func dialScreenHelper(ctx context.Context, helper string) (net.Conn, error) {
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
-	_ = l.(*net.UnixListener).SetDeadline(deadline)
+	_ = l.(*osproc.UnixListener).SetDeadline(deadline)
 	c, err := l.Accept()
 	if err != nil {
 		return nil, fmt.Errorf("the helper did not connect: %w", err)

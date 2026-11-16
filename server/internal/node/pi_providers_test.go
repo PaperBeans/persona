@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -12,6 +13,36 @@ import (
 )
 
 const piTestKey = "sk-test-pi-provider-secret"
+
+func TestPiModelMetadata(t *testing.T) {
+	image, noImage := true, false
+	for _, tc := range []struct {
+		name, api, id string
+		known         []proto.ProviderModel
+		want          piModel
+	}{
+		{"unknown Claude", "anthropic-messages", "claude-x", nil,
+			piModel{ID: "claude-x", Name: "claude-x", ContextWindow: 200000, MaxTokens: 32000, Reasoning: true, Input: []string{"text", "image"}}},
+		{"unknown other", "openai-responses", "other", nil,
+			piModel{ID: "other", Name: "other", ContextWindow: 128000, MaxTokens: 32000, Input: []string{"text"}}},
+		{"reported capabilities", "openai-responses", "other", []proto.ProviderModel{{ID: "other", Name: "Other", ContextWindow: 64000, MaxOutputTokens: 24000, ImageInput: &image, AllEfforts: []string{"minimal"}}},
+			piModel{ID: "other", Name: "Other", ContextWindow: 64000, MaxTokens: 24000, Reasoning: true, Input: []string{"text", "image"}}},
+		{"explicit no image or thinking", "anthropic-messages", "claude-x", []proto.ProviderModel{{ID: "claude-x", ImageInput: &noImage, NoEffort: true, Efforts: []string{"high"}, AllEfforts: []string{"max"}}},
+			piModel{ID: "claude-x", Name: "claude-x", ContextWindow: 200000, MaxTokens: 32000, Input: []string{"text"}}},
+		{"output capped at window", "openai-responses", "other", []proto.ProviderModel{{ID: "other", ContextWindow: 10000, MaxOutputTokens: 20000}},
+			piModel{ID: "other", Name: "other", ContextWindow: 10000, MaxTokens: 10000, Input: []string{"text"}}},
+		{"unknown fields retain old estimates", "anthropic-messages", "other", []proto.ProviderModel{{ID: "other", ContextWindow: 40000, Efforts: []string{"low"}}},
+			piModel{ID: "other", Name: "other", ContextWindow: 40000, MaxTokens: 10000, Reasoning: true, Input: []string{"text"}}},
+		{"unmatched metadata", "openai-responses", "gpt-5-x", []proto.ProviderModel{{ID: "another", MaxOutputTokens: 3, ImageInput: &image, NoEffort: true}},
+			piModel{ID: "gpt-5-x", Name: "gpt-5-x", ContextWindow: 128000, MaxTokens: 32000, Reasoning: true, Input: []string{"text"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := piModelOf(tc.api, tc.id, tc.known); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("piModelOf() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
 
 // piTestHub answers launchers.pull with a key for every provider but "own" (the manager's own-service refusal).
 func piTestHub(t *testing.T, n *Node, agentsDefault map[string]any) *pullHub {

@@ -11,7 +11,8 @@ vi.mock("../../lib/router", () => ({ navigate: vi.fn() }));
 vi.mock("../../ui/atoms", async (orig) => ({ ...(await orig<typeof import("../../ui/atoms")>()), toast: vi.fn() }));
 vi.mock("../../lib/new-agent", async (orig) => ({ ...(await orig<typeof import("../../lib/new-agent")>()), openNewAgent: vi.fn() }));
 
-import { HANDOFF_PRESETS, handOffContext, handOffMessage, reloadInbox, resetInboxForTests, type InboxItem } from "../../lib/inbox";
+import { reloadInbox, resetInboxForTests, type InboxItem } from "../../lib/inbox";
+import { HANDOFF_PRESETS, handOffContext, handOffMessage } from "../../lib/inbox-page";
 import { handOffSourceKey, recallHandOff } from "../../lib/handoff-memory";
 import { contextXML } from "../../lib/context-xml";
 import { openNewAgent, type NewAgentPreset } from "../../lib/new-agent";

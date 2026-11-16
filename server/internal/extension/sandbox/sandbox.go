@@ -23,6 +23,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/acceptloop"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/osproc"
 )
 
 // RunCommand is personad's hidden subcommand that is the sandbox's first process on Linux: it carries the proxy's
@@ -519,7 +520,7 @@ func Run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "sandbox: --proxy-socket <path> --listen <addr> -- <command> …")
 		return 2
 	}
-	ln, err := net.Listen("tcp", listen)
+	ln, err := osproc.Listen("tcp", listen)
 	if err != nil {
 		fmt.Fprintf(stderr, "sandbox: %v\n", err)
 		return 1

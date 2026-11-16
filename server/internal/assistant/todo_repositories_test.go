@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/assistant/repositorystore"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -226,7 +227,7 @@ func TestAgentRepositoryToolsStayOnTheirOwnTodo(t *testing.T) {
 			t.Fatal("foreign write accepted", name, got)
 		}
 	}
-	if got, err := database.TodoRepositories(t.Context(), other); err != nil || got.Revision != 0 {
+	if got, err := repositorystore.New(database).TodoRepositories(t.Context(), other); err != nil || got.Revision != 0 {
 		t.Fatal("foreign Todo changed", got, err)
 	}
 }
@@ -238,7 +239,7 @@ func TestTodoRepositoryReportsNotifyWithoutChangingLegacyProgress(t *testing.T) 
 	}
 	defer database.Close()
 	f := newFakeHub()
-	s := New(Options{Hub: f, Store: func() Store { return database }})
+	s := New(Options{Hub: f, Store: func() Store { return repositorystore.New(database) }})
 	todo, err := s.createPlainTodo(t.Context(), "Reported work", "", db.TodoEdit{})
 	if err != nil {
 		t.Fatal(err)

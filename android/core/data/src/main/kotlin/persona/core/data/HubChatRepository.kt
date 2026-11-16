@@ -35,6 +35,8 @@ class HubChatRepository(
     private val awaitingTranscript: Flow<Set<SessionKey>> = emptyFlow(),
     /** How long a closed chat stays subscribed; 0 unsubscribes at once. */
     private val releaseAfterMillis: Long = 0,
+    /** Streamed text publishes its first chunk at once, then at most once per this window; the turn's end publishes at once. */
+    private val deltaPublishWindowMillis: Long = 50,
 ) : ChatRepository {
     private class Entry(val key: SessionKey, val scope: CoroutineScope) {
         val reducer = ContinuityReducer()
@@ -76,6 +78,10 @@ class HubChatRepository(
         var durationSeconds: Map<String, Long> = emptyMap()
         /** Back online or reopened and no live delta since: the empty delta that ends a turn may have been missed. */
         var reconnected = false
+        /** The open streaming window (see [scheduleDeltaPublish]); null when none is open. Guarded by [lock]. */
+        var deltaWindow: Job? = null
+        /** A delta arrived since the window's last publish. Guarded by [lock]. */
+        var deltaDirty = false
         /**
          * Nothing has come from the hub for this chat yet: its first page is on its way, or was refused as not_loaded
          * and waits for the watch ([notLoadedWait]). With nothing cached the chat shows its loading state meanwhile, not
@@ -110,16 +116,24 @@ class HubChatRepository(
                         dispatch(entry, actions)
                         if (entry.persistPending.compareAndSet(false, true)) entry.scope.launch { persist(entry) }
                     }
-                    is DeltaEvent -> update(SessionKey(event.machineId, event.sessionId)) { entry ->
-                        entry.realtime.delta(event, entry.reducer.items)
-                        entry.reconnected = false
-                        if (!event.turnFinished) {
-                            entry.turnDurationSeconds = null
-                            entry.durationAfterSeq = entry.reducer.items.lastOrNull()?.seq ?: 0
-                        }
-                        else {
-                            entry.stopRequested = false
-                            requestSync(entry.key)
+                    is DeltaEvent -> existing(SessionKey(event.machineId, event.sessionId))?.let { entry ->
+                        entry.ready.await()
+                        entry.lock.withLock {
+                            entry.realtime.delta(event, entry.reducer.items)
+                            entry.reconnected = false
+                            if (!event.turnFinished) {
+                                entry.turnDurationSeconds = null
+                                entry.durationAfterSeq = entry.reducer.items.lastOrNull()?.seq ?: 0
+                                scheduleDeltaPublish(entry)
+                            }
+                            else {
+                                entry.stopRequested = false
+                                // The turn's end publishes now; a window left open would hold the next turn's first chunk.
+                                entry.deltaWindow?.cancel()
+                                entry.deltaWindow = null
+                                requestSync(entry.key)
+                                publish(entry)
+                            }
                         }
                     }
                     is ScreenEvent -> update(SessionKey(event.machineId, event.sessionId)) { entry ->
@@ -260,6 +274,9 @@ class HubChatRepository(
 
     /** The composer shares interruption state with menu actions. Failed requests leave it unchanged. */
     fun trackComposer(delegate: ChatComposerService): ChatComposerService = object : ChatComposerService by delegate {
+        override suspend fun upload(session: SessionKey, name: String, file: java.io.File, destination: String): String =
+            delegate.upload(session, name, file, destination)
+
         override suspend fun interrupt(session: SessionKey) {
             delegate.interrupt(session)
             update(session) { it.stopRequested = true }
@@ -504,6 +521,28 @@ class HubChatRepository(
         val entry = existing(key) ?: return
         entry.ready.await()
         entry.lock.withLock { change(entry); publish(entry) }
+    }
+
+    /**
+     * Called holding [Entry.lock] after a streamed chunk was applied. The first chunk of a burst publishes at once; chunks
+     * that arrive while the window is open only mark it dirty, and its end publishes the latest state once. The window
+     * repeats while chunks keep arriving and closes after a quiet window, so a later chunk publishes at once again.
+     */
+    private fun scheduleDeltaPublish(entry: Entry) {
+        entry.deltaDirty = true
+        if (entry.deltaWindow?.isActive == true) return
+        entry.deltaDirty = false
+        publish(entry)
+        entry.deltaWindow = entry.scope.launch {
+            while (true) {
+                delay(deltaPublishWindowMillis)
+                val quiet = entry.lock.withLock {
+                    if (!entry.deltaDirty) { entry.deltaWindow = null; true }
+                    else { entry.deltaDirty = false; publish(entry); false }
+                }
+                if (quiet) return@launch
+            }
+        }
     }
 
     private fun requestSync(key: SessionKey) {

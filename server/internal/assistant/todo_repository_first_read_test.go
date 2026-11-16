@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/assistant/repositorystore"
 	"github.com/nwverse/persona/server/internal/db"
 )
 
@@ -27,7 +28,7 @@ func TestTodoRepositoriesFirstLegacyReadReturnsCommittedLinks(t *testing.T) {
 			if err := database.PutSetting(t.Context(), reportStagesKey, map[string]todoStage{id: {Stage: "review", PR: urls[1], PRs: []string{urls[0], urls[2]}}}); err != nil {
 				t.Fatal(err)
 			}
-			before, err := database.TodoRepositories(t.Context(), id)
+			before, err := repositorystore.New(database).TodoRepositories(t.Context(), id)
 			if err != nil || before.Revision != 0 || len(before.Repositories) != 0 {
 				t.Fatal("fixture already migrated", before, err)
 			}
@@ -56,7 +57,7 @@ func TestTodoRepositoriesFirstLegacyReadReturnsCommittedLinks(t *testing.T) {
 					}
 				}
 			}
-			persisted, err := database.TodoRepositories(t.Context(), id)
+			persisted, err := repositorystore.New(database).TodoRepositories(t.Context(), id)
 			if err != nil || persisted.Revision != 1 || len(persisted.Repositories) != 2 {
 				t.Fatal("first response did not describe committed migration", persisted, err)
 			}

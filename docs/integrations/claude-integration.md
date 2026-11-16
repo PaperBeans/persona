@@ -73,7 +73,156 @@ Code does not know (`400000` makes it count 400,000, and the session's `1000000`
 window is over 200K and sets the compact window to that window (#3066); a tier, the small model or the sub-Agent model
 set to a model of its own is marked only when that model's window is 1M or more (#5149), since nothing per model would
 hold a smaller one to its size. An ID already ending in `[1m]` is left alone, and one with no known window is passed as
-it is.
+it is. The reply limit and thinking levels a gateway reports are in "What a gateway reports about a model" below.
+
+## What a gateway reports about a model (tested 2.1.325, #8798)
+
+Model discovery saves what a gateway says of each model (`docs/integrations/launchers.md`, "Provider model and gateway
+parameters"). The launch passes on two of those facts; a provider whose models report neither launches exactly as
+before (`TestProviderEnvUnchangedWithoutReportedLimits`). Measured with `claude -p` against a local fake gateway that
+logs each request body, launched as Persona launches a provider (`ANTHROPIC_BASE_URL`,
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`), and checked against Claude Code's official
+[environment variable reference](https://code.claude.com/docs/en/env-vars).
+
+| Variable or flag | What Persona does | Why |
+| --- | --- | --- |
+| `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | Set from the models' `max_output_tokens` (rule below) | A model Claude Code does not know is asked for at most 32,000 tokens |
+| `--effort` (the provider's default level) | Left out when the session's model is marked `no_effort` | The gateway says the model takes no level |
+| `CLAUDE_CODE_MODEL_CAPABILITIES` | Not set | Works on 2.1.325, but is not in the official reference |
+| `CLAUDE_CODE_AUTO_MODE_SERVER` | Not set; a provider's `env` may set it | Turning it off changes how auto mode checks actions: a product decision |
+
+**Reply limit.** Claude Code asks a model ID it cannot resolve to one of its own for `max_tokens: 32000`, so a
+reasoning model, whose thinking counts toward the reply, stops at "Claude's response exceeded the 32000 output token
+maximum". `CLAUDE_CODE_MAX_OUTPUT_TOKENS` raises it, up to 128,000 for such an ID (`200000` is sent as 128,000, the
+reference says the same); a Claude model already gets its own limit (128,000 for Opus 5.5) and is held to it. Claude
+Code knows a Claude ID anywhere in a name (`anthropic/claude-opus-5-5`, a dated ID), so Persona treats an ID with
+`claude-` followed by a Claude family name and a version, or a version (`claude-opus-5-…`, `claude-3-5-…`), as one it
+may know (`claudeKnows`); a gateway's `…-claude-distill` or `claude-opus-distill-…`, and `claude-sonnet-latest`, are
+not. The variable is one value for the whole process, each model
+capped at its own limit, so `outputTokens` sets it to the least of what the models the process runs may be asked for:
+the session's, each tier's, the small model's, the sub-Agent model's and the `/model` menu's extra entry, after the
+provider's `env` (which may name one). What a model may be asked for is its reported `max_output_tokens`, at most an
+eighth of the window Persona knows for it (`outputLimit`, below), and nothing when either is unknown. The value is set
+only when the session's model is not a Claude one (a tier alias such as `opus`, or `best`, which runs what `opus` does,
+counts as its tier's model, and as Claude's own when that tier names none of the gateway's; `opusplan` and `default`
+always count as Claude's own; a lower value would lower the Claude model's own limit), when
+every other model has a limit or looks like a Claude one (a model with none could be asked for more than it writes,
+and a strict gateway refuses that; a Claude-looking ID that reports one counts), and when the result is over 32,000 (a
+lower value would lower what every model is asked for today). A session on a Claude model whose tiers are gateway
+models therefore gets nothing, and its sub-Agents keep 32,000; the provider's `env` can set the value. The provider's
+`env` wins (an empty value leaves Claude Code's own limit), and is pinned in the settings file like the rest of it.
+
+**The window bound (#8816).** A gateway that counts input plus `max_tokens` against the model's window refuses a
+request once the input passes the window less the reply asked for, while Claude Code keeps only `min(max output,
+20000)` free below the window before it compacts. Measured on 2.1.325: a `400` worded like Anthropic's (``input length
+and `max_tokens` exceed context limit: 150000 + 128000 > 200000``) is retried with `max_tokens: 49000` and goes
+through, but one worded as an OpenAI-compatible upstream words it (`This model's maximum context length is … you
+requested …`, a translating gateway passing it on) ends the turn as "Prompt is too long · the provider said …", and
+in a session that fetches no feature flags (a gateway's) Claude Code then compacts. Asking 128,000 of a 200K model
+would make such a gateway refuse every turn from about 72K of input on, where 32,000 reached the compaction point
+first. So Persona raises a model's reply to at most an eighth of its window: what it adds is a stretch in the last
+eighth, right before Claude Code would compact anyway (a 1M model up to 125,000, a 400K one 50,000). A window of 256K
+or less gets no raise and keeps Claude Code's own 32,000, exactly as before #8805, with the stretch that default
+leaves (a 128K model refused from about 96K, compacting near 108K); Persona does not lower it, which would cut replies
+short for every gateway. The window is the smaller of the model's `context_window` and the provider's context limit
+(`max_context`, or `CLAUDE_CODE_MAX_CONTEXT_TOKENS` in its `env`); a model with neither gets no raise, and stops the
+raise for the whole process like one with no reported limit, since Claude Code's own guess for an unknown ID (1M on
+2.1.325) says nothing of the gateway's. A provider whose gateway forwards
+Anthropic's wording, or that wants more anyway, sets `CLAUDE_CODE_MAX_OUTPUT_TOKENS` in its `env`; one that sees
+refusals near the end of the window sets a smaller value there.
+
+**Which model, and which environment.** The value follows the model the session runs, not only the provider's
+default. `launcher.env` sends what each model may be asked for (`max_output_tokens`), and `personad launch` works the
+value out again for the model the start runs (its last `--model`, a tier alias resolved as above, else
+`ANTHROPIC_MODEL`) beside the provider's tiers, which follow the provider's model there (`sessionOutput`). The Agent
+SDK bridge builds its whole environment for the conversation's model, its empty tiers following that model, so the two
+runtimes of the main conversation can differ when the provider's model reports nothing and the conversation's does:
+each counts the models its own process runs. Neither pins Persona's value in its settings: it is in the process
+environment, and a value in the user's own settings `env` wins over it, as it did before #8798 (a default the user
+set elsewhere wins, `docs/design/PRINCIPLES.md`, "Defaults first"); one in the provider's `env` is pinned. Persona marks the value it writes
+(`PERSONA_MAX_OUTPUT_TOKENS`, the same value): Claude Code passes its environment to the commands it runs (measured:
+`env` in a Bash call shows both), so a `personad launch` inside such a session drops an inherited value that still
+equals the mark when it sets none itself (`inheritedOutputClear`), and keeps one the user set (no mark, or a value
+the mark no longer matches). A session started by #8805's version carries an unmarked value, which a launch inside it
+keeps; and a plain `claude` run inside any Persona session inherits the provider's whole environment, its gateway and
+models with this value, as it always has. A model picked in a running session's `/model` menu that is none of the models above is
+still asked for the process's value. The reserve below the window is the same for 32,000 and anything above it, so
+the value does not move where Claude Code compacts.
+
+**Thinking levels.** The provider's default level reaches an Agent as `--effort` from `personad launch` (the `effort`
+field in `docs/integrations/launchers.md`). `launcher.env` now also lists the provider's models marked `no_effort`, and `personad launch` leaves the provider's
+level out when the session starts on one of them (`launchEffort`, the session's model read as above). That does not
+make Claude Code send no level: to a model it does not know it still sends its own default (`output_config.effort:
+high` with no `--effort`; `low`, `xhigh` and `max` are sent as given). The start decides it once: a `/model` switch
+later in the session, to or from such a model, keeps the level the session has. When the
+gateway forwards the model's refusal of the field unmodified, Claude Code retries without it and leaves it out after
+([gateway protocol: automatic retry](https://code.claude.com/docs/en/llm-gateway-protocol#automatic-retry-and-error-forwarding)).
+What else was verified, not used:
+
+- `CLAUDE_CODE_MODEL_CAPABILITIES` (`<model>=<capability>,…;…`, a trailing `*` a prefix, `-` before a capability to
+  turn it off) is read behind `ANTHROPIC_BASE_URL`: `example-model=-effort` drops `output_config.effort`, and
+  `example-model=effort,-xhigh_effort,-max_effort` sends `high` for `--effort xhigh` or `max`. It is not in the official
+  reference, so its format may change without notice; Persona does not write it.
+- The documented per-tier `ANTHROPIC_DEFAULT_*_MODEL_SUPPORTED_CAPABILITIES` apply only on Bedrock, Vertex and Foundry
+  ([model configuration: pinned model
+  capabilities](https://code.claude.com/docs/en/model-config#customize-pinned-model-display-and-capabilities)); 2.1.325 ignores them behind `ANTHROPIC_BASE_URL`.
+- The documented way to send no level is `CLAUDE_CODE_EFFORT_LEVEL=auto` (or `unset`), measured to drop the field. It
+  is one value for the process and wins over `--effort` and `/effort`, so it would lock the session's effort control
+  (#2307); a provider can set it in its `env` for an Agent, and the main conversation ignores it there.
+
+**Auto mode's server-side review.** In auto mode, Claude Code asks the server to check the actions it would send for
+review, as part of the model requests (`safeguards` in the body, a `dangerous-tool-use-…` beta); behind an
+`ANTHROPIC_BASE_URL` gateway it does so by default from 2.1.278
+([server-side classifier review](https://code.claude.com/docs/en/permission-modes#server-side-classifier-review)).
+`CLAUDE_CODE_AUTO_MODE_SERVER=0` stops asking and makes Claude Code send its own classifier requests instead. Measured
+on 2.1.325 as Persona launches a provider: a gateway that returns no review results gets every action that needs the
+check refused ("Auto mode can't check actions in this session … every action that needs the check is refused"), not a
+fall-back to the local classifier that the page describes; with `0`, the classifier requests go to the gateway on the
+model `ANTHROPIC_DEFAULT_SONNET_MODEL` names (Persona sets it whenever the provider names a model: the Sonnet tier,
+else the session's model; without one, Claude Code's default classifier model), and a
+model that answers with no verdict Claude Code can read still gets the action blocked ("Auto mode could not evaluate
+this action"). So `0` helps only when that model can act as the classifier, and it turns off the server's own check.
+Persona does not set the variable; a user whose gateway cannot carry the review can put `CLAUDE_CODE_AUTO_MODE_SERVER=0` in
+the provider's `env`, or use another permission mode.
+
+## Refusal fallback behind a gateway (#7319)
+
+When a reply stops on a refusal, recent Claude Code retries once and then switches the request to a fallback model whose
+ID is fixed inside Claude Code: no setting changes it, `ANTHROPIC_DEFAULT_*_MODEL` included. A gateway that does not
+serve that ID answers 404 "model not found" after two requests that could not succeed, and a sub-Agent just fails (on
+one install over 7 days, all 4 automatic switches in a private profile ended in 404, while 71 such stops with the switch
+off ended without one). Claude Code 2.1.322 was seen falling back to three models; which one depends on the session's
+model and the stop's category:
+
+| Session model | Fallback |
+| --- | --- |
+| `claude-opus-5-5` | `claude-opus-4-8` or `claude-opus-5` |
+| `claude-opus-5` | `claude-opus-4-8` |
+| `claude-sonnet-5-5` | `claude-sonnet-5` |
+| Any other (a gateway's non-Claude models included) | `claude-opus-4-8` or `claude-opus-5` |
+
+So `providerEnv` sets `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1` for a gateway-shaped managed provider (`providerShaped`,
+with a Base URL) whose host is not Anthropic's own API (`proto.AnthropicAPI`) and whose declared model list (`models`)
+is not empty and lacks at least one of the three. The session's model can change at run time and the variable is one
+value per process, so the list must have all three to keep the fallback. IDs compare trimmed, in any case and without a
+trailing context marker such as `[1m]`; a vendor prefix or a date makes another ID, since Claude Code asks for the plain
+one. A provider with no model list, or one whose list has all three, keeps Claude Code's fallback: nothing says the
+gateway lacks them. The rule reads the list the provider declares, not what the gateway serves: a provider imported
+from a computer's shell aliases lists only the model its alias names, so it launches with the fallback off even on a
+gateway that serves all three, until its list names them or its `env` sets the variable empty. The three IDs are one
+constant (`refusalFallbackModels` in `node/launcherenv.go`) with the version they were seen in, pinned by a test; a
+later Claude Code that falls back elsewhere is a one-line change there.
+
+The value goes wherever the provider's other variables go, in the process environment and the settings env alike:
+`personad launch` (Agents in herdr and the CLI assistant, and the sub-Agents they run), the generated
+`launcher-settings` files and a Persona conversation's own settings, the Agent SDK bridge's child and the settings env it
+pins. A private profile gets it too, which the user's `~/.claude/settings.json` never reaches. Such a turn ends on its
+refusal (`system/model_refusal_no_fallback` and a synthetic reply with `stop_reason: "refusal"`), which the headless
+assistant's bounded recovery takes as a safeguards refusal ([Headless assistant](#headless-assistant-chat-tab)), and a
+sub-Agent fails with the refusal instead of a misleading 404. The provider's own environment is applied last and wins
+either way: `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=` (empty) keeps the fallback on a gateway whose list lacks a model it
+serves after all, and `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1` turns it off for one with no list; the next process start
+picks it up. Plain `claude`, shell launchers and providers from before #2455 keep their own environment.
 
 ## Persona tools Agents call without a card
 
@@ -894,7 +1043,7 @@ failure rather than a configuration error.
   sentence naming the model by its short name ("The upstream refused this request, so it switched to Sonnet 5.5"); the
   models as recorded, the category, the explanation, the refusal's own words and the error since sit under a closed
   Details (#5202, web and iOS). Agents conversations show everything.
-- No configuration is required. Claude Code's own session-scoped fallback and the headless assistant's bounded recovery in [Headless assistant](#headless-assistant-chat-tab) are separate mechanisms. The latter handles a final safeguards / 429 / 5xx turn error without rewriting the request; it never replays this section's `model_fallback_unavailable` 404 and does not change Claude Code's own fallback policy.
+- No configuration is required. Claude Code's own session-scoped fallback and the headless assistant's bounded recovery in [Headless assistant](#headless-assistant-chat-tab) are separate mechanisms. The latter handles a final safeguards / 429 / 5xx turn error without rewriting the request; it never replays this section's `model_fallback_unavailable` 404 and does not change Claude Code's own fallback policy. A gateway-shaped managed provider whose model list lacks one of Claude Code's fallback models turns that fallback off at launch instead ([Refusal fallback behind a gateway](#refusal-fallback-behind-a-gateway-7319)), so there the refusal itself ends the turn and the recovery takes it. This section's fallback rows still come from every start that keeps the switch: Anthropic's own API and a gateway whose list has every fallback model, where the fallback model exists, and plain `claude`, shell launchers, providers from before #2455, providers that declare no model list and providers that turn the switch back on, where a gateway without that model still answers 404.
 
 Client follow-up remains necessary for dedicated cards, an always-visible notice, an actual-model/Fell Back marker,
 explicit recovery buttons, and suppressing the old error cards' Retry/Continue or model-settings buttons. Clients may
@@ -958,9 +1107,18 @@ Old clients show notice's Chinese text. Synthetic text without `API Error:` pref
 Old web / Android task cards ignore `turn_error_kind` and still show Interrupted + Continue; this needs client updates.
 Hub `continueTask` does not reject cause refusal: the user's explicit Continue is their decision, but new clients offer no such button.
 
-### Default policy (decision pending)
+### Default policy (decided behind a gateway, pending elsewhere)
 
-`CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK` is read only from process environment, not `--settings` env (tested in issue). Three options:
+Claude Code 2.1.322 reads `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK` from `process.env` each time it checks, and it copies
+each settings source's `env` (`--settings` and the user's `settings.json` included) into `process.env`, so a value in
+either place turns the fallback off. Persona sets it in both places, so a version that reads only the process
+environment sees it too.
+
+#7319 settled the default for gateway-shaped managed providers whose Base URL is not Anthropic's own API and whose model
+list lacks one of Claude Code's fallback models: they launch with the fallback off (option B, limited to these
+providers), and `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=` (empty) in the provider's environment turns it back on
+([Refusal fallback behind a gateway](#refusal-fallback-behind-a-gateway-7319)). Every other start keeps Claude Code's
+default, and the options below are still open for those:
 
 - **A. Keep Claude Code's default automatic fallback, only make it visible.** No launch changes; answers continue, but users may not know a weaker model is now used for the session—the Fell Back badge addresses this.
 - **B. Disable automatic fallback for all Persona-started Claude.** Block stops work; user chooses rephrase, model change, or abandonment. With increasing refusals, stops and stalled tasks become noticeably more frequent.
@@ -969,7 +1127,7 @@ Hub `continueTask` does not reject cause refusal: the user's explicit Continue i
 Variable injection when disabled:
 
 - Herdr pane: prepend `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1 ` to pane run command and herdr `resume_argv` (`claudeCommandLine` in `node/herdrresume.go`). Most launchers are shell functions; env cannot run functions. Assignment + function forwards the variable to launched Claude in zsh / bash; fish differs, as in report-only hooks above. Verify each.
-- Managed launchers: `managedEnv` in `node/managed.go`, like `CLAUDE_CODE_DISABLE_ARTIFACT`; personad launch carries it.
+- Managed launchers: `managedEnv` in `node/managed.go`, like `CLAUDE_CODE_DISABLE_ARTIFACT`; personad launch carries it. Done for gateway-shaped providers not on Anthropic's own API whose model list lacks a fallback model, in both the environment and the settings env ([Refusal fallback behind a gateway](#refusal-fallback-behind-a-gateway-7319)).
 - Headless assistant: `cmd.Env` in node/assistant_start.go.
 - User-started computer sessions are untouched, display only. Setting changes affect only subsequently started / resumed processes; explain in UI.
 

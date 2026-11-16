@@ -58,7 +58,7 @@ pub struct Operation {
     pub option_index: Option<usize>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Transition {
     pub allowed: bool,
     pub page: usize,

@@ -61,8 +61,8 @@ func TestAcceptedNeedsTheTasksPRLive(t *testing.T) {
 		{name: "unmerged", forge: &fakeForge{}, hub: oldHub, refuse: "not merged"},
 		{name: "unmerged, unverifiable hub", forge: &fakeForge{}, refuse: "not merged"},
 		{name: "merged, not deployed", forge: &fakeForge{merged: true, sha: mergeSHA, contains: map[string]bool{oldHub: false}}, hub: oldHub, refuse: "does not contain it yet"},
-		{name: "forge error", forge: &fakeForge{err: errors.New("403")}, hub: oldHub, refuse: "could not be checked"},
-		{name: "forge error, unverifiable hub", forge: &fakeForge{err: errors.New("403")}, refuse: "could not be checked"},
+		{name: "forge error", forge: &fakeForge{err: errors.New("403")}, hub: oldHub, refuse: "交付状态暂时无法验证"},
+		{name: "forge error, unverifiable hub", forge: &fakeForge{err: errors.New("403")}, refuse: "交付状态暂时无法验证"},
 		{name: "the review's link names the unmerged PR", forge: &fakeForge{}, hub: oldHub, extra: map[string]any{"link": "https://github.com/o/r/pull/9"}, refuse: "not merged"},
 		{name: "deployed", forge: &fakeForge{merged: true, sha: mergeSHA, contains: map[string]bool{oldHub: true}}, hub: oldHub},
 		{name: "merged, unverifiable hub", forge: &fakeForge{merged: true, sha: mergeSHA}},
@@ -86,7 +86,7 @@ func TestAcceptedNeedsTheTasksPRLive(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tc.refuse) || !strings.Contains(err.Error(), "external_event") {
+			if err == nil || !strings.Contains(err.Error(), tc.refuse) || (tc.forge.err == nil && !strings.Contains(err.Error(), "external_event")) {
 				t.Fatalf("accepted (%v): %s", err, res)
 			}
 			if got.DoneAt != nil {
@@ -97,6 +97,23 @@ func TestAcceptedNeedsTheTasksPRLive(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAcceptedUnavailableDoesNotCallWorkUnfinished(t *testing.T) {
+	s, todo := deliveryReviewService(t, &fakeForge{err: errors.New("verification unavailable")}, &runningHub{commit: oldHub}, false)
+	_, err := acceptReview(s, todo.ID, nil)
+	if err == nil || !strings.Contains(err.Error(), "交付状态暂时无法验证") {
+		t.Fatalf("missing unavailable-verification guidance: %v", err)
+	}
+	for _, old := range []string{"is not live", "agent_send", "external_event", "outcome cannot"} {
+		if strings.Contains(err.Error(), old) {
+			t.Fatalf("unfinished-work guidance %q remains: %v", old, err)
+		}
+	}
+	if got := todoNow(s, todo.ID); got.DoneAt != nil {
+		t.Fatalf("unavailable verification closed the task: %+v", got)
+	}
+	t.Logf("unavailable verification refusal: %v", err)
 }
 
 func TestAcceptedRemovesConfirmedNonPR(t *testing.T) {

@@ -952,6 +952,81 @@ func TestTaskLeaderNeedsUserGoesToItsOwnSupervisor(t *testing.T) {
 	}
 }
 
+func leaderNeedsUserReview(t *testing.T, s *Service, todoID, recommend string) {
+	t.Helper()
+	res := s.mcpCall(context.Background(), "box", "s1", "task_review", mustJSON(map[string]any{
+		"todo_id": todoID, "verdict": "needs_user", "reason": "The owner must choose the release action", "recommend": recommend,
+	}), false)
+	if res.IsError {
+		t.Fatalf("leader needs_user review was rejected: %+v", res)
+	}
+}
+
+func flushLeaderDecisionDigest(s *Service) {
+	b := &s.supervise
+	b.mu.Lock()
+	if b.timer != nil {
+		b.timer.Stop()
+		b.timer = nil
+	}
+	for id, g := range b.pending {
+		g.At = time.Now().Add(-time.Hour)
+		b.pending[id] = g
+	}
+	b.last = time.Now().Add(-time.Hour)
+	b.mu.Unlock()
+	s.superviseTimes = shortSuperviseTimings
+	s.sendDigest(context.Background())
+}
+
+func leaderDecisionFixture(t *testing.T) (*Service, *fakeHub, string) {
+	t.Helper()
+	s, f := newQuietService(t)
+	startTaskLeader(t, s, f)
+	w := planWorker(t, s, f, nil)
+	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+	return s, f, w.ID
+}
+
+func TestTaskLeaderNeedsUserRecommendationRevisionIsNotDeduplicated(t *testing.T) {
+	s, f, id := leaderDecisionFixture(t)
+	leaderNeedsUserReview(t, s, id, "approve the release")
+	flushLeaderDecisionDigest(s)
+	if got := f.notices(); len(got) != 1 || !strings.Contains(got[0], "approve the release") {
+		t.Fatalf("first decision did not reach the supervisor: %q", got)
+	}
+
+	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+	leaderNeedsUserReview(t, s, id, "do not release; roll back first")
+	if task := todoNow(s, id); task.DoneAt != nil || task.Supervision.State != reviewNeedsUser || len(task.Supervision.Reviews) != 2 {
+		t.Fatalf("second review was not recorded on the same open needs-user task: %+v", task.Supervision)
+	}
+	flushLeaderDecisionDigest(s)
+	got := f.notices()
+	if len(got) != 2 || !strings.Contains(got[len(got)-1], "do not release; roll back first") {
+		t.Fatalf("revised recommendation was suppressed; notices (%d): %q", len(got), got)
+	}
+}
+
+func TestTaskLeaderNeedsUserIdenticalRecommendationIsDeduplicated(t *testing.T) {
+	s, f, id := leaderDecisionFixture(t)
+	leaderNeedsUserReview(t, s, id, "approve the release")
+	flushLeaderDecisionDigest(s)
+	if got := len(f.notices()); got != 1 {
+		t.Fatalf("first decision notices = %d", got)
+	}
+
+	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+	leaderNeedsUserReview(t, s, id, "approve the release")
+	if task := todoNow(s, id); len(task.Supervision.Reviews) != 2 {
+		t.Fatalf("repeated review was not recorded: %+v", task.Supervision)
+	}
+	flushLeaderDecisionDigest(s)
+	if got := f.notices(); len(got) != 1 {
+		t.Fatalf("an unchanged recommendation was notified again: %q", got)
+	}
+}
+
 // A worker's own card stays with the user (askRoute is a main-chat ladder this task does not extend), and no start
 // remedy is begun for a worker's failed start.
 func TestWorkerCardsStayWithTheUser(t *testing.T) {

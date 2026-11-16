@@ -101,7 +101,7 @@ describe("收件箱：线索", () => {
   });
   it("asks the tree route with the id kept readable and a session's slash kept", async () => {
     apiCalls.length = 0;
-    const { fetchInboxTree, parentRoute } = await import("../../lib/inbox");
+    const { fetchInboxTree, parentRoute } = await import("../../lib/inbox-page");
     await fetchInboxTree("inbox", "lark:F1:900");
     await fetchInboxTree("session", "m 1/s1");
     expect(apiCalls.map((c) => c.path)).toEqual(["/inbox/tree/inbox/lark:F1:900", "/inbox/tree/session/m%201/s1"]);

@@ -44,9 +44,13 @@ class HttpAgentCreationService(
         }
     }
     private fun request(vararg segments: String) = Request.Builder().url(url(*segments)).header("Authorization", "Bearer $token")
-    override suspend fun launchers(machineId: String): List<AgentLauncher> {
+    override suspend fun launchers(machineId: String): List<AgentLauncher> = launcherList(machineId).launchers
+    override suspend fun launcherList(machineId: String): AssistantLaunchers {
         val body = read(request("api", "v1", "machines", machineId, "launchers").build())
-        return JsonCodec.decodeFromJsonElement(body["launchers"] ?: JsonArray(emptyList()))
+        // What New Agent lists off there (#8109) adds to the answer: a list this client can't read costs none of the launchers.
+        val unavailable = try { JsonCodec.decodeFromJsonElement<List<UnavailableLauncher>>(body["unavailable"] ?: JsonArray(emptyList())) }
+            catch (_: IllegalArgumentException) { emptyList() }
+        return AssistantLaunchers(JsonCodec.decodeFromJsonElement(body["launchers"] ?: JsonArray(emptyList())), unavailable = unavailable)
     }
     override suspend fun directories(machineId: String, path: String): AgentDirectories = JsonCodec.decodeFromJsonElement(read(
         request("api", "v1", "machines", machineId, "dirs")

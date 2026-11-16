@@ -19,6 +19,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extension/sourcevalidate"
 	"github.com/nwverse/persona/server/internal/extmgr"
 	"github.com/nwverse/persona/server/internal/managercli"
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/nodecmd"
 	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/update"
@@ -68,6 +69,7 @@ const usage = `usage:
   persona-manager version [-v]  the version; -v adds the channel and build number`
 
 func main() {
+	modelhttp.SetVersion(version)
 	args := os.Args[1:]
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, usage)

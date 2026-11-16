@@ -106,7 +106,7 @@ class AssistantSharedAgentShotsTest {
                 PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
                     Column(Modifier.width(400.dp).background(PersonaTheme.palette.background).testTag("shared-agent-trays")) {
                         val host = AssistantTaskHost(tasks, "main", sessions, { it }, {}, { throw it }, {}, pending = listOf(request))
-                        AssistantTrays(host, tray, listOf(request), emptyList(), emptyList(), 400.dp, busy = false, enabled = true,
+                        AssistantTrays(host, tray, listOf(request), emptyList(), emptyList(), { 400.dp }, busy = false, enabled = true,
                             onApprove = { batch -> approved += batch.map { it.first.id } }, onReview = {}, onSend = {}, onSchedule = {})
                     }
                 }
@@ -187,7 +187,7 @@ class AssistantSharedAgentShotsTest {
             CompositionLocalProvider(LocalConfiguration provides configuration) {
                 PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
                     Column(Modifier.width(400.dp).background(PersonaTheme.palette.background).testTag("shared-agent-trays")) {
-                        AssistantTrays(host, tray, emptyList(), emptyList(), emptyList(), 400.dp, busy = false, enabled = true,
+                        AssistantTrays(host, tray, emptyList(), emptyList(), emptyList(), { 400.dp }, busy = false, enabled = true,
                             onApprove = {}, onReview = {}, onSend = {}, onSchedule = {})
                     }
                 }

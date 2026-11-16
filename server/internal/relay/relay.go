@@ -30,6 +30,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apns"
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/pushcrypto"
 	"github.com/nwverse/persona/server/internal/relayproto"
 )
@@ -407,7 +408,7 @@ func Run(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	ln, err := net.Listen("tcp", cfg.Listen)
+	ln, err := osproc.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("relay listen: %w", err)
 	}

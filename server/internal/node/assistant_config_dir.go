@@ -30,6 +30,9 @@ func (n *Node) assistantProfileSelection(ctx context.Context, id, launcher, runt
 		return filepath.Clean(dir), nil
 	}
 	if n.sessionScope != nil {
+		if asked == "legacy" {
+			asked = n.legacyAssistantProfile(ctx, launcher, runtime) // the dedicated node's own existing profile
+		}
 		if asked != "" && asked != n.sessionScope.claude {
 			return "", errors.New("config_dir must stay in the node's session scope")
 		}

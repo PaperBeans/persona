@@ -23,6 +23,7 @@ import (
 
 	"github.com/nwverse/persona/sdk/go/wire"
 
+	"github.com/nwverse/persona/server/internal/assistant/repositorystore"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/db"
@@ -413,7 +414,8 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 		Logf: logf, Devices: devs, Extensions: ext, StopWhenRevoked: o.StopWhenRevoked, StopWhenRejected: o.TokenFirst})
 	// The knowledge base in its directory, kept as its manager.json's kb section says (over the hub's hello). The model
 	// providers' keys are sealed with its own secret.key.
-	svc = New(Options{Hub: bh, Store: func() Store { return database }, Logf: logf, Devices: devs,
+	assistantStore := repositorystore.New(database)
+	svc = New(Options{Hub: bh, Store: func() Store { return assistantStore }, Logf: logf, Devices: devs,
 		KB: &KBOptions{Dir: o.KBDir, KeyDir: o.HandlesDir}, SecretKey: o.SecretKey,
 		Trust: devs, ID: o.ID, Build: version, RepositoryConfig: o.ConfigFile})
 	svc.SetExtensions(ext) // the connectors', Cua's and ego's tools, in this process (fleet_tools.go)

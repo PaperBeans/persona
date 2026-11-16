@@ -3,24 +3,23 @@
 // main conversation's "Compact context" / "New main chat" and the strip above the composer while it compacts (#1727). Its
 // model is the composer's model pill (views/chat/ModelPill.tsx AssistantModelPill, #5033).
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { api, ApiError, errorText } from "../../lib/api";
+import { api, errorText } from "../../lib/api";
 import { assistantInfoText, conversationKey, effectiveLauncher, shortModel, usePickedLauncher } from "../../lib/assistant-chat";
 import { isBackgroundSupervisor } from "../../lib/background-supervisor";
-import {
-  archivedMainTitle, COMPACT_FEATURE, compactBody, compactionView, compactPath, NEW_MAIN_FEATURE, NEW_MAIN_PATH, newMainBody, type CompactionView,
-} from "../../lib/compaction";
+import { COMPACT_FEATURE, compactBody, compactionView, compactPath, NEW_MAIN_FEATURE, type CompactionView } from "../../lib/compaction";
 import { runtimeFallbackText } from "../../lib/model-config";
 import { personaState } from "../../lib/persona";
 import { conversationPage } from "../../lib/conversation-page";
+import { lazyPage } from "../../lib/lazy-page";
 import { CLEAR_MAIN_FEATURE, clearMainContext } from "../../lib/main-clear";
 import { shownManager } from "../../lib/manager-choice";
 import { navigate } from "../../lib/router";
-import { hubHas, refreshAssistant, useStore } from "../../lib/store";
+import { hubHas, useStore } from "../../lib/store";
 import type { Item, Session } from "../../lib/types";
-import { Button, copyText, Dialog, IconButton, Spinner, toast, type MenuItem } from "../../ui/atoms";
+import { copyText, IconButton, Spinner, toast, type MenuItem } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { conversationArchiveItem } from "../ConversationMenu";
-import { Switch } from "./parts";
+import { lazyDialog } from "../LazyOverlay";
 import { PersonaDot, usePersona } from "./Persona";
 import { t } from "../../i18n";
 
@@ -42,6 +41,8 @@ export function AssistantFace({ session, last }: { session?: Session; last?: Pic
 /** The header menu's Persona part: "Details" (the profile), "Knowledge", "Back to main chat", an ordinary conversation's
  *  "Archive" (the sidebar row's action), the main conversation's "Compact context", "Clear context" and "New main chat"
  *  (when the hub can), "Copy info"; `dialogs` goes with them. Empty for an agent. */
+const NewMainDialog = lazyDialog(() => import("./NewMainDialog").then((m) => m.NewMainDialog));
+
 export function useAssistantMenu(session: Session | undefined): { items: MenuItem[]; dialogs: React.ReactNode } {
   const assistant = useStore((s) => s.assistant);
   const machine = useStore((s) => (session ? s.machines.find((m) => m.id === session.machine_id)?.name ?? "" : ""));
@@ -99,10 +100,26 @@ const DONE_SHOWN_MS = 4000;
 /** How long the strip says "Compacting" after asking, before the hub's word on it arrives. */
 const REQUEST_GRACE_MS = 15_000;
 
+const MainChatAgentNotice = lazyPage(() => import("./MainChatAgentNotice").then((m) => m.MainChatAgentNotice));
+
+/** Only the main conversation loads the mismatch check; the existing New-main dialog is shared with the header menu. */
+function MainChatAgentNoticeHost({ session }: { session: Session }) {
+  const isMain = useStore((s) => s.assistant?.main === session.session_id);
+  const canNewMain = useStore((s) => hubHas(s.features, NEW_MAIN_FEATURE));
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      {isMain && <Suspense fallback={null}><MainChatAgentNotice session={session} isMain onNewMain={canNewMain ? () => setOpen(true) : undefined} /></Suspense>}
+      {isMain && canNewMain && <NewMainDialog open={open} onClose={() => setOpen(false)} session={session} />}
+    </>
+  );
+}
+
 /** Above the composer of an assistant conversation: its runtime fallback (#2455), then the compaction strip. */
 export function CompactionStrip({ session }: { session: Session }) {
   return (
     <>
+      <MainChatAgentNoticeHost session={session} />
       {session.runtime_fallback && <RuntimeFallbackNote reason={session.runtime_fallback} />}
       {session.model_fallback && <AssistantModelFallback session={session} />}
       <Compaction session={session} />
@@ -204,64 +221,5 @@ function Compaction({ session }: { session: Session }) {
         </>
       )}
     </div>
-  );
-}
-
-// ── New main chat ───────────────────────────────────────
-
-/** Archives the main conversation (renamed "Old main chat · until <date>") and leaves none: the next message starts the new one. */
-function NewMainDialog({ open, onClose, session }: { open: boolean; onClose: () => void; session: Session }) {
-  const [carry, setCarry] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const toEmptyMain = async () => {
-    await refreshAssistant().catch(() => {});
-    onClose();
-    navigate({ name: "persona" });
-  };
-  const go = async () => {
-    setBusy(true);
-    try {
-      const r = await api<{ ok: boolean; archived?: string; carried?: boolean }>(NEW_MAIN_PATH, { method: "POST", json: newMainBody(carry, session.session_id) });
-      await toEmptyMain();
-      toast(r.carried ? t("assistant-assistantchat.new_main_done_carried") : t("assistant-assistantchat.new_main_done"), "ok");
-    } catch (e) {
-      if (e instanceof ApiError && e.code === "main_changed") {
-        // another device replaced it: show what the hub has now
-        await toEmptyMain();
-        toast(t("assistant-assistantchat.new_main_elsewhere"), "info");
-      } else {
-        toast(t("assistant-assistantchat.new_main_failed", { error: errorText(e) }), "error");
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title={t("assistant-assistantchat.new_main_title")}
-      footer={
-        <>
-          <Button tone="quiet" onClick={onClose}>
-            {t("common.cancel")}
-          </Button>
-          <Button tone="primary" busy={busy} onClick={() => void go()}>
-            {t("assistant-assistantchat.new_main")}
-          </Button>
-        </>
-      }
-    >
-      <p className="text-[13px] leading-relaxed text-ink-2">
-        {t("assistant-assistantchat.new_main_body", { title: archivedMainTitle() })}
-      </p>
-      <div className="mt-3 flex items-start gap-3 rounded-control bg-inset px-3 py-2.5 shadow-hairline">
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium text-ink">{t("assistant-assistantchat.carry_summary")}</div>
-          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-3">{t("assistant-assistantchat.carry_summary_hint")}</div>
-        </div>
-        <Switch checked={carry} onChange={setCarry} label={t("assistant-assistantchat.carry_summary")} disabled={busy} />
-      </div>
-    </Dialog>
   );
 }

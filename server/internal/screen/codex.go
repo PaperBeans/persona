@@ -419,3 +419,42 @@ func codexQuestion(plain []string) *CodexQuestionDialog {
 	}
 	return q
 }
+
+// codexFirstOptionRE is a Codex picker's first option, under the cursor or not ("› 1. Switch to …", "  1. Keep …").
+var codexFirstOptionRE = lazyre.New(`^\s*(?:[❯›>]\s*)?1\.\s+\S`)
+
+// CodexDialogHead is the first line of the dialog at the bottom of a Codex screen (View CodexDialog: a picker such as
+// "Approaching rate limits", which lists its options under a paragraph of its own): the first line of that paragraph,
+// "" when none shows. DialogHead reads Claude Code's dialogs, framed by rules Codex does not draw, and so would give a
+// line of the conversation above it.
+func CodexDialogHead(screen string) string {
+	if ReadCodex(screen).View != CodexDialog {
+		return ""
+	}
+	lines := strings.Split(strings.ReplaceAll(screen, "\r", ""), "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(strings.ReplaceAll(Plain(lines[i]), " ", " "), " ")
+	}
+	opt := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		if codexFirstOptionRE.MatchString(lines[i]) {
+			opt = i
+			break
+		}
+	}
+	i := opt - 1
+	for i >= 0 && strings.TrimSpace(lines[i]) == "" {
+		i--
+	}
+	if opt < 0 || i < 0 {
+		return ""
+	}
+	for i > 0 && strings.TrimSpace(lines[i-1]) != "" {
+		i--
+	}
+	// the dialog's own text is indented; a row at the edge is the conversation's ("• Ran …"): no paragraph of its own
+	if l := lines[i]; l[0] != ' ' {
+		return ""
+	}
+	return strings.TrimSpace(lines[i])
+}

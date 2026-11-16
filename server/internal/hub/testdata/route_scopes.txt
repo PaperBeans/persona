@@ -149,8 +149,10 @@ assistant.ask        GET /api/v1/assistant/reporters
 -                    GET /api/v1/assistant/search
 -                    GET /api/v1/assistant/skills
 -                    GET /api/v1/assistant/standing-authorizations
+assistant.start_defaults GET /api/v1/assistant/start-defaults
 -                    GET /api/v1/assistant/tasks
 -                    GET /api/v1/assistant/tasks/cron
+assistant.start_defaults GET /api/v1/assistant/worker-presets
 -                    GET /api/v1/auth/password/state
 -                    GET /api/v1/auth/tokens
 -                    GET /api/v1/bots/feishu
@@ -620,6 +622,7 @@ assistant.dispatch_policy PUT /api/v1/assistant/dispatch-policy
 -                    PUT /api/v1/assistant/routines
 -                    PUT /api/v1/assistant/saved-prompts/order
 -                    PUT /api/v1/assistant/saved-prompts/{id}
+assistant.start_defaults PUT /api/v1/assistant/start-defaults
 -                    PUT /api/v1/assistant/tasks/{id}
 -                    PUT /api/v1/bots/feishu
 -                    PUT /api/v1/channels/{id}

@@ -107,7 +107,7 @@ func TestCodexAssistantCommandWindowsPathsUseForwardSlashes(t *testing.T) {
 	checkScriptWords(t, launcher, slashed(bin), "launch", "box")
 }
 
-// The model list runs a managed Codex launcher, or plain claude with claude_start_dir, the same way.
+// The model list runs a managed Codex launcher's app-server (#8797), or plain claude with claude_start_dir, the same way.
 func TestAgentModelsCommandWindowsPathsUseForwardSlashes(t *testing.T) {
 	const bin = `C:\Program Files\Persona\personad.exe`
 	n := windowsScriptNode(t, bin, "box")
@@ -119,7 +119,7 @@ func TestAgentModelsCommandWindowsPathsUseForwardSlashes(t *testing.T) {
 	if !ok {
 		t.Fatalf("not codexShell: %q", cmd.Args)
 	}
-	checkScriptWords(t, launcher, slashed(bin), "launch", "box")
+	checkScriptWords(t, launcher, slashed(bin), "launch", "box", "app-server")
 
 	start := `C:\Users\Example User\.claude-work`
 	n.claudeStartDir.Store(&start)

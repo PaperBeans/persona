@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 // A supervisor's accepted closes a task, so with assistant.done_needs_delivery on ("a finished task closes only once
@@ -90,6 +92,11 @@ func (s *Service) acceptedDeliveryError(ctx context.Context, t Todo, link, outco
 	}
 	if !r.held() {
 		return nil
+	}
+	if r.State == deployUnknown || r.State == deployNotIn && r.Err != nil {
+		s.logf("task %s: delivery status temporarily unverifiable: %v", t.ID, r.Err)
+		return fmt.Errorf("%s", i18n.T(s.lang(ctx), "assistant-reports.delivery_verification_unavailable",
+			i18n.Args{"task": t.ID, "pr": pr, "reason": fmt.Sprint(r.Err)}))
 	}
 	why := map[string]string{
 		deployUnmerged: "the PR is not merged",

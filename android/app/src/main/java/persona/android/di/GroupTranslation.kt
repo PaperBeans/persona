@@ -199,6 +199,8 @@ internal fun ChatComposerService.inGroup(names: GroupNames, scope: CoroutineScop
     return object : ChatComposerService {
         override val deliveries = source.deliveries.mapIn(scope) { map -> map.mapValues { delivery(it.value) } }
         override suspend fun upload(session: SessionKey, name: String, file: File) = source.upload(names.raw(session), name, file)
+        override suspend fun upload(session: SessionKey, name: String, file: File, destination: String) =
+            source.upload(names.raw(session), name, file, destination)
         override suspend fun interrupt(session: SessionKey) = source.interrupt(names.raw(session))
         override suspend fun retryRefused(clientMessageId: String, clearDraft: Boolean) =
             delivery(source.retryRefused(clientMessageId, clearDraft))
@@ -374,6 +376,7 @@ internal fun AgentCreationService.inGroup(names: GroupNames): AgentCreationServi
     return object : AgentCreationService {
         override val scope get() = source.scope
         override suspend fun launchers(machineId: String) = source.launchers(names.rawMachine(machineId))
+        override suspend fun launcherList(machineId: String) = source.launcherList(names.rawMachine(machineId))
         override suspend fun directories(machineId: String, path: String) = source.directories(names.rawMachine(machineId), path)
         override suspend fun start(request: AgentStartRequest, operationId: String) =
             result(source.start(request.copy(machineId = names.rawMachine(request.machineId)), operationId))

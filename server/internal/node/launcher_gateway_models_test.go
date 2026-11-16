@@ -10,6 +10,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -79,6 +80,24 @@ func TestGatewayModelsFollowsClaudeCodeDiscovery(t *testing.T) {
 	n.gatewayModels(context.Background(), l)
 	if got.Get("Authorization") != "Bearer sk-test" || got.Get("x-api-key") != "" {
 		t.Fatalf("bearer headers: %v", *got)
+	}
+}
+
+func TestGatewayModelsUserAgent(t *testing.T) {
+	srv, got, _ := gatewayFixture(t)
+	n := gatewayNode(t, `{"env":{"`+gatewayDiscoveryVar+`":"1"}}`)
+	for _, tc := range []struct{ headers, want string }{
+		{"", modelhttp.UserAgent()},
+		{"user-agent: provider/1", "provider/1"},
+		{"user-agent:", ""},
+	} {
+		l := proto.ManagedLauncher{Name: "gw", BaseURL: srv.URL, APIKey: "sk-test", Headers: tc.headers}
+		if models := n.gatewayModels(context.Background(), l); len(models) == 0 {
+			t.Fatal("gateway returned no models")
+		}
+		if ua := got.Get("User-Agent"); ua != tc.want {
+			t.Errorf("headers %q: User-Agent = %q, want %q", tc.headers, ua, tc.want)
+		}
 	}
 }
 

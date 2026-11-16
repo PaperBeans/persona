@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "task_waiting_for_review_only_in_needs_you",
-      "description": "A task its supervisor judged finished (pending_review), from a hub that does not say since when (no pending_since): it is in Needs you and not in In progress, as before the supervisor's review had its own place.",
+      "description": "A task its supervisor judged finished (pending_review), from a hub that does not say since when (no pending_since): it is in Needs you and not in In progress, as before the supervisor's review had its own place. The web lists the review rows under its Persona reviewing entry instead (web_review, #8678).",
       "source": [
         "web/src/lib/assistant-entries.ts assistantEntries",
         "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
@@ -55,7 +55,10 @@
           "task:t-review"
         ],
         "running": [],
-        "shelved": []
+        "shelved": [],
+        "web_review": [
+          "task:t-review"
+        ]
       }
     },
     {
@@ -148,7 +151,7 @@
     },
     {
       "name": "supervisor_review_in_progress",
-      "description": "A task judged finished waits for its supervisor's review, not the owner's: while the review is younger than an hour (pending_since) it is in In progress and not in Needs you. One second short of the hour still is; so is one the owner already looked at (seen_at), which the To-dos page files as Done.",
+      "description": "A task judged finished waits for its supervisor's review, not the owner's: while the review is younger than an hour (pending_since) it is in In progress and not in Needs you. One second short of the hour still is; so is one the owner already looked at (seen_at), which the To-dos page files as Done. The web lists the review rows under its Persona reviewing entry instead (web_review, #8678).",
       "source": [
         "web/src/lib/assistant-entries.ts assistantEntries",
         "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
@@ -268,12 +271,17 @@
           "task:t-fresh",
           "task:t-almost",
           "task:t-seen"
+        ],
+        "web_review": [
+          "task:t-fresh",
+          "task:t-almost",
+          "task:t-seen"
         ]
       }
     },
     {
       "name": "supervisor_review_with_open_pr",
-      "description": "A task whose fresh, open PR waits for a maintainer (the web's Waiting for merge, #7614) and whose supervisor's review is under way: the review is Persona's own work, so it is in In progress saying its supervisor is reviewing it, not Waiting for merge, even after the owner looked at it (seen_at, which the To-dos page files as Waiting for merge). Once the review is overdue it is the owner's: Needs you wins over the PR. Clients without the Waiting for merge group read the same split.",
+      "description": "A task whose fresh, open PR waits for a maintainer (the web's Waiting for merge, #7614) and whose supervisor's review is under way: the review is Persona's own work, so it is in In progress saying its supervisor is reviewing it, not Waiting for merge, even after the owner looked at it (seen_at, which the To-dos page files as Waiting for merge). Once the review is overdue it is the owner's: Needs you wins over the PR. Clients without the Waiting for merge group read the same split. The web lists the review rows under its Persona reviewing entry instead (web_review, #8678).",
       "source": [
         "web/src/lib/assistant-entries.ts assistantEntries",
         "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
@@ -382,12 +390,16 @@
         "shelved": [],
         "supervisor_review": [
           "task:t-review-pr"
+        ],
+        "web_review": [
+          "task:t-overdue-pr",
+          "task:t-review-pr"
         ]
       }
     },
     {
       "name": "overdue_supervisor_review_needs_you",
-      "description": "A review still waiting an hour after the task entered pending_review comes to the owner: at the hour exactly and after it the task is in Needs you, as before, so a stalled or missing supervisor never hides a finished task.",
+      "description": "A review still waiting an hour after the task entered pending_review comes to the owner: at the hour exactly and after it the task is in Needs you, as before, so a stalled or missing supervisor never hides a finished task. The web lists the review rows under its Persona reviewing entry instead (web_review, #8678).",
       "source": [
         "web/src/lib/assistant-entries.ts assistantEntries",
         "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
@@ -471,12 +483,16 @@
           "task:t-late"
         ],
         "running": [],
-        "shelved": []
+        "shelved": [],
+        "web_review": [
+          "task:t-hour",
+          "task:t-late"
+        ]
       }
     },
     {
       "name": "review_without_pending_since_needs_you",
-      "description": "A hub that does not send pending_since (or sends one that is no time) keeps the old rule: the task waiting for review is in Needs you. The ledger's updated_at is not read in its place.",
+      "description": "A hub that does not send pending_since (or sends one that is no time) keeps the old rule: the task waiting for review is in Needs you. The ledger's updated_at is not read in its place. The web lists the review rows under its Persona reviewing entry instead (web_review, #8678).",
       "source": [
         "web/src/lib/assistant-entries.ts assistantEntries",
         "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
@@ -561,12 +577,16 @@
           "task:t-no-time"
         ],
         "running": [],
-        "shelved": []
+        "shelved": [],
+        "web_review": [
+          "task:t-old-hub",
+          "task:t-no-time"
+        ]
       }
     },
     {
       "name": "owner_decisions_stay_in_needs_you_during_a_fresh_review",
-      "description": "What is the owner's stays the owner's however young the review: a pending_review task whose agent asks something, one with an open ask (please verify), and a needs_user task are in Needs you; the fresh review next to them is in In progress.",
+      "description": "What is the owner's stays the owner's however young the review: a pending_review task whose agent asks something, one with an open ask (please verify), and a needs_user task are in Needs you; the fresh review next to them is in In progress. The web lists the review rows under its Persona reviewing entry instead (web_review, #8678).",
       "source": [
         "web/src/lib/assistant-entries.ts assistantEntries",
         "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
@@ -738,6 +758,9 @@
         ],
         "shelved": [],
         "supervisor_review": [
+          "task:t-fresh"
+        ],
+        "web_review": [
           "task:t-fresh"
         ]
       }

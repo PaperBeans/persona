@@ -180,6 +180,8 @@ fun ChatDestination(
     historyReadOnly: Boolean = false, onHistoryBack: (() -> Unit)? = null,
     historyFooter: (@Composable () -> Unit)? = null,
     historySession: Session? = null,
+    /** A Health conversation identified by its host even while its live session row is still loading. */
+    healthChat: Boolean = false,
 ) {
     val context = LocalContext.current.applicationContext
     val services = remember(context) { EntryPointAccessors.fromApplication(context, ChatServices::class.java) }
@@ -247,6 +249,7 @@ fun ChatDestination(
             renderStyle = style,
             embedded = embedded, showTopBar = showTopBar,
             historyReadOnly = historyReadOnly, historyFooter = historyFooter, historySession = historySession,
+            healthChat = healthChat,
             composerState = composer, onDraftChanged = editor?.let { it::changed },
             composerService = wiring?.composer.takeUnless { historyReadOnly },
             statusBindings = ChatStatusBindings(recovery = wiring?.recovery.takeUnless { historyReadOnly }, draftSaveError = error?.let { stringResource(it) }),

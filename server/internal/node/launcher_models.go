@@ -217,7 +217,13 @@ func (n *Node) launcherModelsAgent(ctx context.Context, name, agentType string) 
 func (n *Node) agentModelsCommand(ctx context.Context, shell, name, agent, dir string) (*exec.Cmd, error) {
 	var cmd *exec.Cmd
 	if agent == "codex" {
-		cmd = exec.CommandContext(ctx, shell, "-ic", codexShell(n.launcherForScript(name)), "persona")
+		launcher := n.launcherForScript(name)
+		if _, managed := n.managedLauncher(name); managed {
+			// `personad launch` runs codex itself, not the shell's codex codexShell wraps: without the subcommand
+			// here the provider's codex started its TUI ("stdin is not a terminal") and listed nothing.
+			launcher += " app-server"
+		}
+		cmd = exec.CommandContext(ctx, shell, "-ic", codexShell(launcher), "persona")
 	} else {
 		// No hooks: this claude is no session of the user's (Persona's own, or a hook of theirs, would see one start).
 		ours := filepath.Join(dir, "settings.json")
@@ -458,6 +464,9 @@ func codexModelList(w io.Writer, r io.Reader) ([]proto.AgentModel, error) {
 				if e.Effort != "" {
 					a.Efforts = append(a.Efforts, e.Effort)
 				}
+			}
+			if len(a.Efforts) == 0 && a.DefaultEffort == "none" { // a model that takes no level (a gateway catalog's) has no default one
+				a.DefaultEffort = ""
 			}
 			out = append(out, a)
 		}

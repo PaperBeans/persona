@@ -22,7 +22,7 @@ if [ "$lane" = build ]; then exit 0; fi
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/persona-ci-db.XXXXXX")"
 container="persona-ci-db-$(basename "$fixture" | tr '[:upper:]' '[:lower:]')"
 cleanup() {
-  docker rm -f "$container" >/dev/null 2>&1 || true
+  docker rm -fv "$container" >/dev/null 2>&1 || true
   rm -f "${fixture:?}/database.json"
   rmdir "$fixture" 2>/dev/null || true
 }

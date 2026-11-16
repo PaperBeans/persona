@@ -54,7 +54,7 @@ def main(argv=None):
                              "--database-file", str(fixture / "database.json"), "--"] + command,
                             cwd=root / "server", timeout=720)
             finally:
-                subprocess.run(["docker", "rm", "-f", container], cwd=root,
+                subprocess.run(["docker", "rm", "-fv", container], cwd=root,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=False)
     except ValueError as error:
         raise WatchError("cannot select Go tests: " + str(error)) from error

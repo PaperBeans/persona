@@ -12,6 +12,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -203,7 +204,7 @@ internal fun trayDrafts(inbox: List<AssistantInboxDraft>, feed: List<FeedItem>):
 @Composable
 internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
     requests: List<Interaction>, inbox: List<AssistantInboxDraft>, schedules: List<ScheduledTask>,
-    maximumHeight: Dp, busy: Boolean, enabled: Boolean,
+    maximumHeight: () -> Dp, busy: Boolean, enabled: Boolean,
     onApprove: (List<Pair<Interaction, Resolution>>) -> Unit, onReview: (Interaction) -> Unit,
     onSend: (TrayDraft) -> Unit, onSchedule: (ScheduledTask) -> Unit,
     backgroundRecords: Boolean = false, onBackground: (() -> Unit)? = null,
@@ -279,7 +280,13 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
     Column(Modifier.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
         state.expanded?.let { tray ->
             JCard(Modifier.fillMaxWidth().testTag("assistant-tray-${tray.tag}"), padding = Tokens.Space.xs) {
-                LazyColumn(Modifier.heightIn(max = minOf(maximumHeight, AssistantTrayTokens.maximumHeight)),
+                // The room is read while measuring: it follows the keyboard frame by frame without composing the tray again.
+                LazyColumn(Modifier.layout { measurable, constraints ->
+                    val most = minOf(maximumHeight(), AssistantTrayTokens.maximumHeight).roundToPx()
+                    val placeable = measurable.measure(constraints.copy(
+                        maxHeight = minOf(constraints.maxHeight, most).coerceAtLeast(constraints.minHeight)))
+                    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+                },
                     contentPadding = PaddingValues(bottom = Tokens.Space.s)) {
                     item {
                         val count = when (tray) {
@@ -636,7 +643,7 @@ private fun TrayProgressRow(row: TrayProgress, activity: BackgroundWork? = null,
     val detail = trayBackgroundLine(work) ?: row.text
     val palette = PersonaTheme.palette
     JRow(onClick = onClick, modifier = Modifier.testTag("assistant-progress-${row.id}"), chevron = false, trailing = {
-        if (row.done) JIcon(PhIcons.Check, stringResource(if (row.todo?.supervision?.state == "accepted")
+        if (row.done) JIcon(PersonaIcons.done, stringResource(if (row.todo?.supervision?.state == "accepted")
             R.string.chat_tray_accepted else R.string.chat_tray_done), tint = palette.positive)
         // judged finished and with its supervisor for review (`RunningEntry.Task.supervisorReview`): the row says whose turn it is
         else Text(stringResource(if (work != null) R.string.chat_tray_working else if (live && waiting) R.string.chat_tray_waiting
@@ -764,7 +771,7 @@ private fun JustFinishedRow(todo: Todo, host: AssistantTaskHost, feed: List<Feed
             }
         }
     }, modifier = Modifier.testTag("assistant-just-finished-row"), leading = {
-        JIcon(PhIcons.Check, decorative = true, size = Tokens.Size.iconXS, tint = palette.positive)
+        JIcon(PersonaIcons.done, decorative = true, size = Tokens.Size.iconXS, tint = palette.positive)
     }, trailing = {
         Text(stringResource(R.string.chat_tray_finished_done), style = PersonaTheme.type.micro, color = palette.ink3, maxLines = 1)
     })

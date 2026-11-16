@@ -8,7 +8,35 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/nwverse/persona/server/internal/modelhttp"
 )
+
+func TestDoUserAgent(t *testing.T) {
+	var got string
+	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("User-Agent")
+	}))
+	defer gw.Close()
+	for _, tc := range []struct {
+		name    string
+		headers map[string]string
+		want    string
+	}{
+		{"default", nil, modelhttp.UserAgent()},
+		{"plugin", map[string]string{"user-agent": "plugin/1"}, "plugin/1"},
+		{"empty plugin", map[string]string{"user-agent": ""}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Do(context.Background(), nil, gw.URL, "", Request{URL: "/usage", Headers: tc.headers}); err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("User-Agent = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
 
 // A plugin's request goes to the launcher's own gateway with the key put in, and the key never comes back.
 func TestDoPutsTheKeyInAndTakesItOut(t *testing.T) {

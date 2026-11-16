@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -141,9 +142,9 @@ func (p *gateProxy) openIn(command, session string, health bool) (base string, r
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.ln == nil {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		ln, err := osproc.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
-			if ln, err = net.Listen("tcp", "[::1]:0"); err != nil {
+			if ln, err = osproc.Listen("tcp", "[::1]:0"); err != nil {
 				return "", nil, err
 			}
 		}

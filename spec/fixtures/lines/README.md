@@ -349,9 +349,13 @@ for path in sorted((root / 'spec/fixtures/lines').glob('*.json')):
         if out:
             failed.append(case['name'])
             print('不匹配：%s/%s\n  %s' % (path.name, case['name'], '\n  '.join(out)))
+        if case['name'] in patches:
+            # An entry must change the case it names. Evaluate this even when the
+            # patched comparison passes: an entry that has become unnecessary is stale.
             unpatched = []
             diff(case['name'], ios_expected(case, patched=False), got['actual'], unpatched)
-            if case['name'] in patches and not unpatched:
+            if not unpatched:
+                failed.append(case['name'])
                 print('  stale: the case passes without its entry in ios/differences.json')
 
 closed = all_cases['closed_work_identity']['expected']['lines']

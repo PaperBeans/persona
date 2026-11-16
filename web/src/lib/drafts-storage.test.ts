@@ -2,7 +2,7 @@
 // entries first, never the mounted conversation's keys, and a write that still fails stays quiet so typing never breaks.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canonicalStorageKey, storedValue } from "./compatibility";
-import { MAX_STORED_DRAFTS, onDraftEvent, storeDraft, storeQuotes } from "./drafts";
+import { MAX_STORED_DRAFTS, onDraftEvent, sendDraft, storeDraft, storeQuotes } from "./drafts";
 
 /** A Storage-shaped mock with a character capacity: setItem throws QuotaExceededError once it would overflow. */
 class QuotaStorage {
@@ -160,6 +160,36 @@ describe("quota-safe draft storage", () => {
     expect(draftKeys).toHaveLength(MAX_STORED_DRAFTS);
     expect(storage.getItem("draft:old0")).toBeNull();
     expect(storage.getItem(`draft:old${MAX_STORED_DRAFTS + 4}`)).toBe("x");
+  });
+
+  it("does not evict the target it just wrote when trimming a valid 51st unmounted draft", () => {
+    const storage = new QuotaStorage(Number.MAX_SAFE_INTEGER);
+    vi.stubGlobal("localStorage", storage);
+    for (let i = 0; i < MAX_STORED_DRAFTS; i++) {
+      storeDraft(i === MAX_STORED_DRAFTS - 1 ? "persona-new" : `old-${i}`, `draft-${i}`);
+    }
+    storage.setItem("quote:old-2", JSON.stringify([{ id: "q2", text: "keep this quote" }]));
+    // A mounted composer is outside the bound, so leaving it produces a valid 51st unmounted conversation.
+    unmount = onDraftEvent("mounted-extra", () => {});
+    storeDraft("mounted-extra", "extra draft");
+    unmount();
+    unmount = null;
+
+    expect(sendDraft("old-0", { type: "unsent", text: "recovered send" })).toBe(true);
+
+    expect(storage.getItem("draft:old-0")).toBe("recovered send\ndraft-0");
+    expect(storage.getItem("draft:old-1")).toBeNull();
+    expect(storage.getItem("draft:old-2")).toBe("draft-2");
+    expect(storage.getItem("quote:old-2")).toContain("keep this quote");
+    expect(storage.getItem("draft:mounted-extra")).toBe("extra draft");
+    expect(storage.getItem("draft:persona-new")).toBe(`draft-${MAX_STORED_DRAFTS - 1}`);
+    expect(storage.getItem("draft:jarvis-new")).toBe(`draft-${MAX_STORED_DRAFTS - 1}`);
+    const ids = new Set(
+      [...Array.from({ length: storage.length }, (_, i) => storage.key(i)!)]
+        .filter((k) => k.startsWith("draft:"))
+        .map(canonicalStorageKey),
+    );
+    expect(ids).toHaveLength(MAX_STORED_DRAFTS);
   });
 
   it("never counts the mounted conversation out of the bound", () => {

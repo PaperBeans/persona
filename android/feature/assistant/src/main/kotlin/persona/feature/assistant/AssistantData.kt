@@ -317,6 +317,8 @@ data class AssistantChatOptions(
     val showTopBar: Boolean = false,
     /** The conversation's manager is offline (docs/assistant/managers.md step 4): history only, this note where the composer was. */
     val readOnlyNote: String? = null,
+    /** Known before the live session row arrives: ordinary files still upload to Health storage. */
+    val healthChat: Boolean = false,
 )
 
 /**

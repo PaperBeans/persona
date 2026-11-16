@@ -194,6 +194,8 @@ class GroupRoutingTest {
         val service = object : AgentCreationService {
             override val scope = "hub/gen"
             override suspend fun launchers(machineId: String) = listOf(AgentLauncher(machineId))
+            override suspend fun launcherList(machineId: String) =
+                AssistantLaunchers(launchers(machineId), unavailable = listOf(UnavailableLauncher("left-$machineId", code = "launcher_own_service")))
             override suspend fun directories(machineId: String, path: String) = AgentDirectories(machineId)
             override suspend fun start(request: AgentStartRequest, operationId: String): AgentStartResult {
                 requested = request
@@ -205,6 +207,9 @@ class GroupRoutingTest {
         }
         val wrapped = service.inGroup(other)
         assertEquals("m", wrapped.launchers("m~g0a1b2c3d").single().name)
+        // New Agent's list with what it lists off there (#8109): asked with the plain machine, what is left out kept
+        assertEquals(AssistantLaunchers(listOf(AgentLauncher("m")), unavailable = listOf(UnavailableLauncher("left-m", code = "launcher_own_service"))),
+            wrapped.launcherList("m~g0a1b2c3d"))
         assertEquals(LauncherModels("m", listOf(AgentModel("claude"))), wrapped.launcherModels("m~g0a1b2c3d", "claude"))
         val created = wrapped.start(AgentStartRequest("m~g0a1b2c3d", "/", "claude"), "op") as AgentStartResult.Created
         assertEquals("m", requested!!.machineId)
@@ -215,6 +220,8 @@ class GroupRoutingTest {
         fun hub(answer: AgentStartResult, asked: MutableList<String>) = object : AgentCreationService {
             override val scope = "hub/gen"
             override suspend fun launchers(machineId: String) = emptyList<AgentLauncher>()
+            override suspend fun launcherList(machineId: String) =
+                AssistantLaunchers(unavailable = listOf(UnavailableLauncher("left", reason = "${if (answer == AgentStartResult.Unknown) "home" else "work"} $machineId")))
             override suspend fun directories(machineId: String, path: String) = AgentDirectories(path)
             override suspend fun start(request: AgentStartRequest, operationId: String) = AgentStartResult.Unknown
             override suspend fun operation(operationId: String): AgentStartResult { asked += operationId; return answer }
@@ -229,6 +236,8 @@ class GroupRoutingTest {
         // A route change rebuilds the merged state (and process death loses it): the pending start is checked anew.
         val rebuilt = requireNotNull(mergedAgentsState(listOf(primary, other), states, 0).creation)
         assertEquals(created, rebuilt.operation("op", request.machineId))
+        // New Agent's list with what it lists off there (#8109) comes from the hub that owns the computer
+        assertEquals("work mac~g0a1b2c3d", rebuilt.launcherList(request.machineId).unavailable.single().reason)
         assertEquals(listOf("op"), workAsked)
         assertTrue(homeAsked.isEmpty())
     }

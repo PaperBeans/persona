@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -32,6 +33,7 @@ import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
+import kotlinx.coroutines.flow.first
 import persona.core.designsystem.LocalSelectionAbove
 
 /*
@@ -83,31 +85,98 @@ private fun SelectedWords(menu: MessageMenuState, target: MessageTarget, content
     val quoteLabel = stringResource(R.string.chat_menu_quote)
     val system = LocalClipboard.current
     val clipboard = remember(system) { PickedWordsClipboard(system) }
-    // Everything selected to begin with, once the words have registered with the container as it lays out; a message with
-    // nothing to select (pictures alone) has nothing to be selecting.
+    // Everything selected to begin with, once the same words have been listed for a couple of frames, and not before:
+    // a later text change releases that selection (`onSelectableChange` → `onRelease`) whether or not composition has
+    // seen it, and Copy then does nothing while the message stays selecting. Keep taking it until the bound runs out.
+    // A finger is the user (a tap, a long press), and so is the toolbar's Copy (`toolbarCopy` is `copy()` then
+    // `onRelease()`): that clear is not taken back. Nothing to select is not left selecting.
+    var taking by remember { mutableStateOf(true) }
+    var had by remember { mutableStateOf(false) }
+    var touched by remember { mutableStateOf(false) }
     LaunchedEffect(state) {
-        repeat(SELECT_FRAMES) {
-            withFrameNanos { }
-            val ready = try { state.getSelectableTexts().isNotEmpty() } catch (_: IllegalStateException) { false }
-            if (ready) { state.selectAll(); return@LaunchedEffect }
+        var seen: List<String>? = null
+        var same = 0
+        var frames = 0
+        var userLetGo = false
+        fun words(): List<String>? = try {
+            state.getSelectableTexts().map { it.text }.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }
+        } catch (_: IllegalStateException) {
+            null
         }
-        menu.endSelection(target.id)
+        fun taken() = state.selectedTexts.any { it.text.isNotBlank() }
+        while (frames < SELECT_FRAMES && menu.selecting?.id == target.id && !touched) {
+            withFrameNanos { }
+            frames++
+            if (touched || menu.selecting?.id != target.id) break
+            val now = words()
+            if (now != null && now == seen) same++ else {
+                same = if (now != null) 1 else 0
+                seen = now
+            }
+            // A blank first node is not the message. When the list changes, wait until it holds
+            // again and take the whole of it, including over a selection that was not released.
+            if (now == null || same < STABLE_FRAMES) continue
+            // The same words, already seen, then released: the toolbar Copy. Leave it for the
+            // settle effect. A list that just changed is still being laid out and is taken below.
+            if (had && !taken() && same > STABLE_FRAMES) {
+                userLetGo = true
+                break
+            }
+            if (same == STABLE_FRAMES || !taken()) state.selectAll()
+        }
+        taking = false
+        if (touched || userLetGo || menu.selecting?.id != target.id) return@LaunchedEffect
+        if (!taken()) {
+            menu.endSelection(target.id)
+            return@LaunchedEffect
+        }
+        // Past the bound the screen can go idle, and one more text change can still release the
+        // selection before Copy. Take the new words on the next frame (not inside the layout that
+        // released them). The same words going empty is the toolbar Copy, which the settle effect
+        // ends. A finger is not taken back. A few failures end the selection.
+        var extras = 0
+        while (menu.selecting?.id == target.id && !touched && extras <= 8) {
+            val (finger, blank) = snapshotFlow { touched to !taken() }.first { it.first || it.second }
+            if (finger || menu.selecting?.id != target.id) return@LaunchedEffect
+            withFrameNanos { }
+            if (touched || menu.selecting?.id != target.id) return@LaunchedEffect
+            if (taken()) continue
+            val now = words()
+            if (now == null || now == seen) {
+                if (now == null) menu.endSelection(target.id)
+                return@LaunchedEffect
+            }
+            extras++
+            if (extras > 8) {
+                menu.endSelection(target.id)
+                return@LaunchedEffect
+            }
+            seen = now
+            state.selectAll()
+        }
     }
     // It is over when nothing is selected any more after something was: a tap on the words, Copy or Quote.
-    val picked = state.selectedTexts.isNotEmpty()
-    var had by remember { mutableStateOf(false) }
-    LaunchedEffect(picked) {
+    // Not while the first selection is still being taken: that release is another try, not the end.
+    // `taking` is a key so a release during the take, which this effect already ran through, is settled once the take ends.
+    val picked = state.selectedTexts.any { it.text.isNotBlank() }
+    LaunchedEffect(picked, taking) {
         if (picked) had = true
-        else if (had) {
+        else if (had && !taking) {
             // A long press on another word lets go of the words before it picks the new ones: give it a moment.
             repeat(SETTLE_FRAMES) { withFrameNanos { } }
-            if (state.selectedTexts.isEmpty()) menu.endSelection(target.id)
+            if (state.selectedTexts.isEmpty() && !taking) menu.endSelection(target.id)
         }
     }
     BackHandler { menu.endSelection(target.id) }
     DisposableEffect(menu, target.id) { onDispose { menu.endSelection(target.id) } }
     CompositionLocalProvider(LocalClipboard provides clipboard) {
         SelectionContainer(state, Modifier
+            .pointerInput(target.id) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    touched = true
+                }
+            }
             .onGloballyPositioned { places ->
                 menu.selectingBounds = places.boundsInWindow()
                 // Scrolled out of the screen: nothing of it shows, and nothing is left to select.
@@ -128,6 +197,9 @@ private data object QuoteItem
 
 /** How many frames the words get to register with their container before there is nothing to select. */
 private const val SELECT_FRAMES = 60
+
+/** How many frames the same words must be listed before they are selected. */
+private const val STABLE_FRAMES = 2
 
 /** How many frames nothing may be selected before the selection is taken to be over. */
 private const val SETTLE_FRAMES = 8

@@ -46,7 +46,8 @@ export interface Supervision {
   round?: number;
   reviews?: TaskReview[];
   updated_at?: string;
-  /** When the task entered `pending_review`; absent in every other state, and from an older hub. */
+  /** When the task entered `pending_review`; absent in every other state, and from an older hub. The web lists every
+   *  review alike (Persona reviewing, #8678); Android and Apple read it to tell an overdue one. */
   pending_since?: string;
   /** What its agent last reported to Persona (report_to_supervisor); kept by the hub while it runs. */
   progress?: TaskProgress;
@@ -127,19 +128,6 @@ export function reviewState(todo: Pick<Todo, "done_at"> & { supervision?: Superv
   if (!todo.done_at && st === "cancelled") return "";
   if (st === "parked" && (todo.done_at || !todo.supervision?.parked)) return "";
   return st;
-}
-
-/** How long a task's review is its supervisor's alone (docs/assistant/unified-entry.md "Needs you and In progress"):
- *  past it the review is overdue and the task is the owner's, under Needs you. */
-export const REVIEW_OVERDUE_MS = 60 * 60 * 1000;
-
-/** The task waits for its supervisor's review, which is not the owner's to do yet: open, in `pending_review` for less
- *  than `REVIEW_OVERDUE_MS`. False past that, and when the hub does not say since when (an older hub): the review is
- *  then the owner's, as it was. An open ask or an asking Agent is the owner's whatever this says (assistantEntries). */
-export function supervisorReviewing(todo: Pick<Todo, "done_at"> & { supervision?: Supervision }, now: number): boolean {
-  if (todo.done_at || reviewState(todo) !== "pending_review") return false;
-  const since = Date.parse(todo.supervision?.pending_since ?? "");
-  return Number.isFinite(since) && now - since < REVIEW_OVERDUE_MS;
 }
 
 /** "Parked until Nov 14, 9:00 AM · The design team has to pick the icon set first": a parked task in a line, for its

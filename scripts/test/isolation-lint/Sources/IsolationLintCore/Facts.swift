@@ -33,6 +33,9 @@ struct Parameter: Sendable {
     var escaping: Bool
     var mainActorClosure: Bool
     var isFunctionType: Bool
+    /// What an argument passed here is converted to, as far as that decides whether it may be a function: see
+    /// `Collector.heldType`.
+    var heldType: String?
 }
 
 struct FunctionInfo: Sendable {
@@ -157,6 +160,9 @@ struct NameReference: Sendable {
     /// The base of a further member access, a subscript, an operand or a condition: a value is read here, a function
     /// is not passed on.
     var readsValue: Bool
+    /// The sole, unlabeled expression of a string interpolation (`"\(x.name)"`): the default interpolation describes a
+    /// function there and never calls it, but an `appendInterpolation` of the sources may take one.
+    var interpolated = false
     /// An argument of a call: the callee's path (`["urls", "map"]`).
     var argumentOf: [String]?
     /// What a function returns (`return x.name`, or its whole body): `frame` is that function.
@@ -637,7 +643,8 @@ private final class Collector: SyntaxVisitor {
             return Parameter(label: first == "_" ? nil : first, name: parameter.secondName?.text ?? first,
                              hasDefault: parameter.defaultValue != nil, variadic: parameter.ellipsis != nil,
                              escaping: text.contains("@escaping") || (!function && text.contains("->")),
-                             mainActorClosure: text.contains("@MainActor"), isFunctionType: function || text.contains("->"))
+                             mainActorClosure: text.contains("@MainActor"), isFunctionType: function || text.contains("->"),
+                             heldType: heldType(type))
         }
     }
 
@@ -645,6 +652,31 @@ private final class Collector: SyntaxVisitor {
         if type.is(FunctionTypeSyntax.self) { return true }
         if let attributed = type.as(AttributedTypeSyntax.self) { return isFunctionType(attributed.baseType) }
         return false
+    }
+
+    /// The type a value passed to a parameter of this type is held as, to tell whether that value may be a function
+    /// (for a variadic parameter, the element's): the named type as `typeName` reads it, through optionals,
+    /// attributes and parentheses; `(value)` for an array, a dictionary, a tuple or a metatype, which no function
+    /// converts to. nil for a function type, `some` / `any`, a composition and every other form: any of them may hold
+    /// a function.
+    func heldType(_ type: TypeSyntax) -> String? {
+        if let optional = type.as(OptionalTypeSyntax.self) { return heldType(optional.wrappedType) }
+        if let optional = type.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) { return heldType(optional.wrappedType) }
+        if let attributed = type.as(AttributedTypeSyntax.self) { return heldType(attributed.baseType) }
+        if let tuple = type.as(TupleTypeSyntax.self) {
+            if tuple.elements.count == 1, let only = tuple.elements.first { return heldType(only.type) }
+            return "(value)"
+        }
+        if type.is(ArrayTypeSyntax.self) || type.is(DictionaryTypeSyntax.self) || type.is(MetatypeTypeSyntax.self) { return "(value)" }
+        if let identifier = type.as(IdentifierTypeSyntax.self) {
+            if identifier.name.text == "Optional", let argument = identifier.genericArgumentClause?.arguments.first,
+               case .type(let wrapped) = argument.argument {
+                return heldType(wrapped)
+            }
+            return typeName(type)
+        }
+        if type.is(MemberTypeSyntax.self) { return typeName(type) }
+        return nil
     }
 
     /// How many arguments a value of this type takes, when it is a function type (optional or attributed).
@@ -982,7 +1014,7 @@ private final class Collector: SyntaxVisitor {
         if let member = parent.as(MemberAccessExprSyntax.self) { return member.base?.id == node.id }
         if let call = parent.as(SubscriptCallExprSyntax.self) { return call.calledExpression.id == node.id }
         if parent.is(OptionalChainingExprSyntax.self) || parent.is(ForceUnwrapExprSyntax.self) { return readsValue(parent) }
-        if parent.is(ExpressionSegmentSyntax.self) || parent.is(ConditionElementSyntax.self) { return true }
+        if parent.is(ConditionElementSyntax.self) { return true }
         // `!x.name`, `-x.name`: a Bool or a number.
         if let prefix = parent.as(PrefixOperatorExprSyntax.self), ["!", "-", "~"].contains(prefix.operator.text) { return true }
         if let loop = parent.as(ForStmtSyntax.self) { return loop.sequence.id == node.id }
@@ -1005,10 +1037,18 @@ private final class Collector: SyntaxVisitor {
                 return element.as(BinaryOperatorExprSyntax.self)?.operator.text == "??"
             }
         }
-        if let labeled = parent.as(LabeledExprSyntax.self), labeled.parent?.parent?.is(StringLiteralExprSyntax.self) == true {
-            return true
-        }
         return false
+    }
+
+    /// `"\(x.name)"`: the reference is the sole, unlabeled expression of an interpolation. It sits in a list inside the
+    /// segment, not in the string literal itself. A labeled one (`"\(x, privacy: .public)"`) goes to an interpolation
+    /// method that may take a closure.
+    func isInterpolated(_ node: some SyntaxProtocol) -> Bool {
+        guard let parent = node.parent else { return false }
+        if parent.is(OptionalChainingExprSyntax.self) || parent.is(ForceUnwrapExprSyntax.self) { return isInterpolated(parent) }
+        guard let labeled = parent.as(LabeledExprSyntax.self), labeled.label == nil,
+              let list = labeled.parent?.as(LabeledExprListSyntax.self) else { return false }
+        return list.count == 1 && list.parent?.is(ExpressionSegmentSyntax.self) == true
     }
 
     /// The node is what the function around it returns: `return x.name`, or the only expression of its body.
@@ -1058,7 +1098,7 @@ private final class Collector: SyntaxVisitor {
         if !isCallee(node) {
             references.append(NameReference(name: node.declName.baseName.text, receiver: receiver(of: node), frame: current,
                                             line: line(node), indirect: selectorDepth > 0 ? .selector : .no, readsValue: readsValue(node),
-                                            argumentOf: argumentOf(node), returned: isReturned(node)))
+                                            interpolated: isInterpolated(node), argumentOf: argumentOf(node), returned: isReturned(node)))
         }
         // The member's own name is recorded above; only the base is walked.
         if let base = node.base { walk(base) }
@@ -1069,7 +1109,7 @@ private final class Collector: SyntaxVisitor {
         if !isCallee(node) {
             references.append(NameReference(name: node.baseName.text, receiver: .none, frame: current, line: line(node),
                                             indirect: selectorDepth > 0 ? .selector : .no, readsValue: readsValue(node),
-                                            argumentOf: argumentOf(node), returned: isReturned(node)))
+                                            interpolated: isInterpolated(node), argumentOf: argumentOf(node), returned: isReturned(node)))
         }
         return .visitChildren
     }

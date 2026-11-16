@@ -304,13 +304,18 @@ fun AssistantScreen(
     val onHealthChat = active != null && active in healthKeys
     // "Compact context" and "New main chat" (#1727): the main conversation's menu, on hubs that offer them.
     val mainActions = if (pageManagement != null && !demo) MainActions.of(LocalHubFeatures.current) else MainActions(false, false)
-    // What the main conversation still needs (docs/assistant/onboarding.md 4.4), on hubs that work it out: asked when the tab
-    // shows, when a computer comes or goes and after the hub refused to start it.
+    // Track the main conversation's turn for readiness even while the user is reading another chat.
+    val onMain = active != null && active == snapshot.mainSession
+    val mainSession = snapshot.mainSession?.let { key -> snapshot.conversations.firstOrNull { it.key == key } }
     val readinessOn = pageManagement != null && !demo && AssistantReadinessFeature in LocalHubFeatures.current
     val mainReadiness = remember(pageManagement) { MainReadiness { probe -> requireNotNull(pageManagement).readiness(probe) } }
     var readinessHelp by remember { mutableStateOf<ReadinessHelp?>(null) }
     val machinesSeen = machines.joinToString(",") { "${it.id}:${it.online}" }
-    LaunchedEffect(mainReadiness, readinessOn, machinesSeen) { if (readinessOn) mainReadiness.refresh() }
+    // Reopening main also checks for setup changes that arrive without a turn update.
+    LaunchedEffect(mainReadiness, readinessOn, machinesSeen, onMain,
+        snapshot.mainSession, mainSession?.state, mainSession?.turnErrorCode, mainSession?.modelPick) {
+        if (readinessOn) mainReadiness.refresh()
+    }
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
         if (readinessOn) scope.launch { mainReadiness.refresh() }
     }
@@ -324,8 +329,24 @@ fun AssistantScreen(
         val machine = readiness?.steps?.firstOrNull { it.id == ReadinessStep.COMPUTER }?.machine
         action.destination(launcher, machine, managerChoice.shown)?.let(navigator::navigate)
     }
-    val onMain = active != null && active == snapshot.mainSession
-    val shownCompaction = if (onMain) snapshot.conversations.firstOrNull { it.key == active }?.compaction else null
+    // The hub checks the assistant's default model and computer. An existing chat can use a different one.
+    val modelProblem = blocking?.takeIf {
+        onMain && it.id == ReadinessStep.MODEL && managers.offline == null && mainSession?.modelPick == null &&
+            readiness?.machine?.id?.takeIf(String::isNotBlank)?.let { id -> id == active?.machineId } == true
+    }
+    val mainChatGuidance: (@Composable () -> Unit)? = modelProblem?.let { step ->
+        {
+            val machine = readiness?.machine?.name?.takeIf(String::isNotBlank)
+            val guidance = if (step.code == "not_logged_in" && machine != null) step.copy(
+                title = stringResource(R.string.assistant_model_setup_title),
+                detail = stringResource(R.string.assistant_model_setup_detail, machine),
+                altActions = emptyList(),
+            ) else step
+            ReadinessStepCard(guidance, { runReadinessAction(it) },
+                Modifier.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs))
+        }
+    }
+    val shownCompaction = mainSession?.compaction.takeIf { onMain }
     var compaction by remember(active) { mutableStateOf(CompactionStatus()) }
     var compacting by remember { mutableStateOf(false) }
     var newMainOpen by remember { mutableStateOf(false) }
@@ -968,6 +989,7 @@ fun AssistantScreen(
                         ChatComposer(uploadTarget, composer, working = false, sending = sending || !draftReady,
                             // The health page sends no files: an upload goes to the main chat's machine, outside the health space.
                             canClear = false, service = composerService?.takeIf { uploadTarget.machineId.isNotBlank() && !healthPage },
+                            uploadDestination = if (onHealthChat) "health" else null,
                             onSend = { submit() }, onCommand = { composer.insert(it, composer.focused) },
                             onNotice = { message ->
                                 if (feedback?.notice(message) != true) toast.show(persona.core.designsystem.FeedbackNotice(message))
@@ -1021,8 +1043,10 @@ fun AssistantScreen(
                             CompositionLocalProvider(persona.feature.chat.LocalNewMainChat provides
                                 (if (onMain && mainActions.newMain) ({ newMainOpen = true }) else null),
                                 persona.feature.chat.LocalMainChatClear provides (if (onMain && mainActions.clear) persona.feature.chat.MainChatClear(::clearMain) else null),
+                                persona.feature.chat.LocalMainChatGuidance provides mainChatGuidance,
                                 persona.feature.chat.LocalComposerFocusAsk provides focusAsk) {
-                                if (assistantChatContent != null) assistantChatContent(active, AssistantChatOptions(readOnlyNote = managers.offline))
+                                if (assistantChatContent != null) assistantChatContent(active,
+                                    AssistantChatOptions(readOnlyNote = managers.offline, healthChat = onHealthChat))
                                 else chatContent?.invoke(active)
                             }
                         }

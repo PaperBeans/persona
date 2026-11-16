@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/acceptloop"
+	"github.com/nwverse/persona/server/internal/osproc"
 )
 
 // ListenUnix serves ext on a unix socket at path (made anew; only this user may connect): its sandbox's way out.
@@ -34,7 +35,7 @@ func (p *Proxy) listenUnix(ext, path string, source bool) error {
 	}
 	p.mu.Unlock()
 	_ = os.Remove(path)
-	ln, err := net.Listen("unix", path)
+	ln, err := osproc.Listen("unix", path)
 	if err != nil {
 		return err
 	}
@@ -64,7 +65,7 @@ func (p *Proxy) RelayUnix(ext, path, target string) error {
 	}
 	p.mu.Unlock()
 	_ = os.Remove(path)
-	ln, err := net.Listen("unix", path)
+	ln, err := osproc.Listen("unix", path)
 	if err != nil {
 		return err
 	}

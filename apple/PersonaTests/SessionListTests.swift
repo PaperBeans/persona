@@ -365,6 +365,133 @@ import PersonaWire
         #expect(model.latest(key) == nil)
     }
 
+    /// A complete (non-paged) hub's filtered Agents list never lands another manager's row; opening that chat still
+    /// fetches it (#8748), so the composer can send when the Agent allows it.
+    @Test func openingAMissingRowOnACompleteHubFetchesItEnabled() async throws {
+        let hub = FakeHub()
+        let id = UUID().uuidString.lowercased()
+        hub.on("GET", "/api/v1/sessions", json: #"{"sessions":[{"machine_id":"macbook","session_id":"\#(id)","title":"Other","manager":"m-other","state":"working","status":"working"}]}"#)
+        let key = SessionKey(group: "complete-fixture", machineID: "macbook", sessionID: id)
+        let model = await completeChatModel(hub, key: key)
+        model.open(key)
+        await eventually { model.latest(key) != nil }
+        #expect(model.latest(key)?.canSend == true)
+        #expect(model.missingSessionReason(key) == nil)
+        #expect(hub.sent("GET", "/api/v1/sessions").contains(where: {
+            $0.query["machine_id"] == "macbook" && $0.query["session_id"] == id
+        }))
+    }
+
+    /// After the missing row is in the index, a later filtered complete landing must not clear it while the chat is open.
+    @Test func aFilteredCompleteLandingKeepsAnOpenMissingRow() async throws {
+        let hub = FakeHub()
+        let id = UUID().uuidString.lowercased()
+        hub.on("GET", "/api/v1/sessions", json: #"{"sessions":[{"machine_id":"macbook","session_id":"\#(id)","title":"Other","manager":"m-other","state":"working","status":"working"}]}"#)
+        let key = SessionKey(group: "complete-fixture", machineID: "macbook", sessionID: id)
+        let model = await completeChatModel(hub, key: key)
+        model.open(key)
+        await eventually { model.latest(key) != nil }
+        let other = try JSON.decoder.decode(Session.self, from: Data(#"{"machine_id":"server","session_id":"main","title":"Persona","assistant":true,"manager":"assistant","state":"idle","status":"idle"}"#.utf8))
+        var stamped = other
+        stamped.group = key.group
+        model.landCompleteSessionList([stamped], group: key.group, manager: "assistant")
+        #expect(model.latest(key)?.sessionID == id, "the open other-manager row must survive a filtered landing")
+        #expect(model.latest(key)?.canSend == true)
+    }
+
+    /// A held row of the landing's own manager that left the list, or any held row on an unfiltered landing, still drops
+    /// (#8748 round 2): deleted / archived Agents must not keep the composer enabled.
+    @Test func aHeldRowOfTheFilterOrAnUnfilteredLandingIsDropped() async throws {
+        let hub = FakeHub()
+        let sameID = UUID().uuidString.lowercased()
+        let otherID = UUID().uuidString.lowercased()
+        hub.on("GET", "/api/v1/sessions") { request in
+            let sid = request.query["session_id"] ?? ""
+            if sid == sameID {
+                return Data(#"{"sessions":[{"machine_id":"macbook","session_id":"\#(sameID)","title":"Mine","manager":"assistant","state":"working","status":"working"}]}"#.utf8)
+            }
+            if sid == otherID {
+                return Data(#"{"sessions":[{"machine_id":"macbook","session_id":"\#(otherID)","title":"Other","manager":"m-other","state":"working","status":"working"}]}"#.utf8)
+            }
+            return Data(#"{"sessions":[]}"#.utf8)
+        }
+        let sameKey = SessionKey(group: "complete-fixture", machineID: "macbook", sessionID: sameID)
+        let otherKey = SessionKey(group: "complete-fixture", machineID: "macbook", sessionID: otherID)
+        let model = await completeChatModel(hub, key: sameKey)
+        model.open(sameKey)
+        await eventually { model.latest(sameKey) != nil }
+        let kept = try JSON.decoder.decode(Session.self, from: Data(#"{"machine_id":"server","session_id":"main","title":"Persona","assistant":true,"manager":"assistant","state":"idle","status":"idle"}"#.utf8))
+        var stamped = kept
+        stamped.group = sameKey.group
+        model.landCompleteSessionList([stamped], group: sameKey.group, manager: "assistant")
+        #expect(model.latest(sameKey) == nil, "a row of the filter that left the list is dropped")
+
+        model.open(otherKey)
+        await eventually { model.latest(otherKey) != nil }
+        model.landCompleteSessionList([stamped], group: otherKey.group, manager: nil)
+        #expect(model.latest(otherKey) == nil, "an unfiltered landing drops a missing held row")
+    }
+
+    /// A retained other-manager row on a complete hub must refresh on `sessions_list`: list-mode hubs no longer push
+    /// full snapshots, so without a detail read the open chat would keep a stale `canSend` / `isStopped` (#8748).
+    @Test func aRetainedRowRefreshesOnASessionsListHint() async throws {
+        let hub = FakeHub()
+        let id = UUID().uuidString.lowercased()
+        var payload = #"{"sessions":[{"machine_id":"macbook","session_id":"\#(id)","title":"Other","manager":"m-other","state":"working","status":"working"}]}"#
+        hub.on("GET", "/api/v1/sessions") { _ in Data(payload.utf8) }
+        let key = SessionKey(group: "complete-fixture", machineID: "macbook", sessionID: id)
+        let model = await completeChatModel(hub, key: key)
+        let owner = UUID()
+        model.open(key)
+        model.subscribe(key, by: owner)
+        await eventually { model.latest(key) != nil }
+        let other = try JSON.decoder.decode(Session.self, from: Data(#"{"machine_id":"server","session_id":"main","title":"Persona","assistant":true,"manager":"assistant","state":"idle","status":"idle"}"#.utf8))
+        var stamped = other
+        stamped.group = key.group
+        model.landCompleteSessionList([stamped], group: key.group, manager: "assistant")
+        #expect(model.latest(key)?.canSend == true)
+
+        payload = #"{"sessions":[{"machine_id":"macbook","session_id":"\#(id)","title":"Other","manager":"m-other","status":"offline","state":"offline","capabilities":{"read":true,"terminal":true},"read_only_reason":"stopped"}]}"#
+        let beforeStop = hub.sent("GET", "/api/v1/sessions").count
+        model.handle(.sessionsList(revision: "r-stopped"), group: key.group)
+        await eventually { model.latest(key)?.isStopped == true }
+        #expect(model.latest(key)?.canSend == false)
+        #expect(hub.sent("GET", "/api/v1/sessions").count > beforeStop)
+
+        payload = #"{"sessions":[]}"#
+        model.handle(.sessionsList(revision: "r-gone"), group: key.group)
+        await eventually { model.latest(key) == nil && model.missingSessionReason(key) != nil }
+        #expect(model.missingSessionReason(key) == String(localized: "This conversation isn't available"))
+    }
+
+    /// When the hub answers with no row, the composer gets a reason instead of a silent disable (#8748).
+    @Test func aMissingRowShowsAComposerReason() async throws {
+        let hub = FakeHub()
+        hub.on("GET", "/api/v1/sessions", json: #"{"sessions":[],"total":0}"#)
+        let key = SessionKey(group: "complete-fixture", machineID: "macbook", sessionID: UUID().uuidString.lowercased())
+        let model = await completeChatModel(hub, key: key)
+        model.open(key)
+        await eventually { model.missingSessionReason(key) != nil }
+        #expect(model.latest(key) == nil)
+        #expect(model.missingSessionReason(key) == String(localized: "This conversation isn't available"))
+    }
+
+    /// A complete-list fixture: no paged revision, so detail recovery used to no-op before #8748.
+    private func completeChatModel(_ hub: FakeHub, key: SessionKey) async -> AppModel {
+        let model = AppModel()
+        model.forgetRestoredForTests()
+        let list = SessionListModel<Session>(id: { $0.id }, removalID: { _ in nil },
+            fetch: { _, _, _ in SessionListPage(sessions: [], remove: nil, hasMore: nil, nextCursor: nil, revision: nil, total: nil) },
+            counts: { _ in counts() })
+        await list.load()
+        model.sessionLists.setForTests(list, group: key.group)
+        var client = hub.client
+        client.group = key.group
+        client.sessionLookup = true
+        model.apiForTests = client
+        return model
+    }
+
     @Test func aChatOnAListedSessionTakesItsCompleteRow() async throws {
         let hub = FakeHub()
         let id = UUID().uuidString.lowercased()

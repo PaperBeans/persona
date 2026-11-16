@@ -28,6 +28,7 @@ var movedClusters = []struct {
 	{"assistant", "assistant/kbhistory", []string{"kb_history"}},
 	{"assistant", "assistant/archiverecovery", []string{"kb_archive_recovery"}},
 	{"assistant", "assistant/kbsent", []string{"kb_sent"}},
+	{"db", "assistant/repositorystore", []string{"todo_repositories"}},
 }
 
 const clusterHint = "put the code in the subpackage instead (docs/server/architecture.md, tracking issue #7891)"

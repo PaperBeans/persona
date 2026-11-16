@@ -924,7 +924,7 @@ func TestSessionsOfOneManager(t *testing.T) {
 // whole list come from its computers only (one computer would fall back to a machine_id lookup and skip ownPage / ownCounts).
 func TestSessionsOfOneManagerSeveralComputersExtension(t *testing.T) {
 	h, url, _, b := reachHub(t) // A has ma (s3); B has mb (b1)
-	h.cfg.Machines = append(h.cfg.Machines, MachineConfig{ID: "mc", Name: "mc", Kind: "local"})
+	addCfgMachines(h, MachineConfig{ID: "mc", Name: "mc", Kind: "local"})
 	if _, err := h.moveMachine(context.Background(), "mc", "m-0b0b0b"); err != nil {
 		t.Fatal(err)
 	}

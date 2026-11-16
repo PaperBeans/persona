@@ -409,10 +409,14 @@ func TestNorthStarCommandReadsReadOnly(t *testing.T) {
 		{"00000000-0000-0000-0000-000000000002", "/api/v1/sessions/pc/dot-chat/messages", "done", `{}`},
 		{"00000000-0000-0000-0000-000000000003", "/api/v1/sessions/pc/worker/messages", "failed", `{"code":"offline"}`},
 	}
+	var latestMessageAt time.Time
 	for _, op := range ops {
 		target, _ := json.Marshal(map[string]string{"path": op.path, "query": ""})
-		_, _, err := hubDB.BeginClientOp(ctx, db.ClientOp{ID: op.id, DeviceID: "phone", Kind: "message", Target: target, Digest: "d"})
+		stored, _, err := hubDB.BeginClientOp(ctx, db.ClientOp{ID: op.id, DeviceID: "phone", Kind: "message", Target: target, Digest: "d"})
 		mustDo(t, err)
+		if stored.CreatedAt.After(latestMessageAt) {
+			latestMessageAt = stored.CreatedAt
+		}
 		result, _ := json.Marshal(map[string]any{"status": 200, "body": []byte(op.body)})
 		mustDo(t, hubDB.FinishClientOp(ctx, op.id, op.state, result))
 	}
@@ -425,6 +429,11 @@ func TestNorthStarCommandReadsReadOnly(t *testing.T) {
 	if err := ro.PutSetting(ctx, "north-star-write-probe", 1); err == nil || !strings.Contains(err.Error(), "read-only") {
 		t.Fatalf("the command's connection could write: %v", err)
 	}
+	// Postgres timestamps the messages on its own clock, which may be ahead of the test host's. The command only
+	// counts records up to its supplied time, so wait until all fixture messages are inside that window.
+	waitFor(t, "the command clock to reach the hub message timestamps", func() bool {
+		return !time.Now().Before(latestMessageAt)
+	})
 	ns, err := northStarCommand(ctx, ro, roHub, "", "", "", time.Now())
 	mustDo(t, err)
 	if ns.TimeZone != loc.String() || ns.RecordingSince != nil {

@@ -13,6 +13,8 @@
   "tray_needs_you": "Needs you",
   "tray_running": "In progress",
   "tray_empty_pr": "No pull requests waiting for merge",
+  "tray_review": "Persona reviewing",
+  "tray_empty_review": "Nothing waiting for Persona to review",
   "pr_blocker_review_required": "Review required",
   "pr_blocker_changes_requested": "Changes requested",
   "pr_blocker_checks_failed": "Checks failed",

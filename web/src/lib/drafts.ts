@@ -370,9 +370,12 @@ function dropConversation(store: Storage, id: string) {
 }
 
 /** Keep the retained drafts of unmounted conversations within MAX_STORED_DRAFTS, oldest first. */
-function enforceDraftBound(store: Storage) {
+function enforceDraftBound(store: Storage, targetKey: string) {
   const ids = evictableConversations(protectedDraftKeys());
-  for (let i = 0; i < ids.length - MAX_STORED_DRAFTS; i++) dropConversation(store, ids[i]);
+  const targetId = storedConversationId(targetKey);
+  const victims = ids.filter((id) => id !== targetId);
+  // The target counts toward the bound even though it cannot be its own victim.
+  for (let i = 0; i < ids.length - MAX_STORED_DRAFTS; i++) dropConversation(store, victims[i]);
 }
 
 /** Write a draft or quote entry, evicting older unmounted conversations' entries and retrying when storage is full.
@@ -383,7 +386,7 @@ export function safeDraftWrite(targetKey: string, write: () => void) {
   if (!store) return;
   try {
     write();
-    enforceDraftBound(store);
+    enforceDraftBound(store, targetKey);
     return;
   } catch {
     // quota exceeded or storage blocked: make room below and retry

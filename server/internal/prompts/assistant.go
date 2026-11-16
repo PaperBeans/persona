@@ -885,6 +885,12 @@ func RenderTaskDoneWhen(criteria []string) string {
 	return render("assistant/task_done_when", struct{ Criteria []string }{criteria})
 }
 
+// RenderTaskGoal is a task's done_when as one checkable condition, for a Claude Code /goal typed before the task's
+// first message (docs/integrations/agent-goal.md "A goal set at the start"): one line, trimmed.
+func RenderTaskGoal(criteria []string) string {
+	return strings.TrimSpace(render("assistant/task_goal", struct{ Criteria []string }{criteria}))
+}
+
 // Relay is a message one assistant conversation sends another (conversation_send / conversation_new): what was
 // written, behind a note saying where it comes from and how many hops it is from the user's own message.
 type Relay struct {

@@ -75,6 +75,7 @@
   "scope_todos_write": "Create and edit to-dos and link chats to them (no deletion)",
   "scope_leaders_read": "View leader conversations (directions) and what they report",
   "scope_assistant_dispatch_policy": "Read and change the assistant dispatch policy (which conversations may hand out work)",
+  "scope_assistant_start_defaults": "Read the Agent presets and set the defaults task Agents start with",
   "scope_models": "Use the model you pick for it in Settings › Model configuration (never the key)",
   "scope_transcription": "Turn its own audio into text with the transcription you chose for meetings (never the key, never other audio)",
   "scope_call": "Call the API of extension “{id}”",

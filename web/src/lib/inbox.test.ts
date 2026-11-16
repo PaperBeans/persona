@@ -9,13 +9,8 @@ vi.mock("./store", () => ({
 }));
 vi.mock("../ui/atoms", () => ({ toast: vi.fn() }));
 
-import {
-  badgeCount, bulkMessage, bulkScope, bulkScopeName, canDraft, cardText, connectorReference, connectorSources, contextXML, openTitle, openURL, sourceLine, conversationRoute, docChangeLine, emojiLabel, fromLine, repeatsSummary, getInbox, handOffMessage, interactionAsk,
-  interactionMuted, interactionTitle, itemPath, kindLabel, labelIsUrgent, mailAccounts, mergeMessages, momentText, nextLarkPosition, partRuns, reloadInbox,
-  replyLarkMessage, resetInboxForTests, sections, sendLarkMessage, sendReply, setAllDone, setDocStatus, setDone, shortTime, triage, triageBanner, TRIAGE_REASONS, TRIAGE_SETTINGS,
-  listInboxMutes, muteCovers, muteItem, muteLine, muteShortName, muteTitle, unmuteInbox,
-  unsentReplies, waitingAgents, withToken, type InboxFilter, type InboxItem, type InboxTriage, type LarkMessage,
-} from "./inbox";
+import { badgeCount, bulkMessage, cardText, connectorReference, connectorSources, contextXML, openTitle, openURL, conversationRoute, fromLine, getInbox, interactionAsk, interactionMuted, interactionTitle, itemPath, kindLabel, labelIsUrgent, mailAccounts, mergeMessages, reloadInbox, resetInboxForTests, sections, sendReply, setAllDone, setDocStatus, setDone, shortTime, triage, triageBanner, TRIAGE_REASONS, muteCovers, muteItem, unsentReplies, waitingAgents, withToken, type InboxFilter, type InboxItem, type InboxTriage, type LarkMessage } from "./inbox";
+import { bulkScope, bulkScopeName, canDraft, sourceLine, docChangeLine, emojiLabel, repeatsSummary, handOffMessage, momentText, nextLarkPosition, partRuns, replyLarkMessage, sendLarkMessage, TRIAGE_SETTINGS, listInboxMutes, muteLine, muteShortName, muteTitle, unmuteInbox } from "./inbox-page";
 import { toast } from "../ui/atoms";
 import type { AgentMutes } from "./agent-groups";
 import type { AssistantInfo, Interaction, Session } from "./types";

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/assistant/repositorystore"
 	"github.com/nwverse/persona/server/internal/db"
 )
 
@@ -31,7 +32,7 @@ func TestTodoRepositoryToolsEnforceTitleByteLimitAtomically(t *testing.T) {
 			if _, err := e.s.setTodoRepositories(t.Context(), id, repository.SetInput{ExpectedRevision: &zero, ExpectedCatalogRevision: &one, Repositories: []repository.TaskInput{{RepoID: catalog.Repository.ID}}}); err != nil {
 				t.Fatal(err)
 			}
-			before, err := database.TodoRepositories(t.Context(), id)
+			before, err := repositorystore.New(database).TodoRepositories(t.Context(), id)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -60,7 +61,7 @@ func TestTodoRepositoryToolsEnforceTitleByteLimitAtomically(t *testing.T) {
 					if err == nil {
 						t.Fatal("accepted 1,026-byte source title", text)
 					}
-					after, readErr := database.TodoRepositories(t.Context(), id)
+					after, readErr := repositorystore.New(database).TodoRepositories(t.Context(), id)
 					if readErr != nil || !reflect.DeepEqual(after, before) {
 						t.Fatal("rejected title partially changed associations", after, readErr)
 					}
@@ -86,7 +87,7 @@ func TestTodoRepositoryToolsEnforceTitleByteLimitAtomically(t *testing.T) {
 							}
 						}
 					}
-					after, err := database.TodoRepositories(t.Context(), id)
+					after, err := repositorystore.New(database).TodoRepositories(t.Context(), id)
 					if err != nil || len(after.Repositories) != 1 || len(after.Repositories[0].Links) != 1 || after.Repositories[0].Links[0].Title != title {
 						t.Fatal("valid source title was not saved", after, err)
 					}

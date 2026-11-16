@@ -12,6 +12,11 @@ import (
 // 64 KiB, which every computer's connection kept.
 const lineStart = 16 << 10
 
+// pingFrameMiddleBytes bounds what counts as the middle of a frame for ping activity: an unfinished line below this
+// size cannot be holding a pong behind it, however many raw reads its transport split it into, so it never clears a
+// ping miss. It matches the reader's first buffer, so a line that outgrew it is by definition a large frame.
+const pingFrameMiddleBytes = lineStart
+
 // lineReader reads Serve's lines exactly as a bufio.Scanner with ScanLines did: the same limit, the same lines (the
 // newline and one carriage return before it dropped, an unterminated last line given, empty lines kept) and the same
 // errors (bufio.ErrTooLong, bufio.ErrBadReadCount, io.ErrNoProgress, the reader's own; nil at io.EOF). Only its memory
@@ -38,6 +43,10 @@ type lineReader struct {
 	err        error
 	token      []byte
 	owned      bool
+	// middle, when set, is told of each read that went on with a line begun before it, did not finish it and has
+	// already grown past pingFrameMiddleBytes: the middle of a frame, which Serve counts as ping activity while the
+	// frame is still arriving (PingActivity). Small lines split by the transport never reach it.
+	middle func()
 }
 
 // linePiece is the buffer from which a line is read in pieces, and the size of a piece: the largest buffer grownBufs
@@ -64,8 +73,8 @@ func (s *lineReader) Bytes() []byte { return s.token }
 func (s *lineReader) Owned() bool { return s.owned }
 
 // buffered is the input already read after the current token, valid until the next Scan. Ping activity uses it to
-// classify complete later lines, and traffic that identifies itself as an event, request or result, before a reply
-// wakes its caller.
+// find replies among the later lines, and an unfinished line that names a result, before a deadline reply wakes its
+// caller (bufferedActivity).
 func (s *lineReader) buffered() []byte { return s.buf[s.start:s.end] }
 
 // Err is what ended the input, nil for io.EOF.
@@ -96,6 +105,13 @@ func (s *lineReader) Scan() bool {
 				s.start += s.seen + i + 1
 				s.seen = 0
 				return true
+			}
+			// The bytes not searched yet came in the latest read, those searched or held before it in earlier ones.
+			// Only a frame already bigger than pingFrameMiddleBytes can hold a pong behind it: transport framing splits
+			// small lines across reads too (streaming decompression, lost segments), and those splits must not keep a
+			// dead link alive (#8771).
+			if s.middle != nil && len(data) > s.seen && (s.seen > 0 || s.held > 0) && s.held+len(data) > pingFrameMiddleBytes {
+				s.middle()
 			}
 			s.seen = len(data)
 			if s.err != nil && (len(data) > 0 || s.held > 0) {
@@ -133,7 +149,7 @@ func (s *lineReader) Scan() bool {
 				// limit. Nothing is copied until the line is whole (line).
 				s.parts = append(s.parts, s.buf)
 				s.held += len(s.buf)
-				s.buf, s.spent = takeGrown(min(s.piece, s.max-s.held)), false
+				s.buf = takeGrown(min(s.piece, s.max-s.held))
 				s.start, s.end, s.seen = 0, 0, 0
 			} else {
 				// Out of the first buffer straight to four times it (64 KiB: a session list of a few dozen rows fits),
@@ -198,7 +214,10 @@ func (s *lineReader) dropParts() {
 	switch len(s.parts) {
 	case 0:
 	case 1:
-		giveGrown(s.parts[0])
+		if !s.spent {
+			giveGrown(s.parts[0])
+		}
+		s.spent = false // the next buffer is this line's tail, not the spent first piece it replaced
 	default:
 		s.spent = true
 	}

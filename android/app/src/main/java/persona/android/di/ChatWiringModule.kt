@@ -83,6 +83,7 @@ object ChatWiringModule {
                     embedded = options.embedded, showTopBar = options.showTopBar,
                     // The conversation's manager is offline: history only, its 最后同步于 where the composer was.
                     historyReadOnly = options.readOnlyNote != null,
+                    healthChat = options.healthChat,
                     historyFooter = options.readOnlyNote?.let { note -> { persona.core.designsystem.JNotice(note, status = persona.core.designsystem.Status.Offline) } })
             }
             CompositionLocalProvider(LocalAssistantHost provides host) { key(active.scope.path) { content() } }

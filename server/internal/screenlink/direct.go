@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/osproc"
 )
 
 // The node's direct routes (#6398): one TLS listener port, bound to each candidate address and open only while a
@@ -206,7 +208,7 @@ func (d *Direct) refreshLocked() {
 	d.cands = nil
 	port := d.port
 	for _, c := range want {
-		l, err := net.Listen("tcp", net.JoinHostPort(c.Addr, strconv.Itoa(port)))
+		l, err := osproc.Listen("tcp", net.JoinHostPort(c.Addr, strconv.Itoa(port)))
 		if err != nil && port != 0 {
 			continue // the port is taken on this address: the candidate is left out
 		}

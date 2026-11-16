@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -395,16 +396,16 @@ func (n *Node) launcherModelAnswers(ctx context.Context, launcher, model string)
 // the conversation on its fallback. A 200 that the upstream ends with a refusal still proves the model is served and
 // has quota, so the conversation returns to it.
 var assistantModelProbe = func(ctx context.Context, n *Node, launcher, model string) bool {
-	base, key := n.launcherGateway(ctx, launcher)
+	base, key, headers := n.launcherGateway(ctx, launcher)
 	if base == "" || key == "" || model == "" {
 		return false
 	}
-	return probeGateway(ctx, base, key, n.resolvedLauncherModel(ctx, launcher, model))
+	return probeGateway(ctx, base, key, n.resolvedLauncherModel(ctx, launcher, model), headers)
 }
 
 // probeGateway is the probe's HTTP seam: one one-token request to the gateway. A 2xx (including a stream ended with a
 // refusal) proves the model is served and has quota; a 429/5xx/auth error or a connection failure keeps the fallback.
-func probeGateway(ctx context.Context, base, key, model string) bool {
+func probeGateway(ctx context.Context, base, key, model, headers string) bool {
 	root, err := rootURL(base)
 	if err != nil || model == "" || key == "" {
 		return false
@@ -421,6 +422,12 @@ func probeGateway(ctx context.Context, base, key, model string) bool {
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("x-api-key", key)
 	req.Header.Set("Authorization", "Bearer "+key)
+	for _, line := range strings.Split(headers, "\n") {
+		if name, value, ok := strings.Cut(strings.TrimSpace(line), ":"); ok && strings.EqualFold(strings.TrimSpace(name), "User-Agent") {
+			req.Header.Set("User-Agent", strings.TrimSpace(value))
+		}
+	}
+	modelhttp.SetDefaultUserAgent(req.Header)
 	resp, err := modelProbeHTTPClient.Do(req)
 	if err != nil {
 		return false
@@ -436,13 +443,13 @@ func probeStatusOK(status int) bool { return status >= 200 && status < 300 }
 var modelProbeHTTPClient = &http.Client{Timeout: 15 * time.Second,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
-// launcherGateway is the gateway address and key launcher's agent sends with, layered as Claude Code layers them:
+// launcherGateway is the gateway address, key, and custom headers the launcher's agent sends with, layered as Claude Code layers them:
 // the launcher's --settings env wins, then the user settings of its config directory, then the process environment.
 // The key never leaves this machine and is never logged.
-func (n *Node) launcherGateway(ctx context.Context, launcher string) (base, key string) {
+func (n *Node) launcherGateway(ctx context.Context, launcher string) (base, key, headers string) {
 	p, err := n.launcherProbe(ctx, launcher)
 	if err != nil {
-		return "", ""
+		return "", "", ""
 	}
 	flag := map[string]string{}
 	if arg := settingsArg(p.Args); arg != "" {
@@ -459,16 +466,17 @@ func (n *Node) launcherGateway(ctx context.Context, launcher string) (base, key 
 		user = settingsEnv(s)
 	}
 	get := func(k string) string {
-		if v := flag[k]; v != "" {
+		if v, ok := flag[k]; v != "" || (k == "ANTHROPIC_CUSTOM_HEADERS" && ok) {
 			return v
 		}
-		if v := user[k]; v != "" {
+		if v, ok := user[k]; v != "" || (k == "ANTHROPIC_CUSTOM_HEADERS" && ok) {
 			return v
 		}
 		return p.Env[k]
 	}
 	return firstNonEmpty(get("ANTHROPIC_BASE_URL"), get("OPENAI_BASE_URL")),
-		firstNonEmpty(get("ANTHROPIC_AUTH_TOKEN"), get("ANTHROPIC_API_KEY"), get("OPENAI_API_KEY"))
+		firstNonEmpty(get("ANTHROPIC_AUTH_TOKEN"), get("ANTHROPIC_API_KEY"), get("OPENAI_API_KEY")),
+		get("ANTHROPIC_CUSTOM_HEADERS")
 }
 
 // settingsEnv is a Claude Code settings document's string env values.

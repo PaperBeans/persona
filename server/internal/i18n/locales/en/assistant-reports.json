@@ -115,5 +115,6 @@
   "brief_more": "… and {n} more",
   "brief_also_done": "Also done: {list}",
   "brief_also_sep": "; ",
+  "delivery_verification_unavailable": "Task {task} is not accepted: delivery status temporarily cannot be verified for {pr} ({reason}). This does not mean the work is unfinished. Keep its current state and check again when verification is available; do not request another merge or deployment, park, or cancel solely because verification is unavailable.",
   "decision_not_delivered": "The owner decided: {decision}. It is recorded, but it did not reach the agent ({error}) and was not resent: pass it on once the agent can take it"
 }

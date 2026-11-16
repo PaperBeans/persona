@@ -163,6 +163,12 @@ import PersonaWire
         return true
     }
 
+    /// A reused detail must not carry the previous item's explicit source opening into another item's page.
+    func detailIdentityChanged(from oldKey: String, to newKey: String) {
+        guard oldKey != newKey else { return }
+        showsSource = false
+    }
+
     /// The item changed (new messages, filed or moved back): its plugin draws it again.
     func changed() async {
         guard phase == .plugin, let page else { return }

@@ -15,6 +15,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/modelhttp"
 )
 
 // Report is one key's quota as the app shows it.
@@ -189,6 +191,7 @@ func Do(ctx context.Context, client *http.Client, base, key string, r Request) (
 		}
 		req.Header.Set(k, put(v))
 	}
+	modelhttp.SetDefaultUserAgent(req.Header)
 	if client == nil {
 		client = &http.Client{Timeout: 25 * time.Second}
 	}

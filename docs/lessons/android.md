@@ -9,9 +9,20 @@ An intermittent test is not verified by repeatedly running only its own class. I
 `rememberSelectionState()` and `SelectionContainer(state, …)` are public in Compose Foundation 1.12: `selectAll()`, `clear()`
 and the read-only `selectedTexts` / `getSelectableTexts()` are all a select-in-place needs. Nothing starts from the word under a
 point (`select` takes a range of the container's text, and the Markdown renderer exposes no text layouts to find an offset by), so
-Select takes the whole message and a long press on a word picks that word. The words register as the container is laid out, so wait
-until `getSelectableTexts()` lists them (a frame or two) before `selectAll()`; a message with no words never lists any, and must not be
-left selecting.
+Select takes the whole message and a long press on a word picks that word. The words register as the container is laid out, and a
+later change of those words releases a selection that was already made (`updateTextLayout` calls `notifySelectableChange`, and
+`onSelectableChangeCallback` calls `onRelease`), including after composition has seen the selection. A position change does not
+(`notifyPositionChange`). Wait until `getSelectableTexts()` lists the same non-blank words for a couple of frames before `selectAll()`. A list that
+changes after that take is not done: wait for it to hold again and take the whole of it, even when the earlier selection was
+not released (a blank or partial first node does not count as the message). Keep doing that until the frame bound. A finger
+on the message is the user (a tap, a long press) and is not taken back. The toolbar's Copy is the user as well:
+Foundation 1.12.1 `SelectionManager.toolbarCopy` is `copy()` then `onRelease()`, and the touch-mode context-menu Copy
+does the same (`copy` then `onRelease` when `isInTouchMode`, which starts true). An empty selection whose words did not
+change is that release. Do not `selectAll` again, or the settle frames never see an empty selection and the message stays
+selecting (#8728). When the bound runs out with nothing really selected,
+end the selection. Stopping at the first stable reading leaves a later change: the message stays selecting, and Copy does
+nothing (#8728). A message with
+no words never lists any, and must not be left selecting.
 
 - A `SelectionContainer` inside another takes its text out of the outer one: a code block that opens its own was missing from a
   select-all. A block joins by checking `LocalSelectionAbove` (`SelectableOnItsOwn`); buttons, title bars and cards are wrapped in
@@ -721,3 +732,15 @@ Running `./gradlew` Robolectric/JVM tests on a container without Android Studio 
 - On an IPv6-only NAT64 network curl works but the JVM throws "Network is unreachable" (it defaults to an IPv4 socket): set `_JAVA_OPTIONS=-Djava.net.preferIPv6Addresses=true` for both sdkmanager and Gradle dependency downloads.
 - In a small memory cgroup the default `-Xmx4g` daemon is OOM-killed. Constrain it: `GRADLE_OPTS="-Xmx1600m -Dorg.gradle.workers.max=1 -Dkotlin.compiler.execution.strategy=in-process"`, `--no-daemon`, and an **Groovy-syntax** init script setting every `Test` task `maxHeapSize`/`maxParallelForks = 1`. A Kotlin-syntax init (`Test::class.java`) fails with "No such property: java" — and the failure is easy to misread as a pass, so always confirm `BUILD SUCCESSFUL` and the test-results XML, never just the shell's exit code.
 - Pure-Kotlin modules (`core:domain`, `core:contracts`) expose the JVM `test` task; Android library modules expose `testDebugUnitTest`.
+
+## Under imePadding, a size read in composition recomposes on every keyboard frame (#8334)
+
+With edge-to-edge and `adjustResize` the IME inset changes on every frame of the keyboard's slide, so everything under an
+`imePadding()` is measured smaller each frame. That is cheap as layout and expensive as composition: Compose 1.12's
+`BoxWithConstraints` subcomposes its content again whenever its constraints change, so a page body inside one ran in full
+per frame, and reading `WindowInsets.ime` (or `safeDrawing`, which includes it) in composition does the same to its scope.
+Keep sizes under the keyboard out of composition: `onSizeChanged` into a state read inside `derivedStateOf`, a layout
+modifier or an effect (`snapshotFlow`), and derive booleans such as "keyboard up". `ChatImeRecompositionTest` dispatches the
+inset in steps with `ViewCompat.dispatchApplyWindowInsets` and counts recompose scopes with a `CompositionObserver` set on
+the root composition, which also sees subcompositions; the caller's file and line come from a stack trace in `onScopeEnter`.
+`JPage`'s `SubcomposeLayout` still subcomposes some slots per measure (about 16 scopes a frame), left for later.

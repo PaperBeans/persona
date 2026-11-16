@@ -22,7 +22,7 @@ The default is **review-only**: no configured repositories, and `"merge": false`
 
 ## Configure
 
-Copy `scripts/operations/pr-watch.example.json` outside the checkout, for example to `~/.config/persona/pr-watch.json`, and restrict it to the maintainer (`chmod 600`). Use absolute paths. The service uses the local `gh` login; tokens stay in `gh`'s credential store, not in this file or the service unit.
+Copy `scripts/operations/pr-watch.example.json` outside the checkout, for example to `~/.config/persona/pr-watch.json`, and restrict it to the maintainer (`chmod 600`). Use absolute paths. For the Persona and Persona Extensions repositories, start with `scripts/operations/pr-watch.persona.example.json`: it has both repository profiles, ten workers and a 2700-second reviewer timeout, and keeps merging disabled. Replace the `/path/to/...` placeholders with your own absolute paths; opt into merging separately in that private copy if wanted. No account, machine-specific path, credential, token or live state belongs in either example. The service uses the local `gh` login; tokens stay in `gh`'s credential store, not in this file or the service unit.
 
 Each repository entry has:
 
@@ -72,7 +72,7 @@ The service polls every 60 seconds, uses bounded worker concurrency, and finishe
 
 An optional loopback webhook can supplement polling. Set `PR_WATCH_WEBHOOK_SECRET` in the service's private environment; it must contain at least 32 characters. The receiver verifies HMAC SHA-256, size, event type, repository, PR number and full head SHA. It listens on `127.0.0.1:18777` by default and needs an authenticated HTTPS reverse proxy if used remotely. Polling remains sufficient without it.
 
-To install, adapt `scripts/operations/persona-pr-watch.service`, replacing the source/config placeholders and choosing the local Python path. Keep `UMask=0077`, `NoNewPrivileges=true` and the bounded stop behavior. Do not put secrets in the unit. Then:
+To install, adapt `scripts/operations/persona-pr-watch.service`, replacing the source/config placeholders and choosing the local Python path. `scripts/operations/persona-pr-watch.example.service` is a portable alternative with `%h` for the maintainer's home, `/opt/persona` for the trusted checkout, and an optional private environment file for the reviewer CLI. Keep `UMask=0077`, `NoNewPrivileges=true` and the bounded stop behavior. Do not put secrets, personal paths or tokens in the unit or tracked examples. Then:
 
 ```sh
 systemctl --user daemon-reload

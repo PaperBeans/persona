@@ -152,14 +152,15 @@ func (s *Service) memoryDream(ctx context.Context) {
 	}
 }
 
-// session.items returns messages in sequence order. Take a prefix of the eligible messages so the
-// checkpoint cannot advance past a message deferred by the batch limit.
+// session.items returns messages in sequence order. Take a prefix of eligible sequence groups so the
+// checkpoint cannot advance past a deferred group. The byte limit is soft within a group: all blocks
+// sharing an accepted sequence must be processed before its checkpoint advances.
 func memoryDreamMessages(items []proto.Item, after int) ([]string, int) {
 	var messages []string
-	seq := after
+	seq, groupSeq := after, after
 	left := memoryDreamBatchBytes
 	for _, it := range items {
-		if it.Seq <= seq || it.Role != "user" || it.FullSize > 0 || it.Wake || it.Source != nil || it.Task != nil || it.Compact != nil || it.ToolUseID != "" {
+		if it.Seq <= after || it.Role != "user" || it.FullSize > 0 || it.Wake || it.Source != nil || it.Task != nil || it.Compact != nil || it.ToolUseID != "" {
 			continue
 		}
 		// extensionMessage also rejects cross-conversation text and Persona injections,
@@ -172,11 +173,11 @@ func memoryDreamMessages(items []proto.Item, after int) ([]string, int) {
 		if len(text) > memoryDreamMessageBytes {
 			text = clipBytes(text, memoryDreamMessageBytes-len(memoryDreamExcerptSuffix)) + memoryDreamExcerptSuffix
 		}
-		if len(text) > left {
+		if it.Seq != groupSeq && (left <= 0 || len(text) > left) {
 			break
 		}
 		messages = append(messages, text)
-		seq = it.Seq
+		seq, groupSeq = max(seq, it.Seq), it.Seq
 		left -= len(text)
 	}
 	return messages, seq

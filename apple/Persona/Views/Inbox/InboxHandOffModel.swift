@@ -73,6 +73,8 @@ final class InboxHandOffModel {
         /// Sends the text to an Agent and waits for its pending message's terminal outcome, with the refusal's reason.
         /// The bool is the user's Also Mark as Done choice; the result says whether the outbox already filed it.
         var sendToAgent: (SessionKey, String, Bool) async -> InboxHandOffModel.AgentSendResult
+        /// Follows a New Agent first message that its page already enqueued, through the same outbox delivery signal.
+        var waitForNewAgent: (SessionKey, PendingMessage) async -> InboxHandOffModel.AgentSendResult = { _, _ in .failed() }
         /// Opens a conversation it went to: Persona's (the first two targets) or an Agent's.
         var open: (Target, SessionKey) -> Void
         /// Files the item.
@@ -193,6 +195,7 @@ final class InboxHandOffModel {
                 return s.key
             },
             sendToAgent: { key, text, file in await model.sendForHandOff(key, text: text, item: item, file: file) },
+            waitForNewAgent: { key, message in await model.waitForHandOffDelivery(key, message, followRetries: true) },
             open: { target, key in
                 if case .agent = target {
                     model.openChat = key
@@ -262,16 +265,34 @@ final class InboxHandOffModel {
         }
     }
 
-    /// New Agent's page started an Agent with the item (#5933): `open()` goes there, the item is filed when asked, and
-    /// the session is recorded on the item without sending another message.
+    /// New Agent's page started an Agent with the item (#5933): `open()` goes there and the item is filed when asked.
+    /// Codex's start already carried its first message, so its accepted start is recorded here as before. An ordinary
+    /// start calls `newAgentFirstMessage` first; that consumes the prepared record and waits for outbox delivery.
     func started(_ key: SessionKey, markDone: Bool) {
         sent = (.agent(key), key)
         if let title = newAgentTitle, let clientID = newAgentClientID {
             record(.agent(key), key, title: title, clientID: clientID)
+            newAgentTitle = nil
+            newAgentClientID = nil
         }
+        if markDone { deps.markDone() }
+    }
+
+    /// An ordinary New Agent start enqueued its first message. Record only its terminal delivered outcome, never the
+    /// local enqueue, a refusal, a failure or a discarded message. `nil` means the local enqueue was rejected. Consume
+    /// the prepared identity before returning so duplicate callbacks cannot start another record, and capture only the
+    /// immutable record and dependencies: dismissing the sheets does not retain their view models while the outbox waits.
+    func newAgentFirstMessage(_ message: PendingMessage?, for key: SessionKey) {
+        guard let title = newAgentTitle, let clientID = newAgentClientID else { return }
         newAgentTitle = nil
         newAgentClientID = nil
-        if markDone { deps.markDone() }
+        guard let message else { return }
+        let itemID = itemID, wait = deps.waitForNewAgent, record = deps.record
+        Task {
+            let result = await wait(key, message)
+            guard result.delivered else { return }
+            try? await record(itemID, key, .agent, title, clientID)
+        }
     }
 
     func setMarkDone(_ on: Bool) {
@@ -496,18 +517,47 @@ extension AppModel {
         settleSend(key, msg.id, outcome)
         if outcome == .sent { return handOffSent(key, msg) }
         if outcome == .failed { return .failed(chat(key).pending.first { $0.id == msg.id }?.failure) }
+        return await waitForHandOffDelivery(key, msg)
+    }
 
-        // The outbox owns every retry. Waiting for a link is not failure: follow this message until a retry delivers it
-        // or refuses it. A transcript copy can consume the pending bubble before this loop sees its sent state.
+    /// The outbox owns every retry. Waiting for a link is not failure: follow this message until a retry delivers it
+    /// or refuses it. A transcript copy can consume the pending bubble before this loop sees its sent state. New
+    /// Agent's page uses this same signal after its ordinary `sendNow`, without starting a second send. Its sheet has
+    /// already closed, so `followRetries` also follows a chat retry after a refusal; a unique match on the immutable
+    /// message content and creation time finds the new id that such a retry needs, while ambiguity or deletion ends it.
+    func waitForHandOffDelivery(_ key: SessionKey, _ msg: PendingMessage,
+                                followRetries: Bool = false) async -> InboxHandOffModel.AgentSendResult {
+        var tracked = msg
+        var lastFailed: PendingMessage?
         while !Task.isCancelled {
-            if let current = chat(key).pending.first(where: { $0.id == msg.id }) {
+            var current = chat(key).pending.first { $0.id == tracked.id }
+            if current == nil, followRetries {
+                // An uncertain retry stays sending while its old receipt is checked, and can fail and change id between
+                // polls. Keep the original immutable identity as the fallback so recognition never depends on observing
+                // failed. Never pick between duplicates: an unrelated matching message is not evidence of this hand-off.
+                let identity = tracked.state == .failed ? tracked : lastFailed ?? msg
+                let candidates = chat(key).pending.filter {
+                    $0.id != identity.id && $0.createdAt == identity.createdAt && $0.text == identity.text && $0.images == identity.images
+                }
+                if candidates.count == 1 { current = candidates[0] }
+            }
+            if let current {
+                tracked = current
+                if current.state == .failed { lastFailed = current }
                 switch current.state {
                 case .sent: return handOffSent(key, current)
+                case .failed where followRetries:
+                    // The failed bubble stays available for the person's Retry in the Agent chat. No view or hand-off
+                    // model is captured here; deletion below still ends the wait.
+                    try? await Task.sleep(for: .milliseconds(250))
+                    continue
                 case .failed: return .failed(current.failure)
                 case .sending, .waiting: break
                 }
-            } else if chat(key).items.contains(where: { PendingMessage.arrived(msg, as: $0) }) {
-                return handOffSent(key, msg)
+            } else if chat(key).items.contains(where: {
+                PendingMessage.arrived(tracked, as: $0) || tracked.id != msg.id && PendingMessage.arrived(msg, as: $0)
+            }) {
+                return handOffSent(key, tracked)
             } else {
                 return .failed() // discarded by the user or reset with its hub
             }

@@ -31,3 +31,4 @@ ci_run 'HarmonyOS core licenses' 300 python3 -I scripts/android-licenses.py --wo
 ci_run 'ArkTS host replay helper' 600 cargo build --locked -p persona-core-ohos --example host_replay
 ci_run 'ArkTS core host tests' 900 env PERSONA_CORE_HOST_REPLAY="$CI_ROOT/native/app-core/target/debug/examples/host_replay" node --test "$CI_ROOT/harmony/tests/rustcore-wire.test.mjs" "$CI_ROOT/harmony/tests/rustcore-adapter.test.mjs" "$CI_ROOT/harmony/tests/native-core-async.test.mjs" "$CI_ROOT/harmony/tests/core-host/replay.test.mjs" "$CI_ROOT/harmony/tests/core-host/transport.test.mjs" "$CI_ROOT/harmony/tests/core-host/sort.test.mjs"
 ci_run 'Release library' 1200 cargo build --locked --release -p persona-core-ffi
+ci_run 'Independent C ABI client' 300 bash scripts/test-c-abi.sh

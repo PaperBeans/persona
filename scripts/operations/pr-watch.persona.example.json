@@ -1,0 +1,34 @@
+{
+  "repositories": [
+    {
+      "name": "nwverse/persona",
+      "checkout": "/path/to/trusted-persona-checkout",
+      "base": "main",
+      "merge": false,
+      "verify": {
+        "profile": "persona",
+        "timeout_seconds": 7200
+      }
+    },
+    {
+      "name": "nwverse/persona-extensions",
+      "checkout": "/path/to/trusted-persona-extensions-checkout",
+      "base": "main",
+      "merge": false,
+      "verify": {
+        "profile": "extensions",
+        "timeout_seconds": 7200
+      }
+    }
+  ],
+  "reviewer": {
+    "command": "claude",
+    "timeout_seconds": 2700
+  },
+  "poll_seconds": 60,
+  "workers": 10,
+  "state": "/path/to/private-pr-watch-state/state.json",
+  "webhook": {
+    "port": 18777
+  }
+}

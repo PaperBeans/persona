@@ -46,6 +46,9 @@ func digestFingerprint(e prompts.SuperviseEntry, g superviseSignal) (string, str
 		text = g.Detail
 	}
 	fields := []any{strings.Join(strings.Fields(text), " "), strings.Join(strings.Fields(e.Ask), " "), e.Said, e.Evidence, e.Step, e.Steps}
+	if g.Kind == sigDecide {
+		fields = append(fields, strings.Join(strings.Fields(e.Recommend), " "))
+	}
 	if len(e.Asks) > 0 { // the cards it lists are what is new about it
 		fields = append(fields, e.Asks)
 	}

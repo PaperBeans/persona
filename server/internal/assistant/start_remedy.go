@@ -113,14 +113,12 @@ func (s *Service) beginRemedy(ctx context.Context, planID string, i int, t PlanT
 	return true
 }
 
-// remedyOf is the plan task of todo id whose start is being remedied, with its plan and index.
+// remedyOf is the plan task of todo id whose start is being remedied, with its plan and index: the plan that binds it
+// now (currentPlanAssignment), also for a to-do a plan took over through todo_id, which has no plan id of its own (#8770).
 func (s *Service) remedyOf(ctx context.Context, id string) (Todo, *TaskPlan, int, error) {
 	todo, ok := s.todoNow(id)
 	if !ok {
 		return Todo{}, nil, 0, db.ErrTodoNotFound
-	}
-	if todo.PlanID == "" {
-		return todo, nil, 0, errTaskNotInPlan
 	}
 	p, i, err := s.currentPlanAssignment(ctx, todo)
 	if err != nil {
@@ -369,12 +367,13 @@ func (s *Service) failedStartNotice(ctx context.Context, conversation string, t 
 }
 
 // remedyWatch fails for good the starts being remedied whose tab is no longer kept and that are not starting again:
-// on the supervisor's tick, so a hub restarted meanwhile catches up.
-func (s *Service) remedyWatch(ctx context.Context, t Todo, now time.Time) {
-	if t.PlanID == "" || len(t.Agents) > 0 || t.DoneAt != nil {
+// on the supervisor's tick, so a hub restarted meanwhile catches up. history is the sweep's one read of the plans
+// (planHistoryOnce): it only picks the starts to give up, and giveUpStart reads the one it gives up again.
+func (s *Service) remedyWatch(ctx context.Context, t Todo, now time.Time, history func(context.Context) ([]*TaskPlan, error)) {
+	if len(t.Agents) > 0 || t.DoneAt != nil {
 		return
 	}
-	_, p, i, err := s.remedyOf(ctx, t.ID)
+	p, i, err := s.currentPlanAssignmentIn(ctx, t, history)
 	if err != nil {
 		return
 	}

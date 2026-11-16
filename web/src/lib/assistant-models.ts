@@ -5,7 +5,7 @@
 // and another chat keeps what it started with. On an older hub a pick lasts for this page and goes with each message
 // (lib/assistant-chat.ts), as before; the new-conversation page's pick goes with the conversation's start. First-screen
 // code: the panel's own data is lib/assistant-panel.ts, loaded with the panel.
-import { agentId } from "./agent-kind";
+import { agentId, sessionAgent } from "./agent-kind";
 import { conversationKey, launcherOffered, NEW_CONVERSATION, pickedEffort, pickedFast, pickedLauncher, pickedModel } from "./assistant-chat";
 import { modelName, modelSupportsFast } from "./launcher-models";
 import { providerTitle } from "./provider-names";
@@ -60,12 +60,40 @@ export function assistantPick(c: AssistantChat): ModelPick | undefined {
   return out;
 }
 
+export interface MainChatAgentMismatch {
+  configuredLauncher: string;
+  configuredAgent: string;
+  actualLauncher: string;
+  actualAgent: string;
+}
+
+// Model configuration prefixes launcher providers; a session names the same launcher without that prefix.
+const canonicalLauncher = (name: string) => name.startsWith("launcher.") ? name.slice("launcher.".length) : name;
+
+/** A confirmed Main-chat-setting mismatch: both launchers are known and their agent kinds differ. An unloaded list,
+ *  an unknown default, another launcher of the same kind, or a conversation's own pick changes nothing. */
+export function mainChatAgentMismatch(c: AssistantChat, info: AssistantLaunchers | undefined): MainChatAgentMismatch | undefined {
+  const s = c.session;
+  if (!s || !c.isMain || !s.launcher || !info || assistantPick(c)) return undefined;
+  const configuredLauncher = info.def?.provider || c.config;
+  if (!configuredLauncher || canonicalLauncher(configuredLauncher) === canonicalLauncher(s.launcher)) return undefined;
+  const configured = info.launchers.find((l) => l.name === configuredLauncher)
+    ?? info.launchers.find((l) => canonicalLauncher(l.name) === canonicalLauncher(configuredLauncher));
+  if (!configured) return undefined;
+  const configuredAgent = agentId(configured.agent_type || configured.agent);
+  const actualAgent = agentId(sessionAgent(s).agent);
+  if (configuredAgent === actualAgent) return undefined;
+  return { configuredLauncher, configuredAgent, actualLauncher: s.launcher, actualAgent };
+}
+
 /** The setup the chat's next message runs on (as the hub decides it, assistant/start.go sendModel). */
 export function assistantSetup(c: AssistantChat, info: AssistantLaunchers | undefined): AssistantSetup {
   const s = c.session;
   const pick = assistantPick(c);
   const fast = s?.service_tier === "priority" || (!s && pickedFast());
   if (pick) return { provider: pick.launcher, model: pick.model, effort: pick.effort ?? s?.effort, ...(fast ? { fast: true } : {}), source: "pick" };
+  const mismatch = mainChatAgentMismatch(c, info);
+  if (s && mismatch) return { provider: mismatch.actualLauncher, model: s.model, effort: s.effort, ...(fast ? { fast: true } : {}), source: "own" };
   const def = info?.def;
   if (!s || c.isMain) {
     const provider = def?.provider || c.config || s?.launcher || "claude";

@@ -78,7 +78,12 @@ import Observation
         list.changed = { [weak model, weak list] rows in
             guard let model, let list else { return }
             if list.paged { model.landSessionSummaries(rows, group: group) }
-            else { model.landCompleteSessionList(rows, group: group) }
+            else {
+                // The query's manager filter (empty: every manager). A held other-manager chat is kept only when this
+                // landing filtered it out (#8748); an unfiltered landing still drops a missing row.
+                let filter = list.query.manager.isEmpty ? nil : list.query.manager
+                model.landCompleteSessionList(rows, group: group, manager: filter)
+            }
             // Whether the list is a window or the whole collection decides where the switcher's counts come from.
             if group == model.hub?.group { model.followNeedsYou() }
         }

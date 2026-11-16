@@ -565,7 +565,7 @@ func TestScheduleRoutineTool(t *testing.T) {
 	f := newFakeHub()
 	f.settings = &Settings{Timezone: "Asia/Shanghai"}
 	h := newStorelessService(t, f)
-	out, err := h.toolScheduleRoutine(context.Background(), "", json.RawMessage(`{"title":"周报","prompt":"起草周报","time":"17:00","weekdays":[5]}`))
+	out, err := h.toolScheduleRoutine(context.Background(), "", "", json.RawMessage(`{"title":"周报","prompt":"起草周报","time":"17:00","weekdays":[5]}`))
 	if err != nil || !strings.Contains(out, "周五 17:00") {
 		t.Fatalf("create: %q, %v", out, err)
 	}
@@ -574,16 +574,16 @@ func TestScheduleRoutineTool(t *testing.T) {
 	if r.CreatedBy != "assistant" || !r.Enabled || r.Title != "周报" || r.Repeat != repeatDaily {
 		t.Fatalf("routine %+v", r)
 	}
-	if _, err := h.toolScheduleRoutine(context.Background(), "", json.RawMessage(`{"id":"`+r.ID+`","enabled":false,"weekdays":[1,2,3,4,5,6,7]}`)); err != nil {
+	if _, err := h.toolScheduleRoutine(context.Background(), "", "", json.RawMessage(`{"id":"`+r.ID+`","enabled":false,"weekdays":[1,2,3,4,5,6,7]}`)); err != nil {
 		t.Fatal(err)
 	}
 	if r2 := sc.tasks[len(sc.tasks)-1]; r2.Enabled || r2.Weekdays != nil || r2.Prompt != "起草周报" {
 		t.Fatalf("an update changes only the fields given: %+v", r2)
 	}
-	if _, err := h.toolScheduleRoutine(context.Background(), "", json.RawMessage(`{"title":"x","prompt":"y","time":"9am"}`)); err == nil {
+	if _, err := h.toolScheduleRoutine(context.Background(), "", "", json.RawMessage(`{"title":"x","prompt":"y","time":"9am"}`)); err == nil {
 		t.Fatal("a bad time is refused")
 	}
-	if _, err := h.toolScheduleRoutine(context.Background(), "", json.RawMessage(`{"title":"x","prompt":"y","time":"09:00","weekdays":[0]}`)); err == nil {
+	if _, err := h.toolScheduleRoutine(context.Background(), "", "", json.RawMessage(`{"title":"x","prompt":"y","time":"09:00","weekdays":[0]}`)); err == nil {
 		t.Fatal("weekday 0 is refused")
 	}
 	if !strings.Contains(h.describeSchedule(context.Background(), ""), r.ID) {
@@ -862,7 +862,7 @@ func TestScheduleReadFailureNeverOverwrites(t *testing.T) {
 	h := newServiceOn(t, newFakeHub(), store)
 	m := "server"
 
-	if _, err := h.toolScheduleRoutine(ctx, "", json.RawMessage(`{"title":"x","prompt":"y","time":"09:00"}`)); !errors.Is(err, errScheduleUnavailable) {
+	if _, err := h.toolScheduleRoutine(ctx, "", "", json.RawMessage(`{"title":"x","prompt":"y","time":"09:00"}`)); !errors.Is(err, errScheduleUnavailable) {
 		t.Fatalf("schedule_routine while unreadable: %v", err)
 	}
 	if _, err := h.toolScheduleFollowup(ctx, m, "s1", json.RawMessage(`{"at":"30m","prompt":"y"}`)); !errors.Is(err, errScheduleUnavailable) {

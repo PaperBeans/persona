@@ -235,8 +235,9 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 }
 
 // runtimeWatch asks a runtime to push a session's new items, from since on; for a session whose conversation is a
-// transcript here (transcript: true), only its live text.
-func (n *Node) runtimeWatch(h *runtimeConn, id string, since int) {
+// transcript here (transcript: true), only its live text. The caller owns the registered attempt and handles an error;
+// success leaves its registration untouched.
+func (n *Node) runtimeWatch(h *runtimeConn, id string, since int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), runtimeCallTimeout)
 	defer cancel()
 	params := map[string]any{"session_id": id, "since_seq": since}
@@ -245,7 +246,9 @@ func (n *Node) runtimeWatch(h *runtimeConn, id string, since int) {
 	}
 	if err := h.peer.Call(ctx, "session.watch", params, nil); err != nil {
 		n.logger.Printf("runtime %s: watch %s: %v", h.id(), id, err)
+		return err
 	}
+	return nil
 }
 
 // runtimeAsk forwards a runtime's question / plan / permission to the phone and returns the answer; {dismiss: true}
