@@ -409,14 +409,14 @@ func (c *Connector) Collect(context.Context) ([]connector.InboxThing, error) {
 // falls back to messages-send.
 func (c *Connector) Reply(ctx context.Context, r connector.InboxReply) error {
 	if strings.HasPrefix(r.Thread, "doc:") {
-		return fmt.Errorf("lark-cli document comments are read-only")
+		return fmt.Errorf("%w: lark-cli document comments are read-only", connector.ErrCannotReply)
 	}
 	if c == nil || c.runner == nil {
 		return &adapter.Error{Kind: adapter.KindNotInstalled}
 	}
 	chatID, ok := chatIDFromThread(r.Thread)
 	if !ok {
-		return fmt.Errorf("%s cannot be replied to", r.Thread)
+		return fmt.Errorf("%w: the thread names no chat", connector.ErrCannotReply) // never the thread: it is a private id
 	}
 	var err error
 	if strings.TrimSpace(r.Last) != "" && strings.Contains(r.Thread, ":thread:") {

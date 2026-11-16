@@ -143,7 +143,8 @@ func (h *Manager) inboxAppCall(ctx context.Context, p assistantwire.AppCall) (js
 				}
 			}
 			if !ok {
-				return nil, true, errCannotReply // its connector is not here (the plugin switched off)
+				h.logf("inbox: reply %s through %s not sent: %s (no connector)", a.SendID, a.Source, assistantwire.CodeInboxSourceUnavailable)
+				return nil, true, inboxSendRefusal(errCannotReply) // its connector is not here (the plugin switched off)
 			}
 			var sent assistantwire.InboxSent
 			sent.Already, err = h.sendInboxOnce(ctx, a.SendID, a.Source, func(ctx context.Context) error { return in.Reply(ctx, a.Reply) })

@@ -46,5 +46,12 @@
   "bad_folder": "folder must have at least one name between the slashes",
   "session_ref_required": "session requires machine_id and session_id",
   "handoff_kind": "kind must be agent or conversation",
-  "handoff_record_text": "text must be empty when session is set"
+  "handoff_record_text": "text must be empty when session is set",
+  "send_cannot_reply": "This can’t be answered from Persona, so nothing was sent. Reply in the app it came from.",
+  "send_source_unavailable": "The app this came from isn’t connected right now, so nothing was sent. Check that it’s turned on in Settings, or reply in that app.",
+  "send_signed_out": "You’re signed out of the app this came from, or the sign-in expired, so nothing was sent. Sign in again, then send.",
+  "send_denied": "The app this came from didn’t allow the reply, so nothing was sent. It may be missing a permission, or the chat may no longer be reachable. Reply in that app instead.",
+  "send_rate_limited": "The app this came from is limiting how often replies can be sent, so nothing was sent. Try again in a moment.",
+  "send_failed": "The app this came from couldn’t send the reply, so nothing was sent. Try again, or reply in that app.",
+  "send_unrecorded": "The reply couldn’t be recorded before sending, so nothing was sent. Try again in a moment."
 }

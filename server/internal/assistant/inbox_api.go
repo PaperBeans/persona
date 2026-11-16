@@ -176,11 +176,8 @@ func (s *Service) inboxRoutes() {
 			apierr.WriteBody(w, http.StatusConflict, map[string]any{"code": "inbox_item_done", "error": i18n.T(i18n.OfWriter(w), "assistant-inbox.item_done"), "retryable": false, "delivered": "none"})
 		case errors.Is(err, errNoInboxItem):
 			apierr.Write(w, http.StatusNotFound, err)
-		case replyInDoubt(err):
-			// It may have gone out: the apps say so (delivered unknown); the same reply again is not sent twice.
-			body := apierr.LocalizedBody(http.StatusBadGateway, assistantwire.CodeAssistantInDoubt, err, i18n.OfWriter(w))
-			body["delivered"], body["retryable"] = "unknown", false
-			apierr.WriteBody(w, http.StatusBadGateway, body)
+		case err != nil && s.writeInboxSendError(w, r, "reply", r.PathValue("id"), err):
+			// in doubt (delivered unknown), or why nothing was sent (#9125)
 		case err != nil:
 			apierr.Write(w, http.StatusBadGateway, err)
 		default:

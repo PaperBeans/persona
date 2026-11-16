@@ -147,6 +147,30 @@ const (
 	CodeInboxRefreshFailed = "inbox_refresh_failed"
 )
 
+// Why a reply to an inbox item did not go out (#9125): the extension manager's answer to inbox.reply and
+// inbox.reply_mail, and the apps' code on POST /api/v1/inbox/{id}/reply and …/suggestion
+// (docs/assistant/inbox.md "Send failures"). Each means nothing was sent; a send that may have gone out is
+// CodeAssistantInDoubt instead. The message is a fixed sentence: never the source's own output.
+const (
+	// CodeInboxCannotReply: the item has no way to be answered through its source (a read-only document, a thread with
+	// no chat to post to). Reply in the source's own app.
+	CodeInboxCannotReply = "inbox_cannot_reply"
+	// CodeInboxSourceUnavailable: the source's connector is switched off or missing, mail is not set up, or its program
+	// is not installed or too old.
+	CodeInboxSourceUnavailable = "inbox_source_unavailable"
+	// CodeInboxSourceSignedOut: the source's account is not signed in, or its sign-in expired.
+	CodeInboxSourceSignedOut = "inbox_source_signed_out"
+	// CodeInboxSendDenied: the source refused the send: a missing permission, or the chat or message is gone or closed
+	// to the sender.
+	CodeInboxSendDenied = "inbox_send_denied"
+	// CodeInboxSendRateLimited: the source is rate limited; data.retry_after is how many seconds, when it said.
+	CodeInboxSendRateLimited = "inbox_send_rate_limited"
+	// CodeInboxSendFailed: the source answered with another error.
+	CodeInboxSendFailed = "inbox_send_failed"
+	// CodeInboxSendUnrecorded: the once-only send record (sent_messages) could not be written, so nothing was tried.
+	CodeInboxSendUnrecorded = "inbox_send_unrecorded"
+)
+
 // Rounds of InboxRound.Round.
 const (
 	RoundChats = "chats" // the Feishu chats only (a realtime event)
