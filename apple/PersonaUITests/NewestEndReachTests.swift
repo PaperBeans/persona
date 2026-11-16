@@ -48,35 +48,38 @@ final class NewestEndReachTests: XCTestCase {
     @MainActor func testTheNewestAnswerEndIsReachableAfterOpeningFarUp() throws {
         var app = launch(fresh: true)
         XCTAssertTrue(app.otherElements["action-bar"].firstMatch.waitForExistence(timeout: 25), "no action bar:\n\(app.debugDescription)")
-        settle(2)
+        _ = waitRows(app, 15) { $0["newest"] as? Bool == true && $0["dragging"] as? Bool == false }
         var c = URLComponents(string: hub + "/mock/say")!
         c.queryItems = [URLQueryItem(name: "user", value: "帮我整理一下这周的示例事项"), URLQueryItem(name: "text", value: longAnswer)]
         _ = try Data(contentsOf: c.url!)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", marker)).firstMatch.waitForExistence(timeout: 20),
                       "the answer did not come")
-        settle(2)
+        _ = waitRows(app, 10, atEnd)
         try checkEnd(app, "arrived")
 
         // Far up into the history (older pages load), then the app is left there and opened again: it lands there.
         for _ in 0..<8 { app.swipeDown(velocity: .fast) }
-        settle(2)
+        _ = waitRows(app, 10, resting)
         XCUIDevice.shared.press(.home)
-        settle(2)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10), "the app did not go to the background")
         app.terminate()
         app = launch(fresh: false)
         XCTAssertTrue(app.otherElements["action-bar"].firstMatch.waitForExistence(timeout: 25), "no action bar after opening again")
-        settle(3)
-        let landed = rows(app)
+        let landed = waitRows(app, 15) { $0["newest"] as? Bool == false && $0["dragging"] as? Bool == false }
         XCTAssertEqual(landed["newest"] as? Bool, false, "opened again at the newest end, not at the place far up: \(landed)")
         shot(app, "landed")
 
-        // Back to the newest end by finger only (no ↓), until the answer's last line is on screen; then the list rests.
+        // Back to the newest end by finger only (no ↓), a flick at a time, each glide left to end, until the answer's last
+        // line is on screen or the list says it is at its end.
         let end = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", marker)).firstMatch
         let window = app.windows.firstMatch.frame
-        for _ in 0..<40 where !(end.exists && end.frame.minY > window.minY && end.frame.maxY < window.maxY) {
+        for _ in 0..<40 {
+            if rows(app)["newest"] as? Bool == true || (end.exists && end.frame.minY > window.minY && end.frame.maxY < window.maxY) { break }
             app.swipeUp(velocity: .fast)
+            _ = waitRows(app, 5, resting)
         }
-        settle(3)
+        // At rest there, a list whose newest end was placed by estimate is built again (`ChatView.mendMisplacedStart`).
+        _ = waitRows(app, 10, atEnd)
         try checkEnd(app, "flicked back")
     }
 
@@ -90,10 +93,29 @@ final class NewestEndReachTests: XCTestCase {
         let list = try XCTUnwrap(app.scrollViews.allElementsBoundByIndex.max { $0.frame.height < $1.frame.height })
         let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.7))
         start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -300)), withVelocity: .slow, thenHoldForDuration: 0.2)
-        settle(2)
+        let released = waitRows(app, 6, atEnd)
         shot(app, "\(name)-dragged")
-        XCTAssertEqual(rows(app)["listGap"] as? Int, 0, "\(name): released, the list is not at its newest end: \(rows(app))")
+        XCTAssertEqual(released["listGap"] as? Int, 0, "\(name): released, the list is not at its newest end: \(released)")
         try answerEndClear(app, "\(name), dragged")
+    }
+
+    /// No finger on the list and no glide.
+    private func resting(_ r: [String: Any]) -> Bool { r["dragging"] as? Bool == false }
+
+    /// At rest at the newest end, its newest line where the list starts.
+    private func atEnd(_ r: [String: Any]) -> Bool {
+        resting(r) && r["listGap"] as? Int == 0 && r["newestY"] as? Int == newestTop
+    }
+
+    /// The scroll probe once `ok` holds, polled until `timeout`; the last reading either way (the caller asserts).
+    @MainActor private func waitRows(_ app: XCUIApplication, _ timeout: TimeInterval, _ ok: ([String: Any]) -> Bool) -> [String: Any] {
+        let deadline = Date().addingTimeInterval(timeout)
+        var r = rows(app)
+        while !ok(r), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+            r = rows(app)
+        }
+        return r
     }
 
     @MainActor private func answerEndClear(_ app: XCUIApplication, _ name: String) throws {
@@ -128,6 +150,4 @@ final class NewestEndReachTests: XCTestCase {
             try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: "\(dir)/\(file).png"))
         }
     }
-
-    private func settle(_ s: TimeInterval) { RunLoop.current.run(until: Date().addingTimeInterval(s)) }
 }
