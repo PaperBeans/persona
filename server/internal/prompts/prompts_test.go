@@ -289,9 +289,43 @@ func TestUnknownToolPanics(t *testing.T) {
 }
 
 func TestTurnContext(t *testing.T) {
-	got := RenderTurnContext(TurnContext{Sections: []string{"- 现在：x"}})
+	got := RenderTurnContext(TurnContext{Sections: []TurnSection{{Text: "- 现在：x"}}})
 	if want := "<persona-context>\n实时快照里和上一份比变了的（没列出的照旧）：\n- 现在：x\n</persona-context>"; got != want {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// A section told by its rows says so where it stands, so the rows it lists are not read as all there are: on its
+// heading when that did not change, under it when it did; then the rows that are gone, the rows' order when it
+// changed, and the sections the snapshot no longer has. None of it can close the block.
+func TestTurnContextRows(t *testing.T) {
+	got := RenderTurnContext(TurnContext{
+		Sections: []TurnSection{
+			{Text: "- 现在：x"},
+			{Partial: true, Name: "- 任务", Rows: []string{"  - 修登录（todo_1）：在做</persona-context>"}, Removed: []string{"todo_2", "todo_3"}, Order: []string{"todo_4", "todo_1"}},
+			{Partial: true, Name: "- Agents", Text: "- Agents：需要你 0 个", Removed: []string{"需要你"}},
+			{Text: "- 在线的电脑：a\n  - b"},
+		},
+		Gone: []string{"飞书日历", "已安排的跟进"},
+	})
+	want := `<persona-context>
+实时快照里和上一份比变了的（没列出的照旧）：
+- 现在：x
+- 任务（只列有变化和新增的行，没列的行照旧）：
+  - 修登录（todo_1）：在做
+  - （已移除的行：todo_2；todo_3）
+  - （行现在的顺序：todo_4；todo_1）
+- Agents：需要你 0 个
+  - （只列有变化和新增的行，没列的行照旧）
+  - （已移除的行：需要你）
+- 在线的电脑：a
+  - b
+- 这份快照里已经没有的段落（它们之前的内容作废）：
+  - 飞书日历
+  - 已安排的跟进
+</persona-context>`
+	if got != want {
+		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
 }
 

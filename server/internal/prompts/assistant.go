@@ -360,8 +360,7 @@ type Snapshot struct {
 
 // SnapshotOmit marks the sections a snapshot leaves out for size (#3203). An omitted section still renders its heading
 // and count with where to see the rows (a tool, or the App for Inbox follow-ups), never as empty: the node sends only
-// the sections that changed, so a section that went missing would read as unchanged, and one rendered without its items
-// as "none".
+// what changed, so a section that went missing would read as gone, and one rendered without its items as "none".
 type SnapshotOmit struct {
 	Waiting, Working, Unread, Routines, Following, Followups, Asked, KB, OtherChats, Unaccepted, OpenTodos, Tasks, Approvals bool
 }
@@ -983,10 +982,27 @@ func RenderCodexInstructions(memory string, supervision ...string) string {
 
 // TurnContext is the <persona-context> block a message to the assistant starts with (assistant/turn_context): the
 // sections of the live snapshot (AssistantContext) the conversation hasn't seen yet. Full: all of them (the
-// conversation is new, was compacted, or node lost track); otherwise only those that changed, the time always.
+// conversation is new, was compacted, or node lost track); otherwise only those that changed, the time always, and
+// in Gone the names of the sections the snapshot no longer has.
 type TurnContext struct {
 	Full     bool
-	Sections []string
+	Sections []TurnSection
+	Gone     []string
+}
+
+// TurnSection is one section of a TurnContext: all of it in Text, or with Partial only what changed in it (#9078).
+// A partial section says so on its heading, so the rows it lists are never read as all the rows there are: Text is
+// then the heading line when that changed ("" when it did not: Name, the section's name, stands in for it), Rows the
+// rows that are new or changed, Removed the ids of the rows that are gone, and Order the ids of all its rows in
+// their order now, given only when the reader could not tell it (the rows it knew in the order it knew them, the
+// new ones after them).
+type TurnSection struct {
+	Text    string
+	Partial bool
+	Name    string
+	Rows    []string
+	Removed []string
+	Order   []string
 }
 
 func RenderTurnContext(c TurnContext) string { return render("assistant/turn_context", c) }
