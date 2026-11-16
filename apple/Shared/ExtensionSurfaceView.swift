@@ -28,8 +28,25 @@ struct ExtensionSurfaceView: View {
                 stat(label: metric.label, value: metric.value, detail: metric.detail)
             }
         case .progress(let progress):
-            ProgressView(value: progress.ratio.isFinite ? min(1, max(0, progress.ratio)) : 0) {
-                Text(verbatim: progress.label).font(ExtensionSurfaceTokens.label).lineLimit(1)
+            if ExtensionSurfaceContent.usesProgressRing(family: family) {
+                let ratio = ExtensionSurfaceContent.progressRatio(progress.ratio)
+                let percentage = ratio.formatted(.percent.precision(.fractionLength(0)))
+                Gauge(value: ratio) {
+                    Text(verbatim: progress.label)
+                } currentValueLabel: {
+                    Text(verbatim: progress.label.isEmpty ? percentage : progress.label)
+                        .font(ExtensionSurfaceTokens.label)
+                        .lineLimit(1)
+                        .minimumScaleFactor(ExtensionSurfaceTokens.circularLabelMinimumScale)
+                        .dynamicTypeSize(...ExtensionSurfaceTokens.circularLabelLargestTypeSize)
+                }
+                .gaugeStyle(.accessoryCircularCapacity)
+                .accessibilityLabel(Text(verbatim: progress.label))
+                .accessibilityValue(Text(verbatim: percentage))
+            } else {
+                ProgressView(value: progress.ratio.isFinite ? min(1, max(0, progress.ratio)) : 0) {
+                    Text(verbatim: progress.label).font(ExtensionSurfaceTokens.label).lineLimit(1)
+                }
             }
         case .row(let row):
             HStack(spacing: ExtensionSurfaceTokens.spacing) {
@@ -62,6 +79,14 @@ struct ExtensionSurfaceView: View {
 }
 
 nonisolated enum ExtensionSurfaceContent {
+    static func usesProgressRing(family: String) -> Bool {
+        family == "accessory_circular"
+    }
+
+    static func progressRatio(_ ratio: Double) -> Double {
+        ratio.isFinite ? min(1, max(0, ratio)) : 0
+    }
+
     static func items(_ view: ExtensionView, family: String) -> [ExtensionComponent] {
         let all = view.sections.prefix(2).flatMap(\.items)
         if family.hasPrefix("accessory_") {

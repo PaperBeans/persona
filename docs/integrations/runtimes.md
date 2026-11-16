@@ -292,11 +292,13 @@ workspace catalog lists them with or without sessions in them, its sessions sit 
 worktree as one of them. It implements `createWorkspace` and `prepareWorkspace` (the SDK then declares `caps.workspaces`)
 and calls `rt.workspacesChanged(list)` with the whole list whenever it changes (`docs/protocol/protocol.md` ("Runtime ↔ node")).
 
-- **A row** is `{workspace_id, title?, cwd, kind, branch?, space_id?, space_name?, repo_root?, owned?}`. `workspace_id` is
+- **A row** is `{workspace_id, title?, cwd, kind, branch?, space_id?, space_name?, repo_root?, owned?, pinned_at?}`. `workspace_id` is
   what its sessions name in their own `workspace_id` (the session id rule); `cwd` is absolute; `kind` is `checkout` (a
   repository's main checkout), `worktree` (a linked worktree) or `folder` (no repository; anything else counts as one);
   `space_id` / `space_name` are the space its sessions are grouped in; `repo_root` is the repository's main checkout;
-  `owned` says the runtime made the checkout and removes it with the workspace. At most 2000 rows; invalid ones are dropped.
+  `owned` says the runtime made the checkout and removes it with the workspace. Optional `pinned_at` is the host's native
+  workspace pin time (RFC3339), separate from Persona's session/project pins; absent, cleared or invalid means unpinned.
+  A changed timestamp or an unpin is part of the next full push. At most 2000 rows; invalid ones are dropped.
 - **Only an engine's count**: the node uses the list while the runtime is one of the computer's enabled engines (Paseo) on
   its own socket; a runtime that is connected but not enabled makes, lists and deletes no workspaces. Its rows are then `workspaces.list` rows whose `source` is the runtime id (`project_id` its `space_id`, `is_main`
   true for a checkout, `workspace_kind` `git` or `folder`), and its session rows keep their `workspace_id`. Any other

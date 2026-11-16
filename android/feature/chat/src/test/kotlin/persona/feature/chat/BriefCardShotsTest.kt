@@ -196,7 +196,7 @@ class BriefCardShotsTest {
         }
     }
 
-    /** A week's first briefing: two mechanisms this app has a page for, one it has none for, one a newer hub names. */
+    /** A week's first briefing: three mechanisms this app has a page for, one a newer hub names. */
     private fun setupBrief(): FeedItem {
         val body = (brief().body as JsonObject) + ("setup" to JsonCodec.parseToJsonElement("""[
             {"id":"triage_decide","setting":"agents.triage.decide","count":4,"text":"Card for decisions would have asked you about 4 stops instead of leaving them idle. It costs one triage call per stop. Turn it on in Session triage."},
@@ -208,7 +208,8 @@ class BriefCardShotsTest {
 
     /**
      * The first briefing of a week (#5085): the hub's recommended-setup lines as they came, each with Open settings only
-     * when its mechanism has a page in this app; opening one calls nothing on the hub.
+     * when its mechanism has a page in this app (session triage, standing authorizations, the supervisor's model);
+     * opening one calls nothing on the hub.
      */
     @Test fun theWeeksRecommendedSetupOpensOnlyThePagesThisAppHas() {
         val api = Api(setupBrief())
@@ -240,24 +241,24 @@ class BriefCardShotsTest {
                 rule.onNodeWithTag("brief-setup-$id").assertIsDisplayed()
             }
             rule.onNodeWithText("Something a newer hub recommends.").assertIsDisplayed()
-            rule.onAllNodesWithText("Open settings").assertCountEquals(2)
+            rule.onAllNodesWithText("Open settings").assertCountEquals(3)
             setupButtonsSitUnderTheirLines()
-            rule.onAllNodesWithTag("brief-setup-open-standing_authorizations").assertCountEquals(0)
             rule.onAllNodesWithTag("brief-setup-open-future_mechanism").assertCountEquals(0)
             val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
             File(output, "brief-setup-${s.name.lowercase()}-${if (d) "dark" else "light"}.png").outputStream()
                 .use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
         rule.onNodeWithTag("brief-setup-open-triage_decide").performClick()
+        rule.onNodeWithTag("brief-setup-open-standing_authorizations").performClick()
         rule.onNodeWithTag("brief-setup-open-supervisor_tier").performClick()
-        assertEquals(listOf(BriefSetupPage.SessionTriage, BriefSetupPage.SupervisorModel), opened)
+        assertEquals(listOf(BriefSetupPage.SessionTriage, BriefSetupPage.StandingAuthorizations, BriefSetupPage.SupervisorModel), opened)
         // read-only: nothing was accepted, completed, handled or otherwise sent
         assertTrue(api.accepted.isEmpty() && api.completed.isEmpty() && api.handled.isEmpty() && api.managers.isEmpty())
     }
 
     /** A setup line keeps the card's width with its button under it, as the card's other rows: never a narrow column beside it. */
     private fun setupButtonsSitUnderTheirLines() {
-        for (id in listOf("triage_decide", "supervisor_tier")) {
+        for (id in listOf("triage_decide", "standing_authorizations", "supervisor_tier")) {
             val text = rule.onNodeWithTag("brief-setup-$id").getUnclippedBoundsInRoot()
             val button = rule.onNodeWithTag("brief-setup-open-$id").assertIsDisplayed().getUnclippedBoundsInRoot()
             assertTrue("Open settings must sit under the line of $id", button.top >= text.bottom)

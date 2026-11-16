@@ -87,6 +87,10 @@ class AssistantSettingsShotsTest {
             MemoryFile("morning.md", "---\nname: morning\ndescription: $memoryBody\ntype: feedback\n---\n\n$memoryBody", updated),
             MemoryFile("weekly.md", "---\nname: weekly\ntype: user\n---\n$memoryBody", updated),
         )
+        val places = listOf(
+            SavedPlace("home", "Home", "1 Main Street", 31.23040, 121.47370, 150),
+            SavedPlace("office", "Office", "2 Work Road", 31.20000, 121.50000, 300),
+        )
         override suspend fun warm() {}
         override suspend fun config() = config
         override suspend fun updateConfig(update: AssistantConfigUpdate): AssistantConfig {
@@ -106,6 +110,9 @@ class AssistantSettingsShotsTest {
         override suspend fun memory() = files
         override suspend fun saveMemory(name: String, content: String) {}
         override suspend fun deleteMemory(name: String) {}
+        override suspend fun places() = places
+        override suspend fun savePlace(place: SavedPlace) = place.copy(id = place.id.ifBlank { "new" })
+        override suspend fun deletePlace(id: String) {}
     }
 
     private fun save(name: String, image: Bitmap) {
@@ -223,6 +230,12 @@ class AssistantSettingsShotsTest {
             AssistantSettingsPreview.open = p
             part = p
             for (d in listOf(false, true)) { dark = d; capture(p) }
+        }
+        // Saved Places (#9293): three styles × light / dark, as the issue asks.
+        for (p in listOf("places", "places-empty", "places-delete", "place", "new-place")) {
+            AssistantSettingsPreview.open = p
+            part = p
+            for (s in AppStyle.entries) for (d in listOf(false, true)) { style = s; dark = d; capture(p) }
         }
         AssistantSettingsPreview.open = null
     }

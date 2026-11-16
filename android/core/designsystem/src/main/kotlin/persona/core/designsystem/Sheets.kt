@@ -108,6 +108,7 @@ fun JSheet(
         androidx.compose.runtime.CompositionLocalProvider(
             LocalReadingInset provides 0.dp,
             LocalGlassSource provides null,
+            LocalPaneListToggle provides null,
             LocalHardwareShortcutHelpOwner provides shortcutHelpOwner,
         ) {
         Column(Modifier.fillMaxWidth().hardwareShortcutDismiss({

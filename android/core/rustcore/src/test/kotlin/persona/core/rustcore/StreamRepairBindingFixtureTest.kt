@@ -6,17 +6,18 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Real Kotlin/JNI replay for fence, table and final-marker StreamRepair, with independently stated Apple expectations. */
+/** Real Kotlin/JNI replay for bounded StreamRepair, with independently stated Apple expectations. */
 class StreamRepairBindingFixtureTest {
     private fun replay(text: String): JsonObject {
         val input = buildJsonObject { put("text", text) }.toString()
         val output = NativeBridge.projectStreamRepair(input)
-        assertTrue("JNI returned no fence-repair projection", output.isNotEmpty())
+        assertTrue("JNI returned no StreamRepair projection", output.isNotEmpty())
         return Json.parseToJsonElement(output) as JsonObject
     }
 
@@ -45,7 +46,7 @@ class StreamRepairBindingFixtureTest {
             "- 运行：\n  ~~~\n  make" to "- 运行：\n  ~~~\n  make\n  ~~~",
             "- 运行：\n  ```\n  make\n  ``" to "- 运行：\n  ```\n  make\n  ```",
             "```\na\n  " to "```\na\n```",
-            "这是 **重要" to "这是 **重要",
+            "这是 **重要" to "这是 **重要**",
             "```swift\nlet a\n```" to "```swift\nlet a\n```",
             "```swift\nlet a\n```\n" to "```swift\nlet a\n```\n",
             "" to "",
@@ -187,6 +188,137 @@ class StreamRepairBindingFixtureTest {
         println("JNI StreamRepair table replay: ${repairCases.size} repaired + ${endCases.size} end expectations")
     }
 
+    @Test fun inlineRepairMatchesEveryExplicitAppleInlineAssertion() {
+        // Exact Apple repair assertions: closesWhatTheGrowingLineLeavesOpen, closesHalfACodeSpanAndLeavesWhatIsInIt,
+        // showsAHalfWrittenImageOrLinkAsItsText and every test under MARK: Inlines except display-math end scanning.
+        val cases = listOf(
+            "这是 **重要" to "这是 **重要**",
+            "an *emph" to "an *emph*",
+            "**done** and *also*" to "**done** and *also*",
+            "trailing **" to "trailing **",
+            "** spaced" to "** spaced",
+            "**a\nb" to "**a\nb",
+            "* item\n* other" to "* item\n* other",
+            "***both" to "***both",
+            "a \\*literal" to "a \\*literal",
+            "`code **x" to "`code **x`",
+            "see ![chart](https://exa" to "see chart",
+            "see ![cha" to "see cha",
+            "read [the docs](https://exa" to "read the docs",
+            "read [the docs](https://example.com) ok" to "read [the docs](https://example.com) ok",
+            "这 ~~删除" to "这 ~~删除~~",
+            "这 ~~删除~" to "这 ~~删除~~",
+            "请运行 `swift te" to "请运行 `swift te`",
+            "``a ` b" to "``a ` b``",
+            "**粗体里的 `代码" to "**粗体里的 `代码`**",
+            "**bold *ital" to "**bold *ital***",
+            "**粗 ~~删" to "**粗 ~~删~~**",
+            "这是 **重要 " to "这是 **重要**",
+            "修改 src/_app.tsx 后重启" to "修改 src/_app.tsx 后重启",
+            "改了 _utils.py 里的函数" to "改了 _utils.py 里的函数",
+            "an _emph" to "an _emph",
+            "**粗 _x" to "**粗 _x**",
+            "_a_ 和 *b" to "_a_ 和 *b*",
+            "set snake_case_name" to "set snake_case_name",
+            "大约 ~5 分钟" to "大约 ~5 分钟",
+            "see https://example.com/_next/static" to "see https://example.com/_next/static",
+            "<https://example.com/_a" to "<https://example.com/_a",
+            "read [x](https://example.com/_a) and *more" to "read [x](https://example.com/_a) and *more*",
+            "2 * 3" to "2 * 3",
+            "**注意：**后" to "**注意：**后",
+            "**注意：**后文 *斜" to "**注意：**后文 *斜*",
+            "${'$'}${'$'}\nx^2 + **y" to "${'$'}${'$'}\nx^2 + **y",
+            "其中 ${'$'}a_1 *b" to "其中 ${'$'}a_1 *b",
+            "其中 ${'$'}a_1${'$'} 和 *b" to "其中 ${'$'}a_1${'$'} 和 *b*",
+            "费用 ${'$'}5 和 *b" to "费用 ${'$'}5 和 *b*",
+            "参见[文档](https://exa" to "参见文档",
+            "**参见[文档](https://exa" to "**参见文档**",
+            "图：![架构图]" to "图：架构图",
+            "[WIP]" to "[WIP]",
+            "正文\n\n    let a = **b" to "正文\n\n    let a = **b",
+            "1. 第一项\n\n    接着 **重要" to "1. 第一项\n\n    接着 **重要**",
+            "这是 **重要\n" to "这是 **重要\n",
+            "-\n" to "-\n",
+            "```\na\n  " to "```\na\n```",
+            "正文\n\t" to "正文\n",
+            "   " to "",
+            "a  b" to "a  b",
+        )
+        for ((input, repaired) in cases) {
+            assertEquals("Apple inline repair: ${input.replace("\n", "\\n")}",
+                expected(repaired, if (input.startsWith("```\na")) "code" else "text"), replay(input))
+        }
+        println("JNI StreamRepair inline replay: ${cases.size} complete {repaired,end} expectations")
+    }
+
+    @Test fun inlineSourceBoundariesRejectMarkersAndUnfinishedFormulas() {
+        // Direct consequences of Apple's InlineRepair guards, stated independently here rather than derived from Rust.
+        val cases = listOf(
+            "*a *b" to "*a *b", // two unmatched same-size openers: cmark does not pair them either
+            "a **b ~~c" to "a **b ~~c~~**", // innermost first
+            "a **b `c" to "a **b `c`**", // an open code span closes before emphasis around it
+            "a **b_" to "a **b_**", // the trailing underscore does not open or close; the bold opener still closes
+            "see ![a **b](https://exa" to "see a **b**", // LIFO brackets cut the outer image; its outer bold opener closes
+            "read [a *b](https://exa" to "read a *b*", // a nearer emphasis opener closes around the shown link text
+            "![alt" to "alt", // alt text still being written
+            "其中 \\(a *b" to "其中 \\(a *b", // unfinished inline math is not Markdown
+            "其中 ${'$'}${'$'}a *b" to "其中 ${'$'}${'$'}a *b", // inline ${'$'}${'$'} is not a display block
+            "其中 ${'$'}a *b" to "其中 ${'$'}a *b", // unmatched formula holds its later markers
+            "**后\n文 *斜" to "**后\n文 *斜*", // an opener on a previous line is not synthesized
+            "<https://example.com/a\n*b" to "<https://example.com/a\n*b*", // autolink skipping cannot cross a newline
+            "见图 ![架构 *说明" to "见图 架构 *说明*", // scalar offsets stay intact when cutting a non-ASCII image
+        )
+        for ((input, repaired) in cases) {
+            assertEquals("Apple inline boundary: ${input.replace("\n", "\\n")}", expected(repaired, "text"), replay(input))
+        }
+        val actual = replay("an *emph")
+        val wrong = expected("an *emph", "text")
+        assertNotEquals("wrong inline complete expectation must differ", wrong, actual)
+        assertThrows("wrong inline complete expectation is rejected", AssertionError::class.java) {
+            assertEquals("StreamRepair inline negative", wrong, actual)
+        }
+        println("JNI StreamRepair inline boundaries: ${cases.size} complete expectations plus wrong-object rejection")
+    }
+
+    @Test fun displayMathIsIsolatedButItsEndStateRemainsUnimplemented() {
+        // Scan keeps TeX out of inline repair. This bounded projection does not yet expose Apple's `.math` end.
+        for (input in listOf(
+            "${'$'}${'$'}\nx^2",
+            "${'$'}${'$'}\nx^2\n${'$'}${'$'}",
+            "${'$'}${'$'}\nx^2\n${'$'}${'$'}\n",
+            "\\[\nx",
+            "${'$'}${'$'}E=mc^2${'$'}${'$'}",
+            "质能 ${'$'}E=mc^2${'$'}",
+        )) {
+            assertEquals("display-math projection boundary: ${input.replace("\n", "\\n")}",
+                expected(input, "text"), replay(input))
+        }
+    }
+
+    @Test fun everythingBeforeTheLastLineStaysAsItWasForEveryApplePrefix() {
+        // Exact Apple `reply` source and its `0...unicodeScalars.count` invariant. `lastIndexOf('\n') + 1` implements
+        // Swift's lastIndex(of: "\n").map(index(after:)) without changing the expected prefix into an output-derived value.
+        for (end in 0..reply.codePointCount(0, reply.length)) {
+            val text = reply.substring(0, reply.offsetByCodePoints(0, end))
+            val chunkInput = buildJsonObject { put("text", text) }.toString()
+            val chunks = Json.parseToJsonElement(NativeBridge.projectStreamChunks(chunkInput)) as JsonObject
+            val tail = chunks.getValue("tail").jsonPrimitive.content
+            val kept = tail.substring(0, tail.lastIndexOf('\n') + 1)
+            val repaired = replay(tail).getValue("repaired").jsonPrimitive.content
+            assertTrue("completed prefix changed at scalar $end: ${tail.replace("\n", "\\n")}",
+                repaired.startsWith(kept))
+        }
+        assertEquals("finished reply", reply, replay(reply).getValue("repaired").jsonPrimitive.content)
+        assertEquals("finished reply plus newline", reply + "\n",
+            replay(reply + "\n").getValue("repaired").jsonPrimitive.content)
+        val wrongTail = "上一行\n**重要"
+        val wrongPrefix = "上一行\n**重要!"
+        val actual = replay(wrongTail).getValue("repaired").jsonPrimitive.content
+        assertEquals("wrong-prefix control input repairs as Apple states", "上一行\n**重要**", actual)
+        assertFalse("a deliberately wrong retained prefix is rejected", actual.startsWith(wrongPrefix))
+        println("JNI StreamRepair Apple prefix replay: ${reply.codePointCount(0, reply.length) + 1} scalar prefixes plus finished controls")
+    }
+
     @Test fun rejectsMalformedInputAndWrongExpectedObjects() {
         assertEquals("", NativeBridge.projectStreamRepair("{\"invalid\":true}"))
         assertEquals("", NativeBridge.projectStreamRepair("not JSON"))
@@ -198,6 +330,44 @@ class StreamRepairBindingFixtureTest {
             assertEquals("StreamRepair fence negative", wrong, actual)
         }
         assertTrue(failure.message.orEmpty().contains("StreamRepair fence negative"))
-        assertEquals("an unfinished non-fence line is not a Markdown repair slice", expected("unfinished **", "text"), replay("unfinished **"))
+        assertEquals("a trailing unfinished emphasis marker is unchanged", expected("unfinished **", "text"), replay("unfinished **"))
+    }
+
+    private companion object {
+        // StreamRepairTests.reply, independently transcribed including CJK, links, formulas and the final newline.
+        val reply = """
+            ## 看完了
+
+            改动没问题，**两处**要注意：`StreamChunks` 的 *缝隙* 和 [文档](https://example.com/docs_v2)。
+
+            - 第一项 ~~删掉~~
+            - 第二项
+              1. 嵌套 `code`
+            > 引用 **粗体**
+
+            | 文件 | 改动 |
+            | --- | :-: |
+            | a.swift | 刷新 |
+
+            1. 安装依赖：
+
+               ```bash
+               npm install
+               ```
+            **结果：**
+            | 项 | 值 |
+            | --- | --- |
+            | b | 2 |
+
+            ```swift
+            let a = "**"
+            ```
+
+            ${'$'}${'$'}
+            x^2
+            ${'$'}${'$'}
+
+            ![图](https://example.com/a.png) 结束 ${'$'}a_1${'$'}。
+        """.trimIndent() + "\n"
     }
 }

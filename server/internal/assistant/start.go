@@ -1139,7 +1139,7 @@ func (s *Service) sendModel(ctx context.Context, machine, sid string, p map[stri
 	// drive them and pick nothing, so a model a failed turn's recovery moved one to (node/assistant_recovery.go: Opus
 	// down to Haiku on a run of 429s) was carried over as what it runs, for good.
 	followsSetting := cfg.Main != "" && cfg.Main == sid && cfg.mainRouteMachine() == machine || s.isTaskConversation(ctx, machine, sid) ||
-		s.isLeader(ctx, sid) || s.isBackground(ctx, sid)
+		s.startedByTask(sid) || s.isLeader(ctx, sid) || s.isBackground(ctx, sid)
 	// The owner-visible recovery rule (#7824) covers the main conversation and the leader/background supervisors, but
 	// not worker Agent task conversations, whose cheaper-tier behavior stays unchanged. The node marks the protected
 	// ones so it can publish and persist the model-recovery marker only for them.
@@ -1224,6 +1224,14 @@ func (s *Service) sendOnPick(ctx context.Context, machine, sid string, p map[str
 		return err
 	}
 	return s.applyPick(ctx, p, pick)
+}
+
+// startedByTask: sid is a conversation a scheduled task started (origin task), also once it is no task's current
+// conversation (a task's "New chat next time", a deleted task): it follows the setting like the current one, which is
+// what the apps show for every conversation of that origin (#9248).
+func (s *Service) startedByTask(sid string) bool {
+	o, ok := s.conversationOrigins()
+	return ok && o[sid].origin == OriginTask
 }
 
 // isTaskConversation: sid on machine is a scheduled task's own conversation.

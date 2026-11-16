@@ -25,6 +25,7 @@ import persona.core.contracts.api.PairingService
 import persona.core.contracts.api.ProviderSetup
 import persona.core.contracts.api.RequestManager
 import persona.core.contracts.api.SessionsRepository
+import persona.core.contracts.api.StandingAuthorizationsSource
 import java.lang.reflect.Proxy
 
 /**
@@ -94,6 +95,7 @@ class SettingsAssistantScopeTest {
         feishuBot = recorder(FeishuBotSettings::class.java, "bot"),
         sent = recorder(HubSent::class.java, "sent"),
         extensions = recorder(ExtensionManagement::class.java, "extensions"),
+        standing = recorder(StandingAuthorizationsSource::class.java, "standing"),
     )
 
     private val two = ManagerRoster(listOf(HubManager("assistant", "助手", online = true, isDefault = true), HubManager("m-2", "工作", online = true)), "assistant")
@@ -112,10 +114,11 @@ class SettingsAssistantScopeTest {
         runCatching { scoped.feishuBot!!.status() }
         runCatching { scoped.sent!!.page() }
         runCatching { scoped.extensions!!.extensions() }
+        runCatching { scoped.standing!!.list() }
         seen.toList()
     }
 
-    private val names = listOf("providers", "models", "triage", "knowledgeSelection", "connectors", "channels", "bot", "sent", "extensions")
+    private val names = listOf("providers", "models", "triage", "knowledgeSelection", "connectors", "channels", "bot", "sent", "extensions", "standing")
 
     @Test fun anOlderHubTheDefaultAndOneAssistantNameNone() {
         val one = ManagerRoster(listOf(HubManager("assistant", "助手", online = true, isDefault = true)), "assistant")

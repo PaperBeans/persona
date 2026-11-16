@@ -121,7 +121,9 @@ fun ChatSlimBar(
     Row(modifier.fillMaxWidth().statusBarsPadding().heightIn(min = Tokens.Size.slimBar).padding(horizontal = Tokens.Space.xs),
         verticalAlignment = Alignment.CenterVertically) {
         val side = Modifier.width(Tokens.MinTouch.android)
-        if (onBack != null) JIconButton(persona.core.designsystem.icons.PersonaIcons.back, stringResource(R.string.designsystem_back), onBack, side, raised = false)
+        val listToggle = LocalPaneListToggle.current
+        if (listToggle != null) JIconButton(persona.core.designsystem.icons.PersonaIcons.sidebar, stringResource(R.string.designsystem_sidebar), listToggle, side, raised = false)
+        else if (onBack != null) JIconButton(persona.core.designsystem.icons.PersonaIcons.back, stringResource(R.string.designsystem_back), onBack, side, raised = false)
         else Spacer(side)
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             Row(

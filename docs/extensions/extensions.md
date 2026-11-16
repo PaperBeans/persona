@@ -2077,7 +2077,7 @@ When the app draws a slot, it states in `context` whom it is drawing for and whe
 | --- | --- | --- |
 | `placement` | — | This contribution's slot |
 | `size` | Optional: `compact` / `full` | If not sent, the size from the slot table; `compact` is a card and must be compact (see the limits under "New items") |
-| `ui_version` | The UI version the app can draw: the hub knows `8`; the web sends `8`, iOS and Android send `6` (their native stream `7`) until they draw all of UI version 8; **older apps do not send it, which counts as 1** | `min(app's, hub's)`; the extension can draw a version an older app can handle (e.g. `progress` instead of `chart`) |
+| `ui_version` | The UI version the app can draw: the hub knows `8`; the web sends `8` (its native stream `7`), Android sends `8` (its native stream too), iOS sends `6` (its native stream `7`) until it draws all of UI version 8; **older apps do not send it, which counts as 1** | `min(app's, hub's)`; the extension can draw a version an older app can handle (e.g. `progress` instead of `chart`) |
 | `tz` | The user's time zone (IANA name, `Asia/Shanghai`) | Passed on only if it loads; if not sent or invalid, the user time zone the hub knows (reported by the app, or from assistant settings), empty if neither. "Today" is computed in it |
 | `locale` | The app's language (`zh-Hans-CN`) | Passed on only if it looks like a language tag, otherwise empty |
 | `platform` | `ios` / `mac` / `android` / `web` | Other values are dropped |
@@ -2629,8 +2629,19 @@ by side they have no hairline between them. The card's head is an overview card'
 color, the link in the accent with ›, a spinner in its place while its action is on its way. The web's native stream still sends 7.
 `web/e2e/extension-columns.mjs` checks the grid in a browser against the mock (`MOCK_EXTENSIONS=1 MOCK_EXTENSION_COLUMNS=1`).
 
-**iOS and Android** have the fields in their generated types and still send 6 (their native stream 7): the hub draws them a stack until
-they draw version 8 (their own changes, after #9158).
+**Android** (#9158) draws all of it and sends `8`, its native stream too, which draws through the same renderer (a section's link
+is pressed as the section's own node; `ExtensionColumns.kt` in `android/feature/settings`). The page measures the pane it fills and
+follows the native card grid's rule (`docs/design/DESIGN_SYSTEM.md` "Adaptive card grids"): `floor((width + Space.m) / (cardColumn + Space.m))`
+columns, at most three, so a phone is one column and is drawn as the stack (each section's head with its icon and link, the stack's
+groups), a foldable or a portrait tablet two, a landscape tablet three. With two or more a columns view takes the pane's whole width
+(`JListPage` `fullWidth`) and is a grid of cards inserted into the page's list a row at a time: each card is the section's group panel
+with its head inside (the icon in its named color, the `headline` title, the link as the design system's text button, 48 dp to touch,
+read out as its words), every card in a row as tall as the tallest. A section's rows go side by side where each keeps `cardColumn`, with
+a hairline between lines and none between the rows of a line. Cards (`compact`), sections on a machine's or a launcher's page and an inbox
+item's body are drawn as the stack, with icons, links and rows side by side.
+
+**iOS** has the fields in its generated types and still sends 6 (its native stream 7): the hub draws it a stack until it draws version 8
+(its own change, after #9158).
 
 ## System-level placements (#1858)
 
@@ -2666,7 +2677,8 @@ The returned View is checked as usual (`Fit`), then `FitWidget` trims it to what
 | family | Allowed content |
 | --- | --- |
 | `small` / `medium` / `large` | `metric`, `stat_grid` (at most 2 stats for `small`, 4 otherwise), `progress`, `chart`, `text` (at most 3 lines, 200 characters), `row` (at most 4, not tappable); at most 2 sections, 4 items for `small`, 6 for `medium`, 12 for `large`. `markdown` becomes text, `empty` / `loading` one line of secondary text; `button`, `link`, `field`, `segmented`, `table`, `divider`, `search`, `filter`, `more`, actions, avatars and thumbnails are removed; `refresh_after` unused |
-| `accessory_circular` / `accessory_rectangular` | First `metric`, `progress` or `text` (at most 3 text lines for `rectangular`, 1 for `circular`) |
+| `accessory_circular` | First `metric`, `progress` or `text` (1 text line); progress is a circular capacity ring with its label in the center (percentage when the label is empty). The center text is capped at the interface's largest non-accessibility text size and shrinks as needed to fit the ring |
+| `accessory_rectangular` | First `metric`, `progress` or `text` (at most 3 text lines); progress uses the default progress view |
 | `accessory_inline` | First `metric` or one line of `text` (no progress) |
 
 Returns 502 if nothing drawable remains. Prefer drawing directly for `size`: a `metric` plus `stat_grid` for small, add a compact `chart` for medium, one `progress` or sentence for watch faces.

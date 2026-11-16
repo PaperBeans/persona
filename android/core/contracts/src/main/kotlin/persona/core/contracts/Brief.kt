@@ -61,7 +61,7 @@ data class BriefFailed(
 data class BriefProgress(val id: String, val title: String = "", val stage: String? = null, val stageKind: String? = null)
 
 /** The settings page of this app a recommended mechanism is turned on at. */
-enum class BriefSetupPage { SessionTriage, SupervisorModel }
+enum class BriefSetupPage { SessionTriage, SupervisorModel, StandingAuthorizations }
 
 /**
  * One line of the week's recommended setup (#5085, docs/assistant/assistant.md "Recommended setup"): [text] is the hub's
@@ -69,13 +69,14 @@ enum class BriefSetupPage { SessionTriage, SupervisorModel }
  */
 data class BriefSetup(val id: String, val text: String, val count: Int = 0) {
     /**
-     * Where this app turns the mechanism on, for those it has a page for: Session triage's three switches, and the
-     * background supervisor's model purpose (#5805). Null for the others (standing authorizations, the remembered kinds
-     * of task, the delegate, leaders and the reviews have no page here) and for a mechanism a newer hub names.
+     * Where this app turns the mechanism on, for those it has a page for: Session triage's three switches, the
+     * background supervisor's model purpose (#5805), and standing authorizations (#9247). Null for the others (the
+     * remembered kinds of task, the delegate, leaders and the reviews have no page here) and for a mechanism a newer hub names.
      */
     val page: BriefSetupPage? get() = when (id) {
         "triage_decide", "triage_auto_continue", "triage_wake" -> BriefSetupPage.SessionTriage
         "supervisor_tier" -> BriefSetupPage.SupervisorModel
+        "standing_authorizations" -> BriefSetupPage.StandingAuthorizations
         else -> null
     }
 }

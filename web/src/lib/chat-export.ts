@@ -171,7 +171,7 @@ export function transcriptMarkdown(items: readonly Item[], meta: ExportMeta, o: 
       block([`<details>\n<summary>${summaryText(it.is_error ? w.error : w.result)}</summary>`, "", ...resultParts(it, w, cutNote), "</details>"].join("\n"));
     }
   }
-  return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+  return out.join("\n").trimEnd() + "\n";
 }
 
 function resultParts(result: Item, w: ExportWords, cutNote: (left: number) => string): string[] {

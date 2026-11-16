@@ -352,7 +352,11 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
 // 480,872 B; en 477,659 B to 477,743 B, zh-Hans 478,478 B to 478,562 B): readView keeps the columns layout and a
 // section's span, icon, link and columns (lib/extension-ui.ts readSection8), as it reads every other field, because the
 // assistant's cards read views on the first screen too. Drawing them is a chunk loaded on intent (ViewBody8.tsx).
-export const FIRST_SCREEN_BUDGET = 480_872;
+// The task-chat model display and supervisor follow-up (#9248) adds 75 B in ja; the measured first screen is
+// en 477,818 B, ja 480,947 B, zh-Hans 478,637 B, so the budget accounts for that overage.
+// Paseo workspace pins (#9300), after sharing the pin comparator and reusing sorted subtree summaries, add 39 B:
+// en 477,857 B, ja 480,986 B, zh-Hans 478,676 B. The budget accounts for this measured feature delta.
+export const FIRST_SCREEN_BUDGET = 480_986;
 // The hash in a built file's name: the 8 characters of Rollup's [hash] (url-safe base64) between "-" and the
 // extension, as vite.config.ts names every chunk and asset ("assets/[name]-[hash].js", "[name]-[hash][extname]").
 const NAME_HASH = /-([A-Za-z0-9_-]{8})\.[^./]+$/;

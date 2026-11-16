@@ -797,7 +797,7 @@ App API (the conversation's manager, with full-access role):
 DELETE is idempotent; deleting a missing entry keeps the revision. A concurrent update returns 409 and the caller
 refreshes before retrying; storage unavailable returns 503, and insufficient role returns 403. There is no HTTP grant
 creation endpoint: additions use the main conversation's approval flow. The empty default list authorizes nothing.
-The one other way a grant is made is the owner's **Always** on a suggested rule, below.
+The one other way a grant is made is the owner's **Always** on a suggested rule, below. Apple (#7002) and Android (#9247) list and revoke standing authorizations from Settings and the assistant's profile; the web app does too.
 
 #### A rule after the same answer three times (#4929)
 
@@ -838,8 +838,9 @@ call; nothing is turned on for the owner without the tap.
   sends those cards again, so the line is gone on every device.
 - **Drawn by**: the Apple apps (#5802's Apple part, `docs/apple/ios.md` "Suggested standing rule and held decisions"):
   one line under the plan card, the to-do's decision and the question card, with what Always creates, Always and Not
-  Now, and after Always where the rule is listed and removed. They have no list of standing authorizations, so that
-  result names the web app's. Android draws it too (#5802, `docs/android/android.md` "Rule suggestions, held
+  Now, and after Always where the rule is listed and removed. Apple lists them on the assistant's profile and in
+  Settings (#7002), and Android lists them the same way (#9247); after Always, those apps say where that list is.
+  Android draws the suggestion line too (#5802, `docs/android/android.md` "Rule suggestions, held
   decisions, recommended setup and purpose descriptions"). No event is sent for a plan when its suggestion is
   answered, so the Apple apps take the line off the plans they hold themselves (`TasksStore.ruleSuggestionSettled`).
 - **Two taps on Always at once** make one rule: the grant is stored only if no standing authorization covers the

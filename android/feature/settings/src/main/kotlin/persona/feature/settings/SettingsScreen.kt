@@ -605,6 +605,7 @@ private fun SettingsPageContent(
         "translate" -> TranslationSettingsPage(services.translation.takeUnless { services.demo }, services.models.takeUnless { services.demo },
             services.connectors.takeUnless { services.demo }, onBack = back, pickingAtStart = TranslationPreview.take(),
             onModel = { onNavigate?.invoke(persona.core.navigation.ModelPurposeRoute("translate")) ?: run { purposeManager = null; purpose = "translate"; page = "models" } })
+        "standing-authorizations" -> StandingAuthorizationsPage(mine.standing.takeUnless { services.demo }, machines, back)
         "triage" -> TriageSettingsPage(mine.triage.takeUnless { services.demo }, mine.models.takeUnless { services.demo }, onBack = back,
             onModel = { onNavigate?.invoke(persona.core.navigation.ModelPurposeRoute("agent.triage", owner)) ?: run {
                 purposeManager = owner; purpose = "agent.triage"; page = "models" } })
@@ -913,6 +914,7 @@ private fun AssistantOfflinePage(page: String, assistant: persona.core.contracts
         SettingsPage.FeishuBot -> R.string.settings_feishu_bot_title
         SettingsPage.Sent -> R.string.settings_sent_title
         SettingsPage.KnowledgeSelection -> R.string.settings_knowledge_selection_title
+        SettingsPage.StandingAuthorizations -> R.string.settings_standing_title
         else -> R.string.settings_section_connectors
     }
     JListPage(title = stringResource(title), onBack = onBack) { item("offline") { JAssistantOffline(assistant) } }

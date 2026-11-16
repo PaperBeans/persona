@@ -25,9 +25,26 @@ run with `ELECTRON_RUN_AS_NODE=1`. A plain `node` always runs the bridge without
 Persona is tested with Paseo 0.15.0 and newer (#8134). An older Paseo still works, but has known problems (in 0.14, a message sent while a turn starts cancels that turn),
 and the engine's note under Settings › Machines asks to update it.
 
+## Pinned workspaces
+
+Paseo's **Pin chat / Pin to top** pins a whole workspace. Persona's Agents workspace tree reads that choice automatically
+on web, desktop, Apple and Android: pinned workspaces come first, newest pin first, and show the existing pin mark.
+Their repositories move ahead of unpinned repositories so the workspace stays easy to find. Empty pinned workspaces
+remain visible; closed, unarchived conversations in a pinned workspace remain available even after Paseo unloads them.
+Explicit search and state filters still apply, and manually folded groups stay folded.
+
+Pin or unpin in Paseo. Persona reflects the change when its workspace catalog refreshes (or when the Agents page is
+opened again), including after reconnecting. Each pin belongs to that exact computer and workspace; another workspace
+in the same project or directory stays independent. Persona's own session/project pins and Assistant directions remain
+separate. Reading the catalog never changes either app's preferences.
+
+The bridge carries Paseo's `pinnedAt` as optional `pinned_at` (an RFC3339 timestamp). Clearing it or an older daemon
+omitting it means unpinned. The existing catalog snapshot preserves it while its computer is unreachable; a successful
+refresh replaces it, including removals. There is no new setting or model dependency.
+
 ## Which sessions appear
 
-- **Listed Agents**: all unarchived Paseo Agents, up to 300. Running Agents and those waiting for you are always included.
+- **Listed Agents**: all unarchived Paseo Agents, up to 300. Running Agents, those waiting for you, and Agents in natively pinned workspaces are always included.
   An Agent visible in Paseo's own App is also visible in Persona; archived Agents are omitted. Your own Agents come first:
   Agents another Agent created (below) fill what is left of the 300, and one of those that runs or waits for you is listed with
   every Agent between it and yours, whatever the count.

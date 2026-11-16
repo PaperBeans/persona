@@ -15,7 +15,7 @@
     <string name="chat_rule_creates_none">Always stores no rule and puts this line away.</string>
     <string name="chat_rule_creates_none_setting">Always stores no rule and puts this line away. Persona answers such questions first only once %1$s is turned on in the assistant\'s configuration file on the hub\'s computer.</string>
     <string name="chat_rule_made_trust">Rule made: tasks like this now start directly. It is listed, and can be removed, under Remembered auto-start rules in Persona\'s settings in the web app.</string>
-    <string name="chat_rule_made_standing">Standing authorization made. It is listed, and can be revoked, under Standing authorizations in Persona\'s settings in the web app.</string>
+    <string name="chat_rule_made_standing">Standing authorization added. It is listed, and revoked, in the assistant\'s profile under Standing Authorizations.</string>
     <string name="chat_rule_made_none">No rule was stored.</string>
     <string name="chat_rule_made_none_setting">No rule was stored. To let Persona answer such questions first, turn on %1$s in the assistant\'s configuration file on the hub\'s computer.</string>
     <string name="chat_rule_made_other">Rule made.</string>

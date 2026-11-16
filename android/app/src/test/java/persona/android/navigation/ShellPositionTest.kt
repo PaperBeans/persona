@@ -139,4 +139,26 @@ class ShellPositionTest {
             assertEquals(position, store.load())
         }
     }
+
+    @Test fun missingColumnFlagsDefaultToShownAndRoundTrip() {
+        file.parentFile!!.mkdirs()
+        file.writeText("""{"tab":"Agents","machine":"example"}""")
+        val store = ShellPositionStore(context, scope)
+        val restored = store.load()
+        assertEquals(true, restored.sidebarColumnShown)
+        assertEquals(true, restored.agentsListShown)
+
+        for (sidebar in listOf(false, true)) {
+            for (agents in listOf(false, true)) {
+                val position = ShellPosition(
+                    tab = AppTab.Agents,
+                    machine = "example",
+                    sidebarColumnShown = sidebar,
+                    agentsListShown = agents,
+                )
+                store.save(position)
+                assertEquals(position, store.load())
+            }
+        }
+    }
 }

@@ -449,6 +449,7 @@ internal fun mergedAgentsState(list: List<GroupNames>, states: List<AgentsWiring
             creation(of(machineId)).removeWorktree(machineId, path, deleteBranch, force, kind)
         // A computer's catalog workspaces come from the hub that owns it; none when no hub does.
         override suspend fun workspaces(machineId: String) = of(machineId)?.let { creations[it] }?.workspaces(machineId).orEmpty()
+        override suspend fun workspaceCatalog(machineId: String) = creation(of(machineId)).workspaceCatalog(machineId)
     }
     return AgentsWiringState(
         scope = scope,

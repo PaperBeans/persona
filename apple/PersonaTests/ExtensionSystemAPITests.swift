@@ -286,6 +286,20 @@ import PersonaWire
         }
     }
 
+    @Test func progressRingIsExclusiveToTheCircularAccessory() {
+        #expect(ExtensionSurfaceContent.usesProgressRing(family: "accessory_circular"))
+        for family in ["small", "medium", "large", "accessory_rectangular", "accessory_inline", "", "circular"] {
+            #expect(!ExtensionSurfaceContent.usesProgressRing(family: family))
+        }
+    }
+
+    @Test func progressRingClampsRatiosAndRejectsNonfiniteValues() {
+        for (input, expected) in [(0.0, 0.0), (0.375, 0.375), (1.0, 1.0), (-1.0, 0.0), (2.0, 1.0),
+                                  (Double.nan, 0.0), (Double.infinity, 0.0), (-Double.infinity, 0.0)] {
+            #expect(ExtensionSurfaceContent.progressRatio(input) == expected)
+        }
+    }
+
     @Test func staticParametersAndJSONEscapeHatchMapDeclaredNamesOnly() throws {
         let place = ExtensionShortcutPlace(params: [
             ExtensionShortcutParam(name: "note", title: "Note", kind: "text"),

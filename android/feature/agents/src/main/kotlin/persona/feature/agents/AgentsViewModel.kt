@@ -15,7 +15,8 @@ import java.time.Instant
 import java.util.UUID
 
 private data class GroupListCounts(val filter: SessionListFilter, val revision: String, val counts: SessionListCounts)
-private data class ListInputs(val settings: AgentListSettings, val group: GroupFilter?, val assistant: persona.core.contracts.api.CurrentAssistant?, val visible: SessionKey?)
+private data class ListInputs(val settings: AgentListSettings, val group: GroupFilter?, val assistant: persona.core.contracts.api.CurrentAssistant?,
+                              val visible: SessionKey?, val workspaces: List<AgentWorkspace>)
 
 /** What the hub's paged search matches: the search's words, not its conditions ([AgentQuery]), which it does not read. */
 internal fun hubQuery(query: String): String = AgentQuery.parse(query).text.take(256)
@@ -100,6 +101,21 @@ internal class AgentsViewModel(
     private val messageIds = mutableMapOf<String, String>()
     private var changing = false
     private val settings = MutableStateFlow(AgentListSettings())
+    private val workspaceCatalog = AgentsWorkspaceCatalog()
+    private val workspaceRefresh = MutableStateFlow(0)
+
+    /** Called by the visible screen's lifecycle: hidden pages cancel reads and have no polling timer. */
+    suspend fun watchWorkspaceCatalog(service: AgentCreationService?) {
+        if (service == null) return
+        combine(repository.machines.map { machines ->
+            machines.filter { "paseo" in (it.engineHosts ?: listOf(it.engine)) }.map { it.id to it.online }
+        }.distinctUntilChanged(), workspaceRefresh) { machines, _ -> machines }.collectLatest { machines ->
+            while (true) {
+                workspaceCatalog.refresh(service, machines)
+                kotlinx.coroutines.delay(60_000)
+            }
+        }
+    }
     // Editors need the latest settings before the background list projection catches up.
     val listSettings = settings.asStateFlow()
     private val groupListCounts = MutableStateFlow<Map<String, GroupListCounts>>(emptyMap())
@@ -226,8 +242,8 @@ internal class AgentsViewModel(
         bindings?.assistant?.assistant?.map { it.directionTree }?.distinctUntilChanged() ?: flowOf(null)
     private val projectedPage = combine(renamer?.project(repository.sessions) ?: repository.sessions, repository.machines,
         preferences.snapshots(pairingScope).combine(repository.listStatus) { prefs, status -> prefs to status },
-        combine(settings, groupFilter, assistant, visibleChat, ::ListInputs),
-        combine(operationState, todosFlow.combine(directionsFlow, ::Pair), todosSupportedFlow, ::Triple)) { hubSessions, hubMachines, (localPrefs, pagination), (settings, group, assistant, visible), (ops, todosAndTree, todosSupported) ->
+        combine(settings, groupFilter, assistant, visibleChat, workspaceCatalog.rows, ::ListInputs),
+        combine(operationState, todosFlow.combine(directionsFlow, ::Pair), todosSupportedFlow, ::Triple)) { hubSessions, hubMachines, (localPrefs, pagination), (settings, group, assistant, visible, workspaces), (ops, todosAndTree, todosSupported) ->
         val (todos, directions) = todosAndTree
         val now = Instant.now()
         // The current assistant's (the hub's lists are every manager's, each row with its own).
@@ -247,8 +263,11 @@ internal class AgentsViewModel(
         // A partial machine snapshot must not hide sessions in machine grouping.
         val knownMachines = machines + sessions.map { it.machineId }.distinct().filter { id -> machines.none { it.id == id } }
             .map { Machine(it) } // named by the list as not updated yet (AgentsScreen.kt)
-        val effective = settings.copy(grouping = prefs.grouping, sort = prefs.sort, hideBotmux = prefs.hideBotmux && !settings.quick.showsBotmux)
-        val context = listOf(prefs.range, effective.grouping, effective.sort, effective.hideBotmux, effective.quick, effective.query, effective.machineFilter, prefs.pins, todos, directions)
+        val admittedMachines = machines.mapTo(mutableSetOf()) { it.id }
+        val effective = settings.copy(grouping = prefs.grouping, sort = prefs.sort, hideBotmux = prefs.hideBotmux && !settings.quick.showsBotmux,
+            workspaces = workspaces.filter { it.machineId in admittedMachines })
+        val context = listOf(prefs.range, effective.grouping, effective.sort, effective.hideBotmux, effective.quick, effective.query, effective.machineFilter, prefs.pins, todos, directions,
+            effective.workspaces)
         if (context != previousContext) previous = null
         previousContext = context
         // Server row search uses complete index text; searching the truncated summary again would lose matches.
@@ -789,6 +808,7 @@ internal class AgentsViewModel(
     }
     fun refresh() {
         if (_refreshing.value) return
+        workspaceRefresh.update { it + 1 }
         viewModelScope.launch {
             _refreshing.value = true
             try {

@@ -74,6 +74,8 @@ type runtimeWorkspace struct {
 	RepoRoot string `json:"repo_root,omitempty"`
 	// Owned: the runtime made this checkout, a worktree of its own, and removes it with the workspace.
 	Owned bool `json:"owned,omitempty"`
+	// PinnedAt is a native workspace pin, not a project or session preference in Persona.
+	PinnedAt string `json:"pinned_at,omitempty"`
 }
 
 // cleanWorkspaces keeps the workspaces a runtime may list: valid ids, once each, absolute folders, a kind the node
@@ -104,6 +106,11 @@ func cleanWorkspaces(list []runtimeWorkspace) []runtimeWorkspace {
 		w.Title, w.Branch = clip(w.Title, maxLauncherText), clip(w.Branch, maxBranch)
 		w.SpaceID, w.SpaceName = clip(w.SpaceID, maxLauncherText), clip(w.SpaceName, maxLauncherText)
 		w.RepoRoot = dir(w.RepoRoot)
+		if at, err := time.Parse(time.RFC3339Nano, w.PinnedAt); err == nil && !at.IsZero() {
+			w.PinnedAt = at.UTC().Format(time.RFC3339Nano)
+		} else {
+			w.PinnedAt = ""
+		}
 		switch w.Kind {
 		case workspaceCheckout, workspaceWorktree:
 		default:
@@ -222,7 +229,8 @@ func (n *Node) runtimeWorkspaceRows(h *runtimeConn) []proto.Workspace {
 	out := make([]proto.Workspace, 0, len(list))
 	for _, w := range list {
 		row := proto.Workspace{ID: w.ID, Source: rt, SourceID: w.ID, Title: firstOf(w.Title, w.Branch, filepath.Base(w.Cwd)),
-			Cwd: n.catalogDir(w.Cwd), Branch: w.Branch, Online: true, Available: true, ProjectID: w.SpaceID, ProjectName: w.SpaceName}
+			Cwd: n.catalogDir(w.Cwd), Branch: w.Branch, Online: true, Available: true, ProjectID: w.SpaceID, ProjectName: w.SpaceName,
+			PinnedAt: w.PinnedAt}
 		if w.RepoRoot != "" {
 			row.ProjectPath = n.catalogDir(w.RepoRoot)
 		}

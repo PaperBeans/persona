@@ -15,7 +15,7 @@
     <string name="chat_rule_creates_none">「常に」を選んでもルールは保存されず、この行を閉じるだけです。</string>
     <string name="chat_rule_creates_none_setting">「常に」を選んでもルールは保存されず、この行を閉じるだけです。この種の質問に Persona が先に答えるには、hub のあるコンピュータ上のアシスタントの設定ファイルで %1$s をオンにする必要があります。</string>
     <string name="chat_rule_made_trust">ルールを作成しました：この種類のタスクは今後直接開始されます。Web 版の Persona 設定の「記憶した自動開始ルール」に表示され、そこで削除できます。</string>
-    <string name="chat_rule_made_standing">継続的な承認を作成しました。Web 版の Persona 設定の「継続的な承認」に表示され、そこで取り消せます。</string>
+    <string name="chat_rule_made_standing">継続的な承認を追加しました。アシスタントのプロフィールの「継続的な承認」で確認・取り消しできます。</string>
     <string name="chat_rule_made_none">ルールは保存されていません。</string>
     <string name="chat_rule_made_none_setting">ルールは保存されていません。この種の質問に Persona が先に答えるには、hub のあるコンピュータ上のアシスタントの設定ファイルで %1$s をオンにしてください。</string>
     <string name="chat_rule_made_other">ルールを作成しました。</string>

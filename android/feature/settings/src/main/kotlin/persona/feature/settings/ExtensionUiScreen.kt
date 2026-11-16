@@ -231,15 +231,18 @@ fun ExtensionUiPage(extensions: ExtensionManagement?, extensionId: String, uiId:
     // one the extension invalidated (ui.invalidate) at once or when it shows again, and one back from a page pushed on it.
     KeepFresh(model, extensions.uiEvents)
     val view = state.view
-    JListPage(title = view?.title?.takeIf { it.isNotBlank() } ?: title, onBack = onBack, largeTitle = false,
-        refreshing = state.loading && view != null, onRefresh = { scope.launch { model.load() } }) {
-        if (nativeNotice) item("native-unsupported") { JNotice(stringResource(R.string.settings_ext_native_unsupported)) }
-        viewStatus("page", state, onRetry = { scope.launch { model.load() } })
-        if (view != null && view.sections.none { it.items.any(ExtensionViewText::drawable) }) item("page-empty") {
-            JEmptyState(stringResource(R.string.settings_ext_page_empty_title), stringResource(R.string.settings_ext_page_empty_text), icon = PhIcons.PuzzlePiece)
+    // UI version 8: a columns view takes the pane's whole width, as many columns of cards as it has room for
+    ExtensionPageWidth(view) { columns, fullWidth ->
+        JListPage(title = view?.title?.takeIf { it.isNotBlank() } ?: title, onBack = onBack, largeTitle = false,
+            refreshing = state.loading && view != null, onRefresh = { scope.launch { model.load() } }, fullWidth = fullWidth) {
+            if (nativeNotice) item("native-unsupported") { JNotice(stringResource(R.string.settings_ext_native_unsupported)) }
+            viewStatus("page", state, onRetry = { scope.launch { model.load() } })
+            if (view != null && view.sections.none { it.items.any(ExtensionViewText::drawable) }) item("page-empty") {
+                JEmptyState(stringResource(R.string.settings_ext_page_empty_title), stringResource(R.string.settings_ext_page_empty_text), icon = PhIcons.PuzzlePiece)
+            }
+            extensionViewItems("page", state, handle, columns = columns)
+            item("page-end") { Spacer(Tokens.Space.xl) }
         }
-        extensionViewItems("page", state, handle)
-        item("page-end") { Spacer(Tokens.Space.xl) }
     }
 }
 

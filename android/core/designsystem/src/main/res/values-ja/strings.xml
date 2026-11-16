@@ -37,6 +37,7 @@
     <string name="designsystem_collapsed">折りたたみ済み</string>
     <string name="designsystem_retry">再試行</string>
     <string name="designsystem_back">戻る</string>
+    <string name="designsystem_sidebar">サイドバー</string>
     <string name="designsystem_cancel">キャンセル</string>
     <string name="designsystem_close">閉じる</string>
     <string name="designsystem_done">完了</string>

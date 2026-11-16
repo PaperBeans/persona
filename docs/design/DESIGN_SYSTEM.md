@@ -242,6 +242,7 @@ Outside the scale: composer 32 (`Shell.composerRadius`, `apple/Shared/Design/The
 - The conversation kept in view over the pending cards: `voiceThreadRoom` 44 in a voice call, `cardThreadRoom` 72 over a lone question card (section 4.8, #6277).
 - The Mac's pointer over its picture in the app's VNC: at least `pointer` 22 tall, about macOS's own size (`VNCPointerArt`, #3075).
 - Widths: `readable` 560 (web chat column 880, pages 760), sidebar 340/400/480, drawer `min(0.82 x width, 380)` (Android the same).
+- Android regular-window pages keep `Tokens.Size.splitPageMin` (400dp, matching iOS) beside a column. Where the ordinary column and page do not fit, the Assistant sidebar and Agents list overlay a full-width page with the existing scrim; a scrim tap or row pick dismisses it and the existing sidebar control reopens it. Separating hinges retain their existing safe split; compact drawers and wide-window geometry stay unchanged (`docs/android/android-design.md`, section 3.1; #9170).
 - Android rich-message table columns: `RichTextTokens.tableColumnMinimum` 160 dp and `tableColumnMaximum` 220 dp include the cell padding and scale with the message's font size; they do not alter a table that fits the upstream renderer unchanged.
 - `cardColumn` 330 is the minimum logical column width of an adaptive machine card: iOS pt and Android dp, with the shared token's `px` representing each platform's design unit rather than a physical pixel. `spec/tokens/dimension.json` is the cross-platform record; Android reads the generated `Tokens.Size.cardColumn`.
 - Sidebar rows: `Theme.Sidebar` (`apple/Shared/Design/SidebarMetrics.swift`), 44 on iOS; 24/28/32 on Mac; web 32 (touch 44 via a hit-area expander).
@@ -613,7 +614,7 @@ on-demand model panel, not the everyday Assistant home (#6887).
 
 Machine cards use one adaptive row grid on iOS and Android. Measure the actual pane's available content width after page and reading insets, never the physical display or a device-model bucket. With minimum column `cardColumn` 330 and gap `Space.m`, the column count is `floor((contentWidth + gap) / (cardColumn + gap))`, clamped to at least one; insufficient space stays one column instead of squeezing a card. Android inserts one weighted row at a time into the page's existing lazy list, keyed by that row's stable machine ids, rather than nesting a second scrolling grid. Empty slots in a short last row keep their weights. Cards in a row have equal height and their charts align at the bottom. Reordering is a separate concern projection: equal ranks retain source order, so heartbeat and sample changes at the same severity do not move rows or reset reading position.
 
-An extension's dashboard page (web, #9158; UI version 8's `columns` layout, `web/src/views/extensions/ViewBody8.tsx`) is the same kind of grid on the web: the cards are an overview card's surface (`rounded-card`, `bg-surface`, `shadow-card`) with its head inside (the `text-meta` medium title, an optional 14 px icon in its named color before it, the section's link in `text-label` accent with › at its end), `gap-3` between them, and every card in a row as tall as the tallest. The columns follow the page content's width with container queries: one column, two once each card keeps 24rem, three once three do, so 1440 × 900 with the sidebar open has two. 24rem rather than `cardColumn` (21rem): these cards hold lists whose rows carry a value or a badge at their end, and at 21rem a third column cuts their titles short at desktop widths. A card that spans the row takes all columns. Inside a card that asks for it, rows go two a line from 36rem of card (three from 54rem) without hairlines between them, and stack with hairlines below that. Why a grid and not masonry: the reading order stays the narrow screen's order, left to right then down.
+An extension's dashboard page (web, #9158; UI version 8's `columns` layout, `web/src/views/extensions/ViewBody8.tsx`) is the same kind of grid on the web: the cards are an overview card's surface (`rounded-card`, `bg-surface`, `shadow-card`) with its head inside (the `text-meta` medium title, an optional 14 px icon in its named color before it, the section's link in `text-label` accent with › at its end), `gap-3` between them, and every card in a row as tall as the tallest. The columns follow the page content's width with container queries: one column, two once each card keeps 24rem, three once three do, so 1440 × 900 with the sidebar open has two. 24rem rather than `cardColumn` (21rem): these cards hold lists whose rows carry a value or a badge at their end, and at 21rem a third column cuts their titles short at desktop widths. A card that spans the row takes all columns. Inside a card that asks for it, rows go two a line from 36rem of card (three from 54rem) without hairlines between them, and stack with hairlines below that. Why a grid and not masonry: the reading order stays the narrow screen's order, left to right then down. Android (#9158) draws the same page with the native rule above (`cardColumn` and `Space.m`, at most three columns, a phone one, drawn as the stack): the page measures its pane, a columns view takes the pane's whole width (`JListPage` `fullWidth`), and each row of cards is one item of the page's lazy list, every card the section's group panel (`JGroupItem`) with its head inside (an icon in its named color, the `headline` title, the link a quiet `JButton`) as tall as the row's tallest. A section's rows go side by side where each keeps `cardColumn`.
 
 The web task plan's workspace row (#3659) reuses the assistant form `fieldClass`, native labelled selects/inputs, and
 the existing plan Edit dialog. The compact policy choice stays on the plan card because it authorizes where a task
@@ -702,6 +703,13 @@ opaque routing IDs and read diagnostics stay in details. The layout changes no
 sending identity or confirmation behavior.
 
 ### 3.4 Lists and rows
+
+- **Native workspace pins** (#9300): the Agents workspace tree shows a host-pinned workspace with the existing pin mark,
+  ordered before its unpinned siblings (newest pin first, then the existing stable order). Its repository moves ahead
+  of unpinned repositories. Match the exact machine/source/workspace identity, never the folder or project name; empty
+  pinned workspaces and their unloaded, unarchived conversations remain available. Search and state filters still apply
+  and explicit folds remain under the user's control. The source app changes these pins; Persona's session/project
+  preferences and Assistant directions stay independent (`docs/integrations/paseo.md`, "Pinned workspaces").
 
 - Tiles (an extension's `grid` and `carousel`, `ExtensionTiles.swift`, #827): `Theme.Radius.card` on the chip fill, `Theme.Size.tileMin` / `tileHeight` / `tileNarrow` / `tileRegular`; one that is on takes its named color's tint and a ring of it, the words never take the color.
 
@@ -1178,6 +1186,13 @@ Where a conversation scrolls under the chrome that floats over it, the content f
 - No solid band of page color over content, and no material under a chat's footer: on the solid page the page color alone shows what a mask would, without a tinted strip where nothing is behind it. A page that is not one solid color needs a mask instead.
 
 ### 3.13 Watch-face complications
+
+Extension progress in `accessory_circular` uses a system circular capacity gauge. Its center shows the label on one
+line, or the percentage for an empty label. Only this center text is capped at
+`ExtensionSurfaceTokens.circularLabelLargestTypeSize` (`.xxxLarge`, matching `Theme.interfaceLargestTypeSize`) and
+shrinks to `ExtensionSurfaceTokens.circularLabelMinimumScale` when needed to fit the fixed ring.
+VoiceOver reads the label and percentage; finite ratios are clamped to 0–1 and nonfinite ratios become zero.
+Other extension widget families retain their existing progress view.
 
 The watch widget extension doesn't build `Theme`, so complications take their fonts, marks and colors from `WatchFaceTokens` (`apple/Shared/Design/WatchFaceTokens.swift`, the documented fixed-size exception in 2.2), whose symbols mirror `Theme.Icon` with an `// icon:` note. A complication only draws what its app last wrote (a snapshot file in the watch App Group); all-day recording reloads only its own kind's timeline (`AllDaySnapshot.widgetKind`), not the other faces'.
 

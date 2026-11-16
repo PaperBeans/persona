@@ -21,6 +21,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -73,7 +74,13 @@ internal class PaneSplitStore(context: Context) {
  * [tab] keeps the share the user left in [store]; null (the settings sheet) keeps it only while the panes are shown.
  */
 @Stable
-internal class PaneSplitter(private val tab: AppTab?, private val store: PaneSplitStore?, collapsible: Boolean) {
+internal class PaneSplitter(
+    private val tab: AppTab?,
+    private val store: PaneSplitStore?,
+    collapsible: Boolean,
+    initialCollapsed: Boolean = false,
+    private val onCollapsedChange: ((Boolean) -> Unit)? = null,
+) {
     var collapseEnabled by mutableStateOf(collapsible)
     /** The panes' area, in dp, and the vertical folds across it (dp from its left edge). */
     var width by mutableFloatStateOf(0f)
@@ -83,7 +90,7 @@ internal class PaneSplitter(private val tab: AppTab?, private val store: PaneSpl
     var share by mutableStateOf(tab?.let { store?.share(it) })
         private set
     /** The user dragged the list closed; it shows again whenever nothing is open beside it. */
-    var collapsed by mutableStateOf(false)
+    var collapsed by mutableStateOf(initialCollapsed)
         private set
     /** The list's width while it is dragged or settles. */
     var at by mutableFloatStateOf(0f)
@@ -139,18 +146,24 @@ internal class PaneSplitter(private val tab: AppTab?, private val store: PaneSpl
         if (ticks.reached(at, split.snaps, canCollapse)) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
     }
 
+    private fun setCollapsed(value: Boolean, notify: Boolean) {
+        if (collapsed == value) return
+        collapsed = value
+        if (notify) onCollapsedChange?.invoke(value)
+    }
+
     /** Let go: onto a flat fold nearby, where it is, or (dragged far left) the list closes. */
     fun stop(state: PaneExpansionState, velocityPx: Float, scope: CoroutineScope) {
         if (!moving) return
         val target = settleDivider(at, width, split.snaps, canCollapse)
         if (target == null) {
             generation++
-            collapsed = true
+            setCollapsed(true, notify = true)
             moving = false
             apply(state, 0f)
             return
         }
-        collapsed = false
+        setCollapsed(false, notify = true)
         settleTo(state, target, velocityPx / density, scope)
     }
 
@@ -193,7 +206,7 @@ internal class PaneSplitter(private val tab: AppTab?, private val store: PaneSpl
         generation++
         settling?.cancel()
         moving = false
-        collapsed = true
+        setCollapsed(true, notify = true)
         apply(state, 0f)
     }
 
@@ -201,7 +214,7 @@ internal class PaneSplitter(private val tab: AppTab?, private val store: PaneSpl
         generation++
         settling?.cancel()
         moving = false
-        collapsed = false
+        setCollapsed(false, notify = true)
         apply(state, restingLeft())
     }
 }
@@ -223,12 +236,17 @@ internal fun rememberShellListDetail(
     store: PaneSplitStore?,
     collapsible: Boolean,
     keepScaffoldWhenSingle: Boolean = false,
+    initialCollapsed: Boolean = false,
+    onCollapsedChange: ((Boolean) -> Unit)? = null,
 ): ListDetailSceneStrategy<NavKey> {
     val density = LocalDensity.current.density
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     val state = rememberPaneExpansionState()
-    val splitter = remember(tab, store) { PaneSplitter(tab, store, collapsible) }
+    val currentOnCollapsedChange by rememberUpdatedState(onCollapsedChange)
+    val splitter = remember(tab, store) {
+        PaneSplitter(tab, store, collapsible, initialCollapsed) { currentOnCollapsedChange?.invoke(it) }
+    }
     // The inputs change only with the window, its folds and what is open; the scaffold follows them at once.
     SideEffect {
         splitter.density = density

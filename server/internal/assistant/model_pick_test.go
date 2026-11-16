@@ -729,3 +729,23 @@ func TestRelayedMessagesAndTheSupervisorRunOnTheirModel(t *testing.T) {
 		t.Fatalf("relayed to the supervisor on its pick: %v", p)
 	}
 }
+
+// A conversation a scheduled task started follows Model configuration › Main chat on every message, also once it is no
+// task's current conversation (the apps draw that default for every conversation of origin task, #9248); the same
+// conversation keeps running on its own pick once it has one.
+func TestTaskStartedConversationFollowsMainChat(t *testing.T) {
+	s, f := pickFixture(t)
+	ctx := context.Background()
+	f.setSessions("server", proto.Session{SessionID: "main", Assistant: true, Launcher: "gw"},
+		proto.Session{SessionID: "old-task", Assistant: true, Launcher: "cx", Model: "gpt-5"})
+	s.originSet(ctx, "server", "old-task", OriginTask, "task_gone", "")
+	if p, err := send(t, s, "old-task", map[string]any{}); err != nil || p["launcher"] != "gw" {
+		t.Fatalf("a task's old conversation follows Main chat, not what it ran: %v %v", p, err)
+	}
+	if r := putPick(t, s, "old-task", `{"launcher":"claude","model":"opus"}`); r.Code != 200 {
+		t.Fatalf("PUT: %d %s", r.Code, r.Body.String())
+	}
+	if p, err := send(t, s, "old-task", map[string]any{}); err != nil || p["launcher"] != "claude" || p["model"] != "opus" {
+		t.Fatalf("on its pick: %v %v", p, err)
+	}
+}

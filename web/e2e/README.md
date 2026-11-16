@@ -1,5 +1,17 @@
 # Bounded Agents list verification
 
+## Paseo workspace pins
+
+```sh
+node web/e2e/paseo-workspace-pins.mjs <loopback-web-origin> <artifact-directory> [Chromium-executable]
+```
+
+Uses the real Agents page and sidebar against an owned local web server, with all hub HTTP and WebSocket requests
+answered by synthetic data. Checks a pinned empty workspace ahead of its main sibling and an unrelated repository,
+refreshes an unpin, and verifies that selection, disclosure and Persona's separate session pin survive. Covers desktop
+and phone widths, light and dark, and standard and large text. No preference or Agent writes are allowed. Screenshots
+and `results.json` are written outside the repository; a 180-second watchdog bounds the run.
+
 ## Direct completion of a decision task
 
 ```sh

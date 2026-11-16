@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import persona.android.navigation.PaneHinge
+import persona.android.navigation.PaneSplits
 import persona.android.navigation.sidebarSplit
 import persona.core.designsystem.JSidebarColumn
 
@@ -18,11 +19,14 @@ internal fun AssistantPaneFrame(
     modifier: Modifier = Modifier,
     sidebar: (@Composable () -> Unit)?,
     hinges: List<PaneHinge>,
+    overlay: Boolean = false,
+    onDismiss: () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
         val split = sidebarSplit(maxWidth.value, hinges)
         JSidebarColumn(if (regular && showSidebar) sidebar else null,
-            width = split.sidebar.dp, pageStart = split.page.dp, shown = shown, content = content)
+            width = (if (overlay) PaneSplits.DefaultLeft else split.sidebar).dp, pageStart = split.page.dp,
+            shown = shown, overlay = overlay, onDismiss = onDismiss, content = content)
     }
 }

@@ -84,6 +84,8 @@ fun EntryProviderScope<NavKey>.agentsEntries(
     connectionSettingsContent: @Composable () -> Unit = { PlaceholderScreen(stringResource(R.string.agents_connection_settings)) },
     /** Whether a hub lists terminal panes (feature terminal_panes): the list menu then opens "Terminal". */
     terminalPanes: kotlinx.coroutines.flow.Flow<Boolean> = flowOf(false),
+    /** Only the list's picks may replace an overlaid root detail; shared destinations use [navigator]. */
+    listNavigator: Navigator = navigator,
 ) {
     entry<AgentsRoute> {
         val context = LocalContext.current.applicationContext
@@ -141,7 +143,7 @@ fun EntryProviderScope<NavKey>.agentsEntries(
             }
             val groups by dependencies.groups().groups.collectAsStateWithLifecycle()
             val panes by terminalPanes.collectAsStateWithLifecycle(false)
-            AgentsScreen(model, navigator, metadata.copy(rows = rows), creationModel, onMachineSelected, groups, panes)
+            AgentsScreen(model, listNavigator, metadata.copy(rows = rows), creationModel, onMachineSelected, groups, panes)
         }
     }
     entry<ConnectionSettingsRoute> { connectionSettingsContent() }

@@ -484,7 +484,9 @@ export function agentRow(agent, o = {}) {
   if (space && typeof agent.workspaceId === 'string' && agent.workspaceId) row.slot_name = slotNameOf(p, cwd)
   // The workspace itself, by id: the node keeps it on the row of the engine's runtime, and the apps tie the session to
   // that workspace's row in the catalog (runtime.workspaces, workspaceRow), agents in it or not.
-  if (typeof agent.workspaceId === 'string' && SESSION_ID.test(agent.workspaceId)) row.workspace_id = agent.workspaceId
+  // Retained archived transcripts are history, not current workspace members. A native workspace pin must not
+  // bring them back beside its unarchived chats; resuming restores membership from Paseo's active record.
+  if (!o.archived && typeof agent.workspaceId === 'string' && SESSION_ID.test(agent.workspaceId)) row.workspace_id = agent.workspaceId
   // Its repository, for "By repo" (#2840): Paseo keeps its worktrees under its own folder, where the path names none.
   // By its physical directory (#4492), as the node names the working tree: a repository whose sessions write its path
   // two ways (a home behind a symbolic link) is two projects in the apps.
@@ -575,7 +577,17 @@ export function workspaceRow(d, o = {}) {
   if (kind === 'worktree' && (Boolean(d.worktreeSlug) || d.gitRuntime?.isPaseoOwnedWorktree === true || p?.checkout?.isPaseoOwnedWorktree === true)) {
     row.owned = true
   }
+  const pin = workspacePinTime(d)
+  if (pin) row.pinned_at = pin
   return row
+}
+
+/** Paseo's native workspace pin, normalized for the catalog; absent on old daemons and cleared with null. */
+export function workspacePinTime(d) {
+  const value = d?.pinnedAt
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return undefined
+  const at = Date.parse(value)
+  return Number.isFinite(at) ? new Date(at).toISOString() : undefined
 }
 
 /**

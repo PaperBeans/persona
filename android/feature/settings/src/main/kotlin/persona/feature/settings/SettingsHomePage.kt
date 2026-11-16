@@ -36,6 +36,7 @@ internal fun SettingsHomePage(
     val assistantEntries = listOfNotNull(
         entry(SettingsPage.ModelConfig, R.string.settings_home_models, PersonaIcons.memory, R.string.settings_home_models_detail, R.string.settings_search_models_aliases),
         onNavigate?.let { HomeEntry(AssistantSettingsRoute, R.string.settings_row_assistant, PersonaIcons.ai, R.string.settings_row_assistant_subtitle) },
+        entry(SettingsPage.StandingAuthorizations, R.string.settings_standing_title, PersonaIcons.privacy, aliases = R.string.settings_standing_search_aliases),
         entry(SettingsPage.Connectors, R.string.settings_section_connectors, PersonaIcons.link, R.string.settings_home_connectors_detail, R.string.settings_search_connectors_aliases),
         // Inbox Sources (#5308): the same pages as the Inbox menu, every source, once the hub reports inbox_sources.
         if (!inboxSources) null else HomeEntry(

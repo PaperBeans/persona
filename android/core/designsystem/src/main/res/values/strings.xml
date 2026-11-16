@@ -44,6 +44,7 @@
     <string name="designsystem_collapsed">Collapsed</string>
     <string name="designsystem_retry">Retry</string>
     <string name="designsystem_back">Back</string>
+    <string name="designsystem_sidebar">Sidebar</string>
     <string name="designsystem_cancel">Cancel</string>
     <string name="designsystem_close">Close</string>
     <string name="designsystem_done">Done</string>

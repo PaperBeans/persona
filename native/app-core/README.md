@@ -36,7 +36,7 @@ emulator results never fill the physical-device column.
 | `sort` / `state` / `recents` | 30 sort, 13 state and 21 recents cases | Sort 30; state/recents not implemented | Sort smoke only; state/recents not implemented | Sort 30 on macOS (#8952); state/recents not implemented | Sort 30 + state 13; recents not implemented | Sort is compiled for OHOS but its actual NAPI invocation is not measured; state/recents have no NAPI export | Native / native + DEBUG sort shadow (#8954) / **core Agents-list sort in production** (#8957, #8966, #9066); no state/recents migration | No domain-specific physical run; acceptance blocked |
 | `turns` / `task_index` | 57 static turn cases and five task-index cases + receipt; four operation cases have host-JNI coverage | Turns 57 + 10 operation checkpoints; task index 5 + receipt | Turns 57; task index 5 + receipt | Turns 57; task index 5 + receipt on macOS (#8952) | Turns 57 + 10 operation checkpoints (#9235); task index 5 + receipt | Turns and task-index NAPI unexecuted; host turns is not #8808's Linux loader | Native everywhere | No domain-specific physical run; acceptance blocked |
 | `answer` | 15 question + 9 recommendation cases (#9233), including newline / NBSP / TAB trimming | Full 15 + 9 | Full 15 + 9 | Full 15 + 9 on macOS (#8952 plus #9233) | Full 15 + 9 through host projection | Not measured | Native everywhere | No domain-specific physical run; acceptance blocked |
-| `stream_chunks` / `stream_repair` | Split 21; repair covers fence, table and final-marker source-derived assertions | Split 21; repair 21 fence + 6 end, 22 table + 15 end, and 14 final-marker expectations | Split 21; repair not implemented | Split 21 on macOS; repair not implemented | Split 21; repair not implemented | Split NAPI unexecuted; repair NAPI not implemented | Native everywhere | No domain-specific physical run; acceptance blocked |
+| `stream_chunks` / `stream_repair` | Split 21; repair covers fence, table, final-marker and inline source-derived assertions | Split 21; repair 21 fence + 6 end, 22 table + 15 end, 14 final-marker, 51 explicit inline + 13 boundary expectations and 342 mixed-reply prefixes | Split 21; repair not implemented | Split 21 on macOS; repair not implemented | Split 21; repair not implemented | Split NAPI unexecuted; repair NAPI not implemented | Native everywhere | No domain-specific physical run; acceptance blocked |
 | `viewed_images` | Source-derived ordinary/folded leaf and turn ownership | Ordinary/folded leaf plus identity, ordering and error controls | Ordinary + folded complete objects (#9017) | 28 complete objects + 8 no-line boundaries on macOS (#9237 / #9246) | Not implemented | Not implemented; no NAPI export | Native everywhere | No domain-specific physical run; acceptance blocked |
 
 `scripts/ci/core.sh` exercises the cargo, C ABI and ArkTS-host columns, including generated-codec and OHOS declaration
@@ -47,9 +47,9 @@ cannot rerun them. Those reports used later Xcode versions, so Xcode 26.0 remain
 generated Swift type, a compiled OHOS feature or a host fake is not itself a replay result.
 
 The StreamRepair boundary is deliberately narrower than full Markdown repair: fence recognition/repair, the bounded
-table scanner and final unfinished block-marker hold-back have cargo and real host-JNI evidence. Inline markup, math,
-`plainOpenFence`, rendering, timing/coalescing and production adapters remain out of scope; no C, SwiftPM, ArkTS-host
-or real-NAPI repair replay exists. #8227 was a duplicate-key snapshot correctness bug and is closed. It does not close
+table scanner, final unfinished block-marker hold-back and scalar inline repair have cargo and real host-JNI evidence.
+The `.math` end state, `plainOpenFence`, rendering, timing/coalescing and production adapters remain out of scope; no
+C, SwiftPM, ArkTS-host or real-NAPI repair replay exists. #8227 was a duplicate-key snapshot correctness bug and is closed. It does not close
 the separate Android performance follow-up: #9048's lock-free dispatch and owned-JNI-byte hand-off have overlapping
 host A/B distributions, and the original emulator / device go/no-go evidence remains unresolved as recorded in the plan.
 
@@ -114,7 +114,12 @@ stated repaired strings and six explicit code/text end cases from Apple's tests,
 partial markers and malformed/wrong-expected controls. The final-marker hold-back (#9084) replays all 13 Apple
 `markersOnly` cases/controls plus digit boundaries. Table repair (#9164) replays all 22 repair and 15 table/text end
 assertions from Apple's table-related tests, including half-written rows, early delimiter rows, list indentation and
-lazy-line exclusion. Inline markup, math and `plainOpenFence` are not implemented.
+lazy-line exclusion. Inline repair (#9286) replays all 51 explicit Apple inline-related assertions and 13 separate
+source-derived boundary controls. Its scalar scanner follows emphasis/strikethrough flanking, code spans,
+links/images, escapes, bare/autolinks and inline-formula skipping. All 342 Unicode-scalar prefixes of Apple's mixed
+reply are replayed through real stream-chunks JNI into stream-repair JNI, preserving each completed-line prefix and
+leaving the finished reply unchanged. Display math is recognized to keep inline repair
+out of it. The `.math` end state and `plainOpenFence` are not implemented.
 The answer replay (#8838) calls `projectAnswer` and `displayAnswer` through real Kotlin/JNI for all 15 question and
 9 recommendation cases. It compares complete existing expected objects with their conditional fields and checks invalid
 input, a wrong expectation and the U+200B boundary. #9233 adds a ninth recommendation for newline / NBSP / TAB

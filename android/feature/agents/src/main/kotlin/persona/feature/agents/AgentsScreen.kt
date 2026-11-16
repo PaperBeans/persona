@@ -153,6 +153,12 @@ internal fun AgentsScreen(
     }
     var now by remember { mutableStateOf(Instant.now()) }
     val lifecycle = LocalLifecycleOwner.current
+    val workspaceService = LocalAgentCreationService.current
+    LaunchedEffect(lifecycle, model, workspaceService) {
+        lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            model.watchWorkspaceCatalog(workspaceService)
+        }
+    }
     LaunchedEffect(lifecycle) {
         lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) { now = Instant.now(); delay(1_000) }
@@ -588,10 +594,11 @@ internal fun AgentsScreen(
                                         WorktreeTally.Idle -> stringResource(persona.core.designsystem.R.string.designsystem_worktree_idle)
                                         is WorktreeTally.Agents -> pluralStringResource(persona.core.designsystem.R.plurals.designsystem_tab_agents, tally.count, tally.count)
                                     }
-                                }, quiet = entry.quiet, offline = line?.offline == true)
+                                }, quiet = entry.quiet, offline = line?.offline == true, pinned = line?.pinned == true)
                         } else if (entry.space) AgentSpaceHeader(groupTitle, group.folded, { model.fold(group) }, depth = entry.depth, first = entry.first,
                             quiet = entry.quiet, sessions = group.totalCount ?: group.rows.size, counts = group.headingCounts,
                             waiting = group.waitingInBackground, flags = buildList {
+                                if (group.worktree?.pinned == true) add(RowFlag(stringResource(R.string.agents_row_pinned), PersonaIcons.pinned))
                                 if (space != null && space.preferenceKey in page.preferences.pins.spaces) add(RowFlag(stringResource(R.string.agents_flag_space_pinned), PhIcons.PushPin))
                                 if (space != null && space.preferenceKey in page.preferences.mutes.spaces) add(RowFlag(stringResource(R.string.agents_flag_space_muted), PhIcons.Prohibit))
                                 // iOS TodoSpaceTag: the project is on a to-do.

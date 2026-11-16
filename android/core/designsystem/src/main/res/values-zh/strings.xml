@@ -37,6 +37,7 @@
     <string name="designsystem_collapsed">已收起</string>
     <string name="designsystem_retry">重试</string>
     <string name="designsystem_back">返回</string>
+    <string name="designsystem_sidebar">侧边栏</string>
     <string name="designsystem_cancel">取消</string>
     <string name="designsystem_close">关闭</string>
     <string name="designsystem_done">完成</string>

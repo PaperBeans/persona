@@ -1,6 +1,7 @@
-//! Fence, table and final-block-marker projection of Apple's `StreamRepair.repair` and its end state.
+//! Bounded fence, table, final-block-marker and inline projection of Apple's `StreamRepair` and its end state.
 //!
-//! This deliberately does not implement inline markup, math blocks, rendering or `plainOpenFence`.
+//! Display math is recognized only to keep it out of inline repair; `.math` end reporting, rendering and
+//! `plainOpenFence` are not implemented.
 
 use serde::{Deserialize, Serialize};
 
@@ -183,7 +184,8 @@ struct Scan<'a> {
     lines: Vec<&'a str>,
     ends_with_newline: bool,
     fence: Option<Fence>,
-    closed_last: bool,
+    math_open: bool,
+    closed_last: Option<&'static str>,
     block_start: usize,
 }
 
@@ -193,7 +195,8 @@ impl<'a> Scan<'a> {
         let lines = text.split_terminator('\n').collect::<Vec<_>>();
         let ends_with_newline = text.ends_with('\n');
         let mut fence: Option<Fence> = None;
-        let mut closed_last = false;
+        let mut math_end: Option<&str> = None;
+        let mut closed_last = None;
         let mut block_start = 0;
         for (index, line) in lines.iter().enumerate() {
             let value = trimmed(line);
@@ -201,7 +204,15 @@ impl<'a> Scan<'a> {
                 if closes(open, value) {
                     fence = None;
                     block_start = index + 1;
-                    closed_last = index + 1 == lines.len();
+                    closed_last = (index + 1 == lines.len()).then_some("code");
+                }
+                continue;
+            }
+            if let Some(end) = math_end {
+                if value == end {
+                    math_end = None;
+                    block_start = index + 1;
+                    closed_last = (index + 1 == lines.len()).then_some("math-isolated");
                 }
                 continue;
             }
@@ -214,6 +225,11 @@ impl<'a> Scan<'a> {
                 block_start = index;
                 continue;
             }
+            if columns(line) < 4 && matches!(value, "$$" | "\\[") {
+                math_end = Some(if value == "$$" { "$$" } else { "\\]" });
+                block_start = index;
+                continue;
+            }
             if value.is_empty() {
                 block_start = index + 1;
             }
@@ -222,6 +238,7 @@ impl<'a> Scan<'a> {
             lines,
             ends_with_newline,
             fence,
+            math_open: math_end.is_some(),
             closed_last,
             block_start,
         }
@@ -299,6 +316,51 @@ impl<'a> Scan<'a> {
             is_delimiterish(trimmed(self.lines[last]))
         };
         valid.then_some(Table { header, divided: false })
+    }
+
+    /// The last leaf block: Apple's startsBlock boundary, with a heading ending at its own line.
+    fn repair_inlines(&self, text: &str) -> Option<String> {
+        let last = self.lines.len() - 1;
+        if self.block_start > last {
+            return None;
+        }
+        let mut first = self.block_start;
+        for index in (self.block_start..=last).rev() {
+            let value = trimmed(self.lines[index]);
+            if starts_block(value) {
+                first = if is_heading(value) && index < last {
+                    index + 1
+                } else {
+                    index
+                };
+                break;
+            }
+        }
+        if columns(self.lines[self.block_start]) >= 4
+            && !self.lines[..self.block_start]
+                .iter()
+                .any(|line| starts_list_item(trimmed(line)))
+        {
+            return None;
+        }
+        let scalars = text.chars().collect::<Vec<_>>();
+        let lo = self.scalar_offset(first);
+        let last_lo = self.scalar_offset(last);
+        let end = text.trim_end_matches(is_space_like).chars().count();
+        if end <= last_lo {
+            return None;
+        }
+        InlineRepair {
+            scalars,
+            lo,
+            last_lo,
+            end,
+        }
+        .repaired()
+    }
+
+    fn scalar_offset(&self, line: usize) -> usize {
+        self.lines[..line].iter().map(|line| line.chars().count() + 1).sum()
     }
 
     /// Hold back a half-written last row, or add the header's delimiter with the header's indentation.
@@ -402,7 +464,7 @@ fn project_repair(text: &str) -> String {
         }
         return format!("{text}{}{marker}", if scan.ends_with_newline { "" } else { "\n" });
     }
-    if scan.closed_last {
+    if scan.math_open || scan.closed_last.is_some() {
         return text.to_owned();
     }
     if let Some(table) = scan.repair_table(text) {
@@ -411,7 +473,7 @@ fn project_repair(text: &str) -> String {
     if scan.table().is_some() || scan.ends_with_newline {
         return text.to_owned();
     }
-    hold_markers(text).unwrap_or_else(|| text.to_owned())
+    hold_markers(text).unwrap_or_else(|| scan.repair_inlines(text).unwrap_or_else(|| text.to_owned()))
 }
 
 fn project_end(text: &str) -> &'static str {
@@ -422,8 +484,16 @@ fn project_end(text: &str) -> &'static str {
         return project_end(shorter);
     }
     let scan = Scan::new(text);
-    if scan.fence.is_some() || scan.closed_last && !scan.ends_with_newline {
-        "code"
+    if scan.fence.is_some() {
+        return "code";
+    }
+    if let Some(closed) = scan.closed_last {
+        if scan.ends_with_newline || closed == "math-isolated" {
+            // A closed formula stays out of inline repair, but this bounded end projection does not implement `.math`.
+            "text"
+        } else {
+            closed
+        }
     } else if scan.table().is_some() {
         "table"
     } else {
@@ -431,7 +501,389 @@ fn project_end(text: &str) -> &'static str {
     }
 }
 
-/// Repairs only fences and tables, and reports this slice's prose/code/table end state.
+fn starts_block(line: &str) -> bool {
+    starts_non_table_block(line) || line.starts_with('|')
+}
+
+fn is_space_like(character: char) -> bool {
+    matches!(character, ' ' | '\t' | '\r' | '\n')
+        || unicode_general_category::get_general_category(character)
+            == unicode_general_category::GeneralCategory::SpaceSeparator
+}
+
+fn is_markdown_punctuation(character: char) -> bool {
+    if character.is_ascii() {
+        return "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~".contains(character);
+    }
+    use unicode_general_category::GeneralCategory;
+    matches!(
+        unicode_general_category::get_general_category(character),
+        GeneralCategory::ConnectorPunctuation
+            | GeneralCategory::DashPunctuation
+            | GeneralCategory::OpenPunctuation
+            | GeneralCategory::ClosePunctuation
+            | GeneralCategory::InitialPunctuation
+            | GeneralCategory::FinalPunctuation
+            | GeneralCategory::OtherPunctuation
+    )
+}
+
+/// Apple's InlineRepair works on a Unicode-scalar array. Keep its indices and control flow here, then collect the
+/// scalar slices back into UTF-8. In particular, the same-line destination finder is not nested or escape-aware.
+struct InlineRepair {
+    scalars: Vec<char>,
+    lo: usize,
+    last_lo: usize,
+    end: usize,
+}
+
+#[derive(Debug)]
+struct Opener {
+    character: char,
+    count: usize,
+    at: usize,
+}
+
+struct InlineCode {
+    closer: String,
+}
+
+#[derive(Clone, Copy)]
+struct InlineLink {
+    cut: usize,
+    text: (usize, usize),
+}
+
+impl InlineRepair {
+    fn run(&self, character: char, index: usize) -> usize {
+        let mut end = index;
+        while end < self.end && self.scalars[end] == character {
+            end += 1;
+        }
+        end - index
+    }
+
+    fn line_end(&self, start: usize) -> usize {
+        (start..self.end)
+            .find(|index| self.scalars[*index] == '\n')
+            .unwrap_or(self.end)
+    }
+
+    fn find(&self, first: char, second: Option<char>, start: usize) -> Option<usize> {
+        let stop = self.line_end(start);
+        (start..stop).find(|index| {
+            self.scalars[*index] == first
+                && second.is_none_or(|next| *index + 1 < stop && self.scalars[*index + 1] == next)
+        })
+    }
+
+    fn find_run(&self, character: char, count: usize, start: usize) -> Option<usize> {
+        let mut index = start;
+        while index < self.end {
+            if self.scalars[index] != character {
+                index += 1;
+                continue;
+            }
+            let n = self.run(character, index);
+            if n == count {
+                return Some(index);
+            }
+            index += n;
+        }
+        None
+    }
+
+    fn closing_dollar(&self, start: usize) -> Option<usize> {
+        let stop = self.line_end(start);
+        let mut index = start;
+        while index < stop {
+            if self.scalars[index] == '\\' {
+                index += 2;
+                continue;
+            }
+            if self.scalars[index] == '$' {
+                let before_digit = index + 1 < stop && self.scalars[index + 1].is_ascii_digit();
+                return (!is_space_like(self.scalars[index - 1]) && !before_digit).then_some(index);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    fn url_end(&self, index: usize) -> Option<usize> {
+        let scheme = ["https://", "http://"].into_iter().find(|scheme| {
+            let chars = scheme.chars().collect::<Vec<_>>();
+            index + chars.len() <= self.end
+                && self.scalars[index..index + chars.len()]
+                    .iter()
+                    .zip(chars)
+                    .all(|(actual, expected)| actual.to_lowercase().to_string() == expected.to_string())
+        })?;
+        let mut end = index + scheme.len();
+        while end < self.end
+            && !is_space_like(self.scalars[end])
+            && self.scalars[end].is_ascii()
+            && !"<>]`".contains(self.scalars[end])
+        {
+            end += 1;
+        }
+        Some(end)
+    }
+
+    fn flanking(&self, character: char, index: usize, count: usize) -> (bool, bool) {
+        let previous = (index > self.lo).then(|| self.scalars[index - 1]);
+        let next = (index + count < self.end).then(|| self.scalars[index + count]);
+        let previous_space = previous.is_none_or(is_space_like);
+        let next_space = next.is_none_or(is_space_like);
+        let previous_punctuation = previous.is_some_and(is_markdown_punctuation);
+        let next_punctuation = next.is_some_and(is_markdown_punctuation);
+        let left = !next_space && (!next_punctuation || previous_space || previous_punctuation);
+        let right = !previous_space && (!previous_punctuation || next_space || next_punctuation);
+        if character == '_' {
+            (
+                left && (!right || previous_punctuation),
+                right && (!left || next_punctuation),
+            )
+        } else {
+            (left, right)
+        }
+    }
+
+    fn followed_by_text(&self, start: usize, cut: usize, code: Option<&InlineCode>, link: Option<InlineLink>) -> bool {
+        if code.is_some() {
+            return true;
+        }
+        fn text(scalars: &[char], start: usize, end: usize) -> bool {
+            start < end
+                && scalars[start..end]
+                    .iter()
+                    .any(|c| !is_space_like(*c) && !"*_~`".contains(*c))
+        }
+        if let Some(link) = link {
+            return text(&self.scalars, start, link.cut) || text(&self.scalars, start.max(link.text.0), link.text.1);
+        }
+        text(&self.scalars, start, cut)
+    }
+
+    fn repaired(&self) -> Option<String> {
+        let mut openers: Vec<Opener> = Vec::new();
+        let mut brackets: Vec<(usize, bool)> = Vec::new();
+        let mut mixed = Vec::new();
+        let mut code = None;
+        let mut link = None;
+        let mut stopped = false;
+        let mut cut = self.end;
+        let mut index = self.lo;
+        'scan: while index < self.end {
+            let character = self.scalars[index];
+            match character {
+                '\\' => {
+                    if index + 1 >= self.end {
+                        index += 1;
+                        continue;
+                    }
+                    if self.scalars[index + 1] == '(' {
+                        if let Some(end) = self.find('\\', Some(')'), index + 2) {
+                            index = end + 2;
+                            continue;
+                        }
+                        if index >= self.last_lo {
+                            stopped = true;
+                            break 'scan;
+                        }
+                    }
+                    index += 2;
+                }
+                '`' => {
+                    let count = self.run(character, index);
+                    if let Some(end) = self.find_run(character, count, index + count) {
+                        index = end + count;
+                        continue;
+                    }
+                    if index >= self.last_lo && index + count < self.end && !is_space_like(self.scalars[index + count])
+                    {
+                        code = Some(InlineCode {
+                            closer: "`".repeat(count),
+                        });
+                        stopped = true;
+                        break 'scan;
+                    }
+                    index += count;
+                }
+                '$' => {
+                    if index + 1 < self.end && self.scalars[index + 1] == '$' {
+                        if let Some(end) = self.find('$', Some('$'), index + 2) {
+                            index = end + 2;
+                            continue;
+                        }
+                        if index >= self.last_lo {
+                            stopped = true;
+                            break 'scan;
+                        }
+                        index += 2;
+                        continue;
+                    }
+                    if index + 1 < self.end
+                        && !is_space_like(self.scalars[index + 1])
+                        && !self.scalars[index + 1].is_ascii_digit()
+                    {
+                        if let Some(end) = self.closing_dollar(index + 1) {
+                            index = end + 1;
+                            continue;
+                        }
+                        if index >= self.last_lo {
+                            stopped = true;
+                            break 'scan;
+                        }
+                    }
+                    index += 1;
+                }
+                'h' | 'H' => {
+                    if (index == self.lo || !self.scalars[index - 1].is_ascii_alphanumeric())
+                        && let Some(end) = self.url_end(index)
+                    {
+                        index = end;
+                        continue;
+                    }
+                    index += 1;
+                }
+                '<' => {
+                    if let Some(end) = self.find('>', None, index + 1)
+                        && !self.scalars[index + 1..end].iter().any(|c| is_space_like(*c))
+                    {
+                        index = end + 1;
+                        continue;
+                    }
+                    index += 1;
+                }
+                '[' => {
+                    brackets.push((index, index > self.lo && self.scalars[index - 1] == '!'));
+                    index += 1;
+                }
+                ']' => {
+                    let Some((at, image)) = brackets.pop() else {
+                        index += 1;
+                        continue;
+                    };
+                    if index + 1 < self.end && self.scalars[index + 1] == '(' {
+                        if let Some(end) = self.find(')', None, index + 2) {
+                            index = end + 1;
+                            continue;
+                        }
+                        if at >= self.last_lo {
+                            link = Some(InlineLink {
+                                cut: if image { at - 1 } else { at },
+                                text: (at + 1, index),
+                            });
+                            stopped = true;
+                            break 'scan;
+                        }
+                        index += 2;
+                        continue;
+                    }
+                    if image && index + 1 == self.end && at >= self.last_lo {
+                        link = Some(InlineLink {
+                            cut: at - 1,
+                            text: (at + 1, index),
+                        });
+                        stopped = true;
+                        break 'scan;
+                    }
+                    index += 1;
+                }
+                '*' | '_' | '~' => {
+                    let count = self.run(character, index);
+                    if character == '~' && count != 2 {
+                        if count == 1
+                            && index + count == self.end
+                            && index >= self.last_lo
+                            && openers.iter().any(|opener| opener.character == '~')
+                        {
+                            cut = index;
+                        }
+                        index += count;
+                        continue;
+                    }
+                    if count >= 3 {
+                        mixed.push(character);
+                        index += count;
+                        continue;
+                    }
+                    let (open, close) = self.flanking(character, index, count);
+                    let mut left = count;
+                    if close {
+                        while left > 0 {
+                            let Some(last) = openers.iter().rposition(|opener| opener.character == character) else {
+                                break;
+                            };
+                            let used = if left >= 2 && openers[last].count >= 2 { 2 } else { 1 };
+                            openers[last].count -= used;
+                            left -= used;
+                            openers.truncate(last + 1);
+                            if openers[last].count == 0 {
+                                openers.remove(last);
+                            }
+                        }
+                    }
+                    if left > 0 && open {
+                        openers.push(Opener {
+                            character,
+                            count: left,
+                            at: index + count - left,
+                        });
+                    }
+                    index += count;
+                }
+                _ => index += 1,
+            }
+        }
+        if !stopped && let Some(&(at, _)) = brackets.iter().rev().find(|(at, image)| *image && *at >= self.last_lo) {
+            link = Some(InlineLink {
+                cut: at - 1,
+                text: (at + 1, self.end),
+            });
+        }
+
+        let mut closers = code
+            .as_ref()
+            .map_or_else(String::new, |code: &InlineCode| code.closer.clone());
+        for opener in openers.iter().rev() {
+            if opener.character == '_' {
+                continue;
+            }
+            if opener.at < self.last_lo
+                || mixed.contains(&opener.character)
+                || openers
+                    .iter()
+                    .filter(|other| other.character == opener.character && other.count == opener.count)
+                    .count()
+                    != 1
+                || !self.followed_by_text(opener.at + opener.count, cut, code.as_ref(), link)
+            {
+                break;
+            }
+            closers.push_str(&opener.character.to_string().repeat(opener.count));
+        }
+        if let Some(link) = link {
+            let mut result = self.slice(..link.cut);
+            result.extend(self.scalars[link.text.0..link.text.1].iter());
+            result.push_str(&closers);
+            return Some(result);
+        }
+        if closers.is_empty() {
+            return None;
+        }
+        let mut result = self.slice(..cut);
+        result.push_str(&closers);
+        Some(result)
+    }
+
+    fn slice(&self, range: std::ops::RangeTo<usize>) -> String {
+        self.scalars[range].iter().collect()
+    }
+}
+
+/// Repairs the named bounded slices; display math's end remains `text` in this projection.
 pub fn project(input: &Input) -> Projection {
     Projection {
         repaired: project_repair(&input.text),

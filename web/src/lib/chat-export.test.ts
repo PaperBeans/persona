@@ -138,3 +138,27 @@ describe("reading the whole conversation", () => {
     expect((await readConversation({ work: false, page: stuck, full: h.full })).items).toHaveLength(1);
   });
 });
+
+
+describe("content keeps its internal newlines", () => {
+  const text = '```python\nmessage = """first\n\n\nlast"""\nprint(message)\n```';
+  it.each(["user", "assistant"] as const)("preserves the %s message's code and paragraph breaks", (role) => {
+    const markdown = transcriptMarkdown([{ id: "text1", seq: 1, role, kind: "text", text }], fixture.meta, { work: false, words, time: utc });
+    expect(markdown).toContain(text);
+  });
+
+  it("preserves the thinking text's internal newlines when work is included", () => {
+    const markdown = transcriptMarkdown([{ id: "thought1", seq: 1, role: "assistant", kind: "thinking", text }], fixture.meta, { work: true, words, time: utc });
+    expect(markdown).toContain(text);
+  });
+
+  it.each([true, false])("preserves a tool result's blank lines with its call present: %s", (paired) => {
+    const result = "first\n\n\nlast";
+    const items: Item[] = [
+      ...(paired ? [{ id: "call1", seq: 1, role: "assistant" as const, kind: "tool_use" as const, tool_name: "Read", tool_use_id: "tool1", tool_input: { path: "notes.txt" } }] : []),
+      { id: "result1", seq: 2, role: "assistant", kind: "tool_result", tool_use_id: "tool1", text: result },
+    ];
+    const markdown = transcriptMarkdown(items, fixture.meta, { work: true, words, time: utc });
+    expect(markdown).toContain(fenced(result));
+  });
+});

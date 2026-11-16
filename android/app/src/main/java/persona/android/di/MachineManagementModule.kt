@@ -44,8 +44,10 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.transform
@@ -81,6 +83,25 @@ object MachineManagementModule {
     @Provides @Singleton fun triage(runtime: ConnectionRuntime): AgentTriage = object : AgentTriage {
         override suspend fun switches() = HttpAgentTriage(runtime.connection()).switches()
         override suspend fun put(value: TriageSwitches) = HttpAgentTriage(runtime.connection()).put(value)
+    }
+
+    /**
+     * Settings › Standing Authorizations: the selected group's hub. The client is that group's own (plain ids);
+     * [SelectedGroupStandingAuthorizations] applies [AssistantManagement.inGroup], and a revoke stays on the hub
+     * that listed the row.
+     */
+    @Provides @Singleton fun standingAuthorizations(stacks: GroupStacks, application: Application): StandingAuthorizationsSource {
+        val scope = (application as PersonaApp).scope
+        val identity = stacks.selected.map { it?.id.orEmpty() }
+            .stateIn(scope, SharingStarted.Eagerly, stacks.selected.value?.id.orEmpty())
+        return SelectedGroupStandingAuthorizations(
+            current = {
+                stacks.selected.value?.let { stack ->
+                    StandingHub(stack.id, stack.names, stack.plainBindings.assistantManagement)
+                }
+            },
+            hubIdentity = identity,
+        )
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

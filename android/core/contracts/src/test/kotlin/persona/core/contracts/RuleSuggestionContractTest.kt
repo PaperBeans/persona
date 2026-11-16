@@ -90,8 +90,9 @@ class RuleSuggestionContractTest {
         assertEquals(4, setup.first().count)
         assertEquals(BriefSetupPage.SessionTriage, BriefSetup("triage_auto_continue", "t").page)
         assertEquals(BriefSetupPage.SessionTriage, BriefSetup("triage_wake", "t").page)
+        assertEquals(BriefSetupPage.StandingAuthorizations, BriefSetup("standing_authorizations", "t").page)
         // the mechanisms this app has no page for say where in their text
-        for (id in listOf("delegate", "standing_authorizations", "task_trust", "review_sample", "independent_review")) assertNull(BriefSetup(id, "t").page)
+        for (id in listOf("delegate", "task_trust", "review_sample", "independent_review")) assertNull(BriefSetup(id, "t").page)
         // every other briefing, and an older hub
         val plain = JsonCodec.decodeFromString<FeedItem>("""{"id":"brief2","kind":"brief","body":{"title":"Evening briefing","setup":"none"}}""")
         assertTrue(plain.brief?.setup?.isEmpty() == true)

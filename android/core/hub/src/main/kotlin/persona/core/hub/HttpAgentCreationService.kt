@@ -141,14 +141,25 @@ class HttpAgentCreationService(
     // The catalog covers every computer of the hub: only [machineId]'s rows. An older hub (404), an offline catalog or
     // any other failure shows no workspace choice, never an error.
     override suspend fun workspaces(machineId: String): List<AgentWorkspace> = try {
+        workspaceCatalog(machineId)
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) { emptyList() }
+
+    override suspend fun workspaceCatalog(machineId: String): List<AgentWorkspace> {
         val body = read(request("api", "v1", "workspaces").build())
+        // Partial refreshes retain the last inventory of their failed source, including its pin state.
+        val failed = (body["errors"] as? JsonArray).orEmpty().any { element ->
+            val error = element as? JsonObject
+            error?.get("machine_id")?.jsonPrimitive?.content == machineId &&
+                error["source"]?.jsonPrimitive?.content.let { it.isNullOrEmpty() || it == "paseo" }
+        }
+        if (failed) throw IllegalStateException("Workspace catalog refresh failed")
         // Every computer's workspaces: decoded off the caller's (the form's main) thread.
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             JsonCodec.decodeFromJsonElement<List<AgentWorkspace>>(body["workspaces"] ?: JsonArray(emptyList()))
                 .filter { it.machineId == machineId }
         }
-    } catch (cancelled: CancellationException) { throw cancelled }
-    catch (_: Exception) { emptyList() }
+    }
 
     // git can take a while on a big repository: the start's budget, not the list's.
     private suspend fun worktree(machineId: String, action: String, body: JsonObject) = read(

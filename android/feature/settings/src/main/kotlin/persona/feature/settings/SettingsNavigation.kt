@@ -38,6 +38,7 @@ fun SettingsPage.toInitialPage(): String = when (this) {
     SettingsPage.AgentSettings -> "agent-settings"
     SettingsPage.NotificationBackground -> "notification-background"
     SettingsPage.KnowledgeSelection -> "knowledge-selection"
+    SettingsPage.StandingAuthorizations -> "standing-authorizations"
 }
 
 /** The legacy ledger page opens at its new location; the root and unknown names have no destination. */
@@ -51,7 +52,7 @@ fun settingsPageFromInitialPage(initialPage: String): SettingsPage? =
  */
 private val assistantPages = setOf(SettingsPage.Providers, SettingsPage.ModelConfig, SettingsPage.Triage, SettingsPage.Connectors,
     SettingsPage.Mail, SettingsPage.Feishu, SettingsPage.FeishuBot, SettingsPage.Sent, SettingsPage.Extensions, SettingsPage.Channels,
-    SettingsPage.ClaudeCode, SettingsPage.Codex, SettingsPage.AgentSettings, SettingsPage.KnowledgeSelection)
+    SettingsPage.ClaudeCode, SettingsPage.Codex, SettingsPage.AgentSettings, SettingsPage.KnowledgeSelection, SettingsPage.StandingAuthorizations)
 
 /** Whether [page] (an in-place page key, [SettingsPage.toInitialPage]) is one of the current assistant's settings pages. */
 internal fun isAssistantSettingsPage(page: String): Boolean =

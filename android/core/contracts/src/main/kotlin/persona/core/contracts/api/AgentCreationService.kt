@@ -65,6 +65,9 @@ interface AgentCreationService {
      * choice: empty from an older hub (404) and on any failure, which then shows no choice.
      */
     suspend fun workspaces(machineId: String): List<AgentWorkspace> = emptyList()
+
+    /** A catalog refresh for an existing list: failures propagate so a transient outage cannot clear native pins. */
+    suspend fun workspaceCatalog(machineId: String): List<AgentWorkspace> = workspaces(machineId)
 }
 
 /**
@@ -92,6 +95,8 @@ data class AgentWorkspace(
     val online: Boolean? = null,
     val available: Boolean? = null,
     val owned: Boolean? = null,
+    /** The source's workspace pin, independent of Persona's session/project preferences. */
+    @SerialName("pinned_at") val pinnedAt: String? = null,
 )
 
 /**

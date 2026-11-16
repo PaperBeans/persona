@@ -72,14 +72,17 @@ internal class AppNavigator(
         ErrorBreadcrumbs.shared.navigation("tab:${tab.name}")
     }
 
-    override fun navigate(key: NavKey) {
+    override fun navigate(key: NavKey) = navigate(key, replacingDetailIn = null)
+
+    /** A list pick replaces its detail only after routing confirms it belongs to that tab. */
+    fun navigate(key: NavKey, replacingDetailIn: AppTab?) {
         val from = selectedTab()
         // The route's type only, never its arguments (machine, session, item ids).
         ErrorBreadcrumbs.shared.navigation(key::class.simpleName ?: "route")
         val shown = stacks.mapValues { it.value.lastOrNull() }
         // Reopening the unchanged visible route is idempotent, not a new direct open that invalidates its origin.
         val visibleOrigin = shown[from]?.takeIf { it == key }?.let(openedFrom::get)
-        val opened = open(key)
+        val opened = open(key, replacingDetailIn)
         val to = selectedTab()
         val page = stacks.getValue(to).lastOrNull() ?: return
         if (to == from && page == key && visibleOrigin != null) openedFrom[page] = visibleOrigin
@@ -117,9 +120,9 @@ internal class AppNavigator(
     }
 
     /** Returns the actual key opened, which may have inherited the visible inbox conversation's source. */
-    private fun open(key: NavKey): NavKey {
+    private fun open(key: NavKey, replacingDetailIn: AppTab? = null): NavKey {
         val route = inheritVisibleInboxSource(key)
-        if (route == ConnectionSettingsRoute) return open(SettingsPageRoute(SettingsPage.Diagnostics))
+        if (route == ConnectionSettingsRoute) return open(SettingsPageRoute(SettingsPage.Diagnostics), replacingDetailIn)
         val chat = when (route) { is ChatRoute -> route; is InteractionRoute -> route.chat; else -> null }
         val existingTab = chat?.let { target ->
             stacks.entries.firstOrNull { (_, stack) ->
@@ -155,6 +158,7 @@ internal class AppNavigator(
                     page.chat()?.kind != null && sameKindlessTarget(page, route)
                 }
             } else null
+            replaceDetail(resolved.tab, replacingDetailIn, route)
             val tab = resolved.restore(stacks)
             if (retained != null) {
                 val stack = stacks.getValue(tab)
@@ -178,6 +182,7 @@ internal class AppNavigator(
             ?: stacks.entries.firstOrNull { route in it.value }?.key
             ?: selectedTab().takeIf { it == AppTab.Persona }
             ?: AppTab.Agents else selectedTab()
+        replaceDetail(target, replacingDetailIn, route)
         onSelectTab(target)
         if (chat != null && (route is ChatRoute || fromInbox)) stacks.filterKeys { it != target }.values.forEach { stack ->
             stack.removeAll { page -> page is ChatRoute && sameConversation(page, chat) }
@@ -201,6 +206,13 @@ internal class AppNavigator(
         if (retained == null && stack.last() != route) stack.add(route)
         restoreSecondaryParents(stack)
         return retained ?: route
+    }
+
+    private fun replaceDetail(tab: AppTab, replacingDetailIn: AppTab?, key: NavKey) {
+        val stack = stacks.getValue(tab)
+        if (tab == replacingDetailIn && stack.lastOrNull() != key) {
+            while (stack.size > 1) stack.removeAt(stack.lastIndex)
+        }
     }
 
     /** A child conversation opened above an inbox conversation belongs to the same return chain. */

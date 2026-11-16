@@ -82,12 +82,13 @@ export interface AgentGroup {
   hint?: string;
 }
 
-export function splitAgentSessions(all: Session[], machines: Machine[]) {
+export function splitAgentSessions(all: Session[], machines: Machine[], keepOffline?: (s: Session) => boolean) {
   const online = new Set(machines.filter((m) => m.online).map((m) => m.id));
   const agents = all.filter((s) => !s.assistant);
-  const live = agents.filter((s) => stateOf(s) !== "offline" && online.has(s.machine_id));
+  const live = agents.filter((s) => (stateOf(s) !== "offline" && online.has(s.machine_id)) || keepOffline?.(s));
+  const listed = new Set(live);
   const recent = agents
-    .filter((s) => stateOf(s) === "offline" || !online.has(s.machine_id))
+    .filter((s) => !listed.has(s))
     .sort((a, b) => byTime(b.updated_at, a.updated_at) || a.machine_id.localeCompare(b.machine_id) || a.session_id.localeCompare(b.session_id))
     .slice(0, 40);
   return { live, recent };

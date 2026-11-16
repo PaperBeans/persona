@@ -25,7 +25,7 @@ internal fun scopedAgentList(
     val allRunning = settings.copy(includeCodexHistory = true)
     val runs: ((AgentSession) -> Boolean)? = when (preferences.range) {
         AgentRange.Running -> { row -> settings.draws(row, preferences.pins) }
-        AgentRange.All -> { row -> row.session.runsInAll && allRunning.draws(row, preferences.pins) }
+        AgentRange.All -> { row -> (row.session.runsInAll || allRunning.nativePinned(row.session)) && allRunning.draws(row, preferences.pins) }
         AgentRange.History -> null
     }
     val tree = codexTaskForest(foldRows(rows, settings.hierarchy), ownRows, runs)
@@ -52,7 +52,7 @@ private fun scopedRootAgentList(
     )) ?: buildFlatAgentList(rows, machines, preferences.pins, preferences.mutes, effective, todos, directions)
     if (preferences.range == AgentRange.Running)
         return projected(rows, settings)
-    val history = rows.filter { !it.session.isLive && !(preferences.range == AgentRange.All && it.session.isCodexTask) && settings.admitsHistory(it.session) && !(settings.hideBotmux && it.session.isBotmux) }
+    val history = rows.filter { !it.session.isLive && !(preferences.range == AgentRange.All && (it.session.isCodexTask || settings.nativePinned(it.session))) && settings.admitsHistory(it.session) && !(settings.hideBotmux && it.session.isBotmux) }
     val filtered = history.filter { settings.quick.matches(it) }
     val groups = filtered.groupBy { it.session.machineId to if (it.session.isCodexTask) repoOf(it.session.cwd, it.session.repoRoot).repo else it.session.cwd }.map { (project, members) ->
         val id = "history/${project.first}/${project.second}"
@@ -61,7 +61,7 @@ private fun scopedRootAgentList(
         AgentListGroup(id, persona.core.contracts.CoreText.plain(project.second), ordered, if (folded) emptyList() else ordered, folded)
     }.sortedWith(compareByDescending<AgentListGroup> { it.rows.first().updatedAt }.thenBy { it.id })
     val running = if (preferences.range == AgentRange.All)
-        projected(rows.filter { it.session.runsInAll }, settings.copy(includeCodexHistory = true))
+        projected(rows.filter { it.session.runsInAll || settings.nativePinned(it.session) }, settings.copy(includeCodexHistory = true))
     else AgentListResult(emptyMap(), emptyList(), emptyList())
     return running.copy(groups = running.groups + groups, counts = AgentQuickFilter.entries.associateWith { filter ->
         (running.counts[filter] ?: 0) + history.count { !it.isNestedSubtask && filter.matches(it) }

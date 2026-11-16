@@ -243,7 +243,7 @@ class RuleSuggestionShotsTest {
             rule.onNodeWithTag("rule-made-plan:p1", useUnmergedTree = true).assertIsDisplayed()
             rule.onNodeWithText("under Remembered auto-start rules in Persona's settings in the web app", substring = true, useUnmergedTree = true).assertIsDisplayed()
             rule.onNodeWithTag("rule-made-$todoCard", useUnmergedTree = true).assertIsDisplayed()
-            rule.onNodeWithText("under Standing authorizations in Persona's settings in the web app", substring = true, useUnmergedTree = true).assertIsDisplayed()
+            rule.onNodeWithText("in the assistant's profile under Standing Authorizations", substring = true, useUnmergedTree = true).assertIsDisplayed()
             rule.onNodeWithTag("rule-made-card:q1", useUnmergedTree = true).assertIsDisplayed()
             rule.onNodeWithText("No rule was stored. To let Persona answer such questions first, turn on agents.delegate in the assistant's configuration file on the hub's computer.",
                 useUnmergedTree = true).assertIsDisplayed()

@@ -155,6 +155,21 @@ class AgentCreationServiceTest {
         }
     }
 
+    @Test fun catalogPinRefreshDistinguishesClearFromFailure() = runBlocking {
+        MockWebServer().use { server ->
+            val service = HttpAgentCreationService("hub/pairing", server.url("/").toString(), "test-token", OkHttpClient())
+            fun body(pin: String) = """{"workspaces":[{"machine_id":"computer","source":"paseo","source_id":"w","pinned_at":$pin}]}"""
+            server.enqueue(MockResponse().setBody(body("\"2026-11-16T10:00:00Z\"")))
+            assertEquals("2026-11-16T10:00:00Z", service.workspaceCatalog("computer").single().pinnedAt)
+            server.enqueue(MockResponse().setBody(body("null")))
+            assertNull(service.workspaceCatalog("computer").single().pinnedAt)
+            server.enqueue(MockResponse().setBody("""{"workspaces":[],"errors":[{"machine_id":"computer","source":"paseo","error":"offline"}]}"""))
+            assertTrue(runCatching { service.workspaceCatalog("computer") }.isFailure)
+            server.enqueue(MockResponse().setBody("""{"workspaces":[]} """))
+            assertTrue(service.workspaceCatalog("computer").isEmpty())
+        }
+    }
+
     /** A start in a catalog workspace names its engine (`host`); a start without one sends the same body as before. */
     @Test fun aStartInAWorkspaceCarriesItsHostAndOnlyThen() = runBlocking {
         MockWebServer().use { server ->

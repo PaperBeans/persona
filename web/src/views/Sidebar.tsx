@@ -10,7 +10,7 @@ import { getAgentListFilters, setAgentListFilters, useAgentListFilters } from ".
 import { AGENT_SORT_KEY, AGENT_SORTS, agentSort, byUpdated, machineTreeByUpdate, projectsByUpdate, repoMachinesByUpdate, todoTreeByUpdate, type AgentSort } from "../lib/agent-sort";
 import { AgentChatListRow, AgentFilterButton, AgentFilterChips } from "./agents/AgentChatListControls";
 import { agentGrouping, AGENT_GROUPINGS, type AgentGrouping, buildAgentGroups, buildSpaces, hostsOf, isQuiet, sessionHost, splitAgentSessions, type AgentGroup, type Space } from "../lib/agent-groups";
-import { buildRepoMachineTree } from "../lib/agent-repos";
+import { buildRepoMachineTree, hasWorkspacePin } from "../lib/agent-repos";
 import { useWorkspaceCatalog } from "../lib/workspace-catalog";
 import { keyedRefs } from "../lib/keyed-refs";
 import { buildMachineTree } from "../lib/herdr-tree";
@@ -847,6 +847,7 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
   // drawn as it is, with no word about them
   const todosFailed = !chatList && todosUnread && grouping === "todo" && todosSupported !== false;
   const shownGrouping = todosSupported === false && grouping === "todo" ? "machine" : todosFailed ? "state" : grouping;
+  const catalog = useWorkspaceCatalog(shownGrouping === "repo");
   const availableGroupings = useGroupings();
   // "State first" / "Recently updated" (iOS AgentSort, G099): not under "By status", whose sections are the states already
   const [sortChoice, chooseSort] = useAgentSort();
@@ -872,7 +873,10 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
     () => applyDimensionFilters(listed, dimFilters, evalCtx, facets),
     [listed, dimFilters, evalCtx, facets],
   );
-  const { live, recent: offline } = useMemo(() => splitAgentSessions(dimFiltered, machines), [dimFiltered, machines]);
+  // A host pin keeps its saved conversations in the repository tree, including ones older than Recent's 40 rows.
+  const { live, recent: offline } = useMemo(() => splitAgentSessions(dimFiltered, machines,
+    shownGrouping === "repo" && !chatList ? (s) => hasWorkspacePin(s, catalog.workspaces, catalog.manager) : undefined),
+  [dimFiltered, machines, shownGrouping, chatList, catalog]);
   const seeded = useRef(false);
   useEffect(() => {
     // a filter saved in this browser starts from what it matches once the list has loaded
@@ -925,7 +929,6 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
     return shareTree(lastTodoTree.current, byUpdate ? todoTreeByUpdate(built) : built);
   }, [unpinned, machines, shownGrouping, mutes, todos, todosLoaded, byUpdate, keepEmptyGroups]);
   lastTodoTree.current = todoTree;
-  const catalog = useWorkspaceCatalog(shownGrouping === "repo");
   const repoMachines = useMemo(() => {
     if (shownGrouping !== "repo") return [];
     const built = buildRepoMachineTree(unpinned, machines, { ...catalog, hiddenSources: botmuxHidden ? ["botmux"] : undefined, navigationSessions: [...shown, ...pinnedAgents.filter((p) => !shown.includes(p))], hideEmpty: filtered, compareSessions: byUpdate ? byUpdated : undefined });

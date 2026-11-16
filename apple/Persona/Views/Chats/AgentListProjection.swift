@@ -324,6 +324,12 @@ nonisolated struct AgentListProjection: Sendable {
         let plan = AgentSearchPlan.compile(query: settings.query, settings: settings)
         result.searchPlan = plan
         let parsed = plan.parsed
+        let nativePins = Set(input.workspaces.filter { $0.source == "paseo" && $0.pinnedAt != nil }.map(\.key))
+        let inPinnedWorkspace: (Session) -> Bool = { session in
+            guard settings.grouping == "repo", session.archived != true, session.spaceKind == "paseo",
+                  let id = session.workspaceID else { return false }
+            return nativePins.contains(session.machineRef.path + "/paseo:" + id)
+        }
         // A side session lives in its parent's chat (#7944): a paged window's rows fold here, once per revision (the
         // model's own list is folded already, and folding it again changes nothing). Then the folded children are not
         // rows; what the hub did not fold still goes through CodexTasks below.
@@ -334,7 +340,7 @@ nonisolated struct AgentListProjection: Sendable {
         // are the others'. A working one hangs under its parent only while the list draws a row above it (`runs`): the
         // groupings that list what runs draw the pinned and live agents; Recently Used and By App draw every one.
         let runs: ((Session) -> Bool)? = settings.grouping == "recent" || settings.grouping == "app" ? nil
-            : { $0.state.isLive || settings.pinned($0.key) }
+            : { $0.state.isLive || settings.pinned($0.key) || inPinnedWorkspace($0) }
         // A row a quick filter showed stays a row while it is on, a subtask answered under Needs You too.
         let forest = CodexTasks.build(sessions, ownRows: settings.filter == .all ? [] : settings.kept, runs: runs)
         let admits: (Session) -> Bool = { session in
@@ -426,7 +432,7 @@ nonisolated struct AgentListProjection: Sendable {
                     (settings.machine.isEmpty || workspace.machineRef.path == settings.machine) &&
                     (!settings.multiHub || HubFilter.matches(settings.hub, workspace.group))
             }
-            result.tree = RepoTree.build(result.unpinned.filter { $0.state.isLive }, machines: input.machines.map(\.ref),
+            result.tree = RepoTree.build(result.unpinned.filter { $0.archived != true && ($0.state.isLive || inPinnedWorkspace($0)) }, machines: input.machines.map(\.ref),
                                          workspaces: catalog, includeEmpty: settings.filter == .all, search: settings.query)
             result.byHost = settings.machine.isEmpty && result.tree.count > 1
             for host in result.tree {
@@ -455,7 +461,7 @@ nonisolated struct AgentListProjection: Sendable {
             if settings.sort == "updated" {
                 result.tree = result.tree.map { host in
                     var host = host
-                    host.repos = AgentListOrder.latestFirst(host.repos,
+                    host.repos = host.repos.filter { $0.latestPinnedAt != nil } + AgentListOrder.latestFirst(host.repos.filter { $0.latestPinnedAt == nil },
                         date: { result.repositories[$0.id]?.sessions.map(\.sortDate).max() ?? .distantPast }, id: \.id)
                     return host
                 }

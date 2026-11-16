@@ -399,6 +399,11 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(tokens)
         self.assertEqual({name: ios.get(name) for name in tokens}, tokens, "a size in spec/tokens differs from Theme.Size")
 
+    def test_ios_split_page_min_matches(self):
+        match = re.search(r'static let splitPageMin: CGFloat = ([0-9.]+)$', self.swift_enum("Size"), re.M)
+        self.assertIsNotNone(match, "Theme.Size.splitPageMin not found")
+        self.assertEqual(float(match[1]), self.catalog.values["size.splitPageMin"]["value"])
+
     def test_ios_type_levels_match(self):
         # Theme.Font on the iPhone (the #else branch): each name is a Dynamic Type style, maybe with a weight or monospaced,
         # and Theme.Level gives its size and line height. sectionHeader is the caption level in semibold.

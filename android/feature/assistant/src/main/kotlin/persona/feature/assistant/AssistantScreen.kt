@@ -65,6 +65,8 @@ import persona.core.navigation.ConversationKind
 import persona.core.navigation.TodoDetailRoute
 import persona.core.navigation.ModelPurposeRoute
 import persona.core.navigation.Navigator
+import persona.core.navigation.SettingsPage
+import persona.core.navigation.SettingsPageRoute
 import persona.feature.assistant.proactive.AssistantProactiveScreen
 import persona.feature.assistant.settings.AssistantSettingsScreen
 import persona.feature.assistant.settings.StoredTimezoneChoice
@@ -1021,7 +1023,8 @@ fun AssistantScreen(
             assistantAttempt { assistantMachine = pageManagement.notes().machineId }
             // The old main conversation is an ordinary one on the old machine now: back here, start the new one.
             newConversation()
-        }, onOpenConversation = openFromSchedule, onModelConfiguration = openModelConfiguration)
+        }, onOpenConversation = openFromSchedule, onModelConfiguration = openModelConfiguration,
+            onStandingAuthorizations = { navigator.navigate(SettingsPageRoute(SettingsPage.StandingAuthorizations)) })
         return@PersonaTheme
     }
     if (proactiveOpen && pageManagement != null) {

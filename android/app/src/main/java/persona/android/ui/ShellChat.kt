@@ -153,6 +153,8 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
                             persona.core.contracts.BriefSetupPage.SessionTriage -> SettingsPageRoute(SettingsPage.Triage)
                             persona.core.contracts.BriefSetupPage.SupervisorModel ->
                                 persona.core.navigation.ModelPurposeRoute(persona.core.contracts.api.BackgroundSupervisor.PURPOSE, manager)
+                            persona.core.contracts.BriefSetupPage.StandingAuthorizations ->
+                                SettingsPageRoute(SettingsPage.StandingAuthorizations)
                         })
                     }),
                 renderStyle = if (assistant) ChatRenderStyle.Assistant else ChatRenderStyle.Agent,

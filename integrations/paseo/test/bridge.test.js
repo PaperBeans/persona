@@ -2461,3 +2461,50 @@ test('a workspace archived in Paseo leaves the list with its agents; one Paseo d
 function bridgeHas(node, id) {
   return node.last('runtime.workspaces').workspaces.some((x) => x.workspace_id === id)
 }
+
+test("Paseo pin changes reach the catalog without an agent update, survive reconnect, and never write preferences", async (t) => {
+  const pinnedAt = '2026-11-16T12:00:00.000Z'
+  const pinned = workspaceDescriptor({ id: 'wks_native_pin', workspaceDirectory: '/tmp', pinnedAt })
+  const sibling = { ...pinned, id: 'wks_native_sibling', pinnedAt: null }
+  const { fake, node, bridge } = await setup(t, { workspaces: [pinned, sibling] })
+  const rows = () => node.last('runtime.workspaces')?.workspaces ?? []
+  const row = (id) => rows().find((w) => w.workspace_id === id)
+  await until('the native pin listed', () => row(pinned.id)?.pinned_at === pinnedAt)
+  assert.equal(row(sibling.id).pinned_at, undefined)
+  fake.upsertWorkspace({ ...pinned, pinnedAt: null })
+  await until('the native pin cleared', () => row(pinned.id) && !row(pinned.id).pinned_at)
+  fake.upsertWorkspace({ ...sibling, pinnedAt })
+  await until('only the sibling pinned', () => row(sibling.id)?.pinned_at === pinnedAt)
+  // The reconnect page is already stale when its subscription delivers an unpin. A full read cannot resurrect it.
+  fake.duringPage = (msg) => {
+    if (msg.type !== 'fetch_workspaces_request' || !msg.subscribe) return
+    fake.duringPage = undefined
+    fake.upsertWorkspace(sibling)
+  }
+  fake.drop()
+  await until('reconnected and the stale pin discarded', () => fake.hellos.length === 2
+    && fake.requestsOf('fetch_workspaces_request').length === 2 && row(sibling.id) && !row(sibling.id).pinned_at)
+  assert.equal(bridge.state.workspaces.get(sibling.id).pinnedAt, null)
+  fake.upsertWorkspace({ ...pinned, pinnedAt })
+  await until('pinned again', () => row(pinned.id)?.pinned_at === pinnedAt)
+  fake.removeWorkspace(pinned.id)
+  await until('removed pinned workspace gone', () => !row(pinned.id))
+  assert.equal(fake.requestsOf('workspace.pin.set.request').length, 0, 'catalog reads never change the source pin')
+})
+
+test("a native pinned workspace keeps old conversations beyond the list limit, including a delegated agent's parents", async (t) => {
+  const workspace = workspaceDescriptor({ id: 'wks_old_pin', workspaceDirectory: '/tmp', pinnedAt: null })
+  const { fake, node, rows } = await setup(t, { workspaces: [workspace], listMax: 4 })
+  const old = (id, extra = {}) => agentSnapshot({ id, provider: 'my-codex', cwd: '/tmp', status: 'closed', updatedAt: '2020-01-01T00:00:00Z', ...extra })
+  const parent = old('old-parent', { workspaceId: workspace.id })
+  const child = old('old-child', { workspaceId: workspace.id, labels: { 'paseo.parent-agent-id': parent.id } })
+  fake.upsert(parent, PROJECT)
+  fake.upsert(child, PROJECT)
+  fake.upsertWorkspace({ ...workspace, pinnedAt: '2026-11-16T12:00:00.000Z' })
+  await until('the pinned conversation and its parent retained', () => rows().some((r) => r.session_id === 'paseo-old-child'))
+  assert.ok(rows().some((r) => r.session_id === 'paseo-old-parent'))
+  assert.equal(rows().find((r) => r.session_id === 'paseo-old-child').parent_session_id, 'paseo-old-parent')
+  fake.upsertWorkspace(workspace)
+  await until('unpin releases the old conversations', () => !rows().some((r) => r.session_id === 'paseo-old-child'))
+  assert.equal(node.last('runtime.workspaces').workspaces.find((w) => w.workspace_id === workspace.id).pinned_at, undefined)
+})

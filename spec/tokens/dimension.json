@@ -240,6 +240,14 @@
     }
   },
   "size": {
+    "splitPageMin": {
+      "$type": "dimension",
+      "$value": {
+        "value": 400,
+        "unit": "px"
+      },
+      "$description": "Theme.Size.splitPageMin: least page width beside a list; otherwise the list overlays the full-width page"
+    },
     "cardColumn": {
       "$type": "dimension",
       "$value": {

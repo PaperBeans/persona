@@ -150,7 +150,7 @@ fun AgentRepoHeader(
  * A working tree's line in its repository's card (iOS `RepoWorktreeLine`): ⌂ for the main checkout with its Primary chip,
  * and no mark for the others so the name and indentation carry the meaning like the web sidebar, its [name], small after
  * it what the name does not say ([branch], or [detached] HEAD in the caution color), at the end [tally] ("N agents",
- * Idle) and the chevron. [quiet] or [offline] (its computer out of reach) put the name in the secondary color.
+ * Idle), the source's [pinned] mark and the chevron. [quiet] or [offline] put the name in the secondary color.
  * A tap folds it.
  */
 @Composable
@@ -166,6 +166,7 @@ fun AgentWorktreeLine(
     tally: String? = null,
     quiet: Boolean = false,
     offline: Boolean = false,
+    pinned: Boolean = false,
 ) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
@@ -173,13 +174,14 @@ fun AgentWorktreeLine(
     val primary = stringResource(R.string.designsystem_worktree_primary)
     val detachedText = stringResource(R.string.designsystem_worktree_detached)
     val offlineText = stringResource(R.string.designsystem_worktree_offline)
+    val pinnedText = stringResource(R.string.designsystem_project_pinned)
     val foldState = stringResource(if (folded) R.string.designsystem_folded else R.string.designsystem_expanded)
     val separator = stringResource(R.string.designsystem_separator)
     RepoTreeLine(
         level = level, onClick = onToggle, modifier = modifier,
         spoken = {
             contentDescription = listOfNotNull(kind, name, primary.takeIf { main }, branch ?: detachedText.takeIf { detached },
-                offlineText.takeIf { offline }, tally).joinToString(separator)
+                offlineText.takeIf { offline }, pinnedText.takeIf { pinned }, tally).joinToString(separator)
             stateDescription = foldState
         },
         // Only the main checkout wears a mark; other worktrees stay text-only, matching the web sidebar. RepoTreeLine
@@ -197,6 +199,7 @@ fun AgentWorktreeLine(
             }
         }
         tally?.let { Text(it, style = type.caption, color = palette.ink2, maxLines = 1) }
+        if (pinned) JIcon(PersonaIcons.pinned, null, size = TreeWorktreeMark, tint = palette.ink2)
         FoldChevron(folded)
     }
 }

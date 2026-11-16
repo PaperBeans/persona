@@ -2256,7 +2256,7 @@ private struct AgentsList: View {
                 HStack(spacing: Theme.Space.xs) {
                     let line = RepoWorktreeLine(name: w.name, main: w.main, count: w.sessions.count, quiet: quiet, open: open, level: level,
                                                 detail: detail?.text, caution: detail?.caution == true,
-                                                offline: !target.available || !target.online, showChevron: false)
+                                                offline: !target.available || !target.online, showChevron: false, pinned: target.pinnedAt != nil)
                     // The host's catalog worktrees keep the long-press menu their cards had; it reads the whole inventory,
                     // so the others go without it, as before.
                     Group {

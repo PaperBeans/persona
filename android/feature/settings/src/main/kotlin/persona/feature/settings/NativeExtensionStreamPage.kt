@@ -148,6 +148,8 @@ internal fun NativeExtensionStreamPage(adapter: NativeExtensionStreamAdapter, ti
     }
     LaunchedEffect(displayedTree) { displayedTree?.let { local.prune(it.nodes.keys + "root") } }
     val current by rememberUpdatedState(native)
+    // How many columns of cards the page drew (UI version 8), read when a diff is revealed to find its place in the list.
+    val drawnColumns = remember(session) { intArrayOf(1) }
     fun send(key: String, action: ExtensionViewAction, event: String, value: JsonObject, tree: NativeStreamTree,
              draft: NativeStreamDraft?, drafts: Map<String, NativeStreamDraft>, commit: () -> Unit, done: ((persona.core.contracts.api.ExtensionUiResult?) -> Unit)? = null) {
         fun refused() { done?.invoke(null); local.rejected = true }
@@ -218,7 +220,7 @@ internal fun NativeExtensionStreamPage(adapter: NativeExtensionStreamAdapter, ti
                 rootSelection(key, tabs.name, tabs.action, value, own)
             } },
             more = { index, section -> displayedTree?.view?.sections?.getOrNull(index)?.key?.let { node -> section.more?.action?.let { press(node, ExtensionViewItem(type = "button"), it) } } },
-            reveal = { path -> displayedTree?.let { tree -> if (current.tree === tree) nativeDiffIndex(tree, path)?.let { (node, index) ->
+            reveal = { path -> displayedTree?.let { tree -> if (current.tree === tree) nativeDiffIndex(tree, path, drawnColumns[0])?.let { (node, index) ->
                 local.slot(node, "diff-open") { true }.value = true
                 scope.launch { local.list.scrollToItem(index) }
             } } },
@@ -235,10 +237,14 @@ internal fun NativeExtensionStreamPage(adapter: NativeExtensionStreamAdapter, ti
     val pageState = state.copy(values = state.values + local.roots, query = local.query)
     val base = handle(displayedTree?.snapshot?.rootKey.orEmpty())
     key(session.identity) {
-        JListPage(title = view?.title?.takeIf { it.isNotBlank() } ?: title, onBack = onBack, largeTitle = false, state = local.list,
-            refreshing = state.loading && view != null, onRefresh = { scope.launch { session.requestSnapshot() } }) {
-            if (view == null) item("native-loading") { JLoading() }
-            extensionViewItems("native-page", pageState, base, streamSectionKeys = displayedTree?.view?.sections?.map { it.key!! })
+        // UI version 8: a columns view takes the pane's whole width, as many columns of cards as it has room for
+        ExtensionPageWidth(view) { columns, fullWidth ->
+            SideEffect { drawnColumns[0] = columns }
+            JListPage(title = view?.title?.takeIf { it.isNotBlank() } ?: title, onBack = onBack, largeTitle = false, state = local.list,
+                refreshing = state.loading && view != null, onRefresh = { scope.launch { session.requestSnapshot() } }, fullWidth = fullWidth) {
+                if (view == null) item("native-loading") { JLoading() }
+                extensionViewItems("native-page", pageState, base, streamSectionKeys = displayedTree?.view?.sections?.map { it.key!! }, columns = columns)
+            }
         }
     }
     confirming?.let { confirmation ->

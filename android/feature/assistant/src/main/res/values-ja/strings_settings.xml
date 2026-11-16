@@ -122,6 +122,39 @@
     <plurals name="assistant_settings_memory_count">
         <item quantity="other">%1$d件</item>
     </plurals>
+    <!-- Saved Places (#9293): same wording as iOS Saved Places. -->
+    <string name="assistant_settings_places">よく使う場所</string>
+    <string name="assistant_settings_places_unreadable">読めません</string>
+    <plurals name="assistant_settings_places_count">
+        <item quantity="other">%1$d件</item>
+    </plurals>
+    <string name="assistant_settings_places_empty_title">よく使う場所はありません</string>
+    <string name="assistant_settings_places_empty_text">自宅や職場などよく行く場所を追加すると、「帰り道に牛乳を買うよう知らせて」のようなリマインダーが正しい場所で通知されます。</string>
+    <string name="assistant_settings_places_footer">Persona はこれらの場所を「帰り道に牛乳を買うよう知らせて」のようなリマインダーに使います。チャットで確認した場所だけがここに追加されます。</string>
+    <string name="assistant_settings_places_load_failed_title">よく使う場所を読み込めませんでした</string>
+    <string name="assistant_settings_places_load_failed_text">よく使う場所を読み込めませんでした。接続を確認して、もう一度お試しください。</string>
+    <string name="assistant_settings_places_new">新しい場所</string>
+    <string name="assistant_settings_places_add">追加</string>
+    <string name="assistant_settings_places_name">名前</string>
+    <string name="assistant_settings_places_name_placeholder">自宅、職場…</string>
+    <string name="assistant_settings_places_name_caption">チャットでの呼び方です。「家に着いたら知らせて」の「家」のように。</string>
+    <string name="assistant_settings_places_location">場所</string>
+    <string name="assistant_settings_places_location_caption">検索するか、現在地を使ってください。</string>
+    <string name="assistant_settings_places_search">住所や場所を検索</string>
+    <string name="assistant_settings_places_clear_search">検索をクリア</string>
+    <string name="assistant_settings_places_use_current">現在地を使用</string>
+    <string name="assistant_settings_places_search_nothing">「%1$s」に一致する場所が見つかりません。</string>
+    <string name="assistant_settings_places_search_failed">場所を検索できませんでした。接続を確認して、もう一度お試しください。</string>
+    <string name="assistant_settings_places_geocoder_missing">この端末では住所を調べられません。現在地を使うか、しばらくしてから再試行してください。</string>
+    <string name="assistant_settings_places_location_denied">「設定 › アプリ › Persona › 権限」で Persona に位置情報の使用を許可するか、住所を検索してください。</string>
+    <string name="assistant_settings_places_location_failed">現在地を取得できませんでした。屋外でもう一度試すか、住所を検索してください。</string>
+    <string name="assistant_settings_places_radius">通知の範囲</string>
+    <string name="assistant_settings_places_radius_caption">この円を出入りしたときにリマインダーが通知されます。屋内では位置が 50〜100 m ずれることが多いため、小さい円だと通知されないことがあります。</string>
+    <string name="assistant_settings_places_delete">場所を削除</string>
+    <string name="assistant_settings_places_delete_title">「%1$s」を削除しますか？</string>
+    <string name="assistant_settings_places_delete_text">この場所に設定済みのリマインダーは、元の位置で引き続き通知されます。</string>
+    <string name="assistant_settings_places_saved">「%1$s」を保存しました</string>
+    <string name="assistant_settings_places_deleted">「%1$s」を削除しました</string>
     <string name="assistant_settings_quiet_header">タスク通知</string>
     <string name="assistant_settings_quiet">メインチャットでだけ通知</string>
     <string name="assistant_settings_quiet_caption">メインチャットが送り出したタスクはライブアクティビティ、プッシュ、バッジに出ません。完了・回答待ち・エラーのときは Persona がメインチャットで知らせます。これから送るタスクにだけ適用されます。</string>
