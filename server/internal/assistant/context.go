@@ -133,6 +133,7 @@ func (s *Service) runsScheduledTask(ctx context.Context, session string) bool {
 // shows, after leaving out, for a scoped one, the tasks that are neither handed out nor supervised by it, so another
 // conversation's tasks never crowd its own out. The lists are new: snap shares its own with the cached snapshot.
 func scopeSnapshot(snap prompts.Snapshot, scope string) prompts.Snapshot {
+	// A personal to-do has neither an origin nor a supervisor, so only an unscoped snapshot lists it.
 	mine := func(o prompts.SnapshotOwner) bool { return scope == "" || o.Origin == scope || o.Supervisor == scope }
 	snap.Scoped = scope != ""
 	snap.Tasks, _ = firstOf(snap.Tasks, snapshotTaskLimit, func(t prompts.SnapshotTask) bool { return mine(t.Owner) })

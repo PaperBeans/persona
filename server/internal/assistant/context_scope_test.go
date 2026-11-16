@@ -211,3 +211,48 @@ func TestGoldenSnapshotScoped(t *testing.T) {
 	golden(t, "assistant_snapshot.scoped_none", prompts.RenderSnapshot(prompts.Snapshot{Now: now, Zone: "UTC", Scoped: true,
 		OpenTodosLoaded: true, OpenTodosTotal: 19}))
 }
+
+// A personal to-do has no origin and no supervisor, so a scoped conversation never matches it: with only personal
+// to-dos open, a side conversation's every task list and its compact index are empty, its rendered snapshot says it
+// has no tasks and shows neither the personal row nor the index heading, and the main conversation still lists it.
+func TestScopeSnapshotLeavesOutPersonalTodos(t *testing.T) {
+	index := prompts.Snapshot{OpenTodos: []prompts.SnapshotOpenTodo{{ID: "todo_personal"}}, OpenTodosTotal: 1, OpenTodosLoaded: true}
+	if got := scopeSnapshot(index, "side"); len(got.OpenTodos) != 0 {
+		t.Fatalf("a side conversation's index keeps a personal to-do: %+v", got.OpenTodos)
+	} else if text := prompts.RenderSnapshot(got); strings.Contains(text, "todo_personal") || strings.Contains(text, "其他开放任务") {
+		t.Fatalf("a side conversation's rendered index shows a personal to-do:\n%s", text)
+	}
+	personal := prompts.Snapshot{
+		Tasks:          []prompts.SnapshotTask{{ID: "todo_personal"}},
+		OpenTodos:      []prompts.SnapshotOpenTodo{{ID: "todo_personal"}},
+		OpenTodosTotal: 1,
+		Approvals:      []prompts.SnapshotApproval{{ID: "todo_personal"}},
+		Unaccepted:     []prompts.SnapshotAccept{{Title: "todo_personal"}}, UnacceptedTotal: 1,
+	}
+	got := scopeSnapshot(personal, "side")
+	if len(got.Tasks) != 0 || len(got.OpenTodos) != 0 || len(got.Approvals) != 0 || len(got.Unaccepted) != 0 ||
+		got.UnacceptedTotal != 0 || got.OpenTodosTotal != 1 {
+		t.Fatalf("a side conversation's snapshot keeps a personal to-do: %+v", got)
+	}
+
+	f := newFakeHub()
+	f.settings = &Settings{Main: "main"}
+	s := newStorelessService(t, f)
+	old := time.Now().Add(-48 * time.Hour)
+	putTodo(s, Todo{ID: "todo_personal", Title: "personal errand", CreatedAt: old, UpdatedAt: old})
+	side := scopedContext(t, s, "side")
+	if !strings.Contains(side, "要它新查、新做或改方向才用 agent_send）：没有\n") {
+		t.Errorf("no empty task line for a side conversation with only a personal to-do open:\n%s", side)
+	}
+	for _, leak := range []string{"todo_personal", "personal errand", "其他开放任务", "开放待办索引"} {
+		if strings.Contains(side, leak) {
+			t.Errorf("side conversation's snapshot shows %q:\n%s", leak, side)
+		}
+	}
+	if !strings.Contains(side, "- 开放待办：共 1 件（完整列表用 todo_list）") {
+		t.Errorf("the count of every open to-do and its todo_list entrance are gone:\n%s", side)
+	}
+	if main := scopedContext(t, s, "main"); !strings.Contains(main, "todo_personal") {
+		t.Errorf("main conversation's snapshot lost the personal to-do:\n%s", main)
+	}
+}
