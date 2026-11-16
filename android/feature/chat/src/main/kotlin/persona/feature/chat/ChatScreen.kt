@@ -235,43 +235,35 @@ private fun ChatPage(
     val stackCards = pageRequests.stackCards
     val messages = pageRequests.messages
     val composerDeliveries by pageRequests.composerDeliveries
-    var submittedDraft by remember { mutableStateOf<Pair<String, ChatComposerDraft>?>(null) }
-    var clearingPane by rememberSaveable { mutableStateOf<String?>(null) }
     var linkContexts by rememberSaveable(stateSaver = ChatLinkContextsSaver) { mutableStateOf(emptyList<ChatLinkContext>()) }
     var conversationLauncher by rememberSaveable(key.path, chrome.assistantManagement) { mutableStateOf<String?>(null) }
     var conversationModel by rememberSaveable(key.path, chrome.assistantManagement) { mutableStateOf<String?>(null) }
-    var submittedContexts by remember { mutableStateOf(emptyList<ChatLinkContext>()) }
-    var notice by remember { mutableStateOf<String?>(null) }
     // /model in the "/" list asked for the "Mode" sheet: a one-off, cleared once the sheet opened (not replayed when the bar returns).
     var openModes by remember { mutableStateOf(false) }
     // The host's failure notice whose "Retry" went out: hidden until the list catches up; back if that send failed.
     var hostRetried by rememberSaveable(key.path) { mutableStateOf<String?>(null) }
-    val deliveryActions = remember(sender) { ChatDeliveryActions(sender) }
-    var statusSheet by remember { mutableStateOf(false) }
+    val statusSheetState = remember { mutableStateOf(false) }
+    var statusSheet by statusSheetState
     // The loop and background work's sheet, from the header's pill (Glass, #4339 C8).
     var activitySheet by remember { mutableStateOf(false) }
     // The shell presents transient notices once; persistent sync errors stay inline.
     val feedback = persona.core.designsystem.LocalAppFeedback.current
-    // A message only on this phone taken off (Cancel send / Delete): nothing was sent; Undo puts it back (#4645,
-    // docs/design/DESIGN_SYSTEM.md 4.4 principle 3).
-    fun removed(message: OutboxMessage) {
-        val deleted = res.getString(R.string.chat_delivery_deleted)
-        val undo = persona.core.designsystem.FeedbackAction(res.getString(R.string.chat_delivery_undo)) { sender.restore(message) }
-        if (feedback?.notice(deleted, undo) != true) notice = deleted
-    }
-    fun deliveryAction(message: OutboxMessage, action: DeliveryAction) {
-        if (readOnly) return
-        if (!message.state.allows(action, canSend)) return
-        scope.launch {
-            try {
-                if (!deliveryActions.perform(message.clientMessageId, action, composer::restoreMessage, ::removed))
-                    notice = res.getString(R.string.chat_screen_delivery_changed)
-                else if (action == DeliveryAction.Discard) statusSheet = false
-            } catch (e: CancellationException) { throw e }
-            catch (_: Exception) { notice = res.getString(R.string.chat_screen_delivery_failed) }
-        }
-    }
-    LaunchedEffect(notice) { notice?.let { if (feedback?.notice(it) == true) notice = null } }
+    val deliveryActions = remember(sender) { ChatDeliveryActions(sender) }
+    val clearingPaneState = rememberSaveable { mutableStateOf<String?>(null) }
+    var clearingPane by clearingPaneState
+    val timelineFollow = remember { mutableStateOf<(() -> Unit)?>(null) }
+    val submittedContextState = remember { mutableStateOf(emptyList<ChatLinkContext>()) }
+    val interactionController = rememberChatInteractionController(key, sender, interactions, sessions, composer,
+        composerService, scope, res, feedback, haptics, pageRequests, pageTrays, rememberUpdatedState(canSend),
+        rememberUpdatedState(readOnly), statusSheetState,
+        deliveryActions, clearingPaneState, pageCloseout.drawnSwitch, switchSession, tasks, timelineFollow, submittedContextState)
+    var notice by interactionController.notice
+    var submittedDraft by interactionController.submittedDraft
+    var submittedContexts by submittedContextState
+    var sending by interactionController.sending
+    var sendingId by interactionController.sendingId
+    fun removed(message: OutboxMessage) = interactionController.removed(message)
+    fun deliveryAction(message: OutboxMessage, action: DeliveryAction) = interactionController.deliveryAction(message, action)
     val currentDraftCallback by rememberUpdatedState(onDraftChanged)
     LaunchedEffect(composer) { snapshotFlow { composer.draft }.collect { currentDraftCallback?.invoke(it) } }
     LaunchedEffect(sessionList, clearingPane) {
@@ -292,8 +284,6 @@ private fun ChatPage(
         if (allMessages.none { it.session == key && it.text == SlashCommand.CLEAR && it.state != DeliveryState.Sent })
             notice = res.getString(R.string.chat_screen_clear_sent)
     }
-    var sending by remember { mutableStateOf(false) }
-    var sendingId by remember { mutableStateOf<String?>(null) }
     // A card open on its full page, in either place of cards.
     var taskOverlay by remember { mutableStateOf(false) }
     var stackOverlay by remember { mutableStateOf(false) }
@@ -419,6 +409,7 @@ private fun ChatPage(
     fun followEnd() {
         chatList.returnToLatest()
     }
+    timelineFollow.value = ::followEnd
     fun expand(item: Item) {
         val fold = item.fold ?: return
         if (item.id in folding) return
@@ -454,50 +445,11 @@ private fun ChatPage(
         if (!chatList.followsEnd) scope.launch { chatList.scrollToRecord(line.contentKey) }
     } }, modifier) } }
     /** Whether the message was taken (false: nothing went, the box or another send stands); [onFailed] if it then fails. */
-    fun send(command: String? = null, onFailed: () -> Unit = {}): Boolean {
-        if (readOnly || !canSend) return false
-        if (sending || submittedDraft != null) return false
-        if (command == null && ((!composer.hasContent && linkContexts.isEmpty()) || !composer.ready)) return false
-        val draft = composer.draft
-        val refs = if (command == null) linkContexts else emptyList()
-        val wireText = command ?: linkMessage(composer.message(), refs, context.resources)
-        val id = UUID.randomUUID().toString()
-        if (command == null) { submittedDraft = id to draft; submittedContexts = refs }
-        if (command == "/clear") clearingPane = session?.paneId
-        sendingId = id
-        sending = true
-        followEnd()
-        scope.launch {
-            try {
-                // Routed to a task ("Say to "xx""): its accepted response, not launching the request, consumes the route
-                // and clears the draft below. Until then this has the same pending state as an ordinary send (#5949).
-                val routed = command == null && tasks != null && refs.isEmpty() && draft.attachments.isEmpty() &&
-                    tasks.sendRouted(key.sessionId, draft.text.trim())
-                if (!routed) {
-                    // The user's own message carries out a launcher switch waiting on Glass, where the pill shows it (#5055):
-                    // `apply_switch`; any other message leaves it waiting.
-                    if (command == null && switchesNext(switchSession, glass && agentChat)) {
-                        sender.sendApplyingSwitch(key, wireText, id)
-                        drawnSwitch = null
-                    } else sender.send(key, wireText, id, null, conversationLauncher, conversationModel)
-                }
-                if (command == null) {
-                    composer.clearIfUnchanged(draft)
-                    linkContexts = linkContexts.filterNot { ref -> refs.any { it.id == ref.id } }
-                    submittedDraft = null; submittedContexts = emptyList()
-                }
-            }
-            catch (e: CancellationException) { throw e }
-            catch (e: Exception) {
-                submittedDraft = null; submittedContexts = emptyList()
-                if (command == SlashCommand.CLEAR) clearingPane = null
-                onFailed()
-                if (feedback?.failure(e) != true) notice = operationFeedback(e).text.resolve(res)
-            }
-            finally { sending = false; sendingId = null }
-        }
-        return true
-    }
+    fun send(command: String? = null, onFailed: () -> Unit = {}): Boolean = interactionController.send(command,
+        draft = composer.draft, contexts = linkContexts, hasContent = composer.hasContent, ready = composer.ready,
+        wireText = command ?: linkMessage(composer.message(), linkContexts, context.resources), paneId = session?.paneId,
+        conversationLauncher = conversationLauncher, conversationModel = conversationModel, glassAgent = glass && agentChat,
+        onFailed = onFailed, onCleared = { refs -> linkContexts = linkContexts.filterNot { ref -> refs.any { it.id == ref.id } } })
     // Chat content (group A): the message menu, the image viewer, photos and paths in messages, the API error retry.
     val messageMenu = remember { MessageMenuState() }
     // A swipe to the left quotes (iOS #1058) wherever the long-press menu's "Quote" is offered.
@@ -668,50 +620,20 @@ private fun ChatPage(
             backgroundRecords = assistantPresentation.background, onOpenBackground = { backgroundOpen = true },
             onOpenSetup = chrome.onOpenSetup?.let { open -> { page: persona.core.contracts.BriefSetupPage -> open(page, session?.manager) } })
     }
-    fun approveTray(captured: List<Pair<Interaction, Resolution>>) {
-        if (trayApproving || taps.busy || readOnly) return
-        trayApproving = true
-        scope.launch {
-            try {
-                for ((interaction, resolution) in captured) {
-                    val current = interactions.pending.value
-                    val sourceSession = sessions.sessions.value.firstOrNull { it.key == interaction.sessionKey }
-                        ?: taskAgentSessions[GroupKeys.rawKey(interaction.sessionKey)]
-                    if (!taps.canTap(interaction, current, java.time.Instant.now()) || trayApproval(interaction, sourceSession) != resolution) continue
-                    taps = taps.tapped(interaction.id)
-                    try {
-                        val result = submitInteraction { interactions.resolveOutcome(interaction.id, resolution) }
-                        result.submission.haptic?.let(haptics)
-                        taps = taps.answered(interaction.id, result.card)
-                        if (!result.withdraw) notice = result.notice(res, interaction, resolution)
-                        // An approval from the tray answers a card here too: the next one waiting elsewhere is offered.
-                        else if (result.offersNext(resolution)) answeredHere++
-                    } finally { taps = taps.idle() }
-                }
-            } finally { trayApproving = false }
-        }
-    }
-    fun sendTray(draft: TrayDraft) {
-        if (traySending || readOnly || !canSend) return
-        traySending = true
-        scope.launch {
-            try {
-                when (draft) {
-                    is TrayDraft.Inbox -> {
-                        val accepted = chrome.inboxScope?.let { scopeId ->
-                            chrome.inboxTrays?.send(scopeId, draft.draft, traySendIds.getOrPut(draft.draft) { UUID.randomUUID().toString() })
-                        } == true
-                        if (!accepted) notice = res.getString(R.string.chat_tray_draft_changed)
-                    }
-                    is TrayDraft.Feed -> {
-                        val latest = tasks?.feeds?.value?.get(key.sessionId)?.firstOrNull { it.id == draft.item.id }
-                        if (latest != draft.item || !latest.canSend) notice = res.getString(R.string.chat_tray_draft_changed)
-                        else tasks?.sendMessage(draft.item, draft.text) { notice = operationFeedback(it).text.resolve(res) }
-                    }
-                }
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { notice = operationFeedback(error).text.resolve(res) }
-            finally { traySending = false }
+    fun approveTray(captured: List<Pair<Interaction, Resolution>>) = interactionController.approve(captured, taskAgentSessions)
+    fun sendTray(draft: TrayDraft) = interactionController.sendTray(draft) { current ->
+        when (current) {
+            is TrayDraft.Inbox -> {
+                val accepted = chrome.inboxScope?.let { scopeId ->
+                    chrome.inboxTrays?.send(scopeId, current.draft, traySendIds.getOrPut(current.draft) { UUID.randomUUID().toString() })
+                } == true
+                if (!accepted) notice = res.getString(R.string.chat_tray_draft_changed)
+            }
+            is TrayDraft.Feed -> {
+                val latest = tasks?.feeds?.value?.get(key.sessionId)?.firstOrNull { it.id == current.item.id }
+                if (latest != current.item || !latest.canSend) notice = res.getString(R.string.chat_tray_draft_changed)
+                else tasks?.sendMessage(current.item, current.text) { notice = operationFeedback(it).text.resolve(res) }
+            }
         }
     }
     trayPlan?.let { plan -> taskHost?.let { host ->
@@ -756,13 +678,6 @@ private fun ChatPage(
                 submittedDraft = null
             }
         }
-    }
-    LaunchedEffect(interactionFeedback) {
-        if (interactionFeedback != null) { delay(3_000); interactionFeedback = null }
-    }
-    // As long as the web shows its "Answered" receipts (20 s); never moves on by itself.
-    LaunchedEffect(answeredHere) {
-        if (answeredHere > 0) { offerNext = true; delay(NEXT_WAITING_MILLIS); offerNext = false }
     }
     LaunchedEffect(allRequests) {
         taps = taps.pending(allRequests.map { it.id }.toSet())
@@ -909,43 +824,11 @@ private fun ChatPage(
                     // In a box of its own: with no cards it is nothing, and its height reads 0 again.
                     Box(Modifier.onSizeChanged { if (task) taskHeight = it.height else stackHeight = it.height }) {
                         InteractionPanel(cards, machine, cap, taps.busyId, taps.uncertain, { interaction, resolution ->
-                            if (taps.canTap(interaction, allRequests, java.time.Instant.now())) {
-                                taps = taps.tapped(interaction.id)
-                                scope.launch {
-                                    try {
-                                        val result = submitInteraction { interactions.resolveOutcome(interaction.id, resolution) }
-                                        result.submission.haptic?.let(haptics)
-                                        taps = taps.answered(interaction.id, result.card)
-                                        if (result.withdraw) {
-                                            interactionFeedback = result.notice(res, interaction, resolution)
-                                            if (result.offersNext(resolution)) answeredHere++
-                                        }
-                                        notice = if (result.withdraw) null else result.notice(res, interaction, resolution)
-                                        if (result.submission == InteractionSubmission.PromptChanged || !result.withdraw) {
-                                            try { interactions.refresh() } catch (e: CancellationException) { throw e } catch (_: Exception) { }
-                                        }
-                                    } finally { taps = taps.idle() }
-                                }
-                            }
+                            interactionController.answer(interaction, resolution)
                         }, terminal, { if (task) taskOverlay = it else stackOverlay = it }, linkVisible = linkVisible,
                             folds = requestFolds,
                             blockedReason = if (canApprove) null else approvalBlockedReason(res, session),
-                            terminalHelp = canTerminal, onDiscardLocal = { interaction ->
-                                if (!taps.busy) {
-                                    taps = taps.tapped(interaction.id)
-                                    scope.launch {
-                                        try {
-                                            interactions.discardLocal(interaction.id)
-                                            taps = taps.discarded(interaction.id)
-                                            interactionFeedback = res.getString(R.string.chat_card_discarded_local)
-                                            notice = null
-                                        } catch (e: CancellationException) { throw e
-                                        } catch (_: Exception) {
-                                            notice = res.getString(R.string.chat_card_discard_failed)
-                                        } finally { taps = taps.idle() }
-                                    }
-                                }
-                            }, keyboard = keyboard,
+                            terminalHelp = canTerminal, onDiscardLocal = interactionController::discard, keyboard = keyboard,
                             labels = if (task) taskAsk?.let { mapOf(it.card.id to it.label) }.orEmpty() else emptyMap(),
                             first = if (task) null else chrome.requestId, counted = !task, suggestion = ruleLine)
                     }

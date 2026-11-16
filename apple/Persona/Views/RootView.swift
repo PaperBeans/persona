@@ -332,6 +332,7 @@ struct RootView: View {
         .environment(\.splitSideBars, barEdge != nil) // the columns' top margin under side bars (#4853)
         .readsVerticalBarEdge($barEdge)
         .modifier(PadRoutes(router: pad))
+        .onAppear { agentsPart.linedUpWith = personaPart } // one head line on both tabs (#8596)
         #endif
     }
 }

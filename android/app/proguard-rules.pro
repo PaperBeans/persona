@@ -25,6 +25,7 @@
 # annotation removed") before signing.
 -keepnames class persona.core.data.RealInboxRepository
 -keepnames class persona.core.designsystem.MarkdownRenderer
+-keepnames class persona.core.hub.HttpChatComposerService
 -keepnames class persona.feature.agents.AgentsViewModel
 -keepnames class persona.feature.files.Notebooks
 -keepnames class persona.feature.inbox.LarkInboxRepository

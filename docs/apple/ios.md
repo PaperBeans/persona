@@ -800,8 +800,12 @@ Apps built with older Xcode do not extend under the status bar and camera on Duo
   - Left-column `NavigationLink(value:)` replaces the right column (the left has its own never-pushed stack, forwarding values to the right); programmatically opened list pages must replace it too:
     `path = NavigationPath([value])` (in single-column mode the list is at the stack bottom, equivalent to append; Agents `openFromList`). Pages opened from details still append.
   - The first right-column page has no back button (the list is beside it): add `.splitDetailPage()` to the destination; Agents' custom chat back button hides for `\.splitDetail` (keeping its space so the title stays centered).
-    With the list folded, the chat's ‹ brings it back (#963). On iPhone Duo open on its side the chat has no ‹ then either (#3680): its actions are in the system's side bars, whose
-    Show Sidebar at the top left brings the list back, and a ‹ that did the same was read as a Back that opened the sidebar instead of going back. Upright (#3641) keeps #963's ‹.
+    With the list folded, the chat's leading button brings it back (#963): the sidebar's button (`Theme.Icon.sidebar`, "Show Sidebar", with how many Agents need the user), as on the
+    main conversation, not a ‹ (#8603). What the button shows follows how the page was reached, not what it is: a chat picked in the list is a root and has the sidebar's button; the
+    same chat pushed from inside another page (a waiting Agent on the main conversation, Inbox's) has ‹, which goes back to that page. On iPhone Duo open on its side the chat has
+    neither (#3680): its actions are in the system's side bars, whose Show Sidebar at the top left brings the list back.
+  - The Separate layout's tabs at regular width (#8596): the split makes the floating tab bar's room in its columns, and UIKit held it a second time in the tab's own top safe
+    area for a tab first shown after a switch (the Agents tab's column head 64 pt lower). `TabBarRoomOnce` (ChatsView) takes the tab's top beyond the window's own back off.
   - Split chat pages do not hide the tab bar (single-column pages do, to fill the screen).
   - Settings entry points all use values (`SettingsPage`); view-based `NavigationLink { page }` pushes the left column's own stack and opens in the narrow column.
 - **Persona**: in regular width, the sidebar is `NavigationSplitView`'s left column (the shell's places and Settings at its foot), with the top-left button showing / hiding it; on iPhone Duo open the
@@ -946,16 +950,27 @@ regular width it stays beside the page. The Mac (frozen) and Apple Vision Pro ke
   styles whose list paints the page's own color: three bands down the column.
 - **Under side bars** (the open iPhone Duo on its side, `SidebarRoot` reading `readsVerticalBarEdge` into
   `\.splitSideBars`): nothing is above the columns there, so the column's head and the page's top bar sat at the
-  display's edge, the mark under its rounded corner (#4853). Both columns start `Theme.Space.l` lower, or as low as the
-  lower of their own tops (`SplitNavigation.topPad`), as ChatGPT's open Duo: the head and the page's top stay on one line.
-- **The page beside it**: the Agents page's split (`ChatsView` under `\.unifiedSidebar`, `SidebarRoot` in `RootView`),
-  whose detail starts at the Persona conversation: `AssistantView` without a stack of its own (`embedded`), pushing on
-  the split's one path (`\.unifiedPath`). A pick in the sidebar replaces what is over the conversation, as the web's
-  routes: an Agent's chat (its row, a card), a place (`ShellRoute` / `SidebarRoute`, the split's first page without a back),
-  the conversation itself (its row, `ShellPage.conversation`). Every page the Persona page opens is a value there, never a
-  flag, so the next pick does not land under it. The conversation's sidebar button folds and brings back the split's
-  column (`SplitShowList.hide`). The shaded row follows what is beside the sidebar (`UnifiedSidebar.atRoot`,
-  `shownPlace`).
+  display's edge, the mark under its rounded corner (#4853). Both columns start at least `Theme.Space.l` lower
+  (`SplitNavigation.topPad`), as ChatGPT's open Duo: the head and the conversation's top bar stay on one line. The
+  column's head never follows the page's own top (#8359): that is the root's navigation bar (0 on the conversation,
+  82 pt on a place, 24 on an Agent's chat), and the head dropped by that much on every root but the conversation.
+  `SidebarRootsUITests.testTheSidebarHeadStaysPutOnEveryRoot` holds the head, the main conversation and the Pages
+  heading within 1 pt on the conversation, Recordings, Inbox and an Agent.
+- **The page beside it**: the Agents page's split (`ChatsView` under `\.unifiedSidebar`, `SidebarRoot` in `RootView`;
+  the Persona tab's in the Separate layout too). **Switching area replaces the page's root; only drilling down pushes**
+  (#8359, docs/design/sidebar-navigation.md section 6): each sidebar item is a root of its own, the main conversation, a
+  place (`ShellRoute`), Health or Messages (`SidebarRoute`), an Agent's chat (its row, a card, a route) or another page the
+  Agents list opens. A pick replaces the root at once, with no push, pop or Back; the split's path (`\.unifiedPath`) holds
+  only what is opened inside the page (an Inbox item, a machine, a recording), pushed with Back. Each root keeps its
+  drill-down while the user is elsewhere, and the root in front picked again goes back to it (`SidebarPageRoots`, held by
+  `UnifiedSidebar`). `AssistantView` without a stack of its own (`embedded`) stays the stack's root and draws the root picked
+  (`sidebarRootPage`); `SplitNavigation(rootsSwap:)` counts the root as the first page. The conversation's sidebar button
+  folds and brings back the split's column (`SplitShowList.hide`). The shaded row follows the root, also while drilled in
+  (`UnifiedSidebar.atRoot`, `shownPlace`; an Agent's row from the root). Laid over the page (the open Duo upright) the
+  column slides away on a pick, the only motion. DEBUG: `-probes YES` writes `probe.sidebar-page` (the root, the path, how
+  many animated navigation transitions ran; `SidebarRootsUITests`). The conversation's `RootBarHidden` (which hides the
+  stack's bar again after a pop) stops once the conversation is taken away: a hide still waiting from its last update hid
+  the next root's bar, its title and, on the open Duo upright, the button that brings the sidebar back.
 - **On a phone** (`SplitNavigation`'s drawer layout, `\.splitDrawer`, `SplitDetail.drawer`): the same column in the
   drawer (`AssistantDrawerLayout`, the shell's drawer: 82% of the width, at most 380 pt), the Persona conversation the root
   of one stack under it, and what the drawer opens that stack's first page. The conversation's bar has no Assistant |
@@ -981,7 +996,8 @@ regular width it stays beside the page. The Mac (frozen) and Apple Vision Pro ke
   Duo on its side), each tab the same column with its part of the one sidebar (`UnifiedSidebar.Part`), its own selection
   and its own page: Persona's tab the head, the main conversation, the pages and Persona's chats (in a list of their own,
   `personaList`), Persona's page beside it; the Agents tab the head and the Agents list, the "Choose an Agent" page beside
-  it. Both feet are the Sidebar layout's (New Chat, Search, Settings); the Agents tab's New Chat and places open on
+  it until an Agent is picked, which then is the page's root, put in place with no push (#8603, as the Sidebar layout's
+  roots). Both feet are the Sidebar layout's (New Chat, Search, Settings); the Agents tab's New Chat and places open on
   Persona's tab. Each tab's column is kept as before (`assistant.list`, `agents.list`); an Agent asked for from outside
   opens on the Agents tab only. At compact width the shell is drawn as before.
 - **The head's fold** (both layouts, beside a page; #4206 as the earlier one sidebar had it): the column's head ends in
@@ -990,7 +1006,8 @@ regular width it stays beside the page. The Mac (frozen) and Apple Vision Pro ke
   phone's drawer the face opens it, as before.
 - Tests: `SidebarLayoutRoutingTests` (the router), `SidebarLayoutTests` (iPad UI: the column, a pick replacing the
   page, the routes), `SidebarLayoutPhoneTests` (iPhone UI: the drawer, a pick replacing the page, the face where a back
-  would be, the setting switching both ways at once, nothing picked: Separate). DEBUG: `-app.navigation sidebar` launches in the Sidebar layout, `-app.navigation ""` with nothing picked; `-openAppearance navigation` opens
+  would be, the setting switching both ways at once, nothing picked: Separate), `SidebarRootsUITests` (a pick replaces the
+  root, a drill-down pushes, each root keeps its drill-down; iPad, open Duo, iPhone), `SidebarPageRootsTests` (the rule). DEBUG: `-app.navigation sidebar` launches in the Sidebar layout, `-app.navigation ""` with nothing picked; `-openAppearance navigation` opens
   the setting's page.
 
 ## Home-screen quick actions (#3199)

@@ -457,6 +457,7 @@ struct ShellDestinations: ViewModifier {
                 .navigationDestination(for: InboxChatRoute.self) { r in routed(ChatView(key: r.key, itemManager: r.manager).id(r.key)) }
                 .environment(\.feishuOpen) { path.append($0) }
                 .environment(\.pushInboxChat, routeChat)
+                .environment(\.shellInboxAccounts, accounts)
                 #if DEBUG
                 .onAppear { ShellTrace.shared.note("inbox chat closure available=\(routeChat != nil)") }
                 #endif
@@ -509,9 +510,12 @@ struct ShellDestinations: ViewModifier {
         }
     }
 
-    @ViewBuilder private func place(_ route: ShellRoute) -> some View {
+    private func place(_ route: ShellRoute) -> some View { Self.place(route, path: $path, accounts: accounts) }
+
+    /// A place's page: pushed here, or drawn as the Sidebar layout's root (#8359, `AssistantView.sidebarRootPage`).
+    @ViewBuilder static func place(_ route: ShellRoute, path: Binding<NavigationPath>, accounts: InboxAccountState) -> some View {
         switch route {
-        case .inbox: InboxPage(path: $path, accountState: accounts, embedded: true)
+        case .inbox: InboxPage(path: path, accountState: accounts, embedded: true)
         case .todos: TodosView()
         case .machines: MachinesView()
         case .extensionPage(let r): ExtensionNavPage(route: r)

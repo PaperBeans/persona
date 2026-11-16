@@ -12,10 +12,20 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-func TestReviewConfirmedURLQueryFlag(t *testing.T) {
+// requireCurlURLQuery skips a test that sends --url-query through the real curl: the flag arrived in curl 7.87, and
+// an older curl (Debian 10 ships 7.64) rejects it with exit status 2 before any request leaves.
+func requireCurlURLQuery(t *testing.T) {
+	t.Helper()
 	if _, err := exec.LookPath("curl"); err != nil {
 		t.Skip("no curl")
 	}
+	if out, err := exec.Command("curl", "--url-query", "a=b", "--version").CombinedOutput(); err != nil {
+		t.Skipf("curl has no --url-query (7.87 or newer): %s", strings.TrimSpace(string(out)))
+	}
+}
+
+func TestReviewConfirmedURLQueryFlag(t *testing.T) {
+	requireCurlURLQuery(t)
 	r := newSpaceRig(t)
 	cwd := t.TempDir()
 	base := r.processIn(cwd, "s1")
@@ -45,9 +55,7 @@ func TestReviewConfirmedURLQueryFlag(t *testing.T) {
 }
 
 func TestGateGetDataReadsKeepActualCurlSemantics(t *testing.T) {
-	if _, err := exec.LookPath("curl"); err != nil {
-		t.Skip("no curl")
-	}
+	requireCurlURLQuery(t)
 	tests := []struct {
 		name, method, pathQuery string
 		flags                   []string
@@ -306,9 +314,7 @@ func TestGateGetDataWriteCannotLendGrantToNonGetBody(t *testing.T) {
 }
 
 func TestGateConfirmedURLQueryFlagMatching(t *testing.T) {
-	if _, err := exec.LookPath("curl"); err != nil {
-		t.Skip("no curl")
-	}
+	requireCurlURLQuery(t)
 	const body = `{"text":"n"}`
 	queryFile := filepath.Join(t.TempDir(), "query.txt")
 	if err := os.WriteFile(queryFile, []byte("a=from file+β\r\nb=two\n"), 0o600); err != nil {
@@ -452,9 +458,7 @@ func TestGateConfirmedURLQueryFlagMatching(t *testing.T) {
 }
 
 func TestGateURLQueryFragmentTwoOutstandingGrants(t *testing.T) {
-	if _, err := exec.LookPath("curl"); err != nil {
-		t.Skip("no curl")
-	}
+	requireCurlURLQuery(t)
 	r := newSpaceRig(t)
 	cwd := t.TempDir()
 	base := r.processIn(cwd, "s1")
@@ -501,9 +505,7 @@ func TestGateURLQueryFragmentTwoOutstandingGrants(t *testing.T) {
 }
 
 func TestGateURLQueryEmptyFragmentTwoOutstandingGrants(t *testing.T) {
-	if _, err := exec.LookPath("curl"); err != nil {
-		t.Skip("no curl")
-	}
+	requireCurlURLQuery(t)
 	r := newSpaceRig(t)
 	cwd := t.TempDir()
 	base := r.processIn(cwd, "s1")
@@ -587,9 +589,7 @@ func TestGateURLQueryLiteralDollarNeedsNoExpansion(t *testing.T) {
 }
 
 func TestGateURLQueryPreencodedLiteralVariableBytes(t *testing.T) {
-	if _, err := exec.LookPath("curl"); err != nil {
-		t.Skip("no curl")
-	}
+	requireCurlURLQuery(t)
 	r := newSpaceRig(t)
 	cwd := t.TempDir()
 	base := r.processIn(cwd, "s1")
@@ -614,9 +614,7 @@ func TestGateURLQueryPreencodedLiteralVariableBytes(t *testing.T) {
 }
 
 func TestGateURLQueryUnknownConfirmedAndAllowedGET(t *testing.T) {
-	if _, err := exec.LookPath("curl"); err != nil {
-		t.Skip("no curl")
-	}
+	requireCurlURLQuery(t)
 	queries := []struct {
 		name, suffix, stdin, query string
 		args                       []string
@@ -792,9 +790,7 @@ func TestGateURLQueryUnresolvedExpansionRulesStillAllow(t *testing.T) {
 }
 
 func TestGateURLQueryRelativeFile(t *testing.T) {
-	if _, err := exec.LookPath("curl"); err != nil {
-		t.Skip("no curl")
-	}
+	requireCurlURLQuery(t)
 	const body = `{"text":"n"}`
 	for _, tc := range []struct{ name, flag, query string }{
 		{name: "unnamed", flag: "@query.txt", query: "a%3drelative%2b%ce%b2%0a"},
@@ -833,9 +829,7 @@ func TestGateURLQueryRelativeFile(t *testing.T) {
 }
 
 func TestGateURLQueryStdinRulesStillAllow(t *testing.T) {
-	if _, err := exec.LookPath("curl"); err != nil {
-		t.Skip("no curl")
-	}
+	requireCurlURLQuery(t)
 	for _, tc := range []struct {
 		name, method, path, flag, query string
 		rules                           []proto.LarkRule

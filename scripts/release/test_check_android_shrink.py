@@ -154,7 +154,8 @@ class ShrinkGuardTests(unittest.TestCase):
         rules = [line.strip() for line in (android / "app/proguard-rules.pro").read_text().splitlines()]
         for rule in ("-dontobfuscate", "-keepattributes SourceFile,LineNumberTable",
                      "-keepattributes InnerClasses,EnclosingMethod",
-                     "-keepnames class * extends java.lang.Throwable"):
+                     "-keepnames class * extends java.lang.Throwable",
+                     "-keepnames class persona.core.hub.HttpChatComposerService"):
             self.assertIn(rule, rules)
         # Optimizing saves 13.7 MB: with -dontoptimize the APK is 33.2 MB again (#2840).
         self.assertNotIn("-dontoptimize", rules)

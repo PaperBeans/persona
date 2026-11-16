@@ -347,27 +347,19 @@ fun AssistantScreen(
         }
     }
     val shownCompaction = mainSession?.compaction.takeIf { onMain }
-    var compaction by remember(active) { mutableStateOf(CompactionStatus()) }
-    var compacting by remember { mutableStateOf(false) }
-    var newMainOpen by remember { mutableStateOf(false) }
-    var newMainBusy by remember { mutableStateOf(false) }
-    var carrySummary by rememberSaveable { mutableStateOf(true) }
+    val mainConversation = rememberMainConversationController(pageManagement, repository, mainConversationSender, resources,
+        feedback, toast, managerChoice.shown, shownCompaction, rememberUpdatedState(active), rememberUpdatedState(snapshot.mainSession))
+    var compaction by mainConversation::compaction
+    var compacting by mainConversation::compacting
+    var newMainOpen by mainConversation::newMainOpen
+    var newMainBusy by mainConversation::newMainBusy
+    var carrySummary by mainConversation.carrySummary
+    var clearBusy by mainConversation::clearBusy
     // Clear context (#5100, the web's #5095): the main conversation it cleared, while none has started since. Then the page
     // stays a conversation page: an empty middle over the composer, where the first message starts the new main
     // conversation, not the centered start page. This page and assistant only; another main conversation forgets it.
-    var clearBusy by remember { mutableStateOf(false) }
-    var clearedMain by remember(managerChoice.hubId, managerChoice.shown) { mutableStateOf<SessionKey?>(null) }
-    LaunchedEffect(snapshot.mainSession, clearedMain) {
-        if (snapshot.mainSession != null && snapshot.mainSession != clearedMain) clearedMain = null
-    }
+    var clearedMain by mainConversation.clearedMain
     val clearedPage = clearedMain != null && active == null && newChat == null && !viewingMainQueue
-    LaunchedEffect(active, shownCompaction) { compaction = compaction.observe(shownCompaction) }
-    LaunchedEffect(compaction.line) {
-        if (compaction.line == CompactionLine.Done) {
-            kotlinx.coroutines.delay(CompactionDoneMillis)
-            compaction = compaction.dismissed()
-        }
-    }
     val groups = remember(snapshot, query, ended, archived, words, history.titles) {
         conversationGroups(snapshot.copy(conversations = history.titled(snapshot.conversations.filter { it.key !in archived }.map {
             if (it.key in ended) it.copy(status = "offline", state = "offline") else it
@@ -429,92 +421,9 @@ fun AssistantScreen(
     }
     fun refusal(error: Exception): String =
         if (error is AssistantRefused) error.message.orEmpty() else persona.core.designsystem.operationFeedback(error).text.resolve(resources)
-    fun compactMain() {
-        val key = active ?: return
-        val api = pageManagement ?: return
-        if (compacting) return
-        compacting = true
-        compaction = compaction.asked(shownCompaction)
-        scope.launch {
-            try { api.compactConversation(key) }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) {
-                compaction = compaction.refused(snapshot.conversations.firstOrNull { it.key == key }?.compaction)
-                say(refusal(error))
-            }
-            finally { compacting = false }
-        }
-    }
-    fun newMain() {
-        val api = pageManagement ?: return
-        val previous = snapshot.mainSession ?: return
-        if (newMainBusy) return
-        newMainBusy = true
-        val carry = carrySummary
-        scope.launch {
-            try {
-                val result = api.newMainConversation(carry, previous.sessionId)
-                newMainOpen = false
-                // The next message to the main conversation starts the new one, here and from every other entry.
-                assistantAttempt { mainConversationSender?.mainReplaced(previous) }
-                assistantAttempt { repository.refresh() }
-                newConversation()
-                say(resources.getString(newMainNotice(result.carried, carry)))
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                newMainOpen = false
-                if ((error as? AssistantRefused)?.code == "main_changed") {
-                    // Another device put it away first: show the main conversation the hub has now.
-                    assistantAttempt { mainConversationSender?.mainReplaced(previous) }
-                    assistantAttempt { repository.refresh() }
-                }
-                say(refusal(error))
-            } finally {
-                newMainBusy = false
-            }
-        }
-    }
-    // No confirmation, as on the web and Cindy's /clear: nothing is deleted, the old conversation is archived. [onFailed]: the
-    // composer's /clear goes back into the box.
-    fun clearMain(onFailed: () -> Unit = {}) {
-        val api = pageManagement ?: return
-        val previous = snapshot.mainSession?.takeIf { it == active } ?: return
-        if (clearBusy) return
-        clearBusy = true
-        // Before the request: the hub's update without the main conversation may come before its answer.
-        clearedMain = previous
-        fun shown() = activeSession?.let { SessionKey(activeMachine.orEmpty(), it) }
-        scope.launch {
-            try {
-                api.clearMainConversation(previous.sessionId)
-                // The next message to the main conversation starts a new one, here and from every other entry.
-                assistantAttempt { mainConversationSender?.mainReplaced(previous) }
-                assistantAttempt { repository.refresh() }
-                if (shown() == previous) newConversation()
-            } catch (cancelled: CancellationException) {
-                clearedMain = null
-                throw cancelled
-            } catch (error: Exception) {
-                clearedMain = null
-                if ((error as? AssistantRefused)?.code == "main_changed") {
-                    // Another device replaced or cleared it first: show the main conversation the hub has now, as New main chat does.
-                    assistantAttempt { mainConversationSender?.mainReplaced(previous) }
-                    assistantAttempt { repository.refresh() }
-                    val now = repository.assistant.value.takeIf { it.managerId == managerChoice.shown }?.mainSession
-                    if (shown() == previous) now?.takeUnless { it == previous }?.let(::openConversation) ?: newConversation()
-                    say(refusal(error))
-                } else {
-                    onFailed()
-                    val failed = resources.getString(R.string.assistant_clear_context_failed, refusal(error))
-                    if (feedback?.notice(failed, persona.core.designsystem.FeedbackStyle.Error) != true)
-                        toast.show(persona.core.designsystem.FeedbackNotice(failed, style = persona.core.designsystem.FeedbackStyle.Error))
-                }
-            } finally {
-                clearBusy = false
-            }
-        }
-    }
+    fun compactMain() = mainConversation.compact(active, snapshot, shownCompaction)
+    fun newMain() = mainConversation.replace(snapshot.mainSession, ::newConversation)
+    fun clearMain(onFailed: () -> Unit = {}) = mainConversation.clear(snapshot.mainSession, active, onFailed, ::newConversation, ::openConversation)
     // Hidden at once; after the hub's list is refreshed (it leaves archived ones out) the hub's word is the one kept,
     // so a later message that brings the conversation back shows it again.
     fun archive(session: Session) {
