@@ -46,8 +46,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		// accepted: what was done beyond the brief (#3822, task_brief_result.go).
 		AlsoDone []string `json:"also_done"`
 		// parked (parked.go): until when it waits (a duration or a time; reason says for what), and on what kind of thing.
-		Until     string `json:"until"`
-		WaitingOn string `json:"waiting_on"`
+		Until     string        `json:"until"`
+		WaitingOn string        `json:"waiting_on"`
+		Evidence  *ParkEvidence `json:"evidence"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("arguments: %v", err)
@@ -83,13 +84,13 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	// A parked task says what it waits for, on what kind of thing, and until when, or it is refused (parked.go).
 	var park Parked
 	if a.Verdict == reviewParked {
-		p, err := readPark(a.Reason, a.Until, a.WaitingOn, time.Now())
+		p, err := readPark(a.Reason, a.Until, a.WaitingOn, a.Evidence, time.Now())
 		if err != nil {
 			return "", err
 		}
 		park = p
-	} else if strings.TrimSpace(a.Until) != "" || strings.TrimSpace(a.WaitingOn) != "" {
-		return "", fmt.Errorf("until and waiting_on apply to parked only")
+	} else if strings.TrimSpace(a.Until) != "" || strings.TrimSpace(a.WaitingOn) != "" || a.Evidence != nil {
+		return "", fmt.Errorf("until, waiting_on and evidence apply to parked only")
 	}
 	deadline, err := parseDeadline(a.Deadline, time.Now())
 	switch {
@@ -218,6 +219,8 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 			}
 			if verdict == reviewParked {
 				r.Reason, r.Until, r.WaitingOn, r.Parks = park.Reason, park.Until, park.WaitingOn, park.Count
+				r.Evidence = park.Evidence.clone()
+				r.Evidence.RecordedBy = self
 			}
 			v.State, v.Waits = verdict, nil // reviewed: the supervisor answered what the judge found
 			v.Reviews = append(v.Reviews, r)

@@ -22,8 +22,26 @@ import (
 // parkFor parks the supervised task of newSupervisedService for what, waiting on on, until until.
 func parkFor(t *testing.T, s *Service, id, what, on, until string) {
 	t.Helper()
-	if _, err := reviewErr(s, id, map[string]any{"verdict": "parked", "reason": what, "waiting_on": on, "until": until}); err != nil {
-		t.Fatal(err)
+	if on == parkOwnerPriority {
+		seedLegacyPark(t, s, id, what, on, until)
+	} else {
+		kind, target, sourceURL, wake := "person_reply", "the design team", "", "The design team replies with the requested decision"
+		switch on {
+		case parkExternalEvent:
+			kind, target, sourceURL, wake = "external_event", "the upstream release", "https://example.com/releases/next", "The upstream release is published"
+		case parkDate:
+			kind, target, wake = "date", "the agreed date", "The recorded date arrives"
+			at, err := parseParkUntil(until, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			until = at.UTC().Format(time.RFC3339)
+		}
+		args := map[string]any{"verdict": "parked", "reason": what, "waiting_on": on, "until": until,
+			"evidence": testParkEvidence(kind, target, sourceURL, wake)}
+		if _, err := reviewErr(s, id, args); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if cur := todoNow(s, id); cur.Supervision.state(cur) != reviewParked {
 		t.Fatalf("not parked: %+v", cur.Supervision)

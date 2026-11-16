@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,10 +45,9 @@ func TestMechanicalSignalTable(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		setup        func(*testing.T, *Service, *fakeHub, *Todo, *proto.Session, time.Time)
-		wantPark     bool
 		wantDelivery string
 	}{
-		{name: "open upstream review parks as someone else", wantPark: true},
+		{name: "open upstream review stays for supervisor"},
 		{name: "merged and passing advances delivery without acceptance", setup: func(_ *testing.T, _ *Service, f *fakeHub, _ *Todo, _ *proto.Session, _ time.Time) {
 			f.answerNode("git.pr", func(string, json.RawMessage) (any, error) {
 				return map[string]any{"pr": map[string]any{
@@ -56,7 +56,7 @@ func TestMechanicalSignalTable(t *testing.T) {
 				}}, nil
 			})
 		}, wantDelivery: deliveryMerged},
-		{name: "merged already waiting on other parks as external", setup: func(_ *testing.T, _ *Service, f *fakeHub, todo *Todo, _ *proto.Session, _ time.Time) {
+		{name: "merged delivery gate stays for supervisor", setup: func(_ *testing.T, _ *Service, f *fakeHub, todo *Todo, _ *proto.Session, _ time.Time) {
 			todo.Delivery.State = deliveryMerged
 			f.answerNode("git.pr", func(string, json.RawMessage) (any, error) {
 				return map[string]any{"pr": map[string]any{
@@ -64,7 +64,7 @@ func TestMechanicalSignalTable(t *testing.T) {
 					"checks_complete": true, "reviews_complete": true, "threads_complete": true, "threads": []any{},
 				}}, nil
 			})
-		}, wantPark: true},
+		}},
 		{name: "current future wake defers", setup: func(t *testing.T, s *Service, _ *fakeHub, _ *Todo, c *proto.Session, now time.Time) {
 			at := now.Add(time.Hour)
 			s.putWork(context.Background(), db.SessionWork{MachineID: c.MachineID, SessionID: c.SessionID, TurnAt: c.UpdatedAt, WakeAt: &at,
@@ -108,19 +108,12 @@ func TestMechanicalSignalTable(t *testing.T) {
 			g := superviseSignal{Todo: todo.ID, Kind: sigIdle, Machine: c.MachineID, Session: c.SessionID, Key: "turn-1"}
 			handled, retry := s.mechanicalSignal(context.Background(), g, now)
 			got := todoNow(s, todo.ID)
-			if tc.wantPark {
-				if !handled || !retry.IsZero() || got.DoneAt != nil || got.Supervision.State != reviewParked || len(got.Supervision.Reviews) != 1 {
-					t.Fatalf("park result handled=%v retry=%v todo=%+v", handled, retry, got)
-				}
-				want := parkSomeoneElse
-				if tc.name == "merged already waiting on other parks as external" {
-					want = parkExternalEvent
-				}
-				if got.Supervision.Reviews[0].WaitingOn != want {
-					t.Fatalf("waiting_on=%q want %q", got.Supervision.Reviews[0].WaitingOn, want)
-				}
-			} else if handled {
-				t.Fatalf("unexpectedly handled; retry=%v todo=%+v", retry, got)
+			wantRetry := tc.name == "current future wake defers" || tc.name == "native scheduled wake defers with triage wake disabled"
+			if handled || !retry.IsZero() && !wantRetry {
+				t.Fatalf("mechanical signal was handled or unexpectedly retried: handled=%v retry=%v todo=%+v", handled, retry, got)
+			}
+			if got.Supervision.State != todo.Supervision.State || len(got.Supervision.Reviews) != len(todo.Supervision.Reviews) || got.DoneAt != nil {
+				t.Fatalf("mechanical path fabricated a park or changed review state: before=%+v after=%+v", todo.Supervision, got)
 			}
 			if tc.wantDelivery != "" && (got.Delivery == nil || got.Delivery.State != tc.wantDelivery || got.DoneAt != nil || got.Supervision.State != "") {
 				t.Fatalf("delivery transition accepted/failed: %+v", got)
@@ -128,7 +121,7 @@ func TestMechanicalSignalTable(t *testing.T) {
 			if (tc.name == "current future wake defers" || tc.name == "native scheduled wake defers with triage wake disabled") && (retry.IsZero() || handled || got.Supervision.State != "") {
 				t.Fatalf("future wake not deferred: handled=%v retry=%v todo=%+v", handled, retry, got)
 			}
-			if tc.wantDelivery == "" && !tc.wantPark && tc.name != "current future wake defers" && tc.name != "native scheduled wake defers with triage wake disabled" && got.Supervision.State != "" {
+			if tc.wantDelivery == "" && tc.name != "current future wake defers" && tc.name != "native scheduled wake defers with triage wake disabled" && got.Supervision.State != "" {
 				t.Fatalf("unexpected parking: %+v", got.Supervision)
 			}
 			if len(f.asked) != 0 {
@@ -304,7 +297,7 @@ func TestPRConflictIsNeverMechanicalWithoutAgents(t *testing.T) {
 	}
 }
 
-func TestSendDigestHandlesMechanicalSignalWithoutBackgroundModelWake(t *testing.T) {
+func TestSendDigestRoutesOpenReviewForSupervision(t *testing.T) {
 	s, f, todo, c, _ := mechanicalFixture(t)
 	shortSupervise(t, s)
 	s.noBackground = false
@@ -320,11 +313,20 @@ func TestSendDigestHandlesMechanicalSignalWithoutBackgroundModelWake(t *testing.
 	b.last = time.Time{}
 	b.mu.Unlock()
 	s.sendDigest(context.Background())
-	if got := todoNow(s, todo.ID); got.Supervision.State != reviewParked || got.DoneAt != nil {
-		t.Fatalf("digest did not apply mechanical parking: %+v", got)
+	if got := todoNow(s, todo.ID); got.Supervision.State != "" || len(got.Supervision.Reviews) != 0 || got.DoneAt != nil {
+		t.Fatalf("digest fabricated a park or closed the task: %+v", got)
 	}
-	if len(f.asked) != 0 || len(f.notices()) != 0 || f.made != 0 {
-		t.Fatalf("handled signal still woke a model/conversation or started background supervisor: model calls=%d notices=%q started=%d", len(f.asked), f.notices(), f.made)
+	bg := s.settings(context.Background()).BackgroundSupervisor
+	if bg == "" || bg == "conv1" || len(conversationStarts(f)) != 1 {
+		t.Fatalf("unsupported parking did not reach ordinary background supervision: %q", bg)
+	}
+	listBackground(t, s, f, bg)
+	waitFor(t, "the external wait's supervision message", func() bool { return len(f.noticesTo(bg)) == 1 })
+	if notices := f.noticesTo(bg); !strings.Contains(notices[0], "signal=idle") || len(f.noticesTo("conv1")) != 0 {
+		t.Fatalf("open review did not reach its responsible supervisor alone: %q", notices)
+	}
+	if len(f.asked) != 0 {
+		t.Fatalf("mechanical screening called a model instead of routing the signal: %d", len(f.asked))
 	}
 }
 

@@ -398,6 +398,22 @@ pub unsafe extern "C" fn persona_core_project_stream_chunks(input: *const u8, le
     .unwrap_or_else(|_| PersonaCoreBytes::empty())
 }
 
+/// Repairs a streaming fence, table or final-block marker (`persona_core::stream_repair::Input`). Returns the
+/// complete `{repaired, end}` JSON. Pure function, same buffer ownership as `persona_core_project_sort`.
+///
+/// # Safety
+/// `input` is valid for `length` bytes of UTF-8 JSON.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn persona_core_project_stream_repair(input: *const u8, length: usize) -> PersonaCoreBytes {
+    catch_unwind(AssertUnwindSafe(|| {
+        let Some(input) = json_input::<persona_core_domain::stream_repair::Input>(input, length) else {
+            return PersonaCoreBytes::empty();
+        };
+        json_output(&persona_core_domain::stream_repair::project(&input))
+    }))
+    .unwrap_or_else(|_| PersonaCoreBytes::empty())
+}
+
 /// Projects static transcript rows into turns (`persona_core::turns::Input`). Returns a JSON array of complete turn
 /// objects; the caller applies the checked-in current-iOS overlay to the fixture's expected turns before comparing.
 /// Pure function, same buffer ownership as `persona_core_project_sort`.

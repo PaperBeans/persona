@@ -3,7 +3,6 @@ package assistant
 import (
 	"context"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -167,8 +166,9 @@ func (s *Service) mechanicalSignal(ctx context.Context, g superviseSignal, now t
 		if d.State != deliveryPR {
 			return false, time.Time{} // conflicting delivery evidence needs judgment
 		}
-		return s.parkMechanicalWait(ctx, t, parkSomeoneElse,
-			i18n.T(s.lang(ctx), "assistant-todos.supervision_waits_upstream", i18n.Args{"url": p.URL}), now), time.Time{}
+		// A ready/open PR does not prove anyone requested a named reviewer. Leave the signal with the supervisor
+		// until it can supply the actual contact receipt through task_review; do not synthesize evidence.
+		return false, time.Time{}
 	case "MERGED":
 		if p.ChecksState != "passing" {
 			return false, time.Time{}
@@ -177,7 +177,8 @@ func (s *Service) mechanicalSignal(ctx context.Context, g superviseSignal, now t
 			if !wake.IsZero() {
 				return false, wake
 			}
-			return s.parkMechanicalWait(ctx, t, parkExternalEvent, d.Gate, now), time.Time{}
+			// A delivery gate alone does not identify an observable external event and its wake condition.
+			return false, time.Time{}
 		}
 		// Merge/CI proves a delivery stage, not deployment, live verification or acceptance. If no wake owns the
 		// next step the supervisor still hears of it; otherwise the recorded follow-up proceeds without a model wake.
@@ -188,24 +189,4 @@ func (s *Service) mechanicalSignal(ctx context.Context, g superviseSignal, now t
 		return false, wake
 	}
 	return false, time.Time{}
-}
-
-func (s *Service) parkMechanicalWait(ctx context.Context, t Todo, waitingOn, reason string, now time.Time) bool {
-	_, changed, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
-		cur, ok := s.todoNow(t.ID)
-		if !ok || cur.DoneAt != nil || v.state(cur) != "" || v.Waits != nil || !v.UpdatedAt.Equal(t.Supervision.UpdatedAt) {
-			return false
-		}
-		v.State = reviewParked
-		v.Reviews = append(v.Reviews, TaskReview{At: now.UTC(), Verdict: reviewParked, By: "rule",
-			Reason: strings.TrimSpace(reason), Until: now.Add(parkDefault).UTC(), WaitingOn: waitingOn, Parks: 1})
-		if len(v.Reviews) > 20 {
-			v.Reviews = v.Reviews[len(v.Reviews)-20:]
-		}
-		return true
-	})
-	if err != nil {
-		s.logf("supervise: task %s automatic parking failed: %v", t.ID, err)
-	}
-	return changed && err == nil
 }

@@ -834,3 +834,14 @@ cover intentionally different verification semantics with explicit real-JNI test
 state machine locally. Rejection is driver-level and uncorrelated: signal it without payloads, preserve it across
 multiple synchronous applies in one accept, and check it even when creation or accept also throws. A private shadow
 may stop on that signal without affecting Kotlin or another chat's work.
+
+## An offline computer can still have a readable workspace catalog (#9317)
+
+The workspace catalog is read from the hub, which persists its last successful node inventory. Skipping the hub read
+when a computer is offline loses pinned empty workspaces on a cold app launch. Read the hub and mark those rows
+unavailable using the computer's current state. A complete response replaces the old rows, including an empty list.
+
+An HTTP success may still carry per-machine discovery errors alongside useful cached rows. Preserve that partial
+status through service wrappers: merge returned rows into the prior list by machine/source/source ID, keeping missing
+prior rows until a complete refresh. Translate the identities in partial results just as in successful ones. A malformed
+or missing workspace list is a failure, not evidence that every workspace disappeared.

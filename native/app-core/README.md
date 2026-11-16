@@ -36,7 +36,7 @@ emulator results never fill the physical-device column.
 | `sort` / `state` / `recents` | 30 sort, 13 state and 21 recents cases | Sort 30; state/recents not implemented | Sort smoke only; state/recents not implemented | Sort 30 on macOS (#8952); state/recents not implemented | Sort 30 + state 13; recents not implemented | Sort is compiled for OHOS but its actual NAPI invocation is not measured; state/recents have no NAPI export | Native / native + DEBUG sort shadow (#8954) / **core Agents-list sort in production** (#8957, #8966, #9066); no state/recents migration | No domain-specific physical run; acceptance blocked |
 | `turns` / `task_index` | 57 static turn cases and five task-index cases + receipt; four operation cases have host-JNI coverage | Turns 57 + 10 operation checkpoints; task index 5 + receipt | Turns 57; task index 5 + receipt | Turns 57; task index 5 + receipt on macOS (#8952) | Turns 57 + 10 operation checkpoints (#9235); task index 5 + receipt | Turns and task-index NAPI unexecuted; host turns is not #8808's Linux loader | Native everywhere | No domain-specific physical run; acceptance blocked |
 | `answer` | 15 question + 9 recommendation cases (#9233), including newline / NBSP / TAB trimming | Full 15 + 9 | Full 15 + 9 | Full 15 + 9 on macOS (#8952 plus #9233) | Full 15 + 9 through host projection | Not measured | Native everywhere | No domain-specific physical run; acceptance blocked |
-| `stream_chunks` / `stream_repair` | Split 21; repair covers fence, table, final-marker and inline source-derived assertions | Split 21; repair 21 fence + 6 end, 22 table + 15 end, 14 final-marker, 51 explicit inline + 13 boundary expectations and 342 mixed-reply prefixes | Split 21; repair not implemented | Split 21 on macOS; repair not implemented | Split 21; repair not implemented | Split NAPI unexecuted; repair NAPI not implemented | Native everywhere | No domain-specific physical run; acceptance blocked |
+| `stream_chunks` / `stream_repair` | Split 21; repair covers fence, table, final-marker and inline source-derived assertions | Split 21; repair 21 fence + 6 end, 22 table + 15 end, 14 final-marker, 51 explicit inline + 13 boundary expectations and 342 mixed-reply prefixes | Split 21; repair 80 complete objects (#9241) | Split 21 on macOS; repair not implemented | Split 21; repair 80 complete objects (#9241) | Split NAPI unexecuted; repair NAPI export committed, real NAPI not executed | Native everywhere | No domain-specific physical run; acceptance blocked |
 | `viewed_images` | Source-derived ordinary/folded leaf and turn ownership | Ordinary/folded leaf plus identity, ordering and error controls | Ordinary + folded complete objects (#9017) | 28 complete objects + 8 no-line boundaries on macOS (#9237 / #9246) | Not implemented | Not implemented; no NAPI export | Native everywhere | No domain-specific physical run; acceptance blocked |
 
 `scripts/ci/core.sh` exercises the cargo, C ABI and ArkTS-host columns, including generated-codec and OHOS declaration
@@ -48,8 +48,10 @@ generated Swift type, a compiled OHOS feature or a host fake is not itself a rep
 
 The StreamRepair boundary is deliberately narrower than full Markdown repair: fence recognition/repair, the bounded
 table scanner, final unfinished block-marker hold-back and scalar inline repair have cargo and real host-JNI evidence.
-The `.math` end state, `plainOpenFence`, rendering, timing/coalescing and production adapters remain out of scope; no
-C, SwiftPM, ArkTS-host or real-NAPI repair replay exists. #8227 was a duplicate-key snapshot correctness bug and is closed. It does not close
+Their C ABI and ArkTS-host replays (#9241) cover the named fence/table/marker inputs, including inherited inline
+expectations. The `.math` end state, `plainOpenFence`, rendering, timing/coalescing and production adapters remain out
+of scope; no SwiftPM or real-NAPI repair replay exists. #8227 was a duplicate-key snapshot correctness bug and is
+closed. It does not close
 the separate Android performance follow-up: #9048's lock-free dispatch and owned-JNI-byte hand-off have overlapping
 host A/B distributions, and the original emulator / device go/no-go evidence remains unresolved as recorded in the plan.
 
@@ -83,7 +85,10 @@ and `--print-records` prints the validated raw records. Keep the complete generi
 unchanged fixtures through every pure C projection: sort's `empty_list`, `persona_core_project_answer` and
 `persona_core_display_answer` for all 15 question + 9 recommendation cases (complete conditional expected objects,
 invalid page/option and the U+200B boundaries), `persona_core_project_stream_chunks` for all 21 complete
-`{done, tail}` objects, `persona_core_project_turns` for all 57 static cases with the checked-in current-iOS overlay
+`{done, tail}` objects, `persona_core_project_stream_repair` (#9241) for 22 fence + 19 marker/boundary + 39
+table/boundary complete `{repaired, end}` objects stated independently from the Apple tests/source and existing JNI
+replay,
+`persona_core_project_turns` for all 57 static cases with the checked-in current-iOS overlay
 applied by the client (73 complete turn objects across the 54 non-empty cases), and
 `persona_core_project_task_index` for all five complete expected objects plus the background receipt, and
 `persona_core_project_viewed_images` (#9017) for the complete post-overlay ordinary viewed line and a source-derived
@@ -106,9 +111,10 @@ corpus plus overlay, and separately replays the existing replacement through the
 runtime operations are not incremental ChatStore rebuild, rendered-line/layout, task-index or device-performance evidence.
 The stream replay (#8827) calls `projectStreamChunks` through the real Kotlin/JNI boundary for all 21 existing
 `spec/fixtures/stream-chunks/split.json` cases, comparing complete `{done, tail}` expected objects from the unchanged
-fixture. It checks malformed input and a wrong expected object. It does not execute Swift or cover full StreamRepair,
-visual gaps, rendering, timing/coalescing, production adapters or physical-device performance. Later C ABI, SwiftPM
-and ArkTS host replays cover `stream_chunks` but not StreamRepair, whose C/NAPI/Swift boundaries remain unimplemented.
+fixture. It checks malformed input and a wrong expected object. It does not execute Swift, visual gaps, rendering,
+timing/coalescing, production adapters or physical-device performance. The fence/table/marker StreamRepair slices have
+separate real host-JNI coverage; this PR adds their C ABI and ArkTS host replays. Only their SwiftPM projection remains
+unimplemented; the generated NAPI export is committed but no NAPI library has been loaded or executed.
 The fence StreamRepair replay (#9051) calls `projectStreamRepair` through real Kotlin/JNI for 21 independently
 stated repaired strings and six explicit code/text end cases from Apple's tests, including opener/closure indentation,
 partial markers and malformed/wrong-expected controls. The final-marker hold-back (#9084) replays all 13 Apple
@@ -296,9 +302,13 @@ from the unchanged checked-in fixtures, with exact-name, invalid-input and wrong
 the ninth recommendation. The answer comparison preserves the fixture's
 conditional next-page, picks and display fields. The receipt retains its description and started call with empty
 notices/statuses. Exact manifests, malformed inputs and deliberately wrong expected objects are checked per domain.
+`harmony/tests/core-host/stream-repair.test.mjs` (#9241) replays the same 80 complete `{repaired, end}` objects
+through the `stream_repair` host projection command, including the digit, leading-blank-line and delimiter boundaries.
+Both surfaces reject malformed inputs and deliberately wrong `end`, wrong `repaired` and extra-field expectations.
 The `ohos`-feature NAPI projection exports are `coreProjectSort`, `coreProjectAnswer`, `coreDisplayAnswer`,
-`coreProjectStreamChunks`, `coreProjectTaskIndex` and `coreProjectTurns`; their generated declarations are checked
-for drift. `coreDisplayAnswer` takes a bare option label, while the other five take JSON documents.
+`coreProjectStreamChunks`, `coreProjectStreamRepair` (#9241), `coreProjectTaskIndex` and `coreProjectTurns`; their
+generated declarations are checked for drift. `coreDisplayAnswer` takes a bare option label, while the other six take
+JSON documents.
 `harmony/tests/core-host/turns.test.mjs` (#9235) adds `coreProjectTurns` and its host JSON projection. It compares
 all 57 unchanged static cases after applying the checked-in current-iOS overlay: 54 nonempty cases hold 73 complete
 turn objects, and three explicitly named cases compare empty arrays rather than establishing layout coverage. The

@@ -1,6 +1,7 @@
 package persona.feature.agents
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -15,11 +16,12 @@ internal open class PaseoCatalogTestService : AgentCreationService {
     override val scope = "test-pairing"
     var rows: List<AgentWorkspace> = emptyList()
     var failure: Exception? = null
+    var complete = true
     val reads = mutableListOf<String>()
-    override suspend fun workspaceCatalog(machineId: String): List<AgentWorkspace> {
+    override suspend fun workspaceCatalog(machineId: String): AgentWorkspaceCatalog {
         reads += machineId
         failure?.let { throw it }
-        return rows.filter { it.machineId == machineId }
+        return AgentWorkspaceCatalog(rows.filter { it.machineId == machineId }, complete)
     }
     override suspend fun launchers(machineId: String) = emptyList<AgentLauncher>()
     override suspend fun directories(machineId: String, path: String) = error("Not used")
@@ -51,14 +53,14 @@ class AgentsWorkspaceCatalogTest {
         assertTrue(catalog.rows.value.isEmpty())
     }
 
-    @Test fun offlineAndReconnectKeepSourceIdentityAndNeverReadAnotherMachine() = runTest {
+    @Test fun offlineAndReconnectReadTheHubAndKeepSourceIdentity() = runTest {
         val service = PaseoCatalogTestService().apply { rows = listOf(workspace(), workspace(machine = "other")) }
         val catalog = AgentsWorkspaceCatalog()
         catalog.refresh(service, listOf("computer" to true, "other" to true))
         assertEquals(2, catalog.rows.value.size)
         service.reads.clear()
         catalog.refresh(service, listOf("computer" to false, "other" to true))
-        assertEquals(listOf("other"), service.reads)
+        assertEquals(setOf("computer", "other"), service.reads.toSet())
         assertFalse(catalog.rows.value.single { it.machineId == "computer" }.online!!)
         assertNotNull(catalog.rows.value.single { it.machineId == "computer" }.pinnedAt)
         service.rows = listOf(workspace(pin = null))
@@ -69,7 +71,7 @@ class AgentsWorkspaceCatalogTest {
     }
 
     @Test fun anOlderReadCannotRestoreAPinAfterANewerReadClearedIt() = runTest {
-        val pending = CompletableDeferred<List<AgentWorkspace>>()
+        val pending = CompletableDeferred<AgentWorkspaceCatalog>()
         val slow = object : PaseoCatalogTestService() {
             override suspend fun workspaceCatalog(machineId: String) = pending.await()
         }
@@ -78,9 +80,84 @@ class AgentsWorkspaceCatalogTest {
         val stale = launch { catalog.refresh(slow, listOf("computer" to true)) }
         runCurrent()
         catalog.refresh(fresh, listOf("computer" to true))
-        pending.complete(listOf(workspace()))
+        pending.complete(AgentWorkspaceCatalog(listOf(workspace())))
         stale.join()
         assertNull(catalog.rows.value.single().pinnedAt)
+    }
+
+    @Test fun aColdOfflineListRestoresAndDrawsAnEmptyPinnedWorkspaceFromTheHub() = runTest {
+        val service = PaseoCatalogTestService().apply { rows = listOf(workspace()) }
+        val catalog = AgentsWorkspaceCatalog()
+        catalog.refresh(service, listOf("computer" to false))
+        assertEquals(listOf("computer"), service.reads)
+        val row = catalog.rows.value.single()
+        assertNotNull(row.pinnedAt)
+        assertFalse(row.online!!)
+        assertFalse(row.available!!)
+        val list = buildAgentList(emptyList(), listOf(Machine("computer", online = false)),
+            settings = AgentListSettings(workspaces = catalog.rows.value))
+        val pin = list.groups.single { it.worktree?.pinned == true }
+        assertFalse(pin.folded)
+        assertTrue(pin.worktree!!.offline)
+        assertTrue(pin.rows.isEmpty())
+    }
+
+    @Test fun aCompleteOfflineRefreshCanClearAPinAndRemoveItsWorkspace() = runTest {
+        val service = PaseoCatalogTestService().apply { rows = listOf(workspace()) }
+        val catalog = AgentsWorkspaceCatalog()
+        val machines = listOf("computer" to false)
+        catalog.refresh(service, machines)
+        service.rows = listOf(workspace(pin = null))
+        catalog.refresh(service, machines)
+        assertNull(catalog.rows.value.single().pinnedAt)
+        assertFalse(catalog.rows.value.single().available!!)
+        service.rows = emptyList()
+        catalog.refresh(service, machines)
+        assertTrue(catalog.rows.value.isEmpty())
+    }
+
+    @Test fun partialRowsRestoreAColdCacheAndPreserveOnlyMissingRowsOfTheSameSource() = runTest {
+        val service = object : PaseoCatalogTestService() {
+            override suspend fun workspaceCatalog(machineId: String) = AgentWorkspaceCatalog(rows, complete)
+        }.apply { rows = listOf(workspace()); complete = false }
+        val catalog = AgentsWorkspaceCatalog()
+        val machines = listOf("computer" to true)
+        catalog.refresh(service, machines)
+        assertNotNull(catalog.rows.value.single().pinnedAt)
+        val missing = workspace().copy(sourceId = "missing")
+        service.complete = true
+        service.rows = listOf(workspace(), missing)
+        catalog.refresh(service, machines)
+        service.complete = false
+        service.rows = listOf(workspace(pin = null), workspace(machine = "other"), workspace().copy(source = "orca"))
+        catalog.refresh(service, machines)
+        assertEquals(setOf("workspace", "missing"), catalog.rows.value.map { it.sourceId }.toSet())
+        assertNull(catalog.rows.value.single { it.sourceId == "workspace" }.pinnedAt)
+        assertEquals(missing, catalog.rows.value.single { it.sourceId == "missing" })
+        assertTrue(catalog.rows.value.all { it.machineId == "computer" && it.source == "paseo" })
+        service.complete = true
+        service.rows = listOf(workspace(pin = null))
+        catalog.refresh(service, machines)
+        assertEquals(listOf("workspace"), catalog.rows.value.map { it.sourceId })
+    }
+
+    @Test fun cancellationKeepsTheCacheAndNewPairingNeverInheritsItsPartialRows() = runTest {
+        val service = PaseoCatalogTestService().apply { rows = listOf(workspace()) }
+        val catalog = AgentsWorkspaceCatalog()
+        val machines = listOf("computer" to true)
+        catalog.refresh(service, machines)
+        val pending = CompletableDeferred<AgentWorkspaceCatalog>()
+        val slow = object : PaseoCatalogTestService() {
+            override suspend fun workspaceCatalog(machineId: String) = pending.await()
+        }
+        val request = launch { catalog.refresh(slow, machines) }
+        runCurrent()
+        request.cancelAndJoin()
+        assertNotNull(catalog.rows.value.single().pinnedAt)
+        val anotherPairing = object : PaseoCatalogTestService() { override val scope = "another-pairing" }
+            .apply { complete = false }
+        catalog.refresh(anotherPairing, machines)
+        assertTrue(catalog.rows.value.isEmpty())
     }
 
     @Test fun allRangePlacesAStoppedPinnedChatInItsWorkspaceOnlyOnce() {

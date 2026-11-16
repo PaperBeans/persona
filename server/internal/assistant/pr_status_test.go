@@ -225,7 +225,8 @@ func TestPRStatusIgnoresAReplacedPR(t *testing.T) {
 // mergePark parks a task on the maintainers merging the PR at url, naming it as a supervisor does.
 func mergePark(url string) map[string]any {
 	return map[string]any{"verdict": "parked", "reason": "Waiting for the maintainers to review and merge " + url,
-		"waiting_on": "someone_else", "until": "3d"}
+		"waiting_on": "someone_else", "until": "3d", "evidence": testParkEvidence("merge_review", "named maintainer", url,
+			"The named maintainer submits a review or merges the PR")}
 }
 
 func TestParkWaitsOnPR(t *testing.T) {

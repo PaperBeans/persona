@@ -360,7 +360,6 @@ struct WorktreeRow: View {
     var quiet: Bool
     var open: Bool
     var showChevron = true
-    var pinned = false
     @Environment(\.compactList) private var compact
 
     var body: some View {
@@ -616,6 +615,8 @@ struct RepoWorktreeLine: View {
     /// Its computer is out of reach (a worktree the host lists).
     var offline = false
     var showChevron = true
+    /// Pinned in its engine (Paseo's Pin to top, #9316): the pin mark after its name.
+    var pinned = false
 
     var body: some View {
         RepoTreeLine(level: level) {

@@ -49,6 +49,7 @@ SIGNATURES = {
     "coreProjectAnswer": [("input", "string")],
     "coreDisplayAnswer": [("label", "string")],
     "coreProjectStreamChunks": [("input", "string")],
+    "coreProjectStreamRepair": [("input", "string")],
     "coreProjectTaskIndex": [("input", "string")],
     "coreProjectTurns": [("input", "string")],
 }

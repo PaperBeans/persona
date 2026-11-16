@@ -66,9 +66,12 @@ interface AgentCreationService {
      */
     suspend fun workspaces(machineId: String): List<AgentWorkspace> = emptyList()
 
-    /** A catalog refresh for an existing list: failures propagate so a transient outage cannot clear native pins. */
-    suspend fun workspaceCatalog(machineId: String): List<AgentWorkspace> = workspaces(machineId)
+    /** A catalog refresh, including usable hub-cache rows when a source cannot refresh; transport failures propagate. */
+    suspend fun workspaceCatalog(machineId: String): AgentWorkspaceCatalog = AgentWorkspaceCatalog(workspaces(machineId))
 }
+
+/** A complete response replaces the inventory. A partial response updates returned rows but does not remove missing ones. */
+data class AgentWorkspaceCatalog(val workspaces: List<AgentWorkspace>, val complete: Boolean = true)
 
 /**
  * One workspace of the hub's catalog (`GET /api/v1/workspaces`, docs/protocol/protocol.md): a start with

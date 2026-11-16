@@ -405,7 +405,9 @@ internal fun AgentCreationService.inGroup(names: GroupNames): AgentCreationServi
         override suspend fun workspaces(machineId: String) =
             source.workspaces(names.rawMachine(machineId)).map { it.copy(machineId = names.machineId(it.machineId)) }
         override suspend fun workspaceCatalog(machineId: String) =
-            source.workspaceCatalog(names.rawMachine(machineId)).map { it.copy(machineId = names.machineId(it.machineId)) }
+            source.workspaceCatalog(names.rawMachine(machineId)).let { catalog ->
+                catalog.copy(workspaces = catalog.workspaces.map { it.copy(machineId = names.machineId(it.machineId)) })
+            }
     }
 }
 

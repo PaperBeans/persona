@@ -76,6 +76,9 @@ PersonaCoreBytes persona_core_display_answer(const uint8_t *input, size_t length
 // Splits streamed text into finished blocks and an unfinished tail (stream_chunks::Input). Returns the complete
 // {done, tail} JSON.
 PersonaCoreBytes persona_core_project_stream_chunks(const uint8_t *input, size_t length);
+// Repairs a streaming fence, table or final-block marker (stream_repair::Input). Returns the complete
+// {repaired, end} JSON.
+PersonaCoreBytes persona_core_project_stream_repair(const uint8_t *input, size_t length);
 // Projects static transcript rows into turns (turns::Input). Returns a JSON array of complete turn objects. The
 // caller applies the checked-in current-iOS overlay (spec/fixtures/lines/ios/differences.json) to the fixture's
 // expected turns before comparing; the core never applies it.

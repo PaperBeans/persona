@@ -1,9 +1,12 @@
-// An independently compiled C consumer of the checked-in C header (#8560, #8912, #9017).
+// An independently compiled C consumer of the checked-in C header (#8560, #8912, #9017, #9241).
 //
 // Beyond the original sort smoke, this client replays the unchanged spec fixtures through the real C ABI:
 // answer + display_answer (15 + 9 cases), stream_chunks (21), turns (57 static cases with the checked-in current-iOS
 // overlay applied here, never in the core), task_index (5 complete expected objects plus the background receipt), and
 // viewed_images (ordinary post-overlay plus source-derived folded expected objects).
+// The stream_repair replay (22 fence + 19 marker/boundary + 39 table/boundary complete objects) mirrors the Apple
+// Swift assertions and existing JNI-derived boundaries. Expectations are independently transcribed from Apple
+// tests/source and that replay, never derived from the Rust output. Every object compares both `repaired` and `end`.
 // Expected objects are compared completely: both sides are parsed and re-serialized canonically (sorted object keys,
 // compact separators), so object key order is insignificant while every value, array order and Unicode string is exact.
 // Malformed inputs must return an empty buffer and a deliberately wrong expectation must be detected, per domain.
@@ -770,6 +773,187 @@ static void check_stream(const char *fixtures) {
     printf("c-abi: stream_chunks %zu/21 complete expected objects\n", replayed);
 }
 
+/* ---------- stream_repair ---------- */
+
+/* The Apple StreamRepairTests assertions and existing JNI-derived boundaries are independently transcribed from
+ * apple/Packages/PersonaKit/Tests/PersonaKitTests/StreamRepairTests.swift, its StreamRepair.swift implementation and
+ * StreamRepairBindingFixtureTest, never from Rust output. `prefix` is JNI-derived, not an Apple test assertion.
+ * Every case carries the complete {repaired, end} object. Apple test assertions are named where they directly apply;
+ * source-derived end values and the JNI whitespace/digit boundaries are not presented as executed Apple assertions. */
+typedef struct {
+    const char *input;
+    const char *repaired;
+    const char *end;
+    const char *source;
+} RepairCase;
+
+static JValue *repair_input(const char *text) {
+    JValue *input = jnew(J_OBJECT);
+    jset(input, "text", jstring(text));
+    return input;
+}
+
+static JValue *repair_expected(const char *repaired, const char *end) {
+    JValue *expected = jnew(J_OBJECT);
+    jset(expected, "repaired", jstring(repaired));
+    jset(expected, "end", jstring(end));
+    return expected;
+}
+
+static void expect_different_repair_object(JValue *actual, JValue *wrong, const char *surface, const char *mutation) {
+    if (!actual || !wrong || jequal(actual, wrong)) fail("stream_repair", surface, mutation);
+    jfree(wrong);
+}
+
+static size_t replay_complete_repairs(const RepairCase *cases, size_t count, const char *surface) {
+    size_t matched = 0;
+    for (size_t i = 0; i < count; i++) {
+        JValue *input = repair_input(cases[i].input);
+        JValue *actual = project_case(persona_core_project_stream_repair, input);
+        JValue *expected = repair_expected(cases[i].repaired, cases[i].end);
+        if (!input || !expected || jcount(expected) != 2 || !actual) {
+            fail("stream_repair", cases[i].source, "empty projection or incomplete expected object");
+        } else if (!jequal(actual, expected)) {
+            fail("stream_repair", cases[i].source, "complete {repaired, end} object differs");
+        } else {
+            matched++;
+        }
+        if (i == 0 && actual && expected) {
+            JValue *wrong_end = jclone(expected);
+            jset(wrong_end, "end", jstring("not-an-end"));
+            expect_different_repair_object(actual, wrong_end, surface, "wrong end compared equal");
+
+            JValue *wrong_repaired = jclone(expected);
+            jset(wrong_repaired, "repaired", jstring("deliberately wrong repaired text"));
+            expect_different_repair_object(actual, wrong_repaired, surface, "wrong repaired compared equal");
+
+            JValue *extra_field = jclone(expected);
+            jset(extra_field, "extra", jnew(J_BOOL));
+            expect_different_repair_object(actual, extra_field, surface, "extra field compared equal");
+        }
+        jfree(expected);
+        jfree(actual);
+        jfree(input);
+    }
+    return matched;
+}
+
+static void check_stream_repair(void) {
+    /* 22 fence expectations (21 repair inputs plus the additional `let a` end input); prefix is JNI-derived. */
+    static const RepairCase fence[] = {
+        {"text\n```ts\nconst a", "text\n```ts\nconst a\n```", "code", "closesAnOpenCodeFenceWithItsOwnMarker"},
+        {"~~~~\nx\n", "~~~~\nx\n~~~~", "code", "closesAnOpenCodeFenceWithItsOwnMarker"},
+        {"```\na\n```\ndone", "```\na\n```\ndone", "text", "closesAnOpenCodeFenceWithItsOwnMarker"},
+        {"看这段：\n```swi", "看这段：\n", "code", "holdsAFencesOpeningLineBackUntilItsInfoStringIsWhole"},
+        {"```mermaid", "", "code", "holdsAFencesOpeningLineBackUntilItsInfoStringIsWhole"},
+        {"看这段：\n```swift\n", "看这段：\n```swift\n```", "code", "holdsAFencesOpeningLineBackUntilItsInfoStringIsWhole"},
+        {"```\nlet a = 1\n``", "```\nlet a = 1\n```", "code", "holdsAHalfWrittenClosingRunBack"},
+        {"````\nx\n```", "````\nx\n````", "code", "holdsAHalfWrittenClosingRunBack"},
+        {"````\nx\n```\n", "````\nx\n```\n````", "code", "holdsAHalfWrittenClosingRunBack"},
+        {"prefix\n````\nx\n```\n", "prefix\n````\nx\n```\n````", "code", "JNI-derived prefix + partial closer"},
+        {"```\n**x [a](b", "```\n**x [a](b\n```", "code", "changesNothingInsideAFenceButItsEnd"},
+        {"```\n-", "```\n-\n```", "code", "changesNothingInsideAFenceButItsEnd"},
+        {"1. 安装依赖：\n\n   ```bash\n   npm install", "1. 安装依赖：\n\n   ```bash\n   npm install\n   ```", "code", "closesAFenceInTheListItemItOpenedIn"},
+        {"1. 安装依赖：\n   ```bash\n   npm install\n", "1. 安装依赖：\n   ```bash\n   npm install\n   ```", "code", "closesAFenceInTheListItemItOpenedIn"},
+        {"- 运行：\n  ~~~\n  make", "- 运行：\n  ~~~\n  make\n  ~~~", "code", "closesAFenceInTheListItemItOpenedIn"},
+        {"- 运行：\n  ```\n  make\n  ``", "- 运行：\n  ```\n  make\n  ```", "code", "closesAFenceInTheListItemItOpenedIn"},
+        {"```\na\n  ", "```\na\n```", "code", "leavesOutALineOfOnlyIndentationSoFar"},
+        {"这是 **重要", "这是 **重要**", "text", "closesWhatTheGrowingLineLeavesOpen (#9286)"},
+        {"```swift\nlet a\n```", "```swift\nlet a\n```", "code", "tellsWhereTheTextEnds"},
+        {"```swift\nlet a\n```\n", "```swift\nlet a\n```\n", "text", "tellsWhereTheTextEnds"},
+        {"```swift\nlet a", "```swift\nlet a\n```", "code", "tellsWhereTheTextEnds"},
+        {"", "", "text", "tellsWhereTheTextEnds"},
+    };
+    /* 14 original marker expectations plus five existing JNI digit / leading-blank-line boundaries. */
+    static const RepairCase marker[] = {
+        {"- 第一项\n-", "- 第一项\n", "text", "Apple markersOnly"},
+        {"- 第一项\n- ", "- 第一项\n", "text", "Apple markersOnly"},
+        {"1. 第一步\n2.", "1. 第一步\n", "text", "Apple markersOnly"},
+        {"1. 第一步\n12", "1. 第一步\n", "text", "Apple markersOnly"},
+        {"正文\n##", "正文\n", "text", "Apple markersOnly"},
+        {"正文\n>", "正文\n", "text", "Apple markersOnly"},
+        {"标题\n---", "标题\n", "text", "Apple markersOnly"},
+        {"- [ ]", "", "text", "Apple markersOnly"},
+        {"**", "", "text", "Apple markersOnly"},
+        {"- 第", "- 第", "text", "Apple markersOnly control"},
+        {"2026年", "2026年", "text", "Apple markersOnly control"},
+        {"1.5 倍", "1.5 倍", "text", "Apple markersOnly control"},
+        {"-\n", "-\n", "text", "leavesALineThatHasEnded"},
+        {"正文\n---\n", "正文\n---\n", "text", "existing JNI ended-line control"},
+        {"1234567890", "1234567890", "text", "existing JNI ten-digit boundary"},
+        {"- 12", "- 12", "text", "existing JNI marker-prefixed digits"},
+        {"\xef\xbc\x91\xef\xbc\x92", "\xef\xbc\x91\xef\xbc\x92", "text", "existing JNI full-width digits"},
+        {"\n-", "\n", "text", "existing JNI leading blank line"},
+        {"\n##", "\n", "text", "existing JNI leading blank line"},
+    };
+    /* 22 Apple table-repair expectations from holdsATablesHalfWrittenLastRowBack, givesATableHeaderItsDelimiterRowEarly,
+     * findsATableRightUnderAParagraphLine, keepsATableInTheListItemItIsIn and findsNoTableInALazyLine, plus the
+     * existing JNI/Foundation .whitespaces boundaries and the matching paragraph-separator boundary. */
+#define TABLE_HEAD "| 文件 | 改动 |\n| --- | --- |\n| a.swift | 刷新 |\n"
+    static const RepairCase table[] = {
+        {TABLE_HEAD "| b.swi", TABLE_HEAD, "table", "half-written last row"},
+        {TABLE_HEAD "| b.swift | 超时 |\n", TABLE_HEAD "| b.swift | 超时 |\n", "table", "finished last row"},
+        {"| 文件 | 改", "| 文件 | 改", "text", "unfinished header"},
+        {"Use a | b\n| not a table", "Use a | b\n| not a table", "text", "pipe in prose"},
+        {"| 文件 | 改动 |\n", "| 文件 | 改动 |\n| --- | --- |", "table", "early delimiter"},
+        {"| a | b |\n| --", "| a | b |\n| --- | --- |", "table", "partial delimiter"},
+        {"| a | b |\n|", "| a | b |\n| --- | --- |", "table", "partial delimiter"},
+        {"## 结果\n| a | b | c |\n", "## 结果\n| a | b | c |\n| --- | --- | --- |", "table", "heading + header"},
+        {"| a | b |\n| :-- | --: |", "| a | b |\n| :-- | --: |", "table", "aligned delimiter"},
+        {"| 不是表格\n", "| 不是表格\n", "text", "prose pipe row"},
+        {"| x |\n| a | b |\n", "| x |\n| a | b |\n", "text", "pipe row under pipe row"},
+        {"**结果：**\n| a | b |\n", "**结果：**\n| a | b |\n| --- | --- |", "table", "paragraph + header"},
+        {"**结果：**\n| a | b |\n| --", "**结果：**\n| a | b |\n| --- | --- |", "table", "paragraph + delimiter"},
+        {"**结果：**\n| a | b |\n| --- | --- |\n| 1", "**结果：**\n| a | b |\n| --- | --- |\n", "table", "Apple repair/end"},
+        {"- 项\n\n  | a | b |\n", "- 项\n\n  | a | b |\n  | --- | --- |", "table", "Apple list table/end"},
+        {"1. 项\n   | a | b |\n   | -", "1. 项\n   | a | b |\n   | --- | --- |", "table", "ordered list table"},
+        {"- 项\n  | a | b |\n  | --- | --- |\n  | 1", "- 项\n  | a | b |\n  | --- | --- |\n", "table", "Apple list repair/end"},
+        {"- 项\n\n  | a | b |\n  | --- | --- |\n  ", "- 项\n\n  | a | b |\n  | --- | --- |\n", "table", "Apple list repair/end"},
+        {"- 项\n| a | b |\n", "- 项\n| a | b |\n", "text", "lazy list continuation"},
+        {"- a\n  - b\n  | x |\n", "- a\n  - b\n  | x |\n", "text", "lazy list continuation"},
+        {"> 引用\n| a | b |\n", "> 引用\n| a | b |\n", "text", "quote continuation"},
+        {"- 项\n| a | b |\n| --- | --- |\n| 1", "- 项\n| a | b |\n| --- | --- |\n| 1", "text", "Apple lazy repair/end"},
+        {"**结果：**\n| a | b |\n| --- | --- |\n| 1 | 2 |\n", "**结果：**\n| a | b |\n| --- | --- |\n| 1 | 2 |\n", "table", "Apple finished table end"},
+        {"| a | b |\n| --- | --- |\nfoo", "| a | b |\n| --- | --- |\nfoo", "table", "Apple row without pipes"},
+        {"| a | b |\n| --- | --- |\n- 项", "| a | b |\n| --- | --- |\n- 项", "text", "Apple block after table"},
+        {"- 项\n\n  | a | b |\n  ", "- 项\n\n  | a | b |\n  | --- | --- |", "table", "Apple indented table end"},
+        {"| a | b |\n| --- | --- |\n| 1", "| a | b |\n| --- | --- |\n", "table", "tellsWhereTheTextEnds"},
+        {"| a | b |\n| --- | --- |\n| 1 | 2 |\n", "| a | b |\n| --- | --- |\n| 1 | 2 |\n", "table", "tellsWhereTheTextEnds"},
+        {"| a | b |\n", "| a | b |\n| --- | --- |", "table", "tellsWhereTheTextEnds"},
+        {"| a | b |\n| -", "| a | b |\n| --- | --- |", "table", "tellsWhereTheTextEnds"},
+        {"| a | b", "| a | b", "text", "tellsWhereTheTextEnds"},
+        {"| a | b |\n| --- | --- |\n\n后文", "| a | b |\n| --- | --- |\n\n后文", "text", "tellsWhereTheTextEnds"},
+        {"| a |\n| -\r |\n| x", "| a |\n| -\r |\n| x", "text", "existing JNI CR delimiter"},
+        {"| a |\n| -\x0b |\n| x", "| a |\n| -\x0b |\n| x", "text", "existing JNI vertical-tab delimiter"},
+        {"| a |\n| -\t |\n| x\n", "| a |\n| -\t |\n| x\n", "table", "existing JNI tab delimiter"},
+        {"| a |\n| -\xc2\xa0 |\n| x\n", "| a |\n| -\xc2\xa0 |\n| x\n", "table", "existing JNI NBSP delimiter"},
+        {"| a |\n| -\xc2\x85 |\n| x", "| a |\n| -\xc2\x85 |\n| x", "text", "existing JNI NEL delimiter"},
+        {"| a |\n| -\xe2\x80\xa8 |\n| x", "| a |\n| -\xe2\x80\xa8 |\n| x", "text", "existing JNI line-separator delimiter"},
+        {"| a |\n| -\xe2\x80\xa9 |\n| x", "| a |\n| -\xe2\x80\xa9 |\n| x", "text", "Apple-source paragraph-separator boundary"},
+    };
+    size_t fence_matched = replay_complete_repairs(fence, sizeof(fence) / sizeof(fence[0]), "fence");
+    size_t marker_matched = replay_complete_repairs(marker, sizeof(marker) / sizeof(marker[0]), "marker");
+    size_t table_matched = replay_complete_repairs(table, sizeof(table) / sizeof(table[0]), "table");
+    if (fence_matched != 22) fail("stream_repair", "manifest", "expected exactly 22 complete fence objects");
+    if (marker_matched != 19) fail("stream_repair", "manifest", "expected exactly 19 complete marker objects");
+    if (table_matched != 39) fail("stream_repair", "manifest", "expected exactly 39 complete table objects");
+    /* Malformed inputs must produce an empty buffer. */
+    expect_empty(persona_core_project_stream_repair, "stream_repair", "wrong_schema", "{\"invalid\":true}");
+    expect_empty(persona_core_project_stream_repair, "stream_repair", "invalid_json", "not JSON");
+    /* A deliberately wrong fence expectation must not compare equal. */
+    {
+        JValue *input = repair_input("text\n```ts\nconst a");
+        JValue *actual = project_case(persona_core_project_stream_repair, input);
+        JValue *wrong = repair_expected("text\n```ts\nconst a\n~~~", "text");
+        if (jequal(actual, wrong)) fail("stream_repair", "fence_negative", "a wrong fence expectation compared equal");
+        jfree(wrong);
+        jfree(actual);
+        jfree(input);
+    }
+    printf("c-abi: stream_repair %zu/22 fence + %zu/19 marker/boundary + %zu/39 table/boundary complete objects\n",
+           fence_matched, marker_matched, table_matched);
+}
+
 /* ---------- answer + display_answer ---------- */
 
 static const char *const question_manifest[] = {
@@ -1425,6 +1609,7 @@ int main(int argc, char **argv) {
     }
     check_sort(argv[1]);
     check_stream(argv[1]);
+    check_stream_repair();
     check_answer_file(argv[1], "questions.json", 0, 15);
     check_answer_file(argv[1], "recommended.json", 1, 9);
     check_answer_boundaries();
@@ -1436,6 +1621,6 @@ int main(int argc, char **argv) {
         fprintf(stderr, "c-abi-smoke: FAIL %d check(s)\n", failures);
         return 1;
     }
-    puts("c-abi-smoke: ok independently compiled C client; sort, answer 15+9, stream 21, turns 57 (+overlay), task_index 5+receipt, transport 20 shared-scalar refusals, viewed ordinary+fold; malformed inputs and wrong expectations rejected");
+    puts("c-abi-smoke: ok independently compiled C client; sort, answer 15+9, stream 21, stream_repair 80 complete objects, turns 57 (+overlay), task_index 5+receipt, transport 20 shared-scalar refusals, viewed ordinary+fold; malformed inputs and wrong expectations rejected");
     return 0;
 }

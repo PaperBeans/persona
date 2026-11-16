@@ -32,7 +32,7 @@ func TestUsageMistakesNameTheProgram(t *testing.T) {
 	}
 	for _, name := range []string{"personad", "/usr/local/bin/personad"} {
 		want := "usage: personad "
-		for _, args := range [][]string{{"release"}, {"release", "bogus"}, {"release", "check-next"}, {"launch"}, {"update-watch"}} {
+		for _, args := range [][]string{{"release"}, {"release", "bogus"}, {"release", "check-next"}, {"backup"}, {"backup", "bogus"}, {"launch"}, {"update-watch"}} {
 			out, code := run(name, args...)
 			if code != 2 || !strings.HasPrefix(out, want) && !strings.Contains(out, "\n"+want) {
 				t.Errorf("%s %q: exit %d, output %q", name, args, code, out)
