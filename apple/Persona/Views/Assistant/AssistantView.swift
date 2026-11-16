@@ -726,6 +726,15 @@ struct AssistantView: View {
             // The first one becomes the main conversation; with the settings not read yet, whether there is one is unknown.
             let makesMain = space == nil && model.assistantConfig != nil && model.assistantMain == nil
             let launcher = space == nil ? starterLauncher : healthLauncherPick.wrappedValue
+            // Suggestions and Resend share the cached check. Discovery never delays sending or clears an unknown choice.
+            if !starterEffort.isEmpty {
+                let machine = model.hubRef(space == Session.healthSpace ? model.healthMachineID : model.assistantConfig?.machineID ?? model.hubMachineID)
+                let fallback = space == Session.healthSpace ? model.healthLauncherSetting : model.starterLauncherSetting
+                let manager = space == Session.healthSpace ? nil : api.currentAssistantSettings().managerID
+                let source = AssistantStarterModels.source(machine, launcher: launcher, fallback: fallback,
+                                                           manager: manager, revision: model.assistantLauncherRequestRevision)
+                starterEffort = model.assistantStarterCache.retained(starterEffort, source: source)
+            }
             let s = try await AssistantStart.run(receipts: model.hubFeatures.contains(AssistantStart.feature), op: op) { op in
                 try await api.startConversation(prompt: text, images: images, launcher: launcher,
                                                 permissionMode: starterMode.isEmpty ? nil : starterMode,
@@ -826,6 +835,19 @@ struct AssistantHome: View {
     var delete: () -> Void = {}
     var send: (String, [ImagePayload]) -> Void
     @State private var route: ReadinessRoute?
+    @State private var starterModels = AssistantStarterModels()
+
+    private var starterMachine: MachineRef { model.hubRef(model.assistantConfig?.machineID ?? model.hubMachineID) }
+    private var starterManager: String? { model.api(starterMachine.group)?.currentAssistantSettings().managerID }
+    private var effortSource: String {
+        AssistantStarterModels.source(starterMachine, launcher: launcher, fallback: model.starterLauncherSetting,
+                                      manager: starterManager, revision: model.assistantLauncherRequestRevision)
+    }
+
+    private func sendChecked(_ text: String, _ images: [ImagePayload]) {
+        if !ChatComposerKind.padCard { effort = starterModels.retained(effort, source: effortSource) }
+        send(text, images)
+    }
 
     /// How far the page fades out above the chips and the field.
     private static let fade = Theme.Space.xl
@@ -846,7 +868,7 @@ struct AssistantHome: View {
                     .accessibilityIdentifier("main-cleared")
             } else {
                 VStack(alignment: .leading, spacing: Theme.Space.xl) {
-                    AssistantWelcome(send: send, openHelp: { route = .help($0, machine: nil) })
+                    AssistantWelcome(send: sendChecked, openHelp: { route = .help($0, machine: nil) })
                 }
                 .padding(.horizontal, Theme.Space.xl)
                 .padding(.bottom, Theme.Space.xl)
@@ -884,15 +906,16 @@ struct AssistantHome: View {
                         HStack(spacing: Theme.Space.s) {
                             // The BeautifulUI style picks the launcher in the prompt bar's model menu.
                             if !AppStyle.current.usesBeautifulUI { StarterModelChip(launcher: $launcher) }
-                            NewSessionModePicker(mode: $mode, effort: $effort, modes: SessionModes.assistantModes)
+                            NewSessionModePicker(mode: $mode, effort: $effort, modes: SessionModes.assistantModes,
+                                                 efforts: starterModels.options(for: effortSource))
                         }
                         .padding(.horizontal, Theme.Space.xs)
                     }
                     if AppStyle.current.usesBeautifulUI {
                         BeautifulStarterComposer(disabled: blocked, launcher: $launcher, gate: model.readinessGate(route: $route),
-                                                  offersClear: cleared && pending == nil, send: send)
+                                                  offersClear: cleared && pending == nil, send: sendChecked)
                     } else {
-                        StarterComposer(disabled: blocked, gate: model.readinessGate(route: $route), offersClear: cleared && pending == nil, send: send)
+                        StarterComposer(disabled: blocked, gate: model.readinessGate(route: $route), offersClear: cleared && pending == nil, send: sendChecked)
                     }
                 }
             }
@@ -915,6 +938,14 @@ struct AssistantHome: View {
         .keepsHeightUnderUndockedKeyboard() // the composer stays at the bottom under a floating keyboard (#2565)
         .navigationTitle("Persona")
         .task(id: launcher) { if pending == nil { await model.warmAssistant(launcher: launcher) } }
+        .task(id: effortSource) {
+            guard !ChatComposerKind.padCard else { return }
+            if await starterModels.load(starterMachine, launcher: launcher, fallback: model.starterLauncherSetting,
+                                        manager: starterManager, revision: model.assistantLauncherRequestRevision) {
+                effort = starterModels.retained(effort, source: effortSource)
+            }
+        }
+        .onChange(of: launcher) { old, new in if old != new { effort = "" } }
         .modifier(ReadinessRefresh())
         .readinessSheets($route)
     }
@@ -1179,7 +1210,7 @@ struct StarterComposer: View {
         var health = false
     }
 
-    @State private var launchers: [Launcher] = []
+    @State private var starterModels = AssistantStarterModels()
     @State private var picks: [PhotosPickerItem] = []
     @State private var showPhotos = false
     @State private var showFiles = false
@@ -1249,6 +1280,7 @@ struct StarterComposer: View {
         // The keyboard goes down with the send: the conversation that takes over has a field of its own, and the keyboard
         // coming back up and going down again on the way moved the first message up and down with it (#1911).
         focused = false
+        if let shell { shell.effort = starterModels.retained(shell.effort, source: effortSource) }
         send(draft.message(t, files: ready), images.map(\.1))
         draft.sent()
     }
@@ -1358,6 +1390,14 @@ struct StarterComposer: View {
         model.hubRef(uploadDest == Session.healthSpace ? model.healthMachineID : model.assistantConfig?.machineID ?? model.hubMachineID)
     }
 
+    private var starterManager: String? {
+        uploadDest == Session.healthSpace ? nil : model.api(machine.group)?.currentAssistantSettings().managerID
+    }
+    private var effortSource: String {
+        AssistantStarterModels.source(machine, launcher: shell?.launcher, fallback: shell.flatMap { model.launcherSetting($0) },
+                                      manager: starterManager, revision: model.assistantLauncherRequestRevision)
+    }
+
     /// A PhotosPicker inside a Menu never presents (the menu dismisses first): the buttons present it from here.
     @ViewBuilder private var attachments: some View {
         Button { showPhotos = true } label: { Label("Photos", systemImage: Theme.Icon.photos) }
@@ -1396,7 +1436,7 @@ struct StarterComposer: View {
             if let shell {
                 ShellComposerBar(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)"), text: textBinding, selection: $selection, focused: $focused,
                                  canSend: canSend, hasAttachments: !images.isEmpty || !videos.items.isEmpty || !files.items.isEmpty || !quotes.isEmpty,
-                                 modesTitle: StarterModesMenu.title(modes: shell, launchers: launchers, model: model),
+                                 modesTitle: StarterModesMenu.title(modes: shell, launchers: starterModels.launchers, model: model),
                                  quotes: quotesBinding, history: "assistant.new", gate: gate, openAttach: attachOpener, send: submit) {
                     #if os(iOS)
                     // As a conversation's + (#3225): the iPhone's touch and hold, the iPad's tap with Photos and Files first.
@@ -1411,9 +1451,15 @@ struct StarterComposer: View {
                     attachments
                     #endif
                 } modes: {
-                    StarterModesMenu(modes: shell, launchers: launchers)
+                    StarterModesMenu(modes: shell, launchers: starterModels.launchers,
+                                     efforts: starterModels.options(for: effortSource))
                 }
-                .task(id: machine) { launchers = (try? await model.launchers(machine))?.filter(\.runsAssistant) ?? [] }
+                .task(id: effortSource) {
+                    if await starterModels.load(machine, launcher: shell.launcher, fallback: model.launcherSetting(shell),
+                                                manager: starterManager, revision: model.assistantLauncherRequestRevision) {
+                        shell.effort = starterModels.retained(shell.effort, source: effortSource)
+                    }
+                }
             } else {
                 ComposerRow(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)…"), text: textBinding, selection: $selection, focused: $focused, canSend: canSend,
                             send: submit, history: "assistant.new", gate: gate) {
@@ -1603,7 +1649,13 @@ struct BeautifulStarterComposer: View {
                            })
         }
         // Again once the hub is paired: on a fresh launch the first try runs before there is one.
-        .task(id: launcherMachine) { launchers = (try? await model.launchers(model.hubRef(launcherMachine))) ?? [] }
+        .task(id: "\(machine.path)|\(model.assistantLauncherRequestRevision)") {
+            let api = model.api(machine.group)
+            let scoped = uploadDest == Session.healthSpace ? api?.manager(nil) : api
+            if let answer = try? await model.assistantLaunchers(machine, using: scoped), !Task.isCancelled {
+                launchers = answer.launchers.filter(\.runsAssistant)
+            }
+        }
         .mediaPicker(isPresented: $showPhotos, selection: $picks)
         .fileUploadPicker(isPresented: $showFiles) { urls in
             // The assistant runs on its machine (the hub's unless set otherwise): files go to that one's temp directory.
@@ -1743,7 +1795,11 @@ struct StarterModelChip: View {
                 ModeChip(symbol: Theme.Icon.model, text: current, tint: .secondary) // neutral, like the mode and effort chips beside it
             }
             .labelOnlyMenu()
-            .task(id: model.assistantConfig?.machineID) { launchers = (try? await model.launchers(model.hubRef(model.assistantConfig?.machineID ?? model.hubMachineID))) ?? [] }
+            .task(id: "\(model.assistantConfig?.machineID ?? model.hubMachineID)|\(model.assistantLauncherRequestRevision)") {
+                if let answer = try? await model.assistantLaunchers(model.hubRef(model.assistantConfig?.machineID ?? model.hubMachineID)), !Task.isCancelled {
+                    launchers = answer.launchers.filter(\.runsAssistant)
+                }
+            }
         } else {
             StarterLauncherStatus()
         }
@@ -1820,6 +1876,7 @@ struct StarterModesMenu: View {
     @Environment(AppModel.self) private var model
     var modes: StarterComposer.ShellModes
     var launchers: [Launcher]
+    var efforts: [SessionModes.Option]
 
     /// The button's title: the launcher's model (its name when it names none) and the effort picked. While the
     /// launcher is not known (#4200) the title is the status text, not nil — the shell bar draws the button so the
@@ -1864,7 +1921,10 @@ struct StarterModesMenu: View {
             Section("Model [Assistant View c98e11]") { // switches, so the title is drawn (#4322, `MenuChoice`)
                 let current = modes.launcher ?? model.launcherSetting(modes) ?? ""
                 ForEach(launchers) { l in
-                    MenuChoice(id: l.name, selected: current, pick: { modes.launcher = $0 }) {
+                    MenuChoice(id: l.name, selected: current, pick: { name in
+                        if name != current { modes.effort = "" }
+                        modes.launcher = name
+                    }) {
                         Text(SessionModes.modelName(l.model).map { "\(l.name) · \($0)" } ?? l.name)
                     }
                 }
@@ -1872,7 +1932,7 @@ struct StarterModesMenu: View {
         }
         Section("Thinking Effort") { // switches, so the title is drawn (#4322, `MenuChoice`)
             MenuChoice(id: "", selected: modes.effort, pick: { modes.effort = $0 }) { Text("Use Launcher's") }
-            ForEach(SessionModes.startEffortLevels) { o in
+            ForEach(efforts) { o in
                 MenuChoice(id: o.id, selected: modes.effort, pick: { modes.effort = $0 }) {
                     Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }
                 }

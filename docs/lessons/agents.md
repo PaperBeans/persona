@@ -200,6 +200,7 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
   is silently dropped (`max` too; settings accepts only low…xhigh). The picker has no auto position. `/effort auto` clears this model's default in settings;
   phone auto handling must differ by path (`docs/apple/ios.md` ("Effort and permission modes")). Testing `/effort …` on a dev machine also changes real settings.json; don't use your own configuration.
 - **Settings defaults and session effort need different option lists** (#5946): Claude Code 2.1.318 / Agent SDK 0.3.318 accept only `low`, `medium`, `high`, and `xhigh` in settings.json. Keep `max` in session controls, reject it in settings writes, and report an existing stored `max` as ignored with the model default in effect. Never reuse `proto.EffortLevels` for the settings whitelist. Web settings override node descriptions with their own translations, so a server warning also needs a localized web warning.
+- **Catalog defaults need execution precedence too** (#8941). A launcher's `--settings` model can differ from the CLI catalog's recommendation, but its `effortLevel` does not beat `CLAUDE_CODE_EFFORT_LEVEL`, `--effort`, or a saved level in the same file's `modelSettings`. Native model matching covers aliases and provider IDs, so keep the native effort where that matching may apply. A probe's differential `Env` also omits inherited shell values: combine `Shell`, `Unset`, launcher changes and profile/explicit settings env before projecting a default. Preserve native aliases and leave unknown settings or unsupported levels unchanged; test both inherited variables and settings values that only session controls accept.
 - **A custom launcher name does not identify its Agent** (#8940): assistant effort validation must resolve the executable behind the launcher before deciding whether Codex-only levels are valid. Validate cold and warm starts, explicit and configured effort, and a follow-up that inherits the saved launcher; checking only the literal `codex` command leaves aliases broken. Once dispatch has selected Claude or Codex, validate against that backend rather than the launcher's spelling.
 - **An explicit `--permission-mode default` is not "unset"** (#3026): it overrides `permissions.defaultMode` in Claude Code's settings.json, so
   filling an unset mode with `default` (#2194) silently put every Agent the assistant started into Ask every step for someone whose Claude Code
@@ -1177,3 +1178,32 @@ AskUserQuestion, often with several questions. Read the open call from the trans
 rather than counting on the model to follow the prompt, and check a real transcript's `tool_use` input shape before
 parsing it. Once the card worked, the prompt went back to asking with AskUserQuestion as usual (#8558): a prompt's
 workaround that outlives the fix it stood in for is wrong advice to the model.
+
+## A plugin's asUser prompt is the only way in that counts as the person's (Persona's Claude Code plugin)
+
+The peer inbox frames every message as another session's, and no wording in it makes the model take a go-ahead from
+it: the same "I approve: create the file" was refused through the inbox and when a plugin submitted it framed, and
+accepted only through `$.prompt.submit({ asUser: true })` (Claude Code 2.1.291, 2.1.299 and 2.1.308). Do not try to
+argue the model round in the inbox prompt (#5965). Things that cost time while measuring it:
+
+- A `claude` started from inside a desktop-app session inherits that host's provider variables
+  (`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`, its `ANTHROPIC_BASE_URL`) but not its credentials, and answers "Not logged
+  in". Start it without the parent's `CLAUDE_CODE_*` variables (`node/ccplugin_live_test.go` `childEnv`).
+- A `claude -p --input-format stream-json` session is a good throwaway session for a plugin (it keeps running while
+  stdin is open, and has a peer inbox), but its `sessions/<pid>.json` says `entrypoint: "sdk-cli"`, which the node
+  leaves to its own host: such a claude is not "outside Persona's terminals".
+- A plugin's `$.http.fetch` gives up after 30 s, so a long poll must answer sooner. On Windows, its first connections
+  over a Unix socket a moment after the listener appeared failed (`FailedToOpenSocket`); a retry got through.
+- `$.ui.log(text)` writes a dim row into the transcript by default; a plugin that must stay quiet passes `{ to: 'debug' }`.
+- The plugin API types are written per Claude Code build (`plugin-authoring` skill, `types/claude-code.d.ts`); read the
+  build you test against, not an older copy.
+
+## A check before every message must not start a login shell (2026-11-16, #8947)
+
+The assistant's profile check (#4310) ran the launcher probe before every message. That probe is an interactive login
+shell sourcing the user's startup files, and some resume paths ran it twice. On one install every message to a running
+conversation waited about a second per probe, and in three days none reached it within a second. A check on the send
+path reuses its probe the way `launcherProbeCached` and `modelProbeCache` do: kept for a bounded time, and taken again at
+once when the files it depends on change (`shellStamp` in `server/internal/node/assistant_profile_probe.go`). A change the
+stamp cannot see waits out the bound. In a test, count the shells a send starts with a launcher that appends to a file
+each time it runs, not only the send's result.

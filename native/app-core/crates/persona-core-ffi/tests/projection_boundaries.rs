@@ -1,4 +1,4 @@
-//! Replays the answer, stream-chunk, turn and task-index corpora through the exported C ABI, including ownership of
+//! Replays the answer, stream-chunk, turn, task-index and viewed-image corpora through the exported C ABI, including
 //! each returned buffer. The independently compiled C11 client (`tests/c_abi_smoke.c`) replays the same corpus from
 //! outside Rust; these tests pin the same contract for a Rust caller of the ABI, not for Swift or a device.
 
@@ -10,6 +10,7 @@ use std::slice;
 use persona_core::{
     PersonaCoreBytes, persona_core_bytes_free, persona_core_display_answer, persona_core_project_answer,
     persona_core_project_stream_chunks, persona_core_project_task_index, persona_core_project_turns,
+    persona_core_project_viewed_images,
 };
 use serde_json::Value;
 
@@ -224,4 +225,39 @@ fn c_abi_task_index_replays_all_cases_and_rejects_bad_input() {
         "C ABI task_index replay: {} complete expected objects plus the receipt",
         replayed.len()
     );
+}
+
+#[test]
+fn c_abi_viewed_images_preserves_the_complete_overlay_line_and_rejects_bad_input() {
+    let overlay: Value =
+        serde_json::from_slice(&fs::read(fixtures().join("lines/ios/differences.json")).unwrap()).unwrap();
+    let case = lines_documents()
+        .into_iter()
+        .flat_map(|document| document["cases"].as_array().unwrap().clone())
+        .find(|case| case["name"] == "tool_images_belong_to_call")
+        .expect("the ordinary viewed-image case must exist");
+    let expected = overlay["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == case["name"])
+        .and_then(|entry| entry["replace"]["lines"].as_array())
+        .unwrap()
+        .iter()
+        .find(|line| line["type"] == "viewed")
+        .unwrap();
+    let actual = project(persona_core_project_viewed_images, &case["input"]);
+    assert_eq!(actual, *expected);
+    assert_ne!(
+        actual,
+        serde_json::json!({
+            "id": "vi-wrong",
+            "image_ids": expected["image_ids"],
+            "is_input": false,
+            "type": "viewed",
+        })
+    );
+    assert!(call(persona_core_project_viewed_images, b"{\"invalid\":true}").is_none());
+    assert!(call(persona_core_project_viewed_images, b"not JSON").is_none());
+    assert!(call(persona_core_project_viewed_images, b"{\"items\":[]}").is_none());
 }

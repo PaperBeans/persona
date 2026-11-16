@@ -204,7 +204,7 @@ func (s *Service) briefRoutes() {
 			apierr.Write(w, http.StatusBadRequest, errors.New("asked_at is required"))
 			return
 		}
-		var ok bool
+		var result acceptResult
 		var err error
 		switch {
 		case in.Response != "" && in.Option != "":
@@ -215,11 +215,11 @@ func (s *Service) briefRoutes() {
 				apierr.Write(w, http.StatusBadRequest, errors.New("response must be decide_yourself, not_what_i_asked or explain_first"))
 				return
 			}
-			ok, err = s.ownerCannotAnswer(r.Context(), r.PathValue("id"), in.AskedAt, in.Response)
+			result.taken, err = s.ownerCannotAnswer(r.Context(), r.PathValue("id"), in.AskedAt, in.Response)
 		case in.Option != "":
-			ok, err = s.chooseOption(r.Context(), r.PathValue("id"), in.AskedAt, in.Option)
+			result, err = s.chooseOption(r.Context(), r.PathValue("id"), in.AskedAt, in.Option)
 		default:
-			ok, err = s.acceptTryFromBrief(r.Context(), r.PathValue("id"), in.AskedAt)
+			result, err = s.acceptTryFromBrief(r.Context(), r.PathValue("id"), in.AskedAt)
 		}
 		if errors.Is(err, errDecisionOption) {
 			apierr.Write(w, http.StatusBadRequest, err)
@@ -239,17 +239,21 @@ func (s *Service) briefRoutes() {
 			apierr.CallStatus(w, http.StatusLocked, err)
 			return
 		}
-		if err != nil { // a decision's recommendation that did not reach the agent: nothing taken, the button works again
+		if err != nil { // another delivery failure: nothing taken, the button works again
 			// In the request's language, the reason too when the hub words it (an offline computer, no agent).
-			apierr.Write(w, http.StatusBadGateway, i18n.Err("assistant-reports.accept_not_taken",
+			apierr.WriteCode(w, http.StatusBadGateway, "accept_not_taken", i18n.Err("assistant-reports.accept_not_taken",
 				i18n.Args{"error": clip(oneLine(i18n.Localize(err, s.requestCtxLang(r.Context()))), 120)}))
 			return
 		}
-		if !ok {
+		if !result.taken {
 			apierr.Write(w, http.StatusConflict, i18n.Err("assistant-feishu_cards.already_handled"))
 			return
 		}
-		apierr.WriteJSON(w, map[string]any{"ok": true})
+		body := map[string]any{"ok": true}
+		if result.undelivered != nil {
+			body["delivered"] = "none"
+		}
+		apierr.WriteJSON(w, body)
 	})
 }
 

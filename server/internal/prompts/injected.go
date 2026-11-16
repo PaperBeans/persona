@@ -1,7 +1,9 @@
 package prompts
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/lazyre"
@@ -78,6 +80,8 @@ func ParseInjected(text string) *proto.Injected {
 	text = strings.TrimSpace(text)
 	head, rest, _ := strings.Cut(text, "\n")
 	switch {
+	case strings.HasPrefix(head, "<persona-wake"):
+		return parseWakeMarker(head, rest)
 	case strings.HasPrefix(head, "🔔 任务「"):
 		m := noticeHeadRe.FindStringSubmatch(head)
 		if m == nil || !strings.Contains(rest, noticeMarker) {
@@ -151,6 +155,34 @@ func ParseInjected(text string) *proto.Injected {
 		return &proto.Injected{Kind: proto.InjectedSystem, State: "lost_tasks", Line: line}
 	}
 	return nil
+}
+
+// wakeMetadata is the language-independent identity of newly localized wakes.
+// Legacy Chinese wakes remain readable above, including historical transcripts.
+type wakeMetadata struct {
+	Title string `json:"title"`
+}
+
+func parseWakeMarker(head, body string) *proto.Injected {
+	const start, end = "<persona-wake>", "</persona-wake>"
+	if !strings.HasPrefix(head, start) || !strings.HasSuffix(head, end) || strings.TrimSpace(body) == "" {
+		return nil
+	}
+	raw := strings.TrimSuffix(strings.TrimPrefix(head, start), end)
+	var meta wakeMetadata
+	d := json.NewDecoder(strings.NewReader(raw))
+	d.DisallowUnknownFields()
+	if d.Decode(&meta) != nil || d.Decode(new(any)) != io.EOF {
+		return nil
+	}
+	// Require our canonical JSON: rejects null, absent/duplicate keys and literal
+	// closing tags. A malformed marker must never become guessed provenance.
+	canonical, _ := json.Marshal(meta)
+	if raw != string(canonical) {
+		return nil
+	}
+	return &proto.Injected{Kind: proto.InjectedFollowup, State: "wake", Title: meta.Title,
+		Line: "Persona 叫醒了它：看看「" + meta.Title + "」好了没有"}
 }
 
 // askLaterInjected is how the card of an ask_later message (its text after the first line) ended (#6421): the

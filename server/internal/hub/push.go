@@ -184,6 +184,7 @@ func (p *Pusher) register(d Device) error {
 		d.RelayError = ""
 	}
 	d.RelayError = clipRelayError(d.RelayError)
+	cleanVoIP(&d)
 	d.Features = cleanFeatures(d.Features)
 	p.mu.Lock()
 	cur := p.devices[d.DeviceID]

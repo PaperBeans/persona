@@ -103,7 +103,7 @@ struct AssistantTopBar: View {
             .sheet(isPresented: Binding(get: { typingFor != nil && key != nil }, set: { if !$0 { typingFor = nil } }),
                    onDismiss: { Task { await loadModelOptions() } }) {
                 if let l = typingFor {
-                    TypedModelSheet(machine: model.hubRef(machineID), launcher: l, initial: typedPick(l),
+                    TypedModelSheet(machine: model.hubRef(machineID), launcher: l, purpose: "assistant", initial: typedPick(l),
                                     note: String(localized: "This chat uses it from the next message.")) { id in pick(l, model: id) }
                 }
             }
@@ -112,8 +112,10 @@ struct AssistantTopBar: View {
                 if UserDefaults.standard.bool(forKey: "showInfo") { try? await Task.sleep(for: .seconds(2)); showInfo = true }
             }
             #endif
-        .task(id: model.hubRef(machineID)) {
-            launchers = ((try? await model.launchers(model.hubRef(machineID))) ?? []).filter(\.runsAssistant)
+        .task(id: "\(model.hubRef(machineID).path)|\(model.assistantLauncherRequestRevision)") {
+            if let answer = try? await model.assistantLaunchers(model.hubRef(machineID)), !Task.isCancelled {
+                launchers = answer.launchers.filter(\.runsAssistant)
+            }
             await loadModelOptions()
         }
     }
@@ -491,14 +493,14 @@ struct AssistantTopBar: View {
     /// Each launcher's /model list; a failure just leaves the submenu without entries.
     private func loadModelOptions() async {
         let machine = model.hubRef(machineID)
-        guard let api = model.api(machine.group), !launchers.isEmpty else { return }
+        guard let api = model.api(machine.group), !launchers.isEmpty, !Task.isCancelled else { return }
         await withTaskGroup(of: (String, [AgentModelOption]?).self) { group in
             for l in launchers {
-                group.addTask { (l.name, try? await api.launcherModels(machine: machine.id, launcher: l.name)) }
+                group.addTask { (l.name, try? await api.launcherModels(machine: machine.id, launcher: l.name, purpose: "assistant")) }
             }
             // An empty answer counts too (the last typed ID forgotten); a failed one keeps what was there.
             for await (name, options) in group {
-                if let options { modelOptions[name] = options }
+                if let options, !Task.isCancelled { modelOptions[name] = options }
             }
         }
     }

@@ -177,6 +177,21 @@ EOF
 - `Fixes #N` / `Closes #N`: GitHub closes the issue automatically after merging. `Refs #N`: links without closing (an issue split into several PRs, or only partly fixed).
 - PR titles and bodies are in English (after a squash merge they are the commit on `main`); issues and comments are also in English.
 
+## Screenshots in PRs
+
+Screenshots taken to review a change (light and dark, before and after, UI test captures) belong to the PR, not to the repository:
+once the PR merges nobody opens them again, yet every checkout would carry them. Docs don't link to new screenshots either; describe
+the behavior in words and point to the PR when a picture helps.
+
+- **In the browser**: drag the images into the PR description or a comment; GitHub hosts them.
+- **From the command line** (`gh` cannot upload images): commit them on the PR branch under `pr-assets/<issue>/`, delete them in the
+  very next commit, and link `https://github.com/<owner>/<repo>/raw/<sha of the adding commit>/pr-assets/<issue>/<file>.png` from the
+  PR body. The squash merge leaves nothing on `main`, and the PR keeps the commit reachable.
+
+Only generated README and store images (`docs/assets/`, from `scripts/assets/`) and app resources are committed.
+`scripts/test/test_no_committed_screenshots.py` fails on any other image under `docs/` or under a `screenshots` / `shots` directory.
+The screenshots older docs still link to are listed in `scripts/test/committed_screenshots_baseline.txt`; that list only shrinks.
+
 ## Checking PRs with no linked issue
 
 `.github/workflows/pr-needs-issue.yml` runs only when an operator explicitly dispatches it from the default branch with `pr_number=<number>`; opening, editing or reopening a PR starts no workflow:

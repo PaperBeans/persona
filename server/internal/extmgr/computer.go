@@ -37,6 +37,7 @@ const cuaConfig = `{
     "confirm": {"type": "boolean", "title": "操作前在手机上确认", "description": "打开后，助手每次点击、输入、按键、打开或关闭 App 之前先在手机上问你；关着时直接做，记进 hub 的日志", "default": false},
     "app_approval": {"type": "boolean", "title": "第一次操作一个 App 时先问", "description": "助手第一次在一台 Mac 上操作某个 App（或看整个屏幕）时在手机上问一次，选「一直允许」后记住，在机器页可以移除；终端、系统设置、钥匙串访问、密码管理器和 Persona 每次都问", "default": true},
     "no_auto_lock": {"type": "array", "title": "扩展开着时不自动锁屏", "description": "打开的 Mac 在扩展开着时一直不因空闲锁屏（node 持有 caffeinate，不改系统设置）；和 hub 断开 30 分钟后自动恢复。手动锁屏、合盖照常", "items": {"type": "string", "format": "machine", "x-os": ["darwin"]}, "uniqueItems": true, "x-confirm": "打开后这台 Mac 在扩展开着时一直不会因为空闲锁屏，坐在它前面的人能直接用它。和 hub 断开 30 分钟后自动恢复。"},
+    "screen_x264": {"type": "array", "title": "实时屏幕用 x264 编码", "description": "打开的 Mac 在局域网直连时用你自己装的 ffmpeg（带 libx264，比如 Homebrew 的）编码实时屏幕：每帧快约 6 ms，多用一些 CPU。Persona 不带 x264 或 ffmpeg；没装、离开局域网或跟不上时用系统自带的编码器", "items": {"type": "string", "format": "machine", "x-os": ["darwin"]}, "uniqueItems": true, "x-confirm": "打开后，这台 Mac 在局域网直连时用你自己装的 ffmpeg 编码实时屏幕。x264 是 GPL 软件，Persona 不带它；它更费 CPU，跟不上时自动换回系统自带的编码器。"},
     "keep_awake": {"type": "boolean", "title": "操作或开着 VNC 时保持唤醒", "description": "助手操作那台 Mac、或有人在看它的画面时，它不睡、不因空闲锁屏；最后一次操作 10 分钟后、画面关掉后就撤掉，不改系统设置", "default": true},
     "click_sound": {"type": "string", "title": "点击音效", "description": "助手在 Mac 上点按时，那台 Mac 响一下系统提示音，坐在旁边的人听得到它在动。前台点击会把窗口提到前面、动真的鼠标；后台点击不动光标", "oneOf": [{"const": "none", "title": "无"}, {"const": "foreground", "title": "只前台点击"}, {"const": "all", "title": "前台和后台点击"}], "default": "none"},
     "show_cursor": {"type": "boolean", "title": "显示 Agent 的光标", "description": "助手和电脑上的 Agent 经 Cua Driver 操作时在屏幕上画一个光标，看 VNC 时知道它点在哪。改了会重启扩展打开的 Mac 上 Cua Driver 的后台进程，正在进行的操作会断一下", "default": true}
@@ -63,6 +64,9 @@ type cuaSettings struct {
 	AppApproval *bool `json:"app_approval"`
 	// NoAutoLock: the Macs "Don't auto-lock while the extension is on" is on for (computer_nolock.go).
 	NoAutoLock []string `json:"no_auto_lock"`
+	// ScreenX264: the Macs whose live screen may be encoded by the user's own ffmpeg with libx264 on a direct LAN
+	// (#8859, docs/extensions/computer-use.md "x264 on a direct LAN (#8859)"); the hub passes it in screen.dial.
+	ScreenX264 []string `json:"screen_x264"`
 	// ClickSound: "Click sound", none (or empty), foreground or all; the node plays it (node/cua_extras.go).
 	ClickSound string `json:"click_sound"`
 	// Backend: cua (Cua Driver, the default), lcu, or auto (lcu_status.go).
@@ -131,6 +135,7 @@ func (h *Manager) computerOf(m *Machine) *proto.Computer {
 	}
 	c.Enabled = slices.Contains(s.Machines, m.cfg.ID)
 	c.NoAutoLock = c.Enabled && slices.Contains(s.NoAutoLock, m.cfg.ID)
+	c.ScreenX264 = c.Enabled && slices.Contains(s.ScreenX264, m.cfg.ID)
 	return &c
 }
 
@@ -204,13 +209,15 @@ func (h *Manager) getComputer(w http.ResponseWriter, r *http.Request, m *Machine
 	writeJSON(w, i18n.ComputerStatus(h.requestLang(r), c))
 }
 
-// putComputer: PUT /api/v1/machines/{mid}/computer {"enabled": bool}, the machine page's switch: it goes into the
-// plugin's machines.
+// putComputer: PUT /api/v1/machines/{mid}/computer {"enabled"?, "no_auto_lock"?, "screen_x264"?}, the machine page's
+// switches: they go into the plugin's machines and per-Mac lists.
 func (h *Manager) putComputer(w http.ResponseWriter, r *http.Request, m *Machine) {
 	var in struct {
 		Enabled *bool `json:"enabled"`
 		// "Don't auto-lock while the extension is on" for this Mac (the app asked first).
 		NoAutoLock *bool `json:"no_auto_lock"`
+		// x264 for this Mac's live screen (#8859; the app asked first).
+		ScreenX264 *bool `json:"screen_x264"`
 	}
 	if err := decodeJSONBody(w, r, &in, 4<<10); err != nil {
 		h.writeComputerBodyErr(w, r, err)
@@ -232,6 +239,13 @@ func (h *Manager) putComputer(w http.ResponseWriter, r *http.Request, m *Machine
 			return
 		}
 		h.logf("[%s] no auto lock %v", m.cfg.ID, *in.NoAutoLock)
+	}
+	if in.ScreenX264 != nil {
+		if err := h.setExtensionList(r.Context(), cuaExtensionID, "screen_x264", m.cfg.ID, *in.ScreenX264); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		h.logf("[%s] live screen x264 %v", m.cfg.ID, *in.ScreenX264)
 	}
 	writeJSON(w, i18n.ComputerStatus(h.requestLang(r), h.refreshComputer(r.Context(), m)))
 }

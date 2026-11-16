@@ -76,6 +76,9 @@ PersonaCoreBytes persona_core_project_stream_chunks(const uint8_t *input, size_t
 // caller applies the checked-in current-iOS overlay (spec/fixtures/lines/ios/differences.json) to the fixture's
 // expected turns before comparing; the core never applies it.
 PersonaCoreBytes persona_core_project_turns(const uint8_t *input, size_t length);
+// Projects the first represented work segment's viewed-image line (viewed_images::Input). Returns the complete
+// {id, image_ids, is_input, type} JSON, or an empty buffer when no image produces a viewed line.
+PersonaCoreBytes persona_core_project_viewed_images(const uint8_t *input, size_t length);
 // Projects background-task calls, descriptions and notice status sequences (task_index::Input). Returns the complete
 // Index JSON.
 PersonaCoreBytes persona_core_project_task_index(const uint8_t *input, size_t length);

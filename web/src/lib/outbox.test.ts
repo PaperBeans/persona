@@ -26,6 +26,7 @@ import { pickLauncher } from "./assistant-chat";
 import { navigate } from "./router";
 import { getState } from "./store";
 import { toast } from "../ui/atoms";
+import { t } from "../i18n";
 import { skillContext, skillDraft, splitSkillDraft } from "./skill-mentions";
 
 function response(body: unknown, status = 200) {
@@ -167,6 +168,22 @@ describe("sending from another page", () => {
     expect(toast).toHaveBeenCalledWith(expect.stringContaining("电脑上的那个问题答完后"), "info");
     vi.mocked(toast).mockClear();
     expect(await sendToSession("m", "s", { text: "还有一条" })).toBe(true);
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("says when your own message went through a Claude's inbox although Persona's plugin is there", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response({ ok: true, delivered_as: "relayed", relay_reason: "busy" }))
+      .mockResolvedValueOnce(response({ ok: true, delivered_as: "relayed", relay_reason: "plugin_unconfirmed" }))
+      .mockResolvedValueOnce(response({ ok: true, delivered_as: "user_input" }))
+      .mockResolvedValueOnce(response({ ok: true, delivered_as: "relayed", relay_reason: "no_plugin" })));
+    expect(await sendToSession("m", "s", { text: "可以合并" })).toBe(true);
+    expect(toast).toHaveBeenLastCalledWith(t("lib-outbox.relayed_busy"), "info");
+    expect(await sendToSession("m", "s", { text: "合并吧" })).toBe(true);
+    expect(toast).toHaveBeenLastCalledWith(t("lib-outbox.relayed_plugin"), "info");
+    vi.mocked(toast).mockClear();
+    expect(await sendToSession("m", "s", { text: "合并" })).toBe(true); // in as your input: nothing to say
+    expect(await sendToSession("m", "s", { text: "好" })).toBe(true); // no plugin there: it always used the inbox
     expect(toast).not.toHaveBeenCalled();
   });
 

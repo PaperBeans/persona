@@ -389,6 +389,26 @@ pub unsafe extern "C" fn persona_core_project_turns(input: *const u8, length: us
     .unwrap_or_else(|_| PersonaCoreBytes::empty())
 }
 
+/// Projects the first represented work segment's viewed-image line (`persona_core::viewed_images::Input`). Returns
+/// the complete `{id, image_ids, is_input, type}` JSON, or an empty buffer when no image produces a viewed line.
+/// Pure function, same buffer ownership as `persona_core_project_sort`.
+///
+/// # Safety
+/// `input` is valid for `length` bytes of UTF-8 JSON.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn persona_core_project_viewed_images(input: *const u8, length: usize) -> PersonaCoreBytes {
+    catch_unwind(AssertUnwindSafe(|| {
+        let Some(input) = json_input::<persona_core_domain::viewed_images::Input>(input, length) else {
+            return PersonaCoreBytes::empty();
+        };
+        let Some(projection) = persona_core_domain::viewed_images::project(&input) else {
+            return PersonaCoreBytes::empty();
+        };
+        json_output(&projection)
+    }))
+    .unwrap_or_else(|_| PersonaCoreBytes::empty())
+}
+
 /// Projects background-task calls, descriptions and notice status sequences (`persona_core::task_index::Input`).
 /// Returns the complete `Index` JSON. Pure function, same buffer ownership as `persona_core_project_sort`.
 ///

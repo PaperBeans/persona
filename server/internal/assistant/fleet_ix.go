@@ -507,6 +507,17 @@ func endStatus(r proto.Resolution) string {
 }
 
 var errInvalidElicitation = errors.New("elicitation requires action accept, decline or cancel")
+var errInvalidEditedAnswer = errors.New("edited_text requires an editable permission card and a plain allow")
+
+// editedAnswerAllowed rejects an edit before its card or channel owner action is consumed. The node still has to
+// prove that the rewritten command has the same tool, gate, method, path and query; this checks only the answer envelope.
+func editedAnswerAllowed(ix proto.Interaction, r proto.Resolution) bool {
+	if r.EditedText == "" {
+		return true
+	}
+	return ix.Kind == proto.IxPermission && ix.EditableText != "" && len(ix.Fields) == 0 &&
+		strings.TrimSpace(r.EditedText) != "" && r.PlainAllowWithEditedText()
+}
 
 // resolve answers an interaction. A screen card acts right away and its error comes back (the dialog changed:
 // nothing pressed, a new card follows).
@@ -548,6 +559,10 @@ func (s *Service) resolveAnswer(id string, r proto.Resolution, remember bool, au
 	if p != nil && r.Cancel && (!p.ix.CanCancel || p.ix.Kind != proto.IxQuestion || !r.IsQuestionCancel()) {
 		s.fleet.mu.Unlock()
 		return errInvalidQuestionCancel
+	}
+	if p != nil && !editedAnswerAllowed(p.ix, r) {
+		s.fleet.mu.Unlock()
+		return errInvalidEditedAnswer
 	}
 	if p != nil && p.ix.Kind == proto.IxElicitation && !r.Dismiss &&
 		r.Action != "accept" && r.Action != "decline" && r.Action != "cancel" {
@@ -782,6 +797,7 @@ func (s *Service) finishInteraction(id string) {
 // finished tells everyone an interaction, already out of the pending set, is over.
 func (s *Service) finished(p *pending) {
 	s.taskPlanApproval()
+	go s.urgentCardDone(p.ix.ID) // a call about it stops ringing (urgent_call_loop.go)
 	s.fleet.mu.Lock()
 	done := assistantwire.FleetResolved{ID: p.ix.ID, AnsweredBy: p.answeredBy}
 	if done.AnsweredBy != "" {

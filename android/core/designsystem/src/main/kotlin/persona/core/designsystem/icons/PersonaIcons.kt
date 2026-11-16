@@ -353,7 +353,7 @@ object PersonaIcons {
     /** SF Symbol `eye`. */
     val view: PhIcon get() = PhIcons.Eye
     /** SF Symbol `phone.fill`. */
-    val voiceChannel: PhIcon get() = PhIcons.Waveform
+    val voiceChannel: PhIcon get() = PhIcons.Phone
     /** SF Symbol `antenna.radiowaves.left.and.right`. */
     val voiceConnecting: PhIcon get() = PhIcons.Broadcast
     /** SF Symbol `phone.down.fill`. */

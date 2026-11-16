@@ -15,7 +15,7 @@ enum QuickAction: String, CaseIterable {
 
     var item: UIApplicationShortcutItem {
         let (title, symbol): (String, String) = switch self {
-        case .meetingRecording: (String(localized: "Record [Recordings Section ef2821]"), Theme.Icon.recording)
+        case .meetingRecording: (MeetingWords.start, Theme.Icon.recording)
         case .newConversation: (String(localized: "New Chat [Quick Actions ea4b29]"), Theme.Icon.compose)
         case .inbox: (String(localized: "Inbox"), Theme.Icon.inbox)
         }

@@ -1,7 +1,7 @@
 # Android interface styles and design system
 
 Since 2026-10-31, the Android App's visuals and interaction have been redone wholesale. As the user asked, all three directions became themes, switched in **Settings › Interface style**; the default is **Glass**.
-The old design (the parts of `docs/archive/redesign/` about appearance, layout and interaction, and the HTML prototypes in `prototypes/android/`) is superseded by this document.
+The old design (the parts of `docs/archive/redesign/` about appearance, layout and interaction, and the HTML prototypes removed in #9030) is superseded by this document.
 
 ## 1. Three styles
 

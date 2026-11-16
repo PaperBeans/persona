@@ -121,7 +121,7 @@ export function DecisionRow({ todo, ask, rowKey, admission, onBusyChange, blocke
     setBlocker(undefined);
     acceptBrief(todo.id, ask.asked_at, body).then(
       (res) => {
-        setAnswering({ state: "done", text: res === "handled" ? t("assistant-brief.handled") : done });
+        setAnswering({ state: "done", text: res === "handled" ? t("assistant-brief.handled") : res === "recorded" ? t("assistant-brief.recorded_not_delivered") : done });
         if (res === "handled") void refreshTodos(); // acceptBrief reads them again only when the hub took it
       },
       (e) => {

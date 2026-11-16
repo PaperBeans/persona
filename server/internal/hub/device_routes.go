@@ -34,6 +34,9 @@ func (h *Hub) deviceRoutes(api *http.ServeMux) {
 		if route, ok := h.push.routeOfID(d.DeviceID); ok {
 			resp["push"] = route // the app's Settings › Notifications says which way, or why none (#5998)
 		}
+		if route, ok := h.push.callRouteOfID(d.DeviceID); ok {
+			resp["call"] = route // whether urgent calls can ring it (urgent_call.go), for Settings › Urgent calls
+		}
 		writeJSON(w, resp)
 	})
 	api.HandleFunc("GET /api/v1/devices/{id}/sessions", h.serveDeviceSessions)

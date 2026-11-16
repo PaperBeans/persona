@@ -7,7 +7,22 @@ import PersonaCore
 public enum ContinuityJSON: Equatable, Sendable {
     case null
     case bool(Bool)
-    case number(Double)
+    case number(String)
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case (.number(let left), .number(let right)):
+            if let left = ExactJSONNumbers.normalizedInteger(left),
+               let right = ExactJSONNumbers.normalizedInteger(right) { return left == right }
+            return left == right
+        case (.null, .null): return true
+        case (.bool(let left), .bool(let right)): return left == right
+        case (.string(let left), .string(let right)): return left == right
+        case (.array(let left), .array(let right)): return left == right
+        case (.object(let left), .object(let right)): return left == right
+        default: return false
+        }
+    }
     case string(String)
     case array([ContinuityJSON])
     case object([String: ContinuityJSON])
@@ -16,22 +31,26 @@ public enum ContinuityJSON: Equatable, Sendable {
     public var array: [ContinuityJSON]? { if case .array(let value) = self { value } else { nil } }
     public var string: String? { if case .string(let value) = self { value } else { nil } }
     public var int: Int? {
-        guard case .number(let value) = self else { return nil }
-        return Int(exactly: value)
+        guard case .number(let text) = self else { return nil }
+        // Only an integral decimal inside the platform Int range is a valid fixture index.
+        guard let decimal = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")),
+              let exact = Int(exactly: NSDecimalNumber(decimal: decimal)) else { return nil }
+        return exact
     }
     public var bool: Bool? { if case .bool(let value) = self { value } else { nil } }
     public subscript(_ key: String) -> ContinuityJSON? { object?[key] }
 
     public static func load(file: URL) throws -> ContinuityJSON {
-        let value = try JSONSerialization.jsonObject(with: Data(contentsOf: file))
-        return try from(value)
+        let data = try Data(contentsOf: file)
+        try ExactJSONNumbers.validate(data: data)
+        return try from(try JSONSerialization.jsonObject(with: data))
     }
 
     public static func from(_ value: Any) throws -> ContinuityJSON {
         switch value {
         case is NSNull: .null
         case let value as NSNumber where CFGetTypeID(value) == CFBooleanGetTypeID(): .bool(value.boolValue)
-        case let value as NSNumber: .number(value.doubleValue)
+        case let value as NSNumber: try jsonNumber(value)
         case let value as Bool: .bool(value)
         case let value as String: .string(value)
         case let value as [Any]: .array(try value.map(from))
@@ -41,19 +60,62 @@ public enum ContinuityJSON: Equatable, Sendable {
     }
 
     public func encoded() throws -> String {
-        let data = try JSONSerialization.data(withJSONObject: foundation)
+        if case .number(let text) = self {
+            guard ExactJSONNumbers.isValid(text) else {
+                throw ContinuityFixtureError.invalidFixture("non-finite or out-of-range JSON number")
+            }
+            return text
+        }
+        // Validate every numeric node before Foundation can raise an Objective-C exception for non-finite data.
+        switch self {
+        case .number(let text):
+            guard ExactJSONNumbers.isValid(text) else {
+                throw ContinuityFixtureError.invalidFixture("non-finite or out-of-range JSON number")
+            }
+        case .array(let values):
+            for value in values { try value.validateNumbers() }
+        case .object(let values):
+            for value in values.values { try value.validateNumbers() }
+        default: break
+        }
+        // Foundation otherwise rejects fragments with an Objective-C exception rather than a Swift error. Only
+        // display_answer's bare JSON string is a C input; other scalar values here are diagnostic renderings.
+        let options: JSONSerialization.WritingOptions = [.fragmentsAllowed]
+        let data = try JSONSerialization.data(withJSONObject: foundation, options: options)
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private func validateNumbers() throws {
+        switch self {
+        case .number(let text):
+            guard ExactJSONNumbers.isValid(text) else {
+                throw ContinuityFixtureError.invalidFixture("non-finite or out-of-range JSON number")
+            }
+        case .array(let values):
+            for value in values { try value.validateNumbers() }
+        case .object(let values):
+            for value in values.values { try value.validateNumbers() }
+        default: break
+        }
     }
 
     private var foundation: Any {
         switch self {
         case .null: NSNull()
         case .bool(let value): value
-        case .number(let value): value
+        case .number(let value): NSDecimalNumber(string: value)
         case .string(let value): value
         case .array(let values): values.map(\.foundation)
         case .object(let values): values.mapValues(\.foundation)
         }
+    }
+
+    private static func jsonNumber(_ value: NSNumber) throws -> ContinuityJSON {
+        let text = value.stringValue
+        guard ExactJSONNumbers.isValid(text) else {
+            throw ContinuityFixtureError.invalidFixture("out-of-range JSON number")
+        }
+        return .number(text)
     }
 }
 
@@ -172,16 +234,16 @@ public extension Request {
         var object: [String: ContinuityJSON]
         switch self {
         case let .fetchAfter(after_seq: after):
-            object = ["kind": .string("fetch_after"), "after_seq": .number(Double(after))]
+            object = ["kind": .string("fetch_after"), "after_seq": .number(String(after))]
         case let .fetchLatest(fold_work: fold):
             object = ["kind": .string("fetch_latest"), "fold_work": .bool(fold)]
         case let .subscribe(since_seq: since, fold_work: fold):
             object = ["kind": .string("subscribe"), "fold_work": .bool(fold)]
-            if let since { object["since_seq"] = .number(Double(since)) }
+            if let since { object["since_seq"] = .number(String(since)) }
         case let .fetchOlder(before_seq: before, fold_work: fold):
-            object = ["kind": .string("fetch_older"), "before_seq": .number(Double(before)), "fold_work": .bool(fold)]
+            object = ["kind": .string("fetch_older"), "before_seq": .number(String(before)), "fold_work": .bool(fold)]
         case let .fetchRange(fold_id: _, from_seq: from, through_seq: through):
-            object = ["kind": .string("fetch_range"), "from_seq": .number(Double(from)), "through_seq": .number(Double(through))]
+            object = ["kind": .string("fetch_range"), "from_seq": .number(String(from)), "through_seq": .number(String(through))]
         }
         return .object(object)
     }

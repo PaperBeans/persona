@@ -76,7 +76,7 @@ async function mount() {
         todo = { ...todo, decision_review: { review_at: at } };
         return new Response(JSON.stringify(todo.decision_review), { headers: { "Content-Type": "application/json" } });
       }
-      return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify(refusal ?? { ok: true }), { headers: { "Content-Type": "application/json" } });
     }
     if (path.includes("/todos") && listStatus !== 200) return new Response("{}", { status: listStatus });
     const body = path.includes("/feed") ? { items: feed, plans: { [plan.id]: plan }, task_cards: [{ id: `plan:${plan.id}:0`, plan_id: plan.id, index: 0, todo_id: todo.id, at, updated_at: at, state: "accepted" }] }
@@ -191,6 +191,15 @@ describe("a decision in the Needs you tray", () => {
     await flush();
     expect(posts).toEqual([{ path: expect.stringContaining("/todos/decision-task/accept"), body: { asked_at: at, option: "Everyone now" } }]);
     expect(row().querySelector("[data-decision-done]")!.textContent).toBe(t("assistant-decisionrow.chosen", { option: "Everyone now" }));
+    expect(optionButtons()).toEqual([]);
+  });
+
+  it("records the decision when the hub says no Agent received it", async () => {
+    refusal = { delivered: "none", ok: true };
+    await mount();
+    act(() => optionButtons()[0].click());
+    await flush();
+    expect(row().querySelector("[data-decision-done]")!.textContent).toBe(t("assistant-brief.recorded_not_delivered"));
     expect(optionButtons()).toEqual([]);
   });
 

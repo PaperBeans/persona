@@ -313,10 +313,109 @@ struct AssistantModelChoiceTests {
                                             mainID: "main") == currentRoute)
     }
 
+    @Test func assistantAndAgentLauncherListsHaveSeparateRequestsAndCaches() async throws {
+        let hub = FakeHub()
+        let path = "/api/v1/machines/box/launchers"
+        hub.on("GET", path) { request in
+            let launcher = request.query["purpose"] == "assistant"
+                ? #"{"name":"team","model":"shell-model","source":"path"}"#
+                : #"{"name":"team","model":"runtime-model","source":"paseo"}"#
+            return Data("{\"launchers\":[\(launcher)]}".utf8)
+        }
+        let model = AppModel()
+        model.apiForTests = hub.client
+        let machine = MachineRef(id: "box")
+        #expect(try await model.launchers(machine).first?.model == "runtime-model")
+        #expect(try await model.assistantLaunchers(machine).launchers.first?.model == "shell-model")
+        #expect(try await model.launchers(machine).first?.model == "runtime-model")
+        #expect(try await model.assistantLaunchers(machine).launchers.first?.model == "shell-model")
+        #expect(hub.sent("GET", path).map(\.query) == [[:], ["purpose": "assistant"]])
+    }
+
+    @Test func anExplicitAssistantCapabilityWinsOverAgentKind() {
+        #expect(!Launcher(name: "runtime-codex", agent: "codex", assistant: false).runsAssistant)
+        #expect(!Launcher(name: "runtime-claude", agent: "claude", assistant: false).runsAssistant)
+        #expect(Launcher(name: "runtime-other", agent: "other", assistant: true, source: "runtime").runsAssistant)
+    }
+
+    @Test func olderHubEligibilityKeepsShellLaunchersAndRejectsRuntimeOnlyProviders() {
+        #expect(Launcher(name: "claude").runsAssistant)
+        #expect(Launcher(name: "shell-codex", agent: "codex", source: "path").runsAssistant)
+        #expect(Launcher(name: "shell-claude", agent: "claude", source: "zshrc").runsAssistant)
+        #expect(Launcher(name: "managed-claude", agent: "claude", source: "persona").runsAssistant)
+        #expect(!Launcher(name: "managed-codex", agent: "codex", source: "persona").runsAssistant)
+        #expect(!Launcher(name: "runtime-codex", agent: "codex", source: "paseo").runsAssistant)
+        #expect(!Launcher(name: "runtime-claude", agent: "claude", source: "paseo").runsAssistant)
+    }
+
+    @Test func assistantModelRequestsKeepTheirPurposeAndRefresh() async throws {
+        let hub = FakeHub()
+        let path = "/api/v1/machines/box/launchers/team/models"
+        hub.on("GET", path, json: #"{"agent":"claude","models":[{"id":"shell-model","name":"Shell"}]}"#)
+        let _: LauncherModels = try await hub.client.launcherModels(machine: "box", launcher: "team", refresh: true, purpose: "assistant")
+        let _: [AgentModelOption] = try await hub.client.launcherModels(machine: "box", launcher: "team", purpose: "assistant")
+        let _: LauncherModels = try await hub.client.launcherModels(machine: "box", launcher: "team")
+        #expect(hub.sent("GET", path).map(\.query) == [
+            ["purpose": "assistant", "refresh": "1"], ["purpose": "assistant"], [:],
+        ])
+    }
+
     @Test func conversationModelBodyEncodesMachineIdSnakeCase() throws {
         let body = APIClient.ConversationModelBody(launcher: "claude", model: "opus", effort: "high", machineID: "box")
         let data = try JSON.encoder.encode(body)
         let raw = try JSONDecoder().decode([String: String].self, from: data)
         #expect(raw == ["launcher": "claude", "model": "opus", "effort": "high", "machine_id": "box"])
+    }
+
+    @Test func starterOffersTheSelectedLaunchersDefaultModelEffortsOnly() {
+        let response = response(launchers: [Launcher(name: "fast", model: "fast-model")])
+        let list = LauncherModels(agent: "runtime", models: [
+            AgentModel(id: "fast-model", name: "Fast", isDefault: true, efforts: ["low", "high", "xhigh"]),
+            AgentModel(id: "other-model", name: "Other", efforts: ["max", "ultra"]),
+        ], locked: nil)
+        let options = AssistantStarterEffort.options(launcher: "fast", response: response, list: list)
+        #expect(options.map(\.id) == ["low", "high", "xhigh"])
+        #expect(AssistantStarterEffort.retained("max", options: options) == "")
+        #expect(AssistantStarterEffort.retained("xhigh", options: options) == "xhigh")
+        #expect(AssistantStarterEffort.retained("", options: options) == "")
+    }
+
+    @Test func starterUsesTheConfiguredMainModelInsteadOfTheLaunchersOtherDefault() {
+        let response = response(launchers: [Launcher(name: "team", model: "fast-model")],
+                                default: def(launcher: "team", model: "strong-model"))
+        let list = LauncherModels(agent: "codex", models: [
+            AgentModel(id: "fast-model", name: "Fast", isDefault: true, efforts: ["low", "high"]),
+            AgentModel(id: "strong-model", name: "Strong", efforts: ["high", "ultra"]),
+        ], locked: nil)
+        #expect(AssistantStarterEffort.options(launcher: "team", response: response, list: list).map(\.id) == ["high", "ultra"])
+    }
+
+    @Test func starterNeverGuessesEffortsForAnUnknownOrUnlistedModel() {
+        let response = response(launchers: [Launcher(name: "team", model: "unlisted")])
+        let list = LauncherModels(agent: "claude", models: [AgentModel(id: "other", name: "Other", isDefault: true, efforts: ["max"])], locked: nil)
+        #expect(AssistantStarterEffort.options(launcher: "team", response: response, list: list).isEmpty)
+        #expect(AssistantStarterEffort.options(launcher: "team", response: response, list: nil).isEmpty)
+        let none = LauncherModels(agent: "runtime", models: [AgentModel(id: "unlisted", name: "No reasoning")], locked: nil)
+        #expect(AssistantStarterEffort.options(launcher: "team", response: response, list: none).isEmpty)
+    }
+
+    @Test func starterLoadsCapabilitiesWithoutTreatingAnUnreadLauncherAsUnsupported() async {
+        let hub = FakeHub()
+        let launchers = response(launchers: [Launcher(name: "strong", model: "strong-model"), Launcher(name: "fast", model: "fast-model")])
+        hub.on("GET", "/api/v1/machines/box/launchers/strong/models", json: #"{"agent":"codex","models":[{"id":"strong-model","name":"Strong","default":true,"efforts":["high","max"]}]}"#)
+        hub.on("GET", "/api/v1/machines/box/launchers/fast/models", json: #"{"agent":"runtime","models":[{"id":"fast-model","name":"Fast","default":true,"efforts":["high","xhigh"]}]}"#)
+        let model = AssistantStarterModels(deps: .init(launchers: { _, _, _ in launchers }, api: { _ in hub.client }, cache: AssistantStarterCache()))
+        let box = MachineRef(id: "box")
+        let strong = AssistantStarterModels.source(box, launcher: "strong", fallback: nil)
+        let fast = AssistantStarterModels.source(box, launcher: "fast", fallback: nil)
+        await model.load(box, launcher: "strong", fallback: nil)
+        #expect(model.retained("max", source: strong) == "max")
+        #expect(model.retained("max", source: fast) == "max") // Unknown capabilities preserve the saved choice.
+        #expect(model.options(for: fast).isEmpty)
+        await model.load(box, launcher: "fast", fallback: nil)
+        #expect(model.options(for: fast).map(\.id) == ["high", "xhigh"])
+        #expect(model.retained("max", source: fast) == "")
+        #expect(model.retained("xhigh", source: fast) == "xhigh")
+        #expect(hub.sent("GET", "/api/v1/machines/box/launchers/fast/models").first?.query == ["purpose": "assistant"])
     }
 }

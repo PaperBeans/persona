@@ -252,3 +252,61 @@ func TestGoldenLiveTitle(t *testing.T) {
 		t.Errorf("a long title: %q", got)
 	}
 }
+
+// A name given on the web (#8877) names the recording before the phone's title and the generated one, and stops a live
+// title; an upload with the phone's title unchanged keeps it, one that changes it (renamed on the phone since) takes it
+// back; "" takes it back too. Errors: not one line or too long, no recording, a deleted one.
+func TestWebRename(t *testing.T) {
+	e := goldenEngine(t, &titleModel{replies: []string{`{"title":"导出上限","keep":false}`}})
+	start := time.Date(2026, 11, 10, 14, 0, 0, 0, goldenZone)
+	now := start.Add(5 * time.Minute)
+	e.clock = func() time.Time { return now }
+	if _, err := e.RenameRecording(recID, "网页名", now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("no recording: %v", err)
+	}
+	if _, err := e.RenameRecording("nope", "网页名", now); !errors.Is(err, ErrBadRecording) {
+		t.Fatalf("bad id: %v", err)
+	}
+	putRecording(t, e, recID, recUpload(1, start, false, talk(0, 20)...), now)
+	for _, bad := range []string{"两\n行", strings.Repeat("长", 201)} {
+		if _, err := e.RenameRecording(recID, bad, now); !errors.Is(err, ErrBadTitle) {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+	r, err := e.RenameRecording(recID, " 网页名 ", now)
+	if err != nil || r.Name != "网页名" || r.NameSource() != NamedByRename || r.RenamedAt == nil {
+		t.Fatalf("renamed: %+v %v", r, err)
+	}
+	if recordingNow(t, e, recID).liveTitleDue(now) {
+		t.Error("a renamed recording is due a live title")
+	}
+	if states, _ := e.RecordingStates(); states[0].Name != "网页名" || states[0].NameSource != NamedByRename {
+		t.Errorf("states %+v", states)
+	}
+	// The phone's title as it was: the web's name stays.
+	if put, _ := e.PutRecording(recID, recUpload(2, start, false, talk(0, 20)...), now); put.Name != "网页名" || put.NameSource != NamedByRename {
+		t.Fatalf("an upload with the title as it was: %+v", put)
+	}
+	// The phone renamed it since: its name wins and the web's goes.
+	u := recUpload(3, start, false, talk(0, 20)...)
+	u.Title = "手机名"
+	if put, _ := e.PutRecording(recID, u, now); put.Name != "手机名" || put.NameSource != NamedByTitle {
+		t.Fatalf("the phone's newer name: %+v", put)
+	}
+	if r := recordingNow(t, e, recID); r.Renamed != "" || r.RenamedAt != nil {
+		t.Fatalf("the web's name stayed: %+v", r)
+	}
+	// Cleared on the web.
+	if _, err := e.RenameRecording(recID, "网页名", now); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := e.RenameRecording(recID, "", now); r.Name != "手机名" || r.Renamed != "" {
+		t.Fatalf("cleared: %q %q", r.Name, r.Renamed)
+	}
+	if _, err := e.DeleteRecording(recID, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.RenameRecording(recID, "网页名", now); !errors.Is(err, ErrRecordingDeleted) {
+		t.Fatalf("deleted: %v", err)
+	}
+}

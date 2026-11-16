@@ -110,6 +110,10 @@ struct ScreenStats: Equatable {
     /// Mac, so the overlay names it on a line of its own and never shows it as the picture's latency. The web overlay
     /// shows the same leg.
     var hubRoundTripMs: Double? = nil
+    /// "x264" while the user's own ffmpeg encodes (#8859), on a line under the codec; nil for the Mac's built-in encoder.
+    var encoder: String? = nil
+    /// Why x264, on for that Mac, isn't encoding now, in plain words (#8859); nil when it isn't on.
+    var encoderNote: String? = nil
 
     /// A bitrate as the overlay writes it, in Mbps: one decimal, two below 1 Mbps so a small stream that was measured
     /// doesn't read as 0.0 (the web overlay's rule, `mbpsText`).
@@ -125,6 +129,17 @@ struct ScreenStats: Equatable {
         if let v = networkMs { out.append((String(localized: "Network"), v)) }
         if let v = decodeMs { out.append((String(localized: "Decode"), v)) }
         return out
+    }
+
+    /// Why x264 isn't encoding (`hello.fallback`, #8859), for the overlay's line under the codec.
+    static func x264Note(_ reason: String) -> String {
+        switch reason {
+        case "route": String(localized: "x264 off: not on the same network")
+        case "slow": String(localized: "x264 off: the Mac couldn't keep up")
+        case "congested": String(localized: "x264 off: the network was busy")
+        case "failed": String(localized: "x264 off: ffmpeg stopped")
+        default: String(localized: "x264 isn't available on this Mac")
+        }
     }
 }
 
@@ -198,6 +213,13 @@ struct ScreenStatsOverlay: View {
                 if let why = stats.tierReason { Text(why).foregroundStyle(.tertiary) }
             }
             rateLine
+            // The encoder on a line of its own (#8859): on the codec line it would widen the panel past the screen at
+            // the larger text sizes.
+            if let encoder = stats.encoder {
+                kv(String(localized: "Encoder [Screen Stats]"), encoder)
+            } else if let note = stats.encoderNote {
+                Text(note).foregroundStyle(.tertiary)
+            }
             latencyLine
             if let hub = stats.hubRoundTripMs {
                 Text("Round trip to the hub \(Int(hub.rounded())) ms")
@@ -307,6 +329,22 @@ extension ScreenStats {
         s.path = .directLANUDP
         s.routeRttMs = 4
         s.routeLoss = 0.02
+        return s
+    }()
+    /// x264 encoding (#8859): `-showScreenStatsDemo` with `-showScreenX264Demo`.
+    static let demoVideoX264: ScreenStats = {
+        var s = demoVideo
+        s.codec = "H.264"
+        s.encoder = "x264" // i18n-ignore: a program's name
+        s.bitrateMbps = 5.1
+        s.encodeMs = 2
+        s.totalMs = 16
+        return s
+    }()
+    /// x264 on for the Mac but stopped (#8859): `-showScreenStatsDemo` with `-showScreenX264OffDemo`.
+    static let demoVideoX264Off: ScreenStats = {
+        var s = demoVideo
+        s.encoderNote = ScreenStats.x264Note("slow")
         return s
     }()
     static let demoVNC = ScreenStats(

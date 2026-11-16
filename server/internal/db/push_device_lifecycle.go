@@ -37,12 +37,12 @@ func upsertPushDevice(ctx context.Context, tx pgx.Tx, v Device) error {
 		at := v.LastPushAt.UTC().Truncate(time.Microsecond)
 		delivered = &at
 	}
-	tag, err := tx.Exec(ctx, `INSERT INTO devices (device_id,name,kind,apns_token,apns_env,topic,push_key,relay_url,relay_grant,credential,updated_at,credential_id,locale,relay_error,features,registered_at,last_push_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),$11,$12,$13,$14,COALESCE($15,now()),$16)
-		ON CONFLICT(device_id) DO UPDATE SET name=$2,kind=$3,apns_token=$4,apns_env=$5,topic=$6,push_key=$7,relay_url=$8,relay_grant=$9,credential=$10,updated_at=now(),credential_id=$11,locale=$12,relay_error=$13,features=$14,
+	tag, err := tx.Exec(ctx, `INSERT INTO devices (device_id,name,kind,apns_token,apns_env,topic,push_key,relay_url,relay_grant,credential,updated_at,credential_id,locale,relay_error,features,registered_at,last_push_at,voip_token,voip_grant,voip_error)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),$11,$12,$13,$14,COALESCE($15,now()),$16,$17,$18,$19)
+		ON CONFLICT(device_id) DO UPDATE SET name=$2,kind=$3,apns_token=$4,apns_env=$5,topic=$6,push_key=$7,relay_url=$8,relay_grant=$9,credential=$10,updated_at=now(),credential_id=$11,locale=$12,relay_error=$13,features=$14,voip_token=$17,voip_grant=$18,voip_error=$19,
 		registered_at=GREATEST(devices.registered_at,COALESCE($15,devices.registered_at)),last_push_at=GREATEST(devices.last_push_at,$16)
 		WHERE (COALESCE(NULLIF(devices.credential_id,''),devices.credential)='' OR COALESCE(NULLIF(devices.credential_id,''),devices.credential)=COALESCE(NULLIF($11,''),$10))
-		AND ($15::timestamptz IS NULL OR devices.registered_at <= $15)`, v.DeviceID, v.Name, v.Kind, v.APNSToken, v.APNSEnv, v.Topic, v.PushKey, v.RelayURL, v.RelayGrant, v.Credential, v.CredentialID, v.Locale, v.RelayError, features, registered, delivered)
+		AND ($15::timestamptz IS NULL OR devices.registered_at <= $15)`, v.DeviceID, v.Name, v.Kind, v.APNSToken, v.APNSEnv, v.Topic, v.PushKey, v.RelayURL, v.RelayGrant, v.Credential, v.CredentialID, v.Locale, v.RelayError, features, registered, delivered, v.VoIPToken, v.VoIPGrant, v.VoIPError)
 	if err != nil {
 		var pgerr *pgconn.PgError
 		if errors.As(err, &pgerr) && pgerr.Code == "23514" && (pgerr.Message == "push registration was superseded" || pgerr.Message == "push registration ownership changed") {
@@ -71,7 +71,7 @@ func SamePushInstallation(a, b Device) bool {
 }
 
 func devicesIn(ctx context.Context, tx pgx.Tx) ([]Device, error) {
-	rows, err := tx.Query(ctx, `SELECT device_id,name,kind,apns_token,apns_env,topic,push_key,relay_url,relay_grant,credential,updated_at,prefs,credential_id,locale,relay_error,features,registered_at,last_push_at FROM devices ORDER BY registered_at DESC, device_id DESC FOR UPDATE`)
+	rows, err := tx.Query(ctx, `SELECT device_id,name,kind,apns_token,apns_env,topic,push_key,relay_url,relay_grant,credential,updated_at,prefs,credential_id,locale,relay_error,features,registered_at,last_push_at,voip_token,voip_grant,voip_error FROM devices ORDER BY registered_at DESC, device_id DESC FOR UPDATE`)
 	if err != nil {
 		return nil, err
 	}

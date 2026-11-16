@@ -509,14 +509,6 @@
       "path_tokens": [],
       "external_refs": []
     },
-    "harmony/tests/native-ui-fixture.py": {
-      "reason": "Native UI fixture verifies that the deployed operation header preserves the legacy identity accepted by existing hubs.",
-      "tokens": [
-        "X-Jarvis-Op-Id"
-      ],
-      "path_tokens": [],
-      "external_refs": []
-    },
     "harmony/tests/native-transport-fixture.py": {
       "reason": "Native TLS fixture verifies that the deployed compatibility header equals the canonical client identity.",
       "tokens": [
@@ -690,6 +682,7 @@
       "tokens": [
         ".jarvis",
         "JARVIS_",
+        "X-Jarvis-Op-Id",
         "com.jarvis.hub",
         "com.jarvis.link",
         "com.jarvis.node",

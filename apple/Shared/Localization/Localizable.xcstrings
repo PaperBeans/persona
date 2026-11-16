@@ -15412,6 +15412,28 @@
         }
       }
     },
+    "All Meetings" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All Meetings"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべての会議"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部会议"
+          }
+        }
+      }
+    },
     "API Key" : {
       "shouldTranslate" : true,
       "localizations" : {
@@ -73204,6 +73226,28 @@
         }
       }
     },
+    "In a Meeting… Open" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In a Meeting… Open"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議中…開く"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会议中…打开"
+          }
+        }
+      }
+    },
     "In Container" : {
       "localizations" : {
         "en" : {
@@ -84322,6 +84366,28 @@
         }
       }
     },
+    "Meetings and notes you record on your phone, and meetings from connected apps such as Lark, show up here." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meetings and notes you record on your phone, and meetings from connected apps such as Lark, show up here."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スマートフォンで記録した会議やメモと、Lark などの連携アプリから取り込んだ会議がここに表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在手机上开的会议、记的笔记，和从飞书等连接的应用导入的会议，都会出现在这里。"
+          }
+        }
+      }
+    },
     "MEMORY.md: the table of contents Persona keeps itself; it's updated when you delete a memory." : {
       "localizations" : {
         "en" : {
@@ -90639,6 +90705,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Name After Calendar Meetings" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name After Calendar Meetings"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カレンダーの会議名で名前を付ける"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用日历里的会议命名"
+          }
+        }
+      }
     },
     "Name Changes per Session" : {
       "extractionState" : "manual",
@@ -102129,6 +102217,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Note · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Note · %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メモ · %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "笔记 · %1$@"
+          }
+        }
+      }
     },
     "Notebooks in nbformat %lld aren't supported, so this one is shown as source" : {
       "comment" : "Why the file viewer shows a .ipynb notebook as its source text; %lld is the notebook's format version (PersonaKit, #5758)",
@@ -142887,6 +142997,50 @@
       },
       "extractionState" : "manual"
     },
+    "Start Meeting" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start Meeting"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議を始める"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始会议"
+          }
+        }
+      }
+    },
+    "Start Note" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start Note"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メモを始める"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始笔记"
+          }
+        }
+      }
+    },
     "Start Over" : {
       "localizations" : {
         "en" : {
@@ -145091,6 +145245,50 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Still on This Device" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Still on This Device"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスにだけあるもの"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还在这台设备上"
+          }
+        }
+      }
+    },
+    "Still on This iPhone" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Still on This iPhone"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この iPhone にだけあるもの"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还在这台 iPhone 上"
+          }
+        }
+      }
     },
     "Stop" : {
       "extractionState" : "manual",
@@ -200657,6 +200855,259 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "确认后清除"
+          }
+        }
+      }
+    },
+    "Live Screen with x264" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live Screen with x264"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ライブ画面に x264 を使う"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时屏幕用 x264 编码"
+          }
+        }
+      }
+    },
+    "Faster on the same network, using your %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Faster on the same network, using your %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同じネットワークで高速に。インストール済みの %1$@ を使います"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同一网络下更快，用你装的 %1$@"
+          }
+        }
+      }
+    },
+    "No ffmpeg with libx264 on this Mac now; the built-in encoder is used" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No ffmpeg with libx264 on this Mac now; the built-in encoder is used"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Mac には今 libx264 付きの ffmpeg がないため、内蔵エンコーダを使います"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 现在没有带 libx264 的 ffmpeg，用系统自带的编码器"
+          }
+        }
+      }
+    },
+    "Turn On x264 for the Live Screen?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn On x264 for the Live Screen?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ライブ画面で x264 をオンにしますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时屏幕要打开 x264 吗？"
+          }
+        }
+      }
+    },
+    "On the same network, this Mac's live screen will be encoded by the ffmpeg you installed. x264 is GPL software that Persona doesn't include. It uses more CPU, and when it can't keep up, the Mac's built-in encoder takes over." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On the same network, this Mac's live screen will be encoded by the ffmpeg you installed. x264 is GPL software that Persona doesn't include. It uses more CPU, and when it can't keep up, the Mac's built-in encoder takes over."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同じネットワークでは、この Mac のライブ画面をインストール済みの ffmpeg でエンコードします。x264 は Persona に含まれない GPL ソフトウェアです。CPU をより多く使い、追いつかないときは Mac 内蔵のエンコーダに切り替わります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在同一网络下，这台 Mac 的实时屏幕会由你装的 ffmpeg 编码。x264 是 GPL 软件，Persona 不带它。它更费 CPU，跟不上时会自动换回 Mac 自带的编码器。"
+          }
+        }
+      }
+    },
+    "x264 off: not on the same network" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "x264 off: not on the same network"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "x264 オフ：同じネットワークではありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "x264 未用：不在同一网络"
+          }
+        }
+      }
+    },
+    "x264 off: the Mac couldn't keep up" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "x264 off: the Mac couldn't keep up"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "x264 オフ：Mac が追いつきませんでした"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "x264 已停：Mac 跟不上"
+          }
+        }
+      }
+    },
+    "x264 off: the network was busy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "x264 off: the network was busy"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "x264 オフ：ネットワークが混雑していました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "x264 已停：网络拥堵"
+          }
+        }
+      }
+    },
+    "x264 off: ffmpeg stopped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "x264 off: ffmpeg stopped"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "x264 オフ：ffmpeg が停止しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "x264 已停：ffmpeg 停了"
+          }
+        }
+      }
+    },
+    "x264 isn't available on this Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "x264 isn't available on this Mac"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Mac では x264 を使えません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 用不了 x264"
+          }
+        }
+      }
+    },
+    "Encoder [Screen Stats]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Encoder"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エンコーダ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编码器"
           }
         }
       }

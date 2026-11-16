@@ -102,7 +102,7 @@ class AppServices @Inject constructor(
     private val mergedMetrics = shell.metrics { stack ->
         val route = stack.connection.route.value ?: return@metrics null
         HttpMachineMetricsApi(route.endpoint.url, stack.connection.token, stack.connection.http.client,
-            isCurrent = { stack.current && stack.connection.route.value == route })
+            isCurrent = { stack.current && stack.connection.route.value == route }, cache = stack.metricSnapshots)
     }
     private val mutableSession = MutableStateFlow<ShellSession?>(null)
     val session = mutableSession.asStateFlow()

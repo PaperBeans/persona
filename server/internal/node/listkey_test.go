@@ -105,6 +105,9 @@ func capsFmt(c *proto.SessionCapabilities) string {
 	if c.RewindCode != nil {
 		key += fmt.Sprintf(" rewind_code=%v", *c.RewindCode)
 	}
+	if c.PluginInput {
+		key += " plugin_input=true"
+	}
 	return key + "}"
 }
 

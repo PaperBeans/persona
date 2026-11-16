@@ -136,7 +136,7 @@ func (s *Service) sweepTaskDeadlines(now time.Time) {
 			continue
 		}
 		if a.Reversible && a.Recommend != "" {
-			took, err := s.acceptTryAs(ctx, id, "", true)
+			result, err := s.acceptTryAs(ctx, id, "", true)
 			switch {
 			case err != nil:
 				// Not retried (acceptTryAs keeps the deadline handled): the owner decides instead.
@@ -144,7 +144,7 @@ func (s *Service) sweepTaskDeadlines(now time.Time) {
 				if cur, ok := s.askCopy(id); ok {
 					s.remindOverdue(ctx, id, cur)
 				}
-			case took:
+			case result.taken:
 				s.logf("task %s: deadline passed unanswered: recommendation taken by default", id)
 			}
 			continue

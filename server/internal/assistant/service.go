@@ -131,7 +131,9 @@ type Service struct {
 	// (backgroundSignedOut).
 	born  time.Time
 	pubMu sync.Mutex
-	seq   uint64
+	// urgentWake wakes urgentLoop (urgent_call_loop.go): a call rang.
+	urgentWake chan struct{}
+	seq        uint64
 
 	startingAssistants assistantStarts // machine_privacy.go
 
@@ -266,7 +268,7 @@ var _ Handler = (*Service)(nil)
 // New makes the assistant; nothing runs until the hub calls it.
 func New(o Options) *Service {
 	s := &Service{hub: o.Hub, store: o.Store, logf: o.Logf, mux: http.NewServeMux(), epoch: randomHex(8), tasks: newTasksState(), born: time.Now(),
-		devs: o.Devices, trustSrc: o.Trust, id: o.ID, build: o.Build, repositoryConfig: o.RepositoryConfig}
+		devs: o.Devices, trustSrc: o.Trust, id: o.ID, build: o.Build, repositoryConfig: o.RepositoryConfig, urgentWake: make(chan struct{}, 1)}
 	s.inbox.lang = func() i18n.Lang { return s.lang(context.Background()) }
 	if s.store == nil {
 		s.store = func() Store { return nil }
@@ -284,6 +286,7 @@ func New(o Options) *Service {
 	s.standingAuthorizationRoutes()
 	s.ruleSuggestionRoutes()
 	s.northStarRoutes()
+	s.urgentCallRoutes() // urgent_call.go
 	s.reporterRoutes()
 	s.directionRoutes()
 	s.dispatchPolicyRoutes() // dispatch_policy_routes.go

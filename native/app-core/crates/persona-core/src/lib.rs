@@ -17,5 +17,6 @@ pub mod task_index;
 pub mod transport;
 pub mod turns;
 pub mod viewed_images;
+pub mod wire_envelope;
 
 pub use item::Item;

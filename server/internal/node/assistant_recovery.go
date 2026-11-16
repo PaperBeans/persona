@@ -494,7 +494,7 @@ func assistantExecutionForModel(execution modelExecution, list proto.LauncherMod
 
 // assistantRecoveryModels is launchers.models, replaced by deterministic tests without a CLI or model call.
 var assistantRecoveryModels = func(ctx context.Context, n *Node, launcher string) (proto.LauncherModels, error) {
-	return n.launcherModels(ctx, launcher, "", false)
+	return n.launcherModels(withLauncherPurpose(ctx, "assistant"), launcher, "", false)
 }
 
 // assistantRecoverySend is the ordinary assistantSend recovery path, replaceable by a deterministic process handoff test.

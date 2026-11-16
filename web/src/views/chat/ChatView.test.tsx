@@ -171,6 +171,19 @@ describe("ChatView composer task routing", () => {
     expect(await sender(false)({ text: "One more thing", images: [] })).toBe(true);
     expect(vi.mocked(toast).mock.calls.filter(([text]) => text === t("lib-outbox.waits_on_computer"))).toEqual(toasts ? [[t("lib-outbox.waits_on_computer"), "info"]] : []);
   });
+
+  // your own message to a Claude with Persona's plugin went through its inbox instead of as your input
+  it.each([
+    [{ delivered_as: "relayed", relay_reason: "busy" }, "lib-outbox.relayed_busy"],
+    [{ delivered_as: "relayed", relay_reason: "plugin_unavailable" }, "lib-outbox.relayed_plugin"],
+    [{ delivered_as: "user_input" }, undefined],
+    [{ delivered_as: "relayed", relay_reason: "no_plugin" }, undefined],
+  ])("says when the message may not count as your approval (%j)", async (reply, key) => {
+    fetcher.mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, ...reply }) });
+    expect(await sender(false)({ text: "Go ahead and merge", images: [] })).toBe(true);
+    const relayed = [t("lib-outbox.relayed_busy"), t("lib-outbox.relayed_plugin")];
+    expect(vi.mocked(toast).mock.calls.filter(([text]) => relayed.includes(String(text)))).toEqual(key ? [[t(key), "info"]] : []);
+  });
 });
 
 describe("ChatView message context availability", () => {

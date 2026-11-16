@@ -1103,16 +1103,25 @@ comes back in 1.5–2.8 ms p50 (1.7–4.5 ms p95), against VideoToolbox's 7–8 
   Screen Recording grant. Docs may tell the user to install ffmpeg (`brew install ffmpeg`); nothing installs it for them.
 - **Finding ffmpeg** (node, `node/screenx264.go`): at fixed paths only, `/opt/homebrew/bin`, `/usr/local/bin` and
   `/opt/local/bin`, never `PATH`. One counts when `-encoders` lists libx264 and a 3-frame self-test through the
-  helper's command line gives back 3 FLV frames, the first a keyframe. The answer is kept for the file's path, size
-  and modification time (a `brew upgrade` is tested again; a probe takes about 0.3 s) and reported as
+  helper's command line gives back 3 FLV frames, the first a keyframe. A pass is kept for the file's path, size and
+  modification time (a `brew upgrade` is tested again; a probe takes about 0.15–0.3 s); a failure is tried again after
+  a minute. The probe runs on its own 5 s deadline, never the status call's, and the node logs each outcome once
+  ("screen x264: … qualifies" or "doesn't qualify: <why>"). The result is reported as
   `screen_video.x264` (`"ffmpeg 9.0.2"`). The x264 command-line tool alone won't do: it never flushes its output, so
   each frame waits for later ones (18–57 ms).
-- **Switching it on**: per Mac and off by default; the hub's switch and the phone's side come in a later step of
-  #8859. `screen.dial {…, x264: true}` makes the node start the helper with `--x264 <ffmpeg>` when its probe passed;
-  otherwise the helper starts as before and uses VideoToolbox.
+- **Switching it on**: per Mac and off by default, in the plugin cua's settings as `screen_x264` (a list of Macs, like
+  `no_auto_lock`, asked about first through `x-confirm`). On the iPhone the Mac's page shows "Live Screen with x264"
+  under Control Computer only while its node reports `screen_video.x264` (or while it is on, so it can be turned off),
+  and asks before turning it on: the ffmpeg the user installed encodes, x264 is GPL software Persona doesn't include,
+  it uses more CPU, and the built-in encoder takes over when it can't keep up. The switch is `PUT
+  /api/v1/machines/{mid}/computer {"screen_x264": bool}`; the Mac's status says `screen_x264` while it and Control
+  Computer are on. The hub adds `x264: true` to that Mac's `screen.dial`, and the node starts the helper with `--x264
+  <ffmpeg>` when its probe passed; otherwise the helper starts as before and uses VideoToolbox. The web page and the
+  Android app reach the setting through the plugin's settings form.
 - **Which encoder** (`X264Plan.encoder`): x264 only while the phone says the stream is on a direct LAN route: kind
-  `lan` in `start.path` (the route the stream starts on, shaped like `update.path`), then in each `update.path`. A
-  phone that sends no `start.path` (one from before #8859) and the web page get VideoToolbox. `hello.encoder` is
+  `lan` in `start.path` (the route the stream starts on, shaped like `update.path`), then in each `update.path`. The
+  iPhone app sends the route it knows when the video opens; when it doesn't know one yet, the route's first reading
+  goes as an `update.path`. A phone that sends no `start.path` (one from before #8859) and the web page get VideoToolbox. `hello.encoder` is
   `hardware` or `x264`; `hello.fallback` says why x264, on for this Mac, isn't the encoder now: `unavailable` (no
   disclaim call, ffmpeg didn't start, or the phone offers no H.264), `route`, `slow`, `failed` or `congested`. A
   route change across the LAN's edge, or x264 stopping, starts capture again with a new `hello`, as a new codec does;
@@ -1144,6 +1153,12 @@ comes back in 1.5–2.8 ms p50 (1.7–4.5 ms p95), against VideoToolbox's 7–8 
   that isn't the next frame (`failed`); any frame takes over 50 ms, more than 10% of the last 2 s's frames take over
   8 ms (a process's first frame aside), or a frame is still inside after 200 ms (`slow`); a report cuts the bitrate or
   skips frames (`congested`: VideoToolbox can lower its bitrate as it runs, ffmpeg can't).
+- **Connection Stats** (iPhone): a line under the codec line reads "Encoder x264" while x264 encodes (on the codec
+  line it would widen the panel past the screen at the larger text sizes); with x264 on for the Mac but not encoding,
+  that line says why ("x264 off: not on the same network", "… the Mac couldn't keep
+  up", "… the network was busy", "… ffmpeg stopped", or "x264 isn't available on this Mac"). Screenshots:
+  `-showScreenStatsDemo` with `-showScreenX264Demo` or `-showScreenX264OffDemo` (`VNCTests.testTheOverlayNamesTheEncoder`);
+  the switch: `ComputerSectionTests.testX264AsksFirst` with the mock's `MOCK_SCREEN_X264=1`.
 - **Verifying**: `PERSONA_TEST_FFMPEG=/opt/homebrew/bin/ffmpeg swift test --filter X264` in
   `apple/Packages/PersonaScreenCore` (encodes, decodes with VideoToolbox as the phone does, a keyframe from the spare)
   and `PERSONA_TEST_FFMPEG=… go test -run 'X264|FFmpeg' ./internal/node/` (the probe on the real thing). Without the

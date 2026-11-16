@@ -59,6 +59,9 @@ func (h *Hub) screenVideoConnect(w http.ResponseWriter, r *http.Request, m *Mach
 	if h.extReport().ScreenKeepAwake {
 		dial["keep_awake"] = true // someone is watching: the Mac stays awake until this closes (node/awake.go)
 	}
+	if c, _, _ := h.extrasOf(m); c != nil && c.ScreenX264 {
+		dial["x264"] = true // the user's own ffmpeg may encode, on a direct LAN route (#8859, node/screenx264.go)
+	}
 	link := h.askScreenLink(r, dial) // the video joins the pair's screen session (#6398)
 	var res struct {
 		Link int `json:"link"`

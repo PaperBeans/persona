@@ -16,6 +16,7 @@ spec/
     answer/           回复与交互
     terminal/         终端
     wire/             协议解码
+    wire-envelope/    WebSocket 共享 Envelope 的宽容解码，iOS 源码推导并由 Rust / Kotlin host JNI 回放
     injected/         hub 注入给模型的消息怎么认
     comments/         comment blocks a message leads with (web and iOS)
     sync/             chat sync scenarios: hub state, frames with faults, what each device shows
@@ -51,6 +52,7 @@ spec/
 | answer | 见各自 [README](fixtures/answer/README.md) |
 | terminal | 见各自 [README](fixtures/terminal/README.md) |
 | wire | 见各自 [README](fixtures/wire/README.md). The `items`, `items_after`, `items_range` cases and the `items` events are also replayed by the shared Rust core's `transport` decoders (`native/app-core`, `cargo test`), #7385 |
+| wire-envelope | [README](fixtures/wire-envelope/README.md): a narrow, source-derived current-iOS WebSocket Envelope slice (#8955), replayed by Rust and real host Kotlin/JNI; no iOS execution or production transport change |
 | injected | 见各自 [README](fixtures/injected/README.md)：hub 注入给模型的消息（任务通知、定时任务……）怎么认 |
 | review | [README](fixtures/review/README.md): the node's real `git.review` answers, empty `header` and base `hash` left out, written by the node's test and decoded by iOS (#8733) |
 | comments | [README](fixtures/comments/README.md): the `> Comment N` / `Code comment N` / `Element comment N` blocks a message leads with, written and read back by the web app and the iOS app (#151) |

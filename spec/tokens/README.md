@@ -10,7 +10,7 @@ Design values shared across clients and documented platform-specific differences
 
 | 文件 | 命名空间 | 来源 |
 | --- | --- | --- |
-| `color.semantic.json` | `semantic.<style>.<mode>` | `ios/Shared/Theme.swift` 的 `accent(_:)`、`userBubble(_:)`、`userBubbleText`、`pageBackground(_:)`、`card(_:)`、`cardStroke`；原生风格取 `prototypes/android/style.css` |
+| `color.semantic.json` | `semantic.<style>.<mode>` | `ios/Shared/Theme.swift` 的 `accent(_:)`、`userBubble(_:)`、`userBubbleText`、`pageBackground(_:)`、`card(_:)`、`cardStroke`；原生风格取自旧 Android HTML 原型的 `style.css`（#9030 已删除，见 git 历史） |
 | 同上 | `common.<mode>` | `Theme.brand/danger/positive/caution/cautionText/ai/loop/countBadge`、代码和终端色、`Theme.Diff`、`Theme.Hue`、`Theme.Fill` |
 | 同上 | `system.<mode>` | `Theme.systemPage/systemCard`、SwiftUI 的 `Color.primary/secondary`、UIKit 系统 fill 的显式回退值；见下文限制 |
 | `color.status.json` | `status.<mode>.<state>` | `ios/Shared/StatusPalette.swift`；待唤醒和已屏蔽的映射取 `ios/Persona/Views/Chats/ChatsView.swift` 的分组表 |

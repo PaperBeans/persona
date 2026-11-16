@@ -487,9 +487,10 @@ extension APIClient {
         return r.launcher
     }
     /// The models this launcher's agent offers in its /model menu on this machine (the chat's model picker).
-    func launcherModels(machine: String, launcher: String) async throws -> [AgentModelOption] {
+    func launcherModels(machine: String, launcher: String, purpose: String? = nil) async throws -> [AgentModelOption] {
         struct R: Decodable { var models: [AgentModelOption]? }
-        let r: R = try await get("/api/v1/machines/\(machine)/launchers/\(launcher)/models")
+        let client = purpose == "assistant" ? currentAssistantSettings() : self
+        let r: R = try await client.get("/api/v1/machines/\(machine)/launchers/\(launcher)/models", query: purpose.map { ["purpose": $0] } ?? [:])
         return r.models ?? []
     }
     func saveLauncher(_ input: LauncherInput, isNew: Bool) async throws {

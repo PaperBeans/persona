@@ -3,6 +3,7 @@ package node
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -28,10 +28,14 @@ func routineCheck(ctx context.Context, raw json.RawMessage) (proto.RoutineCheckR
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(p.Timeout)*time.Second)
 	defer cancel()
 
-	cmd := loginShell(ctx, p.Command)
+	// Keep rc functions, aliases and PATH, but separate shell initialization from the check's output (#8876).
+	// The subshell preserves the command's status without interactive bash printing its own "exit" afterward.
+	// This unattended check needs no job control: keep its children in the group cancellation owns.
+	marker := "\x1epersona-routine-" + rand.Text() + "\x1f"
+	cmd := loginShell(ctx, "set +m; builtin printf '%s' "+shellQuote(marker)+"; ( builtin eval "+shellQuote(p.Command)+" )")
 	cmd.Dir, _ = os.UserHomeDir()
 	killGroupOnCancel(cmd)
-	var output routineCheckLine
+	output := routineCheckOutput{marker: []byte(marker)}
 	cmd.Stdout, cmd.Stderr = &output, &output
 	if err := cmd.Start(); err != nil {
 		return proto.RoutineCheckResult{}, err
@@ -64,53 +68,54 @@ func routineCheck(ctx context.Context, raw json.RawMessage) (proto.RoutineCheckR
 	}, nil
 }
 
-// routineCheckLine keeps the check's reason: the first line of its output, up to 512 bytes, that is not the shell's
-// own job-control warning. The node runs the check in an interactive login shell (`-ic`, so the user's aliases and
-// functions work) and, as a service, has no terminal: bash then starts with "cannot set terminal process group (-1):
-// Inappropriate ioctl for device" and "no job control in this shell" on stderr, which is not what the check said (#8876).
-type routineCheckLine struct {
-	line    []byte
-	pending []byte // the line being written, until its newline
-	done    bool
+// Both streams share one pipe, so the shell's marker precedes all command output, including stderr.
+// Retain only enough startup bytes to recognize a split marker and the first line if startup fails before it.
+type routineCheckOutput struct {
+	marker, pending  []byte
+	startup, command routineCheckLine
+	started          bool
 }
 
-// shellJobControl is what an interactive shell prints about itself rather than for the check: the job-control warnings
-// of a shell with no terminal (bash, zsh), with or without their "bash: " prefix, and the "exit" (or "logout") bash
-// writes to stderr when the check ends with the exit builtin, terminal or not. bash translates the warnings: only the
-// untranslated ones and bash's zh_CN ones are known, so in another language the reason is still bash's first line
-// ("exit" is not translated).
-var shellJobControl = lazyre.New(`^(?:(?:[\w./-]+: )?(?:cannot set terminal process group \(-?\d+\): .*|no job control in this shell\.?|can't set tty pgrp: .*|无法设定终端进程组 \(-?\d+\): .*|此 shell 中无任务控制)|exit|logout)$`)
-
-func (w *routineCheckLine) Write(p []byte) (int, error) {
+func (w *routineCheckOutput) Write(p []byte) (int, error) {
 	n := len(p)
-	for len(p) > 0 && !w.done {
-		i := bytes.IndexByte(p, '\n')
-		part := p
-		if i >= 0 {
-			part, p = p[:i], p[i+1:]
-		} else {
-			p = nil
-		}
-		w.pending = append(w.pending, part[:min(512-len(w.pending), len(part))]...)
-		if i >= 0 || len(w.pending) == 512 {
-			w.take()
-		}
+	if w.started {
+		return w.command.Write(p)
+	}
+	_, _ = w.startup.Write(p)
+	data := append(w.pending, p...)
+	if i := bytes.Index(data, w.marker); i >= 0 {
+		w.started = true
+		_, _ = w.command.Write(data[i+len(w.marker):])
+		w.pending = nil
+	} else {
+		w.pending = append(w.pending[:0], data[max(0, len(data)-len(w.marker)+1):]...)
 	}
 	return n, nil
 }
 
-// take ends the pending line: the reason, unless it is the shell's job-control warning.
-func (w *routineCheckLine) take() {
-	if !shellJobControl.Match(bytes.TrimSpace(w.pending)) {
-		w.line, w.done = w.pending, true
+func (w *routineCheckOutput) reason() []byte {
+	if w.started {
+		return w.command.line
 	}
-	w.pending = nil
+	return w.startup.line
 }
 
-// reason is the line kept, or the last line when the output did not end with a newline.
-func (w *routineCheckLine) reason() []byte {
-	if !w.done && len(w.pending) > 0 {
-		w.take()
+type routineCheckLine struct {
+	line []byte
+	done bool
+}
+
+func (w *routineCheckLine) Write(p []byte) (int, error) {
+	n := len(p)
+	if w.done {
+		return n, nil
 	}
-	return w.line
+	if i := bytes.IndexByte(p, '\n'); i >= 0 {
+		p = p[:i]
+		w.done = true
+	}
+	room := 512 - len(w.line)
+	w.line = append(w.line, p[:min(room, len(p))]...)
+	w.done = w.done || len(w.line) == 512
+	return n, nil
 }

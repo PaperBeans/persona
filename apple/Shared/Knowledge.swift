@@ -31,6 +31,12 @@ nonisolated enum KBKind: String, CaseIterable, Identifiable, Sendable {
         case .recordings: Theme.Icon.recording
         }
     }
+
+    /// The kinds Knowledge offers as chips: recordings are listed under meetings (#8731, "one home for meetings"), with
+    /// the meetings imported from connected apps, so there is one place for meetings and notes.
+    static var listed: [KBKind] { allCases.filter { $0 != .recordings } }
+    /// The list that shows this kind's entries: recordings' is meetings'.
+    var listedAs: KBKind { self == .recordings ? .meetings : self }
 }
 
 nonisolated struct KBEntry: Codable, Identifiable, Hashable, Sendable {
@@ -43,11 +49,28 @@ nonisolated struct KBEntry: Codable, Identifiable, Hashable, Sendable {
     var tags: [String]?
     var updated: Date?
     var extra: String?
+    /// A recording's kind: meeting, note or day (#8870); nil on other kinds and from a hub before it.
+    var recordingKind: String?
 
     enum CodingKeys: String, CodingKey {
         case kind, id, name, importance, relevance, tags, updated, extra
         case oneLine = "one_line"
+        case recordingKind = "recording_kind"
     }
+
+    /// The pill a recording's row carries in the meetings list: notes and all-day recordings are the exceptions among
+    /// meetings, so only they are marked; a meeting, an imported one, or a recording from an older hub, none.
+    var recordingTag: String? {
+        guard kind == KBKind.recordings.rawValue else { return nil }
+        switch recordingKind {
+        case "note": return String(localized: "Note [Recording Kind]")
+        case "day": return String(localized: "All-Day")
+        default: return nil
+        }
+    }
+
+    /// The phone's own recording this entry is, when it has it: its page opens instead of the hub's copy.
+    var localRecording: UUID? { kind == KBKind.recordings.rawValue ? UUID(uuidString: id) : nil }
 
     /// Projects: "short · active" → Short-term / Long-term and the status.
     var projectKind: String? {
@@ -64,6 +87,26 @@ nonisolated struct KBEntry: Codable, Identifiable, Hashable, Sendable {
 nonisolated struct KBList: Decodable, Sendable {
     var items: [KBEntry]
     var tags: [String]?
+
+    /// The meetings list (#8731): the meetings imported from connected apps and the recordings made in Persona, with
+    /// each tag once.
+    static func meetings(_ meetings: KBList, recordings: KBList) -> KBList {
+        var tags: [String] = []
+        for t in (meetings.tags ?? []) + (recordings.tags ?? []) where !tags.contains(t) { tags.append(t) }
+        return KBList(items: meetings.items + recordings.items, tags: tags)
+    }
+
+    /// Newest first, entries with no time last; otherwise in the order given.
+    static func newestFirst(_ items: [KBEntry]) -> [KBEntry] {
+        items.enumerated().sorted { a, b in
+            switch (a.element.updated, b.element.updated) {
+            case let (x?, y?) where x != y: x > y
+            case (.some, nil): true
+            case (nil, .some): false
+            default: a.offset < b.offset
+            }
+        }.map(\.element)
+    }
 }
 
 nonisolated struct KBDetail: Decodable, Sendable {

@@ -106,7 +106,7 @@ GET  /relay/v1/health     → {"ok":true,"apns":true,"push_types":["alert","back
 
 The relay address must be `https` (the hub also only accepts `https`, or `http` to a local loopback address for end-to-end scripts): grants and Live Activity content must not cross the network in plaintext.
 
-hub: `POST /api/v1/devices` gains three fields: `push_key` (the phone's public key, base64 of the X9.63 uncompressed point), `relay_url`, `relay_grant`.
+hub: `POST /api/v1/devices` gains three fields: `push_key` (the phone's public key, base64 of the X9.63 uncompressed point), `relay_url`, `relay_grant`. For urgent calls three more: `voip_token` (the PushKit token), `voip_grant` (the relay's grant for it, topic `<bundle id>.voip`) and `voip_error` (why the phone got none, in its words); the answer's `call` says whether a ring can reach the phone. A ring (`call.ring`, `../protocol/protocol.md` "Bus") goes through the relay with `voip_grant`, renewed once with the PushKit token on a 401; when APNs calls the PushKit token dead, the hub forgets only that token and the phone keeps its other pushes.
 
 hub routing (`push.go`): with `apns.json` → direct (exactly as before); without → via the relay if the device sent `relay_url` + `relay_grant` + `push_key`; otherwise no push.
 

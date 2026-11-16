@@ -255,6 +255,9 @@ func (w *keyWriter) caps(c *proto.SessionCapabilities) {
 	if c.RewindCode != nil {
 		w.b.WriteString(" rewind_code=" + strconv.FormatBool(*c.RewindCode))
 	}
+	if c.PluginInput {
+		w.b.WriteString(" plugin_input=true")
+	}
 	w.b.WriteByte('}')
 }
 

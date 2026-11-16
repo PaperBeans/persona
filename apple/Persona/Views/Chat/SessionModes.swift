@@ -748,6 +748,7 @@ struct NewSessionModePicker: View {
     @Binding var mode: String
     @Binding var effort: String
     var modes: [SessionModes.Option] = SessionModes.permissionModes
+    var efforts: [SessionModes.Option] = SessionModes.startEffortLevels
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
@@ -765,7 +766,7 @@ struct NewSessionModePicker: View {
             Menu {
                 Picker("Thinking Effort", selection: $effort) {
                     Text("Use Launcher's").tag("")
-                    ForEach(SessionModes.startEffortLevels) { o in Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }.tag(o.id) }
+                    ForEach(efforts) { o in Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }.tag(o.id) }
                 }
                 .pickerStyle(.inline)
             } label: {

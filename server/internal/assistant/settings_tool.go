@@ -220,6 +220,7 @@ func (s *Service) ownSettings() []ownSetting {
 			get: s.getAdmission,
 			set: s.setAdmission},
 		s.trustSetting(),
+		s.urgentRulesSetting(), // urgent_call_rules.go
 	}
 }
 

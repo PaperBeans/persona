@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // Decisions the owner can answer (#3804, decision.go). All names, ids and texts are placeholders.
@@ -363,6 +365,46 @@ func TestDecisionAskedWhileAPleaseVerifyIsWritten(t *testing.T) {
 	}
 }
 
+// A session-list failure is a transient lookup, not proof that no Agent exists: the decision must stay retryable.
+func TestSessionListFailureKeepsDecisionRetryable(t *testing.T) {
+	reachA, reachB, reachM := agentReachAttempts, agentReachBackoff, agentReachMax
+	agentReachAttempts, agentReachBackoff, agentReachMax = 2, time.Millisecond, 200*time.Millisecond
+	t.Cleanup(func() { agentReachAttempts, agentReachBackoff, agentReachMax = reachA, reachB, reachM })
+	s, f, todo := newSupervisedService(t)
+	waitsForReview(t, s, f, todo.ID, "两种走法：A 先灰度，B 直接全量。")
+	if _, err := reviewErr(s, todo.ID, rolloutDecision()); err != nil {
+		t.Fatal(err)
+	}
+	calls := f.sessionsListCalls("box")
+	f.sessionsFail["box"] = 1000
+	result, err := s.chooseOption(context.Background(), todo.ID, "", "直接全量")
+	if err == nil || result.taken || noAgentCanTake(err) {
+		t.Fatalf("a failed session list took the decision: result=%+v err=%v", result, err)
+	}
+	if f.sessionsListCalls("box")-calls != agentReachAttempts+1 {
+		t.Fatalf("session list calls = %d, want initial lookup plus %d retries", f.sessionsListCalls("box")-calls, agentReachAttempts)
+	}
+	key := "undelivered|" + askOf(s, todo.ID).AskedAt.UTC().Format(time.RFC3339Nano)
+	s.supervise.mu.Lock()
+	g, pending := s.supervise.pending[todo.ID+"|"+sigIdle]
+	told := s.supervise.sent[todo.ID+"|"+sigIdle] == key
+	s.supervise.mu.Unlock()
+	if pending && g.Key == key || told || listedAsk(t, s, todo.ID) == nil {
+		t.Fatalf("the lookup failure ended the decision: %+v", g)
+	}
+	if listedAsk(t, s, todo.ID) == nil {
+		t.Fatal("the transient failure left no decision to retry")
+	}
+	f.sessionsFail["box"] = 0
+	result, err = s.chooseOption(context.Background(), todo.ID, "", "直接全量")
+	if err != nil || !result.taken || result.undelivered != nil {
+		t.Fatalf("the recovered lookup did not deliver the choice: result=%+v err=%v", result, err)
+	}
+	if listedAsk(t, s, todo.ID) != nil {
+		t.Fatal("the recovered choice is still waiting")
+	}
+}
+
 // A decision on priority has a default and a date without the review setting any: after a day unanswered the
 // recommendation is taken as the owner's OK would take it.
 func TestPriorityDecisionIsTakenAtItsDefaultTime(t *testing.T) {
@@ -402,6 +444,41 @@ func TestPriorityDecisionIsTakenAtItsDefaultTime(t *testing.T) {
 	}
 	if d := time.Until(askOf(s2, todo2.ID).Deadline); d > 2*time.Hour || d < 119*time.Minute {
 		t.Fatalf("the review's deadline was not kept: in %v", d)
+	}
+}
+
+// A default recommendation at its deadline is not an explicit owner action: with no Agent it keeps the existing
+// rollback and reminder behavior instead of becoming a recorded-only success.
+func TestDefaultRecommendationWithStoppedAgentKeepsReminder(t *testing.T) {
+	s, f, todo := newSupervisedService(t)
+	waitsForReview(t, s, f, todo.ID, "两种走法：A 先灰度，B 直接全量。")
+	if _, err := reviewErr(s, todo.ID, rolloutDecision()); err != nil {
+		t.Fatal(err)
+	}
+	a := askOf(s, todo.ID)
+	c := idleAgent(time.Now().Add(-time.Hour))
+	c.Status = proto.StatusInterrupted
+	f.setSessions("box", c)
+	sent := len(sentToAgent(f))
+	pushes := len(decidePushes(t, f))
+	pastDeadline(t, s, todo.ID)
+	s.sweepDecisionDeadlines(time.Now())
+	got := askOf(s, todo.ID)
+	if !got.AcceptedAt.IsZero() || got.ByDefault || got.DueAt.IsZero() ||
+		todoNow(s, todo.ID).Supervision.State != reviewNeedsUser || listedAsk(t, s, todo.ID) == nil ||
+		len(decidePushes(t, f)) != pushes+1 {
+		t.Fatalf("automatic default changed its reminder behavior: %+v", got)
+	}
+	if len(sentToAgent(f)) != sent {
+		t.Fatal("the stopped Agent got the default recommendation")
+	}
+	key := "undelivered|" + a.AskedAt.UTC().Format(time.RFC3339Nano)
+	s.supervise.mu.Lock()
+	g, pending := s.supervise.pending[todo.ID+"|"+sigIdle]
+	told := s.supervise.sent[todo.ID+"|"+sigIdle] == key
+	s.supervise.mu.Unlock()
+	if pending && g.Key == key || told {
+		t.Fatalf("the default became an owner decision: %+v", g)
 	}
 }
 
@@ -618,6 +695,96 @@ func TestOptionChosenGoesToTheAgent(t *testing.T) {
 	want := i18n.T(s2.botLang(context.Background()), "assistant-reports.verdict_take_to_agent", i18n.Args{"option": "先灰度 10%"})
 	if got := sentToAgent(f2)[sent:]; len(got) != 1 || got[0] != want {
 		t.Fatalf("to the agent: %q", got)
+	}
+}
+
+// A stopped, absent or offline Agent cannot take the owner's answer, but the answer is still made: it is recorded,
+// the ask ends, and the supervisor gets the choice and the delivery failure. An ordinary send failure stays retryable.
+func TestDecisionWithoutLiveAgentIsRecordedForSupervisor(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		stop func(*fakeHub)
+		want int
+	}{
+		{"stopped", func(f *fakeHub) {
+			c := idleAgent(time.Now().Add(-time.Hour))
+			c.Status = proto.StatusInterrupted
+			f.setSessions("box", c)
+		}, http.StatusOK},
+		{"stopped refusal", func(f *fakeHub) {
+			f.mu.Lock()
+			f.failSend = &rpc.Error{Code: proto.CodeAgentStopped, Message: "the agent has stopped"}
+			f.mu.Unlock()
+		}, http.StatusOK},
+		{"no agent", func(f *fakeHub) { f.setSessions("box") }, http.StatusOK},
+		{"offline", func(f *fakeHub) {
+			f.mu.Lock()
+			f.devices = []Device{}
+			f.mu.Unlock()
+		}, http.StatusOK},
+		{"transient send failure", func(f *fakeHub) {
+			f.mu.Lock()
+			f.failSend = errors.New("temporary network break")
+			f.mu.Unlock()
+		}, http.StatusBadGateway},
+	} {
+		for _, option := range []string{"直接全量", "先灰度 10%"} {
+			t.Run(tc.name+"/"+option, func(t *testing.T) {
+				database := todoTestDB(t)
+				s, f, todo := newSupervisedServiceOn(t, database)
+				waitsForReview(t, s, f, todo.ID, "两种走法：A 先灰度，B 直接全量。")
+				if _, err := reviewErr(s, todo.ID, rolloutDecision()); err != nil {
+					t.Fatal(err)
+				}
+				a := askOf(s, todo.ID)
+				tc.stop(f)
+				sent := len(sentToAgent(f))
+				rec := answerAsk(s, todo.ID, map[string]string{"option": option})
+				if rec.Code != tc.want {
+					t.Fatalf("accept: %d %s, want %d", rec.Code, rec.Body.String(), tc.want)
+				}
+				var body map[string]any
+				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				if body["code"] != "accept_not_taken" && tc.want == http.StatusBadGateway {
+					t.Fatalf("error code %v", body["code"])
+				}
+				if got := len(sentToAgent(f)); got != sent {
+					t.Fatalf("%d sends after the failed one", got-sent)
+				}
+				decisions, err := database.ListTodoDecisions(context.Background(), todo.ID, true)
+				if err != nil {
+					t.Fatal(err)
+				}
+				key := "undelivered|" + a.AskedAt.UTC().Format(time.RFC3339Nano)
+				s.supervise.mu.Lock()
+				g, pending := s.supervise.pending[todo.ID+"|"+sigIdle]
+				told := s.supervise.sent[todo.ID+"|"+sigIdle] == key
+				s.supervise.mu.Unlock()
+				if tc.want == http.StatusBadGateway {
+					if len(decisions) != 0 || askOf(s, todo.ID).AcceptedAt.IsZero() == false ||
+						todoNow(s, todo.ID).Supervision.State != reviewNeedsUser || pending && g.Key == key || told {
+						t.Fatalf("retryable failure took the decision: decisions=%+v ask=%+v signal=%+v", decisions, askOf(s, todo.ID), g)
+					}
+					return
+				}
+				if body["ok"] != true || body["delivered"] != "none" {
+					t.Fatalf("recorded response %v", body)
+				}
+				if len(decisions) != 1 || decisions[0].Choice != option {
+					t.Fatalf("decisions %+v", decisions)
+				}
+				if got := askOf(s, todo.ID); got.AcceptedAt.IsZero() || listedAsk(t, s, todo.ID) != nil ||
+					todoNow(s, todo.ID).Supervision.State == reviewNeedsUser {
+					t.Fatalf("the decision still waits: %+v", got)
+				}
+				if (!pending || g.Key != key || !strings.Contains(g.Detail, option)) && !told {
+					t.Fatalf("supervisor not told: %+v (told %v)", g, told)
+				}
+				s.waitWorkEvents() // do not let the next database fixture truncate an event still in flight
+			})
+		}
 	}
 }
 

@@ -178,11 +178,38 @@ func TestOutsideClaudeSendNotTaken(t *testing.T) {
 	writeOutsideClaude(t, home, sidA, "cli", "idle", inbox, nil)
 	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
 	_, err := request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "still there?", "client_msg_id": "m-1"})
-	if !maybeDelivered(err) || !strings.Contains(err.Error(), "还没有收下") {
+	if !maybeDelivered(err) || !strings.Contains(err.Error(), "还没有收下") || refusalCode(err) != peerUnconfirmed {
 		t.Fatalf("held message: %v", err)
 	}
 	if len(inbox.users()) != 1 {
 		t.Fatalf("the inbox read %d messages", len(inbox.users()))
+	}
+}
+
+// A session in bypass permissions mode (what the desktop app's sessions often run in) holds Persona's message for the
+// person at the computer to approve. The send says that (peer_held), not only that it was not confirmed, and stays
+// delivered unknown: it goes in once approved there, so the app must neither call it failed nor resend it.
+func TestOutsideClaudeSendHeldInBypassMode(t *testing.T) {
+	n, f, home := herdrNode(t)
+	noPaneEnv(t)
+	shortPeerWait(t, 500*time.Millisecond)
+	cwd, _ := json.Marshal(home) // a Windows path's backslashes
+	p := writeTranscript(t, home, home, sidA, time.Now(),
+		`{"type":"user","uuid":"u1","timestamp":"2026-11-16T03:00:00Z","cwd":`+string(cwd)+`,"sessionId":"`+sidA+`","permissionMode":"bypassPermissions","message":{"role":"user","content":"deploy it"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-11-16T03:00:05Z","sessionId":"`+sidA+`","message":{"role":"assistant","content":[{"type":"text","text":"on it"}]}}`,
+		strings.Repeat(" ", 4096))
+	inbox := newFakeInbox(t, p)
+	inbox.setMode("hold")
+	writeOutsideClaude(t, home, sidA, "claude-desktop-3p", "idle", inbox, nil)
+	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
+	_, err := request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "still there?", "client_msg_id": "m-1"})
+	if !maybeDelivered(err) || refusalCode(err) != peerHeld {
+		t.Fatalf("held in bypass mode: %v (code %q)", err, refusalCode(err))
+	}
+	// The same session taking it (approved at once, or crossSessionInbound accept): an ordinary success.
+	inbox.setMode("take")
+	if _, err := request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "and now?", "client_msg_id": "m-2"}); err != nil {
+		t.Fatalf("taken: %v", err)
 	}
 }
 

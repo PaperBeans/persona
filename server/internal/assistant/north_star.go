@@ -42,6 +42,7 @@ const (
 	nsActionCard    = "action_card"
 	nsNotifyUser    = "notify_user"
 	nsAuthorization = "authorization"
+	nsUrgentCall    = "urgent_call" // a matter that rang the owner's phone (urgent_call_tool.go), once however often it rang
 
 	// Where an interruption came from.
 	nsFromDot     = "dot" // the main conversation or a leader conversation
@@ -63,7 +64,7 @@ const (
 	outcomeUnknown = "unknown"
 )
 
-var nsCategories = []string{nsAskUser, nsActionCard, nsNotifyUser, nsAuthorization}
+var nsCategories = []string{nsAskUser, nsActionCard, nsNotifyUser, nsAuthorization, nsUrgentCall}
 
 // northStarSince is the setting saying when recording began, and by which build.
 type northStarSince struct {
@@ -333,6 +334,9 @@ type InterruptExcluded struct {
 	// NotifyMissed counts the notify_user calls no device took when they were made, by why (notifyMissed): the hub
 	// handed them to no phone, computer or browser, so they did not interrupt the owner.
 	NotifyMissed map[string]int `json:"notify_missed"`
+	// CallSkipped counts the urgent calls that did not ring, by why (urgent_call_tool.go's gates, or no phone could
+	// take it): each went out as a P0 notification instead, counted under notify_user when a device took it.
+	CallSkipped map[string]int `json:"call_skipped"`
 }
 
 // InterruptSource is one source's count in one category.
@@ -439,7 +443,7 @@ func readNorthStar(ctx context.Context, st northStarStore, q northStarQuery) (No
 	if err != nil {
 		return ns, err
 	}
-	events, err := st.WorkEventsBetween(ctx, q.Since, q.Until, []string{notifyEvent, sendEvent, "ask_routed", "ask_escalated"})
+	events, err := st.WorkEventsBetween(ctx, q.Since, q.Until, []string{notifyEvent, sendEvent, "ask_routed", "ask_escalated", urgentCallEvent, urgentSkippedEvent})
 	if err != nil {
 		return ns, err
 	}
@@ -495,7 +499,7 @@ func readNorthStar(ctx context.Context, st northStarStore, q northStarQuery) (No
 
 func interruptions(q northStarQuery, roles convRoles, cards []db.NorthStarCard, events []db.WorkEvent, recorded func(time.Time) bool) Interruptions {
 	in := Interruptions{Categories: map[string]*InterruptCategory{}, Sources: []InterruptSource{},
-		Excluded: InterruptExcluded{NotifyMissed: map[string]int{}}}
+		Excluded: InterruptExcluded{NotifyMissed: map[string]int{}, CallSkipped: map[string]int{}}}
 	for _, c := range nsCategories {
 		in.Categories[c] = &InterruptCategory{BySource: map[string]int{}, ByKind: map[string]int{}}
 	}
@@ -575,6 +579,19 @@ func interruptions(q northStarQuery, roles convRoles, cards []db.NorthStarCard, 
 			}
 			todo, _ := e.Detail["todo"].(string)
 			count(nsNotifyUser, nsNotifyUser, e.MachineID, e.SessionID, todo, "")
+		case urgentCallEvent:
+			if test, _ := e.Detail["test"].(bool); test {
+				in.Excluded.Probe++ // Settings › Urgent calls › Test call
+				continue
+			}
+			why, _ := e.Detail["why"].(string)
+			count(nsUrgentCall, why, e.MachineID, e.SessionID, "", "")
+		case urgentSkippedEvent:
+			if test, _ := e.Detail["test"].(bool); test {
+				continue
+			}
+			reason, _ := e.Detail["reason"].(string)
+			in.Excluded.CallSkipped[reason]++
 		}
 	}
 	if !recorded(q.Since) {
@@ -787,8 +804,13 @@ func (b briefNorthStar) lines(l i18n.Lang) []string {
 			return i18n.T(l, "assistant-north_star.not_recorded")
 		}
 		n := ns.Interruptions
-		v := i18n.T(l, "assistant-north_star.count", i18n.Args{"n": n.Total, "ask": n.Categories[nsAskUser].Count,
-			"cards": n.Categories[nsActionCard].Count, "notify": n.Categories[nsNotifyUser].Count, "auth": n.Categories[nsAuthorization].Count})
+		key := "assistant-north_star.count"
+		if n.Categories[nsUrgentCall].Count > 0 { // the urgent calls only when one rang, so the line is as it was without them
+			key = "assistant-north_star.count_calls"
+		}
+		v := i18n.T(l, key, i18n.Args{"n": n.Total, "ask": n.Categories[nsAskUser].Count,
+			"cards": n.Categories[nsActionCard].Count, "notify": n.Categories[nsNotifyUser].Count, "auth": n.Categories[nsAuthorization].Count,
+			"calls": n.Categories[nsUrgentCall].Count})
 		if n.Partial {
 			v += i18n.T(l, "assistant-north_star.partial")
 		}

@@ -12,7 +12,7 @@ import (
 )
 
 const dreamNoteName = "dreaming.md"
-const dreamNoteHeader = "---\nname: dreaming\ndescription: Background summary of stable user preferences and corrections\nmetadata:\n  type: user\n---\n\n"
+const dreamNoteHeader = "---\ntitle: User preferences and corrections\ndescription: Background summary of stable user preferences and corrections\nmetadata:\n  type: user\n---\n\n"
 const dreamIndexLine = "- [User preferences and corrections](dreaming.md) — Background summary of stable preferences and corrections"
 
 func checkDreamMemoryDir(cwd string) error {

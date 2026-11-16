@@ -288,7 +288,7 @@ func allowed(p principal, method, path string) bool {
 // terminal, pressing more than a menu's key, filling in a card's fields and making a tool's approval stand (always) are
 // for a full device. A screen card's own "don't ask again" is one of its options, and the watch shows it.
 func answerMayResolve(r proto.Resolution) bool {
-	if r.Text != "" || len(r.PreKeys) > 0 || r.Always || r.Message != "" || len(r.Values) > 0 || r.Action != "" || len(r.Content) > 0 {
+	if r.Text != "" || r.EditedText != "" || len(r.PreKeys) > 0 || r.Always || r.Message != "" || len(r.Values) > 0 || r.Action != "" || len(r.Content) > 0 {
 		return false
 	}
 	return len(r.Keys) == 0 || len(r.Keys) == 1 && answerKey.MatchString(r.Keys[0])

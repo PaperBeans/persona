@@ -264,6 +264,7 @@ var rpcFailureKeys = map[string]string{
 	"peer_unreachable": "rpc-errors.peer_unreachable",
 	"peer_too_long":    "rpc-errors.peer_too_long",
 	"peer_unconfirmed": "rpc-errors.peer_unconfirmed",
+	"peer_held":        "rpc-errors.peer_held", // a bypass permissions session holds it for approval at the computer
 	"peer_command":     "rpc-errors.peer_command",
 	// a desktop app session nothing runs, which the app did not open in time (node/claudedesktop_open.go)
 	"desktop_open_failed": "rpc-errors.desktop_open_failed",

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { getSystemErrorName } from "node:util";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import {
   PAIR_INPUT,
@@ -14,6 +15,7 @@ import {
   receiptVerdict,
   runCaptured,
   sanitize,
+  sanitizeJSON,
   serviceVerdict,
   writeFailureReceipt,
   writeSanitizedJSON,
@@ -70,8 +72,37 @@ test("owned-path classification is lexical, boundary-aware and not deletion auth
   assert.equal(classifyOwnedPath(root, "child"), "outside");
   assert.equal(classifyOwnedPath("", root), "outside");
   assert.equal(sanitize(`path=${root}; next=${root}, end=${root} error=${root}:`, root), "path=<run>; next=<run>, end=<run> error=<run>:");
-  assert.equal(sanitize(`/tmp/private${root}/artifact`, root), "<path>");
+  assert.equal(sanitize(join(dirname(root), `private-${basename(root)}`, "artifact"), root), "<path>");
   succeed();
+});
+
+test("Windows drive and UNC receipt paths preserve ownership without leaking paths", () => {
+  for (const root of [String.raw`C:\receipts\owned`, String.raw`\\server\share\owned`]) {
+    assert.equal(classifyOwnedPath(root, root), "root");
+    assert.equal(classifyOwnedPath(root, `${root}\\child\\file`), "descendant");
+    assert.equal(classifyOwnedPath(root, `${root}-sibling\\file`), "outside");
+    assert.equal(sanitize(`${root} ${root}\\child\\file ${root}-sibling\\file`, root), "<run> <run>/child/file <path>");
+    assert.equal(sanitize(`path=${root}; next=${root}, error=${root}:`, root), "path=<run>; next=<run>, error=<run>:");
+    assert.throws(() => sanitizeJSON({ [root]: 1, [`${root}\\`]: 2 }, root), /merge or shadow/);
+  }
+  assert.equal(classifyOwnedPath(String.raw`C:\receipts\owned`, String.raw`c:\RECEIPTS\owned\child`), "descendant");
+  assert.equal(classifyOwnedPath(String.raw`C:\receipts\owned`, String.raw`D:\receipts\owned`), "outside");
+});
+
+test("paths with spaces are redacted through structural boundaries without leaking suffixes", () => {
+  for (const { root, sibling, unknown, child } of [
+    { root: String.raw`C:\Users\Synthetic Owner\AppData\Local\Temp\owned`, sibling: String.raw`C:\Users\Synthetic Owner\AppData\Local\Temp\owned-sibling\private file`, unknown: String.raw`D:\Other Owner\private file`, child: String.raw`\child folder\file` },
+    { root: String.raw`\\sample-server\share\Synthetic Owner\owned`, sibling: String.raw`\\sample-server\share\Synthetic Owner\owned-sibling\private file`, unknown: String.raw`\\another-server\share\Other Owner\private file`, child: String.raw`\child folder\file` },
+    { root: "/tmp/Synthetic Owner/owned", sibling: "/tmp/Synthetic Owner/owned-sibling/private file", unknown: "/tmp/Other Owner/private file", child: "/child folder/file" },
+  ]) {
+    assert.equal(sanitize(`path=${root}; child=${root}${child}`, root), "path=<run>; child=<run>/child folder/file");
+    assert.equal(sanitize(`${sibling} ${unknown} ${root}`, root), "<path> <path> <run>");
+    assert.equal(sanitize(`first="${root}", second='${unknown}'\n${sibling}`, root), 'first="<run>", second=\'<path>\'\n<path>');
+    assert.deepEqual(sanitizeJSON({ root, child: root + child, sibling, unknown }, root), { root: "<run>", child: "<run>/child folder/file", sibling: "<path>", unknown: "<path>" });
+    assert.equal(classifyOwnedPath(root, sibling), "outside");
+    assert.equal(classifyOwnedPath(root, root + child), "descendant");
+    assert.throws(() => sanitizeJSON({ [root]: 1, [root + "/"]: 2 }, root), /merge or shadow/);
+  }
 });
 
 test("sanitization covers keys, collisions, punctuation and truncated credentials", async t => {
@@ -117,7 +148,19 @@ test("a collision during failure reporting replaces the old PASS with a minimal 
   succeed();
 });
 
-test("an observer spawn failure produces a bounded failed command receipt", async t => {
+function assertUnsupportedGroup(result) {
+  assert.equal(result.groupEmpty, false);
+  assert.equal(result.group.error, "a Linux owned-process-group receipt is required");
+  assert.equal(result.escalationError, "a Linux owned-process-group receipt is required");
+  const verdict = receiptVerdict({ commands: [result], cleanup: { ok: true } });
+  assert.equal(verdict.commandFailure, true);
+  assert.equal(verdict.mayRemoveRunRoot, false);
+  assert.equal(verdict.descendantProofMissing, true);
+}
+
+test(process.platform === "linux"
+  ? "an observer spawn failure produces a bounded failed command receipt"
+  : "an unsupported platform refuses group evidence without launching the Linux observer", async t => {
   const original = process.execPath;
   Object.defineProperty(process, "execPath", { value: join(original, "does-not-exist"), configurable: true });
   t.after(() => { Object.defineProperty(process, "execPath", { value: original, configurable: true }); });
@@ -125,7 +168,8 @@ test("an observer spawn failure produces a bounded failed command receipt", asyn
   assert.equal(result.code, 0);
   assert.equal(result.closed, true);
   assert.equal(result.groupEmpty, false);
-  assert.match(result.escalationError, /owned-group observer/);
+  if (process.platform === "linux") assert.match(result.escalationError, /owned-group observer/);
+  else assertUnsupportedGroup(result);
 });
 
 test("service verdict requires four intercepted reads and no mutation", () => {
@@ -139,7 +183,7 @@ test("service verdict requires four intercepted reads and no mutation", () => {
 
 test("spawn failure returns a bounded failed close without an uncaught stdin error", async () => {
   const result = await runCaptured("/tmp/persona-link-real-common-does-not-exist", [], { input: "x".repeat(128 * 1024), timeout: 1000 });
-  assert.equal(result.code, -2);
+  assert.equal(getSystemErrorName(result.code), "ENOENT");
   assert.equal(result.closed, true);
   assert.match(result.spawnError, /ENOENT/);
   assert.match(result.error, /ENOENT/);
@@ -158,12 +202,15 @@ test("a captured command waits for close and preserves nonzero and signal exits"
   assert.equal(result.closed, true);
   assert.equal(result.stdout, "closed\n");
   const signaled = await runCaptured(process.execPath, ["-e", "process.kill(process.pid, 'SIGTERM')"]);
-  assert.equal(signaled.code, null);
-  assert.equal(signaled.signal, "SIGTERM");
+  // Windows reports a self-termination as exit 1; it does not expose a POSIX signal status.
+  assert.equal(signaled.code, process.platform === "win32" ? 1 : null);
+  assert.equal(signaled.signal, process.platform === "win32" ? null : "SIGTERM");
   assert.equal(signaled.closed, true);
 });
 
-test("a real TERM-resistant child has a bounded SIGKILL close and a timeout failure", async t => {
+test(process.platform === "win32"
+  ? "a native Windows timeout closes the direct child without claiming group cleanup"
+  : "a real TERM-resistant child has a bounded SIGKILL close and a timeout failure", async t => {
   const source = "process.on('SIGTERM', () => {}); console.log('ready'); setTimeout(() => {}, 10000)";
   const closeGrace = 100;
   const startedAt = Date.now();
@@ -172,13 +219,19 @@ test("a real TERM-resistant child has a bounded SIGKILL close and a timeout fail
   assert.equal(result.stdout, "ready\n");
   assert.equal(result.timedOut, true);
   assert.equal(result.closed, !result.closeTimedOut);
-  assert.equal(result.signal, result.closeTimedOut ? null : "SIGKILL");
+  assert.equal(result.signal, result.closeTimedOut ? null : process.platform === "win32" ? "SIGTERM" : "SIGKILL");
   if (!result.closeTimedOut) {
     assert.equal(result.code, null);
-    assert.equal(result.escalationError, undefined);
-    assert.equal(result.groupEmpty, true);
+    if (process.platform === "linux") {
+      assert.equal(result.escalationError, undefined);
+      assert.equal(result.groupEmpty, true);
+    } else assertUnsupportedGroup(result);
   }
   assert.ok(elapsed < 10_000, "the bounded failure must return before the fixture's own 10-second timer");
+  if (process.platform !== "linux") {
+    assert.equal(result.closed, true, "the native direct child must close before this fixture completes");
+    return;
+  }
   t.after(async () => {
     // A close timeout does not identify the fixture's later exit; check its exact PID, PGID and start time.
     const initialStat = await readFile(`/proc/${result.pid}/stat`, "utf8").catch(() => "");
@@ -206,166 +259,183 @@ test("a real TERM-resistant child has a bounded SIGKILL close and a timeout fail
   });
 });
 
-test("a descendant that holds inherited pipes produces a bounded close failure", async t => {
-  const { root, succeed } = await temporary(t, "descendant.pid", "descendant.closed");
-  const pidFile = join(root, "descendant.pid");
-  const closedFile = join(root, "descendant.closed");
-  const source = `
-    const fs = require('node:fs');
-    const child = require('node:child_process').spawn(process.execPath, ['-e', 'const fs=require("fs");process.on("SIGTERM",()=>{fs.writeFileSync(process.argv[1],"closed");process.exit(0)});console.log("descendant-ready");setTimeout(()=>{},30000)', ${JSON.stringify(closedFile)}], { stdio: ['ignore', 'inherit', 'inherit'] });
-    child.once('spawn', () => { fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); process.exit(0); });
-  `;
-  t.after(async () => {
-    const pid = Number(await readFile(pidFile, "utf8").catch(() => "0"));
-    if (pid > 0) {
-      const initialStat = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "");
-      const fields = initialStat.slice(initialStat.lastIndexOf(")") + 2).trim().split(/\s+/);
-      const startTime = fields[19];
-      if (initialStat) assert.equal(Number(fields[2]), result.pid, "the descendant must remain in the exact owned group");
-      for (const signal of ["SIGTERM", "SIGKILL"]) {
-        const stat = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "");
-        if (!stat) break;
-        assert.equal(stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/)[19], startTime, "the descendant PID was reused");
-        try { process.kill(-result.pid, signal); } catch (error) { if (error.code !== "ESRCH") throw error; }
-        const deadline = Date.now() + 2000;
-        while (await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "")) {
-          assert.ok(Date.now() < deadline, `the exact descendant did not exit within 2000 ms of ${signal}`);
-          await new Promise(done => setTimeout(done, 10));
+// These fixtures depend on the Linux /proc PID/PGID/start-time cleanup proof. Do not start them on a host
+// where that proof is unavailable; exercise the unsupported-platform receipt contract with a real child instead.
+if (process.platform === "linux") {
+  test("a descendant that holds inherited pipes produces a bounded close failure", async t => {
+    const { root, succeed } = await temporary(t, "descendant.pid", "descendant.closed");
+    const pidFile = join(root, "descendant.pid");
+    const closedFile = join(root, "descendant.closed");
+    const source = `
+      const fs = require('node:fs');
+      const child = require('node:child_process').spawn(process.execPath, ['-e', 'const fs=require("fs");process.on("SIGTERM",()=>{fs.writeFileSync(process.argv[1],"closed");process.exit(0)});console.log("descendant-ready");setTimeout(()=>{},30000)', ${JSON.stringify(closedFile)}], { stdio: ['ignore', 'inherit', 'inherit'] });
+      child.once('spawn', () => { fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); process.exit(0); });
+    `;
+    t.after(async () => {
+      const pid = Number(await readFile(pidFile, "utf8").catch(() => "0"));
+      if (pid > 0) {
+        const initialStat = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "");
+        const fields = initialStat.slice(initialStat.lastIndexOf(")") + 2).trim().split(/\s+/);
+        const startTime = fields[19];
+        if (initialStat) assert.equal(Number(fields[2]), result.pid, "the descendant must remain in the exact owned group");
+        for (const signal of ["SIGTERM", "SIGKILL"]) {
+          const stat = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "");
+          if (!stat) break;
+          assert.equal(stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/)[19], startTime, "the descendant PID was reused");
+          try { process.kill(-result.pid, signal); } catch (error) { if (error.code !== "ESRCH") throw error; }
+          const deadline = Date.now() + 2000;
+          while (await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "")) {
+            assert.ok(Date.now() < deadline, `the exact descendant did not exit within 2000 ms of ${signal}`);
+            await new Promise(done => setTimeout(done, 10));
+          }
         }
       }
-    }
-    await unlink(pidFile).catch(() => {});
+      await unlink(pidFile).catch(() => {});
+    });
+    const result = await runCaptured(process.execPath, ["-e", source], { timeout: 200, terminateGrace: 50, closeGrace: 100 });
+    assert.equal(await readFile(pidFile, "utf8").then(value => Number(value) > 0), true, "the parent must publish the exact child PID before exiting");
+    assert.deepEqual(new Set(result.stdout.split("\n").filter(Boolean)), new Set(["descendant-ready"]));
+    assert.equal(result.timedOut, true);
+    assert.equal(result.closeTimedOut, false, "the owned process group closes the captured pipes");
+    assert.equal(result.closed, true);
+    assert.equal(await readFile(closedFile, "utf8"), "closed");
+    succeed();
   });
-  const result = await runCaptured(process.execPath, ["-e", source], { timeout: 200, terminateGrace: 50, closeGrace: 100 });
-  assert.equal(await readFile(pidFile, "utf8").then(value => Number(value) > 0), true, "the parent must publish the exact child PID before exiting");
-  assert.deepEqual(new Set(result.stdout.split("\n").filter(Boolean)), new Set(["descendant-ready"]));
-  assert.equal(result.timedOut, true);
-  assert.equal(result.closeTimedOut, false, "the owned process group closes the captured pipes");
-  assert.equal(result.closed, true);
-  assert.equal(await readFile(closedFile, "utf8"), "closed");
-  succeed();
-});
 
-test("an ignored-stdio descendant prevents a successful group receipt", async t => {
-  const { root, succeed } = await temporary(t, "descendant.pid", "descendant.py", "out", "err");
-  const pidFile = join(root, "descendant.pid");
-  const fixture = join(root, "descendant.py");
-  await writeFile(fixture, `import os,signal,time
+  test("an ignored-stdio descendant prevents a successful group receipt", async t => {
+    const { root, succeed } = await temporary(t, "descendant.pid", "descendant.py", "out", "err");
+    const pidFile = join(root, "descendant.pid");
+    const fixture = join(root, "descendant.py");
+    await writeFile(fixture, `import os,signal,time
 def stop(*_):
     raise SystemExit(0)
 signal.signal(signal.SIGTERM,stop)
 with open(${JSON.stringify(pidFile)},'w') as f:f.write(str(os.getpid()))
 time.sleep(30)
 `);
-  const source = `
-    const fs = require('node:fs');
-    const out = fs.openSync(${JSON.stringify(join(root, 'out'))}, 'w');
-    const err = fs.openSync(${JSON.stringify(join(root, 'err'))}, 'w');
-    const child = require('node:child_process').spawn('/usr/bin/python3', ['-I', ${JSON.stringify(fixture)}], { stdio: ['ignore', out, err] });
-    child.on('error', error => { fs.writeFileSync(${JSON.stringify(join(root, 'error'))}, error.message); process.exit(2); });
-    setTimeout(() => process.exit(fs.existsSync(${JSON.stringify(pidFile)}) ? 0 : 2), 200);
-  `;
-  const result = await runCaptured(process.execPath, ["-e", source], { closeGrace: 50 });
-  try {
-    assert.equal(result.code, 0);
-    assert.equal(result.closed, true);
-    assert.equal(result.groupEmpty, false);
-    assert.equal(receiptVerdict({ commands: [result], provenance: {}, cleanup: { ok: true } }).mayRemoveRunRoot, false);
-  } finally {
-    const pid = Number(await readFile(pidFile, "utf8").catch(() => "0"));
-    const stat = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "");
-    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-    if (pid > 0 && fields.length > 2) {
-      const group = Number(fields[2]);
-      assert.equal(group, result.pid, "the fixture must still belong to this run's owned group");
-      for (const signal of ["SIGTERM", "SIGKILL"]) {
-        try { process.kill(-group, signal); } catch (error) { if (error.code !== "ESRCH") throw error; }
-        for (let attempt = 0; attempt < 100; attempt++) {
-          await new Promise(done => setTimeout(done, 10));
+    const source = `
+      const fs = require('node:fs');
+      const out = fs.openSync(${JSON.stringify(join(root, 'out'))}, 'w');
+      const err = fs.openSync(${JSON.stringify(join(root, 'err'))}, 'w');
+      const child = require('node:child_process').spawn('/usr/bin/python3', ['-I', ${JSON.stringify(fixture)}], { stdio: ['ignore', out, err] });
+      child.on('error', error => { fs.writeFileSync(${JSON.stringify(join(root, 'error'))}, error.message); process.exit(2); });
+      setTimeout(() => process.exit(fs.existsSync(${JSON.stringify(pidFile)}) ? 0 : 2), 200);
+    `;
+    const result = await runCaptured(process.execPath, ["-e", source], { closeGrace: 50 });
+    try {
+      assert.equal(result.code, 0);
+      assert.equal(result.closed, true);
+      assert.equal(result.groupEmpty, false);
+      assert.equal(receiptVerdict({ commands: [result], provenance: {}, cleanup: { ok: true } }).mayRemoveRunRoot, false);
+    } finally {
+      const pid = Number(await readFile(pidFile, "utf8").catch(() => "0"));
+      const stat = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "");
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      if (pid > 0 && fields.length > 2) {
+        const group = Number(fields[2]);
+        assert.equal(group, result.pid, "the fixture must still belong to this run's owned group");
+        for (const signal of ["SIGTERM", "SIGKILL"]) {
+          try { process.kill(-group, signal); } catch (error) { if (error.code !== "ESRCH") throw error; }
+          for (let attempt = 0; attempt < 100; attempt++) {
+            await new Promise(done => setTimeout(done, 10));
+            if (!await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "")) break;
+          }
           if (!await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "")) break;
         }
-        if (!await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "")) break;
-      }
-      if (await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "")) {
-        throw new Error("the owned descendant fixture did not close");
+        if (await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "")) {
+          throw new Error("the owned descendant fixture did not close");
+        }
       }
     }
-  }
-  succeed();
-});
+    succeed();
+  });
 
-test("a detached descendant survives original-group observation and cannot authorize cleanup", async t => {
-  const { root, succeed } = await temporary(t, "ready.json");
-  const readyFile = join(root, "ready.json");
-  const marker = "persona-link-detached-test-fixture";
-  const source = `
-    const fs = require('node:fs');
-    const child = require('node:child_process').spawn(process.execPath, ['-e', "const fs=require('node:fs');const stat=fs.readFileSync('/proc/self/stat','utf8');const fields=stat.slice(stat.lastIndexOf(')')+2).trim().split(/\\\\s+/);fs.writeFileSync(process.argv[2],JSON.stringify({pid:process.pid,pgid:Number(fields[2]),start:fields[19]}));setInterval(()=>{},1000);", ${JSON.stringify(marker)}, ${JSON.stringify(readyFile)}], { detached: true, stdio: 'ignore' });
-    child.unref();
-    const deadline = Date.now() + 2000;
-    const timer = setInterval(() => {
-      if (fs.existsSync(${JSON.stringify(readyFile)})) { clearInterval(timer); process.exit(0); }
-      else if (Date.now() > deadline) { clearInterval(timer); process.exit(2); }
-    }, 10);
-  `;
-  let identity;
-  let result;
-  let verdict;
-  let cleanupError;
-  try {
-    result = await runCaptured(process.execPath, ["-e", source], { closeGrace: 50 });
-    identity = JSON.parse(await readFile(readyFile, "utf8"));
-    const stat = await readFile(`/proc/${identity.pid}/stat`, "utf8");
-    const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
-    assert.equal(Number(fields[2]), identity.pgid);
-    assert.equal(fields[19], identity.start);
-    assert.equal(identity.pgid, identity.pid, "the fixture must detach into its own process group");
-    assert.notEqual(identity.pgid, result.pid, "the fixture must not be found by the original-group scan");
-    assert.equal(result.code, 0);
-    assert.equal(result.closed, true);
-    assert.equal(result.groupEmpty, true, "the original PGID is empty even though the detached descendant is alive");
-    verdict = receiptVerdict({ commands: [result], cleanup: { ok: true } });
-    assert.equal(verdict.ok, false);
-    assert.equal(verdict.mayRemoveRunRoot, false);
-    assert.equal(verdict.descendantProofMissing, true);
-  } catch (error) {
-    cleanupError = error;
-  } finally {
-    if (identity) {
-      try {
-        const stat = await readFile(`/proc/${identity.pid}/stat`, "utf8").catch(() => "");
-        if (stat) {
-          const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
-          assert.equal(Number(fields[2]), identity.pgid, "fixture PGID changed before cleanup");
-          assert.equal(fields[19], identity.start, "fixture PID was reused before cleanup");
-          for (const signal of ["SIGTERM", "SIGKILL"]) {
-            try { process.kill(-identity.pgid, signal); } catch (error) { if (error.code !== "ESRCH") throw error; }
-            for (let attempt = 0; attempt < 100; attempt++) {
-              await new Promise(done => setTimeout(done, 10));
+  test("a detached descendant survives original-group observation and cannot authorize cleanup", async t => {
+    const { root, succeed } = await temporary(t, "ready.json");
+    const readyFile = join(root, "ready.json");
+    const marker = "persona-link-detached-test-fixture";
+    const source = `
+      const fs = require('node:fs');
+      const child = require('node:child_process').spawn(process.execPath, ['-e', "const fs=require('node:fs');const stat=fs.readFileSync('/proc/self/stat','utf8');const fields=stat.slice(stat.lastIndexOf(')')+2).trim().split(/\\\\s+/);fs.writeFileSync(process.argv[2],JSON.stringify({pid:process.pid,pgid:Number(fields[2]),start:fields[19]}));setInterval(()=>{},1000);", ${JSON.stringify(marker)}, ${JSON.stringify(readyFile)}], { detached: true, stdio: 'ignore' });
+      child.unref();
+      const deadline = Date.now() + 2000;
+      const timer = setInterval(() => {
+        if (fs.existsSync(${JSON.stringify(readyFile)})) { clearInterval(timer); process.exit(0); }
+        else if (Date.now() > deadline) { clearInterval(timer); process.exit(2); }
+      }, 10);
+    `;
+    let identity;
+    let result;
+    let verdict;
+    let cleanupError;
+    try {
+      result = await runCaptured(process.execPath, ["-e", source], { closeGrace: 50 });
+      identity = JSON.parse(await readFile(readyFile, "utf8"));
+      const stat = await readFile(`/proc/${identity.pid}/stat`, "utf8");
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
+      assert.equal(Number(fields[2]), identity.pgid);
+      assert.equal(fields[19], identity.start);
+      assert.equal(identity.pgid, identity.pid, "the fixture must detach into its own process group");
+      assert.notEqual(identity.pgid, result.pid, "the fixture must not be found by the original-group scan");
+      assert.equal(result.code, 0);
+      assert.equal(result.closed, true);
+      assert.equal(result.groupEmpty, true, "the original PGID is empty even though the detached descendant is alive");
+      verdict = receiptVerdict({ commands: [result], cleanup: { ok: true } });
+      assert.equal(verdict.ok, false);
+      assert.equal(verdict.mayRemoveRunRoot, false);
+      assert.equal(verdict.descendantProofMissing, true);
+    } catch (error) {
+      cleanupError = error;
+    } finally {
+      if (identity) {
+        try {
+          const stat = await readFile(`/proc/${identity.pid}/stat`, "utf8").catch(() => "");
+          if (stat) {
+            const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
+            assert.equal(Number(fields[2]), identity.pgid, "fixture PGID changed before cleanup");
+            assert.equal(fields[19], identity.start, "fixture PID was reused before cleanup");
+            for (const signal of ["SIGTERM", "SIGKILL"]) {
+              try { process.kill(-identity.pgid, signal); } catch (error) { if (error.code !== "ESRCH") throw error; }
+              for (let attempt = 0; attempt < 100; attempt++) {
+                await new Promise(done => setTimeout(done, 10));
+                if (!await readFile(`/proc/${identity.pid}/stat`, "utf8").catch(() => "")) break;
+              }
               if (!await readFile(`/proc/${identity.pid}/stat`, "utf8").catch(() => "")) break;
             }
-            if (!await readFile(`/proc/${identity.pid}/stat`, "utf8").catch(() => "")) break;
+            assert.equal(await readFile(`/proc/${identity.pid}/stat`, "utf8").catch(() => ""), "", "the exact fixture must exit before ordinary test cleanup");
           }
-          assert.equal(await readFile(`/proc/${identity.pid}/stat`, "utf8").catch(() => ""), "", "the exact fixture must exit before ordinary test cleanup");
+        } catch (error) {
+          cleanupError ??= error;
         }
-      } catch (error) {
-        cleanupError ??= error;
+      }
+      if (cleanupError) {
+        const evidence = join(root, "detached-counterexample.json");
+        await writeFile(evidence, `${JSON.stringify({ identity, result, verdict, cleanupError: cleanupError.message, originalGroupObservation: "not proof of detached-descendant exit" }, null, 2)}\n`, { mode: 0o600 });
+        throw cleanupError;
       }
     }
-    if (cleanupError) {
-      const evidence = join(root, "detached-counterexample.json");
-      await writeFile(evidence, `${JSON.stringify({ identity, result, verdict, cleanupError: cleanupError.message, originalGroupObservation: "not proof of detached-descendant exit" }, null, 2)}\n`, { mode: 0o600 });
-      throw cleanupError;
-    }
-  }
-  succeed();
-});
+    succeed();
+  });
+} else {
+  test("a real completed child cannot authorize cleanup without Linux group observation", async () => {
+    const result = await runCaptured(process.execPath, ["-e", "console.log('real child closed')"]);
+    assert.equal(result.code, 0);
+    assert.equal(result.closed, true);
+    assert.equal(result.timedOut, false);
+    assert.equal(result.stdout, "real child closed\n");
+    assertUnsupportedGroup(result);
+  });
+}
 
 test("stdin failures remain observable beside a genuine child close", async () => {
-  const result = await runCaptured("/bin/sh", ["-c", "exec 0<&-; sleep 0.1"], { input: "x".repeat(128 * 1024), timeout: 2000 });
+  // 128 KiB can fit in a Linux socket buffer before fd 0 closes, producing no write error.
+  // Keep a real write pending, and confirm that the child actually closed its input.
+  const result = await runCaptured(process.execPath, ["-e", "require('node:fs').closeSync(0); console.log('stdin closed'); setTimeout(() => {}, 100)"], { input: "x".repeat(8 * 1024 * 1024), timeout: 2000 });
+  assert.equal(result.stdout, "stdin closed\n");
   assert.equal(result.code, 0);
   assert.equal(result.closed, true);
-  assert.match(result.error, /stdin:.*EPIPE/);
+  // A real closed-pipe write reports EOF on Windows libuv; POSIX reports EPIPE.
+  assert.match(result.error, process.platform === "win32" ? /^stdin: write (?:EOF|EPIPE)$/ : /^stdin: write EPIPE$/);
   assert.equal(result.stdout.includes("private fixture input"), false);
 });
 

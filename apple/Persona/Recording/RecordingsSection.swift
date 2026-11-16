@@ -30,6 +30,8 @@ struct RecordingsSection: View {
     #endif
     /// The recording a swipe asked to delete (its row shows the confirmation), and why a delete failed.
     @State private var pendingDelete: UUID?
+    /// The row's recording while Rename is open (#8873).
+    @State private var renaming: UUID?
     @State private var failure: String?
 
     var body: some View {
@@ -41,7 +43,15 @@ struct RecordingsSection: View {
         #else
         let today: UUID? = nil
         #endif
-        let recents = library.entries.filter { !(capturing && $0.id == capture.recordingID) && $0.id != today }
+        // Only what the knowledge base doesn't have whole yet (#8731, one home for meetings): a recording synced whole is
+        // in Knowledge's Meetings list, which All Meetings below opens.
+        let recents = library.entries.filter { e in
+            guard !(capturing && e.id == capture.recordingID), e.id != today else { return false }
+            #if os(iOS) || os(visionOS)
+            if e.isDay { return RecordingStatusText.dayStillHere(days.cell(e.id).summary) }
+            #endif
+            return RecordingStatusText.stillHere(e, sync: sync)
+        }
         Section {
             #if os(iOS)
             RecordingCaptureControls(part: startAtBottom ? .options : .inline, sharedForm: form ?? ownForm)
@@ -91,11 +101,6 @@ struct RecordingsSection: View {
         }
         #endif
         Section {
-            if recents.isEmpty, !capturing, today == nil {
-                EmptyStateView(symbol: Theme.Icon.recording, title: String(localized: "No Recordings Yet"),
-                               message: String(localized: "Record meetings, dictation and on-site notes with your phone or Apple Watch; the transcribed text goes into Knowledge."))
-                    .listRowBackground(Color.clear)
-            }
             ForEach(recents) { entry in
                 if entry.isDay {
                     // A day is deleted on its page: it stops the watch and deletes every part on the hub too.
@@ -104,6 +109,11 @@ struct RecordingsSection: View {
                 } else {
                     NavigationLink { RecordingDetailView(id: entry.id) } label: { RecordingRow(entry: entry) }
                         .accessibilityIdentifier("recording-row")
+                        // Rename (#8873): a touch and hold, and VoiceOver's actions (a menu is no control of its own).
+                        .contextMenu {
+                            Button { renaming = entry.id } label: { Label("Rename", systemImage: Theme.Icon.edit) }
+                        }
+                        .accessibilityAction(named: Text("Rename")) { renaming = entry.id }
                         // Only the swiped row's dialog shows, so its popover points at that row.
                         .confirmationDialog("Delete This Recording?", isPresented: Binding(get: { pendingDelete == entry.id }, set: { if !$0, pendingDelete == entry.id { pendingDelete = nil } }),
                                             titleVisibility: .visible) {
@@ -125,18 +135,31 @@ struct RecordingsSection: View {
         } header: {
             if !recents.isEmpty {
                 HStack(spacing: Theme.Space.sm) {
-                    Text("Recent Recordings")
+                    #if os(visionOS)
+                    Text("Still on This Device")
+                    #else
+                    Text("Still on This iPhone")
+                    #endif
                     CountBadge(count: recents.count)
                 }
                 .alert("Couldn't Finish", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
                     Button("OK [Recordings Section de32e2]") { failure = nil }.lineLimit(1)
                 } message: { Text(failure ?? "") }
+                .recordingRename($renaming)
             }
         } footer: {
             if let problem = sync.problem ?? library.error {
                 Label(problem, systemImage: Theme.Icon.error).foregroundStyle(Theme.danger)
                     .accessibilityIdentifier("recording-sync-problem")
             }
+        }
+        // Every meeting and note, the imported ones too, is in one list: Knowledge's Meetings (#8731).
+        Section {
+            NavigationLink { KnowledgeView(kind: .meetings) } label: {
+                Label { Text("All Meetings").lineLimit(1) } icon: { ThemedIcon(Theme.Icon.knowledge) }
+                    .font(Theme.Font.body)
+            }
+            .accessibilityIdentifier("recordings-all-meetings")
         }
         .task {
             PhoneRecordingReceiver.shared.start()
@@ -243,6 +266,26 @@ struct RecordingStatusText: View {
         let (text, tone) = Self.status(entry, transcription: transcription, sync: sync)
         Text(text).foregroundStyle(tone).accessibilityIdentifier("recording-status")
     }
+
+    /// Whether the Meetings page lists the recording (#8731): until the knowledge base has it whole. Synced with all of it
+    /// transcribed, it is in Knowledge's Meetings list; recording, transcribing, waiting, past retention, nothing heard
+    /// or not accepted, only this phone has it.
+    static func stillHere(_ entry: RecordingEntry, sync: RecordingSync) -> Bool {
+        if case .synced = sync.status(entry), entry.transcribedAll, !entry.active { return false }
+        return true
+    }
+
+    #if os(iOS) || os(visionOS)
+    /// The same for a past all-day recording, whose state is its day's (`RecordingDayStatus.word`): it leaves the page
+    /// once the hub has its text (synced, its recap ready, being written or failed). Listed until its summary is read.
+    static func dayStillHere(_ summary: RecordingDaySummary?) -> Bool {
+        guard let summary else { return true }
+        switch RecordingDayStatus.word(summary) {
+        case .synced, .recapReady, .recapWriting, .recapFailed: return false
+        default: return true
+        }
+    }
+    #endif
 
     static func status(_ entry: RecordingEntry, transcription: RecordingTranscription, sync: RecordingSync) -> (String, Color) {
         if entry.active {
@@ -421,7 +464,7 @@ struct RecordingCaptureControls: View {
             Text("English").tag("en-US")
             Text("Japanese").tag("ja-JP")
         } label: {
-            Label { Text("Recording Language") } icon: { ThemedIcon(Theme.Icon.language) }
+            Label { Text("Language") } icon: { ThemedIcon(Theme.Icon.language) } // the meeting's (#8731: no "Recording")
         }.font(Theme.Font.body).disabled(busy)
         if form.hasBluetooth {
             Picker(selection: $inputRaw) {
@@ -440,7 +483,7 @@ struct RecordingCaptureControls: View {
             Button { record() } label: {
                 HStack(spacing: Theme.Space.s) {
                     // White like the title: the symbol took the tint, drew in the button's own blue and pushed the title off-center.
-                    Label("Record [Recordings Section ef2821]", systemImage: Theme.Icon.recording).foregroundStyle(Theme.onSolid)
+                    Label(MeetingWords.start(form.pickedKind), systemImage: Theme.Icon.recording).foregroundStyle(Theme.onSolid)
                     if busy { ProgressView() }
                 }
                 .font(Theme.Font.bodyStrong)
@@ -473,7 +516,7 @@ struct RecordingCaptureControls: View {
                     form.meetingNow = await MeetingCalendar.meetingOffMain()
                 }
             } label: {
-                Label("Name Recordings After Calendar Meetings", systemImage: Theme.Icon.calendarEvent).font(Theme.Font.caption)
+                Label("Name After Calendar Meetings", systemImage: Theme.Icon.calendarEvent).font(Theme.Font.caption)
                     .lineLimit(1).multilineTextAlignment(.leading)
             }
             .buttonStyle(.borderless)
@@ -779,7 +822,7 @@ struct RecordingsPage: View {
     var body: some View {
         page
             .themedPage()
-            .navigationTitle(String(localized: "Recordings"))
+            .navigationTitle(MeetingWords.place)
             .navigationBarTitleDisplayMode(.inline)
             #if os(iOS)
             .recordingLiveSheet()
@@ -798,6 +841,9 @@ struct RecordingsPage: View {
                 }
             }
             .onAppear {
+                // `-showRecordingSample YES|second`: the made-up recording, here too since Knowledge lists it only once
+                // the hub has it (#8731); once per launch, as there.
+                _ = RecordingSamples.installIfAsked()
                 // Once per launch: back from it, the page appears again.
                 guard !Self.sampleOpened else { return }
                 let defaults = UserDefaults.standard

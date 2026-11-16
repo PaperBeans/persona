@@ -106,7 +106,7 @@ public struct NativeChatStoreContinuityReplay {
                 try shadowCheck(.array(list.map { .string($0.id) }) == expected["item_ids"], "item-ids", step: index)
                 try shadowCheck(.array(requests) == expected["actions"], "actions", step: index)
                 try shadowCheck(actualItems == expected["items"], "items", step: index)
-                try shadowCheck(.number(Double(patch.covered)) == expected["covered"], "covered", step: index)
+                try shadowCheck(.number(String(patch.covered)) == expected["covered"], "covered", step: index)
                 try shadowCheck((patch.history.map(ContinuityJSON.string) ?? .null) == expected["history"], "history", step: index)
                 try shadowCheck((patch.hasMore.map(ContinuityJSON.bool) ?? .null) == expected["has_more"], "has-more", step: index)
                 try shadowCheck(.bool(patch.loadedOnce) == expected["loaded_once"], "loaded-once", step: index)

@@ -127,6 +127,8 @@ agents.read          GET /api/v1/agents/sessions/{id}/messages
 -                    GET /api/v1/app/android/latest
 assistant.ask        GET /api/v1/assistant
 -                    GET /api/v1/assistant/availability
+-                    GET /api/v1/assistant/calls
+-                    GET /api/v1/assistant/calls/{id}
 assistant.ask        GET /api/v1/assistant/capabilities
 -                    GET /api/v1/assistant/conversations/{id}/always
 assistant.ask        GET /api/v1/assistant/conversations/{id}/feed
@@ -152,6 +154,7 @@ assistant.ask        GET /api/v1/assistant/reporters
 assistant.start_defaults GET /api/v1/assistant/start-defaults
 -                    GET /api/v1/assistant/tasks
 -                    GET /api/v1/assistant/tasks/cron
+-                    GET /api/v1/assistant/urgent-call
 assistant.start_defaults GET /api/v1/assistant/worker-presets
 -                    GET /api/v1/auth/password/state
 -                    GET /api/v1/auth/tokens
@@ -376,6 +379,7 @@ agents.control       POST /api/v1/agents/sessions/{id}/messages
 agents.control       POST /api/v1/agents/sessions/{id}/read
 -                    POST /api/v1/agents/sessions/{id}/unhide
 -                    POST /api/v1/assistant/agents/{mid}/{sid}/supervisor
+-                    POST /api/v1/assistant/calls/{id}/state
 assistant.ask        POST /api/v1/assistant/conversations
 -                    POST /api/v1/assistant/conversations/{id}/archive
 -                    POST /api/v1/assistant/conversations/{id}/compact
@@ -410,6 +414,7 @@ assistant.ask        POST /api/v1/assistant/conversations/{id}/stop
 -                    POST /api/v1/assistant/tasks
 -                    POST /api/v1/assistant/tasks/{id}/fresh
 -                    POST /api/v1/assistant/tasks/{id}/run
+-                    POST /api/v1/assistant/urgent-call/test
 -                    POST /api/v1/assistant/warm
 -                    POST /api/v1/auth/pair-codes
 -                    POST /api/v1/auth/password/exchange
@@ -624,6 +629,7 @@ assistant.dispatch_policy PUT /api/v1/assistant/dispatch-policy
 -                    PUT /api/v1/assistant/saved-prompts/{id}
 assistant.start_defaults PUT /api/v1/assistant/start-defaults
 -                    PUT /api/v1/assistant/tasks/{id}
+-                    PUT /api/v1/assistant/urgent-call
 -                    PUT /api/v1/bots/feishu
 -                    PUT /api/v1/channels/{id}
 -                    PUT /api/v1/connectors/github/auth
@@ -673,6 +679,7 @@ kb.write             PUT /api/v1/kb/{kind}/{id}
 -                    PUT /api/v1/recordings/{id}
 -                    PUT /api/v1/recordings/{id}/audio
 -                    PUT /api/v1/recordings/{id}/private
+-                    PUT /api/v1/recordings/{id}/title
 -                    PUT /api/v1/subscriptions/{id}
 todos.write          PUT /api/v1/todos/{id}/agents/{mid}/{sid}
 todos.write          PUT /api/v1/todos/{id}/repositories

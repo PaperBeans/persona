@@ -26,6 +26,11 @@ type Device struct {
 	// RelayError: why the phone got no grant from its relay, in its own words (the relay's status and answer, a
 	// redirect, a network error); empty when it got one or names no relay.
 	RelayError string `json:"relay_error,omitempty"`
+	// Urgent calls (docs/assistant/urgent-call.md): the phone's PushKit token, the relay grant for it (topic
+	// "<bundle id>.voip") and why it got none. Empty: this device cannot be rung.
+	VoIPToken string `json:"voip_token,omitempty"`
+	VoIPGrant string `json:"voip_grant,omitempty"`
+	VoIPError string `json:"voip_error,omitempty"`
 	// Features: what the app on it understands beyond the first version's pushes ("withdraw": a background push
 	// naming the cards that are over, hub/push_withdraw.go). The hub keeps only names it knows.
 	Features []string `json:"features,omitempty"`
@@ -94,7 +99,7 @@ func (d *DB) UpsertDevice(ctx context.Context, v Device) error {
 }
 
 func (d *DB) Devices(ctx context.Context) ([]Device, error) {
-	rows, err := d.pool.Query(ctx, `SELECT device_id, name, kind, apns_token, apns_env, topic, push_key, relay_url, relay_grant, credential, updated_at, prefs, credential_id, locale, relay_error, features, registered_at, last_push_at FROM devices ORDER BY registered_at DESC, device_id DESC`)
+	rows, err := d.pool.Query(ctx, `SELECT device_id, name, kind, apns_token, apns_env, topic, push_key, relay_url, relay_grant, credential, updated_at, prefs, credential_id, locale, relay_error, features, registered_at, last_push_at, voip_token, voip_grant, voip_error FROM devices ORDER BY registered_at DESC, device_id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +111,7 @@ func collectDevices(rows pgx.Rows) ([]Device, error) {
 		var v Device
 		var prefs []byte
 		var lastPush *time.Time
-		err := r.Scan(&v.DeviceID, &v.Name, &v.Kind, &v.APNSToken, &v.APNSEnv, &v.Topic, &v.PushKey, &v.RelayURL, &v.RelayGrant, &v.Credential, &v.UpdatedAt, &prefs, &v.CredentialID, &v.Locale, &v.RelayError, &v.Features, &v.RegisteredAt, &lastPush)
+		err := r.Scan(&v.DeviceID, &v.Name, &v.Kind, &v.APNSToken, &v.APNSEnv, &v.Topic, &v.PushKey, &v.RelayURL, &v.RelayGrant, &v.Credential, &v.UpdatedAt, &prefs, &v.CredentialID, &v.Locale, &v.RelayError, &v.Features, &v.RegisteredAt, &lastPush, &v.VoIPToken, &v.VoIPGrant, &v.VoIPError)
 		if lastPush != nil {
 			v.LastPushAt = *lastPush
 		}

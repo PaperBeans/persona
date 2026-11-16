@@ -14,6 +14,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from persona_identity import CONTEXT_TAG_PATTERN, FILE_TAG_PATTERN
+
 PORT = int(os.environ.get("PORT", "18760"))
 # MOCK_CHILD_SESSIONS=1 (#5120) builds on the Paseo computer: its agent's created agents are its children.
 if os.environ.get("MOCK_CHILD_SESSIONS"):
@@ -3678,6 +3681,9 @@ RECORDING_MINUTES = [os.environ.get("MOCK_RECORDING_MINUTES", "pending")]
 # characters. The answer to its uploads, GET /api/v1/recordings and its detail then carry name and name_source. Off by
 # default, so recordings keep the names other tests expect.
 RECORDING_TITLES = [os.environ.get("MOCK_RECORDING_TITLES") == "1"]
+# Names given on the web (#8877): PUT /api/v1/recordings/{id}/title keeps one per recording ("" clears it), first in the
+# name until an upload changes the recording's title, as the hub's rule.
+RECORDING_RENAMED = {}
 RECORDING_MINUTES_SHAPE = [MINUTES_SHAPE_START]
 RECORDING_MINUTES_ASKED = []
 # All-day recording fixtures (#4741): ready makes a recap from the stored text; the other modes let clients exercise
@@ -4665,9 +4671,10 @@ def meeting_live(rid):
                                          "asks": [], "sent": {}, "due": {}, "asks_rev": 0})
 
 
-def recording_title(body):
-    """What the hub calls an upload (its title, its calendar's, a made-up live title) and where that comes from (#8873);
-    (None, None) while it is named only by when it started."""
+def recording_title(body, rid=None):
+    """What the hub calls an upload (a name given on the web, its title, its calendar's, a made-up live title) and where
+    that comes from (#8873, #8877); (None, None) while it is named only by when it started."""
+    if rid and RECORDING_RENAMED.get(rid): return RECORDING_RENAMED[rid], "renamed"
     title = (body.get("title") or "").strip()
     cal = ((body.get("calendar") or {}).get("title") or "").strip()
     if title: return title, ("calendar" if title == cal else "title")
@@ -4680,9 +4687,9 @@ def recording_title(body):
     return next((x for x in lines if x), "")[:15], "model"
 
 
-def recording_named(out, body):
+def recording_named(out, body, rid=None):
     """out with the name and name_source of upload body, when it has a name."""
-    name, source = recording_title(body)
+    name, source = recording_title(body, rid)
     if name: out.update(name=name, name_source=source)
     return out
 
@@ -7265,7 +7272,7 @@ def recordings_route_locked(h, method, p):
                                             **({f: v[f] for f in ("kind", "day", "part", "next", "base", "recap_state", "recap_final", "recap_final_at") if f in v}
                                                if v.get("kind") == "day" else {}),
                                             **({"trimmed_at": RECORDINGS_TRIMMED[k]} if k in RECORDINGS_TRIMMED else {}),
-                                            **recording_named({}, v)}
+                                            **recording_named({}, v, k)}
                                            for k, v in RECORDINGS.items()]}) or True
     rid = p.split("/")[4].lower()
     if p.endswith("/segments"):
@@ -7310,12 +7317,30 @@ def recordings_route_locked(h, method, p):
             threading.Timer(3, recording_minutes_next, args=(rid,)).start()
         return h.send_json({"state": "pending"}, 202) or True
     kb = KB.setdefault("recordings", [])
+    if p.endswith("/title") and method == "PUT":  # the owner's name from the web (#8877)
+        if rid in RECORDINGS_DELETED: return h.send_json({"error": "这条录音已删除", "code": "recording_deleted"}, 410) or True
+        if rid not in RECORDINGS: return h.send_json({"error": "没有这条录音", "code": "recording_not_found"}, 404) or True
+        try: body = json.loads(h.last_body or b"{}")
+        except ValueError: body = None
+        title = body.get("title") if isinstance(body, dict) else None
+        if not isinstance(title, str) or "\n" in title or "\r" in title or len(title.strip()) > 200:
+            return h.send_json({"error": "A title must be one line of at most 200 characters."}, 400) or True
+        RECORDING_RENAMED[rid] = title.strip()
+        name, source = recording_title(RECORDINGS[rid], rid)
+        for e in kb:
+            if e["id"] == rid: e["name"] = name or "录音"
+        meta = (KB_DETAIL.get(("recordings", rid)) or {}).get("meta")
+        if meta is not None:
+            for k in ("name", "name_source", "renamed"): meta.pop(k, None)
+            if name: meta.update(name=name, name_source=source)
+            if RECORDING_RENAMED[rid]: meta["renamed"] = RECORDING_RENAMED[rid]
+        return h.send_json({"name": name, "name_source": source} if name else {}) or True
     if p.rstrip("/") != "/api/v1/recordings/" + p.split("/")[4]:  # a path below a recording that no route took
         return h.send_json({"error": "404 page not found"}, 404) or True
     if method == "DELETE":
         if (t := TRANSCRIPTIONS.pop(rid, None)) and t.get("socket"): t["socket"]["fail"]("recording_deleted")
         existed = rid in RECORDINGS
-        RECORDINGS.pop(rid, None); RECORDING_UPLOADED.pop(rid, None); RECORDINGS_DELETED.add(rid); RECORDINGS_TRIMMED.pop(rid, None); RECORDING_DAY_TODOS.pop(rid, None)
+        RECORDINGS.pop(rid, None); RECORDING_UPLOADED.pop(rid, None); RECORDING_RENAMED.pop(rid, None); RECORDINGS_DELETED.add(rid); RECORDINGS_TRIMMED.pop(rid, None); RECORDING_DAY_TODOS.pop(rid, None)
         kb[:] = [e for e in kb if e["id"] != rid]; KB_DETAIL.pop(("recordings", rid), None)
         with MEETING_LOCK: MEETING_LIVE.pop(rid, None)  # live lines and asks go with the recording
         with PHOTO_LOCK:  # as at the trim
@@ -7344,18 +7369,20 @@ def recordings_route_locked(h, method, p):
     if have and have["revision"] > body["revision"]:
         # Nothing written. As the hub answers: the upload's revision and, on a hub that attends, the role in effect (the
         # stored one) and what was wrong with this upload's attendance fields, whatever the status.
-        out = recording_named({"id": rid, "revision": body["revision"], "status": "stale"}, have)
+        out = recording_named({"id": rid, "revision": body["revision"], "status": "stale"}, have, rid)
         if MEETING_ATTENDANCE:
             out["attendance"] = meeting_live(rid)["role"]
             if room_of(rid) is None and (problem := meeting_attendance(body)[2]): out["attendance_problem"] = problem
             if (v := upload_room_view(rid, body)) is not None: out["room"] = v
         return h.send_json(transcription_upload_result(rid, body, out)) or True
     for seg in body.get("segments", []): seg.pop("source", None)
+    if have and RECORDING_RENAMED.get(rid) and (body.get("title") or "") != (have.get("title") or ""):
+        RECORDING_RENAMED.pop(rid)  # renamed on the phone since: the newer name wins (#8877)
     transcription_put(rid, body)
     RECORDINGS[rid] = {k: v for k, v in body.items() if k not in ("transcription", "timeline")}
     RECORDING_UPLOADED[rid] = time.time()
     text = "\n".join("[%d:%02d] %s" % (int(x["start"]) // 60, int(x["start"]) % 60, x["text"]) for x in body.get("segments", []))
-    name, name_source = recording_title(body)
+    name, name_source = recording_title(body, rid)
     entry = {"kind": "recordings", "id": rid, "name": name or "录音", "relevance": 0, "tags": [],
              "one_line": (body.get("segments") or [{"text": ""}])[0]["text"], "updated": body["started_at"],
              "recording_kind": kind}  # #8870
@@ -7372,7 +7399,7 @@ def recordings_route_locked(h, method, p):
         ready = body.get("complete") and RECORDING_MINUTES[0] == "ready"
         detail["meta"]["minutes_state"] = "ready" if ready else ("failed" if body.get("complete") and RECORDING_MINUTES[0] == "failed" else "pending")
         if ready: detail["minutes"] = None  # made from the photos as they are when the detail is stored, below
-    out = recording_named({"id": rid, "revision": body["revision"], "status": "stored"}, body)
+    out = recording_named({"id": rid, "revision": body["revision"], "status": "stored"}, body, rid)
     room = None
     if MEETING_ATTENDANCE:
         role, session, problem = meeting_attendance(body)
@@ -9276,6 +9303,14 @@ INTERACTIONS = [
      "tool_name": "ExitPlanMode", "tool_use_id": "toolu_p1",
      "plan": "## 支持 HEIC\n\n1. 用 `sips` 把 HEIC 转成 JPEG，质量 90，保留 EXIF\n2. 转换放到导出前，原文件不动\n3. 已经转过的按内容哈希跳过\n4. 补测试：竖拍、实况照片、没有 EXIF 的图"},
 ]
+# MOCK_EDITABLE=1: a Claude Code Lark approval whose outgoing text may be edited before Allow, plus a deny note.
+if os.environ.get("MOCK_EDITABLE") == "1":
+    INTERACTIONS.append({
+        "id": "ix_editable_lark", "machine_id": "macbook", "session_id": TESTS, "session_title": "补齐网络层的单元测试",
+        "cwd": "/Users/me/code/weather", "kind": "permission", "created_at": ago(minutes=1), "expires_at": later(minutes=29),
+        "tool_name": "Bash", "summary": "回复发布群：测试已经通过，准备发版",
+        "tool_input": {"command": "lark api POST /conversations/oc_example/messages --body '{\"text\":\"测试已经通过，准备发版\"}'"},
+        "editable_text": "测试已经通过，准备发版"})
 
 # MOCK_ASK_LONG=1: Persona's main conversation waits on an ask_user card taller than a phone's dock (#3112): two
 # questions, the first with eight options that have descriptions, so the card has to scroll for the last ones.
@@ -19574,8 +19609,8 @@ def features():
 
 
 _SEARCH_DROP = [re.compile(r"(?s)<persona-view-errors\b[^>]*>.*?</persona-view-errors>\s*"),
-                re.compile(r"(?s)<persona-context\b[^>]*>.*?</persona-context>\s*"),
-                re.compile(r"<persona-file\b[^>]*?/?>(?:\s*</persona-file>)?")]
+                re.compile(r"(?s)<" + CONTEXT_TAG_PATTERN + r"\b[^>]*>.*?</" + CONTEXT_TAG_PATTERN + r">\s*"),
+                re.compile(r"<" + FILE_TAG_PATTERN + r"\b[^>]*?/?>(?:\s*</" + FILE_TAG_PATTERN + r">)?")]
 _SEARCH_PASTED = re.compile(r"(?s)<pasted_content\b[^>]*>(.*?)</pasted_content>")
 _SEARCH_IMAGES = [re.compile(r"(?s)<attached_images>.*?</attached_images>"), re.compile(r"\[Image #\d+\]\s?")]
 _SEARCH_ACTION = re.compile(r'\n<persona-action view="[^"<>]*" action="[^"<>]*">\{[^<>]*\}</persona-action>$')
@@ -21247,6 +21282,9 @@ def zrle_rect(px, W, x, y, w, h, z):
 SCREEN_INPUT = {"mode": os.environ.get("MOCK_SCREEN_INPUT", "")}
 SCREEN_VIDEO = {"mode": os.environ.get("MOCK_SCREEN_VIDEO", ""), "pairs": set(), "streams": [], "starts": [], "reports": 0,
                 "updates": [], "refuse": False, "tiers": os.environ.get("MOCK_SCREEN_VIDEO_TIERS") == "1"}
+# MOCK_SCREEN_X264=1 (#8859): MacBook's node found the user's own ffmpeg with libx264 (`screen_video.x264`), so its page
+# offers x264 for the live screen.
+SCREEN_X264 = os.environ.get("MOCK_SCREEN_X264") == "1"
 _SCREEN_VIDEO_FIXTURE = {}
 _SCREEN_VIDEO_FILES = {"hevc": "fixture.bin", "h264": "fixture-h264.bin"}
 
@@ -22516,6 +22554,7 @@ def computer_of(machine_id, enabled):
         c["screen_video"] = {"version": 1, "codecs": ["hevc", "h264"],
                              "permission": "missing" if SCREEN_VIDEO["mode"] in ("missing", "denied") else "granted"}
         if SCREEN_VIDEO["mode"] == "denied": c["screen_video"]["asked"] = True
+        if SCREEN_X264: c["screen_video"]["x264"] = "ffmpeg 9.0.2"
     if machine_id == "macbook" and c.get("screen_sharing") and SCREEN_INPUT["mode"]:  # MOCK_SCREEN_INPUT (#7775)
         c["screen_input"] = {"version": 1, "permission": "granted" if SCREEN_INPUT["mode"] == "granted" else "missing"}
         if SCREEN_INPUT["mode"] == "asked": c["screen_input"]["asked"] = True
@@ -23223,6 +23262,10 @@ if MOCK_COMPUTER:
                           {"name": "no_auto_lock", "type": "array", "title": "插件开着时不自动锁屏", "unique_items": True,
                            "description": "打开的 Mac 在插件开着时一直不因空闲锁屏（node 持有 caffeinate，不改系统设置）；和 hub 断开 30 分钟后自动恢复。手动锁屏、合盖照常",
                            "confirm": "打开后这台 Mac 在插件开着时一直不会因为空闲锁屏，坐在它前面的人能直接用它。和 hub 断开 30 分钟后自动恢复。",
+                           "items": {"name": "items", "type": "string", "format": "machine", "os": ["darwin"]}},
+                          {"name": "screen_x264", "type": "array", "title": "实时屏幕用 x264 编码", "unique_items": True,  # #8859
+                           "description": "打开的 Mac 在局域网直连时用你自己装的 ffmpeg（带 libx264，比如 Homebrew 的）编码实时屏幕：每帧快约 6 ms，多用一些 CPU。Persona 不带 x264 或 ffmpeg；没装、离开局域网或跟不上时用系统自带的编码器",
+                           "confirm": "打开后，这台 Mac 在局域网直连时用你自己装的 ffmpeg 编码实时屏幕。x264 是 GPL 软件，Persona 不带它；它更费 CPU，跟不上时自动换回系统自带的编码器。",
                            "items": {"name": "items", "type": "string", "format": "machine", "os": ["darwin"]}},
                           {"name": "keep_awake", "type": "boolean", "title": "操作或开着 VNC 时保持唤醒", "default": True,
                            "description": "助手操作那台 Mac、或有人在看它的画面时，它不睡、不因空闲锁屏；最后一次操作 10 分钟后、画面关掉后就撤掉，不改系统设置"},
@@ -24640,7 +24683,8 @@ def plugins_route(handler, p, body):
             for m in MACHINES:
                 if "computer" in m:
                     m["computer"] = {**computer_of(m["id"], m["id"] in (cfg.get("machines") or [])),
-                                     "no_auto_lock": m["id"] in (cfg.get("no_auto_lock") or [])}  # #1507 b2
+                                     "no_auto_lock": m["id"] in (cfg.get("no_auto_lock") or []),  # #1507 b2
+                                     "screen_x264": m["id"] in (cfg.get("screen_x264") or [])}  # #8859
             for send, _ in list(LIVE):
                 try: send({"type": "machines", "machines": out_machines()})
                 except Exception: pass
@@ -26952,9 +26996,12 @@ class H(BaseHTTPRequestHandler):
                 return self.send_json({"error": "操控电脑的插件没打开，或这台不是 Mac"}, 404)
             body = json.loads(self.last_body or b"{}")
             if "enabled" in body:
-                machine["computer"] = {**computer_of(machine["id"], bool(body["enabled"])), "no_auto_lock": machine["computer"].get("no_auto_lock", False)}
+                machine["computer"] = {**computer_of(machine["id"], bool(body["enabled"])), "no_auto_lock": machine["computer"].get("no_auto_lock", False),
+                                       "screen_x264": machine["computer"].get("screen_x264", False)}
             if "no_auto_lock" in body:  # "Do not lock automatically while the plugin is open" (#1507 b2)
                 machine["computer"] = {**machine["computer"], "no_auto_lock": bool(body["no_auto_lock"]) and machine["computer"].get("enabled", False)}
+            if "screen_x264" in body:  # x264 for the live screen (#8859)
+                machine["computer"] = {**machine["computer"], "screen_x264": bool(body["screen_x264"]) and machine["computer"].get("enabled", False)}
             for send, _ in list(LIVE):
                 try: send({"type": "machines", "machines": out_machines()})
                 except Exception: pass
@@ -27922,11 +27969,20 @@ class H(BaseHTTPRequestHandler):
                 PREFS["quiet"] = {k: body["quiet"].get(k, "") for k in ("enabled", "start", "end", "tz")}
             return self.send_json(PREFS)
         if p.startswith("/api/v1/sessions/") and p.endswith("/messages") and os.environ.get("MOCK_SEND_REFUSE"):
-            # MOCK_SEND_REFUSE=input_draft|dialog_open: the computer refuses sends (SendSafety); clear_draft then succeeds
+            # MOCK_SEND_REFUSE=input_draft|dialog_open: the computer refuses sends (SendSafety); clear_draft then succeeds.
+            # =peer_held|peer_unconfirmed: a Claude session outside Persona's terminals got it through its peer inbox but did
+            # not take it (held for approval at the computer in bypass permissions mode / not confirmed): delivered unknown
             body = json.loads(self.last_body or b"{}")
             SENT.append(body)
             if body.get("clear_draft"):
                 return self.send_json({"ok": True})
+            if os.environ["MOCK_SEND_REFUSE"] in ("peer_held", "peer_unconfirmed"):
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                import readiness_mock  # the hub's own catalogs (server/internal/i18n)
+                code = os.environ["MOCK_SEND_REFUSE"]
+                lang = readiness_mock.lang_of(self.headers.get("Accept-Language", ""))
+                return self.send_json({"error": readiness_mock.t(lang, "rpc-errors." + code), "code": code,
+                                       "detail": "the node's own words", "delivered": "unknown"}, 409)
             if os.environ["MOCK_SEND_REFUSE"] == "dialog_open":
                 # As the hub words a node's refusal: its own sentence, the dialog's first line flat beside it (#3752).
                 return self.send_json({"error": "终端正在等待选择，请先到终端处理。", "code": "dialog_open", "delivered": "none",

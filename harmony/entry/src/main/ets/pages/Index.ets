@@ -1,5 +1,5 @@
 import { ThemeScope } from '../design/ThemeScope';
-import { util } from '@kit.ArkTS';
+import { util, taskpool } from '@kit.ArkTS';
 import { AdminWorkspacePage } from '../components/AdminWorkspacePage';
 import { ExtensionPage } from '../components/ExtensionPage';
 import { ExtensionNavigationPage } from '../components/ExtensionNavigationPage';
@@ -26,6 +26,11 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ComposeListItemV2, ContentItemV2, KeyboardAvoidMode, TextModifier, SymbolGlyphModifier, CapsuleSegmentButtonV2, SegmentButtonV2Items, ColorMetrics, LengthMetrics, uiMaterial } from '@kit.ArkUI';
 import { ConfigurationConstant } from '@kit.AbilityKit';
 import { ClientModel, client } from '../models/ClientModel';
+import { NativeAgentListAdapter } from '../core/AgentListAdapter';
+import type { AgentListInput } from '../core/AgentListAdapter';
+import type { AgentSortReport, CoreAgentListProjection, CoreSortInput } from '../core/AgentListProjection';
+import type { DebugAgentSortSnapshot } from '../core/DebugAgentSortSnapshot';
+import type { DebugAgentListShadow } from '../platform/DebugAgentListShadow';
 import { ResourceRow, HubProfile, Wire } from '../models/Wire';
 import { BoundRow, reconcileBoundRows } from '../models/RowBinding';
 import { Pairing, PairingTarget } from '../platform/Pairing';
@@ -108,6 +113,12 @@ struct Index {
   @Local tool: number = 0;
   private titleMaterial: uiMaterial.Material = uiMaterial.isImmersiveMaterialSupported() ? new uiMaterial.ImmersiveMaterial({ style: uiMaterial.ImmersiveStyle.THIN }) : uiMaterial.Material.empty;
   @Local agentWorkspace: AgentWorkspace = new AgentWorkspace();
+  private agentShadow: DebugAgentListShadow | undefined;
+  private agentShadowTask: taskpool.Task | undefined;
+  private agentShadowPending: DebugAgentSortSnapshot | undefined;
+  private agentShadowRunning: boolean = false;
+  private agentShadowWorker: ((input: CoreSortInput, projection: CoreAgentListProjection) => AgentSortReport[]) | undefined;
+  private agentShadowStarted: boolean = false;
   @Local environment: NativeEnvironment = nativeEnvironment;
   @Local spacesShown: boolean = false;
   @Local spacesInset: number = 0;
@@ -261,8 +272,53 @@ struct Index {
     this.syncConversationRows(); this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE); this.updateBreakpoint(); this.consumePairingLink(); this.restoreScope(); this.consumeNotification();
     this.bindDeviceOwner(this.model);
     this.applications.bind(this.model); this.applications.refresh();
+    this.startAgentListShadow();
   }
-  aboutToDisappear(): void { this.agentWorkspace.hide(); this.applications.dispose(); this.dismissChatActions(); }
+  private startAgentListShadow(): void {
+    if (!BuildProfile.DEBUG || this.agentShadowStarted) return;
+    this.agentShadowStarted = true;
+    import('../platform/DebugAgentListShadow').then(({DebugAgentListShadow, runDebugAgentSortShadow}) => {
+      if (!this.agentShadowStarted) return;
+      const shadow = new DebugAgentListShadow();
+      this.agentShadow = shadow;
+      this.agentShadowWorker = runDebugAgentSortShadow;
+      this.agentWorkspace.setListShadow((input: AgentListInput) => {
+        try {
+          const snapshot = shadow.snapshot(input);
+          if (snapshot) { this.agentShadowPending = snapshot; this.runAgentListShadow(); }
+        } catch (_) { shadow.failure(); }
+      });
+    }).catch(() => undefined);
+  }
+  private runAgentListShadow(): void {
+    const shadow = this.agentShadow, worker = this.agentShadowWorker, snapshot = this.agentShadowPending;
+    if (!shadow || !worker || !snapshot || this.agentShadowRunning || !this.agentShadowStarted) return;
+    this.agentShadowPending = undefined;
+    this.agentShadowRunning = true;
+    let reports: Promise<AgentSortReport[]>;
+    try {
+      const task = new taskpool.Task(worker, snapshot.input, snapshot.projection);
+      this.agentShadowTask = task;
+      reports = taskpool.execute(task) as Promise<AgentSortReport[]>;
+    } catch (_) {
+      this.agentShadowTask = undefined; this.agentShadowRunning = false; shadow.failure();
+      if (this.agentShadowPending) this.runAgentListShadow();
+      return;
+    }
+    reports.then((result: AgentSortReport[]) => {
+      if (this.agentShadow === shadow) shadow.receive(result);
+    }).catch(() => { if (this.agentShadow === shadow) shadow.failure(); }).finally(() => {
+      this.agentShadowTask = undefined; this.agentShadowRunning = false;
+      if (this.agentShadowPending) this.runAgentListShadow();
+    });
+  }
+  aboutToDisappear(): void {
+    try {
+      this.agentShadowStarted = false; this.agentShadow = undefined; this.agentShadowPending = undefined;
+      if (this.agentShadowTask) { taskpool.cancel(this.agentShadowTask); this.agentShadowTask = undefined; }
+    } catch (_) { this.agentShadowTask = undefined; }
+    finally { this.agentWorkspace.setListShadow(undefined); this.agentWorkspace.hide(); this.applications.dispose(); this.dismissChatActions(); }
+  }
   @Monitor('model.profile', 'model.connected', 'model.features') applicationOwnerChanged(): void {
     this.applications.bind(this.model); this.applications.connectionChanged();
   }

@@ -99,7 +99,8 @@ type gateKey struct {
 // gateGrant is a call larkCheck let through, to go once.
 type gateGrant struct {
 	command, method, path, query string
-	body                         any // the JSON body confirmed; nil: any (not JSON, cut short, an upload, $… in it)
+	body                         any  // the JSON body confirmed; nil: any (not JSON, cut short, an upload, $… in it)
+	bodyUseNumber                bool // an edited grant compares JSON numbers without float64 rounding
 	until                        time.Time
 	// session is the conversation larkCheck decided for, and through how it let the call through: what the ledger says
 	// of the write once it has gone out.
@@ -249,6 +250,8 @@ func gateQueryKey(raw string) string {
 func (p *gateProxy) take(k gateKey, method, path, query string, body []byte, isJSON bool) (gateGrant, bool) {
 	var sent any
 	parsed := isJSON && json.Unmarshal(body, &sent) == nil
+	var sentNumbers any
+	numbersParsed, numbersTried := false, false
 	query = gateQueryKey(query)
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -263,7 +266,21 @@ func (p *gateProxy) take(k gateKey, method, path, query string, body []byte, isJ
 		if g.session != "" && k.session != "" && g.session != k.session {
 			continue
 		}
-		if g.body != nil && (!parsed || !reflect.DeepEqual(g.body, sent)) {
+		candidate, candidateParsed := sent, parsed
+		if g.bodyUseNumber {
+			if !numbersTried {
+				numbersTried = true
+				dec := json.NewDecoder(bytes.NewReader(body))
+				dec.UseNumber()
+				numbersParsed = isJSON && dec.Decode(&sentNumbers) == nil
+				if numbersParsed {
+					var extra any
+					numbersParsed = dec.Decode(&extra) == io.EOF
+				}
+			}
+			candidate, candidateParsed = sentNumbers, numbersParsed
+		}
+		if g.body != nil && (!candidateParsed || !reflect.DeepEqual(g.body, candidate)) {
 			continue
 		}
 		p.grants = slices.Delete(p.grants, i, i+1)

@@ -430,10 +430,12 @@ class AdaptiveRunner:
         expected = step.get("session")
         if expected:
             target = self.fixtures.get(expected, expected)
-            def selected():
-                route, key = self.read_navigation()
-                return True if key == target else None
-            poll("selected session " + target, selected, timeout=float(step.get("timeout", 60)))
+            # Persona embeds assistant conversations outside the root ChatRoute stack.
+            if step.get("conversationKind") != "assistant":
+                def selected():
+                    route, key = self.read_navigation()
+                    return True if key == target else None
+                poll("selected session " + target, selected, timeout=float(step.get("timeout", 60)))
             def draft_ready():
                 probe = self.read_probe(self.pid())
                 now = self.elapsed_nanos()

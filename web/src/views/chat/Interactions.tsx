@@ -7,7 +7,6 @@ import { mergeRefs } from "../../lib/tap-guard";
 import { delegateLines, isDelegating, recommendedLabels, type DelegatedAnswer } from "../../lib/delegate";
 import { Choice, DigitHint } from "./Choice";
 import { DelegatedCard } from "./Delegated";
-import { allowBody, denyBody } from "../../lib/quick-answers";
 import { BUSY_MOTION, spinStyle } from "../../lib/busy-motion";
 import { appArchiveDeps, archiveAgent, archiveSession } from "../../lib/agent-archives";
 import type { Interaction } from "../../lib/types";
@@ -26,6 +25,7 @@ import { Button, Collapse, cx, EASE, Kbd, Menu, SECRET_INPUT, toast, useMenu } f
 import { Icon } from "../../ui/icons";
 import { Markdown } from "../../ui/Markdown";
 import { permissionDetail, permissionReason, summaryExtra } from "../../lib/tool-detail";
+import { usePermissionText } from "./permission-text";
 import { DIFF_TOOLS, DiffBlocks, editDiffs } from "./ActionRow";
 import { ANSWERED_LIST_MAX, cardFold, cardLine, nextWaiting, PLAN_MAX, showsAnswered } from "./dock";
 import { useCardCut } from "./card-cut";
@@ -543,6 +543,7 @@ function PlanCard({ ix }: { ix: Interaction }) {
 
 function PermissionCard({ ix }: { ix: Interaction }) {
   const [busy, setBusy] = useState(false);
+  const editable = usePermissionText(ix);
   const go = async (body: Record<string, unknown>) => {
     setBusy(true);
     await resolve(ix, body);
@@ -552,8 +553,8 @@ function PermissionCard({ ix }: { ix: Interaction }) {
   // while that button is focused, which is the button's own activation, not the card's main action
   const keys = useCardKeys({
     enter: () => {
-      if (busy) return false;
-      void go(allowBody());
+      if (busy || editable.composing || !editable.canAllow) return false;
+      void go(editable.allow());
     },
   });
   const tapGuard = useChatCardTapGuard(ix);
@@ -567,17 +568,17 @@ function PermissionCard({ ix }: { ix: Interaction }) {
       busy={busy}
       footer={
         <>
-          <Button tone="quiet" disabled={busy} onClick={() => go(denyBody())}>
+          <Button tone="quiet" disabled={busy} onClick={() => go(editable.deny())}>
             {t("chat-interactions.deny")}
           </Button>
           <span className="flex gap-1.5">
             {/* Only where an Always is kept (offersAlways): never on the manager's own cards. */}
-            {offersAlways(ix) && (
+            {offersAlways(ix) && !editable.changed && (
               <Button tone="secondary" disabled={busy} onClick={() => go({ allow: true, always: true })}>
                 {t("chat-interactions.always_allow")}
               </Button>
             )}
-            <Button tone="primary" busy={busy} onClick={() => go(allowBody())}>
+            <Button tone="primary" busy={busy} disabled={!editable.canAllow} onClick={() => go(editable.allow())}>
               {t("chat-interactions.allow")}
               {keys.focused && <Kbd>Enter</Kbd>}
             </Button>
@@ -586,6 +587,7 @@ function PermissionCard({ ix }: { ix: Interaction }) {
       }
     >
       <PermissionBody ix={ix} />
+      {editable.editor}
       {alwaysScope(ix) && <p className="mt-2 text-[12px] leading-relaxed text-ink-3">{alwaysScope(ix)}</p>}
     </Card>
   );

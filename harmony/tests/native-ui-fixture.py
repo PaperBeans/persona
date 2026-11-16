@@ -11,10 +11,14 @@ import json
 from pathlib import Path
 import ssl
 import struct
+import sys
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from persona_identity import LEGACY_OP_HEADER
 
 
 HUB_ID = '8a18eac0-435d-4e42-907a-015ce56de2ba'
@@ -481,7 +485,7 @@ def main():
             self.close_connection = True
 
         def operation_id(self):
-            return self.headers.get('X-Persona-Op-Id', '') or self.headers.get('X-Jarvis-Op-Id', '')
+            return self.headers.get('X-Persona-Op-Id', '') or self.headers.get(LEGACY_OP_HEADER, '')
 
         def authorized(self):
             return self.headers.get('Authorization') == 'Bearer ' + DEVICE_TOKEN

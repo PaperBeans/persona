@@ -334,7 +334,7 @@ func (s *Service) launcherHasModel(ctx context.Context, machine, launcher, model
 // launcherModelSet is the launcher's own /model list on machine (ids and what aliases resolve to), as it was a few
 // minutes ago at most; nil when it is not known (an agent with no list, a failed call).
 func (s *Service) launcherModelSet(ctx context.Context, machine, launcher string) map[string]bool {
-	key := machine + "\x00" + launcher
+	key := launcherModelCacheKey(ctx, machine, launcher)
 	c := &s.models
 	c.cacheMu.Lock()
 	if c.cacheAt != nil && time.Since(c.cacheAt[key]) < 5*time.Minute {
@@ -384,7 +384,7 @@ func (s *Service) launcherModelSet(ctx context.Context, machine, launcher string
 // launcherModelResolution reads the alias and default relationships alongside launcherModelSet's cached ids. A failed
 // or empty model read is unknown, not proof that a reply from another model belongs to this binding.
 func (s *Service) launcherModelResolution(ctx context.Context, machine, launcher string) (map[string]string, string) {
-	key := machine + "\x00" + launcher
+	key := launcherModelCacheKey(ctx, machine, launcher)
 	c := &s.models
 	c.cacheMu.Lock()
 	if c.cacheAt != nil && time.Since(c.cacheAt[key]) < 5*time.Minute {
@@ -405,7 +405,11 @@ func (s *Service) launcherModelResolution(ctx context.Context, machine, launcher
 // the plugin gateway behind it.
 func (s *Service) askLauncherModels(ctx context.Context, machine, name string, refresh bool) (proto.LauncherModels, error) {
 	var res proto.LauncherModels
-	if err := s.call(ctx, machine, assistantwire.DeviceLaunchersModels, s.launcherParams(ctx, machine, name, map[string]any{"refresh": refresh}), &res); err != nil {
+	params := map[string]any{"refresh": refresh}
+	if purpose := launcherPurpose(ctx); purpose != "" {
+		params["purpose"] = purpose
+	}
+	if err := s.call(ctx, machine, assistantwire.DeviceLaunchersModels, s.launcherParams(ctx, machine, name, params), &res); err != nil {
 		return res, err
 	}
 	if res.Models == nil {

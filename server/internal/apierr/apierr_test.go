@@ -246,6 +246,7 @@ func TestRPCFailureLocalePreservesOutcomeAndDiagnostics(t *testing.T) {
 		{"peer long", &rpc.Error{Code: "peer_too_long", Message: "node's own words", Data: json.RawMessage(`{"delivered":"none"}`)}, "rpc-errors.peer_too_long"},
 		{"peer command", &rpc.Error{Code: "peer_command", Message: "node's own words", Data: json.RawMessage(`{"delivered":"none"}`)}, "rpc-errors.peer_command"},
 		{"peer unconfirmed", &rpc.Error{Code: "peer_unconfirmed", Message: "node's own words", Data: json.RawMessage(`{"delivered":"unknown"}`)}, "rpc-errors.peer_unconfirmed"},
+		{"peer held", &rpc.Error{Code: "peer_held", Message: "node's own words", Data: json.RawMessage(`{"delivered":"unknown"}`)}, "rpc-errors.peer_held"},
 		// a mode change the node cannot make (#1843): change it on the computer, or resume the session first
 		{"modes outside", &rpc.Error{Code: proto.CodeModesOnComputer, Message: "node's own words", Data: json.RawMessage(`{"delivered":"none"}`)}, "rpc-errors.modes_on_computer"},
 		{"modes not running", &rpc.Error{Code: proto.CodeModesNotRunning, Message: "node's own words", Data: json.RawMessage(`{"delivered":"none"}`)}, "rpc-errors.modes_not_running"},

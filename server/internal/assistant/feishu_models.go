@@ -12,6 +12,7 @@ import (
 
 // botModels uses the main conversation's persistent model pick, shared with the apps.
 func (s *Service) botModels(ctx context.Context, f FeishuFeatures, messageID, cmd, model, root, parent string) {
+	ctx = withLauncherPurpose(ctx, "assistant")
 	l := s.botLang(ctx)
 	note := func(key string, args ...i18n.Args) {
 		s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards."+key, args...))

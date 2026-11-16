@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -154,6 +155,37 @@ func TestAgentsSwitchFilterBusyAndMovedMeanwhile(t *testing.T) {
 	}
 	if got := callsFor(ft.f, "s1dflt0001"); len(got) != n {
 		t.Errorf("moved meanwhile, switched anyway: %v", got)
+	}
+}
+
+// Initial queue loading can overlap an inventory event. Both paths must read the
+// loaded flag under the queue mutex, including the no-store early return.
+func TestAgentsSwitchConcurrentLoadAndList(t *testing.T) {
+	for range 256 {
+		s := &Service{}
+		start := make(chan struct{})
+		var done sync.WaitGroup
+		done.Add(2)
+		go func() {
+			defer done.Done()
+			<-start
+			s.loadSwitchQueue(context.Background())
+		}()
+		go func() {
+			defer done.Done()
+			<-start
+			for range 8 {
+				s.switchQueueListed("sample-machine")
+			}
+		}()
+		close(start)
+		done.Wait()
+		s.switchQ.mu.Lock()
+		ready := s.switchQ.loaded && s.switchQ.items != nil && s.switchQ.running != nil && s.switchQ.retry != nil
+		s.switchQ.mu.Unlock()
+		if !ready {
+			t.Fatal("concurrent listing lost the initialized queue")
+		}
 	}
 }
 

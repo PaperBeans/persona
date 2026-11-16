@@ -656,6 +656,9 @@ func (d *Devices) Call(ctx context.Context, p devicewire.NodeCall) (json.RawMess
 		if err != nil {
 			return nil, err
 		}
+		if params, err = ownerInputParams(p, params); err != nil {
+			return nil, err
+		}
 	}
 	if refusesHandoff(p.Method, params) {
 		return nil, errHandoffRefused

@@ -1339,15 +1339,14 @@ extension AssistantSidebar {
         }
     }
 
-    /// First among the places: Recordings, a place like the rows under it, so a tap opens the page and its Record button
-    /// starts a recording (#5517: as Record, the tap recorded at once, and in zh-Hans and ja it reads as the page's name).
-    /// While a recording runs, the row says so and opens it.
+    /// First among the places: Meetings (#8731; Recordings before), a place like the rows under it, so a tap opens the page
+    /// and its Start Meeting starts one (#5517: as Record, the tap recorded at once). While something records, the row says
+    /// what (`MeetingWords.running`) and opens it.
     @ViewBuilder private var meetingRow: some View {
         #if os(iOS)
         if let openRecordingsPage {
-            let recording = RecordingCapture.shared.state != .idle
-            action(recording ? String(localized: "Recording… Open") : String(localized: "Recordings"),
-                   Theme.Icon.recording, id: "sidebar-meeting-recording", place: .recordings, run: openRecordingsPage)
+            action(MeetingWords.running ?? MeetingWords.place,
+                   Theme.Icon.meeting, id: "sidebar-meeting-recording", place: .recordings, run: openRecordingsPage)
         }
         #endif
     }

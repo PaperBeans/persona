@@ -19,6 +19,8 @@ struct RecordingLiveView: View {
     @State private var following = true
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var showAttendee = false
+    /// This recording while Rename is open (#8873).
+    @State private var renaming: UUID?
     /// The role Turn on Persona or the role menu asked for while nobody was chosen to attend (#3862): it goes on once the
     /// picker names someone; closing the picker without a pick leaves Persona off.
     @State private var pendingRole: MeetingAttendance?
@@ -40,6 +42,7 @@ struct RecordingLiveView: View {
                     }
                 }
                 .onChange(of: showAttendee) { _, shown in if !shown { pendingRole = nil } }
+                .recordingRename($renaming)
                 .onChange(of: exchanges.compactMap(\.answer)) { old, new in
                     // An answer arriving on screen: announced, with no haptic while the microphone is open.
                     if new.count > old.count, let latest = new.last { AccessibilityNotification.Announcement(latest).post() }
@@ -96,10 +99,13 @@ struct RecordingLiveView: View {
         }
     }
 
-    /// The page menu, where the meeting page has its own (#5243): Meeting or Note. Persona's part keeps its strip's menu.
+    /// The page menu, where the meeting page has its own (#5243): Meeting or Note, and Rename (#8873). Persona's part keeps
+    /// its strip's menu.
     private func pageMenu(_ entry: RecordingEntry) -> some View {
         Menu {
             RecordingKindPicker(entry: entry)
+            Button { renaming = id } label: { Label("Rename", systemImage: Theme.Icon.edit) }
+                .accessibilityIdentifier("recording-live-rename")
         } label: {
             ThemedIcon(Theme.Icon.moreMenu).font(Theme.Font.heading).foregroundStyle(Theme.accent)
                 .tapTargetFrame()

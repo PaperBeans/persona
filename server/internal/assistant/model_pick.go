@@ -353,6 +353,7 @@ func (s *Service) modelPickRefusal(ctx context.Context, machine, name string, la
 // agent (it sets its own --model, or its agent takes no model). A model its list lacks is a typed one and is kept, as a
 // message's pick (#1644); a list that can't be read refuses nothing.
 func (s *Service) pickedModelRefusal(ctx context.Context, machine, launcher, model string) error {
+	ctx = withLauncherPurpose(ctx, "assistant")
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	res, err := s.askLauncherModels(cctx, machine, launcher, false) // the node keeps its list a while

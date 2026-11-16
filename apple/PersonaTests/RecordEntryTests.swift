@@ -134,7 +134,7 @@ import PersonaWire
     /// was said before is the meeting's transcript, but no line before it is attended (no live line goes for it).
     @Test func aNoteBecomesAMeetingAsAStartWould() throws {
         let note = recording()
-        #expect(note.displayTitle == String(localized: "Recording · \(now.formatted(date: .abbreviated, time: .shortened))"))
+        #expect(note.displayTitle == String(localized: "Note · \(now.formatted(date: .abbreviated, time: .shortened))"))
 
         let unnamed = MeetingRecorder.switched(note, meeting: true, at: 240, named: nil, start: RecordingAttendance(role: .off))
         #expect(unnamed.isMeeting && unnamed.title.isEmpty)
@@ -209,9 +209,10 @@ import PersonaWire
 
     // MARK: One name
 
-    /// Siri and Shortcuts, the Control and the home screen's menu all say Record, the word of the drawer and the page.
-    @Test func everyEntryPointSaysRecord() {
-        let record = String(localized: "Record [Recordings Section ef2821]")
+    /// Siri and Shortcuts, the Control and the home screen's menu all say Start Meeting, the page's button (#8731, D5).
+    @Test func everyEntryPointSaysStartMeeting() {
+        let record = MeetingWords.start
+        #expect(record == String(localized: "Start Meeting"))
         #expect(String(localized: StartMeetingRecordingIntent.title) == record)
         #expect(QuickAction.meetingRecording.item.localizedTitle == record)
         #expect(QuickAction.meetingRecording.rawValue == "persona.meeting-recording", "the type stays: kept home screen items work")

@@ -1,6 +1,6 @@
 # PersonaCore for iOS
 
-The Apple binding of the shared Rust continuity core (#6871, #6793). The iOS app and `PersonaTests` link it; watch,
+The Apple binding of the shared Rust core (#6871, #6793). The iOS app and `PersonaTests` link it; watch,
 widgets, Vision and Persona Link do not. It does not replace the production `ChatStore` in phase 1
 and has no user-facing text or screen changes.
 
@@ -33,6 +33,32 @@ Only `dispatch` is suitable for the UI thread. `drain`, `flush`, creation and `c
 the launch path. Host callbacks run on the Rust worker thread and must not synchronously flush or free that same core;
 the C header specifies the ownership and borrowed-buffer contract. The callback box is retained once and released once.
 Errors from an effect callback are reported by the next test-only `flush` rather than silently discarded.
+
+## Pure projection binding (#8952)
+
+`PersonaCoreProjections` wraps the six existing pure C entry points: sort, answer, display_answer, stream_chunks,
+turns and task_index. Each accepts and returns a UTF-8 JSON document, without a core handle or a worker. An empty C
+result is an explicit error rather than an empty JSON value; the adapter copies the returned bytes and gives the
+allocation back with `persona_core_bytes_free` on every path. `displayAnswer` takes a bare JSON string for the option
+label. These synchronous calls run on their caller, so sizable projections stay off the main actor. No production
+client calls them yet.
+
+The test-only replay in `ProjectionBindingReplay` and `TranscriptProjectionReplay` reads the unchanged fixtures and
+compares complete expected objects, including exact array order and integer-vs-boolean distinctions. It pins exact
+case-name manifests, exercises malformed input in each domain, and catches deliberately wrong expected objects through
+the same comparison. `PersonaCoreProjectionTests` runs this on macOS through the real C XCFramework:
+
+- 30 `agents_list` sort cases. The separate `session_state` / `hub_state` projections have no C entry point and are
+  outside this six-function slice.
+- Answer: 15 question and 8 recommendation cases, conditional expected fields, invalid page/option and U+200B.
+- Stream chunks: all 21 complete `{done, tail}` objects.
+- Turns: all 57 static cases with the checked-in current-iOS overlay applied by the caller; 54 cases hold 62 complete
+  turn objects, while three compare empty arrays only.
+- Task index: all five complete expected objects plus the background receipt boundary.
+
+This is macOS-host SwiftPM binding evidence, not an iOS simulator or physical-device result. It does not cover
+production adapters, rendered lines, incremental rebuilds, `StreamRepair`, transport, performance or the minimum
+Xcode 26.0 compiler when tested with a later Xcode.
 
 ## Adapter and shadow contract
 

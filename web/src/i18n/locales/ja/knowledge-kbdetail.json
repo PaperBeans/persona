@@ -215,5 +215,12 @@
   "recap_refresh_failed": "最新のまとめを読み込めませんでした。更新してから再試行してください：{error}",
   "recap_kept_until": "文字起こしは保存期間を過ぎました。このまとめは {date} まで保存されます。",
   "recap_transcript_expired": "文字起こしは保存期間を過ぎました。このまとめだけが残っています。",
-  "recap_kept_forever": "文字起こしは保存期間を過ぎました。このまとめは削除するまで保存されます。"
+  "recap_kept_forever": "文字起こしは保存期間を過ぎました。このまとめは削除するまで保存されます。",
+  "rename": "名前を変更",
+  "rename_title": "名前を変更",
+  "rename_placeholder": "自動で名前を付ける",
+  "rename_hint": "空欄のままにすると、自動で名前が付きます。あとで iPhone で名前を変えると、そちらが優先されます。",
+  "renamed": "名前を変更しました",
+  "rename_cleared": "自動の名前に戻しました",
+  "rename_failed": "名前を変更できませんでした：{error}"
 }

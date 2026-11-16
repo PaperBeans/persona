@@ -68,6 +68,15 @@ describe("readable hub errors", () => {
     expect(isOfflineError(text)).toBe(false);
   });
 
+  it("shows a decision accept failure's reason without exposing its diagnostic detail", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      code: "accept_not_taken", error: "every agent on this task has stopped", detail: "private diagnostic",
+    }), { status: 502 })));
+    const error = await api("/todos/todo_v1/accept", { method: "POST", token: "test-token" }).catch((e: unknown) => e);
+    expect(errorText(error)).toBe(t("lib-api.hub_unavailable", { detail: "HTTP 502: every agent on this task has stopped" }));
+    expect(errorText(error)).not.toContain("private diagnostic");
+  });
+
   it.each(["", "HTTP 500"])("keeps a bare status only once: %s", (message) => {
     expect(errorText(new ApiError(500, message, {}, false))).toBe(t("lib-api.server_error", { detail: "HTTP 500" }));
   });

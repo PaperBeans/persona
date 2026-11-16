@@ -290,19 +290,20 @@ func (s *Service) askRound(id, asked string) (*acceptAsk, error) {
 }
 
 // chooseOption: the owner chose option label of task id's decision (asked: its round). The recommended one is taken as
-// "OK" takes it; another is their own choice, kept in the to-do's decisions and sent to the task's agent, which ends
-// the decision. False: the round is over. errDecisionOption: no such option; else acceptTry's errors, or the send's.
-func (s *Service) chooseOption(ctx context.Context, id, asked, label string) (bool, error) {
+// "OK" takes it; another is their own choice, kept in the to-do's decisions and sent to the task's Agent, which ends
+// the decision. With no Agent that can receive it, the choice is still recorded and handed to the supervisor. A zero
+// result means the round is over. errDecisionOption: no such option; another delivery error leaves the round retryable.
+func (s *Service) chooseOption(ctx context.Context, id, asked, label string) (acceptResult, error) {
 	s.reviewDismissals.actions.acquire(id)
 	defer s.reviewDismissals.actions.release(id)
 	if t, ok := s.todoNow(id); ok {
 		if dismissed, err := s.decisionDismissed(ctx, t); err != nil || dismissed {
-			return false, err
+			return acceptResult{}, err
 		}
 	}
 	a, err := s.askRound(id, asked)
 	if err != nil || a == nil {
-		return false, err
+		return acceptResult{}, err
 	}
 	label = strings.TrimSpace(label)
 	i := slices.IndexFunc(a.Options, func(o DecisionOption) bool { return o.Label == label })
@@ -310,17 +311,21 @@ func (s *Service) chooseOption(ctx context.Context, id, asked, label string) (bo
 	case label == a.Recommend && label != "":
 		return s.acceptTryAsDismissalLocked(ctx, id, "", false)
 	case i < 0:
-		return false, errDecisionOption
+		return acceptResult{}, errDecisionOption
 	}
 	t, _ := s.todoNow(id)
 	l := s.botLang(ctx)
 	s.deadlineAnswered(ctx, id, a.AskedAt) // their own answer: no default at its deadline, even if the send fails
 	msg := i18n.T(l, "assistant-reports.decision_chosen_to_agent", i18n.Args{"option": label, "leads_to": a.Options[i].LeadsTo})
+	var sendErr error
 	if _, err := s.relayToTask(ctx, t.Origin, id, msg, func(cur Todo) bool {
 		return cur.DoneAt == nil && !acceptAskStale(a, cur)
 	}); err != nil {
 		s.logf("task %s: decision to agent: %v", id, err)
-		return false, err
+		if !noAgentCanTake(err) {
+			return acceptResult{}, err
+		}
+		sendErr = err
 	}
 	if st := s.todoDB(); st != nil {
 		at, dec := decisionNow(), "dec_"+randomHex(8)
@@ -333,9 +338,14 @@ func (s *Service) chooseOption(ctx context.Context, id, asked, label string) (bo
 			s.decisionsChanged(ctx, id, at)
 		}
 	}
-	s.userDecided(ctx, id)
+	result := acceptSucceeded()
+	if sendErr != nil {
+		result = s.decisionNotDelivered(ctx, id, a.AskedAt, label, sendErr)
+	} else {
+		s.userDecided(ctx, id)
+	}
 	s.endAsk(ctx, id, a.AskedAt, "", label)
-	return true, nil
+	return result, nil
 }
 
 // routeDecisionAnswer is an explicitly addressed chat answer, not an inference from arbitrary conversation text.

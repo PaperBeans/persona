@@ -92,3 +92,20 @@ Read before changing the bridge (`integrations/paseo`), its node runner (`node/p
   - A bare envelope is always Paseo's (Paseo 0.11+ quotes one a person sends as a `user-message`), so one of a kind not known here is a notice of its first line, not the user's words.
 - **Where a session's items come from can change under a send** (#8358, Paseo 0.15.4). A runtime's session reads the runtime's own items until its row names a Claude transcript the node has, then the transcript, with other line ids and seqs: a new session before its first turn, a takeover whose answer named no transcript (as before #8225), a list that left it out. The node tied a message's `client_msg_id` to the runtime's line while that was the content and kept that line, so the transcript's copy never carried it; a send recorded meanwhile was looked for past the runtime's seq, which the transcript may never reach. An echo record now says where its seq and line count (`in`), and is looked for again where the items come from now, by its words and time. A line found in the transcript stays, so a runtime batch matched later does not take it back. A record from an older node has no `in` and is tagged wherever its line is, as before. Anything else keyed by item ids or seqs of a runtime's session has the same trap.
 - **An end-to-end check reads the state it asserts, not the last push** (#8358). The node pushes its session list a moment after what changed it: `node.info` stops naming the bridge before the list without the bridge's rows arrives, and a row names its forks (`aliases`) once the node has found their transcripts, which can be a list after the row is back. Checks that read `node.sessions()` once right after such an event failed about every other run. Wait for the asserted rows with `until` and a limit, and keep the check's own condition for the verdict.
+
+## A catalog scope includes aliases, checks and shared mutations (#8942)
+
+A shell launcher and a Paseo provider can share a name while running different accounts. Assistant model discovery
+must follow the process that runs the conversation, and every cached projection of that answer must carry the same
+scope: IDs, aliases and the default. Scoping the ID set alone made a later alias lookup read the Agent cache or no
+cache at all. The main conversation's readiness check also needs the assistant purpose, independently of a generic
+Settings Test. Test both cold and Agent-primed caches and the actual readiness call.
+
+Custom model IDs are shared between these catalogs. Forget removes the row in both, and marks reads that overlap the
+operation so a late response cannot restore a successfully deleted row. Failure restores only that ID while preserving
+newer catalog data; a fresh read after success may show an ID the user has typed again.
+
+The assistant-purpose query does not select a manager: the `/machines` routes are not automatically scoped by the
+assistant switcher. Capture the manager when reading its catalog, send its header explicitly, and include it in cache
+and in-flight request keys. Keep generic Agent reads on their existing default-manager route. Changing the selected
+manager must refresh the pill even when the machine and launcher names stay the same.

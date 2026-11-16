@@ -49,6 +49,10 @@ def start(env):
     return base, stop
 
 
+# How the hub names an upload with the title upload() gives it, in every answer (recording_named, #8974).
+TITLED = {"name": "Design review", "name_source": "title"}
+
+
 class Hub:
     def call(self, method, path, body=None, headers=None):
         data = None if body is None else (body if isinstance(body, bytes) else json.dumps(body).encode())
@@ -59,7 +63,7 @@ class Hub:
         except HTTPError as e:
             return e.code, json.load(e)
 
-    def upload(self, rid, **fields):
+    def upload(self, rid, **fields):  # titled "Design review": every answer names it so (TITLED)
         body = {"revision": int(time.time() * 1000), "started_at": "2026-11-10T14:00:00+08:00", "device": "phone", "language": "en",
                 "kind": "meeting", "title": "Design review", "segments": [], "complete": False, **fields}
         return self.call("PUT", f"/api/v1/recordings/{rid}", body)
@@ -109,7 +113,8 @@ class MeetingAttendanceMockTests(Hub, unittest.TestCase):
         latest = self.upload(rid)[1]  # omitted: attending turns off
         self.assertEqual(latest["attendance"], "off")
         # Stale, as the hub answers: the upload's own revision, the stored role.
-        want = {"id": rid, "revision": 1, "status": "stale", "attendance": "off"}
+        # the hub names a titled upload in every answer, the stale one too (kb_recordings.go, #8974)
+        want = {"id": rid, "revision": 1, "status": "stale", "attendance": "off", **TITLED}
         if "meeting_transcription" in self.call("GET", "/api/v1/health")[1]["features"]: want["transcription"] = "device"
         self.assertEqual(self.upload(rid, revision=1, attendance="listener")[1], want)
         self.upload(rid, complete=True, ended_at="2026-11-10T15:00:00+08:00")
@@ -164,7 +169,8 @@ class MeetingAttendanceMockTests(Hub, unittest.TestCase):
                                 ({"attendance": "participant", "attending_session": {"machine_id": "macbook"}}, "bad_session"),
                                 ({"attendance": "off", "attending_session": {"machine_id": "macbook"}}, None), ({"attendance": "participant"}, None)]:
             with self.subTest(fields=fields):
-                want = {"id": rid, "revision": 1, "status": "stale", "attendance": "listener", **({"attendance_problem": problem} if problem else {})}
+                want = {"id": rid, "revision": 1, "status": "stale", "attendance": "listener", **TITLED,
+                        **({"attendance_problem": problem} if problem else {})}
                 if fields.get("kind", "meeting") == "meeting" and "meeting_transcription" in self.call("GET", "/api/v1/health")[1]["features"]:
                     want["transcription"] = "device"
                 self.assertEqual(self.upload(rid, revision=1, **fields), (200, want))

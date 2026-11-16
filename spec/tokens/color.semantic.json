@@ -1739,7 +1739,7 @@
             ],
             "alpha": 1
           },
-          "$description": "prototypes/android/style.css：原生静态回退，非动态取色；accent"
+          "$description": "旧 Android HTML 原型 style.css（#9030 已删除）：原生静态回退，非动态取色；accent"
         },
         "userBubble": {
           "$type": "color",
@@ -1752,7 +1752,7 @@
             ],
             "alpha": 1
           },
-          "$description": "prototypes/android/style.css：原生静态回退，非动态取色；userBubble"
+          "$description": "旧 Android HTML 原型 style.css（#9030 已删除）：原生静态回退，非动态取色；userBubble"
         },
         "userBubbleText": {
           "$type": "color",
@@ -1765,7 +1765,7 @@
             ],
             "alpha": 1
           },
-          "$description": "prototypes/android/style.css：原生静态回退，非动态取色；userBubbleText"
+          "$description": "旧 Android HTML 原型 style.css（#9030 已删除）：原生静态回退，非动态取色；userBubbleText"
         },
         "pageBackground": {
           "$type": "color",
@@ -1778,7 +1778,7 @@
             ],
             "alpha": 1
           },
-          "$description": "prototypes/android/style.css：原生静态回退，非动态取色；pageBackground"
+          "$description": "旧 Android HTML 原型 style.css（#9030 已删除）：原生静态回退，非动态取色；pageBackground"
         },
         "card": {
           "$type": "color",
@@ -1791,7 +1791,7 @@
             ],
             "alpha": 1
           },
-          "$description": "prototypes/android/style.css：原生静态回退，非动态取色；card"
+          "$description": "旧 Android HTML 原型 style.css（#9030 已删除）：原生静态回退，非动态取色；card"
         },
         "onAccent": {
           "$type": "color",
@@ -1858,7 +1858,7 @@
             ],
             "alpha": 1
           },
-          "$description": "prototypes/android/style.css：原生静态回退，非动态取色；accent"
+          "$description": "旧 Android HTML 原型 style.css（#9030 已删除）：原生静态回退，非动态取色；accent"
         },
         "userBubble": {
           "$type": "color",
@@ -1871,7 +1871,7 @@
             ],
             "alpha": 1
           },
-          "$description": "prototypes/android/style.css：原生静态回退，非动态取色；userBubble"
+          "$description": "旧 Android HTML 原型 style.css（#9030 已删除）：原生静态回退，非动态取色；userBubble"
         },
         "userBubbleText": {
           "$type": "color",
@@ -1884,7 +1884,7 @@
             ],
             "alpha": 1
           },
-          "$description": "prototypes/android/style.css：原生静态回退，非动态取色；userBubbleText"
+          "$description": "旧 Android HTML 原型 style.css（#9030 已删除）：原生静态回退，非动态取色；userBubbleText"
         },
         "pageBackground": {
           "$type": "color",
@@ -1897,7 +1897,7 @@
             ],
             "alpha": 1
           },
-          "$description": "prototypes/android/style.css：原生静态回退，非动态取色；pageBackground"
+          "$description": "旧 Android HTML 原型 style.css（#9030 已删除）：原生静态回退，非动态取色；pageBackground"
         },
         "card": {
           "$type": "color",
@@ -1910,7 +1910,7 @@
             ],
             "alpha": 1
           },
-          "$description": "prototypes/android/style.css：原生静态回退，非动态取色；card"
+          "$description": "旧 Android HTML 原型 style.css（#9030 已删除）：原生静态回退，非动态取色；card"
         },
         "onAccent": {
           "$type": "color",

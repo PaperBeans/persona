@@ -120,19 +120,22 @@ func TestTaskStateDiscardsDraftWhenRunCannotBeRegistered(t *testing.T) {
 	}
 	node := newFakeHub().withMachine()
 	s := newServiceOn(t, node, store)
-	store.failReads(true)
 	task.stateRunKey = s.openTaskStateDraft()
-	node.setItems(proto.Item{Role: "user", Kind: proto.KindText, Text: taskStatePrompt(task)})
+	// The state instructions belong to the dispatched scheduled prompt, not a separate injected notice.
+	now := time.Now().UTC()
+	node.setItems(proto.Item{Role: "user", Kind: proto.KindText, Text: taskPrompt(task, now, now, time.UTC, false, false, false)})
 	args, _ := json.Marshal(map[string]string{"run_key": task.stateRunKey, "text": "new cursor"})
 	result, err := s.toolScheduleStateSet(ctx, "server", "scheduled", args)
 	if err != nil || !strings.Contains(result, "not yet saved") {
 		t.Fatalf("staging an already dispatched turn: %q, %v", result, err)
 	}
+	// Fail registration after the dispatched turn has staged its state.
+	store.failReads(true)
 	s.startScheduledRun(ScheduleRun{RefID: task.ID, MachineID: "server", SessionID: "scheduled"}, task, &Device{ID: "server"})
+	store.failReads(false)
 	if _, err := s.toolScheduleStateSet(ctx, "server", "scheduled", args); err == nil || !strings.Contains(err.Error(), "no longer accepting state") {
 		t.Fatalf("the unregistered run still accepts state: %v", err)
 	}
-	store.failReads(false)
 	tasks, runs := scheduleState(s)
 	if len(runs) != 0 || len(tasks) != 1 || tasks[0].StateNote == nil ||
 		tasks[0].StateNote.Text != "previous cursor" || tasks[0].StateNote.Revision != 1 {

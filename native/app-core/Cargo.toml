@@ -18,6 +18,7 @@ persona-core-runtime = { path = "crates/persona-core-runtime" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 bincode = "1.3"
+unicode-segmentation = "1"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

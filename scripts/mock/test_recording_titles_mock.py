@@ -46,6 +46,27 @@ class RecordingTitlesMockTests(Hub, unittest.TestCase):
         self.assertNotIn("name", out)
         self.call("POST", "/mock/recording_titles", {"on": True})
 
+    def test_web_rename(self):
+        rid = str(uuid.uuid4())
+        p = f"/api/v1/recordings/{rid}/title"
+        self.assertEqual(self.call("PUT", p, {"title": "x"})[1]["code"], "recording_not_found")
+        rev = int(time.time() * 1000)
+        self.upload(rid, revision=rev, title="Design review")
+        for bad in ({"title": None}, {"title": "two\nlines"}, {"title": "长" * 201}, {}):
+            self.assertEqual(self.call("PUT", p, bad)[0], 400, bad)
+        self.assertEqual(self.call("PUT", p, {"title": " Export cap "})[1], {"name": "Export cap", "name_source": "renamed"})
+        rows = {r["id"]: r for r in self.call("GET", "/api/v1/recordings")[1]["recordings"]}
+        self.assertEqual(rows[rid]["name_source"], "renamed")
+        self.assertEqual(self.call("GET", "/api/v1/kb/recordings/" + rid)[1]["detail"]["meta"]["renamed"], "Export cap")
+        # The phone's title as it was keeps it; a new one takes it back.
+        self.assertEqual(self.upload(rid, revision=rev + 1, title="Design review")[1]["name"], "Export cap")
+        out = self.upload(rid, revision=rev + 2, title="Release date")[1]
+        self.assertEqual((out["name"], out["name_source"]), ("Release date", "title"))
+        self.call("PUT", p, {"title": "Export cap"})
+        self.assertEqual(self.call("PUT", p, {"title": ""})[1]["name"], "Release date")
+        self.call("DELETE", f"/api/v1/recordings/{rid}")
+        self.assertEqual(self.call("PUT", p, {"title": "x"})[1]["code"], "recording_deleted")
+
 
 if __name__ == "__main__":
     unittest.main()

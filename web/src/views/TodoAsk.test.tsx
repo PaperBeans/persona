@@ -120,6 +120,16 @@ describe("a to-do's row", () => {
     expect(toast).toHaveBeenCalledWith("已按推荐来", "ok");
   });
 
+  it("settles a recorded decision whose Agent is unavailable", async () => {
+    listed = [todo()]; // keep the settled row visible after refresh
+    api.mockImplementation(async (path: string) => path.endsWith("/accept") ? { ok: true, delivered: "none" } : path === "/todos" ? { todos: listed } : {});
+    await drawList([todo()]);
+    act(() => askButton()!.click());
+    await flush();
+    expect(host.querySelector("[data-ask-done=recorded]")?.textContent).toBe("已记下，Agent 已停，督办会接手");
+    expect(toast).toHaveBeenCalledWith("已记下，Agent 已停，督办会接手", "ok");
+  });
+
   it("an earlier round already answered says so and reads the to-dos again", async () => {
     listed = [todo()]; // the hub still lists it until the read comes back
     api.mockImplementation(async (path: string) => {

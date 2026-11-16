@@ -279,14 +279,18 @@ nonisolated struct MachineScreenVideo: Codable, Hashable, Sendable {
     /// The node has asked macOS for this helper version's grant (once), so Persona Screen is in System Settings' list;
     /// false while macOS's alert is still to come.
     var asked = false
+    /// The ffmpeg with libx264 the user installed on the Mac, as its node found and tested it ("ffmpeg 9.0.2", #8859):
+    /// x264 can be turned on for the Mac's live screen. Nil: none, or an older node.
+    var x264: String? = nil
 
-    enum CodingKeys: String, CodingKey { case version, codecs, permission, asked }
+    enum CodingKeys: String, CodingKey { case version, codecs, permission, asked, x264 }
 
-    init(version: Int = 0, codecs: [String] = [], permission: String? = nil, asked: Bool = false) {
+    init(version: Int = 0, codecs: [String] = [], permission: String? = nil, asked: Bool = false, x264: String? = nil) {
         self.version = version
         self.codecs = codecs
         self.permission = permission
         self.asked = asked
+        self.x264 = x264
     }
 
     init(from decoder: Decoder) throws {
@@ -295,6 +299,7 @@ nonisolated struct MachineScreenVideo: Codable, Hashable, Sendable {
         codecs = (try? c.decodeIfPresent([String].self, forKey: .codecs)) ?? []
         permission = try c.decodeIfPresent(String.self, forKey: .permission)
         asked = (try? c.decodeIfPresent(Bool.self, forKey: .asked)) ?? false
+        x264 = (try? c.decodeIfPresent(String.self, forKey: .x264)) ?? nil
     }
 
     /// The node offers the video channel at all: the Picture / Quality switcher appears only then (#3954).
@@ -355,6 +360,8 @@ nonisolated struct MachineComputer: Codable, Hashable, Sendable {
     var screenSharing = false
     /// 「扩展开着时不自动锁屏」 is on for it (#1507 b2).
     var noAutoLock = false
+    /// x264 is on for its live screen (#8859; the plugin's screen_x264): its own ffmpeg encodes on a direct LAN route.
+    var screenX264 = false
     /// cua or lcu. Nil from a hub that only knows Cua Driver.
     var backend: String? = nil
     /// The official ChatGPT desktop app is installed (LCU's runtime).
@@ -369,7 +376,7 @@ nonisolated struct MachineComputer: Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case enabled, installed, version, daemon, accessibility, desktop, ready, note, job, backend, chatgpt, displays
         case screenRecording = "screen_recording", screenSharing = "screen_sharing", noAutoLock = "no_auto_lock", screenVideo = "screen_video"
-        case screenInput = "screen_input"
+        case screenInput = "screen_input", screenX264 = "screen_x264"
     }
 
     init(enabled: Bool = false, installed: Bool = false, version: String? = nil, daemon: Bool = false, accessibility: String? = nil,
@@ -403,6 +410,7 @@ nonisolated struct MachineComputer: Codable, Hashable, Sendable {
         job = try? c.decodeIfPresent(ComputerJob.self, forKey: .job)
         screenSharing = try c.decodeIfPresent(Bool.self, forKey: .screenSharing) ?? false
         noAutoLock = try c.decodeIfPresent(Bool.self, forKey: .noAutoLock) ?? false
+        screenX264 = (try? c.decodeIfPresent(Bool.self, forKey: .screenX264)) ?? false
         backend = try c.decodeIfPresent(String.self, forKey: .backend)
         chatgpt = try c.decodeIfPresent(Bool.self, forKey: .chatgpt) ?? false
         // An unreadable list only costs the display choice, not the machine.
@@ -653,7 +661,14 @@ extension Launcher {
     /// use (headless `claude -p`, `codex app-server`, the runtime). Other agents (TRAEX…) are left out; the node
     /// refuses them with a reason too.
     var runsAssistant: Bool {
-        assistant == true || (baseURL != "(traex)" && (agent == nil || agent == "" || agent == "claude" || agent == "codex"))
+        if let assistant { return assistant }
+        guard baseURL != "(traex)" else { return false }
+        // Older hubs can ignore purpose=assistant. A runtime's provider is not a shell command, and managed Codex
+        // launchers cannot start the assistant's app-server. Keep the shell fallback for hubs without capabilities.
+        let managed = source == "persona" || source == LegacyNames.product
+        let machine = source == nil || source == "" || source == "zshrc" || source == "path" || source == "builtin"
+        guard machine || managed, !(managed && agent == "codex") else { return false }
+        return agent == nil || agent == "" || agent == "claude" || agent == "codex" || agent == "agy"
     }
 }
 

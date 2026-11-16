@@ -170,6 +170,7 @@ class HubWays(
     suspend fun open(tunnel: HubTunnel): String {
         val key = tunnel.key
         val task = synchronized(lock) {
+            blocked[key]?.let { (way, problem) -> if (way.sameWay(tunnel)) throw TunnelException(problem) else blocked.remove(key) }
             val pending = starting[key]
             if (pending != null && pending.epoch == epochs[key] && pending.tunnel.sameWay(tunnel)) pending.task
             else {
@@ -235,6 +236,16 @@ class HubWays(
             val detail = error.message ?: error.javaClass.simpleName
             val problem = (error as? TunnelException)?.problem
                 ?: if (tunnel.ssh != null) TunnelProblem.SshUnreachable(detail) else TunnelProblem.ProxyUnreachable(detail)
+            // A changed key must block every concurrent retry, not just opens which arrive after this coroutine finishes.
+            // Publish it before removing the pending start or closing its session, so no caller can redial in that window.
+            if (problem.needsUser) {
+                synchronized(lock) {
+                    if ((epochs[key] ?: 0) == epoch) {
+                        blocked[key] = tunnel to problem
+                        setState(key, TunnelState.Down(problem))
+                    }
+                }
+            }
             val stale = synchronized(lock) {
                 val handle = made
                 if (handle != null && running[key] === handle) running.remove(key)

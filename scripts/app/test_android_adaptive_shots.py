@@ -28,6 +28,7 @@ class FakeAdb:
         self.ui_failures = 0
         self.png_frames = []
         self.ui_text = ""
+        self.probe_text = ""
         self.window = {
             "widthDp": 600, "heightDp": 480, "widthPx": 1200, "heightPx": 960,
             "densityDpi": 320, "orientation": "landscape", "taskId": 42, "bounds": (0, 0, 1200, 960),
@@ -67,6 +68,8 @@ class FakeAdb:
             return '<hierarchy><node resource-id="field" text="%s" content-desc="" class="EditText" bounds="[0,0][10,10]" focused="true" /></hierarchy>' % self.ui_text
         if arguments[:2] == ("cat", "/proc/uptime"):
             return "100.00 100.00\n"
+        if arguments == ("run-as", APP_ID, "cat", shots.PROBE_PATH):
+            return self.probe_text
         if arguments[:2] == ("run-as", APP_ID) and "cat" in arguments and any(arg.endswith("shell-position.json") for arg in arguments):
             return '{"tab":"Agents","chats":{"Agents":{"machineId":"machine","sessionId":"session"}}}'
         if arguments[:2] == ("run-as", APP_ID) and "shell-position.json" in arguments:
@@ -90,7 +93,62 @@ def make_runner(adb, output, document=None, reset=False):
         return shots.AdaptiveRunner(adb, document or scenario(), output, "light", reset=reset)
 
 
+def composer_probe():
+    return {"fieldVersion": 1, "session": "test-session", "pid": 42, "updatedAtNanos": 100_000_000_000,
+            "pages": {"chat:machine/session": {"updatedAtNanos": 100_000_000_000,
+                                               "composer": {"draftLoaded": True}}}}
+
+
 class AdaptiveShotsTest(unittest.TestCase):
+    def test_embedded_assistant_waits_for_its_live_composer_without_a_root_chat(self):
+        adb = FakeAdb()
+        adb.probe_text = json.dumps(composer_probe())
+        with tempfile.TemporaryDirectory() as output:
+            runner = make_runner(adb, output)
+            runner.read_navigation = mock.Mock(return_value=("Persona", None))
+            runner.wait_ready({"session": "machine/session", "conversationKind": "assistant", "timeout": 0.01})
+            runner.read_navigation.assert_not_called()
+            self.assertIn(["run-as", APP_ID, "cat", shots.PROBE_PATH], adb.commands)
+
+    def test_embedded_assistant_keeps_live_chat_identity_and_draft_guards(self):
+        for failure in ("wrong-chat", "missing-composer", "unloaded", "wrong-pid", "stale", "stale-page"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as output:
+                probe = composer_probe()
+                page = probe["pages"]["chat:machine/session"]
+                if failure == "wrong-chat":
+                    probe["pages"] = {"chat:other/session": page}
+                elif failure == "missing-composer":
+                    del page["composer"]
+                elif failure == "unloaded":
+                    page["composer"]["draftLoaded"] = False
+                elif failure == "wrong-pid":
+                    probe["pid"] = 43
+                elif failure == "stale":
+                    probe["updatedAtNanos"] = 0
+                else:
+                    page["updatedAtNanos"] = 0
+                adb = FakeAdb()
+                adb.probe_text = json.dumps(probe)
+                runner = make_runner(adb, output)
+                runner.read_navigation = mock.Mock(return_value=("Persona", None))
+                with self.assertRaisesRegex(shots.AdaptiveFailure, "composer draft"):
+                    runner.wait_ready({"session": "machine/session", "conversationKind": "assistant", "timeout": 0.01})
+
+    def test_agent_keeps_its_root_chat_gate_before_reading_the_composer(self):
+        for kind in (None, "agent"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as output:
+                adb = FakeAdb()
+                adb.probe_text = json.dumps(composer_probe())
+                runner = make_runner(adb, output)
+                runner.read_navigation = mock.Mock(return_value=("Persona", None))
+                step = {"session": "machine/session", "timeout": 0.01}
+                if kind is not None:
+                    step["conversationKind"] = kind
+                with self.assertRaisesRegex(shots.AdaptiveFailure, "selected session"):
+                    runner.wait_ready(step)
+                runner.read_navigation.assert_called()
+                self.assertNotIn(["run-as", APP_ID, "cat", shots.PROBE_PATH], adb.commands)
+
     def test_navigation_reads_default_and_explicit_tabs(self):
         chat = {"machineId": "machine", "sessionId": "session"}
         cases = [

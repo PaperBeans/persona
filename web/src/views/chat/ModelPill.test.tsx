@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
 import type { PanelProvider } from "../../lib/model-panel";
 import { requestModelPicker } from "../../lib/model-switch";
+import { setToken } from "../../lib/api";
+import { resetManagerChoice, setRosterDefault } from "../../lib/manager-choice";
 import { getSession, getState, upsertSession } from "../../lib/store";
 import type { Session } from "../../lib/types";
 import type { ModelPanelProps } from "../../ui/model-panel/ModelPanel";
@@ -211,6 +213,7 @@ const agent = (x: Partial<Session> = {}): Session =>
   ({ machine_id: `mac-${machine}`, session_id: "s1", title: "整理发布说明", cwd: "/code", status: "idle", state: "idle", agent: "claude", launcher: "gateway", model: "claude-opus-5-5", effort: "high", pane_id: "p1", ...x }) as Session;
 
 beforeEach(() => {
+  resetManagerChoice();
   machine++;
   panel.props = null;
   toast.mockClear();
@@ -241,6 +244,8 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   vi.unstubAllGlobals();
+  resetManagerChoice();
+  setToken("");
 });
 
 async function show(s: Session) {
@@ -258,6 +263,21 @@ const modes = () => calls.filter((c) => c.url.endsWith("/modes")).map((c) => c.b
 const provider = (id: string) => panel.props!.providers.find((p: PanelProvider) => p.id === id)!;
 
 describe("an Agent's pill", () => {
+  it("reloads when the default manager becomes known or the credential owner changes", async () => {
+    await show(agent());
+    expect(calls.filter((c) => c.url.includes("/models"))).toHaveLength(1);
+    listAnswer = () => json({ agent: "claude", models: [{ id: "opus", resolved: "claude-opus-5-5", name: "Default manager model" }] });
+    await act(async () => setRosterDefault("known-default"));
+    await flush();
+    expect(calls.filter((c) => c.url.includes("/models"))).toHaveLength(2);
+    expect(pill()!.textContent).toContain("Default manager model");
+    listAnswer = () => json({ agent: "claude", models: [{ id: "opus", resolved: "claude-opus-5-5", name: "Replacement owner model" }] });
+    await act(async () => setToken("replacement-review-owner"));
+    await flush();
+    expect(calls.filter((c) => c.url.includes("/models"))).toHaveLength(3);
+    expect(pill()!.textContent).toContain("Replacement owner model");
+  });
+
   it("reads its own list once for the model's name, and opens the panel with the computer's launchers", async () => {
     await show(agent());
     expect(pill()!.textContent).toContain("Opus 5.5");

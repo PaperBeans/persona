@@ -680,20 +680,20 @@ export async function retryTask(todo: Todo) {
  *  of the fixed responses that say the owner cannot answer it as asked. */
 export type AskAnswer = { option: string } | { response: string };
 
-/** The Accept button of a `brief` item's task to verify: "accepted", or "handled" when the hub says that round is over
- *  (asked again since, or already verified: 409 with no code of its own). Any other failure throws, since nothing was
- *  taken: the Agent's node refusing it (dialog_open: a dialog has its terminal, #7343) is 423 with that code, or a 409
- *  with it from a hub built between the two.
+/** The Accept button of a `brief` item's task to verify: "accepted" when the hub took it, "recorded" when no Agent could
+ *  receive the decision and the supervisor has it, or "handled" when that round is already over (409). Any other failure
+ *  throws, since nothing was taken: the Agent's node refusing it (dialog_open: a dialog has its terminal, #7343) is 423
+ *  with that code, or a 409 with it from a hub built between the two.
  *  `answer`: a decision's option or fixed response instead of its recommendation. */
-export async function acceptBrief(todoId: string, askedAt: string, answer?: AskAnswer): Promise<"accepted" | "handled"> {
+export async function acceptBrief(todoId: string, askedAt: string, answer?: AskAnswer): Promise<"accepted" | "recorded" | "handled"> {
   try {
-    await api(`/todos/${enc(todoId)}/accept`, { method: "POST", json: { asked_at: askedAt, ...answer } });
+    const res = await api<{ delivered?: string }>(`/todos/${enc(todoId)}/accept`, { method: "POST", json: { asked_at: askedAt, ...answer } });
+    void refreshTodos();
+    return res.delivered === "none" ? "recorded" : "accepted";
   } catch (e) {
     if (e instanceof ApiError && e.status === 409 && (!e.code || e.code === "conflict")) return "handled";
     throw e;
   }
-  void refreshTodos();
-  return "accepted";
 }
 
 /** The Handled button of a question in a `brief` item's `later` list: "marked", or "handled" when the hub says it is not in

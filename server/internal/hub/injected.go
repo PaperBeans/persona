@@ -53,8 +53,8 @@ func (h *Hub) taskByTitle(title string) string {
 }
 
 // injectedLine is the one line the apps show for an injected message, in l (docs/protocol/i18n.md). The message itself stays as
-// the model read it (Chinese: prompts.ParseInjected reads it back); only the line is the user's language. zh-Hans is
-// what ParseInjected wrote.
+// the model read it; localized wakes carry a structured marker and legacy messages retain their template fallback.
+// The line follows the viewer's language. ParseInjected supplies the canonical zh-Hans line.
 func injectedLine(l i18n.Lang, in *proto.Injected) string {
 	if l == i18n.ZhHans {
 		return in.Line

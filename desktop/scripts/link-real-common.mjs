@@ -2,28 +2,32 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
-import { dirname, relative, resolve, sep } from "node:path";
+import { dirname, posix, win32 } from "node:path";
 
 export const PAIR_INPUT = "persona://link?";
 export const SERVICE_SENTINEL = "real Link smoke: systemctl access is unavailable";
 
+const receiptPath = value => /^(?:[a-z]:[\\/]|\\\\)/i.test(value) ? win32 : posix;
+
 /** Classify lexical path identity only; this never authorizes recursive deletion through symlinks. */
 export function classifyOwnedPath(run, candidate) {
-  if (typeof run !== "string" || !run.startsWith(sep) || typeof candidate !== "string" || !candidate.startsWith(sep)) return "outside";
-  const descendant = relative(resolve(run), resolve(candidate));
+  if (typeof run !== "string" || typeof candidate !== "string") return "outside";
+  const paths = receiptPath(run);
+  if (!paths.isAbsolute(run) || !paths.isAbsolute(candidate)) return "outside";
+  const descendant = paths.relative(paths.resolve(run), paths.resolve(candidate));
   if (descendant === "") return "root";
-  if (descendant === ".." || descendant.startsWith(`..${sep}`) || descendant.startsWith(sep)) return "outside";
+  if (descendant === ".." || descendant.startsWith(`..${paths.sep}`) || paths.isAbsolute(descendant)) return "outside";
   return "descendant";
 }
 
 /** Map only the run root and its descendants. Siblings and string prefixes are private, not owned paths. */
 export function redactPaths(run, paths = []) {
-  const root = resolve(run);
-  const unique = [...new Set([root, ...paths.filter(Boolean).map(path => resolve(path)), homedir()])]
+  const root = receiptPath(run).resolve(run);
+  const unique = [...new Set([root, ...paths.filter(Boolean).map(path => receiptPath(path).resolve(path)), homedir()])]
     .sort((a, b) => b.length - a.length || a.localeCompare(b));
   return unique.map(path => {
     const kind = classifyOwnedPath(root, path);
-    const descendant = relative(root, path);
+    const descendant = receiptPath(root).relative(root, path).split(receiptPath(root).sep).join("/");
     const replacement = kind === "root" ? "<run>" : kind === "descendant" ? `<run>/${descendant}` : "<path>";
     return { path, replacement };
   });
@@ -33,20 +37,24 @@ function redactPathString(text, run, paths) {
   const mappings = redactPaths(run, paths);
   let output = "";
   for (let start = 0; start < text.length;) {
-    const match = /^\/(?:[^\s"'`;,:)}\]]+\/?)+/.exec(text.slice(start));
+    const rest = text.slice(start);
+    const match = /^(?:[a-z]:[\\/]|\\\\|\/)[^\r\n"'`;,:)}\]]*/i.exec(rest);
     if (!match) { output += text[start++]; continue; }
-    const raw = match[0].replace(/\/+$/, "");
-    if (!raw) { output += match[0]; start += match[0].length; continue; }
-    const candidates = mappings.filter(({ path }) => raw === path || raw.startsWith(`${path}/`)).sort((a, b) => b.path.length - a.path.length);
+    // Spaces can belong to a path. Keep the whole field unless another absolute path starts;
+    // unknown paths may redact extra words, but must not expose a private suffix after a space.
+    const nextPath = /\s+(?=(?:[\w.-]+=)?(?:[a-z]:[\\/]|\\\\|\/))/i.exec(rest);
+    const raw = rest.slice(0, Math.min(match[0].length, nextPath?.index ?? rest.length)).trimEnd();
+    if (raw === "/") { output += raw; start += raw.length; continue; }
+    const candidates = mappings.filter(({ path }) => classifyOwnedPath(path, raw) !== "outside").sort((a, b) => b.path.length - a.path.length);
     if (candidates.length) {
       const { path, replacement } = candidates[0];
-      const descendant = raw.slice(path.length);
-      output += replacement === "<path>" && descendant ? "<path>" : `${replacement}${descendant}`;
+      const descendant = receiptPath(path).relative(path, raw).split(receiptPath(path).sep).join("/");
+      output += replacement === "<path>" && descendant ? "<path>" : `${replacement}${descendant ? `/${descendant}` : ""}`;
     } else {
       const kind = classifyOwnedPath(run, raw);
-      output += kind === "root" ? "<run>" : kind === "descendant" ? `<run>/${relative(run, raw)}` : "<path>";
+      output += kind === "root" ? "<run>" : kind === "descendant" ? `<run>/${receiptPath(run).relative(run, raw).split(receiptPath(run).sep).join("/")}` : "<path>";
     }
-    start += match[0].length;
+    start += raw.length;
   }
   return output;
 }
@@ -291,8 +299,7 @@ export function runCaptured(executable, args, options = {}) {
       if (settled) return;
       settled = true;
       for (const timer of [terminateTimer, killTimer, closeTimer]) clearTimeout(timer);
-      let group = { groupEmpty: false, error: "group observation not completed" };
-      if (platform() === "linux") group = await observeOwnedGroup(child, closeGrace);
+      const group = await observeOwnedGroup(child, closeGrace);
       const groupError = group.error ?? (group.groupEmpty ? undefined : "owned process group was not observed empty");
       escalationError = [escalationError, groupError].filter(Boolean).join("; ") || undefined;
       resolve({ executable, args: [...args], pid: child.pid, code, signal, error, spawnError, stdinError, timedOut, closeTimedOut, escalationError, closed: !closeTimedOut, groupEmpty: group.groupEmpty === true, group: { groupEmpty: group.groupEmpty === true, remaining: group.remaining, error: group.error }, stdout, stderr, startedAt, endedAt: new Date().toISOString() });

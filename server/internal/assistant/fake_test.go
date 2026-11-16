@@ -85,6 +85,7 @@ type fakeHub struct {
 	larkCLI       bool
 	slowSnapshots time.Duration // the connectors' live states come this late (nothing: there are none)
 	liveStates    []any         // the connectors' live states (connectors.snapshots), when they come at once
+	liveDelay     time.Duration // liveStates come this late instead (the ask's deadline still holds)
 	snapshotAsks  int           // connectors.snapshots calls
 	hungChannel   string        // the channel whose program never answers a send (hangChannel)
 	replies       []string      // the model's answers, in turn (the last one again when they run out)
@@ -648,8 +649,15 @@ func (f *fakeHub) AppCall(ctx context.Context, p AppCall) (json.RawMessage, erro
 	if p.AppID == AppConnectors && p.Method == ConnectorsSnapshots {
 		f.mu.Lock()
 		f.snapshotAsks++
-		slow, live := f.slowSnapshots, f.liveStates
+		slow, live, delay := f.slowSnapshots, f.liveStates, f.liveDelay
 		f.mu.Unlock()
+		if slow == 0 && delay > 0 {
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
 		if slow == 0 {
 			if live == nil {
 				live = []any{}

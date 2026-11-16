@@ -25,14 +25,14 @@ and `PersonaShortcuts.updateAppShortcutParameters()`, so Spotlight can find sess
 - Give an Agent a Task: "用 Persona 让 Agent 去做" (Have Persona give an Agent a task), "让 Persona 的 <会话名> 去做" (Have Persona's <session name> do it), "Persona 交给 Agent" (Persona, hand it to an Agent), "Have Persona agent do something", "Send a task to <session name> with Persona"
 - Personal Agent Unread: "Persona 个人 Agent 未读" (Persona personal Agent unread), "Persona Agent 有什么新消息" (What's new from Persona Agents), "Check Persona agents"
 - New To-Do: "用 Persona 新建待办" (Create a to-do with Persona), "Persona 记个待办" (Persona, note a to-do), "Persona 加个待办" (Persona, add a to-do), "Add a to-do in Persona", "New Persona to-do" → Siri then asks "What's the to-do?"; notes can only be entered in the Shortcuts App.
-- Record: "用 Persona 录音" (Record with Persona), "用 Persona 录会议" (Record a meeting with Persona), "用 Persona 录下这个会" (Record this meeting with Persona), "在 Persona 开始录音" (Start recording in Persona), "Persona 录会议" (Persona, record the meeting). Every one records a meeting (`docs/apple/recording.md`, "Meeting recordings"). The tenth App Shortcut: Apple allows ten, so the list is full.
+- Start Meeting (Record until #8731): "用 Persona 开会" (Start a meeting with Persona), "Persona 开始会议" (Persona, start a meeting), and the earlier "用 Persona 录音" (Record with Persona), "用 Persona 录会议" (Record a meeting with Persona), "用 Persona 录下这个会" (Record this meeting with Persona), "在 Persona 开始录音" (Start recording in Persona), "Persona 录会议" (Persona, record the meeting). Every one records a meeting (`docs/apple/recording.md`, "Meeting recordings"). The tenth App Shortcut: Apple allows ten, so the list is full.
 - The existing Ask Claude / status actions each gain an English phrase.
 
 `String` parameters cannot appear in phrases (see `docs/apple/intents.md`), so Siri asks for the question / task contents after the invocation phrase.
 
 ## Action Button and Control Center
 
-- Action Button: **Settings › Action Button › Shortcut**; select "Ask Persona", "Give an Agent a Task", "New To-Do" or "Record" directly (App Shortcuts appear automatically), or **Controls** › Record.
+- Action Button: **Settings › Action Button › Shortcut**; select "Ask Persona", "Give an Agent a Task", "New To-Do" or "Start Meeting" directly (App Shortcuts appear automatically), or **Controls** › Record.
 - Control Center / Lock Screen: the `PersonaWidgets` extension adds `ControlWidget`s: `AskPersonaControl`, `PersonaAgentsControl` open the App's assistant page / Agents page;
   `MeetingRecordingControl` (kind `persona.control.meeting-recording`) starts a meeting recording without opening the App.
   Their intents live in `LiveActivity/PersonaControlIntents.swift` and `LiveActivity/RecordingIntents.swift` (compiled into both App and extension; `perform` runs only in the App).

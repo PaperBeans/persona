@@ -41,33 +41,38 @@ func (s *Service) botCardAction(ctx context.Context, a *feishubot.CardAction, ac
 		return s.answerFromCard(ctx, a, action)
 	case "accept":
 		// The hub checked the owner pressed it; marking a task verified approves nothing.
-		ok, err := false, error(nil)
+		var result acceptResult
+		var err error
 		ask, _ := s.askCopy(a.Str("id"))
 		if resp := a.Str("resp"); resp != "" { // "I can't answer this": to its supervisor, nothing taken (decision.go)
 			if s.askCardNow(a.Str("id"), a.Context.MessageID) {
-				ok, err = s.ownerCannotAnswer(ctx, a.Str("id"), "", resp)
+				result.taken, err = s.ownerCannotAnswer(ctx, a.Str("id"), "", resp)
 			}
 			ask.Response = resp
 		} else if opt := a.Str("opt"); opt != "" { // an option of the decision other than the recommended one
 			if s.askCardNow(a.Str("id"), a.Context.MessageID) {
-				ok, err = s.chooseOption(ctx, a.Str("id"), "", opt)
+				result, err = s.chooseOption(ctx, a.Str("id"), "", opt)
 			}
 			ask.Chosen = opt
 			if opt == ask.Recommend {
 				ask.Chosen = "" // the recommended one: taken as OK takes it
 			}
 		} else if at := a.Str("asked_at"); at != "" { // a button of a briefing card: it accepts the round it was asked in (briefing.go)
-			ok, err = s.acceptTryFromBrief(ctx, a.Str("id"), at)
+			result, err = s.acceptTryFromBrief(ctx, a.Str("id"), at)
 		} else {
-			ok, err = s.acceptTry(ctx, a.Str("id"), a.Context.MessageID)
+			result, err = s.acceptTry(ctx, a.Str("id"), a.Context.MessageID)
 		}
 		if errors.Is(err, errAcceptStore) { // the asks could not be read or saved: not accepted, the button works again
 			return toast("error", i18n.T(l, "http-status.unavailable"))
 		}
-		if err != nil { // a recommendation that did not reach the agent: not taken, nothing recorded, the button works again
+		if err != nil { // another delivery failure: not taken, nothing recorded, the button works again
 			return toast("error", i18n.T(l, "assistant-reports.accept_not_taken", i18n.Args{"error": clip(oneLine(i18n.Localize(err, l)), 120)}))
 		}
-		if ok {
+		if result.undelivered != nil {
+			why := clip(oneLine(i18n.Localize(result.undelivered, l)), 120)
+			return toast("success", i18n.T(l, "assistant-reports.accept_decided_not_sent", i18n.Args{"error": why}))
+		}
+		if result.taken {
 			return toast("success", acceptedNote(l, &ask)) // "verified", "got it", or the recommendation taken (conclusion.go)
 		}
 		return toast("info", i18n.T(l, "assistant-feishu_cards.already_handled"))

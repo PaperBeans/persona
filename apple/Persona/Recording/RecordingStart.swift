@@ -1,7 +1,23 @@
 #if os(iOS)
 import SwiftUI
 
-/// What one tap of Record starts on the Recordings page (`RecordingCaptureControls`).
+/// The iPhone's words for its meetings (#8731, D5): the place is Meetings, a start says Start Meeting (Start Note for a
+/// note), and while one runs its way in says what runs. The watch keeps Record for now.
+enum MeetingWords {
+    static var place: String { String(localized: "Meetings") }
+    static var start: String { String(localized: "Start Meeting") }
+    static func start(_ kind: RecordingKindChoice) -> String { kind == .note ? String(localized: "Start Note") : start }
+
+    /// While something records: In a Meeting… Open for a meeting, Recording… Open for a note; nil when nothing does.
+    @MainActor static var running: String? {
+        let capture = RecordingCapture.shared
+        guard capture.state != .idle else { return nil }
+        let meeting = capture.recordingID.flatMap(RecordingLibrary.shared.entry)?.isMeeting ?? true
+        return meeting ? String(localized: "In a Meeting… Open") : String(localized: "Recording… Open")
+    }
+}
+
+/// What one tap of Start Meeting starts on the Meetings page (`RecordingCaptureControls`).
 enum RecordingStart: Equatable {
     /// `MeetingRecorder.startMeeting` with Persona's part; nil when the hub doesn't offer attending (the one-tap default).
     case meeting(RecordingAttendance?)

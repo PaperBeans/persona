@@ -329,7 +329,11 @@ func (s *Service) launcherRoutes() {
 			return
 		}
 		var res proto.LauncherCheck
-		if err := s.call(ctx, machine, assistantwire.DeviceLaunchersCheck, map[string]any{"name": r.PathValue("name")}, &res); err != nil {
+		params := map[string]any{"name": r.PathValue("name")}
+		if r.URL.Query().Get("purpose") == "assistant" {
+			params["purpose"] = "assistant"
+		}
+		if err := s.call(ctx, machine, assistantwire.DeviceLaunchersCheck, params, &res); err != nil {
 			apierr.Call(w, err)
 			return
 		}
@@ -517,7 +521,7 @@ func (s *Service) machineLauncherRoutes() {
 		apierr.WriteJSON(w, out)
 	})
 	s.handle("GET /api/v1/machines/{mid}/launchers/{name}/models", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 70*time.Second)
+		ctx, cancel := context.WithTimeout(withLauncherPurpose(r.Context(), r.URL.Query().Get("purpose")), 70*time.Second)
 		defer cancel()
 		mid := r.PathValue("mid")
 		if _, ok := s.device(ctx, mid); !ok {

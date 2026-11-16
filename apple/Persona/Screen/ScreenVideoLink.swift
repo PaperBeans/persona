@@ -128,6 +128,13 @@ import UIKit
     private(set) var reading = ScreenVideoReading()
     private(set) var codec: String?
     private(set) var size: CGSize?
+    /// "x264" while the user's own ffmpeg encodes the stream (#8859, `hello.encoder`); nil for the Mac's built-in encoder.
+    private(set) var encoder: String?
+    /// Why x264, on for that Mac, doesn't encode now, in plain words (`hello.fallback`); nil when it isn't on.
+    private(set) var encoderNote: String?
+    /// The route `start` named (#8859); nil when the stream opened before its route was known, so the route's first
+    /// reading goes to the helper as an `update` (x264 runs only on a direct LAN route).
+    private var startedOn: UpdateMessage.Path?
     /// The helper said it has quality tiers (#6396, `hello.features`): only then does ⋯ › Quality do anything, so only
     /// then is it offered. Kept once heard, for this session.
     private(set) var tiers = false
@@ -226,7 +233,7 @@ import UIKit
     func routeChanged(_ change: PathChange) {
         route = change
         link = change.to
-        if change.reason != .start { stream?.send(UpdateMessage(path: .init(change.to))) }
+        if change.reason != .start || startedOn == nil { stream?.send(UpdateMessage(path: .init(change.to))) }
         stream?.tierPath(change) // the tiers look again (#6396)
         onPathChange(change)
     }
@@ -301,8 +308,10 @@ import UIKit
         opened = target
         rect = target.0.rect
         tally = ScreenVideoTally()
+        // The route it starts on (#8859): the helper uses x264, when on for that Mac, only on a direct LAN route.
+        startedOn = route.map { UpdateMessage.Path($0.to) }
         let start = StartMessage(display: target.0.display, maxSize: Self.maxSize, fps: budget.fps, maxKbps: budget.maxKbps,
-                                 codecs: ["hevc", "h264"])
+                                 codecs: ["hevc", "h264"], path: startedOn)
         let mailbox = mailbox
         // The tiers (#6396), when this app has them: they start once the helper's hello says it has them too.
         let tiers = ScreenTiers.appSupported
@@ -351,6 +360,8 @@ import UIKit
     private func hello(_ h: HelloMessage) {
         codec = h.codec == "h264" ? "H.264" : "HEVC"
         size = CGSize(width: h.width, height: h.height)
+        encoder = h.encoder == "x264" ? "x264" : nil // i18n-ignore: a program's name
+        encoderNote = h.encoder == "x264" ? nil : h.fallback.map(ScreenStats.x264Note)
         if h.features?.contains("tiers") == true {
             tiers = true
             // On mobile data, the picture starts on Data Saver; until the user chooses, ask (twice at most).

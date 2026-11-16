@@ -52,8 +52,8 @@ export function answerLines(ix: Interaction, r: Resolution): AnswerLine[] {
       if (r.approve === true) return [{ label: "", answer: MODE_LABEL[str(r.mode)] ? t("lib-answered.approved_mode", { mode: MODE_LABEL[str(r.mode)] }) : t("lib-answered.approved") }];
       return [{ label: "", answer: str(r.feedback) ? t("lib-answered.rejected_feedback", { feedback: str(r.feedback) }) : t("lib-answered.rejected") }];
     case "permission":
-      if (r.allow === true) return [{ label: "", answer: r.always === true ? t("lib-answered.always_allowed") : t("lib-answered.allowed") }];
-      if (r.allow === false) return [{ label: "", answer: t("lib-answered.denied") }];
+      if (r.allow === true) return [{ label: "", answer: r.always === true ? t("lib-answered.always_allowed") : str(r.edited_text) ? t("lib-answered.allowed_edited") : t("lib-answered.allowed") }];
+      if (r.allow === false) return [{ label: "", answer: str(r.message) && str(r.message) !== t("chat-interactions.denied_message") ? t("lib-answered.denied_reason", { reason: str(r.message) }) : t("lib-answered.denied") }];
       return [{ label: "", answer: t("lib-answered.handled") }];
     case "elicitation":
       return elicitationLines(ix, r);

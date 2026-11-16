@@ -63,28 +63,31 @@ type Interaction struct {
 	Manager string `json:"manager,omitempty"`
 	// Private: a Just me turn raised it (docs/assistant/meeting-minutes.md "Just me"): its push and the Fleet Live
 	// Activity say nothing of what it asks, as a health conversation's card, and it never goes to Lark or a channel.
-	Private         bool            `json:"private,omitempty"`
-	ID              string          `json:"id"`
-	MachineID       string          `json:"machine_id"`
-	SessionID       string          `json:"session_id"`
-	SessionTitle    string          `json:"session_title,omitempty"`
-	TaskTitle       string          `json:"task_title,omitempty"` // the task its agent works for (docs/assistant/unified-entry.md), set when sent to clients
-	Cwd             string          `json:"cwd,omitempty"`
-	Kind            string          `json:"kind"`
-	CreatedAt       time.Time       `json:"created_at"`
-	ExpiresAt       time.Time       `json:"expires_at"`
-	ToolName        string          `json:"tool_name,omitempty"`
-	ToolUseID       string          `json:"tool_use_id,omitempty"`
-	Questions       []Question      `json:"questions,omitempty"`
-	Plan            string          `json:"plan,omitempty"`
-	ToolInput       json.RawMessage `json:"tool_input,omitempty"`
-	Summary         string          `json:"summary,omitempty"`
-	Screen          string          `json:"screen,omitempty"`
-	AgentID         string          `json:"agent_id,omitempty"`
-	AgentType       string          `json:"agent_type,omitempty"`
-	MCPServerName   string          `json:"mcp_server_name,omitempty"`
-	MCPConfigSource string          `json:"mcp_config_source,omitempty"`
-	Elicitation     *Elicitation    `json:"elicitation,omitempty"`
+	Private      bool            `json:"private,omitempty"`
+	ID           string          `json:"id"`
+	MachineID    string          `json:"machine_id"`
+	SessionID    string          `json:"session_id"`
+	SessionTitle string          `json:"session_title,omitempty"`
+	TaskTitle    string          `json:"task_title,omitempty"` // the task its agent works for (docs/assistant/unified-entry.md), set when sent to clients
+	Cwd          string          `json:"cwd,omitempty"`
+	Kind         string          `json:"kind"`
+	CreatedAt    time.Time       `json:"created_at"`
+	ExpiresAt    time.Time       `json:"expires_at"`
+	ToolName     string          `json:"tool_name,omitempty"`
+	ToolUseID    string          `json:"tool_use_id,omitempty"`
+	Questions    []Question      `json:"questions,omitempty"`
+	Plan         string          `json:"plan,omitempty"`
+	ToolInput    json.RawMessage `json:"tool_input,omitempty"`
+	// EditableText is the outgoing body text a Claude Code Lark send/reply approval card may let the user edit before
+	// allowing. It is set only by that command gate; runtimes and other cards cannot declare it.
+	EditableText    string       `json:"editable_text,omitempty"`
+	Summary         string       `json:"summary,omitempty"`
+	Screen          string       `json:"screen,omitempty"`
+	AgentID         string       `json:"agent_id,omitempty"`
+	AgentType       string       `json:"agent_type,omitempty"`
+	MCPServerName   string       `json:"mcp_server_name,omitempty"`
+	MCPConfigSource string       `json:"mcp_config_source,omitempty"`
+	Elicitation     *Elicitation `json:"elicitation,omitempty"`
 	// CanCancel is advertised only by runtimes supporting question-only cancellation.
 	CanCancel bool `json:"can_cancel,omitempty"`
 	// Dialog is the screen's dialog read on the hub (screen interactions); answers name an option and are checked
@@ -202,8 +205,11 @@ type Resolution struct {
 	Allow    *bool             `json:"allow,omitempty"`
 	Always   bool              `json:"always,omitempty"`
 	Message  string            `json:"message,omitempty"`
-	Keys     []string          `json:"keys,omitempty"`
-	Text     string            `json:"text,omitempty"`
+	// EditedText is the replacement body text on a plain Allow of an editable_text card, and nothing else in the
+	// answer: no route, target, recipients, tool or other arguments can be changed from the card.
+	EditedText string   `json:"edited_text,omitempty"`
+	Keys       []string `json:"keys,omitempty"`
+	Text       string   `json:"text,omitempty"`
 	// AnsweredBy is who answered when it was not the user in the app: AnsweredByAssistant for a question the
 	// assistant answered on their behalf (docs/assistant/assistant.md), AnsweredByDefault for recommended options taken
 	// at a deadline. Absent when the user answered.

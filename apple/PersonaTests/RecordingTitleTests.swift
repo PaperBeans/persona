@@ -27,7 +27,7 @@ import PersonaWire
         #expect(entry(hubName: "Export cap").displayTitle == "Export cap")
         #expect(RecordingTitle.source(entry(hubName: "Export cap")) == .hub)
         #expect(entry().displayTitle == String(localized: "Meeting · \(when)"))
-        #expect(entry(meeting: false).displayTitle == String(localized: "Recording · \(when)"))
+        #expect(entry(meeting: false).displayTitle == String(localized: "Note · \(when)")) // a note says so (#8731)
         #expect(entry(hubName: "").displayTitle == String(localized: "Meeting · \(when)"))
         // An all-day recording keeps its day's name.
         var day = entry(hubName: "Export cap", meeting: false)
@@ -81,6 +81,20 @@ import PersonaWire
         let body = try JSONSerialization.jsonObject(with: JSON.encoder.encode(RecordingUpload(try #require(lib.entry(made.id))))) as? [String: Any]
         #expect(body?["title"] as? String == "")
         #expect(body?.keys.contains { $0.contains("hub") } == false)
+    }
+
+    /// A name the owner gave on the web (#8877) becomes the recording's own title, unless it already is or a change of
+    /// this phone's is still to go up (its newer title wins on the hub); other names are kept beside it.
+    @Test func webNameIsTakenAsTheRecordingsOwn() {
+        let mine = entry(title: "Design review")
+        #expect(RecordingTitle.naming(mine, name: "Export cap", source: "renamed", pending: false) == .adopt("Export cap"))
+        #expect(RecordingTitle.naming(mine, name: " Export cap\n", source: "renamed", pending: false) == .adopt("Export cap"))
+        #expect(RecordingTitle.naming(mine, name: "Export cap", source: "renamed", pending: true) == .keep(nil))
+        #expect(RecordingTitle.naming(mine, name: "Design review", source: "renamed", pending: false) == .keep(nil))
+        #expect(RecordingTitle.naming(mine, name: "", source: "renamed", pending: false) == .keep(nil))
+        #expect(RecordingTitle.naming(entry(), name: "Export cap", source: "model", pending: false) == .keep("Export cap"))
+        #expect(RecordingTitle.naming(mine, name: "Design review", source: "title", pending: false) == .keep(nil))
+        #expect(RecordingTitle.naming(entry(), name: nil, source: nil, pending: true) == .keep(nil))
     }
 
     /// An entry saved before the field existed reads as one with no hub name.

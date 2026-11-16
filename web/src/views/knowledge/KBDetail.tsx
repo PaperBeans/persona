@@ -11,6 +11,7 @@ import { RecordingAsks } from "./RecordingAsks";
 import { MeetingPrivate, RecordingConversation, useRecordingMeeting } from "./RecordingConversation";
 import { RecordingPhotos } from "./RecordingPhotos";
 import { RecordingLiveView } from "./RecordingLiveView";
+import { namedBy, RecordingRenameDialog } from "./RecordingRename";
 import { scrollBehavior } from "../../ui/stream/motion";
 import { Relationships } from "./Relationships";
 import { TopicPoints } from "./TopicPoints";
@@ -119,6 +120,7 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
   const [reloadError, setReloadError] = useState("");
   const [retry, setRetry] = useState(0);
   const [editing, setEditing] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [asking, setAsking] = useState(false);
   const [allLog, setAllLog] = useState(false);
   const [allMatches, setAllMatches] = useState(false);
@@ -273,6 +275,13 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
               <Button tone="accent" icon="spark" busy={asking} disabled={!d} onClick={ask} title={t("knowledge-kbdetail.ask_title")}>
                 {t("knowledge-kbdetail.ask")}
               </Button>
+              {/* A meeting or note (#8877): renamed here, kept over the phone's next upload. Not an all-day recording,
+                  named by its day. */}
+              {kind === "recordings" && d && !rec?.allDay && (
+                <Button tone="secondary" icon="pencil" onClick={() => setRenaming(true)}>
+                  {t("knowledge-kbdetail.rename")}
+                </Button>
+              )}
               {kind === "projects" && (
                 <Button
                   tone="secondary"
@@ -539,6 +548,19 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
       </div>
 
       {d && <TagEditor entry={e} auth={auth} open={editing} onClose={() => setEditing(false)} onSaved={onSaved} />}
+      {renaming && d && (
+        <RecordingRenameDialog
+          id={id}
+          name={e.name}
+          source={namedBy(d.meta)}
+          auth={auth}
+          onClose={() => setRenaming(false)}
+          onDone={() => {
+            void load().catch(() => {});
+            onSaved();
+          }}
+        />
+      )}
       {d?.kind === "chats" && <DayDialog chat={d.id} chatName={e.name} auth={auth} day={day?.day ?? null} focus={day?.focus} query={day?.query} onClose={() => setDay(null)} />}
       <MomentDialog moment={moment} auth={auth} onClose={() => setMoment(null)} />
     </div>

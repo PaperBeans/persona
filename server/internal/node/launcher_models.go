@@ -293,6 +293,9 @@ func (n *Node) listAgentModels(ctx context.Context, name, agent string) ([]proto
 			}
 			return nil, fmt.Errorf("%s 没有给出模型列表：%w", name, r.err)
 		}
+		if agent == "claude" {
+			r.models = n.launcherSettingsModelDefault(ctx, name, dir, r.models)
+		}
 		return r.models, nil
 	case <-ctx.Done():
 		return nil, fmt.Errorf("%s 在 %d 秒内没有给出模型列表", name, int(launcherModelsTimeout.Seconds()))

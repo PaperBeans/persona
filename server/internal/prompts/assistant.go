@@ -40,6 +40,36 @@ type AssistantClaudeMD struct {
 	// BackgroundSupervisor: the background supervisor follows up the tasks no leader supervises (#4927), so the main
 	// conversation is told it no longer reviews them itself. False keeps the text as it was.
 	BackgroundSupervisor bool
+	// UrgentCall: the owner turned urgent calls on (docs/assistant/urgent-call.md): when to call and the "what counts
+	// as urgent" rules. nil adds nothing.
+	UrgentCall *UrgentCall
+}
+
+// UrgentCall is the urgent-call section of the assistant's instructions.
+type UrgentCall struct {
+	Rules []UrgentCallRule
+}
+
+// UrgentCallRule is one "what counts as urgent" rule: its id (urgent_call's rule) and its words.
+type UrgentCallRule struct {
+	ID   string
+	Text string
+}
+
+// urgentRuleTemplates are the built-in rules' definitions, used while the owner has not reworded them.
+var urgentRuleTemplates = map[string]string{
+	"money_loss":     "assistant/urgent_rule_money_loss",
+	"harm":           "assistant/urgent_rule_harm",
+	"agent_disaster": "assistant/urgent_rule_agent_disaster",
+}
+
+// UrgentRuleBuiltin is built-in rule id's definition ("" for an id that is not one).
+func UrgentRuleBuiltin(id string) string {
+	name, ok := urgentRuleTemplates[id]
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(render(name, nil))
 }
 
 func RenderAssistantClaudeMD(d AssistantClaudeMD) string { return render("assistant/claude_md", d) }

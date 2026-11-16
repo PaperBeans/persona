@@ -547,9 +547,11 @@ export function groupEntries(kind: KBKind, items: KBEntry[], tag?: string): Entr
   } else if (tag) {
     out = [{ key: "tag", title: `#${tag}`, items: kind === "meetings" ? newestFirst(list) : list }];
   } else if (kind === "meetings") {
-    // A meeting is looked for by when it was (#8871): the sorted ones newest first, the rest folded as elsewhere.
-    const ranked = newestFirst(list.filter((e) => e.importance));
-    const rest = newestFirst(list.filter((e) => !e.importance));
+    // A meeting is looked for by when it was (#8871): the sorted ones newest first with the owner's own recordings, never
+    // folded (one just ended has no importance until its summary is written), the rest folded as elsewhere.
+    const open = (e: KBEntry) => !!e.importance || e.kind === "recordings";
+    const ranked = newestFirst(list.filter(open));
+    const rest = newestFirst(list.filter((e) => !open(e)));
     out = [
       { key: "ranked", title: t("lib-kb.section_all"), items: ranked },
       {

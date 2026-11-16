@@ -1,8 +1,9 @@
-// An independently compiled C consumer of the checked-in C header (#8560, #8912).
+// An independently compiled C consumer of the checked-in C header (#8560, #8912, #9017).
 //
 // Beyond the original sort smoke, this client replays the unchanged spec fixtures through the real C ABI:
 // answer + display_answer (15 + 8 cases), stream_chunks (21), turns (57 static cases with the checked-in current-iOS
-// overlay applied here, never in the core) and task_index (5 complete expected objects plus the background receipt).
+// overlay applied here, never in the core), task_index (5 complete expected objects plus the background receipt), and
+// viewed_images (ordinary post-overlay plus source-derived folded expected objects).
 // Expected objects are compared completely: both sides are parsed and re-serialized canonically (sorted object keys,
 // compact separators), so object key order is insignificant while every value, array order and Unicode string is exact.
 // Malformed inputs must return an empty buffer and a deliberately wrong expectation must be detected, per domain.
@@ -459,6 +460,27 @@ static JValue *jbool_value(int value) {
     JValue *v = jnew(J_BOOL);
     if (v) v->u.boolean = value;
     return v;
+}
+
+static JValue *jnumber(long value) {
+    char text[32];
+    snprintf(text, sizeof(text), "%ld", value);
+    JValue *v = jnew(J_NUMBER);
+    if (!v) return NULL;
+    size_t length = strlen(text);
+    v->u.number.text = malloc(length + 1);
+    if (!v->u.number.text) { jfree(v); return NULL; }
+    memcpy(v->u.number.text, text, length + 1);
+    v->u.number.length = length;
+    return v;
+}
+
+static void jpush(JValue *array, JValue *value) {
+    if (!array || array->kind != J_ARRAY || !value) { jfree(value); return; }
+    JValue **items = realloc(array->u.array.items, (array->u.array.count + 1) * sizeof(*items));
+    if (!items) { jfree(value); return; }
+    array->u.array.items = items;
+    array->u.array.items[array->u.array.count++] = value;
 }
 
 static JValue *jclone(const JValue *v) {
@@ -1163,6 +1185,123 @@ static void check_task_index(const char *fixtures) {
     expect_empty(persona_core_project_task_index, "task_index", "invalid_json", "not JSON");
 }
 
+/* ---------- viewed images: real C ABI plus complete ordinary/folded expected objects ---------- */
+
+static JValue *named_case(const JValue *doc, const char *name) {
+    JValue *cases = jget(doc, "cases");
+    for (size_t i = 0; i < jcount(cases); i++) {
+        JValue *c = jat(cases, i);
+        const char *candidate = jstr(jget(c, "name"));
+        if (candidate && strcmp(candidate, name) == 0) return c;
+    }
+    return NULL;
+}
+
+static JValue *fold_image(const char *item_id, const char *tool_use_id, const char *tool, const char *source,
+                          const char *path, long size, long width, long height) {
+    JValue *image = jnew(J_OBJECT);
+    if (item_id) jset(image, "item_id", jstring(item_id));
+    jset(image, "tool_use_id", jstring(tool_use_id));
+    jset(image, "tool", jstring(tool));
+    jset(image, "source", jstring(source));
+    if (path) jset(image, "path", jstring(path));
+    jset(image, "mime", jstring("image/png"));
+    if (size > 0) jset(image, "size", jnumber(size));
+    if (width > 0) jset(image, "width", jnumber(width));
+    if (height > 0) jset(image, "height", jnumber(height));
+    return image;
+}
+
+static JValue *expected_viewed(const char *id, const char *const *ids, size_t count) {
+    JValue *expected = jnew(J_OBJECT);
+    jset(expected, "id", jstring(id));
+    JValue *images = jnew(J_ARRAY);
+    for (size_t i = 0; i < count; i++) jpush(images, jstring(ids[i]));
+    jset(expected, "image_ids", images);
+    jset(expected, "is_input", jbool_value(0));
+    jset(expected, "type", jstring("viewed"));
+    return expected;
+}
+
+static void check_viewed_images(const char *fixtures) {
+    char path[4096];
+    snprintf(path, sizeof(path), "%s/lines/work.json", fixtures);
+    JValue *work = load_json(path);
+    JValue *tool = named_case(work, "tool_images_belong_to_call");
+    snprintf(path, sizeof(path), "%s/lines/ios/differences.json", fixtures);
+    JValue *overlay = load_json(path);
+    JValue *entry = named_case(overlay, "tool_images_belong_to_call");
+    const JValue *expected = NULL;
+    JValue *lines = jget(jget(entry, "replace"), "lines");
+    for (size_t i = 0; i < jcount(lines); i++) {
+        JValue *line = jat(lines, i);
+        const char *type = jstr(jget(line, "type"));
+        if (type && strcmp(type, "viewed") == 0) expected = line;
+    }
+    if (!tool || !expected) fail("viewed_images", "ordinary", "missing source input or complete post-overlay expected");
+    JValue *actual = project_case(persona_core_project_viewed_images, jget(tool, "input"));
+    if (!actual || !jequal(actual, expected)) {
+        fail("viewed_images", "tool_images_belong_to_call", "complete post-overlay viewed object differs");
+    }
+    if (actual && jequal(actual, jget(jget(tool, "expected"), "lines"))) {
+        fail("viewed_images", "overlay_shape", "compared a line with the whole lines array");
+    }
+    JValue *wrong = jclone(expected);
+    jset(wrong, "id", jstring("vi-fold:2#0"));
+    if (actual && jequal(actual, wrong)) fail("viewed_images", "wrong_expectation", "wrong owner compared equal");
+    jfree(wrong);
+    jfree(actual);
+
+    snprintf(path, sizeof(path), "%s/lines/folds.json", fixtures);
+    JValue *folds = load_json(path);
+    JValue *fold_case = named_case(folds, "fold_counts_tools_and_thoughts");
+    JValue *input = jclone(jget(fold_case, "input"));
+    JValue *items = jget(input, "items");
+    JValue *fold = NULL;
+    for (size_t i = 0; i < jcount(items); i++) {
+        JValue *item = jat(items, i);
+        const char *kind = jstr(jget(item, "kind"));
+        if (kind && strcmp(kind, "fold") == 0) fold = jget(item, "fold");
+    }
+    if (!fold) fail("viewed_images", "fold_input", "source fold not found");
+    JValue *images = jnew(J_ARRAY);
+    /* ViewedImagesTests.aFoldGivesTheSameStripAsItsWork is the independent source for these four FoldImage values. */
+    jpush(images, fold_image("5#0", "a", "Read", "read", "/w/shot.png", 100, 4, 3));
+    jpush(images, fold_image("8#0", "b", "mcp__persona__computer_state", "screenshot", NULL, 900, 16, 10));
+    jpush(images, fold_image(NULL, "d", "Read", "read", "/w/big.JPG", 0, 0, 0));
+    jpush(images, fold_image("20#0", "g", "mcp__persona__browser_look", "browser", NULL, 300, 8, 5));
+    jset(fold, "images", images);
+    JValue *fold_actual = project_case(persona_core_project_viewed_images, input);
+    static const char *const ids[] = {
+        "p:/w/shot.png", "s:image/png:900:16x10", "p:/w/big.JPG", "s:image/png:300:8x5",
+    };
+    JValue *fold_expected = expected_viewed("vi-1#0", ids, 4);
+    if (!fold_actual || !jequal(fold_actual, fold_expected)) {
+        fail("viewed_images", "folded_work", "complete source-derived folded viewed object differs");
+    }
+    JValue *wrong_fold = expected_viewed("vi-1#0", ids, 3);
+    if (fold_actual && jequal(fold_actual, wrong_fold)) {
+        fail("viewed_images", "fold_wrong_expectation", "incomplete expected compared equal");
+    }
+    jfree(wrong_fold);
+    jfree(fold_expected);
+    jfree(fold_actual);
+    jfree(input);
+    jfree(folds);
+
+    expect_empty(persona_core_project_viewed_images, "viewed_images", "wrong_schema", "{\"invalid\":true}");
+    expect_empty(persona_core_project_viewed_images, "viewed_images", "invalid_json", "not JSON");
+    expect_empty(persona_core_project_viewed_images, "viewed_images", "no_work", "{\"items\":[]}");
+    JValue *empty_fold_input = jclone(jget(fold_case, "input"));
+    JValue *empty_fold_actual = project_case(persona_core_project_viewed_images, empty_fold_input);
+    if (empty_fold_actual) fail("viewed_images", "no_fold_images", "fold without images returned a viewed line");
+    jfree(empty_fold_actual);
+    jfree(empty_fold_input);
+    jfree(overlay);
+    jfree(work);
+    puts("c-abi: viewed_images ordinary post-overlay and folded complete expected objects; negatives rejected");
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: c_abi_smoke <spec/fixtures directory>\n");
@@ -1192,10 +1331,11 @@ int main(int argc, char **argv) {
     check_answer_boundaries();
     check_turns(argv[1]);
     check_task_index(argv[1]);
+    check_viewed_images(argv[1]);
     if (failures) {
         fprintf(stderr, "c-abi-smoke: FAIL %d check(s)\n", failures);
         return 1;
     }
-    puts("c-abi-smoke: ok independently compiled C client; sort, answer 15+8, stream 21, turns 57 (+overlay), task_index 5+receipt; malformed inputs and wrong expectations rejected");
+    puts("c-abi-smoke: ok independently compiled C client; sort, answer 15+8, stream 21, turns 57 (+overlay), task_index 5+receipt, viewed ordinary+fold; malformed inputs and wrong expectations rejected");
     return 0;
 }

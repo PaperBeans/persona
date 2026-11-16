@@ -165,9 +165,10 @@ func newE2EFixture(t *testing.T, s voicetest.Script) *e2eFixture {
 	return e
 }
 
-// stream sends the script's audio in 100 ms frames at ten times real time, with the role and speaking frames at their
-// moments (speaking ahead of the audio, as playback starts), then end.
-func (e *e2eFixture) stream(p *testPhone, s voicetest.Script, total float64) {
+// stream sends 100 ms frames at at most ten times real time, with role and speaking frames at their moments,
+// then end. The normal caption case waits for the independent fake peer to consume each frame; scheduler delays
+// must not turn this content check into the adapter's separately tested backlog/skip scenario.
+func (e *e2eFixture) stream(p *testPhone, s voicetest.Script, total float64, paceCaptions bool) {
 	e.t.Helper()
 	pcm := voicetest.PCM(s, total)
 	controls := []struct {
@@ -189,8 +190,20 @@ func (e *e2eFixture) stream(p *testPhone, s voicetest.Script, total float64) {
 			controls = controls[1:]
 		}
 		<-tick.C
-		if err := p.c.Write(context.Background(), websocket.MessageBinary, pcm[off:min(off+frame, len(pcm))]); err != nil {
+		var consumed int64
+		if paceCaptions {
+			consumed, _ = e.live.CaptionSamples() // the first frame may start the upstream job
+		}
+		end := min(off+frame, len(pcm))
+		if err := p.c.Write(context.Background(), websocket.MessageBinary, pcm[off:end]); err != nil {
 			e.t.Fatalf("audio: %v", err)
+		}
+		if paceCaptions {
+			want := consumed + int64((end-off)/2)
+			waitLong(e.t, "the caption peer to consume audio", 5*time.Second, func() bool {
+				heard, ready := e.live.CaptionSamples()
+				return ready && heard >= want
+			})
 		}
 	}
 	p.send(map[string]any{"type": "end", "at": total})
@@ -222,7 +235,7 @@ func TestHubTranscriptionEndToEnd(t *testing.T) {
 	if ready["from"] != 0.0 {
 		t.Fatalf("ready %v", ready)
 	}
-	e.stream(p, script, e2eLength)
+	e.stream(p, script, e2eLength, true)
 	waitLong(t, "the socket's end", 40*time.Second, func() bool {
 		p.mu.Lock()
 		defer p.mu.Unlock()
@@ -340,7 +353,7 @@ func TestHubTranscriptionEndToEndWithoutCaptions(t *testing.T) {
 	e := newE2EFixture(t, script)
 	e.upload(meetingRec, 1, map[string]any{"transcription": "hub", "attendance": "listener", "language": "zh-CN"})
 	p, _ := e.open(meetingRec, 0, nil)
-	e.stream(p, script, 10)
+	e.stream(p, script, 10, false)
 	waitLong(t, "the socket's end", 40*time.Second, func() bool {
 		p.mu.Lock()
 		defer p.mu.Unlock()

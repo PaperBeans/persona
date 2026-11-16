@@ -3,6 +3,7 @@ package kb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -50,7 +51,7 @@ func (r *Recording) liveTitleDue(now time.Time) bool {
 	switch {
 	case r.Complete, r.Trimmed(), r.Kind == RecordingDay:
 		return false
-	case r.Title != "" || calendarTitle(r) != "": // the owner's or the calendar's name comes first
+	case r.Renamed != "" || r.Title != "" || calendarTitle(r) != "": // the owner's or the calendar's name comes first
 		return false
 	case r.AITitleFrom == AITitleSummary || r.AITitleFrom == AITitleMinutes: // settled
 		return false
@@ -60,6 +61,51 @@ func (r *Recording) liveTitleDue(now time.Time) bool {
 		return false
 	}
 	return true
+}
+
+// ErrBadTitle: a name given on the web is not one line of at most renameRunes characters.
+var ErrBadTitle = errors.New("a title is one line of at most 200 characters")
+
+// renameRunes is the most of a name given on the web, as the phone's calendar titles.
+const renameRunes = 200
+
+// RenameRecording gives recording id the owner's name from the web (#8877): it names the recording before the upload's
+// title until an upload changes that title (the phone renamed it since), and "" takes it back. Not for a deleted
+// recording (ErrRecordingDeleted) or one there is none of (ErrNotFound); a trimmed one keeps its meta.json, so it can.
+func (e *Engine) RenameRecording(rawID, title string, now time.Time) (*Recording, error) {
+	if e.Store.ReadOnly() {
+		return nil, ErrReadOnly
+	}
+	id, ok := RecordingID(rawID)
+	if !ok {
+		return nil, badRecording("id must be a UUID")
+	}
+	title = strings.TrimSpace(title)
+	if strings.ContainsAny(title, "\r\n") || utf8.RuneCountInString(title) > renameRunes {
+		return nil, ErrBadTitle
+	}
+	st := e.Store
+	st.recMu.Lock()
+	defer st.recMu.Unlock()
+	if _, gone := st.tombstones()[id]; gone {
+		return nil, ErrRecordingDeleted
+	}
+	r, ok := st.Recording(id)
+	if !ok {
+		return nil, ErrNotFound
+	}
+	r.Renamed, r.RenamedAt = title, nil
+	if title != "" {
+		at := now.UTC()
+		r.RenamedAt = &at
+	}
+	r.Name = e.recordingName(r)
+	if err := st.putEntity(KindRecording, r.ID, r, &r.Tagging, false); err != nil {
+		return nil, err
+	}
+	st.notify(KindRecording, r.ID, "metadata")
+	e.index(KindRecording, r.ID, r.Name, r.Tagging, r.OneLine, r.StartedAt)
+	return r, nil
 }
 
 // named puts r's name in the answer, with where it came from; neither while it is named only by when it started.

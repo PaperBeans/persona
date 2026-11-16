@@ -70,6 +70,30 @@ func TestWithInjectedInboxNote(t *testing.T) {
 	}
 }
 
+func TestWithLocalizedWakeKeepsTextAndUserIdentity(t *testing.T) {
+	h := &Hub{}
+	text := prompts.RenderAgentWake(prompts.AgentWake{Language: "English", Attempt: 1, Wait: "sample build"})
+	got := h.withInjected([]proto.Item{
+		{Role: "user", Kind: proto.KindText, Text: text},
+		{Role: "user", Kind: proto.KindText, Text: text, ClientMsgID: "app-input"},
+		{Role: "user", Kind: proto.KindText, Text: prompts.ProtectUserMessage(text)},
+	})
+	if got[0].Injected == nil || got[0].Injected.State != "wake" || got[0].Text != text {
+		t.Fatalf("wake text or metadata changed: %+v", got[0])
+	}
+	for _, it := range got[1:] {
+		if it.Injected != nil || it.Source != nil {
+			t.Fatal("a user's pasted wake became automated input")
+		}
+	}
+	for _, l := range []i18n.Lang{i18n.En, i18n.Ja, i18n.ZhHans} {
+		want := i18n.T(l, "injected.wake", i18n.Args{"title": "sample build"})
+		if line := injectedLine(l, got[0].Injected); line != want {
+			t.Fatalf("%s: %q, want %q", l, line, want)
+		}
+	}
+}
+
 func TestWithInjectedAskLater(t *testing.T) {
 	h := &Hub{}
 	later := prompts.RenderAskLater(prompts.AskLater{When: "11-13 12:48", Questions: []string{"什么时候提醒？"},

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/streams"
 )
@@ -79,12 +80,12 @@ func TestTheX264ProbeIsKeptPerFile(t *testing.T) {
 	ff := fakeFFmpeg(t, dir, "#!/bin/sh\n")
 	var probes atomic.Int32
 	verdict := "ffmpeg 9.0.2"
-	swap(t, &probeFFmpeg, func(_ context.Context, path string) string {
+	swap(t, &probeFFmpeg, func(_ context.Context, path string) (string, string) {
 		if path != ff {
 			t.Errorf("probed %s", path)
 		}
 		probes.Add(1)
-		return verdict
+		return verdict, "made up"
 	})
 	swap(t, &screenFFmpegPaths, []string{filepath.Join(dir, "missing"), ff})
 	p := &x264Probe{}
@@ -113,20 +114,63 @@ func TestTheX264ProbeIsKeptPerFile(t *testing.T) {
 	}
 }
 
+// A failed probe stands for screenX264Retry, then the same file is tried again; a probe never runs on a caller's
+// context, so a status call that was already cancelled still gets (and keeps) the right answer (#8859).
+func TestAFailedX264ProbeIsTriedAgain(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS only")
+	}
+	ff := fakeFFmpeg(t, t.TempDir(), "#!/bin/sh\n")
+	swap(t, &screenFFmpegPaths, []string{ff})
+	now := time.Unix(1_800_000_000, 0)
+	swap(t, &screenX264Now, func() time.Time { return now })
+	var probes atomic.Int32
+	pass := false
+	swap(t, &probeFFmpeg, func(ctx context.Context, _ string) (string, string) {
+		probes.Add(1)
+		if ctx.Err() != nil {
+			return "", "cancelled"
+		}
+		if !pass {
+			return "", "made up"
+		}
+		return "ffmpeg 9.0.2", ""
+	})
+	p := &x264Probe{}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if path, _ := p.get(cancelled); path != "" || probes.Load() != 1 {
+		t.Fatalf("first, failing: %q after %d probes", path, probes.Load())
+	}
+	pass = true
+	now = now.Add(screenX264Retry - time.Second)
+	if path, _ := p.get(cancelled); path != "" || probes.Load() != 1 {
+		t.Fatalf("within the retry time: %q after %d probes, want the failure kept", path, probes.Load())
+	}
+	now = now.Add(time.Second)
+	if path, v := p.get(cancelled); path != ff || v != "ffmpeg 9.0.2" || probes.Load() != 2 {
+		t.Fatalf("after it, on a cancelled caller's context: %q %q after %d probes", path, v, probes.Load())
+	}
+	now = now.Add(time.Hour)
+	if path, _ := p.get(cancelled); path != ff || probes.Load() != 2 {
+		t.Fatalf("a pass stands until the file changes: %q after %d probes", path, probes.Load())
+	}
+}
+
 // A program without libx264 fails the probe (no self-test run); the real thing, named by PERSONA_TEST_FFMPEG (e.g.
 // Homebrew's), passes it.
 func TestProbeFFmpeg(t *testing.T) {
 	dir := t.TempDir()
 	nox264 := fakeFFmpeg(t, dir, "#!/bin/sh\necho ' V....D libx265   libx265 H.265'\n")
-	if v := probeFFmpeg(context.Background(), nox264); v != "" {
-		t.Fatalf("an ffmpeg without libx264 = %q", v)
+	if v, why := probeFFmpeg(context.Background(), nox264); v != "" || why != "no libx264" {
+		t.Fatalf("an ffmpeg without libx264 = %q (%s)", v, why)
 	}
 	real := os.Getenv("PERSONA_TEST_FFMPEG")
 	if real == "" {
 		t.Skip("set PERSONA_TEST_FFMPEG to an ffmpeg with libx264 for the self-test")
 	}
-	if v := probeFFmpeg(context.Background(), real); !strings.HasPrefix(v, "ffmpeg ") {
-		t.Fatalf("probe of %s = %q", real, v)
+	if v, why := probeFFmpeg(context.Background(), real); !strings.HasPrefix(v, "ffmpeg ") {
+		t.Fatalf("probe of %s = %q (%s)", real, v, why)
 	}
 }
 
@@ -160,7 +204,7 @@ func TestTheHelperGetsTheUsersFFmpeg(t *testing.T) {
 	dir := t.TempDir()
 	ff := fakeFFmpeg(t, dir, "#!/bin/sh\n")
 	swap(t, &screenFFmpegPaths, []string{ff})
-	swap(t, &probeFFmpeg, func(context.Context, string) string { return "ffmpeg 9.0.2" })
+	swap(t, &probeFFmpeg, func(context.Context, string) (string, string) { return "ffmpeg 9.0.2", "" })
 	var launched [][]string
 	connect := fakeHelper(t, func(token string) string { return token }, "")
 	swap(t, &screenLaunch, func(ctx context.Context, helper string, args ...string) error {
@@ -183,7 +227,7 @@ func TestTheHelperGetsTheUsersFFmpeg(t *testing.T) {
 	}
 	start(false)
 	start(true)
-	swap(t, &probeFFmpeg, func(context.Context, string) string { return "" })
+	swap(t, &probeFFmpeg, func(context.Context, string) (string, string) { return "", "made up" })
 	swap(t, &screenX264, &x264Probe{})
 	start(true)
 	if len(launched) != 3 {

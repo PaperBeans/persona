@@ -620,7 +620,11 @@ struct VNCPage: View {
     private var currentStats: ScreenStats? {
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
-        if args.contains("-showScreenStatsDemo") { return args.contains("-showScreenUDP") ? .demoVideoUDP : .demoVideo }
+        if args.contains("-showScreenStatsDemo") {
+            if args.contains("-showScreenX264Demo") { return .demoVideoX264 }
+            if args.contains("-showScreenX264OffDemo") { return .demoVideoX264Off }
+            return args.contains("-showScreenUDP") ? .demoVideoUDP : .demoVideo
+        }
         #endif
         guard let s = session else { return nil }
         #if os(iOS) && canImport(PersonaScreenKit)
@@ -632,7 +636,8 @@ struct VNCPage: View {
             return ScreenStats(mode: .video, path: route.path, routeRttMs: route.rtt, routeLoss: route.loss, routeReason: route.reason,
                                tier: tier, tierReason: why, bitrateMbps: r.mbps, fps: r.fps, codec: v.codec,
                                resolution: v.size.map { "\(Int($0.width))×\(Int($0.height))" }, captureMs: r.captureMs,
-                               encodeMs: r.encodeMs, networkMs: r.networkMs, decodeMs: r.decodeMs, totalMs: r.totalMs)
+                               encodeMs: r.encodeMs, networkMs: r.networkMs, decodeMs: r.decodeMs, totalMs: r.totalMs,
+                               encoder: v.encoder, encoderNote: v.encoderNote)
         }
         return ScreenStats(mode: .vnc, path: route.path, routeRttMs: route.rtt, routeLoss: route.loss, routeReason: route.reason,
                            bitrateMbps: s.mbps > 0 ? s.mbps : nil,

@@ -199,6 +199,26 @@ pub extern "system" fn Java_persona_core_rustcore_NativeBridge_destroy(_env: JNI
     }
 }
 
+/// Projects the source-derived WebSocket envelope from one raw JSON document. Pure diagnostic function (#8955).
+/// It does not route an event or use a runtime handle; malformed input returns an empty string.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_persona_core_rustcore_NativeBridge_projectWireEnvelope<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    input: JString<'a>,
+) -> JString<'a> {
+    catch_unwind(AssertUnwindSafe(|| {
+        let input: String = env.get_string(&input).ok()?.into();
+        let projection = persona_core_domain::wire_envelope::project(input.as_bytes())?;
+        let json = serde_json::to_string(&projection).ok()?;
+        env.new_string(json).ok()
+    }))
+    .ok()
+    .flatten()
+    .or_else(|| env.new_string("").ok())
+    .unwrap_or_default()
+}
+
 /// Projects the Agents list from a JSON input string. Pure function, no runtime handle needed.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_persona_core_rustcore_NativeBridge_projectSort<'a>(
@@ -318,7 +338,7 @@ pub extern "system" fn Java_persona_core_rustcore_NativeBridge_projectTaskIndex<
     .unwrap_or_default()
 }
 
-/// Projects the viewed-image strip for the tool call in a lines input. Pure function, no runtime handle needed.
+/// Projects the viewed-image strip for the first represented work group in a lines input. Pure function.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_persona_core_rustcore_NativeBridge_projectViewedImages<'a>(
     mut env: JNIEnv<'a>,

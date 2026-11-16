@@ -203,8 +203,8 @@ describe("reading the lists", () => {
     }));
   });
   afterEach(() => vi.unstubAllGlobals());
-  const answer = async (part: string, r: Response) => {
-    const at = waiting.findIndex((w) => w.url.includes(part));
+  const answer = async (part: string | RegExp, r: Response) => {
+    const at = waiting.findIndex((w) => typeof part === "string" ? w.url.includes(part) : part.test(w.url));
     waiting.splice(at, 1)[0].answer(r);
     await flush();
   };
@@ -231,6 +231,93 @@ describe("reading the lists", () => {
     await answer("/machines/m-fail/launchers/gateway/models", json({ error: "claude 没有登录" }, 502));
     expect(modelList("m-fail", "gateway").error).toContain("claude 没有登录");
     expect(modelList("m-fail", "gateway").list).toBeUndefined();
+  });
+
+  it("keeps an assistant's shell models separate from the same named Agent provider", async () => {
+    const agent = readModels("m-purpose", "shared");
+    const assistant = readModels("m-purpose", "shared", { purpose: "assistant" });
+    await flush();
+    expect(waiting).toHaveLength(2);
+    await answer("/models?purpose=assistant", json({ agent: "claude", models: [{ id: "shell-model", name: "Shell" }] }));
+    await answer("/models", json({ agent: "claude", models: [{ id: "engine-model", name: "Engine" }] }));
+    await Promise.all([agent, assistant]);
+    expect(modelList("m-purpose", "shared", "assistant").list?.models[0].id).toBe("shell-model");
+    expect(modelList("m-purpose", "shared").list?.models[0].id).toBe("engine-model");
+    await readModels("m-purpose", "shared", { purpose: "assistant" });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("forgets a shared custom model in both cached purposes with one request", async () => {
+    for (const purpose of [undefined, "assistant"] as const) {
+      void readModels("m-shared-forget", "gateway", { purpose });
+      await flush();
+      await answer("/models", json(claudeList));
+    }
+    const one = forgetModel("m-shared-forget", "gateway", "vendor/model-x", "assistant");
+    const duplicate = forgetModel("m-shared-forget", "gateway", "vendor/model-x");
+    await flush();
+    for (const purpose of [undefined, "assistant"] as const) {
+      expect(modelList("m-shared-forget", "gateway", purpose).list!.models.some((m) => m.id === "vendor/model-x")).toBe(false);
+    }
+    expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+    await answer("/models/custom", json({}));
+    expect(await Promise.all([one, duplicate])).toEqual(["", ""]);
+  });
+
+  it("keeps stale reads that overlap a successful Forget from restoring either catalog", async () => {
+    for (const purpose of [undefined, "assistant"] as const) {
+      void readModels("m-forget-stale", "gateway", { purpose });
+      await flush();
+      await answer("/models", json(claudeList));
+    }
+    const reloads = [readModels("m-forget-stale", "gateway", { again: true }),
+      readModels("m-forget-stale", "gateway", { purpose: "assistant", again: true })];
+    await flush();
+    const deleted = forgetModel("m-forget-stale", "gateway", "vendor/model-x", "assistant");
+    await flush();
+    await answer("/models/custom", json({}));
+    expect(await deleted).toBe("");
+    await answer("/models?purpose=assistant", json(claudeList));
+    await answer("/models", json(claudeList));
+    await Promise.all(reloads);
+    for (const purpose of [undefined, "assistant"] as const) {
+      expect(modelList("m-forget-stale", "gateway", purpose).list!.models.some((m) => m.id === "vendor/model-x")).toBe(false);
+    }
+    // A later fresh answer can contain a model the user typed again after forgetting it.
+    void readModels("m-forget-stale", "gateway", { again: true });
+    await flush();
+    await answer("/models", json(claudeList));
+    expect(modelList("m-forget-stale", "gateway").list!.models.some((m) => m.id === "vendor/model-x")).toBe(true);
+  });
+
+  it("restores a failed Forget in a purpose first loaded while deletion was pending", async () => {
+    void readModels("m-forget-new-purpose", "gateway", { purpose: "assistant" });
+    await flush();
+    await answer("/models", json(claudeList));
+    const deleted = forgetModel("m-forget-new-purpose", "gateway", "vendor/model-x", "assistant");
+    void readModels("m-forget-new-purpose", "gateway");
+    await flush();
+    const fresh = { agent: "claude", models: [{ id: "engine-native" }, { id: "vendor/model-x", custom: true, name: "Updated custom" }] };
+    await answer(/\/models$/, json(fresh));
+    expect(modelList("m-forget-new-purpose", "gateway").list!.models.map((m) => m.id)).toEqual(["engine-native"]);
+    await answer("/models/custom", json({ error: "Forbidden" }, 403));
+    expect(await deleted).toContain("Forbidden");
+    expect(modelList("m-forget-new-purpose", "gateway").list).toEqual(fresh);
+    expect(modelList("m-forget-new-purpose", "gateway", "assistant").list!.models.map((m) => m.id)).toEqual(claudeList.models.map((m) => m.id));
+  });
+
+  it("does not suppress a late catalog answer after Forget failed", async () => {
+    void readModels("m-forget-late-failure", "gateway", { purpose: "assistant" });
+    await flush();
+    await answer("/models", json(claudeList));
+    const deleted = forgetModel("m-forget-late-failure", "gateway", "vendor/model-x", "assistant");
+    const reading = readModels("m-forget-late-failure", "gateway");
+    await flush();
+    await answer("/models/custom", json({ error: "Forbidden" }, 403));
+    expect(await deleted).toContain("Forbidden");
+    await answer("/models", json(claudeList));
+    await reading;
+    expect(modelList("m-forget-late-failure", "gateway").list!.models.some((m) => m.id === "vendor/model-x")).toBe(true);
   });
 
   it("reads at most three lists at a time, the session's own ahead of the queue", async () => {

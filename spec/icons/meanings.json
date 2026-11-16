@@ -695,7 +695,7 @@
     },
     "voiceChannel": {
       "sf": "phone.fill",
-      "phosphor": "waveform"
+      "phosphor": "phone"
     },
     "voiceConnecting": {
       "sf": "antenna.radiowaves.left.and.right",

@@ -24,6 +24,10 @@ type SessionCapabilities struct {
 	Approve   bool `json:"approve"`
 	Terminal  bool `json:"terminal"`
 	Attach    bool `json:"attach"`
+	// PluginInput: a Claude outside Persona's terminals whose Persona plugin polls the node: the owner's own messages
+	// go in as their input while it rests, not as another session's through its inbox (docs/integrations/
+	// claude-integration.md "Owner input through the Persona plugin"). Absent from older nodes and everywhere else.
+	PluginInput bool `json:"plugin_input,omitempty"`
 	// PermissionModes are the permission modes session.modes takes for a session whose agent is not Claude Code (Modes
 	// is about Claude Code's five), as a runtime's row lists them (#8261): default, the agent's own approval, and
 	// bypassPermissions where it has an Allow all (Paseo's Auto Accept and Codex's full-access). The apps offer a

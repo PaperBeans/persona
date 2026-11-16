@@ -93,10 +93,12 @@ describe("the meetings list (#8871)", () => {
       e("old", { kind: "meetings", importance: "P0", updated: "2026-10-01T09:00:00Z" }),
       e("new", { kind: "recordings", importance: "P3", updated: "2026-11-16T09:00:00Z" }),
       e("raw", { kind: "meetings", updated: "2026-11-15T09:00:00Z" }),
+      e("just-ended", { kind: "recordings", updated: "2026-11-16T10:00:00Z" }),
       e("undated", { kind: "meetings" }),
     ]);
+    // The owner's own recordings never fold, sorted or not yet (no summary yet).
     expect(s.map((x) => [x.key, x.title, x.items.map((i) => i.id), !!x.fold])).toEqual([
-      ["ranked", "全部", ["new", "old"], false],
+      ["ranked", "全部", ["just-ended", "new", "old"], false],
       ["rest", "还没整理的", ["raw", "undated"], true],
     ]);
     const tagged = groupEntries("meetings", [e("a", { kind: "meetings", updated: "2026-01-01T00:00:00Z" }), e("b", { kind: "recordings", updated: "2026-02-01T00:00:00Z" })], "周会");

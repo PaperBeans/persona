@@ -323,18 +323,9 @@ internal class MergedShellServices(private val stacks: GroupStacks) {
     /** Every group's dashboard in one; [plain] builds the API of one group's connection (null while it has no route). */
     fun metrics(plain: (GroupStack) -> MachineMetricsApi?): MachineMetricsApi = object : MachineMetricsApi {
         private fun of(stack: GroupStack) = plain(stack) ?: throw HubFailure(HubError.NoNetwork)
-        override suspend fun dashboard(): MetricsDashboard {
-            val list = stacks.stacks.value
-            if (list.size == 1) return of(list.single()).dashboard().let { it.copy(machines = it.machines.map(list.single().names::metrics)) }
-            var failure: Exception? = null
-            val parts = list.mapNotNull { stack ->
-                try { of(stack).dashboard().let { it.copy(machines = it.machines.map(stack.names::metrics)) } }
-                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                catch (error: Exception) { if (failure == null) failure = error; null }
-            }
-            if (parts.isEmpty()) throw failure ?: HubFailure(HubError.NoNetwork)
-            return MetricsDashboard(parts.flatMap { it.machines }, parts.first().step)
-        }
+        override suspend fun dashboard(): MetricsDashboard = mergedMetrics(stacks.stacks.value.map { stack ->
+            MetricsGroup(stack.names, { plain(stack) }, stack.metricSnapshots) { stack.current }
+        })
         override suspend fun history(machineId: String, range: MetricRange): MetricsHistory {
             val stack = stacks.of(machineId) ?: throw HubFailure(HubError.NoNetwork)
             val history = of(stack).history(GroupKeys.raw(machineId), range)

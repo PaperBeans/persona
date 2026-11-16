@@ -34,6 +34,7 @@
   "peer_unreachable": "Couldn’t reach this Claude session’s message channel (it may have just restarted or quit). Try again shortly, or continue it on the computer.",
   "peer_too_long": "The message is too long for the message channel. Split it into shorter messages.",
   "peer_unconfirmed": "The message was handed to this Claude session, but it hasn’t taken it yet: it may be waiting for approval on the computer, or it was dropped as a repeat. Check on the computer before sending it again.",
+  "peer_held": "The message reached this Claude session, which is holding it for approval on the computer: it runs in bypass permissions mode, so it holds messages from Persona until you allow them there. No need to send it again.",
   "peer_command": "The message channel only delivers plain messages and doesn’t run slash commands. Type the command on the computer.",
   "desktop_open_failed": "Claude’s desktop app on the computer didn’t open this session in time (it may still be starting, or the computer may be locked). Open it there, then send again. Nothing was sent.",
   "open_elsewhere_desktop": "This session is open in Claude’s desktop app on the computer, and Persona won’t start a second Claude writing to it. Continue it there, or close it there and send again. Nothing was sent.",

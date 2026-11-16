@@ -1616,8 +1616,7 @@ extension AttachMoreSection {
         if let scan { capture.append(AttachMoreRow(id: "composer-menu-scan", title: String(localized: "Scan Document"), symbol: Theme.Icon.scanDocument, action: scan)) }
         if let glasses { capture.append(AttachMoreRow(id: "attach-glasses", title: String(localized: "Glasses Photo"), symbol: Theme.Icon.glasses, action: glasses)) }
         if let meeting {
-            let recording = RecordingCapture.shared.state != .idle
-            capture.append(AttachMoreRow(id: "composer-menu-meeting", title: recording ? String(localized: "Recording… Open") : String(localized: "Record [Recordings Section ef2821]"),
+            capture.append(AttachMoreRow(id: "composer-menu-meeting", title: MeetingWords.running ?? MeetingWords.start,
                                          symbol: Theme.Icon.recording, action: meeting))
         }
         var sections: [AttachMoreSection] = []

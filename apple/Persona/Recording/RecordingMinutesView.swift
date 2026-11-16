@@ -85,9 +85,7 @@ import UIKit
             trimmed = answer.detail.meta?.trimmedAt?.isEmpty == false
             if transcription != answer.detail.meta?.transcription { transcription = answer.detail.meta?.transcription }
             // The minutes' title names it from now on (#8873): read here, where the page waits for them.
-            if let meta = answer.detail.meta {
-                RecordingLibrary.shared.noteHubName(entry.id, RecordingTitle.hubName(name: meta.name, source: meta.nameSource))
-            }
+            if let meta = answer.detail.meta { RecordingSync.shared.hubNamed(entry.id, name: meta.name, source: meta.nameSource) }
             #if os(iOS)
             MinutesRelay.shared.note(RecordingLibrary.shared.entry(entry.id) ?? entry, state: state) // the watch gets the name too
             #endif

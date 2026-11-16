@@ -49,21 +49,11 @@ final class ExtensionManagementUITests: XCTestCase {
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
     }
 
-    @MainActor private func dismissIconNote() {
-        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        guard board.alerts.firstMatch.waitForExistence(timeout: 2) else { return }
-        for label in ["OK", "好"] where board.alerts.buttons[label].exists { // i18n-ignore: the system's own button
-            board.alerts.buttons[label].tap()
-            sleep(1)
-            return
-        }
-    }
-
     @MainActor private func togglePack(_ element: XCUIElement, app: XCUIApplication) {
         // Stock can drop a synthesized coordinate tap while its system UI settles. Retry only when no question appeared;
         // the caller still requires the question, the unchanged switch and zero writes.
         for _ in 0..<3 {
-            dismissIconNote()
+            HomeScreen.dismissIconNote()
             let control = element.switches.firstMatch
             let target = control.exists ? control : element
             let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true AND hittable == true"), object: target)

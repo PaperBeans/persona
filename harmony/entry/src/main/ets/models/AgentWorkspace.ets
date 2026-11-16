@@ -1,5 +1,8 @@
 import type { ClientModel } from './ClientModel';
 import { ResourceRow, Wire } from './Wire';
+import type { AgentListAdapter, AgentListInput, AgentListRow } from '../core/AgentListAdapter';
+import type { AgentListGroupProjection } from '../core/AgentListProjection';
+import { NativeAgentListAdapter } from '../core/AgentListAdapter';
 
 interface AgentRepository {
   call(path: string, method?: string, body?: Record<string, Object>, operationId?: string, admit?: () => boolean): Promise<Record<string, Object>>;
@@ -51,10 +54,6 @@ function rowKey(row: ResourceRow): string { return JSON.stringify(row.group ? [r
 function rowSpaceKey(row: ResourceRow): string {
   const name = Wire.text(row.data(), 'space_name');
   return name ? rowMachine(row) + '/' + name : '';
-}
-function pathName(path: string): string {
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/g, '');
-  return normalized ? normalized.slice(normalized.lastIndexOf('/') + 1) : '';
 }
 function cloneRow(row: ResourceRow): ResourceRow {
   const copy = new ResourceRow(row.id, row.title, row.kind);
@@ -117,6 +116,15 @@ export class AgentWorkspace {
   private freezeSuppressed: boolean = false;
   private historyRequest: number = 0;
   private persistTimer: number = -1;
+  private adapter: AgentListAdapter = new NativeAgentListAdapter();
+  private listInput: AgentListInput | undefined;
+  private listShadow: ((input: AgentListInput) => void) | undefined;
+
+  /** Only DEBUG/test installs a shadow observer; it cannot replace native rows. */
+  setListShadow(observer: ((input: AgentListInput) => void) | undefined): void {
+    this.listShadow = observer;
+    if (observer && this.listInput) observer(this.listInput);
+  }
 
   historySupported(): boolean { return !!this.client?.directoryOwners().some((owner: ClientModel) => owner.features.includes('agent_session_archives')); }
   rowOnline(row: ResourceRow): boolean { return this.ownerFor(row)?.connected === true; }
@@ -626,8 +634,27 @@ export class AgentWorkspace {
     this.freezeSuppressed = false; this.frozenGroups = this.sourceReady() ? this.copyGroups(this.groups) : undefined;
   }
 
+  private frozenProjection(groups: AgentWorkspaceGroup[]): AgentListGroupProjection[] {
+    const latest = new Map<string, ResourceRow>();
+    this.sourceRows.forEach((row: ResourceRow) => latest.set(rowKey(row), row));
+    return groups.map((group) => ({id: group.id, machineId: group.machineId, machineName: group.machineName,
+      repositoryPath: group.repositoryPath, repositoryName: group.repositoryName, worktreePath: group.worktreePath,
+      worktreeName: group.worktreeName, branch: group.branch, showMachine: group.showMachine,
+      showRepository: group.showRepository, showWorktree: group.showWorktree,
+      rows: group.rows.map((row: ResourceRow) => {
+        const current = latest.get(rowKey(row)) || row, raw = current.data();
+        raw['machine_id'] = rowMachine(current); raw['session_id'] = rowSession(current); raw['title'] = current.title;
+        raw['cwd'] = current.path; raw['state'] = current.state; raw['manager'] = current.manager; raw['app_hub_group'] = current.group;
+        return {id: current.id, raw, source: current};
+      })}));
+  }
+
   private rebuild(): void {
     if (this.readingDetail && !this.freezeSuppressed && this.frozenGroups) {
+      if (this.listShadow) {
+        const input = this.makeListInput();
+        this.listInput = input; this.listShadow(input);
+      }
       const latest = new Map<string, ResourceRow>();
       this.sourceRows.forEach((row: ResourceRow) => latest.set(rowKey(row), row));
       this.groups = this.frozenGroups.map((group: AgentWorkspaceGroup) => {
@@ -638,88 +665,43 @@ export class AgentWorkspace {
       this.frozenGroups = this.copyGroups(this.groups);
       return;
     }
-    const needle = this.search.trim().toLowerCase();
-    const rows = this.sourceRows.filter((row: ResourceRow) => {
-      if (this.machineFilter && rowMachine(row) !== this.machineFilter && this.machineIdentity(row) !== this.machineFilter) return false;
-      if (!this.history && (row.state === 'offline' || Wire.text(row.data(), 'source_kind') === 'codex_history')) return false;
-      if (this.quickFilter !== 'all' && row.state !== this.quickFilter) return false;
-      if (!needle) return true;
-      const data = row.data(), machine = this.ownerFor(row)?.machines.find((item: ResourceRow) => item.id === rowMachine(row));
-      const text = [row.title, row.path, Wire.text(data, 'last_text'), Wire.text(data, 'agent'), Wire.text(data, 'agent_label'),
-        Wire.text(data, 'space_name'), Wire.text(data, 'slot_name'), Wire.text(data, 'repo_root'), Wire.text(data, 'worktree'), machine?.title || rowMachine(row)]
-        .join(' ').toLowerCase();
-      return text.includes(needle);
+    const input = this.makeListInput();
+    this.listInput = input;
+    if (this.listShadow) this.listShadow(input);
+    const groups = this.adapter.project(input);
+    this.groups = groups.map((group) => new AgentWorkspaceGroup(group.id, group.machineId,
+      group.machineName, group.repositoryPath, group.repositoryName, group.worktreePath, group.worktreeName,
+      group.branch, group.rows.map((row: AgentListRow) => row.source as ResourceRow)));
+    this.groups.forEach((group: AgentWorkspaceGroup, index: number) => {
+      group.showMachine = groups[index].showMachine;
+      group.showRepository = groups[index].showRepository;
+      group.showWorktree = groups[index].showWorktree;
     });
-    rows.sort((left: ResourceRow, right: ResourceRow) => this.compareRows(left, right));
-    const groups: AgentWorkspaceGroup[] = [];
-    const lookup = new Map<string, AgentWorkspaceGroup>();
-    rows.forEach((row: ResourceRow) => {
-      const data = row.data(), machineId = rowMachine(row);
-      const machine = this.ownerFor(row)?.machines.find((item: ResourceRow) => item.id === machineId && item.manager === row.manager);
-      const repositoryPath = Wire.text(data, 'repo_root') || Wire.text(data, 'worktree') || '';
-      const repositoryName = pathName(repositoryPath);
-      const worktreePath = Wire.text(data, 'worktree') || row.path || repositoryPath;
-      const branch = Wire.text(data, 'branch');
-      const worktreeName = branch || pathName(worktreePath) || repositoryName;
-      const repositoryKey = repositoryPath || repositoryName;
-      const worktreeKey = worktreePath || worktreeName;
-      const id = this.groupingMode === 'flat' ? 'flat' : this.groupingMode === 'machine' ?
-        JSON.stringify([row.group, row.manager, machineId]) : this.groupingMode === 'repository' ?
-        JSON.stringify([row.group, row.manager, machineId, repositoryKey]) : JSON.stringify([row.group, row.manager, machineId, repositoryKey, worktreeKey]);
-      let group = lookup.get(id);
-      if (!group) {
-        group = new AgentWorkspaceGroup(id, machineId, machine?.title || machineId, repositoryPath, repositoryName,
-          worktreePath, worktreeName, branch);
-        lookup.set(id, group); groups.push(group);
-      }
-      group.rows.push(row);
-    });
-    groups.forEach((group: AgentWorkspaceGroup) => {
-      group.showMachine = this.groupingMode === 'machine';
-      group.showRepository = this.groupingMode === 'repository';
-      group.showWorktree = this.groupingMode === 'worktree';
-    });
-    this.groups = groups;
-    if (this.readingDetail && this.sourceReady() && !this.freezeSuppressed && !this.frozenGroups) this.frozenGroups = this.copyGroups(groups);
+    if (this.readingDetail && this.sourceReady() && !this.freezeSuppressed && !this.frozenGroups) this.frozenGroups = this.copyGroups(this.groups);
   }
 
-  private compareRows(left: ResourceRow, right: ResourceRow): number {
-    const leftData = left.data(), rightData = right.data();
-    const leftRepository = Wire.text(leftData, 'repo_root') || Wire.text(leftData, 'worktree') || '';
-    const rightRepository = Wire.text(rightData, 'repo_root') || Wire.text(rightData, 'worktree') || '';
-    const leftWorktree = Wire.text(leftData, 'worktree') || left.path || leftRepository;
-    const rightWorktree = Wire.text(rightData, 'worktree') || right.path || rightRepository;
-    if (this.groupingMode !== 'flat') {
-      const machineOrder = rowMachine(left).localeCompare(rowMachine(right));
-      if (machineOrder) return machineOrder;
-      if (this.groupingMode === 'repository' || this.groupingMode === 'worktree') {
-        const repositoryOrder = leftRepository.localeCompare(rightRepository);
-        if (repositoryOrder) return repositoryOrder;
-      }
-      if (this.groupingMode === 'worktree') {
-        const worktreeOrder = leftWorktree.localeCompare(rightWorktree);
-        if (worktreeOrder) return worktreeOrder;
-      }
-    }
-    const leftPinned = this.preferencesFor(left).pinsSessions.indexOf(this.sessionKey(left)), rightPinned = this.preferencesFor(right).pinsSessions.indexOf(this.sessionKey(right));
-    if (leftPinned >= 0 || rightPinned >= 0) {
-      if (leftPinned < 0) return 1;
-      if (rightPinned < 0) return -1;
-      if (leftPinned !== rightPinned) return leftPinned - rightPinned;
-    }
-    const rank = (row: ResourceRow): number => {
-      if (row.state === 'needs_you') return 0;
-      if (row.state === 'unread') return 1;
-      if (row.state === 'working') return 2;
-      if (this.isMuted(row)) return 4;
-      return 3;
-    };
-    const stateOrder = rank(left) - rank(right);
-    if (stateOrder) return stateOrder;
-    const leftDate = Date.parse(Wire.text(left.data(), 'updated_at')) || 0;
-    const rightDate = Date.parse(Wire.text(right.data(), 'updated_at')) || 0;
-    if (leftDate !== rightDate) return rightDate - leftDate;
-    return left.id.localeCompare(right.id);
+  private makeListInput(): AgentListInput {
+    const rows = this.sourceRows.map((row: ResourceRow): AgentListRow => {
+      const raw = row.data();
+      raw['machine_id'] = rowMachine(row); raw['session_id'] = rowSession(row); raw['title'] = row.title;
+      raw['cwd'] = row.path; raw['state'] = row.state; raw['manager'] = row.manager; raw['app_hub_group'] = row.group;
+      return {id: row.id, raw, source: row};
+    });
+    return {rows, history: this.history, grouping: this.groupingMode, quick: this.quickFilter,
+      machineFilter: this.machineFilter, query: this.search, reading: this.readingDetail,
+      frozen: this.readingDetail && !this.freezeSuppressed && this.frozenGroups ? this.frozenProjection(this.frozenGroups) : undefined,
+      kept: this.frozenGroups?.flatMap((group) => group.rows.map((row: ResourceRow) =>
+        (row.group ? row.group + '|' : '') + rowMachine(row) + '/' + rowSession(row))) || [],
+      machines: this.client?.directoryOwners().flatMap((owner: ClientModel) => owner.machines.map((row: ResourceRow) =>
+        ({id: row.id, name: row.title, group: owner.profile.id}))) || [],
+      coreSettings: {sort: 'state', folded: [], expanded_idle: [], expanded_quiet: [], compact: false},
+      preferencesFor: (row: AgentListRow) => this.preferencesFor(row.source as ResourceRow),
+      machineIdentity: (row: AgentListRow) => this.machineIdentity(row.source as ResourceRow),
+      machineName: (row: AgentListRow) => {
+        const source = row.source as ResourceRow;
+        const machine = this.ownerFor(source)?.machines.find((item: ResourceRow) => item.id === rowMachine(source) && item.manager === source.manager);
+        return machine?.title || rowMachine(source);
+      }};
   }
 
   private copyGroup(group: AgentWorkspaceGroup): AgentWorkspaceGroup {

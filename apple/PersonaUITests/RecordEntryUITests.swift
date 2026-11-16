@@ -31,8 +31,8 @@ final class RecordEntryUITests: XCTestCase {
         let app = launch(hub, ["-openShellPage", "recordings"])
         let record = app.buttons["recording-meeting-start"]
         XCTAssertTrue(record.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertEqual(record.label, "录音")
-        XCTAssertFalse(app.buttons["recording-start"].exists, "one Record button, no second one")
+        XCTAssertEqual(record.label, "开始会议")
+        XCTAssertFalse(app.buttons["recording-start"].exists, "one start button, no second one")
         let kind = element(app, "recording-kind")
         reveal(kind, in: app)
         XCTAssertTrue(kind.waitForExistence(timeout: 10), app.debugDescription)
@@ -55,8 +55,8 @@ final class RecordEntryUITests: XCTestCase {
         XCTAssertTrue(element(app, "recording-kind-detail").exists, "what a note is, under the choice")
         XCTAssertFalse(app.buttons["recording-start"].exists)
         scrollToTop(app)
-        XCTAssertTrue(record.isHittable, "the same Record button records the note")
-        XCTAssertEqual(record.label, "录音")
+        XCTAssertTrue(record.isHittable, "the same button records the note")
+        XCTAssertEqual(record.label, "开始笔记") // it says what it starts (#8731)
         try shot(app, "start-note")
 
         reveal(kind, in: app)
@@ -81,14 +81,14 @@ final class RecordEntryUITests: XCTestCase {
         menu.tapCenter()
         let row = app.buttons["sidebar-meeting-recording"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(row.label.contains("录音"), row.label)
-        XCTAssertFalse(row.label.contains("会议") || row.label.contains("录音中"), "Recordings, not Meeting Recording: \(row.label)")
+        XCTAssertTrue(row.label.contains("会议"), row.label)
+        XCTAssertFalse(row.label.contains("会议中") || row.label.contains("录音中"), "the place, Meetings (#8731), not a running one: \(row.label)")
         try shot(app, "drawer")
 
         row.tap()
         let record = app.buttons["recording-meeting-start"]
-        XCTAssertTrue(record.waitForExistence(timeout: 15), "the row opens Recordings: \(app.debugDescription)")
-        XCTAssertEqual(record.label, "录音")
+        XCTAssertTrue(record.waitForExistence(timeout: 15), "the row opens Meetings: \(app.debugDescription)")
+        XCTAssertEqual(record.label, "开始会议")
         sleep(3)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         XCTAssertFalse(springboard.alerts.firstMatch.exists, "no microphone prompt: the row starts nothing")

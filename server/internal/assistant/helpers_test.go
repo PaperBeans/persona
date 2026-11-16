@@ -48,7 +48,7 @@ func (s *Service) linkTask(ctx context.Context, it *InboxItem, tasks []prompts.I
 // accepted is acceptTry without the error.
 func (s *Service) accepted(ctx context.Context, id, card string) bool {
 	ok, _ := s.acceptTry(ctx, id, card)
-	return ok
+	return ok.taken
 }
 
 // agentArchiveChanges is when each of machine's archive records last changed, by session id. A later archive/restore

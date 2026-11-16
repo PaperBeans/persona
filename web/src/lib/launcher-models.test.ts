@@ -116,11 +116,11 @@ describe("列表", () => {
       .mockResolvedValueOnce({ ok: false, status: 502, text: async () => JSON.stringify({ error: "claude: command not found" }) });
     vi.stubGlobal("fetch", fetcher);
     expect(await launcherModels("desk top", "traex")).toEqual({ agent: "traex", models: [] });
-    expect(await launcherModels("desktop", "gateway/x", { refresh: true })).toEqual(claude);
+    expect(await launcherModels("desktop", "gateway/x", { refresh: true, purpose: "assistant" })).toEqual(claude);
     expect(await launcherModels("desktop", "claude")).toBeNull();
     await expect(launcherModels("desktop", "claude")).rejects.toMatchObject({ status: 502, message: "claude: command not found" });
     expect(fetcher.mock.calls.map((c) => c[0]).slice(0, 2)).toEqual([
-      "/api/v1/machines/desk%20top/launchers/traex/models", "/api/v1/machines/desktop/launchers/gateway%2Fx/models?refresh=1",
+      "/api/v1/machines/desk%20top/launchers/traex/models", "/api/v1/machines/desktop/launchers/gateway%2Fx/models?refresh=1&purpose=assistant",
     ]);
   });
 });

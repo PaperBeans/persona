@@ -459,7 +459,14 @@ final class AppModel {
     @ObservationIgnored private(set) var launcherUnavailable: [MachineRef: [UnavailableLauncher]] = [:]
     /// The main chat's own picker (`?purpose=assistant`, #5033): its eligible launchers, the effective Main chat
     /// default, and what can't run there with why. Separate from `launcherCache`, which serves the agent.new purpose.
-    @ObservationIgnored private(set) var assistantLauncherCache: [MachineRef: APIClient.LaunchersResponse] = [:]
+    nonisolated struct AssistantLauncherScope: Hashable {
+        var machine: MachineRef
+        var manager: String?
+    }
+    @ObservationIgnored private(set) var assistantLauncherCache: [AssistantLauncherScope: APIClient.LaunchersResponse] = [:]
+    @ObservationIgnored private var assistantLauncherReads: [AssistantLauncherScope: Int] = [:]
+    @ObservationIgnored private var assistantLauncherReadID = 0
+    @ObservationIgnored let assistantStarterCache = AssistantStarterCache()
     /// Observed because the cache above is intentionally not observed: a fresh answer must redraw the composer's title.
     private(set) var assistantLauncherRevision = 0
     /// Only a settings snapshot should start another picker request. Kept separate from the answer revision so a
@@ -1175,6 +1182,7 @@ final class AppModel {
             // it ticks during transcript streaming and is not published through SessionCell to the composer.
             // Invalidate only the assistant picker; New Chat and Model Providers use launchersRevision instead.
             assistantLauncherCache = [:]
+            assistantStarterCache.clear()
             assistantLauncherRequestRevision += 1
             if sessionLists.lists[api.group]?.paged == true { landSessionSummaries(api.stamp(st.conversations), group: api.group) }
             // Only on the very first launch: after New Chat the key exists but is empty, and the home page stays.
@@ -3653,6 +3661,7 @@ final class AppModel {
         launcherDefaults = [:]
         launcherUnavailable = [:]
         assistantLauncherCache = [:]
+        assistantStarterCache.clear()
         // Model Settings changes are launcher changes too: wake the open main-chat composer to re-read the default.
         launchersRevision += 1
         assistantLauncherRevision += 1
@@ -3678,11 +3687,21 @@ final class AppModel {
     /// The main chat's picker data (`GET …/launchers?purpose=assistant`, #5033): the launchers that can run the
     /// assistant on this machine, the effective Main chat default (`default`, what the next message runs with no pick),
     /// and the ones that can't with why. Cached until Model Settings change or a `refresh`.
-    func assistantLaunchers(_ machine: MachineRef, refresh: Bool = false) async throws -> APIClient.LaunchersResponse {
-        if !refresh, let cached = assistantLauncherCache[machine] { return cached }
-        guard let api = api(machine.group) else { return APIClient.LaunchersResponse(launchers: [], default: nil, unavailable: nil) }
-        let r = try await api.launcherList(machine: machine.id, purpose: "assistant")
-        assistantLauncherCache[machine] = r
+    func assistantLaunchers(_ machine: MachineRef, refresh: Bool = false, using catalogAPI: APIClient? = nil) async throws -> APIClient.LaunchersResponse {
+        guard let client = (catalogAPI ?? api(machine.group))?.currentAssistantSettings() else {
+            return APIClient.LaunchersResponse(launchers: [], default: nil, unavailable: nil)
+        }
+        let scope = AssistantLauncherScope(machine: machine, manager: client.managerID)
+        if !refresh, let cached = assistantLauncherCache[scope] { return cached }
+        let revision = assistantLauncherRequestRevision
+        assistantLauncherReadID += 1
+        let read = assistantLauncherReadID
+        if assistantLauncherReads[scope] == nil && assistantLauncherReads.count >= 64 { assistantLauncherReads.removeAll() }
+        assistantLauncherReads[scope] = read
+        let r = try await client.launcherList(machine: machine.id, purpose: "assistant")
+        guard revision == assistantLauncherRequestRevision, assistantLauncherReads[scope] == read else { return r }
+        if assistantLauncherCache[scope] == nil && assistantLauncherCache.count >= 64 { assistantLauncherCache.removeAll() }
+        assistantLauncherCache[scope] = r
         assistantLauncherRevision += 1
         return r
     }
@@ -3741,7 +3760,8 @@ final class AppModel {
     /// The main chat picker data already read for `machine` (nil: nothing cached yet; `assistantLaunchers(_:)` reads it).
     /// The composer title reads this so it shows the effective Main chat model, not only the running process's last one.
     func cachedAssistantLaunchers(_ machine: MachineRef) -> APIClient.LaunchersResponse? {
-        assistantLauncherCache[machine]
+        let manager = api(machine.group)?.currentAssistantSettings().managerID
+        return assistantLauncherCache[AssistantLauncherScope(machine: machine, manager: manager)]
     }
 
 
@@ -4041,6 +4061,9 @@ final class AppModel {
     /// conversation (one not listed yet stays; the health space's is the default's and stays), and the pushed pages close
     /// (`assistantSwitches`). Another assistant's conversation opened from a notification stays through a re-read.
     func assistantManagerChanged(switched: Bool = true) {
+        assistantLauncherCache = [:]
+        assistantStarterCache.clear()
+        assistantLauncherRequestRevision += 1
         assistantConfig = heldAssistant(hub?.group ?? "")
         // The tree is the default manager's: kept through a re-read of it, dropped for any other.
         if switched || !assistantShows(nil) {

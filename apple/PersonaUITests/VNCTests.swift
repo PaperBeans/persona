@@ -1211,6 +1211,31 @@ final class VNCTests: XCTestCase {
         }
     }
 
+    /// #8859: a line under the codec names x264 while the user's own ffmpeg encodes, or says why x264, on for that Mac,
+    /// stopped (the demos with `-showScreenX264Demo` / `-showScreenX264OffDemo`), in light and dark, at the
+    /// default size and at xxxLarge.
+    @MainActor func testTheOverlayNamesTheEncoder() throws {
+        for (demo, name) in [("-showScreenX264Demo", "x264"), ("-showScreenX264OffDemo", "x264-off")] {
+            for (scheme, size) in [("light", "L"), ("dark", "L"), ("light", "XXXL"), ("dark", "XXXL")] {
+                let (app, _) = try signedInMachinePage(["-showScreenStatsDemo", "YES", demo, "YES", "-ui.scheme", scheme,
+                                                        "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategory\(size)"])
+                let overlay = app.descendants(matching: .any)["screen-stats"].firstMatch
+                XCTAssertTrue(overlay.waitForExistence(timeout: 10), "the overlay:\n\(app.debugDescription)")
+                if name == "x264" {
+                    XCTAssertTrue(overlay.label.contains("H.264") && overlay.label.contains("x264"), "the encoder: \(overlay.label)")
+                } else {
+                    XCTAssertTrue(overlay.label.contains("x264") && overlay.label.contains("HEVC"), "why x264 stopped: \(overlay.label)")
+                }
+                for source in [app, XCUIApplication(bundleIdentifier: "com.apple.springboard")] { // the icon follows the look
+                    let alert = source.alerts.containing(NSPredicate(format: "label CONTAINS[c] 'icon' OR label CONTAINS '图标'")).firstMatch
+                    if alert.exists, alert.buttons.firstMatch.exists { alert.buttons.firstMatch.tap() }
+                }
+                shot(app, "vnc-overlay-\(name)-\(scheme)-\(size == "L" ? "default" : "xxxl")")
+                app.terminate()
+            }
+        }
+    }
+
     /// #6398: a phone that asks the hub for a screen session (direct routes on, `-showScreenRoutes`) and a hub that
     /// doesn't offer one (the mock, like an older hub or node) keep today's live screen through the same raw streams:
     /// RFB signs in and, with the mock's video channel, video takes the picture and reports frames.

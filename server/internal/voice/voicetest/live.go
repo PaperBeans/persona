@@ -216,6 +216,26 @@ func (l *Live) Audio() []float64 {
 	return out
 }
 
+// CaptionSamples reports samples actually consumed by the active fake caption peer.
+// It is independent of the adapter's queue and includes any silence it sends.
+func (l *Live) CaptionSamples() (int64, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := len(l.conns) - 1; i >= 0; i-- {
+		c := l.conns[i]
+		if !c.caption {
+			continue
+		}
+		c.mu.Lock()
+		samples, gone := c.samples, c.gone
+		c.mu.Unlock()
+		if !gone {
+			return samples, true
+		}
+	}
+	return 0, false
+}
+
 // Open is how many sessions are connected now.
 func (l *Live) Open() int {
 	l.mu.Lock()

@@ -211,7 +211,7 @@ func TestSupervisorAcceptedLeavesABigFeatureToTheOwner(t *testing.T) {
 	if got := s.todoStages(ctx)[todo.ID]; got.Stage != "deploy" || got.Verified {
 		t.Fatalf("waiting for owner: %+v", got)
 	}
-	if ok, err := s.acceptTry(ctx, todo.ID, ""); err != nil || !ok {
+	if ok, err := s.acceptTry(ctx, todo.ID, ""); err != nil || !ok.taken {
 		t.Fatalf("owner acceptance: %v %v", ok, err)
 	}
 	if got := s.todoStages(ctx)[todo.ID]; got.Stage != "verify" || !got.Verified {

@@ -56,7 +56,7 @@ final class MenuSectionTitleTests: XCTestCase {
         app.launchArguments = ["-pairURL", pair, "-ui.scheme", scheme] + extra
         app.launchPinned()
         LiveActivityShots.allowNotifications()
-        dismissIconNote()
+        HomeScreen.dismissIconNote()
         let field = app.descendants(matching: .any)["shell-composer-field"].firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 20), "no composer:\n\(app.debugDescription)")
         field.tapCenter()
@@ -106,17 +106,6 @@ final class MenuSectionTitleTests: XCTestCase {
         let notText = NSPredicate(format: "elementType != %d", XCUIElement.ElementType.staticText.rawValue)
         let below = menu.descendants(matching: .any).matching(NSCompoundPredicate(andPredicateWithSubpredicates: [rows, notText]))
         return below.allElementsBoundByIndex.contains { $0.frame.minY >= line.frame.maxY - 1 }
-    }
-
-    /// The app icon follows the color scheme (`AppIconChoice`); the system says so in an alert when a launch switches it.
-    @MainActor private func dismissIconNote() {
-        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        guard board.alerts.firstMatch.waitForExistence(timeout: 2) else { return }
-        for label in ["OK", "好"] where board.alerts.buttons[label].exists { // i18n-ignore: the system's own button
-            board.alerts.buttons[label].tap()
-            sleep(1)
-            return
-        }
     }
 
     @MainActor private func shot(_ name: String) {

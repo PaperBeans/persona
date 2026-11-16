@@ -712,6 +712,26 @@ func (s *Service) routeToTaskChecked(ctx context.Context, conversation, todoID, 
 // task themselves. The apps draw both as the owner's; where a task came from reads only the latter (decision.go).
 const routedRelay = "answer"
 
+// agentUnavailableError marks a routing refusal that no Agent can receive. The wrapper keeps the localized route error;
+// a lower-level send failure with the same text is not marked and stays retryable.
+type agentUnavailableError struct{ error }
+
+func (e *agentUnavailableError) Unwrap() error { return e.error }
+func (e *agentUnavailableError) Text(l i18n.Lang) string {
+	return i18n.Localize(e.error, l)
+}
+
+func agentUnavailable(key string) error {
+	return &agentUnavailableError{error: i18n.Err(key)}
+}
+
+// noAgentCanTake reports whether nothing can receive a decision now: the router found no live Agent or computer, or the
+// node explicitly refused a stopped Agent. Other send failures can be transient and must not take the decision.
+func noAgentCanTake(err error) bool {
+	var unavailable *agentUnavailableError
+	return errors.As(err, &unavailable) || refusedWith(err, proto.CodeAgentStopped)
+}
+
 // relayToTask is routeToTaskChecked for what the hub words on the owner's behalf (routedRelay).
 func (s *Service) relayToTask(ctx context.Context, conversation, todoID, text string, guard func(Todo) bool) (FeedItem, error) {
 	return s.routeToTaskAs(ctx, conversation, todoID, text, routedRelay, guard)
@@ -731,7 +751,16 @@ func (s *Service) routeToTaskAs(ctx context.Context, conversation, todoID, text,
 	}
 	agents := s.taskAgents(ctx, t)
 	if len(agents) == 0 {
-		return FeedItem{}, i18n.Err("assistant-tasks.route_no_agent")
+		// A failed session list is not an answer. Retry with reachability before deciding that the task genuinely has
+		// no Agent, or a transient lookup could end a decision as if the Agent were gone.
+		reachedAgents, reached := s.taskAgentsReached(ctx, t)
+		if !reached {
+			return FeedItem{}, i18n.Err("assistant-tasks.route_offline")
+		}
+		agents = reachedAgents
+	}
+	if len(agents) == 0 {
+		return FeedItem{}, agentUnavailable("assistant-tasks.route_no_agent")
 	}
 	live, last := liveTaskAgents(agents)
 	if len(live) == 0 { // every agent has stopped (read-only, #4754): the user's message starts a new one (tasks_successor.go)
@@ -742,7 +771,7 @@ func (s *Service) routeToTaskAs(ctx context.Context, conversation, todoID, text,
 			}
 		}
 		if relay != "" {
-			return FeedItem{}, i18n.Err("assistant-tasks.route_agents_stopped")
+			return FeedItem{}, agentUnavailable("assistant-tasks.route_agents_stopped")
 		}
 		// One new agent per task at a time: a second message while it starts (the owner's next line, or the same one
 		// sent again after the app stopped waiting) goes to the agent that start brings up, not to a second one.
@@ -816,7 +845,7 @@ func (s *Service) newlyLinkedAgent(t Todo, todoID string) (proto.Session, bool) 
 // sendToTaskAgent sends text to c, an agent of task todoID, and keeps it in conversation's feed (routeToTaskAs).
 func (s *Service) sendToTaskAgent(ctx context.Context, conversation, todoID string, c proto.Session, text, relay string, guard func(Todo) bool) (FeedItem, error) {
 	if _, ok := s.device(ctx, c.MachineID); !ok {
-		return FeedItem{}, i18n.Err("assistant-tasks.route_offline")
+		return FeedItem{}, agentUnavailable("assistant-tasks.route_offline")
 	}
 	// An offline row a node before #4754 lists is resumed first: that can take minutes, and goes on when the phone
 	// stops waiting, as a send from the chat does.

@@ -53,7 +53,7 @@ func (s *Service) readinessReplySucceeded(ctx context.Context, machine, launcher
 	if sess.Model == "" {
 		return true
 	}
-	aliases, defaultModel := s.launcherModelResolution(ctx, machine, launcher)
+	aliases, defaultModel := s.launcherModelResolution(withLauncherPurpose(ctx, "assistant"), machine, launcher)
 	want := binding.Model
 	if want == "" {
 		if defaultModel == "" {

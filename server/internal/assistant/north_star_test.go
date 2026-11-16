@@ -128,7 +128,7 @@ func TestNorthStarInterruptionsAndAvailability(t *testing.T) {
 		t.Fatalf("kinds: %+v %+v", in.Categories[nsAuthorization], in.Categories[nsActionCard])
 	}
 	wantExcluded := InterruptExcluded{SupervisorRouted: 2, SupervisorHeld: 1, SupervisorEscalated: 1, AutoAuthorized: 1, Probe: 2,
-		NotifyMissed: map[string]int{missedNoDevice: 2, missedHubAway: 1}}
+		NotifyMissed: map[string]int{missedNoDevice: 2, missedHubAway: 1}, CallSkipped: map[string]int{}}
 	if !reflect.DeepEqual(in.Excluded, wantExcluded) {
 		t.Fatalf("excluded %+v, want %+v", in.Excluded, wantExcluded)
 	}

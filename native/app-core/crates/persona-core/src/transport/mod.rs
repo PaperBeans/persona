@@ -57,7 +57,7 @@
 //!   a string other than `items`, without checking the rest of its envelope; iOS drops such a frame when an
 //!   envelope key has the wrong type. Decoders for those frames come in later phases.
 
-pub(crate) mod seen;
+pub mod seen;
 
 use std::borrow::Cow;
 
@@ -248,7 +248,7 @@ pub enum Frame {
 
 /// `items`: every element read as an item, or the first one refused. An element is read as soon as the array
 /// reaches it, so a page whose first element is refused costs no more than skipping the rest.
-struct Items(Result<Vec<Item>, (usize, ItemFault)>);
+pub(crate) struct Items(pub(crate) Result<Vec<Item>, (usize, ItemFault)>);
 
 impl<'de> Shape<'de> for Items {
     fn seq<A: SeqAccess<'de>>(mut seq: A) -> Result<Option<Self>, A::Error> {
@@ -276,7 +276,7 @@ fn read_items(items: Option<Items>) -> Result<Vec<Item>, DecodeError> {
     }
 }
 
-fn utf8(bytes: &[u8]) -> Result<&str, DecodeError> {
+pub(crate) fn utf8(bytes: &[u8]) -> Result<&str, DecodeError> {
     std::str::from_utf8(bytes).map_err(|e| DecodeError::InvalidUtf8 {
         valid_up_to: e.valid_up_to(),
     })
@@ -284,7 +284,7 @@ fn utf8(bytes: &[u8]) -> Result<&str, DecodeError> {
 
 /// Parses the root object into `T`, a [`keyed!`] struct: no key's type can fail it, so every error left is the
 /// document's.
-fn root<'a, T: Deserialize<'a>>(json: &'a str) -> Result<T, DecodeError> {
+pub(crate) fn root<'a, T: Deserialize<'a>>(json: &'a str) -> Result<T, DecodeError> {
     let malformed = |e: serde_json::Error| DecodeError::Malformed {
         truncated: e.is_eof(),
         line: e.line(),

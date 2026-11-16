@@ -29,6 +29,11 @@ struct KnowledgeView: View {
     @State private var curating: Bool?
     /// The project the user asked to delete, while the question is up.
     @State private var deletingProject: KBEntry?
+    /// The recording a swipe asked to delete (its row shows the question), and why a delete failed (#8731).
+    @State private var deletingRecording: UUID?
+    /// A recording row's recording while Rename is open (#8873).
+    @State private var renamingRecording: UUID?
+    @State private var recordingFailure: String?
     /// Projects taken off the list while their deletion is sent.
     @State private var hiddenProjects: Set<String> = []
     #if DEBUG
@@ -46,13 +51,9 @@ struct KnowledgeView: View {
     /// leaves nothing, so the results area would spin for good on a field of spaces (#4086).
     private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
-    /// Recordings on a phone is this device's own list (with what is still recording or transcribing), not the hub's copy.
-    private var localRecordings: Bool {
-        #if os(iOS) || os(visionOS)
-        true
-        #else
-        false
-        #endif
+    /// `kind`: the list it opens on (the Meetings page's All Meetings opens meetings, #8731); recordings' is meetings'.
+    init(kind: KBKind = .projects) {
+        _kind = State(initialValue: kind.listedAs)
     }
 
     private var kindBar: some View {
@@ -75,10 +76,6 @@ struct KnowledgeView: View {
             }
             if searching {
                 searchResults
-            } else if kind == .recordings, localRecordings {
-                #if os(iOS) || os(visionOS)
-                RecordingsSection()
-                #endif
             } else if let list {
                 content(list)
             } else if let error {
@@ -88,8 +85,11 @@ struct KnowledgeView: View {
             }
         }
         .listStyle(.insetGrouped)
-        #if os(iOS)
-        .recordingLiveSheet() // the live recording sheet opens from here too (`RecordingsSection` is this list's Recordings kind)
+        .alert("Couldn't Finish", isPresented: Binding(get: { recordingFailure != nil }, set: { if !$0 { recordingFailure = nil } })) {
+            Button("OK [Recordings Section de32e2]") { recordingFailure = nil }.lineLimit(1)
+        } message: { Text(recordingFailure ?? "") }
+        #if os(iOS) || os(visionOS)
+        .recordingRename($renamingRecording)
         #endif
         #if os(macOS)
         .modifier(MacBelowTitleRowIfAsked()) // under Knowledge's title in the window: the list starts below it (#1243)
@@ -105,7 +105,7 @@ struct KnowledgeView: View {
             if shell != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        if !(kind == .recordings && localRecordings) { tagChoices }
+                        tagChoices
                         Button { showMap = true } label: { Label("Knowledge Map", systemImage: Theme.Icon.knowledgeMap) }
                             .accessibilityIdentifier("kb.map")
                     } label: { ThemedIcon(Theme.Icon.moreMenu) }
@@ -154,7 +154,7 @@ struct KnowledgeView: View {
             if UserDefaults.standard.bool(forKey: "showKnowledgeMap") {
                 Task { try? await Task.sleep(for: .seconds(1)); showMap = true }
             }
-            if let k = UserDefaults.standard.string(forKey: "showKnowledgeKind").flatMap(KBKind.init(rawValue:)) { kind = k }
+            if let k = UserDefaults.standard.string(forKey: "showKnowledgeKind").flatMap(KBKind.init(rawValue:)) { kind = k.listedAs }
             if let ref = UserDefaults.standard.string(forKey: "showKnowledgeEntry"), let slash = ref.firstIndex(of: "/") {
                 let id = String(ref[ref.index(after: slash)...])
                 let e = KBEntry(kind: String(ref[..<slash]), id: id, name: id, relevance: 0)
@@ -176,7 +176,9 @@ struct KnowledgeView: View {
         } else if list.items.isEmpty {
             Section {
                 EmptyStateView(symbol: kind.symbol, title: tag == nil ? String(localized: "No \(kind.title) yet") : String(localized: "No \(kind.title) tagged #\(tag!)"),
-                               message: String(localized: "The hub archives and condenses your Lark and email conversations, organizes them into projects, people, docs and meetings, and ranks them by importance and relevance."))
+                               message: kind == .meetings
+                                   ? String(localized: "Meetings and notes you record on your phone, and meetings from connected apps such as Lark, show up here.")
+                                   : String(localized: "The hub archives and condenses your Lark and email conversations, organizes them into projects, people, docs and meetings, and ranks them by importance and relevance."))
             }
             .listRowBackground(Color.clear)
         } else if kind == .projects {
@@ -208,10 +210,16 @@ struct KnowledgeView: View {
             }
         } else {
             // Most people are only someone in a group (no importance yet): folded under the ranked ones, as Not a Project.
-            let ranked = tag != nil ? list.items : list.items.filter { !($0.importance ?? "").isEmpty }
-            let rest = tag != nil ? [] : list.items.filter { ($0.importance ?? "").isEmpty }
+            // A meeting is looked for by when it was (#8731): both newest first, the sorted ones under All, with the owner's
+            // own recordings, never folded (one just ended has no importance until its summary is written).
+            let byTime = kind == .meetings
+            let open: (KBEntry) -> Bool = { !($0.importance ?? "").isEmpty || (byTime && $0.kind == KBKind.recordings.rawValue) }
+            let ranked = tag != nil ? list.items : list.items.filter(open)
+            let rest = tag != nil ? [] : list.items.filter { !open($0) }
             if !ranked.isEmpty {
-                Section { rows(ranked) } header: { header(tag.map { "#" + $0 } ?? String(localized: "By Importance and Relevance"), ranked.count) }
+                Section { rows(byTime ? KBList.newestFirst(ranked) : ranked) } header: {
+                    header(tag.map { "#" + $0 } ?? (byTime ? String(localized: "All") : String(localized: "By Importance and Relevance")), ranked.count)
+                }
             }
             if !rest.isEmpty {
                 Section {
@@ -227,7 +235,7 @@ struct KnowledgeView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("kb.rest")
-                    if showIgnored || ranked.isEmpty { rows(rest) }
+                    if showIgnored || ranked.isEmpty { rows(byTime ? KBList.newestFirst(rest) : rest) }
                 } footer: {
                     if !ranked.isEmpty {
                         Text("\(kind.title) that have only appeared in groups and aren't tagged yet. Anyone who has talked with you or shows up in important chats gets organized by AI.")
@@ -278,14 +286,66 @@ struct KnowledgeView: View {
     }
 
     private func rows(_ items: [KBEntry]) -> some View {
-        ForEach(items.filter { !hiddenProjects.contains($0.id) || $0.kind != KBKind.projects.rawValue }) { e in
+        ForEach(items.filter { (!hiddenProjects.contains($0.id) || $0.kind != KBKind.projects.rawValue) && !deletedHere($0) }) { e in
             if e.kind == KBKind.projects.rawValue {
                 projectRow(e)
             } else {
+                #if os(iOS) || os(visionOS)
+                if let id = e.localRecording, opener == nil, RecordingLibrary.shared.entry(id) != nil {
+                    recordingRow(e, id: id)
+                } else {
+                    KBEntryLink(entry: e) { KBRow(entry: e) }
+                }
+                #else
                 KBEntryLink(entry: e) { KBRow(entry: e) }
+                #endif
             }
         }
     }
+
+    /// A recording deleted on this phone (here or on its page) leaves the list at once; the hub's copy goes once the
+    /// deletion syncs. The rows read the library's entries, so a deletion redraws them.
+    private func deletedHere(_ e: KBEntry) -> Bool {
+        #if os(iOS) || os(visionOS)
+        guard let id = e.localRecording else { return false }
+        return RecordingLibrary.shared.isDeleted(id)
+        #else
+        false
+        #endif
+    }
+
+    #if os(iOS) || os(visionOS)
+    /// A recording this phone made, in the meetings list (#8731): its own page opens (minutes, transcript, the meeting's
+    /// conversation), and a swipe deletes it as the Meetings page's rows do (#4938), asked first.
+    private func recordingRow(_ e: KBEntry, id: UUID) -> some View {
+        NavigationLink {
+            if RecordingLibrary.shared.entry(id)?.isDay == true { RecordingDayView(id: id) } else { RecordingDetailView(id: id) }
+        } label: { KBRow(entry: e) }
+            .accessibilityIdentifier("kb.recording")
+            // Rename (#8873): a touch and hold, and VoiceOver's actions; not a day, named by its date.
+            .contextMenu {
+                if RecordingLibrary.shared.entry(id)?.isDay == false {
+                    Button { renamingRecording = id } label: { Label("Rename", systemImage: Theme.Icon.edit) }
+                }
+            }
+            .accessibilityAction(named: Text("Rename")) { if RecordingLibrary.shared.entry(id)?.isDay == false { renamingRecording = id } }
+            .confirmationDialog("Delete This Recording?", isPresented: Binding(get: { deletingRecording == id }, set: { if !$0, deletingRecording == id { deletingRecording = nil } }),
+                                titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    if let message = RecordingDeletion.run(id) { recordingFailure = message }
+                }
+            } message: { Text("The audio on this device will be deleted now. Its text in Knowledge is removed after sync succeeds; if Knowledge is off or read-only, that deletion stays pending.") }
+            .swipeActions(edge: .trailing) {
+                // As on the Meetings page: none while the watch still records it, and a day is deleted on its page (it
+                // stops the watch and deletes every part on the hub).
+                if let local = RecordingLibrary.shared.entry(id), !local.active, !local.isDay {
+                    Button { deletingRecording = id } label: { Label("Delete", systemImage: Theme.Icon.delete) }
+                        .tint(Theme.danger)
+                        .accessibilityIdentifier("kb.recording.delete")
+                }
+            }
+    }
+    #endif
 
     /// A project row: Delete in its swipe actions and context menu, asked first as on the web (#4412), then undoable.
     private func projectRow(_ e: KBEntry) -> some View {
@@ -355,7 +415,7 @@ struct KnowledgeView: View {
     // MARK: Tags
 
     @ToolbarContentBuilder private var legacyToolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) { if !(kind == .recordings && localRecordings) { tagMenu } }
+        ToolbarItem(placement: .topBarTrailing) { tagMenu }
         ToolbarItem(placement: .topBarTrailing) {
             Button { showMap = true } label: { ThemedIcon(Theme.Icon.knowledgeMap) }
                 .accessibilityLabel("Knowledge Map")
@@ -451,10 +511,18 @@ struct KnowledgeView: View {
     }
 
     private func load() async {
-        guard let api = scopedAPI(), !(kind == .recordings && localRecordings) else { return }
+        guard let api = scopedAPI() else { return }
         let kind = kind
         do {
-            let l = try await api.kbList(kind, tag: tag)
+            let l: KBList
+            if kind == .meetings {
+                // One list with the recordings (#8731): both are read, and either failing fails the page.
+                async let meetings = api.kbList(.meetings, tag: tag)
+                async let recordings = api.kbList(.recordings, tag: tag)
+                l = try await KBList.meetings(meetings, recordings: recordings)
+            } else {
+                l = try await api.kbList(kind, tag: tag)
+            }
             guard !Task.isCancelled, api.sameSettingsScope(as: model.api) else { return }
             lists[kind] = l
             error = nil
@@ -538,7 +606,7 @@ struct KBKindBar: View {
     /// chips after it along or onto another row.
     private var filterChips: some View {
         LarkFlowLayout(spacing: Theme.Space.xs, lineSpacing: Theme.Space.sm) {
-            ForEach(KBKind.allCases) { k in
+            ForEach(KBKind.listed) { k in
                 BUIFilterChip(k.title, isActive: k == kind) {
                     Haptics.tap()
                     withAnimation(Theme.Motion.standard) { kind = k }
@@ -560,7 +628,7 @@ struct KBKindBar: View {
     }
 
     @ViewBuilder private func chips(icons: Bool, padding: CGFloat) -> some View {
-        ForEach(KBKind.allCases) { k in
+        ForEach(KBKind.listed) { k in
             let on = k == kind
             Button {
                 Haptics.tap()
@@ -621,6 +689,8 @@ struct KBRow: View {
 
     private func badges(tags: Int) -> some View {
         HStack(spacing: Theme.Space.sm) {
+            // Notes and all-day recordings among meetings (#8731); meetings carry none.
+            if let t = entry.recordingTag { KBPill(text: t) }
             ImportanceBadge(importance: entry.importance)
             if let n = entry.topicPoints { KBPill(text: String(localized: "\(n) knowledge points")) }
             if let k = entry.projectKind { KBPill(text: k, tint: (entry.extra ?? "").hasPrefix("long") ? Theme.Hue.blue : nil) }

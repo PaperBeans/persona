@@ -215,5 +215,12 @@
   "recap_refresh_failed": "未能读取最新回顾，请先刷新再重试：{error}",
   "recap_kept_until": "转写已过保留期。这份回顾保留到 {date}。",
   "recap_transcript_expired": "转写已过保留期，只留下了这份回顾。",
-  "recap_kept_forever": "转写已过保留期。这份回顾会一直保留，直到你删除。"
+  "recap_kept_forever": "转写已过保留期。这份回顾会一直保留，直到你删除。",
+  "rename": "改名",
+  "rename_title": "改名",
+  "rename_placeholder": "自动命名",
+  "rename_hint": "留空则自动命名。之后在 iPhone 上再改名，会以 iPhone 的为准。",
+  "renamed": "已改名",
+  "rename_cleared": "已恢复自动命名",
+  "rename_failed": "改名没成功：{error}"
 }

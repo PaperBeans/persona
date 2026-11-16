@@ -241,8 +241,18 @@ func TestUpdateLooksAgainBeforeTheSwap(t *testing.T) {
 	waitFor(t, "waiting for idle", func() bool { return h.upd.view().State == "waiting_idle" })
 	writeService(t, h.dir, "user/personad.service", strings.ReplaceAll(unitRunningHub, "%s", filepath.Dir(h.target)))
 	setSessions(h.machine, proto.Session{SessionID: "s1", Status: proto.StatusIdle})
-	waitFor(t, "the update to fail", func() bool { return h.upd.view().State == "failed" })
-	if hist := h.upd.settings.History; len(hist) != 1 || !strings.Contains(hist[0].Reason, "persona-hub") {
+	// The failed state is published before its history is recorded. Wait for both, and read the history under its lock.
+	var hist []updateRecord
+	waitFor(t, "the failed update's history", func() bool {
+		h.upd.mu.Lock()
+		defer h.upd.mu.Unlock()
+		if h.upd.state != "failed" || len(h.upd.settings.History) == 0 {
+			return false
+		}
+		hist = slices.Clone(h.upd.settings.History)
+		return true
+	})
+	if len(hist) != 1 || !strings.Contains(hist[0].Reason, "persona-hub") {
 		t.Fatalf("history %+v", hist)
 	}
 	nothingReplaced(t, h)

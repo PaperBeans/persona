@@ -66,7 +66,7 @@ function WaitingRow({ row }: { row: BriefRow }) {
 }
 
 /** What the Accept button of a task says: it asked, the hub took it, or the round is already over. */
-type Accepting = "idle" | "busy" | "finishing" | "finished" | "accepted" | "handled";
+type Accepting = "idle" | "busy" | "finishing" | "finished" | "accepted" | "recorded" | "handled";
 
 /** What the button of a row to verify says: Accept a deployed task, Got it a conclusion, Take recommendation a decision. */
 function acceptLabel(row: BriefRow): { label: string; title: string } {
@@ -84,7 +84,7 @@ export function AcceptRow({ row, stacked = false, admission, onBusyChange, block
   // the primary button (and the settled word) on its own full-width line while the row is narrow
   const full = stacked ? "w-full" : "@max-md:w-full";
   const deciding = row.outcome === "decide";
-  const settled = state === "accepted" || state === "handled" || state === "finished";
+  const settled = state === "accepted" || state === "recorded" || state === "handled" || state === "finished";
   // A decision with nothing recommended can still be finished, but has nothing to take.
   const takes = !deciding || !!row.recommend;
   const accept = () => {
@@ -152,7 +152,7 @@ export function AcceptRow({ row, stacked = false, admission, onBusyChange, block
       {!settled && secondary}
       {settled ? (
         <span className={cx("shrink-0 text-[12.5px] text-ink-2", full)} data-brief-accepted={state}>
-          {t(state === "finished" ? "assistant-brief.finished" : state === "handled" ? "assistant-brief.handled" : deciding ? "assistant-brief.taken" : row.outcome ? "assistant-brief.noted" : "assistant-brief.accepted")}
+          {t(state === "finished" ? "assistant-brief.finished" : state === "handled" ? "assistant-brief.handled" : state === "recorded" ? "assistant-brief.recorded_not_delivered" : deciding ? "assistant-brief.taken" : row.outcome ? "assistant-brief.noted" : "assistant-brief.accepted")}
         </span>
       ) : takes ? (
         <Button tone="primary" className={full} busy={state === "busy"} disabled={blocked || !row.asked_at || state === "finishing"} title={button.title} onClick={accept}>

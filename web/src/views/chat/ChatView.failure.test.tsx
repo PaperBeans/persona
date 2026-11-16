@@ -515,6 +515,62 @@ describe("a send whose answer came back in doubt (the hub stopped waiting, the m
     expect(host.querySelectorAll("[data-user-bubble]")).toHaveLength(1);
   });
 
+  // A Claude desktop session in bypass permissions mode holds Persona's message for approval on the computer: the node
+  // says so (peer_held, delivered unknown). The bubble said "Not sent: not sure it arrived, check this message", and Check
+  // changed nothing, so the owner could not tell what had happened or what to do.
+  it("a message held for approval on the computer says so, is no failure, and Check says it is still waiting", async () => {
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    let sending!: Promise<boolean>;
+    act(() => { sending = captured.onSend!({ text: "等电脑上批准的消息", images: [] }); });
+    await flush();
+    answer(json({ code: "peer_held", error: "held there", detail: "the node's words", delivered: "unknown" }, 409));
+    await act(async () => void (await sending));
+    await flush();
+    const line = host.querySelector("[data-outbox] [data-in-doubt]");
+    expect(line?.getAttribute("data-in-doubt")).toBe("held");
+    expect(line?.getAttribute("role")).toBe("status");
+    expect(line?.textContent).toContain(t("lib-outbox.held_on_computer"));
+    expect(line?.textContent).not.toContain(t("chat-outboxbubbles.failed", { error: "" }));
+    expect(line?.textContent).not.toContain(t("lib-outbox.delivery_unknown"));
+    expect(action(t("chat-outboxbubbles.retry"))).toBeUndefined();
+
+    vi.mocked(toast).mockClear();
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("/ops/")
+      ? Promise.resolve(json({ id: bodies[0].client_msg_id, kind: "message", target: { path: "/api/v1/sessions/hub/c1/messages" }, state: "unknown" }))
+      : Promise.resolve(json({}))));
+    await act(async () => action(t("chat-outboxbubbles.check"))!.click());
+    await flush();
+    expect(toast).toHaveBeenCalledWith(t("lib-outbox.still_held"), "info");
+    expect(bodies).toHaveLength(1);
+
+    // approved there: its line reaches the transcript and the bubble goes, nothing sent again
+    transcript.items = [{ id: "line-held", seq: 1, role: "user", kind: "text", text: bodies[0].text, ts: new Date().toISOString() }];
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(failed()).toBeNull();
+    expect(bodies).toHaveLength(1);
+  });
+
+  it("an unconfirmed peer send names the computer, and a bubble kept with the generic words says it in the code's", async () => {
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    let sending!: Promise<boolean>;
+    act(() => { sending = captured.onSend!({ text: "没确认收下的消息", images: [] }); });
+    await flush();
+    answer(json({ code: "peer_unconfirmed", error: "not taken", delivered: "unknown" }, 409));
+    await act(async () => void (await sending));
+    await flush();
+    const line = () => host.querySelector("[data-outbox] [data-in-doubt]");
+    expect(line()?.getAttribute("data-in-doubt")).toBe("unknown");
+    expect(line()?.textContent).toContain(t("lib-outbox.peer_unconfirmed"));
+    // an entry an older page kept with the generic words (before this fix) shows the code's words too
+    const kept = getState().outbox["hub/c1"]!;
+    act(() => setOutbox("hub/c1", kept.map((e) => ({ ...e, error: t("lib-outbox.delivery_unknown") }))));
+    await flush();
+    expect(line()?.textContent).toContain(t("lib-outbox.peer_unconfirmed"));
+  });
+
   it("a refusal stays failed even with the same words in the chat", async () => {
     act(() => root.render(<ChatView mid="hub" sid="c1" />));
     await flush();

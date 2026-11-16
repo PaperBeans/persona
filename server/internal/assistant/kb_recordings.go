@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -17,6 +18,9 @@ import (
 
 // codeRecordingDeleted: the recording was deleted here; the phone drops it instead of uploading it again.
 const codeRecordingDeleted = "recording_deleted"
+
+// maxTitleBody is the most a rename's body may be (#8877): a title of 200 characters with room for JSON escaping.
+const maxTitleBody = 4 << 10
 
 func (s *Service) recordingRoutes(engine func(http.ResponseWriter, *http.Request) *kb.Engine) {
 	s.handle("PUT /api/v1/recordings/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +118,44 @@ func (s *Service) recordingRoutes(engine func(http.ResponseWriter, *http.Request
 			s.hubStop(r.PathValue("id"), codeRecordingDeleted) // its audio socket and job (meeting_transcribe.go)
 		}
 		apierr.WriteJSON(w, map[string]any{"deleted": deleted})
+	})
+	// The owner's name from the web (#8877): it names the recording until the phone renames it again.
+	s.handle("PUT /api/v1/recordings/{id}/title", func(w http.ResponseWriter, r *http.Request) {
+		if !meetingCaller(w, r) {
+			return
+		}
+		e := engine(w, r)
+		if e == nil {
+			return
+		}
+		raw, ok := meetingBody(w, r, maxTitleBody, "4 KiB")
+		if !ok {
+			return
+		}
+		var in struct {
+			Title *string `json:"title"`
+		}
+		if json.Unmarshal(raw, &in) != nil || in.Title == nil {
+			apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-meeting.bad_title"))
+			return
+		}
+		rec, err := e.RenameRecording(r.PathValue("id"), *in.Title, time.Now())
+		switch {
+		case errors.Is(err, kb.ErrBadTitle):
+			apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-meeting.bad_title"))
+			return
+		case errors.Is(err, kb.ErrBadRecording):
+			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		case err != nil:
+			writeMeetingError(w, err)
+			return
+		}
+		out := map[string]any{}
+		if src := rec.NameSource(); src != "" { // as the upload's answer: none while it is named only by its start
+			out["name"], out["name_source"] = rec.Name, src
+		}
+		apierr.WriteJSON(w, out)
 	})
 	s.handle("GET /api/v1/recordings", func(w http.ResponseWriter, r *http.Request) {
 		e := engine(w, r)

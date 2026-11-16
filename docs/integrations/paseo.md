@@ -529,8 +529,9 @@ launcher ran on another account, and a provider added in Persona never applied i
   terminal engine and Paseo, picking the other one in "Start in" keeps the default's list; a launcher the chosen engine does not have then
   goes by "A launcher Paseo does not have" (the same kind, said, or a refusal) in Paseo, and as before in the terminal. The hub's
   `GET /api/v1/machines/{mid}/launchers?host=` already answers per host for an app that asks again when the host changes.
-- On a computer whose engine is Paseo, a name the login shell and Paseo both have is Paseo's provider in the models and Test a picker
-  asks for, the main chat's model menu too, although the main chat runs the shell's launcher of that name on its command line.
+- On a computer whose engine is Paseo, a name the login shell and Paseo both have is Paseo's provider in an Agent picker's models and Test.
+  Assistant pickers send `purpose=assistant` for model discovery and Test, which use the shell launcher or the runtime that actually runs
+  assistant conversations. Older clients without that parameter still receive the Agent engine's models and Test result.
 - The MCP server's `command` is the node's own program as an absolute path, stored in the Agent's config and kept by Paseo across reloads. Updates and deploys replace that file in place, so it normally stays valid. If the node's program
   moves or is switched (for example `persona-link node switch`, or a reinstall elsewhere), Agents created earlier keep the old path and lose their Persona tools until they are created again; the bridge does not rewrite a stored config.
 - Connect only to the local Paseo daemon. Paseo's relay and its other connected hosts are not integrated. Paseo on another computer uses that computer's own node.

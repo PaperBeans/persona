@@ -101,14 +101,17 @@ struct PersonaShortcuts: AppShortcutsProvider {
         #if os(iOS)
         AppShortcut(
             intent: StartMeetingRecordingIntent(),
+            // Start Meeting since #8731; the Record phrases keep working.
             phrases: [
+                "Start a meeting with \(.applicationName)",
+                "\(.applicationName), start a meeting",
                 "Record with \(.applicationName)",
                 "Record a meeting with \(.applicationName)",
                 "Record this meeting with \(.applicationName)",
                 "Start recording in \(.applicationName)",
                 "\(.applicationName), record the meeting",
             ],
-            shortTitle: "Record [Recordings Section ef2821]",
+            shortTitle: "Start Meeting",
             systemImageName: "waveform.circle" // icon: App Shortcuts take only a literal (Theme.Icon.recording)
         )
         #endif

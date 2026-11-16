@@ -68,7 +68,8 @@ python3 scripts/test/test_doc_paths.py && python3 scripts/test/test_doc_sections
 ```
 
 `git config core.hooksPath scripts/hooks` runs the privacy scan on every commit and push. UI changes need screenshots in
-light and dark, which you actually looked at ([`docs/operations/testing.md`](docs/operations/testing.md)), plus the
+light and dark, which you actually looked at ([`docs/operations/testing.md`](docs/operations/testing.md)), shown in the PR and
+never committed ([`docs/operations/collaboration.md`](docs/operations/collaboration.md), "Screenshots in PRs"), plus the
 "UI change self-check" from [`docs/design/DESIGN_SYSTEM.md`](docs/design/DESIGN_SYSTEM.md). Say in the PR which checks you
 couldn't run (a missing toolchain, no device) rather than leaving them out.
 

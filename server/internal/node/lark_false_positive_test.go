@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -229,6 +230,7 @@ func TestLarkLiteralForLoops(t *testing.T) {
 		{"message threads", `for id in 1111 2222 3333 4444; do echo "== $id"; timeout 60 ol GET "/messages/$id/thread" | jq -c '.items[]?' | head -20; done`, 0},
 		{"meeting insights", `for h in 1111 2222 3333 4444; do timeout 60 ol GET "/meetings/$h/insights" > /tmp/ins_$h.json 2>&1; head -c 100 /tmp/ins_$h.json; done`, 0},
 		{"binary versions", `for b in ~/.persona/bin/personad ~/.persona/bin/persona-node; do [ -x "$b" ] && { echo "== $b"; timeout 10 "$b" version 2>&1 | head -3; }; done`, 0},
+		{"legacy binary versions", `for b in ~/.persona/bin/personad ~/.persona/bin/` + compat.DaemonBinary + `; do [ -x "$b" ] && { echo "== $b"; timeout 10 "$b" version 2>&1 | head -3; }; done`, 0},
 		{"quoted list and braced route", `for id in '1111' "2222"; do ex GET "/messages/${id}/thread"; done`, 0},
 		{"unquoted scalar route", `for id in 1111 2222; do ex GET /messages/$id/thread; done`, 0},
 		{"ordinary command names", `for b in pwd ls; do "$b"; done`, 0},

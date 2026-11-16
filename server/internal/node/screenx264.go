@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"runtime"
@@ -26,19 +27,29 @@ import (
 // variable for tests.
 var screenFFmpegPaths = []string{"/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/opt/local/bin/ffmpeg"}
 
-// screenX264Wait bounds one probe (an encoder list, a version and a self-test). A variable for tests.
-var screenX264Wait = 10 * time.Second
+// screenX264Wait bounds one probe (an encoder list, a self-test and a version; about 0.15–0.3 s). A variable for tests.
+var screenX264Wait = 5 * time.Second
+
+// screenX264Retry is how long a failed probe stands before the same file is tried again; a passed one stands until the
+// file changes. A variable for tests.
+var screenX264Retry = time.Minute
+
+// screenX264Now is the probe's clock. A variable for tests.
+var screenX264Now = time.Now
 
 // screenX264 is this node's probe.
 var screenX264 = &x264Probe{}
 
-// x264Probe keeps the last answer for one file. A probe takes about 0.3 s (three short ffmpeg runs) once per file; a
-// caller that comes while it runs waits for it, so two statuses never disagree about the same ffmpeg.
+// x264Probe keeps the last answer for one file. A caller that comes while a probe runs waits for it, so two statuses
+// never disagree about the same ffmpeg. The probe runs on its own deadline, never the caller's: a status call cut short
+// must not leave "no ffmpeg" behind, and a failure is tried again after screenX264Retry (on the first node built with
+// it, macstudio's answer stayed empty after its first probe failed, #8859).
 type x264Probe struct {
-	mu      sync.Mutex
-	key     string // the file the answer is for: path, size, modification time; "" before any, and with none found
-	path    string // the ffmpeg that passed, "" when none did
-	version string
+	mu       sync.Mutex
+	key      string // the file the answer is for: path, size, modification time; "" before any, and with none found
+	path     string // the ffmpeg that passed, "" when none did
+	version  string
+	failedAt time.Time // when the probe of key last failed; zero after a pass
 }
 
 // candidate is the first executable ffmpeg at screenFFmpegPaths and its key, or "" for both.
@@ -56,39 +67,51 @@ func (p *x264Probe) candidate() (path, key string) {
 }
 
 // get is the ffmpeg that passed the probe and its version ("ffmpeg 9.0.2"), or "" for both; probed first when the file
-// changed since the last answer (bounded by ctx and screenX264Wait).
+// changed since the last answer, or when the last probe of it failed more than screenX264Retry ago. Each probe's
+// outcome goes to the node's log once.
 func (p *x264Probe) get(ctx context.Context) (path, version string) {
 	c, key := p.candidate()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if key != p.key {
-		p.key, p.path, p.version = key, "", ""
-		if c != "" {
-			pctx, cancel := context.WithTimeout(ctx, screenX264Wait)
-			if v := probeFFmpeg(pctx, c); v != "" {
-				p.path, p.version = c, v
-			}
-			cancel()
-		}
+	retry := !p.failedAt.IsZero() && screenX264Now().Sub(p.failedAt) >= screenX264Retry
+	if key == p.key && !retry {
+		return p.path, p.version
 	}
+	p.key, p.path, p.version, p.failedAt = key, "", "", time.Time{}
+	if c == "" {
+		return "", ""
+	}
+	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), screenX264Wait)
+	v, why := probeFFmpeg(pctx, c)
+	cancel()
+	if v == "" {
+		p.failedAt = screenX264Now()
+		log.Printf("screen x264: %s doesn't qualify: %s", c, why)
+		return "", ""
+	}
+	p.path, p.version = c, v
+	log.Printf("screen x264: %s qualifies (%s)", c, v)
 	return p.path, p.version
 }
 
-// probeFFmpeg is "ffmpeg <version>" when the ffmpeg at path has libx264 and passes the self-test, else "". A variable
-// for tests.
-var probeFFmpeg = func(ctx context.Context, path string) string {
+// probeFFmpeg is "ffmpeg <version>" when the ffmpeg at path has libx264 and passes the self-test, else "" and why not.
+// A variable for tests.
+var probeFFmpeg = func(ctx context.Context, path string) (version, why string) {
 	out, err := exec.CommandContext(ctx, path, "-hide_banner", "-encoders").Output()
-	if err != nil || !hasEncoder(string(out), "libx264") {
-		return ""
+	if err != nil {
+		return "", "-encoders: " + err.Error()
 	}
-	if !x264SelfTest(ctx, path) {
-		return ""
+	if !hasEncoder(string(out), "libx264") {
+		return "", "no libx264"
+	}
+	if err := x264SelfTest(ctx, path); err != nil {
+		return "", "self-test: " + err.Error()
 	}
 	out, err = exec.CommandContext(ctx, path, "-hide_banner", "-version").Output()
 	if err != nil {
-		return ""
+		return "", "-version: " + err.Error()
 	}
-	return ffmpegVersion(string(out))
+	return ffmpegVersion(string(out)), ""
 }
 
 // hasEncoder: ffmpeg's `-encoders` list has name (lines like " V....D libx264  libx264 H.264 / AVC …").
@@ -112,7 +135,7 @@ func ffmpegVersion(out string) string {
 
 // x264SelfTest runs ffmpeg as the helper does (PersonaScreenCore's X264Plan.arguments, kept in step) on three small
 // gray frames and checks that three FLV video frames come back, the first a keyframe.
-func x264SelfTest(ctx context.Context, path string) bool {
+func x264SelfTest(ctx context.Context, path string) error {
 	const w, h, n = 64, 64, 3
 	args := []string{
 		"-hide_banner", "-loglevel", "error", "-nostdin",
@@ -129,10 +152,12 @@ func x264SelfTest(ctx context.Context, path string) bool {
 	cmd.Stdin = bytes.NewReader(bytes.Repeat([]byte{128}, w*h*3/2*n))
 	out, err := cmd.Output()
 	if err != nil {
-		return false
+		return err
 	}
-	frames, firstKey := flvVideoFrames(out)
-	return frames == n && firstKey
+	if frames, firstKey := flvVideoFrames(out); frames != n || !firstKey {
+		return fmt.Errorf("%d frames back, the first a keyframe: %v", frames, firstKey)
+	}
+	return nil
 }
 
 // flvVideoFrames counts an FLV stream's AVC frames (not its sequence header) and says whether the first is a keyframe.

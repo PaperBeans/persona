@@ -77,6 +77,7 @@ const (
 	peerUnreachable = "peer_unreachable" // the inbox is not there, or its key is missing
 	peerTooLong     = "peer_too_long"    // longer than the inbox takes in one line
 	peerUnconfirmed = "peer_unconfirmed" // written, but the session has not taken it (held, dropped): delivery unknown
+	peerHeld        = "peer_held"        // written to a bypass permissions session, which holds it for approval at the computer: delivery unknown
 	peerCommand     = "peer_command"     // a slash command, which the inbox does not run
 )
 
@@ -121,6 +122,7 @@ const (
 	peerTooLongMsg     = "消息太长，会话之间的消息通道一次放不下：分成几条发。这次没有发送。"
 	peerWriteBrokeMsg  = "给这个 Claude 的消息写到一半连接断了，不知道它收到没有：先在电脑上看一眼再决定要不要重发。"
 	peerUnconfirmedMsg = "消息已交给这个 Claude，但它还没有收下：可能在等电脑上批准（权限模式是跳过确认的会话会先扣下其他会话发来的消息），也可能和上一条重复被丢掉了。先在电脑上看一眼再决定要不要重发。"
+	peerHeldMsg        = "消息已交给这个 Claude，但它在等电脑上批准：这个会话的权限模式是跳过确认，会先扣下 Persona 发来的消息，在电脑上允许后它才会收下。不用重发。"
 	peerCommandMsg     = "会话之间的消息通道只送普通消息，不执行斜杠命令：命令请在电脑上输入。这次没有发送。"
 )
 

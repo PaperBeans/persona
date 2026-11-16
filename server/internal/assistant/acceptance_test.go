@@ -414,7 +414,7 @@ func TestAcceptancePassReplyWhenAlreadyHandled(t *testing.T) {
 	ctx := context.Background()
 	s, f, _, notes, id := askedToAccept(t)
 	mid := askOf(s, id).MessageID
-	if ok, err := s.acceptTry(ctx, id, mid); !ok || err != nil { // the card's button
+	if ok, err := s.acceptTry(ctx, id, mid); !ok.taken || err != nil { // the card's button
 		t.Fatalf("the card was not accepted: %v", err)
 	}
 	before, sent := len(notes()), len(f.agentSent)

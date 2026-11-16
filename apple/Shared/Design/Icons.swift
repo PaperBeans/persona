@@ -735,7 +735,8 @@ extension Theme {
         static let sideSessions = "rectangle.portrait.on.rectangle.portrait"
         /// A conversation with an agent (an Agents chat, a session quoted as context, the chats in Storage).
         static let agentChat = "bubble.left.and.text.bubble.right"
-        /// A meeting (a scheduled task's meeting prep, the suggestion to prepare one, a meeting recording).
+        /// A meeting (a scheduled task's meeting prep, the suggestion to prepare one, a meeting recording, the drawer's
+        /// Meetings, #8731).
         static let meeting = "person.2.wave.2"
         /// Persona stops attending the meeting being recorded (#2981: the recording Live Activity's Turn Off).
         static let attendanceOff = "waveform.slash"

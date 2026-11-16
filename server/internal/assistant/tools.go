@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -40,6 +41,9 @@ var toolNames = []string{"ask_user", "notify_user", "supervision_finish", "sched
 
 // Tools are the assistant's tools (assistant.tools).
 func (s *Service) Tools(ctx context.Context) []proto.Tool {
+	if s.urgentOn(ctx) { // only while the owner has urgent calls on (urgent_call.go)
+		return toolsNamed(append(slices.Clip(toolNames), "urgent_call"))
+	}
 	return toolsNamed(toolNames)
 }
 
@@ -238,6 +242,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		s.recordNotify(ctx, machine, self, notifyMissed(res)) // an interruption when a device took it (north_star.go)
 		s.promoteSupervision(self)
 		return notifyAnswerText(s.lang(ctx), res, copies.wait(notifyCopyWait)), nil
+	case "urgent_call":
+		return s.toolUrgentCall(ctx, machine, self, args) // urgent_call_tool.go
 	case "conversations_list":
 		return s.toolConversationsList(ctx, self, args)
 	case "conversation_read":

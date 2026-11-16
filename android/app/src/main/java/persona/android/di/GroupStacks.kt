@@ -40,6 +40,8 @@ class GroupStack internal constructor(
     internal val mergedTerminal: TerminalTransport by lazy { terminal.inGroup(names) }
     internal val files: SessionFiles by lazy { HubSessionFiles(connection).inGroup(names) }
     internal val actions: ChatActions by lazy { HttpChatActions(connection).inGroup(names) }
+    /** Successful manager snapshots follow this pairing across refreshed HTTP routes. */
+    internal val metricSnapshots = HttpMachineMetricsApi.Cache()
     val current: Boolean get() = group.data === data && group.active
 }
 

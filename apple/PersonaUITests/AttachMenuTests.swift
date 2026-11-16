@@ -272,7 +272,7 @@ final class AttachMenuTests: XCTestCase {
     /// Swipes the menu down until `row` is on screen. At the largest text sizes the menu scrolls: it opens upward with
     /// its first row next to the +, and a row it hasn't scrolled to is not in the accessibility tree (#6112).
     @MainActor private func scrolledTo(_ app: XCUIApplication, _ row: XCUIElement) -> Bool {
-        let rows = ["语音对话", "拍照", "扫描文稿", "录音", "提及文件或会话", "作为上下文", "快捷指令"]
+        let rows = ["语音对话", "拍照", "扫描文稿", "开始会议", "提及文件或会话", "作为上下文", "快捷指令"]
         let menu = app.collectionViews.containing(NSPredicate(format: "label IN %@", rows)).firstMatch
         for _ in 0..<5 where !(row.exists && row.isHittable) {
             menu.swipeDown()
@@ -298,7 +298,7 @@ final class AttachMenuTests: XCTestCase {
     /// The meeting row says Record, as the drawer's row does since #5243 (#6067).
     @MainActor private func item(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         let titles = ["composer-menu-voice": "语音对话", "composer-menu-camera": "拍照", "composer-menu-scan": "扫描文稿",
-                      "composer-menu-mention": "提及文件或会话", "composer-menu-meeting": "录音", "attach-clear": "清空上下文"]
+                      "composer-menu-mention": "提及文件或会话", "composer-menu-meeting": "开始会议", "attach-clear": "清空上下文"]
         let title = titles[id] ?? (id.hasPrefix("attach-command-") ? String(id.dropFirst("attach-command-".count)) : id)
         return app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label BEGINSWITH %@", id, title)).firstMatch
     }

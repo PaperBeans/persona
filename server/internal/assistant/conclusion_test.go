@@ -370,7 +370,7 @@ func TestRecommendationThatCannotReachTheAgentIsNotTaken(t *testing.T) {
 	f.mu.Lock()
 	f.failSend = errors.New("node down")
 	f.mu.Unlock()
-	if ok, err := s.acceptTryFromBrief(ctx, todo.ID, a.AskedAt.UTC().Format(timeKeyLayout)); ok || err == nil {
+	if ok, err := s.acceptTryFromBrief(ctx, todo.ID, a.AskedAt.UTC().Format(timeKeyLayout)); ok.taken || err == nil {
 		t.Fatalf("taken while the agent cannot be reached: %v %v", ok, err)
 	}
 	// The web button: 502 with the reason, not 409 "already handled" (the web app toasts it and the button works again).
@@ -398,7 +398,7 @@ func TestRecommendationThatCannotReachTheAgentIsNotTaken(t *testing.T) {
 	f.mu.Lock()
 	f.failSend = nil
 	f.mu.Unlock()
-	if ok, err := s.acceptTry(ctx, todo.ID, ""); !ok || err != nil {
+	if ok, err := s.acceptTry(ctx, todo.ID, ""); !ok.taken || err != nil {
 		t.Fatalf("not taken once the agent is reachable: %v %v", ok, err)
 	}
 	if got := sentToAgent(f); len(got) == 0 || !strings.Contains(got[len(got)-1], "先灰度 10%") {
@@ -546,7 +546,7 @@ func TestRecommendationIsRecordedOnlyOnceItReachedTheAgent(t *testing.T) {
 	f.mu.Lock()
 	f.failSend = errors.New("node down")
 	f.mu.Unlock()
-	if err := s.takeRecommendation(ctx, todo.ID, a); err == nil {
+	if _, err := s.takeRecommendation(ctx, todo.ID, a); err == nil {
 		t.Fatal("no error while the agent cannot be reached")
 	}
 	if list := decisions(); len(list) != 0 {
@@ -555,7 +555,7 @@ func TestRecommendationIsRecordedOnlyOnceItReachedTheAgent(t *testing.T) {
 	f.mu.Lock()
 	f.failSend = nil
 	f.mu.Unlock()
-	if err := s.takeRecommendation(ctx, todo.ID, a); err != nil {
+	if _, err := s.takeRecommendation(ctx, todo.ID, a); err != nil {
 		t.Fatal(err)
 	}
 	if list := decisions(); len(list) != 1 || list[0].Choice != "先灰度 10%" {

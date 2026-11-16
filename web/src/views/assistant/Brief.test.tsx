@@ -161,6 +161,14 @@ describe("a brief item", () => {
     expect([...host.querySelectorAll("button")].some((b) => b.textContent === "通过")).toBe(false);
   });
 
+  it("says when the decision is recorded for the supervisor because no Agent can take it", async () => {
+    api.mockResolvedValueOnce({ ok: true, delivered: "none" });
+    drawDecision({ id: "todo_stopped", title: "Demo rollout", outcome: "decide", recommend: "Stage it", waited_s: 60, asked_at: ASKED });
+    const take = [...rows("accept")[0].querySelectorAll("button")].find((b) => b.textContent === "按推荐来")!;
+    await act(async () => take.click());
+    expect(host.querySelector("[data-brief-accepted=recorded]")?.textContent).toBe("已记下，Agent 已停，督办会接手");
+  });
+
   it("a round that is over (409) says it was handled; another failure keeps the button for a retry", async () => {
     draw(item());
     api.mockRejectedValueOnce(new ApiError(409, "已经处理过了", {}));

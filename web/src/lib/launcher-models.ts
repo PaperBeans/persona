@@ -99,9 +99,9 @@ export interface UnavailableLauncher {
 }
 
 /** The launchers on `mid` with the default of `purpose` (the hub's own when absent: "New agent"). */
-export function machineLaunchers(mid: string, opts: { purpose?: string; signal?: AbortSignal } = {}): Promise<MachineLaunchers> {
+export function machineLaunchers(mid: string, opts: { purpose?: string; manager?: string; signal?: AbortSignal } = {}): Promise<MachineLaunchers> {
   const q = opts.purpose ? `?purpose=${enc(opts.purpose)}` : "";
-  return api<MachineLaunchers>(`/machines/${enc(mid)}/launchers${q}`, { signal: opts.signal });
+  return api<MachineLaunchers>(`/machines/${enc(mid)}/launchers${q}`, { signal: opts.signal, headers: opts.manager ? { [MANAGER_HEADER]: opts.manager } : undefined });
 }
 
 /** A picker's first entry: "Default: <provider> · <model>" from the hub's default, `fallback` naming the launcher when the hub
@@ -116,9 +116,12 @@ export function defaultLabel(d: LauncherDefault | null | undefined, fallback = "
 const MODELS_HUB_MS = 70_000;
 
 /** The list for `launcher` on `mid` (seconds when the node has to start the CLI); null from an older hub (no picker). */
-export async function launcherModels(mid: string, launcher: string, opts: { refresh?: boolean; signal?: AbortSignal } = {}): Promise<LauncherModels | null> {
+export async function launcherModels(mid: string, launcher: string, opts: { refresh?: boolean; purpose?: "assistant"; manager?: string; signal?: AbortSignal } = {}): Promise<LauncherModels | null> {
+  const query = new URLSearchParams();
+  if (opts.refresh) query.set("refresh", "1");
+  if (opts.purpose) query.set("purpose", opts.purpose);
   try {
-    const r = await api<LauncherModels>(`/machines/${enc(mid)}/launchers/${enc(launcher)}/models${opts.refresh ? "?refresh=1" : ""}`, { signal: opts.signal, timeout: pastHub(MODELS_HUB_MS) });
+    const r = await api<LauncherModels>(`/machines/${enc(mid)}/launchers/${enc(launcher)}/models${query.size ? `?${query}` : ""}`, { signal: opts.signal, timeout: pastHub(MODELS_HUB_MS), headers: opts.manager ? { [MANAGER_HEADER]: opts.manager } : undefined });
     return { ...r, models: r.models ?? [] };
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
@@ -158,8 +161,8 @@ export const takesTypedModel = (agent: string) =>
 export const typedModelOffered = (agent: string, list: LauncherModels | null | undefined) => takesTypedModel(agent) && !list?.locked;
 
 /** Forgets one model ID typed for `launcher` on `mid` (#1644, the list's "Forget"): the hub stops listing it. */
-export function forgetCustomModel(mid: string, launcher: string, model: string): Promise<unknown> {
-  return api(`/machines/${enc(mid)}/launchers/${enc(launcher)}/models/custom?model=${enc(model)}`, { method: "DELETE" });
+export function forgetCustomModel(mid: string, launcher: string, model: string, opts: { manager?: string } = {}): Promise<unknown> {
+  return api(`/machines/${enc(mid)}/launchers/${enc(launcher)}/models/custom?model=${enc(model)}`, { method: "DELETE", headers: opts.manager ? { [MANAGER_HEADER]: opts.manager } : undefined });
 }
 
 /** `list` without the typed ID `id` (the optimistic Forget), and how to put it back where it was when the hub says no. */

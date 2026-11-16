@@ -20,7 +20,7 @@ use serde::Deserialize;
 use serde::de::{Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 
 /// What a known key held.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub(crate) enum Seen<T> {
     #[default]
     Missing,
@@ -149,7 +149,14 @@ pub enum KeyFault {
 }
 
 impl<T> Seen<T> {
-    /// A required key.
+    /// A required key, borrowed where the projection only checks its shape.
+    pub(crate) fn optional_ref(&self, key: &'static str) -> Result<Option<&T>, KeyFault> {
+        match self {
+            Seen::Value(value) => Ok(Some(value)),
+            Seen::Missing | Seen::Null => Ok(None),
+            Seen::Wrong => Err(KeyFault::WrongType(key)),
+        }
+    }
     pub(crate) fn required(self, key: &'static str) -> Result<T, KeyFault> {
         match self {
             Seen::Value(value) => Ok(value),

@@ -224,10 +224,17 @@ fn is_supervision(item: &Item) -> bool {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Fold {
+    /// These fields are present only for an actual fold item. Optional outer `fold` still deserializes an absent
+    /// payload for every ordinary item; a real fold uses the existing zero-count compatibility behavior.
+    #[serde(default)]
     pub tools: i64,
+    #[serde(default)]
     pub thoughts: i64,
+    #[serde(default)]
     pub through_seq: i64,
+    #[serde(default)]
     pub through_id: String,
+    #[serde(default)]
     pub until: Option<String>,
 }
 

@@ -456,8 +456,8 @@ final class RecordingSync {
             store.synced = have.filter { library.entry($0.key) != nil && library.entry($0.key)?.isDay != true }
             // What the hub calls each now (#8873): the summary's or the minutes' title arrives after the last upload.
             for row in rows where row.kind != "day" {
-                guard let id = UUID(uuidString: row.id), library.entry(id) != nil else { continue }
-                library.noteHubName(id, RecordingTitle.hubName(name: row.name, source: row.nameSource))
+                guard let id = UUID(uuidString: row.id) else { continue }
+                hubNamed(id, name: row.name, source: row.nameSource)
             }
             handDays(rows, deleted: (answer.deleted ?? []).compactMap(UUID.init(uuidString:)))
             for id in (answer.deleted ?? []).compactMap(UUID.init(uuidString:)) where library.entry(id).map({ !$0.isDay }) == true {
@@ -469,6 +469,17 @@ final class RecordingSync {
         } catch {
             note(error)
             return false
+        }
+    }
+
+    /// What the hub calls a recording now (#8873, #8877): a name the owner gave on the web becomes its own title (uploaded
+    /// with its next revision, which settles the hub's copy into it), unless a change of this phone's is still to go up;
+    /// any other name is kept beside it (`RecordingTitle.naming`).
+    func hubNamed(_ id: UUID, name: String?, source: String?) {
+        guard let entry = library.entry(id), !entry.isDay else { return }
+        switch RecordingTitle.naming(entry, name: name, source: source, pending: status(entry) == .pending) {
+        case .adopt(let title): library.rename(id, to: title)
+        case .keep(let name): library.noteHubName(id, name)
         }
     }
 
@@ -612,7 +623,7 @@ final class RecordingSync {
             save()
             if answer?.status != "expired" { // what the hub calls it now (#8873); none from an older manager
                 let named = try? JSON.decoder.decode(NameAnswer.self, from: data)
-                library.noteHubName(entry.id, RecordingTitle.hubName(name: named?.name, source: named?.source))
+                hubNamed(entry.id, name: named?.name, source: named?.source)
             }
             if body.endedAt != nil, !endedStored.contains(entry.id) { endedStored.insert(entry.id) }
             if body.transcription != nil {

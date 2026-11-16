@@ -358,6 +358,8 @@ var Routes = []string{
 	"GET /api/v1/recordings",
 	"POST /api/v1/recordings/{id}/minutes",
 	"POST /api/v1/recordings/{id}/minutes/todos",
+	// The owner's name from the web (#8877).
+	"PUT /api/v1/recordings/{id}/title",
 	// All-day recordings' appends (kb_day.go there, #4741).
 	"POST /api/v1/recordings/{id}/segments",
 	// Attending a meeting (meeting_live.go there, docs/assistant/meeting-minutes.md "Attending a meeting").

@@ -17,8 +17,8 @@ final class MeetingRecordingUITests: XCTestCase {
         app.launchPinned()
         let start = app.buttons["recording-meeting-start"]
         XCTAssertTrue(start.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertEqual(start.label, "录音")
-        XCTAssertFalse(app.buttons["recording-start"].exists, "one Record button: a note is the Type choice under it")
+        XCTAssertEqual(start.label, "开始会议")
+        XCTAssertFalse(app.buttons["recording-start"].exists, "one start button: a note is the Type choice under it")
         try shot(app, "recordings")
 
         app.terminate()
@@ -27,7 +27,7 @@ final class MeetingRecordingUITests: XCTestCase {
         openDrawer(app)
         let row = app.buttons["sidebar-meeting-recording"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(row.label.contains("录音") && !row.label.contains("会议"), row.label)
+        XCTAssertTrue(row.label.contains("会议") && !row.label.contains("会议中"), row.label) // the place, Meetings (#8731)
     }
 
     /// A meeting being recorded: its name from the calendar, the time, Meeting, its bookmarks; the drawer's row opens it;
@@ -56,7 +56,7 @@ final class MeetingRecordingUITests: XCTestCase {
         openDrawer(app)
         let row = app.buttons["sidebar-meeting-recording"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(row.label.contains("录音中"), row.label)
+        XCTAssertTrue(row.label.contains("会议中"), row.label) // a meeting runs: In a Meeting… Open (#8731)
         row.tap()
         XCTAssertTrue(app.descendants(matching: .any)["recording-now-title"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
     }

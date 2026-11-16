@@ -49,6 +49,8 @@ struct MeetingPage: View {
     @State private var position = ScrollPosition(edge: .bottom)
     /// The private mark being changed (shown at once, the hub's answer follows), and why a change failed.
     @State private var pendingPrivate: Bool?
+    /// This meeting while Rename is open (#8873).
+    @State private var renaming: UUID?
     @State private var privateProblem: String?
     @State private var minutes = RecordingMinutesModel()
     /// The first answer about the minutes is in: until then the status card says nothing about them.
@@ -75,6 +77,7 @@ struct MeetingPage: View {
             }
         }
         .themedGroupedPage()
+        .recordingRename($renaming)
         .navigationTitle(close == nil ? String(localized: "Meeting") : "")
         .navigationBarTitleDisplayMode(.inline)
         // `meeting_live` and reconnects read the meeting again only while a page shows it (or it records here). A Talk
@@ -405,8 +408,8 @@ struct MeetingPage: View {
 
     // MARK: The page menu
 
-    /// Persona's role (Off turns it off), the private mark, and Meeting / Note (#5243: a note leaves this page for the live
-    /// view, as the sheet shows a note).
+    /// Persona's role (Off turns it off), the private mark, Meeting / Note (#5243: a note leaves this page for the live
+    /// view, as the sheet shows a note), and Rename (#8873).
     private func pageMenu(_ entry: RecordingEntry) -> some View {
         let role = entry.attendance?.role ?? .off
         return Menu {
@@ -423,6 +426,8 @@ struct MeetingPage: View {
             .disabled(pendingPrivate != nil)
             .accessibilityIdentifier("meeting-private")
             RecordingKindPicker(entry: entry)
+            Button { renaming = id } label: { Label("Rename", systemImage: Theme.Icon.edit) }
+                .accessibilityIdentifier("meeting-rename")
         } label: {
             ThemedIcon(Theme.Icon.moreMenu).font(Theme.Font.heading).foregroundStyle(Theme.accent)
                 .tapTargetFrame()

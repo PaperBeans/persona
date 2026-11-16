@@ -138,7 +138,7 @@ func TestTaskReviewDismissalSuppressesAcceptAndDeadline(t *testing.T) {
 			t.Fatalf("dismissed accept: %d %s", w.Code, w.Body)
 		}
 	}
-	if ok, err := e.s.acceptTry(context.Background(), "task", ""); ok || err != nil {
+	if ok, err := e.s.acceptTry(context.Background(), "task", ""); ok.taken || err != nil {
 		t.Fatalf("card accept: %v %v", ok, err)
 	}
 	e.s.sweepTaskDeadlines(time.Now())

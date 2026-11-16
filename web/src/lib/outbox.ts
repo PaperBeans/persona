@@ -136,12 +136,36 @@ export function placeFailed(lines: ChatLine[], list: OutboxEntry[]): { before: M
   return { before, rest };
 }
 
+/** An uncertain send whose computer said where it is (a Claude session outside Persona's terminals, through its peer
+ *  inbox): its own words, not only "not sure it arrived", so the owner knows what to do (approve it on the computer). */
+const IN_DOUBT_REASONS: Record<string, string> = {
+  peer_held: "lib-outbox.held_on_computer", // a bypass permissions session holds it for approval at the computer
+  peer_unconfirmed: "lib-outbox.peer_unconfirmed", // handed over, not taken: held there, or dropped as a repeat
+};
+
+/** The code's own words for an uncertain send, when it has some. */
+function inDoubtReason(code: unknown): string | undefined {
+  const key = typeof code === "string" ? IN_DOUBT_REASONS[code] : undefined;
+  return key ? t(key) : undefined;
+}
+
 /** Why it didn't go, in words. */
 export function failureText(e: unknown): string {
   if (e instanceof ApiError && e.code === "input_draft") return t("lib-outbox.input_draft");
   if (e instanceof ApiError && e.code === "dialog_open") return t("lib-outbox.dialog_open");
-  if (e instanceof ApiError && e.body.delivered === "unknown") return t("lib-outbox.delivery_unknown");
+  if (e instanceof ApiError && e.body.delivered === "unknown") return inDoubtReason(e.code) ?? t("lib-outbox.delivery_unknown");
   return errorText(e);
+}
+
+/** What a kept entry's bubble says: an uncertain one in the page's current language from its code (one kept from
+ *  before a reload, or from a page that only had the generic words), else the words it failed with. */
+export function entryReason(e: Pick<OutboxEntry, "error" | "code" | "inDoubt">): string {
+  return (e.inDoubt ? inDoubtReason(e.code) : undefined) ?? e.error ?? "";
+}
+
+/** Held for approval on the computer (peer_held): not a failure, the owner's step there is what is left. */
+export function heldOnComputer(e: Pick<OutboxEntry, "code" | "inDoubt">): boolean {
+  return Boolean(e.inDoubt) && e.code === "peer_held";
 }
 
 // ── the store's side ────────────────────────────────────
@@ -324,11 +348,33 @@ export function resetRestoredForTests() {
   restored.clear();
 }
 
+/** How the node says your own message went into a Claude outside Persona's terminals (session.send's answer). */
+export type DeliveryReply = { delivered_as?: string; relay_reason?: string };
+
+/**
+ * What to tell you when your own message to a Claude with Persona's plugin went through its message inbox instead of
+ * as your input (docs/integrations/claude-integration.md "Owner input through the Persona plugin"): the Agent may not
+ * take it as your approval. Nothing when it went in as your input, or when the session has no plugin (it always used
+ * the inbox there, and its row says so).
+ */
+export function relayNotice(reply?: DeliveryReply): string | undefined {
+  if (reply?.delivered_as !== "relayed") return undefined;
+  switch (reply.relay_reason) {
+    case "busy":
+      return t("lib-outbox.relayed_busy");
+    case "plugin_unavailable":
+    case "plugin_refused":
+    case "plugin_unconfirmed":
+      return t("lib-outbox.relayed_plugin");
+  }
+  return undefined;
+}
+
 async function deliver(mid: string, sid: string, e: OutboxEntry, clearDraft?: string, flight = beginMessageSend(mid, sid, e.id, e.text)): Promise<boolean> {
   const key = outboxKey(mid, sid);
   try {
     // stays sending through a gap (a hub restart); the client_msg_id is the op id
-    const r = await inSendOrder(key, () => apiOp<{ launcher_note?: string; waits_on_computer?: boolean } | undefined>(`${sessionPath(mid, sid)}/messages`, {
+    const r = await inSendOrder(key, () => apiOp<({ launcher_note?: string; waits_on_computer?: boolean } & DeliveryReply) | undefined>(`${sessionPath(mid, sid)}/messages`, {
       ...flight.request,
       method: "POST",
       opId: e.id,
@@ -340,6 +386,8 @@ async function deliver(mid: string, sid: string, e: OutboxEntry, clearDraft?: st
     showLauncherNote(`${mid}/${sid}`, r?.launcher_note);
     // An outside-terminal Claude took it behind a question only the computer can answer (#5890).
     if (r?.waits_on_computer) toast(t("lib-outbox.waits_on_computer"), "info");
+    const relayed = relayNotice(r);
+    if (relayed) toast(relayed, "info");
     return true;
   } catch (err) {
     if (!flight.current()) return false;

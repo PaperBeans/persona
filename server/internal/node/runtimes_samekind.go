@@ -41,6 +41,9 @@ func (n *Node) exclusiveRuntime(ctx context.Context) *runtimeConn {
 // runtimeOfIn is the runtime that runs launcher name in a start in ctx: the start host's engine runtime for a name it
 // offers when it runs only its own launchers (exclusiveRuntime), whatever else has the name; else runtimeOf.
 func (n *Node) runtimeOfIn(ctx context.Context, name string) *runtimeConn {
+	if assistantLauncherPurpose(ctx) {
+		return n.assistantRuntime(name)
+	}
 	if h := n.exclusiveRuntime(ctx); h != nil {
 		if _, own := h.launcherNamed(name); own {
 			return h

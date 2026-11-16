@@ -11,7 +11,7 @@ import Foundation
 /// lasts (the system stops a recording without one). Before the microphone has ever been allowed it opens the app to ask.
 /// The type keeps its name (it was Record a Meeting until #5243): shortcuts people made with it go on working.
 struct StartMeetingRecordingIntent: AudioRecordingIntent {
-    nonisolated static let title: LocalizedStringResource = "Record [Recordings Section ef2821]"
+    nonisolated static let title: LocalizedStringResource = "Start Meeting"
     // The contract's Wording (#3862 phase 4): a room meeting taking part may send what is said while Talk is held.
     // App Intent metadata says "this device", never "iPhone": App Store Connect rejects it (90626, #6471).
     nonisolated static let description = IntentDescription("Starts recording a meeting in Persona, named after the calendar event happening now. Audio stays on this device, except while you hold Talk: what is said then goes to the voice service. If you set meetings to be transcribed on the hub, the meeting's audio, Talk included, goes through your hub to its speech service, and the hub deletes it once the minutes are written. The transcript goes to Knowledge.")

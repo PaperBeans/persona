@@ -7,10 +7,16 @@ registerHooks({
   resolve(specifier, context, next) {
     if (context.parentURL?.endsWith('/AgentWorkspace.ets') && specifier === './Wire')
       return { url: new URL('./Wire.ets', context.parentURL).href, shortCircuit: true };
+    if (context.parentURL?.includes('/entry/src/main/ets/')) {
+      const resolved = new URL(specifier, context.parentURL);
+      if (resolved.pathname.endsWith('/Wire')) resolved.pathname += '.ets';
+      else if (!/\.[a-z]+$/i.test(resolved.pathname)) resolved.pathname += '.ts';
+      return { url: resolved.href, shortCircuit: true };
+    }
     return next(specifier, context);
   },
   load(url, context, next) {
-    if (url.endsWith('.ets')) {
+    if (url.endsWith('.ets') || url.endsWith('/AgentListAdapter.ts') || url.endsWith('/AgentListProjection.ts')) {
       const source = readFileSync(new URL(url), 'utf8').replace(/@ObservedV2\s*/g, '').replace(/@Trace\s+/g, '');
       return { format: 'module', source: stripTypeScriptTypes(source), shortCircuit: true };
     }

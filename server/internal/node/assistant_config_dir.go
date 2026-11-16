@@ -173,8 +173,8 @@ func (n *Node) assistantLauncherProfile(ctx context.Context, launcher, runtime s
 		env = providerEnv(l, "", "", true)
 	} else if runtime == proto.AssistantRuntimeAgentSDK && launcher == "claude" {
 		return "" // the SDK runs the executable, not a shell function or alias
-	} else if p, err := n.launcherProbe(ctx, launcher); err == nil {
-		env = p.Env
+	} else if e, ok := n.launcherProfileEnv(ctx, launcher); ok { // not a login shell per message (#8947)
+		env = e
 	}
 	if dir, set := env["CLAUDE_CONFIG_DIR"]; set {
 		if launcher == "claude" {

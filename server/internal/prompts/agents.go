@@ -1,5 +1,7 @@
 package prompts
 
+import "encoding/json"
+
 func RenderAgentSessionName() string { return render("agents/session_name", nil) }
 
 // AgentSessionNameInput contains only bounded dialogue, never machine paths or credentials.
@@ -86,6 +88,7 @@ func RenderAgentTriageInput(in AgentTriageInput) string { return render("agents/
 
 // AgentWake is what the hub sends an agent whose wait should be over (agents/wake).
 type AgentWake struct {
+	Language  string // Native language name; empty preserves the legacy Chinese text.
 	Attempt   int
 	Wait      string
 	Then      string
@@ -96,7 +99,17 @@ type AgentWake struct {
 	ApprovedByTask bool
 }
 
-func RenderAgentWake(w AgentWake) string { return render("agents/wake", w) }
+func RenderAgentWake(w AgentWake) string {
+	// JSON escapes tags and newlines in the wait, keeping the marker on one line.
+	marker, err := json.Marshal(wakeMetadata{Title: w.Wait})
+	if err != nil {
+		panic(err)
+	}
+	return render("agents/wake", struct {
+		AgentWake
+		Marker string
+	}{w, string(marker)})
+}
 
 // RenderAgentLimitContinue is what the manager sends an agent a subscription's usage limit stopped, once the limit has
 // reset and its CLI did not say it goes on by itself (agents/limit_continue, docs/assistant/agent-work.md "Usage limits").

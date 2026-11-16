@@ -56,19 +56,22 @@ type contextState struct {
 	mu       sync.Mutex
 	snap     *prompts.Snapshot
 	at       time.Time
+	took     time.Duration // how long the read snap came from took
 	snapping chan struct{} // closed when the snapshot being taken is in
 }
 
 // contextSnapshot is the live snapshot each message to the assistant starts with: the time, which machines are up,
 // agents waiting for the user, unread Feishu chats and the rest of today's meetings. It is taken on every message, so
 // it must not hold the message up: the sources are read at most every snapshotFresh, a message waits for a new read
-// at most snapshotWait and otherwise goes with the last one (the time is always now). Each source has a short
-// deadline; a slow one is left out. The sources are read once for every conversation: scope ("" for all of them,
-// snapshotScope) picks the tasks this one's lists show.
+// at most snapshotWait and otherwise goes with the last one (the time is always now). While reads take longer than
+// snapshotWait (the last one did), a message does not wait at all: the read it starts would come too late for it
+// anyway, and is there for the next message (#8948). Each source has a short deadline; a slow one is left out. The
+// sources are read once for every conversation: scope ("" for all of them, snapshotScope) picks the tasks this one's
+// lists show.
 func (s *Service) contextSnapshot(ctx context.Context, scope string) string {
 	cs := &s.live
 	cs.mu.Lock()
-	snap, at := cs.snap, cs.at
+	snap, at, took := cs.snap, cs.at, cs.took
 	var wait chan struct{}
 	if snap == nil || time.Since(at) >= snapshotFresh {
 		if wait = cs.snapping; wait == nil {
@@ -80,13 +83,18 @@ func (s *Service) contextSnapshot(ctx context.Context, scope string) string {
 	cs.mu.Unlock()
 	if wait != nil {
 		limit := snapshotWait
-		if snap == nil || time.Since(at) > snapshotStale {
+		switch {
+		case snap == nil || time.Since(at) > snapshotStale:
 			limit = snapshotSlowest // nothing usable yet: wait for the sources' own deadlines
+		case took > snapshotWait:
+			limit = 0 // the last read came too late for a message: this one goes with the snapshot it read
 		}
-		select {
-		case <-wait:
-		case <-time.After(limit):
-		case <-ctx.Done():
+		if limit > 0 {
+			select {
+			case <-wait:
+			case <-time.After(limit):
+			case <-ctx.Done():
+			}
 		}
 		cs.mu.Lock()
 		snap = cs.snap
@@ -239,16 +247,20 @@ func cutSnapshot(text string) string {
 func (s *Service) takeSnapshot(done chan struct{}) {
 	ctx, cancel := context.WithTimeout(context.Background(), snapshotSlowest)
 	defer cancel()
+	start := time.Now()
 	loc := s.location(ctx)
 	now := time.Now().In(loc)
 	devices, phone, apps := s.devicesAndPhone(ctx)
 	snap := prompts.Snapshot{Now: now, Zone: loc.String(), PhoneOnline: phone, Apps: snapshotApps(apps)}
 	var wg sync.WaitGroup
+	var connectors time.Duration
 	wg.Add(1)
 	go func() { // one ask for both sections: each connector builds its chats and meetings in one answer
 		defer wg.Done()
+		t := time.Now()
 		live := s.connectorSnapshots(ctx)
 		snap.Chats, snap.Calendar = snapshotChats(live), snapshotCalendar(live, now)
+		connectors = time.Since(t)
 	}()
 	for _, m := range devices {
 		snap.Machines = append(snap.Machines, prompts.SnapshotMachine{Name: m.Name, ID: m.ID, Online: m.Online})
@@ -271,10 +283,17 @@ func (s *Service) takeSnapshot(done chan struct{}) {
 	}
 	snap.Followups, snap.FollowupsTotal, snap.Routines, snap.RoutinesTotal, snap.Missed, snap.MissedTotal = s.snapshotSchedule(ctx, loc, now)
 	wg.Wait()
+	took := time.Since(start)
+	if took > snapshotWait {
+		// Messages go with the snapshot before this one meanwhile (contextSnapshot); the connectors' share says
+		// whether a connector's live state is what is slow.
+		s.logf("assistant: live snapshot: the read took %s (connectors %s), longer than a message waits (%s): messages go with the last one",
+			took.Round(time.Millisecond), connectors.Round(time.Millisecond), snapshotWait)
+	}
 
 	cs := &s.live
 	cs.mu.Lock()
-	cs.snap, cs.at, cs.snapping = &snap, time.Now(), nil
+	cs.snap, cs.at, cs.took, cs.snapping = &snap, time.Now(), took, nil
 	cs.mu.Unlock()
 	close(done)
 }

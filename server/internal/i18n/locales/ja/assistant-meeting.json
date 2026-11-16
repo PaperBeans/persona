@@ -20,6 +20,7 @@
   "ask_busy": "いま 2 件の質問に回答中です。どちらかの回答が終わってから聞いてください。",
   "meeting_ended": "この会議は終わりました。続きは会議後の会話でどうぞ。",
   "bad_private": "private は true か false にしてください。",
+  "bad_title": "タイトルは 1 行、200 文字以内にしてください。",
   "not_meeting": "この録音は会議ではありません。",
   "text_too_long": "テキストが {max} 文字を超えています。",
   "too_many_images": "画像は {max} 枚までです。",
