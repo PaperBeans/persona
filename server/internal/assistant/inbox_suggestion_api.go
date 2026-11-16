@@ -72,10 +72,8 @@ func (s *Service) inboxSuggestionRoutes() {
 			apierr.Write(w, http.StatusForbidden, err)
 		case errors.Is(err, errMailReplyTargetChanged):
 			apierr.WriteBody(w, http.StatusConflict, map[string]any{"code": "mail_reply_target_changed", "error": i18n.T(l, "assistant-inbox.mail_target_changed"), "retryable": false, "delivered": "none"})
-		case replyInDoubt(err):
-			body := apierr.LocalizedBody(http.StatusBadGateway, assistantwire.CodeAssistantInDoubt, err, i18n.OfWriter(w))
-			body["delivered"], body["retryable"] = "unknown", false
-			apierr.WriteBody(w, http.StatusBadGateway, body)
+		case err != nil && s.writeInboxSendError(w, r, "suggestion", r.PathValue("id"), err):
+			// in doubt (delivered unknown), or why nothing was sent (#9125)
 		case err != nil:
 			apierr.Write(w, http.StatusBadGateway, err)
 		default:

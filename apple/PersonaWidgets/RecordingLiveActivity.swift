@@ -10,14 +10,15 @@ import WidgetKit
 struct RecordingLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: RecordingActivityAttributes.self) { context in
-            RecordingLockScreen(state: context.state, id: context.attributes.recordingID)
+            // A stale running recording (the app stopped confirming it: iOS ended the app, #9108) is drawn stopped.
+            RecordingLockScreen(state: context.state.drawn(stale: context.isStale), id: context.attributes.recordingID)
                 // The lock screen is cut at about 160 pt: larger text would push the buttons off it.
                 .dynamicTypeSize(...DynamicTypeSize.large)
                 .activitySystemActionForegroundColor(Palette.recordingRed)
                 .environment(\.locale, LanguageStore.drawingLocale)
                 .widgetURL(RecordingLink.page)
         } dynamicIsland: { context in
-            let state = context.state
+            let state = context.state.drawn(stale: context.isStale)
             let id = context.attributes.recordingID
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -41,7 +42,7 @@ struct RecordingLiveActivity: Widget {
                         .padding(.horizontal, IslandMetrics.gap)
                         RecordingAnswer(state: state).foregroundStyle(.white.opacity(0.85)).padding(.horizontal, IslandMetrics.gap)
                         RecordingButtons(id: id, onDark: true, attends: state.persona != nil, recording: state.phase == .recording,
-                                         talking: state.talking)
+                                         talking: state.talking, stopped: state.phase == .stopped)
                             .padding(.horizontal, IslandMetrics.recordingIslandButtonsInset)
                     }
                     .environment(\.locale, LanguageStore.drawingLocale)
@@ -72,15 +73,16 @@ struct RecordingLiveActivity: Widget {
     }
 }
 
-/// The recording's mark: a red disc with a waveform while it records, a pause sign while it doesn't, and the talk mark
-/// while a talk window is open (#3862 phase 4; still, no repeating animation: they don't run in Live Activities).
+/// The recording's mark: a red disc with a waveform while it records, a pause sign while it doesn't, a stop sign once it
+/// stopped without the app (`stopped`), and the talk mark while a talk window is open (#3862 phase 4; still, no repeating
+/// animation: they don't run in Live Activities).
 struct RecordingMark: View {
     var phase: RecordingActivityAttributes.ContentState.Phase
     var size: CGFloat
     var talking = false
 
     private var symbol: String {
-        guard phase == .recording else { return RecordingSymbol.paused }
+        guard phase == .recording else { return phase == .stopped ? RecordingSymbol.stop : RecordingSymbol.paused }
         return talking ? RecordingSymbol.talking : RecordingSymbol.recording
     }
 
@@ -96,7 +98,8 @@ struct RecordingMark: View {
     }
 }
 
-/// The recorded time: counted by the system while recording, standing still while paused.
+/// The recorded time: counted by the system while recording, standing still while paused, and where the app last
+/// confirmed it once it stopped without the app.
 struct RecordingTime: View {
     var state: RecordingActivityAttributes.ContentState
 
@@ -129,6 +132,7 @@ struct RecordingSubtitle: View {
         switch state.phase {
         case .interrupted: Text("Paused by a call · Open Persona to continue")
         case .paused: Text("Paused")
+        case .stopped: Text("Stopped · Open Persona to see the recording")
         case .recording:
             if let persona = state.persona {
                 // Persona attends (#2981): said in place of what it is, so whoever sees the phone knows (the bookmarks
@@ -162,40 +166,50 @@ struct RecordingButtons: View {
     var recording = true
     /// The meeting's Talk: nil without it, true while a talk window is open.
     var talking: Bool? = nil
+    /// Stopped without the app (`ContentState.Phase.stopped`): Stop alone, whose tap opens the app, which ends the
+    /// activity (nothing records any more).
+    var stopped = false
 
     var body: some View {
         HStack(spacing: IslandMetrics.buttonGap) {
-            if attends && recording {
-                Group {
-                    if let talking {
-                        // What the button shows goes with the tap: a stale Done can't open a window.
-                        Button(intent: TalkInMeetingIntent(recordingID: id, open: !talking)) {
-                            if talking { label("Done [Talk Window]", RecordingSymbol.talking) } else { label("Talk [Meeting Talk]", RecordingSymbol.talk) }
-                        }
-                    } else {
-                        Button(intent: AskPersonaInMeetingIntent(recordingID: id)) { label("Ask Persona", RecordingSymbol.ask) }
-                    }
-                }
-                .buttonStyle(.bordered)
-                .tint(onDark ? .white : .primary)
-                .layoutPriority(1)
+            if !stopped {
+                actions
             }
-            Button(intent: AddRecordingBookmarkIntent(recordingID: id)) { label("Bookmark", RecordingSymbol.bookmark, iconOnly: attends) }
-                .buttonStyle(.bordered)
-                .tint(onDark ? .white : .primary)
-            if attends {
-                Button(intent: TurnOffMeetingAttendanceIntent(recordingID: id)) {
-                    label("Turn Off Persona", RecordingSymbol.attendanceOff, iconOnly: true)
-                }
-                .buttonStyle(.bordered)
-                .tint(onDark ? .white : .primary)
-            }
-            Button(intent: StopRecordingIntent(recordingID: id)) { label("Stop", RecordingSymbol.stop, iconOnly: attends) }
+            Button(intent: StopRecordingIntent(recordingID: id)) { label("Stop", RecordingSymbol.stop, iconOnly: attends && !stopped) }
                 .buttonStyle(.borderedProminent)
                 .tint(Palette.recordingButton)
                 .foregroundStyle(.white)
         }
         .buttonBorderShape(.capsule)
+    }
+
+    /// Ask Persona or Talk, Bookmark and Turn Off: what a recording that runs (or is paused) offers before Stop.
+    @ViewBuilder private var actions: some View {
+        if attends && recording {
+            Group {
+                if let talking {
+                    // What the button shows goes with the tap: a stale Done can't open a window.
+                    Button(intent: TalkInMeetingIntent(recordingID: id, open: !talking)) {
+                        if talking { label("Done [Talk Window]", RecordingSymbol.talking) } else { label("Talk [Meeting Talk]", RecordingSymbol.talk) }
+                    }
+                } else {
+                    Button(intent: AskPersonaInMeetingIntent(recordingID: id)) { label("Ask Persona", RecordingSymbol.ask) }
+                }
+            }
+            .buttonStyle(.bordered)
+            .tint(onDark ? .white : .primary)
+            .layoutPriority(1)
+        }
+        Button(intent: AddRecordingBookmarkIntent(recordingID: id)) { label("Bookmark", RecordingSymbol.bookmark, iconOnly: attends) }
+            .buttonStyle(.bordered)
+            .tint(onDark ? .white : .primary)
+        if attends {
+            Button(intent: TurnOffMeetingAttendanceIntent(recordingID: id)) {
+                label("Turn Off Persona", RecordingSymbol.attendanceOff, iconOnly: true)
+            }
+            .buttonStyle(.bordered)
+            .tint(onDark ? .white : .primary)
+        }
     }
 
     @ViewBuilder private func label(_ text: LocalizedStringKey, _ symbol: String, iconOnly: Bool = false) -> some View {
@@ -241,7 +255,8 @@ struct RecordingAnswer: View {
     }
 
     var body: some View {
-        if let persona = state.persona {
+        // Stopped without the app (#9108): no answer and no role, which would read as still attending.
+        if let persona = state.persona, state.phase != .stopped {
             if state.talking == true, state.phase == .recording {
                 // A talk window is open (#3862 phase 4): what Persona hears now, in place of the answer or the line.
                 Label { Text("Listening to you…").lineLimit(1) } icon: { Image(systemName: RecordingSymbol.talking) }
@@ -306,7 +321,8 @@ struct RecordingLockScreen: View {
                     .frame(width: IslandMetrics.recordingLockTimerWidth, alignment: .trailing)
             }
             RecordingAnswer(state: state, lines: RecordingAnswer.lockLines(state)).foregroundStyle(.secondary)
-            RecordingButtons(id: id, attends: state.persona != nil, recording: state.phase == .recording, talking: state.talking)
+            RecordingButtons(id: id, attends: state.persona != nil, recording: state.phase == .recording, talking: state.talking,
+                             stopped: state.phase == .stopped)
         }
         .padding(IslandMetrics.lockPadding)
     }

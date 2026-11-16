@@ -224,7 +224,7 @@ func TestAssistantShellLauncherCompaction(t *testing.T) {
 	} {
 		for _, main := range []bool{true, false} {
 			t.Run(tt.name+"/main="+strconv.FormatBool(main), func(t *testing.T) {
-				fakeClaudeHome(t, "env > \"$HOME/claude-env\"\nread line\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\"}'\nsleep 30\n")
+				fakeClaudeHome(t, "env > \"$HOME/claude-env.part\"\nmv \"$HOME/claude-env.part\" \"$HOME/claude-env\"\nread line\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\"}'\nsleep 30\n")
 				for _, k := range []string{"CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW"} {
 					t.Setenv(k, "")
 					os.Unsetenv(k)
@@ -284,7 +284,7 @@ func TestAssistantShellLauncherCompaction(t *testing.T) {
 // settings, and claude gets the launcher's own file from the launcher as before. A launcher file that is there but
 // does not read still stops the start.
 func TestAssistantLauncherTemporarySettings(t *testing.T) {
-	fakeClaudeHome(t, "printf '%s\\n' \"$@\" > \"$HOME/claude-args\"\nread line\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\"}'\nsleep 30\n")
+	fakeClaudeHome(t, "printf '%s\\n' \"$@\" > \"$HOME/claude-args.part\"\nmv \"$HOME/claude-args.part\" \"$HOME/claude-args\"\nread line\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\"}'\nsleep 30\n")
 	home := os.Getenv("HOME")
 	rc := `function testtemp { local f; f=$(mktemp "$HOME/launcher-XXXXXX"); printf '%s' '{"env":{"LAUNCHER":"yes"}}' > "$f"; ( trap 'rm -f -- "$f"' EXIT; command claude "$@" --settings "$f" ) }`
 	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte(rc+"\n"), 0o600); err != nil {

@@ -7,7 +7,8 @@ import OSLog
 /// The phone's half of the recording Live Activity (docs/apple/live-activity.md「Recording」): one activity while this phone
 /// records, any recording (a meeting's or a note), started with it and ended with it. It follows `RecordingCapture` (state,
 /// a call's interruption) and the recording's entry (its title once the calendar is read, bookmarks); the time is counted
-/// by the system from `runningSince`, so a recording that runs on needs no updates. A meeting with the live view (#3862
+/// by the system from `runningSince`, so a recording that runs on needs only its once-a-minute `aliveAt`, which lets the
+/// activity go stale when iOS ends the app (#9108). A meeting with the live view (#3862
 /// phase 2) also carries its current topic and latest line: an answer, a phase or anything else goes at once, a new line
 /// or topic at most every 5 seconds (`hold`).
 @MainActor final class RecordingActivity {
@@ -79,10 +80,13 @@ import OSLog
         let hub = transcription.meeting(id)
         let transcribed = hub.hubMode
             ? Transcribed(hubLine: hub.lines.last?.text, shown: transcription.shown(id, role: entry.attendance?.role ?? .off)) : nil
-        let content = Self.content(entry: entry, recording: state == .recording, interrupted: interrupted,
-                                   elapsed: capture.timeline, previous: previous, now: now,
-                                   answer: answered?.text, answeredAt: answered?.at,
-                                   topic: topic, roomMissing: roomMissing, talking: talking, transcribed: transcribed)
+        let drawn = Self.content(entry: entry, recording: state == .recording, interrupted: interrupted,
+                                 elapsed: capture.timeline, previous: previous, now: now,
+                                 answer: answered?.text, answeredAt: answered?.at,
+                                 topic: topic, roomMissing: roomMissing, talking: talking, transcribed: transcribed)
+        // Once a minute while it records, the activity hears it still does (#9108): when iOS ends the app, it goes stale.
+        let content = Self.alive(drawn, now: now)
+        if let alive = content.aliveAt { wake(at: Date(timeIntervalSince1970: alive + Self.aliveEvery)) }
         // The answer gives way to the latest line 60 s after it came: looked at again then.
         if content.answer != nil, entry.attendance?.liveView == true, let at = answered?.at,
            at.addingTimeInterval(Self.answerShown) > now {
@@ -214,6 +218,25 @@ import OSLog
     /// A new line or topic updates the activity at most this often.
     nonisolated static let throttle: TimeInterval = 5
 
+    /// While it records, the app confirms it this often (`aliveAt`, on the minute) ...
+    nonisolated static let aliveEvery: TimeInterval = 60
+    /// ... and the activity goes stale this long after the last confirmation: two missed minutes and some, so a busy
+    /// moment never makes it stale while the app runs (#9108).
+    nonisolated static let staleAfter: TimeInterval = 150
+
+    /// `content` with the minute the app confirms it still records (`aliveAt`), nil when it doesn't record (pure).
+    nonisolated static func alive(_ content: Content, now: Date) -> Content {
+        var c = content
+        c.aliveAt = c.phase == .recording ? (now.timeIntervalSince1970 / aliveEvery).rounded(.down) * aliveEvery : nil
+        return c
+    }
+
+    /// When an activity showing `content` goes stale (the system's `staleDate`): `staleAfter` past its `aliveAt`; never
+    /// while it doesn't record (pure).
+    nonisolated static func staleDate(_ content: Content) -> Date? {
+        content.aliveAt.map { Date(timeIntervalSince1970: $0 + staleAfter) }
+    }
+
     /// While recording, a higher relevance than the Fleet activity's (1 at most): the island shows the recording.
     nonisolated static let relevance: Double = 2
 
@@ -232,7 +255,8 @@ import OSLog
         guard activity(id) == nil else { return }
         do {
             _ = try Activity.request(attributes: RecordingActivityAttributes(recordingID: id.uuidString),
-                                     content: ActivityContent(state: content, staleDate: nil, relevanceScore: Self.relevance),
+                                     content: ActivityContent(state: content, staleDate: staleDate(for: content),
+                                                              relevanceScore: Self.relevance),
                                      pushType: nil)
         } catch {
             // Live Activities off for Persona in Settings: the recording goes on without one.
@@ -241,9 +265,31 @@ import OSLog
     }
 
     private func update(_ activity: Activity<RecordingActivityAttributes>, _ content: Content) {
+        #if DEBUG
+        if Self.sampleStale { return }
+        #endif
         nonisolated(unsafe) let a = activity
-        let state = ActivityContent(state: content, staleDate: nil, relevanceScore: Self.relevance)
+        let state = ActivityContent(state: content, staleDate: staleDate(for: content), relevanceScore: Self.relevance)
         Task { await a.update(state) }
+    }
+
+    #if DEBUG
+    /// `-showMeetingSample stopped` (#9129): a running recording's activity goes stale 3 seconds after it is requested,
+    /// as it does once iOS ended the app, so the island and the Lock Screen draw it stopped. Not at once: an activity
+    /// requested with a stale date already past is never shown. No update follows it.
+    static var sampleStale = false
+    private var sampleStaleAt: Date?
+    #endif
+
+    /// The stale date the system gets for `content` (`staleDate`).
+    private func staleDate(for content: Content) -> Date? {
+        #if DEBUG
+        if Self.sampleStale, content.aliveAt != nil {
+            if sampleStaleAt == nil { sampleStaleAt = .now.addingTimeInterval(3) }
+            return sampleStaleAt
+        }
+        #endif
+        return Self.staleDate(content)
     }
 
     private func endAll() {

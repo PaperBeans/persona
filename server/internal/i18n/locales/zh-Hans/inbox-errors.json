@@ -46,5 +46,12 @@
   "bad_folder": "文件夹路径里至少要有一级名称。",
   "session_ref_required": "session 必须同时包含 machine_id 和 session_id。",
   "handoff_kind": "kind 必须是 agent 或 conversation。",
-  "handoff_record_text": "设置 session 时，text 必须为空。"
+  "handoff_record_text": "设置 session 时，text 必须为空。",
+  "send_cannot_reply": "这条无法在 Persona 里回复，没有发送任何内容。请到原来的应用里回复。",
+  "send_source_unavailable": "来源应用现在没有连接，没有发送任何内容。请在设置里确认它已开启，或到该应用里回复。",
+  "send_signed_out": "来源应用的账号未登录或登录已过期，没有发送任何内容。请重新登录后再发送。",
+  "send_denied": "来源应用拒绝了这条回复，没有发送任何内容。可能缺少权限，或这个会话已无法访问。请到该应用里回复。",
+  "send_rate_limited": "来源应用限制了发送频率，没有发送任何内容。请稍后再试。",
+  "send_failed": "来源应用没能发出这条回复，没有发送任何内容。请重试，或到该应用里回复。",
+  "send_unrecorded": "发送前无法记录这条回复，没有发送任何内容。请稍后再试。"
 }

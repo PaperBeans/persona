@@ -74,7 +74,8 @@ final class MeetingRecordingUITests: XCTestCase {
     }
 
     /// The meeting's Live Activity: Dynamic Island compact and expanded, Lock Screen. PERSONA_MEETING_PHASE=recording
-    /// (default) | paused | interrupted. Shots, not a pass / fail check of the drawing; the Lock Screen's Stop is checked.
+    /// (default) | paused | interrupted | stopped (stale, as after iOS ended the app, #9108). Shots, not a pass / fail check
+    /// of the drawing; the Lock Screen's Stop is checked.
     @MainActor func testLiveActivityShots() throws {
         let hub = try mockHub()
         let phase = ProcessInfo.processInfo.environment["PERSONA_MEETING_PHASE"] ?? "recording"

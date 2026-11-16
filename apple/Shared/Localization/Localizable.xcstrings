@@ -147052,6 +147052,29 @@
       },
       "extractionState" : "manual"
     },
+    "Stopped · Open Persona to see the recording" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stopped · Open Persona to see the recording"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止しました · Personaを開いて録音を確認"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已停止 · 打开 Persona 查看录音"
+          }
+        }
+      }
+    },
     "Stopped — tap Continue on your Apple Watch" : {
       "extractionState" : "manual",
       "localizations" : {
